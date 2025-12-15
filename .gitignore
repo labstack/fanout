@@ -1,7 +1,6 @@
 # Binaries
 /fanout
 /loadtest
-/loglytics
 *.exe
 
 # Data
