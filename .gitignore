@@ -1,0 +1,21 @@
+# Binaries
+/fanout
+/loadtest
+/loglytics
+*.exe
+
+# Data
+/lake/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Test/temp
+testdata/
+.playwright-mcp/
+*.pid

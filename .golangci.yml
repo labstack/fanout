@@ -1,0 +1,25 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - std-error-handling
+    rules:
+      - linters: [errcheck]
+        path: _test\.go
+      - linters: [errcheck]
+        text: "Close|Remove|Sscanf|Walk|Scan|Read|Export"
+      - linters: [staticcheck]
+        text: "QF"
+      - linters: [unused]
+        path: cmd/
+      - linters: [unused]
+        path: internal/mcp/discovery\.go
+      - linters: [unused]
+        path: internal/api/ui\.go

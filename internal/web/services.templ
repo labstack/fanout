@@ -1,0 +1,236 @@
+package web
+
+import "fmt"
+
+// ServicesData for the services list page
+type ServicesData struct {
+	Services []ServiceRow
+}
+
+type ServiceRow struct {
+	Name      string
+	Status    string
+	SpanCount int64
+	P95Ms     float64
+	ErrorRate float64
+}
+
+// Services renders the services list page
+templ Services(data ServicesData) {
+	@Layout("Services", "services") {
+		<div class="page-header">
+			<h1 class="page-title">Services</h1>
+			<p class="page-subtitle">{ fmt.Sprintf("%d services monitored", len(data.Services)) }</p>
+		</div>
+		<div class="card">
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Service</th>
+						<th>Status</th>
+						<th>Requests</th>
+						<th>P95 Latency</th>
+						<th>Error Rate</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, svc := range data.Services {
+						<tr>
+							<td><a href={ templ.SafeURL("/services/" + svc.Name) }>{ svc.Name }</a></td>
+							<td>
+								<span class={ "status", statusClass(svc.Status) }>{ svc.Status }</span>
+							</td>
+							<td>{ fmt.Sprintf("%d", svc.SpanCount) }</td>
+							<td>{ fmt.Sprintf("%.0fms", svc.P95Ms) }</td>
+							<td>{ fmt.Sprintf("%.1f%%", svc.ErrorRate*100) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+// ServiceDetailData for the service detail page
+type ServiceDetailData struct {
+	Name         string
+	Status       string
+	P50Ms        float64
+	P95Ms        float64
+	P99Ms        float64
+	ErrorRate    float64
+	SpanCount    int64
+	TopErrors    []ErrorInfo
+	SlowOps      []SlowOp
+	Dependencies []Dependency
+}
+
+type ErrorInfo struct {
+	Operation string
+	Count     int64
+	TraceID   string
+	Message   string
+}
+
+type SlowOp struct {
+	Operation string
+	P95Ms     float64
+	Count     int64
+}
+
+type Dependency struct {
+	Service   string
+	CallCount int64
+	AvgMs     float64
+	ErrorRate float64
+	Status    string
+}
+
+// ServiceDetail renders the service detail page
+templ ServiceDetail(data ServiceDetailData) {
+	@Layout(data.Name, "services") {
+		<div class="page-header">
+			<h1 class="page-title">
+				{ data.Name }
+				<span class={ "status", statusClass(data.Status) } style="margin-left: 0.75rem; vertical-align: middle;">{ data.Status }</span>
+			</h1>
+			<p class="page-subtitle">Service diagnostics</p>
+		</div>
+		<!-- Latency Metrics -->
+		<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ fmt.Sprintf("%.0f", data.P50Ms) }ms</div>
+					<div class="metric-label">P50 Latency</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ fmt.Sprintf("%.0f", data.P95Ms) }ms</div>
+					<div class="metric-label">P95 Latency</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ fmt.Sprintf("%.0f", data.P99Ms) }ms</div>
+					<div class="metric-label">P99 Latency</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value" style={ errorColor(data.ErrorRate) }>{ fmt.Sprintf("%.1f", data.ErrorRate*100) }%</div>
+					<div class="metric-label">Error Rate</div>
+				</div>
+			</div>
+		</div>
+		<div class="grid grid-2" style="margin-bottom: 1.5rem;">
+			<!-- Top Errors -->
+			<div class="card">
+				<div class="card-title">Top Errors</div>
+				if len(data.TopErrors) == 0 {
+					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No errors in the last 15 minutes</p>
+				} else {
+					<table class="table">
+						<thead>
+							<tr>
+								<th>Operation</th>
+								<th>Count</th>
+								<th>Example Trace</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, err := range data.TopErrors {
+								<tr>
+									<td>{ err.Operation }</td>
+									<td>{ fmt.Sprintf("%d", err.Count) }</td>
+									<td>
+										if err.TraceID != "" {
+											<a href={ templ.SafeURL("/traces/" + err.TraceID) }>{ truncate(err.TraceID, 12) }</a>
+										} else {
+											<span style="color: var(--text-muted);">-</span>
+										}
+									</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+			<!-- Slow Operations -->
+			<div class="card">
+				<div class="card-title">Slow Operations</div>
+				if len(data.SlowOps) == 0 {
+					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No slow operations detected</p>
+				} else {
+					<table class="table">
+						<thead>
+							<tr>
+								<th>Operation</th>
+								<th>P95 Latency</th>
+								<th>Count</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, op := range data.SlowOps {
+								<tr>
+									<td>{ op.Operation }</td>
+									<td>{ fmt.Sprintf("%.0fms", op.P95Ms) }</td>
+									<td>{ fmt.Sprintf("%d", op.Count) }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+		</div>
+		<!-- Dependencies -->
+		<div class="card">
+			<div class="card-title">Downstream Dependencies</div>
+			if len(data.Dependencies) == 0 {
+				<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No downstream calls detected</p>
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Service</th>
+							<th>Status</th>
+							<th>Calls</th>
+							<th>Avg Latency</th>
+							<th>Error Rate</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, dep := range data.Dependencies {
+							<tr>
+								<td><a href={ templ.SafeURL("/services/" + dep.Service) }>{ dep.Service }</a></td>
+								<td>
+									<span class={ "status", statusClass(dep.Status) }>{ dep.Status }</span>
+								</td>
+								<td>{ fmt.Sprintf("%d", dep.CallCount) }</td>
+								<td>{ fmt.Sprintf("%.0fms", dep.AvgMs) }</td>
+								<td>{ fmt.Sprintf("%.1f%%", dep.ErrorRate*100) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</div>
+	}
+}
+
+func errorColor(rate float64) string {
+	if rate > 0.1 {
+		return "color: var(--danger);"
+	}
+	if rate > 0.01 {
+		return "color: var(--warning);"
+	}
+	return "color: var(--success);"
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
+}

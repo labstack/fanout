@@ -1,0 +1,358 @@
+package web
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+// OverviewData contains all data for the overview page
+type OverviewData struct {
+	Healthy          bool
+	Summary          string
+	Services         ServiceSummary
+	TopIssues        []TopIssue
+	ThroughputPerMin int64
+	P95Ms            float64
+	ErrorRate        float64
+	Topology         TopologyData
+	Timeline         TimelineData
+}
+
+type ServiceSummary struct {
+	Total     int
+	Healthy   int
+	Degraded  int
+	Unhealthy int
+}
+
+type TopIssue struct {
+	Service string
+	Issue   string
+	Value   float64
+	Detail  string
+}
+
+type TopologyData struct {
+	Nodes []ServiceNode
+	Edges []ServiceEdge
+}
+
+type ServiceNode struct {
+	Name      string
+	Status    string
+	SpanCount int64
+	P95Ms     float64
+	ErrorRate float64
+}
+
+type ServiceEdge struct {
+	From      string
+	To        string
+	CallCount int64
+	AvgMs     float64
+	ErrorRate float64
+	Status    string
+}
+
+type TimelineData struct {
+	Buckets   []TimelineBucket
+	Anomalies []Anomaly
+	AvgP95Ms  float64
+}
+
+type TimelineBucket struct {
+	Time         string
+	RequestCount int64
+	ErrorCount   int64
+	P95Ms        float64
+	ErrorRate    float64
+	IsAnomaly    bool
+}
+
+type Anomaly struct {
+	Time        string
+	Type        string
+	Description string
+}
+
+// Overview renders the main overview page
+templ Overview(data OverviewData) {
+	@Layout("Overview", "overview") {
+		<!-- Anomaly Alert Banner -->
+		if len(data.Timeline.Anomalies) > 0 {
+			@alertBanner(data.Timeline.Anomalies)
+		}
+		<div class="page-header">
+			<h1 class="page-title">System Overview</h1>
+			<p class="page-subtitle">{ data.Summary }</p>
+		</div>
+		<!-- Health Metrics -->
+		<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ fmt.Sprintf("%d", data.Services.Total) }</div>
+					<div class="metric-label">Total Services</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value" style="color: var(--success);">{ fmt.Sprintf("%d", data.Services.Healthy) }</div>
+					<div class="metric-label">Healthy</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value" style="color: var(--warning);">{ fmt.Sprintf("%d", data.Services.Degraded) }</div>
+					<div class="metric-label">Degraded</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value" style="color: var(--danger);">{ fmt.Sprintf("%d", data.Services.Unhealthy) }</div>
+					<div class="metric-label">Unhealthy</div>
+				</div>
+			</div>
+		</div>
+		<!-- Key Metrics -->
+		<div class="grid grid-3" style="margin-bottom: 1.5rem;">
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ fmt.Sprintf("%d", data.ThroughputPerMin) }</div>
+					<div class="metric-label">Requests/min</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ fmt.Sprintf("%.0f", data.P95Ms) }ms</div>
+					<div class="metric-label">P95 Latency</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ fmt.Sprintf("%.1f", data.ErrorRate*100) }%</div>
+					<div class="metric-label">Error Rate</div>
+				</div>
+			</div>
+		</div>
+		<div class="grid grid-2" style="margin-bottom: 1.5rem;">
+			<!-- Timeline Chart -->
+			<div class="card">
+				<div class="card-title">Request Timeline</div>
+				@timelineChart(data.Timeline)
+			</div>
+			<!-- Top Issues -->
+			<div class="card">
+				<div class="card-title">Top Issues</div>
+				if len(data.TopIssues) == 0 {
+					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No issues detected</p>
+				} else {
+					<table class="table">
+						<thead>
+							<tr>
+								<th>Service</th>
+								<th>Issue</th>
+								<th>Detail</th>
+							</tr>
+						</thead>
+						<tbody>
+							for _, issue := range data.TopIssues {
+								<tr>
+									<td><a href={ templ.SafeURL("/services/" + issue.Service) }>{ issue.Service }</a></td>
+									<td>
+										if issue.Issue == "high_error_rate" {
+											<span class="status status-unhealthy">Errors</span>
+										} else if issue.Issue == "high_latency" {
+											<span class="status status-degraded">Slow</span>
+										} else {
+											<span class="status status-degraded">{ issue.Issue }</span>
+										}
+									</td>
+									<td>{ issue.Detail }</td>
+								</tr>
+							}
+						</tbody>
+					</table>
+				}
+			</div>
+		</div>
+		<!-- Services Table -->
+		<div class="card">
+			<div class="card-title">Services</div>
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Service</th>
+						<th>Status</th>
+						<th>Requests</th>
+						<th>P95</th>
+						<th>Error Rate</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, node := range data.Topology.Nodes {
+						<tr>
+							<td><a href={ templ.SafeURL("/services/" + node.Name) }>{ node.Name }</a></td>
+							<td>
+								<span class={ "status", statusClass(node.Status) }>{ node.Status }</span>
+							</td>
+							<td>{ fmt.Sprintf("%d", node.SpanCount) }</td>
+							<td>{ fmt.Sprintf("%.0fms", node.P95Ms) }</td>
+							<td>{ fmt.Sprintf("%.1f%%", node.ErrorRate*100) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+func statusClass(status string) string {
+	switch status {
+	case "healthy":
+		return "status-healthy"
+	case "degraded":
+		return "status-degraded"
+	case "unhealthy":
+		return "status-unhealthy"
+	default:
+		return "status-degraded"
+	}
+}
+
+templ timelineChart(data TimelineData) {
+	if len(data.Buckets) == 0 {
+		<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No data available</p>
+	} else {
+		<div class="chart" data-vega={ timelineSpec(data) }></div>
+	}
+}
+
+func timelineSpec(data TimelineData) string {
+	values := make([]map[string]any, len(data.Buckets))
+	for i, b := range data.Buckets {
+		values[i] = map[string]any{
+			"time":     b.Time,
+			"requests": b.RequestCount,
+			"p95":      b.P95Ms,
+			"anomaly":  b.IsAnomaly,
+		}
+	}
+
+	spec := map[string]any{
+		"$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+		"width":   "container",
+		"height":  250,
+		"data":    map[string]any{"values": values},
+		"layer": []map[string]any{
+			{
+				"mark": map[string]any{"type": "area", "opacity": 0.3},
+				"encoding": map[string]any{
+					"x": map[string]any{"field": "time", "type": "nominal", "axis": map[string]any{"title": nil, "labelAngle": -45}},
+					"y": map[string]any{"field": "requests", "type": "quantitative", "axis": map[string]any{"title": "Requests"}},
+				},
+			},
+			{
+				"mark": map[string]any{"type": "line", "point": true},
+				"encoding": map[string]any{
+					"x":     map[string]any{"field": "time", "type": "nominal"},
+					"y":     map[string]any{"field": "requests", "type": "quantitative"},
+					"color": map[string]any{"condition": map[string]any{"test": "datum.anomaly", "value": "#ef4444"}, "value": "#3b82f6"},
+				},
+			},
+		},
+	}
+
+	b, _ := json.Marshal(spec)
+	return string(b)
+}
+
+templ alertBanner(anomalies []Anomaly) {
+	<div class="alert-banner">
+		<div class="alert-icon">
+			<sl-icon name="exclamation-triangle-fill"></sl-icon>
+		</div>
+		<div class="alert-content">
+			<strong>{ fmt.Sprintf("%d anomaly detected", len(anomalies)) }</strong>
+			if len(anomalies) > 1 {
+				<strong>{ fmt.Sprintf(" (%d total)", len(anomalies)) }</strong>
+			}
+			<span class="alert-details">
+				for i, a := range anomalies {
+					if i > 0 {
+						<span>| </span>
+					}
+					if i < 3 {
+						<span class="anomaly-item">
+							{ anomalyIcon(a.Type) } { a.Description }
+						</span>
+					}
+				}
+				if len(anomalies) > 3 {
+					<span>and { fmt.Sprintf("%d", len(anomalies)-3) } more...</span>
+				}
+			</span>
+		</div>
+		<button class="alert-dismiss" onclick="this.parentElement.style.display='none'">
+			<sl-icon name="x"></sl-icon>
+		</button>
+	</div>
+	<style>
+		.alert-banner {
+			display: flex;
+			align-items: center;
+			gap: 1rem;
+			padding: 0.75rem 1rem;
+			background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+			border: 1px solid #f59e0b;
+			border-radius: 0.5rem;
+			margin-bottom: 1.5rem;
+			color: #92400e;
+		}
+		.sl-theme-dark .alert-banner {
+			background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(245, 158, 11, 0.1) 100%);
+			border-color: rgba(245, 158, 11, 0.5);
+			color: #fbbf24;
+		}
+		.alert-icon {
+			font-size: 1.25rem;
+			color: #f59e0b;
+		}
+		.alert-content {
+			flex: 1;
+			font-size: 0.875rem;
+		}
+		.alert-details {
+			margin-left: 0.5rem;
+			opacity: 0.9;
+		}
+		.anomaly-item {
+			display: inline-flex;
+			align-items: center;
+			gap: 0.25rem;
+		}
+		.alert-dismiss {
+			background: transparent;
+			border: none;
+			cursor: pointer;
+			padding: 0.25rem;
+			color: inherit;
+			opacity: 0.7;
+		}
+		.alert-dismiss:hover {
+			opacity: 1;
+		}
+	</style>
+}
+
+func anomalyIcon(atype string) string {
+	switch atype {
+	case "latency_spike":
+		return "Latency:"
+	case "error_spike":
+		return "Errors:"
+	case "traffic_drop":
+		return "Traffic:"
+	default:
+		return ""
+	}
+}

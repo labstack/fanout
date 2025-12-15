@@ -1,0 +1,31 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Loglytics</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 2rem; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+    .card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+    code { background: #f3f4f6; padding: 2px 4px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Loglytics — single-binary OTLP → Parquet → DuckDB</h1>
+  <div class="card">
+    <p>Health: <a href="/healthz">/healthz</a></p>
+    <p>API examples:</p>
+    <ul>
+      <li><a href="/api/v1/latency_overview?window=15">/api/v1/latency_overview?window=15</a></li>
+      <li><a href="/api/v1/throughput?window=60">/api/v1/throughput?window=60</a></li>
+      <li><a href="/api/v1/logs_samples?window=60&limit=20&q=ERROR">/api/v1/logs_samples?window=60&limit=20&q=ERROR</a></li>
+      <li><a href="/api/v1/error_routes?window=60&limit=20">/api/v1/error_routes?window=60&limit=20</a></li>
+    </ul>
+  </div>
+  <div class="card">
+    <h2>OTLP gRPC endpoint</h2>
+    <p>Point your SDKs/Vector at <code>grpc://host:4317</code></p>
+  </div>
+</body>
+</html>

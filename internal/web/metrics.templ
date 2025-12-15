@@ -1,0 +1,216 @@
+package web
+
+import "fmt"
+
+// MetricsData for the metrics explorer page
+type MetricsData struct {
+	Names    []string
+	Selected string
+	Service  string
+	Window   int
+	Metrics  []MetricRow
+	Limit    int
+	Offset   int
+	HasMore  bool
+}
+
+type MetricRow struct {
+	Time    string
+	Name    string
+	Service string
+	Type    string
+	Value   float64
+}
+
+// Metrics renders the metrics explorer page
+templ Metrics(data MetricsData) {
+	@Layout("Metrics", "metrics") {
+		<div class="page-header">
+			<h1 class="page-title">Metrics Explorer</h1>
+			<p class="page-subtitle">Browse raw metrics data</p>
+		</div>
+		<!-- Search Form -->
+		<div class="card" style="margin-bottom: 1.5rem;">
+			<form method="GET" action="/metrics" class="search-form">
+				<div class="form-row">
+					<div class="form-group">
+						<label for="name">Metric Name</label>
+						<select name="name" id="name">
+							<option value="">All metrics</option>
+							for _, n := range data.Names {
+								<option value={ n } selected?={ data.Selected == n }>{ n }</option>
+							}
+						</select>
+					</div>
+					<div class="form-group">
+						<label for="service">Service</label>
+						<input type="text" name="service" id="service" placeholder="All services" value={ data.Service }/>
+					</div>
+					<div class="form-group">
+						<label for="window">Time Window</label>
+						<select name="window" id="window">
+							<option value="15" selected?={ data.Window == 15 }>Last 15 min</option>
+							<option value="60" selected?={ data.Window == 60 }>Last 1 hour</option>
+							<option value="360" selected?={ data.Window == 360 }>Last 6 hours</option>
+							<option value="1440" selected?={ data.Window == 1440 }>Last 24 hours</option>
+						</select>
+					</div>
+					<div class="form-group" style="align-self: flex-end;">
+						<button type="submit" class="btn btn-primary">Search</button>
+					</div>
+				</div>
+			</form>
+		</div>
+		<!-- Results -->
+		<div class="card">
+			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Metrics)) } metrics)</div>
+			if len(data.Metrics) == 0 {
+				<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No metrics found</p>
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Time</th>
+							<th>Name</th>
+							<th>Service</th>
+							<th>Type</th>
+							<th>Value</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, m := range data.Metrics {
+							<tr>
+								<td style="font-family: monospace; font-size: 0.8rem;">{ m.Time }</td>
+								<td>{ m.Name }</td>
+								<td><a href={ templ.SafeURL("/services/" + m.Service) }>{ m.Service }</a></td>
+								<td><span class={ "metric-type", metricTypeClass(m.Type) }>{ m.Type }</span></td>
+								<td style="font-family: monospace;">{ fmt.Sprintf("%.2f", m.Value) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<!-- Pagination -->
+				if data.Offset > 0 || data.HasMore {
+					<div class="pagination">
+						if data.Offset > 0 {
+							<a href={ templ.SafeURL(metricsPaginationURL(data.Selected, data.Service, data.Window, data.Limit, data.Offset-data.Limit)) } class="btn btn-secondary">Previous</a>
+						}
+						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Metrics)) }</span>
+						if data.HasMore {
+							<a href={ templ.SafeURL(metricsPaginationURL(data.Selected, data.Service, data.Window, data.Limit, data.Offset+data.Limit)) } class="btn btn-secondary">Next</a>
+						}
+					</div>
+				}
+			}
+		</div>
+		<style>
+			.search-form .form-row {
+				display: flex;
+				gap: 1rem;
+				flex-wrap: wrap;
+			}
+			.form-group {
+				display: flex;
+				flex-direction: column;
+				gap: 0.5rem;
+				min-width: 150px;
+				flex: 1;
+			}
+			.form-group label {
+				font-size: 0.75rem;
+				font-weight: 600;
+				color: var(--text-secondary);
+				text-transform: uppercase;
+			}
+			.form-group input, .form-group select {
+				padding: 0.5rem 0.75rem;
+				border: 1px solid var(--border-color);
+				border-radius: 0.375rem;
+				font-size: 0.875rem;
+				background: var(--bg-secondary);
+				color: var(--text-primary);
+			}
+			.btn {
+				padding: 0.5rem 1rem;
+				border: none;
+				border-radius: 0.375rem;
+				font-size: 0.875rem;
+				font-weight: 500;
+				cursor: pointer;
+			}
+			.btn-primary {
+				background: var(--accent);
+				color: white;
+			}
+			.btn-primary:hover {
+				background: var(--accent-hover);
+			}
+			.btn-secondary {
+				background: var(--bg-secondary);
+				color: var(--text-primary);
+				border: 1px solid var(--border-color);
+				text-decoration: none;
+				display: inline-block;
+			}
+			.btn-secondary:hover {
+				background: var(--bg-tertiary);
+			}
+			.metric-type {
+				padding: 0.125rem 0.5rem;
+				border-radius: 4px;
+				font-size: 0.7rem;
+				font-weight: 600;
+			}
+			.metric-gauge {
+				background: var(--accent);
+				color: white;
+			}
+			.metric-sum {
+				background: var(--success);
+				color: white;
+			}
+			.metric-histogram {
+				background: var(--warning);
+				color: white;
+			}
+			.pagination {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 1rem;
+				padding: 1rem;
+				border-top: 1px solid var(--border-color);
+				margin-top: 1rem;
+			}
+			.pagination-info {
+				color: var(--text-muted);
+				font-size: 0.875rem;
+			}
+		</style>
+	}
+}
+
+func metricTypeClass(mtype string) string {
+	switch mtype {
+	case "GAUGE":
+		return "metric-gauge"
+	case "SUM":
+		return "metric-sum"
+	case "HISTOGRAM":
+		return "metric-histogram"
+	default:
+		return ""
+	}
+}
+
+func metricsPaginationURL(name, service string, window, limit, offset int) string {
+	url := "/metrics?"
+	if name != "" {
+		url += "name=" + name + "&"
+	}
+	if service != "" {
+		url += "service=" + service + "&"
+	}
+	url += fmt.Sprintf("window=%d&limit=%d&offset=%d", window, limit, offset)
+	return url
+}

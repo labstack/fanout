@@ -1,0 +1,6 @@
+lake/
+testdata/
+*.parquet
+.git/
+.gitignore
+*.md

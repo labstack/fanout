@@ -1,0 +1,221 @@
+package service
+
+import (
+	"context"
+	"fmt"
+	"sort"
+)
+
+// Trace returns a complete distributed trace with auto root-cause analysis.
+func (s *Service) Trace(ctx context.Context, traceID string, includeLogs bool) (*TraceResult, error) {
+	if traceID == "" {
+		return nil, fmt.Errorf("trace_id is required")
+	}
+
+	out := &TraceResult{
+		TraceID:      traceID,
+		Services:     []string{},
+		Spans:        []SpanInfo{},
+		Logs:         []LogInfo{},
+		CriticalPath: []string{},
+	}
+
+	// Get spans
+	q := fmt.Sprintf(`
+SELECT "name=span_id" as span_id,
+       "name=parent_span_id" as parent_span_id,
+       "name=service_name" as service,
+       "name=name" as operation,
+       strftime(epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS start_time,
+       "name=duration_ms" as duration_ms,
+       "name=status_code" as status,
+       "name=status_msg" as status_msg,
+       "name=start_unix_nano" as start_nano
+FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+WHERE "name=trace_id" = '%s'
+ORDER BY "name=start_unix_nano" ASC;
+`, s.cfg.LakeDir, escapeLike(traceID))
+
+	rows, err := s.duck.DB.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("query failed: %w", err)
+	}
+	defer rows.Close()
+
+	type spanWithNano struct {
+		SpanInfo
+		startNano int64
+	}
+
+	var spans []spanWithNano
+	services := make(map[string]bool)
+	spanByID := make(map[string]*spanWithNano)
+
+	for rows.Next() {
+		var r spanWithNano
+		var parentID, statusMsg any
+		if err := rows.Scan(&r.SpanID, &parentID, &r.Service, &r.Name, &r.StartTime, &r.Duration, &r.Status, &statusMsg, &r.startNano); err != nil {
+			continue
+		}
+		if parentID != nil {
+			r.ParentID = fmt.Sprintf("%v", parentID)
+		}
+		if statusMsg != nil {
+			r.StatusMsg = fmt.Sprintf("%v", statusMsg)
+		}
+		services[r.Service] = true
+		if r.Status == "STATUS_CODE_ERROR" || r.Status == "ERROR" {
+			out.HasError = true
+		}
+		spans = append(spans, r)
+		spanByID[r.SpanID] = &spans[len(spans)-1]
+	}
+
+	// Calculate self time and find root
+	var rootSpan *spanWithNano
+	childDurations := make(map[string]float64)
+
+	for i := range spans {
+		sp := &spans[i]
+		if sp.ParentID == "" {
+			rootSpan = sp
+			if sp.Duration > out.Duration {
+				out.Duration = sp.Duration
+			}
+		}
+		if sp.ParentID != "" {
+			childDurations[sp.ParentID] += sp.Duration
+		}
+	}
+
+	for i := range spans {
+		sp := &spans[i]
+		sp.SelfTime = sp.Duration - childDurations[sp.SpanID]
+		if sp.SelfTime < 0 {
+			sp.SelfTime = 0
+		}
+	}
+
+	// Find critical path (spans with highest self time that are errors or slow)
+	type criticalSpan struct {
+		span     *spanWithNano
+		priority float64
+	}
+	var criticals []criticalSpan
+
+	for i := range spans {
+		sp := &spans[i]
+		isError := sp.Status == "STATUS_CODE_ERROR" || sp.Status == "ERROR"
+		isSlow := sp.SelfTime > 100
+
+		if isError || isSlow {
+			sp.IsCritical = true
+			priority := sp.SelfTime
+			if isError {
+				priority += 10000 // Errors have highest priority
+			}
+			criticals = append(criticals, criticalSpan{sp, priority})
+		}
+	}
+
+	sort.Slice(criticals, func(i, j int) bool {
+		return criticals[i].priority > criticals[j].priority
+	})
+
+	for i, c := range criticals {
+		if i >= 5 {
+			break
+		}
+		out.CriticalPath = append(out.CriticalPath, c.span.SpanID)
+	}
+
+	// Auto root cause detection
+	if out.HasError {
+		// Find first error span
+		for i := range spans {
+			sp := &spans[i]
+			if sp.Status == "STATUS_CODE_ERROR" || sp.Status == "ERROR" {
+				desc := sp.StatusMsg
+				if desc == "" {
+					desc = fmt.Sprintf("Error in %s: %s", sp.Service, sp.Name)
+				}
+				out.RootCause = &RootCause{
+					SpanID:      sp.SpanID,
+					Service:     sp.Service,
+					Operation:   sp.Name,
+					Reason:      "error",
+					Description: desc,
+				}
+				break
+			}
+		}
+	} else if rootSpan != nil && rootSpan.Duration > 1000 {
+		// Find slowest span
+		var slowest *spanWithNano
+		for i := range spans {
+			sp := &spans[i]
+			if slowest == nil || sp.SelfTime > slowest.SelfTime {
+				slowest = sp
+			}
+		}
+		if slowest != nil && slowest.SelfTime > 100 {
+			out.RootCause = &RootCause{
+				SpanID:      slowest.SpanID,
+				Service:     slowest.Service,
+				Operation:   slowest.Name,
+				Reason:      "latency",
+				Description: fmt.Sprintf("Slow operation: %s in %s (%.0fms self time)", slowest.Name, slowest.Service, slowest.SelfTime),
+			}
+		}
+	}
+
+	// Convert to output format
+	for _, sp := range spans {
+		out.Spans = append(out.Spans, sp.SpanInfo)
+	}
+	out.SpanCount = len(out.Spans)
+
+	for svc := range services {
+		out.Services = append(out.Services, svc)
+	}
+
+	// Fetch correlated logs
+	if includeLogs {
+		out.Logs = s.fetchTraceLogs(ctx, traceID)
+	}
+
+	return out, nil
+}
+
+func (s *Service) fetchTraceLogs(ctx context.Context, traceID string) []LogInfo {
+	logs := []LogInfo{}
+
+	q := fmt.Sprintf(`
+SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+       "name=service_name" as service,
+       "name=severity" as severity,
+       "name=body" as body,
+       "name=span_id" as span_id
+FROM read_parquet('%s/logs/year=*/month=*/day=*/hour=*/part-*.parquet')
+WHERE "name=trace_id" = '%s'
+ORDER BY "name=time_unix_nano" ASC
+LIMIT 100;
+`, s.cfg.LakeDir, escapeLike(traceID))
+
+	rows, err := s.duck.DB.QueryContext(ctx, q)
+	if err != nil {
+		return logs
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var r LogInfo
+		var spanID any
+		rows.Scan(&r.Time, &r.Service, &r.Severity, &r.Body, &spanID)
+		if spanID != nil {
+			r.SpanID = fmt.Sprintf("%v", spanID)
+		}
+		logs = append(logs, r)
+	}
+	return logs
+}

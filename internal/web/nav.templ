@@ -1,0 +1,30 @@
+package web
+
+// NavItem represents a navigation menu item
+type NavItem struct {
+	Icon   string
+	Label  string
+	Href   string
+	Active bool
+}
+
+// Nav renders the sidebar navigation
+templ Nav(active string) {
+	<nav class="nav">
+		@navItem("house-door", "Overview", "/", active == "overview")
+		@navItem("hdd-stack", "Services", "/services", active == "services")
+		@navItem("diagram-3", "Traces", "/traces", active == "traces")
+		@navItem("file-text", "Logs", "/logs", active == "logs")
+		@navItem("graph-up", "Metrics", "/metrics", active == "metrics")
+	</nav>
+}
+
+templ navItem(icon, label, href string, active bool) {
+	<a
+		href={ templ.SafeURL(href) }
+		class={ "nav-item", templ.KV("active", active) }
+	>
+		<sl-icon name={ icon }></sl-icon>
+		<span>{ label }</span>
+	</a>
+}

@@ -1,0 +1,407 @@
+package web
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+// TracesData for the traces search page
+type TracesData struct {
+	Query   string
+	Service string
+	Status  string
+	Traces  []TraceRow
+	// Pagination
+	Limit   int
+	Offset  int
+	HasMore bool
+}
+
+type TraceRow struct {
+	TraceID   string
+	Service   string
+	Operation string
+	Duration  float64
+	Status    string
+	Time      string
+}
+
+// Traces renders the traces search page
+templ Traces(data TracesData) {
+	@Layout("Traces", "traces") {
+		<div class="page-header">
+			<h1 class="page-title">Traces</h1>
+			<p class="page-subtitle">Search and analyze distributed traces</p>
+		</div>
+		<!-- Search Form -->
+		<div class="card" style="margin-bottom: 1.5rem;">
+			<form method="GET" action="/traces" class="search-form">
+				<div class="form-row">
+					<div class="form-group">
+						<label for="q">Search</label>
+						<input type="text" name="q" id="q" placeholder="Operation or trace ID..." value={ data.Query }/>
+					</div>
+					<div class="form-group">
+						<label for="service">Service</label>
+						<input type="text" name="service" id="service" placeholder="All services" value={ data.Service }/>
+					</div>
+					<div class="form-group">
+						<label for="status">Status</label>
+						<select name="status" id="status">
+							<option value="" selected?={ data.Status == "" }>All</option>
+							<option value="error" selected?={ data.Status == "error" }>Errors only</option>
+							<option value="slow" selected?={ data.Status == "slow" }>Slow only</option>
+						</select>
+					</div>
+					<div class="form-group" style="align-self: flex-end;">
+						<button type="submit" class="btn btn-primary">Search</button>
+					</div>
+				</div>
+			</form>
+		</div>
+		<!-- Results -->
+		<div class="card">
+			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Traces)) } traces)</div>
+			if len(data.Traces) == 0 {
+				<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No traces found</p>
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Trace ID</th>
+							<th>Service</th>
+							<th>Operation</th>
+							<th>Duration</th>
+							<th>Status</th>
+							<th>Time</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, t := range data.Traces {
+							<tr>
+								<td><a href={ templ.SafeURL("/traces/" + t.TraceID) }>{ truncateID(t.TraceID) }</a></td>
+								<td><a href={ templ.SafeURL("/services/" + t.Service) }>{ t.Service }</a></td>
+								<td>{ t.Operation }</td>
+								<td>{ fmt.Sprintf("%.0fms", t.Duration) }</td>
+								<td>
+									if t.Status == "error" {
+										<span class="status status-unhealthy">error</span>
+									} else {
+										<span class="status status-healthy">ok</span>
+									}
+								</td>
+								<td>{ t.Time }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+				<!-- Pagination -->
+				if data.Offset > 0 || data.HasMore {
+					<div class="pagination">
+						if data.Offset > 0 {
+							<a href={ templ.SafeURL(paginationURL("/traces", data.Query, data.Service, data.Status, data.Limit, data.Offset-data.Limit)) } class="btn btn-secondary">Previous</a>
+						}
+						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Traces)) }</span>
+						if data.HasMore {
+							<a href={ templ.SafeURL(paginationURL("/traces", data.Query, data.Service, data.Status, data.Limit, data.Offset+data.Limit)) } class="btn btn-secondary">Next</a>
+						}
+					</div>
+				}
+			}
+		</div>
+		<style>
+			.search-form .form-row {
+				display: flex;
+				gap: 1rem;
+				flex-wrap: wrap;
+			}
+			.form-group {
+				display: flex;
+				flex-direction: column;
+				gap: 0.5rem;
+				min-width: 150px;
+				flex: 1;
+			}
+			.form-group label {
+				font-size: 0.75rem;
+				font-weight: 600;
+				color: var(--text-secondary);
+				text-transform: uppercase;
+			}
+			.form-group input, .form-group select {
+				padding: 0.5rem 0.75rem;
+				border: 1px solid var(--border-color);
+				border-radius: 0.375rem;
+				font-size: 0.875rem;
+				background: var(--bg-secondary);
+				color: var(--text-primary);
+			}
+			.btn {
+				padding: 0.5rem 1rem;
+				border: none;
+				border-radius: 0.375rem;
+				font-size: 0.875rem;
+				font-weight: 500;
+				cursor: pointer;
+			}
+			.btn-primary {
+				background: var(--accent);
+				color: white;
+			}
+			.btn-primary:hover {
+				background: var(--accent-hover);
+			}
+			.btn-secondary {
+				background: var(--bg-secondary);
+				color: var(--text-primary);
+				border: 1px solid var(--border-color);
+				text-decoration: none;
+				display: inline-block;
+			}
+			.btn-secondary:hover {
+				background: var(--bg-tertiary);
+			}
+			.pagination {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 1rem;
+				padding: 1rem;
+				border-top: 1px solid var(--border-color);
+				margin-top: 1rem;
+			}
+			.pagination-info {
+				color: var(--text-muted);
+				font-size: 0.875rem;
+			}
+		</style>
+	}
+}
+
+// TraceDetailData for the trace detail page
+type TraceDetailData struct {
+	TraceID     string
+	RootService string
+	RootOp      string
+	Duration    float64
+	SpanCount   int
+	Spans       []SpanInfo
+	Logs        []LogInfo
+	RootCause   string
+}
+
+type SpanInfo struct {
+	SpanID      string
+	ParentID    string
+	Service     string
+	Operation   string
+	Duration    float64
+	Status      string
+	StartOffset float64
+	Depth       int
+}
+
+type LogInfo struct {
+	Time     string
+	Service  string
+	Severity string
+	Body     string
+}
+
+// TraceDetail renders the trace detail page with waterfall
+templ TraceDetail(data TraceDetailData) {
+	@Layout("Trace "+truncateID(data.TraceID), "traces") {
+		<div class="page-header">
+			<h1 class="page-title">Trace { truncateID(data.TraceID) }</h1>
+			<p class="page-subtitle">{ data.RootService } / { data.RootOp } - { fmt.Sprintf("%.0fms", data.Duration) }</p>
+		</div>
+		<!-- Summary -->
+		<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ fmt.Sprintf("%.0f", data.Duration) }ms</div>
+					<div class="metric-label">Total Duration</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ fmt.Sprintf("%d", data.SpanCount) }</div>
+					<div class="metric-label">Spans</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					<div class="metric-value">{ data.RootService }</div>
+					<div class="metric-label">Root Service</div>
+				</div>
+			</div>
+			<div class="card">
+				<div class="metric">
+					if data.RootCause != "" {
+						<div class="metric-value" style="color: var(--danger); font-size: 1rem;">{ data.RootCause }</div>
+					} else {
+						<div class="metric-value" style="color: var(--success);">None</div>
+					}
+					<div class="metric-label">Root Cause</div>
+				</div>
+			</div>
+		</div>
+		<!-- Waterfall Chart -->
+		<div class="card" style="margin-bottom: 1.5rem;">
+			<div class="card-title">Trace Waterfall</div>
+			<div class="waterfall" data-spans={ spansJSON(data.Spans) } data-duration={ fmt.Sprintf("%.0f", data.Duration) }>
+				for _, span := range data.Spans {
+					<div class="waterfall-row">
+						<div class="waterfall-label" style={ fmt.Sprintf("padding-left: %dpx;", span.Depth*20) }>
+							<span class="service">{ span.Service }</span>
+							<span class="operation">{ span.Operation }</span>
+						</div>
+						<div class="waterfall-bar-container">
+							<div
+								class={ "waterfall-bar", waterfallBarClass(span.Status) }
+								style={ waterfallBarStyle(span.StartOffset, span.Duration, data.Duration) }
+							>
+								{ fmt.Sprintf("%.0fms", span.Duration) }
+							</div>
+						</div>
+					</div>
+				}
+			</div>
+		</div>
+		<!-- Logs -->
+		if len(data.Logs) > 0 {
+			<div class="card">
+				<div class="card-title">Correlated Logs ({ fmt.Sprintf("%d", len(data.Logs)) })</div>
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Time</th>
+							<th>Service</th>
+							<th>Severity</th>
+							<th>Message</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, log := range data.Logs {
+							<tr>
+								<td>{ log.Time }</td>
+								<td>{ log.Service }</td>
+								<td>
+									<span class={ "status", logSeverityClass(log.Severity) }>{ log.Severity }</span>
+								</td>
+								<td style="font-family: monospace; font-size: 0.8rem;">{ log.Body }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+		<style>
+			.waterfall {
+				display: flex;
+				flex-direction: column;
+				gap: 0.25rem;
+			}
+			.waterfall-row {
+				display: grid;
+				grid-template-columns: 300px 1fr;
+				gap: 1rem;
+				align-items: center;
+			}
+			.waterfall-label {
+				font-size: 0.8rem;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.waterfall-label .service {
+				font-weight: 600;
+				color: var(--accent);
+			}
+			.waterfall-label .operation {
+				color: var(--text-secondary);
+				margin-left: 0.5rem;
+			}
+			.waterfall-bar-container {
+				height: 24px;
+				background: var(--bg-tertiary);
+				border-radius: 4px;
+				position: relative;
+			}
+			.waterfall-bar {
+				position: absolute;
+				height: 100%;
+				border-radius: 4px;
+				display: flex;
+				align-items: center;
+				padding: 0 0.5rem;
+				font-size: 0.7rem;
+				color: white;
+				min-width: 40px;
+			}
+			.waterfall-bar-ok {
+				background: var(--accent);
+			}
+			.waterfall-bar-error {
+				background: var(--danger);
+			}
+		</style>
+	}
+}
+
+func truncateID(id string) string {
+	if len(id) > 16 {
+		return id[:16] + "..."
+	}
+	return id
+}
+
+func waterfallBarClass(status string) string {
+	if status == "error" {
+		return "waterfall-bar-error"
+	}
+	return "waterfall-bar-ok"
+}
+
+func waterfallBarStyle(startOffset, duration, totalDuration float64) string {
+	if totalDuration == 0 {
+		return "left: 0; width: 100%;"
+	}
+	left := (startOffset / totalDuration) * 100
+	width := (duration / totalDuration) * 100
+	if width < 2 {
+		width = 2
+	}
+	return fmt.Sprintf("left: %.1f%%; width: %.1f%%;", left, width)
+}
+
+func logSeverityClass(severity string) string {
+	switch severity {
+	case "ERROR", "FATAL":
+		return "status-unhealthy"
+	case "WARN":
+		return "status-degraded"
+	default:
+		return "status-healthy"
+	}
+}
+
+func spansJSON(spans []SpanInfo) string {
+	b, _ := json.Marshal(spans)
+	return string(b)
+}
+
+func paginationURL(base, q, service, status string, limit, offset int) string {
+	url := base + "?"
+	if q != "" {
+		url += "q=" + q + "&"
+	}
+	if service != "" {
+		url += "service=" + service + "&"
+	}
+	if status != "" {
+		url += "status=" + status + "&"
+	}
+	url += fmt.Sprintf("limit=%d&offset=%d", limit, offset)
+	return url
+}
