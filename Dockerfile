@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-bookworm AS builder
+FROM golang:1.23-bookworm AS builder
 
 WORKDIR /app
 
@@ -13,22 +13,25 @@ COPY . .
 # Build with CGO enabled
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o fanout ./cmd/fanout
 
-# Runtime stage - minimal Debian
+# Runtime stage
 FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Runtime deps only
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create lake directory
-RUN mkdir -p /app/lake
+# Create data directory
+RUN mkdir -p /data
 
 COPY --from=builder /app/fanout .
 
-# HTTP (API + MCP at /mcp), OTLP gRPC
+# Ports: HTTP (API + MCP), OTLP gRPC
 EXPOSE 7520 4317
 
-ENV LAKE_DIR=/app/lake
+ENV LAKE_DIR=/data
+ENV HTTP_ADDR=:7520
+ENV OTLP_GRPC_ADDR=:4317
 
 ENTRYPOINT ["./fanout"]
