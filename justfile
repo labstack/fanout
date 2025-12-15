@@ -69,3 +69,12 @@ endpoints:
 lake:
     @du -sh ./lake 2>/dev/null || echo "No lake dir"
     @find ./lake -name "*.parquet" 2>/dev/null | wc -l | xargs echo "Parquet files:"
+
+# Create and push a release tag (triggers CI release)
+tag VERSION:
+    git tag v{{VERSION}}
+    git push origin v{{VERSION}}
+
+# Build Docker image locally
+docker:
+    docker build -t fanout:local .
