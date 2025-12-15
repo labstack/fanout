@@ -15,12 +15,9 @@ builds:
       - CGO_ENABLED=1
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
     ldflags:
       - -s -w
       - -X main.version={{.Version}}
@@ -28,13 +25,10 @@ builds:
       - -X main.date={{.Date}}
     overrides:
       - goos: linux
-        goarch: amd64
-        env:
-          - CC=x86_64-linux-gnu-gcc
-      - goos: linux
         goarch: arm64
         env:
           - CC=aarch64-linux-gnu-gcc
+          - CXX=aarch64-linux-gnu-g++
 
 archives:
   - id: default
