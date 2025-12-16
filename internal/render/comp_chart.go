@@ -64,10 +64,6 @@ func (c *chartComponent) Render(config json.RawMessage, format Format) (Output, 
 			spec = cfg.Spec
 		} else {
 			// Build spec from parts
-			width := cfg.Width
-			if width == 0 {
-				width = 400
-			}
 			height := cfg.Height
 			if height == 0 {
 				height = 200
