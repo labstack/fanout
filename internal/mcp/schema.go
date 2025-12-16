@@ -65,12 +65,12 @@ WHERE "name=kind" = 'SPAN_KIND_CLIENT'
   AND "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000`,
 
 			// Timeline (requests per minute)
-			`SELECT ts_min, service_name, span_count,
+			`SELECT bucket, service, spans,
        ROUND(error_rate * 100, 2) as error_pct,
        ROUND(p95_ms, 2) as p95
-FROM svc_minute
-WHERE ts_min >= NOW() - INTERVAL '60 minutes'
-ORDER BY ts_min DESC, span_count DESC`,
+FROM service_rollup
+WHERE bucket >= NOW() - INTERVAL '60 minutes'
+ORDER BY bucket DESC, spans DESC`,
 		},
 	}, nil
 }

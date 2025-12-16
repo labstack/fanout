@@ -57,14 +57,14 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 	// Query metrics for all services at once
 	sql := fmt.Sprintf(`
 		SELECT
-			service_name,
-			COALESCE(SUM(span_count), 0) as requests,
+			service,
+			COALESCE(SUM(spans), 0) as requests,
 			COALESCE(AVG(error_rate), 0) as error_rate,
 			COALESCE(AVG(p50_ms), 0) as p50_ms,
 			COALESCE(AVG(p95_ms), 0) as p95_ms
-		FROM svc_minute
-		WHERE service_name IN (%s) AND ts_min >= NOW() - INTERVAL '%d minutes'
-		GROUP BY service_name
+		FROM service_rollup
+		WHERE service IN (%s) AND bucket >= NOW() - INTERVAL '%d minutes'
+		GROUP BY service
 		ORDER BY requests DESC
 	`, strings.Join(quoted, ","), window)
 
@@ -77,7 +77,7 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 	var metrics []CompareMetrics
 	for _, row := range resp.Results {
 		m := CompareMetrics{
-			Service:   getString(row, "service_name"),
+			Service:   getString(row, "service"),
 			Requests:  getInt64(row, "requests"),
 			ErrorRate: getFloat64(row, "error_rate"),
 			P50Ms:     getFloat64(row, "p50_ms"),

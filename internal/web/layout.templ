@@ -126,10 +126,6 @@ templ Layout(title string, activePage string) {
 					background: var(--bg-primary);
 				}
 
-				.page-header {
-					margin-bottom: 1.5rem;
-				}
-
 				.page-title {
 					font-size: 1.5rem;
 					font-weight: 700;
@@ -164,6 +160,7 @@ templ Layout(title string, activePage string) {
 				.grid-2 { grid-template-columns: repeat(2, 1fr); }
 				.grid-3 { grid-template-columns: repeat(3, 1fr); }
 				.grid-4 { grid-template-columns: repeat(4, 1fr); }
+				.grid > sl-badge { justify-self: start; align-self: center; }
 
 				@media (max-width: 1024px) {
 					.grid-3, .grid-4 { grid-template-columns: repeat(2, 1fr); }
@@ -175,7 +172,19 @@ templ Layout(title string, activePage string) {
 				}
 
 				/* Metrics */
-				.metric { text-align: center; }
+				.metric, .metric-card { text-align: center; }
+				.metric-card {
+					display: flex;
+					flex-direction: column;
+					align-items: center;
+					justify-content: center;
+					padding: 1rem;
+				}
+				.metric-card::part(body) {
+					display: flex;
+					flex-direction: column;
+					align-items: center;
+				}
 				.metric-value {
 					font-size: 2rem;
 					font-weight: 700;
@@ -186,6 +195,8 @@ templ Layout(title string, activePage string) {
 					font-size: 0.75rem;
 					color: var(--text-muted);
 					margin-top: 0.25rem;
+					text-transform: uppercase;
+					letter-spacing: 0.05em;
 				}
 
 				/* Status badges */
@@ -230,13 +241,121 @@ templ Layout(title string, activePage string) {
 				/* Charts */
 				.chart { width: 100%; height: 300px; }
 
-				/* Loading */
+				/* Loading - use sl-spinner inline */
 				.loading {
 					display: flex;
 					align-items: center;
 					justify-content: center;
 					padding: 2rem;
 					color: var(--text-muted);
+				}
+
+				/* HTMX Loading Indicator */
+				.htmx-request {
+					opacity: 0.6;
+					transition: opacity 200ms ease-in;
+				}
+				.htmx-request .htmx-indicator {
+					display: inline-flex !important;
+				}
+				.htmx-indicator {
+					display: none;
+				}
+				.loading-overlay {
+					position: relative;
+				}
+				.loading-overlay.htmx-request::after {
+					content: '';
+					position: absolute;
+					inset: 0;
+					background: var(--bg-secondary);
+					opacity: 0.5;
+					border-radius: inherit;
+				}
+
+				/* Breadcrumbs */
+				.breadcrumbs {
+					margin-bottom: 1rem;
+				}
+				.breadcrumbs sl-breadcrumb-item::part(label) {
+					font-size: 0.875rem;
+					color: var(--text-secondary);
+				}
+				.breadcrumbs sl-breadcrumb-item:last-child::part(label) {
+					color: var(--text-primary);
+					font-weight: 500;
+				}
+
+				/* Page header with refresh */
+				.page-header {
+					display: flex;
+					align-items: center;
+					justify-content: space-between;
+					margin-bottom: 1.5rem;
+				}
+				.page-header-left {
+					flex: 1;
+				}
+				.page-header-right {
+					display: flex;
+					align-items: center;
+					gap: 0.75rem;
+				}
+				.last-updated {
+					font-size: 0.75rem;
+					color: var(--text-muted);
+				}
+
+				/* Quick Filters */
+				.quick-filters {
+					display: flex;
+					gap: 0.5rem;
+					margin-bottom: 1rem;
+				}
+				.quick-filters sl-button::part(base) {
+					font-size: 0.75rem;
+				}
+
+				/* Sparklines */
+				.sparkline {
+					display: inline-block;
+					vertical-align: middle;
+				}
+				.sparkline svg {
+					display: block;
+				}
+				.sparkline-line {
+					fill: none;
+					stroke: var(--accent);
+					stroke-width: 1.5;
+				}
+				.sparkline-error .sparkline-line {
+					stroke: var(--danger);
+				}
+
+				/* Empty States */
+				.empty-state {
+					display: flex;
+					flex-direction: column;
+					align-items: center;
+					justify-content: center;
+					padding: 3rem 1rem;
+					text-align: center;
+					color: var(--text-muted);
+				}
+				.empty-state sl-icon {
+					font-size: 3rem;
+					margin-bottom: 1rem;
+					opacity: 0.5;
+				}
+				.empty-state-title {
+					font-size: 1rem;
+					font-weight: 600;
+					color: var(--text-secondary);
+					margin-bottom: 0.5rem;
+				}
+				.empty-state-message {
+					font-size: 0.875rem;
 				}
 			</style>
 		</head>
@@ -245,6 +364,14 @@ templ Layout(title string, activePage string) {
 				<header class="header">
 					<a href="/" class="header-brand">Fanout</a>
 					<div class="header-spacer"></div>
+					<sl-select id="time-window" size="small" value="60" style="width: 120px;">
+						<sl-option value="15">Last 15m</sl-option>
+						<sl-option value="30">Last 30m</sl-option>
+						<sl-option value="60">Last 1h</sl-option>
+						<sl-option value="180">Last 3h</sl-option>
+						<sl-option value="360">Last 6h</sl-option>
+						<sl-option value="1440">Last 24h</sl-option>
+					</sl-select>
 					<sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
 				</header>
 				<aside class="sidebar">
@@ -283,6 +410,39 @@ templ Layout(title string, activePage string) {
 				}
 				initVegaCharts();
 				document.body.addEventListener('htmx:afterSwap', initVegaCharts);
+
+				// Last updated timestamp
+				let lastUpdateTime = Date.now();
+				function updateTimestamp() {
+					const el = document.getElementById('last-updated');
+					if (!el) return;
+					const seconds = Math.floor((Date.now() - lastUpdateTime) / 1000);
+					if (seconds < 5) el.textContent = 'Updated just now';
+					else if (seconds < 60) el.textContent = `Updated ${seconds}s ago`;
+					else el.textContent = `Updated ${Math.floor(seconds / 60)}m ago`;
+				}
+				setInterval(updateTimestamp, 5000);
+				document.body.addEventListener('htmx:afterSwap', () => {
+					lastUpdateTime = Date.now();
+					updateTimestamp();
+				});
+
+				// Time window selector
+				const timeSelect = document.getElementById('time-window');
+				const currentUrl = new URL(window.location.href);
+				const currentWindow = currentUrl.searchParams.get('window') || '60';
+				timeSelect.value = currentWindow;
+
+				timeSelect.addEventListener('sl-change', (e) => {
+					const newWindow = e.target.value;
+					const newUrl = new URL(window.location.href);
+					if (newWindow === '60') {
+						newUrl.searchParams.delete('window');
+					} else {
+						newUrl.searchParams.set('window', newWindow);
+					}
+					window.location.href = newUrl.toString();
+				});
 			</script>
 		</body>
 	</html>

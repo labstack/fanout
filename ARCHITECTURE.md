@@ -84,7 +84,7 @@ Each Export call transforms OTLP data into normalized rows and pushes to in-memo
 ### Query Engine (`internal/query/`)
 
 - **DuckDB** reads directly from Parquet files
-- Maintains **`svc_minute`** rollups for fast dashboard queries
+- Maintains **`service_rollup`** table for fast dashboard queries
 - In-process via CGO driver
 
 ### Service Layer (`internal/service/`)
@@ -227,13 +227,12 @@ erDiagram
         float hist_sum
     }
 
-    SVC_MINUTE {
-        timestamp ts_min PK
-        string service_name PK
-        bigint span_count
+    SERVICE_ROLLUP {
+        timestamp bucket PK
+        string service PK
+        bigint spans
         float p50_ms
         float p95_ms
-        float p99_ms
         float error_rate
     }
 

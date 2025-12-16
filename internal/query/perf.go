@@ -11,12 +11,12 @@ import (
 // based on the time window. Instead of scanning all partitions,
 // it only includes hours that could contain data within the window.
 func ParquetGlob(lakeDir, signal string, windowMinutes int) string {
-	now := time.Now().UTC()
+	now := time.Now() // Use local time to match lake writer partitions
 	start := now.Add(-time.Duration(windowMinutes) * time.Minute)
 
-	// If window is large (>24h), fall back to full glob
-	if windowMinutes > 24*60 {
-		return fmt.Sprintf("%s/%s/year=*/month=*/day=*/hour=*/part-*.parquet", lakeDir, signal)
+	// If window is large (>=24h), fall back to full glob
+	if windowMinutes >= 24*60 {
+		return fmt.Sprintf("'%s/%s/year=*/month=*/day=*/hour=*/part-*.parquet'", lakeDir, signal)
 	}
 
 	// Collect all hour partitions we need
@@ -39,9 +39,9 @@ func ParquetGlob(lakeDir, signal string, windowMinutes int) string {
 		patterns = append(patterns, pattern)
 	}
 
-	// DuckDB supports list of files
+	// DuckDB supports list of files (all paths must be quoted)
 	if len(patterns) == 1 {
-		return patterns[0]
+		return fmt.Sprintf("'%s'", patterns[0])
 	}
 	return fmt.Sprintf("[%s]", strings.Join(wrapQuotes(patterns), ","))
 }

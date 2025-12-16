@@ -83,7 +83,7 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 		})
 	}
 
-	return render(c, web.OverviewContent(data))
+	return renderTempl(c, web.OverviewContent(data))
 }
 
 // PartialStats returns just the stats grid
@@ -99,7 +99,7 @@ func (h *UIHandler) PartialStats(c echo.Context) error {
 		Unhealthy: status.Services.Unhealthy,
 	}
 
-	return render(c, web.StatsGrid(data))
+	return renderTempl(c, web.StatsGrid(data))
 }
 
 // PartialKeyMetrics returns just the key metrics grid
@@ -107,7 +107,7 @@ func (h *UIHandler) PartialKeyMetrics(c echo.Context) error {
 	cachePartial(c)
 	ctx := c.Request().Context()
 	status := h.getStatus(ctx, 15)
-	return render(c, web.KeyMetrics(status.ThroughputPerMin, status.P95Ms, status.ErrorRate))
+	return renderTempl(c, web.KeyMetrics(status.ThroughputPerMin, status.P95Ms, status.ErrorRate))
 }
 
 // PartialTopIssues returns just the top issues table
@@ -126,7 +126,7 @@ func (h *UIHandler) PartialTopIssues(c echo.Context) error {
 		})
 	}
 
-	return render(c, web.TopIssues(issues))
+	return renderTempl(c, web.TopIssues(issues))
 }
 
 // PartialServicesTable returns just the services table
@@ -146,7 +146,7 @@ func (h *UIHandler) PartialServicesTable(c echo.Context) error {
 		})
 	}
 
-	return render(c, web.ServicesTable(nodes))
+	return renderTempl(c, web.ServicesTable(nodes))
 }
 
 // PartialTimeline returns just the timeline chart
@@ -167,5 +167,5 @@ func (h *UIHandler) PartialTimeline(c echo.Context) error {
 		})
 	}
 
-	return render(c, web.TimelineChart(data))
+	return renderTempl(c, web.TimelineChart(data))
 }

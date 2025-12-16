@@ -39,7 +39,9 @@ func NewServer(svc *service.Service, duck *query.Duck, cfg config.Config) *Serve
 func (s *Server) RegisterRoutes(e *echo.Echo) {
 	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return s.mcp
-	}, nil)
+	}, &mcp.StreamableHTTPOptions{
+		Stateless: true, // Survives server restarts - no session persistence needed
+	})
 	e.Any("/mcp", echo.WrapHandler(handler))
 
 	// Shareable report view
@@ -130,7 +132,7 @@ func (s *Server) registerTools() {
 	// 9. render - Universal HTML renderer for custom reports
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "render",
-		Description: "Generate custom HTML reports from declarative sections. Supports metrics, tables, charts (Vega-Lite), badges, grids, panels. Returns shareable URL.",
+		Description: renderToolDescription(),
 	}, s.render)
 
 	// 10. compare - Side-by-side service comparison
@@ -138,6 +140,14 @@ func (s *Server) registerTools() {
 		Name:        "compare",
 		Description: "Compare 2-4 services side-by-side. Returns requests, error rate, P50/P95 latency for each service with winner determination.",
 	}, s.compare)
+}
+
+// renderToolDescription generates the MCP tool description dynamically
+func renderToolDescription() string {
+	return `Generate custom HTML reports from declarative sections. Returns shareable URL.
+
+` + ComponentToolDescription() + `
+Example section: {"type": "metric", "config": {"label": "Requests", "value": "1.2k"}}`
 }
 
 const notFoundHTML = `<!DOCTYPE html>
@@ -152,6 +162,7 @@ func wrapReportHTML(r *Report) string {
 <html><head>
 <title>%s - Fanout Report</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css"/>
+<link rel="stylesheet" href="/css/components.css"/>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
 <script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
@@ -168,9 +179,12 @@ func wrapReportHTML(r *Report) string {
   --danger-light: #fee2e2;
   --text-primary: #0f172a;
   --text-secondary: #64748b;
+  --text-muted: #94a3b8;
   --border: #e2e8f0;
+  --border-color: #e2e8f0;
   --bg-card: #ffffff;
   --bg-page: #f8fafc;
+  --bg-tertiary: #f1f5f9;
   --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
   --shadow-lg: 0 4px 6px rgba(0,0,0,0.1), 0 2px 4px rgba(0,0,0,0.06);
 }

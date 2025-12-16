@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/render"
 	"github.com/labstack/fanout/internal/web"
 	"golang.org/x/sync/errgroup"
 )
@@ -31,21 +32,33 @@ func RegisterUIRoutes(e *echo.Echo, duck *query.Duck, cfg config.Config) {
 	e.GET("/", h.Overview)
 	e.GET("/services", h.Services)
 	e.GET("/services/:name", h.ServiceDetail)
+	e.GET("/topology", h.Topology)
 	e.GET("/traces", h.Traces)
 	e.GET("/traces/:id", h.TraceDetail)
 	e.GET("/logs", h.Logs)
 	e.GET("/metrics", h.Metrics)
 
+	// Component CSS (dynamic from registry)
+	e.GET("/css/components.css", ComponentCSS)
+
 	// htmx partial routes
 	RegisterPartialRoutes(e, h)
+}
+
+// ComponentCSS serves combined CSS from all registered components
+func ComponentCSS(c echo.Context) error {
+	css := render.AllCSS()
+	c.Response().Header().Set("Content-Type", "text/css")
+	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
+	return c.String(200, css)
 }
 
 // Overview renders the main dashboard
 func (h *UIHandler) Overview(c echo.Context) error {
 	ctx := c.Request().Context()
-	window := 15
+	window := parseWindow(c)
 
-	data := web.OverviewData{}
+	data := web.OverviewData{Window: window}
 
 	// Run queries in parallel
 	var status statusResult
@@ -60,12 +73,12 @@ func (h *UIHandler) Overview(c echo.Context) error {
 	})
 
 	g.Go(func() error {
-		topo = h.getTopology(gctx, 60)
+		topo = h.getTopology(gctx, window)
 		return nil
 	})
 
 	g.Go(func() error {
-		timeline = h.getTimeline(gctx, "", 60, 5)
+		timeline = h.getTimeline(gctx, "", window, 5)
 		return nil
 	})
 
@@ -123,35 +136,78 @@ func (h *UIHandler) Overview(c echo.Context) error {
 		})
 	}
 
-	return render(c, web.Overview(data))
+	return renderTempl(c, web.Overview(data))
 }
 
 // Services renders the services list page
 func (h *UIHandler) Services(c echo.Context) error {
 	ctx := c.Request().Context()
-	topo := h.getTopology(ctx, 60)
+	filter := c.QueryParam("filter")
+	window := parseWindow(c)
 
-	data := web.ServicesData{}
+	var topo topoResult
+	var trends map[string][]int64
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		topo = h.getTopology(gctx, window)
+		return nil
+	})
+	g.Go(func() error {
+		trends = h.getServiceTrends(gctx, window)
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	data := web.ServicesData{Filter: filter, Window: window}
 	for _, n := range topo.Nodes {
+		// Apply filter
+		switch filter {
+		case "errors":
+			if n.ErrorRate < 0.01 {
+				continue
+			}
+		case "slow":
+			if n.P95Ms < 500 {
+				continue
+			}
+		}
 		data.Services = append(data.Services, web.ServiceRow{
 			Name:      n.Name,
 			Status:    n.Status,
 			SpanCount: n.SpanCount,
 			P95Ms:     n.P95Ms,
 			ErrorRate: n.ErrorRate,
+			Trend:     trends[n.Name],
 		})
 	}
 
-	return render(c, web.Services(data))
+	return renderTempl(c, web.Services(data))
 }
 
 // ServiceDetail renders a service detail page
 func (h *UIHandler) ServiceDetail(c echo.Context) error {
 	ctx := c.Request().Context()
 	name := c.Param("name")
-	window := 15
+	window := parseWindow(c)
 
-	diag := h.getDiagnose(ctx, name, window)
+	var diag diagnoseResult
+	var timeline timelineResult
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		diag = h.getDiagnose(gctx, name, window)
+		return nil
+	})
+	g.Go(func() error {
+		timeline = h.getTimeline(gctx, name, window, 5)
+		return nil
+	})
+	if err := g.Wait(); err != nil {
+		return err
+	}
 
 	data := web.ServiceDetailData{
 		Name:      name,
@@ -161,6 +217,19 @@ func (h *UIHandler) ServiceDetail(c echo.Context) error {
 		P99Ms:     diag.P99Ms,
 		ErrorRate: diag.ErrorRate,
 		SpanCount: diag.SpanCount,
+		Window:    window,
+	}
+
+	// Add timeline data for charts
+	for _, b := range timeline.Buckets {
+		data.Timeline = append(data.Timeline, web.TimelinePoint{
+			Time:         b.Time,
+			RequestCount: b.RequestCount,
+			ErrorCount:   b.ErrorCount,
+			P50Ms:        b.P50Ms,
+			P95Ms:        b.P95Ms,
+			ErrorRate:    b.ErrorRate,
+		})
 	}
 
 	for _, e := range diag.TopErrors {
@@ -190,7 +259,49 @@ func (h *UIHandler) ServiceDetail(c echo.Context) error {
 		})
 	}
 
-	return render(c, web.ServiceDetail(data))
+	return renderTempl(c, web.ServiceDetail(data))
+}
+
+// Topology renders the service topology page
+func (h *UIHandler) Topology(c echo.Context) error {
+	ctx := c.Request().Context()
+	window := parseWindow(c)
+
+	var nodes []web.ServiceNode
+	var edges []web.ServiceEdge
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		topo := h.getTopology(gctx, window)
+		for _, n := range topo.Nodes {
+			nodes = append(nodes, web.ServiceNode{
+				Name:      n.Name,
+				Status:    n.Status,
+				SpanCount: n.SpanCount,
+				P95Ms:     n.P95Ms,
+				ErrorRate: n.ErrorRate,
+			})
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		edges = h.getTopoEdges(gctx, window)
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	data := web.TopologyData{
+		Nodes:  nodes,
+		Edges:  edges,
+		Window: window,
+	}
+
+	return renderTempl(c, web.Topology(data))
 }
 
 // Traces renders the traces search page
@@ -199,7 +310,7 @@ func (h *UIHandler) Traces(c echo.Context) error {
 	query := c.QueryParam("q")
 	service := c.QueryParam("service")
 	status := c.QueryParam("status")
-	window := 15
+	window := parseWindow(c)
 
 	// Pagination
 	limit := 50
@@ -227,9 +338,10 @@ func (h *UIHandler) Traces(c echo.Context) error {
 		Limit:   limit,
 		Offset:  offset,
 		HasMore: hasMore,
+		Window:  window,
 	}
 
-	return render(c, web.Traces(data))
+	return renderTempl(c, web.Traces(data))
 }
 
 // TraceDetail renders a trace detail page
@@ -238,7 +350,7 @@ func (h *UIHandler) TraceDetail(c echo.Context) error {
 	traceID := c.Param("id")
 
 	detail := h.getTraceDetail(ctx, traceID)
-	return render(c, web.TraceDetail(detail))
+	return renderTempl(c, web.TraceDetail(detail))
 }
 
 // Logs renders the logs search page
@@ -247,7 +359,7 @@ func (h *UIHandler) Logs(c echo.Context) error {
 	query := c.QueryParam("q")
 	service := c.QueryParam("service")
 	severity := c.QueryParam("severity")
-	window := 15
+	window := parseWindow(c)
 
 	// Pagination
 	limit := 100
@@ -274,16 +386,33 @@ func (h *UIHandler) Logs(c echo.Context) error {
 		Logs:     logs,
 		Limit:    limit,
 		Offset:   offset,
+		Window:   window,
 		HasMore:  hasMore,
 	}
 
-	return render(c, web.Logs(data))
+	return renderTempl(c, web.Logs(data))
 }
 
-// render is a helper to render templ components
-func render(c echo.Context, component templ.Component) error {
+// renderTempl is a helper to render templ components
+func renderTempl(c echo.Context, component templ.Component) error {
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTML)
 	return component.Render(c.Request().Context(), c.Response().Writer)
+}
+
+// parseWindow reads window query param and returns minutes (default 60)
+func parseWindow(c echo.Context) int {
+	window := 60
+	if w := c.QueryParam("window"); w != "" {
+		fmt.Sscanf(w, "%d", &window)
+		// Clamp to valid values
+		switch window {
+		case 15, 30, 60, 180, 360, 1440:
+			// valid
+		default:
+			window = 60
+		}
+	}
+	return window
 }
 
 // --- Query helpers (same logic as MCP tools) ---
@@ -471,6 +600,86 @@ LIMIT 50;
 	return out
 }
 
+// getServiceTrends returns per-service request counts bucketed by 5 minutes
+func (h *UIHandler) getServiceTrends(ctx context.Context, window int) map[string][]int64 {
+	out := make(map[string][]int64)
+
+	q := fmt.Sprintf(`
+SELECT
+  "name=service_name" as service,
+  time_bucket(INTERVAL '5 minutes', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) as bucket,
+  COUNT(*) as cnt
+FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+GROUP BY "name=service_name", bucket
+ORDER BY service, bucket ASC;
+`, h.cfg.LakeDir, window)
+
+	rows, err := h.duck.DB.QueryContext(ctx, q)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var service string
+		var bucket any
+		var cnt int64
+		if err := rows.Scan(&service, &bucket, &cnt); err != nil {
+			continue
+		}
+		out[service] = append(out[service], cnt)
+	}
+
+	return out
+}
+
+// getTopoEdges returns caller-callee relationships between services
+func (h *UIHandler) getTopoEdges(ctx context.Context, window int) []web.ServiceEdge {
+	var out []web.ServiceEdge
+
+	// Find parent-child span relationships across services
+	q := fmt.Sprintf(`
+WITH spans AS (
+  SELECT
+    "name=span_id" as span_id,
+    "name=parent_span_id" as parent_id,
+    "name=service_name" as service,
+    "name=status_code" as status
+  FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+  WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+)
+SELECT
+  parent.service as caller,
+  child.service as callee,
+  COUNT(*) as calls,
+  AVG(CASE WHEN child.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) as error_rate
+FROM spans child
+JOIN spans parent ON child.parent_id = parent.span_id
+WHERE parent.service != child.service
+GROUP BY parent.service, child.service
+HAVING COUNT(*) > 5
+ORDER BY calls DESC
+LIMIT 100;
+`, h.cfg.LakeDir, window)
+
+	rows, err := h.duck.DB.QueryContext(ctx, q)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var e web.ServiceEdge
+		if err := rows.Scan(&e.From, &e.To, &e.CallCount, &e.ErrorRate); err != nil {
+			continue
+		}
+		out = append(out, e)
+	}
+
+	return out
+}
+
 type timelineResult struct {
 	Buckets   []timelineBucket
 	Anomalies []anomaly
@@ -481,6 +690,7 @@ type timelineBucket struct {
 	Time         string
 	RequestCount int64
 	ErrorCount   int64
+	P50Ms        float64
 	P95Ms        float64
 	ErrorRate    float64
 	IsAnomaly    bool
@@ -505,6 +715,7 @@ SELECT
   time_bucket(INTERVAL '%d minutes', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) as bucket,
   COUNT(*) as cnt,
   SUM(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1 ELSE 0 END) as errors,
+  COALESCE(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p50,
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95
 FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
@@ -523,7 +734,7 @@ ORDER BY bucket ASC;
 	for rows.Next() {
 		var b timelineBucket
 		var bucket any
-		if err := rows.Scan(&bucket, &b.RequestCount, &b.ErrorCount, &b.P95Ms); err != nil {
+		if err := rows.Scan(&bucket, &b.RequestCount, &b.ErrorCount, &b.P50Ms, &b.P95Ms); err != nil {
 			continue
 		}
 		b.Time = fmt.Sprintf("%v", bucket)
@@ -945,7 +1156,7 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 		HasMore:  hasMore,
 	}
 
-	return render(c, web.Metrics(data))
+	return renderTempl(c, web.Metrics(data))
 }
 
 func (h *UIHandler) getMetricNames(ctx context.Context) []string {

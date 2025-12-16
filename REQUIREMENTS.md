@@ -10,7 +10,7 @@
 
 ### Storage
 - **Partitioned Parquet**: `/lake/{signal}/year=YYYY/month=MM/day=DD/hour=HH/part-<ts>.parquet`
-- **DuckDB** embedded query engine + **minute rollups** (`svc_minute`)
+- **DuckDB** embedded query engine + **minute rollups** (`service_rollup`)
 - **Retention**: Automatic pruning (configurable, default 30 days)
 
 ### HTTP API (:7520)

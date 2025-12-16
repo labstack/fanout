@@ -97,24 +97,24 @@ Common queries:
 - By service: WHERE "name=service_name" = 'checkout'
 - Gauge metrics: WHERE "name=mtype" = 'GAUGE'
 
-### 4. Rollup Table (svc_minute)
+### 4. Rollup Table (service_rollup)
 Pre-aggregated data for fast queries:
-Table: svc_minute
+Table: service_rollup
 Columns:
-- ts_min (TIMESTAMP): 1-minute time bucket
-- service_name (VARCHAR): Service name
-- span_count (BIGINT): Number of spans in this bucket
+- bucket (TIMESTAMP): 1-minute time bucket
+- service (VARCHAR): Service name
+- spans (BIGINT): Number of spans in this bucket
 - error_rate (DOUBLE): Error rate (0.0 to 1.0)
 - p50_ms (DOUBLE): 50th percentile duration
 - p95_ms (DOUBLE): 95th percentile duration
 
 Time range:
-- Recent data: WHERE ts_min >= NOW() - INTERVAL '<minutes> minutes'
+- Recent data: WHERE bucket >= NOW() - INTERVAL '<minutes> minutes'
 
 ## Query Guidelines
 1. Always filter by time to improve performance
 2. Use read_parquet() for raw data access
-3. Use svc_minute table for fast dashboard queries
+3. Use service_rollup table for fast dashboard queries
 4. JSON columns can be queried with LIKE or json_extract_string()
 5. Always include LIMIT clause (default max 1000 rows)
 6. For time windows, use: NOW() - INTERVAL '<N> minutes' or EXTRACT(EPOCH FROM NOW()) * 1000000000 for nanoseconds

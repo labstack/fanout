@@ -33,31 +33,20 @@ templ Metrics(data MetricsData) {
 		<div class="card" style="margin-bottom: 1.5rem;">
 			<form method="GET" action="/metrics" class="search-form">
 				<div class="form-row">
-					<div class="form-group">
-						<label for="name">Metric Name</label>
-						<select name="name" id="name">
-							<option value="">All metrics</option>
-							for _, n := range data.Names {
-								<option value={ n } selected?={ data.Selected == n }>{ n }</option>
-							}
-						</select>
-					</div>
-					<div class="form-group">
-						<label for="service">Service</label>
-						<input type="text" name="service" id="service" placeholder="All services" value={ data.Service }/>
-					</div>
-					<div class="form-group">
-						<label for="window">Time Window</label>
-						<select name="window" id="window">
-							<option value="15" selected?={ data.Window == 15 }>Last 15 min</option>
-							<option value="60" selected?={ data.Window == 60 }>Last 1 hour</option>
-							<option value="360" selected?={ data.Window == 360 }>Last 6 hours</option>
-							<option value="1440" selected?={ data.Window == 1440 }>Last 24 hours</option>
-						</select>
-					</div>
-					<div class="form-group" style="align-self: flex-end;">
-						<button type="submit" class="btn btn-primary">Search</button>
-					</div>
+					<sl-select name="name" label="Metric Name" value={ data.Selected }>
+						<sl-option value="">All metrics</sl-option>
+						for _, n := range data.Names {
+							<sl-option value={ n }>{ n }</sl-option>
+						}
+					</sl-select>
+					<sl-input name="service" label="Service" placeholder="All services" value={ data.Service }></sl-input>
+					<sl-select name="window" label="Time Window" value={ fmt.Sprintf("%d", data.Window) }>
+						<sl-option value="15">Last 15 min</sl-option>
+						<sl-option value="60">Last 1 hour</sl-option>
+						<sl-option value="360">Last 6 hours</sl-option>
+						<sl-option value="1440">Last 24 hours</sl-option>
+					</sl-select>
+					<sl-button type="submit" variant="primary">Search</sl-button>
 				</div>
 			</form>
 		</div>
@@ -83,7 +72,7 @@ templ Metrics(data MetricsData) {
 								<td style="font-family: monospace; font-size: 0.8rem;">{ m.Time }</td>
 								<td>{ m.Name }</td>
 								<td><a href={ templ.SafeURL("/services/" + m.Service) }>{ m.Service }</a></td>
-								<td><span class={ "metric-type", metricTypeClass(m.Type) }>{ m.Type }</span></td>
+								<td><sl-badge variant={ metricTypeVariant(m.Type) }>{ m.Type }</sl-badge></td>
 								<td style="font-family: monospace;">{ fmt.Sprintf("%.2f", m.Value) }</td>
 							</tr>
 						}
@@ -93,11 +82,11 @@ templ Metrics(data MetricsData) {
 				if data.Offset > 0 || data.HasMore {
 					<div class="pagination">
 						if data.Offset > 0 {
-							<a href={ templ.SafeURL(metricsPaginationURL(data.Selected, data.Service, data.Window, data.Limit, data.Offset-data.Limit)) } class="btn btn-secondary">Previous</a>
+							<sl-button href={ metricsPaginationURL(data.Selected, data.Service, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
 						}
 						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Metrics)) }</span>
 						if data.HasMore {
-							<a href={ templ.SafeURL(metricsPaginationURL(data.Selected, data.Service, data.Window, data.Limit, data.Offset+data.Limit)) } class="btn btn-secondary">Next</a>
+							<sl-button href={ metricsPaginationURL(data.Selected, data.Service, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
 						}
 					</div>
 				}
@@ -108,70 +97,11 @@ templ Metrics(data MetricsData) {
 				display: flex;
 				gap: 1rem;
 				flex-wrap: wrap;
+				align-items: flex-end;
 			}
-			.form-group {
-				display: flex;
-				flex-direction: column;
-				gap: 0.5rem;
-				min-width: 150px;
+			.search-form sl-input, .search-form sl-select {
 				flex: 1;
-			}
-			.form-group label {
-				font-size: 0.75rem;
-				font-weight: 600;
-				color: var(--text-secondary);
-				text-transform: uppercase;
-			}
-			.form-group input, .form-group select {
-				padding: 0.5rem 0.75rem;
-				border: 1px solid var(--border-color);
-				border-radius: 0.375rem;
-				font-size: 0.875rem;
-				background: var(--bg-secondary);
-				color: var(--text-primary);
-			}
-			.btn {
-				padding: 0.5rem 1rem;
-				border: none;
-				border-radius: 0.375rem;
-				font-size: 0.875rem;
-				font-weight: 500;
-				cursor: pointer;
-			}
-			.btn-primary {
-				background: var(--accent);
-				color: white;
-			}
-			.btn-primary:hover {
-				background: var(--accent-hover);
-			}
-			.btn-secondary {
-				background: var(--bg-secondary);
-				color: var(--text-primary);
-				border: 1px solid var(--border-color);
-				text-decoration: none;
-				display: inline-block;
-			}
-			.btn-secondary:hover {
-				background: var(--bg-tertiary);
-			}
-			.metric-type {
-				padding: 0.125rem 0.5rem;
-				border-radius: 4px;
-				font-size: 0.7rem;
-				font-weight: 600;
-			}
-			.metric-gauge {
-				background: var(--accent);
-				color: white;
-			}
-			.metric-sum {
-				background: var(--success);
-				color: white;
-			}
-			.metric-histogram {
-				background: var(--warning);
-				color: white;
+				min-width: 150px;
 			}
 			.pagination {
 				display: flex;
@@ -190,16 +120,16 @@ templ Metrics(data MetricsData) {
 	}
 }
 
-func metricTypeClass(mtype string) string {
+func metricTypeVariant(mtype string) string {
 	switch mtype {
 	case "GAUGE":
-		return "metric-gauge"
+		return "primary"
 	case "SUM":
-		return "metric-sum"
+		return "success"
 	case "HISTOGRAM":
-		return "metric-histogram"
+		return "warning"
 	default:
-		return ""
+		return "neutral"
 	}
 }
 

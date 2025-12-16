@@ -248,17 +248,16 @@ LIMIT 100`,
 		},
 		{
 			Title:       "Service latency percentiles",
-			Description: "P50, P95, P99 latencies by service from rollup table",
+			Description: "P50, P95 latencies by service from rollup table",
 			Query: `SELECT
-  service_name,
-  AVG(avg_duration_ms) as avg_ms,
-  AVG(p95_duration_ms) as p95_ms,
-  AVG(p99_duration_ms) as p99_ms,
-  SUM(span_count) as total_requests,
-  SUM(error_count) as total_errors
-FROM svc_minute
-WHERE time_bucket >= NOW() - INTERVAL '15 minutes'
-GROUP BY service_name
+  service,
+  AVG(p50_ms) as p50_ms,
+  AVG(p95_ms) as p95_ms,
+  SUM(spans) as total_requests,
+  AVG(error_rate) as avg_error_rate
+FROM service_rollup
+WHERE bucket >= NOW() - INTERVAL '15 minutes'
+GROUP BY service
 ORDER BY total_requests DESC`,
 		},
 	}

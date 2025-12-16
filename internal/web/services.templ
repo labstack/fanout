@@ -1,10 +1,15 @@
 package web
 
-import "fmt"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // ServicesData for the services list page
 type ServicesData struct {
 	Services []ServiceRow
+	Filter   string // "all", "errors", "slow"
+	Window   int
 }
 
 type ServiceRow struct {
@@ -13,40 +18,66 @@ type ServiceRow struct {
 	SpanCount int64
 	P95Ms     float64
 	ErrorRate float64
+	Trend     []int64 // Last 12 5-min buckets of request counts
 }
 
 // Services renders the services list page
 templ Services(data ServicesData) {
 	@Layout("Services", "services") {
 		<div class="page-header">
-			<h1 class="page-title">Services</h1>
-			<p class="page-subtitle">{ fmt.Sprintf("%d services monitored", len(data.Services)) }</p>
+			<div class="page-header-left">
+				<h1 class="page-title">Services</h1>
+				<p class="page-subtitle">{ fmt.Sprintf("%d services monitored", len(data.Services)) }</p>
+			</div>
+		</div>
+		<div class="quick-filters">
+			<sl-button href="/services" size="small" variant={ filterVariant(data.Filter, "") }>All</sl-button>
+			<sl-button href="/services?filter=errors" size="small" variant={ filterVariant(data.Filter, "errors") }>
+				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
+				Errors
+			</sl-button>
+			<sl-button href="/services?filter=slow" size="small" variant={ filterVariant(data.Filter, "slow") }>
+				<sl-icon slot="prefix" name="clock"></sl-icon>
+				Slow
+			</sl-button>
 		</div>
 		<div class="card">
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Service</th>
-						<th>Status</th>
-						<th>Requests</th>
-						<th>P95 Latency</th>
-						<th>Error Rate</th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, svc := range data.Services {
+			if len(data.Services) == 0 {
+				<div class="empty-state">
+					<sl-icon name="boxes"></sl-icon>
+					<div class="empty-state-title">No services detected</div>
+					<div class="empty-state-message">Services will appear here once telemetry data is received.</div>
+				</div>
+			} else {
+				<table class="table">
+					<thead>
 						<tr>
-							<td><a href={ templ.SafeURL("/services/" + svc.Name) }>{ svc.Name }</a></td>
-							<td>
-								<span class={ "status", statusClass(svc.Status) }>{ svc.Status }</span>
-							</td>
-							<td>{ fmt.Sprintf("%d", svc.SpanCount) }</td>
-							<td>{ fmt.Sprintf("%.0fms", svc.P95Ms) }</td>
-							<td>{ fmt.Sprintf("%.1f%%", svc.ErrorRate*100) }</td>
+							<th>Service</th>
+							<th>Status</th>
+							<th>Trend</th>
+							<th>Requests</th>
+							<th>P95 Latency</th>
+							<th>Error Rate</th>
 						</tr>
-					}
-				</tbody>
-			</table>
+					</thead>
+					<tbody>
+						for _, svc := range data.Services {
+							<tr>
+								<td><a href={ templ.SafeURL("/services/" + svc.Name) }>{ svc.Name }</a></td>
+								<td>
+									<span class={ "status", statusClass(svc.Status) }>{ svc.Status }</span>
+								</td>
+								<td>
+									@Sparkline(svc.Trend, svc.ErrorRate > 0.05)
+								</td>
+								<td>{ fmt.Sprintf("%d", svc.SpanCount) }</td>
+								<td>{ fmt.Sprintf("%.0fms", svc.P95Ms) }</td>
+								<td>{ fmt.Sprintf("%.1f%%", svc.ErrorRate*100) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
 		</div>
 	}
 }
@@ -63,6 +94,18 @@ type ServiceDetailData struct {
 	TopErrors    []ErrorInfo
 	SlowOps      []SlowOp
 	Dependencies []Dependency
+	Timeline     []TimelinePoint
+	Window       int
+}
+
+// TimelinePoint represents a single data point for charts
+type TimelinePoint struct {
+	Time         string
+	RequestCount int64
+	ErrorCount   int64
+	P50Ms        float64
+	P95Ms        float64
+	ErrorRate    float64
 }
 
 type ErrorInfo struct {
@@ -89,12 +132,21 @@ type Dependency struct {
 // ServiceDetail renders the service detail page
 templ ServiceDetail(data ServiceDetailData) {
 	@Layout(data.Name, "services") {
+		<nav class="breadcrumbs">
+			<sl-breadcrumb>
+				<sl-breadcrumb-item href="/">Overview</sl-breadcrumb-item>
+				<sl-breadcrumb-item href="/services">Services</sl-breadcrumb-item>
+				<sl-breadcrumb-item>{ data.Name }</sl-breadcrumb-item>
+			</sl-breadcrumb>
+		</nav>
 		<div class="page-header">
-			<h1 class="page-title">
-				{ data.Name }
-				<span class={ "status", statusClass(data.Status) } style="margin-left: 0.75rem; vertical-align: middle;">{ data.Status }</span>
-			</h1>
-			<p class="page-subtitle">Service diagnostics</p>
+			<div class="page-header-left">
+				<h1 class="page-title">
+					{ data.Name }
+					<span class={ "status", statusClass(data.Status) } style="margin-left: 0.75rem; vertical-align: middle;">{ data.Status }</span>
+				</h1>
+				<p class="page-subtitle">Service diagnostics</p>
+			</div>
 		</div>
 		<!-- Latency Metrics -->
 		<div class="grid grid-4" style="margin-bottom: 1.5rem;">
@@ -123,12 +175,25 @@ templ ServiceDetail(data ServiceDetailData) {
 				</div>
 			</div>
 		</div>
+		<!-- Trend Charts -->
+		if len(data.Timeline) > 1 {
+			<div class="grid grid-2" style="margin-bottom: 1.5rem;">
+				<div class="card">
+					<div class="card-title">Latency Trend</div>
+					<div class="chart" style="height: 200px;" data-vega={ latencyChartSpec(data.Timeline) }></div>
+				</div>
+				<div class="card">
+					<div class="card-title">Request Volume</div>
+					<div class="chart" style="height: 200px;" data-vega={ requestChartSpec(data.Timeline) }></div>
+				</div>
+			</div>
+		}
 		<div class="grid grid-2" style="margin-bottom: 1.5rem;">
 			<!-- Top Errors -->
 			<div class="card">
 				<div class="card-title">Top Errors</div>
 				if len(data.TopErrors) == 0 {
-					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No errors in the last 15 minutes</p>
+					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No errors detected</p>
 				} else {
 					<table class="table">
 						<thead>
@@ -233,4 +298,158 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+func filterVariant(current, target string) string {
+	if current == target || (current == "" && target == "") {
+		return "primary"
+	}
+	return "default"
+}
+
+// Sparkline renders an SVG sparkline chart
+templ Sparkline(data []int64, isError bool) {
+	if len(data) == 0 {
+		<span class="sparkline">-</span>
+	} else {
+		<span class={ "sparkline", sparklineClass(isError) }>
+			<svg width="80" height="20" viewBox="0 0 80 20">
+				<polyline class="sparkline-line" points={ sparklinePoints(data) } fill="none"></polyline>
+			</svg>
+		</span>
+	}
+}
+
+func sparklineClass(isError bool) string {
+	if isError {
+		return "sparkline-error"
+	}
+	return ""
+}
+
+func sparklinePoints(data []int64) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	// Find max for normalization
+	var max int64 = 1
+	for _, v := range data {
+		if v > max {
+			max = v
+		}
+	}
+
+	// Generate points
+	points := ""
+	w := 80.0 / float64(len(data)-1)
+	for i, v := range data {
+		x := float64(i) * w
+		y := 18.0 - (float64(v)/float64(max))*16.0 // Leave 2px margin top/bottom
+		if i > 0 {
+			points += " "
+		}
+		points += fmt.Sprintf("%.1f,%.1f", x, y)
+	}
+	return points
+}
+
+// latencyChartSpec generates a Vega-Lite spec for latency trend
+func latencyChartSpec(data []TimelinePoint) string {
+	values := make([]map[string]any, len(data))
+	for i, p := range data {
+		values[i] = map[string]any{
+			"time": p.Time,
+			"p50":  p.P50Ms,
+			"p95":  p.P95Ms,
+		}
+	}
+
+	spec := map[string]any{
+		"$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+		"width":   "container",
+		"height":  180,
+		"data":    map[string]any{"values": values},
+		"layer": []map[string]any{
+			{
+				"mark": map[string]any{"type": "area", "opacity": 0.2, "color": "#f59e0b"},
+				"encoding": map[string]any{
+					"x": map[string]any{
+						"field":    "time",
+						"type":     "temporal",
+						"timeUnit": "yearmonthdatehoursminutes",
+						"axis":     map[string]any{"title": nil, "format": "%H:%M", "labelAngle": 0, "tickCount": 6},
+					},
+					"y": map[string]any{"field": "p95", "type": "quantitative", "axis": map[string]any{"title": "Latency (ms)"}},
+				},
+			},
+			{
+				"mark": map[string]any{"type": "line", "strokeWidth": 2, "color": "#f59e0b"},
+				"encoding": map[string]any{
+					"x": map[string]any{"field": "time", "type": "temporal", "timeUnit": "yearmonthdatehoursminutes"},
+					"y": map[string]any{"field": "p95", "type": "quantitative"},
+				},
+			},
+			{
+				"mark": map[string]any{"type": "line", "strokeWidth": 2, "color": "#3b82f6"},
+				"encoding": map[string]any{
+					"x": map[string]any{"field": "time", "type": "temporal", "timeUnit": "yearmonthdatehoursminutes"},
+					"y": map[string]any{"field": "p50", "type": "quantitative"},
+				},
+			},
+		},
+	}
+
+	b, _ := json.Marshal(spec)
+	return string(b)
+}
+
+// requestChartSpec generates a Vega-Lite spec for request volume with error rate
+func requestChartSpec(data []TimelinePoint) string {
+	values := make([]map[string]any, len(data))
+	for i, p := range data {
+		values[i] = map[string]any{
+			"time":     p.Time,
+			"requests": p.RequestCount,
+			"errors":   p.ErrorCount,
+			"errRate":  p.ErrorRate * 100,
+		}
+	}
+
+	spec := map[string]any{
+		"$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+		"width":   "container",
+		"height":  180,
+		"data":    map[string]any{"values": values},
+		"layer": []map[string]any{
+			{
+				"mark": map[string]any{"type": "bar", "color": "#3b82f6", "opacity": 0.6},
+				"encoding": map[string]any{
+					"x": map[string]any{
+						"field":    "time",
+						"type":     "temporal",
+						"timeUnit": "yearmonthdatehoursminutes",
+						"axis":     map[string]any{"title": nil, "format": "%H:%M", "labelAngle": 0, "tickCount": 6},
+					},
+					"y": map[string]any{"field": "requests", "type": "quantitative", "axis": map[string]any{"title": "Requests"}},
+				},
+			},
+			{
+				"mark": map[string]any{"type": "line", "strokeWidth": 2, "color": "#ef4444"},
+				"encoding": map[string]any{
+					"x": map[string]any{"field": "time", "type": "temporal", "timeUnit": "yearmonthdatehoursminutes"},
+					"y": map[string]any{
+						"field": "errRate",
+						"type":  "quantitative",
+						"axis":  map[string]any{"title": "Error %", "orient": "right"},
+						"scale": map[string]any{"domain": []int{0, 100}},
+					},
+				},
+			},
+		},
+		"resolve": map[string]any{"scale": map[string]any{"y": "independent"}},
+	}
+
+	b, _ := json.Marshal(spec)
+	return string(b)
 }

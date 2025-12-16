@@ -27,10 +27,10 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 	d := &Duck{DB: db, cfg: cfg}
 	// Create rollup table
 	if _, err := db.Exec(`
-CREATE TABLE IF NOT EXISTS svc_minute (
-  ts_min TIMESTAMP,
-  service_name TEXT,
-  span_count BIGINT,
+CREATE TABLE IF NOT EXISTS service_rollup (
+  bucket TIMESTAMP,
+  service TEXT,
+  spans BIGINT,
   p50_ms DOUBLE,
   p95_ms DOUBLE,
   error_rate DOUBLE
@@ -74,16 +74,16 @@ func (d *Duck) RunRollups(ctx context.Context) {
 
 func (d *Duck) rollupOnce(ctx context.Context) error {
 	_, err := d.DB.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO svc_minute
+INSERT INTO service_rollup
 SELECT
-  date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS ts_min,
-  "name=service_name" as service_name,
-  COUNT(*) AS span_count,
+  date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
+  "name=service_name" as service,
+  COUNT(*) AS spans,
   avg("name=duration_ms") AS p50_ms,
   quantile_cont("name=duration_ms", 0.95) AS p95_ms,
   avg(CASE WHEN "name=status_code" = 'STATUS_CODE_ERROR' OR "name=status_code" = 'ERROR' THEN 1 ELSE 0 END) AS error_rate
 FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
-WHERE ts_min > COALESCE((SELECT max(ts_min) FROM svc_minute), TIMESTAMP '1970-01-01')
+WHERE bucket > COALESCE((SELECT max(bucket) FROM service_rollup), TIMESTAMP '1970-01-01')
 GROUP BY ALL;
 `, d.cfg.LakeDir))
 	return err
@@ -169,17 +169,17 @@ LIMIT %d;
 }
 
 type ThroughputRow struct {
-	TSMin string `json:"ts_min"`
-	Spans int64  `json:"spans"`
+	Bucket string `json:"bucket"`
+	Spans  int64  `json:"spans"`
 }
 
 func (d *Duck) Throughput(ctx context.Context, windowMinutes int) ([]ThroughputRow, error) {
 	q := fmt.Sprintf(`
-SELECT strftime(ts_min, '%%Y-%%m-%%dT%%H:%%M:00Z') AS ts_min, SUM(span_count) AS spans
-FROM svc_minute
-WHERE ts_min >= now() - INTERVAL %d MINUTE
-GROUP BY ts_min
-ORDER BY ts_min ASC;
+SELECT strftime(bucket, '%%Y-%%m-%%dT%%H:%%M:00Z') AS bucket, SUM(spans) AS spans
+FROM service_rollup
+WHERE bucket >= now() - INTERVAL %d MINUTE
+GROUP BY bucket
+ORDER BY bucket ASC;
 `, windowMinutes)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -189,7 +189,7 @@ ORDER BY ts_min ASC;
 	out := []ThroughputRow{}
 	for rows.Next() {
 		var r ThroughputRow
-		if err := rows.Scan(&r.TSMin, &r.Spans); err != nil {
+		if err := rows.Scan(&r.Bucket, &r.Spans); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -198,16 +198,16 @@ ORDER BY ts_min ASC;
 }
 
 type ServiceThroughputRow struct {
-	ServiceName    string `json:"service_name"`
+	Service        string `json:"service"`
 	SpansPerMinute int64  `json:"spans_per_minute"`
 }
 
 func (d *Duck) ServiceThroughput(ctx context.Context, windowMinutes int) ([]ServiceThroughputRow, error) {
 	q := fmt.Sprintf(`
-SELECT service_name, SUM(span_count)::BIGINT / %d AS spans_per_minute
-FROM svc_minute
-WHERE ts_min >= now() - INTERVAL %d MINUTE
-GROUP BY service_name
+SELECT service, SUM(spans)::BIGINT / %d AS spans_per_minute
+FROM service_rollup
+WHERE bucket >= now() - INTERVAL %d MINUTE
+GROUP BY service
 ORDER BY spans_per_minute DESC
 LIMIT 20;
 `, windowMinutes, windowMinutes)
@@ -219,7 +219,7 @@ LIMIT 20;
 	out := []ServiceThroughputRow{}
 	for rows.Next() {
 		var r ServiceThroughputRow
-		if err := rows.Scan(&r.ServiceName, &r.SpansPerMinute); err != nil {
+		if err := rows.Scan(&r.Service, &r.SpansPerMinute); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

@@ -33,7 +33,7 @@ graph TB
     subgraph Query
         DUCK[DuckDB]
         PART --> DUCK
-        DUCK --> ROLL[Rollups: svc_minute]
+        DUCK --> ROLL[Rollups: service_rollup]
     end
 
     subgraph API
@@ -266,13 +266,13 @@ erDiagram
     SPANS ||--o{ LOGS : "trace_id"
 ```
 
-### Rollup Table (svc_minute)
+### Rollup Table (service_rollup)
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `ts_min` | TIMESTAMP | 1-minute bucket |
-| `service_name` | VARCHAR | Service name |
-| `span_count` | BIGINT | Request count |
+| `bucket` | TIMESTAMP | 1-minute bucket |
+| `service` | VARCHAR | Service name |
+| `spans` | BIGINT | Request count |
 | `error_rate` | DOUBLE | Error rate (0-1) |
 | `p50_ms` | DOUBLE | P50 latency |
 | `p95_ms` | DOUBLE | P95 latency |

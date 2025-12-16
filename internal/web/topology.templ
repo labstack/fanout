@@ -1,0 +1,251 @@
+package web
+
+import (
+	"encoding/json"
+	"fmt"
+)
+
+// Topology renders the service topology page (uses TopologyData from overview.templ)
+templ Topology(data TopologyData) {
+	@Layout("Topology", "topology") {
+		<div class="page-header">
+			<div class="page-header-left">
+				<h1 class="page-title">Service Topology</h1>
+				<p class="page-subtitle">Service dependency map showing call relationships</p>
+			</div>
+		</div>
+		if len(data.Nodes) == 0 {
+			<div class="card">
+				<div class="empty-state">
+					<sl-icon name="share"></sl-icon>
+					<div class="empty-state-title">No topology data</div>
+					<div class="empty-state-message">Service topology will appear here once inter-service calls are detected.</div>
+				</div>
+			</div>
+		} else {
+			<!-- Legend -->
+			<div class="card" style="margin-bottom: 1rem;">
+				<div style="display: flex; gap: 2rem; align-items: center; font-size: 0.875rem;">
+					<span><span class="status status-healthy">●</span> Healthy</span>
+					<span><span class="status status-degraded">●</span> Degraded</span>
+					<span><span class="status status-unhealthy">●</span> Unhealthy</span>
+					<span style="color: var(--text-muted);">Click a node to view service details</span>
+				</div>
+			</div>
+			<!-- Topology Graph -->
+			<div class="card">
+				<div id="topology-graph" class="topology-container" data-nodes={ topoNodesJSON(data.Nodes) } data-edges={ topoEdgesJSON(data.Edges) }></div>
+			</div>
+			<script>
+				(function() {
+					const container = document.getElementById('topology-graph');
+					const nodes = JSON.parse(container.dataset.nodes);
+					const edges = JSON.parse(container.dataset.edges);
+					const isDark = document.body.classList.contains('sl-theme-dark');
+					const textColor = isDark ? '#f1f5f9' : '#0f172a';
+
+					// Build Vega spec for force-directed graph
+					const spec = {
+						"$schema": "https://vega.github.io/schema/vega/v5.json",
+						"width": 800,
+						"height": 500,
+						"padding": 20,
+						"autosize": "none",
+
+						"signals": [
+							{ "name": "cx", "update": "width / 2" },
+							{ "name": "cy", "update": "height / 2" },
+							{ "name": "nodeRadius", "value": 20 },
+							{ "name": "linkDistance", "value": 120 },
+							{ "name": "textColor", "value": textColor }
+						],
+
+						"data": [
+							{
+								"name": "node-data",
+								"values": nodes,
+								"transform": [
+									{
+										"type": "formula",
+										"as": "color",
+										"expr": "datum.status === 'unhealthy' ? '#ef4444' : datum.status === 'degraded' ? '#f59e0b' : '#22c55e'"
+									}
+								]
+							},
+							{
+								"name": "link-data",
+								"values": edges
+							}
+						],
+
+						"scales": [
+							{
+								"name": "nodeSize",
+								"type": "sqrt",
+								"domain": {"data": "node-data", "field": "spanCount"},
+								"range": [300, 2000]
+							}
+						],
+
+						"marks": [
+							{
+								"name": "links",
+								"type": "path",
+								"from": {"data": "link-data"},
+								"interactive": false,
+								"encode": {
+									"update": {
+										"stroke": {"value": "#94a3b8"},
+										"strokeWidth": {"value": 2},
+										"strokeOpacity": {"value": 0.6}
+									}
+								},
+								"transform": [
+									{
+										"type": "linkpath",
+										"require": {"signal": "force"},
+										"shape": "line",
+										"sourceX": "datum.source.x",
+										"sourceY": "datum.source.y",
+										"targetX": "datum.target.x",
+										"targetY": "datum.target.y"
+									}
+								]
+							},
+							{
+								"name": "nodes",
+								"type": "symbol",
+								"from": {"data": "node-data"},
+								"encode": {
+									"enter": {
+										"fill": {"field": "color"},
+										"stroke": {"value": "white"},
+										"strokeWidth": {"value": 2},
+										"cursor": {"value": "pointer"},
+										"tooltip": {"signal": "datum.name + ' | P95: ' + format(datum.p95Ms, '.0f') + 'ms | Errors: ' + format(datum.errorRate * 100, '.1f') + '%'"}
+									},
+									"update": {
+										"size": {"scale": "nodeSize", "field": "spanCount"},
+										"fill": {"field": "color"}
+									}
+								},
+								"transform": [
+									{
+										"type": "force",
+										"iterations": 300,
+										"restart": {"signal": "linkDistance"},
+										"signal": "force",
+										"forces": [
+											{"force": "center", "x": {"signal": "cx"}, "y": {"signal": "cy"}},
+											{"force": "collide", "radius": {"signal": "nodeRadius + 5"}},
+											{"force": "nbody", "strength": -30},
+											{"force": "link", "links": "link-data", "distance": {"signal": "linkDistance"}, "id": "datum.name"}
+										]
+									}
+								]
+							},
+							{
+								"type": "text",
+								"from": {"data": "nodes"},
+								"encode": {
+									"enter": {
+										"text": {"field": "datum.name"},
+										"fontSize": {"value": 11},
+										"fontWeight": {"value": "600"},
+										"fill": {"signal": "textColor"},
+										"align": {"value": "center"},
+										"baseline": {"value": "middle"},
+										"dy": {"value": 32}
+									},
+									"update": {
+										"x": {"field": "x"},
+										"y": {"field": "y"}
+									}
+								}
+							}
+						]
+					};
+
+					// Render with Vega
+					vegaEmbed('#topology-graph', spec, {
+						actions: false,
+						renderer: 'svg',
+						theme: isDark ? 'dark' : undefined
+					}).then(result => {
+						// Add click handler
+						result.view.addEventListener('click', (event, item) => {
+							if (item && item.datum && item.datum.name) {
+								window.location.href = '/services/' + encodeURIComponent(item.datum.name);
+							}
+						});
+					});
+				})();
+			</script>
+		}
+		<style>
+			.topology-container {
+				min-height: 540px;
+				display: flex;
+				align-items: center;
+				justify-content: center;
+			}
+			.topology-container svg {
+				max-width: 100%;
+			}
+		</style>
+	}
+}
+
+func topoNodesJSON(nodes []ServiceNode) string {
+	type jsNode struct {
+		Name      string  `json:"name"`
+		Status    string  `json:"status"`
+		SpanCount int64   `json:"spanCount"`
+		P95Ms     float64 `json:"p95Ms"`
+		ErrorRate float64 `json:"errorRate"`
+	}
+	var out []jsNode
+	for _, n := range nodes {
+		out = append(out, jsNode{
+			Name:      n.Name,
+			Status:    n.Status,
+			SpanCount: n.SpanCount,
+			P95Ms:     n.P95Ms,
+			ErrorRate: n.ErrorRate,
+		})
+	}
+	b, _ := json.Marshal(out)
+	return string(b)
+}
+
+func topoEdgesJSON(edges []ServiceEdge) string {
+	// Convert to source/target format for Vega
+	type vegaEdge struct {
+		Source    string  `json:"source"`
+		Target    string  `json:"target"`
+		CallCount int64   `json:"callCount"`
+		ErrorRate float64 `json:"errorRate"`
+	}
+	var out []vegaEdge
+	for _, e := range edges {
+		out = append(out, vegaEdge{
+			Source:    e.From,
+			Target:    e.To,
+			CallCount: e.CallCount,
+			ErrorRate: e.ErrorRate,
+		})
+	}
+	b, _ := json.Marshal(out)
+	return string(b)
+}
+
+// Format large numbers
+func topoFormatCount(n int64) string {
+	if n >= 1000000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	}
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fK", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
