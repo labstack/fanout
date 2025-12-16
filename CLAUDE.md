@@ -131,8 +131,6 @@ graph LR
 ```
 cmd/
   fanout/         # Main binary
-  datagen/        # Test data generator
-  loadtest/       # Load testing tool
 
 internal/
   api/            # HTTP handlers (health, UI routes)
@@ -319,16 +317,16 @@ graph TB
 ## Testing
 
 ```bash
-# OTLP endpoint config
+# Start fanout
+./fanout
+
+# Use otel-demo for test data (in separate terminal)
+cd ../otel-demo && docker compose up -d
+
+# Or configure any OTLP-compatible app
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_SERVICE_NAME=my-service
-
-# Generate test data
-go run ./cmd/datagen
-
-# Load test
-go run ./cmd/loadtest
 ```
 
 ## Performance
