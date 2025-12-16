@@ -118,6 +118,9 @@ func main() {
 		mcpServer := mcp.NewServer(svc, q, cfg)
 		mcpServer.RegisterRoutes(e)
 		log.Printf("[mcp] MCP server enabled at /mcp")
+
+		// Start report cleanup goroutine
+		go mcp.RunCleanup(ctx)
 	}
 
 	// Run HTTP

@@ -18,3 +18,5 @@
 testdata/
 .playwright-mcp/
 *.pid
+tmp/
+.air.toml

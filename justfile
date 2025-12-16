@@ -20,6 +20,11 @@ build: gen
 run: build
     ./fanout
 
+# Dev mode with auto-reload
+dev:
+    @which air > /dev/null || go install github.com/air-verse/air@latest
+    air
+
 # Run tests
 test:
     CGO_ENABLED=1 go test ./...

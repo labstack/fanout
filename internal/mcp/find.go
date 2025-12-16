@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/labstack/fanout/internal/render"
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -18,6 +19,7 @@ type FindIn struct {
 	Window   int      `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
 	Severity []string `json:"severity,omitempty" jsonschema:"Log severity filter: DEBUG,INFO,WARN,ERROR,FATAL"`
 	Limit    int      `json:"limit,omitempty" jsonschema:"Max results per type,default=50"`
+	Format   string   `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
 type FoundSpan struct {
@@ -39,12 +41,13 @@ type FoundLog struct {
 }
 
 type FindOut struct {
-	Spans      []FoundSpan `json:"spans"`
-	Logs       []FoundLog  `json:"logs"`
-	SpanCount  int         `json:"span_count"`
-	LogCount   int         `json:"log_count"`
-	HasMore    bool        `json:"has_more"`
-	Suggestion string      `json:"suggestion,omitempty"`
+	Spans      []FoundSpan    `json:"spans"`
+	Logs       []FoundLog     `json:"logs"`
+	SpanCount  int            `json:"span_count"`
+	LogCount   int            `json:"log_count"`
+	HasMore    bool           `json:"has_more"`
+	Suggestion string         `json:"suggestion,omitempty"`
+	Render     *render.Output `json:"render,omitempty"`
 }
 
 func (s *Server) find(ctx context.Context, req *mcp.CallToolRequest, in FindIn) (*mcp.CallToolResult, FindOut, error) {
@@ -100,5 +103,90 @@ func (s *Server) find(ctx context.Context, req *mcp.CallToolRequest, in FindIn) 
 		out.Suggestion = "No results. Try widening the time window or adjusting filters."
 	}
 
+	// Render output
+	format := parseFormat(in.Format)
+	if format != render.Data {
+		rendered := renderFind(&out)
+		out.Render = &rendered
+	}
+
 	return nil, out, nil
+}
+
+func renderFind(f *FindOut) render.Output {
+	var items []render.Renderer
+
+	// Summary
+	summary := &render.Grid{
+		Cols: 3,
+		Items: []render.Renderer{
+			&render.Metric{Label: "Spans", Value: fmt.Sprintf("%d", f.SpanCount)},
+			&render.Metric{Label: "Logs", Value: fmt.Sprintf("%d", f.LogCount)},
+			&render.Badge{Label: moreLabel(f.HasMore), Status: moreStatus(f.HasMore)},
+		},
+	}
+	items = append(items, summary)
+
+	// Spans table
+	if len(f.Spans) > 0 {
+		var rows [][]string
+		for _, sp := range f.Spans {
+			rows = append(rows, []string{
+				sp.Service,
+				truncate(sp.Operation, 30),
+				fmt.Sprintf("%.1fms", sp.DurationMs),
+				sp.Status,
+				truncate(sp.TraceID, 16),
+			})
+		}
+		spansTable := &render.Table{
+			Title:    "Spans",
+			Headers:  []string{"Service", "Operation", "Duration", "Status", "Trace"},
+			Rows:     rows,
+			MaxWidth: 30,
+		}
+		items = append(items, spansTable)
+	}
+
+	// Logs table
+	if len(f.Logs) > 0 {
+		var rows [][]string
+		for _, lg := range f.Logs {
+			rows = append(rows, []string{
+				lg.Timestamp,
+				lg.Service,
+				lg.Severity,
+				truncate(lg.Body, 60),
+			})
+		}
+		logsTable := &render.Table{
+			Title:    "Logs",
+			Headers:  []string{"Time", "Service", "Severity", "Body"},
+			Rows:     rows,
+			MaxWidth: 60,
+		}
+		items = append(items, logsTable)
+	}
+
+	// Suggestion
+	if f.Suggestion != "" {
+		items = append(items, &render.Text{Content: f.Suggestion, Style: "dim"})
+	}
+
+	composed := &render.Compose{Vertical: true, Items: items}
+	return composed.Render(render.Both)
+}
+
+func moreLabel(hasMore bool) string {
+	if hasMore {
+		return "more available"
+	}
+	return "complete"
+}
+
+func moreStatus(hasMore bool) string {
+	if hasMore {
+		return "warning"
+	}
+	return "healthy"
 }

@@ -6,7 +6,153 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Fanout is a single-binary observability platform that ingests OpenTelemetry (OTLP) traces, logs, and metrics via gRPC, stores them as partitioned Parquet files, and queries them using embedded DuckDB. Built with Go and Echo framework.
 
-**Architecture:** OTLP gRPC (:4317) → Lake Writer (Parquet) → DuckDB (query + rollups) → Echo HTTP API (:7520) + MCP Server
+## Architecture
+
+```mermaid
+graph TB
+    subgraph Ingest
+        OTLP[OTLP gRPC :4317]
+        TI[Tenant Interceptor]
+        OTLP --> TI
+    end
+
+    subgraph Channels
+        CS[Spans Channel]
+        CL[Logs Channel]
+        CM[Metrics Channel]
+        TI --> CS & CL & CM
+    end
+
+    subgraph Storage
+        LW[Lake Writer]
+        CS & CL & CM --> LW
+        LW --> PQ[(Parquet Files)]
+        PQ --> |year/month/day/hour| PART[Partitioned Storage]
+    end
+
+    subgraph Query
+        DUCK[DuckDB]
+        PART --> DUCK
+        DUCK --> ROLL[Rollups: svc_minute]
+    end
+
+    subgraph API
+        ECHO[Echo HTTP :7520]
+        SVC[Service Layer]
+        DUCK --> SVC
+        SVC --> ECHO
+    end
+
+    subgraph Interfaces
+        UI[Web UI]
+        MCP[MCP Server]
+        REPORTS[Reports]
+        ECHO --> UI & MCP & REPORTS
+    end
+
+    subgraph Clients
+        BROWSER[Browser]
+        CLAUDE[Claude Code]
+        UI --> BROWSER
+        MCP --> CLAUDE
+        REPORTS --> BROWSER
+    end
+```
+
+## Data Flow
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant OTLP as OTLP gRPC
+    participant Chan as Channels
+    participant Lake as Lake Writer
+    participant PQ as Parquet
+    participant Duck as DuckDB
+    participant API as HTTP API
+
+    App->>OTLP: Send traces/logs/metrics
+    OTLP->>Chan: Push to channels
+    Chan->>Lake: Batch rows
+    Lake->>PQ: Flush to Parquet (15s)
+    Duck->>PQ: Read Parquet files
+    Duck->>Duck: Maintain rollups (60s)
+    API->>Duck: Query data
+    Duck->>API: Return results
+```
+
+## MCP Tools
+
+```mermaid
+graph LR
+    subgraph Discovery
+        STATUS[status]
+        TOPO[topology]
+    end
+
+    subgraph Investigation
+        DIAG[diagnose]
+        FIND[find]
+        TRACE[trace]
+        TIMELINE[timeline]
+        COMPARE[compare]
+    end
+
+    subgraph Advanced
+        QUERY[query]
+        SCHEMA[schema]
+        RENDER[render]
+    end
+
+    STATUS --> |service issues| DIAG
+    TOPO --> |dependencies| DIAG
+    DIAG --> |trace IDs| TRACE
+    FIND --> |trace IDs| TRACE
+    TIMELINE --> |anomalies| FIND
+    SCHEMA --> |table info| QUERY
+    QUERY --> |data| RENDER
+```
+
+| Tool | Description |
+|------|-------------|
+| `status` | System health overview, top issues, key metrics |
+| `diagnose` | Deep-dive: P50/P95/P99 latency, errors, dependencies |
+| `find` | Search spans/logs by pattern, service, status, severity |
+| `trace` | Distributed trace with root-cause analysis |
+| `timeline` | Time-bucketed metrics with anomaly detection |
+| `topology` | Service dependency map with health status |
+| `query` | Raw SQL against DuckDB |
+| `schema` | Database schema reference for SQL queries |
+| `render` | Generate HTML reports with charts (Vega-Lite) |
+| `compare` | Side-by-side service comparison |
+
+## Directory Structure
+
+```
+cmd/
+  fanout/         # Main binary
+  datagen/        # Test data generator
+  loadtest/       # Load testing tool
+
+internal/
+  api/            # HTTP handlers (health, UI routes)
+  config/         # Environment config
+  ingest/         # OTLP gRPC server
+  intelligence/   # Anomaly detection
+  lake/           # Parquet writer + retention
+  mcp/            # MCP server + tools
+  metrics/        # Prometheus metrics
+  query/          # DuckDB queries + rollups
+  render/         # ASCII/HTML rendering
+  service/        # Business logic layer
+  web/            # Templ templates
+
+lake/             # Data storage (gitignored)
+  spans/          # Trace spans
+  logs/           # Log entries
+  metrics/        # Metric points
+  reports/        # Saved HTML reports
+```
 
 ## Build & Run
 
@@ -25,8 +171,6 @@ just run
 
 ## Configuration
 
-All config via environment variables (see `internal/config/config.go`):
-
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HTTP_ADDR` | `:7520` | HTTP server address |
@@ -39,86 +183,157 @@ All config via environment variables (see `internal/config/config.go`):
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 
-## Architecture Details
-
-### Data Flow
-1. **Ingest** (`internal/ingest/`): gRPC OTLP services accept traces/logs/metrics, extract tenant from `x-tenant-id` header, push to channels
-2. **Lake Writer** (`internal/lake/`): Batches rows, flushes to Parquet partitioned by `year/month/day/hour`
-3. **Pruner** (`internal/lake/retention.go`): Automatic data retention
-4. **Query Engine** (`internal/query/`): DuckDB reads Parquet, maintains `svc_minute` rollups
-5. **Service Layer** (`internal/service/`): Shared business logic for MCP and Web UI
-6. **HTTP API** (`internal/api/`): Echo endpoints + Templ UI + Vega-Lite charts
-7. **MCP Server** (`internal/mcp/`): Model Context Protocol for AI agents
-
-### Key Components
-
-**Main** (`cmd/fanout/main.go`):
-- Initializes all components with shared channels
-- Starts gRPC server with tenant interceptor
-- Starts DuckDB rollup goroutine
-- Configures Echo with optional Bearer auth and rate limiting
-
-**Service Layer** (`internal/service/`):
-- `status.go` - System health overview
-- `diagnose.go` - Service deep-dive (P50/P95/P99, errors, dependencies)
-- `find.go` - Search spans/logs with filters
-- `trace.go` - Distributed trace analysis with root-cause detection
-- `timeline.go` - Time-bucketed metrics + anomaly detection
-- `topology.go` - Service dependency mapping
-
-**MCP Server** (`internal/mcp/`):
-- Tools: status, diagnose, find, trace, timeline, topology, query
-- Streaming SSE responses
-
-### Data Schema
-
-**Spans**: trace_id, span_id, parent_span_id, service_name, name, kind, start_unix_nano, end_unix_nano, duration_ms, status_code, status_msg, resource_json, attributes_json, tenant_id, ingested_unix_nano
-
-**Logs**: time_unix_nano, severity, body, service_name, trace_id, span_id, resource_json, attributes_json, tenant_id, ingested_unix_nano
-
-**Metrics**: time_unix_nano, name, mtype, service_name, value, hist_bounds_json, hist_counts_json, attributes_json, resource_json, tenant_id, ingested_unix_nano, hist_count, hist_sum
-
 ## API Endpoints
 
-**Health & Metrics:**
-- `GET /healthz` - Liveness
-- `GET /readyz` - Readiness
-- `GET /-/metrics` - Prometheus
+```mermaid
+graph LR
+    subgraph Health
+        H1[GET /healthz]
+        H2[GET /readyz]
+        H3[GET /-/metrics]
+    end
 
-**UI:**
-- `GET /` - Overview dashboard
-- `GET /services` - Service list
-- `GET /services/:name` - Service detail
-- `GET /traces` - Trace list
-- `GET /traces/:id` - Trace detail
-- `GET /logs` - Logs
-- `GET /metrics` - Metrics
+    subgraph UI
+        U1[GET /]
+        U2[GET /services]
+        U3[GET /services/:name]
+        U4[GET /traces]
+        U5[GET /traces/:id]
+        U6[GET /logs]
+        U7[GET /metrics]
+    end
 
-**MCP:**
-- `POST /mcp` - Model Context Protocol endpoint
+    subgraph MCP
+        M1[POST /mcp]
+    end
+
+    subgraph Reports
+        R1[GET /reports]
+        R2[GET /view/r/:id]
+        R3[GET /api/reports]
+        R4[DELETE /api/reports/:id]
+    end
+```
+
+## Data Schema
+
+### Parquet Files
+
+```mermaid
+erDiagram
+    SPANS {
+        string trace_id PK
+        string span_id PK
+        string parent_span_id
+        string service_name
+        string name
+        string kind
+        bigint start_unix_nano
+        bigint end_unix_nano
+        double duration_ms
+        string status_code
+        string status_msg
+        string resource_json
+        string attributes_json
+        string tenant_id
+    }
+
+    LOGS {
+        bigint time_unix_nano PK
+        string severity
+        string body
+        string service_name
+        string trace_id FK
+        string span_id FK
+        string resource_json
+        string attributes_json
+        string tenant_id
+    }
+
+    METRICS {
+        bigint time_unix_nano PK
+        string name
+        string mtype
+        string service_name
+        double value
+        string hist_bounds_json
+        string hist_counts_json
+        string attributes_json
+        string resource_json
+        string tenant_id
+    }
+
+    SPANS ||--o{ LOGS : "trace_id"
+```
+
+### Rollup Table (svc_minute)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `ts_min` | TIMESTAMP | 1-minute bucket |
+| `service_name` | VARCHAR | Service name |
+| `span_count` | BIGINT | Request count |
+| `error_rate` | DOUBLE | Error rate (0-1) |
+| `p50_ms` | DOUBLE | P50 latency |
+| `p95_ms` | DOUBLE | P95 latency |
+
+## Report System
+
+```mermaid
+graph TB
+    subgraph Generation
+        LLM[Claude Code]
+        QUERY[query tool]
+        RENDER[render tool]
+        LLM --> QUERY
+        QUERY --> LLM
+        LLM --> RENDER
+    end
+
+    subgraph Storage
+        RENDER --> JSON[(lake/reports/*.json)]
+        JSON --> |expires 24h| CLEANUP[Cleanup Goroutine]
+    end
+
+    subgraph Viewing
+        JSON --> VIEW[/view/r/:id]
+        JSON --> LIST[/reports]
+        VIEW --> HTML[Shoelace + Vega-Lite]
+    end
+```
+
+**Components:** metric, table, chart, text, grid, panel, badge, bar, sparkline
 
 ## Dependencies
 
-Key libraries (see `go.mod`):
-- `github.com/labstack/echo/v4` - HTTP framework
-- `github.com/duckdb/duckdb-go/v2` - DuckDB driver (requires CGO)
-- `github.com/parquet-go/parquet-go` - Parquet writer
-- `github.com/a-h/templ` - Template engine
-- `github.com/modelcontextprotocol/go-sdk` - MCP SDK
-- `google.golang.org/grpc` - gRPC server
-- `go.opentelemetry.io/proto/otlp` - OTLP protocol
+| Library | Purpose |
+|---------|---------|
+| `echo/v4` | HTTP framework |
+| `duckdb-go/v2` | DuckDB driver (CGO) |
+| `parquet-go` | Parquet writer |
+| `templ` | Template engine |
+| `go-sdk/mcp` | MCP SDK |
+| `grpc` | gRPC server |
+| `otlp` | OTLP protocol |
 
-## Testing OTLP Ingest
+## Testing
 
 ```bash
+# OTLP endpoint config
 OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_SERVICE_NAME=my-service
+
+# Generate test data
+go run ./cmd/datagen
+
+# Load test
+go run ./cmd/loadtest
 ```
 
 ## Performance
 
-- Flush interval controls freshness vs I/O (default 15s)
-- Queries scan Parquet files within time window
-- Rollups (`svc_minute`) provide fast dashboard queries
-- Targets: P95 < 1.5s on rollups, < 5s on raw scans
+- Flush interval: 15s (freshness vs I/O tradeoff)
+- Rollups: 60s aggregation cycle
+- Query targets: P95 < 1.5s (rollups), < 5s (raw scans)
+- Report cleanup: hourly, 24h expiration

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/labstack/fanout/internal/render"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -12,6 +13,7 @@ import (
 type TraceIn struct {
 	TraceID     string `json:"trace_id" jsonschema:"Trace ID to analyze"`
 	IncludeLogs bool   `json:"include_logs,omitempty" jsonschema:"Include correlated logs,default=true"`
+	Format      string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
 type TraceSpan struct {
@@ -52,6 +54,7 @@ type TraceOut struct {
 	Logs          []CorrelatedLog `json:"logs"`
 	RootCause     *RootCause      `json:"root_cause,omitempty"`
 	CriticalPath  []string        `json:"critical_path"`
+	Render        *render.Output  `json:"render,omitempty"`
 }
 
 func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn) (*mcp.CallToolResult, TraceOut, error) {
@@ -116,5 +119,136 @@ func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn
 		}
 	}
 
+	// Render output
+	format := parseFormat(in.Format)
+	if format != render.Data {
+		rendered := renderTrace(&out)
+		out.Render = &rendered
+	}
+
 	return nil, out, nil
+}
+
+func renderTrace(t *TraceOut) render.Output {
+	var items []render.Renderer
+
+	// Header with key metrics
+	status := "healthy"
+	if t.HasError {
+		status = "unhealthy"
+	}
+	header := &render.Grid{
+		Cols: 4,
+		Items: []render.Renderer{
+			&render.Badge{Label: status, Status: status},
+			&render.Metric{Label: "Duration", Value: fmt.Sprintf("%.1f", t.TotalDuration), Unit: "ms"},
+			&render.Metric{Label: "Spans", Value: fmt.Sprintf("%d", t.SpanCount)},
+			&render.Metric{Label: "Services", Value: fmt.Sprintf("%d", len(t.Services))},
+		},
+	}
+	items = append(items, header)
+
+	// Root cause alert if present
+	if t.RootCause != nil {
+		rootCause := &render.Panel{
+			Title: "Root Cause",
+			Content: []render.Renderer{
+				&render.Badge{Label: t.RootCause.Type, Status: "unhealthy"},
+				&render.Text{Content: t.RootCause.Description},
+				&render.Text{Content: fmt.Sprintf("Service: %s", t.RootCause.Service), Style: "dim"},
+			},
+		}
+		items = append(items, rootCause)
+	}
+
+	// Build span tree
+	tree := buildTraceTree(t.Spans)
+	items = append(items, &render.Panel{
+		Title:   "Trace Tree",
+		Content: []render.Renderer{tree},
+	})
+
+	// Critical path
+	if len(t.CriticalPath) > 0 {
+		pathText := ""
+		for i, p := range t.CriticalPath {
+			if i > 0 {
+				pathText += " → "
+			}
+			pathText += p
+		}
+		items = append(items, &render.Text{Content: "Critical Path: " + pathText, Style: "bold"})
+	}
+
+	// Logs table if present
+	if len(t.Logs) > 0 {
+		var rows [][]string
+		for _, lg := range t.Logs {
+			rows = append(rows, []string{
+				lg.Timestamp,
+				lg.Service,
+				lg.Severity,
+				truncate(lg.Body, 50),
+			})
+		}
+		logsTable := &render.Table{
+			Title:    "Correlated Logs",
+			Headers:  []string{"Time", "Service", "Severity", "Body"},
+			Rows:     rows,
+			MaxWidth: 50,
+		}
+		items = append(items, logsTable)
+	}
+
+	composed := &render.Compose{Vertical: true, Items: items}
+	return composed.Render(render.Both)
+}
+
+func buildTraceTree(spans []TraceSpan) *render.Tree {
+	if len(spans) == 0 {
+		return &render.Tree{Root: &render.Node{Label: "No spans"}}
+	}
+
+	nodeMap := make(map[string]*render.Node)
+	var root *render.Node
+
+	// Create nodes
+	for _, sp := range spans {
+		statusIcon := "○"
+		if sp.Status == "error" || sp.Status == "ERROR" {
+			statusIcon = "✗"
+		} else if sp.IsCritical {
+			statusIcon = "●"
+		}
+
+		node := &render.Node{
+			Label: fmt.Sprintf("%s %s/%s", statusIcon, sp.Service, sp.Operation),
+			Value: fmt.Sprintf("%.1fms", sp.DurationMs),
+			Meta: map[string]string{
+				"status":    sp.Status,
+				"self_time": fmt.Sprintf("%.1fms", sp.SelfTimeMs),
+			},
+		}
+		nodeMap[sp.SpanID] = node
+
+		if sp.ParentSpanID == "" {
+			root = node
+		}
+	}
+
+	// Link children to parents
+	for _, sp := range spans {
+		if sp.ParentSpanID != "" {
+			if parent, ok := nodeMap[sp.ParentSpanID]; ok {
+				parent.Children = append(parent.Children, nodeMap[sp.SpanID])
+			}
+		}
+	}
+
+	// Fallback if no root found
+	if root == nil && len(spans) > 0 {
+		root = nodeMap[spans[0].SpanID]
+	}
+
+	return &render.Tree{Root: root}
 }

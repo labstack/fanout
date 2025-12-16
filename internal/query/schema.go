@@ -101,16 +101,15 @@ Common queries:
 Pre-aggregated data for fast queries:
 Table: svc_minute
 Columns:
-- time_bucket (TIMESTAMP): 1-minute time bucket
+- ts_min (TIMESTAMP): 1-minute time bucket
 - service_name (VARCHAR): Service name
 - span_count (BIGINT): Number of spans in this bucket
-- error_count (BIGINT): Number of error spans
-- avg_duration_ms (DOUBLE): Average span duration
-- p95_duration_ms (DOUBLE): 95th percentile duration
-- p99_duration_ms (DOUBLE): 99th percentile duration
+- error_rate (DOUBLE): Error rate (0.0 to 1.0)
+- p50_ms (DOUBLE): 50th percentile duration
+- p95_ms (DOUBLE): 95th percentile duration
 
 Time range:
-- Recent data: WHERE time_bucket >= NOW() - INTERVAL '<minutes> minutes'
+- Recent data: WHERE ts_min >= NOW() - INTERVAL '<minutes> minutes'
 
 ## Query Guidelines
 1. Always filter by time to improve performance
