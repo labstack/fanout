@@ -83,3 +83,12 @@ tag VERSION:
 # Build Docker image locally
 docker:
     docker build -t fanout:local .
+
+# Install git hooks
+hooks:
+    @echo '#!/bin/sh' > .git/hooks/pre-commit
+    @echo 'echo "Running pre-commit checks..."' >> .git/hooks/pre-commit
+    @echo 'just qcheck || { echo "❌ Pre-commit checks failed"; exit 1; }' >> .git/hooks/pre-commit
+    @echo 'echo "✓ Pre-commit checks passed"' >> .git/hooks/pre-commit
+    @chmod +x .git/hooks/pre-commit
+    @echo "✓ Git hooks installed"
