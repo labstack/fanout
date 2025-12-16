@@ -294,7 +294,7 @@ func Overview(data OverviewData) templ.Component {
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-					} else {
+					} else if issue.Issue != "" {
 						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<span class=\"status status-degraded\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
@@ -540,16 +540,21 @@ func timelineSpec(data TimelineData) string {
 		"data":    map[string]any{"values": values},
 		"layer": []map[string]any{
 			{
-				"mark": map[string]any{"type": "area", "opacity": 0.3},
+				"mark": map[string]any{"type": "area", "opacity": 0.3, "line": true},
 				"encoding": map[string]any{
-					"x": map[string]any{"field": "time", "type": "nominal", "axis": map[string]any{"title": nil, "labelAngle": -45}},
+					"x": map[string]any{
+						"field":    "time",
+						"type":     "temporal",
+						"timeUnit": "yearmonthdatehoursminutes",
+						"axis":     map[string]any{"title": nil, "format": "%H:%M", "labelAngle": 0, "tickCount": 8},
+					},
 					"y": map[string]any{"field": "requests", "type": "quantitative", "axis": map[string]any{"title": "Requests"}},
 				},
 			},
 			{
-				"mark": map[string]any{"type": "line", "point": true},
+				"mark": map[string]any{"type": "line", "point": false, "strokeWidth": 2},
 				"encoding": map[string]any{
-					"x":     map[string]any{"field": "time", "type": "nominal"},
+					"x":     map[string]any{"field": "time", "type": "temporal", "timeUnit": "yearmonthdatehoursminutes"},
 					"y":     map[string]any{"field": "requests", "type": "quantitative"},
 					"color": map[string]any{"condition": map[string]any{"test": "datum.anomaly", "value": "#ef4444"}, "value": "#3b82f6"},
 				},
@@ -589,7 +594,7 @@ func alertBanner(anomalies []Anomaly) templ.Component {
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d anomaly detected", len(anomalies)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 275, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 280, Col: 63}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
@@ -607,7 +612,7 @@ func alertBanner(anomalies []Anomaly) templ.Component {
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf(" (%d total)", len(anomalies)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 277, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 282, Col: 56}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 			if templ_7745c5c3_Err != nil {
@@ -641,7 +646,7 @@ func alertBanner(anomalies []Anomaly) templ.Component {
 				var templ_7745c5c3_Var28 string
 				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(anomalyIcon(a.Type))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 286, Col: 28}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 291, Col: 28}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {
@@ -654,7 +659,7 @@ func alertBanner(anomalies []Anomaly) templ.Component {
 				var templ_7745c5c3_Var29 string
 				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(a.Description)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 286, Col: 46}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 291, Col: 46}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
@@ -674,7 +679,7 @@ func alertBanner(anomalies []Anomaly) templ.Component {
 			var templ_7745c5c3_Var30 string
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(anomalies)-3))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 291, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 296, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 			if templ_7745c5c3_Err != nil {

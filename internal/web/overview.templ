@@ -163,7 +163,7 @@ templ Overview(data OverviewData) {
 											<span class="status status-unhealthy">Errors</span>
 										} else if issue.Issue == "high_latency" {
 											<span class="status status-degraded">Slow</span>
-										} else {
+										} else if issue.Issue != "" {
 											<span class="status status-degraded">{ issue.Issue }</span>
 										}
 									</td>
@@ -245,16 +245,21 @@ func timelineSpec(data TimelineData) string {
 		"data":    map[string]any{"values": values},
 		"layer": []map[string]any{
 			{
-				"mark": map[string]any{"type": "area", "opacity": 0.3},
+				"mark": map[string]any{"type": "area", "opacity": 0.3, "line": true},
 				"encoding": map[string]any{
-					"x": map[string]any{"field": "time", "type": "nominal", "axis": map[string]any{"title": nil, "labelAngle": -45}},
+					"x": map[string]any{
+						"field":     "time",
+						"type":      "temporal",
+						"timeUnit":  "yearmonthdatehoursminutes",
+						"axis":      map[string]any{"title": nil, "format": "%H:%M", "labelAngle": 0, "tickCount": 8},
+					},
 					"y": map[string]any{"field": "requests", "type": "quantitative", "axis": map[string]any{"title": "Requests"}},
 				},
 			},
 			{
-				"mark": map[string]any{"type": "line", "point": true},
+				"mark": map[string]any{"type": "line", "point": false, "strokeWidth": 2},
 				"encoding": map[string]any{
-					"x":     map[string]any{"field": "time", "type": "nominal"},
+					"x":     map[string]any{"field": "time", "type": "temporal", "timeUnit": "yearmonthdatehoursminutes"},
 					"y":     map[string]any{"field": "requests", "type": "quantitative"},
 					"color": map[string]any{"condition": map[string]any{"test": "datum.anomaly", "value": "#ef4444"}, "value": "#3b82f6"},
 				},

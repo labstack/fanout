@@ -84,18 +84,27 @@ LIMIT 100;
 			out.Services.Unhealthy++
 		}
 
-		if svc.status != "healthy" && len(out.TopIssues) < 5 {
-			issue := TopIssue{Service: svc.name}
+		// Only add to TopIssues if there's a specific issue to report
+		if len(out.TopIssues) < 5 {
+			var issue TopIssue
 			if svc.errorRate > 0.05 {
-				issue.Issue = "Errors"
-				issue.Value = svc.errorRate
-				issue.Detail = fmt.Sprintf("%.1f%% errors", svc.errorRate*100)
+				issue = TopIssue{
+					Service: svc.name,
+					Issue:   "Errors",
+					Value:   svc.errorRate,
+					Detail:  fmt.Sprintf("%.1f%% errors", svc.errorRate*100),
+				}
 			} else if svc.p95 > 1000 {
-				issue.Issue = "Latency"
-				issue.Value = svc.p95
-				issue.Detail = fmt.Sprintf("p95 %.0fms", svc.p95)
+				issue = TopIssue{
+					Service: svc.name,
+					Issue:   "Latency",
+					Value:   svc.p95,
+					Detail:  fmt.Sprintf("p95 %.0fms", svc.p95),
+				}
 			}
-			out.TopIssues = append(out.TopIssues, issue)
+			if issue.Issue != "" {
+				out.TopIssues = append(out.TopIssues, issue)
+			}
 		}
 	}
 
