@@ -40,11 +40,11 @@ func (rs *ReportStore) Save(r *Report) {
 	defer rs.mu.Unlock()
 
 	// Ensure directory exists
-	os.MkdirAll(rs.dir, 0755)
+	_ = os.MkdirAll(rs.dir, 0755)
 
 	// Write report to JSON file
 	data, _ := json.Marshal(r)
-	os.WriteFile(rs.dir+"/"+r.ID+".json", data, 0644)
+	_ = os.WriteFile(rs.dir+"/"+r.ID+".json", data, 0644)
 }
 
 func (rs *ReportStore) Get(id string) *Report {
@@ -396,12 +396,12 @@ func renderChart(title string, cfg ChartConfig) string {
 		}
 		if cfg.Data != nil {
 			var data any
-			json.Unmarshal(cfg.Data, &data)
+			_ = json.Unmarshal(cfg.Data, &data)
 			built["data"] = data
 		}
 		if cfg.Encoding != nil {
 			var enc any
-			json.Unmarshal(cfg.Encoding, &enc)
+			_ = json.Unmarshal(cfg.Encoding, &enc)
 			built["encoding"] = enc
 		}
 		spec, _ = json.Marshal(built)

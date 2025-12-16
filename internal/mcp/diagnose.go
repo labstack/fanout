@@ -131,11 +131,7 @@ func renderDiagnose(d *DiagnoseOut) render.Output {
 		},
 	}
 
-	// Latency metrics with visual bars
-	maxLatency := d.Metrics.P99Ms
-	if maxLatency == 0 {
-		maxLatency = 100
-	}
+	// Latency metrics
 	metrics := &render.Grid{
 		Cols: 4,
 		Items: []render.Renderer{
