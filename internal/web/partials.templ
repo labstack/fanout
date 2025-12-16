@@ -1,0 +1,174 @@
+package web
+
+import "fmt"
+
+// Partials - HTML fragments for htmx updates (no Layout wrapper)
+
+// OverviewContent renders the full overview content without layout
+templ OverviewContent(data OverviewData) {
+	<!-- Anomaly Alert Banner -->
+	if len(data.Timeline.Anomalies) > 0 {
+		@alertBanner(data.Timeline.Anomalies)
+	}
+	<div class="page-header">
+		<h1 class="page-title">System Overview</h1>
+		<p class="page-subtitle">{ data.Summary }</p>
+	</div>
+	@StatsGrid(data.Services)
+	@KeyMetrics(data.ThroughputPerMin, data.P95Ms, data.ErrorRate)
+	<div class="grid grid-2" style="margin-bottom: 1.5rem;">
+		<div class="card">
+			<div class="card-title">Request Timeline</div>
+			@timelineChart(data.Timeline)
+		</div>
+		<div class="card">
+			<div class="card-title">Top Issues</div>
+			@TopIssues(data.TopIssues)
+		</div>
+	</div>
+	@ServicesTable(data.Topology.Nodes)
+}
+
+// StatsGrid renders service health counts
+templ StatsGrid(s ServiceSummary) {
+	<div
+		id="stats-grid"
+		class="grid grid-4"
+		style="margin-bottom: 1.5rem;"
+		hx-get="/partials/overview/stats"
+		hx-trigger="every 30s"
+		hx-swap="outerHTML"
+	>
+		<div class="card">
+			<div class="metric">
+				<div class="metric-value">{ fmt.Sprintf("%d", s.Total) }</div>
+				<div class="metric-label">Total Services</div>
+			</div>
+		</div>
+		<div class="card">
+			<div class="metric">
+				<div class="metric-value" style="color: var(--success);">{ fmt.Sprintf("%d", s.Healthy) }</div>
+				<div class="metric-label">Healthy</div>
+			</div>
+		</div>
+		<div class="card">
+			<div class="metric">
+				<div class="metric-value" style="color: var(--warning);">{ fmt.Sprintf("%d", s.Degraded) }</div>
+				<div class="metric-label">Degraded</div>
+			</div>
+		</div>
+		<div class="card">
+			<div class="metric">
+				<div class="metric-value" style="color: var(--danger);">{ fmt.Sprintf("%d", s.Unhealthy) }</div>
+				<div class="metric-label">Unhealthy</div>
+			</div>
+		</div>
+	</div>
+}
+
+// KeyMetrics renders throughput, latency, error rate
+templ KeyMetrics(throughput int64, p95 float64, errorRate float64) {
+	<div
+		id="key-metrics"
+		class="grid grid-3"
+		style="margin-bottom: 1.5rem;"
+		hx-get="/partials/overview/metrics"
+		hx-trigger="every 30s"
+		hx-swap="outerHTML"
+	>
+		<div class="card">
+			<div class="metric">
+				<div class="metric-value">{ fmt.Sprintf("%d", throughput) }</div>
+				<div class="metric-label">Requests/min</div>
+			</div>
+		</div>
+		<div class="card">
+			<div class="metric">
+				<div class="metric-value">{ fmt.Sprintf("%.0f", p95) }ms</div>
+				<div class="metric-label">P95 Latency</div>
+			</div>
+		</div>
+		<div class="card">
+			<div class="metric">
+				<div class="metric-value">{ fmt.Sprintf("%.1f", errorRate*100) }%</div>
+				<div class="metric-label">Error Rate</div>
+			</div>
+		</div>
+	</div>
+}
+
+// TopIssues renders the issues table content
+templ TopIssues(issues []TopIssue) {
+	if len(issues) == 0 {
+		<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No issues detected</p>
+	} else {
+		<table class="table">
+			<thead>
+				<tr>
+					<th>Service</th>
+					<th>Issue</th>
+					<th>Detail</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, issue := range issues {
+					<tr>
+						<td><a href={ templ.SafeURL("/services/" + issue.Service) }>{ issue.Service }</a></td>
+						<td>
+							if issue.Issue == "high_error_rate" {
+								<span class="status status-unhealthy">Errors</span>
+							} else if issue.Issue == "high_latency" {
+								<span class="status status-degraded">Slow</span>
+							} else if issue.Issue != "" {
+								<span class="status status-degraded">{ issue.Issue }</span>
+							}
+						</td>
+						<td>{ issue.Detail }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	}
+}
+
+// ServicesTable renders the services list
+templ ServicesTable(nodes []ServiceNode) {
+	<div
+		id="services-table"
+		class="card"
+		hx-get="/partials/overview/services"
+		hx-trigger="every 30s"
+		hx-swap="outerHTML"
+	>
+		<div class="card-title">Services</div>
+		<table class="table">
+			<thead>
+				<tr>
+					<th>Service</th>
+					<th>Status</th>
+					<th>Requests</th>
+					<th>P95</th>
+					<th>Error Rate</th>
+				</tr>
+			</thead>
+			<tbody>
+				for _, node := range nodes {
+					<tr>
+						<td><a href={ templ.SafeURL("/services/" + node.Name) }>{ node.Name }</a></td>
+						<td>
+							<span class={ "status", statusClass(node.Status) }>{ node.Status }</span>
+						</td>
+						<td>{ fmt.Sprintf("%d", node.SpanCount) }</td>
+						<td>{ fmt.Sprintf("%.0fms", node.P95Ms) }</td>
+						<td>{ fmt.Sprintf("%.1f%%", node.ErrorRate*100) }</td>
+					</tr>
+				}
+			</tbody>
+		</table>
+	</div>
+}
+
+// TimelineChart renders just the chart
+templ TimelineChart(data TimelineData) {
+	@timelineChart(data)
+}

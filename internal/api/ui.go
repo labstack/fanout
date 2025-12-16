@@ -26,6 +26,7 @@ func NewUIHandler(duck *query.Duck, cfg config.Config) *UIHandler {
 func RegisterUIRoutes(e *echo.Echo, duck *query.Duck, cfg config.Config) {
 	h := NewUIHandler(duck, cfg)
 
+	// Full page routes
 	e.GET("/", h.Overview)
 	e.GET("/services", h.Services)
 	e.GET("/services/:name", h.ServiceDetail)
@@ -33,6 +34,9 @@ func RegisterUIRoutes(e *echo.Echo, duck *query.Duck, cfg config.Config) {
 	e.GET("/traces/:id", h.TraceDetail)
 	e.GET("/logs", h.Logs)
 	e.GET("/metrics", h.Metrics)
+
+	// htmx partial routes
+	RegisterPartialRoutes(e, h)
 }
 
 // Overview renders the main dashboard

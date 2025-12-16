@@ -84,125 +84,40 @@ templ Overview(data OverviewData) {
 		}
 		<div class="page-header">
 			<h1 class="page-title">System Overview</h1>
-			<p class="page-subtitle">{ data.Summary }</p>
+			<p class="page-subtitle" id="summary">{ data.Summary }</p>
 		</div>
-		<!-- Health Metrics -->
-		<div class="grid grid-4" style="margin-bottom: 1.5rem;">
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ fmt.Sprintf("%d", data.Services.Total) }</div>
-					<div class="metric-label">Total Services</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value" style="color: var(--success);">{ fmt.Sprintf("%d", data.Services.Healthy) }</div>
-					<div class="metric-label">Healthy</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value" style="color: var(--warning);">{ fmt.Sprintf("%d", data.Services.Degraded) }</div>
-					<div class="metric-label">Degraded</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value" style="color: var(--danger);">{ fmt.Sprintf("%d", data.Services.Unhealthy) }</div>
-					<div class="metric-label">Unhealthy</div>
-				</div>
-			</div>
-		</div>
-		<!-- Key Metrics -->
-		<div class="grid grid-3" style="margin-bottom: 1.5rem;">
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ fmt.Sprintf("%d", data.ThroughputPerMin) }</div>
-					<div class="metric-label">Requests/min</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ fmt.Sprintf("%.0f", data.P95Ms) }ms</div>
-					<div class="metric-label">P95 Latency</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ fmt.Sprintf("%.1f", data.ErrorRate*100) }%</div>
-					<div class="metric-label">Error Rate</div>
-				</div>
-			</div>
-		</div>
+		<!-- Health Metrics - auto refresh every 30s -->
+		@StatsGrid(data.Services)
+		<!-- Key Metrics - auto refresh every 30s -->
+		@KeyMetrics(data.ThroughputPerMin, data.P95Ms, data.ErrorRate)
 		<div class="grid grid-2" style="margin-bottom: 1.5rem;">
-			<!-- Timeline Chart -->
+			<!-- Timeline Chart - auto refresh every 30s -->
 			<div class="card">
 				<div class="card-title">Request Timeline</div>
-				@timelineChart(data.Timeline)
+				<div
+					id="timeline-chart"
+					hx-get="/partials/overview/timeline"
+					hx-trigger="every 30s"
+					hx-swap="innerHTML"
+				>
+					@timelineChart(data.Timeline)
+				</div>
 			</div>
-			<!-- Top Issues -->
+			<!-- Top Issues - auto refresh every 30s -->
 			<div class="card">
 				<div class="card-title">Top Issues</div>
-				if len(data.TopIssues) == 0 {
-					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No issues detected</p>
-				} else {
-					<table class="table">
-						<thead>
-							<tr>
-								<th>Service</th>
-								<th>Issue</th>
-								<th>Detail</th>
-							</tr>
-						</thead>
-						<tbody>
-							for _, issue := range data.TopIssues {
-								<tr>
-									<td><a href={ templ.SafeURL("/services/" + issue.Service) }>{ issue.Service }</a></td>
-									<td>
-										if issue.Issue == "high_error_rate" {
-											<span class="status status-unhealthy">Errors</span>
-										} else if issue.Issue == "high_latency" {
-											<span class="status status-degraded">Slow</span>
-										} else if issue.Issue != "" {
-											<span class="status status-degraded">{ issue.Issue }</span>
-										}
-									</td>
-									<td>{ issue.Detail }</td>
-								</tr>
-							}
-						</tbody>
-					</table>
-				}
+				<div
+					id="top-issues"
+					hx-get="/partials/overview/issues"
+					hx-trigger="every 30s"
+					hx-swap="innerHTML"
+				>
+					@TopIssues(data.TopIssues)
+				</div>
 			</div>
 		</div>
-		<!-- Services Table -->
-		<div class="card">
-			<div class="card-title">Services</div>
-			<table class="table">
-				<thead>
-					<tr>
-						<th>Service</th>
-						<th>Status</th>
-						<th>Requests</th>
-						<th>P95</th>
-						<th>Error Rate</th>
-					</tr>
-				</thead>
-				<tbody>
-					for _, node := range data.Topology.Nodes {
-						<tr>
-							<td><a href={ templ.SafeURL("/services/" + node.Name) }>{ node.Name }</a></td>
-							<td>
-								<span class={ "status", statusClass(node.Status) }>{ node.Status }</span>
-							</td>
-							<td>{ fmt.Sprintf("%d", node.SpanCount) }</td>
-							<td>{ fmt.Sprintf("%.0fms", node.P95Ms) }</td>
-							<td>{ fmt.Sprintf("%.1f%%", node.ErrorRate*100) }</td>
-						</tr>
-					}
-				</tbody>
-			</table>
-		</div>
+		<!-- Services Table - auto refresh every 30s -->
+		@ServicesTable(data.Topology.Nodes)
 	}
 }
 
