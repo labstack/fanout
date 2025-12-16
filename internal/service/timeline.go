@@ -31,12 +31,12 @@ SELECT
   COUNT(*) as cnt,
   SUM(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1 ELSE 0 END) as errors,
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   %s
 GROUP BY bucket
 ORDER BY bucket ASC;
-`, granularity, s.cfg.LakeDir, window, svcFilter)
+`, granularity, s.duck.SpansGlob(window), window, svcFilter)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {

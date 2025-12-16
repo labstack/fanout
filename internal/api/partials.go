@@ -5,6 +5,11 @@ import (
 	"github.com/labstack/fanout/internal/web"
 )
 
+// cachePartial sets short cache headers for partial responses
+func cachePartial(c echo.Context) {
+	c.Response().Header().Set("Cache-Control", "max-age=10, stale-while-revalidate=30")
+}
+
 // RegisterPartialRoutes registers htmx partial routes
 func RegisterPartialRoutes(e *echo.Echo, h *UIHandler) {
 	p := e.Group("/partials")
@@ -20,6 +25,7 @@ func RegisterPartialRoutes(e *echo.Echo, h *UIHandler) {
 
 // PartialOverview returns the full overview content (no layout)
 func (h *UIHandler) PartialOverview(c echo.Context) error {
+	cachePartial(c)
 	ctx := c.Request().Context()
 	window := 15
 
@@ -82,6 +88,7 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 
 // PartialStats returns just the stats grid
 func (h *UIHandler) PartialStats(c echo.Context) error {
+	cachePartial(c)
 	ctx := c.Request().Context()
 	status := h.getStatus(ctx, 15)
 
@@ -97,6 +104,7 @@ func (h *UIHandler) PartialStats(c echo.Context) error {
 
 // PartialKeyMetrics returns just the key metrics grid
 func (h *UIHandler) PartialKeyMetrics(c echo.Context) error {
+	cachePartial(c)
 	ctx := c.Request().Context()
 	status := h.getStatus(ctx, 15)
 	return render(c, web.KeyMetrics(status.ThroughputPerMin, status.P95Ms, status.ErrorRate))
@@ -104,6 +112,7 @@ func (h *UIHandler) PartialKeyMetrics(c echo.Context) error {
 
 // PartialTopIssues returns just the top issues table
 func (h *UIHandler) PartialTopIssues(c echo.Context) error {
+	cachePartial(c)
 	ctx := c.Request().Context()
 	status := h.getStatus(ctx, 15)
 
@@ -122,6 +131,7 @@ func (h *UIHandler) PartialTopIssues(c echo.Context) error {
 
 // PartialServicesTable returns just the services table
 func (h *UIHandler) PartialServicesTable(c echo.Context) error {
+	cachePartial(c)
 	ctx := c.Request().Context()
 	topo := h.getTopology(ctx, 60)
 
@@ -141,6 +151,7 @@ func (h *UIHandler) PartialServicesTable(c echo.Context) error {
 
 // PartialTimeline returns just the timeline chart
 func (h *UIHandler) PartialTimeline(c echo.Context) error {
+	cachePartial(c)
 	ctx := c.Request().Context()
 	timeline := h.getTimeline(ctx, "", 60, 5)
 

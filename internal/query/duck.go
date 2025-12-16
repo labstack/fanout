@@ -19,7 +19,8 @@ type Duck struct {
 }
 
 func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
-	db, err := sql.Open("duckdb", "")
+	// DuckDB config: memory limit and thread count for better performance
+	db, err := sql.Open("duckdb", "?threads=4&memory_limit=256MB")
 	if err != nil {
 		return nil, err
 	}
@@ -40,6 +41,21 @@ CREATE TABLE IF NOT EXISTS svc_minute (
 }
 
 func (d *Duck) Close() error { return d.DB.Close() }
+
+// SpansGlob returns optimized glob pattern for spans within the time window
+func (d *Duck) SpansGlob(windowMinutes int) string {
+	return ParquetGlob(d.cfg.LakeDir, "spans", windowMinutes)
+}
+
+// LogsGlob returns optimized glob pattern for logs within the time window
+func (d *Duck) LogsGlob(windowMinutes int) string {
+	return ParquetGlob(d.cfg.LakeDir, "logs", windowMinutes)
+}
+
+// MetricsGlob returns optimized glob pattern for metrics within the time window
+func (d *Duck) MetricsGlob(windowMinutes int) string {
+	return ParquetGlob(d.cfg.LakeDir, "metrics", windowMinutes)
+}
 
 func (d *Duck) RunRollups(ctx context.Context) {
 	ticker := time.NewTicker(time.Duration(d.cfg.RollupEvery) * time.Second)
@@ -89,7 +105,7 @@ WITH S AS (
          "name=duration_ms" as duration_ms,
          "name=status_code" as status_code,
          "name=start_unix_nano" as start_unix_nano
-  FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+  FROM read_parquet(%s)
   WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 )
 SELECT service_name,
@@ -100,7 +116,7 @@ FROM S
 GROUP BY service_name
 ORDER BY p95_ms DESC
 LIMIT 100;
-`, d.cfg.LakeDir, windowMinutes)
+`, d.SpansGlob(windowMinutes), windowMinutes)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
@@ -130,12 +146,12 @@ SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%
        "name=body" as body,
        "name=service_name" as service_name,
        "name=severity" as severity
-FROM read_parquet('%s/logs/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=body" ~ '%s'
 ORDER BY ts DESC
 LIMIT %d;
-`, d.cfg.LakeDir, windowMinutes, escapeLike(pattern), limit)
+`, d.LogsGlob(windowMinutes), windowMinutes, escapeLike(pattern), limit)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
@@ -219,13 +235,13 @@ type ErrorRoute struct {
 func (d *Duck) ErrorRoutes(ctx context.Context, windowMinutes, limit int) ([]ErrorRoute, error) {
 	q := fmt.Sprintf(`
 SELECT "name=body" AS route, COUNT(*) AS count
-FROM read_parquet('%s/logs/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=severity" IN ('ERROR','ERR','WARN')
 GROUP BY "name=body"
 ORDER BY count DESC
 LIMIT %d;
-`, d.cfg.LakeDir, windowMinutes, limit)
+`, d.LogsGlob(windowMinutes), windowMinutes, limit)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
@@ -255,7 +271,7 @@ WITH spans_with_errors AS (
   SELECT "name=service_name" as service_name,
          "name=name" as name,
          "name=status_code" as status_code
-  FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+  FROM read_parquet(%s)
   WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 )
 SELECT service_name,
@@ -267,7 +283,7 @@ GROUP BY service_name, name
 HAVING errors > 0
 ORDER BY errors DESC
 LIMIT %d;
-`, d.cfg.LakeDir, windowMinutes, limit)
+`, d.SpansGlob(windowMinutes), windowMinutes, limit)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err

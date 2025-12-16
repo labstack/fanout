@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/web"
+	"golang.org/x/sync/errgroup"
 )
 
 // UIHandler handles all UI routes
@@ -46,8 +47,33 @@ func (h *UIHandler) Overview(c echo.Context) error {
 
 	data := web.OverviewData{}
 
-	// Get status data
-	status := h.getStatus(ctx, window)
+	// Run queries in parallel
+	var status statusResult
+	var topo topoResult
+	var timeline timelineResult
+
+	g, gctx := errgroup.WithContext(ctx)
+
+	g.Go(func() error {
+		status = h.getStatus(gctx, window)
+		return nil
+	})
+
+	g.Go(func() error {
+		topo = h.getTopology(gctx, 60)
+		return nil
+	})
+
+	g.Go(func() error {
+		timeline = h.getTimeline(gctx, "", 60, 5)
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	// Build response from parallel results
 	data.Healthy = status.Healthy
 	data.Summary = status.Summary
 	data.Services = web.ServiceSummary{
@@ -69,8 +95,6 @@ func (h *UIHandler) Overview(c echo.Context) error {
 		})
 	}
 
-	// Get topology data
-	topo := h.getTopology(ctx, 60)
 	for _, n := range topo.Nodes {
 		data.Topology.Nodes = append(data.Topology.Nodes, web.ServiceNode{
 			Name:      n.Name,
@@ -81,8 +105,6 @@ func (h *UIHandler) Overview(c echo.Context) error {
 		})
 	}
 
-	// Get timeline data
-	timeline := h.getTimeline(ctx, "", 60, 5)
 	for _, b := range timeline.Buckets {
 		data.Timeline.Buckets = append(data.Timeline.Buckets, web.TimelineBucket{
 			Time:         b.Time,

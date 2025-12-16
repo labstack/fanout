@@ -83,12 +83,12 @@ SELECT "name=trace_id" as trace_id,
        "name=duration_ms" as duration_ms,
        "name=status_code" as status,
        strftime(epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS start_time
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   %s
 ORDER BY "name=start_unix_nano" DESC
 LIMIT %d;
-`, s.cfg.LakeDir, p.Window, filterStr, p.Limit+1)
+`, s.duck.SpansGlob(p.Window), p.Window, filterStr, p.Limit+1)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -138,12 +138,12 @@ SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%
        "name=severity" as severity,
        "name=body" as body,
        "name=trace_id" as trace_id
-FROM read_parquet('%s/logs/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   %s
 ORDER BY "name=time_unix_nano" DESC
 LIMIT %d;
-`, s.cfg.LakeDir, p.Window, filterStr, p.Limit+1)
+`, s.duck.LogsGlob(p.Window), p.Window, filterStr, p.Limit+1)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {

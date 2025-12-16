@@ -163,10 +163,10 @@ func timelineSpec(data TimelineData) string {
 				"mark": map[string]any{"type": "area", "opacity": 0.3, "line": true},
 				"encoding": map[string]any{
 					"x": map[string]any{
-						"field":     "time",
-						"type":      "temporal",
-						"timeUnit":  "yearmonthdatehoursminutes",
-						"axis":      map[string]any{"title": nil, "format": "%H:%M", "labelAngle": 0, "tickCount": 8},
+						"field":    "time",
+						"type":     "temporal",
+						"timeUnit": "yearmonthdatehoursminutes",
+						"axis":     map[string]any{"title": nil, "format": "%H:%M", "labelAngle": 0, "tickCount": 8},
 					},
 					"y": map[string]any{"field": "requests", "type": "quantitative", "axis": map[string]any{"title": "Requests"}},
 				},

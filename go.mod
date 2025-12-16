@@ -4,14 +4,13 @@ go 1.25.5
 
 require (
 	github.com/a-h/templ v0.3.960
-	github.com/anthropics/anthropic-sdk-go v1.17.0
 	github.com/duckdb/duckdb-go/v2 v2.5.1
 	github.com/labstack/echo/v4 v4.13.4
 	github.com/modelcontextprotocol/go-sdk v1.1.0
-	github.com/ollama/ollama v0.12.10
 	github.com/parquet-go/parquet-go v0.25.1
 	github.com/prometheus/client_golang v1.23.2
 	go.opentelemetry.io/proto/otlp v1.9.0
+	golang.org/x/sync v0.18.0
 	google.golang.org/grpc v1.77.0
 )
 
@@ -45,10 +44,6 @@ require (
 	github.com/prometheus/common v0.66.1 // indirect
 	github.com/prometheus/procfs v0.16.1 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
-	github.com/tidwall/gjson v1.18.0 // indirect
-	github.com/tidwall/match v1.1.1 // indirect
-	github.com/tidwall/pretty v1.2.1 // indirect
-	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
@@ -61,7 +56,6 @@ require (
 	golang.org/x/mod v0.29.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/oauth2 v0.32.0 // indirect
-	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/telemetry v0.0.0-20251105150722-cbe4531f26c3 // indirect
 	golang.org/x/text v0.31.0 // indirect

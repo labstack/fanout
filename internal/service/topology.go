@@ -17,18 +17,19 @@ func (s *Service) Topology(ctx context.Context, window int) (*TopologyResult, er
 	}
 
 	// Get service nodes with health
+	spansGlob := s.duck.SpansGlob(window)
 	q := fmt.Sprintf(`
 SELECT
   "name=service_name" as service,
   COUNT(*) as cnt,
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95,
   COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 GROUP BY "name=service_name"
 ORDER BY cnt DESC
 LIMIT 50;
-`, s.cfg.LakeDir, window)
+`, spansGlob, window)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -53,8 +54,8 @@ WITH calls AS (
     child."name=service_name" as callee,
     child."name=duration_ms" as duration_ms,
     child."name=status_code" as status
-  FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet') child
-  JOIN read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet') parent
+  FROM read_parquet(%s) child
+  JOIN read_parquet(%s) parent
     ON child."name=parent_span_id" = parent."name=span_id"
     AND child."name=trace_id" = parent."name=trace_id"
   WHERE epoch_ms(CAST(child."name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
@@ -70,7 +71,7 @@ FROM calls
 GROUP BY caller, callee
 ORDER BY call_count DESC
 LIMIT 100;
-`, s.cfg.LakeDir, s.cfg.LakeDir, window)
+`, spansGlob, spansGlob, window)
 
 	rows, err = s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
