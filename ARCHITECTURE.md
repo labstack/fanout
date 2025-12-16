@@ -149,30 +149,30 @@ graph LR
 ```mermaid
 graph TB
     subgraph Health
-        HZ[GET /healthz]
-        RZ[GET /readyz]
-        PM[GET /-/metrics]
+        HZ["GET /healthz"]
+        RZ["GET /readyz"]
+        PM["GET /-/metrics"]
     end
 
     subgraph "Web UI"
-        OV[GET /]
-        SV[GET /services]
-        SD[GET /services/:name]
-        TC[GET /traces]
-        TD[GET /traces/:id]
-        LG[GET /logs]
-        MT[GET /metrics]
-        RP[GET /reports]
+        OV["GET /"]
+        SV["GET /services"]
+        SD["GET /services/:name"]
+        TC["GET /traces"]
+        TD["GET /traces/:id"]
+        LG["GET /logs"]
+        MT["GET /metrics"]
+        RP["GET /reports"]
     end
 
     subgraph MCP
-        MC[POST /mcp]
-        VW[GET /view/r/:id]
+        MC["POST /mcp"]
+        VW["GET /view/r/:id"]
     end
 
     subgraph "Reports API"
-        RL[GET /api/reports]
-        RD[DELETE /api/reports/:id]
+        RL["GET /api/reports"]
+        RD["DELETE /api/reports/:id"]
     end
 ```
 
@@ -256,12 +256,12 @@ flowchart LR
     end
 
     subgraph Storage
-        FS[(lake/reports/)]
+        FS[("lake/reports/")]
     end
 
     subgraph Output
-        URL[/view/r/:id]
-        API[/api/reports]
+        URL["/view/r/:id"]
+        API["/api/reports"]
     end
 
     MCP --> SEC
