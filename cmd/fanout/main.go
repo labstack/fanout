@@ -85,7 +85,19 @@ func main() {
 	e := echo.New()
 	e.HideBanner = true
 	e.Use(middleware.Recover())
-	e.Use(middleware.Logger())
+	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
+		LogURI:       true,
+		LogStatus:    true,
+		LogLatency:   true,
+		LogMethod:    true,
+		LogRemoteIP:  true,
+		LogUserAgent: true,
+		LogError:     true,
+		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+			log.Printf("%s %s %d %s", v.Method, v.URI, v.Status, v.Latency)
+			return nil
+		},
+	}))
 
 	// Auth (optional)
 	apiToken := strings.TrimSpace(cfg.APIToken)
