@@ -329,16 +329,18 @@ func (h *UIHandler) Traces(c echo.Context) error {
 	}
 
 	traces, hasMore := h.searchTracesPage(ctx, query, service, status, window, limit, offset)
+	services := h.getServices(ctx, window)
 
 	data := web.TracesData{
-		Query:   query,
-		Service: service,
-		Status:  status,
-		Traces:  traces,
-		Limit:   limit,
-		Offset:  offset,
-		HasMore: hasMore,
-		Window:  window,
+		Query:    query,
+		Service:  service,
+		Services: services,
+		Status:   status,
+		Traces:   traces,
+		Limit:    limit,
+		Offset:   offset,
+		HasMore:  hasMore,
+		Window:   window,
 	}
 
 	return renderTempl(c, web.Traces(data))
@@ -379,10 +381,12 @@ func (h *UIHandler) Logs(c echo.Context) error {
 	}
 
 	logs, hasMore := h.searchLogsPage(ctx, query, service, severity, window, limit, offset)
+	services := h.getServices(ctx, window)
 
 	data := web.LogsData{
 		Query:    query,
 		Service:  service,
+		Services: services,
 		Severity: severity,
 		Logs:     logs,
 		Limit:    limit,
@@ -1199,8 +1203,9 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 		}
 	}
 
-	// Get distinct metric names
+	// Get distinct metric names and services
 	names := h.getMetricNames(ctx, window)
+	services := h.getServices(ctx, window)
 
 	// Get metrics with filters
 	metrics, hasMore := h.searchMetricsPage(ctx, name, service, window, limit, offset)
@@ -1209,6 +1214,7 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 		Names:    names,
 		Selected: name,
 		Service:  service,
+		Services: services,
 		Window:   window,
 		Metrics:  metrics,
 		Limit:    limit,
@@ -1244,6 +1250,33 @@ LIMIT 100;
 		}
 	}
 	return names
+}
+
+func (h *UIHandler) getServices(ctx context.Context, window int) []string {
+	var services []string
+
+	spansGlob := h.duck.SpansGlob(window)
+	q := fmt.Sprintf(`
+SELECT DISTINCT "name=service_name"
+FROM read_parquet(%s)
+WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+ORDER BY "name=service_name"
+LIMIT 100;
+`, spansGlob, window)
+
+	rows, err := h.duck.DB.QueryContext(ctx, q)
+	if err != nil {
+		return services
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var svc string
+		if err := rows.Scan(&svc); err == nil && svc != "" {
+			services = append(services, svc)
+		}
+	}
+	return services
 }
 
 func (h *UIHandler) searchMetricsPage(ctx context.Context, name, service string, window, limit, offset int) ([]web.MetricRow, bool) {

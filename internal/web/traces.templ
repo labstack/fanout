@@ -9,10 +9,11 @@ import (
 
 // TracesData for the traces search page
 type TracesData struct {
-	Query   string
-	Service string
-	Status  string
-	Traces  []TraceRow
+	Query    string
+	Service  string
+	Services []string
+	Status   string
+	Traces   []TraceRow
 	// Pagination
 	Limit   int
 	Offset  int
@@ -54,7 +55,12 @@ templ Traces(data TracesData) {
 		<form method="GET" action="/traces" class="search-form">
 			<div class="form-row">
 				<sl-input name="q" label="Search" placeholder="Operation or trace ID..." value={ data.Query }></sl-input>
-				<sl-input name="service" label="Service" placeholder="All services" value={ data.Service }></sl-input>
+				<sl-select name="service" label="Service" value={ data.Service }>
+					<sl-option value="">All services</sl-option>
+					for _, svc := range data.Services {
+						<sl-option value={ svc }>{ svc }</sl-option>
+					}
+				</sl-select>
 				<sl-select name="status" label="Status" value={ data.Status }>
 					<sl-option value="">All</sl-option>
 					<sl-option value="error">Errors only</sl-option>

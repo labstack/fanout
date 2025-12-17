@@ -10,6 +10,7 @@ import (
 type LogsData struct {
 	Query    string
 	Service  string
+	Services []string
 	Severity string
 	Logs     []LogRow
 	// Pagination
@@ -56,7 +57,12 @@ templ Logs(data LogsData) {
 		<form method="GET" action="/logs" class="search-form">
 			<div class="form-row">
 				<sl-input name="q" label="Search" placeholder="Log message pattern..." value={ data.Query }></sl-input>
-				<sl-input name="service" label="Service" placeholder="All services" value={ data.Service }></sl-input>
+				<sl-select name="service" label="Service" value={ data.Service }>
+					<sl-option value="">All services</sl-option>
+					for _, svc := range data.Services {
+						<sl-option value={ svc }>{ svc }</sl-option>
+					}
+				</sl-select>
 				<sl-select name="severity" label="Severity" value={ data.Severity }>
 						<sl-option value="">All</sl-option>
 						<sl-option value="DEBUG">DEBUG</sl-option>

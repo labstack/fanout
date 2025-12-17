@@ -12,6 +12,7 @@ type MetricsData struct {
 	Names    []string
 	Selected string
 	Service  string
+	Services []string
 	Window   int
 	Metrics  []MetricRow
 	Limit    int
@@ -44,7 +45,12 @@ templ Metrics(data MetricsData) {
 							<sl-option value={ n }>{ n }</sl-option>
 						}
 					</sl-select>
-					<sl-input name="service" label="Service" placeholder="All services" value={ data.Service }></sl-input>
+					<sl-select name="service" label="Service" value={ data.Service }>
+						<sl-option value="">All services</sl-option>
+						for _, svc := range data.Services {
+							<sl-option value={ svc }>{ svc }</sl-option>
+						}
+					</sl-select>
 					<sl-select name="window" label="Time Window" value={ fmt.Sprintf("%d", data.Window) }>
 						<sl-option value="15">Last 15 min</sl-option>
 						<sl-option value="30">Last 30 min</sl-option>
