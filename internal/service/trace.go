@@ -7,9 +7,15 @@ import (
 )
 
 // Trace returns a complete distributed trace with auto root-cause analysis.
-func (s *Service) Trace(ctx context.Context, traceID string, includeLogs bool) (*TraceResult, error) {
+// window limits the search to recent parquet files (in minutes, default 1440 = 24h).
+func (s *Service) Trace(ctx context.Context, traceID string, includeLogs bool, window int) (*TraceResult, error) {
 	if traceID == "" {
 		return nil, fmt.Errorf("trace_id is required")
+	}
+
+	// Default to 24 hours if no window specified
+	if window <= 0 {
+		window = 1440
 	}
 
 	out := &TraceResult{
@@ -20,7 +26,7 @@ func (s *Service) Trace(ctx context.Context, traceID string, includeLogs bool) (
 		CriticalPath: []string{},
 	}
 
-	// Get spans
+	// Get spans (using optimized glob for time window)
 	q := fmt.Sprintf(`
 SELECT "name=span_id" as span_id,
        "name=parent_span_id" as parent_span_id,
@@ -31,10 +37,10 @@ SELECT "name=span_id" as span_id,
        "name=status_code" as status,
        "name=status_msg" as status_msg,
        "name=start_unix_nano" as start_nano
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE "name=trace_id" = '%s'
 ORDER BY "name=start_unix_nano" ASC;
-`, s.cfg.LakeDir, escapeLike(traceID))
+`, s.duck.SpansGlob(window), escapeSQL(traceID))
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -181,13 +187,13 @@ ORDER BY "name=start_unix_nano" ASC;
 
 	// Fetch correlated logs
 	if includeLogs {
-		out.Logs = s.fetchTraceLogs(ctx, traceID)
+		out.Logs = s.fetchTraceLogs(ctx, traceID, window)
 	}
 
 	return out, nil
 }
 
-func (s *Service) fetchTraceLogs(ctx context.Context, traceID string) []LogInfo {
+func (s *Service) fetchTraceLogs(ctx context.Context, traceID string, window int) []LogInfo {
 	logs := []LogInfo{}
 
 	q := fmt.Sprintf(`
@@ -196,11 +202,11 @@ SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%
        "name=severity" as severity,
        "name=body" as body,
        "name=span_id" as span_id
-FROM read_parquet('%s/logs/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE "name=trace_id" = '%s'
 ORDER BY "name=time_unix_nano" ASC
 LIMIT 100;
-`, s.cfg.LakeDir, escapeLike(traceID))
+`, s.duck.LogsGlob(window), escapeSQL(traceID))
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {

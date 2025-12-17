@@ -7,7 +7,7 @@ import (
 
 // Topology renders the service topology page (uses TopologyData from overview.templ)
 templ Topology(data TopologyData) {
-	@Layout("Topology", "topology") {
+	@Layout("Topology", "topology", data.Window) {
 		<div class="page-header">
 			<div class="page-header-left">
 				<h1 class="page-title">Service Topology</h1>
@@ -34,7 +34,7 @@ templ Topology(data TopologyData) {
 			</div>
 			<!-- Topology Graph -->
 			<div class="card">
-				<div id="topology-graph" class="topology-container" data-nodes={ topoNodesJSON(data.Nodes) } data-edges={ topoEdgesJSON(data.Edges) }></div>
+				<div id="topology-graph" class="topology-container" data-nodes={ topoNodesJSON(data.Nodes) } data-edges={ topoEdgesJSON(data.Edges) } data-window={ fmt.Sprintf("%d", data.Window) }></div>
 			</div>
 			<script>
 				(function() {
@@ -171,14 +171,19 @@ templ Topology(data TopologyData) {
 						actions: false,
 						renderer: 'svg',
 						theme: isDark ? 'dark' : undefined
-					}).then(result => {
-						// Add click handler
-						result.view.addEventListener('click', (event, item) => {
-							if (item && item.datum && item.datum.name) {
-								window.location.href = '/services/' + encodeURIComponent(item.datum.name);
-							}
+						}).then(result => {
+							const windowMinutes = parseInt(container.dataset.window, 10);
+							// Add click handler
+							result.view.addEventListener('click', (event, item) => {
+								if (item && item.datum && item.datum.name) {
+									let href = '/services/' + encodeURIComponent(item.datum.name);
+									if (windowMinutes !== 60) {
+										href += '?window=' + encodeURIComponent(windowMinutes);
+									}
+									window.location.href = href;
+								}
+							});
 						});
-					});
 				})();
 			</script>
 		}

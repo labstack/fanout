@@ -1,6 +1,10 @@
 package web
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+)
 
 // LogsData for the logs search page
 type LogsData struct {
@@ -25,43 +29,49 @@ type LogRow struct {
 
 // Logs renders the logs search page
 templ Logs(data LogsData) {
-	@Layout("Logs", "logs") {
+	@Layout("Logs", "logs", data.Window) {
 		<div class="page-header">
 			<div class="page-header-left">
 				<h1 class="page-title">Logs</h1>
 				<p class="page-subtitle">Search application logs</p>
 			</div>
 		</div>
-		<div class="quick-filters">
-			<sl-button href="/logs" size="small" variant={ logFilterVariant(data.Severity, "") }>All</sl-button>
-			<sl-button href="/logs?severity=ERROR" size="small" variant={ logFilterVariant(data.Severity, "ERROR") }>
-				<sl-badge variant="danger">ERROR</sl-badge>
-			</sl-button>
-			<sl-button href="/logs?severity=WARN" size="small" variant={ logFilterVariant(data.Severity, "WARN") }>
-				<sl-badge variant="warning">WARN</sl-badge>
-			</sl-button>
-			<sl-button href="/logs?severity=INFO" size="small" variant={ logFilterVariant(data.Severity, "INFO") }>
-				<sl-badge variant="primary">INFO</sl-badge>
-			</sl-button>
-		</div>
+	<div class="quick-filters">
+		<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, "", data.Window, data.Limit, 0) } size="small" variant={ logFilterVariant(data.Severity, "") }>All</sl-button>
+		<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, "ERROR", data.Window, data.Limit, 0) } size="small" variant={ logFilterVariant(data.Severity, "ERROR") }>
+			<sl-icon name="exclamation-triangle" slot="prefix"></sl-icon>
+			Errors
+		</sl-button>
+		<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, "WARN", data.Window, data.Limit, 0) } size="small" variant={ logFilterVariant(data.Severity, "WARN") }>
+			<sl-icon name="exclamation-circle" slot="prefix"></sl-icon>
+			Warn
+		</sl-button>
+		<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, "INFO", data.Window, data.Limit, 0) } size="small" variant={ logFilterVariant(data.Severity, "INFO") }>
+			<sl-icon name="info-circle" slot="prefix"></sl-icon>
+			Info
+		</sl-button>
+	</div>
 		<!-- Search Form -->
-		<div class="card" style="margin-bottom: 1.5rem;">
-			<form method="GET" action="/logs" class="search-form">
-				<div class="form-row">
-					<sl-input name="q" label="Search" placeholder="Log message pattern..." value={ data.Query }></sl-input>
-					<sl-input name="service" label="Service" placeholder="All services" value={ data.Service }></sl-input>
-					<sl-select name="severity" label="Severity" value={ data.Severity }>
+	<div class="card" style="margin-bottom: 1.5rem;">
+		<form method="GET" action="/logs" class="search-form">
+			<div class="form-row">
+				<sl-input name="q" label="Search" placeholder="Log message pattern..." value={ data.Query }></sl-input>
+				<sl-input name="service" label="Service" placeholder="All services" value={ data.Service }></sl-input>
+				<sl-select name="severity" label="Severity" value={ data.Severity }>
 						<sl-option value="">All</sl-option>
 						<sl-option value="DEBUG">DEBUG</sl-option>
 						<sl-option value="INFO">INFO</sl-option>
 						<sl-option value="WARN">WARN</sl-option>
-						<sl-option value="ERROR">ERROR</sl-option>
-						<sl-option value="FATAL">FATAL</sl-option>
-					</sl-select>
-					<sl-button type="submit" variant="primary">Search</sl-button>
-				</div>
-			</form>
-		</div>
+					<sl-option value="ERROR">ERROR</sl-option>
+					<sl-option value="FATAL">FATAL</sl-option>
+				</sl-select>
+				if data.Window != 60 {
+					<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
+				}
+				<sl-button type="submit" variant="primary">Search</sl-button>
+			</div>
+		</form>
+	</div>
 		<!-- Results -->
 		<div class="card">
 			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Logs)) } logs)</div>
@@ -73,17 +83,19 @@ templ Logs(data LogsData) {
 				</div>
 			} else {
 				<div class="logs-list">
-					for _, log := range data.Logs {
-						<div class={ "log-entry", logEntryClass(log.Severity) }>
-							<div class="log-header">
-								<sl-badge variant={ severityVariant(log.Severity) }>{ log.Severity }</sl-badge>
-								<span class="time">{ log.Time }</span>
-								<a href={ templ.SafeURL("/services/" + log.Service) } class="service">{ log.Service }</a>
-								if log.TraceID != "" {
-									<sl-button href={ "/traces/" + log.TraceID } size="small" variant="text">trace</sl-button>
-								}
-							</div>
-							<div class="log-body">{ log.Body }</div>
+						for _, log := range data.Logs {
+							<div class={ "log-entry", logEntryClass(log.Severity) }>
+								<div class="log-header">
+									<sl-badge variant={ severityVariant(log.Severity) }>{ log.Severity }</sl-badge>
+									<span class="time">{ log.Time }</span>
+									if log.Service != "" {
+										<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(log.Service), data.Window)) } class="service">{ log.Service }</a>
+									}
+									if log.TraceID != "" {
+										<sl-button href={ withWindow("/traces/"+pathEscape(log.TraceID), data.Window) } size="small" variant="text">trace</sl-button>
+									}
+								</div>
+								<div class="log-body">{ log.Body }</div>
 						</div>
 					}
 				</div>
@@ -91,11 +103,11 @@ templ Logs(data LogsData) {
 				if data.Offset > 0 || data.HasMore {
 					<div class="pagination">
 						if data.Offset > 0 {
-							<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, data.Severity, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
+							<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, data.Severity, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
 						}
 						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Logs)) }</span>
 						if data.HasMore {
-							<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, data.Severity, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
+							<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, data.Severity, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
 						}
 					</div>
 				}
@@ -197,19 +209,23 @@ func severityVariant(severity string) string {
 	}
 }
 
-func logsPaginationURL(base, q, service, severity string, limit, offset int) string {
-	url := base + "?"
+func logsPaginationURL(base, q, service, severity string, window, limit, offset int) string {
+	values := url.Values{}
 	if q != "" {
-		url += "q=" + q + "&"
+		values.Set("q", q)
 	}
 	if service != "" {
-		url += "service=" + service + "&"
+		values.Set("service", service)
 	}
 	if severity != "" {
-		url += "severity=" + severity + "&"
+		values.Set("severity", severity)
 	}
-	url += fmt.Sprintf("limit=%d&offset=%d", limit, offset)
-	return url
+	if window != 60 {
+		values.Set("window", strconv.Itoa(window))
+	}
+	values.Set("limit", strconv.Itoa(limit))
+	values.Set("offset", strconv.Itoa(offset))
+	return base + "?" + values.Encode()
 }
 
 func logFilterVariant(current, target string) string {

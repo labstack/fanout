@@ -60,7 +60,8 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 		return nil, DiagnoseOut{}, fmt.Errorf("service is required")
 	}
 
-	result, err := s.svc.Diagnose(ctx, in.Service, in.Window)
+	window := clampInt(in.Window, minWindow, maxWindow, defWindow)
+	result, err := s.svc.Diagnose(ctx, in.Service, window)
 	if err != nil {
 		return nil, DiagnoseOut{
 			Service:        in.Service,

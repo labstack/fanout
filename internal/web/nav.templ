@@ -9,20 +9,20 @@ type NavItem struct {
 }
 
 // Nav renders the sidebar navigation
-templ Nav(active string) {
+templ Nav(active string, window int) {
 	<nav class="nav">
-		@navItem("house-door", "Overview", "/", active == "overview")
-		@navItem("hdd-stack", "Services", "/services", active == "services")
-		@navItem("share", "Topology", "/topology", active == "topology")
-		@navItem("diagram-3", "Traces", "/traces", active == "traces")
-		@navItem("file-text", "Logs", "/logs", active == "logs")
-		@navItem("graph-up", "Metrics", "/metrics", active == "metrics")
+		@navItem("house-door", "Overview", "/", active == "overview", window)
+		@navItem("hdd-stack", "Services", "/services", active == "services", window)
+		@navItem("share", "Topology", "/topology", active == "topology", window)
+		@navItem("diagram-3", "Traces", "/traces", active == "traces", window)
+		@navItem("file-text", "Logs", "/logs", active == "logs", window)
+		@navItem("graph-up", "Metrics", "/metrics", active == "metrics", window)
 	</nav>
 }
 
-templ navItem(icon, label, href string, active bool) {
+templ navItem(icon, label, href string, active bool, window int) {
 	<a
-		href={ templ.SafeURL(href) }
+		href={ templ.SafeURL(withWindow(href, window)) }
 		class={ "nav-item", templ.KV("active", active) }
 	>
 		<sl-icon name={ icon }></sl-icon>

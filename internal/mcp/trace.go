@@ -12,7 +12,8 @@ import (
 
 type TraceIn struct {
 	TraceID     string `json:"trace_id" jsonschema:"Trace ID to analyze"`
-	IncludeLogs bool   `json:"include_logs,omitempty" jsonschema:"Include correlated logs,default=true"`
+	IncludeLogs *bool  `json:"include_logs,omitempty" jsonschema:"Include correlated logs,default=true"`
+	Window      int    `json:"window,omitempty" jsonschema:"Time window in minutes to search,default=1440 (24h)"`
 	Format      string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
@@ -62,7 +63,16 @@ func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn
 		return nil, TraceOut{}, fmt.Errorf("trace_id is required")
 	}
 
-	result, err := s.svc.Trace(ctx, in.TraceID, true) // always include logs
+	// Default to true if not specified
+	includeLogs := true
+	if in.IncludeLogs != nil {
+		includeLogs = *in.IncludeLogs
+	}
+
+	// Default to 24h (1440 min) for trace lookups
+	window := clampInt(in.Window, minWindow, maxWindow, 1440)
+
+	result, err := s.svc.Trace(ctx, in.TraceID, includeLogs, window)
 	if err != nil {
 		return nil, TraceOut{}, err
 	}

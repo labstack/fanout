@@ -59,10 +59,10 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 	var filters []string
 
 	if p.Query != "" {
-		filters = append(filters, fmt.Sprintf(`"name=name" ILIKE '%%%s%%'`, escapeLike(p.Query)))
+		filters = append(filters, fmt.Sprintf(`"name=name" ILIKE '%%%s%%'`, escapeLikePattern(p.Query)))
 	}
 	if p.Service != "" {
-		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, escapeLike(p.Service)))
+		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, escapeSQL(p.Service)))
 	}
 	if p.Status == "error" {
 		filters = append(filters, `"name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')`)
@@ -114,15 +114,15 @@ func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool
 	var filters []string
 
 	if p.Query != "" {
-		filters = append(filters, fmt.Sprintf(`"name=body" ~ '%s'`, escapeLike(p.Query)))
+		filters = append(filters, fmt.Sprintf(`"name=body" ~ '%s'`, escapeSQL(p.Query)))
 	}
 	if p.Service != "" {
-		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, escapeLike(p.Service)))
+		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, escapeSQL(p.Service)))
 	}
 	if len(p.Severity) > 0 {
 		quoted := make([]string, len(p.Severity))
 		for i, sev := range p.Severity {
-			quoted[i] = fmt.Sprintf("'%s'", escapeLike(sev))
+			quoted[i] = fmt.Sprintf("'%s'", escapeSQL(sev))
 		}
 		filters = append(filters, fmt.Sprintf(`"name=severity" IN (%s)`, strings.Join(quoted, ",")))
 	}

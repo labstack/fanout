@@ -43,10 +43,7 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 		return nil, CompareOut{}, fmt.Errorf("max 4 services to compare")
 	}
 
-	window := in.Window
-	if window == 0 {
-		window = 60
-	}
+	window := clampInt(in.Window, minWindow, maxWindow, 60) // default 60 for compare
 
 	// Build IN clause for services
 	quoted := make([]string, len(in.Services))

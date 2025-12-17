@@ -1,17 +1,32 @@
 package mcp
 
-// Helper functions for SQL escaping
+// Input validation helpers
 
-func escapeLike(str string) string {
-	result := ""
-	for _, c := range str {
-		if c == '\'' {
-			result += "''"
-		} else if c == '\\' {
-			result += "\\\\"
-		} else {
-			result += string(c)
-		}
+// clampInt returns v clamped to [min, max], or def if v is 0.
+func clampInt(v, min, max, def int) int {
+	if v == 0 {
+		return def
 	}
-	return result
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
+
+// Validation constants
+const (
+	minWindow = 1
+	maxWindow = 1440 // 24 hours
+	defWindow = 15
+
+	minLimit = 1
+	maxLimit = 1000
+	defLimit = 50
+
+	minGranularity = 1
+	maxGranularity = 60
+	defGranularity = 5
+)

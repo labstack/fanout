@@ -79,87 +79,16 @@ type Anomaly struct {
 
 // Overview renders the main overview page
 templ Overview(data OverviewData) {
-	@Layout("Overview", "overview") {
-		<!-- Anomaly Alert Banner -->
-		if len(data.Timeline.Anomalies) > 0 {
-			@alertBanner(data.Timeline.Anomalies)
-		}
-		<div class="page-header">
-			<div class="page-header-left">
-				<h1 class="page-title">System Overview</h1>
-				<p class="page-subtitle" id="summary">{ data.Summary }</p>
-			</div>
-			<div class="page-header-right">
-				<span class="last-updated" id="last-updated">Updated just now</span>
-				<sl-icon-button
-					name="arrow-clockwise"
-					label="Refresh"
-					hx-get="/partials/overview"
-					hx-target="#overview-content"
-					hx-swap="innerHTML"
-				></sl-icon-button>
-				<sl-spinner class="htmx-indicator" style="font-size: 1rem;"></sl-spinner>
-			</div>
-		</div>
-		<div id="overview-content">
-			<!-- Health Metrics - auto refresh every 30s -->
-			<div
-				id="stats-grid"
-				class="loading-overlay"
-				hx-get="/partials/overview/stats"
-				hx-trigger="every 30s"
-				hx-swap="innerHTML"
-			>
-				@StatsGrid(data.Services)
-			</div>
-			<!-- Key Metrics - auto refresh every 30s -->
-			<div
-				id="key-metrics"
-				class="loading-overlay"
-				hx-get="/partials/overview/metrics"
-				hx-trigger="every 30s"
-				hx-swap="innerHTML"
-			>
-				@KeyMetrics(data.ThroughputPerMin, data.P95Ms, data.ErrorRate)
-			</div>
-			<div class="grid grid-2" style="margin-bottom: 1.5rem;">
-				<!-- Timeline Chart - auto refresh every 30s -->
-				<div class="card">
-					<div class="card-title">Request Timeline</div>
-					<div
-						id="timeline-chart"
-						class="loading-overlay"
-						hx-get="/partials/overview/timeline"
-						hx-trigger="every 30s"
-						hx-swap="innerHTML"
-					>
-						@timelineChart(data.Timeline)
-					</div>
-				</div>
-				<!-- Top Issues - auto refresh every 30s -->
-				<div class="card">
-					<div class="card-title">Top Issues</div>
-					<div
-						id="top-issues"
-						class="loading-overlay"
-						hx-get="/partials/overview/issues"
-						hx-trigger="every 30s"
-						hx-swap="innerHTML"
-					>
-						@TopIssues(data.TopIssues)
-					</div>
-				</div>
-			</div>
-			<!-- Services Table - auto refresh every 30s -->
-			<div
-				id="services-table"
-				class="loading-overlay"
-				hx-get="/partials/overview/services"
-				hx-trigger="every 30s"
-				hx-swap="innerHTML"
-			>
-				@ServicesTable(data.Topology.Nodes)
-			</div>
+	@Layout("Overview", "overview", data.Window) {
+		<div
+			id="overview-content"
+			class="loading-overlay"
+			hx-get={ "/partials/overview?window=" + fmt.Sprintf("%d", data.Window) }
+			hx-trigger="every 30s"
+			hx-swap="innerHTML"
+			hx-indicator="#overview-spinner"
+		>
+			@OverviewContent(data)
 		</div>
 	}
 }

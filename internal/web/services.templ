@@ -23,24 +23,24 @@ type ServiceRow struct {
 
 // Services renders the services list page
 templ Services(data ServicesData) {
-	@Layout("Services", "services") {
+	@Layout("Services", "services", data.Window) {
 		<div class="page-header">
 			<div class="page-header-left">
 				<h1 class="page-title">Services</h1>
 				<p class="page-subtitle">{ fmt.Sprintf("%d services monitored", len(data.Services)) }</p>
 			</div>
 		</div>
-		<div class="quick-filters">
-			<sl-button href="/services" size="small" variant={ filterVariant(data.Filter, "") }>All</sl-button>
-			<sl-button href="/services?filter=errors" size="small" variant={ filterVariant(data.Filter, "errors") }>
-				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
-				Errors
-			</sl-button>
-			<sl-button href="/services?filter=slow" size="small" variant={ filterVariant(data.Filter, "slow") }>
-				<sl-icon slot="prefix" name="clock"></sl-icon>
-				Slow
-			</sl-button>
-		</div>
+	<div class="quick-filters">
+		<sl-button href={ withWindow("/services", data.Window) } size="small" variant={ filterVariant(data.Filter, "") }>All</sl-button>
+		<sl-button href={ withWindow("/services?filter=errors", data.Window) } size="small" variant={ filterVariant(data.Filter, "errors") }>
+			<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
+			Errors
+		</sl-button>
+		<sl-button href={ withWindow("/services?filter=slow", data.Window) } size="small" variant={ filterVariant(data.Filter, "slow") }>
+			<sl-icon slot="prefix" name="clock"></sl-icon>
+			Slow
+		</sl-button>
+	</div>
 		<div class="card">
 			if len(data.Services) == 0 {
 				<div class="empty-state">
@@ -63,7 +63,7 @@ templ Services(data ServicesData) {
 					<tbody>
 						for _, svc := range data.Services {
 							<tr>
-								<td><a href={ templ.SafeURL("/services/" + svc.Name) }>{ svc.Name }</a></td>
+								<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc.Name), data.Window)) }>{ svc.Name }</a></td>
 								<td>
 									<span class={ "status", statusClass(svc.Status) }>{ svc.Status }</span>
 								</td>
@@ -131,14 +131,14 @@ type Dependency struct {
 
 // ServiceDetail renders the service detail page
 templ ServiceDetail(data ServiceDetailData) {
-	@Layout(data.Name, "services") {
-		<nav class="breadcrumbs">
-			<sl-breadcrumb>
-				<sl-breadcrumb-item href="/">Overview</sl-breadcrumb-item>
-				<sl-breadcrumb-item href="/services">Services</sl-breadcrumb-item>
-				<sl-breadcrumb-item>{ data.Name }</sl-breadcrumb-item>
-			</sl-breadcrumb>
-		</nav>
+	@Layout(data.Name, "services", data.Window) {
+	<nav class="breadcrumbs">
+		<sl-breadcrumb>
+			<sl-breadcrumb-item href={ withWindow("/", data.Window) }>Overview</sl-breadcrumb-item>
+			<sl-breadcrumb-item href={ withWindow("/services", data.Window) }>Services</sl-breadcrumb-item>
+			<sl-breadcrumb-item>{ data.Name }</sl-breadcrumb-item>
+		</sl-breadcrumb>
+	</nav>
 		<div class="page-header">
 			<div class="page-header-left">
 				<h1 class="page-title">
@@ -210,7 +210,7 @@ templ ServiceDetail(data ServiceDetailData) {
 									<td>{ fmt.Sprintf("%d", err.Count) }</td>
 									<td>
 										if err.TraceID != "" {
-											<a href={ templ.SafeURL("/traces/" + err.TraceID) }>{ truncate(err.TraceID, 12) }</a>
+											<a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(err.TraceID), data.Window)) }>{ truncate(err.TraceID, 12) }</a>
 										} else {
 											<span style="color: var(--text-muted);">-</span>
 										}
@@ -267,7 +267,7 @@ templ ServiceDetail(data ServiceDetailData) {
 					<tbody>
 						for _, dep := range data.Dependencies {
 							<tr>
-								<td><a href={ templ.SafeURL("/services/" + dep.Service) }>{ dep.Service }</a></td>
+									<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(dep.Service), data.Window)) }>{ dep.Service }</a></td>
 								<td>
 									<span class={ "status", statusClass(dep.Status) }>{ dep.Status }</span>
 								</td>

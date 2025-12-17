@@ -163,7 +163,7 @@ WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVA
   AND "name=body" ~ '%s'
 ORDER BY ts DESC
 LIMIT %d;
-`, d.LogsGlob(windowMinutes), windowMinutes, escapeLike(pattern), limit)
+`, d.LogsGlob(windowMinutes), windowMinutes, escapeSQL(pattern), limit)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
@@ -312,6 +312,7 @@ LIMIT %d;
 	return out, rows.Err()
 }
 
-func escapeLike(s string) string {
+// escapeSQL escapes single quotes for SQL string literals.
+func escapeSQL(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "''")
 }

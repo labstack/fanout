@@ -27,9 +27,9 @@ func RegisterPartialRoutes(e *echo.Echo, h *UIHandler) {
 func (h *UIHandler) PartialOverview(c echo.Context) error {
 	cachePartial(c)
 	ctx := c.Request().Context()
-	window := 15
+	window := parseWindow(c)
 
-	data := web.OverviewData{}
+	data := web.OverviewData{Window: window}
 
 	status := h.getStatus(ctx, window)
 	data.Healthy = status.Healthy
@@ -53,7 +53,7 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 		})
 	}
 
-	topo := h.getTopology(ctx, 60)
+	topo := h.getTopology(ctx, window)
 	for _, n := range topo.Nodes {
 		data.Topology.Nodes = append(data.Topology.Nodes, web.ServiceNode{
 			Name:      n.Name,
@@ -64,7 +64,7 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 		})
 	}
 
-	timeline := h.getTimeline(ctx, "", 60, 5)
+	timeline := h.getTimeline(ctx, "", window, 5)
 	for _, b := range timeline.Buckets {
 		data.Timeline.Buckets = append(data.Timeline.Buckets, web.TimelineBucket{
 			Time:         b.Time,
@@ -90,7 +90,8 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 func (h *UIHandler) PartialStats(c echo.Context) error {
 	cachePartial(c)
 	ctx := c.Request().Context()
-	status := h.getStatus(ctx, 15)
+	window := parseWindow(c)
+	status := h.getStatus(ctx, window)
 
 	data := web.ServiceSummary{
 		Total:     status.Services.Total,
@@ -106,7 +107,8 @@ func (h *UIHandler) PartialStats(c echo.Context) error {
 func (h *UIHandler) PartialKeyMetrics(c echo.Context) error {
 	cachePartial(c)
 	ctx := c.Request().Context()
-	status := h.getStatus(ctx, 15)
+	window := parseWindow(c)
+	status := h.getStatus(ctx, window)
 	return renderTempl(c, web.KeyMetrics(status.ThroughputPerMin, status.P95Ms, status.ErrorRate))
 }
 
@@ -114,7 +116,8 @@ func (h *UIHandler) PartialKeyMetrics(c echo.Context) error {
 func (h *UIHandler) PartialTopIssues(c echo.Context) error {
 	cachePartial(c)
 	ctx := c.Request().Context()
-	status := h.getStatus(ctx, 15)
+	window := parseWindow(c)
+	status := h.getStatus(ctx, window)
 
 	var issues []web.TopIssue
 	for _, issue := range status.TopIssues {
@@ -126,14 +129,15 @@ func (h *UIHandler) PartialTopIssues(c echo.Context) error {
 		})
 	}
 
-	return renderTempl(c, web.TopIssues(issues))
+	return renderTempl(c, web.TopIssues(issues, window))
 }
 
 // PartialServicesTable returns just the services table
 func (h *UIHandler) PartialServicesTable(c echo.Context) error {
 	cachePartial(c)
 	ctx := c.Request().Context()
-	topo := h.getTopology(ctx, 60)
+	window := parseWindow(c)
+	topo := h.getTopology(ctx, window)
 
 	var nodes []web.ServiceNode
 	for _, n := range topo.Nodes {
@@ -146,14 +150,15 @@ func (h *UIHandler) PartialServicesTable(c echo.Context) error {
 		})
 	}
 
-	return renderTempl(c, web.ServicesTable(nodes))
+	return renderTempl(c, web.ServicesTable(nodes, window))
 }
 
 // PartialTimeline returns just the timeline chart
 func (h *UIHandler) PartialTimeline(c echo.Context) error {
 	cachePartial(c)
 	ctx := c.Request().Context()
-	timeline := h.getTimeline(ctx, "", 60, 5)
+	window := parseWindow(c)
+	timeline := h.getTimeline(ctx, "", window, 5)
 
 	var data web.TimelineData
 	for _, b := range timeline.Buckets {

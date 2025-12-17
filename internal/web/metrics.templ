@@ -1,6 +1,11 @@
 package web
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+)
 
 // MetricsData for the metrics explorer page
 type MetricsData struct {
@@ -24,7 +29,7 @@ type MetricRow struct {
 
 // Metrics renders the metrics explorer page
 templ Metrics(data MetricsData) {
-	@Layout("Metrics", "metrics") {
+	@Layout("Metrics", "metrics", data.Window) {
 		<div class="page-header">
 			<h1 class="page-title">Metrics Explorer</h1>
 			<p class="page-subtitle">Browse raw metrics data</p>
@@ -42,7 +47,9 @@ templ Metrics(data MetricsData) {
 					<sl-input name="service" label="Service" placeholder="All services" value={ data.Service }></sl-input>
 					<sl-select name="window" label="Time Window" value={ fmt.Sprintf("%d", data.Window) }>
 						<sl-option value="15">Last 15 min</sl-option>
+						<sl-option value="30">Last 30 min</sl-option>
 						<sl-option value="60">Last 1 hour</sl-option>
+						<sl-option value="180">Last 3 hours</sl-option>
 						<sl-option value="360">Last 6 hours</sl-option>
 						<sl-option value="1440">Last 24 hours</sl-option>
 					</sl-select>
@@ -66,15 +73,21 @@ templ Metrics(data MetricsData) {
 							<th>Value</th>
 						</tr>
 					</thead>
-					<tbody>
-						for _, m := range data.Metrics {
-							<tr>
-								<td style="font-family: monospace; font-size: 0.8rem;">{ m.Time }</td>
-								<td>{ m.Name }</td>
-								<td><a href={ templ.SafeURL("/services/" + m.Service) }>{ m.Service }</a></td>
-								<td><sl-badge variant={ metricTypeVariant(m.Type) }>{ m.Type }</sl-badge></td>
-								<td style="font-family: monospace;">{ fmt.Sprintf("%.2f", m.Value) }</td>
-							</tr>
+						<tbody>
+							for _, m := range data.Metrics {
+								<tr>
+									<td style="font-family: monospace; font-size: 0.8rem;">{ m.Time }</td>
+									<td>{ m.Name }</td>
+									<td>
+									if m.Service != "" {
+										<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(m.Service), data.Window)) }>{ m.Service }</a>
+									} else {
+										<span style="color: var(--text-muted);">—</span>
+									}
+								</td>
+									<td><sl-badge variant={ metricTypeVariant(m.Type) }>{ m.Type }</sl-badge></td>
+									<td style="font-family: monospace;">{ fmt.Sprintf("%.2f", m.Value) }</td>
+								</tr>
 						}
 					</tbody>
 				</table>
@@ -121,12 +134,12 @@ templ Metrics(data MetricsData) {
 }
 
 func metricTypeVariant(mtype string) string {
-	switch mtype {
-	case "GAUGE":
+	switch strings.ToLower(mtype) {
+	case "gauge":
 		return "primary"
-	case "SUM":
+	case "sum", "sum_delta":
 		return "success"
-	case "HISTOGRAM":
+	case "histogram":
 		return "warning"
 	default:
 		return "neutral"
@@ -134,13 +147,17 @@ func metricTypeVariant(mtype string) string {
 }
 
 func metricsPaginationURL(name, service string, window, limit, offset int) string {
-	url := "/metrics?"
+	values := url.Values{}
 	if name != "" {
-		url += "name=" + name + "&"
+		values.Set("name", name)
 	}
 	if service != "" {
-		url += "service=" + service + "&"
+		values.Set("service", service)
 	}
-	url += fmt.Sprintf("window=%d&limit=%d&offset=%d", window, limit, offset)
-	return url
+	if window != 60 {
+		values.Set("window", strconv.Itoa(window))
+	}
+	values.Set("limit", strconv.Itoa(limit))
+	values.Set("offset", strconv.Itoa(offset))
+	return "/metrics?" + values.Encode()
 }

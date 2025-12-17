@@ -22,7 +22,7 @@ func (s *Service) Timeline(ctx context.Context, svc string, window, granularity 
 
 	svcFilter := ""
 	if svc != "" {
-		svcFilter = fmt.Sprintf(`AND "name=service_name" = '%s'`, escapeLike(svc))
+		svcFilter = fmt.Sprintf(`AND "name=service_name" = '%s'`, escapeSQL(svc))
 	}
 
 	q := fmt.Sprintf(`
@@ -141,9 +141,21 @@ ORDER BY bucket ASC;
 	return out, nil
 }
 
-// escapeLike escapes SQL LIKE special characters.
-func escapeLike(s string) string {
-	// Simple escape for SQL injection prevention
+// escapeSQL escapes single quotes for SQL string literals (used in = comparisons).
+func escapeSQL(s string) string {
+	result := ""
+	for _, c := range s {
+		if c == '\'' {
+			result += "''"
+		} else {
+			result += string(c)
+		}
+	}
+	return result
+}
+
+// escapeLikePattern escapes SQL LIKE special characters (%, _) plus quotes.
+func escapeLikePattern(s string) string {
 	result := ""
 	for _, c := range s {
 		switch c {

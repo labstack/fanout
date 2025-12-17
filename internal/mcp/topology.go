@@ -42,7 +42,8 @@ type TopologyOut struct {
 }
 
 func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in TopologyIn) (*mcp.CallToolResult, TopologyOut, error) {
-	result, err := s.svc.Topology(ctx, in.Window)
+	window := clampInt(in.Window, minWindow, maxWindow, 60) // default 60 for topology
+	result, err := s.svc.Topology(ctx, window)
 	if err != nil {
 		return nil, TopologyOut{Nodes: []ServiceNode{}, Edges: []ServiceEdge{}}, nil
 	}

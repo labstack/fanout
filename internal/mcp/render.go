@@ -31,8 +31,11 @@ type ReportStore struct {
 	dir string
 }
 
-var reports = &ReportStore{
-	dir: "lake/reports",
+var reports = &ReportStore{}
+
+// InitReportStore sets the reports directory (call from NewServer)
+func InitReportStore(lakeDir string) {
+	reports.dir = lakeDir + "/reports"
 }
 
 func (rs *ReportStore) Save(r *Report) {

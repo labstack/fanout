@@ -51,14 +51,17 @@ type FindOut struct {
 }
 
 func (s *Server) find(ctx context.Context, req *mcp.CallToolRequest, in FindIn) (*mcp.CallToolResult, FindOut, error) {
+	window := clampInt(in.Window, minWindow, maxWindow, defWindow)
+	limit := clampInt(in.Limit, minLimit, maxLimit, defLimit)
+
 	result, err := s.svc.Find(ctx, service.FindParams{
 		Query:    in.Query,
 		Service:  in.Service,
 		Type:     in.Type,
 		Status:   in.Status,
-		Window:   in.Window,
+		Window:   window,
 		Severity: in.Severity,
-		Limit:    in.Limit,
+		Limit:    limit,
 	})
 	if err != nil {
 		return nil, FindOut{Spans: []FoundSpan{}, Logs: []FoundLog{}}, nil

@@ -3,6 +3,8 @@ package web
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
+	"strconv"
 )
 
 // TracesData for the traces search page
@@ -29,39 +31,42 @@ type TraceRow struct {
 
 // Traces renders the traces search page
 templ Traces(data TracesData) {
-	@Layout("Traces", "traces") {
+	@Layout("Traces", "traces", data.Window) {
 		<div class="page-header">
 			<div class="page-header-left">
 				<h1 class="page-title">Traces</h1>
 				<p class="page-subtitle">Search and analyze distributed traces</p>
 			</div>
 		</div>
-		<div class="quick-filters">
-			<sl-button href="/traces" size="small" variant={ traceFilterVariant(data.Status, "") }>All</sl-button>
-			<sl-button href="/traces?status=error" size="small" variant={ traceFilterVariant(data.Status, "error") }>
-				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
-				Errors
-			</sl-button>
-			<sl-button href="/traces?status=slow" size="small" variant={ traceFilterVariant(data.Status, "slow") }>
-				<sl-icon slot="prefix" name="clock"></sl-icon>
-				Slow (&gt;1s)
-			</sl-button>
-		</div>
+	<div class="quick-filters">
+		<sl-button href={ paginationURL("/traces", data.Query, data.Service, "", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "") }>All</sl-button>
+		<sl-button href={ paginationURL("/traces", data.Query, data.Service, "error", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "error") }>
+			<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
+			Errors
+		</sl-button>
+		<sl-button href={ paginationURL("/traces", data.Query, data.Service, "slow", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "slow") }>
+			<sl-icon slot="prefix" name="clock"></sl-icon>
+			Slow (&gt;1s)
+		</sl-button>
+	</div>
 		<!-- Search Form -->
-		<div class="card" style="margin-bottom: 1.5rem;">
-			<form method="GET" action="/traces" class="search-form">
-				<div class="form-row">
-					<sl-input name="q" label="Search" placeholder="Operation or trace ID..." value={ data.Query }></sl-input>
-					<sl-input name="service" label="Service" placeholder="All services" value={ data.Service }></sl-input>
-					<sl-select name="status" label="Status" value={ data.Status }>
-						<sl-option value="">All</sl-option>
-						<sl-option value="error">Errors only</sl-option>
-						<sl-option value="slow">Slow only</sl-option>
-					</sl-select>
-					<sl-button type="submit" variant="primary">Search</sl-button>
-				</div>
-			</form>
-		</div>
+	<div class="card" style="margin-bottom: 1.5rem;">
+		<form method="GET" action="/traces" class="search-form">
+			<div class="form-row">
+				<sl-input name="q" label="Search" placeholder="Operation or trace ID..." value={ data.Query }></sl-input>
+				<sl-input name="service" label="Service" placeholder="All services" value={ data.Service }></sl-input>
+				<sl-select name="status" label="Status" value={ data.Status }>
+					<sl-option value="">All</sl-option>
+					<sl-option value="error">Errors only</sl-option>
+					<sl-option value="slow">Slow only</sl-option>
+				</sl-select>
+				if data.Window != 60 {
+					<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
+				}
+				<sl-button type="submit" variant="primary">Search</sl-button>
+			</div>
+		</form>
+	</div>
 		<!-- Results -->
 		<div class="card">
 			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Traces)) } traces)</div>
@@ -86,8 +91,14 @@ templ Traces(data TracesData) {
 					<tbody>
 						for _, t := range data.Traces {
 							<tr>
-								<td><a href={ templ.SafeURL("/traces/" + t.TraceID) }>{ truncateID(t.TraceID) }</a></td>
-								<td><a href={ templ.SafeURL("/services/" + t.Service) }>{ t.Service }</a></td>
+								<td><a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(t.TraceID), data.Window)) }>{ truncateID(t.TraceID) }</a></td>
+								<td>
+									if t.Service != "" {
+										<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(t.Service), data.Window)) }>{ t.Service }</a>
+									} else {
+										<span style="color: var(--text-muted);">—</span>
+									}
+								</td>
 								<td>{ t.Operation }</td>
 								<td>{ fmt.Sprintf("%.0fms", t.Duration) }</td>
 								<td>
@@ -102,18 +113,18 @@ templ Traces(data TracesData) {
 						}
 					</tbody>
 				</table>
-				<!-- Pagination -->
-				if data.Offset > 0 || data.HasMore {
-					<div class="pagination">
-						if data.Offset > 0 {
-							<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
-						}
-						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Traces)) }</span>
-						if data.HasMore {
-							<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
-						}
-					</div>
-				}
+					<!-- Pagination -->
+					if data.Offset > 0 || data.HasMore {
+						<div class="pagination">
+							if data.Offset > 0 {
+								<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
+							}
+							<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Traces)) }</span>
+							if data.HasMore {
+								<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
+							}
+						</div>
+					}
 			}
 		</div>
 		<style>
@@ -154,6 +165,7 @@ type TraceDetailData struct {
 	Spans       []SpanInfo
 	Logs        []LogInfo
 	RootCause   string
+	Window      int
 }
 
 type SpanInfo struct {
@@ -176,14 +188,14 @@ type LogInfo struct {
 
 // TraceDetail renders the trace detail page with waterfall
 templ TraceDetail(data TraceDetailData) {
-	@Layout("Trace "+truncateID(data.TraceID), "traces") {
-		<nav class="breadcrumbs">
-			<sl-breadcrumb>
-				<sl-breadcrumb-item href="/">Overview</sl-breadcrumb-item>
-				<sl-breadcrumb-item href="/traces">Traces</sl-breadcrumb-item>
-				<sl-breadcrumb-item>{ truncateID(data.TraceID) }</sl-breadcrumb-item>
-			</sl-breadcrumb>
-		</nav>
+	@Layout("Trace "+truncateID(data.TraceID), "traces", data.Window) {
+	<nav class="breadcrumbs">
+		<sl-breadcrumb>
+			<sl-breadcrumb-item href={ withWindow("/", data.Window) }>Overview</sl-breadcrumb-item>
+			<sl-breadcrumb-item href={ withWindow("/traces", data.Window) }>Traces</sl-breadcrumb-item>
+			<sl-breadcrumb-item>{ truncateID(data.TraceID) }</sl-breadcrumb-item>
+		</sl-breadcrumb>
+	</nav>
 		<div class="page-header">
 			<div class="page-header-left">
 				<h1 class="page-title">Trace { truncateID(data.TraceID) }</h1>
@@ -366,19 +378,23 @@ func spansJSON(spans []SpanInfo) string {
 	return string(b)
 }
 
-func paginationURL(base, q, service, status string, limit, offset int) string {
-	url := base + "?"
+func paginationURL(base, q, service, status string, window, limit, offset int) string {
+	values := url.Values{}
 	if q != "" {
-		url += "q=" + q + "&"
+		values.Set("q", q)
 	}
 	if service != "" {
-		url += "service=" + service + "&"
+		values.Set("service", service)
 	}
 	if status != "" {
-		url += "status=" + status + "&"
+		values.Set("status", status)
 	}
-	url += fmt.Sprintf("limit=%d&offset=%d", limit, offset)
-	return url
+	if window != 60 {
+		values.Set("window", strconv.Itoa(window))
+	}
+	values.Set("limit", strconv.Itoa(limit))
+	values.Set("offset", strconv.Itoa(offset))
+	return base + "?" + values.Encode()
 }
 
 func traceFilterVariant(current, target string) string {

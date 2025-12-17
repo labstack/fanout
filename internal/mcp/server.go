@@ -25,6 +25,9 @@ func NewServer(svc *service.Service, duck *query.Duck, cfg config.Config) *Serve
 		Version: "1.0.0",
 	}, nil)
 
+	// Initialize report store with configured lake dir
+	InitReportStore(cfg.LakeDir)
+
 	s := &Server{
 		mcp:  mcpServer,
 		svc:  svc,
@@ -83,50 +86,78 @@ func (s *Server) apiDeleteReport(c echo.Context) error {
 func (s *Server) registerTools() {
 	// 1. status - Entry point, zero-config health overview
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "status",
-		Description: "Get system health overview. Start here. Returns service health counts, top issues, and key metrics. No parameters required.",
+		Name: "status",
+		Description: `Get system health overview. Start here. Returns service health counts, top issues, and key metrics. No parameters required.
+
+Workflow: status → diagnose (problem service) → find/trace (specific errors)
+
+Returns: healthy (bool), services (total/healthy/degraded/unhealthy counts), top_issues (service, issue type, value), throughput_per_min, p95_ms, error_rate`,
 	}, s.status)
 
 	// 2. diagnose - Deep-dive into a specific service
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "diagnose",
-		Description: "Deep-dive into a service. Returns P50/P95/P99 latency, error rate, top errors with example traces, slow operations, and downstream dependencies.",
+		Name: "diagnose",
+		Description: `Deep-dive into a service. Returns P50/P95/P99 latency, error rate, top errors with example traces, slow operations, and downstream dependencies.
+
+Use after status identifies a problem service.
+
+Returns: metrics (p50/p95/p99_ms, error_rate, request_count), top_errors (message, count, example_trace), slow_operations (name, p95_ms, count), dependencies (service, status, error_rate, p95_ms, calls)`,
 	}, s.diagnose)
 
 	// 3. find - Unified span/log search
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "find",
-		Description: "Search spans and logs. Filter by pattern, service, status (error/slow), severity. Returns matching spans/logs with trace IDs for deeper investigation.",
+		Name: "find",
+		Description: `Search spans and logs. Filter by pattern, service, status (error/slow), severity. Returns matching spans/logs with trace IDs for deeper investigation.
+
+Use to find specific errors or patterns. Pass trace_id to trace tool for full context.
+
+Returns: spans (trace_id, span_id, service, operation, duration_ms, status), logs (ts, service, severity, body, trace_id), suggestion (next action hint)`,
 	}, s.find)
 
 	// 4. trace - Request journey with auto root cause
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "trace",
-		Description: "Get complete distributed trace with auto root-cause analysis. Shows all spans, correlated logs, critical path, and identifies the likely cause of errors or latency.",
+		Name: "trace",
+		Description: `Get complete distributed trace with auto root-cause analysis. Shows all spans, correlated logs, critical path, and identifies the likely cause of errors or latency.
+
+Use with trace_id from find or diagnose results.
+
+Returns: spans (full tree with timing), logs (correlated by trace), critical_path (slowest chain), root_cause (identified issue with confidence)`,
 	}, s.trace)
 
 	// 5. timeline - Events with anomaly detection
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "timeline",
-		Description: "Get time-bucketed metrics with automatic anomaly detection. Identifies latency spikes, error rate increases, and traffic drops.",
+		Name: "timeline",
+		Description: `Get time-bucketed metrics with automatic anomaly detection. Identifies latency spikes, error rate increases, and traffic drops.
+
+Use for trend analysis and finding when issues started.
+
+Returns: buckets (time, request_count, error_count, p95_ms, error_rate, is_anomaly), anomalies (time, type, description, value, expected)`,
 	}, s.timeline)
 
 	// 6. topology - Service map with health
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "topology",
-		Description: "Get service dependency map. Shows all services as nodes with health status, and edges representing inter-service calls with call counts and error rates.",
+		Name: "topology",
+		Description: `Get service dependency map. Shows all services as nodes with health status, and edges representing inter-service calls with call counts and error rates.
+
+Use to understand service relationships and identify dependency issues.
+
+Returns: nodes (service, status, request_count, error_rate, p95_ms), edges (source, target, calls, error_rate)`,
 	}, s.topology)
 
 	// 7. query - Raw SQL escape hatch
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "query",
-		Description: "Execute raw SQL against the data lake. For advanced analysis not covered by other tools. Call with empty sql to get schema reference.",
+		Description: queryToolDescription(),
 	}, s.query)
 
 	// 8. schema - Database schema reference for LLM
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "schema",
-		Description: "Get database schema reference with table definitions and example queries. Use this to understand the data model before writing SQL queries.",
+		Name: "schema",
+		Description: `Get database schema reference with table definitions and example queries. Use this to understand the data model before writing SQL queries.
+
+Call this before writing complex SQL to get full column details and working examples.
+
+Returns: schema (markdown with all tables/columns), examples (working SQL queries for common tasks)`,
 	}, s.schema)
 
 	// 9. render - Universal HTML renderer for custom reports
@@ -137,9 +168,39 @@ func (s *Server) registerTools() {
 
 	// 10. compare - Side-by-side service comparison
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "compare",
-		Description: "Compare 2-4 services side-by-side. Returns requests, error rate, P50/P95 latency for each service with winner determination.",
+		Name: "compare",
+		Description: `Compare 2-4 services side-by-side. Returns requests, error rate, P50/P95 latency for each service with winner determination.
+
+Use to benchmark services or compare before/after deployments.
+
+Returns: services (array with service, requests, error_rate, p50_ms, p95_ms), winner (best performing service), summary`,
 	}, s.compare)
+}
+
+func queryToolDescription() string {
+	return `Execute raw SQL against the data lake. For advanced analysis not covered by other tools. Call with empty sql to get schema reference.
+
+Tables:
+- service_rollup: Pre-aggregated 1-min buckets (fastest)
+  Columns: bucket (TIMESTAMP), service, spans, p50_ms, p95_ms, error_rate
+
+- read_parquet('lake/spans/**/*.parquet'): Raw trace spans
+  Key columns (quote as "name=..."): trace_id, span_id, service_name, name, duration_ms, status_code, start_unix_nano, attributes_json
+
+- read_parquet('lake/logs/**/*.parquet'): Log entries
+  Key columns: time_unix_nano, severity, body, service_name, trace_id
+
+- read_parquet('lake/metrics/**/*.parquet'): Metric points
+  Key columns: time_unix_nano, name, mtype, service_name, value
+
+Time filter (last N minutes):
+WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - N*60) * 1000000000
+
+Example - top endpoints by P95:
+SELECT "name=name", COUNT(*) as cnt, ROUND(quantile_cont("name=duration_ms", 0.95), 2) as p95
+FROM read_parquet('lake/spans/**/*.parquet')
+WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 900) * 1000000000
+GROUP BY "name=name" ORDER BY p95 DESC LIMIT 10`
 }
 
 // renderToolDescription generates the MCP tool description dynamically

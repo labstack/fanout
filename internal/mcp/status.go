@@ -41,7 +41,8 @@ type StatusOut struct {
 }
 
 func (s *Server) status(ctx context.Context, req *mcp.CallToolRequest, in StatusIn) (*mcp.CallToolResult, StatusOut, error) {
-	result, err := s.svc.Status(ctx, in.Window)
+	window := clampInt(in.Window, minWindow, maxWindow, defWindow)
+	result, err := s.svc.Status(ctx, window)
 	if err != nil {
 		return nil, StatusOut{
 			Healthy:   true,

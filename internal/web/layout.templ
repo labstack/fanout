@@ -1,7 +1,7 @@
 package web
 
 // Base layout with sidebar navigation
-templ Layout(title string, activePage string) {
+templ Layout(title string, activePage string, window int) {
 	<!DOCTYPE html>
 	<html lang="en">
 		<head>
@@ -75,14 +75,18 @@ templ Layout(title string, activePage string) {
 					gap: 1rem;
 				}
 
-				.header-brand {
-					font-size: 1.25rem;
-					font-weight: 700;
-					color: var(--accent);
-					text-decoration: none;
-				}
+					.header-brand {
+						font-size: 1.25rem;
+						font-weight: 700;
+						color: var(--accent);
+						text-decoration: none;
+					}
 
-				.header-spacer { flex: 1; }
+					.mobile-nav-toggle {
+						display: none;
+					}
+
+					.header-spacer { flex: 1; }
 
 				/* Sidebar */
 				.sidebar {
@@ -165,11 +169,12 @@ templ Layout(title string, activePage string) {
 				@media (max-width: 1024px) {
 					.grid-3, .grid-4 { grid-template-columns: repeat(2, 1fr); }
 				}
-				@media (max-width: 640px) {
-					.grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
-					.app { grid-template-columns: 1fr; }
-					.sidebar { display: none; }
-				}
+					@media (max-width: 640px) {
+						.grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+						.app { grid-template-columns: 1fr; }
+						.sidebar { display: none; }
+						.mobile-nav-toggle { display: inline-flex; }
+					}
 
 				/* Metrics */
 				.metric, .metric-card { text-align: center; }
@@ -256,6 +261,9 @@ templ Layout(title string, activePage string) {
 					transition: opacity 200ms ease-in;
 				}
 				.htmx-request .htmx-indicator {
+					display: inline-flex !important;
+				}
+				.htmx-indicator.htmx-request {
 					display: inline-flex !important;
 				}
 				.htmx-indicator {
@@ -360,11 +368,12 @@ templ Layout(title string, activePage string) {
 			</style>
 		</head>
 		<body class="sl-theme-light">
-			<div class="app">
-				<header class="header">
-					<a href="/" class="header-brand">Fanout</a>
-					<div class="header-spacer"></div>
-					<sl-select id="time-window" size="small" value="60" style="width: 120px;">
+				<div class="app">
+					<header class="header">
+						<sl-icon-button class="mobile-nav-toggle" id="mobile-nav-toggle" name="list" label="Menu"></sl-icon-button>
+						<a href={ templ.SafeURL(withWindow("/", window)) } class="header-brand">Fanout</a>
+						<div class="header-spacer"></div>
+						<sl-select id="time-window" size="small" value="60" style="width: 120px;">
 						<sl-option value="15">Last 15m</sl-option>
 						<sl-option value="30">Last 30m</sl-option>
 						<sl-option value="60">Last 1h</sl-option>
@@ -373,18 +382,21 @@ templ Layout(title string, activePage string) {
 						<sl-option value="1440">Last 24h</sl-option>
 					</sl-select>
 					<sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
-				</header>
-				<aside class="sidebar">
-					@Nav(activePage)
-				</aside>
-				<main class="main">
-					{ children... }
-				</main>
-			</div>
-			<script>
-				// Theme toggle
-				const toggle = document.getElementById('theme-toggle');
-				const body = document.body;
+					</header>
+					<aside class="sidebar">
+						@Nav(activePage, window)
+					</aside>
+					<main class="main">
+						{ children... }
+					</main>
+				</div>
+				<sl-drawer id="mobile-nav" label="Navigation" placement="start">
+					@Nav(activePage, window)
+				</sl-drawer>
+				<script>
+					// Theme toggle
+					const toggle = document.getElementById('theme-toggle');
+					const body = document.body;
 				const saved = localStorage.getItem('theme');
 
 				if (saved === 'dark' || (!saved && matchMedia('(prefers-color-scheme: dark)').matches)) {
@@ -392,16 +404,23 @@ templ Layout(title string, activePage string) {
 					toggle.name = 'sun';
 				}
 
-				toggle.addEventListener('click', () => {
-					const isDark = body.classList.contains('sl-theme-dark');
-					body.classList.replace(isDark ? 'sl-theme-dark' : 'sl-theme-light', isDark ? 'sl-theme-light' : 'sl-theme-dark');
-					toggle.name = isDark ? 'moon' : 'sun';
-					localStorage.setItem('theme', isDark ? 'light' : 'dark');
-				});
+					toggle.addEventListener('click', () => {
+						const isDark = body.classList.contains('sl-theme-dark');
+						body.classList.replace(isDark ? 'sl-theme-dark' : 'sl-theme-light', isDark ? 'sl-theme-light' : 'sl-theme-dark');
+						toggle.name = isDark ? 'moon' : 'sun';
+						localStorage.setItem('theme', isDark ? 'light' : 'dark');
+					});
 
-				// Vega charts init
-				function initVegaCharts() {
-					document.querySelectorAll('[data-vega]').forEach(el => {
+					// Mobile navigation
+					const mobileNavToggle = document.getElementById('mobile-nav-toggle');
+					const mobileNav = document.getElementById('mobile-nav');
+					if (mobileNavToggle && mobileNav) {
+						mobileNavToggle.addEventListener('click', () => mobileNav.show());
+					}
+
+					// Vega charts init
+					function initVegaCharts() {
+						document.querySelectorAll('[data-vega]').forEach(el => {
 						try {
 							const spec = JSON.parse(el.dataset.vega);
 							vegaEmbed(el, spec, { actions: false, theme: body.classList.contains('sl-theme-dark') ? 'dark' : undefined });

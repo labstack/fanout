@@ -11,8 +11,22 @@ templ OverviewContent(data OverviewData) {
 		@alertBanner(data.Timeline.Anomalies)
 	}
 	<div class="page-header">
-		<h1 class="page-title">System Overview</h1>
-		<p class="page-subtitle">{ data.Summary }</p>
+		<div class="page-header-left">
+			<h1 class="page-title">System Overview</h1>
+			<p class="page-subtitle" id="summary">{ data.Summary }</p>
+		</div>
+		<div class="page-header-right">
+			<span class="last-updated" id="last-updated">Updated just now</span>
+			<sl-icon-button
+				name="arrow-clockwise"
+				label="Refresh"
+				hx-get={ "/partials/overview?window=" + fmt.Sprintf("%d", data.Window) }
+				hx-target="#overview-content"
+				hx-swap="innerHTML"
+				hx-indicator="#overview-spinner"
+			></sl-icon-button>
+			<sl-spinner id="overview-spinner" class="htmx-indicator" style="font-size: 1rem;"></sl-spinner>
+		</div>
 	</div>
 	@StatsGrid(data.Services)
 	@KeyMetrics(data.ThroughputPerMin, data.P95Ms, data.ErrorRate)
@@ -23,22 +37,15 @@ templ OverviewContent(data OverviewData) {
 		</div>
 		<div class="card">
 			<div class="card-title">Top Issues</div>
-			@TopIssues(data.TopIssues)
+			@TopIssues(data.TopIssues, data.Window)
 		</div>
 	</div>
-	@ServicesTable(data.Topology.Nodes)
+	@ServicesTable(data.Topology.Nodes, data.Window)
 }
 
 // StatsGrid renders service health counts
 templ StatsGrid(s ServiceSummary) {
-	<div
-		id="stats-grid"
-		class="grid grid-4"
-		style="margin-bottom: 1.5rem;"
-		hx-get="/partials/overview/stats"
-		hx-trigger="every 30s"
-		hx-swap="outerHTML"
-	>
+	<div id="stats-grid" class="grid grid-4" style="margin-bottom: 1.5rem;">
 		<div class="card">
 			<div class="metric">
 				<div class="metric-value">{ fmt.Sprintf("%d", s.Total) }</div>
@@ -68,14 +75,7 @@ templ StatsGrid(s ServiceSummary) {
 
 // KeyMetrics renders throughput, latency, error rate
 templ KeyMetrics(throughput int64, p95 float64, errorRate float64) {
-	<div
-		id="key-metrics"
-		class="grid grid-3"
-		style="margin-bottom: 1.5rem;"
-		hx-get="/partials/overview/metrics"
-		hx-trigger="every 30s"
-		hx-swap="outerHTML"
-	>
+	<div id="key-metrics" class="grid grid-3" style="margin-bottom: 1.5rem;">
 		<div class="card">
 			<div class="metric">
 				<div class="metric-value">{ fmt.Sprintf("%d", throughput) }</div>
@@ -98,7 +98,7 @@ templ KeyMetrics(throughput int64, p95 float64, errorRate float64) {
 }
 
 // TopIssues renders the issues table content
-templ TopIssues(issues []TopIssue) {
+templ TopIssues(issues []TopIssue, window int) {
 	if len(issues) == 0 {
 		<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No issues detected</p>
 	} else {
@@ -110,13 +110,19 @@ templ TopIssues(issues []TopIssue) {
 					<th>Detail</th>
 				</tr>
 			</thead>
-			<tbody>
-				for _, issue := range issues {
-					<tr>
-						<td><a href={ templ.SafeURL("/services/" + issue.Service) }>{ issue.Service }</a></td>
-						<td>
-							if issue.Issue == "high_error_rate" {
-								<span class="status status-unhealthy">Errors</span>
+				<tbody>
+					for _, issue := range issues {
+						<tr>
+							<td>
+								if issue.Service != "" {
+									<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(issue.Service), window)) }>{ issue.Service }</a>
+								} else {
+									<span style="color: var(--text-muted);">—</span>
+								}
+							</td>
+							<td>
+								if issue.Issue == "high_error_rate" {
+									<span class="status status-unhealthy">Errors</span>
 							} else if issue.Issue == "high_latency" {
 								<span class="status status-degraded">Slow</span>
 							} else if issue.Issue != "" {
@@ -132,14 +138,8 @@ templ TopIssues(issues []TopIssue) {
 }
 
 // ServicesTable renders the services list
-templ ServicesTable(nodes []ServiceNode) {
-	<div
-		id="services-table"
-		class="card"
-		hx-get="/partials/overview/services"
-		hx-trigger="every 30s"
-		hx-swap="outerHTML"
-	>
+templ ServicesTable(nodes []ServiceNode, window int) {
+	<div id="services-table" class="card">
 		<div class="card-title">Services</div>
 		<table class="table">
 			<thead>
@@ -151,13 +151,13 @@ templ ServicesTable(nodes []ServiceNode) {
 					<th>Error Rate</th>
 				</tr>
 			</thead>
-			<tbody>
-				for _, node := range nodes {
-					<tr>
-						<td><a href={ templ.SafeURL("/services/" + node.Name) }>{ node.Name }</a></td>
-						<td>
-							<span class={ "status", statusClass(node.Status) }>{ node.Status }</span>
-						</td>
+				<tbody>
+					for _, node := range nodes {
+						<tr>
+							<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(node.Name), window)) }>{ node.Name }</a></td>
+							<td>
+								<span class={ "status", statusClass(node.Status) }>{ node.Status }</span>
+							</td>
 						<td>{ fmt.Sprintf("%d", node.SpanCount) }</td>
 						<td>{ fmt.Sprintf("%.0fms", node.P95Ms) }</td>
 						<td>{ fmt.Sprintf("%.1f%%", node.ErrorRate*100) }</td>

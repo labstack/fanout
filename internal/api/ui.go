@@ -348,8 +348,9 @@ func (h *UIHandler) Traces(c echo.Context) error {
 func (h *UIHandler) TraceDetail(c echo.Context) error {
 	ctx := c.Request().Context()
 	traceID := c.Param("id")
+	window := parseWindow(c)
 
-	detail := h.getTraceDetail(ctx, traceID)
+	detail := h.getTraceDetail(ctx, traceID, window)
 	return renderTempl(c, web.TraceDetail(detail))
 }
 
@@ -444,18 +445,19 @@ type topIssue struct {
 func (h *UIHandler) getStatus(ctx context.Context, window int) statusResult {
 	out := statusResult{TopIssues: []topIssue{}}
 
+	spansGlob := h.duck.SpansGlob(window)
 	q := fmt.Sprintf(`
 SELECT
   "name=service_name" as service,
   COUNT(*) as cnt,
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95_ms,
   COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 GROUP BY "name=service_name"
 ORDER BY cnt DESC
 LIMIT 100;
-`, h.cfg.LakeDir, window)
+`, spansGlob, window)
 
 	rows, err := h.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -569,18 +571,19 @@ type topoEdge struct {
 func (h *UIHandler) getTopology(ctx context.Context, window int) topoResult {
 	out := topoResult{Nodes: []topoNode{}, Edges: []topoEdge{}}
 
+	spansGlob := h.duck.SpansGlob(window)
 	q := fmt.Sprintf(`
 SELECT
   "name=service_name" as service,
   COUNT(*) as cnt,
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95,
   COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 GROUP BY "name=service_name"
 ORDER BY cnt DESC
 LIMIT 50;
-`, h.cfg.LakeDir, window)
+`, spansGlob, window)
 
 	rows, err := h.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -604,16 +607,17 @@ LIMIT 50;
 func (h *UIHandler) getServiceTrends(ctx context.Context, window int) map[string][]int64 {
 	out := make(map[string][]int64)
 
+	spansGlob := h.duck.SpansGlob(window)
 	q := fmt.Sprintf(`
 SELECT
   "name=service_name" as service,
   time_bucket(INTERVAL '5 minutes', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) as bucket,
   COUNT(*) as cnt
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 GROUP BY "name=service_name", bucket
 ORDER BY service, bucket ASC;
-`, h.cfg.LakeDir, window)
+`, spansGlob, window)
 
 	rows, err := h.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -638,6 +642,7 @@ ORDER BY service, bucket ASC;
 func (h *UIHandler) getTopoEdges(ctx context.Context, window int) []web.ServiceEdge {
 	var out []web.ServiceEdge
 
+	spansGlob := h.duck.SpansGlob(window)
 	// Find parent-child span relationships across services
 	q := fmt.Sprintf(`
 WITH spans AS (
@@ -646,7 +651,7 @@ WITH spans AS (
     "name=parent_span_id" as parent_id,
     "name=service_name" as service,
     "name=status_code" as status
-  FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+  FROM read_parquet(%s)
   WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 )
 SELECT
@@ -661,7 +666,7 @@ GROUP BY parent.service, child.service
 HAVING COUNT(*) > 5
 ORDER BY calls DESC
 LIMIT 100;
-`, h.cfg.LakeDir, window)
+`, spansGlob, window)
 
 	rows, err := h.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -705,9 +710,12 @@ type anomaly struct {
 func (h *UIHandler) getTimeline(ctx context.Context, service string, window, granularity int) timelineResult {
 	out := timelineResult{Buckets: []timelineBucket{}, Anomalies: []anomaly{}}
 
+	spansGlob := h.duck.SpansGlob(window)
+	var args []any
 	svcFilter := ""
 	if service != "" {
-		svcFilter = fmt.Sprintf(`AND "name=service_name" = '%s'`, service)
+		svcFilter = `AND "name=service_name" = ?`
+		args = append(args, service)
 	}
 
 	q := fmt.Sprintf(`
@@ -717,14 +725,14 @@ SELECT
   SUM(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1 ELSE 0 END) as errors,
   COALESCE(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p50,
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   %s
 GROUP BY bucket
 ORDER BY bucket ASC;
-`, granularity, h.cfg.LakeDir, window, svcFilter)
+`, granularity, spansGlob, window, svcFilter)
 
-	rows, err := h.duck.DB.QueryContext(ctx, q)
+	rows, err := h.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return out
 	}
@@ -817,6 +825,8 @@ func (h *UIHandler) getDiagnose(ctx context.Context, service string, window int)
 		Dependencies: []dependency{},
 	}
 
+	spansGlob := h.duck.SpansGlob(window)
+
 	// Get latency percentiles and error rate
 	q := fmt.Sprintf(`
 SELECT
@@ -825,12 +835,12 @@ SELECT
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95,
   COALESCE(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p99,
   COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
-WHERE "name=service_name" = '%s'
+FROM read_parquet(%s)
+WHERE "name=service_name" = ?
   AND epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE;
-`, h.cfg.LakeDir, service, window)
+`, spansGlob, window)
 
-	row := h.duck.DB.QueryRowContext(ctx, q)
+	row := h.duck.DB.QueryRowContext(ctx, q, service)
 	if err := row.Scan(&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate); err == nil {
 		out.Status = deriveHealth(out.ErrorRate, out.P95Ms)
 	}
@@ -841,16 +851,16 @@ SELECT
   "name=name" as operation,
   COUNT(*) as cnt,
   MAX("name=trace_id") as trace_id
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
-WHERE "name=service_name" = '%s'
+FROM read_parquet(%s)
+WHERE "name=service_name" = ?
   AND "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')
   AND epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 GROUP BY "name=name"
 ORDER BY cnt DESC
 LIMIT 5;
-`, h.cfg.LakeDir, service, window)
+`, spansGlob, window)
 
-	rows, err := h.duck.DB.QueryContext(ctx, q)
+	rows, err := h.duck.DB.QueryContext(ctx, q, service)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -867,16 +877,16 @@ SELECT
   "name=name" as operation,
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95,
   COUNT(*) as cnt
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
-WHERE "name=service_name" = '%s'
+FROM read_parquet(%s)
+WHERE "name=service_name" = ?
   AND epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 GROUP BY "name=name"
 HAVING COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) > 100
 ORDER BY p95 DESC
 LIMIT 5;
-`, h.cfg.LakeDir, service, window)
+`, spansGlob, window)
 
-	rows, err = h.duck.DB.QueryContext(ctx, q)
+	rows, err = h.duck.DB.QueryContext(ctx, q, service)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -884,6 +894,45 @@ LIMIT 5;
 			if err := rows.Scan(&op.Operation, &op.P95Ms, &op.Count); err == nil {
 				out.SlowOps = append(out.SlowOps, op)
 			}
+		}
+	}
+
+	// Get downstream dependencies
+	q = fmt.Sprintf(`
+WITH downstream AS (
+  SELECT
+    child."name=service_name" as dep_service,
+    child."name=duration_ms" as duration_ms,
+    child."name=status_code" as status
+  FROM read_parquet(%s) parent
+  JOIN read_parquet(%s) child
+    ON parent."name=span_id" = child."name=parent_span_id"
+    AND parent."name=trace_id" = child."name=trace_id"
+  WHERE epoch_ms(CAST(parent."name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+    AND parent."name=service_name" = ?
+    AND child."name=service_name" != ?
+)
+SELECT
+  dep_service,
+  COUNT(*) as calls,
+  AVG(duration_ms) as avg_ms,
+  AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) as error_rate
+FROM downstream
+GROUP BY dep_service
+ORDER BY calls DESC
+LIMIT 10;
+`, spansGlob, spansGlob, window)
+
+	rows, err = h.duck.DB.QueryContext(ctx, q, service, service)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var d dependency
+			if err := rows.Scan(&d.Service, &d.CallCount, &d.AvgMs, &d.ErrorRate); err != nil {
+				continue
+			}
+			d.Status = deriveHealth(d.ErrorRate, d.AvgMs)
+			out.Dependencies = append(out.Dependencies, d)
 		}
 	}
 
@@ -900,15 +949,19 @@ func (h *UIHandler) searchTraces(ctx context.Context, searchQuery, service, stat
 func (h *UIHandler) searchTracesPage(ctx context.Context, searchQuery, service, status string, window, limit, offset int) ([]web.TraceRow, bool) {
 	var out []web.TraceRow
 
+	spansGlob := h.duck.SpansGlob(window)
+	var args []any
 	filters := []string{
 		fmt.Sprintf(`epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
 	}
 
 	if service != "" {
-		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, service))
+		filters = append(filters, `"name=service_name" = ?`)
+		args = append(args, service)
 	}
 	if searchQuery != "" {
-		filters = append(filters, fmt.Sprintf(`("name=name" ILIKE '%%%s%%' OR "name=trace_id" ILIKE '%%%s%%')`, searchQuery, searchQuery))
+		filters = append(filters, `("name=name" ILIKE ? OR "name=trace_id" ILIKE ?)`)
+		args = append(args, "%"+searchQuery+"%", "%"+searchQuery+"%")
 	}
 	if status == "error" {
 		filters = append(filters, `"name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')`)
@@ -934,13 +987,13 @@ SELECT DISTINCT ON ("name=trace_id")
   "name=duration_ms" as duration,
   "name=status_code" as status,
   epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) as ts
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 %s
 ORDER BY "name=trace_id", ts DESC
 LIMIT %d OFFSET %d;
-`, h.cfg.LakeDir, whereClause, limit+1, offset)
+`, spansGlob, whereClause, limit+1, offset)
 
-	rows, err := h.duck.DB.QueryContext(ctx, q)
+	rows, err := h.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return out, false
 	}
@@ -971,35 +1024,38 @@ LIMIT %d OFFSET %d;
 	return out, hasMore
 }
 
-func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string) web.TraceDetailData {
+func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window int) web.TraceDetailData {
 	out := web.TraceDetailData{
 		TraceID: traceID,
 		Spans:   []web.SpanInfo{},
 		Logs:    []web.LogInfo{},
+		Window:  window,
 	}
 
 	// Get all spans for this trace
+	spansGlob := h.duck.SpansGlob(window)
 	q := fmt.Sprintf(`
-SELECT
-  "name=span_id" as span_id,
-  "name=parent_span_id" as parent_id,
-  "name=service_name" as service,
-  "name=name" as operation,
-  "name=duration_ms" as duration,
-  "name=status_code" as status,
-  "name=start_unix_nano" as start_nano
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
-WHERE "name=trace_id" = '%s'
-ORDER BY "name=start_unix_nano" ASC;
-`, h.cfg.LakeDir, traceID)
+	SELECT
+	  "name=span_id" as span_id,
+	  "name=parent_span_id" as parent_id,
+	  "name=service_name" as service,
+	  "name=name" as operation,
+	  "name=duration_ms" as duration,
+	  "name=status_code" as status,
+	  "name=start_unix_nano" as start_nano
+	FROM read_parquet(%s)
+	WHERE "name=trace_id" = ?
+	ORDER BY "name=start_unix_nano" ASC;
+	`, spansGlob)
 
-	rows, err := h.duck.DB.QueryContext(ctx, q)
+	rows, err := h.duck.DB.QueryContext(ctx, q, traceID)
 	if err != nil {
 		return out
 	}
 	defer rows.Close()
 
 	var minStart int64 = -1
+	var maxEnd int64 = -1
 	var spans []struct {
 		spanID    string
 		parentID  string
@@ -1025,6 +1081,10 @@ ORDER BY "name=start_unix_nano" ASC;
 		}
 		if minStart == -1 || s.startNano < minStart {
 			minStart = s.startNano
+		}
+		endNano := s.startNano + int64(s.duration*1e6)
+		if maxEnd == -1 || endNano > maxEnd {
+			maxEnd = endNano
 		}
 		spans = append(spans, s)
 	}
@@ -1062,14 +1122,13 @@ ORDER BY "name=start_unix_nano" ASC;
 		}
 
 		offset := float64(s.startNano-minStart) / 1e6
-		if s.parentID == "" {
-			out.RootService = s.service
-			out.RootOp = s.operation
-		}
-		out.Duration += s.duration
-		out.Spans = append(out.Spans, web.SpanInfo{
-			SpanID:      s.spanID,
-			ParentID:    s.parentID,
+			if s.parentID == "" {
+				out.RootService = s.service
+				out.RootOp = s.operation
+			}
+			out.Spans = append(out.Spans, web.SpanInfo{
+				SpanID:      s.spanID,
+				ParentID:    s.parentID,
 			Service:     s.service,
 			Operation:   s.operation,
 			Duration:    s.duration,
@@ -1080,24 +1139,28 @@ ORDER BY "name=start_unix_nano" ASC;
 	}
 
 	out.SpanCount = len(out.Spans)
+	if minStart != -1 && maxEnd != -1 && maxEnd > minStart {
+		out.Duration = float64(maxEnd-minStart) / 1e6
+	}
 	if len(out.Spans) > 0 && out.Duration == 0 {
 		out.Duration = out.Spans[0].Duration
 	}
 
 	// Get correlated logs
+	logsGlob := h.duck.LogsGlob(window)
 	q = fmt.Sprintf(`
-SELECT
-  epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) as ts,
-  "name=service_name" as service,
-  "name=severity" as severity,
-  "name=body" as body
-FROM read_parquet('%s/logs/year=*/month=*/day=*/hour=*/part-*.parquet')
-WHERE "name=trace_id" = '%s'
-ORDER BY "name=time_unix_nano" ASC
-LIMIT 50;
-`, h.cfg.LakeDir, traceID)
+	SELECT
+	  epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) as ts,
+	  "name=service_name" as service,
+	  "name=severity" as severity,
+	  "name=body" as body
+	FROM read_parquet(%s)
+	WHERE "name=trace_id" = ?
+	ORDER BY "name=time_unix_nano" ASC
+	LIMIT 50;
+	`, logsGlob)
 
-	rows, err = h.duck.DB.QueryContext(ctx, q)
+	rows, err = h.duck.DB.QueryContext(ctx, q, traceID)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -1118,10 +1181,7 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 	ctx := c.Request().Context()
 	name := c.QueryParam("name")
 	service := c.QueryParam("service")
-	window := 15
-	if w := c.QueryParam("window"); w != "" {
-		fmt.Sscanf(w, "%d", &window)
-	}
+	window := parseWindow(c)
 
 	// Pagination
 	limit := 100
@@ -1140,7 +1200,7 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 	}
 
 	// Get distinct metric names
-	names := h.getMetricNames(ctx)
+	names := h.getMetricNames(ctx, window)
 
 	// Get metrics with filters
 	metrics, hasMore := h.searchMetricsPage(ctx, name, service, window, limit, offset)
@@ -1159,15 +1219,17 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 	return renderTempl(c, web.Metrics(data))
 }
 
-func (h *UIHandler) getMetricNames(ctx context.Context) []string {
+func (h *UIHandler) getMetricNames(ctx context.Context, window int) []string {
 	var names []string
 
+	metricsGlob := h.duck.MetricsGlob(window)
 	q := fmt.Sprintf(`
 SELECT DISTINCT "name=name"
-FROM read_parquet('%s/metrics/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
+WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 ORDER BY "name=name"
 LIMIT 100;
-`, h.cfg.LakeDir)
+`, metricsGlob, window)
 
 	rows, err := h.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -1187,15 +1249,19 @@ LIMIT 100;
 func (h *UIHandler) searchMetricsPage(ctx context.Context, name, service string, window, limit, offset int) ([]web.MetricRow, bool) {
 	var out []web.MetricRow
 
+	metricsGlob := h.duck.MetricsGlob(window)
+	var args []any
 	filters := []string{
 		fmt.Sprintf(`epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
 	}
 
 	if name != "" {
-		filters = append(filters, fmt.Sprintf(`"name=name" = '%s'`, name))
+		filters = append(filters, `"name=name" = ?`)
+		args = append(args, name)
 	}
 	if service != "" {
-		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, service))
+		filters = append(filters, `"name=service_name" = ?`)
+		args = append(args, service)
 	}
 
 	whereClause := ""
@@ -1214,13 +1280,13 @@ SELECT
   "name=service_name" as service,
   "name=mtype" as mtype,
   COALESCE("name=value", 0) as value
-FROM read_parquet('%s/metrics/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 %s
 ORDER BY ts DESC
 LIMIT %d OFFSET %d;
-`, h.cfg.LakeDir, whereClause, limit+1, offset)
+`, metricsGlob, whereClause, limit+1, offset)
 
-	rows, err := h.duck.DB.QueryContext(ctx, q)
+	rows, err := h.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return out, false
 	}
@@ -1254,18 +1320,23 @@ func (h *UIHandler) searchLogs(ctx context.Context, searchQuery, service, severi
 func (h *UIHandler) searchLogsPage(ctx context.Context, searchQuery, service, severity string, window, limit, offset int) ([]web.LogRow, bool) {
 	var out []web.LogRow
 
+	logsGlob := h.duck.LogsGlob(window)
+	var args []any
 	filters := []string{
 		fmt.Sprintf(`epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
 	}
 
 	if service != "" {
-		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, service))
+		filters = append(filters, `"name=service_name" = ?`)
+		args = append(args, service)
 	}
 	if searchQuery != "" {
-		filters = append(filters, fmt.Sprintf(`"name=body" ILIKE '%%%s%%'`, searchQuery))
+		filters = append(filters, `"name=body" ILIKE ?`)
+		args = append(args, "%"+searchQuery+"%")
 	}
 	if severity != "" {
-		filters = append(filters, fmt.Sprintf(`"name=severity" = '%s'`, severity))
+		filters = append(filters, `"name=severity" = ?`)
+		args = append(args, severity)
 	}
 
 	whereClause := ""
@@ -1285,13 +1356,13 @@ SELECT
   "name=severity" as severity,
   "name=body" as body,
   COALESCE("name=trace_id", '') as trace_id
-FROM read_parquet('%s/logs/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet(%s)
 %s
 ORDER BY ts DESC
 LIMIT %d OFFSET %d;
-`, h.cfg.LakeDir, whereClause, limit+1, offset)
+`, logsGlob, whereClause, limit+1, offset)
 
-	rows, err := h.duck.DB.QueryContext(ctx, q)
+	rows, err := h.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return out, false
 	}

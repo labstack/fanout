@@ -17,7 +17,7 @@ type NavItem struct {
 }
 
 // Nav renders the sidebar navigation
-func Nav(active string) templ.Component {
+func Nav(active string, window int) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -42,27 +42,27 @@ func Nav(active string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = navItem("house-door", "Overview", "/", active == "overview").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = navItem("house-door", "Overview", "/", active == "overview", window).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = navItem("hdd-stack", "Services", "/services", active == "services").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = navItem("hdd-stack", "Services", "/services", active == "services", window).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = navItem("share", "Topology", "/topology", active == "topology").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = navItem("share", "Topology", "/topology", active == "topology", window).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = navItem("diagram-3", "Traces", "/traces", active == "traces").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = navItem("diagram-3", "Traces", "/traces", active == "traces", window).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = navItem("file-text", "Logs", "/logs", active == "logs").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = navItem("file-text", "Logs", "/logs", active == "logs", window).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = navItem("graph-up", "Metrics", "/metrics", active == "metrics").Render(ctx, templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = navItem("graph-up", "Metrics", "/metrics", active == "metrics", window).Render(ctx, templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -74,7 +74,7 @@ func Nav(active string) templ.Component {
 	})
 }
 
-func navItem(icon, label, href string, active bool) templ.Component {
+func navItem(icon, label, href string, active bool, window int) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -105,9 +105,9 @@ func navItem(icon, label, href string, active bool) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var4 templ.SafeURL
-		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(href))
+		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow(href, window)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/nav.templ`, Line: 25, Col: 28}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/nav.templ`, Line: 25, Col: 48}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
