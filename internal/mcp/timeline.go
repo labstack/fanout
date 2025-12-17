@@ -45,7 +45,7 @@ type TimelineOut struct {
 }
 
 func (s *Server) timeline(ctx context.Context, req *mcp.CallToolRequest, in TimelineIn) (*mcp.CallToolResult, TimelineOut, error) {
-	window := clampInt(in.Window, minWindow, maxWindow, 60)            // default 60 for timeline
+	window := clampInt(in.Window, minWindow, maxWindow, 60) // default 60 for timeline
 	granularity := clampInt(in.Granularity, minGranularity, maxGranularity, defGranularity)
 
 	result, err := s.svc.Timeline(ctx, in.Service, window, granularity)

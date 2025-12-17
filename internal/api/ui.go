@@ -1122,13 +1122,13 @@ func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window i
 		}
 
 		offset := float64(s.startNano-minStart) / 1e6
-			if s.parentID == "" {
-				out.RootService = s.service
-				out.RootOp = s.operation
-			}
-			out.Spans = append(out.Spans, web.SpanInfo{
-				SpanID:      s.spanID,
-				ParentID:    s.parentID,
+		if s.parentID == "" {
+			out.RootService = s.service
+			out.RootOp = s.operation
+		}
+		out.Spans = append(out.Spans, web.SpanInfo{
+			SpanID:      s.spanID,
+			ParentID:    s.parentID,
 			Service:     s.service,
 			Operation:   s.operation,
 			Duration:    s.duration,

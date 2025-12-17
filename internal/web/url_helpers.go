@@ -32,4 +32,3 @@ func withWindow(href string, window int) string {
 func pathEscape(s string) string {
 	return url.PathEscape(s)
 }
-

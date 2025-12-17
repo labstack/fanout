@@ -54,4 +54,3 @@ func TestParquetGlob_NoFilesFallsBackToBroadGlob(t *testing.T) {
 		t.Fatalf("expected broad glob fallback, got: %s", glob)
 	}
 }
-
