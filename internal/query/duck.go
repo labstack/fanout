@@ -11,6 +11,7 @@ import (
 	_ "github.com/duckdb/duckdb-go/v2"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/metrics"
 )
 
 type Duck struct {
@@ -63,30 +64,41 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			if err := d.rollupOnce(ctx); err != nil {
+			start := time.Now()
+			rows, err := d.rollupOnce(ctx)
+			if err != nil {
 				log.Printf("[rollup] %v", err)
+				continue
 			}
+			metrics.RecordRollup(rows, time.Since(start).Seconds())
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (d *Duck) rollupOnce(ctx context.Context) error {
-	_, err := d.DB.ExecContext(ctx, fmt.Sprintf(`
+func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
+	res, err := d.DB.ExecContext(ctx, fmt.Sprintf(`
 INSERT INTO service_rollup
 SELECT
   date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
   "name=service_name" as service,
   COUNT(*) AS spans,
-  avg("name=duration_ms") AS p50_ms,
+  quantile_cont("name=duration_ms", 0.50) AS p50_ms,
   quantile_cont("name=duration_ms", 0.95) AS p95_ms,
   avg(CASE WHEN "name=status_code" = 'STATUS_CODE_ERROR' OR "name=status_code" = 'ERROR' THEN 1 ELSE 0 END) AS error_rate
 FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
 WHERE bucket > COALESCE((SELECT max(bucket) FROM service_rollup), TIMESTAMP '1970-01-01')
 GROUP BY ALL;
 `, d.cfg.LakeDir))
-	return err
+	if err != nil {
+		return 0, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return 0, nil
+	}
+	return int(affected), nil
 }
 
 // ---- Queries for API ----

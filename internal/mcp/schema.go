@@ -58,10 +58,10 @@ LIMIT 50`,
 
 			// Service dependencies from spans
 			`SELECT DISTINCT "name=service_name" as caller,
-       json_extract_string("name=attributes_json", '$.peer.service') as callee
+       json_extract_string(from_utf8("name=attributes_json"), '$.peer.service') as callee
 FROM read_parquet('lake/spans/**/*.parquet')
 WHERE "name=kind" = 'SPAN_KIND_CLIENT'
-  AND json_extract_string("name=attributes_json", '$.peer.service') IS NOT NULL
+  AND json_extract_string(from_utf8("name=attributes_json"), '$.peer.service') IS NOT NULL
   AND "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000`,
 
 			// Timeline (requests per minute)

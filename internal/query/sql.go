@@ -193,42 +193,42 @@ func GetQueryExamples() []QueryExample {
 			Title:       "Error logs in last hour",
 			Description: "Find all error and fatal logs from the last hour",
 			Query: `SELECT
-  EPOCH_MS(time_unix_nano / 1000000) as timestamp,
-  service_name,
-  severity,
-  body
+  epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) as timestamp,
+  "name=service_name" as service_name,
+  "name=severity" as severity,
+  "name=body" as body
 FROM read_parquet('lake/logs/**/*.parquet')
-WHERE severity IN ('ERROR', 'FATAL')
-  AND time_unix_nano >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000
-ORDER BY time_unix_nano DESC
+WHERE "name=severity" IN ('ERROR', 'FATAL')
+  AND "name=time_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000
+ORDER BY "name=time_unix_nano" DESC
 LIMIT 100`,
 		},
 		{
 			Title:       "Slowest traces",
 			Description: "Top 20 slowest traces in the last 15 minutes",
 			Query: `SELECT
-  trace_id,
-  service_name,
-  name as operation,
-  duration_ms,
-  status_code
+  "name=trace_id" as trace_id,
+  "name=service_name" as service_name,
+  "name=name" as operation,
+  "name=duration_ms" as duration_ms,
+  "name=status_code" as status_code
 FROM read_parquet('lake/spans/**/*.parquet')
-WHERE start_unix_nano >= (EXTRACT(EPOCH FROM NOW()) - 900) * 1000000000
-  AND parent_span_id IS NULL
-ORDER BY duration_ms DESC
+WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 900) * 1000000000
+  AND ("name=parent_span_id" IS NULL OR "name=parent_span_id" = '')
+ORDER BY "name=duration_ms" DESC
 LIMIT 20`,
 		},
 		{
 			Title:       "HTTP 5xx errors by endpoint",
 			Description: "Count of 5xx errors grouped by service and endpoint",
 			Query: `SELECT
-  service_name,
-  name as endpoint,
+  "name=service_name" as service_name,
+  "name=name" as endpoint,
   COUNT(*) as error_count
 FROM read_parquet('lake/spans/**/*.parquet')
-WHERE start_unix_nano >= (EXTRACT(EPOCH FROM NOW()) - 1800) * 1000000000
-  AND attributes_json LIKE '%"http.status_code":5__"%'
-GROUP BY service_name, name
+WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 1800) * 1000000000
+  AND from_utf8("name=attributes_json") ILIKE '%http.status_code%'
+GROUP BY "name=service_name", "name=name"
 ORDER BY error_count DESC
 LIMIT 20`,
 		},
@@ -236,13 +236,13 @@ LIMIT 20`,
 			Title:       "Service throughput per minute",
 			Description: "Request count per service per minute in last hour",
 			Query: `SELECT
-  DATE_TRUNC('minute', EPOCH_MS(start_unix_nano / 1000000)) as minute,
-  service_name,
+  DATE_TRUNC('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) as minute,
+  "name=service_name" as service_name,
   COUNT(*) as request_count
 FROM read_parquet('lake/spans/**/*.parquet')
-WHERE start_unix_nano >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000
-  AND kind = 'SERVER'
-GROUP BY minute, service_name
+WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000
+  AND "name=kind" = 'SPAN_KIND_SERVER'
+GROUP BY minute, "name=service_name"
 ORDER BY minute DESC, request_count DESC
 LIMIT 100`,
 		},

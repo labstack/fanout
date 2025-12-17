@@ -186,14 +186,14 @@ erDiagram
         string parent_span_id
         string service_name
         string name
-        int kind
+        string kind
         bigint start_unix_nano
         bigint end_unix_nano
         float duration_ms
         string status_code
         string status_msg
-        json resource_json
-        json attributes_json
+        blob resource_json
+        blob attributes_json
         string tenant_id
         bigint ingested_unix_nano
     }
@@ -205,8 +205,8 @@ erDiagram
         string service_name
         string trace_id FK
         string span_id FK
-        json resource_json
-        json attributes_json
+        blob resource_json
+        blob attributes_json
         string tenant_id
         bigint ingested_unix_nano
     }
@@ -217,10 +217,10 @@ erDiagram
         string mtype
         string service_name
         float value
-        json hist_bounds_json
-        json hist_counts_json
-        json attributes_json
-        json resource_json
+        blob hist_bounds_json
+        blob hist_counts_json
+        blob attributes_json
+        blob resource_json
         string tenant_id
         bigint ingested_unix_nano
         bigint hist_count

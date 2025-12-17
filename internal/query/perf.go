@@ -2,6 +2,8 @@ package query
 
 import (
 	"fmt"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,42 +18,53 @@ func ParquetGlob(lakeDir, signal string, windowMinutes int) string {
 
 	// If window is large (>=24h), fall back to full glob
 	if windowMinutes >= 24*60 {
-		return fmt.Sprintf("'%s/%s/year=*/month=*/day=*/hour=*/part-*.parquet'", lakeDir, signal)
+		return sqlQuote(fmt.Sprintf("%s/%s/year=*/month=*/day=*/hour=*/part-*.parquet", lakeDir, signal))
 	}
 
-	// Collect all hour partitions we need
-	var patterns []string
-	seen := make(map[string]bool)
+	// Expand hour patterns to actual existing files, otherwise DuckDB errors
+	// when any pattern matches zero files.
+	startHour := start.Truncate(time.Hour)
+	endHour := now.Truncate(time.Hour)
 
-	for t := start; !t.After(now); t = t.Add(time.Hour) {
+	filesSet := make(map[string]struct{})
+	for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
 		pattern := fmt.Sprintf("%s/%s/year=%d/month=%02d/day=%02d/hour=%02d/part-*.parquet",
 			lakeDir, signal, t.Year(), t.Month(), t.Day(), t.Hour())
-		if !seen[pattern] {
-			seen[pattern] = true
-			patterns = append(patterns, pattern)
+		matches, _ := filepath.Glob(pattern)
+		for _, m := range matches {
+			filesSet[m] = struct{}{}
 		}
 	}
 
-	// Also include current hour (in case we're at minute 0)
-	pattern := fmt.Sprintf("%s/%s/year=%d/month=%02d/day=%02d/hour=%02d/part-*.parquet",
-		lakeDir, signal, now.Year(), now.Month(), now.Day(), now.Hour())
-	if !seen[pattern] {
-		patterns = append(patterns, pattern)
+	// If there are no files in the window, return a broad glob. Callers may
+	// treat the resulting read_parquet error as "no data yet".
+	if len(filesSet) == 0 {
+		return sqlQuote(fmt.Sprintf("%s/%s/year=*/month=*/day=*/hour=*/part-*.parquet", lakeDir, signal))
 	}
 
-	// DuckDB supports list of files (all paths must be quoted)
-	if len(patterns) == 1 {
-		return fmt.Sprintf("'%s'", patterns[0])
+	files := make([]string, 0, len(filesSet))
+	for f := range filesSet {
+		files = append(files, f)
 	}
-	return fmt.Sprintf("[%s]", strings.Join(wrapQuotes(patterns), ","))
+	sort.Strings(files)
+
+	// DuckDB supports list of files (all paths must be quoted).
+	if len(files) == 1 {
+		return sqlQuote(files[0])
+	}
+	return fmt.Sprintf("[%s]", strings.Join(wrapQuotes(files), ","))
 }
 
 func wrapQuotes(ss []string) []string {
 	out := make([]string, len(ss))
 	for i, s := range ss {
-		out[i] = fmt.Sprintf("'%s'", s)
+		out[i] = sqlQuote(s)
 	}
 	return out
+}
+
+func sqlQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 // Cache provides a simple TTL cache for query results

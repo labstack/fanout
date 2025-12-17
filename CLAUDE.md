@@ -231,8 +231,8 @@ erDiagram
         double duration_ms
         string status_code
         string status_msg
-        string resource_json
-        string attributes_json
+        blob resource_json
+        blob attributes_json
         string tenant_id
     }
 
@@ -243,8 +243,8 @@ erDiagram
         string service_name
         string trace_id FK
         string span_id FK
-        string resource_json
-        string attributes_json
+        blob resource_json
+        blob attributes_json
         string tenant_id
     }
 
@@ -254,10 +254,10 @@ erDiagram
         string mtype
         string service_name
         double value
-        string hist_bounds_json
-        string hist_counts_json
-        string attributes_json
-        string resource_json
+        blob hist_bounds_json
+        blob hist_counts_json
+        blob attributes_json
+        blob resource_json
         string tenant_id
     }
 

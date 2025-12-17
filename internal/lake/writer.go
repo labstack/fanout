@@ -3,14 +3,17 @@ package lake
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/parquet-go/parquet-go"
+	"github.com/parquet-go/parquet-go/compress/zstd"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/metrics"
 )
 
 type SpanRow struct {
@@ -85,16 +88,22 @@ func (w *Writer) Run(ctx context.Context) error {
 		case r := <-w.chSpans:
 			w.mu.Lock()
 			w.bufSpans = append(w.bufSpans, r)
+			metrics.RecordIngest("spans", 1)
+			metrics.UpdateQueueDepth("spans", len(w.chSpans))
 			w.maybeFlush()
 			w.mu.Unlock()
 		case r := <-w.chLogs:
 			w.mu.Lock()
 			w.bufLogs = append(w.bufLogs, r)
+			metrics.RecordIngest("logs", 1)
+			metrics.UpdateQueueDepth("logs", len(w.chLogs))
 			w.maybeFlush()
 			w.mu.Unlock()
 		case r := <-w.chMetrics:
 			w.mu.Lock()
 			w.bufMetrics = append(w.bufMetrics, r)
+			metrics.RecordIngest("metrics", 1)
+			metrics.UpdateQueueDepth("metrics", len(w.chMetrics))
 			w.maybeFlush()
 			w.mu.Unlock()
 		case <-ticker.C:
@@ -122,21 +131,39 @@ func (w *Writer) maybeFlush() {
 func (w *Writer) flushLocked() {
 	now := time.Now()
 	if len(w.bufSpans) > 0 {
-		_ = writeParquet(filepath.Join(w.cfg.LakeDir, "spans"), now, w.bufSpans)
-		w.bufSpans = w.bufSpans[:0]
+		start := time.Now()
+		_, bytes, err := writeParquet(filepath.Join(w.cfg.LakeDir, "spans"), now, w.bufSpans)
+		if err != nil {
+			log.Printf("[lake] write spans parquet: %v", err)
+		} else {
+			metrics.RecordFlush("spans", bytes, time.Since(start).Seconds())
+			w.bufSpans = w.bufSpans[:0]
+		}
 	}
 	if len(w.bufLogs) > 0 {
-		_ = writeParquet(filepath.Join(w.cfg.LakeDir, "logs"), now, w.bufLogs)
-		w.bufLogs = w.bufLogs[:0]
+		start := time.Now()
+		_, bytes, err := writeParquet(filepath.Join(w.cfg.LakeDir, "logs"), now, w.bufLogs)
+		if err != nil {
+			log.Printf("[lake] write logs parquet: %v", err)
+		} else {
+			metrics.RecordFlush("logs", bytes, time.Since(start).Seconds())
+			w.bufLogs = w.bufLogs[:0]
+		}
 	}
 	if len(w.bufMetrics) > 0 {
-		_ = writeParquet(filepath.Join(w.cfg.LakeDir, "metrics"), now, w.bufMetrics)
-		w.bufMetrics = w.bufMetrics[:0]
+		start := time.Now()
+		_, bytes, err := writeParquet(filepath.Join(w.cfg.LakeDir, "metrics"), now, w.bufMetrics)
+		if err != nil {
+			log.Printf("[lake] write metrics parquet: %v", err)
+		} else {
+			metrics.RecordFlush("metrics", bytes, time.Since(start).Seconds())
+			w.bufMetrics = w.bufMetrics[:0]
+		}
 	}
 	w.lastFlush = now
 }
 
-func writeParquet[T any](base string, ts time.Time, rows []T) error {
+func writeParquet[T any](base string, ts time.Time, rows []T) (string, int64, error) {
 	year, month, day := ts.Date()
 	hour := ts.Hour()
 	dir := filepath.Join(base,
@@ -146,22 +173,40 @@ func writeParquet[T any](base string, ts time.Time, rows []T) error {
 		fmt.Sprintf("hour=%02d", hour),
 	)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
+		return "", 0, err
 	}
-	file := filepath.Join(dir, fmt.Sprintf("part-%d.parquet", ts.UnixNano()))
-	f, err := os.Create(file)
+	finalPath := filepath.Join(dir, fmt.Sprintf("part-%d.parquet", ts.UnixNano()))
+
+	tmp, err := os.CreateTemp(dir, ".tmp-*.parquet")
 	if err != nil {
-		return err
+		return "", 0, err
 	}
-	defer f.Close()
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = tmp.Close()
+	}()
 
-	w := parquet.NewWriter(f)
-	defer w.Close()
-
-	for i := range rows {
-		if err := w.Write(rows[i]); err != nil {
-			return err
-		}
+	if err := parquet.Write(tmp, rows, parquet.Compression(&zstd.Codec{})); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", 0, err
 	}
-	return w.Close()
+	if err := tmp.Sync(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", 0, err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", 0, err
+	}
+	if err := os.Rename(tmpPath, finalPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", 0, err
+	}
+	_ = os.Chmod(finalPath, 0o644)
+
+	info, err := os.Stat(finalPath)
+	if err != nil {
+		return finalPath, 0, nil
+	}
+	return finalPath, info.Size(), nil
 }
