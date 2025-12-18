@@ -19,18 +19,63 @@ templ Topology(data TopologyData) {
 				@EmptyStateSetup("topology")
 			</div>
 		} else {
+			<!-- Summary Stats -->
+			<div class="grid grid-4" style="margin-bottom: 1rem;">
+				<div class="card">
+					<div class="metric">
+						<div class="metric-value">{ fmt.Sprintf("%d", len(data.Nodes)) }</div>
+						<div class="metric-label">Services</div>
+					</div>
+				</div>
+				<div class="card">
+					<div class="metric">
+						<div class="metric-value">{ fmt.Sprintf("%d", len(data.Edges)) }</div>
+						<div class="metric-label">Connections</div>
+					</div>
+				</div>
+				<div class="card">
+					<div class="metric">
+						<div class="metric-value" style="color: var(--warning);">{ fmt.Sprintf("%d", countByStatus(data.Nodes, "degraded")) }</div>
+						<div class="metric-label">Degraded</div>
+					</div>
+				</div>
+				<div class="card">
+					<div class="metric">
+						<div class="metric-value" style="color: var(--danger);">{ fmt.Sprintf("%d", countByStatus(data.Nodes, "unhealthy")) }</div>
+						<div class="metric-label">Unhealthy</div>
+					</div>
+				</div>
+			</div>
 			<!-- Legend -->
 			<div class="card" style="margin-bottom: 1rem;">
-				<div style="display: flex; gap: 2rem; align-items: center; font-size: 0.875rem;">
-					<span><span class="status status-healthy">●</span> Healthy</span>
-					<span><span class="status status-degraded">●</span> Degraded</span>
-					<span><span class="status status-unhealthy">●</span> Unhealthy</span>
-					<span style="color: var(--text-muted);">Click a node to view service details</span>
+				<div class="topo-legend">
+					<div class="topo-legend-group">
+						<span class="topo-legend-title">Nodes:</span>
+						<span><span class="status status-healthy">●</span> Healthy</span>
+						<span><span class="status status-degraded">●</span> Degraded</span>
+						<span><span class="status status-unhealthy">●</span> Unhealthy</span>
+					</div>
+					<div class="topo-legend-group">
+						<span class="topo-legend-title">Edges:</span>
+						<span><span class="topo-edge-sample topo-edge-ok"></span> Low errors</span>
+						<span><span class="topo-edge-sample topo-edge-warn"></span> Some errors</span>
+						<span><span class="topo-edge-sample topo-edge-error"></span> High errors</span>
+					</div>
+					<span style="color: var(--text-muted); margin-left: auto;">Click node for details • Edge thickness = call volume</span>
 				</div>
 			</div>
 			<!-- Topology Graph -->
-			<div class="card">
-				<div id="topology-graph" class="topology-container" data-nodes={ topoNodesJSON(data.Nodes) } data-edges={ topoEdgesJSON(data.Edges) } data-window={ fmt.Sprintf("%d", data.Window) }></div>
+			<div class="card" style="position: relative;">
+				<div class="topo-controls">
+					<sl-button-group>
+						<sl-icon-button id="topo-zoom-in" name="zoom-in" label="Zoom in"></sl-icon-button>
+						<sl-icon-button id="topo-zoom-out" name="zoom-out" label="Zoom out"></sl-icon-button>
+						<sl-icon-button id="topo-reset" name="arrows-angle-contract" label="Reset"></sl-icon-button>
+					</sl-button-group>
+				</div>
+				<div id="topology-wrapper" class="topology-wrapper">
+					<div id="topology-graph" class="topology-container" data-nodes={ topoNodesJSON(data.Nodes) } data-edges={ topoEdgesJSON(data.Edges) } data-window={ fmt.Sprintf("%d", data.Window) }></div>
+				</div>
 			</div>
 			<script>
 				(function() {
@@ -41,18 +86,20 @@ templ Topology(data TopologyData) {
 					const textColor = isDark ? '#f1f5f9' : '#0f172a';
 
 					// Build Vega spec for force-directed graph
+					const nodeCount = nodes.length;
+					const graphHeight = Math.max(550, Math.min(700, nodeCount * 30));
 					const spec = {
 						"$schema": "https://vega.github.io/schema/vega/v5.json",
-						"width": 800,
-						"height": 500,
-						"padding": 20,
+						"width": 900,
+						"height": graphHeight,
+						"padding": 40,
 						"autosize": "none",
 
 						"signals": [
 							{ "name": "cx", "update": "width / 2" },
 							{ "name": "cy", "update": "height / 2" },
 							{ "name": "nodeRadius", "value": 20 },
-							{ "name": "linkDistance", "value": 120 },
+							{ "name": "linkDistance", "value": 100 },
 							{ "name": "textColor", "value": textColor }
 						],
 
@@ -80,6 +127,18 @@ templ Topology(data TopologyData) {
 								"type": "sqrt",
 								"domain": {"data": "node-data", "field": "spanCount"},
 								"range": [300, 2000]
+							},
+							{
+								"name": "edgeWidth",
+								"type": "sqrt",
+								"domain": {"data": "link-data", "field": "callCount"},
+								"range": [1.5, 6]
+							},
+							{
+								"name": "edgeColor",
+								"type": "threshold",
+								"domain": [0.01, 0.05],
+								"range": ["#94a3b8", "#f59e0b", "#ef4444"]
 							}
 						],
 
@@ -88,12 +147,15 @@ templ Topology(data TopologyData) {
 								"name": "links",
 								"type": "path",
 								"from": {"data": "link-data"},
-								"interactive": false,
+								"interactive": true,
 								"encode": {
+									"enter": {
+										"tooltip": {"signal": "'Calls: ' + datum.callCount + ' | Errors: ' + format(datum.errorRate * 100, '.1f') + '%'"}
+									},
 									"update": {
-										"stroke": {"value": "#94a3b8"},
-										"strokeWidth": {"value": 2},
-										"strokeOpacity": {"value": 0.6}
+										"stroke": {"scale": "edgeColor", "field": "errorRate"},
+										"strokeWidth": {"scale": "edgeWidth", "field": "callCount"},
+										"strokeOpacity": {"value": 0.7}
 									}
 								},
 								"transform": [
@@ -133,8 +195,8 @@ templ Topology(data TopologyData) {
 										"signal": "force",
 										"forces": [
 											{"force": "center", "x": {"signal": "cx"}, "y": {"signal": "cy"}},
-											{"force": "collide", "radius": {"signal": "nodeRadius + 5"}},
-											{"force": "nbody", "strength": -30},
+											{"force": "collide", "radius": {"signal": "nodeRadius + 15"}},
+											{"force": "nbody", "strength": -80},
 											{"force": "link", "links": "link-data", "distance": {"signal": "linkDistance"}, "id": "datum.name"}
 										]
 									}
@@ -180,19 +242,117 @@ templ Topology(data TopologyData) {
 								}
 							});
 						});
+
+					// Zoom controls
+					const wrapper = document.getElementById('topology-wrapper');
+					let scale = 1;
+					let panX = 0, panY = 0;
+					let isPanning = false;
+					let startX, startY;
+
+					function updateTransform() {
+						container.style.transform = `translate(${panX}px, ${panY}px) scale(${scale})`;
+					}
+
+					document.getElementById('topo-zoom-in').addEventListener('click', () => {
+						scale = Math.min(scale * 1.25, 3);
+						updateTransform();
+					});
+
+					document.getElementById('topo-zoom-out').addEventListener('click', () => {
+						scale = Math.max(scale / 1.25, 0.5);
+						updateTransform();
+					});
+
+					document.getElementById('topo-reset').addEventListener('click', () => {
+						scale = 1;
+						panX = 0;
+						panY = 0;
+						updateTransform();
+					});
+
+					// Pan with mouse drag
+					wrapper.addEventListener('mousedown', (e) => {
+						if (e.target.closest('svg')) {
+							isPanning = true;
+							startX = e.clientX - panX;
+							startY = e.clientY - panY;
+							wrapper.style.cursor = 'grabbing';
+						}
+					});
+
+					window.addEventListener('mousemove', (e) => {
+						if (!isPanning) return;
+						panX = e.clientX - startX;
+						panY = e.clientY - startY;
+						updateTransform();
+					});
+
+					window.addEventListener('mouseup', () => {
+						isPanning = false;
+						wrapper.style.cursor = 'grab';
+					});
+
+					// Zoom with scroll wheel
+					wrapper.addEventListener('wheel', (e) => {
+						e.preventDefault();
+						const delta = e.deltaY > 0 ? 0.9 : 1.1;
+						scale = Math.max(0.5, Math.min(3, scale * delta));
+						updateTransform();
+					}, { passive: false });
 				})();
 			</script>
 		}
 		<style>
+			.topo-controls {
+				position: absolute;
+				top: 0.75rem;
+				right: 0.75rem;
+				z-index: 10;
+			}
+			.topology-wrapper {
+				overflow: hidden;
+				min-height: 540px;
+				cursor: grab;
+			}
 			.topology-container {
 				min-height: 540px;
 				display: flex;
 				align-items: center;
 				justify-content: center;
+				transform-origin: center center;
+				transition: transform 0.1s ease-out;
 			}
 			.topology-container svg {
-				max-width: 100%;
+				max-width: none;
 			}
+			.topo-legend {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 1.5rem;
+				align-items: center;
+				font-size: 0.875rem;
+			}
+			.topo-legend-group {
+				display: flex;
+				gap: 1rem;
+				align-items: center;
+			}
+			.topo-legend-title {
+				font-weight: 600;
+				color: var(--text-muted);
+			}
+			.topo-edge-sample {
+				display: inline-block;
+				width: 24px;
+				height: 3px;
+				vertical-align: middle;
+				margin-right: 0.25rem;
+				border-radius: 1px;
+			}
+			.topo-edge-ok { background: #94a3b8; }
+			.topo-edge-warn { background: #f59e0b; }
+			.topo-edge-error { background: #ef4444; }
 		</style>
 	}
 }
@@ -249,4 +409,15 @@ func topoFormatCount(n int64) string {
 		return fmt.Sprintf("%.1fK", float64(n)/1000)
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+// countByStatus counts nodes with a specific status
+func countByStatus(nodes []ServiceNode, status string) int {
+	count := 0
+	for _, n := range nodes {
+		if n.Status == status {
+			count++
+		}
+	}
+	return count
 }
