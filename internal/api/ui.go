@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/render"
+	"github.com/labstack/fanout/internal/search"
 	"github.com/labstack/fanout/internal/web"
 	"golang.org/x/sync/errgroup"
 )
@@ -360,8 +361,6 @@ func (h *UIHandler) TraceDetail(c echo.Context) error {
 func (h *UIHandler) Logs(c echo.Context) error {
 	ctx := c.Request().Context()
 	query := c.QueryParam("q")
-	service := c.QueryParam("service")
-	severity := c.QueryParam("severity")
 	window := parseWindow(c)
 
 	// Pagination
@@ -380,19 +379,15 @@ func (h *UIHandler) Logs(c echo.Context) error {
 		}
 	}
 
-	logs, hasMore := h.searchLogsPage(ctx, query, service, severity, window, limit, offset)
-	services := h.getServices(ctx, window)
+	logs, hasMore := h.searchLogsPage(ctx, query, window, limit, offset)
 
 	data := web.LogsData{
-		Query:    query,
-		Service:  service,
-		Services: services,
-		Severity: severity,
-		Logs:     logs,
-		Limit:    limit,
-		Offset:   offset,
-		Window:   window,
-		HasMore:  hasMore,
+		Query:   query,
+		Logs:    logs,
+		Limit:   limit,
+		Offset:  offset,
+		Window:  window,
+		HasMore: hasMore,
 	}
 
 	return renderTempl(c, web.Logs(data))
@@ -1345,13 +1340,11 @@ LIMIT %d OFFSET %d;
 
 // --- Logs helpers ---
 
-func (h *UIHandler) searchLogs(ctx context.Context, searchQuery, service, severity string, window, limit int) []web.LogRow {
-	logs, _ := h.searchLogsPage(ctx, searchQuery, service, severity, window, limit, 0)
-	return logs
-}
-
-func (h *UIHandler) searchLogsPage(ctx context.Context, searchQuery, service, severity string, window, limit, offset int) ([]web.LogRow, bool) {
+func (h *UIHandler) searchLogsPage(ctx context.Context, searchQuery string, window, limit, offset int) ([]web.LogRow, bool) {
 	var out []web.LogRow
+
+	// Parse search query for advanced syntax
+	parsed := search.Parse(searchQuery)
 
 	logsGlob := h.duck.LogsGlob(window)
 	var args []any
@@ -1359,17 +1352,52 @@ func (h *UIHandler) searchLogsPage(ctx context.Context, searchQuery, service, se
 		fmt.Sprintf(`epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
 	}
 
-	if service != "" {
-		filters = append(filters, `"name=service_name" = ?`)
-		args = append(args, service)
+	// Service filter from query DSL
+	if svcFilter := parsed.Service(); len(svcFilter) > 0 {
+		if len(svcFilter) == 1 {
+			filters = append(filters, `"name=service_name" = ?`)
+			args = append(args, svcFilter[0])
+		} else {
+			placeholders := ""
+			for i, s := range svcFilter {
+				if i > 0 {
+					placeholders += ", "
+				}
+				placeholders += "?"
+				args = append(args, s)
+			}
+			filters = append(filters, `"name=service_name" IN (`+placeholders+`)`)
+		}
 	}
-	if searchQuery != "" {
+
+	// Severity filter from query DSL
+	if sevFilter := parsed.Severity(); len(sevFilter) > 0 {
+		if len(sevFilter) == 1 {
+			filters = append(filters, `"name=severity" = ?`)
+			args = append(args, sevFilter[0])
+		} else {
+			placeholders := ""
+			for i, s := range sevFilter {
+				if i > 0 {
+					placeholders += ", "
+				}
+				placeholders += "?"
+				args = append(args, s)
+			}
+			filters = append(filters, `"name=severity" IN (`+placeholders+`)`)
+		}
+	}
+
+	// Text search terms (AND'd together)
+	for _, term := range parsed.Terms {
 		filters = append(filters, `"name=body" ILIKE ?`)
-		args = append(args, "%"+searchQuery+"%")
+		args = append(args, "%"+term+"%")
 	}
-	if severity != "" {
-		filters = append(filters, `"name=severity" = ?`)
-		args = append(args, severity)
+
+	// Exclude terms
+	for _, term := range parsed.Exclude {
+		filters = append(filters, `"name=body" NOT ILIKE ?`)
+		args = append(args, "%"+term+"%")
 	}
 
 	whereClause := ""

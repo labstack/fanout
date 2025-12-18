@@ -8,11 +8,8 @@ import (
 
 // LogsData for the logs search page
 type LogsData struct {
-	Query    string
-	Service  string
-	Services []string
-	Severity string
-	Logs     []LogRow
+	Query string
+	Logs  []LogRow
 	// Pagination
 	Limit   int
 	Offset  int
@@ -37,47 +34,22 @@ templ Logs(data LogsData) {
 				<p class="page-subtitle">Search application logs</p>
 			</div>
 		</div>
-	<div class="quick-filters">
-		<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, "", data.Window, data.Limit, 0) } size="small" variant={ logFilterVariant(data.Severity, "") }>All</sl-button>
-		<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, "ERROR", data.Window, data.Limit, 0) } size="small" variant={ logFilterVariant(data.Severity, "ERROR") }>
-			<sl-icon name="exclamation-triangle" slot="prefix"></sl-icon>
-			Errors
-		</sl-button>
-		<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, "WARN", data.Window, data.Limit, 0) } size="small" variant={ logFilterVariant(data.Severity, "WARN") }>
-			<sl-icon name="exclamation-circle" slot="prefix"></sl-icon>
-			Warn
-		</sl-button>
-		<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, "INFO", data.Window, data.Limit, 0) } size="small" variant={ logFilterVariant(data.Severity, "INFO") }>
-			<sl-icon name="info-circle" slot="prefix"></sl-icon>
-			Info
-		</sl-button>
-	</div>
 		<!-- Search Form -->
-	<div class="card" style="margin-bottom: 1.5rem;">
-		<form method="GET" action="/logs" class="search-form">
-			<div class="form-row">
-				<sl-input name="q" label="Search" placeholder="Log message pattern..." value={ data.Query }></sl-input>
-				<sl-select name="service" label="Service" value={ data.Service }>
-					<sl-option value="">All services</sl-option>
-					for _, svc := range data.Services {
-						<sl-option value={ svc }>{ svc }</sl-option>
+		<div class="card" style="margin-bottom: 1.5rem;">
+			<form method="GET" action="/logs" class="search-form">
+				<div class="form-row">
+					<sl-input name="q" label="Search" placeholder="service:cart severity:ERROR &quot;timeout&quot; -retry" value={ data.Query } style="flex: 3;"></sl-input>
+					if data.Window != 60 {
+						<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
 					}
-				</sl-select>
-				<sl-select name="severity" label="Severity" value={ data.Severity }>
-						<sl-option value="">All</sl-option>
-						<sl-option value="DEBUG">DEBUG</sl-option>
-						<sl-option value="INFO">INFO</sl-option>
-						<sl-option value="WARN">WARN</sl-option>
-					<sl-option value="ERROR">ERROR</sl-option>
-					<sl-option value="FATAL">FATAL</sl-option>
-				</sl-select>
-				if data.Window != 60 {
-					<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
-				}
-				<sl-button type="submit" variant="primary">Search</sl-button>
-			</div>
-		</form>
-	</div>
+					<sl-button type="submit" variant="primary">Search</sl-button>
+				</div>
+				<div class="search-hint">
+					<sl-icon name="lightbulb"></sl-icon>
+					<code>service:name</code> <code>severity:ERROR,WARN</code> <code>"exact phrase"</code> <code>-exclude</code>
+				</div>
+			</form>
+		</div>
 		<!-- Results -->
 		<div class="card">
 			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Logs)) } logs)</div>
@@ -89,19 +61,19 @@ templ Logs(data LogsData) {
 				</div>
 			} else {
 				<div class="logs-list">
-						for _, log := range data.Logs {
-							<div class={ "log-entry", logEntryClass(log.Severity) }>
-								<div class="log-header">
-									<sl-badge variant={ severityVariant(log.Severity) }>{ log.Severity }</sl-badge>
-									<span class="time">{ log.Time }</span>
-									if log.Service != "" {
-										<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(log.Service), data.Window)) } class="service">{ log.Service }</a>
-									}
-									if log.TraceID != "" {
-										<sl-button href={ withWindow("/traces/"+pathEscape(log.TraceID), data.Window) } size="small" variant="text">trace</sl-button>
-									}
-								</div>
-								<div class="log-body">{ log.Body }</div>
+					for _, log := range data.Logs {
+						<div class={ "log-entry", logEntryClass(log.Severity) }>
+							<div class="log-header">
+								<sl-badge variant={ severityVariant(log.Severity) }>{ log.Severity }</sl-badge>
+								<span class="time">{ log.Time }</span>
+								if log.Service != "" {
+									<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(log.Service), data.Window)) } class="service">{ log.Service }</a>
+								}
+								if log.TraceID != "" {
+									<sl-button href={ withWindow("/traces/"+pathEscape(log.TraceID), data.Window) } size="small" variant="text">trace</sl-button>
+								}
+							</div>
+							<div class="log-body">{ log.Body }</div>
 						</div>
 					}
 				</div>
@@ -109,11 +81,11 @@ templ Logs(data LogsData) {
 				if data.Offset > 0 || data.HasMore {
 					<div class="pagination">
 						if data.Offset > 0 {
-							<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, data.Severity, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
+							<sl-button href={ logsPaginationURL(data.Query, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
 						}
 						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Logs)) }</span>
 						if data.HasMore {
-							<sl-button href={ logsPaginationURL("/logs", data.Query, data.Service, data.Severity, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
+							<sl-button href={ logsPaginationURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
 						}
 					</div>
 				}
@@ -129,6 +101,24 @@ templ Logs(data LogsData) {
 			.search-form sl-input, .search-form sl-select {
 				flex: 1;
 				min-width: 150px;
+			}
+			.search-hint {
+				margin-top: 0.75rem;
+				font-size: 0.75rem;
+				color: var(--text-muted);
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
+				flex-wrap: wrap;
+			}
+			.search-hint sl-icon {
+				font-size: 0.875rem;
+			}
+			.search-hint code {
+				background: var(--bg-tertiary);
+				padding: 0.125rem 0.375rem;
+				border-radius: 0.25rem;
+				font-size: 0.7rem;
 			}
 			.logs-list {
 				display: flex;
@@ -215,28 +205,15 @@ func severityVariant(severity string) string {
 	}
 }
 
-func logsPaginationURL(base, q, service, severity string, window, limit, offset int) string {
+func logsPaginationURL(q string, window, limit, offset int) string {
 	values := url.Values{}
 	if q != "" {
 		values.Set("q", q)
-	}
-	if service != "" {
-		values.Set("service", service)
-	}
-	if severity != "" {
-		values.Set("severity", severity)
 	}
 	if window != 60 {
 		values.Set("window", strconv.Itoa(window))
 	}
 	values.Set("limit", strconv.Itoa(limit))
 	values.Set("offset", strconv.Itoa(offset))
-	return base + "?" + values.Encode()
-}
-
-func logFilterVariant(current, target string) string {
-	if current == target {
-		return "primary"
-	}
-	return "default"
+	return "/logs?" + values.Encode()
 }

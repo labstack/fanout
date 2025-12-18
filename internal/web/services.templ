@@ -30,17 +30,17 @@ templ Services(data ServicesData) {
 				<p class="page-subtitle">{ fmt.Sprintf("%d services monitored", len(data.Services)) }</p>
 			</div>
 		</div>
-	<div class="quick-filters">
-		<sl-button href={ withWindow("/services", data.Window) } size="small" variant={ filterVariant(data.Filter, "") }>All</sl-button>
-		<sl-button href={ withWindow("/services?filter=errors", data.Window) } size="small" variant={ filterVariant(data.Filter, "errors") }>
-			<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
-			Errors
-		</sl-button>
-		<sl-button href={ withWindow("/services?filter=slow", data.Window) } size="small" variant={ filterVariant(data.Filter, "slow") }>
-			<sl-icon slot="prefix" name="clock"></sl-icon>
-			Slow
-		</sl-button>
-	</div>
+		<div class="quick-filters">
+			<sl-button href={ withWindow("/services", data.Window) } size="small" variant={ filterVariant(data.Filter, "") }>All</sl-button>
+			<sl-button href={ withWindow("/services?filter=errors", data.Window) } size="small" variant={ filterVariant(data.Filter, "errors") }>
+				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
+				Errors
+			</sl-button>
+			<sl-button href={ withWindow("/services?filter=slow", data.Window) } size="small" variant={ filterVariant(data.Filter, "slow") }>
+				<sl-icon slot="prefix" name="clock"></sl-icon>
+				Slow
+			</sl-button>
+		</div>
 		<div class="card">
 			if len(data.Services) == 0 {
 				<div class="empty-state">
@@ -132,13 +132,13 @@ type Dependency struct {
 // ServiceDetail renders the service detail page
 templ ServiceDetail(data ServiceDetailData) {
 	@Layout(data.Name, "services", data.Window) {
-	<nav class="breadcrumbs">
-		<sl-breadcrumb>
-			<sl-breadcrumb-item href={ withWindow("/", data.Window) }>Overview</sl-breadcrumb-item>
-			<sl-breadcrumb-item href={ withWindow("/services", data.Window) }>Services</sl-breadcrumb-item>
-			<sl-breadcrumb-item>{ data.Name }</sl-breadcrumb-item>
-		</sl-breadcrumb>
-	</nav>
+		<nav class="breadcrumbs">
+			<sl-breadcrumb>
+				<sl-breadcrumb-item href={ withWindow("/", data.Window) }>Overview</sl-breadcrumb-item>
+				<sl-breadcrumb-item href={ withWindow("/services", data.Window) }>Services</sl-breadcrumb-item>
+				<sl-breadcrumb-item>{ data.Name }</sl-breadcrumb-item>
+			</sl-breadcrumb>
+		</nav>
 		<div class="page-header">
 			<div class="page-header-left">
 				<h1 class="page-title">
@@ -267,7 +267,7 @@ templ ServiceDetail(data ServiceDetailData) {
 					<tbody>
 						for _, dep := range data.Dependencies {
 							<tr>
-									<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(dep.Service), data.Window)) }>{ dep.Service }</a></td>
+								<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(dep.Service), data.Window)) }>{ dep.Service }</a></td>
 								<td>
 									<span class={ "status", statusClass(dep.Status) }>{ dep.Status }</span>
 								</td>

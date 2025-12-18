@@ -368,12 +368,12 @@ templ Layout(title string, activePage string, window int) {
 			</style>
 		</head>
 		<body class="sl-theme-light">
-				<div class="app">
-					<header class="header">
-						<sl-icon-button class="mobile-nav-toggle" id="mobile-nav-toggle" name="list" label="Menu"></sl-icon-button>
-						<a href={ templ.SafeURL(withWindow("/", window)) } class="header-brand">Fanout</a>
-						<div class="header-spacer"></div>
-						<sl-select id="time-window" size="small" value="60" style="width: 120px;">
+			<div class="app">
+				<header class="header">
+					<sl-icon-button class="mobile-nav-toggle" id="mobile-nav-toggle" name="list" label="Menu"></sl-icon-button>
+					<a href={ templ.SafeURL(withWindow("/", window)) } class="header-brand">Fanout</a>
+					<div class="header-spacer"></div>
+					<sl-select id="time-window" size="small" value="60" style="width: 120px;">
 						<sl-option value="15">Last 15m</sl-option>
 						<sl-option value="30">Last 30m</sl-option>
 						<sl-option value="60">Last 1h</sl-option>
@@ -382,18 +382,18 @@ templ Layout(title string, activePage string, window int) {
 						<sl-option value="1440">Last 24h</sl-option>
 					</sl-select>
 					<sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
-					</header>
-					<aside class="sidebar">
-						@Nav(activePage, window)
-					</aside>
-					<main class="main">
-						{ children... }
-					</main>
-				</div>
-				<sl-drawer id="mobile-nav" label="Navigation" placement="start">
+				</header>
+				<aside class="sidebar">
 					@Nav(activePage, window)
-				</sl-drawer>
-				<script>
+				</aside>
+				<main class="main">
+					{ children... }
+				</main>
+			</div>
+			<sl-drawer id="mobile-nav" label="Navigation" placement="start">
+				@Nav(activePage, window)
+			</sl-drawer>
+			<script>
 					// Theme toggle
 					const toggle = document.getElementById('theme-toggle');
 					const body = document.body;

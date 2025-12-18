@@ -39,40 +39,40 @@ templ Traces(data TracesData) {
 				<p class="page-subtitle">Search and analyze distributed traces</p>
 			</div>
 		</div>
-	<div class="quick-filters">
-		<sl-button href={ paginationURL("/traces", data.Query, data.Service, "", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "") }>All</sl-button>
-		<sl-button href={ paginationURL("/traces", data.Query, data.Service, "error", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "error") }>
-			<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
-			Errors
-		</sl-button>
-		<sl-button href={ paginationURL("/traces", data.Query, data.Service, "slow", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "slow") }>
-			<sl-icon slot="prefix" name="clock"></sl-icon>
-			Slow (&gt;1s)
-		</sl-button>
-	</div>
+		<div class="quick-filters">
+			<sl-button href={ paginationURL("/traces", data.Query, data.Service, "", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "") }>All</sl-button>
+			<sl-button href={ paginationURL("/traces", data.Query, data.Service, "error", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "error") }>
+				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
+				Errors
+			</sl-button>
+			<sl-button href={ paginationURL("/traces", data.Query, data.Service, "slow", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "slow") }>
+				<sl-icon slot="prefix" name="clock"></sl-icon>
+				Slow (&gt;1s)
+			</sl-button>
+		</div>
 		<!-- Search Form -->
-	<div class="card" style="margin-bottom: 1.5rem;">
-		<form method="GET" action="/traces" class="search-form">
-			<div class="form-row">
-				<sl-input name="q" label="Search" placeholder="Operation or trace ID..." value={ data.Query }></sl-input>
-				<sl-select name="service" label="Service" value={ data.Service }>
-					<sl-option value="">All services</sl-option>
-					for _, svc := range data.Services {
-						<sl-option value={ svc }>{ svc }</sl-option>
+		<div class="card" style="margin-bottom: 1.5rem;">
+			<form method="GET" action="/traces" class="search-form">
+				<div class="form-row">
+					<sl-input name="q" label="Search" placeholder="Operation or trace ID..." value={ data.Query }></sl-input>
+					<sl-select name="service" label="Service" value={ data.Service }>
+						<sl-option value="">All services</sl-option>
+						for _, svc := range data.Services {
+							<sl-option value={ svc }>{ svc }</sl-option>
+						}
+					</sl-select>
+					<sl-select name="status" label="Status" value={ data.Status }>
+						<sl-option value="">All</sl-option>
+						<sl-option value="error">Errors only</sl-option>
+						<sl-option value="slow">Slow only</sl-option>
+					</sl-select>
+					if data.Window != 60 {
+						<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
 					}
-				</sl-select>
-				<sl-select name="status" label="Status" value={ data.Status }>
-					<sl-option value="">All</sl-option>
-					<sl-option value="error">Errors only</sl-option>
-					<sl-option value="slow">Slow only</sl-option>
-				</sl-select>
-				if data.Window != 60 {
-					<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
-				}
-				<sl-button type="submit" variant="primary">Search</sl-button>
-			</div>
-		</form>
-	</div>
+					<sl-button type="submit" variant="primary">Search</sl-button>
+				</div>
+			</form>
+		</div>
 		<!-- Results -->
 		<div class="card">
 			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Traces)) } traces)</div>
@@ -119,18 +119,18 @@ templ Traces(data TracesData) {
 						}
 					</tbody>
 				</table>
-					<!-- Pagination -->
-					if data.Offset > 0 || data.HasMore {
-						<div class="pagination">
-							if data.Offset > 0 {
-								<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
-							}
-							<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Traces)) }</span>
-							if data.HasMore {
-								<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
-							}
-						</div>
-					}
+				<!-- Pagination -->
+				if data.Offset > 0 || data.HasMore {
+					<div class="pagination">
+						if data.Offset > 0 {
+							<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
+						}
+						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Traces)) }</span>
+						if data.HasMore {
+							<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
+						}
+					</div>
+				}
 			}
 		</div>
 		<style>
@@ -195,13 +195,13 @@ type LogInfo struct {
 // TraceDetail renders the trace detail page with waterfall
 templ TraceDetail(data TraceDetailData) {
 	@Layout("Trace "+truncateID(data.TraceID), "traces", data.Window) {
-	<nav class="breadcrumbs">
-		<sl-breadcrumb>
-			<sl-breadcrumb-item href={ withWindow("/", data.Window) }>Overview</sl-breadcrumb-item>
-			<sl-breadcrumb-item href={ withWindow("/traces", data.Window) }>Traces</sl-breadcrumb-item>
-			<sl-breadcrumb-item>{ truncateID(data.TraceID) }</sl-breadcrumb-item>
-		</sl-breadcrumb>
-	</nav>
+		<nav class="breadcrumbs">
+			<sl-breadcrumb>
+				<sl-breadcrumb-item href={ withWindow("/", data.Window) }>Overview</sl-breadcrumb-item>
+				<sl-breadcrumb-item href={ withWindow("/traces", data.Window) }>Traces</sl-breadcrumb-item>
+				<sl-breadcrumb-item>{ truncateID(data.TraceID) }</sl-breadcrumb-item>
+			</sl-breadcrumb>
+		</nav>
 		<div class="page-header">
 			<div class="page-header-left">
 				<h1 class="page-title">Trace { truncateID(data.TraceID) }</h1>

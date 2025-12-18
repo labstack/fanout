@@ -79,21 +79,21 @@ templ Metrics(data MetricsData) {
 							<th>Value</th>
 						</tr>
 					</thead>
-						<tbody>
-							for _, m := range data.Metrics {
-								<tr>
-									<td style="font-family: monospace; font-size: 0.8rem;">{ m.Time }</td>
-									<td>{ m.Name }</td>
-									<td>
+					<tbody>
+						for _, m := range data.Metrics {
+							<tr>
+								<td style="font-family: monospace; font-size: 0.8rem;">{ m.Time }</td>
+								<td>{ m.Name }</td>
+								<td>
 									if m.Service != "" {
 										<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(m.Service), data.Window)) }>{ m.Service }</a>
 									} else {
 										<span style="color: var(--text-muted);">—</span>
 									}
 								</td>
-									<td><sl-badge variant={ metricTypeVariant(m.Type) }>{ m.Type }</sl-badge></td>
-									<td style="font-family: monospace;">{ fmt.Sprintf("%.2f", m.Value) }</td>
-								</tr>
+								<td><sl-badge variant={ metricTypeVariant(m.Type) }>{ m.Type }</sl-badge></td>
+								<td style="font-family: monospace;">{ fmt.Sprintf("%.2f", m.Value) }</td>
+							</tr>
 						}
 					</tbody>
 				</table>

@@ -110,19 +110,19 @@ templ TopIssues(issues []TopIssue, window int) {
 					<th>Detail</th>
 				</tr>
 			</thead>
-				<tbody>
-					for _, issue := range issues {
-						<tr>
-							<td>
-								if issue.Service != "" {
-									<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(issue.Service), window)) }>{ issue.Service }</a>
-								} else {
-									<span style="color: var(--text-muted);">—</span>
-								}
-							</td>
-							<td>
-								if issue.Issue == "high_error_rate" {
-									<span class="status status-unhealthy">Errors</span>
+			<tbody>
+				for _, issue := range issues {
+					<tr>
+						<td>
+							if issue.Service != "" {
+								<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(issue.Service), window)) }>{ issue.Service }</a>
+							} else {
+								<span style="color: var(--text-muted);">—</span>
+							}
+						</td>
+						<td>
+							if issue.Issue == "high_error_rate" {
+								<span class="status status-unhealthy">Errors</span>
 							} else if issue.Issue == "high_latency" {
 								<span class="status status-degraded">Slow</span>
 							} else if issue.Issue != "" {
@@ -151,13 +151,13 @@ templ ServicesTable(nodes []ServiceNode, window int) {
 					<th>Error Rate</th>
 				</tr>
 			</thead>
-				<tbody>
-					for _, node := range nodes {
-						<tr>
-							<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(node.Name), window)) }>{ node.Name }</a></td>
-							<td>
-								<span class={ "status", statusClass(node.Status) }>{ node.Status }</span>
-							</td>
+			<tbody>
+				for _, node := range nodes {
+					<tr>
+						<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(node.Name), window)) }>{ node.Name }</a></td>
+						<td>
+							<span class={ "status", statusClass(node.Status) }>{ node.Status }</span>
+						</td>
 						<td>{ fmt.Sprintf("%d", node.SpanCount) }</td>
 						<td>{ fmt.Sprintf("%.0fms", node.P95Ms) }</td>
 						<td>{ fmt.Sprintf("%.1f%%", node.ErrorRate*100) }</td>
