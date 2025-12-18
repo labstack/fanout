@@ -43,11 +43,7 @@ templ Services(data ServicesData) {
 		</div>
 		<div class="card">
 			if len(data.Services) == 0 {
-				<div class="empty-state">
-					<sl-icon name="boxes"></sl-icon>
-					<div class="empty-state-title">No services detected</div>
-					<div class="empty-state-message">Services will appear here once telemetry data is received.</div>
-				</div>
+				@EmptyStateSetup("services")
 			} else {
 				<table class="table">
 					<thead>

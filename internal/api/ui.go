@@ -308,9 +308,7 @@ func (h *UIHandler) Topology(c echo.Context) error {
 // Traces renders the traces search page
 func (h *UIHandler) Traces(c echo.Context) error {
 	ctx := c.Request().Context()
-	query := c.QueryParam("q")
-	service := c.QueryParam("service")
-	status := c.QueryParam("status")
+	queryStr := c.QueryParam("q")
 	window := parseWindow(c)
 
 	// Pagination
@@ -329,19 +327,15 @@ func (h *UIHandler) Traces(c echo.Context) error {
 		}
 	}
 
-	traces, hasMore := h.searchTracesPage(ctx, query, service, status, window, limit, offset)
-	services := h.getServices(ctx, window)
+	traces, hasMore := h.searchTracesPage(ctx, queryStr, window, limit, offset)
 
 	data := web.TracesData{
-		Query:    query,
-		Service:  service,
-		Services: services,
-		Status:   status,
-		Traces:   traces,
-		Limit:    limit,
-		Offset:   offset,
-		HasMore:  hasMore,
-		Window:   window,
+		Query:   queryStr,
+		Traces:  traces,
+		Limit:   limit,
+		Offset:  offset,
+		HasMore: hasMore,
+		Window:  window,
 	}
 
 	return renderTempl(c, web.Traces(data))
@@ -940,13 +934,11 @@ LIMIT 10;
 
 // --- Traces helpers ---
 
-func (h *UIHandler) searchTraces(ctx context.Context, searchQuery, service, status string, window, limit int) []web.TraceRow {
-	traces, _ := h.searchTracesPage(ctx, searchQuery, service, status, window, limit, 0)
-	return traces
-}
-
-func (h *UIHandler) searchTracesPage(ctx context.Context, searchQuery, service, status string, window, limit, offset int) ([]web.TraceRow, bool) {
+func (h *UIHandler) searchTracesPage(ctx context.Context, queryStr string, window, limit, offset int) ([]web.TraceRow, bool) {
 	var out []web.TraceRow
+
+	// Parse query DSL
+	q := search.Parse(queryStr)
 
 	spansGlob := h.duck.SpansGlob(window)
 	var args []any
@@ -954,31 +946,74 @@ func (h *UIHandler) searchTracesPage(ctx context.Context, searchQuery, service, 
 		fmt.Sprintf(`epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
 	}
 
-	if service != "" {
-		filters = append(filters, `"name=service_name" = ?`)
-		args = append(args, service)
-	}
-	if searchQuery != "" {
-		filters = append(filters, `("name=name" ILIKE ? OR "name=trace_id" ILIKE ?)`)
-		args = append(args, "%"+searchQuery+"%", "%"+searchQuery+"%")
-	}
-	if status == "error" {
-		filters = append(filters, `"name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')`)
-	} else if status == "slow" {
-		filters = append(filters, `"name=duration_ms" > 1000`)
-	}
-
-	whereClause := ""
-	for i, f := range filters {
-		if i == 0 {
-			whereClause = "WHERE " + f
-		} else {
-			whereClause += " AND " + f
+	// Service filter
+	if services := q.Service(); len(services) > 0 {
+		placeholders := makePlaceholders(len(services))
+		filters = append(filters, fmt.Sprintf(`"name=service_name" IN (%s)`, placeholders))
+		for _, s := range services {
+			args = append(args, s)
 		}
 	}
 
+	// Operation filter
+	if ops := q.Operation(); len(ops) > 0 {
+		var opFilters []string
+		for _, op := range ops {
+			if containsWildcard(op) {
+				opFilters = append(opFilters, `"name=name" ILIKE ?`)
+				args = append(args, wildcardToLike(op))
+			} else {
+				opFilters = append(opFilters, `"name=name" ILIKE ?`)
+				args = append(args, "%"+op+"%")
+			}
+		}
+		filters = append(filters, "("+joinFilters(opFilters, " OR ")+")")
+	}
+
+	// Status filter
+	if statuses := q.Status(); len(statuses) > 0 {
+		var statusFilters []string
+		for _, s := range statuses {
+			switch s {
+			case "error":
+				statusFilters = append(statusFilters, `"name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')`)
+			case "slow":
+				statusFilters = append(statusFilters, `"name=duration_ms" > 1000`)
+			}
+		}
+		if len(statusFilters) > 0 {
+			filters = append(filters, "("+joinFilters(statusFilters, " OR ")+")")
+		}
+	}
+
+	// Duration filter (e.g., ">1000", "<500")
+	if dur := q.Duration(); dur != "" {
+		if len(dur) > 1 {
+			op := string(dur[0])
+			val := dur[1:]
+			if op == ">" || op == "<" {
+				filters = append(filters, fmt.Sprintf(`"name=duration_ms" %s ?`, op))
+				args = append(args, val)
+			}
+		}
+	}
+
+	// Text search terms (match operation or trace_id)
+	for _, term := range q.Terms {
+		filters = append(filters, `("name=name" ILIKE ? OR "name=trace_id" ILIKE ?)`)
+		args = append(args, "%"+term+"%", "%"+term+"%")
+	}
+
+	// Exclude terms
+	for _, term := range q.Exclude {
+		filters = append(filters, `"name=name" NOT ILIKE ?`)
+		args = append(args, "%"+term+"%")
+	}
+
+	whereClause := buildWhereClause(filters)
+
 	// Query limit+1 to detect if there are more results
-	q := fmt.Sprintf(`
+	sqlQ := fmt.Sprintf(`
 SELECT DISTINCT ON ("name=trace_id")
   "name=trace_id" as trace_id,
   "name=service_name" as service,
@@ -992,7 +1027,7 @@ ORDER BY "name=trace_id", ts DESC
 LIMIT %d OFFSET %d;
 `, spansGlob, whereClause, limit+1, offset)
 
-	rows, err := h.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := h.duck.DB.QueryContext(ctx, sqlQ, args...)
 	if err != nil {
 		return out, false
 	}
@@ -1023,6 +1058,18 @@ LIMIT %d OFFSET %d;
 	return out, hasMore
 }
 
+// joinFilters joins filter strings with the given operator
+func joinFilters(filters []string, op string) string {
+	if len(filters) == 0 {
+		return ""
+	}
+	result := filters[0]
+	for i := 1; i < len(filters); i++ {
+		result += op + filters[i]
+	}
+	return result
+}
+
 func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window int) web.TraceDetailData {
 	out := web.TraceDetailData{
 		TraceID: traceID,
@@ -1041,6 +1088,8 @@ func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window i
 	  "name=name" as operation,
 	  "name=duration_ms" as duration,
 	  "name=status_code" as status,
+	  COALESCE("name=status_msg", '') as status_msg,
+	  COALESCE("name=kind", '') as kind,
 	  "name=start_unix_nano" as start_nano
 	FROM read_parquet(%s)
 	WHERE "name=trace_id" = ?
@@ -1062,6 +1111,8 @@ func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window i
 		operation string
 		duration  float64
 		status    string
+		statusMsg string
+		kind      string
 		startNano int64
 	}
 
@@ -1073,9 +1124,11 @@ func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window i
 			operation string
 			duration  float64
 			status    string
+			statusMsg string
+			kind      string
 			startNano int64
 		}
-		if err := rows.Scan(&s.spanID, &s.parentID, &s.service, &s.operation, &s.duration, &s.status, &s.startNano); err != nil {
+		if err := rows.Scan(&s.spanID, &s.parentID, &s.service, &s.operation, &s.duration, &s.status, &s.statusMsg, &s.kind, &s.startNano); err != nil {
 			continue
 		}
 		if minStart == -1 || s.startNano < minStart {
@@ -1132,6 +1185,8 @@ func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window i
 			Operation:   s.operation,
 			Duration:    s.duration,
 			Status:      status,
+			StatusMsg:   s.statusMsg,
+			Kind:        s.kind,
 			StartOffset: offset,
 			Depth:       getDepth(s.spanID),
 		})
@@ -1178,73 +1233,254 @@ func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window i
 // Metrics renders the metrics explorer page
 func (h *UIHandler) Metrics(c echo.Context) error {
 	ctx := c.Request().Context()
-	name := c.QueryParam("name")
-	service := c.QueryParam("service")
+	query := c.QueryParam("q")
 	window := parseWindow(c)
 
-	// Pagination
-	limit := 100
-	if l := c.QueryParam("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
-		if limit <= 0 || limit > 500 {
-			limit = 100
-		}
-	}
-	offset := 0
-	if o := c.QueryParam("offset"); o != "" {
-		fmt.Sscanf(o, "%d", &offset)
-		if offset < 0 {
-			offset = 0
-		}
-	}
-
-	// Get distinct metric names and services
-	names := h.getMetricNames(ctx, window)
-	services := h.getServices(ctx, window)
-
-	// Get metrics with filters
-	metrics, hasMore := h.searchMetricsPage(ctx, name, service, window, limit, offset)
+	// Get metrics summary with filters
+	metrics := h.getMetricsSummary(ctx, query, window)
 
 	data := web.MetricsData{
-		Names:    names,
-		Selected: name,
-		Service:  service,
-		Services: services,
-		Window:   window,
-		Metrics:  metrics,
-		Limit:    limit,
-		Offset:   offset,
-		HasMore:  hasMore,
+		Query:   query,
+		Window:  window,
+		Metrics: metrics,
 	}
 
 	return renderTempl(c, web.Metrics(data))
 }
 
-func (h *UIHandler) getMetricNames(ctx context.Context, window int) []string {
-	var names []string
+// getMetricsSummary returns aggregated metrics with sparkline data
+func (h *UIHandler) getMetricsSummary(ctx context.Context, queryStr string, window int) []web.MetricSummary {
+	var out []web.MetricSummary
+
+	// Parse query DSL
+	parsed := search.Parse(queryStr)
 
 	metricsGlob := h.duck.MetricsGlob(window)
+	var args []any
+	filters := []string{
+		fmt.Sprintf(`epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
+	}
+
+	// Name filter (supports wildcards via LIKE)
+	if nameFilter := parsed.Name(); len(nameFilter) > 0 {
+		for _, n := range nameFilter {
+			if containsWildcard(n) {
+				filters = append(filters, `"name=name" ILIKE ?`)
+				args = append(args, wildcardToLike(n))
+			} else {
+				filters = append(filters, `"name=name" = ?`)
+				args = append(args, n)
+			}
+		}
+	}
+
+	// Service filter
+	if svcFilter := parsed.Service(); len(svcFilter) > 0 {
+		placeholders := makePlaceholders(len(svcFilter))
+		for _, s := range svcFilter {
+			args = append(args, s)
+		}
+		filters = append(filters, `"name=service_name" IN (`+placeholders+`)`)
+	}
+
+	// Type filter
+	if typeFilter := parsed.Type(); len(typeFilter) > 0 {
+		placeholders := makePlaceholders(len(typeFilter))
+		for _, t := range typeFilter {
+			args = append(args, t)
+		}
+		filters = append(filters, `"name=mtype" IN (`+placeholders+`)`)
+	}
+
+	// Text search terms (match metric name)
+	for _, term := range parsed.Terms {
+		filters = append(filters, `"name=name" ILIKE ?`)
+		args = append(args, "%"+term+"%")
+	}
+
+	whereClause := buildWhereClause(filters)
+
+	// Aggregation query
 	q := fmt.Sprintf(`
-SELECT DISTINCT "name=name"
+SELECT
+  "name=name" as metric_name,
+  COALESCE("name=mtype", 'unknown') as mtype,
+  COUNT(*) as cnt,
+  AVG(COALESCE("name=value", 0)) as avg_val,
+  MIN(COALESCE("name=value", 0)) as min_val,
+  MAX(COALESCE("name=value", 0)) as max_val,
+  LIST(DISTINCT "name=service_name") as services
+FROM read_parquet(%s)
+%s
+GROUP BY "name=name", "name=mtype"
+ORDER BY metric_name
+LIMIT 100;
+`, metricsGlob, whereClause)
+
+	rows, err := h.duck.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+
+	var metricNames []string
+	metricMap := make(map[string]*web.MetricSummary)
+
+	for rows.Next() {
+		var m web.MetricSummary
+		var services any
+		if err := rows.Scan(&m.Name, &m.Type, &m.Count, &m.Avg, &m.Min, &m.Max, &services); err != nil {
+			continue
+		}
+		// Parse services list
+		m.Services = parseServiceList(services)
+		metricNames = append(metricNames, m.Name)
+		metricMap[m.Name] = &m
+		out = append(out, m)
+	}
+
+	// Get sparkline data (12 time buckets)
+	if len(metricNames) > 0 {
+		sparklines := h.getMetricSparklines(ctx, metricNames, window)
+		for i := range out {
+			if trend, ok := sparklines[out[i].Name]; ok {
+				out[i].Trend = trend
+			}
+		}
+	}
+
+	return out
+}
+
+// getMetricSparklines returns 12-point trend data for each metric
+func (h *UIHandler) getMetricSparklines(ctx context.Context, names []string, window int) map[string][]float64 {
+	out := make(map[string][]float64)
+
+	metricsGlob := h.duck.MetricsGlob(window)
+	bucketMins := window / 12
+	if bucketMins < 1 {
+		bucketMins = 1
+	}
+
+	// Build name filter
+	placeholders := makePlaceholders(len(names))
+	var args []any
+	for _, n := range names {
+		args = append(args, n)
+	}
+
+	q := fmt.Sprintf(`
+SELECT
+  "name=name" as metric_name,
+  time_bucket(INTERVAL '%d minutes', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT))) as bucket,
+  AVG(COALESCE("name=value", 0)) as avg_val
 FROM read_parquet(%s)
 WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-ORDER BY "name=name"
-LIMIT 100;
-`, metricsGlob, window)
+  AND "name=name" IN (%s)
+GROUP BY "name=name", bucket
+ORDER BY metric_name, bucket ASC;
+`, bucketMins, metricsGlob, window, placeholders)
 
-	rows, err := h.duck.DB.QueryContext(ctx, q)
+	rows, err := h.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
-		return names
+		return out
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		var name string
-		if err := rows.Scan(&name); err == nil {
-			names = append(names, name)
+		var bucket any
+		var avg float64
+		if err := rows.Scan(&name, &bucket, &avg); err != nil {
+			continue
+		}
+		out[name] = append(out[name], avg)
+	}
+
+	return out
+}
+
+// Helper functions
+
+func containsWildcard(s string) bool {
+	return len(s) > 0 && (s[0] == '*' || s[len(s)-1] == '*' || containsAny(s, "*?"))
+}
+
+func containsAny(s, chars string) bool {
+	for _, c := range chars {
+		for _, sc := range s {
+			if c == sc {
+				return true
+			}
 		}
 	}
-	return names
+	return false
+}
+
+func wildcardToLike(s string) string {
+	// Convert glob wildcards to SQL LIKE
+	result := s
+	result = replaceAll(result, "*", "%")
+	result = replaceAll(result, "?", "_")
+	return result
+}
+
+func replaceAll(s, old, new string) string {
+	for {
+		i := indexOf(s, old)
+		if i < 0 {
+			return s
+		}
+		s = s[:i] + new + s[i+len(old):]
+	}
+}
+
+func indexOf(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
+}
+
+func makePlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	result := "?"
+	for i := 1; i < n; i++ {
+		result += ", ?"
+	}
+	return result
+}
+
+func buildWhereClause(filters []string) string {
+	if len(filters) == 0 {
+		return ""
+	}
+	clause := "WHERE " + filters[0]
+	for i := 1; i < len(filters); i++ {
+		clause += " AND " + filters[i]
+	}
+	return clause
+}
+
+func parseServiceList(v any) []string {
+	if v == nil {
+		return nil
+	}
+	// DuckDB LIST returns []any
+	if list, ok := v.([]any); ok {
+		var out []string
+		for _, item := range list {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	return nil
 }
 
 func (h *UIHandler) getServices(ctx context.Context, window int) []string {
@@ -1272,70 +1508,6 @@ LIMIT 100;
 		}
 	}
 	return services
-}
-
-func (h *UIHandler) searchMetricsPage(ctx context.Context, name, service string, window, limit, offset int) ([]web.MetricRow, bool) {
-	var out []web.MetricRow
-
-	metricsGlob := h.duck.MetricsGlob(window)
-	var args []any
-	filters := []string{
-		fmt.Sprintf(`epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
-	}
-
-	if name != "" {
-		filters = append(filters, `"name=name" = ?`)
-		args = append(args, name)
-	}
-	if service != "" {
-		filters = append(filters, `"name=service_name" = ?`)
-		args = append(args, service)
-	}
-
-	whereClause := ""
-	for i, f := range filters {
-		if i == 0 {
-			whereClause = "WHERE " + f
-		} else {
-			whereClause += " AND " + f
-		}
-	}
-
-	q := fmt.Sprintf(`
-SELECT
-  epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) as ts,
-  "name=name" as metric_name,
-  "name=service_name" as service,
-  "name=mtype" as mtype,
-  COALESCE("name=value", 0) as value
-FROM read_parquet(%s)
-%s
-ORDER BY ts DESC
-LIMIT %d OFFSET %d;
-`, metricsGlob, whereClause, limit+1, offset)
-
-	rows, err := h.duck.DB.QueryContext(ctx, q, args...)
-	if err != nil {
-		return out, false
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var m web.MetricRow
-		var ts any
-		if err := rows.Scan(&ts, &m.Name, &m.Service, &m.Type, &m.Value); err != nil {
-			continue
-		}
-		m.Time = fmt.Sprintf("%v", ts)
-		out = append(out, m)
-	}
-
-	hasMore := len(out) > limit
-	if hasMore {
-		out = out[:limit]
-	}
-
-	return out, hasMore
 }
 
 // --- Logs helpers ---

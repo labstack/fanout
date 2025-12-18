@@ -462,7 +462,145 @@ templ Layout(title string, activePage string, window int) {
 					}
 					window.location.href = newUrl.toString();
 				});
+
+				// Keyboard shortcuts
+				(function() {
+					let gPressed = false;
+					let gTimeout = null;
+					const windowParam = currentWindow !== '60' ? `?window=${currentWindow}` : '';
+
+					const shortcuts = {
+						'g': { 'o': '/', 's': '/services', 't': '/traces', 'l': '/logs', 'm': '/metrics', 'p': '/topology' }
+					};
+
+					function isInputFocused() {
+						const el = document.activeElement;
+						return el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SL-INPUT' || el.tagName === 'SL-SELECT' || el.isContentEditable);
+					}
+
+					function focusSearch() {
+						const input = document.querySelector('sl-input[name="q"]') || document.querySelector('input[name="q"]');
+						if (input) {
+							input.focus();
+							if (input.select) input.select();
+						}
+					}
+
+					function navigateRows(direction) {
+						const rows = Array.from(document.querySelectorAll('.table tbody tr'));
+						if (!rows.length) return;
+						const current = rows.findIndex(r => r.classList.contains('kb-selected'));
+						let next = current + direction;
+						if (next < 0) next = 0;
+						if (next >= rows.length) next = rows.length - 1;
+						rows.forEach(r => r.classList.remove('kb-selected'));
+						rows[next].classList.add('kb-selected');
+						rows[next].scrollIntoView({ block: 'nearest' });
+					}
+
+					function openSelectedRow() {
+						const row = document.querySelector('.table tbody tr.kb-selected');
+						if (row) {
+							const link = row.querySelector('a');
+							if (link) link.click();
+						}
+					}
+
+					document.addEventListener('keydown', (e) => {
+						// Don't trigger when typing in inputs
+						if (isInputFocused() && e.key !== 'Escape') return;
+
+						// Escape - blur inputs, close dialogs
+						if (e.key === 'Escape') {
+							document.activeElement?.blur();
+							document.querySelector('sl-dialog[open]')?.hide();
+							document.querySelectorAll('.table tbody tr').forEach(r => r.classList.remove('kb-selected'));
+							return;
+						}
+
+						// ? - show help
+						if (e.key === '?' && !e.shiftKey) {
+							e.preventDefault();
+							document.getElementById('kb-help')?.show();
+							return;
+						}
+
+						// / - focus search
+						if (e.key === '/') {
+							e.preventDefault();
+							focusSearch();
+							return;
+						}
+
+						// j/k - row navigation
+						if (e.key === 'j') { navigateRows(1); return; }
+						if (e.key === 'k') { navigateRows(-1); return; }
+
+						// Enter - open selected row
+						if (e.key === 'Enter') {
+							const row = document.querySelector('.table tbody tr.kb-selected');
+							if (row) { e.preventDefault(); openSelectedRow(); return; }
+						}
+
+						// g+key navigation
+						if (e.key === 'g' && !gPressed) {
+							gPressed = true;
+							gTimeout = setTimeout(() => { gPressed = false; }, 1000);
+							return;
+						}
+
+						if (gPressed && shortcuts.g[e.key]) {
+							e.preventDefault();
+							clearTimeout(gTimeout);
+							gPressed = false;
+							window.location.href = shortcuts.g[e.key] + windowParam;
+							return;
+						}
+
+						// r - refresh (if htmx refresh button exists)
+						if (e.key === 'r') {
+							const refreshBtn = document.querySelector('[hx-get][hx-target="#overview-content"]');
+							if (refreshBtn) { refreshBtn.click(); return; }
+						}
+					});
+				})();
 			</script>
+			<!-- Keyboard Help Dialog -->
+			<sl-dialog id="kb-help" label="Keyboard Shortcuts" style="--width: 400px;">
+				<div class="kb-help-content">
+					<div class="kb-section">
+						<div class="kb-section-title">Navigation</div>
+						<div class="kb-row"><kbd>g</kbd> <kbd>o</kbd> <span>Overview</span></div>
+						<div class="kb-row"><kbd>g</kbd> <kbd>s</kbd> <span>Services</span></div>
+						<div class="kb-row"><kbd>g</kbd> <kbd>t</kbd> <span>Traces</span></div>
+						<div class="kb-row"><kbd>g</kbd> <kbd>l</kbd> <span>Logs</span></div>
+						<div class="kb-row"><kbd>g</kbd> <kbd>m</kbd> <span>Metrics</span></div>
+						<div class="kb-row"><kbd>g</kbd> <kbd>p</kbd> <span>Topology</span></div>
+					</div>
+					<div class="kb-section">
+						<div class="kb-section-title">Tables</div>
+						<div class="kb-row"><kbd>j</kbd> <span>Next row</span></div>
+						<div class="kb-row"><kbd>k</kbd> <span>Previous row</span></div>
+						<div class="kb-row"><kbd>Enter</kbd> <span>Open selected</span></div>
+					</div>
+					<div class="kb-section">
+						<div class="kb-section-title">General</div>
+						<div class="kb-row"><kbd>/</kbd> <span>Focus search</span></div>
+						<div class="kb-row"><kbd>r</kbd> <span>Refresh data</span></div>
+						<div class="kb-row"><kbd>Esc</kbd> <span>Clear / Close</span></div>
+						<div class="kb-row"><kbd>?</kbd> <span>Show this help</span></div>
+					</div>
+				</div>
+				<sl-button slot="footer" variant="primary" onclick="this.closest('sl-dialog').hide()">Close</sl-button>
+			</sl-dialog>
+			<style>
+				.kb-help-content { display: flex; flex-direction: column; gap: 1.25rem; }
+				.kb-section-title { font-weight: 600; color: var(--text-secondary); margin-bottom: 0.5rem; font-size: 0.75rem; text-transform: uppercase; }
+				.kb-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.25rem 0; font-size: 0.875rem; }
+				.kb-row span { margin-left: auto; color: var(--text-secondary); }
+				kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; padding: 0.125rem 0.375rem; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 0.25rem; font-family: inherit; font-size: 0.75rem; font-weight: 500; }
+				.table tbody tr.kb-selected { outline: 2px solid var(--accent); outline-offset: -2px; background: var(--bg-tertiary); }
+			</style>
 		</body>
 	</html>
 }

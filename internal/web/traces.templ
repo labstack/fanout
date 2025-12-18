@@ -5,16 +5,13 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 )
 
 // TracesData for the traces search page
 type TracesData struct {
-	Query    string
-	Service  string
-	Services []string
-	Status   string
-	Traces   []TraceRow
-	// Pagination
+	Query   string
+	Traces  []TraceRow
 	Limit   int
 	Offset  int
 	HasMore bool
@@ -40,12 +37,12 @@ templ Traces(data TracesData) {
 			</div>
 		</div>
 		<div class="quick-filters">
-			<sl-button href={ paginationURL("/traces", data.Query, data.Service, "", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "") }>All</sl-button>
-			<sl-button href={ paginationURL("/traces", data.Query, data.Service, "error", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "error") }>
+			<sl-button href={ tracesURL("", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Query, "") }>All</sl-button>
+			<sl-button href={ tracesURL("status:error", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Query, "status:error") }>
 				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
 				Errors
 			</sl-button>
-			<sl-button href={ paginationURL("/traces", data.Query, data.Service, "slow", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Status, "slow") }>
+			<sl-button href={ tracesURL("status:slow", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Query, "status:slow") }>
 				<sl-icon slot="prefix" name="clock"></sl-icon>
 				Slow (&gt;1s)
 			</sl-button>
@@ -54,22 +51,15 @@ templ Traces(data TracesData) {
 		<div class="card" style="margin-bottom: 1.5rem;">
 			<form method="GET" action="/traces" class="search-form">
 				<div class="form-row">
-					<sl-input name="q" label="Search" placeholder="Operation or trace ID..." value={ data.Query }></sl-input>
-					<sl-select name="service" label="Service" value={ data.Service }>
-						<sl-option value="">All services</sl-option>
-						for _, svc := range data.Services {
-							<sl-option value={ svc }>{ svc }</sl-option>
-						}
-					</sl-select>
-					<sl-select name="status" label="Status" value={ data.Status }>
-						<sl-option value="">All</sl-option>
-						<sl-option value="error">Errors only</sl-option>
-						<sl-option value="slow">Slow only</sl-option>
-					</sl-select>
+					<sl-input name="q" label="Search" placeholder="service:cart status:error op:checkout duration:>1000" value={ data.Query } style="flex: 3;"></sl-input>
 					if data.Window != 60 {
 						<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
 					}
 					<sl-button type="submit" variant="primary">Search</sl-button>
+				</div>
+				<div class="search-hint">
+					<sl-icon name="lightbulb"></sl-icon>
+					<code>service:name</code> <code>op:checkout</code> <code>status:error,slow</code> <code>duration:&gt;1000</code> <code>"phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
 		</div>
@@ -123,11 +113,11 @@ templ Traces(data TracesData) {
 				if data.Offset > 0 || data.HasMore {
 					<div class="pagination">
 						if data.Offset > 0 {
-							<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
+							<sl-button href={ tracesURL(data.Query, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
 						}
 						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Traces)) }</span>
 						if data.HasMore {
-							<sl-button href={ paginationURL("/traces", data.Query, data.Service, data.Status, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
+							<sl-button href={ tracesURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
 						}
 					</div>
 				}
@@ -140,9 +130,27 @@ templ Traces(data TracesData) {
 				flex-wrap: wrap;
 				align-items: flex-end;
 			}
-			.search-form sl-input, .search-form sl-select {
+			.search-form sl-input {
 				flex: 1;
-				min-width: 150px;
+				min-width: 200px;
+			}
+			.search-hint {
+				margin-top: 0.75rem;
+				font-size: 0.75rem;
+				color: var(--text-muted);
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
+				flex-wrap: wrap;
+			}
+			.search-hint sl-icon {
+				font-size: 0.875rem;
+			}
+			.search-hint code {
+				background: var(--bg-tertiary);
+				padding: 0.125rem 0.375rem;
+				border-radius: 0.25rem;
+				font-size: 0.7rem;
 			}
 			.pagination {
 				display: flex;
@@ -181,6 +189,8 @@ type SpanInfo struct {
 	Operation   string
 	Duration    float64
 	Status      string
+	StatusMsg   string
+	Kind        string
 	StartOffset float64
 	Depth       int
 }
@@ -241,26 +251,104 @@ templ TraceDetail(data TraceDetailData) {
 		</div>
 		<!-- Waterfall Chart -->
 		<div class="card" style="margin-bottom: 1.5rem;">
-			<div class="card-title">Trace Waterfall</div>
-			<div class="waterfall" data-spans={ spansJSON(data.Spans) } data-duration={ fmt.Sprintf("%.0f", data.Duration) }>
-				for _, span := range data.Spans {
-					<div class="waterfall-row">
-						<div class="waterfall-label" style={ fmt.Sprintf("padding-left: %dpx;", span.Depth*20) }>
-							<span class="service">{ span.Service }</span>
-							<span class="operation">{ span.Operation }</span>
+			<div class="card-title" style="display: flex; align-items: center; justify-content: space-between;">
+				<span>Trace Waterfall</span>
+				<div class="waterfall-legend">
+					<span class="legend-item"><span class="legend-dot legend-server"></span>Server</span>
+					<span class="legend-item"><span class="legend-dot legend-client"></span>Client</span>
+					<span class="legend-item"><span class="legend-dot legend-internal"></span>Internal</span>
+					<span class="legend-item"><span class="legend-dot legend-error"></span>Error</span>
+				</div>
+			</div>
+			<div class="waterfall">
+				for i, span := range data.Spans {
+					<div class={ "waterfall-row", spanRowClass(span.Status) } data-span-id={ span.SpanID }>
+						<div class="waterfall-info" style={ fmt.Sprintf("padding-left: %dpx;", span.Depth*20+8) }>
+							<button class="waterfall-toggle" aria-expanded="false" aria-controls={ fmt.Sprintf("span-detail-%d", i) }>
+								<sl-icon name="chevron-right" class="toggle-icon"></sl-icon>
+							</button>
+							<div class="waterfall-label">
+								<span class="service">{ span.Service }</span>
+								<span class="operation">{ span.Operation }</span>
+								if span.Status == "error" && span.StatusMsg != "" {
+									<span class="error-hint" title={ span.StatusMsg }>
+										<sl-icon name="exclamation-circle"></sl-icon>
+									</span>
+								}
+							</div>
 						</div>
 						<div class="waterfall-bar-container">
 							<div
-								class={ "waterfall-bar", waterfallBarClass(span.Status) }
+								class={ "waterfall-bar", waterfallBarClass(span.Status, span.Kind) }
 								style={ waterfallBarStyle(span.StartOffset, span.Duration, data.Duration) }
 							>
 								{ fmt.Sprintf("%.0fms", span.Duration) }
 							</div>
 						</div>
 					</div>
+					<div class="span-detail" id={ fmt.Sprintf("span-detail-%d", i) } hidden>
+						<div class="span-detail-content" style={ fmt.Sprintf("margin-left: %dpx;", span.Depth*20+32) }>
+							<div class="span-detail-grid">
+								<div class="span-detail-item">
+									<span class="span-detail-label">Span ID</span>
+									<span class="span-detail-value mono">{ span.SpanID }</span>
+								</div>
+								if span.ParentID != "" {
+									<div class="span-detail-item">
+										<span class="span-detail-label">Parent ID</span>
+										<span class="span-detail-value mono">{ span.ParentID }</span>
+									</div>
+								}
+								<div class="span-detail-item">
+									<span class="span-detail-label">Duration</span>
+									<span class="span-detail-value">{ fmt.Sprintf("%.2fms", span.Duration) }</span>
+								</div>
+								<div class="span-detail-item">
+									<span class="span-detail-label">Start Offset</span>
+									<span class="span-detail-value">{ fmt.Sprintf("+%.2fms", span.StartOffset) }</span>
+								</div>
+								if span.Kind != "" {
+									<div class="span-detail-item">
+										<span class="span-detail-label">Kind</span>
+										<span class="span-detail-value">{ span.Kind }</span>
+									</div>
+								}
+								<div class="span-detail-item">
+									<span class="span-detail-label">Status</span>
+									<span class={ "span-detail-value", spanStatusClass(span.Status) }>{ span.Status }</span>
+								</div>
+							</div>
+							if span.StatusMsg != "" {
+								<div class="span-error-msg">
+									<sl-icon name="exclamation-triangle"></sl-icon>
+									{ span.StatusMsg }
+								</div>
+							}
+						</div>
+					</div>
 				}
 			</div>
 		</div>
+		<script>
+			// Waterfall expand/collapse
+			document.querySelectorAll('.waterfall-toggle').forEach(btn => {
+				btn.addEventListener('click', (e) => {
+					e.stopPropagation();
+					const row = btn.closest('.waterfall-row');
+					const detail = row.nextElementSibling;
+					const expanded = btn.getAttribute('aria-expanded') === 'true';
+					btn.setAttribute('aria-expanded', !expanded);
+					btn.querySelector('.toggle-icon').name = expanded ? 'chevron-right' : 'chevron-down';
+					detail.hidden = expanded;
+				});
+			});
+			// Click row to toggle
+			document.querySelectorAll('.waterfall-row').forEach(row => {
+				row.addEventListener('click', () => {
+					row.querySelector('.waterfall-toggle')?.click();
+				});
+			});
+		</script>
 		<!-- Logs -->
 		if len(data.Logs) > 0 {
 			<div class="card">
@@ -290,30 +378,100 @@ templ TraceDetail(data TraceDetailData) {
 			</div>
 		}
 		<style>
+			/* Legend */
+			.waterfall-legend {
+				display: flex;
+				gap: 1rem;
+				font-size: 0.75rem;
+				font-weight: 400;
+			}
+			.legend-item {
+				display: flex;
+				align-items: center;
+				gap: 0.375rem;
+				color: var(--text-muted);
+			}
+			.legend-dot {
+				width: 10px;
+				height: 10px;
+				border-radius: 2px;
+			}
+			.legend-server { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); }
+			.legend-client { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }
+			.legend-internal { background: linear-gradient(135deg, #64748b 0%, #475569 100%); }
+			.legend-error { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
+
 			.waterfall {
 				display: flex;
 				flex-direction: column;
-				gap: 0.25rem;
 			}
 			.waterfall-row {
 				display: grid;
-				grid-template-columns: 300px 1fr;
+				grid-template-columns: 320px 1fr;
 				gap: 1rem;
 				align-items: center;
+				padding: 0.375rem 0;
+				border-radius: 0.375rem;
+				cursor: pointer;
+				transition: background 0.1s;
+			}
+			.waterfall-row:hover {
+				background: var(--bg-tertiary);
+			}
+			.waterfall-row-error {
+				background: rgba(239, 68, 68, 0.05);
+			}
+			.waterfall-row-error:hover {
+				background: rgba(239, 68, 68, 0.1);
+			}
+			.waterfall-info {
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
+			}
+			.waterfall-toggle {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				width: 20px;
+				height: 20px;
+				padding: 0;
+				border: none;
+				background: none;
+				color: var(--text-muted);
+				cursor: pointer;
+				border-radius: 0.25rem;
+				flex-shrink: 0;
+			}
+			.waterfall-toggle:hover {
+				background: var(--bg-tertiary);
+				color: var(--text-primary);
+			}
+			.waterfall-toggle .toggle-icon {
+				font-size: 0.75rem;
 			}
 			.waterfall-label {
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
 				font-size: 0.8rem;
 				overflow: hidden;
-				text-overflow: ellipsis;
-				white-space: nowrap;
+				min-width: 0;
 			}
 			.waterfall-label .service {
 				font-weight: 600;
 				color: var(--accent);
+				flex-shrink: 0;
 			}
 			.waterfall-label .operation {
 				color: var(--text-secondary);
-				margin-left: 0.5rem;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.waterfall-label .error-hint {
+				color: var(--danger);
+				flex-shrink: 0;
 			}
 			.waterfall-bar-container {
 				height: 24px;
@@ -331,12 +489,94 @@ templ TraceDetail(data TraceDetailData) {
 				font-size: 0.7rem;
 				color: white;
 				min-width: 40px;
+				font-weight: 500;
+				text-shadow: 0 1px 1px rgba(0,0,0,0.2);
 			}
-			.waterfall-bar-ok {
-				background: var(--accent);
-			}
+			/* Error always takes priority */
 			.waterfall-bar-error {
-				background: var(--danger);
+				background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+			}
+			/* Kind-based colors (when not error) */
+			.waterfall-bar-server {
+				background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+			}
+			.waterfall-bar-client {
+				background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+			}
+			.waterfall-bar-producer {
+				background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+			}
+			.waterfall-bar-consumer {
+				background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+			}
+			.waterfall-bar-internal {
+				background: linear-gradient(135deg, #64748b 0%, #475569 100%);
+			}
+			/* Default fallback */
+			.waterfall-bar-ok {
+				background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+			}
+			/* Span detail panel */
+			.span-detail {
+				overflow: hidden;
+			}
+			.span-detail-content {
+				padding: 0.75rem 1rem;
+				margin: 0.25rem 0 0.5rem;
+				background: var(--bg-tertiary);
+				border-radius: 0.5rem;
+				border-left: 3px solid var(--accent);
+			}
+			.waterfall-row-error + .span-detail .span-detail-content {
+				border-left-color: var(--danger);
+			}
+			.span-detail-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+				gap: 0.75rem;
+			}
+			.span-detail-item {
+				display: flex;
+				flex-direction: column;
+				gap: 0.125rem;
+			}
+			.span-detail-label {
+				font-size: 0.65rem;
+				color: var(--text-muted);
+				text-transform: uppercase;
+				letter-spacing: 0.025em;
+			}
+			.span-detail-value {
+				font-size: 0.8rem;
+				color: var(--text-primary);
+			}
+			.span-detail-value.mono {
+				font-family: 'SF Mono', Monaco, monospace;
+				font-size: 0.75rem;
+			}
+			.span-detail-value.status-error {
+				color: var(--danger);
+				font-weight: 600;
+			}
+			.span-detail-value.status-ok {
+				color: var(--success);
+			}
+			.span-error-msg {
+				display: flex;
+				align-items: flex-start;
+				gap: 0.5rem;
+				margin-top: 0.75rem;
+				padding: 0.625rem 0.75rem;
+				background: rgba(239, 68, 68, 0.1);
+				border-radius: 0.375rem;
+				font-size: 0.8rem;
+				color: var(--danger);
+				font-family: 'SF Mono', Monaco, monospace;
+				word-break: break-word;
+			}
+			.span-error-msg sl-icon {
+				flex-shrink: 0;
+				margin-top: 0.125rem;
 			}
 		</style>
 	}
@@ -349,11 +589,25 @@ func truncateID(id string) string {
 	return id
 }
 
-func waterfallBarClass(status string) string {
+func waterfallBarClass(status, kind string) string {
 	if status == "error" {
 		return "waterfall-bar-error"
 	}
-	return "waterfall-bar-ok"
+	// Map span kind to color class
+	switch {
+	case strings.Contains(kind, "SERVER"):
+		return "waterfall-bar-server"
+	case strings.Contains(kind, "CLIENT"):
+		return "waterfall-bar-client"
+	case strings.Contains(kind, "PRODUCER"):
+		return "waterfall-bar-producer"
+	case strings.Contains(kind, "CONSUMER"):
+		return "waterfall-bar-consumer"
+	case strings.Contains(kind, "INTERNAL"):
+		return "waterfall-bar-internal"
+	default:
+		return "waterfall-bar-ok"
+	}
 }
 
 func waterfallBarStyle(startOffset, duration, totalDuration float64) string {
@@ -384,28 +638,47 @@ func spansJSON(spans []SpanInfo) string {
 	return string(b)
 }
 
-func paginationURL(base, q, service, status string, window, limit, offset int) string {
+func tracesURL(q string, window, limit, offset int) templ.SafeURL {
 	values := url.Values{}
 	if q != "" {
 		values.Set("q", q)
 	}
-	if service != "" {
-		values.Set("service", service)
-	}
-	if status != "" {
-		values.Set("status", status)
-	}
 	if window != 60 {
 		values.Set("window", strconv.Itoa(window))
 	}
-	values.Set("limit", strconv.Itoa(limit))
-	values.Set("offset", strconv.Itoa(offset))
-	return base + "?" + values.Encode()
+	if limit != 50 {
+		values.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		values.Set("offset", strconv.Itoa(offset))
+	}
+	if len(values) == 0 {
+		return "/traces"
+	}
+	return templ.SafeURL("/traces?" + values.Encode())
 }
 
 func traceFilterVariant(current, target string) string {
-	if current == target {
+	// Check if current query contains the target filter
+	if target == "" && current == "" {
+		return "primary"
+	}
+	if target != "" && strings.Contains(current, target) {
 		return "primary"
 	}
 	return "default"
+}
+
+func spanRowClass(status string) string {
+	if status == "error" {
+		return "waterfall-row-error"
+	}
+	return ""
+}
+
+func spanStatusClass(status string) string {
+	if status == "error" {
+		return "status-error"
+	}
+	return "status-ok"
 }

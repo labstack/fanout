@@ -10,30 +10,27 @@ import templruntime "github.com/a-h/templ/runtime"
 
 import (
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
 )
 
 // MetricsData for the metrics explorer page
 type MetricsData struct {
-	Names    []string
-	Selected string
-	Service  string
-	Services []string
-	Window   int
-	Metrics  []MetricRow
-	Limit    int
-	Offset   int
-	HasMore  bool
+	Query   string
+	Window  int
+	Metrics []MetricSummary
 }
 
-type MetricRow struct {
-	Time    string
-	Name    string
-	Service string
-	Type    string
-	Value   float64
+// MetricSummary represents an aggregated metric
+type MetricSummary struct {
+	Name     string
+	Type     string   // gauge, sum, histogram
+	Services []string // services emitting this metric
+	Count    int64
+	Avg      float64
+	Min      float64
+	Max      float64
+	Latest   float64
+	Trend    []float64 // bucketed values for sparkline
 }
 
 // Metrics renders the metrics explorer page
@@ -70,340 +67,247 @@ func Metrics(data MetricsData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"page-header\"><h1 class=\"page-title\">Metrics Explorer</h1><p class=\"page-subtitle\">Browse raw metrics data</p></div><!-- Search Form --> <div class=\"card\" style=\"margin-bottom: 1.5rem;\"><form method=\"GET\" action=\"/metrics\" class=\"search-form\"><div class=\"form-row\"><sl-select name=\"name\" label=\"Metric Name\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"page-header\"><div class=\"page-header-left\"><h1 class=\"page-title\">Metrics Explorer</h1><p class=\"page-subtitle\">Explore aggregated metrics</p></div></div><!-- Search Form --> <div class=\"card\" style=\"margin-bottom: 1.5rem;\"><form method=\"GET\" action=\"/metrics\" class=\"search-form\"><div class=\"form-row\"><sl-input name=\"q\" label=\"Search\" placeholder=\"name:http.* service:cart type:gauge\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var3 string
-			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(data.Selected)
+			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(data.Query)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 42, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 41, Col: 107}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\"><sl-option value=\"\">All metrics</sl-option> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" style=\"flex: 3;\"></sl-input> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			for _, n := range data.Names {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<sl-option value=\"")
+			if data.Window != 60 {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<input type=\"hidden\" name=\"window\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var4 string
-				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(n)
+				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Window))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 45, Col: 27}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 43, Col: 79}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var5 string
-				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(n)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 45, Col: 33}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</sl-option>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\"> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</sl-select> <sl-select name=\"service\" label=\"Service\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<sl-button type=\"submit\" variant=\"primary\">Search</sl-button></div><div class=\"search-hint\"><sl-icon name=\"lightbulb\"></sl-icon> <code>name:pattern</code> <code>service:name</code> <code>type:gauge,sum</code></div></form></div><!-- Results --> <div class=\"card\"><div class=\"card-title\">Results (")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var6 string
-			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(data.Service)
+			var templ_7745c5c3_Var5 string
+			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Metrics)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 48, Col: 67}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 55, Col: 74}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\"><sl-option value=\"\">All services</sl-option> ")
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			for _, svc := range data.Services {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<sl-option value=\"")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var7 string
-				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(svc)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 51, Col: 29}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var8 string
-				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(svc)
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 51, Col: 37}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</sl-option>")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</sl-select> <sl-select name=\"window\" label=\"Time Window\" value=\"")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var9 string
-			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Window))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 54, Col: 88}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"><sl-option value=\"15\">Last 15 min</sl-option> <sl-option value=\"30\">Last 30 min</sl-option> <sl-option value=\"60\">Last 1 hour</sl-option> <sl-option value=\"180\">Last 3 hours</sl-option> <sl-option value=\"360\">Last 6 hours</sl-option> <sl-option value=\"1440\">Last 24 hours</sl-option></sl-select> <sl-button type=\"submit\" variant=\"primary\">Search</sl-button></div></form></div><!-- Results --> <div class=\"card\"><div class=\"card-title\">Results (")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var10 string
-			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Metrics)))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 68, Col: 74}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " metrics)</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, " metrics)</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Metrics) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<p style=\"color: var(--text-muted); text-align: center; padding: 2rem;\">No metrics found</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"empty-state\"><sl-icon name=\"bar-chart-2\"></sl-icon><div class=\"empty-state-title\">No metrics found</div><div class=\"empty-state-message\">Try adjusting your search filters or check if metrics are being collected.</div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<table class=\"table\"><thead><tr><th>Time</th><th>Name</th><th>Service</th><th>Type</th><th>Value</th></tr></thead> <tbody>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<table class=\"table\"><thead><tr><th>Name</th><th>Type</th><th>Count</th><th>Avg</th><th>Min</th><th>Max</th><th>Trend</th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				for _, m := range data.Metrics {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<tr><td style=\"font-family: monospace; font-size: 0.8rem;\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<tr><td><div class=\"metric-name\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var6 string
+					templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(m.Name)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 79, Col: 42}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if len(m.Services) > 0 {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"metric-services\">")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						for i, svc := range m.Services {
+							if i < 3 {
+								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<a href=\"")
+								if templ_7745c5c3_Err != nil {
+									return templ_7745c5c3_Err
+								}
+								var templ_7745c5c3_Var7 templ.SafeURL
+								templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/services/"+pathEscape(svc), data.Window)))
+								if templ_7745c5c3_Err != nil {
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 84, Col: 91}
+								}
+								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
+								if templ_7745c5c3_Err != nil {
+									return templ_7745c5c3_Err
+								}
+								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"service-tag\">")
+								if templ_7745c5c3_Err != nil {
+									return templ_7745c5c3_Err
+								}
+								var templ_7745c5c3_Var8 string
+								templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(svc)
+								if templ_7745c5c3_Err != nil {
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 84, Col: 119}
+								}
+								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+								if templ_7745c5c3_Err != nil {
+									return templ_7745c5c3_Err
+								}
+								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</a> ")
+								if templ_7745c5c3_Err != nil {
+									return templ_7745c5c3_Err
+								}
+							}
+						}
+						if len(m.Services) > 3 {
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<span class=\"service-more\">+")
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+							var templ_7745c5c3_Var9 string
+							templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(m.Services)-3))
+							if templ_7745c5c3_Err != nil {
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 88, Col: 78}
+							}
+							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span>")
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</div>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</td><td><sl-badge variant=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var10 string
+					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(metricTypeVariant(m.Type))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 93, Col: 57}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var11 string
-					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(m.Time)
+					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(m.Type)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 85, Col: 71}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 93, Col: 68}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</td><td>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</sl-badge></td><td class=\"mono\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var12 string
-					templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(m.Name)
+					templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(formatCount(m.Count))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 86, Col: 20}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 94, Col: 47}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</td><td>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</td><td class=\"mono\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					if m.Service != "" {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<a href=\"")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						var templ_7745c5c3_Var13 templ.SafeURL
-						templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/services/"+pathEscape(m.Service), data.Window)))
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 89, Col: 94}
-						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\">")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						var templ_7745c5c3_Var14 string
-						templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(m.Service)
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 89, Col: 108}
-						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</a>")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-					} else {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<span style=\"color: var(--text-muted);\">—</span>")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
+					var templ_7745c5c3_Var13 string
+					templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(formatValue(m.Avg))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 95, Col: 45}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</td><td><sl-badge variant=\"")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</td><td class=\"mono\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var14 string
+					templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(formatValue(m.Min))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 96, Col: 45}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</td><td class=\"mono\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var15 string
-					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(metricTypeVariant(m.Type))
+					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(formatValue(m.Max))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 94, Col: 57}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 97, Col: 45}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</td><td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var16 string
-					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(m.Type)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 94, Col: 68}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+					templ_7745c5c3_Err = MetricSparkline(m.Trend).Render(ctx, templ_7745c5c3_Buffer)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</sl-badge></td><td style=\"font-family: monospace;\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var17 string
-					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.2f", m.Value))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 95, Col: 74}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</td></tr>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</td></tr>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</tbody></table><!-- Pagination --> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</tbody></table>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if data.Offset > 0 || data.HasMore {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<div class=\"pagination\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					if data.Offset > 0 {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<sl-button href=\"")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						var templ_7745c5c3_Var18 string
-						templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(metricsPaginationURL(data.Selected, data.Service, data.Window, data.Limit, data.Offset-data.Limit))
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 104, Col: 123}
-						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\" variant=\"default\" size=\"small\">Previous</sl-button> ")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<span class=\"pagination-info\">Showing ")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var19 string
-					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+1))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 106, Col: 78}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "-")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var20 string
-					templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+len(data.Metrics)))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 106, Col: 131}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "</span> ")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					if data.HasMore {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "<sl-button href=\"")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						var templ_7745c5c3_Var21 string
-						templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(metricsPaginationURL(data.Selected, data.Service, data.Window, data.Limit, data.Offset+data.Limit))
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 108, Col: 123}
-						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "\" variant=\"default\" size=\"small\">Next</sl-button>")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "</div>")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</div><style>\n\t\t\t.search-form .form-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t\talign-items: flex-end;\n\t\t\t}\n\t\t\t.search-form sl-input, .search-form sl-select {\n\t\t\t\tflex: 1;\n\t\t\t\tmin-width: 150px;\n\t\t\t}\n\t\t\t.pagination {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 1rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t\tmargin-top: 1rem;\n\t\t\t}\n\t\t\t.pagination-info {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t</style>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</div><style>\n\t\t\t.search-form .form-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t\talign-items: flex-end;\n\t\t\t}\n\t\t\t.search-form sl-input {\n\t\t\t\tflex: 1;\n\t\t\t\tmin-width: 200px;\n\t\t\t}\n\t\t\t.search-hint {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t}\n\t\t\t.search-hint sl-icon {\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t\t.search-hint code {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tpadding: 0.125rem 0.375rem;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t}\n\t\t\t.metric-name {\n\t\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\t\tfont-size: 0.85rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.metric-services {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.25rem;\n\t\t\t\tmargin-top: 0.25rem;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t}\n\t\t\t.service-tag {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tpadding: 0.1rem 0.35rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t}\n\t\t\t.service-tag:hover {\n\t\t\t\tbackground: var(--accent);\n\t\t\t\tcolor: white;\n\t\t\t}\n\t\t\t.service-more {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\t.mono {\n\t\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t}\n\t\t\t.sparkline {\n\t\t\t\twidth: 80px;\n\t\t\t\theight: 24px;\n\t\t\t}\n\t\t\t.sparkline polyline {\n\t\t\t\tfill: none;\n\t\t\t\tstroke: var(--accent);\n\t\t\t\tstroke-width: 1.5;\n\t\t\t\tstroke-linecap: round;\n\t\t\t\tstroke-linejoin: round;\n\t\t\t}\n\t\t\t.empty-state {\n\t\t\t\ttext-align: center;\n\t\t\t\tpadding: 3rem 1rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\t.empty-state sl-icon {\n\t\t\t\tfont-size: 3rem;\n\t\t\t\tmargin-bottom: 1rem;\n\t\t\t\topacity: 0.5;\n\t\t\t}\n\t\t\t.empty-state-title {\n\t\t\t\tfont-size: 1.1rem;\n\t\t\t\tfont-weight: 500;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.empty-state-message {\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t</style>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -415,6 +319,91 @@ func Metrics(data MetricsData) templ.Component {
 		}
 		return nil
 	})
+}
+
+// MetricSparkline renders an SVG sparkline from values
+func MetricSparkline(values []float64) templ.Component {
+	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
+		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
+		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
+			return templ_7745c5c3_CtxErr
+		}
+		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
+		if !templ_7745c5c3_IsBuffer {
+			defer func() {
+				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
+				if templ_7745c5c3_Err == nil {
+					templ_7745c5c3_Err = templ_7745c5c3_BufErr
+				}
+			}()
+		}
+		ctx = templ.InitializeContext(ctx)
+		templ_7745c5c3_Var16 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var16 == nil {
+			templ_7745c5c3_Var16 = templ.NopComponent
+		}
+		ctx = templ.ClearChildren(ctx)
+		if len(values) > 1 {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<svg class=\"sparkline\" viewBox=\"0 0 100 24\" preserveAspectRatio=\"none\"><polyline points=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var17 string
+			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(metricSparklinePoints(values))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 205, Col: 51}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "\"></polyline></svg>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		} else {
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<span style=\"color: var(--text-muted);\">—</span>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+		}
+		return nil
+	})
+}
+
+func metricSparklinePoints(values []float64) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	// Find min/max for scaling
+	min, max := values[0], values[0]
+	for _, v := range values {
+		if v < min {
+			min = v
+		}
+		if v > max {
+			max = v
+		}
+	}
+
+	// Avoid division by zero
+	rang := max - min
+	if rang == 0 {
+		rang = 1
+	}
+
+	// Generate points
+	var points []string
+	xStep := 100.0 / float64(len(values)-1)
+	for i, v := range values {
+		x := float64(i) * xStep
+		// Invert Y (SVG 0 is top), leave 2px padding
+		y := 22 - ((v-min)/rang)*20
+		points = append(points, fmt.Sprintf("%.1f,%.1f", x, y))
+	}
+
+	return strings.Join(points, " ")
 }
 
 func metricTypeVariant(mtype string) string {
@@ -430,20 +419,30 @@ func metricTypeVariant(mtype string) string {
 	}
 }
 
-func metricsPaginationURL(name, service string, window, limit, offset int) string {
-	values := url.Values{}
-	if name != "" {
-		values.Set("name", name)
+func formatCount(n int64) string {
+	if n >= 1000000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
 	}
-	if service != "" {
-		values.Set("service", service)
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
-	if window != 60 {
-		values.Set("window", strconv.Itoa(window))
+	return fmt.Sprintf("%d", n)
+}
+
+func formatValue(v float64) string {
+	if v == 0 {
+		return "0"
 	}
-	values.Set("limit", strconv.Itoa(limit))
-	values.Set("offset", strconv.Itoa(offset))
-	return "/metrics?" + values.Encode()
+	if v >= 1000000 {
+		return fmt.Sprintf("%.1fM", v/1000000)
+	}
+	if v >= 1000 {
+		return fmt.Sprintf("%.1fk", v/1000)
+	}
+	if v < 0.01 {
+		return fmt.Sprintf("%.4f", v)
+	}
+	return fmt.Sprintf("%.2f", v)
 }
 
 var _ = templruntime.GeneratedTemplate

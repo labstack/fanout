@@ -16,11 +16,7 @@ templ Topology(data TopologyData) {
 		</div>
 		if len(data.Nodes) == 0 {
 			<div class="card">
-				<div class="empty-state">
-					<sl-icon name="share"></sl-icon>
-					<div class="empty-state-title">No topology data</div>
-					<div class="empty-state-message">Service topology will appear here once inter-service calls are detected.</div>
-				</div>
+				@EmptyStateSetup("topology")
 			</div>
 		} else {
 			<!-- Legend -->

@@ -122,3 +122,31 @@ func (q *Query) Service() []string {
 func (q *Query) Severity() []string {
 	return q.Fields["severity"]
 }
+
+// Name returns name filter values, or nil if not set.
+func (q *Query) Name() []string {
+	return q.Fields["name"]
+}
+
+// Type returns type filter values, or nil if not set.
+func (q *Query) Type() []string {
+	return q.Fields["type"]
+}
+
+// Status returns status filter values (error, slow), or nil if not set.
+func (q *Query) Status() []string {
+	return q.Fields["status"]
+}
+
+// Duration returns duration filter (e.g., ">1000", "<500"), or empty if not set.
+func (q *Query) Duration() string {
+	if vals := q.Fields["duration"]; len(vals) > 0 {
+		return vals[0]
+	}
+	return ""
+}
+
+// Operation returns operation filter values, or nil if not set.
+func (q *Query) Operation() []string {
+	return q.Fields["op"]
+}
