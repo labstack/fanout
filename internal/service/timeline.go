@@ -142,4 +142,3 @@ ORDER BY bucket ASC;
 	out.Buckets = buckets
 	return out, nil
 }
-

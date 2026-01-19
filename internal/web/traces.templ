@@ -50,12 +50,9 @@ templ Traces(data TracesData) {
 		</div>
 		<!-- Search Form -->
 		<div class="card" style="margin-bottom: 1.5rem;">
-			<form method="GET" action="/traces" class="search-form">
+			<form method="GET" action="/traces" class="search-form" onsubmit="return cleanFormSubmit(this)">
 				<div class="form-row">
 					<sl-input name="q" label="Search" placeholder="service:cart status:error op:checkout duration:>1000" value={ data.Query } style="flex: 3;"></sl-input>
-					if data.Window != 60 {
-						<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
-					}
 					<sl-button type="submit" variant="primary">Search</sl-button>
 				</div>
 				<div class="search-hint">
@@ -63,6 +60,19 @@ templ Traces(data TracesData) {
 					<code>service:name</code> <code>namespace:default</code> <code>op:checkout</code> <code>status:error,slow</code> <code>duration:&gt;1000</code> <code>"phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
+			<script>
+				function cleanFormSubmit(form) {
+					const url = new URL(form.action, window.location.origin);
+					const q = form.querySelector('[name="q"]').value.trim();
+					if (q) url.searchParams.set('q', q);
+					const ns = new URL(window.location.href).searchParams.get('namespace');
+					if (ns) url.searchParams.set('namespace', ns);
+					const win = new URL(window.location.href).searchParams.get('window');
+					if (win && win !== '60') url.searchParams.set('window', win);
+					window.location.href = url.toString();
+					return false;
+				}
+			</script>
 		</div>
 		<!-- Results -->
 		<div class="card">
