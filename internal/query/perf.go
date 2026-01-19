@@ -10,15 +10,16 @@ import (
 )
 
 // ParquetGlob returns an optimized glob pattern for parquet files
-// based on the time window. Instead of scanning all partitions,
-// it only includes hours that could contain data within the window.
-func ParquetGlob(lakeDir, signal string, windowMinutes int) string {
+// scoped to a single tenant/namespace partition.
+// Path structure: lake/{signal}/tenant={tenant}/namespace={namespace}/year=*/month=*/day=*/hour=*/part-*.parquet
+func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) string {
 	now := time.Now() // Use local time to match lake writer partitions
 	start := now.Add(-time.Duration(windowMinutes) * time.Minute)
 
-	// If window is large (>=24h), fall back to full glob
+	// If window is large (>=24h), fall back to full glob for the partition
 	if windowMinutes >= 24*60 {
-		return sqlQuote(fmt.Sprintf("%s/%s/year=*/month=*/day=*/hour=*/part-*.parquet", lakeDir, signal))
+		return sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/part-*.parquet",
+			lakeDir, signal, tenant, namespace))
 	}
 
 	// Expand hour patterns to actual existing files, otherwise DuckDB errors
@@ -28,18 +29,19 @@ func ParquetGlob(lakeDir, signal string, windowMinutes int) string {
 
 	filesSet := make(map[string]struct{})
 	for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
-		pattern := fmt.Sprintf("%s/%s/year=%d/month=%02d/day=%02d/hour=%02d/part-*.parquet",
-			lakeDir, signal, t.Year(), t.Month(), t.Day(), t.Hour())
+		pattern := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d/hour=%02d/part-*.parquet",
+			lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day(), t.Hour())
 		matches, _ := filepath.Glob(pattern)
 		for _, m := range matches {
 			filesSet[m] = struct{}{}
 		}
 	}
 
-	// If there are no files in the window, return a broad glob. Callers may
-	// treat the resulting read_parquet error as "no data yet".
+	// If there are no files in the window, return a broad glob for the partition.
+	// Callers may treat the resulting read_parquet error as "no data yet".
 	if len(filesSet) == 0 {
-		return sqlQuote(fmt.Sprintf("%s/%s/year=*/month=*/day=*/hour=*/part-*.parquet", lakeDir, signal))
+		return sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/part-*.parquet",
+			lakeDir, signal, tenant, namespace))
 	}
 
 	files := make([]string, 0, len(filesSet))

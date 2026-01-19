@@ -7,7 +7,7 @@ import (
 )
 
 // Timeline returns time-bucketed metrics with anomaly detection.
-func (s *Service) Timeline(ctx context.Context, svc string, window, granularity int) (*TimelineResult, error) {
+func (s *Service) Timeline(ctx context.Context, svc string, window, granularity int, namespace, tenantID string) (*TimelineResult, error) {
 	if window == 0 {
 		window = 60
 	}
@@ -24,6 +24,8 @@ func (s *Service) Timeline(ctx context.Context, svc string, window, granularity 
 	if svc != "" {
 		svcFilter = fmt.Sprintf(`AND "name=service_name" = '%s'`, escapeSQL(svc))
 	}
+	// Always scope to single partition
+	namespace, tenantID = s.defaults(namespace, tenantID)
 
 	q := fmt.Sprintf(`
 SELECT
@@ -36,7 +38,7 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
   %s
 GROUP BY bucket
 ORDER BY bucket ASC;
-`, granularity, s.duck.SpansGlob(window), window, svcFilter)
+`, granularity, s.duck.SpansGlob(tenantID, namespace, window), window, svcFilter)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -141,33 +143,3 @@ ORDER BY bucket ASC;
 	return out, nil
 }
 
-// escapeSQL escapes single quotes for SQL string literals (used in = comparisons).
-func escapeSQL(s string) string {
-	result := ""
-	for _, c := range s {
-		if c == '\'' {
-			result += "''"
-		} else {
-			result += string(c)
-		}
-	}
-	return result
-}
-
-// escapeLikePattern escapes SQL LIKE special characters (%, _) plus quotes.
-func escapeLikePattern(s string) string {
-	result := ""
-	for _, c := range s {
-		switch c {
-		case '\'':
-			result += "''"
-		case '%':
-			result += "\\%"
-		case '_':
-			result += "\\_"
-		default:
-			result += string(c)
-		}
-	}
-	return result
-}

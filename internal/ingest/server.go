@@ -14,12 +14,12 @@ import (
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	"google.golang.org/grpc"
 
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/lake"
 )
 
-type CtxTenantKey struct{}
-
 type Server struct {
+	cfg        config.Config
 	outSpans   chan<- lake.SpanRow
 	outLogs    chan<- lake.LogRow
 	outMetrics chan<- lake.MetricRow
@@ -40,8 +40,8 @@ type metricsService struct {
 	srv *Server
 }
 
-func NewServer(spans chan<- lake.SpanRow, logs chan<- lake.LogRow, metrics chan<- lake.MetricRow) *Server {
-	return &Server{outSpans: spans, outLogs: logs, outMetrics: metrics}
+func NewServer(cfg config.Config, spans chan<- lake.SpanRow, logs chan<- lake.LogRow, metrics chan<- lake.MetricRow) *Server {
+	return &Server{cfg: cfg, outSpans: spans, outLogs: logs, outMetrics: metrics}
 }
 
 func RegisterOTLP(s grpc.ServiceRegistrar, srv *Server) {
@@ -53,14 +53,20 @@ func RegisterOTLP(s grpc.ServiceRegistrar, srv *Server) {
 // ---- Trace ingest ----
 
 func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTraceServiceRequest) (*collectortrace.ExportTraceServiceResponse, error) {
-	tenant, _ := ctx.Value(CtxTenantKey{}).(string)
+	cfg := ts.srv.cfg
 	now := time.Now().UnixNano()
 	for _, rs := range req.ResourceSpans {
 		resourceJSON := toJSON(rs.Resource)
 		svc := getServiceName(rs.Resource)
+		namespace := getServiceNamespace(rs.Resource)
+		if namespace == "" {
+			namespace = cfg.DefaultNS
+		}
 		for _, ss := range rs.ScopeSpans {
 			for _, sp := range ss.Spans {
 				row := lake.SpanRow{
+					TenantID:       cfg.TenantID.String(),
+					Namespace:      namespace,
 					TraceID:        fmt.Sprintf("%x", sp.TraceId),
 					SpanID:         fmt.Sprintf("%x", sp.SpanId),
 					ParentSpanID:   hexOrEmpty(sp.ParentSpanId),
@@ -74,7 +80,6 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 					StatusMsg:      sp.Status.Message,
 					ResourceJSON:   resourceJSON,
 					AttributesJSON: toJSON(sp.Attributes),
-					TenantID:       tenant,
 					IngestedAt:     now,
 				}
 				ts.srv.outSpans <- row
@@ -87,14 +92,20 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 // ---- Logs ingest ----
 
 func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogsServiceRequest) (*collectorlogs.ExportLogsServiceResponse, error) {
-	tenant, _ := ctx.Value(CtxTenantKey{}).(string)
+	cfg := ls.srv.cfg
 	now := time.Now().UnixNano()
 	for _, rl := range req.ResourceLogs {
 		resourceJSON := toJSON(rl.Resource)
 		svc := getServiceName(rl.Resource)
+		namespace := getServiceNamespace(rl.Resource)
+		if namespace == "" {
+			namespace = cfg.DefaultNS
+		}
 		for _, sl := range rl.ScopeLogs {
 			for _, lr := range sl.LogRecords {
 				row := lake.LogRow{
+					TenantID:       cfg.TenantID.String(),
+					Namespace:      namespace,
 					TimeUnixNanos:  int64(lr.TimeUnixNano),
 					Severity:       lr.SeverityText,
 					Body:           bodyString(lr.Body),
@@ -103,7 +114,6 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 					SpanID:         hexOrEmpty(lr.SpanId),
 					ResourceJSON:   resourceJSON,
 					AttributesJSON: toJSON(lr.Attributes),
-					TenantID:       tenant,
 					IngestedAt:     now,
 				}
 				ls.srv.outLogs <- row
@@ -116,17 +126,23 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 // ---- Metrics ingest ----
 
 func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.ExportMetricsServiceRequest) (*collectormetrics.ExportMetricsServiceResponse, error) {
-	tenant, _ := ctx.Value(CtxTenantKey{}).(string)
+	cfg := ms.srv.cfg
 	now := time.Now().UnixNano()
 	for _, rm := range req.ResourceMetrics {
 		resourceJSON := toJSON(rm.Resource)
 		svc := getServiceName(rm.Resource)
+		namespace := getServiceNamespace(rm.Resource)
+		if namespace == "" {
+			namespace = cfg.DefaultNS
+		}
 		for _, sm := range rm.ScopeMetrics {
 			for _, m := range sm.Metrics {
 				switch d := m.Data.(type) {
 				case *metricspb.Metric_Gauge:
 					for _, dp := range d.Gauge.DataPoints {
 						row := lake.MetricRow{
+							TenantID:       cfg.TenantID.String(),
+							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							MType:          "gauge",
@@ -134,7 +150,6 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							Value:          number(dp.Value),
 							AttributesJSON: toJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
-							TenantID:       tenant,
 							IngestedAt:     now,
 						}
 						ms.srv.outMetrics <- row
@@ -146,6 +161,8 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 					}
 					for _, dp := range d.Sum.DataPoints {
 						row := lake.MetricRow{
+							TenantID:       cfg.TenantID.String(),
+							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							MType:          kind,
@@ -153,7 +170,6 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							Value:          number(dp.Value),
 							AttributesJSON: toJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
-							TenantID:       tenant,
 							IngestedAt:     now,
 						}
 						ms.srv.outMetrics <- row
@@ -165,6 +181,8 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							histSum = *dp.Sum
 						}
 						row := lake.MetricRow{
+							TenantID:       cfg.TenantID.String(),
+							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							MType:          "histogram",
@@ -173,7 +191,6 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							HistCountsJSON: toJSON(dp.BucketCounts),
 							AttributesJSON: toJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
-							TenantID:       tenant,
 							IngestedAt:     now,
 							HistCount:      int64(dp.Count),
 							HistSum:        histSum,
@@ -213,11 +230,19 @@ func bodyString(v *common.AnyValue) string {
 }
 
 func getServiceName(r *resourcepb.Resource) string {
+	return getResourceAttr(r, "service.name")
+}
+
+func getServiceNamespace(r *resourcepb.Resource) string {
+	return getResourceAttr(r, "service.namespace")
+}
+
+func getResourceAttr(r *resourcepb.Resource, key string) string {
 	if r == nil {
 		return ""
 	}
 	for _, kv := range r.Attributes {
-		if kv.Key == "service.name" {
+		if kv.Key == key {
 			if s := asString(kv.Value); s != "" {
 				return s
 			}

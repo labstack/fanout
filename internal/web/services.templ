@@ -14,6 +14,7 @@ type ServicesData struct {
 
 type ServiceRow struct {
 	Name      string
+	Namespace string
 	Status    string
 	SpanCount int64
 	P95Ms     float64
@@ -49,6 +50,7 @@ templ Services(data ServicesData) {
 					<thead>
 						<tr>
 							<th>Service</th>
+							<th>Namespace</th>
 							<th>Status</th>
 							<th>Trend</th>
 							<th>Requests</th>
@@ -60,6 +62,13 @@ templ Services(data ServicesData) {
 						for _, svc := range data.Services {
 							<tr>
 								<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc.Name), data.Window)) }>{ svc.Name }</a></td>
+								<td>
+									if svc.Namespace != "" {
+										<span class="namespace-badge">{ svc.Namespace }</span>
+									} else {
+										<span style="color: var(--text-muted);">—</span>
+									}
+								</td>
 								<td>
 									<span class={ "status", statusClass(svc.Status) }>{ svc.Status }</span>
 								</td>
@@ -81,6 +90,7 @@ templ Services(data ServicesData) {
 // ServiceDetailData for the service detail page
 type ServiceDetailData struct {
 	Name         string
+	Namespace    string
 	Status       string
 	P50Ms        float64
 	P95Ms        float64
@@ -141,7 +151,12 @@ templ ServiceDetail(data ServiceDetailData) {
 					{ data.Name }
 					<span class={ "status", statusClass(data.Status) } style="margin-left: 0.75rem; vertical-align: middle;">{ data.Status }</span>
 				</h1>
-				<p class="page-subtitle">Service diagnostics</p>
+				<p class="page-subtitle">
+					if data.Namespace != "" {
+						<span class="namespace-badge" style="margin-right: 0.5rem;">{ data.Namespace }</span>
+					}
+					Service diagnostics
+				</p>
 			</div>
 		</div>
 		<!-- Latency Metrics -->

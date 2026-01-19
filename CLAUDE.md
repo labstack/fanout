@@ -232,6 +232,7 @@ erDiagram
         string span_id PK
         string parent_span_id
         string service_name
+        string namespace
         string name
         string kind
         bigint start_unix_nano
@@ -249,6 +250,7 @@ erDiagram
         string severity
         string body
         string service_name
+        string namespace
         string trace_id FK
         string span_id FK
         blob resource_json
@@ -261,6 +263,7 @@ erDiagram
         string name
         string mtype
         string service_name
+        string namespace
         double value
         blob hist_bounds_json
         blob hist_counts_json
@@ -270,6 +273,15 @@ erDiagram
     }
 
     SPANS ||--o{ LOGS : "trace_id"
+```
+
+### Namespace Support
+
+The `namespace` field captures OTLP's `service.namespace` resource attribute, allowing multi-product deployments to logically separate services. Use `ns:` filter in UI search or MCP tools.
+
+```bash
+# Configure via OTEL resource attributes
+OTEL_RESOURCE_ATTRIBUTES=service.namespace=product-a
 ```
 
 ### Rollup Table (service_rollup)

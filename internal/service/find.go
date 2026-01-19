@@ -8,13 +8,15 @@ import (
 
 // FindParams contains search parameters.
 type FindParams struct {
-	Query    string
-	Service  string
-	Type     string // spans, logs, both
-	Status   string // error, slow, all
-	Window   int
-	Severity []string
-	Limit    int
+	Query     string
+	Service   string
+	Type      string // spans, logs, both
+	Status    string // error, slow, all
+	Window    int
+	Severity  []string
+	Limit     int
+	Namespace string
+	TenantID  string
 }
 
 // Find searches spans and logs with smart defaults.
@@ -28,6 +30,9 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 	if p.Type == "" {
 		p.Type = "both"
 	}
+
+	// Always scope to single partition
+	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
 
 	out := &FindResult{
 		Spans: []SpanResult{},
@@ -75,6 +80,7 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 		filterStr = "AND " + strings.Join(filters, " AND ")
 	}
 
+	// Glob scoped to single partition
 	q := fmt.Sprintf(`
 SELECT "name=trace_id" as trace_id,
        "name=span_id" as span_id,
@@ -88,7 +94,7 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
   %s
 ORDER BY "name=start_unix_nano" DESC
 LIMIT %d;
-`, s.duck.SpansGlob(p.Window), p.Window, filterStr, p.Limit+1)
+`, s.duck.SpansGlob(p.TenantID, p.Namespace, p.Window), p.Window, filterStr, p.Limit+1)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -132,6 +138,7 @@ func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool
 		filterStr = "AND " + strings.Join(filters, " AND ")
 	}
 
+	// Glob scoped to single partition
 	q := fmt.Sprintf(`
 SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
        "name=service_name" as service,
@@ -143,7 +150,7 @@ WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVA
   %s
 ORDER BY "name=time_unix_nano" DESC
 LIMIT %d;
-`, s.duck.LogsGlob(p.Window), p.Window, filterStr, p.Limit+1)
+`, s.duck.LogsGlob(p.TenantID, p.Namespace, p.Window), p.Window, filterStr, p.Limit+1)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {

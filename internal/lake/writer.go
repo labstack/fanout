@@ -17,6 +17,8 @@ import (
 )
 
 type SpanRow struct {
+	TenantID       string  `parquet:"-"` // Partitioning only
+	Namespace      string  `parquet:"-"` // Partitioning only
 	TraceID        string  `parquet:"name=trace_id, type=BYTE_ARRAY, convertedtype=UTF8"`
 	SpanID         string  `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8"`
 	ParentSpanID   string  `parquet:"name=parent_span_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
@@ -30,11 +32,12 @@ type SpanRow struct {
 	StatusMsg      string  `parquet:"name=status_msg, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	ResourceJSON   []byte  `parquet:"name=resource_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	AttributesJSON []byte  `parquet:"name=attributes_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	TenantID       string  `parquet:"name=tenant_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	IngestedAt     int64   `parquet:"name=ingested_unix_nano, type=INT64"`
 }
 
 type LogRow struct {
+	TenantID       string `parquet:"-"` // Partitioning only
+	Namespace      string `parquet:"-"` // Partitioning only
 	TimeUnixNanos  int64  `parquet:"name=time_unix_nano, type=INT64"`
 	Severity       string `parquet:"name=severity, type=BYTE_ARRAY, convertedtype=UTF8"`
 	Body           string `parquet:"name=body, type=BYTE_ARRAY, convertedtype=UTF8"`
@@ -43,11 +46,12 @@ type LogRow struct {
 	SpanID         string `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	ResourceJSON   []byte `parquet:"name=resource_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	AttributesJSON []byte `parquet:"name=attributes_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	TenantID       string `parquet:"name=tenant_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	IngestedAt     int64  `parquet:"name=ingested_unix_nano, type=INT64"`
 }
 
 type MetricRow struct {
+	TenantID       string  `parquet:"-"` // Partitioning only
+	Namespace      string  `parquet:"-"` // Partitioning only
 	TimeUnixNanos  int64   `parquet:"name=time_unix_nano, type=INT64"`
 	Name           string  `parquet:"name=name, type=BYTE_ARRAY, convertedtype=UTF8"`
 	MType          string  `parquet:"name=mtype, type=BYTE_ARRAY, convertedtype=UTF8"`
@@ -57,7 +61,6 @@ type MetricRow struct {
 	HistCountsJSON []byte  `parquet:"name=hist_counts_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	AttributesJSON []byte  `parquet:"name=attributes_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	ResourceJSON   []byte  `parquet:"name=resource_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	TenantID       string  `parquet:"name=tenant_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	IngestedAt     int64   `parquet:"name=ingested_unix_nano, type=INT64"`
 	HistCount      int64   `parquet:"name=hist_count, type=INT64, repetitiontype=OPTIONAL"`
 	HistSum        float64 `parquet:"name=hist_sum, type=DOUBLE, repetitiontype=OPTIONAL"`
@@ -130,36 +133,76 @@ func (w *Writer) maybeFlush() {
 
 func (w *Writer) flushLocked() {
 	now := time.Now()
+
+	// Group spans by tenant/namespace
 	if len(w.bufSpans) > 0 {
-		start := time.Now()
-		_, bytes, err := writeParquet(filepath.Join(w.cfg.LakeDir, "spans"), now, w.bufSpans)
-		if err != nil {
-			log.Printf("[lake] write spans parquet: %v", err)
-		} else {
-			metrics.RecordFlush("spans", bytes, time.Since(start).Seconds())
-			w.bufSpans = w.bufSpans[:0]
+		byPartition := make(map[string][]SpanRow)
+		for _, r := range w.bufSpans {
+			key := r.TenantID + "/" + r.Namespace
+			byPartition[key] = append(byPartition[key], r)
 		}
+		var totalBytes int64
+		start := time.Now()
+		for _, rows := range byPartition {
+			r := rows[0]
+			base := filepath.Join(w.cfg.LakeDir, "spans", fmt.Sprintf("tenant=%s", r.TenantID), fmt.Sprintf("namespace=%s", r.Namespace))
+			_, bytes, err := writeParquet(base, now, rows)
+			if err != nil {
+				log.Printf("[lake] write spans parquet (tenant=%s, namespace=%s): %v", r.TenantID, r.Namespace, err)
+			} else {
+				totalBytes += bytes
+			}
+		}
+		metrics.RecordFlush("spans", totalBytes, time.Since(start).Seconds())
+		w.bufSpans = w.bufSpans[:0]
 	}
+
+	// Group logs by tenant/namespace
 	if len(w.bufLogs) > 0 {
-		start := time.Now()
-		_, bytes, err := writeParquet(filepath.Join(w.cfg.LakeDir, "logs"), now, w.bufLogs)
-		if err != nil {
-			log.Printf("[lake] write logs parquet: %v", err)
-		} else {
-			metrics.RecordFlush("logs", bytes, time.Since(start).Seconds())
-			w.bufLogs = w.bufLogs[:0]
+		byPartition := make(map[string][]LogRow)
+		for _, r := range w.bufLogs {
+			key := r.TenantID + "/" + r.Namespace
+			byPartition[key] = append(byPartition[key], r)
 		}
+		var totalBytes int64
+		start := time.Now()
+		for _, rows := range byPartition {
+			r := rows[0]
+			base := filepath.Join(w.cfg.LakeDir, "logs", fmt.Sprintf("tenant=%s", r.TenantID), fmt.Sprintf("namespace=%s", r.Namespace))
+			_, bytes, err := writeParquet(base, now, rows)
+			if err != nil {
+				log.Printf("[lake] write logs parquet (tenant=%s, namespace=%s): %v", r.TenantID, r.Namespace, err)
+			} else {
+				totalBytes += bytes
+			}
+		}
+		metrics.RecordFlush("logs", totalBytes, time.Since(start).Seconds())
+		w.bufLogs = w.bufLogs[:0]
 	}
+
+	// Group metrics by tenant/namespace
 	if len(w.bufMetrics) > 0 {
-		start := time.Now()
-		_, bytes, err := writeParquet(filepath.Join(w.cfg.LakeDir, "metrics"), now, w.bufMetrics)
-		if err != nil {
-			log.Printf("[lake] write metrics parquet: %v", err)
-		} else {
-			metrics.RecordFlush("metrics", bytes, time.Since(start).Seconds())
-			w.bufMetrics = w.bufMetrics[:0]
+		byPartition := make(map[string][]MetricRow)
+		for _, r := range w.bufMetrics {
+			key := r.TenantID + "/" + r.Namespace
+			byPartition[key] = append(byPartition[key], r)
 		}
+		var totalBytes int64
+		start := time.Now()
+		for _, rows := range byPartition {
+			r := rows[0]
+			base := filepath.Join(w.cfg.LakeDir, "metrics", fmt.Sprintf("tenant=%s", r.TenantID), fmt.Sprintf("namespace=%s", r.Namespace))
+			_, bytes, err := writeParquet(base, now, rows)
+			if err != nil {
+				log.Printf("[lake] write metrics parquet (tenant=%s, namespace=%s): %v", r.TenantID, r.Namespace, err)
+			} else {
+				totalBytes += bytes
+			}
+		}
+		metrics.RecordFlush("metrics", totalBytes, time.Since(start).Seconds())
+		w.bufMetrics = w.bufMetrics[:0]
 	}
+
 	w.lastFlush = now
 }
 

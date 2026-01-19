@@ -43,19 +43,29 @@ CREATE TABLE IF NOT EXISTS service_rollup (
 
 func (d *Duck) Close() error { return d.DB.Close() }
 
-// SpansGlob returns optimized glob pattern for spans within the time window
-func (d *Duck) SpansGlob(windowMinutes int) string {
-	return ParquetGlob(d.cfg.LakeDir, "spans", windowMinutes)
+// SpansGlob returns optimized glob pattern for spans within a single partition
+func (d *Duck) SpansGlob(tenant, namespace string, windowMinutes int) string {
+	return ParquetGlob(d.cfg.LakeDir, "spans", tenant, namespace, windowMinutes)
 }
 
-// LogsGlob returns optimized glob pattern for logs within the time window
-func (d *Duck) LogsGlob(windowMinutes int) string {
-	return ParquetGlob(d.cfg.LakeDir, "logs", windowMinutes)
+// LogsGlob returns optimized glob pattern for logs within a single partition
+func (d *Duck) LogsGlob(tenant, namespace string, windowMinutes int) string {
+	return ParquetGlob(d.cfg.LakeDir, "logs", tenant, namespace, windowMinutes)
 }
 
-// MetricsGlob returns optimized glob pattern for metrics within the time window
-func (d *Duck) MetricsGlob(windowMinutes int) string {
-	return ParquetGlob(d.cfg.LakeDir, "metrics", windowMinutes)
+// MetricsGlob returns optimized glob pattern for metrics within a single partition
+func (d *Duck) MetricsGlob(tenant, namespace string, windowMinutes int) string {
+	return ParquetGlob(d.cfg.LakeDir, "metrics", tenant, namespace, windowMinutes)
+}
+
+// DefaultTenantID returns the configured tenant ID
+func (d *Duck) DefaultTenantID() string {
+	return d.cfg.TenantID.String()
+}
+
+// DefaultNamespace returns the configured default namespace
+func (d *Duck) DefaultNamespace() string {
+	return d.cfg.DefaultNS
 }
 
 func (d *Duck) RunRollups(ctx context.Context) {
@@ -87,7 +97,7 @@ SELECT
   quantile_cont("name=duration_ms", 0.50) AS p50_ms,
   quantile_cont("name=duration_ms", 0.95) AS p95_ms,
   avg(CASE WHEN "name=status_code" = 'STATUS_CODE_ERROR' OR "name=status_code" = 'ERROR' THEN 1 ELSE 0 END) AS error_rate
-FROM read_parquet('%s/spans/year=*/month=*/day=*/hour=*/part-*.parquet')
+FROM read_parquet('%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/part-*.parquet', hive_partitioning=true)
 WHERE bucket > COALESCE((SELECT max(bucket) FROM service_rollup), TIMESTAMP '1970-01-01')
 GROUP BY ALL;
 `, d.cfg.LakeDir))
@@ -111,6 +121,7 @@ type LatencyRow struct {
 }
 
 func (d *Duck) LatencyOverview(ctx context.Context, windowMinutes int) ([]LatencyRow, error) {
+	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
 WITH S AS (
   SELECT "name=service_name" as service_name,
@@ -128,7 +139,7 @@ FROM S
 GROUP BY service_name
 ORDER BY p95_ms DESC
 LIMIT 100;
-`, d.SpansGlob(windowMinutes), windowMinutes)
+`, d.SpansGlob(tenantID, namespace, windowMinutes), windowMinutes)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
@@ -153,6 +164,7 @@ type LogsSample struct {
 }
 
 func (d *Duck) LogsSamples(ctx context.Context, windowMinutes, limit int, pattern string) ([]LogsSample, error) {
+	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
        "name=body" as body,
@@ -163,7 +175,7 @@ WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVA
   AND "name=body" ~ '%s'
 ORDER BY ts DESC
 LIMIT %d;
-`, d.LogsGlob(windowMinutes), windowMinutes, escapeSQL(pattern), limit)
+`, d.LogsGlob(tenantID, namespace, windowMinutes), windowMinutes, escapeSQL(pattern), limit)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
@@ -245,6 +257,7 @@ type ErrorRoute struct {
 }
 
 func (d *Duck) ErrorRoutes(ctx context.Context, windowMinutes, limit int) ([]ErrorRoute, error) {
+	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT "name=body" AS route, COUNT(*) AS count
 FROM read_parquet(%s)
@@ -253,7 +266,7 @@ WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVA
 GROUP BY "name=body"
 ORDER BY count DESC
 LIMIT %d;
-`, d.LogsGlob(windowMinutes), windowMinutes, limit)
+`, d.LogsGlob(tenantID, namespace, windowMinutes), windowMinutes, limit)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err
@@ -278,6 +291,7 @@ type ErrorRouteRow struct {
 }
 
 func (d *Duck) ErrorRouteDetails(ctx context.Context, windowMinutes, limit int) ([]ErrorRouteRow, error) {
+	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
 WITH spans_with_errors AS (
   SELECT "name=service_name" as service_name,
@@ -295,7 +309,7 @@ GROUP BY service_name, name
 HAVING errors > 0
 ORDER BY errors DESC
 LIMIT %d;
-`, d.SpansGlob(windowMinutes), windowMinutes, limit)
+`, d.SpansGlob(tenantID, namespace, windowMinutes), windowMinutes, limit)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err

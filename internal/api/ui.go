@@ -3,6 +3,10 @@ package api
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
@@ -39,11 +43,20 @@ func RegisterUIRoutes(e *echo.Echo, duck *query.Duck, cfg config.Config) {
 	e.GET("/logs", h.Logs)
 	e.GET("/metrics", h.Metrics)
 
+	// API routes
+	e.GET("/api/namespaces", h.Namespaces)
+
 	// Component CSS (dynamic from registry)
 	e.GET("/css/components.css", ComponentCSS)
 
 	// htmx partial routes
 	RegisterPartialRoutes(e, h)
+}
+
+// Namespaces returns discovered namespaces from the data
+func (h *UIHandler) Namespaces(c echo.Context) error {
+	namespaces := h.discoverNamespaces()
+	return c.JSON(200, namespaces)
 }
 
 // ComponentCSS serves combined CSS from all registered components
@@ -58,6 +71,7 @@ func ComponentCSS(c echo.Context) error {
 func (h *UIHandler) Overview(c echo.Context) error {
 	ctx := c.Request().Context()
 	window := parseWindow(c)
+	namespace := parseNamespace(c)
 
 	data := web.OverviewData{Window: window}
 
@@ -69,17 +83,17 @@ func (h *UIHandler) Overview(c echo.Context) error {
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		status = h.getStatus(gctx, window)
+		status = h.getStatus(gctx, window, namespace)
 		return nil
 	})
 
 	g.Go(func() error {
-		topo = h.getTopology(gctx, window)
+		topo = h.getTopology(gctx, window, namespace)
 		return nil
 	})
 
 	g.Go(func() error {
-		timeline = h.getTimeline(gctx, "", window, 5)
+		timeline = h.getTimeline(gctx, "", window, 5, namespace)
 		return nil
 	})
 
@@ -145,17 +159,18 @@ func (h *UIHandler) Services(c echo.Context) error {
 	ctx := c.Request().Context()
 	filter := c.QueryParam("filter")
 	window := parseWindow(c)
+	namespace := parseNamespace(c)
 
 	var topo topoResult
 	var trends map[string][]int64
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		topo = h.getTopology(gctx, window)
+		topo = h.getTopology(gctx, window, namespace)
 		return nil
 	})
 	g.Go(func() error {
-		trends = h.getServiceTrends(gctx, window)
+		trends = h.getServiceTrends(gctx, window, namespace)
 		return nil
 	})
 	if err := g.Wait(); err != nil {
@@ -177,6 +192,7 @@ func (h *UIHandler) Services(c echo.Context) error {
 		}
 		data.Services = append(data.Services, web.ServiceRow{
 			Name:      n.Name,
+			Namespace: n.Namespace,
 			Status:    n.Status,
 			SpanCount: n.SpanCount,
 			P95Ms:     n.P95Ms,
@@ -193,17 +209,18 @@ func (h *UIHandler) ServiceDetail(c echo.Context) error {
 	ctx := c.Request().Context()
 	name := c.Param("name")
 	window := parseWindow(c)
+	namespace := parseNamespace(c)
 
 	var diag diagnoseResult
 	var timeline timelineResult
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
-		diag = h.getDiagnose(gctx, name, window)
+		diag = h.getDiagnose(gctx, name, window, namespace)
 		return nil
 	})
 	g.Go(func() error {
-		timeline = h.getTimeline(gctx, name, window, 5)
+		timeline = h.getTimeline(gctx, name, window, 5, namespace)
 		return nil
 	})
 	if err := g.Wait(); err != nil {
@@ -267,6 +284,7 @@ func (h *UIHandler) ServiceDetail(c echo.Context) error {
 func (h *UIHandler) Topology(c echo.Context) error {
 	ctx := c.Request().Context()
 	window := parseWindow(c)
+	namespace := parseNamespace(c)
 
 	var nodes []web.ServiceNode
 	var edges []web.ServiceEdge
@@ -274,7 +292,7 @@ func (h *UIHandler) Topology(c echo.Context) error {
 	g, gctx := errgroup.WithContext(ctx)
 
 	g.Go(func() error {
-		topo := h.getTopology(gctx, window)
+		topo := h.getTopology(gctx, window, namespace)
 		for _, n := range topo.Nodes {
 			nodes = append(nodes, web.ServiceNode{
 				Name:      n.Name,
@@ -288,7 +306,7 @@ func (h *UIHandler) Topology(c echo.Context) error {
 	})
 
 	g.Go(func() error {
-		edges = h.getTopoEdges(gctx, window)
+		edges = h.getTopoEdges(gctx, window, namespace)
 		return nil
 	})
 
@@ -310,6 +328,7 @@ func (h *UIHandler) Traces(c echo.Context) error {
 	ctx := c.Request().Context()
 	queryStr := c.QueryParam("q")
 	window := parseWindow(c)
+	namespace := parseNamespace(c)
 
 	// Pagination
 	limit := 50
@@ -327,7 +346,7 @@ func (h *UIHandler) Traces(c echo.Context) error {
 		}
 	}
 
-	traces, hasMore := h.searchTracesPage(ctx, queryStr, window, limit, offset)
+	traces, hasMore := h.searchTracesPage(ctx, queryStr, window, limit, offset, namespace)
 
 	data := web.TracesData{
 		Query:   queryStr,
@@ -346,8 +365,9 @@ func (h *UIHandler) TraceDetail(c echo.Context) error {
 	ctx := c.Request().Context()
 	traceID := c.Param("id")
 	window := parseWindow(c)
+	namespace := parseNamespace(c)
 
-	detail := h.getTraceDetail(ctx, traceID, window)
+	detail := h.getTraceDetail(ctx, traceID, window, namespace)
 	return renderTempl(c, web.TraceDetail(detail))
 }
 
@@ -356,6 +376,7 @@ func (h *UIHandler) Logs(c echo.Context) error {
 	ctx := c.Request().Context()
 	query := c.QueryParam("q")
 	window := parseWindow(c)
+	namespace := parseNamespace(c)
 
 	// Pagination
 	limit := 100
@@ -373,7 +394,7 @@ func (h *UIHandler) Logs(c echo.Context) error {
 		}
 	}
 
-	logs, hasMore := h.searchLogsPage(ctx, query, window, limit, offset)
+	logs, hasMore := h.searchLogsPage(ctx, query, window, limit, offset, namespace)
 
 	data := web.LogsData{
 		Query:   query,
@@ -409,6 +430,16 @@ func parseWindow(c echo.Context) int {
 	return window
 }
 
+// parseNamespace reads namespace query param
+func parseNamespace(c echo.Context) string {
+	return c.QueryParam("namespace")
+}
+
+// escapeSQL escapes single quotes for SQL string literals
+func escapeSQL(s string) string {
+	return strings.ReplaceAll(s, "'", "''")
+}
+
 // --- Query helpers (same logic as MCP tools) ---
 
 type statusResult struct {
@@ -435,10 +466,15 @@ type topIssue struct {
 	Detail  string
 }
 
-func (h *UIHandler) getStatus(ctx context.Context, window int) statusResult {
+func (h *UIHandler) getStatus(ctx context.Context, window int, namespace string) statusResult {
 	out := statusResult{TopIssues: []topIssue{}}
 
-	spansGlob := h.duck.SpansGlob(window)
+	// Use provided namespace or default
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	spansGlob := h.duck.SpansGlob(h.duck.DefaultTenantID(), namespace, window)
+
 	q := fmt.Sprintf(`
 SELECT
   "name=service_name" as service,
@@ -546,6 +582,7 @@ type topoResult struct {
 
 type topoNode struct {
 	Name      string
+	Namespace string
 	Status    string
 	SpanCount int64
 	P95Ms     float64
@@ -561,10 +598,15 @@ type topoEdge struct {
 	Status    string
 }
 
-func (h *UIHandler) getTopology(ctx context.Context, window int) topoResult {
+func (h *UIHandler) getTopology(ctx context.Context, window int, namespace string) topoResult {
 	out := topoResult{Nodes: []topoNode{}, Edges: []topoEdge{}}
 
-	spansGlob := h.duck.SpansGlob(window)
+	// Use provided namespace or default
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	spansGlob := h.duck.SpansGlob(h.duck.DefaultTenantID(), namespace, window)
+
 	q := fmt.Sprintf(`
 SELECT
   "name=service_name" as service,
@@ -589,6 +631,7 @@ LIMIT 50;
 		if err := rows.Scan(&n.Name, &n.SpanCount, &n.P95Ms, &n.ErrorRate); err != nil {
 			continue
 		}
+		n.Namespace = namespace
 		n.Status = deriveHealth(n.ErrorRate, n.P95Ms)
 		out.Nodes = append(out.Nodes, n)
 	}
@@ -597,10 +640,15 @@ LIMIT 50;
 }
 
 // getServiceTrends returns per-service request counts bucketed by 5 minutes
-func (h *UIHandler) getServiceTrends(ctx context.Context, window int) map[string][]int64 {
+func (h *UIHandler) getServiceTrends(ctx context.Context, window int, namespace string) map[string][]int64 {
 	out := make(map[string][]int64)
 
-	spansGlob := h.duck.SpansGlob(window)
+	// Use provided namespace or default
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	spansGlob := h.duck.SpansGlob(h.duck.DefaultTenantID(), namespace, window)
+
 	q := fmt.Sprintf(`
 SELECT
   "name=service_name" as service,
@@ -632,10 +680,15 @@ ORDER BY service, bucket ASC;
 }
 
 // getTopoEdges returns caller-callee relationships between services
-func (h *UIHandler) getTopoEdges(ctx context.Context, window int) []web.ServiceEdge {
+func (h *UIHandler) getTopoEdges(ctx context.Context, window int, namespace string) []web.ServiceEdge {
 	var out []web.ServiceEdge
 
-	spansGlob := h.duck.SpansGlob(window)
+	// Use provided namespace or default
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	spansGlob := h.duck.SpansGlob(h.duck.DefaultTenantID(), namespace, window)
+
 	// Find parent-child span relationships across services
 	q := fmt.Sprintf(`
 WITH spans AS (
@@ -700,10 +753,15 @@ type anomaly struct {
 	Description string
 }
 
-func (h *UIHandler) getTimeline(ctx context.Context, service string, window, granularity int) timelineResult {
+func (h *UIHandler) getTimeline(ctx context.Context, service string, window, granularity int, namespace string) timelineResult {
 	out := timelineResult{Buckets: []timelineBucket{}, Anomalies: []anomaly{}}
 
-	spansGlob := h.duck.SpansGlob(window)
+	// Use provided namespace or default
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	spansGlob := h.duck.SpansGlob(h.duck.DefaultTenantID(), namespace, window)
+
 	var args []any
 	svcFilter := ""
 	if service != "" {
@@ -811,14 +869,18 @@ type dependency struct {
 	Status    string
 }
 
-func (h *UIHandler) getDiagnose(ctx context.Context, service string, window int) diagnoseResult {
+func (h *UIHandler) getDiagnose(ctx context.Context, service string, window int, namespace string) diagnoseResult {
 	out := diagnoseResult{
 		TopErrors:    []errorInfo{},
 		SlowOps:      []slowOp{},
 		Dependencies: []dependency{},
 	}
 
-	spansGlob := h.duck.SpansGlob(window)
+	// Use provided namespace or default
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	spansGlob := h.duck.SpansGlob(h.duck.DefaultTenantID(), namespace, window)
 
 	// Get latency percentiles and error rate
 	q := fmt.Sprintf(`
@@ -934,13 +996,16 @@ LIMIT 10;
 
 // --- Traces helpers ---
 
-func (h *UIHandler) searchTracesPage(ctx context.Context, queryStr string, window, limit, offset int) ([]web.TraceRow, bool) {
+func (h *UIHandler) searchTracesPage(ctx context.Context, queryStr string, window, limit, offset int, namespace string) ([]web.TraceRow, bool) {
 	var out []web.TraceRow
 
 	// Parse query DSL
 	q := search.Parse(queryStr)
 
-	spansGlob := h.duck.SpansGlob(window)
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	spansGlob := h.duck.SpansGlob(h.duck.DefaultTenantID(), namespace, window)
 	var args []any
 	filters := []string{
 		fmt.Sprintf(`epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
@@ -1017,7 +1082,7 @@ func (h *UIHandler) searchTracesPage(ctx context.Context, queryStr string, windo
 SELECT DISTINCT ON ("name=trace_id")
   "name=trace_id" as trace_id,
   "name=service_name" as service,
-  "name=name" as operation,
+    "name=name" as operation,
   "name=duration_ms" as duration,
   "name=status_code" as status,
   epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) as ts
@@ -1070,7 +1135,7 @@ func joinFilters(filters []string, op string) string {
 	return result
 }
 
-func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window int) web.TraceDetailData {
+func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window int, namespace string) web.TraceDetailData {
 	out := web.TraceDetailData{
 		TraceID: traceID,
 		Spans:   []web.SpanInfo{},
@@ -1079,7 +1144,10 @@ func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window i
 	}
 
 	// Get all spans for this trace
-	spansGlob := h.duck.SpansGlob(window)
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	spansGlob := h.duck.SpansGlob(h.duck.DefaultTenantID(), namespace, window)
 	q := fmt.Sprintf(`
 	SELECT
 	  "name=span_id" as span_id,
@@ -1201,7 +1269,7 @@ func (h *UIHandler) getTraceDetail(ctx context.Context, traceID string, window i
 	}
 
 	// Get correlated logs
-	logsGlob := h.duck.LogsGlob(window)
+	logsGlob := h.duck.LogsGlob(h.duck.DefaultTenantID(), namespace, window)
 	q = fmt.Sprintf(`
 	SELECT
 	  epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) as ts,
@@ -1235,9 +1303,10 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 	ctx := c.Request().Context()
 	query := c.QueryParam("q")
 	window := parseWindow(c)
+	namespace := parseNamespace(c)
 
 	// Get metrics summary with filters
-	metrics := h.getMetricsSummary(ctx, query, window)
+	metrics := h.getMetricsSummary(ctx, query, window, namespace)
 
 	data := web.MetricsData{
 		Query:   query,
@@ -1249,13 +1318,16 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 }
 
 // getMetricsSummary returns aggregated metrics with sparkline data
-func (h *UIHandler) getMetricsSummary(ctx context.Context, queryStr string, window int) []web.MetricSummary {
+func (h *UIHandler) getMetricsSummary(ctx context.Context, queryStr string, window int, namespace string) []web.MetricSummary {
 	var out []web.MetricSummary
 
 	// Parse query DSL
 	parsed := search.Parse(queryStr)
 
-	metricsGlob := h.duck.MetricsGlob(window)
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	metricsGlob := h.duck.MetricsGlob(h.duck.DefaultTenantID(), namespace, window)
 	var args []any
 	filters := []string{
 		fmt.Sprintf(`epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
@@ -1341,7 +1413,7 @@ LIMIT 100;
 
 	// Get sparkline data (12 time buckets)
 	if len(metricNames) > 0 {
-		sparklines := h.getMetricSparklines(ctx, metricNames, window)
+		sparklines := h.getMetricSparklines(ctx, metricNames, window, namespace)
 		for i := range out {
 			if trend, ok := sparklines[out[i].Name]; ok {
 				out[i].Trend = trend
@@ -1353,10 +1425,10 @@ LIMIT 100;
 }
 
 // getMetricSparklines returns 12-point trend data for each metric
-func (h *UIHandler) getMetricSparklines(ctx context.Context, names []string, window int) map[string][]float64 {
+func (h *UIHandler) getMetricSparklines(ctx context.Context, names []string, window int, namespace string) map[string][]float64 {
 	out := make(map[string][]float64)
 
-	metricsGlob := h.duck.MetricsGlob(window)
+	metricsGlob := h.duck.MetricsGlob(h.duck.DefaultTenantID(), namespace, window)
 	bucketMins := window / 12
 	if bucketMins < 1 {
 		bucketMins = 1
@@ -1486,7 +1558,7 @@ func parseServiceList(v any) []string {
 func (h *UIHandler) getServices(ctx context.Context, window int) []string {
 	var services []string
 
-	spansGlob := h.duck.SpansGlob(window)
+	spansGlob := h.duck.SpansGlob(h.duck.DefaultTenantID(), h.duck.DefaultNamespace(), window)
 	q := fmt.Sprintf(`
 SELECT DISTINCT "name=service_name"
 FROM read_parquet(%s)
@@ -1510,15 +1582,46 @@ LIMIT 100;
 	return services
 }
 
+// discoverNamespaces scans the filesystem to find all namespaces
+func (h *UIHandler) discoverNamespaces() []string {
+	var namespaces []string
+	seen := make(map[string]bool)
+
+	// Scan lake directory for namespace=* directories
+	tenantID := h.duck.DefaultTenantID()
+	basePath := filepath.Join(h.cfg.LakeDir, "spans", fmt.Sprintf("tenant=%s", tenantID))
+
+	entries, err := os.ReadDir(basePath)
+	if err != nil {
+		return namespaces
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "namespace=") {
+			ns := strings.TrimPrefix(entry.Name(), "namespace=")
+			if ns != "" && !seen[ns] {
+				seen[ns] = true
+				namespaces = append(namespaces, ns)
+			}
+		}
+	}
+
+	sort.Strings(namespaces)
+	return namespaces
+}
+
 // --- Logs helpers ---
 
-func (h *UIHandler) searchLogsPage(ctx context.Context, searchQuery string, window, limit, offset int) ([]web.LogRow, bool) {
+func (h *UIHandler) searchLogsPage(ctx context.Context, searchQuery string, window, limit, offset int, namespace string) ([]web.LogRow, bool) {
 	var out []web.LogRow
 
 	// Parse search query for advanced syntax
 	parsed := search.Parse(searchQuery)
 
-	logsGlob := h.duck.LogsGlob(window)
+	if namespace == "" {
+		namespace = h.duck.DefaultNamespace()
+	}
+	logsGlob := h.duck.LogsGlob(h.duck.DefaultTenantID(), namespace, window)
 	var args []any
 	filters := []string{
 		fmt.Sprintf(`epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, window),
@@ -1586,7 +1689,7 @@ func (h *UIHandler) searchLogsPage(ctx context.Context, searchQuery string, wind
 SELECT
   epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) as ts,
   "name=service_name" as service,
-  "name=severity" as severity,
+    "name=severity" as severity,
   "name=body" as body,
   COALESCE("name=trace_id", '') as trace_id
 FROM read_parquet(%s)

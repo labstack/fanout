@@ -47,6 +47,7 @@ func TestWriterFlush(t *testing.T) {
 		LakeDir:      lakeDir,
 		FlushSeconds: 1,
 		MaxRows:      10,
+		DefaultNS:    "default",
 	}
 	w := NewWriter(cfg, chSpans, chLogs, chMetrics)
 
@@ -64,6 +65,7 @@ func TestWriterFlush(t *testing.T) {
 			TraceID:        "trace-1",
 			SpanID:         "span-" + string(rune('0'+i)),
 			ServiceName:    "test-service",
+			Namespace:      "default",
 			Name:           "test-op",
 			StartUnixNanos: now,
 			EndUnixNanos:   now + 1000000,
@@ -75,8 +77,8 @@ func TestWriterFlush(t *testing.T) {
 	// Wait for flush
 	time.Sleep(2 * time.Second)
 
-	// Check parquet file exists
-	matches, err := filepath.Glob(filepath.Join(lakeDir, "spans", "year=*", "month=*", "day=*", "hour=*", "part-*.parquet"))
+	// Check parquet file exists (new path: tenant=*/namespace=*/year=*/...)
+	matches, err := filepath.Glob(filepath.Join(lakeDir, "spans", "tenant=*", "namespace=*", "year=*", "month=*", "day=*", "hour=*", "part-*.parquet"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,6 +104,7 @@ func TestWriterMaxRowsFlush(t *testing.T) {
 		LakeDir:      lakeDir,
 		FlushSeconds: 60, // Long interval
 		MaxRows:      5,  // Small max to trigger flush
+		DefaultNS:    "default",
 	}
 	w := NewWriter(cfg, chSpans, chLogs, chMetrics)
 
@@ -118,6 +121,7 @@ func TestWriterMaxRowsFlush(t *testing.T) {
 			TraceID:        "trace-2",
 			SpanID:         "span-" + string(rune('0'+i)),
 			ServiceName:    "test",
+			Namespace:      "default",
 			Name:           "op",
 			StartUnixNanos: now,
 			EndUnixNanos:   now + 1000000,
@@ -129,7 +133,7 @@ func TestWriterMaxRowsFlush(t *testing.T) {
 	// Short wait - MaxRows should trigger immediate flush
 	time.Sleep(500 * time.Millisecond)
 
-	matches, err := filepath.Glob(filepath.Join(lakeDir, "spans", "year=*", "month=*", "day=*", "hour=*", "part-*.parquet"))
+	matches, err := filepath.Glob(filepath.Join(lakeDir, "spans", "tenant=*", "namespace=*", "year=*", "month=*", "day=*", "hour=*", "part-*.parquet"))
 	if err != nil {
 		t.Fatal(err)
 	}

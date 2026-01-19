@@ -12,9 +12,11 @@ import (
 // diagnose - Service deep-dive with root cause analysis
 
 type DiagnoseIn struct {
-	Service string `json:"service" jsonschema:"Service name to diagnose"`
-	Window  int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
-	Format  string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
+	Service   string `json:"service" jsonschema:"Service name to diagnose"`
+	Window    int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
+	TenantID  string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
+	Format    string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
 type ServiceMetrics struct {
@@ -61,7 +63,7 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 	}
 
 	window := clampInt(in.Window, minWindow, maxWindow, defWindow)
-	result, err := s.svc.Diagnose(ctx, in.Service, window)
+	result, err := s.svc.Diagnose(ctx, in.Service, window, in.Namespace, in.TenantID)
 	if err != nil {
 		return nil, DiagnoseOut{
 			Service:        in.Service,

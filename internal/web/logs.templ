@@ -18,11 +18,12 @@ type LogsData struct {
 }
 
 type LogRow struct {
-	Time     string
-	Service  string
-	Severity string
-	Body     string
-	TraceID  string
+	Time      string
+	Service   string
+	Namespace string
+	Severity  string
+	Body      string
+	TraceID   string
 }
 
 // Logs renders the logs search page
@@ -46,7 +47,7 @@ templ Logs(data LogsData) {
 				</div>
 				<div class="search-hint">
 					<sl-icon name="lightbulb"></sl-icon>
-					<code>service:name</code> <code>severity:ERROR,WARN</code> <code>"exact phrase"</code> <code>-exclude</code>
+					<code>service:name</code> <code>namespace:default</code> <code>severity:ERROR,WARN</code> <code>"exact phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
 		</div>
@@ -66,6 +67,9 @@ templ Logs(data LogsData) {
 							<div class="log-header">
 								<sl-badge variant={ severityVariant(log.Severity) }>{ log.Severity }</sl-badge>
 								<span class="time">{ log.Time }</span>
+								if log.Namespace != "" {
+									<span class="namespace-badge">{ log.Namespace }</span>
+								}
 								if log.Service != "" {
 									<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(log.Service), data.Window)) } class="service">{ log.Service }</a>
 								}

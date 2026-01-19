@@ -14,6 +14,8 @@ import (
 type TimelineIn struct {
 	Service     string `json:"service,omitempty" jsonschema:"Filter by service"`
 	Window      int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=60"`
+	Namespace   string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
+	TenantID    string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
 	Granularity int    `json:"granularity,omitempty" jsonschema:"Bucket size in minutes,default=5"`
 	Format      string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
@@ -48,7 +50,7 @@ func (s *Server) timeline(ctx context.Context, req *mcp.CallToolRequest, in Time
 	window := clampInt(in.Window, minWindow, maxWindow, 60) // default 60 for timeline
 	granularity := clampInt(in.Granularity, minGranularity, maxGranularity, defGranularity)
 
-	result, err := s.svc.Timeline(ctx, in.Service, window, granularity)
+	result, err := s.svc.Timeline(ctx, in.Service, window, granularity, in.Namespace, in.TenantID)
 	if err != nil {
 		return nil, TimelineOut{
 			Service:   in.Service,

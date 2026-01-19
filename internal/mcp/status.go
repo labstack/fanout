@@ -11,8 +11,10 @@ import (
 // status - The entry point. Zero params needed.
 
 type StatusIn struct {
-	Window int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
-	Format string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
+	Window    int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
+	TenantID  string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
+	Format    string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
 type ServiceSummary struct {
@@ -42,7 +44,7 @@ type StatusOut struct {
 
 func (s *Server) status(ctx context.Context, req *mcp.CallToolRequest, in StatusIn) (*mcp.CallToolResult, StatusOut, error) {
 	window := clampInt(in.Window, minWindow, maxWindow, defWindow)
-	result, err := s.svc.Status(ctx, window)
+	result, err := s.svc.Status(ctx, window, in.Namespace, in.TenantID)
 	if err != nil {
 		return nil, StatusOut{
 			Healthy:   true,

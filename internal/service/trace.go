@@ -26,6 +26,9 @@ func (s *Service) Trace(ctx context.Context, traceID string, includeLogs bool, w
 		CriticalPath: []string{},
 	}
 
+	// Use config defaults for partition
+	namespace, tenantID := s.defaults("", "")
+
 	// Get spans (using optimized glob for time window)
 	q := fmt.Sprintf(`
 SELECT "name=span_id" as span_id,
@@ -40,7 +43,7 @@ SELECT "name=span_id" as span_id,
 FROM read_parquet(%s)
 WHERE "name=trace_id" = '%s'
 ORDER BY "name=start_unix_nano" ASC;
-`, s.duck.SpansGlob(window), escapeSQL(traceID))
+`, s.duck.SpansGlob(tenantID, namespace, window), escapeSQL(traceID))
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -195,6 +198,7 @@ ORDER BY "name=start_unix_nano" ASC;
 
 func (s *Service) fetchTraceLogs(ctx context.Context, traceID string, window int) []LogInfo {
 	logs := []LogInfo{}
+	namespace, tenantID := s.defaults("", "")
 
 	q := fmt.Sprintf(`
 SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
@@ -206,7 +210,7 @@ FROM read_parquet(%s)
 WHERE "name=trace_id" = '%s'
 ORDER BY "name=time_unix_nano" ASC
 LIMIT 100;
-`, s.duck.LogsGlob(window), escapeSQL(traceID))
+`, s.duck.LogsGlob(tenantID, namespace, window), escapeSQL(traceID))
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {

@@ -21,6 +21,7 @@ type TracesData struct {
 type TraceRow struct {
 	TraceID   string
 	Service   string
+	Namespace string
 	Operation string
 	Duration  float64
 	Status    string
@@ -59,7 +60,7 @@ templ Traces(data TracesData) {
 				</div>
 				<div class="search-hint">
 					<sl-icon name="lightbulb"></sl-icon>
-					<code>service:name</code> <code>op:checkout</code> <code>status:error,slow</code> <code>duration:&gt;1000</code> <code>"phrase"</code> <code>-exclude</code>
+					<code>service:name</code> <code>namespace:default</code> <code>op:checkout</code> <code>status:error,slow</code> <code>duration:&gt;1000</code> <code>"phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
 		</div>
@@ -78,6 +79,7 @@ templ Traces(data TracesData) {
 						<tr>
 							<th>Trace ID</th>
 							<th>Service</th>
+							<th>Namespace</th>
 							<th>Operation</th>
 							<th>Duration</th>
 							<th>Status</th>
@@ -91,6 +93,13 @@ templ Traces(data TracesData) {
 								<td>
 									if t.Service != "" {
 										<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(t.Service), data.Window)) }>{ t.Service }</a>
+									} else {
+										<span style="color: var(--text-muted);">—</span>
+									}
+								</td>
+								<td>
+									if t.Namespace != "" {
+										<span class="namespace-badge">{ t.Namespace }</span>
 									} else {
 										<span style="color: var(--text-muted);">—</span>
 									}

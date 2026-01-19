@@ -6,10 +6,13 @@ import (
 )
 
 // Status returns system health overview.
-func (s *Service) Status(ctx context.Context, window int) (*StatusResult, error) {
+func (s *Service) Status(ctx context.Context, window int, namespace, tenantID string) (*StatusResult, error) {
 	if window == 0 {
 		window = 15
 	}
+
+	// Always scope to single partition
+	namespace, tenantID = s.defaults(namespace, tenantID)
 
 	q := fmt.Sprintf(`
 SELECT
@@ -22,7 +25,7 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
 GROUP BY "name=service_name"
 ORDER BY cnt DESC
 LIMIT 100;
-`, s.duck.SpansGlob(window), window)
+`, s.duck.SpansGlob(tenantID, namespace, window), window)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {

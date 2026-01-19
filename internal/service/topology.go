@@ -6,7 +6,7 @@ import (
 )
 
 // Topology returns the service dependency map with health indicators.
-func (s *Service) Topology(ctx context.Context, window int) (*TopologyResult, error) {
+func (s *Service) Topology(ctx context.Context, window int, namespace, tenantID string) (*TopologyResult, error) {
 	if window == 0 {
 		window = 60
 	}
@@ -16,8 +16,11 @@ func (s *Service) Topology(ctx context.Context, window int) (*TopologyResult, er
 		Edges: []ServiceEdge{},
 	}
 
+	// Always scope to single partition
+	namespace, tenantID = s.defaults(namespace, tenantID)
+	spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
+
 	// Get service nodes with health
-	spansGlob := s.duck.SpansGlob(window)
 	q := fmt.Sprintf(`
 SELECT
   "name=service_name" as service,

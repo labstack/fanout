@@ -226,7 +226,7 @@ func GetQueryExamples() []QueryExample {
   "name=service_name" as service_name,
   "name=severity" as severity,
   "name=body" as body
-FROM read_parquet('lake/logs/**/*.parquet')
+FROM read_parquet('lake/logs/tenant=*/namespace=*/**/*.parquet')
 WHERE "name=severity" IN ('ERROR', 'FATAL')
   AND "name=time_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000
 ORDER BY "name=time_unix_nano" DESC
@@ -241,7 +241,7 @@ LIMIT 100`,
   "name=name" as operation,
   "name=duration_ms" as duration_ms,
   "name=status_code" as status_code
-FROM read_parquet('lake/spans/**/*.parquet')
+FROM read_parquet('lake/spans/tenant=*/namespace=*/**/*.parquet')
 WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 900) * 1000000000
   AND ("name=parent_span_id" IS NULL OR "name=parent_span_id" = '')
 ORDER BY "name=duration_ms" DESC
@@ -254,7 +254,7 @@ LIMIT 20`,
   "name=service_name" as service_name,
   "name=name" as endpoint,
   COUNT(*) as error_count
-FROM read_parquet('lake/spans/**/*.parquet')
+FROM read_parquet('lake/spans/tenant=*/namespace=*/**/*.parquet')
 WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 1800) * 1000000000
   AND from_utf8("name=attributes_json") ILIKE '%http.status_code%'
 GROUP BY "name=service_name", "name=name"
@@ -268,7 +268,7 @@ LIMIT 20`,
   DATE_TRUNC('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) as minute,
   "name=service_name" as service_name,
   COUNT(*) as request_count
-FROM read_parquet('lake/spans/**/*.parquet')
+FROM read_parquet('lake/spans/tenant=*/namespace=*/**/*.parquet')
 WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000
   AND "name=kind" = 'SPAN_KIND_SERVER'
 GROUP BY minute, "name=service_name"
@@ -276,7 +276,7 @@ ORDER BY minute DESC, request_count DESC
 LIMIT 100`,
 		},
 		{
-			Title:       "Service latency percentiles",
+			Title:       "Service latency from rollup",
 			Description: "P50, P95 latencies by service from rollup table",
 			Query: `SELECT
   service,

@@ -2,20 +2,25 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
+
+	"github.com/google/uuid"
 )
 
 type Config struct {
-	HTTPAddr       string // :7520
-	OTLPGRPCAddr   string // :4317
-	LakeDir        string // ./lake
-	FlushSeconds   int    // 15
-	MaxRows        int    // 50000 per file
-	APIToken       string // bearer for API (optional)
-	RollupEvery    int    // seconds
-	MCPEnabled     bool   // enable MCP server
-	RetentionDays  int    // days to keep data (0 = forever)
-	RetentionHours int    // how often to check retention (hours)
+	HTTPAddr       string    // :7520
+	OTLPGRPCAddr   string    // :4317
+	LakeDir        string    // ./lake
+	FlushSeconds   int       // 15
+	MaxRows        int       // 50000 per file
+	APIToken       string    // bearer for API (optional)
+	RollupEvery    int       // seconds
+	MCPEnabled     bool      // enable MCP server
+	RetentionDays  int       // days to keep data (0 = forever)
+	RetentionHours int       // how often to check retention (hours)
+	TenantID       uuid.UUID // tenant identifier (UUIDv7)
+	DefaultNS      string    // default namespace if not set
 }
 
 func Load() Config {
@@ -30,7 +35,20 @@ func Load() Config {
 		MCPEnabled:     getenvBool("MCP_ENABLED", true),
 		RetentionDays:  getenvInt("RETENTION_DAYS", 30),
 		RetentionHours: getenvInt("RETENTION_HOURS", 1),
+		TenantID:       getenvUUID("TENANT_ID"),
+		DefaultNS:      getenv("DEFAULT_NAMESPACE", "default"),
 	}
+}
+
+func getenvUUID(k string) uuid.UUID {
+	if v := os.Getenv(k); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			log.Fatalf("invalid UUID for %s: %v", k, err)
+		}
+		return id
+	}
+	return uuid.Nil // stable default
 }
 
 func getenvBool(k string, def bool) bool {

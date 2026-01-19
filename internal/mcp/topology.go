@@ -12,8 +12,10 @@ import (
 // topology - Service map with health indicators
 
 type TopologyIn struct {
-	Window int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=60"`
-	Format string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
+	Window    int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=60"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
+	TenantID  string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
+	Format    string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
 type ServiceNode struct {
@@ -43,7 +45,7 @@ type TopologyOut struct {
 
 func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in TopologyIn) (*mcp.CallToolResult, TopologyOut, error) {
 	window := clampInt(in.Window, minWindow, maxWindow, 60) // default 60 for topology
-	result, err := s.svc.Topology(ctx, window)
+	result, err := s.svc.Topology(ctx, window, in.Namespace, in.TenantID)
 	if err != nil {
 		return nil, TopologyOut{Nodes: []ServiceNode{}, Edges: []ServiceEdge{}}, nil
 	}

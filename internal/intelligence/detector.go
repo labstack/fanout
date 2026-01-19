@@ -116,7 +116,8 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	windowMins := int(d.config.LookbackWindow.Minutes())
-	spansGlob := d.duck.SpansGlob(windowMins * 2) // 2x for baseline
+	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
+	spansGlob := d.duck.SpansGlob(tenantID, namespace, windowMins*2) // 2x for baseline
 
 	// Compare current error rate to baseline (previous period)
 	sql := fmt.Sprintf(`
@@ -190,7 +191,8 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	windowMins := int(d.config.LookbackWindow.Minutes())
-	spansGlob := d.duck.SpansGlob(windowMins * 2)
+	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
+	spansGlob := d.duck.SpansGlob(tenantID, namespace, windowMins*2)
 
 	sql := fmt.Sprintf(`
 		WITH current_period AS (
@@ -261,7 +263,8 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	windowMins := int(d.config.LookbackWindow.Minutes())
-	spansGlob := d.duck.SpansGlob(windowMins * 2)
+	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
+	spansGlob := d.duck.SpansGlob(tenantID, namespace, windowMins*2)
 
 	sql := fmt.Sprintf(`
 		WITH current_period AS (
@@ -335,7 +338,8 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	windowMins := int(d.config.LookbackWindow.Minutes())
-	logsGlob := d.duck.LogsGlob(windowMins)
+	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
+	logsGlob := d.duck.LogsGlob(tenantID, namespace, windowMins)
 
 	// Group logs by message pattern (first 100 chars as template)
 	sql := fmt.Sprintf(`
@@ -366,9 +370,9 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 		template, _ := row["template"].(string)
 		severity, _ := row["severity"].(string)
 		serviceName, _ := row["service_name"].(string)
-		count := int(row["occurrence_count"].(float64))
-		firstSeenNano := int64(row["first_seen_nano"].(float64))
-		lastSeenNano := int64(row["last_seen_nano"].(float64))
+		count := toInt(row["occurrence_count"])
+		firstSeenNano := toInt64(row["first_seen_nano"])
+		lastSeenNano := toInt64(row["last_seen_nano"])
 
 		patterns = append(patterns, Pattern{
 			Template:    template,
@@ -470,4 +474,23 @@ func (d *Detector) generateSummary(healthScore float64, anomalies []Anomaly, pat
 	} else {
 		return fmt.Sprintf("Critical system issues (%.0f/100). Immediate attention required.", healthScore)
 	}
+}
+
+// toInt64 converts interface{} to int64, handling both int64 and float64
+func toInt64(v interface{}) int64 {
+	switch n := v.(type) {
+	case int64:
+		return n
+	case float64:
+		return int64(n)
+	case int:
+		return int64(n)
+	default:
+		return 0
+	}
+}
+
+// toInt converts interface{} to int, handling both int64 and float64
+func toInt(v interface{}) int {
+	return int(toInt64(v))
 }

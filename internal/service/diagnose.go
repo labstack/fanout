@@ -6,7 +6,7 @@ import (
 )
 
 // Diagnose returns detailed service diagnostics with root cause analysis.
-func (s *Service) Diagnose(ctx context.Context, svc string, window int) (*DiagnoseResult, error) {
+func (s *Service) Diagnose(ctx context.Context, svc string, window int, namespace, tenantID string) (*DiagnoseResult, error) {
 	if svc == "" {
 		return nil, fmt.Errorf("service is required")
 	}
@@ -21,8 +21,9 @@ func (s *Service) Diagnose(ctx context.Context, svc string, window int) (*Diagno
 		Dependencies: []Dependency{},
 	}
 
-	// Get overall metrics
-	spansGlob := s.duck.SpansGlob(window)
+	// Always scope to single partition
+	namespace, tenantID = s.defaults(namespace, tenantID)
+	spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
 	q := fmt.Sprintf(`
 SELECT
   COUNT(*) as cnt,

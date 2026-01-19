@@ -150,3 +150,8 @@ func (q *Query) Duration() string {
 func (q *Query) Operation() []string {
 	return q.Fields["op"]
 }
+
+// Namespace returns namespace filter values, or nil if not set.
+func (q *Query) Namespace() []string {
+	return q.Fields["namespace"]
+}

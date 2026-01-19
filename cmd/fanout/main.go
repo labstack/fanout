@@ -17,7 +17,6 @@ import (
 
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip" // Register gzip decompressor
-	"google.golang.org/grpc/metadata"
 
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/config"
@@ -73,10 +72,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("listen gRPC: %v", err)
 	}
-	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(withTenantInterceptor()),
-	)
-	ing := ingest.NewServer(chSpans, chLogs, chMetrics)
+	grpcSrv := grpc.NewServer()
+	ing := ingest.NewServer(cfg, chSpans, chLogs, chMetrics)
 	ingest.RegisterOTLP(grpcSrv, ing)
 
 	go func() {
@@ -158,20 +155,4 @@ func main() {
 	ctxShutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
 	_ = e.Shutdown(ctxShutdown)
-}
-
-func withTenantInterceptor() grpc.UnaryServerInterceptor {
-	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		md, ok := metadata.FromIncomingContext(ctx)
-		var tenant string
-		if ok {
-			if vals := md.Get("x-tenant-id"); len(vals) > 0 {
-				tenant = vals[0]
-			}
-		}
-		if tenant == "" {
-			tenant = os.Getenv("DEFAULT_TENANT_ID")
-		}
-		return handler(context.WithValue(ctx, ingest.CtxTenantKey{}, tenant), req)
-	}
 }

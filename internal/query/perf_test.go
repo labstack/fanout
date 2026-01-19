@@ -16,9 +16,12 @@ func TestParquetGlob_OnlyReturnsExistingFiles(t *testing.T) {
 	defer os.RemoveAll(lakeDir)
 
 	now := time.Now()
+	// Path structure: lake/{signal}/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/
 	dir := filepath.Join(
 		lakeDir,
 		"spans",
+		"tenant=00000000-0000-0000-0000-000000000000",
+		"namespace=default",
 		now.Format("year=2006"),
 		now.Format("month=01"),
 		now.Format("day=02"),
@@ -33,7 +36,7 @@ func TestParquetGlob_OnlyReturnsExistingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	glob := ParquetGlob(lakeDir, "spans", 120)
+	glob := ParquetGlob(lakeDir, "spans", "00000000-0000-0000-0000-000000000000", "default", 120)
 	if !strings.Contains(glob, "part-1.parquet") {
 		t.Fatalf("expected glob to include parquet file path, got: %s", glob)
 	}
@@ -49,8 +52,8 @@ func TestParquetGlob_NoFilesFallsBackToBroadGlob(t *testing.T) {
 	}
 	defer os.RemoveAll(lakeDir)
 
-	glob := ParquetGlob(lakeDir, "spans", 15)
-	if !strings.Contains(glob, "year=*/month=*/day=*/hour=*/part-*.parquet") {
+	glob := ParquetGlob(lakeDir, "spans", "test-tenant", "test-namespace", 15)
+	if !strings.Contains(glob, "tenant=test-tenant/namespace=test-namespace/year=*/month=*/day=*/hour=*/part-*.parquet") {
 		t.Fatalf("expected broad glob fallback, got: %s", glob)
 	}
 }

@@ -222,6 +222,18 @@ templ Layout(title string, activePage string, window int) {
 				.sl-theme-dark .status-degraded { background: #b45309; color: #fef3c7; }
 				.sl-theme-dark .status-unhealthy { background: #991b1b; color: #fee2e2; }
 
+				/* Namespace badge */
+				.namespace-badge {
+					display: inline-block;
+					padding: 0.125rem 0.5rem;
+					border-radius: 0.25rem;
+					font-size: 0.7rem;
+					font-weight: 500;
+					background: var(--bg-tertiary);
+					color: var(--text-secondary);
+					border: 1px solid var(--border-color);
+				}
+
 				/* Tables */
 				.table {
 					width: 100%;
@@ -373,6 +385,7 @@ templ Layout(title string, activePage string, window int) {
 					<sl-icon-button class="mobile-nav-toggle" id="mobile-nav-toggle" name="list" label="Menu"></sl-icon-button>
 					<a href={ templ.SafeURL(withWindow("/", window)) } class="header-brand">Fanout</a>
 					<div class="header-spacer"></div>
+					<sl-select id="namespace-select" size="small" style="width: 140px;"></sl-select>
 					<sl-select id="time-window" size="small" value="60" style="width: 120px;">
 						<sl-option value="15">Last 15m</sl-option>
 						<sl-option value="30">Last 30m</sl-option>
@@ -461,6 +474,59 @@ templ Layout(title string, activePage string, window int) {
 						newUrl.searchParams.set('window', newWindow);
 					}
 					window.location.href = newUrl.toString();
+				});
+
+				// Namespace selector
+				const namespaceSelect = document.getElementById('namespace-select');
+				const urlNamespace = currentUrl.searchParams.get('namespace');
+				const storedNamespace = localStorage.getItem('namespace') || 'default';
+
+				async function loadNamespaces() {
+					// Show cached value immediately
+					const displayNs = urlNamespace || storedNamespace;
+					namespaceSelect.innerHTML = `<sl-option value="${displayNs}">${displayNs}</sl-option>`;
+					await customElements.whenDefined('sl-select');
+					await namespaceSelect.updateComplete;
+					namespaceSelect.value = displayNs;
+
+					try {
+						const res = await fetch('/api/namespaces');
+						const namespaces = await res.json();
+						if (namespaces.length === 0) return;
+
+						// Determine namespace to use
+						let namespace = storedNamespace;
+						if (urlNamespace && namespaces.includes(urlNamespace)) {
+							namespace = urlNamespace;
+						} else if (!namespaces.includes(namespace)) {
+							namespace = namespaces[0];
+						}
+
+						// If namespace not in URL, redirect to add it
+						if (!urlNamespace) {
+							localStorage.setItem('namespace', namespace);
+							const url = new URL(window.location.href);
+							url.searchParams.set('namespace', namespace);
+							window.location.replace(url.toString());
+							return;
+						}
+
+						namespaceSelect.innerHTML = namespaces.map(n =>
+							`<sl-option value="${n}">${n}</sl-option>`
+						).join('');
+						await namespaceSelect.updateComplete;
+						namespaceSelect.value = namespace;
+						localStorage.setItem('namespace', namespace);
+					} catch (e) {}
+				}
+				loadNamespaces();
+
+				namespaceSelect.addEventListener('sl-change', (e) => {
+					const namespace = e.target.value;
+					localStorage.setItem('namespace', namespace);
+					const url = new URL(window.location.href);
+					url.searchParams.set('namespace', namespace);
+					window.location.href = url.toString();
 				});
 
 				// Keyboard shortcuts
