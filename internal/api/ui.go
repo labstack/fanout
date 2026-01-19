@@ -432,7 +432,7 @@ func parseWindow(c echo.Context) int {
 
 // parseNamespace reads namespace query param
 func parseNamespace(c echo.Context) string {
-	return c.QueryParam("namespace")
+	return c.QueryParam("ns")
 }
 
 // escapeSQL escapes single quotes for SQL string literals

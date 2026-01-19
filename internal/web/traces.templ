@@ -65,8 +65,8 @@ templ Traces(data TracesData) {
 					const url = new URL(form.action, window.location.origin);
 					const q = form.querySelector('[name="q"]').value.trim();
 					if (q) url.searchParams.set('q', q);
-					const ns = new URL(window.location.href).searchParams.get('namespace');
-					if (ns) url.searchParams.set('namespace', ns);
+					const ns = new URL(window.location.href).searchParams.get('ns');
+					if (ns) url.searchParams.set('ns', ns);
 					const win = new URL(window.location.href).searchParams.get('window');
 					if (win && win !== '60') url.searchParams.set('window', win);
 					window.location.href = url.toString();

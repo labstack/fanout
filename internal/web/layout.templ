@@ -478,7 +478,7 @@ templ Layout(title string, activePage string, window int) {
 
 				// Namespace selector
 				const namespaceSelect = document.getElementById('namespace-select');
-				const urlNamespace = currentUrl.searchParams.get('namespace');
+				const urlNamespace = currentUrl.searchParams.get('ns');
 				const storedNamespace = localStorage.getItem('namespace') || 'default';
 
 				async function loadNamespaces() {
@@ -506,7 +506,7 @@ templ Layout(title string, activePage string, window int) {
 						if (!urlNamespace) {
 							localStorage.setItem('namespace', namespace);
 							const url = new URL(window.location.href);
-							url.searchParams.set('namespace', namespace);
+							url.searchParams.set('ns', namespace);
 							window.location.replace(url.toString());
 							return;
 						}
@@ -525,7 +525,7 @@ templ Layout(title string, activePage string, window int) {
 					const namespace = e.target.value;
 					localStorage.setItem('namespace', namespace);
 					const url = new URL(window.location.href);
-					url.searchParams.set('namespace', namespace);
+					url.searchParams.set('ns', namespace);
 					window.location.href = url.toString();
 				});
 
