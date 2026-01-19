@@ -228,7 +228,7 @@ func timelineSpec(data TimelineData) string {
 	}
 
 	spec := map[string]any{
-		"$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+		"$schema": "https://vega.github.io/schema/vega-lite/v6.json",
 		"width":   "container",
 		"height":  250,
 		"data":    map[string]any{"values": values},

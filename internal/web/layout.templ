@@ -18,7 +18,7 @@ templ Layout(title string, activePage string, window int) {
 			<!-- Vega-Lite -->
 			<script src="https://cdn.jsdelivr.net/npm/vega@6.2.0"></script>
 			<script src="https://cdn.jsdelivr.net/npm/vega-lite@6.4.1"></script>
-			<script src="https://cdn.jsdelivr.net/npm/vega-embed@7.0.2"></script>
+			<script src="https://cdn.jsdelivr.net/npm/vega-embed@7.1.0"></script>
 			<style>
 				:root {
 					--sidebar-width: 220px;
@@ -378,166 +378,152 @@ templ Layout(title string, activePage string, window int) {
 					font-size: 0.875rem;
 				}
 			</style>
-		</head>
-		<body class="sl-theme-light">
-			<div class="app">
-				<header class="header">
-					<sl-icon-button class="mobile-nav-toggle" id="mobile-nav-toggle" name="list" label="Menu"></sl-icon-button>
-					<a href={ templ.SafeURL(withWindow("/", window)) } class="header-brand">Fanout</a>
-					<div class="header-spacer"></div>
-					<sl-select id="namespace-select" size="small" style="width: 140px;"></sl-select>
-					<sl-select id="time-window" size="small" value="60" style="width: 120px;">
-						<sl-option value="15">Last 15m</sl-option>
-						<sl-option value="30">Last 30m</sl-option>
-						<sl-option value="60">Last 1h</sl-option>
-						<sl-option value="180">Last 3h</sl-option>
-						<sl-option value="360">Last 6h</sl-option>
-						<sl-option value="1440">Last 24h</sl-option>
-					</sl-select>
-					<sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
-				</header>
-				<aside class="sidebar">
-					@Nav(activePage, window)
-				</aside>
-				<main class="main">
-					{ children... }
-				</main>
-			</div>
-			<sl-drawer id="mobile-nav" label="Navigation" placement="start">
-				@Nav(activePage, window)
-			</sl-drawer>
 			<script>
-					// Theme toggle
-					const toggle = document.getElementById('theme-toggle');
-					const body = document.body;
-				const saved = localStorage.getItem('theme');
+				// Guard against re-execution when htmx swaps body
+				if (!window._fanoutInit) {
+					window._fanoutInit = true;
 
-				if (saved === 'dark' || (!saved && matchMedia('(prefers-color-scheme: dark)').matches)) {
-					body.classList.replace('sl-theme-light', 'sl-theme-dark');
-					toggle.name = 'sun';
-				}
+					// Initialize UI components (called on load and after htmx swaps)
+					function initUI() {
+						const body = document.body;
 
-					toggle.addEventListener('click', () => {
-						const isDark = body.classList.contains('sl-theme-dark');
-						body.classList.replace(isDark ? 'sl-theme-dark' : 'sl-theme-light', isDark ? 'sl-theme-light' : 'sl-theme-dark');
-						toggle.name = isDark ? 'moon' : 'sun';
-						localStorage.setItem('theme', isDark ? 'light' : 'dark');
-					});
+						// Theme toggle
+						const toggle = document.getElementById('theme-toggle');
+						if (toggle && !toggle._initialized) {
+							toggle._initialized = true;
+							const saved = localStorage.getItem('theme');
+							if (saved === 'dark' || (!saved && matchMedia('(prefers-color-scheme: dark)').matches)) {
+								body.classList.replace('sl-theme-light', 'sl-theme-dark');
+								toggle.name = 'sun';
+							}
+							toggle.addEventListener('click', () => {
+								const isDark = body.classList.contains('sl-theme-dark');
+								body.classList.replace(isDark ? 'sl-theme-dark' : 'sl-theme-light', isDark ? 'sl-theme-light' : 'sl-theme-dark');
+								toggle.name = isDark ? 'moon' : 'sun';
+								localStorage.setItem('theme', isDark ? 'light' : 'dark');
+							});
+						}
 
-					// Mobile navigation
-					const mobileNavToggle = document.getElementById('mobile-nav-toggle');
-					const mobileNav = document.getElementById('mobile-nav');
-					if (mobileNavToggle && mobileNav) {
-						mobileNavToggle.addEventListener('click', () => mobileNav.show());
-					}
+						// Mobile navigation
+						const mobileNavToggle = document.getElementById('mobile-nav-toggle');
+						const mobileNav = document.getElementById('mobile-nav');
+						if (mobileNavToggle && mobileNav && !mobileNavToggle._initialized) {
+							mobileNavToggle._initialized = true;
+							mobileNavToggle.addEventListener('click', () => mobileNav.show());
+						}
 
-					// Vega charts init
-					function initVegaCharts() {
+						// Vega charts
 						document.querySelectorAll('[data-vega]').forEach(el => {
-						try {
-							const spec = JSON.parse(el.dataset.vega);
-							vegaEmbed(el, spec, { actions: false, theme: body.classList.contains('sl-theme-dark') ? 'dark' : undefined });
-						} catch(e) { console.error('Vega error:', e); }
-					});
-				}
-				initVegaCharts();
-				document.body.addEventListener('htmx:afterSwap', initVegaCharts);
+							if (el._vegaInit) return;
+							el._vegaInit = true;
+							try {
+								const spec = JSON.parse(el.dataset.vega);
+								vegaEmbed(el, spec, { actions: false, theme: body.classList.contains('sl-theme-dark') ? 'dark' : undefined });
+							} catch(e) { console.error('Vega error:', e); }
+						});
 
-				// Last updated timestamp
-				let lastUpdateTime = Date.now();
-				function updateTimestamp() {
-					const el = document.getElementById('last-updated');
-					if (!el) return;
-					const seconds = Math.floor((Date.now() - lastUpdateTime) / 1000);
-					if (seconds < 5) el.textContent = 'Updated just now';
-					else if (seconds < 60) el.textContent = `Updated ${seconds}s ago`;
-					else el.textContent = `Updated ${Math.floor(seconds / 60)}m ago`;
-				}
-				setInterval(updateTimestamp, 5000);
-				document.body.addEventListener('htmx:afterSwap', () => {
-					lastUpdateTime = Date.now();
-					updateTimestamp();
-				});
+						// Time window selector
+						const timeSelect = document.getElementById('time-window');
+						if (timeSelect && !timeSelect._initialized) {
+							timeSelect._initialized = true;
+							const currentUrl = new URL(window.location.href);
+							const currentWindow = currentUrl.searchParams.get('window') || '60';
+							timeSelect.value = currentWindow;
 
-				// Time window selector
-				const timeSelect = document.getElementById('time-window');
-				const currentUrl = new URL(window.location.href);
-				const currentWindow = currentUrl.searchParams.get('window') || '60';
-				timeSelect.value = currentWindow;
+							timeSelect.addEventListener('sl-change', (e) => {
+								const newWindow = e.target.value;
+								const newUrl = new URL(window.location.href);
+								if (newWindow === '60') {
+									newUrl.searchParams.delete('window');
+								} else {
+									newUrl.searchParams.set('window', newWindow);
+								}
+								e.target.blur();
+								htmx.ajax('GET', newUrl.pathname + newUrl.search, {target: 'body', swap: 'innerHTML'});
+								history.pushState({}, '', newUrl.toString());
+							});
+						}
 
-				timeSelect.addEventListener('sl-change', (e) => {
-					const newWindow = e.target.value;
-					const newUrl = new URL(window.location.href);
-					if (newWindow === '60') {
-						newUrl.searchParams.delete('window');
-					} else {
-						newUrl.searchParams.set('window', newWindow);
+						// Namespace selector
+						const namespaceSelect = document.getElementById('namespace-select');
+						if (namespaceSelect && !namespaceSelect._initialized) {
+							namespaceSelect._initialized = true;
+							const currentUrl = new URL(window.location.href);
+							const urlNamespace = currentUrl.searchParams.get('ns');
+							const storedNamespace = localStorage.getItem('namespace') || 'default';
+
+							async function loadNamespaces() {
+								const displayNs = urlNamespace || storedNamespace;
+								namespaceSelect.innerHTML = `<sl-option value="${displayNs}">${displayNs}</sl-option>`;
+								await customElements.whenDefined('sl-select');
+								await namespaceSelect.updateComplete;
+								namespaceSelect.value = displayNs;
+
+								try {
+									const res = await fetch('/api/namespaces');
+									const namespaces = await res.json();
+									if (namespaces.length === 0) return;
+
+									let namespace = storedNamespace;
+									if (urlNamespace && namespaces.includes(urlNamespace)) {
+										namespace = urlNamespace;
+									} else if (!namespaces.includes(namespace)) {
+										namespace = namespaces[0];
+									}
+
+									if (!urlNamespace) {
+										localStorage.setItem('namespace', namespace);
+										const url = new URL(window.location.href);
+										url.searchParams.set('ns', namespace);
+										htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
+										history.replaceState({}, '', url.toString());
+										return;
+									}
+
+									namespaceSelect.innerHTML = namespaces.map(n =>
+										`<sl-option value="${n}">${n}</sl-option>`
+									).join('');
+									await namespaceSelect.updateComplete;
+									namespaceSelect.value = namespace;
+									localStorage.setItem('namespace', namespace);
+								} catch (e) {}
+							}
+							loadNamespaces();
+
+							namespaceSelect.addEventListener('sl-change', (e) => {
+								const namespace = e.target.value;
+								localStorage.setItem('namespace', namespace);
+								const url = new URL(window.location.href);
+								url.searchParams.set('ns', namespace);
+								e.target.blur();
+								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
+								history.pushState({}, '', url.toString());
+							});
+						}
 					}
-					window.location.href = newUrl.toString();
-				});
 
-				// Namespace selector
-				const namespaceSelect = document.getElementById('namespace-select');
-				const urlNamespace = currentUrl.searchParams.get('ns');
-				const storedNamespace = localStorage.getItem('namespace') || 'default';
+					// Last updated timestamp
+					let lastUpdateTime = Date.now();
+					function updateTimestamp() {
+						const el = document.getElementById('last-updated');
+						if (!el) return;
+						const seconds = Math.floor((Date.now() - lastUpdateTime) / 1000);
+						if (seconds < 5) el.textContent = 'Updated just now';
+						else if (seconds < 60) el.textContent = `Updated ${seconds}s ago`;
+						else el.textContent = `Updated ${Math.floor(seconds / 60)}m ago`;
+					}
 
-				async function loadNamespaces() {
-					// Show cached value immediately
-					const displayNs = urlNamespace || storedNamespace;
-					namespaceSelect.innerHTML = `<sl-option value="${displayNs}">${displayNs}</sl-option>`;
-					await customElements.whenDefined('sl-select');
-					await namespaceSelect.updateComplete;
-					namespaceSelect.value = displayNs;
-
-					try {
-						const res = await fetch('/api/namespaces');
-						const namespaces = await res.json();
-						if (namespaces.length === 0) return;
-
-						// Determine namespace to use
-						let namespace = storedNamespace;
-						if (urlNamespace && namespaces.includes(urlNamespace)) {
-							namespace = urlNamespace;
-						} else if (!namespaces.includes(namespace)) {
-							namespace = namespaces[0];
-						}
-
-						// If namespace not in URL, redirect to add it
-						if (!urlNamespace) {
-							localStorage.setItem('namespace', namespace);
-							const url = new URL(window.location.href);
-							url.searchParams.set('ns', namespace);
-							window.location.replace(url.toString());
-							return;
-						}
-
-						namespaceSelect.innerHTML = namespaces.map(n =>
-							`<sl-option value="${n}">${n}</sl-option>`
-						).join('');
-						await namespaceSelect.updateComplete;
-						namespaceSelect.value = namespace;
-						localStorage.setItem('namespace', namespace);
-					} catch (e) {}
-				}
-				loadNamespaces();
-
-				namespaceSelect.addEventListener('sl-change', (e) => {
-					const namespace = e.target.value;
-					localStorage.setItem('namespace', namespace);
-					const url = new URL(window.location.href);
-					url.searchParams.set('ns', namespace);
-					window.location.href = url.toString();
-				});
-
-				// Keyboard shortcuts
-				(function() {
+					// Keyboard shortcuts
 					let gPressed = false;
 					let gTimeout = null;
-					const windowParam = currentWindow !== '60' ? `?window=${currentWindow}` : '';
-
 					const shortcuts = {
 						'g': { 'o': '/', 's': '/services', 't': '/traces', 'l': '/logs', 'm': '/metrics', 'p': '/topology' }
 					};
+
+					function getWindowParam() {
+						const w = new URL(window.location.href).searchParams.get('window');
+						return w && w !== '60' ? `?window=${w}` : '';
+					}
 
 					function isInputFocused() {
 						const el = document.activeElement;
@@ -573,10 +559,8 @@ templ Layout(title string, activePage string, window int) {
 					}
 
 					document.addEventListener('keydown', (e) => {
-						// Don't trigger when typing in inputs
 						if (isInputFocused() && e.key !== 'Escape') return;
 
-						// Escape - blur inputs, close dialogs
 						if (e.key === 'Escape') {
 							document.activeElement?.blur();
 							document.querySelector('sl-dialog[open]')?.hide();
@@ -584,31 +568,26 @@ templ Layout(title string, activePage string, window int) {
 							return;
 						}
 
-						// ? - show help
 						if (e.key === '?' && !e.shiftKey) {
 							e.preventDefault();
 							document.getElementById('kb-help')?.show();
 							return;
 						}
 
-						// / - focus search
 						if (e.key === '/') {
 							e.preventDefault();
 							focusSearch();
 							return;
 						}
 
-						// j/k - row navigation
 						if (e.key === 'j') { navigateRows(1); return; }
 						if (e.key === 'k') { navigateRows(-1); return; }
 
-						// Enter - open selected row
 						if (e.key === 'Enter') {
 							const row = document.querySelector('.table tbody tr.kb-selected');
 							if (row) { e.preventDefault(); openSelectedRow(); return; }
 						}
 
-						// g+key navigation
 						if (e.key === 'g' && !gPressed) {
 							gPressed = true;
 							gTimeout = setTimeout(() => { gPressed = false; }, 1000);
@@ -619,18 +598,62 @@ templ Layout(title string, activePage string, window int) {
 							e.preventDefault();
 							clearTimeout(gTimeout);
 							gPressed = false;
-							window.location.href = shortcuts.g[e.key] + windowParam;
+							const dest = shortcuts.g[e.key] + getWindowParam();
+							htmx.ajax('GET', dest, {target: 'body', swap: 'innerHTML'});
+							history.pushState({}, '', dest);
 							return;
 						}
 
-						// r - refresh (if htmx refresh button exists)
 						if (e.key === 'r') {
 							const refreshBtn = document.querySelector('[hx-get][hx-target="#overview-content"]');
 							if (refreshBtn) { refreshBtn.click(); return; }
 						}
 					});
-				})();
+
+					// Run on DOM ready
+					document.addEventListener('DOMContentLoaded', () => {
+						initUI();
+						setInterval(updateTimestamp, 5000);
+					});
+
+					// Run after htmx swaps body content
+					document.addEventListener('htmx:afterSwap', (e) => {
+						if (e.detail.target === document.body) {
+							initUI();
+						}
+						lastUpdateTime = Date.now();
+						updateTimestamp();
+					});
+				}
 			</script>
+		</head>
+		<body class="sl-theme-light" hx-boost="true">
+			<div class="app">
+				<header class="header">
+					<sl-icon-button class="mobile-nav-toggle" id="mobile-nav-toggle" name="list" label="Menu"></sl-icon-button>
+					<a href={ templ.SafeURL(withWindow("/", window)) } class="header-brand">Fanout</a>
+					<div class="header-spacer"></div>
+					<sl-select id="namespace-select" size="small" style="width: 140px;"></sl-select>
+					<sl-select id="time-window" size="small" value="60" style="width: 120px;">
+						<sl-option value="15">Last 15m</sl-option>
+						<sl-option value="30">Last 30m</sl-option>
+						<sl-option value="60">Last 1h</sl-option>
+						<sl-option value="180">Last 3h</sl-option>
+						<sl-option value="360">Last 6h</sl-option>
+						<sl-option value="1440">Last 24h</sl-option>
+					</sl-select>
+					<sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
+				</header>
+				<aside class="sidebar">
+					@Nav(activePage, window)
+				</aside>
+				<main class="main">
+					{ children... }
+				</main>
+			</div>
+			<sl-drawer id="mobile-nav" label="Navigation" placement="start">
+				@Nav(activePage, window)
+			</sl-drawer>
 			<!-- Keyboard Help Dialog -->
 			<sl-dialog id="kb-help" label="Keyboard Shortcuts" style="--width: 400px;">
 				<div class="kb-help-content">

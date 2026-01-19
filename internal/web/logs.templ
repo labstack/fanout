@@ -56,7 +56,8 @@ templ Logs(data LogsData) {
 					if (ns) url.searchParams.set('ns', ns);
 					const win = new URL(window.location.href).searchParams.get('window');
 					if (win && win !== '60') url.searchParams.set('window', win);
-					window.location.href = url.toString();
+					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
+					history.pushState({}, '', url.toString());
 					return false;
 				}
 			</script>

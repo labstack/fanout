@@ -1056,7 +1056,7 @@ func latencyChartSpec(data []TimelinePoint) string {
 	}
 
 	spec := map[string]any{
-		"$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+		"$schema": "https://vega.github.io/schema/vega-lite/v6.json",
 		"width":   "container",
 		"height":  180,
 		"data":    map[string]any{"values": values},
@@ -1107,7 +1107,7 @@ func requestChartSpec(data []TimelinePoint) string {
 	}
 
 	spec := map[string]any{
-		"$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+		"$schema": "https://vega.github.io/schema/vega-lite/v6.json",
 		"width":   "container",
 		"height":  180,
 		"data":    map[string]any{"values": values},

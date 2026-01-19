@@ -238,7 +238,8 @@ templ Topology(data TopologyData) {
 									if (windowMinutes !== 60) {
 										href += '?window=' + encodeURIComponent(windowMinutes);
 									}
-									window.location.href = href;
+									htmx.ajax('GET', href, {target: 'body', swap: 'innerHTML'});
+									history.pushState({}, '', href);
 								}
 							});
 						});
