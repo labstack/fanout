@@ -1,94 +1,107 @@
 # Fanout justfile
 
+set dotenv-load
+
+export CGO_ENABLED := "1"
+
+bin := "fanout"
+addr := env("HTTP_ADDR", ":7520")
+
 default:
     @just --list
 
-# Install dependencies and tools
-deps:
-    go mod download
-    go install github.com/a-h/templ/cmd/templ@latest
-
-# Generate templ files
-gen:
+# Build binary
+build:
     templ generate
-
-# Build binary (CGO required for DuckDB)
-build: gen
-    CGO_ENABLED=1 go build -o fanout ./cmd/fanout
+    go build -o {{bin}} ./cmd/fanout
 
 # Run server
 run: build
-    ./fanout
+    ./{{bin}}
 
 # Dev mode with auto-reload
 dev:
-    @which air > /dev/null || go install github.com/air-verse/air@latest
+    @command -v air >/dev/null || go install github.com/air-verse/air@latest
     air
 
 # Run tests
-test:
-    CGO_ENABLED=1 go test ./...
+test *ARGS='./...':
+    go test {{ARGS}}
+
+# Test with coverage
+cov:
+    go test -coverprofile=coverage.out ./...
+    go tool cover -html=coverage.out -o coverage.html
+    @echo "Coverage: coverage.html"
+
+# Run benchmarks
+bench:
+    go test -bench=. -benchmem ./...
 
 # Format code
 fmt:
     go fmt ./...
     templ fmt .
 
-# Run go vet
-vet:
+# Run checks
+check: fmt
     go vet ./...
-
-# Run golangci-lint
-lint:
     golangci-lint run
-
-# All checks (used by pre-commit)
-check: gen fmt vet lint build
-    @echo "✓ All checks passed"
+    just build
+    @echo "All checks passed"
 
 # Quick check (no lint)
-qcheck: gen vet build
-    @echo "✓ Quick check passed"
+qcheck: fmt
+    go vet ./...
+    just build
 
-# Clean build artifacts
+# Clean build artifacts (keeps lake data)
 clean:
-    rm -f fanout
+    rm -f {{bin}} coverage.out coverage.html
+    rm -rf tmp/
+
+# Clean everything including data
+clean-all: clean
     rm -rf lake/
 
-# Update dependencies
+# Update deps
 update:
-    go get -u ./...
-    go mod tidy
+    go get -u ./... && go mod tidy
+
+# Install tools
+tools:
+    go install github.com/a-h/templ/cmd/templ@latest
+    go install github.com/air-verse/air@latest
+    go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
 # Health check
 health:
-    @curl -s http://localhost:7520/healthz || echo "Server not running"
+    @curl -sf http://localhost{{addr}}/healthz && echo "OK" || echo "Not running"
 
-# Show endpoints
-endpoints:
-    @echo "HTTP:  http://localhost:7520"
-    @echo "OTLP:  localhost:4317"
-    @echo "MCP:   http://localhost:7520/mcp"
-
-# Lake stats
+# Show lake stats
 lake:
-    @du -sh ./lake 2>/dev/null || echo "No lake dir"
-    @find ./lake -name "*.parquet" 2>/dev/null | wc -l | xargs echo "Parquet files:"
+    @du -sh lake 2>/dev/null || echo "No data"
+    @find lake -name "*.parquet" 2>/dev/null | wc -l | tr -d ' '
 
-# Create and push a release tag (triggers CI release)
+# Tail logs
+logs SERVICE="":
+    @if [ -n "{{SERVICE}}" ]; then \
+        curl -s "http://localhost{{addr}}/api/logs?service={{SERVICE}}" | jq; \
+    else \
+        curl -s "http://localhost{{addr}}/api/logs" | jq; \
+    fi
+
+# Tag release
 tag VERSION:
     git tag v{{VERSION}}
     git push origin v{{VERSION}}
 
-# Build Docker image locally
-docker:
-    docker build -t fanout:local .
+# Build docker image
+docker TAG="local":
+    docker build -t fanout:{{TAG}} .
 
 # Install git hooks
 hooks:
-    @echo '#!/bin/sh' > .git/hooks/pre-commit
-    @echo 'echo "Running pre-commit checks..."' >> .git/hooks/pre-commit
-    @echo 'just qcheck || { echo "❌ Pre-commit checks failed"; exit 1; }' >> .git/hooks/pre-commit
-    @echo 'echo "✓ Pre-commit checks passed"' >> .git/hooks/pre-commit
-    @chmod +x .git/hooks/pre-commit
-    @echo "✓ Git hooks installed"
+    echo 'just qcheck' > .git/hooks/pre-commit
+    chmod +x .git/hooks/pre-commit
+    @echo "Hooks installed"

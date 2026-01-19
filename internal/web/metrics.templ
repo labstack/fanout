@@ -202,7 +202,7 @@ templ Metrics(data MetricsData) {
 templ MetricSparkline(values []float64) {
 	if len(values) > 1 {
 		<svg class="sparkline" viewBox="0 0 100 24" preserveAspectRatio="none">
-			<polyline points={ metricSparklinePoints(values) }/>
+			<polyline points={ metricSparklinePoints(values) }></polyline>
 		</svg>
 	} else {
 		<span style="color: var(--text-muted);">—</span>

@@ -20,3 +20,5 @@ testdata/
 *.pid
 tmp/
 .air.toml
+coverage.out
+coverage.html
