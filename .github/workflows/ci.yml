@@ -27,7 +27,7 @@ jobs:
           fi
 
       - name: Vet
-        run: GOTOOLCHAIN=local go vet ./...
+        run: go vet ./...
 
       - name: Lint
         uses: golangci/golangci-lint-action@v7
@@ -46,7 +46,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Test
-        run: GOTOOLCHAIN=local go test -race -coverprofile=coverage.txt ./...
+        run: go test -race -coverprofile=coverage.txt ./...
 
       - name: Upload coverage
         uses: codecov/codecov-action@v5
@@ -68,5 +68,4 @@ jobs:
       - name: Build
         run: |
           export CGO_ENABLED=1
-          export GOTOOLCHAIN=local
           go build -o fanout ./cmd/fanout
