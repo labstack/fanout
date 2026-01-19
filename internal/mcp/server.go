@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"fmt"
+	"html"
 	"net/http"
 	"time"
 
@@ -219,6 +220,7 @@ const notFoundHTML = `<!DOCTYPE html>
 </body></html>`
 
 func wrapReportHTML(r *Report) string {
+	safeTitle := html.EscapeString(r.Query)
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html><head>
 <title>%s - Fanout Report</title>
@@ -472,7 +474,7 @@ document.querySelectorAll('.chart[data-vega]').forEach(el => {
   } catch(e) { console.error('Vega error:', e); }
 });
 </script>
-</body></html>`, r.Query, r.Query, r.CreatedAt.Format("2006-01-02 15:04:05"), r.ID, r.HTML)
+</body></html>`, safeTitle, safeTitle, r.CreatedAt.Format("2006-01-02 15:04:05"), r.ID, r.HTML)
 }
 
 func renderReportsPage(rpts []*Report) string {
@@ -482,6 +484,7 @@ func renderReportsPage(rpts []*Report) string {
 		if time.Now().After(r.ExpiresAt) {
 			expired = `<sl-icon name="exclamation-circle" style="color:var(--danger)"></sl-icon>`
 		}
+		safeQuery := html.EscapeString(r.Query)
 		rows += fmt.Sprintf(`<tr>
 			<td><a href="/view/r/%s">%s</a></td>
 			<td>%s</td>
@@ -490,7 +493,7 @@ func renderReportsPage(rpts []*Report) string {
 				<sl-button size="small" href="/view/r/%s"><sl-icon name="eye"></sl-icon></sl-button>
 				<sl-button size="small" variant="danger" onclick="deleteReport('%s')"><sl-icon name="trash"></sl-icon></sl-button>
 			</td>
-		</tr>`, r.ID, r.Query, r.CreatedAt.Format("2006-01-02 15:04"), r.ExpiresAt.Format("2006-01-02 15:04"), expired, r.ID, r.ID)
+		</tr>`, r.ID, safeQuery, r.CreatedAt.Format("2006-01-02 15:04"), r.ExpiresAt.Format("2006-01-02 15:04"), expired, r.ID, r.ID)
 	}
 
 	return fmt.Sprintf(`<!DOCTYPE html>

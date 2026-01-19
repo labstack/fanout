@@ -82,7 +82,7 @@ func (h *HealthHandler) checkDuckDB() CheckResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	_, err := h.duck.DB.QueryContext(ctx, "SELECT 1")
+	rows, err := h.duck.DB.QueryContext(ctx, "SELECT 1")
 	latency := time.Since(start).Milliseconds()
 
 	if err != nil {
@@ -92,6 +92,7 @@ func (h *HealthHandler) checkDuckDB() CheckResult {
 			Error:     err.Error(),
 		}
 	}
+	rows.Close()
 
 	return CheckResult{
 		Status:    "ok",

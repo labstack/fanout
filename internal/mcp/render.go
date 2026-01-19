@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"html"
 	"os"
 	"strings"
 	"sync"
@@ -172,28 +173,28 @@ func (s *Server) render(ctx context.Context, req *mcp.CallToolRequest, in Render
 		}
 
 		// Wrap in titled section if title provided
-		html := out.HTML
-		if sec.Title != "" && html != "" {
-			html = `<div class="section"><div class="section-title">` + sec.Title + `</div>` + html + `</div>`
+		sectionHTML := out.HTML
+		if sec.Title != "" && sectionHTML != "" {
+			sectionHTML = `<div class="section"><div class="section-title">` + html.EscapeString(sec.Title) + `</div>` + sectionHTML + `</div>`
 		}
-		htmlParts = append(htmlParts, html)
+		htmlParts = append(htmlParts, sectionHTML)
 	}
 
-	html := `<div class="compose compose-column">` + strings.Join(htmlParts, "") + `</div>`
+	composedHTML := `<div class="compose compose-column">` + strings.Join(htmlParts, "") + `</div>`
 
 	id := genID()
 	report := &Report{
 		ID:        id,
-		Query:     in.Title,
-		Summary:   in.Title,
-		HTML:      html,
+		Query:     html.EscapeString(in.Title),
+		Summary:   html.EscapeString(in.Title),
+		HTML:      composedHTML,
 		CreatedAt: time.Now(),
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 	}
 	reports.Save(report)
 
 	return nil, RenderOut{
-		HTML:     html,
+		HTML:     composedHTML,
 		ShareURL: "/view/r/" + id,
 		ReportID: id,
 	}, nil

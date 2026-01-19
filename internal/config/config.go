@@ -51,8 +51,7 @@ func getenv(k, def string) string {
 func getenvInt(k string, def int) int {
 	if v := os.Getenv(k); v != "" {
 		var i int
-		_, _ = fmt.Sscanf(v, "%d", &i)
-		if i > 0 {
+		if _, err := fmt.Sscanf(v, "%d", &i); err == nil {
 			return i
 		}
 	}

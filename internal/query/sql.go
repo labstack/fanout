@@ -152,6 +152,35 @@ func validateSQL(query string) error {
 		}
 	}
 
+	// Block file-reading table functions (prevent arbitrary file access)
+	// Only read_parquet with lake/ path is allowed
+	fileReaders := []string{
+		"READ_CSV", "READ_JSON", "READ_TEXT", "READ_BLOB",
+		"READ_CSV_AUTO", "READ_JSON_AUTO",
+	}
+	for _, fn := range fileReaders {
+		pattern := regexp.MustCompile(`\b` + fn + `\s*\(`)
+		if pattern.MatchString(upperQuery) {
+			return fmt.Errorf("function '%s' is not allowed; use read_parquet with lake/ paths", fn)
+		}
+	}
+
+	// Validate read_parquet paths - must reference lake/ directory only
+	parquetPattern := regexp.MustCompile(`(?i)READ_PARQUET\s*\(\s*'([^']*)'`)
+	matches := parquetPattern.FindAllStringSubmatch(query, -1)
+	for _, m := range matches {
+		if len(m) > 1 {
+			path := m[1]
+			if !strings.HasPrefix(path, "lake/") && !strings.Contains(path, "/lake/") {
+				return fmt.Errorf("read_parquet path must be within lake/ directory")
+			}
+			// Block path traversal
+			if strings.Contains(path, "..") {
+				return fmt.Errorf("path traversal not allowed")
+			}
+		}
+	}
+
 	// Basic SQL injection checks
 	if strings.Contains(query, "--") && !strings.Contains(query, "-- ") {
 		return fmt.Errorf("potential SQL comment injection detected")
