@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
-          cache: true
+          cache: false
           cache-dependency-path: go.sum
 
       - name: Check formatting
@@ -42,11 +42,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
-          cache: true
+          cache: false
           cache-dependency-path: go.sum
-
-      - name: Clean build cache
-        run: go clean -cache
 
       - name: Test
         run: go test -race -coverprofile=coverage.txt ./...
@@ -65,11 +62,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25.x"
-          cache: true
+          cache: false
           cache-dependency-path: go.sum
-
-      - name: Clean build cache
-        run: go clean -cache
 
       - name: Build
         run: |
