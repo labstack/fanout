@@ -164,8 +164,9 @@ func (w *Writer) flushLocked() {
 }
 
 func writeParquet[T any](base string, ts time.Time, rows []T) (string, int64, error) {
-	year, month, day := ts.Date()
-	hour := ts.Hour()
+	utc := ts.UTC()
+	year, month, day := utc.Date()
+	hour := utc.Hour()
 	dir := filepath.Join(base,
 		fmt.Sprintf("year=%04d", year),
 		fmt.Sprintf("month=%02d", int(month)),

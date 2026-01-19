@@ -181,6 +181,14 @@ just run
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 
+## Tenancy Model
+
+Fanout is designed for **single-tenant deployment**. While `tenant_id` is captured during ingest (from `x-tenant-id` gRPC metadata or `DEFAULT_TENANT_ID` env var), it is **not enforced** in queries—all users see all data.
+
+For multi-tenant deployments:
+- Deploy separate Fanout instances per tenant, OR
+- Add tenant filtering to query paths in `internal/service/` and `internal/mcp/`
+
 ## API Endpoints
 
 ```mermaid

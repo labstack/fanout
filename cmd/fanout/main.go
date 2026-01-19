@@ -22,6 +22,7 @@ import (
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/ingest"
+	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/lake"
 	"github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/query"
@@ -62,6 +63,10 @@ func main() {
 	// Start retention pruner
 	pruner := lake.NewPruner(cfg)
 	go pruner.Run(ctx)
+
+	// Start intelligence detector
+	detector := intelligence.NewDetector(q, intelligence.DefaultDetectorConfig())
+	go detector.Run(ctx)
 
 	// Start gRPC ingest (OTLP)
 	grpcLis, err := net.Listen("tcp", cfg.OTLPGRPCAddr)
