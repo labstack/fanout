@@ -616,11 +616,9 @@ templ Layout(title string, activePage string, window int) {
 						setInterval(updateTimestamp, 5000);
 					});
 
-					// Run after htmx swaps body content
+					// Run after htmx swaps content (body or partial)
 					document.addEventListener('htmx:afterSwap', (e) => {
-						if (e.detail.target === document.body) {
-							initUI();
-						}
+						initUI();
 						lastUpdateTime = Date.now();
 						updateTimestamp();
 					});
