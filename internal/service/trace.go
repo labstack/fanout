@@ -103,24 +103,27 @@ ORDER BY "name=start_unix_nano" ASC;
 		if eventsJSON != nil {
 			if b, ok := eventsJSON.([]byte); ok && len(b) > 0 {
 				var events []SpanEvent
-				json.Unmarshal(b, &events)
-				r.Events = events
+				if err := json.Unmarshal(b, &events); err == nil {
+					r.Events = events
+				}
 			}
 		}
 		// Parse links JSON
 		if linksJSON != nil {
 			if b, ok := linksJSON.([]byte); ok && len(b) > 0 {
 				var links []SpanLink
-				json.Unmarshal(b, &links)
-				r.Links = links
+				if err := json.Unmarshal(b, &links); err == nil {
+					r.Links = links
+				}
 			}
 		}
 		// Parse attributes JSON
 		if attrsJSON != nil {
 			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
 				var attrs map[string]any
-				json.Unmarshal(b, &attrs)
-				r.Attributes = attrs
+				if err := json.Unmarshal(b, &attrs); err == nil {
+					r.Attributes = attrs
+				}
 			}
 		}
 		services[r.Service] = true
