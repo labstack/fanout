@@ -431,7 +431,7 @@ LIMIT 50;
 				}
 				if attrsJSON != nil {
 					if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
-						json.Unmarshal(b, &log.Attributes)
+						_ = json.Unmarshal(b, &log.Attributes)
 					}
 				}
 				out.Logs = append(out.Logs, log)
@@ -590,7 +590,7 @@ LIMIT %d OFFSET %d;
 		}
 		if attrsJSON != nil {
 			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
-				json.Unmarshal(b, &log.Attributes)
+				_ = json.Unmarshal(b, &log.Attributes)
 			}
 		}
 		logs = append(logs, log)
