@@ -12,16 +12,18 @@ import (
 // find - Unified span/log search with smart defaults
 
 type FindIn struct {
-	Query     string   `json:"query,omitempty" jsonschema:"Search pattern (regex for logs, substring for spans)"`
-	Service   string   `json:"service,omitempty" jsonschema:"Filter by service"`
-	Type      string   `json:"type,omitempty" jsonschema:"Signal type: spans|logs|both,default=both"`
-	Status    string   `json:"status,omitempty" jsonschema:"Filter: error|slow|all,default=all"`
-	Window    int      `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
-	Namespace string   `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
-	TenantID  string   `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
-	Severity  []string `json:"severity,omitempty" jsonschema:"Log severity filter: DEBUG,INFO,WARN,ERROR,FATAL"`
-	Limit     int      `json:"limit,omitempty" jsonschema:"Max results per type,default=50"`
-	Format    string   `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
+	Query     string            `json:"query,omitempty" jsonschema:"Search pattern (regex for logs, substring for spans)"`
+	Service   string            `json:"service,omitempty" jsonschema:"Filter by service"`
+	Operation string            `json:"operation,omitempty" jsonschema:"Filter by operation/span name"`
+	Type      string            `json:"type,omitempty" jsonschema:"Signal type: spans|logs|both,default=both"`
+	Status    string            `json:"status,omitempty" jsonschema:"Filter: error|slow|all,default=all"`
+	Window    int               `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
+	Namespace string            `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
+	TenantID  string            `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
+	Severity  []string          `json:"severity,omitempty" jsonschema:"Log severity filter: DEBUG,INFO,WARN,ERROR,FATAL"`
+	Attrs     map[string]string `json:"attrs,omitempty" jsonschema:"Attribute filters as key=value pairs (e.g. http.status_code=500)"`
+	Limit     int               `json:"limit,omitempty" jsonschema:"Max results per type,default=50"`
+	Format    string            `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
 type FoundSpan struct {
@@ -66,12 +68,14 @@ func (s *Server) find(ctx context.Context, req *mcp.CallToolRequest, in FindIn) 
 	result, err := s.svc.Find(ctx, service.FindParams{
 		Query:     in.Query,
 		Service:   in.Service,
+		Operation: in.Operation,
 		Type:      in.Type,
 		Status:    in.Status,
 		Window:    window,
 		Namespace: in.Namespace,
 		TenantID:  in.TenantID,
 		Severity:  in.Severity,
+		Attrs:     in.Attrs,
 		Limit:     limit,
 	})
 	if err != nil {

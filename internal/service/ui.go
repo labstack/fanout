@@ -12,17 +12,21 @@ import (
 
 // TraceSearchParams contains trace search parameters.
 type TraceSearchParams struct {
-	Query     string
-	Services  []string
-	Status    []string // error, slow
-	Duration  string   // e.g., ">1000", "<500"
-	Terms     []string
-	Exclude   []string
-	Window    int
-	Limit     int
-	Offset    int
-	Namespace string
-	TenantID  string
+	Query      string
+	Services   []string
+	Operations []string          // op:checkout,payment
+	Status     []string          // error, slow
+	Duration   string            // e.g., ">1000", "<500"
+	Attrs      map[string]string // attr:key=value filters
+	TraceID    string            // trace:abc123
+	SpanID     string            // span:def456
+	Terms      []string
+	Exclude    []string
+	Window     int
+	Limit      int
+	Offset     int
+	Namespace  string
+	TenantID   string
 }
 
 // TraceRow represents a trace in search results.
@@ -68,6 +72,15 @@ func (s *Service) SearchTraces(ctx context.Context, p TraceSearchParams) (*Trace
 		}
 	}
 
+	// Operation filter (span-level search)
+	if len(p.Operations) > 0 {
+		placeholders := makePlaceholders(len(p.Operations))
+		filters = append(filters, fmt.Sprintf(`"name=name" IN (%s)`, placeholders))
+		for _, op := range p.Operations {
+			args = append(args, op)
+		}
+	}
+
 	// Status filter
 	for _, status := range p.Status {
 		switch status {
@@ -86,6 +99,24 @@ func (s *Service) SearchTraces(ctx context.Context, p TraceSearchParams) (*Trace
 			filters = append(filters, fmt.Sprintf(`"name=duration_ms" %s ?`, op))
 			args = append(args, val)
 		}
+	}
+
+	// Trace ID filter
+	if p.TraceID != "" {
+		filters = append(filters, `"name=trace_id" = ?`)
+		args = append(args, p.TraceID)
+	}
+
+	// Span ID filter
+	if p.SpanID != "" {
+		filters = append(filters, `"name=span_id" = ?`)
+		args = append(args, p.SpanID)
+	}
+
+	// Attribute filters (JSON extraction)
+	for key, val := range p.Attrs {
+		filters = append(filters, `json_extract_string(from_utf8("name=attributes_json"), ?) = ?`)
+		args = append(args, "$."+key, val)
 	}
 
 	// Text search terms

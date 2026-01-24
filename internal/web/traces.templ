@@ -57,7 +57,7 @@ templ Traces(data TracesData) {
 				</div>
 				<div class="search-hint">
 					<sl-icon name="lightbulb"></sl-icon>
-					<code>service:name</code> <code>namespace:default</code> <code>op:checkout</code> <code>status:error,slow</code> <code>duration:&gt;1000</code> <code>"phrase"</code> <code>-exclude</code>
+					<code>service:name</code> <code>op:checkout</code> <code>status:error</code> <code>duration:&gt;1000</code> <code>attr:http.status_code=500</code> <code>trace:abc123</code> <code>"phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
 			<script>

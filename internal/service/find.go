@@ -10,10 +10,12 @@ import (
 type FindParams struct {
 	Query     string
 	Service   string
+	Operation string // filter by operation name
 	Type      string // spans, logs, both
 	Status    string // error, slow, all
 	Window    int
 	Severity  []string
+	Attrs     map[string]string // attr:key=value filters
 	Limit     int
 	Namespace string
 	TenantID  string
@@ -69,10 +71,19 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 	if p.Service != "" {
 		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, escapeSQL(p.Service)))
 	}
+	if p.Operation != "" {
+		filters = append(filters, fmt.Sprintf(`"name=name" = '%s'`, escapeSQL(p.Operation)))
+	}
 	if p.Status == "error" {
 		filters = append(filters, `"name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')`)
 	} else if p.Status == "slow" {
 		filters = append(filters, `"name=duration_ms" > 1000`)
+	}
+	// Attribute filters
+	for key, val := range p.Attrs {
+		filters = append(filters, fmt.Sprintf(
+			`json_extract_string(from_utf8("name=attributes_json"), '$.%s') = '%s'`,
+			escapeSQL(key), escapeSQL(val)))
 	}
 
 	filterStr := ""

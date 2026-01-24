@@ -1,0 +1,285 @@
+package web
+
+import "fmt"
+
+// UnifiedData contains data for the unified timeline page.
+type UnifiedData struct {
+	Query       string
+	Service     string
+	Events      []UnifiedEvent
+	SpanCount   int
+	LogCount    int
+	MetricCount int
+	HasMore     bool
+	Window      int
+}
+
+// UnifiedEvent represents an event in the unified timeline.
+type UnifiedEvent struct {
+	Time     string
+	Type     string // span, log, metric
+	Service  string
+	Name     string
+	Value    string
+	Status   string
+	TraceID  string
+	SpanID   string
+	Severity string
+	Duration float64
+}
+
+templ Unified(data UnifiedData) {
+	@Layout("Unified Timeline", "unified", data.Window) {
+		<div class="page-header">
+			<sl-breadcrumb>
+				<sl-breadcrumb-item href={ templ.SafeURL(withWindow("/", data.Window)) }>Overview</sl-breadcrumb-item>
+				<sl-breadcrumb-item>Unified</sl-breadcrumb-item>
+			</sl-breadcrumb>
+			<h1>Unified Timeline</h1>
+			<p class="subtitle">Traces, logs, and metrics in one view</p>
+		</div>
+		<!-- Search Bar -->
+		<form class="search-form" method="get" action="/unified">
+			<sl-input
+				name="q"
+				placeholder="service:checkout status:error..."
+				value={ data.Query }
+				size="medium"
+				clearable
+			>
+				<sl-icon name="search" slot="prefix"></sl-icon>
+			</sl-input>
+			<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
+			<sl-button type="submit" variant="primary">Search</sl-button>
+		</form>
+		<!-- Signal Type Filters -->
+		<div class="filter-bar">
+			<div class="signal-legend">
+				<span class="legend-item span">
+					<span class="legend-dot"></span>
+					Spans ({ fmt.Sprintf("%d", data.SpanCount) })
+				</span>
+				<span class="legend-item log">
+					<span class="legend-dot"></span>
+					Logs ({ fmt.Sprintf("%d", data.LogCount) })
+				</span>
+				<span class="legend-item metric">
+					<span class="legend-dot"></span>
+					Metrics ({ fmt.Sprintf("%d", data.MetricCount) })
+				</span>
+			</div>
+		</div>
+		if len(data.Events) == 0 {
+			<div class="empty-state">
+				<sl-icon name="layers" style="font-size: 48px; opacity: 0.5;"></sl-icon>
+				<h3>No events found</h3>
+				<p>Try adjusting your filters or time window</p>
+			</div>
+		} else {
+			<!-- Unified Timeline -->
+			<div class="unified-timeline">
+				for _, event := range data.Events {
+					<div class={ "timeline-event", event.Type, templ.KV("error", event.Status == "error") }>
+						<div class="event-time">{ formatTime(event.Time) }</div>
+						<div class="event-indicator">
+							<span class={ "event-dot", event.Type }></span>
+							<span class="event-line"></span>
+						</div>
+						<div class="event-content">
+							<div class="event-header">
+								<span class={ "event-type-badge", event.Type }>{ event.Type }</span>
+								<span class="event-service">{ event.Service }</span>
+								if event.Status == "error" {
+									<sl-badge variant="danger" pill>error</sl-badge>
+								}
+							</div>
+							<div class="event-name">{ event.Name }</div>
+							<div class="event-value">{ event.Value }</div>
+							if event.TraceID != "" {
+								<div class="event-links">
+									<a href={ templ.SafeURL(withWindow("/traces/"+event.TraceID, data.Window)) } class="trace-link">
+										<sl-icon name="git-branch"></sl-icon>
+										{ truncateID(event.TraceID) }
+									</a>
+								</div>
+							}
+						</div>
+					</div>
+				}
+			</div>
+			if data.HasMore {
+				<div class="load-more">
+					<sl-badge variant="warning">More events available - narrow your filters</sl-badge>
+				</div>
+			}
+		}
+		<!-- Query Help -->
+		<details class="query-help">
+			<summary>Search Syntax</summary>
+			<div class="help-content">
+				<table class="help-table">
+					<tr><td><code>service:name</code></td><td>Filter by service</td></tr>
+					<tr><td><code>op:checkout</code></td><td>Filter by operation name</td></tr>
+					<tr><td><code>status:error</code></td><td>Show only errors</td></tr>
+					<tr><td><code>attr:key=value</code></td><td>Filter by attribute</td></tr>
+					<tr><td><code>trace:abc123</code></td><td>Find specific trace</td></tr>
+					<tr><td><code>severity:ERROR</code></td><td>Log severity filter</td></tr>
+					<tr><td><code>"exact phrase"</code></td><td>Match exact text</td></tr>
+					<tr><td><code>-exclude</code></td><td>Exclude term</td></tr>
+				</table>
+			</div>
+		</details>
+		<style>
+			.signal-legend {
+				display: flex;
+				gap: 24px;
+				padding: 12px 0;
+			}
+			.legend-item {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				font-size: 14px;
+			}
+			.legend-dot {
+				width: 12px;
+				height: 12px;
+				border-radius: 50%;
+			}
+			.legend-item.span .legend-dot { background: var(--sl-color-primary-500); }
+			.legend-item.log .legend-dot { background: var(--sl-color-warning-500); }
+			.legend-item.metric .legend-dot { background: var(--sl-color-success-500); }
+
+			.unified-timeline {
+				display: flex;
+				flex-direction: column;
+				gap: 0;
+				padding: 16px 0;
+			}
+			.timeline-event {
+				display: grid;
+				grid-template-columns: 140px 40px 1fr;
+				gap: 8px;
+				padding: 12px 0;
+				border-bottom: 1px solid var(--border);
+			}
+			.timeline-event:last-child {
+				border-bottom: none;
+			}
+			.timeline-event.error {
+				background: rgba(var(--sl-color-danger-500), 0.05);
+			}
+			.event-time {
+				font-size: 12px;
+				color: var(--text-muted);
+				text-align: right;
+				padding-top: 4px;
+			}
+			.event-indicator {
+				display: flex;
+				flex-direction: column;
+				align-items: center;
+			}
+			.event-dot {
+				width: 12px;
+				height: 12px;
+				border-radius: 50%;
+				flex-shrink: 0;
+			}
+			.event-dot.span { background: var(--sl-color-primary-500); }
+			.event-dot.log { background: var(--sl-color-warning-500); }
+			.event-dot.metric { background: var(--sl-color-success-500); }
+			.event-line {
+				width: 2px;
+				flex: 1;
+				background: var(--border);
+				margin-top: 4px;
+			}
+			.event-content {
+				padding-bottom: 8px;
+			}
+			.event-header {
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				margin-bottom: 4px;
+			}
+			.event-type-badge {
+				font-size: 10px;
+				font-weight: 600;
+				text-transform: uppercase;
+				padding: 2px 6px;
+				border-radius: 4px;
+			}
+			.event-type-badge.span { background: var(--sl-color-primary-100); color: var(--sl-color-primary-700); }
+			.event-type-badge.log { background: var(--sl-color-warning-100); color: var(--sl-color-warning-700); }
+			.event-type-badge.metric { background: var(--sl-color-success-100); color: var(--sl-color-success-700); }
+			.event-service {
+				font-weight: 500;
+			}
+			.event-name {
+				font-family: var(--sl-font-mono);
+				font-size: 14px;
+				margin-bottom: 4px;
+			}
+			.event-value {
+				font-size: 13px;
+				color: var(--text-muted);
+			}
+			.event-links {
+				margin-top: 8px;
+			}
+			.trace-link {
+				display: inline-flex;
+				align-items: center;
+				gap: 4px;
+				font-size: 12px;
+				color: var(--sl-color-primary-600);
+				text-decoration: none;
+			}
+			.trace-link:hover {
+				text-decoration: underline;
+			}
+			.load-more {
+				text-align: center;
+				padding: 16px;
+			}
+			.query-help {
+				margin-top: 24px;
+				padding: 12px;
+				background: var(--card-bg);
+				border-radius: 8px;
+			}
+			.query-help summary {
+				cursor: pointer;
+				font-weight: 500;
+			}
+			.help-content {
+				padding-top: 12px;
+			}
+			.help-table {
+				width: 100%;
+			}
+			.help-table td {
+				padding: 4px 8px;
+			}
+			.help-table td:first-child {
+				width: 180px;
+			}
+			.help-table code {
+				background: var(--sl-color-neutral-100);
+				padding: 2px 6px;
+				border-radius: 4px;
+				font-size: 13px;
+			}
+		</style>
+	}
+}
+
+func formatTime(ts string) string {
+	// Extract time portion from ISO timestamp
+	if len(ts) >= 19 {
+		return ts[11:19] // HH:MM:SS
+	}
+	return ts
+}

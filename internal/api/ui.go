@@ -37,6 +37,7 @@ func RegisterUIRoutes(e *echo.Echo, svc *service.Service, cfg config.Config) {
 	e.GET("/traces/:id", h.TraceDetail)
 	e.GET("/logs", h.Logs)
 	e.GET("/metrics", h.Metrics)
+	e.GET("/unified", h.Unified)
 
 	// API routes
 	e.GET("/api/namespaces", h.Namespaces)
@@ -354,15 +355,19 @@ func (h *UIHandler) Traces(c echo.Context) error {
 	q := search.Parse(queryStr)
 
 	result, _ := h.svc.SearchTraces(ctx, service.TraceSearchParams{
-		Services:  q.Service(),
-		Status:    q.Status(),
-		Duration:  q.Duration(),
-		Terms:     q.Terms,
-		Exclude:   q.Exclude,
-		Window:    window,
-		Limit:     limit,
-		Offset:    offset,
-		Namespace: namespace,
+		Services:   q.Service(),
+		Operations: q.Operation(),
+		Status:     q.Status(),
+		Duration:   q.Duration(),
+		Attrs:      q.Attr(),
+		TraceID:    q.TraceID(),
+		SpanID:     q.SpanID(),
+		Terms:      q.Terms,
+		Exclude:    q.Exclude,
+		Window:     window,
+		Limit:      limit,
+		Offset:     offset,
+		Namespace:  namespace,
 	})
 
 	var traces []web.TraceRow
@@ -581,6 +586,59 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 	}
 
 	return renderTempl(c, web.Metrics(data))
+}
+
+// Unified renders the unified timeline page
+func (h *UIHandler) Unified(c echo.Context) error {
+	ctx := c.Request().Context()
+	queryStr := c.QueryParam("q")
+	window := parseWindow(c)
+	namespace := parseNamespace(c)
+
+	// Parse query DSL
+	q := search.Parse(queryStr)
+
+	// Get service filter
+	svc := ""
+	if services := q.Service(); len(services) > 0 {
+		svc = services[0]
+	}
+
+	result, _ := h.svc.Unified(ctx, service.UnifiedParams{
+		Service:   svc,
+		Window:    window,
+		Limit:     100,
+		Namespace: namespace,
+	})
+
+	var events []web.UnifiedEvent
+	for _, e := range result.Events {
+		events = append(events, web.UnifiedEvent{
+			Time:     e.Time,
+			Type:     e.Type,
+			Service:  e.Service,
+			Name:     e.Name,
+			Value:    e.Value,
+			Status:   e.Status,
+			TraceID:  e.TraceID,
+			SpanID:   e.SpanID,
+			Severity: e.Severity,
+			Duration: e.Duration,
+		})
+	}
+
+	data := web.UnifiedData{
+		Query:       queryStr,
+		Service:     svc,
+		Events:      events,
+		SpanCount:   result.SpanCount,
+		LogCount:    result.LogCount,
+		MetricCount: result.MetricCount,
+		HasMore:     result.HasMore,
+		Window:      window,
+	}
+
+	return renderTempl(c, web.Unified(data))
 }
 
 // renderTempl is a helper to render templ components

@@ -155,3 +155,30 @@ func (q *Query) Operation() []string {
 func (q *Query) Namespace() []string {
 	return q.Fields["namespace"]
 }
+
+// Attr returns attribute filters as key=value pairs from attr:key=value syntax.
+func (q *Query) Attr() map[string]string {
+	attrs := make(map[string]string)
+	for _, v := range q.Fields["attr"] {
+		if idx := strings.Index(v, "="); idx > 0 {
+			attrs[v[:idx]] = v[idx+1:]
+		}
+	}
+	return attrs
+}
+
+// TraceID returns trace_id filter value, or empty if not set.
+func (q *Query) TraceID() string {
+	if vals := q.Fields["trace"]; len(vals) > 0 {
+		return vals[0]
+	}
+	return ""
+}
+
+// SpanID returns span_id filter value, or empty if not set.
+func (q *Query) SpanID() string {
+	if vals := q.Fields["span"]; len(vals) > 0 {
+		return vals[0]
+	}
+	return ""
+}
