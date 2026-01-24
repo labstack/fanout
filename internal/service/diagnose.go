@@ -31,7 +31,7 @@ SELECT
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95,
   COALESCE(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p99,
   COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
-FROM read_parquet(%s)
+FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=service_name" = '%s';
 `, spansGlob, window, escapeSQL(svc))
@@ -52,7 +52,7 @@ SELECT
   "name=status_msg" as msg,
   COUNT(*) as cnt,
   FIRST("name=trace_id") as trace_id
-FROM read_parquet(%s)
+FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=service_name" = '%s'
   AND "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')
@@ -82,7 +82,7 @@ SELECT
   "name=name" as op,
   PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms") as p95,
   COUNT(*) as cnt
-FROM read_parquet(%s)
+FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=service_name" = '%s'
 GROUP BY "name=name"
@@ -108,8 +108,8 @@ WITH downstream AS (
     child."name=service_name" as dep_service,
     child."name=duration_ms" as duration_ms,
     child."name=status_code" as status
-  FROM read_parquet(%s) parent
-  JOIN read_parquet(%s) child
+  FROM read_parquet(%s, union_by_name=true) parent
+  JOIN read_parquet(%s, union_by_name=true) child
     ON parent."name=span_id" = child."name=parent_span_id"
     AND parent."name=trace_id" = child."name=trace_id"
   WHERE epoch_ms(CAST(parent."name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE

@@ -25,21 +25,28 @@ type FindIn struct {
 }
 
 type FoundSpan struct {
-	TraceID    string  `json:"trace_id"`
-	SpanID     string  `json:"span_id"`
-	Service    string  `json:"service"`
-	Operation  string  `json:"operation"`
-	DurationMs float64 `json:"duration_ms"`
-	Status     string  `json:"status"`
-	StartTime  string  `json:"start_time"`
+	TraceID      string `json:"trace_id"`
+	SpanID       string `json:"span_id"`
+	Service      string `json:"service"`
+	Operation    string `json:"operation"`
+	DurationMs   float64 `json:"duration_ms"`
+	Status       string `json:"status"`
+	StartTime    string `json:"start_time"`
+	ScopeName    string `json:"scope_name,omitempty"`
+	ScopeVersion string `json:"scope_version,omitempty"`
 }
 
 type FoundLog struct {
-	Timestamp string `json:"ts"`
-	Service   string `json:"service"`
-	Severity  string `json:"severity"`
-	Body      string `json:"body"`
-	TraceID   string `json:"trace_id,omitempty"`
+	Timestamp      string `json:"ts"`
+	ObservedTime   string `json:"observed_ts,omitempty"`
+	Service        string `json:"service"`
+	Severity       string `json:"severity"`
+	SeverityNumber int32  `json:"severity_number,omitempty"`
+	Body           string `json:"body"`
+	TraceID        string `json:"trace_id,omitempty"`
+	SpanID         string `json:"span_id,omitempty"`
+	ScopeName      string `json:"scope_name,omitempty"`
+	ScopeVersion   string `json:"scope_version,omitempty"`
 }
 
 type FindOut struct {
@@ -81,23 +88,30 @@ func (s *Server) find(ctx context.Context, req *mcp.CallToolRequest, in FindIn) 
 
 	for _, sp := range result.Spans {
 		out.Spans = append(out.Spans, FoundSpan{
-			TraceID:    sp.TraceID,
-			SpanID:     sp.SpanID,
-			Service:    sp.Service,
-			Operation:  sp.Name,
-			DurationMs: sp.Duration,
-			Status:     sp.Status,
-			StartTime:  sp.StartTime,
+			TraceID:      sp.TraceID,
+			SpanID:       sp.SpanID,
+			Service:      sp.Service,
+			Operation:    sp.Name,
+			DurationMs:   sp.Duration,
+			Status:       sp.Status,
+			StartTime:    sp.StartTime,
+			ScopeName:    sp.ScopeName,
+			ScopeVersion: sp.ScopeVersion,
 		})
 	}
 
 	for _, lg := range result.Logs {
 		out.Logs = append(out.Logs, FoundLog{
-			Timestamp: lg.Time,
-			Service:   lg.Service,
-			Severity:  lg.Severity,
-			Body:      lg.Body,
-			TraceID:   lg.TraceID,
+			Timestamp:      lg.Time,
+			ObservedTime:   lg.ObservedTime,
+			Service:        lg.Service,
+			Severity:       lg.Severity,
+			SeverityNumber: lg.SeverityNumber,
+			Body:           lg.Body,
+			TraceID:        lg.TraceID,
+			SpanID:         lg.SpanID,
+			ScopeName:      lg.ScopeName,
+			ScopeVersion:   lg.ScopeVersion,
 		})
 	}
 

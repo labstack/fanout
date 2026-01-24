@@ -18,12 +18,19 @@ type LogsData struct {
 }
 
 type LogRow struct {
-	Time      string
-	Service   string
-	Namespace string
-	Severity  string
-	Body      string
-	TraceID   string
+	Time           string
+	ObservedTime   string
+	Service        string
+	Namespace      string
+	Severity       string
+	SeverityNumber int32
+	Body           string
+	TraceID        string
+	SpanID         string
+	Flags          uint32
+	ScopeName      string
+	ScopeVersion   string
+	Attributes     map[string]any
 }
 
 // Logs renders the logs search page
@@ -73,7 +80,7 @@ templ Logs(data LogsData) {
 				</div>
 			} else {
 				<div class="logs-list">
-					for _, log := range data.Logs {
+					for i, log := range data.Logs {
 						<div class={ "log-entry", logEntryClass(log.Severity) }>
 							<div class="log-header">
 								<sl-badge variant={ severityVariant(log.Severity) }>{ log.Severity }</sl-badge>
@@ -87,11 +94,64 @@ templ Logs(data LogsData) {
 								if log.TraceID != "" {
 									<sl-button href={ withWindow("/traces/"+pathEscape(log.TraceID), data.Window) } size="small" variant="text">trace</sl-button>
 								}
+								if hasLogDetails(log) {
+									<button class="log-expand" aria-expanded="false" aria-controls={ fmt.Sprintf("log-detail-%d", i) }>
+										<sl-icon name="chevron-down" class="expand-icon"></sl-icon>
+									</button>
+								}
 							</div>
 							<div class="log-body">{ log.Body }</div>
+							if hasLogDetails(log) {
+								<div class="log-detail" id={ fmt.Sprintf("log-detail-%d", i) } hidden>
+									<div class="log-detail-grid">
+										if log.SpanID != "" {
+											<div class="log-detail-item">
+												<span class="log-detail-label">Span ID</span>
+												<span class="log-detail-value mono">{ log.SpanID }</span>
+											</div>
+										}
+										if log.ScopeName != "" {
+											<div class="log-detail-item">
+												<span class="log-detail-label">Scope</span>
+												<span class="log-detail-value">{ log.ScopeName }{ logScopeVersion(log.ScopeVersion) }</span>
+											</div>
+										}
+										if log.ObservedTime != "" && log.ObservedTime != log.Time {
+											<div class="log-detail-item">
+												<span class="log-detail-label">Observed</span>
+												<span class="log-detail-value">{ log.ObservedTime }</span>
+											</div>
+										}
+									</div>
+									if len(log.Attributes) > 0 {
+										<div class="log-attributes">
+											<div class="log-attr-title">Attributes</div>
+											for k, v := range log.Attributes {
+												<div class="log-attr-row">
+													<span class="log-attr-key">{ k }</span>
+													<span class="log-attr-value">{ formatLogAttr(v) }</span>
+												</div>
+											}
+										</div>
+									}
+								</div>
+							}
 						</div>
 					}
 				</div>
+				<script>
+					document.querySelectorAll('.log-expand').forEach(btn => {
+						btn.addEventListener('click', (e) => {
+							e.stopPropagation();
+							const entry = btn.closest('.log-entry');
+							const detail = entry.querySelector('.log-detail');
+							const expanded = btn.getAttribute('aria-expanded') === 'true';
+							btn.setAttribute('aria-expanded', !expanded);
+							btn.querySelector('.expand-icon').name = expanded ? 'chevron-down' : 'chevron-up';
+							detail.hidden = expanded;
+						});
+					});
+				</script>
 				<!-- Pagination -->
 				if data.Offset > 0 || data.HasMore {
 					<div class="pagination">
@@ -179,6 +239,77 @@ templ Logs(data LogsData) {
 				white-space: pre-wrap;
 				word-break: break-word;
 			}
+			.log-expand {
+				margin-left: auto;
+				padding: 0.25rem;
+				border: none;
+				background: none;
+				color: var(--text-muted);
+				cursor: pointer;
+				border-radius: 0.25rem;
+			}
+			.log-expand:hover {
+				background: var(--bg-tertiary);
+				color: var(--text-primary);
+			}
+			.log-detail {
+				margin-top: 0.75rem;
+				padding-top: 0.75rem;
+				border-top: 1px solid var(--border-color);
+			}
+			.log-detail-grid {
+				display: grid;
+				grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+				gap: 0.75rem;
+			}
+			.log-detail-item {
+				display: flex;
+				flex-direction: column;
+				gap: 0.125rem;
+			}
+			.log-detail-label {
+				font-size: 0.65rem;
+				color: var(--text-muted);
+				text-transform: uppercase;
+				letter-spacing: 0.025em;
+			}
+			.log-detail-value {
+				font-size: 0.75rem;
+				color: var(--text-primary);
+			}
+			.log-detail-value.mono {
+				font-family: 'SF Mono', Monaco, monospace;
+			}
+			.log-attributes {
+				margin-top: 0.75rem;
+			}
+			.log-attr-title {
+				font-size: 0.65rem;
+				font-weight: 600;
+				color: var(--text-muted);
+				text-transform: uppercase;
+				letter-spacing: 0.025em;
+				margin-bottom: 0.5rem;
+			}
+			.log-attr-row {
+				display: flex;
+				gap: 0.5rem;
+				font-size: 0.75rem;
+				padding: 0.25rem 0.5rem;
+				background: rgba(0,0,0,0.1);
+				border-radius: 0.25rem;
+				margin-bottom: 0.25rem;
+			}
+			.log-attr-key {
+				font-weight: 500;
+				color: var(--accent);
+				min-width: 100px;
+			}
+			.log-attr-value {
+				color: var(--text-primary);
+				font-family: monospace;
+				word-break: break-all;
+			}
 			.pagination {
 				display: flex;
 				align-items: center;
@@ -231,4 +362,22 @@ func logsPaginationURL(q string, window, limit, offset int) string {
 	values.Set("limit", strconv.Itoa(limit))
 	values.Set("offset", strconv.Itoa(offset))
 	return "/logs?" + values.Encode()
+}
+
+func hasLogDetails(log LogRow) bool {
+	return log.SpanID != "" || log.ScopeName != "" || len(log.Attributes) > 0 || (log.ObservedTime != "" && log.ObservedTime != log.Time)
+}
+
+func logScopeVersion(v string) string {
+	if v == "" {
+		return ""
+	}
+	return "@" + v
+}
+
+func formatLogAttr(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", v)
 }

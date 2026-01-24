@@ -36,10 +36,12 @@ type TopologyResult struct {
 // ServiceNode represents a service in the topology.
 type ServiceNode struct {
 	Name      string
+	Namespace string
 	Status    string
 	SpanCount int64
 	P95Ms     float64
 	ErrorRate float64
+	Trend     []int64 // optional sparkline data
 }
 
 // ServiceEdge represents a call between services.
@@ -63,6 +65,7 @@ type TimeBucket struct {
 	Time        string
 	Requests    int64
 	Errors      int64
+	P50Ms       float64
 	P95Ms       float64
 	ErrorRate   float64
 	IsAnomaly   bool
@@ -130,25 +133,55 @@ type TraceResult struct {
 
 // SpanInfo describes a span in a trace.
 type SpanInfo struct {
-	SpanID     string
-	ParentID   string
-	Service    string
+	SpanID       string
+	ParentID     string
+	Service      string
+	Name         string
+	Kind         string
+	Duration     float64
+	SelfTime     float64
+	Status       string
+	StatusMsg    string
+	StartTime    string
+	IsCritical   bool
+	Events       []SpanEvent
+	Links        []SpanLink
+	TraceState   string
+	Flags        uint32
+	ScopeName    string
+	ScopeVersion string
+	Attributes   map[string]any
+}
+
+// SpanEvent is an annotation within a span's lifetime.
+type SpanEvent struct {
+	Time       int64
 	Name       string
-	Duration   float64
-	SelfTime   float64
-	Status     string
-	StatusMsg  string
-	StartTime  string
-	IsCritical bool
+	Attributes map[string]string
+}
+
+// SpanLink references a related span (e.g., async producer/consumer).
+type SpanLink struct {
+	TraceID    string
+	SpanID     string
+	TraceState string
+	Attributes map[string]string
 }
 
 // LogInfo describes a log entry.
 type LogInfo struct {
-	Time     string
-	Severity string
-	Body     string
-	Service  string
-	SpanID   string
+	Time           string
+	ObservedTime   string
+	Severity       string
+	SeverityNumber int32
+	Body           string
+	Service        string
+	TraceID        string
+	SpanID         string
+	Flags          uint32
+	ScopeName      string
+	ScopeVersion   string
+	Attributes     map[string]any
 }
 
 // RootCause identifies the likely cause of an issue.
@@ -169,21 +202,50 @@ type FindResult struct {
 
 // SpanResult is a span from search results.
 type SpanResult struct {
-	TraceID   string
-	SpanID    string
-	Service   string
-	Name      string
-	Duration  float64
-	Status    string
-	StartTime string
+	TraceID      string
+	SpanID       string
+	Service      string
+	Name         string
+	Duration     float64
+	Status       string
+	StartTime    string
+	ScopeName    string
+	ScopeVersion string
 }
 
 // LogResult is a log entry from search results.
 type LogResult struct {
-	Time     string
-	Severity string
-	Body     string
-	Service  string
-	TraceID  string
-	SpanID   string
+	Time           string
+	ObservedTime   string
+	Severity       string
+	SeverityNumber int32
+	Body           string
+	Service        string
+	TraceID        string
+	SpanID         string
+	ScopeName      string
+	ScopeVersion   string
+}
+
+// MetricInfo describes a metric with its metadata.
+type MetricInfo struct {
+	Name        string
+	Description string
+	Unit        string
+	Type        string
+	Service     string
+	Value       float64
+	Time        string
+	Exemplars   []Exemplar
+	ScopeName   string
+	ScopeVersion string
+}
+
+// Exemplar links a metric data point to a trace.
+type Exemplar struct {
+	Time       int64
+	TraceID    string
+	SpanID     string
+	Value      float64
+	Attributes map[string]string
 }

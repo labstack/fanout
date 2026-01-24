@@ -128,7 +128,7 @@ WITH S AS (
          "name=duration_ms" as duration_ms,
          "name=status_code" as status_code,
          "name=start_unix_nano" as start_unix_nano
-  FROM read_parquet(%s)
+  FROM read_parquet(%s, union_by_name=true)
   WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 )
 SELECT service_name,
@@ -170,7 +170,7 @@ SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%
        "name=body" as body,
        "name=service_name" as service_name,
        "name=severity" as severity
-FROM read_parquet(%s)
+FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=body" ~ '%s'
 ORDER BY ts DESC
@@ -260,7 +260,7 @@ func (d *Duck) ErrorRoutes(ctx context.Context, windowMinutes, limit int) ([]Err
 	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT "name=body" AS route, COUNT(*) AS count
-FROM read_parquet(%s)
+FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=severity" IN ('ERROR','ERR','WARN')
 GROUP BY "name=body"
@@ -297,7 +297,7 @@ WITH spans_with_errors AS (
   SELECT "name=service_name" as service_name,
          "name=name" as name,
          "name=status_code" as status_code
-  FROM read_parquet(%s)
+  FROM read_parquet(%s, union_by_name=true)
   WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 )
 SELECT service_name,

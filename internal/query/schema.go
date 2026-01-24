@@ -9,9 +9,10 @@ The data is stored in Parquet files partitioned by tenant, namespace, and time:
 /lake/{signal}/tenant={tenant}/namespace={namespace}/year=YYYY/month=MM/day=DD/hour=HH/part-<ts>.parquet
 
 **IMPORTANT**: Use hive_partitioning=true to access partition columns (tenant, namespace, year, month, day, hour).
+Use union_by_name=true to handle schema evolution (old files may not have new columns).
 
 ### 1. Spans (Traces)
-Table: read_parquet('lake/spans/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true)
+Table: read_parquet('lake/spans/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true, union_by_name=true)
 
 **IMPORTANT**: Data columns are named with a literal "name=" prefix (e.g. "name=trace_id") and must be double-quoted.
 Partition columns (tenant, namespace, year, month, day, hour) have NO prefix.
@@ -30,6 +31,12 @@ Data columns:
 - "name=status_msg" (VARCHAR): Error message if status is ERROR
 - "name=resource_json" (BLOB): UTF-8 JSON bytes with resource attributes
 - "name=attributes_json" (BLOB): UTF-8 JSON bytes with span attributes (http.method, http.status_code, etc.)
+- "name=events_json" (BLOB): UTF-8 JSON array of span events [{time_unix_nano, name, attributes}, ...]
+- "name=links_json" (BLOB): UTF-8 JSON array of span links [{trace_id, span_id, trace_state, attributes}, ...]
+- "name=trace_state" (VARCHAR): W3C trace state string
+- "name=flags" (INT32): Span flags (sampled, etc.)
+- "name=scope_name" (VARCHAR): Instrumentation scope/library name
+- "name=scope_version" (VARCHAR): Instrumentation scope/library version
 - "name=ingested_unix_nano" (BIGINT): Ingestion timestamp in nanoseconds
 
 Partition columns (extracted from path, no "name=" prefix):
@@ -55,45 +62,62 @@ Common queries:
 - Root spans only: WHERE "name=parent_span_id" IS NULL OR "name=parent_span_id" = ''
 
 ### 2. Logs
-Table: read_parquet('lake/logs/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true)
+Table: read_parquet('lake/logs/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true, union_by_name=true)
 
 Data columns:
 - "name=time_unix_nano" (BIGINT): Log timestamp in nanoseconds since epoch
-- "name=severity" (VARCHAR): Severity level (TRACE, DEBUG, INFO, WARN, ERROR, FATAL)
+- "name=observed_time_unix_nano" (BIGINT): When log was observed/collected (vs generated)
+- "name=severity" (VARCHAR): Severity level text (TRACE, DEBUG, INFO, WARN, ERROR, FATAL)
+- "name=severity_number" (INT32): Numeric severity (1-24, higher = more severe)
 - "name=body" (VARCHAR): Log message body
 - "name=service_name" (VARCHAR): Name of the service generating this log
 - "name=trace_id" (VARCHAR): Associated trace ID (if available)
 - "name=span_id" (VARCHAR): Associated span ID (if available)
+- "name=flags" (INT32): Log record flags
 - "name=resource_json" (BLOB): UTF-8 JSON bytes with resource attributes
 - "name=attributes_json" (BLOB): UTF-8 JSON bytes with log attributes
+- "name=scope_name" (VARCHAR): Instrumentation scope/library name
+- "name=scope_version" (VARCHAR): Instrumentation scope/library version
 - "name=ingested_unix_nano" (BIGINT): Ingestion timestamp in nanoseconds
 
 Partition columns: tenant, namespace, year, month, day, hour
 
 Common queries:
-- Error logs: WHERE "name=severity" IN ('ERROR', 'FATAL')
+- Error logs: WHERE "name=severity" IN ('ERROR', 'FATAL') or "name=severity_number" >= 17
 - Search logs: WHERE "name=body" LIKE '%error%' or "name=body" ~ 'regex_pattern'
 - By service: WHERE "name=service_name" = 'checkout'
 - By namespace: WHERE namespace = 'opentelemetry-demo'
+- By instrumentation: WHERE "name=scope_name" = 'my-logger'
 
 ### 3. Metrics
-Table: read_parquet('lake/metrics/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true)
+Table: read_parquet('lake/metrics/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true, union_by_name=true)
 
 Data columns:
 - "name=time_unix_nano" (BIGINT): Metric timestamp in nanoseconds since epoch
 - "name=name" (VARCHAR): Metric name (e.g., "http.server.duration", "system.cpu.usage")
-- "name=mtype" (VARCHAR): Metric type (gauge, sum, sum_delta, histogram)
+- "name=description" (VARCHAR): Metric description
+- "name=unit" (VARCHAR): Metric unit (e.g., "ms", "By", "1")
+- "name=mtype" (VARCHAR): Metric type (gauge, sum, sum_delta, histogram, exp_histogram, summary)
 - "name=service_name" (VARCHAR): Name of the service generating this metric
 - "name=value" (DOUBLE): Metric value (for GAUGE and SUM types)
-- "name=hist_bounds_json" (BLOB): UTF-8 JSON bytes with histogram bucket boundaries
-- "name=hist_counts_json" (BLOB): UTF-8 JSON bytes with histogram bucket counts
-- "name=hist_count" (BIGINT): Total histogram count
-- "name=hist_sum" (DOUBLE): Total histogram sum
+- "name=hist_bounds_json" (BLOB): UTF-8 JSON bytes with histogram bucket boundaries (or quantiles for summary)
+- "name=hist_counts_json" (BLOB): UTF-8 JSON bytes with histogram bucket counts (or quantile values for summary)
+- "name=hist_count" (BIGINT): Total histogram/summary count
+- "name=hist_sum" (DOUBLE): Total histogram/summary sum
+- "name=exemplars_json" (BLOB): UTF-8 JSON array of exemplars [{time_unix_nano, trace_id, span_id, value, attributes}, ...]
 - "name=attributes_json" (BLOB): UTF-8 JSON bytes with metric attributes
 - "name=resource_json" (BLOB): UTF-8 JSON bytes with resource attributes
+- "name=scope_name" (VARCHAR): Instrumentation scope/library name
+- "name=scope_version" (VARCHAR): Instrumentation scope/library version
 - "name=ingested_unix_nano" (BIGINT): Ingestion timestamp in nanoseconds
 
 Partition columns: tenant, namespace, year, month, day, hour
+
+Common queries:
+- By metric name: WHERE "name=name" = 'http.server.duration'
+- By type: WHERE "name=mtype" = 'histogram'
+- By unit: WHERE "name=unit" = 'ms'
+- Get exemplar traces: SELECT json_extract_string(from_utf8("name=exemplars_json"), '$[0].trace_id') as trace_id
 
 ### 4. Rollup Table (service_rollup)
 Pre-aggregated data for fast queries:
@@ -111,17 +135,18 @@ Time range:
 
 ## Query Guidelines
 1. Always use hive_partitioning=true with read_parquet for partition column access
-2. Filter by time to improve performance
-3. Use service_rollup table for fast dashboard queries
-4. JSON columns are BLOB; convert with from_utf8() before json_extract_*
-5. Always include LIMIT clause (default max 1000 rows)
-6. Data columns have "name=" prefix and must be double-quoted
-7. Partition columns (tenant, namespace, year, month, day, hour) have NO prefix
-8. Filter by namespace: WHERE namespace = 'my-namespace'
-9. Filter by tenant: WHERE tenant = 'my-tenant'
+2. Use union_by_name=true to handle schema evolution (old files may not have new columns)
+3. Filter by time to improve performance
+4. Use service_rollup table for fast dashboard queries
+5. JSON columns are BLOB; convert with from_utf8() before json_extract_*
+6. Always include LIMIT clause (default max 1000 rows)
+7. Data columns have "name=" prefix and must be double-quoted
+8. Partition columns (tenant, namespace, year, month, day, hour) have NO prefix
+9. Filter by namespace: WHERE namespace = 'my-namespace'
+10. Filter by tenant: WHERE tenant = 'my-tenant'
 
 ## DuckDB-Specific Functions
-- read_parquet('path/**/*.parquet', hive_partitioning=true): Read Parquet with partition columns
+- read_parquet('path/**/*.parquet', hive_partitioning=true, union_by_name=true): Read Parquet with partition columns and schema evolution
 - from_utf8(blob_column): Convert BLOB → VARCHAR (for JSON columns)
 - json_extract_string(json_text, '$.key'): Extract JSON values
 - to_timestamp(seconds): Convert epoch seconds to timestamp

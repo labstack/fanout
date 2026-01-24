@@ -121,11 +121,11 @@ func main() {
 	// Prometheus metrics (internal/ops)
 	e.GET("/-/metrics", echo.WrapHandler(promhttp.Handler()))
 
-	// UI routes (Templ + HTMX + Vega-Lite)
-	api.RegisterUIRoutes(e, q, cfg)
-
-	// Create shared service layer
+	// Create shared service layer (used by both UI and MCP)
 	svc := service.New(q, cfg)
+
+	// UI routes (Templ + HTMX + Vega-Lite)
+	api.RegisterUIRoutes(e, svc, cfg)
 
 	// MCP server (Model Context Protocol)
 	if cfg.MCPEnabled {

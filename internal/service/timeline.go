@@ -32,8 +32,9 @@ SELECT
   time_bucket(INTERVAL '%d minutes', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) as bucket,
   COUNT(*) as cnt,
   SUM(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1 ELSE 0 END) as errors,
+  COALESCE(PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p50,
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95
-FROM read_parquet(%s)
+FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   %s
 GROUP BY bucket
@@ -52,7 +53,7 @@ ORDER BY bucket ASC;
 	for rows.Next() {
 		var b TimeBucket
 		var bucket any
-		if err := rows.Scan(&bucket, &b.Requests, &b.Errors, &b.P95Ms); err != nil {
+		if err := rows.Scan(&bucket, &b.Requests, &b.Errors, &b.P50Ms, &b.P95Ms); err != nil {
 			continue
 		}
 		b.Time = fmt.Sprintf("%v", bucket)

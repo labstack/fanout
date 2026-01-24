@@ -27,7 +27,7 @@ SELECT
   COUNT(*) as cnt,
   COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95,
   COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
-FROM read_parquet(%s)
+FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
 GROUP BY "name=service_name"
 ORDER BY cnt DESC
@@ -57,8 +57,8 @@ WITH calls AS (
     child."name=service_name" as callee,
     child."name=duration_ms" as duration_ms,
     child."name=status_code" as status
-  FROM read_parquet(%s) child
-  JOIN read_parquet(%s) parent
+  FROM read_parquet(%s, union_by_name=true) child
+  JOIN read_parquet(%s, union_by_name=true) parent
     ON child."name=parent_span_id" = parent."name=span_id"
     AND child."name=trace_id" = parent."name=trace_id"
   WHERE epoch_ms(CAST(child."name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
@@ -12,6 +13,7 @@ import (
 	common "go.opentelemetry.io/proto/otlp/common/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/grpc"
 
 	"github.com/labstack/fanout/internal/config"
@@ -63,6 +65,7 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 			namespace = cfg.DefaultNS
 		}
 		for _, ss := range rs.ScopeSpans {
+			scopeName, scopeVer := scopeInfo(ss.Scope)
 			for _, sp := range ss.Spans {
 				row := lake.SpanRow{
 					TenantID:       cfg.TenantID.String(),
@@ -80,6 +83,12 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 					StatusMsg:      sp.Status.Message,
 					ResourceJSON:   resourceJSON,
 					AttributesJSON: toJSON(sp.Attributes),
+					EventsJSON:     eventsToJSON(sp.Events),
+					LinksJSON:      linksToJSON(sp.Links),
+					TraceState:     sp.TraceState,
+					Flags:          sp.Flags,
+					ScopeName:      scopeName,
+					ScopeVersion:   scopeVer,
 					IngestedAt:     now,
 				}
 				ts.srv.outSpans <- row
@@ -102,19 +111,25 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 			namespace = cfg.DefaultNS
 		}
 		for _, sl := range rl.ScopeLogs {
+			scopeName, scopeVer := scopeInfo(sl.Scope)
 			for _, lr := range sl.LogRecords {
 				row := lake.LogRow{
-					TenantID:       cfg.TenantID.String(),
-					Namespace:      namespace,
-					TimeUnixNanos:  int64(lr.TimeUnixNano),
-					Severity:       lr.SeverityText,
-					Body:           bodyString(lr.Body),
-					ServiceName:    svc,
-					TraceID:        hexOrEmpty(lr.TraceId),
-					SpanID:         hexOrEmpty(lr.SpanId),
-					ResourceJSON:   resourceJSON,
-					AttributesJSON: toJSON(lr.Attributes),
-					IngestedAt:     now,
+					TenantID:          cfg.TenantID.String(),
+					Namespace:         namespace,
+					TimeUnixNanos:     int64(lr.TimeUnixNano),
+					ObservedTimeNanos: int64(lr.ObservedTimeUnixNano),
+					Severity:          lr.SeverityText,
+					SeverityNumber:    int32(lr.SeverityNumber),
+					Body:              bodyString(lr.Body),
+					ServiceName:       svc,
+					TraceID:           hexOrEmpty(lr.TraceId),
+					SpanID:            hexOrEmpty(lr.SpanId),
+					Flags:             lr.Flags,
+					ResourceJSON:      resourceJSON,
+					AttributesJSON:    toJSON(lr.Attributes),
+					ScopeName:         scopeName,
+					ScopeVersion:      scopeVer,
+					IngestedAt:        now,
 				}
 				ls.srv.outLogs <- row
 			}
@@ -136,6 +151,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 			namespace = cfg.DefaultNS
 		}
 		for _, sm := range rm.ScopeMetrics {
+			scopeName, scopeVer := scopeInfo(sm.Scope)
 			for _, m := range sm.Metrics {
 				switch d := m.Data.(type) {
 				case *metricspb.Metric_Gauge:
@@ -145,11 +161,16 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
+							Description:    m.Description,
+							Unit:           m.Unit,
 							MType:          "gauge",
 							ServiceName:    svc,
 							Value:          number(dp.Value),
+							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
 							AttributesJSON: toJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
+							ScopeName:      scopeName,
+							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
 						ms.srv.outMetrics <- row
@@ -165,11 +186,16 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
+							Description:    m.Description,
+							Unit:           m.Unit,
 							MType:          kind,
 							ServiceName:    svc,
 							Value:          number(dp.Value),
+							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
 							AttributesJSON: toJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
+							ScopeName:      scopeName,
+							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
 						ms.srv.outMetrics <- row
@@ -185,20 +211,74 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
+							Description:    m.Description,
+							Unit:           m.Unit,
 							MType:          "histogram",
 							ServiceName:    svc,
 							HistBoundsJSON: toJSON(dp.ExplicitBounds),
 							HistCountsJSON: toJSON(dp.BucketCounts),
-							AttributesJSON: toJSON(dp.Attributes),
-							ResourceJSON:   resourceJSON,
-							IngestedAt:     now,
 							HistCount:      int64(dp.Count),
 							HistSum:        histSum,
+							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
+							AttributesJSON: toJSON(dp.Attributes),
+							ResourceJSON:   resourceJSON,
+							ScopeName:      scopeName,
+							ScopeVersion:   scopeVer,
+							IngestedAt:     now,
 						}
 						ms.srv.outMetrics <- row
 					}
-				default:
-					// ignore other types in v1.0
+				case *metricspb.Metric_ExponentialHistogram:
+					for _, dp := range d.ExponentialHistogram.DataPoints {
+						histSum := 0.0
+						if dp.Sum != nil {
+							histSum = *dp.Sum
+						}
+						row := lake.MetricRow{
+							TenantID:       cfg.TenantID.String(),
+							Namespace:      namespace,
+							TimeUnixNanos:  int64(dp.TimeUnixNano),
+							Name:           m.Name,
+							Description:    m.Description,
+							Unit:           m.Unit,
+							MType:          "exp_histogram",
+							ServiceName:    svc,
+							HistBoundsJSON: toJSON(expHistBuckets(dp)),
+							HistCountsJSON: toJSON(expHistCounts(dp)),
+							HistCount:      int64(dp.Count),
+							HistSum:        histSum,
+							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
+							AttributesJSON: toJSON(dp.Attributes),
+							ResourceJSON:   resourceJSON,
+							ScopeName:      scopeName,
+							ScopeVersion:   scopeVer,
+							IngestedAt:     now,
+						}
+						ms.srv.outMetrics <- row
+					}
+				case *metricspb.Metric_Summary:
+					for _, dp := range d.Summary.DataPoints {
+						row := lake.MetricRow{
+							TenantID:       cfg.TenantID.String(),
+							Namespace:      namespace,
+							TimeUnixNanos:  int64(dp.TimeUnixNano),
+							Name:           m.Name,
+							Description:    m.Description,
+							Unit:           m.Unit,
+							MType:          "summary",
+							ServiceName:    svc,
+							HistBoundsJSON: toJSON(summaryQuantiles(dp)),
+							HistCountsJSON: toJSON(summaryValues(dp)),
+							HistCount:      int64(dp.Count),
+							HistSum:        dp.Sum,
+							AttributesJSON: toJSON(dp.Attributes),
+							ResourceJSON:   resourceJSON,
+							ScopeName:      scopeName,
+							ScopeVersion:   scopeVer,
+							IngestedAt:     now,
+						}
+						ms.srv.outMetrics <- row
+					}
 				}
 			}
 		}
@@ -279,4 +359,143 @@ func hexOrEmpty(b []byte) string {
 		return ""
 	}
 	return fmt.Sprintf("%x", b)
+}
+
+func eventsToJSON(events []*tracepb.Span_Event) []byte {
+	if len(events) == 0 {
+		return nil
+	}
+	type evt struct {
+		Time       int64             `json:"time_unix_nano"`
+		Name       string            `json:"name"`
+		Attributes map[string]string `json:"attributes,omitempty"`
+	}
+	out := make([]evt, 0, len(events))
+	for _, e := range events {
+		ev := evt{
+			Time: int64(e.TimeUnixNano),
+			Name: e.Name,
+		}
+		if len(e.Attributes) > 0 {
+			ev.Attributes = make(map[string]string, len(e.Attributes))
+			for _, kv := range e.Attributes {
+				ev.Attributes[kv.Key] = asString(kv.Value)
+			}
+		}
+		out = append(out, ev)
+	}
+	b, _ := json.Marshal(out)
+	return b
+}
+
+func linksToJSON(links []*tracepb.Span_Link) []byte {
+	if len(links) == 0 {
+		return nil
+	}
+	type link struct {
+		TraceID    string            `json:"trace_id"`
+		SpanID     string            `json:"span_id"`
+		TraceState string            `json:"trace_state,omitempty"`
+		Attributes map[string]string `json:"attributes,omitempty"`
+	}
+	out := make([]link, 0, len(links))
+	for _, l := range links {
+		ln := link{
+			TraceID:    fmt.Sprintf("%x", l.TraceId),
+			SpanID:     fmt.Sprintf("%x", l.SpanId),
+			TraceState: l.TraceState,
+		}
+		if len(l.Attributes) > 0 {
+			ln.Attributes = make(map[string]string, len(l.Attributes))
+			for _, kv := range l.Attributes {
+				ln.Attributes[kv.Key] = asString(kv.Value)
+			}
+		}
+		out = append(out, ln)
+	}
+	b, _ := json.Marshal(out)
+	return b
+}
+
+func scopeInfo(scope *common.InstrumentationScope) (name, version string) {
+	if scope == nil {
+		return "", ""
+	}
+	return scope.Name, scope.Version
+}
+
+func exemplarsToJSON(exemplars []*metricspb.Exemplar) []byte {
+	if len(exemplars) == 0 {
+		return nil
+	}
+	type ex struct {
+		Time       int64             `json:"time_unix_nano"`
+		TraceID    string            `json:"trace_id,omitempty"`
+		SpanID     string            `json:"span_id,omitempty"`
+		Value      float64           `json:"value"`
+		Attributes map[string]string `json:"attributes,omitempty"`
+	}
+	out := make([]ex, 0, len(exemplars))
+	for _, e := range exemplars {
+		val := 0.0
+		switch v := e.Value.(type) {
+		case *metricspb.Exemplar_AsDouble:
+			val = v.AsDouble
+		case *metricspb.Exemplar_AsInt:
+			val = float64(v.AsInt)
+		}
+		item := ex{
+			Time:    int64(e.TimeUnixNano),
+			TraceID: hexOrEmpty(e.TraceId),
+			SpanID:  hexOrEmpty(e.SpanId),
+			Value:   val,
+		}
+		if len(e.FilteredAttributes) > 0 {
+			item.Attributes = make(map[string]string, len(e.FilteredAttributes))
+			for _, kv := range e.FilteredAttributes {
+				item.Attributes[kv.Key] = asString(kv.Value)
+			}
+		}
+		out = append(out, item)
+	}
+	b, _ := json.Marshal(out)
+	return b
+}
+
+func expHistBuckets(dp *metricspb.ExponentialHistogramDataPoint) []float64 {
+	// Convert exponential histogram to explicit buckets for simplified storage
+	// This is a lossy conversion but provides compatibility with standard histogram queries
+	if dp.Positive == nil || len(dp.Positive.BucketCounts) == 0 {
+		return nil
+	}
+	base := math.Pow(2, math.Pow(2, float64(-dp.Scale)))
+	offset := int(dp.Positive.Offset)
+	buckets := make([]float64, len(dp.Positive.BucketCounts))
+	for i := range dp.Positive.BucketCounts {
+		buckets[i] = math.Pow(base, float64(offset+i))
+	}
+	return buckets
+}
+
+func expHistCounts(dp *metricspb.ExponentialHistogramDataPoint) []uint64 {
+	if dp.Positive == nil {
+		return nil
+	}
+	return dp.Positive.BucketCounts
+}
+
+func summaryQuantiles(dp *metricspb.SummaryDataPoint) []float64 {
+	quantiles := make([]float64, len(dp.QuantileValues))
+	for i, qv := range dp.QuantileValues {
+		quantiles[i] = qv.Quantile
+	}
+	return quantiles
+}
+
+func summaryValues(dp *metricspb.SummaryDataPoint) []float64 {
+	values := make([]float64, len(dp.QuantileValues))
+	for i, qv := range dp.QuantileValues {
+		values[i] = qv.Value
+	}
+	return values
 }

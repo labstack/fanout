@@ -18,24 +18,48 @@ type TraceIn struct {
 }
 
 type TraceSpan struct {
-	SpanID       string  `json:"span_id"`
-	ParentSpanID string  `json:"parent_span_id,omitempty"`
-	Service      string  `json:"service"`
-	Operation    string  `json:"operation"`
-	StartTime    string  `json:"start_time"`
-	DurationMs   float64 `json:"duration_ms"`
-	Status       string  `json:"status"`
-	StatusMsg    string  `json:"status_msg,omitempty"`
-	SelfTimeMs   float64 `json:"self_time_ms"`
-	IsCritical   bool    `json:"is_critical,omitempty"`
+	SpanID       string            `json:"span_id"`
+	ParentSpanID string            `json:"parent_span_id,omitempty"`
+	Service      string            `json:"service"`
+	Operation    string            `json:"operation"`
+	Kind         string            `json:"kind,omitempty"`
+	StartTime    string            `json:"start_time"`
+	DurationMs   float64           `json:"duration_ms"`
+	Status       string            `json:"status"`
+	StatusMsg    string            `json:"status_msg,omitempty"`
+	SelfTimeMs   float64           `json:"self_time_ms"`
+	IsCritical   bool              `json:"is_critical,omitempty"`
+	Events       []SpanEventOut    `json:"events,omitempty"`
+	Links        []SpanLinkOut     `json:"links,omitempty"`
+	TraceState   string            `json:"trace_state,omitempty"`
+	ScopeName    string            `json:"scope_name,omitempty"`
+	ScopeVersion string            `json:"scope_version,omitempty"`
+	Attributes   map[string]any    `json:"attributes,omitempty"`
+}
+
+type SpanEventOut struct {
+	Time       int64             `json:"time_unix_nano"`
+	Name       string            `json:"name"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+}
+
+type SpanLinkOut struct {
+	TraceID    string            `json:"trace_id"`
+	SpanID     string            `json:"span_id"`
+	TraceState string            `json:"trace_state,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
 type CorrelatedLog struct {
-	Timestamp string `json:"ts"`
-	Service   string `json:"service"`
-	Severity  string `json:"severity"`
-	Body      string `json:"body"`
-	SpanID    string `json:"span_id,omitempty"`
+	Timestamp      string `json:"ts"`
+	ObservedTime   string `json:"observed_ts,omitempty"`
+	Service        string `json:"service"`
+	Severity       string `json:"severity"`
+	SeverityNumber int32  `json:"severity_number,omitempty"`
+	Body           string `json:"body"`
+	SpanID         string `json:"span_id,omitempty"`
+	ScopeName      string `json:"scope_name,omitempty"`
+	ScopeVersion   string `json:"scope_version,omitempty"`
 }
 
 type RootCause struct {
@@ -96,27 +120,52 @@ func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn
 	}
 
 	for _, sp := range result.Spans {
-		out.Spans = append(out.Spans, TraceSpan{
+		ts := TraceSpan{
 			SpanID:       sp.SpanID,
 			ParentSpanID: sp.ParentID,
 			Service:      sp.Service,
 			Operation:    sp.Name,
+			Kind:         sp.Kind,
 			StartTime:    sp.StartTime,
 			DurationMs:   sp.Duration,
 			Status:       sp.Status,
 			StatusMsg:    sp.StatusMsg,
 			SelfTimeMs:   sp.SelfTime,
 			IsCritical:   sp.IsCritical,
-		})
+			TraceState:   sp.TraceState,
+			ScopeName:    sp.ScopeName,
+			ScopeVersion: sp.ScopeVersion,
+			Attributes:   sp.Attributes,
+		}
+		for _, ev := range sp.Events {
+			ts.Events = append(ts.Events, SpanEventOut{
+				Time:       ev.Time,
+				Name:       ev.Name,
+				Attributes: ev.Attributes,
+			})
+		}
+		for _, ln := range sp.Links {
+			ts.Links = append(ts.Links, SpanLinkOut{
+				TraceID:    ln.TraceID,
+				SpanID:     ln.SpanID,
+				TraceState: ln.TraceState,
+				Attributes: ln.Attributes,
+			})
+		}
+		out.Spans = append(out.Spans, ts)
 	}
 
 	for _, lg := range result.Logs {
 		out.Logs = append(out.Logs, CorrelatedLog{
-			Timestamp: lg.Time,
-			Service:   lg.Service,
-			Severity:  lg.Severity,
-			Body:      lg.Body,
-			SpanID:    lg.SpanID,
+			Timestamp:      lg.Time,
+			ObservedTime:   lg.ObservedTime,
+			Service:        lg.Service,
+			Severity:       lg.Severity,
+			SeverityNumber: lg.SeverityNumber,
+			Body:           lg.Body,
+			SpanID:         lg.SpanID,
+			ScopeName:      lg.ScopeName,
+			ScopeVersion:   lg.ScopeVersion,
 		})
 	}
 

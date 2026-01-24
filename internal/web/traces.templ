@@ -203,23 +203,51 @@ type TraceDetailData struct {
 }
 
 type SpanInfo struct {
-	SpanID      string
-	ParentID    string
-	Service     string
-	Operation   string
-	Duration    float64
-	Status      string
-	StatusMsg   string
-	Kind        string
-	StartOffset float64
-	Depth       int
+	SpanID       string
+	ParentID     string
+	Service      string
+	Operation    string
+	Duration     float64
+	SelfTime     float64
+	Status       string
+	StatusMsg    string
+	Kind         string
+	StartOffset  float64
+	Depth        int
+	Events       []SpanEvent
+	Links        []SpanLink
+	TraceState   string
+	Flags        uint32
+	ScopeName    string
+	ScopeVersion string
+	Attributes   map[string]any
+}
+
+type SpanEvent struct {
+	Time       int64
+	Name       string
+	Attributes map[string]string
+}
+
+type SpanLink struct {
+	TraceID    string
+	SpanID     string
+	TraceState string
+	Attributes map[string]string
 }
 
 type LogInfo struct {
-	Time     string
-	Service  string
-	Severity string
-	Body     string
+	Time           string
+	ObservedTime   string
+	Service        string
+	Severity       string
+	SeverityNumber int32
+	Body           string
+	SpanID         string
+	Flags          uint32
+	ScopeName      string
+	ScopeVersion   string
+	Attributes     map[string]any
 }
 
 // TraceDetail renders the trace detail page with waterfall
@@ -324,6 +352,10 @@ templ TraceDetail(data TraceDetailData) {
 									<span class="span-detail-value">{ fmt.Sprintf("%.2fms", span.Duration) }</span>
 								</div>
 								<div class="span-detail-item">
+									<span class="span-detail-label">Self Time</span>
+									<span class="span-detail-value">{ fmt.Sprintf("%.2fms", span.SelfTime) }</span>
+								</div>
+								<div class="span-detail-item">
 									<span class="span-detail-label">Start Offset</span>
 									<span class="span-detail-value">{ fmt.Sprintf("+%.2fms", span.StartOffset) }</span>
 								</div>
@@ -337,11 +369,58 @@ templ TraceDetail(data TraceDetailData) {
 									<span class="span-detail-label">Status</span>
 									<span class={ "span-detail-value", spanStatusClass(span.Status) }>{ span.Status }</span>
 								</div>
+								if span.ScopeName != "" {
+									<div class="span-detail-item">
+										<span class="span-detail-label">Scope</span>
+										<span class="span-detail-value">{ span.ScopeName }{ scopeVersion(span.ScopeVersion) }</span>
+									</div>
+								}
 							</div>
 							if span.StatusMsg != "" {
 								<div class="span-error-msg">
 									<sl-icon name="exclamation-triangle"></sl-icon>
 									{ span.StatusMsg }
+								</div>
+							}
+							if len(span.Events) > 0 {
+								<div class="span-section">
+									<div class="span-section-title">Events ({ fmt.Sprintf("%d", len(span.Events)) })</div>
+									<div class="span-events">
+										for _, ev := range span.Events {
+											<div class="span-event">
+												<span class="event-name">{ ev.Name }</span>
+												if len(ev.Attributes) > 0 {
+													<span class="event-attrs">{ formatAttrs(ev.Attributes) }</span>
+												}
+											</div>
+										}
+									</div>
+								</div>
+							}
+							if len(span.Links) > 0 {
+								<div class="span-section">
+									<div class="span-section-title">Links ({ fmt.Sprintf("%d", len(span.Links)) })</div>
+									<div class="span-links">
+										for _, ln := range span.Links {
+											<div class="span-link">
+												<a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(ln.TraceID), data.Window)) } class="link-trace">{ truncateID(ln.TraceID) }</a>
+												<span class="link-span">span: { truncateID(ln.SpanID) }</span>
+											</div>
+										}
+									</div>
+								</div>
+							}
+							if len(span.Attributes) > 0 {
+								<div class="span-section">
+									<div class="span-section-title">Attributes</div>
+									<div class="span-attributes">
+										for k, v := range span.Attributes {
+											<div class="attr-row">
+												<span class="attr-key">{ k }</span>
+												<span class="attr-value">{ formatAttrValue(v) }</span>
+											</div>
+										}
+									</div>
 								</div>
 							}
 						</div>
@@ -598,6 +677,85 @@ templ TraceDetail(data TraceDetailData) {
 				flex-shrink: 0;
 				margin-top: 0.125rem;
 			}
+			/* New sections for events, links, attributes */
+			.span-section {
+				margin-top: 0.75rem;
+				padding-top: 0.75rem;
+				border-top: 1px solid var(--border-color);
+			}
+			.span-section-title {
+				font-size: 0.7rem;
+				font-weight: 600;
+				color: var(--text-muted);
+				text-transform: uppercase;
+				letter-spacing: 0.025em;
+				margin-bottom: 0.5rem;
+			}
+			.span-events, .span-links {
+				display: flex;
+				flex-direction: column;
+				gap: 0.25rem;
+			}
+			.span-event {
+				display: flex;
+				gap: 0.5rem;
+				font-size: 0.75rem;
+				padding: 0.25rem 0.5rem;
+				background: var(--bg-tertiary);
+				border-radius: 0.25rem;
+			}
+			.event-name {
+				font-weight: 500;
+				color: var(--text-primary);
+			}
+			.event-attrs {
+				color: var(--text-muted);
+				font-family: monospace;
+				font-size: 0.7rem;
+			}
+			.span-link {
+				display: flex;
+				gap: 0.5rem;
+				font-size: 0.75rem;
+				padding: 0.25rem 0.5rem;
+				background: var(--bg-tertiary);
+				border-radius: 0.25rem;
+			}
+			.link-trace {
+				color: var(--accent);
+				text-decoration: none;
+				font-family: monospace;
+			}
+			.link-trace:hover {
+				text-decoration: underline;
+			}
+			.link-span {
+				color: var(--text-muted);
+				font-family: monospace;
+			}
+			.span-attributes {
+				display: flex;
+				flex-direction: column;
+				gap: 0.25rem;
+			}
+			.attr-row {
+				display: flex;
+				gap: 0.5rem;
+				font-size: 0.75rem;
+				padding: 0.25rem 0.5rem;
+				background: var(--bg-tertiary);
+				border-radius: 0.25rem;
+			}
+			.attr-key {
+				font-weight: 500;
+				color: var(--accent);
+				min-width: 120px;
+			}
+			.attr-value {
+				color: var(--text-primary);
+				font-family: monospace;
+				word-break: break-all;
+			}
 		</style>
 	}
 }
@@ -701,4 +859,29 @@ func spanStatusClass(status string) string {
 		return "status-error"
 	}
 	return "status-ok"
+}
+
+func scopeVersion(v string) string {
+	if v == "" {
+		return ""
+	}
+	return "@" + v
+}
+
+func formatAttrs(attrs map[string]string) string {
+	if len(attrs) == 0 {
+		return ""
+	}
+	var parts []string
+	for k, v := range attrs {
+		parts = append(parts, k+"="+v)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func formatAttrValue(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprintf("%v", v)
 }

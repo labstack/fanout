@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 )
@@ -30,17 +31,26 @@ func (s *Service) Trace(ctx context.Context, traceID string, includeLogs bool, w
 	namespace, tenantID := s.defaults("", "")
 
 	// Get spans (using optimized glob for time window)
+	// Use union_by_name=true to handle schema evolution (old files may not have new columns)
 	q := fmt.Sprintf(`
 SELECT "name=span_id" as span_id,
        "name=parent_span_id" as parent_span_id,
        "name=service_name" as service,
        "name=name" as operation,
+       "name=kind" as kind,
        strftime(epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS start_time,
        "name=duration_ms" as duration_ms,
        "name=status_code" as status,
        "name=status_msg" as status_msg,
-       "name=start_unix_nano" as start_nano
-FROM read_parquet(%s)
+       "name=start_unix_nano" as start_nano,
+       "name=events_json" as events_json,
+       "name=links_json" as links_json,
+       "name=trace_state" as trace_state,
+       "name=flags" as flags,
+       "name=scope_name" as scope_name,
+       "name=scope_version" as scope_version,
+       "name=attributes_json" as attributes_json
+FROM read_parquet(%s, union_by_name=true)
 WHERE "name=trace_id" = '%s'
 ORDER BY "name=start_unix_nano" ASC;
 `, s.duck.SpansGlob(tenantID, namespace, window), escapeSQL(traceID))
@@ -62,8 +72,9 @@ ORDER BY "name=start_unix_nano" ASC;
 
 	for rows.Next() {
 		var r spanWithNano
-		var parentID, statusMsg any
-		if err := rows.Scan(&r.SpanID, &parentID, &r.Service, &r.Name, &r.StartTime, &r.Duration, &r.Status, &statusMsg, &r.startNano); err != nil {
+		var parentID, statusMsg, eventsJSON, linksJSON, traceState, flags, scopeName, scopeVersion, attrsJSON any
+		if err := rows.Scan(&r.SpanID, &parentID, &r.Service, &r.Name, &r.Kind, &r.StartTime, &r.Duration, &r.Status, &statusMsg, &r.startNano,
+			&eventsJSON, &linksJSON, &traceState, &flags, &scopeName, &scopeVersion, &attrsJSON); err != nil {
 			continue
 		}
 		if parentID != nil {
@@ -71,6 +82,46 @@ ORDER BY "name=start_unix_nano" ASC;
 		}
 		if statusMsg != nil {
 			r.StatusMsg = fmt.Sprintf("%v", statusMsg)
+		}
+		if traceState != nil {
+			r.TraceState = fmt.Sprintf("%v", traceState)
+		}
+		if flags != nil {
+			if f, ok := flags.(int64); ok {
+				r.Flags = uint32(f)
+			} else if f, ok := flags.(uint32); ok {
+				r.Flags = f
+			}
+		}
+		if scopeName != nil {
+			r.ScopeName = fmt.Sprintf("%v", scopeName)
+		}
+		if scopeVersion != nil {
+			r.ScopeVersion = fmt.Sprintf("%v", scopeVersion)
+		}
+		// Parse events JSON
+		if eventsJSON != nil {
+			if b, ok := eventsJSON.([]byte); ok && len(b) > 0 {
+				var events []SpanEvent
+				json.Unmarshal(b, &events)
+				r.Events = events
+			}
+		}
+		// Parse links JSON
+		if linksJSON != nil {
+			if b, ok := linksJSON.([]byte); ok && len(b) > 0 {
+				var links []SpanLink
+				json.Unmarshal(b, &links)
+				r.Links = links
+			}
+		}
+		// Parse attributes JSON
+		if attrsJSON != nil {
+			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
+				var attrs map[string]any
+				json.Unmarshal(b, &attrs)
+				r.Attributes = attrs
+			}
 		}
 		services[r.Service] = true
 		if r.Status == "STATUS_CODE_ERROR" || r.Status == "ERROR" {
@@ -202,11 +253,19 @@ func (s *Service) fetchTraceLogs(ctx context.Context, traceID string, window int
 
 	q := fmt.Sprintf(`
 SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+       CASE WHEN "name=observed_time_unix_nano" > 0
+            THEN strftime(epoch_ms(CAST("name=observed_time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ')
+            ELSE NULL END AS observed_ts,
        "name=service_name" as service,
        "name=severity" as severity,
+       "name=severity_number" as severity_number,
        "name=body" as body,
-       "name=span_id" as span_id
-FROM read_parquet(%s)
+       "name=span_id" as span_id,
+       "name=flags" as flags,
+       "name=scope_name" as scope_name,
+       "name=scope_version" as scope_version,
+       "name=attributes_json" as attributes_json
+FROM read_parquet(%s, union_by_name=true)
 WHERE "name=trace_id" = '%s'
 ORDER BY "name=time_unix_nano" ASC
 LIMIT 100;
@@ -220,10 +279,42 @@ LIMIT 100;
 
 	for rows.Next() {
 		var r LogInfo
-		var spanID any
-		rows.Scan(&r.Time, &r.Service, &r.Severity, &r.Body, &spanID)
+		r.TraceID = traceID
+		var observedTime, spanID, flags, scopeName, scopeVersion, attrsJSON any
+		var severityNum any
+		rows.Scan(&r.Time, &observedTime, &r.Service, &r.Severity, &severityNum, &r.Body, &spanID, &flags, &scopeName, &scopeVersion, &attrsJSON)
+		if observedTime != nil {
+			r.ObservedTime = fmt.Sprintf("%v", observedTime)
+		}
+		if severityNum != nil {
+			if num, ok := severityNum.(int64); ok {
+				r.SeverityNumber = int32(num)
+			} else if num, ok := severityNum.(int32); ok {
+				r.SeverityNumber = num
+			}
+		}
 		if spanID != nil {
 			r.SpanID = fmt.Sprintf("%v", spanID)
+		}
+		if flags != nil {
+			if f, ok := flags.(int64); ok {
+				r.Flags = uint32(f)
+			} else if f, ok := flags.(uint32); ok {
+				r.Flags = f
+			}
+		}
+		if scopeName != nil {
+			r.ScopeName = fmt.Sprintf("%v", scopeName)
+		}
+		if scopeVersion != nil {
+			r.ScopeVersion = fmt.Sprintf("%v", scopeVersion)
+		}
+		if attrsJSON != nil {
+			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
+				var attrs map[string]any
+				json.Unmarshal(b, &attrs)
+				r.Attributes = attrs
+			}
 		}
 		logs = append(logs, r)
 	}

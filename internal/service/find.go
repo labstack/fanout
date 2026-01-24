@@ -80,7 +80,7 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 		filterStr = "AND " + strings.Join(filters, " AND ")
 	}
 
-	// Glob scoped to single partition
+	// Glob scoped to single partition, union_by_name for schema evolution
 	q := fmt.Sprintf(`
 SELECT "name=trace_id" as trace_id,
        "name=span_id" as span_id,
@@ -88,8 +88,10 @@ SELECT "name=trace_id" as trace_id,
        "name=name" as operation,
        "name=duration_ms" as duration_ms,
        "name=status_code" as status,
-       strftime(epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS start_time
-FROM read_parquet(%s)
+       strftime(epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS start_time,
+       "name=scope_name" as scope_name,
+       "name=scope_version" as scope_version
+FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   %s
 ORDER BY "name=start_unix_nano" DESC
@@ -105,7 +107,14 @@ LIMIT %d;
 	var spans []SpanResult
 	for rows.Next() {
 		var r SpanResult
-		rows.Scan(&r.TraceID, &r.SpanID, &r.Service, &r.Name, &r.Duration, &r.Status, &r.StartTime)
+		var scopeName, scopeVersion any
+		rows.Scan(&r.TraceID, &r.SpanID, &r.Service, &r.Name, &r.Duration, &r.Status, &r.StartTime, &scopeName, &scopeVersion)
+		if scopeName != nil {
+			r.ScopeName = fmt.Sprintf("%v", scopeName)
+		}
+		if scopeVersion != nil {
+			r.ScopeVersion = fmt.Sprintf("%v", scopeVersion)
+		}
 		spans = append(spans, r)
 	}
 
@@ -138,14 +147,21 @@ func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool
 		filterStr = "AND " + strings.Join(filters, " AND ")
 	}
 
-	// Glob scoped to single partition
+	// Glob scoped to single partition, union_by_name for schema evolution
 	q := fmt.Sprintf(`
 SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+       CASE WHEN "name=observed_time_unix_nano" > 0
+            THEN strftime(epoch_ms(CAST("name=observed_time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ')
+            ELSE NULL END AS observed_ts,
        "name=service_name" as service,
        "name=severity" as severity,
+       "name=severity_number" as severity_number,
        "name=body" as body,
-       "name=trace_id" as trace_id
-FROM read_parquet(%s)
+       "name=trace_id" as trace_id,
+       "name=span_id" as span_id,
+       "name=scope_name" as scope_name,
+       "name=scope_version" as scope_version
+FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   %s
 ORDER BY "name=time_unix_nano" DESC
@@ -161,10 +177,30 @@ LIMIT %d;
 	var logs []LogResult
 	for rows.Next() {
 		var r LogResult
-		var traceID any
-		rows.Scan(&r.Time, &r.Service, &r.Severity, &r.Body, &traceID)
+		var observedTime, traceID, spanID, scopeName, scopeVersion any
+		var severityNum any
+		rows.Scan(&r.Time, &observedTime, &r.Service, &r.Severity, &severityNum, &r.Body, &traceID, &spanID, &scopeName, &scopeVersion)
+		if observedTime != nil {
+			r.ObservedTime = fmt.Sprintf("%v", observedTime)
+		}
+		if severityNum != nil {
+			if num, ok := severityNum.(int64); ok {
+				r.SeverityNumber = int32(num)
+			} else if num, ok := severityNum.(int32); ok {
+				r.SeverityNumber = num
+			}
+		}
 		if traceID != nil {
 			r.TraceID = fmt.Sprintf("%v", traceID)
+		}
+		if spanID != nil {
+			r.SpanID = fmt.Sprintf("%v", spanID)
+		}
+		if scopeName != nil {
+			r.ScopeName = fmt.Sprintf("%v", scopeName)
+		}
+		if scopeVersion != nil {
+			r.ScopeVersion = fmt.Sprintf("%v", scopeVersion)
 		}
 		logs = append(logs, r)
 	}

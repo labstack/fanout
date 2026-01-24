@@ -127,7 +127,7 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 				COUNT(*) FILTER (WHERE "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')) AS error_count,
 				COUNT(*) AS total_count,
 				(COUNT(*) FILTER (WHERE "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR'))::FLOAT / COUNT(*)::FLOAT) AS error_rate
-			FROM read_parquet(%s)
+			FROM read_parquet(%s, union_by_name=true)
 			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
 			GROUP BY "name=service_name"
 		),
@@ -138,7 +138,7 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 				COUNT(*) AS total_count,
 				(COUNT(*) FILTER (WHERE "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR'))::FLOAT / COUNT(*)::FLOAT) AS error_rate,
 				STDDEV(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_stddev
-			FROM read_parquet(%s)
+			FROM read_parquet(%s, union_by_name=true)
 			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
 			GROUP BY "name=service_name"
 		)
@@ -200,7 +200,7 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 				"name=service_name" as service_name,
 				AVG(("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS avg_latency,
 				PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS p95_latency
-			FROM read_parquet(%s)
+			FROM read_parquet(%s, union_by_name=true)
 			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
 			AND "name=kind" = 'SPAN_KIND_SERVER'
 			GROUP BY "name=service_name"
@@ -210,7 +210,7 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 				"name=service_name" as service_name,
 				AVG(("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS avg_latency,
 				STDDEV(("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS latency_stddev
-			FROM read_parquet(%s)
+			FROM read_parquet(%s, union_by_name=true)
 			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
 			AND "name=kind" = 'SPAN_KIND_SERVER'
 			GROUP BY "name=service_name"
@@ -271,7 +271,7 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 			SELECT
 				"name=service_name" as service_name,
 				COUNT(*) AS span_count
-			FROM read_parquet(%s)
+			FROM read_parquet(%s, union_by_name=true)
 			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
 			GROUP BY "name=service_name"
 		),
@@ -284,7 +284,7 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 				SELECT
 					"name=service_name" as service_name,
 					COUNT(*) AS cnt
-				FROM read_parquet(%s)
+				FROM read_parquet(%s, union_by_name=true)
 				WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
 				GROUP BY "name=service_name", time_bucket(INTERVAL '5 minutes', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)))
 			) subq
@@ -350,7 +350,7 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 			COUNT(*) AS occurrence_count,
 			MIN("name=time_unix_nano") AS first_seen_nano,
 			MAX("name=time_unix_nano") AS last_seen_nano
-		FROM read_parquet(%s)
+		FROM read_parquet(%s, union_by_name=true)
 		WHERE "name=time_unix_nano" >= %d AND "name=time_unix_nano" < %d
 		AND "name=severity" IN ('WARN', 'ERROR', 'FATAL')
 		GROUP BY SUBSTRING("name=body", 1, 100), "name=severity", "name=service_name"

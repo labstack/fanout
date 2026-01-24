@@ -199,7 +199,7 @@ WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - N*60) * 1000000000
 
 Example - top endpoints by P95:
 SELECT "name=name", COUNT(*) as cnt, ROUND(quantile_cont("name=duration_ms", 0.95), 2) as p95
-FROM read_parquet('lake/spans/**/*.parquet')
+FROM read_parquet('lake/spans/**/*.parquet', union_by_name=true)
 WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 900) * 1000000000
 GROUP BY "name=name" ORDER BY p95 DESC LIMIT 10`
 }
