@@ -260,19 +260,19 @@ ORDER BY "name=start_unix_nano" ASC;
 		// Parse events JSON
 		if eventsJSON != nil {
 			if b, ok := eventsJSON.([]byte); ok && len(b) > 0 {
-				json.Unmarshal(b, &sp.events)
+				_ = json.Unmarshal(b, &sp.events)
 			}
 		}
 		// Parse links JSON
 		if linksJSON != nil {
 			if b, ok := linksJSON.([]byte); ok && len(b) > 0 {
-				json.Unmarshal(b, &sp.links)
+				_ = json.Unmarshal(b, &sp.links)
 			}
 		}
 		// Parse attributes JSON
 		if attrsJSON != nil {
 			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
-				json.Unmarshal(b, &sp.attributes)
+				_ = json.Unmarshal(b, &sp.attributes)
 			}
 		}
 		if traceState != nil {

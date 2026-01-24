@@ -315,8 +315,9 @@ LIMIT 100;
 		if attrsJSON != nil {
 			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
 				var attrs map[string]any
-				json.Unmarshal(b, &attrs)
-				r.Attributes = attrs
+				if err := json.Unmarshal(b, &attrs); err == nil {
+					r.Attributes = attrs
+				}
 			}
 		}
 		logs = append(logs, r)
