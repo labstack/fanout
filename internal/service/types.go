@@ -229,15 +229,15 @@ type LogResult struct {
 
 // MetricInfo describes a metric with its metadata.
 type MetricInfo struct {
-	Name        string
-	Description string
-	Unit        string
-	Type        string
-	Service     string
-	Value       float64
-	Time        string
-	Exemplars   []Exemplar
-	ScopeName   string
+	Name         string
+	Description  string
+	Unit         string
+	Type         string
+	Service      string
+	Value        float64
+	Time         string
+	Exemplars    []Exemplar
+	ScopeName    string
 	ScopeVersion string
 }
 

@@ -42,22 +42,22 @@ type SpanRow struct {
 }
 
 type LogRow struct {
-	TenantID            string `parquet:"-"` // Partitioning only
-	Namespace           string `parquet:"-"` // Partitioning only
-	TimeUnixNanos       int64  `parquet:"name=time_unix_nano, type=INT64"`
-	ObservedTimeNanos   int64  `parquet:"name=observed_time_unix_nano, type=INT64, repetitiontype=OPTIONAL"`
-	Severity            string `parquet:"name=severity, type=BYTE_ARRAY, convertedtype=UTF8"`
-	SeverityNumber      int32  `parquet:"name=severity_number, type=INT32, repetitiontype=OPTIONAL"`
-	Body                string `parquet:"name=body, type=BYTE_ARRAY, convertedtype=UTF8"`
-	ServiceName         string `parquet:"name=service_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	TraceID             string `parquet:"name=trace_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	SpanID              string `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	Flags               uint32 `parquet:"name=flags, type=INT32, repetitiontype=OPTIONAL"`
-	ResourceJSON        []byte `parquet:"name=resource_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	AttributesJSON      []byte `parquet:"name=attributes_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ScopeName           string `parquet:"name=scope_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ScopeVersion        string `parquet:"name=scope_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	IngestedAt          int64  `parquet:"name=ingested_unix_nano, type=INT64"`
+	TenantID          string `parquet:"-"` // Partitioning only
+	Namespace         string `parquet:"-"` // Partitioning only
+	TimeUnixNanos     int64  `parquet:"name=time_unix_nano, type=INT64"`
+	ObservedTimeNanos int64  `parquet:"name=observed_time_unix_nano, type=INT64, repetitiontype=OPTIONAL"`
+	Severity          string `parquet:"name=severity, type=BYTE_ARRAY, convertedtype=UTF8"`
+	SeverityNumber    int32  `parquet:"name=severity_number, type=INT32, repetitiontype=OPTIONAL"`
+	Body              string `parquet:"name=body, type=BYTE_ARRAY, convertedtype=UTF8"`
+	ServiceName       string `parquet:"name=service_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	TraceID           string `parquet:"name=trace_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	SpanID            string `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	Flags             uint32 `parquet:"name=flags, type=INT32, repetitiontype=OPTIONAL"`
+	ResourceJSON      []byte `parquet:"name=resource_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	AttributesJSON    []byte `parquet:"name=attributes_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	ScopeName         string `parquet:"name=scope_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	ScopeVersion      string `parquet:"name=scope_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	IngestedAt        int64  `parquet:"name=ingested_unix_nano, type=INT64"`
 }
 
 type MetricRow struct {

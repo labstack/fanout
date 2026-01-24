@@ -18,23 +18,23 @@ type TraceIn struct {
 }
 
 type TraceSpan struct {
-	SpanID       string            `json:"span_id"`
-	ParentSpanID string            `json:"parent_span_id,omitempty"`
-	Service      string            `json:"service"`
-	Operation    string            `json:"operation"`
-	Kind         string            `json:"kind,omitempty"`
-	StartTime    string            `json:"start_time"`
-	DurationMs   float64           `json:"duration_ms"`
-	Status       string            `json:"status"`
-	StatusMsg    string            `json:"status_msg,omitempty"`
-	SelfTimeMs   float64           `json:"self_time_ms"`
-	IsCritical   bool              `json:"is_critical,omitempty"`
-	Events       []SpanEventOut    `json:"events,omitempty"`
-	Links        []SpanLinkOut     `json:"links,omitempty"`
-	TraceState   string            `json:"trace_state,omitempty"`
-	ScopeName    string            `json:"scope_name,omitempty"`
-	ScopeVersion string            `json:"scope_version,omitempty"`
-	Attributes   map[string]any    `json:"attributes,omitempty"`
+	SpanID       string         `json:"span_id"`
+	ParentSpanID string         `json:"parent_span_id,omitempty"`
+	Service      string         `json:"service"`
+	Operation    string         `json:"operation"`
+	Kind         string         `json:"kind,omitempty"`
+	StartTime    string         `json:"start_time"`
+	DurationMs   float64        `json:"duration_ms"`
+	Status       string         `json:"status"`
+	StatusMsg    string         `json:"status_msg,omitempty"`
+	SelfTimeMs   float64        `json:"self_time_ms"`
+	IsCritical   bool           `json:"is_critical,omitempty"`
+	Events       []SpanEventOut `json:"events,omitempty"`
+	Links        []SpanLinkOut  `json:"links,omitempty"`
+	TraceState   string         `json:"trace_state,omitempty"`
+	ScopeName    string         `json:"scope_name,omitempty"`
+	ScopeVersion string         `json:"scope_version,omitempty"`
+	Attributes   map[string]any `json:"attributes,omitempty"`
 }
 
 type SpanEventOut struct {

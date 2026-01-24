@@ -25,15 +25,15 @@ type FindIn struct {
 }
 
 type FoundSpan struct {
-	TraceID      string `json:"trace_id"`
-	SpanID       string `json:"span_id"`
-	Service      string `json:"service"`
-	Operation    string `json:"operation"`
+	TraceID      string  `json:"trace_id"`
+	SpanID       string  `json:"span_id"`
+	Service      string  `json:"service"`
+	Operation    string  `json:"operation"`
 	DurationMs   float64 `json:"duration_ms"`
-	Status       string `json:"status"`
-	StartTime    string `json:"start_time"`
-	ScopeName    string `json:"scope_name,omitempty"`
-	ScopeVersion string `json:"scope_version,omitempty"`
+	Status       string  `json:"status"`
+	StartTime    string  `json:"start_time"`
+	ScopeName    string  `json:"scope_name,omitempty"`
+	ScopeVersion string  `json:"scope_version,omitempty"`
 }
 
 type FoundLog struct {
