@@ -60,7 +60,7 @@ echo ""
 
 # Test SSH
 echo "🔐 Testing SSH..."
-if ! ssh -o ConnectTimeout=10 "$SERVER" "echo 'OK'" > /dev/null 2>&1; then
+if ! ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$SERVER" "echo 'OK'" > /dev/null 2>&1; then
     echo "❌ SSH connection failed"
     exit 1
 fi
