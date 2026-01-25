@@ -1,0 +1,47 @@
+services:
+  nginx-proxy:
+    image: nginxproxy/nginx-proxy
+    container_name: nginx-proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+      - /data/ssl:/etc/nginx/certs
+      - /data/nginx:/etc/nginx/vhost.d
+      - /data/html:/usr/share/nginx/html
+
+  letsencrypt:
+    image: nginxproxy/acme-companion
+    container_name: letsencrypt
+    restart: unless-stopped
+    volumes_from:
+      - nginx-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /data/acme:/etc/acme.sh
+    environment:
+      - DEFAULT_EMAIL=${LETSENCRYPT_EMAIL:-admin@fanout.run}
+
+  fanout:
+    image: ghcr.io/labstack/fanout:${VERSION:-latest}
+    container_name: fanout
+    restart: unless-stopped
+    environment:
+      - VIRTUAL_HOST=fanout.run,www.fanout.run
+      - VIRTUAL_PORT=7520
+      - LETSENCRYPT_HOST=fanout.run,www.fanout.run
+      - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-admin@fanout.run}
+      - LAKE_DIR=/data
+      - HTTP_ADDR=:7520
+      - OTLP_GRPC_ADDR=:4317
+    ports:
+      - "4317:4317"  # OTLP gRPC (not proxied)
+    volumes:
+      - /data/fanout:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7520/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
