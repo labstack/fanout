@@ -113,3 +113,185 @@ func TestRetentionDisabled(t *testing.T) {
 		t.Error("retention should be disabled with 0 days")
 	}
 }
+
+func TestParsePartition(t *testing.T) {
+	tests := []struct {
+		name   string
+		input  string
+		prefix string
+		want   int
+	}{
+		{"valid year", "year=2024", "year", 2024},
+		{"valid month", "month=06", "month", 6},
+		{"valid day", "day=15", "day", 15},
+		{"valid hour", "hour=10", "hour", 10},
+		{"wrong prefix", "year=2024", "month", 0},
+		{"invalid format", "invalid", "year", 0},
+		{"empty value", "year=", "year", 0},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parsePartition(tc.input, tc.prefix)
+			if got != tc.want {
+				t.Errorf("parsePartition(%q, %q) = %d, want %d", tc.input, tc.prefix, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDirSize(t *testing.T) {
+	dir, err := os.MkdirTemp("", "dirsize-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	// Create files
+	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("hello"), 0644)
+	os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("world!"), 0644)
+
+	size := dirSize(dir)
+	// "hello" = 5, "world!" = 6
+	if size != 11 {
+		t.Errorf("dirSize() = %d, want 11", size)
+	}
+}
+
+func TestDirSize_Empty(t *testing.T) {
+	dir, err := os.MkdirTemp("", "dirsize-empty-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	size := dirSize(dir)
+	if size != 0 {
+		t.Errorf("dirSize() = %d, want 0 for empty dir", size)
+	}
+}
+
+func TestCleanEmptyDir(t *testing.T) {
+	dir, err := os.MkdirTemp("", "cleandir-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	emptyDir := filepath.Join(dir, "empty")
+	os.MkdirAll(emptyDir, 0755)
+
+	cleanEmptyDir(emptyDir)
+
+	if _, err := os.Stat(emptyDir); !os.IsNotExist(err) {
+		t.Error("empty dir should be removed")
+	}
+}
+
+func TestCleanEmptyDir_NotEmpty(t *testing.T) {
+	dir, err := os.MkdirTemp("", "cleandir-notempty-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	notEmptyDir := filepath.Join(dir, "notempty")
+	os.MkdirAll(notEmptyDir, 0755)
+	os.WriteFile(filepath.Join(notEmptyDir, "file.txt"), []byte("data"), 0644)
+
+	cleanEmptyDir(notEmptyDir)
+
+	if _, err := os.Stat(notEmptyDir); os.IsNotExist(err) {
+		t.Error("non-empty dir should not be removed")
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		bytes int64
+		want  string
+	}{
+		{0, "0 B"},
+		{512, "512 B"},
+		{1024, "1.0 KB"},
+		{1536, "1.5 KB"},
+		{1048576, "1.0 MB"},
+		{1073741824, "1.0 GB"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.want, func(t *testing.T) {
+			got := FormatBytes(tc.bytes)
+			if got != tc.want {
+				t.Errorf("FormatBytes(%d) = %q, want %q", tc.bytes, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParsePathTime(t *testing.T) {
+	baseDir := "/lake/spans"
+	tests := []struct {
+		name     string
+		path     string
+		wantZero bool
+	}{
+		{"valid path", "/lake/spans/year=2024/month=06/day=15/hour=10/part.parquet", false},
+		{"missing hour", "/lake/spans/year=2024/month=06/day=15/part.parquet", false},
+		{"incomplete", "/lake/spans/year=2024/part.parquet", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parsePathTime(tc.path, baseDir)
+			if tc.wantZero && !got.IsZero() {
+				t.Errorf("parsePathTime() = %v, want zero", got)
+			}
+			if !tc.wantZero && got.IsZero() {
+				t.Error("parsePathTime() returned zero, want non-zero")
+			}
+		})
+	}
+}
+
+func TestPrunerStats(t *testing.T) {
+	dir, err := os.MkdirTemp("", "stats-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	// Create parquet file
+	partitionDir := filepath.Join(dir, "spans", "year=2024", "month=06", "day=15", "hour=10")
+	os.MkdirAll(partitionDir, 0755)
+	os.WriteFile(filepath.Join(partitionDir, "part-1.parquet"), []byte("data"), 0644)
+
+	p := NewPruner(config.Config{LakeDir: dir})
+	stats := p.Stats()
+
+	if len(stats) != 3 {
+		t.Errorf("Stats() returned %d signals, want 3", len(stats))
+	}
+
+	var spanStats *PruneStats
+	for i := range stats {
+		if stats[i].Signal == "spans" {
+			spanStats = &stats[i]
+			break
+		}
+	}
+
+	if spanStats == nil {
+		t.Fatal("spans stats not found")
+	}
+
+	if spanStats.PartitionCount != 1 {
+		t.Errorf("PartitionCount = %d, want 1", spanStats.PartitionCount)
+	}
+	if spanStats.TotalBytes == 0 {
+		t.Error("TotalBytes should not be 0")
+	}
+	if spanStats.OldestData.IsZero() {
+		t.Error("OldestData should not be zero")
+	}
+}
