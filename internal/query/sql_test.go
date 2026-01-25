@@ -35,7 +35,7 @@ func TestValidateSQL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSQL(tt.query)
+			err := validateSQL(tt.query, "lake")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateSQL() error = %v, wantErr %v", err, tt.wantErr)
 			}

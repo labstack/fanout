@@ -35,7 +35,7 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 	}
 
 	// Validate SQL
-	if err := validateSQL(req.Query); err != nil {
+	if err := validateSQL(req.Query, d.cfg.LakeDir); err != nil {
 		return SQLResponse{
 			Error: fmt.Sprintf("SQL validation failed: %v", err),
 		}
@@ -117,7 +117,7 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 }
 
 // validateSQL checks if the SQL query is safe to execute
-func validateSQL(query string) error {
+func validateSQL(query string, lakeDir string) error {
 	upperQuery := strings.ToUpper(strings.TrimSpace(query))
 
 	// Must start with SELECT or WITH (for CTEs)
@@ -165,14 +165,15 @@ func validateSQL(query string) error {
 		}
 	}
 
-	// Validate read_parquet paths - must reference lake/ directory only
+	// Validate read_parquet paths - must reference configured lake directory
 	parquetPattern := regexp.MustCompile(`(?i)READ_PARQUET\s*\(\s*'([^']*)'`)
 	matches := parquetPattern.FindAllStringSubmatch(query, -1)
 	for _, m := range matches {
 		if len(m) > 1 {
 			path := m[1]
-			if !strings.HasPrefix(path, "lake/") && !strings.Contains(path, "/lake/") {
-				return fmt.Errorf("read_parquet path must be within lake/ directory")
+			// Allow paths that start with configured lake dir or contain it
+			if !strings.HasPrefix(path, lakeDir) && !strings.Contains(path, lakeDir+"/") {
+				return fmt.Errorf("read_parquet path must be within %s directory", lakeDir)
 			}
 			// Block path traversal
 			if strings.Contains(path, "..") {
