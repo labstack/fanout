@@ -70,7 +70,7 @@ templ Unified(data UnifiedData) {
 			</sl-button>
 		</div>
 		<!-- Search Form -->
-		<div class="card" style="margin-bottom: 1.5rem;">
+		<sl-card style="margin-bottom: 1.5rem;">
 			<form method="GET" action="/unified" class="search-form" onsubmit="return cleanUnifiedSubmit(this)">
 				<div class="form-row">
 					<sl-input name="q" label="Search" placeholder="service:checkout status:error type:span severity:ERROR" value={ data.Query } style="flex: 3;"></sl-input>
@@ -95,7 +95,7 @@ templ Unified(data UnifiedData) {
 					return false;
 				}
 			</script>
-		</div>
+		</sl-card>
 		<!-- Facets -->
 		<div class="facets-bar">
 			<div class="facet-group">
@@ -122,8 +122,8 @@ templ Unified(data UnifiedData) {
 			}
 		</div>
 		<!-- Results -->
-		<div class="card">
-			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Events)) } events)</div>
+		<sl-card>
+			<div slot="header" class="card-header">Results ({ fmt.Sprintf("%d", len(data.Events)) } events)</div>
 			if len(data.Events) == 0 {
 				<div class="empty-state">
 					<sl-icon name="layers"></sl-icon>
@@ -198,7 +198,7 @@ templ Unified(data UnifiedData) {
 					</div>
 				}
 			}
-		</div>
+		</sl-card>
 		<style>
 			.search-form .form-row {
 				display: flex;

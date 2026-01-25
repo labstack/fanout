@@ -31,14 +31,14 @@ templ OverviewContent(data OverviewData) {
 	@StatsGrid(data.Services)
 	@KeyMetrics(data.ThroughputPerMin, data.P95Ms, data.ErrorRate)
 	<div class="grid grid-2" style="margin-bottom: 1.5rem;">
-		<div class="card">
-			<div class="card-title">Request Timeline</div>
+		<sl-card>
+			<div slot="header" class="card-header">Request Timeline</div>
 			@timelineChart(data.Timeline)
-		</div>
-		<div class="card">
-			<div class="card-title">Top Issues</div>
+		</sl-card>
+		<sl-card>
+			<div slot="header" class="card-header">Top Issues</div>
 			@TopIssues(data.TopIssues, data.Window)
-		</div>
+		</sl-card>
 	</div>
 	@ServicesTable(data.Topology.Nodes, data.Window)
 }
@@ -46,54 +46,40 @@ templ OverviewContent(data OverviewData) {
 // StatsGrid renders service health counts
 templ StatsGrid(s ServiceSummary) {
 	<div id="stats-grid" class="grid grid-4" style="margin-bottom: 1.5rem;">
-		<div class="card">
-			<div class="metric">
-				<div class="metric-value">{ fmt.Sprintf("%d", s.Total) }</div>
-				<div class="metric-label">Total Services</div>
-			</div>
-		</div>
-		<div class="card">
-			<div class="metric">
-				<div class="metric-value" style="color: var(--success);">{ fmt.Sprintf("%d", s.Healthy) }</div>
-				<div class="metric-label">Healthy</div>
-			</div>
-		</div>
-		<div class="card">
-			<div class="metric">
-				<div class="metric-value" style="color: var(--warning);">{ fmt.Sprintf("%d", s.Degraded) }</div>
-				<div class="metric-label">Degraded</div>
-			</div>
-		</div>
-		<div class="card">
-			<div class="metric">
-				<div class="metric-value" style="color: var(--danger);">{ fmt.Sprintf("%d", s.Unhealthy) }</div>
-				<div class="metric-label">Unhealthy</div>
-			</div>
-		</div>
+		<sl-card class="metric-card">
+			<div class="metric-value">{ fmt.Sprintf("%d", s.Total) }</div>
+			<div class="metric-label">Total Services</div>
+		</sl-card>
+		<sl-card class="metric-card">
+			<div class="metric-value" style="color: var(--success);">{ fmt.Sprintf("%d", s.Healthy) }</div>
+			<div class="metric-label">Healthy</div>
+		</sl-card>
+		<sl-card class="metric-card">
+			<div class="metric-value" style="color: var(--warning);">{ fmt.Sprintf("%d", s.Degraded) }</div>
+			<div class="metric-label">Degraded</div>
+		</sl-card>
+		<sl-card class="metric-card">
+			<div class="metric-value" style="color: var(--danger);">{ fmt.Sprintf("%d", s.Unhealthy) }</div>
+			<div class="metric-label">Unhealthy</div>
+		</sl-card>
 	</div>
 }
 
 // KeyMetrics renders throughput, latency, error rate
 templ KeyMetrics(throughput int64, p95 float64, errorRate float64) {
 	<div id="key-metrics" class="grid grid-3" style="margin-bottom: 1.5rem;">
-		<div class="card">
-			<div class="metric">
-				<div class="metric-value">{ fmt.Sprintf("%d", throughput) }</div>
-				<div class="metric-label">Requests/min</div>
-			</div>
-		</div>
-		<div class="card">
-			<div class="metric">
-				<div class="metric-value">{ fmt.Sprintf("%.0f", p95) }ms</div>
-				<div class="metric-label">P95 Latency</div>
-			</div>
-		</div>
-		<div class="card">
-			<div class="metric">
-				<div class="metric-value">{ fmt.Sprintf("%.1f", errorRate*100) }%</div>
-				<div class="metric-label">Error Rate</div>
-			</div>
-		</div>
+		<sl-card class="metric-card">
+			<div class="metric-value">{ fmt.Sprintf("%d", throughput) }</div>
+			<div class="metric-label">Requests/min</div>
+		</sl-card>
+		<sl-card class="metric-card">
+			<div class="metric-value">{ fmt.Sprintf("%.0f", p95) }ms</div>
+			<div class="metric-label">P95 Latency</div>
+		</sl-card>
+		<sl-card class="metric-card">
+			<div class="metric-value">{ fmt.Sprintf("%.1f", errorRate*100) }%</div>
+			<div class="metric-label">Error Rate</div>
+		</sl-card>
 	</div>
 }
 
@@ -122,11 +108,11 @@ templ TopIssues(issues []TopIssue, window int) {
 						</td>
 						<td>
 							if issue.Issue == "high_error_rate" {
-								<span class="status status-unhealthy">Errors</span>
+								<sl-badge variant="danger" pill>Errors</sl-badge>
 							} else if issue.Issue == "high_latency" {
-								<span class="status status-degraded">Slow</span>
+								<sl-badge variant="warning" pill>Slow</sl-badge>
 							} else if issue.Issue != "" {
-								<span class="status status-degraded">{ issue.Issue }</span>
+								<sl-badge variant="warning" pill>{ issue.Issue }</sl-badge>
 							}
 						</td>
 						<td>{ issue.Detail }</td>
@@ -139,8 +125,8 @@ templ TopIssues(issues []TopIssue, window int) {
 
 // ServicesTable renders the services list
 templ ServicesTable(nodes []ServiceNode, window int) {
-	<div id="services-table" class="card">
-		<div class="card-title">Services</div>
+	<sl-card id="services-table">
+		<div slot="header" class="card-header">Services</div>
 		<table class="table">
 			<thead>
 				<tr>
@@ -156,7 +142,7 @@ templ ServicesTable(nodes []ServiceNode, window int) {
 					<tr>
 						<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(node.Name), window)) }>{ node.Name }</a></td>
 						<td>
-							<span class={ "status", statusClass(node.Status) }>{ node.Status }</span>
+							<sl-badge variant={ statusVariant(node.Status) } pill>{ node.Status }</sl-badge>
 						</td>
 						<td>{ fmt.Sprintf("%d", node.SpanCount) }</td>
 						<td>{ fmt.Sprintf("%.0fms", node.P95Ms) }</td>
@@ -165,7 +151,7 @@ templ ServicesTable(nodes []ServiceNode, window int) {
 				}
 			</tbody>
 		</table>
-	</div>
+	</sl-card>
 }
 
 // TimelineChart renders just the chart

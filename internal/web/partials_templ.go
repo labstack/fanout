@@ -82,7 +82,7 @@ func OverviewContent(data OverviewData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"grid grid-2\" style=\"margin-bottom: 1.5rem;\"><div class=\"card\"><div class=\"card-title\">Request Timeline</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "<div class=\"grid grid-2\" style=\"margin-bottom: 1.5rem;\"><sl-card><div slot=\"header\" class=\"card-header\">Request Timeline</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -90,7 +90,7 @@ func OverviewContent(data OverviewData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div><div class=\"card\"><div class=\"card-title\">Top Issues</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</sl-card> <sl-card><div slot=\"header\" class=\"card-header\">Top Issues</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -98,7 +98,7 @@ func OverviewContent(data OverviewData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</sl-card></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -132,59 +132,59 @@ func StatsGrid(s ServiceSummary) templ.Component {
 			templ_7745c5c3_Var4 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div id=\"stats-grid\" class=\"grid grid-4\" style=\"margin-bottom: 1.5rem;\"><div class=\"card\"><div class=\"metric\"><div class=\"metric-value\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div id=\"stats-grid\" class=\"grid grid-4\" style=\"margin-bottom: 1.5rem;\"><sl-card class=\"metric-card\"><div class=\"metric-value\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", s.Total))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 51, Col: 58}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 50, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</div><div class=\"metric-label\">Total Services</div></div></div><div class=\"card\"><div class=\"metric\"><div class=\"metric-value\" style=\"color: var(--success);\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</div><div class=\"metric-label\">Total Services</div></sl-card> <sl-card class=\"metric-card\"><div class=\"metric-value\" style=\"color: var(--success);\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", s.Healthy))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 57, Col: 91}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 54, Col: 90}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div><div class=\"metric-label\">Healthy</div></div></div><div class=\"card\"><div class=\"metric\"><div class=\"metric-value\" style=\"color: var(--warning);\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</div><div class=\"metric-label\">Healthy</div></sl-card> <sl-card class=\"metric-card\"><div class=\"metric-value\" style=\"color: var(--warning);\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var7 string
 		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", s.Degraded))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 63, Col: 92}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 58, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</div><div class=\"metric-label\">Degraded</div></div></div><div class=\"card\"><div class=\"metric\"><div class=\"metric-value\" style=\"color: var(--danger);\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</div><div class=\"metric-label\">Degraded</div></sl-card> <sl-card class=\"metric-card\"><div class=\"metric-value\" style=\"color: var(--danger);\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var8 string
 		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", s.Unhealthy))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 69, Col: 92}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 62, Col: 91}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</div><div class=\"metric-label\">Unhealthy</div></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</div><div class=\"metric-label\">Unhealthy</div></sl-card></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -214,46 +214,46 @@ func KeyMetrics(throughput int64, p95 float64, errorRate float64) templ.Componen
 			templ_7745c5c3_Var9 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div id=\"key-metrics\" class=\"grid grid-3\" style=\"margin-bottom: 1.5rem;\"><div class=\"card\"><div class=\"metric\"><div class=\"metric-value\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<div id=\"key-metrics\" class=\"grid grid-3\" style=\"margin-bottom: 1.5rem;\"><sl-card class=\"metric-card\"><div class=\"metric-value\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var10 string
 		templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", throughput))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 81, Col: 61}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 72, Col: 60}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</div><div class=\"metric-label\">Requests/min</div></div></div><div class=\"card\"><div class=\"metric\"><div class=\"metric-value\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</div><div class=\"metric-label\">Requests/min</div></sl-card> <sl-card class=\"metric-card\"><div class=\"metric-value\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0f", p95))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 87, Col: 56}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 76, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "ms</div><div class=\"metric-label\">P95 Latency</div></div></div><div class=\"card\"><div class=\"metric\"><div class=\"metric-value\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "ms</div><div class=\"metric-label\">P95 Latency</div></sl-card> <sl-card class=\"metric-card\"><div class=\"metric-value\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var12 string
 		templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.1f", errorRate*100))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 93, Col: 66}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 80, Col: 65}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "%</div><div class=\"metric-label\">Error Rate</div></div></div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "%</div><div class=\"metric-label\">Error Rate</div></sl-card></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -306,7 +306,7 @@ func TopIssues(issues []TopIssue, window int) templ.Component {
 					var templ_7745c5c3_Var14 templ.SafeURL
 					templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/services/"+pathEscape(issue.Service), window)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 118, Col: 91}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 104, Col: 91}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 					if templ_7745c5c3_Err != nil {
@@ -319,7 +319,7 @@ func TopIssues(issues []TopIssue, window int) templ.Component {
 					var templ_7745c5c3_Var15 string
 					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(issue.Service)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 118, Col: 109}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 104, Col: 109}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 					if templ_7745c5c3_Err != nil {
@@ -340,30 +340,30 @@ func TopIssues(issues []TopIssue, window int) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				if issue.Issue == "high_error_rate" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<span class=\"status status-unhealthy\">Errors</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "<sl-badge variant=\"danger\" pill>Errors</sl-badge>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else if issue.Issue == "high_latency" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<span class=\"status status-degraded\">Slow</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<sl-badge variant=\"warning\" pill>Slow</sl-badge>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				} else if issue.Issue != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<span class=\"status status-degraded\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<sl-badge variant=\"warning\" pill>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var16 string
 					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(issue.Issue)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 129, Col: 58}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 115, Col: 54}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</span>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "</sl-badge>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -375,7 +375,7 @@ func TopIssues(issues []TopIssue, window int) templ.Component {
 				var templ_7745c5c3_Var17 string
 				templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(issue.Detail)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 132, Col: 24}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 118, Col: 24}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 				if templ_7745c5c3_Err != nil {
@@ -417,7 +417,7 @@ func ServicesTable(nodes []ServiceNode, window int) templ.Component {
 			templ_7745c5c3_Var18 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div id=\"services-table\" class=\"card\"><div class=\"card-title\">Services</div><table class=\"table\"><thead><tr><th>Service</th><th>Status</th><th>Requests</th><th>P95</th><th>Error Rate</th></tr></thead> <tbody>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<sl-card id=\"services-table\"><div slot=\"header\" class=\"card-header\">Services</div><table class=\"table\"><thead><tr><th>Service</th><th>Status</th><th>Requests</th><th>P95</th><th>Error Rate</th></tr></thead> <tbody>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -429,7 +429,7 @@ func ServicesTable(nodes []ServiceNode, window int) templ.Component {
 			var templ_7745c5c3_Var19 templ.SafeURL
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/services/"+pathEscape(node.Name), window)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 157, Col: 89}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 143, Col: 89}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 			if templ_7745c5c3_Err != nil {
@@ -442,55 +442,59 @@ func ServicesTable(nodes []ServiceNode, window int) templ.Component {
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(node.Name)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 157, Col: 103}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 143, Col: 103}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</a></td><td>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "</a></td><td><sl-badge variant=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var21 = []any{"status", statusClass(node.Status)}
-			templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var21...)
+			var templ_7745c5c3_Var21 string
+			templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(statusVariant(node.Status))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 145, Col: 53}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<span class=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\" pill>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var22 string
-			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var21).String())
+			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(node.Status)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 1, Col: 0}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 145, Col: 74}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</sl-badge></td><td>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var23 string
-			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(node.Status)
+			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", node.SpanCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 159, Col: 71}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 147, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</span></td><td>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</td><td>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var24 string
-			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", node.SpanCount))
+			templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0fms", node.P95Ms))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 161, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 148, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 			if templ_7745c5c3_Err != nil {
@@ -501,33 +505,20 @@ func ServicesTable(nodes []ServiceNode, window int) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var25 string
-			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0fms", node.P95Ms))
+			templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.1f%%", node.ErrorRate*100))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 162, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 149, Col: 53}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</td><td>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var26 string
-			templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.1f%%", node.ErrorRate*100))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 163, Col: 53}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</td></tr>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</td></tr>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "</tbody></table></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</tbody></table></sl-card>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -552,9 +543,9 @@ func TimelineChart(data TimelineData) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var27 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var27 == nil {
-			templ_7745c5c3_Var27 = templ.NopComponent
+		templ_7745c5c3_Var26 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var26 == nil {
+			templ_7745c5c3_Var26 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
 		templ_7745c5c3_Err = timelineChart(data).Render(ctx, templ_7745c5c3_Buffer)
@@ -582,60 +573,60 @@ func EmptyStateSetup(dataType string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var28 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var28 == nil {
-			templ_7745c5c3_Var28 = templ.NopComponent
+		templ_7745c5c3_Var27 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var27 == nil {
+			templ_7745c5c3_Var27 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<div class=\"empty-state-setup\"><div class=\"empty-state-icon\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<div class=\"empty-state-setup\"><div class=\"empty-state-icon\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if dataType == "services" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<sl-icon name=\"boxes\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<sl-icon name=\"boxes\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if dataType == "traces" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<sl-icon name=\"git-branch\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<sl-icon name=\"git-branch\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if dataType == "logs" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<sl-icon name=\"file-text\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<sl-icon name=\"file-text\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if dataType == "metrics" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<sl-icon name=\"bar-chart-2\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<sl-icon name=\"bar-chart-2\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if dataType == "topology" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<sl-icon name=\"share-2\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<sl-icon name=\"share-2\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<sl-icon name=\"database\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<sl-icon name=\"database\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "</div><div class=\"empty-state-content\"><h3 class=\"empty-state-title\">No ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "</div><div class=\"empty-state-content\"><h3 class=\"empty-state-title\">No ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var29 string
-		templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(dataType)
+		var templ_7745c5c3_Var28 string
+		templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(dataType)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 195, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 181, Col: 46}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, " detected</h3><p class=\"empty-state-desc\">Configure your application to send telemetry data to Fanout.</p><sl-card class=\"setup-card\"><div class=\"setup-step\"><sl-badge variant=\"primary\" pill>1</sl-badge><div class=\"step-content\"><div class=\"step-title\">Configure OTLP endpoint</div><div class=\"step-code\"><code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317</code></div></div></div><sl-divider></sl-divider><div class=\"setup-step\"><sl-badge variant=\"primary\" pill>2</sl-badge><div class=\"step-content\"><div class=\"step-title\">Set service name</div><div class=\"step-code\"><code>OTEL_SERVICE_NAME=my-service</code></div></div></div><sl-divider></sl-divider><div class=\"setup-step\"><sl-badge variant=\"primary\" pill>3</sl-badge><div class=\"step-content\"><div class=\"step-title\">Use gRPC protocol</div><div class=\"step-code\"><code>OTEL_EXPORTER_OTLP_PROTOCOL=grpc</code></div></div></div></sl-card> <sl-alert variant=\"primary\" open class=\"setup-alert\"><sl-icon slot=\"icon\" name=\"lightbulb\"></sl-icon> Data typically appears within 15 seconds after your app starts sending telemetry.</sl-alert></div></div><style>\n\t\t.empty-state-setup {\n\t\t\tdisplay: flex;\n\t\t\tflex-direction: column;\n\t\t\talign-items: center;\n\t\t\tpadding: 3rem 2rem;\n\t\t\ttext-align: center;\n\t\t}\n\t\t.empty-state-icon sl-icon {\n\t\t\tfont-size: 4rem;\n\t\t\tcolor: var(--accent);\n\t\t\topacity: 0.6;\n\t\t}\n\t\t.empty-state-content {\n\t\t\tmax-width: 480px;\n\t\t}\n\t\t.empty-state-setup .empty-state-title {\n\t\t\tfont-size: 1.25rem;\n\t\t\tfont-weight: 600;\n\t\t\tcolor: var(--text-primary);\n\t\t\tmargin: 1rem 0 0.5rem;\n\t\t}\n\t\t.empty-state-desc {\n\t\t\tcolor: var(--text-muted);\n\t\t\tmargin-bottom: 1.5rem;\n\t\t}\n\t\t.setup-card {\n\t\t\ttext-align: left;\n\t\t\t--padding: 1rem;\n\t\t}\n\t\t.setup-card sl-divider {\n\t\t\t--spacing: 0.75rem;\n\t\t}\n\t\t.setup-step {\n\t\t\tdisplay: flex;\n\t\t\tgap: 0.75rem;\n\t\t\talign-items: flex-start;\n\t\t}\n\t\t.setup-step sl-badge::part(base) {\n\t\t\tmin-width: 24px;\n\t\t\theight: 24px;\n\t\t}\n\t\t.step-content {\n\t\t\tflex: 1;\n\t\t\tmin-width: 0;\n\t\t}\n\t\t.step-title {\n\t\t\tfont-size: 0.875rem;\n\t\t\tfont-weight: 500;\n\t\t\tcolor: var(--text-primary);\n\t\t\tmargin-bottom: 0.375rem;\n\t\t}\n\t\t.step-code {\n\t\t\tbackground: var(--bg-tertiary);\n\t\t\tpadding: 0.5rem 0.75rem;\n\t\t\tborder-radius: 0.375rem;\n\t\t\toverflow-x: auto;\n\t\t}\n\t\t.step-code code {\n\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\tfont-size: 0.75rem;\n\t\t\tcolor: var(--accent);\n\t\t\twhite-space: nowrap;\n\t\t}\n\t\t.setup-alert {\n\t\t\tmargin-top: 1.5rem;\n\t\t}\n\t\t.setup-alert::part(base) {\n\t\t\tfont-size: 0.8rem;\n\t\t}\n\t</style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, " detected</h3><p class=\"empty-state-desc\">Configure your application to send telemetry data to Fanout.</p><sl-card class=\"setup-card\"><div class=\"setup-step\"><sl-badge variant=\"primary\" pill>1</sl-badge><div class=\"step-content\"><div class=\"step-title\">Configure OTLP endpoint</div><div class=\"step-code\"><code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317</code></div></div></div><sl-divider></sl-divider><div class=\"setup-step\"><sl-badge variant=\"primary\" pill>2</sl-badge><div class=\"step-content\"><div class=\"step-title\">Set service name</div><div class=\"step-code\"><code>OTEL_SERVICE_NAME=my-service</code></div></div></div><sl-divider></sl-divider><div class=\"setup-step\"><sl-badge variant=\"primary\" pill>3</sl-badge><div class=\"step-content\"><div class=\"step-title\">Use gRPC protocol</div><div class=\"step-code\"><code>OTEL_EXPORTER_OTLP_PROTOCOL=grpc</code></div></div></div></sl-card> <sl-alert variant=\"primary\" open class=\"setup-alert\"><sl-icon slot=\"icon\" name=\"lightbulb\"></sl-icon> Data typically appears within 15 seconds after your app starts sending telemetry.</sl-alert></div></div><style>\n\t\t.empty-state-setup {\n\t\t\tdisplay: flex;\n\t\t\tflex-direction: column;\n\t\t\talign-items: center;\n\t\t\tpadding: 3rem 2rem;\n\t\t\ttext-align: center;\n\t\t}\n\t\t.empty-state-icon sl-icon {\n\t\t\tfont-size: 4rem;\n\t\t\tcolor: var(--accent);\n\t\t\topacity: 0.6;\n\t\t}\n\t\t.empty-state-content {\n\t\t\tmax-width: 480px;\n\t\t}\n\t\t.empty-state-setup .empty-state-title {\n\t\t\tfont-size: 1.25rem;\n\t\t\tfont-weight: 600;\n\t\t\tcolor: var(--text-primary);\n\t\t\tmargin: 1rem 0 0.5rem;\n\t\t}\n\t\t.empty-state-desc {\n\t\t\tcolor: var(--text-muted);\n\t\t\tmargin-bottom: 1.5rem;\n\t\t}\n\t\t.setup-card {\n\t\t\ttext-align: left;\n\t\t\t--padding: 1rem;\n\t\t}\n\t\t.setup-card sl-divider {\n\t\t\t--spacing: 0.75rem;\n\t\t}\n\t\t.setup-step {\n\t\t\tdisplay: flex;\n\t\t\tgap: 0.75rem;\n\t\t\talign-items: flex-start;\n\t\t}\n\t\t.setup-step sl-badge::part(base) {\n\t\t\tmin-width: 24px;\n\t\t\theight: 24px;\n\t\t}\n\t\t.step-content {\n\t\t\tflex: 1;\n\t\t\tmin-width: 0;\n\t\t}\n\t\t.step-title {\n\t\t\tfont-size: 0.875rem;\n\t\t\tfont-weight: 500;\n\t\t\tcolor: var(--text-primary);\n\t\t\tmargin-bottom: 0.375rem;\n\t\t}\n\t\t.step-code {\n\t\t\tbackground: var(--bg-tertiary);\n\t\t\tpadding: 0.5rem 0.75rem;\n\t\t\tborder-radius: 0.375rem;\n\t\t\toverflow-x: auto;\n\t\t}\n\t\t.step-code code {\n\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\tfont-size: 0.75rem;\n\t\t\tcolor: var(--accent);\n\t\t\twhite-space: nowrap;\n\t\t}\n\t\t.setup-alert {\n\t\t\tmargin-top: 1.5rem;\n\t\t}\n\t\t.setup-alert::part(base) {\n\t\t\tfont-size: 0.8rem;\n\t\t}\n\t</style>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -660,50 +651,50 @@ func EmptyStateSearch(dataType string) templ.Component {
 			}()
 		}
 		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var30 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var30 == nil {
-			templ_7745c5c3_Var30 = templ.NopComponent
+		templ_7745c5c3_Var29 := templ.GetChildren(ctx)
+		if templ_7745c5c3_Var29 == nil {
+			templ_7745c5c3_Var29 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<div class=\"empty-state\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<div class=\"empty-state\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if dataType == "traces" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<sl-icon name=\"search\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<sl-icon name=\"search\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if dataType == "logs" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<sl-icon name=\"file-text\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<sl-icon name=\"file-text\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if dataType == "metrics" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<sl-icon name=\"bar-chart-2\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<sl-icon name=\"bar-chart-2\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<sl-icon name=\"search\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<sl-icon name=\"search\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<div class=\"empty-state-title\">No ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<div class=\"empty-state-title\">No ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		var templ_7745c5c3_Var31 string
-		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(dataType)
+		var templ_7745c5c3_Var30 string
+		templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(dataType)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 319, Col: 46}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 305, Col: 46}
 		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, " found</div><div class=\"empty-state-message\">Try adjusting your search filters or expanding the time window.</div></div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, " found</div><div class=\"empty-state-message\">Try adjusting your search filters or expanding the time window.</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

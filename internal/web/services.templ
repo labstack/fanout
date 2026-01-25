@@ -42,7 +42,7 @@ templ Services(data ServicesData) {
 				Slow
 			</sl-button>
 		</div>
-		<div class="card">
+		<sl-card>
 			if len(data.Services) == 0 {
 				@EmptyStateSetup("services")
 			} else {
@@ -70,7 +70,7 @@ templ Services(data ServicesData) {
 									}
 								</td>
 								<td>
-									<span class={ "status", statusClass(svc.Status) }>{ svc.Status }</span>
+									<sl-badge variant={ statusVariant(svc.Status) } pill>{ svc.Status }</sl-badge>
 								</td>
 								<td>
 									@Sparkline(svc.Trend, svc.ErrorRate > 0.05)
@@ -83,7 +83,7 @@ templ Services(data ServicesData) {
 					</tbody>
 				</table>
 			}
-		</div>
+		</sl-card>
 	}
 }
 
@@ -149,7 +149,7 @@ templ ServiceDetail(data ServiceDetailData) {
 			<div class="page-header-left">
 				<h1 class="page-title">
 					{ data.Name }
-					<span class={ "status", statusClass(data.Status) } style="margin-left: 0.75rem; vertical-align: middle;">{ data.Status }</span>
+					<sl-badge variant={ statusVariant(data.Status) } pill style="margin-left: 0.75rem; vertical-align: middle;">{ data.Status }</sl-badge>
 				</h1>
 				<p class="page-subtitle">
 					if data.Namespace != "" {
@@ -161,48 +161,40 @@ templ ServiceDetail(data ServiceDetailData) {
 		</div>
 		<!-- Latency Metrics -->
 		<div class="grid grid-4" style="margin-bottom: 1.5rem;">
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ fmt.Sprintf("%.0f", data.P50Ms) }ms</div>
-					<div class="metric-label">P50 Latency</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ fmt.Sprintf("%.0f", data.P95Ms) }ms</div>
-					<div class="metric-label">P95 Latency</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ fmt.Sprintf("%.0f", data.P99Ms) }ms</div>
-					<div class="metric-label">P99 Latency</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value" style={ errorColor(data.ErrorRate) }>{ fmt.Sprintf("%.1f", data.ErrorRate*100) }%</div>
-					<div class="metric-label">Error Rate</div>
-				</div>
-			</div>
+			<sl-card class="metric-card">
+				<div class="metric-value">{ fmt.Sprintf("%.0f", data.P50Ms) }ms</div>
+				<div class="metric-label">P50 Latency</div>
+			</sl-card>
+			<sl-card class="metric-card">
+				<div class="metric-value">{ fmt.Sprintf("%.0f", data.P95Ms) }ms</div>
+				<div class="metric-label">P95 Latency</div>
+			</sl-card>
+			<sl-card class="metric-card">
+				<div class="metric-value">{ fmt.Sprintf("%.0f", data.P99Ms) }ms</div>
+				<div class="metric-label">P99 Latency</div>
+			</sl-card>
+			<sl-card class="metric-card">
+				<div class="metric-value" style={ errorColor(data.ErrorRate) }>{ fmt.Sprintf("%.1f", data.ErrorRate*100) }%</div>
+				<div class="metric-label">Error Rate</div>
+			</sl-card>
 		</div>
 		<!-- Trend Charts -->
 		if len(data.Timeline) > 1 {
 			<div class="grid grid-2" style="margin-bottom: 1.5rem;">
-				<div class="card">
-					<div class="card-title">Latency Trend</div>
+				<sl-card>
+					<div slot="header" class="card-header">Latency Trend</div>
 					<div class="chart" style="height: 200px;" data-vega={ latencyChartSpec(data.Timeline) }></div>
-				</div>
-				<div class="card">
-					<div class="card-title">Request Volume</div>
+				</sl-card>
+				<sl-card>
+					<div slot="header" class="card-header">Request Volume</div>
 					<div class="chart" style="height: 200px;" data-vega={ requestChartSpec(data.Timeline) }></div>
-				</div>
+				</sl-card>
 			</div>
 		}
 		<div class="grid grid-2" style="margin-bottom: 1.5rem;">
 			<!-- Top Errors -->
-			<div class="card">
-				<div class="card-title">Top Errors</div>
+			<sl-card>
+				<div slot="header" class="card-header">Top Errors</div>
 				if len(data.TopErrors) == 0 {
 					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No errors detected</p>
 				} else {
@@ -231,10 +223,10 @@ templ ServiceDetail(data ServiceDetailData) {
 						</tbody>
 					</table>
 				}
-			</div>
+			</sl-card>
 			<!-- Slow Operations -->
-			<div class="card">
-				<div class="card-title">Slow Operations</div>
+			<sl-card>
+				<div slot="header" class="card-header">Slow Operations</div>
 				if len(data.SlowOps) == 0 {
 					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No slow operations detected</p>
 				} else {
@@ -257,11 +249,11 @@ templ ServiceDetail(data ServiceDetailData) {
 						</tbody>
 					</table>
 				}
-			</div>
+			</sl-card>
 		</div>
 		<!-- Dependencies -->
-		<div class="card">
-			<div class="card-title">Downstream Dependencies</div>
+		<sl-card>
+			<div slot="header" class="card-header">Downstream Dependencies</div>
 			if len(data.Dependencies) == 0 {
 				<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No downstream calls detected</p>
 			} else {
@@ -280,7 +272,7 @@ templ ServiceDetail(data ServiceDetailData) {
 							<tr>
 								<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(dep.Service), data.Window)) }>{ dep.Service }</a></td>
 								<td>
-									<span class={ "status", statusClass(dep.Status) }>{ dep.Status }</span>
+									<sl-badge variant={ statusVariant(dep.Status) } pill>{ dep.Status }</sl-badge>
 								</td>
 								<td>{ fmt.Sprintf("%d", dep.CallCount) }</td>
 								<td>{ fmt.Sprintf("%.0fms", dep.AvgMs) }</td>
@@ -290,7 +282,7 @@ templ ServiceDetail(data ServiceDetailData) {
 					</tbody>
 				</table>
 			}
-		</div>
+		</sl-card>
 	}
 }
 

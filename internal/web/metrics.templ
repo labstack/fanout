@@ -35,7 +35,7 @@ templ Metrics(data MetricsData) {
 			</div>
 		</div>
 		<!-- Search Form -->
-		<div class="card" style="margin-bottom: 1.5rem;">
+		<sl-card style="margin-bottom: 1.5rem;">
 			<form method="GET" action="/metrics" class="search-form">
 				<div class="form-row">
 					<sl-input name="q" label="Search" placeholder="name:http.* service:cart type:gauge" value={ data.Query } style="flex: 3;"></sl-input>
@@ -49,10 +49,10 @@ templ Metrics(data MetricsData) {
 					<code>name:pattern</code> <code>service:name</code> <code>namespace:default</code> <code>type:gauge,sum</code>
 				</div>
 			</form>
-		</div>
+		</sl-card>
 		<!-- Results -->
-		<div class="card">
-			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Metrics)) } metrics)</div>
+		<sl-card>
+			<div slot="header" class="card-header">Results ({ fmt.Sprintf("%d", len(data.Metrics)) } metrics)</div>
 			if len(data.Metrics) == 0 {
 				<div class="empty-state">
 					<sl-icon name="bar-chart-2"></sl-icon>
@@ -103,7 +103,7 @@ templ Metrics(data MetricsData) {
 					</tbody>
 				</table>
 			}
-		</div>
+		</sl-card>
 		<style>
 			.search-form .form-row {
 				display: flex;

@@ -154,16 +154,16 @@ func Overview(data OverviewData) templ.Component {
 	})
 }
 
-func statusClass(status string) string {
+func statusVariant(status string) string {
 	switch status {
 	case "healthy":
-		return "status-healthy"
+		return "success"
 	case "degraded":
-		return "status-degraded"
+		return "warning"
 	case "unhealthy":
-		return "status-unhealthy"
+		return "danger"
 	default:
-		return "status-degraded"
+		return "warning"
 	}
 }
 

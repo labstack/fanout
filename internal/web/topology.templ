@@ -15,45 +15,37 @@ templ Topology(data TopologyData) {
 			</div>
 		</div>
 		if len(data.Nodes) == 0 {
-			<div class="card">
+			<sl-card>
 				@EmptyStateSetup("topology")
-			</div>
+			</sl-card>
 		} else {
 			<!-- Summary Stats -->
 			<div class="grid grid-4" style="margin-bottom: 1rem;">
-				<div class="card">
-					<div class="metric">
-						<div class="metric-value">{ fmt.Sprintf("%d", len(data.Nodes)) }</div>
-						<div class="metric-label">Services</div>
-					</div>
-				</div>
-				<div class="card">
-					<div class="metric">
-						<div class="metric-value">{ fmt.Sprintf("%d", len(data.Edges)) }</div>
-						<div class="metric-label">Connections</div>
-					</div>
-				</div>
-				<div class="card">
-					<div class="metric">
-						<div class="metric-value" style="color: var(--warning);">{ fmt.Sprintf("%d", countByStatus(data.Nodes, "degraded")) }</div>
-						<div class="metric-label">Degraded</div>
-					</div>
-				</div>
-				<div class="card">
-					<div class="metric">
-						<div class="metric-value" style="color: var(--danger);">{ fmt.Sprintf("%d", countByStatus(data.Nodes, "unhealthy")) }</div>
-						<div class="metric-label">Unhealthy</div>
-					</div>
-				</div>
+				<sl-card class="metric-card">
+					<div class="metric-value">{ fmt.Sprintf("%d", len(data.Nodes)) }</div>
+					<div class="metric-label">Services</div>
+				</sl-card>
+				<sl-card class="metric-card">
+					<div class="metric-value">{ fmt.Sprintf("%d", len(data.Edges)) }</div>
+					<div class="metric-label">Connections</div>
+				</sl-card>
+				<sl-card class="metric-card">
+					<div class="metric-value" style="color: var(--warning);">{ fmt.Sprintf("%d", countByStatus(data.Nodes, "degraded")) }</div>
+					<div class="metric-label">Degraded</div>
+				</sl-card>
+				<sl-card class="metric-card">
+					<div class="metric-value" style="color: var(--danger);">{ fmt.Sprintf("%d", countByStatus(data.Nodes, "unhealthy")) }</div>
+					<div class="metric-label">Unhealthy</div>
+				</sl-card>
 			</div>
 			<!-- Legend -->
-			<div class="card" style="margin-bottom: 1rem;">
+			<sl-card style="margin-bottom: 1rem;">
 				<div class="topo-legend">
 					<div class="topo-legend-group">
 						<span class="topo-legend-title">Nodes:</span>
-						<span><span class="status status-healthy">●</span> Healthy</span>
-						<span><span class="status status-degraded">●</span> Degraded</span>
-						<span><span class="status status-unhealthy">●</span> Unhealthy</span>
+						<span><span style="color: var(--success);">●</span> Healthy</span>
+						<span><span style="color: var(--warning);">●</span> Degraded</span>
+						<span><span style="color: var(--danger);">●</span> Unhealthy</span>
 					</div>
 					<div class="topo-legend-group">
 						<span class="topo-legend-title">Edges:</span>
@@ -63,9 +55,9 @@ templ Topology(data TopologyData) {
 					</div>
 					<span style="color: var(--text-muted); margin-left: auto;">Click node for details • Edge thickness = call volume</span>
 				</div>
-			</div>
+			</sl-card>
 			<!-- Topology Graph -->
-			<div class="card" style="position: relative;">
+			<sl-card style="position: relative;">
 				<div class="topo-controls">
 					<sl-button-group>
 						<sl-icon-button id="topo-zoom-in" name="zoom-in" label="Zoom in"></sl-icon-button>
@@ -76,7 +68,7 @@ templ Topology(data TopologyData) {
 				<div id="topology-wrapper" class="topology-wrapper">
 					<div id="topology-graph" class="topology-container" data-nodes={ topoNodesJSON(data.Nodes) } data-edges={ topoEdgesJSON(data.Edges) } data-window={ fmt.Sprintf("%d", data.Window) }></div>
 				</div>
-			</div>
+			</sl-card>
 			<script>
 				(function() {
 					const container = document.getElementById('topology-graph');

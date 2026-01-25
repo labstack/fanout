@@ -43,7 +43,7 @@ templ Logs(data LogsData) {
 			</div>
 		</div>
 		<!-- Search Form -->
-		<div class="card" style="margin-bottom: 1.5rem;">
+		<sl-card style="margin-bottom: 1.5rem;">
 			<form method="GET" action="/logs" class="search-form" onsubmit="return cleanFormSubmit(this)">
 				<div class="form-row">
 					<sl-input name="q" label="Search" placeholder="service:cart severity:ERROR &quot;timeout&quot; -retry" value={ data.Query } style="flex: 3;"></sl-input>
@@ -68,10 +68,10 @@ templ Logs(data LogsData) {
 					return false;
 				}
 			</script>
-		</div>
+		</sl-card>
 		<!-- Results -->
-		<div class="card">
-			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Logs)) } logs)</div>
+		<sl-card>
+			<div slot="header" class="card-header">Results ({ fmt.Sprintf("%d", len(data.Logs)) } logs)</div>
 			if len(data.Logs) == 0 {
 				<div class="empty-state">
 					<sl-icon name="file-text"></sl-icon>
@@ -165,7 +165,7 @@ templ Logs(data LogsData) {
 					</div>
 				}
 			}
-		</div>
+		</sl-card>
 		<style>
 			.search-form .form-row {
 				display: flex;

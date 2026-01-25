@@ -62,7 +62,7 @@ templ Traces(data TracesData) {
 			</sl-button>
 		</div>
 		<!-- Search Form -->
-		<div class="card" style="margin-bottom: 1.5rem;">
+		<sl-card style="margin-bottom: 1.5rem;">
 			<form method="GET" action="/traces" class="search-form" onsubmit="return cleanFormSubmit(this)">
 				<div class="form-row">
 					<sl-input name="q" label="Search" placeholder="service:cart status:error op:checkout duration:>1000" value={ data.Query } style="flex: 3;"></sl-input>
@@ -87,7 +87,7 @@ templ Traces(data TracesData) {
 					return false;
 				}
 			</script>
-		</div>
+		</sl-card>
 		<!-- Facets -->
 		if len(data.Facets.ByService) > 0 || len(data.Facets.ByStatus) > 0 {
 			<div class="facets-bar">
@@ -114,8 +114,8 @@ templ Traces(data TracesData) {
 			</div>
 		}
 		<!-- Results -->
-		<div class="card">
-			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Traces)) } traces)</div>
+		<sl-card>
+			<div slot="header" class="card-header">Results ({ fmt.Sprintf("%d", len(data.Traces)) } traces)</div>
 			if len(data.Traces) == 0 {
 				<div class="empty-state">
 					<sl-icon name="search"></sl-icon>
@@ -180,7 +180,7 @@ templ Traces(data TracesData) {
 					</div>
 				}
 			}
-		</div>
+		</sl-card>
 		<style>
 			.search-form .form-row {
 				display: flex;
@@ -351,38 +351,30 @@ templ TraceDetail(data TraceDetailData) {
 		</div>
 		<!-- Summary -->
 		<div class="grid grid-4" style="margin-bottom: 1.5rem;">
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ fmt.Sprintf("%.0f", data.Duration) }ms</div>
-					<div class="metric-label">Total Duration</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ fmt.Sprintf("%d", data.SpanCount) }</div>
-					<div class="metric-label">Spans</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					<div class="metric-value">{ data.RootService }</div>
-					<div class="metric-label">Root Service</div>
-				</div>
-			</div>
-			<div class="card">
-				<div class="metric">
-					if data.RootCause != "" {
-						<div class="metric-value" style="color: var(--danger); font-size: 1rem;">{ data.RootCause }</div>
-					} else {
-						<div class="metric-value" style="color: var(--success);">None</div>
-					}
-					<div class="metric-label">Root Cause</div>
-				</div>
-			</div>
+			<sl-card class="metric-card">
+				<div class="metric-value">{ fmt.Sprintf("%.0f", data.Duration) }ms</div>
+				<div class="metric-label">Total Duration</div>
+			</sl-card>
+			<sl-card class="metric-card">
+				<div class="metric-value">{ fmt.Sprintf("%d", data.SpanCount) }</div>
+				<div class="metric-label">Spans</div>
+			</sl-card>
+			<sl-card class="metric-card">
+				<div class="metric-value">{ data.RootService }</div>
+				<div class="metric-label">Root Service</div>
+			</sl-card>
+			<sl-card class="metric-card">
+				if data.RootCause != "" {
+					<div class="metric-value" style="color: var(--danger); font-size: 1rem;">{ data.RootCause }</div>
+				} else {
+					<div class="metric-value" style="color: var(--success);">None</div>
+				}
+				<div class="metric-label">Root Cause</div>
+			</sl-card>
 		</div>
 		<!-- Waterfall Chart -->
-		<div class="card" style="margin-bottom: 1.5rem;">
-			<div class="card-title" style="display: flex; align-items: center; justify-content: space-between;">
+		<sl-card style="margin-bottom: 1.5rem;">
+			<div slot="header" class="card-header" style="display: flex; align-items: center; justify-content: space-between;">
 				<span>Trace Waterfall</span>
 				<div class="waterfall-legend">
 					<span class="legend-item"><span class="legend-dot legend-server"></span>Server</span>
@@ -522,7 +514,7 @@ templ TraceDetail(data TraceDetailData) {
 					</div>
 				}
 			</div>
-		</div>
+		</sl-card>
 		<script>
 			// Waterfall expand/collapse
 			document.querySelectorAll('.waterfall-toggle').forEach(btn => {
@@ -545,8 +537,8 @@ templ TraceDetail(data TraceDetailData) {
 		</script>
 		<!-- Logs -->
 		if len(data.Logs) > 0 {
-			<div class="card">
-				<div class="card-title">Correlated Logs ({ fmt.Sprintf("%d", len(data.Logs)) })</div>
+			<sl-card>
+				<div slot="header" class="card-header">Correlated Logs ({ fmt.Sprintf("%d", len(data.Logs)) })</div>
 				<table class="table">
 					<thead>
 						<tr>
@@ -569,7 +561,7 @@ templ TraceDetail(data TraceDetailData) {
 						}
 					</tbody>
 				</table>
-			</div>
+			</sl-card>
 		}
 		<style>
 			/* Legend */
