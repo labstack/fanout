@@ -293,6 +293,69 @@ templ Layout(title string, activePage string, window int) {
 					border-radius: inherit;
 				}
 
+				/* Top Loading Bar */
+				.loading-bar {
+					position: fixed;
+					top: 0;
+					left: 0;
+					right: 0;
+					height: 3px;
+					background: var(--accent);
+					z-index: 9999;
+					transform: scaleX(0);
+					transform-origin: left;
+					transition: transform 0.3s ease-out;
+				}
+				.loading-bar.active {
+					animation: loading-progress 2s ease-out forwards;
+				}
+				@keyframes loading-progress {
+					0% { transform: scaleX(0); }
+					50% { transform: scaleX(0.7); }
+					100% { transform: scaleX(0.95); }
+				}
+				.loading-bar.done {
+					transform: scaleX(1);
+					transition: transform 0.1s ease-out;
+				}
+				.loading-bar.hide {
+					opacity: 0;
+					transition: opacity 0.2s ease-out;
+				}
+
+				/* Skeleton Loading */
+				.skeleton {
+					background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--border-color) 50%, var(--bg-tertiary) 75%);
+					background-size: 200% 100%;
+					animation: skeleton-shimmer 1.5s infinite;
+					border-radius: 4px;
+				}
+				@keyframes skeleton-shimmer {
+					0% { background-position: 200% 0; }
+					100% { background-position: -200% 0; }
+				}
+				.skeleton-text {
+					height: 1em;
+					margin: 0.25em 0;
+				}
+				.skeleton-text.short { width: 40%; }
+				.skeleton-text.medium { width: 60%; }
+				.skeleton-text.long { width: 80%; }
+				.skeleton-box {
+					height: 100px;
+					margin: 0.5rem 0;
+				}
+				.skeleton-row {
+					display: flex;
+					gap: 1rem;
+					padding: 0.75rem;
+					border-bottom: 1px solid var(--border-color);
+				}
+				.skeleton-cell {
+					height: 1rem;
+					flex: 1;
+				}
+
 				/* Breadcrumbs */
 				.breadcrumbs {
 					margin-bottom: 1rem;
@@ -423,25 +486,56 @@ templ Layout(title string, activePage string, window int) {
 						});
 
 						// Time window selector
-						const timeSelect = document.getElementById('time-window');
-						if (timeSelect && !timeSelect._initialized) {
-							timeSelect._initialized = true;
-							const currentUrl = new URL(window.location.href);
-							const currentWindow = currentUrl.searchParams.get('window') || '60';
-							timeSelect.value = currentWindow;
+						const timeDropdown = document.getElementById('time-dropdown');
+						const timeValue = document.getElementById('time-value');
+						const timeUnit = document.getElementById('time-unit');
+						const timeDisplay = document.getElementById('time-display');
 
-							timeSelect.addEventListener('sl-change', (e) => {
-								const newWindow = e.target.value;
-								const newUrl = new URL(window.location.href);
-								if (newWindow === '60') {
-									newUrl.searchParams.delete('window');
-								} else {
-									newUrl.searchParams.set('window', newWindow);
-								}
-								e.target.blur();
-								htmx.ajax('GET', newUrl.pathname + newUrl.search, {target: 'body', swap: 'innerHTML'});
-								history.pushState({}, '', newUrl.toString());
+						if (timeDropdown && !timeDropdown._initialized) {
+							timeDropdown._initialized = true;
+
+							const multipliers = { minutes: 1, hours: 60, days: 1440, weeks: 10080 };
+
+							function getWindowMinutes() {
+								const val = parseInt(timeValue.value) || 1;
+								return val * multipliers[timeUnit.value];
+							}
+
+							function formatWindow(minutes) {
+								if (minutes >= 10080 && minutes % 10080 === 0) return `${minutes/10080}w`;
+								if (minutes >= 1440 && minutes % 1440 === 0) return `${minutes/1440}d`;
+								if (minutes >= 60 && minutes % 60 === 0) return `${minutes/60}h`;
+								return `${minutes}m`;
+							}
+
+							function setWindowFromMinutes(minutes) {
+								let unit = 'minutes', val = minutes;
+								if (minutes >= 10080 && minutes % 10080 === 0) { unit = 'weeks'; val = minutes / 10080; }
+								else if (minutes >= 1440 && minutes % 1440 === 0) { unit = 'days'; val = minutes / 1440; }
+								else if (minutes >= 60 && minutes % 60 === 0) { unit = 'hours'; val = minutes / 60; }
+								timeValue.value = val;
+								timeUnit.value = unit;
+								timeDisplay.textContent = 'Last ' + formatWindow(minutes);
+							}
+
+							function applyWindow(minutes) {
+								const url = new URL(window.location.href);
+								url.searchParams.set('window', minutes);
+								timeDropdown.hide();
+								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
+								history.pushState({}, '', url.toString());
+							}
+
+							// Event listeners
+							timeValue.addEventListener('sl-change', () => applyWindow(getWindowMinutes()));
+							timeUnit.addEventListener('sl-change', () => applyWindow(getWindowMinutes()));
+							document.querySelectorAll('[data-window]').forEach(btn => {
+								btn.addEventListener('click', () => applyWindow(parseInt(btn.dataset.window)));
 							});
+
+							// Initialize from URL
+							const currentWindow = new URL(window.location.href).searchParams.get('window') || '60';
+							setWindowFromMinutes(parseInt(currentWindow));
 						}
 
 						// Namespace selector
@@ -622,24 +716,65 @@ templ Layout(title string, activePage string, window int) {
 						lastUpdateTime = Date.now();
 						updateTimestamp();
 					});
+
+					// Loading bar control
+					document.addEventListener('htmx:beforeRequest', () => {
+						const bar = document.getElementById('loading-bar');
+						if (bar) {
+							bar.classList.remove('done', 'hide');
+							bar.classList.add('active');
+						}
+					});
+
+					document.addEventListener('htmx:afterRequest', () => {
+						const bar = document.getElementById('loading-bar');
+						if (bar) {
+							bar.classList.remove('active');
+							bar.classList.add('done');
+							setTimeout(() => bar.classList.add('hide'), 150);
+							setTimeout(() => {
+								bar.classList.remove('done', 'hide');
+								bar.style.transform = '';
+							}, 400);
+						}
+					});
 				}
 			</script>
 		</head>
 		<body class="sl-theme-light" hx-boost="true">
+			<div id="loading-bar" class="loading-bar"></div>
 			<div class="app">
 				<header class="header">
 					<sl-icon-button class="mobile-nav-toggle" id="mobile-nav-toggle" name="list" label="Menu"></sl-icon-button>
 					<a href={ templ.SafeURL(withWindow("/", window)) } class="header-brand">Fanout</a>
 					<div class="header-spacer"></div>
 					<sl-select id="namespace-select" size="small" style="width: 140px;"></sl-select>
-					<sl-select id="time-window" size="small" value="60" style="width: 120px;">
-						<sl-option value="15">Last 15m</sl-option>
-						<sl-option value="30">Last 30m</sl-option>
-						<sl-option value="60">Last 1h</sl-option>
-						<sl-option value="180">Last 3h</sl-option>
-						<sl-option value="360">Last 6h</sl-option>
-						<sl-option value="1440">Last 24h</sl-option>
-					</sl-select>
+					<sl-dropdown id="time-dropdown" placement="bottom-end" distance="4">
+						<sl-button slot="trigger" size="small" caret>
+							<sl-icon name="clock" slot="prefix"></sl-icon>
+							<span id="time-display">Last 1h</span>
+						</sl-button>
+						<sl-menu>
+							<div style="padding: 12px; min-width: 200px;">
+								<div style="display: flex; gap: 8px; margin-bottom: 12px;">
+									<sl-input id="time-value" type="number" value="1" min="1" max="90" size="small" style="width: 70px;"></sl-input>
+									<sl-select id="time-unit" value="hours" size="small" style="flex: 1;">
+										<sl-option value="minutes">minutes</sl-option>
+										<sl-option value="hours">hours</sl-option>
+										<sl-option value="days">days</sl-option>
+										<sl-option value="weeks">weeks</sl-option>
+									</sl-select>
+								</div>
+								<sl-button-group style="width: 100%;">
+									<sl-button size="small" data-window="60">1h</sl-button>
+									<sl-button size="small" data-window="360">6h</sl-button>
+									<sl-button size="small" data-window="1440">24h</sl-button>
+									<sl-button size="small" data-window="10080">7d</sl-button>
+									<sl-button size="small" data-window="43200">30d</sl-button>
+								</sl-button-group>
+							</div>
+						</sl-menu>
+					</sl-dropdown>
 					<sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
 				</header>
 				<aside class="sidebar">

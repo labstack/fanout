@@ -8,7 +8,12 @@ package web
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+)
 
 // UnifiedData contains data for the unified timeline page.
 type UnifiedData struct {
@@ -20,6 +25,15 @@ type UnifiedData struct {
 	MetricCount int
 	HasMore     bool
 	Window      int
+	Limit       int
+	Offset      int
+	Facets      UnifiedFacets
+}
+
+// UnifiedFacets contains aggregated counts for filtering
+type UnifiedFacets struct {
+	ByType    []FacetCount
+	ByService []FacetCount
 }
 
 // UnifiedEvent represents an event in the unified timeline.
@@ -69,289 +83,630 @@ func Unified(data UnifiedData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"page-header\"><sl-breadcrumb><sl-breadcrumb-item href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"page-header\"><div class=\"page-header-left\"><h1 class=\"page-title\">Unified Timeline</h1><p class=\"page-subtitle\">Traces, logs, and metrics in one view</p></div></div><div class=\"quick-filters\"><sl-button href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var3 string
-			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(templ.SafeURL(withWindow("/", data.Window)))
+			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL("", data.Window, data.Limit, 0))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 35, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 54, Col: 63}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\">Overview</sl-breadcrumb-item> <sl-breadcrumb-item>Unified</sl-breadcrumb-item></sl-breadcrumb><h1>Unified Timeline</h1><p class=\"subtitle\">Traces, logs, and metrics in one view</p></div><!-- Search Bar --> <form class=\"search-form\" method=\"get\" action=\"/unified\"><sl-input name=\"q\" placeholder=\"service:checkout status:error...\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "\" size=\"small\" variant=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var4 string
-			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(data.Query)
+			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, ""))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 46, Col: 22}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 54, Col: 125}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\" size=\"medium\" clearable><sl-icon name=\"search\" slot=\"prefix\"></sl-icon></sl-input> <input type=\"hidden\" name=\"window\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "\">All</sl-button> <sl-button href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var5 string
-			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Window))
+			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL("type:span", data.Window, data.Limit, 0))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 52, Col: 76}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 55, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\"> <sl-button type=\"submit\" variant=\"primary\">Search</sl-button></form><!-- Signal Type Filters --> <div class=\"filter-bar\"><div class=\"signal-legend\"><span class=\"legend-item span\"><span class=\"legend-dot\"></span> Spans (")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" size=\"small\" variant=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var6 string
-			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.SpanCount))
+			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, "type:span"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 60, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 55, Col: 143}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, ")</span> <span class=\"legend-item log\"><span class=\"legend-dot\"></span> Logs (")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "\"><sl-icon slot=\"prefix\" name=\"diagram-3\"></sl-icon> Spans</sl-button> <sl-button href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var7 string
-			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.LogCount))
+			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL("type:log", data.Window, data.Limit, 0))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 64, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 59, Col: 71}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, ")</span> <span class=\"legend-item metric\"><span class=\"legend-dot\"></span> Metrics (")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" size=\"small\" variant=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var8 string
-			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.MetricCount))
+			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, "type:log"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 68, Col: 51}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 59, Col: 141}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, ")</span></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "\"><sl-icon slot=\"prefix\" name=\"journal-text\"></sl-icon> Logs</sl-button> <sl-button href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var9 string
+			templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL("type:metric", data.Window, data.Limit, 0))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 63, Col: 74}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" size=\"small\" variant=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var10 string
+			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, "type:metric"))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 63, Col: 147}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "\"><sl-icon slot=\"prefix\" name=\"graph-up\"></sl-icon> Metrics</sl-button> <sl-button href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var11 string
+			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL("status:error", data.Window, data.Limit, 0))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 67, Col: 75}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\" size=\"small\" variant=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var12 string
+			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, "status:error"))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 67, Col: 149}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"><sl-icon slot=\"prefix\" name=\"exclamation-triangle\"></sl-icon> Errors</sl-button></div><!-- Search Form --> <div class=\"card\" style=\"margin-bottom: 1.5rem;\"><form method=\"GET\" action=\"/unified\" class=\"search-form\" onsubmit=\"return cleanUnifiedSubmit(this)\"><div class=\"form-row\"><sl-input name=\"q\" label=\"Search\" placeholder=\"service:checkout status:error type:span severity:ERROR\" value=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var13 string
+			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(data.Query)
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 76, Col: 126}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" style=\"flex: 3;\"></sl-input> <sl-button type=\"submit\" variant=\"primary\">Search</sl-button></div><div class=\"search-hint\"><sl-icon name=\"lightbulb\"></sl-icon> <code>service:name</code> <code>type:span|log|metric</code> <code>status:error</code> <code>severity:ERROR</code> <code>op:checkout</code> <code>trace:abc123</code> <code>\"phrase\"</code> <code>-exclude</code></div></form><script>\n\t\t\t\tfunction cleanUnifiedSubmit(form) {\n\t\t\t\t\tconst url = new URL(form.action, window.location.origin);\n\t\t\t\t\tconst q = form.querySelector('[name=\"q\"]').value.trim();\n\t\t\t\t\tif (q) url.searchParams.set('q', q);\n\t\t\t\t\tconst ns = new URL(window.location.href).searchParams.get('ns');\n\t\t\t\t\tif (ns) url.searchParams.set('ns', ns);\n\t\t\t\t\tconst win = new URL(window.location.href).searchParams.get('window');\n\t\t\t\t\tif (win && win !== '60') url.searchParams.set('window', win);\n\t\t\t\t\thtmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});\n\t\t\t\t\thistory.pushState({}, '', url.toString());\n\t\t\t\t\treturn false;\n\t\t\t\t}\n\t\t\t</script></div><!-- Facets --> <div class=\"facets-bar\"><div class=\"facet-group\"><span class=\"facet-label\">Type</span> <a href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var14 templ.SafeURL
+			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinURLErrs(unifiedFacetURL(data.Query, "type", "span", data.Window))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 103, Col: 70}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"facet-chip facet-span\">span <span class=\"facet-count\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var15 string
+			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.SpanCount))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 104, Col: 71}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</span></a> <a href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var16 templ.SafeURL
+			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs(unifiedFacetURL(data.Query, "type", "log", data.Window))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 106, Col: 69}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" class=\"facet-chip facet-log\">log <span class=\"facet-count\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var17 string
+			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.LogCount))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 107, Col: 69}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span></a> <a href=\"")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var18 templ.SafeURL
+			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinURLErrs(unifiedFacetURL(data.Query, "type", "metric", data.Window))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 109, Col: 72}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" class=\"facet-chip facet-metric\">metric <span class=\"facet-count\">")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var19 string
+			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.MetricCount))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 110, Col: 75}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</span></a></div>")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			if len(data.Facets.ByService) > 0 {
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"facet-group\"><span class=\"facet-label\">Services</span> ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				for _, f := range data.Facets.ByService {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<a href=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var20 templ.SafeURL
+					templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinURLErrs(unifiedFacetURL(data.Query, "service", f.Value, data.Window))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 117, Col: 76}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" class=\"facet-chip\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var21 string
+					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(f.Value)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 118, Col: 16}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, " <span class=\"facet-count\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var22 string
+					templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", f.Count))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 118, Col: 73}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "</span></a>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "</div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</div><!-- Results --> <div class=\"card\"><div class=\"card-title\">Results (")
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			var templ_7745c5c3_Var23 string
+			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Events)))
+			if templ_7745c5c3_Err != nil {
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 126, Col: 73}
+			}
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, " events)</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Events) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<div class=\"empty-state\"><sl-icon name=\"layers\" style=\"font-size: 48px; opacity: 0.5;\"></sl-icon><h3>No events found</h3><p>Try adjusting your filters or time window</p></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div class=\"empty-state\"><sl-icon name=\"layers\"></sl-icon><div class=\"empty-state-title\">No events found</div><div class=\"empty-state-message\">Try adjusting your search filters or expanding the time window.</div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<!-- Unified Timeline --> <div class=\"unified-timeline\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<table class=\"table\"><thead><tr><th>Time</th><th>Type</th><th>Service</th><th>Name</th><th>Value</th><th>Status</th><th>Trace</th></tr></thead> <tbody>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				for _, event := range data.Events {
-					var templ_7745c5c3_Var9 = []any{"timeline-event", event.Type, templ.KV("error", event.Status == "error")}
-					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var9...)
+				for _, e := range data.Events {
+					var templ_7745c5c3_Var24 = []any{templ.KV("row-error", e.Status == "error" || e.Severity == "ERROR")}
+					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var24...)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<div class=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<tr class=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var10 string
-					templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var9).String())
+					var templ_7745c5c3_Var25 string
+					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var24).String())
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 1, Col: 0}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"><div class=\"event-time\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "\"><td class=\"cell-time\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var11 string
-					templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(formatTime(event.Time))
+					var templ_7745c5c3_Var26 string
+					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(formatTime(e.Time))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 83, Col: 54}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 149, Col: 50}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</div><div class=\"event-indicator\">")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var12 = []any{"event-dot", event.Type}
-					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var12...)
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "</td><td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<span class=\"")
+					var templ_7745c5c3_Var27 = []any{"type-badge", "type-" + e.Type}
+					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var27...)
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var13 string
-					templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var12).String())
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<span class=\"")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var28 string
+					templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var27).String())
 					if templ_7745c5c3_Err != nil {
 						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 1, Col: 0}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\"></span> <span class=\"event-line\"></span></div><div class=\"event-content\"><div class=\"event-header\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var14 = []any{"event-type-badge", event.Type}
-					templ_7745c5c3_Err = templ.RenderCSSItems(ctx, templ_7745c5c3_Buffer, templ_7745c5c3_Var14...)
+					var templ_7745c5c3_Var29 string
+					templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(e.Type)
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 151, Col: 64}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<span class=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 34, "</span></td><td>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var15 string
-					templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(templ.CSSClasses(templ_7745c5c3_Var14).String())
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 1, Col: 0}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var16 string
-					templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(event.Type)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 90, Col: 67}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span> <span class=\"event-service\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var17 string
-					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(event.Service)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 91, Col: 51}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, "</span> ")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					if event.Status == "error" {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<sl-badge variant=\"danger\" pill>error</sl-badge>")
+					if e.Service != "" {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<a href=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var30 templ.SafeURL
+						templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/services/"+pathEscape(e.Service), data.Window)))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 155, Col: 94}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "\">")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var31 string
+						templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(e.Service)
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 155, Col: 108}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "</a>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span style=\"color: var(--text-muted);\">—</span>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "</div><div class=\"event-name\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "</td><td class=\"cell-name\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var18 string
-					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(event.Name)
+					var templ_7745c5c3_Var32 string
+					templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(truncateName(e.Name, 40))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 96, Col: 43}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 160, Col: 56}
 					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "</div><div class=\"event-value\">")
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					var templ_7745c5c3_Var19 string
-					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(event.Value)
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 97, Col: 45}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "</td><td class=\"cell-value\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "</div>")
+					var templ_7745c5c3_Var33 string
+					templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(truncateName(e.Value, 50))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 161, Col: 58}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					if event.TraceID != "" {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "<div class=\"event-links\"><a href=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "</td><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if e.Type == "span" {
+						if e.Status == "error" {
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<sl-badge variant=\"danger\">error</sl-badge>")
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+						} else if e.Status != "" {
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<sl-badge variant=\"success\">ok</sl-badge>")
+							if templ_7745c5c3_Err != nil {
+								return templ_7745c5c3_Err
+							}
+						}
+					} else if e.Type == "log" {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<sl-badge variant=\"")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var20 templ.SafeURL
-						templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/traces/"+event.TraceID, data.Window)))
+						var templ_7745c5c3_Var34 string
+						templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(logSeverityVariant(e.Severity))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 100, Col: 83}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 170, Col: 60}
 						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "\" class=\"trace-link\"><sl-icon name=\"git-branch\"></sl-icon> ")
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						var templ_7745c5c3_Var21 string
-						templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(truncateID(event.TraceID))
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 102, Col: 37}
-						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</a></div>")
+						var templ_7745c5c3_Var35 string
+						templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(e.Severity)
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 170, Col: 75}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "</sl-badge>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<span style=\"color: var(--text-muted);\">—</span>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "</div></div>")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</td><td>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if e.TraceID != "" {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<a href=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var36 templ.SafeURL
+						templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/traces/"+e.TraceID, data.Window)))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 177, Col: 80}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" class=\"trace-link\">")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var37 string
+						templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(truncateID(e.TraceID))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 178, Col: 34}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "</a>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					} else {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<span style=\"color: var(--text-muted);\">—</span>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "</td></tr>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "</div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "</tbody></table><!-- Pagination --> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if data.HasMore {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 28, "<div class=\"load-more\"><sl-badge variant=\"warning\">More events available - narrow your filters</sl-badge></div>")
+				if data.Offset > 0 || data.HasMore {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<div class=\"pagination\">")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if data.Offset > 0 {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<sl-button href=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var38 string
+						templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL(data.Query, data.Window, data.Limit, maxInt(0, data.Offset-data.Limit)))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 192, Col: 107}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "\" variant=\"default\" size=\"small\">Previous</sl-button> ")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<span class=\"pagination-info\">Showing ")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var39 string
+					templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+1))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 194, Col: 78}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 59, "-")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					var templ_7745c5c3_Var40 string
+					templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+len(data.Events)))
+					if templ_7745c5c3_Err != nil {
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 194, Col: 130}
+					}
+					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</span> ")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+					if data.HasMore {
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "<sl-button href=\"")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						var templ_7745c5c3_Var41 string
+						templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit))
+						if templ_7745c5c3_Err != nil {
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 196, Col: 96}
+						}
+						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 62, "\" variant=\"default\" size=\"small\">Next</sl-button>")
+						if templ_7745c5c3_Err != nil {
+							return templ_7745c5c3_Err
+						}
+					}
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "</div>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, " <!-- Query Help --> <details class=\"query-help\"><summary>Search Syntax</summary><div class=\"help-content\"><table class=\"help-table\"><tr><td><code>service:name</code></td><td>Filter by service</td></tr><tr><td><code>op:checkout</code></td><td>Filter by operation name</td></tr><tr><td><code>status:error</code></td><td>Show only errors</td></tr><tr><td><code>attr:key=value</code></td><td>Filter by attribute</td></tr><tr><td><code>trace:abc123</code></td><td>Find specific trace</td></tr><tr><td><code>severity:ERROR</code></td><td>Log severity filter</td></tr><tr><td><code>\"exact phrase\"</code></td><td>Match exact text</td></tr><tr><td><code>-exclude</code></td><td>Exclude term</td></tr></table></div></details><style>\n\t\t\t.signal-legend {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 24px;\n\t\t\t\tpadding: 12px 0;\n\t\t\t}\n\t\t\t.legend-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 8px;\n\t\t\t\tfont-size: 14px;\n\t\t\t}\n\t\t\t.legend-dot {\n\t\t\t\twidth: 12px;\n\t\t\t\theight: 12px;\n\t\t\t\tborder-radius: 50%;\n\t\t\t}\n\t\t\t.legend-item.span .legend-dot { background: var(--sl-color-primary-500); }\n\t\t\t.legend-item.log .legend-dot { background: var(--sl-color-warning-500); }\n\t\t\t.legend-item.metric .legend-dot { background: var(--sl-color-success-500); }\n\n\t\t\t.unified-timeline {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0;\n\t\t\t\tpadding: 16px 0;\n\t\t\t}\n\t\t\t.timeline-event {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: 140px 40px 1fr;\n\t\t\t\tgap: 8px;\n\t\t\t\tpadding: 12px 0;\n\t\t\t\tborder-bottom: 1px solid var(--border);\n\t\t\t}\n\t\t\t.timeline-event:last-child {\n\t\t\t\tborder-bottom: none;\n\t\t\t}\n\t\t\t.timeline-event.error {\n\t\t\t\tbackground: rgba(var(--sl-color-danger-500), 0.05);\n\t\t\t}\n\t\t\t.event-time {\n\t\t\t\tfont-size: 12px;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-align: right;\n\t\t\t\tpadding-top: 4px;\n\t\t\t}\n\t\t\t.event-indicator {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\talign-items: center;\n\t\t\t}\n\t\t\t.event-dot {\n\t\t\t\twidth: 12px;\n\t\t\t\theight: 12px;\n\t\t\t\tborder-radius: 50%;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.event-dot.span { background: var(--sl-color-primary-500); }\n\t\t\t.event-dot.log { background: var(--sl-color-warning-500); }\n\t\t\t.event-dot.metric { background: var(--sl-color-success-500); }\n\t\t\t.event-line {\n\t\t\t\twidth: 2px;\n\t\t\t\tflex: 1;\n\t\t\t\tbackground: var(--border);\n\t\t\t\tmargin-top: 4px;\n\t\t\t}\n\t\t\t.event-content {\n\t\t\t\tpadding-bottom: 8px;\n\t\t\t}\n\t\t\t.event-header {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 8px;\n\t\t\t\tmargin-bottom: 4px;\n\t\t\t}\n\t\t\t.event-type-badge {\n\t\t\t\tfont-size: 10px;\n\t\t\t\tfont-weight: 600;\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tpadding: 2px 6px;\n\t\t\t\tborder-radius: 4px;\n\t\t\t}\n\t\t\t.event-type-badge.span { background: var(--sl-color-primary-100); color: var(--sl-color-primary-700); }\n\t\t\t.event-type-badge.log { background: var(--sl-color-warning-100); color: var(--sl-color-warning-700); }\n\t\t\t.event-type-badge.metric { background: var(--sl-color-success-100); color: var(--sl-color-success-700); }\n\t\t\t.event-service {\n\t\t\t\tfont-weight: 500;\n\t\t\t}\n\t\t\t.event-name {\n\t\t\t\tfont-family: var(--sl-font-mono);\n\t\t\t\tfont-size: 14px;\n\t\t\t\tmargin-bottom: 4px;\n\t\t\t}\n\t\t\t.event-value {\n\t\t\t\tfont-size: 13px;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\t.event-links {\n\t\t\t\tmargin-top: 8px;\n\t\t\t}\n\t\t\t.trace-link {\n\t\t\t\tdisplay: inline-flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 4px;\n\t\t\t\tfont-size: 12px;\n\t\t\t\tcolor: var(--sl-color-primary-600);\n\t\t\t\ttext-decoration: none;\n\t\t\t}\n\t\t\t.trace-link:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.load-more {\n\t\t\t\ttext-align: center;\n\t\t\t\tpadding: 16px;\n\t\t\t}\n\t\t\t.query-help {\n\t\t\t\tmargin-top: 24px;\n\t\t\t\tpadding: 12px;\n\t\t\t\tbackground: var(--card-bg);\n\t\t\t\tborder-radius: 8px;\n\t\t\t}\n\t\t\t.query-help summary {\n\t\t\t\tcursor: pointer;\n\t\t\t\tfont-weight: 500;\n\t\t\t}\n\t\t\t.help-content {\n\t\t\t\tpadding-top: 12px;\n\t\t\t}\n\t\t\t.help-table {\n\t\t\t\twidth: 100%;\n\t\t\t}\n\t\t\t.help-table td {\n\t\t\t\tpadding: 4px 8px;\n\t\t\t}\n\t\t\t.help-table td:first-child {\n\t\t\t\twidth: 180px;\n\t\t\t}\n\t\t\t.help-table code {\n\t\t\t\tbackground: var(--sl-color-neutral-100);\n\t\t\t\tpadding: 2px 6px;\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tfont-size: 13px;\n\t\t\t}\n\t\t</style>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 64, "</div><style>\n\t\t\t.search-form .form-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t\talign-items: flex-end;\n\t\t\t}\n\t\t\t.search-form sl-input {\n\t\t\t\tflex: 1;\n\t\t\t\tmin-width: 200px;\n\t\t\t}\n\t\t\t.search-hint {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t}\n\t\t\t.search-hint sl-icon {\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t\t.search-hint code {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tpadding: 0.125rem 0.375rem;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t}\n\t\t\t.facets-bar {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 0.75rem 1rem;\n\t\t\t\tbackground: var(--bg-secondary);\n\t\t\t\tborder: 1px solid var(--border-color);\n\t\t\t\tborder-radius: 8px;\n\t\t\t\tmargin-bottom: 1rem;\n\t\t\t}\n\t\t\t.facet-group {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t}\n\t\t\t.facet-label {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t}\n\t\t\t.facet-chip {\n\t\t\t\tdisplay: inline-flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 4px;\n\t\t\t\tpadding: 2px 8px;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 12px;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\ttext-decoration: none;\n\t\t\t\ttransition: background 0.15s;\n\t\t\t}\n\t\t\t.facet-chip:hover {\n\t\t\t\tbackground: var(--sl-color-primary-100);\n\t\t\t\tcolor: var(--sl-color-primary-700);\n\t\t\t}\n\t\t\t.facet-chip.facet-span {\n\t\t\t\tbackground: rgba(99, 102, 241, 0.1);\n\t\t\t\tcolor: #6366f1;\n\t\t\t}\n\t\t\t.facet-chip.facet-span:hover {\n\t\t\t\tbackground: rgba(99, 102, 241, 0.2);\n\t\t\t}\n\t\t\t.facet-chip.facet-log {\n\t\t\t\tbackground: rgba(245, 158, 11, 0.1);\n\t\t\t\tcolor: #d97706;\n\t\t\t}\n\t\t\t.facet-chip.facet-log:hover {\n\t\t\t\tbackground: rgba(245, 158, 11, 0.2);\n\t\t\t}\n\t\t\t.facet-chip.facet-metric {\n\t\t\t\tbackground: rgba(34, 197, 94, 0.1);\n\t\t\t\tcolor: #16a34a;\n\t\t\t}\n\t\t\t.facet-chip.facet-metric:hover {\n\t\t\t\tbackground: rgba(34, 197, 94, 0.2);\n\t\t\t}\n\t\t\t.facet-count {\n\t\t\t\tfont-weight: 600;\n\t\t\t\topacity: 0.8;\n\t\t\t}\n\t\t\t.type-badge {\n\t\t\t\tdisplay: inline-block;\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tpadding: 2px 6px;\n\t\t\t\tborder-radius: 4px;\n\t\t\t}\n\t\t\t.type-span {\n\t\t\t\tbackground: rgba(99, 102, 241, 0.15);\n\t\t\t\tcolor: #6366f1;\n\t\t\t}\n\t\t\t.type-log {\n\t\t\t\tbackground: rgba(245, 158, 11, 0.15);\n\t\t\t\tcolor: #d97706;\n\t\t\t}\n\t\t\t.type-metric {\n\t\t\t\tbackground: rgba(34, 197, 94, 0.15);\n\t\t\t\tcolor: #16a34a;\n\t\t\t}\n\t\t\t.cell-time {\n\t\t\t\tfont-family: monospace;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.cell-name {\n\t\t\t\tfont-family: monospace;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tmax-width: 250px;\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.cell-value {\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-secondary);\n\t\t\t\tmax-width: 200px;\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.trace-link {\n\t\t\t\tfont-family: monospace;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t}\n\t\t\t.trace-link:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.row-error {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.05);\n\t\t\t}\n\t\t\t.row-error:hover td {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1) !important;\n\t\t\t}\n\t\t\t.pagination {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 1rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t\tmargin-top: 1rem;\n\t\t\t}\n\t\t\t.pagination-info {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t</style>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -371,6 +726,63 @@ func formatTime(ts string) string {
 		return ts[11:19] // HH:MM:SS
 	}
 	return ts
+}
+
+func truncateName(s string, max int) string {
+	if len(s) > max {
+		return s[:max-3] + "..."
+	}
+	return s
+}
+
+func unifiedURL(q string, window, limit, offset int) templ.SafeURL {
+	values := url.Values{}
+	if q != "" {
+		values.Set("q", q)
+	}
+	if window != 60 {
+		values.Set("window", strconv.Itoa(window))
+	}
+	if limit != 100 && limit > 0 {
+		values.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		values.Set("offset", strconv.Itoa(offset))
+	}
+	if len(values) == 0 {
+		return "/unified"
+	}
+	return templ.SafeURL("/unified?" + values.Encode())
+}
+
+func unifiedFilterVariant(current, target string) string {
+	if target == "" && current == "" {
+		return "primary"
+	}
+	if target != "" && strings.Contains(current, target) {
+		return "primary"
+	}
+	return "default"
+}
+
+func unifiedFacetURL(query, facetType, value string, window int) templ.SafeURL {
+	newQuery := query
+	prefix := facetType + ":"
+	if strings.Contains(query, prefix+value) {
+		return unifiedURL(query, window, 0, 0)
+	}
+	if newQuery != "" {
+		newQuery += " "
+	}
+	newQuery += prefix + value
+	return unifiedURL(newQuery, window, 0, 0)
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 var _ = templruntime.GeneratedTemplate

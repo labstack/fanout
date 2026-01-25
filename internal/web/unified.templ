@@ -1,6 +1,11 @@
 package web
 
-import "fmt"
+import (
+	"fmt"
+	"net/url"
+	"strconv"
+	"strings"
+)
 
 // UnifiedData contains data for the unified timeline page.
 type UnifiedData struct {
@@ -12,6 +17,15 @@ type UnifiedData struct {
 	MetricCount int
 	HasMore     bool
 	Window      int
+	Limit       int
+	Offset      int
+	Facets      UnifiedFacets
+}
+
+// UnifiedFacets contains aggregated counts for filtering
+type UnifiedFacets struct {
+	ByType    []FacetCount
+	ByService []FacetCount
 }
 
 // UnifiedEvent represents an event in the unified timeline.
@@ -31,246 +45,320 @@ type UnifiedEvent struct {
 templ Unified(data UnifiedData) {
 	@Layout("Unified Timeline", "unified", data.Window) {
 		<div class="page-header">
-			<sl-breadcrumb>
-				<sl-breadcrumb-item href={ templ.SafeURL(withWindow("/", data.Window)) }>Overview</sl-breadcrumb-item>
-				<sl-breadcrumb-item>Unified</sl-breadcrumb-item>
-			</sl-breadcrumb>
-			<h1>Unified Timeline</h1>
-			<p class="subtitle">Traces, logs, and metrics in one view</p>
-		</div>
-		<!-- Search Bar -->
-		<form class="search-form" method="get" action="/unified">
-			<sl-input
-				name="q"
-				placeholder="service:checkout status:error..."
-				value={ data.Query }
-				size="medium"
-				clearable
-			>
-				<sl-icon name="search" slot="prefix"></sl-icon>
-			</sl-input>
-			<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
-			<sl-button type="submit" variant="primary">Search</sl-button>
-		</form>
-		<!-- Signal Type Filters -->
-		<div class="filter-bar">
-			<div class="signal-legend">
-				<span class="legend-item span">
-					<span class="legend-dot"></span>
-					Spans ({ fmt.Sprintf("%d", data.SpanCount) })
-				</span>
-				<span class="legend-item log">
-					<span class="legend-dot"></span>
-					Logs ({ fmt.Sprintf("%d", data.LogCount) })
-				</span>
-				<span class="legend-item metric">
-					<span class="legend-dot"></span>
-					Metrics ({ fmt.Sprintf("%d", data.MetricCount) })
-				</span>
+			<div class="page-header-left">
+				<h1 class="page-title">Unified Timeline</h1>
+				<p class="page-subtitle">Traces, logs, and metrics in one view</p>
 			</div>
 		</div>
-		if len(data.Events) == 0 {
-			<div class="empty-state">
-				<sl-icon name="layers" style="font-size: 48px; opacity: 0.5;"></sl-icon>
-				<h3>No events found</h3>
-				<p>Try adjusting your filters or time window</p>
-			</div>
-		} else {
-			<!-- Unified Timeline -->
-			<div class="unified-timeline">
-				for _, event := range data.Events {
-					<div class={ "timeline-event", event.Type, templ.KV("error", event.Status == "error") }>
-						<div class="event-time">{ formatTime(event.Time) }</div>
-						<div class="event-indicator">
-							<span class={ "event-dot", event.Type }></span>
-							<span class="event-line"></span>
-						</div>
-						<div class="event-content">
-							<div class="event-header">
-								<span class={ "event-type-badge", event.Type }>{ event.Type }</span>
-								<span class="event-service">{ event.Service }</span>
-								if event.Status == "error" {
-									<sl-badge variant="danger" pill>error</sl-badge>
-								}
-							</div>
-							<div class="event-name">{ event.Name }</div>
-							<div class="event-value">{ event.Value }</div>
-							if event.TraceID != "" {
-								<div class="event-links">
-									<a href={ templ.SafeURL(withWindow("/traces/"+event.TraceID, data.Window)) } class="trace-link">
-										<sl-icon name="git-branch"></sl-icon>
-										{ truncateID(event.TraceID) }
-									</a>
-								</div>
-							}
-						</div>
-					</div>
+		<div class="quick-filters">
+			<sl-button href={ unifiedURL("", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "") }>All</sl-button>
+			<sl-button href={ unifiedURL("type:span", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "type:span") }>
+				<sl-icon slot="prefix" name="diagram-3"></sl-icon>
+				Spans
+			</sl-button>
+			<sl-button href={ unifiedURL("type:log", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "type:log") }>
+				<sl-icon slot="prefix" name="journal-text"></sl-icon>
+				Logs
+			</sl-button>
+			<sl-button href={ unifiedURL("type:metric", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "type:metric") }>
+				<sl-icon slot="prefix" name="graph-up"></sl-icon>
+				Metrics
+			</sl-button>
+			<sl-button href={ unifiedURL("status:error", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "status:error") }>
+				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
+				Errors
+			</sl-button>
+		</div>
+		<!-- Search Form -->
+		<div class="card" style="margin-bottom: 1.5rem;">
+			<form method="GET" action="/unified" class="search-form" onsubmit="return cleanUnifiedSubmit(this)">
+				<div class="form-row">
+					<sl-input name="q" label="Search" placeholder="service:checkout status:error type:span severity:ERROR" value={ data.Query } style="flex: 3;"></sl-input>
+					<sl-button type="submit" variant="primary">Search</sl-button>
+				</div>
+				<div class="search-hint">
+					<sl-icon name="lightbulb"></sl-icon>
+					<code>service:name</code> <code>type:span|log|metric</code> <code>status:error</code> <code>severity:ERROR</code> <code>op:checkout</code> <code>trace:abc123</code> <code>"phrase"</code> <code>-exclude</code>
+				</div>
+			</form>
+			<script>
+				function cleanUnifiedSubmit(form) {
+					const url = new URL(form.action, window.location.origin);
+					const q = form.querySelector('[name="q"]').value.trim();
+					if (q) url.searchParams.set('q', q);
+					const ns = new URL(window.location.href).searchParams.get('ns');
+					if (ns) url.searchParams.set('ns', ns);
+					const win = new URL(window.location.href).searchParams.get('window');
+					if (win && win !== '60') url.searchParams.set('window', win);
+					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
+					history.pushState({}, '', url.toString());
+					return false;
 				}
+			</script>
+		</div>
+		<!-- Facets -->
+		<div class="facets-bar">
+			<div class="facet-group">
+				<span class="facet-label">Type</span>
+				<a href={ unifiedFacetURL(data.Query, "type", "span", data.Window) } class="facet-chip facet-span">
+					span <span class="facet-count">{ fmt.Sprintf("%d", data.SpanCount) }</span>
+				</a>
+				<a href={ unifiedFacetURL(data.Query, "type", "log", data.Window) } class="facet-chip facet-log">
+					log <span class="facet-count">{ fmt.Sprintf("%d", data.LogCount) }</span>
+				</a>
+				<a href={ unifiedFacetURL(data.Query, "type", "metric", data.Window) } class="facet-chip facet-metric">
+					metric <span class="facet-count">{ fmt.Sprintf("%d", data.MetricCount) }</span>
+				</a>
 			</div>
-			if data.HasMore {
-				<div class="load-more">
-					<sl-badge variant="warning">More events available - narrow your filters</sl-badge>
+			if len(data.Facets.ByService) > 0 {
+				<div class="facet-group">
+					<span class="facet-label">Services</span>
+					for _, f := range data.Facets.ByService {
+						<a href={ unifiedFacetURL(data.Query, "service", f.Value, data.Window) } class="facet-chip">
+							{ f.Value } <span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span>
+						</a>
+					}
 				</div>
 			}
-		}
-		<!-- Query Help -->
-		<details class="query-help">
-			<summary>Search Syntax</summary>
-			<div class="help-content">
-				<table class="help-table">
-					<tr><td><code>service:name</code></td><td>Filter by service</td></tr>
-					<tr><td><code>op:checkout</code></td><td>Filter by operation name</td></tr>
-					<tr><td><code>status:error</code></td><td>Show only errors</td></tr>
-					<tr><td><code>attr:key=value</code></td><td>Filter by attribute</td></tr>
-					<tr><td><code>trace:abc123</code></td><td>Find specific trace</td></tr>
-					<tr><td><code>severity:ERROR</code></td><td>Log severity filter</td></tr>
-					<tr><td><code>"exact phrase"</code></td><td>Match exact text</td></tr>
-					<tr><td><code>-exclude</code></td><td>Exclude term</td></tr>
+		</div>
+		<!-- Results -->
+		<div class="card">
+			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Events)) } events)</div>
+			if len(data.Events) == 0 {
+				<div class="empty-state">
+					<sl-icon name="layers"></sl-icon>
+					<div class="empty-state-title">No events found</div>
+					<div class="empty-state-message">Try adjusting your search filters or expanding the time window.</div>
+				</div>
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Time</th>
+							<th>Type</th>
+							<th>Service</th>
+							<th>Name</th>
+							<th>Value</th>
+							<th>Status</th>
+							<th>Trace</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, e := range data.Events {
+							<tr class={ templ.KV("row-error", e.Status == "error" || e.Severity == "ERROR") }>
+								<td class="cell-time">{ formatTime(e.Time) }</td>
+								<td>
+									<span class={ "type-badge", "type-" + e.Type }>{ e.Type }</span>
+								</td>
+								<td>
+									if e.Service != "" {
+										<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(e.Service), data.Window)) }>{ e.Service }</a>
+									} else {
+										<span style="color: var(--text-muted);">—</span>
+									}
+								</td>
+								<td class="cell-name">{ truncateName(e.Name, 40) }</td>
+								<td class="cell-value">{ truncateName(e.Value, 50) }</td>
+								<td>
+									if e.Type == "span" {
+										if e.Status == "error" {
+											<sl-badge variant="danger">error</sl-badge>
+										} else if e.Status != "" {
+											<sl-badge variant="success">ok</sl-badge>
+										}
+									} else if e.Type == "log" {
+										<sl-badge variant={ logSeverityVariant(e.Severity) }>{ e.Severity }</sl-badge>
+									} else {
+										<span style="color: var(--text-muted);">—</span>
+									}
+								</td>
+								<td>
+									if e.TraceID != "" {
+										<a href={ templ.SafeURL(withWindow("/traces/"+e.TraceID, data.Window)) } class="trace-link">
+											{ truncateID(e.TraceID) }
+										</a>
+									} else {
+										<span style="color: var(--text-muted);">—</span>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
 				</table>
-			</div>
-		</details>
+				<!-- Pagination -->
+				if data.Offset > 0 || data.HasMore {
+					<div class="pagination">
+						if data.Offset > 0 {
+							<sl-button href={ unifiedURL(data.Query, data.Window, data.Limit, maxInt(0, data.Offset-data.Limit)) } variant="default" size="small">Previous</sl-button>
+						}
+						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Events)) }</span>
+						if data.HasMore {
+							<sl-button href={ unifiedURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
+						}
+					</div>
+				}
+			}
+		</div>
 		<style>
-			.signal-legend {
+			.search-form .form-row {
 				display: flex;
-				gap: 24px;
-				padding: 12px 0;
+				gap: 1rem;
+				flex-wrap: wrap;
+				align-items: flex-end;
 			}
-			.legend-item {
-				display: flex;
-				align-items: center;
-				gap: 8px;
-				font-size: 14px;
-			}
-			.legend-dot {
-				width: 12px;
-				height: 12px;
-				border-radius: 50%;
-			}
-			.legend-item.span .legend-dot { background: var(--sl-color-primary-500); }
-			.legend-item.log .legend-dot { background: var(--sl-color-warning-500); }
-			.legend-item.metric .legend-dot { background: var(--sl-color-success-500); }
-
-			.unified-timeline {
-				display: flex;
-				flex-direction: column;
-				gap: 0;
-				padding: 16px 0;
-			}
-			.timeline-event {
-				display: grid;
-				grid-template-columns: 140px 40px 1fr;
-				gap: 8px;
-				padding: 12px 0;
-				border-bottom: 1px solid var(--border);
-			}
-			.timeline-event:last-child {
-				border-bottom: none;
-			}
-			.timeline-event.error {
-				background: rgba(var(--sl-color-danger-500), 0.05);
-			}
-			.event-time {
-				font-size: 12px;
-				color: var(--text-muted);
-				text-align: right;
-				padding-top: 4px;
-			}
-			.event-indicator {
-				display: flex;
-				flex-direction: column;
-				align-items: center;
-			}
-			.event-dot {
-				width: 12px;
-				height: 12px;
-				border-radius: 50%;
-				flex-shrink: 0;
-			}
-			.event-dot.span { background: var(--sl-color-primary-500); }
-			.event-dot.log { background: var(--sl-color-warning-500); }
-			.event-dot.metric { background: var(--sl-color-success-500); }
-			.event-line {
-				width: 2px;
+			.search-form sl-input {
 				flex: 1;
-				background: var(--border);
-				margin-top: 4px;
+				min-width: 200px;
 			}
-			.event-content {
-				padding-bottom: 8px;
-			}
-			.event-header {
+			.search-hint {
+				margin-top: 0.75rem;
+				font-size: 0.75rem;
+				color: var(--text-muted);
 				display: flex;
 				align-items: center;
-				gap: 8px;
-				margin-bottom: 4px;
+				gap: 0.5rem;
+				flex-wrap: wrap;
 			}
-			.event-type-badge {
-				font-size: 10px;
+			.search-hint sl-icon {
+				font-size: 0.875rem;
+			}
+			.search-hint code {
+				background: var(--bg-tertiary);
+				padding: 0.125rem 0.375rem;
+				border-radius: 0.25rem;
+				font-size: 0.7rem;
+			}
+			.facets-bar {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 1rem;
+				padding: 0.75rem 1rem;
+				background: var(--bg-secondary);
+				border: 1px solid var(--border-color);
+				border-radius: 8px;
+				margin-bottom: 1rem;
+			}
+			.facet-group {
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
+				flex-wrap: wrap;
+			}
+			.facet-label {
+				font-size: 0.75rem;
+				font-weight: 600;
+				color: var(--text-muted);
+				text-transform: uppercase;
+			}
+			.facet-chip {
+				display: inline-flex;
+				align-items: center;
+				gap: 4px;
+				padding: 2px 8px;
+				background: var(--bg-tertiary);
+				border-radius: 12px;
+				font-size: 0.75rem;
+				color: var(--text-primary);
+				text-decoration: none;
+				transition: background 0.15s;
+			}
+			.facet-chip:hover {
+				background: var(--sl-color-primary-100);
+				color: var(--sl-color-primary-700);
+			}
+			.facet-chip.facet-span {
+				background: rgba(99, 102, 241, 0.1);
+				color: #6366f1;
+			}
+			.facet-chip.facet-span:hover {
+				background: rgba(99, 102, 241, 0.2);
+			}
+			.facet-chip.facet-log {
+				background: rgba(245, 158, 11, 0.1);
+				color: #d97706;
+			}
+			.facet-chip.facet-log:hover {
+				background: rgba(245, 158, 11, 0.2);
+			}
+			.facet-chip.facet-metric {
+				background: rgba(34, 197, 94, 0.1);
+				color: #16a34a;
+			}
+			.facet-chip.facet-metric:hover {
+				background: rgba(34, 197, 94, 0.2);
+			}
+			.facet-count {
+				font-weight: 600;
+				opacity: 0.8;
+			}
+			.type-badge {
+				display: inline-block;
+				font-size: 0.65rem;
 				font-weight: 600;
 				text-transform: uppercase;
 				padding: 2px 6px;
 				border-radius: 4px;
 			}
-			.event-type-badge.span { background: var(--sl-color-primary-100); color: var(--sl-color-primary-700); }
-			.event-type-badge.log { background: var(--sl-color-warning-100); color: var(--sl-color-warning-700); }
-			.event-type-badge.metric { background: var(--sl-color-success-100); color: var(--sl-color-success-700); }
-			.event-service {
-				font-weight: 500;
+			.type-span {
+				background: rgba(99, 102, 241, 0.15);
+				color: #6366f1;
 			}
-			.event-name {
-				font-family: var(--sl-font-mono);
-				font-size: 14px;
-				margin-bottom: 4px;
+			.type-log {
+				background: rgba(245, 158, 11, 0.15);
+				color: #d97706;
 			}
-			.event-value {
-				font-size: 13px;
-				color: var(--text-muted);
+			.type-metric {
+				background: rgba(34, 197, 94, 0.15);
+				color: #16a34a;
 			}
-			.event-links {
-				margin-top: 8px;
+			.cell-time {
+				font-family: monospace;
+				font-size: 0.8rem;
+				white-space: nowrap;
+			}
+			.cell-name {
+				font-family: monospace;
+				font-size: 0.8rem;
+				max-width: 250px;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
+			}
+			.cell-value {
+				font-size: 0.8rem;
+				color: var(--text-secondary);
+				max-width: 200px;
+				overflow: hidden;
+				text-overflow: ellipsis;
+				white-space: nowrap;
 			}
 			.trace-link {
-				display: inline-flex;
-				align-items: center;
-				gap: 4px;
-				font-size: 12px;
-				color: var(--sl-color-primary-600);
+				font-family: monospace;
+				font-size: 0.75rem;
+				color: var(--accent);
 				text-decoration: none;
 			}
 			.trace-link:hover {
 				text-decoration: underline;
 			}
-			.load-more {
-				text-align: center;
-				padding: 16px;
+			.row-error {
+				background: rgba(239, 68, 68, 0.05);
 			}
-			.query-help {
-				margin-top: 24px;
-				padding: 12px;
-				background: var(--card-bg);
-				border-radius: 8px;
+			.row-error:hover td {
+				background: rgba(239, 68, 68, 0.1) !important;
 			}
-			.query-help summary {
-				cursor: pointer;
-				font-weight: 500;
+			.pagination {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+				gap: 1rem;
+				padding: 1rem;
+				border-top: 1px solid var(--border-color);
+				margin-top: 1rem;
 			}
-			.help-content {
-				padding-top: 12px;
-			}
-			.help-table {
-				width: 100%;
-			}
-			.help-table td {
-				padding: 4px 8px;
-			}
-			.help-table td:first-child {
-				width: 180px;
-			}
-			.help-table code {
-				background: var(--sl-color-neutral-100);
-				padding: 2px 6px;
-				border-radius: 4px;
-				font-size: 13px;
+			.pagination-info {
+				color: var(--text-muted);
+				font-size: 0.875rem;
 			}
 		</style>
 	}
@@ -282,4 +370,61 @@ func formatTime(ts string) string {
 		return ts[11:19] // HH:MM:SS
 	}
 	return ts
+}
+
+func truncateName(s string, max int) string {
+	if len(s) > max {
+		return s[:max-3] + "..."
+	}
+	return s
+}
+
+func unifiedURL(q string, window, limit, offset int) templ.SafeURL {
+	values := url.Values{}
+	if q != "" {
+		values.Set("q", q)
+	}
+	if window != 60 {
+		values.Set("window", strconv.Itoa(window))
+	}
+	if limit != 100 && limit > 0 {
+		values.Set("limit", strconv.Itoa(limit))
+	}
+	if offset > 0 {
+		values.Set("offset", strconv.Itoa(offset))
+	}
+	if len(values) == 0 {
+		return "/unified"
+	}
+	return templ.SafeURL("/unified?" + values.Encode())
+}
+
+func unifiedFilterVariant(current, target string) string {
+	if target == "" && current == "" {
+		return "primary"
+	}
+	if target != "" && strings.Contains(current, target) {
+		return "primary"
+	}
+	return "default"
+}
+
+func unifiedFacetURL(query, facetType, value string, window int) templ.SafeURL {
+	newQuery := query
+	prefix := facetType + ":"
+	if strings.Contains(query, prefix+value) {
+		return unifiedURL(query, window, 0, 0)
+	}
+	if newQuery != "" {
+		newQuery += " "
+	}
+	newQuery += prefix + value
+	return unifiedURL(newQuery, window, 0, 0)
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

@@ -16,24 +16,31 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 	now := time.Now() // Use local time to match lake writer partitions
 	start := now.Add(-time.Duration(windowMinutes) * time.Minute)
 
-	// If window is large (>=24h), fall back to full glob for the partition
-	if windowMinutes >= 24*60 {
-		return sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/part-*.parquet",
-			lakeDir, signal, tenant, namespace))
-	}
-
-	// Expand hour patterns to actual existing files, otherwise DuckDB errors
-	// when any pattern matches zero files.
-	startHour := start.Truncate(time.Hour)
-	endHour := now.Truncate(time.Hour)
-
 	filesSet := make(map[string]struct{})
-	for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
-		pattern := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d/hour=%02d/part-*.parquet",
-			lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day(), t.Hour())
-		matches, _ := filepath.Glob(pattern)
-		for _, m := range matches {
-			filesSet[m] = struct{}{}
+
+	// For windows > 24h, use day-level globs to reduce filesystem calls
+	if windowMinutes > 1440 {
+		startDay := start.Truncate(24 * time.Hour)
+		endDay := now.Truncate(24 * time.Hour)
+		for t := startDay; !t.After(endDay); t = t.Add(24 * time.Hour) {
+			pattern := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d/hour=*/part-*.parquet",
+				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
+			matches, _ := filepath.Glob(pattern)
+			for _, m := range matches {
+				filesSet[m] = struct{}{}
+			}
+		}
+	} else {
+		// For smaller windows, use hour-level precision
+		startHour := start.Truncate(time.Hour)
+		endHour := now.Truncate(time.Hour)
+		for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
+			pattern := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d/hour=%02d/part-*.parquet",
+				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day(), t.Hour())
+			matches, _ := filepath.Glob(pattern)
+			for _, m := range matches {
+				filesSet[m] = struct{}{}
+			}
 		}
 	}
 

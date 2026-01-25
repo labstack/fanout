@@ -33,6 +33,7 @@ type TraceSearchParams struct {
 type TraceRow struct {
 	TraceID   string
 	Service   string
+	Namespace string
 	Operation string
 	Duration  float64
 	Status    string
@@ -43,6 +44,19 @@ type TraceRow struct {
 type TraceSearchResult struct {
 	Traces  []TraceRow
 	HasMore bool
+	Facets  TraceFacets
+}
+
+// TraceFacets contains aggregated counts for filtering
+type TraceFacets struct {
+	ByService []FacetCount
+	ByStatus  []FacetCount
+}
+
+// FacetCount represents a count for a facet value
+type FacetCount struct {
+	Value string
+	Count int
 }
 
 // SearchTraces searches for traces with pagination.
@@ -137,11 +151,12 @@ func (s *Service) SearchTraces(ctx context.Context, p TraceSearchParams) (*Trace
 SELECT DISTINCT ON ("name=trace_id")
   "name=trace_id" as trace_id,
   "name=service_name" as service,
+  COALESCE(namespace, '') as namespace,
   "name=name" as operation,
   "name=duration_ms" as duration,
   "name=status_code" as status,
   epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) as ts
-FROM read_parquet(%s, union_by_name=true)
+FROM read_parquet(%s, union_by_name=true, hive_partitioning=true)
 %s
 ORDER BY "name=trace_id", ts DESC
 LIMIT %d OFFSET %d;
@@ -158,7 +173,7 @@ LIMIT %d OFFSET %d;
 		var t TraceRow
 		var statusCode string
 		var ts any
-		if err := rows.Scan(&t.TraceID, &t.Service, &t.Operation, &t.Duration, &statusCode, &ts); err != nil {
+		if err := rows.Scan(&t.TraceID, &t.Service, &t.Namespace, &t.Operation, &t.Duration, &statusCode, &ts); err != nil {
 			continue
 		}
 		if statusCode == "STATUS_CODE_ERROR" || statusCode == "ERROR" {
@@ -175,7 +190,54 @@ LIMIT %d OFFSET %d;
 		traces = traces[:p.Limit]
 	}
 
-	return &TraceSearchResult{Traces: traces, HasMore: hasMore}, nil
+	// Compute facets from returned traces
+	facets := computeFacets(traces)
+
+	return &TraceSearchResult{Traces: traces, HasMore: hasMore, Facets: facets}, nil
+}
+
+func computeFacets(traces []TraceRow) TraceFacets {
+	svcCounts := make(map[string]int)
+	statusCounts := make(map[string]int)
+
+	for _, t := range traces {
+		if t.Service != "" {
+			svcCounts[t.Service]++
+		}
+		if t.Status != "" {
+			statusCounts[t.Status]++
+		}
+	}
+
+	var facets TraceFacets
+
+	// Convert maps to sorted slices
+	for svc, cnt := range svcCounts {
+		facets.ByService = append(facets.ByService, FacetCount{Value: svc, Count: cnt})
+	}
+	sort.Slice(facets.ByService, func(i, j int) bool {
+		return facets.ByService[i].Count > facets.ByService[j].Count // descending
+	})
+	// Limit to top 5 services
+	if len(facets.ByService) > 5 {
+		facets.ByService = facets.ByService[:5]
+	}
+
+	for status, cnt := range statusCounts {
+		facets.ByStatus = append(facets.ByStatus, FacetCount{Value: status, Count: cnt})
+	}
+	sort.Slice(facets.ByStatus, func(i, j int) bool {
+		// Sort error first, then by count
+		if facets.ByStatus[i].Value == "error" {
+			return true
+		}
+		if facets.ByStatus[j].Value == "error" {
+			return false
+		}
+		return facets.ByStatus[i].Count > facets.ByStatus[j].Count
+	})
+
+	return facets
 }
 
 // TraceDetailResult contains full trace info for UI rendering.

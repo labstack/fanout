@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"sync"
 )
 
 // UnifiedParams contains parameters for unified timeline query.
@@ -53,16 +54,27 @@ func (s *Service) Unified(ctx context.Context, p UnifiedParams) (*UnifiedResult,
 		Events: []UnifiedEvent{},
 	}
 
-	// Query spans
-	spans := s.queryUnifiedSpans(ctx, p)
+	// Run queries in parallel
+	var wg sync.WaitGroup
+	var spans, logs, metrics []UnifiedEvent
+
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		spans = s.queryUnifiedSpans(ctx, p)
+	}()
+	go func() {
+		defer wg.Done()
+		logs = s.queryUnifiedLogs(ctx, p)
+	}()
+	go func() {
+		defer wg.Done()
+		metrics = s.queryUnifiedMetrics(ctx, p)
+	}()
+	wg.Wait()
+
 	out.SpanCount = len(spans)
-
-	// Query logs
-	logs := s.queryUnifiedLogs(ctx, p)
 	out.LogCount = len(logs)
-
-	// Query metrics
-	metrics := s.queryUnifiedMetrics(ctx, p)
 	out.MetricCount = len(metrics)
 
 	// Merge all events

@@ -375,11 +375,21 @@ func (h *UIHandler) Traces(c echo.Context) error {
 		traces = append(traces, web.TraceRow{
 			TraceID:   t.TraceID,
 			Service:   t.Service,
+			Namespace: t.Namespace,
 			Operation: t.Operation,
 			Duration:  t.Duration,
 			Status:    t.Status,
 			Time:      t.Time,
 		})
+	}
+
+	// Convert facets
+	var facets web.TraceFacets
+	for _, f := range result.Facets.ByService {
+		facets.ByService = append(facets.ByService, web.FacetCount{Value: f.Value, Count: f.Count})
+	}
+	for _, f := range result.Facets.ByStatus {
+		facets.ByStatus = append(facets.ByStatus, web.FacetCount{Value: f.Value, Count: f.Count})
 	}
 
 	data := web.TracesData{
@@ -389,6 +399,7 @@ func (h *UIHandler) Traces(c echo.Context) error {
 		Offset:  offset,
 		HasMore: result.HasMore,
 		Window:  window,
+		Facets:  facets,
 	}
 
 	return renderTempl(c, web.Traces(data))
@@ -636,6 +647,8 @@ func (h *UIHandler) Unified(c echo.Context) error {
 		MetricCount: result.MetricCount,
 		HasMore:     result.HasMore,
 		Window:      window,
+		Limit:       100,
+		Offset:      0,
 	}
 
 	return renderTempl(c, web.Unified(data))
@@ -647,17 +660,17 @@ func renderTempl(c echo.Context, component templ.Component) error {
 	return component.Render(c.Request().Context(), c.Response().Writer)
 }
 
-// parseWindow reads window query param and returns minutes (default 60)
+// parseWindow reads window query param and returns minutes (default 60, max 90 days)
 func parseWindow(c echo.Context) int {
 	window := 60
 	if w := c.QueryParam("window"); w != "" {
 		fmt.Sscanf(w, "%d", &window)
-		switch window {
-		case 15, 30, 60, 180, 360, 1440:
-			// valid
-		default:
-			window = 60
-		}
+	}
+	if window < 1 {
+		window = 1
+	}
+	if window > 129600 { // 90 days max
+		window = 129600
 	}
 	return window
 }

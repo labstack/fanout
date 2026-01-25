@@ -63,6 +63,10 @@ func main() {
 	pruner := lake.NewPruner(cfg)
 	go pruner.Run(ctx)
 
+	// Start compactor (merges small hourly files into daily files)
+	compactor := lake.NewCompactor(cfg)
+	go compactor.Run(ctx)
+
 	// Start intelligence detector
 	detector := intelligence.NewDetector(q, intelligence.DefaultDetectorConfig())
 	go detector.Run(ctx)

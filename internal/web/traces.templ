@@ -16,6 +16,19 @@ type TracesData struct {
 	Offset  int
 	HasMore bool
 	Window  int
+	Facets  TraceFacets
+}
+
+// TraceFacets contains aggregated counts for filtering
+type TraceFacets struct {
+	ByService []FacetCount
+	ByStatus  []FacetCount
+}
+
+// FacetCount represents a count for a facet value
+type FacetCount struct {
+	Value string
+	Count int
 }
 
 type TraceRow struct {
@@ -75,6 +88,31 @@ templ Traces(data TracesData) {
 				}
 			</script>
 		</div>
+		<!-- Facets -->
+		if len(data.Facets.ByService) > 0 || len(data.Facets.ByStatus) > 0 {
+			<div class="facets-bar">
+				if len(data.Facets.ByStatus) > 0 {
+					<div class="facet-group">
+						<span class="facet-label">Status</span>
+						for _, f := range data.Facets.ByStatus {
+							<a href={ facetURL(data.Query, "status", f.Value, data.Window) } class={ "facet-chip", facetChipClass(f.Value) }>
+								{ f.Value } <span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span>
+							</a>
+						}
+					</div>
+				}
+				if len(data.Facets.ByService) > 0 {
+					<div class="facet-group">
+						<span class="facet-label">Services</span>
+						for _, f := range data.Facets.ByService {
+							<a href={ facetURL(data.Query, "service", f.Value, data.Window) } class="facet-chip">
+								{ f.Value } <span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span>
+							</a>
+						}
+					</div>
+				}
+			</div>
+		}
 		<!-- Results -->
 		<div class="card">
 			<div class="card-title">Results ({ fmt.Sprintf("%d", len(data.Traces)) } traces)</div>
@@ -184,6 +222,51 @@ templ Traces(data TracesData) {
 			.pagination-info {
 				color: var(--text-muted);
 				font-size: 0.875rem;
+			}
+			.facets-bar {
+				display: flex;
+				flex-wrap: wrap;
+				gap: 1rem;
+				padding: 0.75rem 1rem;
+				background: var(--card-bg);
+				border-radius: 8px;
+				margin-bottom: 1rem;
+			}
+			.facet-group {
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
+				flex-wrap: wrap;
+			}
+			.facet-label {
+				font-size: 0.75rem;
+				font-weight: 600;
+				color: var(--text-muted);
+				text-transform: uppercase;
+			}
+			.facet-chip {
+				display: inline-flex;
+				align-items: center;
+				gap: 4px;
+				padding: 2px 8px;
+				background: var(--bg-tertiary);
+				border-radius: 12px;
+				font-size: 0.75rem;
+				color: var(--text-primary);
+				text-decoration: none;
+				transition: background 0.15s;
+			}
+			.facet-chip:hover {
+				background: var(--sl-color-primary-100);
+				color: var(--sl-color-primary-700);
+			}
+			.facet-chip.facet-error {
+				background: var(--sl-color-danger-100);
+				color: var(--sl-color-danger-700);
+			}
+			.facet-count {
+				font-weight: 600;
+				opacity: 0.8;
 			}
 		</style>
 	}
@@ -321,6 +404,18 @@ templ TraceDetail(data TraceDetailData) {
 								if span.Status == "error" && span.StatusMsg != "" {
 									<span class="error-hint" title={ span.StatusMsg }>
 										<sl-icon name="exclamation-circle"></sl-icon>
+									</span>
+								}
+								if len(span.Events) > 0 {
+									<span class="events-badge" title={ eventsTitle(span.Events) }>
+										<sl-icon name="lightning-charge"></sl-icon>
+										{ fmt.Sprintf("%d", len(span.Events)) }
+									</span>
+								}
+								if len(span.Links) > 0 {
+									<span class="links-badge" title={ fmt.Sprintf("%d linked traces", len(span.Links)) }>
+										<sl-icon name="link-45deg"></sl-icon>
+										{ fmt.Sprintf("%d", len(span.Links)) }
 									</span>
 								}
 							</div>
@@ -571,6 +666,25 @@ templ TraceDetail(data TraceDetailData) {
 			.waterfall-label .error-hint {
 				color: var(--danger);
 				flex-shrink: 0;
+			}
+			.waterfall-label .events-badge,
+			.waterfall-label .links-badge {
+				display: inline-flex;
+				align-items: center;
+				gap: 2px;
+				font-size: 10px;
+				padding: 1px 4px;
+				border-radius: 4px;
+				flex-shrink: 0;
+				cursor: help;
+			}
+			.waterfall-label .events-badge {
+				background: var(--sl-color-warning-100);
+				color: var(--sl-color-warning-700);
+			}
+			.waterfall-label .links-badge {
+				background: var(--sl-color-primary-100);
+				color: var(--sl-color-primary-700);
 			}
 			.waterfall-bar-container {
 				height: 24px;
@@ -847,6 +961,29 @@ func traceFilterVariant(current, target string) string {
 	return "default"
 }
 
+func facetURL(query, facetType, value string, window int) templ.SafeURL {
+	// Build a URL that adds/replaces the facet filter in the query
+	newQuery := query
+	prefix := facetType + ":"
+	// Check if facet is already in query
+	if strings.Contains(query, prefix+value) {
+		return tracesURL(query, window, 0, 0)
+	}
+	// Add facet to query
+	if newQuery != "" {
+		newQuery += " "
+	}
+	newQuery += prefix + value
+	return tracesURL(newQuery, window, 0, 0)
+}
+
+func facetChipClass(value string) string {
+	if value == "error" {
+		return "facet-error"
+	}
+	return ""
+}
+
 func spanRowClass(status string) string {
 	if status == "error" {
 		return "waterfall-row-error"
@@ -884,4 +1021,15 @@ func formatAttrValue(v any) string {
 		return ""
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+func eventsTitle(events []SpanEvent) string {
+	if len(events) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(events))
+	for _, e := range events {
+		names = append(names, e.Name)
+	}
+	return strings.Join(names, ", ")
 }
