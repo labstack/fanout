@@ -112,7 +112,7 @@ func TestReportStore_ListEmpty(t *testing.T) {
 	store := &ReportStore{dir: tmpDir + "/reports"}
 
 	reports := store.List()
-	if reports != nil && len(reports) != 0 {
+	if len(reports) != 0 {
 		t.Errorf("List() on empty store returned %d reports", len(reports))
 	}
 }
