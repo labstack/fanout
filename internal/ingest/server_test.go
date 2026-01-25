@@ -251,10 +251,10 @@ func TestLinksToJSON(t *testing.T) {
 
 func TestScopeInfo(t *testing.T) {
 	tests := []struct {
-		name           string
-		scope          *common.InstrumentationScope
-		expectedName   string
-		expectedVer    string
+		name         string
+		scope        *common.InstrumentationScope
+		expectedName string
+		expectedVer  string
 	}{
 		{"nil scope", nil, "", ""},
 		{"empty scope", &common.InstrumentationScope{}, "", ""},

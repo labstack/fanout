@@ -100,7 +100,7 @@ func TestThresholdBarComponent_Render(t *testing.T) {
 				"warn":  70.0,
 				"crit":  90.0,
 			},
-			format:   ASCII,
+			format:    ASCII,
 			wantASCII: "Test",
 		},
 	}

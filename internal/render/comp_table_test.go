@@ -44,10 +44,10 @@ func TestTableComponent_Render(t *testing.T) {
 	c := &tableComponent{}
 
 	tests := []struct {
-		name           string
-		config         tableConfig
-		format         Format
-		wantASCII      string
+		name            string
+		config          tableConfig
+		format          Format
+		wantASCII       string
 		wantHTMLContain string
 	}{
 		{

@@ -47,12 +47,12 @@ func TestMetricComponent_Render(t *testing.T) {
 	c := &metricComponent{}
 
 	tests := []struct {
-		name       string
-		config     metricConfig
-		format     Format
-		wantASCII  string
-		wantHTML   string
-		wantErr    bool
+		name      string
+		config    metricConfig
+		format    Format
+		wantASCII string
+		wantHTML  string
+		wantErr   bool
 	}{
 		{
 			name:      "basic metric ASCII",

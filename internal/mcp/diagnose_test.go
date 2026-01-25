@@ -72,9 +72,9 @@ func TestRenderDiagnose(t *testing.T) {
 
 func TestRenderDiagnose_Empty(t *testing.T) {
 	diag := &DiagnoseOut{
-		Service: "empty-service",
-		Status:  "unknown",
-		Metrics: ServiceMetrics{},
+		Service:        "empty-service",
+		Status:         "unknown",
+		Metrics:        ServiceMetrics{},
 		TopErrors:      []ErrorDetail{},
 		SlowOperations: []SlowOperation{},
 		Dependencies:   []Dependency{},

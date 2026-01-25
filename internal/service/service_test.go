@@ -114,11 +114,11 @@ func TestDefaults(t *testing.T) {
 	svc := New(nil, cfg)
 
 	tests := []struct {
-		name        string
-		namespace   string
-		tenantID    string
-		wantNS      string
-		wantTenant  string
+		name       string
+		namespace  string
+		tenantID   string
+		wantNS     string
+		wantTenant string
 	}{
 		{
 			name:       "both empty uses defaults",

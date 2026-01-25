@@ -169,7 +169,7 @@ func TestTopology_EdgeHealthStatus(t *testing.T) {
 	// Edges with different health statuses
 	mock.ExpectQuery("WITH").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}).
-			AddRow("a", "b", int64(100), 50.0, 0.005).   // healthy
+			AddRow("a", "b", int64(100), 50.0, 0.005).  // healthy
 			AddRow("b", "c", int64(100), 2000.0, 0.03). // degraded
 			AddRow("c", "d", int64(100), 50.0, 0.15))   // unhealthy
 

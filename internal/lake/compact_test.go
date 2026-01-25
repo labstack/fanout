@@ -29,9 +29,9 @@ func TestIsCompacted(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	tests := []struct {
-		name   string
-		setup  func(string)
-		want   bool
+		name  string
+		setup func(string)
+		want  bool
 	}{
 		{
 			name: "no compacted file",

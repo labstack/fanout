@@ -15,11 +15,11 @@ func TestParseFormat(t *testing.T) {
 		{"html", render.HTML},
 		{"both", render.Both},
 		{"data", render.Data},
-		{"", render.ASCII},           // default
-		{"invalid", render.ASCII},    // invalid defaults to ASCII
-		{"ASCII", render.ASCII},      // case sensitive - wrong case defaults
-		{"HTML", render.ASCII},       // case sensitive
-		{"  html  ", render.ASCII},   // no trimming - wrong input defaults
+		{"", render.ASCII},         // default
+		{"invalid", render.ASCII},  // invalid defaults to ASCII
+		{"ASCII", render.ASCII},    // case sensitive - wrong case defaults
+		{"HTML", render.ASCII},     // case sensitive
+		{"  html  ", render.ASCII}, // no trimming - wrong input defaults
 	}
 
 	for _, tc := range tests {

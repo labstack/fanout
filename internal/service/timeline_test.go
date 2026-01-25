@@ -154,12 +154,12 @@ func TestTimeline_ErrorAnomaly(t *testing.T) {
 	// Error rate must be > 1% AND > avg + 2*std to trigger
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"bucket", "cnt", "errors", "p50", "p95"}).
-			AddRow(now.Add(-25*time.Minute), int64(100), int64(1), 10.0, 50.0).   // 1%
-			AddRow(now.Add(-20*time.Minute), int64(100), int64(1), 10.0, 50.0).   // 1%
-			AddRow(now.Add(-15*time.Minute), int64(100), int64(1), 10.0, 50.0).   // 1%
-			AddRow(now.Add(-10*time.Minute), int64(100), int64(1), 10.0, 50.0).   // 1%
-			AddRow(now.Add(-5*time.Minute), int64(100), int64(50), 10.0, 50.0).   // 50% - extreme spike
-			AddRow(now, int64(100), int64(1), 10.0, 50.0))                         // 1%
+			AddRow(now.Add(-25*time.Minute), int64(100), int64(1), 10.0, 50.0). // 1%
+			AddRow(now.Add(-20*time.Minute), int64(100), int64(1), 10.0, 50.0). // 1%
+			AddRow(now.Add(-15*time.Minute), int64(100), int64(1), 10.0, 50.0). // 1%
+			AddRow(now.Add(-10*time.Minute), int64(100), int64(1), 10.0, 50.0). // 1%
+			AddRow(now.Add(-5*time.Minute), int64(100), int64(50), 10.0, 50.0). // 50% - extreme spike
+			AddRow(now, int64(100), int64(1), 10.0, 50.0))                      // 1%
 
 	result, err := svc.Timeline(context.Background(), "", 60, 5, "", "")
 	if err != nil {

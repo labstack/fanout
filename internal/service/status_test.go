@@ -104,8 +104,8 @@ func TestStatus_TopIssues(t *testing.T) {
 	defer svc.duck.DB.Close()
 
 	rows := sqlmock.NewRows([]string{"service", "cnt", "p95_ms", "error_rate"}).
-		AddRow("high-error-svc", int64(100), 50.0, 0.10).   // errors > 5%
-		AddRow("slow-svc", int64(100), 2000.0, 0.01)        // p95 > 1000ms
+		AddRow("high-error-svc", int64(100), 50.0, 0.10). // errors > 5%
+		AddRow("slow-svc", int64(100), 2000.0, 0.01)      // p95 > 1000ms
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 

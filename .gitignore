@@ -22,3 +22,4 @@ tmp/
 .air.toml
 coverage.out
 coverage.html
+cover.out
