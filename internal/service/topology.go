@@ -18,10 +18,27 @@ func (s *Service) Topology(ctx context.Context, window int, namespace, tenantID 
 
 	// Always scope to single partition
 	namespace, tenantID = s.defaults(namespace, tenantID)
-	spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
 
-	// Get service nodes with health
-	q := fmt.Sprintf(`
+	// Use rollups for long time ranges (>60 min), raw parquet for short
+	var q string
+	if window > 60 {
+		// Fast path: use pre-aggregated rollup table
+		q = fmt.Sprintf(`
+SELECT
+  service,
+  SUM(spans)::BIGINT as cnt,
+  AVG(p95_ms) as p95,
+  AVG(error_rate) as error_rate
+FROM service_rollup
+WHERE bucket >= now() - INTERVAL %d MINUTE
+GROUP BY service
+ORDER BY cnt DESC
+LIMIT 50;
+`, window)
+	} else {
+		// Detailed path: scan raw parquet for accurate percentiles
+		spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
+		q = fmt.Sprintf(`
 SELECT
   "name=service_name" as service,
   COUNT(*) as cnt,
@@ -33,6 +50,7 @@ GROUP BY "name=service_name"
 ORDER BY cnt DESC
 LIMIT 50;
 `, spansGlob, window)
+	}
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -50,6 +68,12 @@ LIMIT 50;
 	}
 
 	// Get service edges (caller -> callee)
+	// For edges we need raw parquet, but limit scan to recent data for large windows
+	edgeWindow := window
+	if edgeWindow > 1440 { // Cap at 1 day for edges
+		edgeWindow = 1440
+	}
+	spansGlob := s.duck.SpansGlob(tenantID, namespace, edgeWindow)
 	q = fmt.Sprintf(`
 WITH calls AS (
   SELECT
@@ -74,7 +98,7 @@ FROM calls
 GROUP BY caller, callee
 ORDER BY call_count DESC
 LIMIT 100;
-`, spansGlob, spansGlob, window)
+`, spansGlob, spansGlob, edgeWindow)
 
 	rows, err = s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
