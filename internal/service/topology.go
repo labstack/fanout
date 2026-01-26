@@ -68,10 +68,10 @@ LIMIT 50;
 	}
 
 	// Get service edges (caller -> callee)
-	// For edges we need raw parquet, but limit scan to recent data for large windows
+	// For edges we need raw parquet - cap at 60 min for fast response
 	edgeWindow := window
-	if edgeWindow > 1440 { // Cap at 1 day for edges
-		edgeWindow = 1440
+	if edgeWindow > 60 {
+		edgeWindow = 60 // Edges from last hour only for large windows
 	}
 	spansGlob := s.duck.SpansGlob(tenantID, namespace, edgeWindow)
 	q = fmt.Sprintf(`
