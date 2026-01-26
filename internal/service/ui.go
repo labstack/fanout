@@ -629,7 +629,7 @@ SELECT
        THEN strftime(epoch_ms(CAST("name=observed_time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ')
        ELSE NULL END as observed_ts,
   "name=service_name" as service,
-  COALESCE("name=namespace", '') as namespace,
+  COALESCE(namespace, '') as namespace,
   "name=severity" as severity,
   "name=severity_number" as severity_number,
   "name=body" as body,
