@@ -39,7 +39,7 @@ services:
     ports:
       - "4317:4317"  # OTLP gRPC (not proxied)
     volumes:
-      - /var/lib/fanout:/var/lib/fanout
+      - /data/fanout:/var/lib/fanout
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:7520/healthz"]
       interval: 30s
