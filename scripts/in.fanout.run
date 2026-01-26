@@ -1,0 +1,5 @@
+location / {
+    grpc_pass grpc://fanout:4317;
+    grpc_set_header Host $host;
+    grpc_set_header X-Real-IP $remote_addr;
+}

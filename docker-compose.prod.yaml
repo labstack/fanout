@@ -29,15 +29,13 @@ services:
     container_name: fanout
     restart: unless-stopped
     environment:
-      - VIRTUAL_HOST=fanout.run
+      - VIRTUAL_HOST=fanout.run,in.fanout.run
       - VIRTUAL_PORT=7520
-      - LETSENCRYPT_HOST=fanout.run
+      - LETSENCRYPT_HOST=fanout.run,in.fanout.run
       - LETSENCRYPT_EMAIL=${LETSENCRYPT_EMAIL:-admin@fanout.run}
       - LAKE_DIR=/var/lib/fanout
       - HTTP_ADDR=:7520
       - OTLP_GRPC_ADDR=:4317
-    ports:
-      - "4317:4317"  # OTLP gRPC (not proxied)
     volumes:
       - /data/fanout:/var/lib/fanout
     healthcheck:

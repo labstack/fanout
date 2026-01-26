@@ -84,6 +84,7 @@ SETUP_EOF
 
 echo "📥 Copying config..."
 scp "$(dirname "$0")/../docker-compose.prod.yaml" "$SERVER:/app/docker-compose.yaml"
+scp "$(dirname "$0")/in.fanout.run" "$SERVER:/data/nginx/in.fanout.run_location"
 
 echo "🚀 Deploying..."
 ssh "$SERVER" "
