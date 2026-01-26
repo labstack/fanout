@@ -62,15 +62,14 @@ templ Traces(data TracesData) {
 			</sl-button>
 		</div>
 		<!-- Search Form -->
-		<sl-card style="margin-bottom: 1.5rem;">
-			<form method="GET" action="/traces" class="search-form" onsubmit="return cleanFormSubmit(this)">
+		<div class="search-section">
+			<form method="GET" action="/traces" onsubmit="return cleanFormSubmit(this)">
 				<div class="form-row">
-					<sl-input name="q" label="Search" placeholder="service:cart status:error op:checkout duration:>1000" value={ data.Query } style="flex: 3;"></sl-input>
+					<sl-input name="q" placeholder="service:cart status:error op:checkout duration:>1000" value={ data.Query }></sl-input>
 					<sl-button type="submit" variant="primary">Search</sl-button>
 				</div>
 				<div class="search-hint">
-					<sl-icon name="lightbulb"></sl-icon>
-					<code>service:name</code> <code>op:checkout</code> <code>status:error</code> <code>duration:&gt;1000</code> <code>attr:http.status_code=500</code> <code>trace:abc123</code> <code>"phrase"</code> <code>-exclude</code>
+					<code>service:name</code> <code>op:checkout</code> <code>status:error</code> <code>duration:&gt;1000</code> <code>attr:key=value</code> <code>"phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
 			<script>
@@ -87,7 +86,7 @@ templ Traces(data TracesData) {
 					return false;
 				}
 			</script>
-		</sl-card>
+		</div>
 		<!-- Facets -->
 		if len(data.Facets.ByService) > 0 || len(data.Facets.ByStatus) > 0 {
 			<div class="facets-bar">
@@ -114,10 +113,10 @@ templ Traces(data TracesData) {
 			</div>
 		}
 		<!-- Results -->
-		<sl-card>
-			<div slot="header" class="card-header">Results ({ fmt.Sprintf("%d", len(data.Traces)) } traces)</div>
+		<div class="results-section">
+			<div class="results-header">Results ({ fmt.Sprintf("%d", len(data.Traces)) } traces)</div>
 			if len(data.Traces) == 0 {
-				<div class="empty-state">
+				<div class="empty-state" style="padding: 3rem;">
 					<sl-icon name="search"></sl-icon>
 					<div class="empty-state-title">No traces found</div>
 					<div class="empty-state-message">Try adjusting your search filters or expanding the time window.</div>
@@ -180,36 +179,8 @@ templ Traces(data TracesData) {
 					</div>
 				}
 			}
-		</sl-card>
+		</div>
 		<style>
-			.search-form .form-row {
-				display: flex;
-				gap: 1rem;
-				flex-wrap: wrap;
-				align-items: flex-end;
-			}
-			.search-form sl-input {
-				flex: 1;
-				min-width: 200px;
-			}
-			.search-hint {
-				margin-top: 0.75rem;
-				font-size: 0.75rem;
-				color: var(--text-muted);
-				display: flex;
-				align-items: center;
-				gap: 0.5rem;
-				flex-wrap: wrap;
-			}
-			.search-hint sl-icon {
-				font-size: 0.875rem;
-			}
-			.search-hint code {
-				background: var(--bg-tertiary);
-				padding: 0.125rem 0.375rem;
-				border-radius: 0.25rem;
-				font-size: 0.7rem;
-			}
 			.pagination {
 				display: flex;
 				align-items: center;

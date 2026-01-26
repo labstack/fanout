@@ -226,6 +226,56 @@ templ Layout(title string, activePage string, window int) {
 					border: 1px solid var(--border-color);
 				}
 
+				/* Search section */
+				.search-section {
+					background: var(--bg-secondary);
+					border: 1px solid var(--border-color);
+					border-radius: 0.5rem;
+					padding: 1rem 1.25rem;
+					margin-bottom: 1.5rem;
+				}
+				.search-section .form-row {
+					display: flex;
+					gap: 0.75rem;
+					align-items: flex-end;
+				}
+				.search-section sl-input {
+					flex: 1;
+				}
+				.search-section .search-hint {
+					margin-top: 0.75rem;
+					font-size: 0.75rem;
+					color: var(--text-muted);
+					display: flex;
+					flex-wrap: wrap;
+					gap: 0.5rem;
+					align-items: center;
+				}
+				.search-section .search-hint code {
+					background: var(--bg-tertiary);
+					padding: 0.125rem 0.375rem;
+					border-radius: 0.25rem;
+					font-size: 0.7rem;
+				}
+
+				/* Results section */
+				.results-section {
+					background: var(--bg-secondary);
+					border: 1px solid var(--border-color);
+					border-radius: 0.5rem;
+					overflow: hidden;
+				}
+				.results-header {
+					padding: 0.875rem 1.25rem;
+					border-bottom: 1px solid var(--border-color);
+					font-size: 0.75rem;
+					font-weight: 600;
+					color: var(--text-secondary);
+					text-transform: uppercase;
+					letter-spacing: 0.025em;
+					background: var(--bg-primary);
+				}
+
 				/* Tables */
 				.table {
 					width: 100%;
@@ -233,17 +283,25 @@ templ Layout(title string, activePage string, window int) {
 					font-size: 0.875rem;
 				}
 				.table th, .table td {
-					padding: 0.75rem;
+					padding: 0.75rem 1rem;
 					text-align: left;
-					border-bottom: 1px solid var(--border-color);
 				}
 				.table th {
 					font-weight: 600;
 					color: var(--text-secondary);
-					font-size: 0.75rem;
+					font-size: 0.7rem;
 					text-transform: uppercase;
+					letter-spacing: 0.03em;
+					background: var(--bg-primary);
+					border-bottom: 2px solid var(--border-color);
 				}
-				.table tr:hover td { background: var(--bg-tertiary); }
+				.table td {
+					border-bottom: 1px solid var(--border-color);
+				}
+				.table tbody tr:last-child td {
+					border-bottom: none;
+				}
+				.table tbody tr:hover td { background: var(--bg-tertiary); }
 				.table a { color: var(--accent); text-decoration: none; }
 				.table a:hover { text-decoration: underline; }
 
