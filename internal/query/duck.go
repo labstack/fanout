@@ -26,7 +26,7 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 		return nil, err
 	}
 	d := &Duck{DB: db, cfg: cfg}
-	// Create rollup table
+	// Create rollup tables
 	if _, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS service_rollup (
   bucket TIMESTAMP,
@@ -34,6 +34,17 @@ CREATE TABLE IF NOT EXISTS service_rollup (
   spans BIGINT,
   p50_ms DOUBLE,
   p95_ms DOUBLE,
+  error_rate DOUBLE
+);`); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`
+CREATE TABLE IF NOT EXISTS edge_rollup (
+  bucket TIMESTAMP,
+  caller TEXT,
+  callee TEXT,
+  calls BIGINT,
+  avg_ms DOUBLE,
   error_rate DOUBLE
 );`); err != nil {
 		return nil, err
@@ -88,6 +99,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 }
 
 func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
+	// Service rollup
 	res, err := d.DB.ExecContext(ctx, fmt.Sprintf(`
 INSERT INTO service_rollup
 SELECT
@@ -104,10 +116,36 @@ GROUP BY ALL;
 	if err != nil {
 		return 0, err
 	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return 0, nil
-	}
+	affected, _ := res.RowsAffected()
+
+	// Edge rollup (caller -> callee relationships)
+	_, _ = d.DB.ExecContext(ctx, fmt.Sprintf(`
+INSERT INTO edge_rollup
+WITH calls AS (
+  SELECT
+    date_trunc('minute', epoch_ms(CAST(child."name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
+    parent."name=service_name" as caller,
+    child."name=service_name" as callee,
+    child."name=duration_ms" as duration_ms,
+    child."name=status_code" as status
+  FROM read_parquet('%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/part-*.parquet', hive_partitioning=true) child
+  JOIN read_parquet('%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/part-*.parquet', hive_partitioning=true) parent
+    ON child."name=parent_span_id" = parent."name=span_id"
+    AND child."name=trace_id" = parent."name=trace_id"
+  WHERE bucket > COALESCE((SELECT max(bucket) FROM edge_rollup), TIMESTAMP '1970-01-01')
+    AND parent."name=service_name" != child."name=service_name"
+)
+SELECT
+  bucket,
+  caller,
+  callee,
+  COUNT(*) as calls,
+  AVG(duration_ms) as avg_ms,
+  AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) as error_rate
+FROM calls
+GROUP BY bucket, caller, callee;
+`, d.cfg.LakeDir, d.cfg.LakeDir))
+
 	return int(affected), nil
 }
 

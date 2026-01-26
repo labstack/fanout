@@ -68,13 +68,25 @@ LIMIT 50;
 	}
 
 	// Get service edges (caller -> callee)
-	// For edges we need raw parquet - cap at 60 min for fast response
-	edgeWindow := window
-	if edgeWindow > 60 {
-		edgeWindow = 60 // Edges from last hour only for large windows
-	}
-	spansGlob := s.duck.SpansGlob(tenantID, namespace, edgeWindow)
-	q = fmt.Sprintf(`
+	if window > 60 {
+		// Fast path: use edge rollup table
+		q = fmt.Sprintf(`
+SELECT
+  caller,
+  callee,
+  SUM(calls)::BIGINT as call_count,
+  AVG(avg_ms) as avg_ms,
+  AVG(error_rate) as error_rate
+FROM edge_rollup
+WHERE bucket >= now() - INTERVAL %d MINUTE
+GROUP BY caller, callee
+ORDER BY call_count DESC
+LIMIT 100;
+`, window)
+	} else {
+		// Detailed path: scan raw parquet
+		spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
+		q = fmt.Sprintf(`
 WITH calls AS (
   SELECT
     parent."name=service_name" as caller,
@@ -98,7 +110,8 @@ FROM calls
 GROUP BY caller, callee
 ORDER BY call_count DESC
 LIMIT 100;
-`, spansGlob, spansGlob, edgeWindow)
+`, spansGlob, spansGlob, window)
+	}
 
 	rows, err = s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
