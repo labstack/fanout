@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" style="background: #ffffff;">
+  <defs>
+    <filter id="rough" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.04" numOctaves="5" result="noise"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="1" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#1e293b"/>
+    </marker>
+    <style>
+      .box { fill: #ffffff; stroke: #1e293b; stroke-width: 2; rx: 8; }
+      .box-blue { fill: #dbeafe; stroke: #3b82f6; stroke-width: 2; rx: 8; }
+      .box-green { fill: #dcfce7; stroke: #22c55e; stroke-width: 2; rx: 8; }
+      .box-amber { fill: #fef3c7; stroke: #f59e0b; stroke-width: 2; rx: 8; }
+      .box-purple { fill: #f3e8ff; stroke: #a855f7; stroke-width: 2; rx: 8; }
+      .title { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 15px; font-weight: 600; fill: #1e293b; }
+      .subtitle { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; fill: #64748b; }
+      .port { font-family: 'SF Mono', Monaco, monospace; font-size: 10px; fill: #64748b; }
+      .arrow { stroke: #1e293b; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+      .label { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 10px; fill: #64748b; }
+    </style>
+  </defs>
+
+  <!-- Apps/SDKs -->
+  <g transform="translate(30, 140)">
+    <rect class="box" width="100" height="120" filter="url(#rough)"/>
+    <text class="title" x="50" y="35" text-anchor="middle">Apps</text>
+    <text class="subtitle" x="50" y="55" text-anchor="middle">OpenTelemetry</text>
+    <text class="subtitle" x="50" y="70" text-anchor="middle">SDK</text>
+    <g transform="translate(30, 80)">
+      <rect width="40" height="30" rx="4" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+      <text x="20" y="20" text-anchor="middle" style="font-size: 18px;">📱</text>
+    </g>
+  </g>
+
+  <!-- Arrow: Apps -> Ingest -->
+  <path class="arrow" d="M135,200 C160,200 170,200 195,200" filter="url(#rough)"/>
+  <text class="label" x="165" y="190">OTLP</text>
+
+  <!-- Ingest -->
+  <g transform="translate(200, 140)">
+    <rect class="box-blue" width="120" height="120" filter="url(#rough)"/>
+    <text class="title" x="60" y="35" text-anchor="middle">Ingest</text>
+    <text class="subtitle" x="60" y="55" text-anchor="middle">gRPC Server</text>
+    <text class="port" x="60" y="100" text-anchor="middle">:4317</text>
+    <g transform="translate(40, 60)">
+      <text style="font-size: 24px;">📥</text>
+    </g>
+  </g>
+
+  <!-- Arrow: Ingest -> Lake -->
+  <path class="arrow" d="M325,200 C350,200 360,200 385,200" filter="url(#rough)"/>
+  <text class="label" x="355" y="190">batch</text>
+
+  <!-- Lake (Parquet) -->
+  <g transform="translate(390, 120)">
+    <rect class="box-green" width="120" height="160" filter="url(#rough)"/>
+    <text class="title" x="60" y="30" text-anchor="middle">Lake</text>
+    <text class="subtitle" x="60" y="50" text-anchor="middle">Parquet Files</text>
+    <g transform="translate(20, 65)">
+      <rect width="80" height="20" rx="3" fill="#bbf7d0" stroke="#22c55e" stroke-width="1"/>
+      <text x="40" y="14" text-anchor="middle" style="font-size: 10px; fill: #166534;">spans/</text>
+    </g>
+    <g transform="translate(20, 90)">
+      <rect width="80" height="20" rx="3" fill="#bbf7d0" stroke="#22c55e" stroke-width="1"/>
+      <text x="40" y="14" text-anchor="middle" style="font-size: 10px; fill: #166534;">logs/</text>
+    </g>
+    <g transform="translate(20, 115)">
+      <rect width="80" height="20" rx="3" fill="#bbf7d0" stroke="#22c55e" stroke-width="1"/>
+      <text x="40" y="14" text-anchor="middle" style="font-size: 10px; fill: #166534;">metrics/</text>
+    </g>
+  </g>
+
+  <!-- Arrow: Lake -> Query -->
+  <path class="arrow" d="M515,200 C540,200 550,200 575,200" filter="url(#rough)"/>
+  <text class="label" x="545" y="190">scan</text>
+
+  <!-- Query Engine -->
+  <g transform="translate(580, 140)">
+    <rect class="box-amber" width="120" height="120" filter="url(#rough)"/>
+    <text class="title" x="60" y="35" text-anchor="middle">Query</text>
+    <text class="subtitle" x="60" y="55" text-anchor="middle">DuckDB</text>
+    <g transform="translate(40, 60)">
+      <text style="font-size: 24px;">🦆</text>
+    </g>
+    <text class="port" x="60" y="105" text-anchor="middle">+ rollups</text>
+  </g>
+
+  <!-- Arrow: Query -> API -->
+  <path class="arrow" d="M705,200 C730,200 740,200 765,200" filter="url(#rough)"/>
+
+  <!-- HTTP API -->
+  <g transform="translate(770, 100)">
+    <rect class="box-purple" width="110" height="200" filter="url(#rough)"/>
+    <text class="title" x="55" y="30" text-anchor="middle">HTTP</text>
+    <text class="port" x="55" y="48" text-anchor="middle">:7520</text>
+
+    <!-- Web UI -->
+    <g transform="translate(15, 60)">
+      <rect width="80" height="35" rx="4" fill="#e9d5ff" stroke="#a855f7" stroke-width="1"/>
+      <text x="40" y="15" text-anchor="middle" style="font-size: 11px; font-weight: 500; fill: #7c3aed;">Web UI</text>
+      <text x="40" y="28" text-anchor="middle" style="font-size: 9px; fill: #a855f7;">HTMX + Templ</text>
+    </g>
+
+    <!-- MCP -->
+    <g transform="translate(15, 105)">
+      <rect width="80" height="35" rx="4" fill="#e9d5ff" stroke="#a855f7" stroke-width="1"/>
+      <text x="40" y="15" text-anchor="middle" style="font-size: 11px; font-weight: 500; fill: #7c3aed;">MCP</text>
+      <text x="40" y="28" text-anchor="middle" style="font-size: 9px; fill: #a855f7;">10 tools</text>
+    </g>
+
+    <!-- API -->
+    <g transform="translate(15, 150)">
+      <rect width="80" height="35" rx="4" fill="#e9d5ff" stroke="#a855f7" stroke-width="1"/>
+      <text x="40" y="15" text-anchor="middle" style="font-size: 11px; font-weight: 500; fill: #7c3aed;">REST</text>
+      <text x="40" y="28" text-anchor="middle" style="font-size: 9px; fill: #a855f7;">JSON API</text>
+    </g>
+  </g>
+
+  <!-- Title -->
+  <text x="450" y="45" text-anchor="middle" style="font-family: 'Segoe UI', system-ui, sans-serif; font-size: 22px; font-weight: 700; fill: #0f172a;">Fanout Architecture</text>
+  <text x="450" y="70" text-anchor="middle" style="font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; fill: #64748b;">Single-binary observability: OTLP → Parquet → DuckDB → API</text>
+
+  <!-- Footer note -->
+  <text x="450" y="370" text-anchor="middle" style="font-family: 'Segoe UI', system-ui, sans-serif; font-size: 11px; fill: #94a3b8;">All components run in a single binary • No external dependencies</text>
+</svg>

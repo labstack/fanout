@@ -2,6 +2,10 @@
 
 Single-binary observability platform. Ingest OTLP, store as Parquet, query with DuckDB.
 
+<p align="center">
+  <img src="docs/architecture.svg" alt="Fanout Architecture" width="800"/>
+</p>
+
 **Documentation:**
 - [Architecture](ARCHITECTURE.md) - System design, data flow, components
 - [Requirements](REQUIREMENTS.md) - Product scope, configuration, build
