@@ -384,6 +384,7 @@ graph TB
         LG[Logs /logs]
         MT[Metrics /metrics]
         TP[Topology /topology]
+        UF[Unified /unified]
         RP[Reports /reports]
     end
 
@@ -391,10 +392,10 @@ graph TB
         KB[Keyboard Shortcuts]
         TM[Time Window Selector]
         SR[Search DSL]
-        ZM[Zoom/Pan Controls]
+        NS[Namespace Filter]
     end
 
-    OV --> SL & TL & LG & MT & TP
+    OV --> SL & TL & LG & MT & TP & UF
     SL --> SD
     TL --> TD
     KB --> |g+key| OV & SL & TL & LG & MT & TP
@@ -434,11 +435,8 @@ graph TB
         LG["GET /logs"]
         MT["GET /metrics"]
         TP["GET /topology"]
+        UF["GET /unified"]
         RP["GET /reports"]
-    end
-
-    subgraph "Partials (HTMX)"
-        PO["GET /partials/overview"]
     end
 
     subgraph MCP
@@ -449,6 +447,10 @@ graph TB
         VW["GET /view/r/:id"]
         RL["GET /api/reports"]
         RD["DELETE /api/reports/:id"]
+    end
+
+    subgraph API
+        NS["GET /api/namespaces"]
     end
 ```
 
@@ -578,6 +580,9 @@ Environment variables:
 | `API_TOKEN` | - | Bearer auth token (optional) |
 | `MCP_ENABLED` | `true` | Enable MCP server at /mcp |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
+| `RETENTION_HOURS` | `1` | Retention check interval |
+| `DEFAULT_NAMESPACE` | `default` | Default namespace for services |
+| `TENANT_ID` | - | Tenant UUID (optional) |
 
 ## Security & Tenancy
 

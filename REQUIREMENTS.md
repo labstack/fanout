@@ -20,7 +20,7 @@
 
 ### MCP Server
 - Endpoint: `/mcp`
-- Tools: status, diagnose, find, trace, timeline, topology, query
+- Tools: status, diagnose, find, trace, timeline, topology, compare, query, schema, render
 
 ## 2. Non-Goals (v1.0)
 - External DB service (no ClickHouse/Elasticsearch)
@@ -56,6 +56,8 @@
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 | `RETENTION_HOURS` | `1` | Retention check interval |
+| `DEFAULT_NAMESPACE` | `default` | Default namespace for services |
+| `TENANT_ID` | - | Tenant UUID (optional) |
 
 ## 7. Build & Run
 

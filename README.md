@@ -2,6 +2,10 @@
 
 Single-binary observability platform. Ingest OTLP, store as Parquet, query with DuckDB.
 
+**Documentation:**
+- [Architecture](ARCHITECTURE.md) - System design, data flow, components
+- [Requirements](REQUIREMENTS.md) - Product scope, configuration, build
+
 ## Quick Start
 
 ```bash
@@ -24,80 +28,37 @@ docker compose up -d
 
 Connect Claude Code or any MCP client to `http://localhost:7520/mcp`
 
-MCP clients automatically receive JSON Schema via `tools/list`. Parameters below for reference:
+| Tool | Description |
+|------|-------------|
+| `status` | System health overview. Start here. |
+| `diagnose` | Deep-dive into a service (P50/P95/P99, errors, slow ops) |
+| `find` | Search spans and logs by pattern, service, status |
+| `trace` | Distributed trace with auto root-cause analysis |
+| `timeline` | Time-bucketed metrics with anomaly detection |
+| `topology` | Service dependency map with health status |
+| `compare` | Side-by-side comparison of 2-4 services |
+| `query` | Raw SQL against DuckDB |
+| `schema` | Database schema reference for writing queries |
+| `render` | Generate HTML reports with charts |
 
-### status
-System health overview. Start here.
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| window | int | 15 | Time window in minutes |
-
-### diagnose
-Deep-dive into a service. P50/P95/P99 latency, error rate, top errors, slow ops, dependencies.
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| service | string | required | Service name to diagnose |
-| window | int | 15 | Time window in minutes |
-
-### find
-Search spans and logs. Filter by pattern, service, status, severity.
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| query | string | - | Search pattern (regex for logs, substring for spans) |
-| service | string | - | Filter by service |
-| type | string | both | Signal type: spans\|logs\|both |
-| status | string | all | Filter: error\|slow\|all |
-| window | int | 15 | Time window in minutes |
-| severity | []string | - | Log severity: DEBUG,INFO,WARN,ERROR,FATAL |
-| limit | int | 50 | Max results per type |
-
-### trace
-Distributed trace with auto root-cause analysis. Shows spans, logs, critical path.
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| trace_id | string | required | Trace ID to analyze |
-| include_logs | bool | true | Include correlated logs |
-
-### timeline
-Time-bucketed metrics with anomaly detection.
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| service | string | - | Filter by service |
-| window | int | 60 | Time window in minutes |
-| granularity | int | 5 | Bucket size in minutes |
-
-### topology
-Service dependency map. Nodes with health, edges with call counts.
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| window | int | 60 | Time window in minutes |
-
-### query
-Raw SQL against the data lake. Call with empty sql for schema reference.
-
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-| sql | string | - | SQL query (SELECT/WITH only) |
-| max_rows | int | 1000 | Max rows to return |
+MCP clients receive full JSON Schema via `tools/list`.
 
 ## Configuration
 
-Environment variables:
-- `HTTP_ADDR` (default `:7520`)
-- `OTLP_GRPC_ADDR` (default `:4317`)
-- `LAKE_DIR` (default `./lake`)
-- `FLUSH_SECONDS` (default `15`)
-- `MAX_ROWS` (default `50000`)
-- `ROLLUP_EVERY` (default `60`)
-- `API_TOKEN` (optional Bearer auth)
-- `MCP_ENABLED` (default `true`)
-- `RETENTION_DAYS` (default `30`)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HTTP_ADDR` | `:7520` | HTTP server address |
+| `OTLP_GRPC_ADDR` | `:4317` | OTLP gRPC address |
+| `LAKE_DIR` | `./lake` | Parquet storage directory |
+| `FLUSH_SECONDS` | `15` | Batch flush interval |
+| `MAX_ROWS` | `50000` | Max rows per Parquet file |
+| `ROLLUP_EVERY` | `60` | Rollup refresh (seconds) |
+| `API_TOKEN` | - | Bearer auth token (optional) |
+| `MCP_ENABLED` | `true` | Enable MCP server |
+| `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
+| `RETENTION_HOURS` | `1` | Retention check interval |
+| `DEFAULT_NAMESPACE` | `default` | Default namespace |
+| `TENANT_ID` | - | Tenant UUID (optional) |
 
 ## OTLP Ingest
 
@@ -110,9 +71,27 @@ OTEL_SERVICE_NAME=my-service
 
 ## HTTP API
 
-- `GET /healthz` - Health check
-- `GET /` - Dashboard UI
+**Health:**
+- `GET /healthz` - Liveness check
+- `GET /readyz` - Readiness check
+- `GET /-/metrics` - Prometheus metrics
+
+**Web UI:**
+- `GET /` - Overview dashboard
 - `GET /services` - Service list
-- `GET /traces` - Trace list
-- `GET /logs` - Logs view
+- `GET /services/:name` - Service detail
+- `GET /traces` - Trace search
+- `GET /traces/:id` - Trace detail
+- `GET /logs` - Log search
+- `GET /metrics` - Metrics explorer
+- `GET /topology` - Service map
+- `GET /unified` - Unified timeline
+- `GET /reports` - Report list
+
+**MCP:**
 - `POST /mcp` - MCP endpoint
+
+**Reports:**
+- `GET /view/r/:id` - View report
+- `GET /api/reports` - List reports (JSON)
+- `DELETE /api/reports/:id` - Delete report
