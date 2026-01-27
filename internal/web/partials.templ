@@ -1,6 +1,9 @@
 package web
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // Partials - HTML fragments for htmx updates (no Layout wrapper)
 
@@ -16,7 +19,9 @@ templ OverviewContent(data OverviewData) {
 			<p class="page-subtitle" id="summary">{ data.Summary }</p>
 		</div>
 		<div class="page-header-right">
-			<span class="last-updated" id="last-updated">Updated just now</span>
+			<span class="last-updated" id="last-updated">
+				Updated <sl-relative-time date={ nowISO() } sync></sl-relative-time>
+			</span>
 			<sl-icon-button
 				name="arrow-clockwise"
 				label="Refresh"
@@ -45,48 +50,51 @@ templ OverviewContent(data OverviewData) {
 
 // StatsGrid renders service health counts
 templ StatsGrid(s ServiceSummary) {
-	<div id="stats-grid" class="grid grid-4" style="margin-bottom: 1.5rem;">
-		<sl-card class="metric-card">
-			<div class="metric-value">{ fmt.Sprintf("%d", s.Total) }</div>
-			<div class="metric-label">Total Services</div>
-		</sl-card>
-		<sl-card class="metric-card">
-			<div class="metric-value" style="color: var(--success);">{ fmt.Sprintf("%d", s.Healthy) }</div>
-			<div class="metric-label">Healthy</div>
-		</sl-card>
-		<sl-card class="metric-card">
-			<div class="metric-value" style="color: var(--warning);">{ fmt.Sprintf("%d", s.Degraded) }</div>
-			<div class="metric-label">Degraded</div>
-		</sl-card>
-		<sl-card class="metric-card">
-			<div class="metric-value" style="color: var(--danger);">{ fmt.Sprintf("%d", s.Unhealthy) }</div>
-			<div class="metric-label">Unhealthy</div>
-		</sl-card>
+	<div id="stats-grid" class="stats-bar" style="margin-bottom: 1rem;">
+		<div class="stats-item">
+			<div class="stats-value">{ fmt.Sprintf("%d", s.Total) }</div>
+			<div class="stats-label">Services</div>
+		</div>
+		<div class="stats-item">
+			<div class="stats-value" style="color: var(--success);">{ fmt.Sprintf("%d", s.Healthy) }</div>
+			<div class="stats-label">Healthy</div>
+		</div>
+		<div class="stats-item">
+			<div class="stats-value" style="color: var(--warning);">{ fmt.Sprintf("%d", s.Degraded) }</div>
+			<div class="stats-label">Degraded</div>
+		</div>
+		<div class="stats-item">
+			<div class="stats-value" style="color: var(--danger);">{ fmt.Sprintf("%d", s.Unhealthy) }</div>
+			<div class="stats-label">Unhealthy</div>
+		</div>
 	</div>
 }
 
 // KeyMetrics renders throughput, latency, error rate
 templ KeyMetrics(throughput int64, p95 float64, errorRate float64) {
-	<div id="key-metrics" class="grid grid-3" style="margin-bottom: 1.5rem;">
-		<sl-card class="metric-card">
-			<div class="metric-value">{ fmt.Sprintf("%d", throughput) }</div>
-			<div class="metric-label">Requests/min</div>
-		</sl-card>
-		<sl-card class="metric-card">
-			<div class="metric-value">{ fmt.Sprintf("%.0f", p95) }ms</div>
-			<div class="metric-label">P95 Latency</div>
-		</sl-card>
-		<sl-card class="metric-card">
-			<div class="metric-value">{ fmt.Sprintf("%.1f", errorRate*100) }%</div>
-			<div class="metric-label">Error Rate</div>
-		</sl-card>
+	<div id="key-metrics" class="stats-bar" style="margin-bottom: 1.5rem;">
+		<div class="stats-item">
+			<div class="stats-value">{ fmt.Sprintf("%d", throughput) }</div>
+			<div class="stats-label">Requests/min</div>
+		</div>
+		<div class="stats-item">
+			<div class="stats-value">{ fmt.Sprintf("%.0f", p95) }ms</div>
+			<div class="stats-label">P95 Latency</div>
+		</div>
+		<div class="stats-item">
+			<div class="stats-value">{ fmt.Sprintf("%.1f", errorRate*100) }%</div>
+			<div class="stats-label">Error Rate</div>
+		</div>
 	</div>
 }
 
 // TopIssues renders the issues table content
 templ TopIssues(issues []TopIssue, window int) {
 	if len(issues) == 0 {
-		<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No issues detected</p>
+		<div class="empty-inline success">
+			<sl-icon name="check-circle"></sl-icon>
+			<span>No issues detected</span>
+		</div>
 	} else {
 		<table class="table">
 			<thead>
@@ -305,4 +313,9 @@ templ EmptyStateSearch(dataType string) {
 		<div class="empty-state-title">No { dataType } found</div>
 		<div class="empty-state-message">Try adjusting your search filters or expanding the time window.</div>
 	</div>
+}
+
+// nowISO returns current time in ISO 8601 format for sl-relative-time
+func nowISO() string {
+	return time.Now().UTC().Format(time.RFC3339)
 }

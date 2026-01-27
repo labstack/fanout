@@ -159,81 +159,47 @@ func timelineSpec(data TimelineData) string {
 }
 
 templ alertBanner(anomalies []Anomaly) {
-	<div class="alert-banner">
-		<div class="alert-icon">
-			<sl-icon name="exclamation-triangle-fill"></sl-icon>
-		</div>
-		<div class="alert-content">
-			<strong>{ fmt.Sprintf("%d anomaly detected", len(anomalies)) }</strong>
-			if len(anomalies) > 1 {
-				<strong>{ fmt.Sprintf(" (%d total)", len(anomalies)) }</strong>
+	<sl-alert variant="warning" open closable class="anomaly-alert" id="anomaly-banner" data-count={ fmt.Sprintf("%d", len(anomalies)) }>
+		<sl-icon slot="icon" name="exclamation-triangle"></sl-icon>
+		<strong>{ fmt.Sprintf("%d anomal", len(anomalies)) }{ anomalyPlural(len(anomalies)) } detected</strong>
+		<span style="margin-left: 0.5rem; opacity: 0.9;">
+			for i, a := range anomalies {
+				if i > 0 {
+					<span> | </span>
+				}
+				if i < 3 {
+					<span>{ anomalyIcon(a.Type) } { a.Description }</span>
+				}
 			}
-			<span class="alert-details">
-				for i, a := range anomalies {
-					if i > 0 {
-						<span>| </span>
-					}
-					if i < 3 {
-						<span class="anomaly-item">
-							{ anomalyIcon(a.Type) } { a.Description }
-						</span>
-					}
+			if len(anomalies) > 3 {
+				<span> and { fmt.Sprintf("%d", len(anomalies)-3) } more...</span>
+			}
+		</span>
+	</sl-alert>
+	<script>
+		(function() {
+			const banner = document.getElementById('anomaly-banner');
+			if (!banner) return;
+
+			const count = banner.dataset.count;
+			const key = 'anomaly-dismissed-' + count;
+			const dismissed = localStorage.getItem(key);
+
+			// Auto-hide if dismissed within last hour
+			if (dismissed) {
+				const dismissedAt = parseInt(dismissed, 10);
+				if (Date.now() - dismissedAt < 3600000) {
+					banner.open = false;
+				} else {
+					localStorage.removeItem(key);
 				}
-				if len(anomalies) > 3 {
-					<span>and { fmt.Sprintf("%d", len(anomalies)-3) } more...</span>
-				}
-			</span>
-		</div>
-		<button class="alert-dismiss" onclick="this.parentElement.style.display='none'">
-			<sl-icon name="x"></sl-icon>
-		</button>
-	</div>
-	<style>
-		.alert-banner {
-			display: flex;
-			align-items: center;
-			gap: 1rem;
-			padding: 0.75rem 1rem;
-			background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-			border: 1px solid #f59e0b;
-			border-radius: 0.5rem;
-			margin-bottom: 1.5rem;
-			color: #92400e;
-		}
-		.sl-theme-dark .alert-banner {
-			background: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(245, 158, 11, 0.1) 100%);
-			border-color: rgba(245, 158, 11, 0.5);
-			color: #fbbf24;
-		}
-		.alert-icon {
-			font-size: 1.25rem;
-			color: #f59e0b;
-		}
-		.alert-content {
-			flex: 1;
-			font-size: 0.875rem;
-		}
-		.alert-details {
-			margin-left: 0.5rem;
-			opacity: 0.9;
-		}
-		.anomaly-item {
-			display: inline-flex;
-			align-items: center;
-			gap: 0.25rem;
-		}
-		.alert-dismiss {
-			background: transparent;
-			border: none;
-			cursor: pointer;
-			padding: 0.25rem;
-			color: inherit;
-			opacity: 0.7;
-		}
-		.alert-dismiss:hover {
-			opacity: 1;
-		}
-	</style>
+			}
+
+			banner.addEventListener('sl-after-hide', () => {
+				localStorage.setItem(key, Date.now().toString());
+			});
+		})();
+	</script>
 }
 
 func anomalyIcon(atype string) string {
@@ -247,4 +213,11 @@ func anomalyIcon(atype string) string {
 	default:
 		return ""
 	}
+}
+
+func anomalyPlural(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }

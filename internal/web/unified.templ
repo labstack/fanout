@@ -100,22 +100,22 @@ templ Unified(data UnifiedData) {
 		<div class="facets-bar">
 			<div class="facet-group">
 				<span class="facet-label">Type</span>
-				<a href={ unifiedFacetURL(data.Query, "type", "span", data.Window) } class="facet-chip facet-span">
-					span <span class="facet-count">{ fmt.Sprintf("%d", data.SpanCount) }</span>
+				<a href={ unifiedFacetURL(data.Query, "type", "span", data.Window) } style="text-decoration: none;">
+					<sl-tag size="small" class="facet-span">span<span class="facet-count">{ fmt.Sprintf("%d", data.SpanCount) }</span></sl-tag>
 				</a>
-				<a href={ unifiedFacetURL(data.Query, "type", "log", data.Window) } class="facet-chip facet-log">
-					log <span class="facet-count">{ fmt.Sprintf("%d", data.LogCount) }</span>
+				<a href={ unifiedFacetURL(data.Query, "type", "log", data.Window) } style="text-decoration: none;">
+					<sl-tag size="small" class="facet-log">log<span class="facet-count">{ fmt.Sprintf("%d", data.LogCount) }</span></sl-tag>
 				</a>
-				<a href={ unifiedFacetURL(data.Query, "type", "metric", data.Window) } class="facet-chip facet-metric">
-					metric <span class="facet-count">{ fmt.Sprintf("%d", data.MetricCount) }</span>
+				<a href={ unifiedFacetURL(data.Query, "type", "metric", data.Window) } style="text-decoration: none;">
+					<sl-tag size="small" class="facet-metric">metric<span class="facet-count">{ fmt.Sprintf("%d", data.MetricCount) }</span></sl-tag>
 				</a>
 			</div>
 			if len(data.Facets.ByService) > 0 {
 				<div class="facet-group">
 					<span class="facet-label">Services</span>
 					for _, f := range data.Facets.ByService {
-						<a href={ unifiedFacetURL(data.Query, "service", f.Value, data.Window) } class="facet-chip">
-							{ f.Value } <span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span>
+						<a href={ unifiedFacetURL(data.Query, "service", f.Value, data.Window) } style="text-decoration: none;">
+							<sl-tag size="small">{ f.Value }<span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span></sl-tag>
 						</a>
 					}
 				</div>
@@ -146,9 +146,9 @@ templ Unified(data UnifiedData) {
 					<tbody>
 						for _, e := range data.Events {
 							<tr class={ templ.KV("row-error", e.Status == "error" || e.Severity == "ERROR") }>
-								<td class="cell-time">{ formatTime(e.Time) }</td>
+								<td class="cell-time"><sl-relative-time date={ e.Time }></sl-relative-time></td>
 								<td>
-									<span class={ "type-badge", "type-" + e.Type }>{ e.Type }</span>
+									<sl-tag size="small" class={ "facet-" + e.Type }>{ e.Type }</sl-tag>
 								</td>
 								<td>
 									if e.Service != "" {
@@ -186,17 +186,17 @@ templ Unified(data UnifiedData) {
 					</tbody>
 				</table>
 				<!-- Pagination -->
-				if data.Offset > 0 || data.HasMore {
-					<div class="pagination">
-						if data.Offset > 0 {
-							<sl-button href={ unifiedURL(data.Query, data.Window, data.Limit, maxInt(0, data.Offset-data.Limit)) } variant="default" size="small">Previous</sl-button>
-						}
-						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Events)) }</span>
-						if data.HasMore {
-							<sl-button href={ unifiedURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
-						}
-					</div>
-				}
+				<div class="pagination">
+					<sl-button href={ unifiedURL(data.Query, data.Window, data.Limit, maxInt(0, data.Offset-data.Limit)) } variant="default" size="small" disabled?={ data.Offset == 0 }>
+						<sl-icon slot="prefix" name="chevron-left"></sl-icon>
+						Previous
+					</sl-button>
+					<span class="pagination-info">{ fmt.Sprintf("%d", data.Offset+1) } - { fmt.Sprintf("%d", data.Offset+len(data.Events)) }</span>
+					<sl-button href={ unifiedURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small" disabled?={ !data.HasMore }>
+						Next
+						<sl-icon slot="suffix" name="chevron-right"></sl-icon>
+					</sl-button>
+				</div>
 			}
 		</sl-card>
 		<style>
@@ -228,88 +228,10 @@ templ Unified(data UnifiedData) {
 				border-radius: 0.25rem;
 				font-size: 0.7rem;
 			}
-			.facets-bar {
-				display: flex;
-				flex-wrap: wrap;
-				gap: 1rem;
-				padding: 0.75rem 1rem;
-				background: var(--bg-secondary);
-				border: 1px solid var(--border-color);
-				border-radius: 8px;
-				margin-bottom: 1rem;
-			}
-			.facet-group {
-				display: flex;
-				align-items: center;
-				gap: 0.5rem;
-				flex-wrap: wrap;
-			}
-			.facet-label {
-				font-size: 0.75rem;
-				font-weight: 600;
-				color: var(--text-muted);
-				text-transform: uppercase;
-			}
-			.facet-chip {
-				display: inline-flex;
-				align-items: center;
-				gap: 4px;
-				padding: 2px 8px;
-				background: var(--bg-tertiary);
-				border-radius: 12px;
-				font-size: 0.75rem;
-				color: var(--text-primary);
-				text-decoration: none;
-				transition: background 0.15s;
-			}
-			.facet-chip:hover {
-				background: var(--sl-color-primary-100);
-				color: var(--sl-color-primary-700);
-			}
-			.facet-chip.facet-span {
-				background: rgba(99, 102, 241, 0.1);
-				color: #6366f1;
-			}
-			.facet-chip.facet-span:hover {
-				background: rgba(99, 102, 241, 0.2);
-			}
-			.facet-chip.facet-log {
-				background: rgba(245, 158, 11, 0.1);
-				color: #d97706;
-			}
-			.facet-chip.facet-log:hover {
-				background: rgba(245, 158, 11, 0.2);
-			}
-			.facet-chip.facet-metric {
-				background: rgba(34, 197, 94, 0.1);
-				color: #16a34a;
-			}
-			.facet-chip.facet-metric:hover {
-				background: rgba(34, 197, 94, 0.2);
-			}
-			.facet-count {
-				font-weight: 600;
-				opacity: 0.8;
-			}
-			.type-badge {
-				display: inline-block;
-				font-size: 0.65rem;
-				font-weight: 600;
-				text-transform: uppercase;
-				padding: 2px 6px;
-				border-radius: 4px;
-			}
-			.type-span {
-				background: rgba(99, 102, 241, 0.15);
-				color: #6366f1;
-			}
-			.type-log {
-				background: rgba(245, 158, 11, 0.15);
-				color: #d97706;
-			}
-			.type-metric {
-				background: rgba(34, 197, 94, 0.15);
-				color: #16a34a;
+			/* sl-relative-time cell styling */
+			.cell-time sl-relative-time {
+				font-family: monospace;
+				font-size: 0.8rem;
 			}
 			.cell-time {
 				font-family: monospace;

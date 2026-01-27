@@ -281,110 +281,109 @@ func alertBanner(anomalies []Anomaly) templ.Component {
 			templ_7745c5c3_Var6 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"alert-banner\"><div class=\"alert-icon\"><sl-icon name=\"exclamation-triangle-fill\"></sl-icon></div><div class=\"alert-content\"><strong>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<sl-alert variant=\"warning\" open closable class=\"anomaly-alert\" id=\"anomaly-banner\" data-count=\"")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var7 string
-		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d anomaly detected", len(anomalies)))
+		templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(anomalies)))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 167, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 162, Col: 131}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</strong> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\"><sl-icon slot=\"icon\" name=\"exclamation-triangle\"></sl-icon> <strong>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if len(anomalies) > 1 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<strong>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			var templ_7745c5c3_Var8 string
-			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf(" (%d total)", len(anomalies)))
-			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 169, Col: 56}
-			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</strong> ")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
+		var templ_7745c5c3_Var8 string
+		templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d anomal", len(anomalies)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 164, Col: 52}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<span class=\"alert-details\">")
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		var templ_7745c5c3_Var9 string
+		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(anomalyPlural(len(anomalies)))
+		if templ_7745c5c3_Err != nil {
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 164, Col: 85}
+		}
+		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
+		if templ_7745c5c3_Err != nil {
+			return templ_7745c5c3_Err
+		}
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, " detected</strong> <span style=\"margin-left: 0.5rem; opacity: 0.9;\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		for i, a := range anomalies {
 			if i > 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<span>| </span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "<span>| </span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, " ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if i < 3 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<span class=\"anomaly-item\">")
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				var templ_7745c5c3_Var9 string
-				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(anomalyIcon(a.Type))
-				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 178, Col: 28}
-				}
-				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
-				if templ_7745c5c3_Err != nil {
-					return templ_7745c5c3_Err
-				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, " ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var10 string
-				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(a.Description)
+				templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(anomalyIcon(a.Type))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 178, Col: 46}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 171, Col: 32}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "</span> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var11 string
+				templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(a.Description)
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 171, Col: 50}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "</span> ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
 		}
 		if len(anomalies) > 3 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<span>and ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "<span>and ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			var templ_7745c5c3_Var11 string
-			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(anomalies)-3))
+			var templ_7745c5c3_Var12 string
+			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(anomalies)-3))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 183, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/overview.templ`, Line: 175, Col: 52}
 			}
-			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
+			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 18, " more...</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, " more...</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "</span></div><button class=\"alert-dismiss\" onclick=\"this.parentElement.style.display='none'\"><sl-icon name=\"x\"></sl-icon></button></div><style>\n\t\t.alert-banner {\n\t\t\tdisplay: flex;\n\t\t\talign-items: center;\n\t\t\tgap: 1rem;\n\t\t\tpadding: 0.75rem 1rem;\n\t\t\tbackground: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);\n\t\t\tborder: 1px solid #f59e0b;\n\t\t\tborder-radius: 0.5rem;\n\t\t\tmargin-bottom: 1.5rem;\n\t\t\tcolor: #92400e;\n\t\t}\n\t\t.sl-theme-dark .alert-banner {\n\t\t\tbackground: linear-gradient(135deg, rgba(245, 158, 11, 0.2) 0%, rgba(245, 158, 11, 0.1) 100%);\n\t\t\tborder-color: rgba(245, 158, 11, 0.5);\n\t\t\tcolor: #fbbf24;\n\t\t}\n\t\t.alert-icon {\n\t\t\tfont-size: 1.25rem;\n\t\t\tcolor: #f59e0b;\n\t\t}\n\t\t.alert-content {\n\t\t\tflex: 1;\n\t\t\tfont-size: 0.875rem;\n\t\t}\n\t\t.alert-details {\n\t\t\tmargin-left: 0.5rem;\n\t\t\topacity: 0.9;\n\t\t}\n\t\t.anomaly-item {\n\t\t\tdisplay: inline-flex;\n\t\t\talign-items: center;\n\t\t\tgap: 0.25rem;\n\t\t}\n\t\t.alert-dismiss {\n\t\t\tbackground: transparent;\n\t\t\tborder: none;\n\t\t\tcursor: pointer;\n\t\t\tpadding: 0.25rem;\n\t\t\tcolor: inherit;\n\t\t\topacity: 0.7;\n\t\t}\n\t\t.alert-dismiss:hover {\n\t\t\topacity: 1;\n\t\t}\n\t</style>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "</span></sl-alert><script>\n\t\t(function() {\n\t\t\tconst banner = document.getElementById('anomaly-banner');\n\t\t\tif (!banner) return;\n\n\t\t\tconst count = banner.dataset.count;\n\t\t\tconst key = 'anomaly-dismissed-' + count;\n\t\t\tconst dismissed = localStorage.getItem(key);\n\n\t\t\t// Auto-hide if dismissed within last hour\n\t\t\tif (dismissed) {\n\t\t\t\tconst dismissedAt = parseInt(dismissed, 10);\n\t\t\t\tif (Date.now() - dismissedAt < 3600000) {\n\t\t\t\t\tbanner.open = false;\n\t\t\t\t} else {\n\t\t\t\t\tlocalStorage.removeItem(key);\n\t\t\t\t}\n\t\t\t}\n\n\t\t\tbanner.addEventListener('sl-after-hide', () => {\n\t\t\t\tlocalStorage.setItem(key, Date.now().toString());\n\t\t\t});\n\t\t})();\n\t</script>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -403,6 +402,13 @@ func anomalyIcon(atype string) string {
 	default:
 		return ""
 	}
+}
+
+func anomalyPlural(n int) string {
+	if n == 1 {
+		return "y"
+	}
+	return "ies"
 }
 
 var _ = templruntime.GeneratedTemplate

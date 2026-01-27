@@ -81,11 +81,13 @@ templ Metrics(data MetricsData) {
 										<div class="metric-services">
 											for i, svc := range m.Services {
 												if i < 3 {
-													<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc), data.Window)) } class="service-tag">{ svc }</a>
+													<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc), data.Window)) } style="text-decoration: none;">
+														<sl-tag size="small" variant="primary" pill>{ svc }</sl-tag>
+													</a>
 												}
 											}
 											if len(m.Services) > 3 {
-												<span class="service-more">+{ fmt.Sprintf("%d", len(m.Services)-3) }</span>
+												<sl-tag size="small" variant="neutral" pill>+{ fmt.Sprintf("%d", len(m.Services)-3) }</sl-tag>
 											}
 										</div>
 									}
@@ -144,21 +146,9 @@ templ Metrics(data MetricsData) {
 				margin-top: 0.25rem;
 				flex-wrap: wrap;
 			}
-			.service-tag {
-				font-size: 0.65rem;
-				padding: 0.1rem 0.35rem;
-				background: var(--bg-tertiary);
-				border-radius: 0.25rem;
-				color: var(--accent);
-				text-decoration: none;
-			}
-			.service-tag:hover {
+			.metric-services a:hover sl-tag::part(base) {
 				background: var(--accent);
 				color: white;
-			}
-			.service-more {
-				font-size: 0.65rem;
-				color: var(--text-muted);
 			}
 			.mono {
 				font-family: 'SF Mono', Monaco, monospace;

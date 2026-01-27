@@ -160,38 +160,38 @@ func Logs(data LogsData) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</sl-badge> <span class=\"time\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "</sl-badge> <sl-relative-time class=\"time\" date=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var9 string
 					templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(log.Time)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 86, Col: 37}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 86, Col: 54}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</span> ")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\"></sl-relative-time> ")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					if log.Namespace != "" {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<span class=\"namespace-badge\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<sl-tag size=\"small\" class=\"ns-tag\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var10 string
 						templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(log.Namespace)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 88, Col: 54}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 88, Col: 60}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</span> ")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "</sl-tag> ")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -423,90 +423,84 @@ func Logs(data LogsData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</div><script>\n\t\t\t\t\tdocument.querySelectorAll('.log-expand').forEach(btn => {\n\t\t\t\t\t\tbtn.addEventListener('click', (e) => {\n\t\t\t\t\t\t\te.stopPropagation();\n\t\t\t\t\t\t\tconst entry = btn.closest('.log-entry');\n\t\t\t\t\t\t\tconst detail = entry.querySelector('.log-detail');\n\t\t\t\t\t\t\tconst expanded = btn.getAttribute('aria-expanded') === 'true';\n\t\t\t\t\t\t\tbtn.setAttribute('aria-expanded', !expanded);\n\t\t\t\t\t\t\tbtn.querySelector('.expand-icon').name = expanded ? 'chevron-down' : 'chevron-up';\n\t\t\t\t\t\t\tdetail.hidden = expanded;\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t</script> <!-- Pagination --> ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "</div><script>\n\t\t\t\t\tdocument.querySelectorAll('.log-expand').forEach(btn => {\n\t\t\t\t\t\tbtn.addEventListener('click', (e) => {\n\t\t\t\t\t\t\te.stopPropagation();\n\t\t\t\t\t\t\tconst entry = btn.closest('.log-entry');\n\t\t\t\t\t\t\tconst detail = entry.querySelector('.log-detail');\n\t\t\t\t\t\t\tconst expanded = btn.getAttribute('aria-expanded') === 'true';\n\t\t\t\t\t\t\tbtn.setAttribute('aria-expanded', !expanded);\n\t\t\t\t\t\t\tbtn.querySelector('.expand-icon').name = expanded ? 'chevron-down' : 'chevron-up';\n\t\t\t\t\t\t\tdetail.hidden = expanded;\n\t\t\t\t\t\t});\n\t\t\t\t\t});\n\t\t\t\t</script> <!-- Pagination --> <div class=\"pagination\"><sl-button href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if data.Offset > 0 || data.HasMore {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<div class=\"pagination\">")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					if data.Offset > 0 {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "<sl-button href=\"")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						var templ_7745c5c3_Var23 string
-						templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(logsPaginationURL(data.Query, data.Window, data.Limit, data.Offset-data.Limit))
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 158, Col: 103}
-						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "\" variant=\"default\" size=\"small\">Previous</sl-button> ")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<span class=\"pagination-info\">Showing ")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var24 string
-					templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+1))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 160, Col: 78}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "-")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					var templ_7745c5c3_Var25 string
-					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+len(data.Logs)))
-					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 160, Col: 128}
-					}
-					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "</span> ")
-					if templ_7745c5c3_Err != nil {
-						return templ_7745c5c3_Err
-					}
-					if data.HasMore {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<sl-button href=\"")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						var templ_7745c5c3_Var26 string
-						templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(logsPaginationURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit))
-						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 162, Col: 103}
-						}
-						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "\" variant=\"default\" size=\"small\">Next</sl-button>")
-						if templ_7745c5c3_Err != nil {
-							return templ_7745c5c3_Err
-						}
-					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</div>")
+				var templ_7745c5c3_Var23 string
+				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(logsPaginationURL(data.Query, data.Window, data.Limit, logsMaxOffset(data.Offset-data.Limit)))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 156, Col: 116}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "\" variant=\"default\" size=\"small\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if data.Offset == 0 {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, " disabled")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "><sl-icon slot=\"prefix\" name=\"chevron-left\"></sl-icon> Previous</sl-button> <span class=\"pagination-info\">")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var24 string
+				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+1))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 160, Col: 69}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, " - ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var25 string
+				templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+len(data.Logs)))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 160, Col: 121}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "</span> <sl-button href=\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				var templ_7745c5c3_Var26 string
+				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(logsPaginationURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit))
+				if templ_7745c5c3_Err != nil {
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 161, Col: 101}
+				}
+				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "\" variant=\"default\" size=\"small\"")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if !data.HasMore {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, " disabled")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, ">Next <sl-icon slot=\"suffix\" name=\"chevron-right\"></sl-icon></sl-button></div>")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "</div><style>\n\t\t\t.logs-list {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0;\n\t\t\t\tpadding: 0;\n\t\t\t}\n\t\t\t.log-entry {\n\t\t\t\tpadding: 0.875rem 1rem;\n\t\t\t\tborder-left: 3px solid var(--border-color);\n\t\t\t\tborder-bottom: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.log-entry:last-child {\n\t\t\t\tborder-bottom: none;\n\t\t\t}\n\t\t\t.log-entry-error {\n\t\t\t\tborder-left-color: var(--danger);\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t}\n\t\t\t.log-entry-warn {\n\t\t\t\tborder-left-color: var(--warning);\n\t\t\t\tbackground: rgba(245, 158, 11, 0.1);\n\t\t\t}\n\t\t\t.log-header {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.time {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: monospace;\n\t\t\t}\n\t\t\t.service {\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t}\n\t\t\t.service:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.log-body {\n\t\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\twhite-space: pre-wrap;\n\t\t\t\tword-break: break-word;\n\t\t\t}\n\t\t\t.log-expand {\n\t\t\t\tmargin-left: auto;\n\t\t\t\tpadding: 0.25rem;\n\t\t\t\tborder: none;\n\t\t\t\tbackground: none;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tcursor: pointer;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.log-expand:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.log-detail {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding-top: 0.75rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.log-detail-grid {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: repeat(auto-fit, minmax(150px, 1fr));\n\t\t\t\tgap: 0.75rem;\n\t\t\t}\n\t\t\t.log-detail-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.125rem;\n\t\t\t}\n\t\t\t.log-detail-label {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t}\n\t\t\t.log-detail-value {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.log-detail-value.mono {\n\t\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\t}\n\t\t\t.log-attributes {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t}\n\t\t\t.log-attr-title {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.log-attr-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: rgba(0,0,0,0.1);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tmargin-bottom: 0.25rem;\n\t\t\t}\n\t\t\t.log-attr-key {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tmin-width: 100px;\n\t\t\t}\n\t\t\t.log-attr-value {\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\tfont-family: monospace;\n\t\t\t\tword-break: break-all;\n\t\t\t}\n\t\t\t.pagination {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 1rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t\tmargin-top: 1rem;\n\t\t\t}\n\t\t\t.pagination-info {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t</style>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</div><style>\n\t\t\t.logs-list {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0;\n\t\t\t\tpadding: 0;\n\t\t\t}\n\t\t\t.log-entry {\n\t\t\t\tpadding: 0.875rem 1rem;\n\t\t\t\tborder-left: 3px solid var(--border-color);\n\t\t\t\tborder-bottom: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.log-entry:last-child {\n\t\t\t\tborder-bottom: none;\n\t\t\t}\n\t\t\t.log-entry-error {\n\t\t\t\tborder-left-color: var(--danger);\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t}\n\t\t\t.log-entry-warn {\n\t\t\t\tborder-left-color: var(--warning);\n\t\t\t\tbackground: rgba(245, 158, 11, 0.1);\n\t\t\t}\n\t\t\t.log-header {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.time {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: monospace;\n\t\t\t}\n\t\t\t.service {\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t}\n\t\t\t.service:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.log-body {\n\t\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\twhite-space: pre-wrap;\n\t\t\t\tword-break: break-word;\n\t\t\t}\n\t\t\t.log-expand {\n\t\t\t\tmargin-left: auto;\n\t\t\t\tpadding: 0.25rem;\n\t\t\t\tborder: none;\n\t\t\t\tbackground: none;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tcursor: pointer;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.log-expand:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.log-detail {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding-top: 0.75rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.log-detail-grid {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: repeat(auto-fit, minmax(150px, 1fr));\n\t\t\t\tgap: 0.75rem;\n\t\t\t}\n\t\t\t.log-detail-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.125rem;\n\t\t\t}\n\t\t\t.log-detail-label {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t}\n\t\t\t.log-detail-value {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.log-detail-value.mono {\n\t\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\t}\n\t\t\t.log-attributes {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t}\n\t\t\t.log-attr-title {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.log-attr-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: rgba(0,0,0,0.1);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tmargin-bottom: 0.25rem;\n\t\t\t}\n\t\t\t.log-attr-key {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tmin-width: 100px;\n\t\t\t}\n\t\t\t.log-attr-value {\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\tfont-family: monospace;\n\t\t\t\tword-break: break-all;\n\t\t\t}\n\t\t\t.pagination {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 1rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t\tmargin-top: 1rem;\n\t\t\t}\n\t\t\t.pagination-info {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t</style>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -573,6 +567,13 @@ func formatLogAttr(v any) string {
 		return ""
 	}
 	return fmt.Sprintf("%v", v)
+}
+
+func logsMaxOffset(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 var _ = templruntime.GeneratedTemplate

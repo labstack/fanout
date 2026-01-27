@@ -8,6 +8,7 @@ templ Layout(title string, activePage string, window int) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title } - Fanout</title>
+			<link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
 			<!-- Shoelace CSS -->
 			<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css"/>
 			<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/themes/dark.css"/>
@@ -147,6 +148,8 @@ templ Layout(title string, activePage string, window int) {
 					--border-color: var(--border-color);
 					--border-radius: 0.75rem;
 					--padding: 1.25rem;
+					display: block;
+					width: 100%;
 				}
 				sl-card::part(base) {
 					background: var(--bg-secondary);
@@ -185,42 +188,91 @@ templ Layout(title string, activePage string, window int) {
 						.mobile-nav-toggle { display: inline-flex; }
 					}
 
-				/* Metrics */
-				.metric, .metric-card { text-align: center; }
-				.metric-card {
+				/* Stats Bar */
+				.stats-bar {
 					display: flex;
-					flex-direction: column;
-					align-items: center;
-					justify-content: center;
-					padding: 1rem;
+					background: var(--bg-secondary);
+					border: 1px solid var(--border-color);
+					border-radius: 0.75rem;
+					overflow: hidden;
+				}
+				.stats-item {
+					flex: 1;
+					padding: 1rem 1.5rem;
+					text-align: center;
+					border-right: 1px solid var(--border-color);
+				}
+				.stats-item:last-child {
+					border-right: none;
+				}
+				.stats-value {
+					font-size: 1.5rem;
+					font-weight: 700;
+					color: var(--text-primary);
+					line-height: 1;
+				}
+				.stats-label {
+					font-size: 0.7rem;
+					color: var(--text-muted);
+					margin-top: 0.25rem;
+					text-transform: uppercase;
+					letter-spacing: 0.03em;
+				}
+				/* Legacy metric cards */
+				.metric-card {
+					--padding: 1rem;
 				}
 				.metric-card::part(body) {
-					display: flex;
-					flex-direction: column;
-					align-items: center;
+					padding: 1rem;
+					text-align: center;
 				}
 				.metric-value {
-					font-size: 2rem;
+					font-size: 1.5rem;
 					font-weight: 700;
 					color: var(--text-primary);
 					line-height: 1;
 				}
 				.metric-label {
-					font-size: 0.75rem;
+					font-size: 0.7rem;
 					color: var(--text-muted);
 					margin-top: 0.25rem;
 					text-transform: uppercase;
-					letter-spacing: 0.05em;
+					letter-spacing: 0.03em;
 				}
 
 	
-				/* Namespace badge */
-				.namespace-badge {
-					display: inline-block;
-					padding: 0.125rem 0.5rem;
-					border-radius: 0.25rem;
+				/* sl-tag styles */
+				sl-tag {
+					--sl-spacing-x-small: 0.25rem;
+				}
+				sl-tag::part(base) {
 					font-size: 0.7rem;
-					font-weight: 500;
+					height: auto;
+					padding: 0.125rem 0.5rem;
+				}
+				sl-tag[size="small"]::part(base) {
+					font-size: 0.65rem;
+					padding: 0.1rem 0.375rem;
+				}
+				/* Tag variants for facets */
+				sl-tag.facet-error::part(base) {
+					background: var(--sl-color-danger-100);
+					color: var(--sl-color-danger-700);
+				}
+				sl-tag.facet-span::part(base) {
+					background: rgba(99, 102, 241, 0.1);
+					color: #6366f1;
+				}
+				sl-tag.facet-log::part(base) {
+					background: rgba(245, 158, 11, 0.1);
+					color: #d97706;
+				}
+				sl-tag.facet-metric::part(base) {
+					background: rgba(34, 197, 94, 0.1);
+					color: #16a34a;
+				}
+				/* Namespace tag styling */
+				sl-tag.ns-tag::part(base) {
 					background: var(--bg-tertiary);
 					color: var(--text-secondary);
 					border: 1px solid var(--border-color);
@@ -458,6 +510,149 @@ templ Layout(title string, activePage string, window int) {
 				.empty-state-message {
 					font-size: 0.875rem;
 				}
+
+				/* Inline empty states (for smaller cards) */
+				.empty-inline {
+					display: flex;
+					align-items: center;
+					justify-content: center;
+					gap: 0.5rem;
+					padding: 2rem;
+					color: var(--text-muted);
+					font-size: 0.875rem;
+				}
+				.empty-inline sl-icon {
+					font-size: 1rem;
+					opacity: 0.6;
+				}
+				.empty-inline.success sl-icon {
+					color: var(--success);
+				}
+
+				/* Table row transitions */
+				.table td {
+					transition: background 0.1s ease;
+				}
+
+				/* Clickable search hints */
+				.search-hint code {
+					cursor: pointer;
+					transition: background 0.15s, color 0.15s;
+				}
+				.search-hint code:hover {
+					background: var(--accent);
+					color: white;
+				}
+
+				/* Dark mode enhancements */
+				.sl-theme-dark .search-hint code {
+					background: #1e293b;
+				}
+				.sl-theme-dark .facet-chip {
+					background: #1e293b;
+				}
+				.sl-theme-dark sl-badge::part(base) {
+					border: 1px solid rgba(255,255,255,0.1);
+				}
+
+				/* Skeleton loading */
+				.skeleton {
+					background: linear-gradient(90deg, var(--bg-tertiary) 25%, var(--bg-secondary) 50%, var(--bg-tertiary) 75%);
+					background-size: 200% 100%;
+					animation: skeleton-loading 1.5s infinite;
+					border-radius: 0.25rem;
+				}
+				@keyframes skeleton-loading {
+					0% { background-position: 200% 0; }
+					100% { background-position: -200% 0; }
+				}
+				.skeleton-row {
+					height: 2.5rem;
+					margin-bottom: 0.5rem;
+				}
+				.skeleton-stat {
+					height: 3rem;
+					width: 60%;
+					margin: 0 auto;
+				}
+
+				/* Mobile table scroll */
+				.table-container {
+					overflow-x: auto;
+					-webkit-overflow-scrolling: touch;
+				}
+				.table-container::after {
+					content: '';
+					position: absolute;
+					right: 0;
+					top: 0;
+					bottom: 0;
+					width: 20px;
+					background: linear-gradient(to right, transparent, var(--bg-secondary));
+					pointer-events: none;
+					opacity: 0;
+					transition: opacity 0.2s;
+				}
+				.table-container.has-scroll::after {
+					opacity: 1;
+				}
+
+				/* sl-relative-time styling */
+				sl-relative-time {
+					color: var(--text-muted);
+					font-size: inherit;
+				}
+				sl-relative-time::part(relative-time) {
+					cursor: help;
+				}
+
+				/* sl-skeleton loading */
+				sl-skeleton {
+					--border-radius: 0.25rem;
+				}
+
+				/* sl-tooltip styling */
+				sl-tooltip::part(body) {
+					font-size: 0.75rem;
+				}
+
+				/* sl-alert for anomaly banners */
+				sl-alert.anomaly-alert::part(base) {
+					margin-bottom: 1.5rem;
+				}
+				sl-alert.anomaly-alert::part(message) {
+					font-size: 0.875rem;
+				}
+
+				/* Facet bar styles */
+				.facets-bar {
+					display: flex;
+					flex-wrap: wrap;
+					gap: 1rem;
+					padding: 0.75rem 1rem;
+					background: var(--bg-secondary);
+					border: 1px solid var(--border-color);
+					border-radius: 0.5rem;
+					margin-bottom: 1rem;
+				}
+				.facet-group {
+					display: flex;
+					align-items: center;
+					gap: 0.5rem;
+					flex-wrap: wrap;
+				}
+				.facet-label {
+					font-size: 0.7rem;
+					font-weight: 600;
+					color: var(--text-muted);
+					text-transform: uppercase;
+					letter-spacing: 0.025em;
+				}
+				.facet-count {
+					font-weight: 600;
+					opacity: 0.8;
+					margin-left: 0.25rem;
+				}
 			</style>
 			<script>
 				// Guard against re-execution when htmx swaps body
@@ -467,6 +662,20 @@ templ Layout(title string, activePage string, window int) {
 					// Initialize UI components (called on load and after htmx swaps)
 					function initUI() {
 						const body = document.body;
+
+						// Clickable search hints
+						document.querySelectorAll('.search-hint code').forEach(chip => {
+							if (chip._clickInit) return;
+							chip._clickInit = true;
+							chip.addEventListener('click', () => {
+								const input = document.querySelector('sl-input[name="q"]');
+								if (input) {
+									const currentVal = input.value || '';
+									input.value = (currentVal + ' ' + chip.textContent).trim();
+									input.focus();
+								}
+							});
+						});
 
 						// Theme toggle
 						const toggle = document.getElementById('theme-toggle');
@@ -614,17 +823,6 @@ templ Layout(title string, activePage string, window int) {
 						}
 					}
 
-					// Last updated timestamp
-					let lastUpdateTime = Date.now();
-					function updateTimestamp() {
-						const el = document.getElementById('last-updated');
-						if (!el) return;
-						const seconds = Math.floor((Date.now() - lastUpdateTime) / 1000);
-						if (seconds < 5) el.textContent = 'Updated just now';
-						else if (seconds < 60) el.textContent = `Updated ${seconds}s ago`;
-						else el.textContent = `Updated ${Math.floor(seconds / 60)}m ago`;
-					}
-
 					// Keyboard shortcuts
 					let gPressed = false;
 					let gTimeout = null;
@@ -725,14 +923,11 @@ templ Layout(title string, activePage string, window int) {
 					// Run on DOM ready
 					document.addEventListener('DOMContentLoaded', () => {
 						initUI();
-						setInterval(updateTimestamp, 5000);
 					});
 
 					// Run after htmx swaps content (body or partial)
 					document.addEventListener('htmx:afterSwap', (e) => {
 						initUI();
-						lastUpdateTime = Date.now();
-						updateTimestamp();
 					});
 
 					// Loading bar control

@@ -1,6 +1,7 @@
 package api
 
 import (
+	_ "embed"
 	"fmt"
 
 	"github.com/a-h/templ"
@@ -12,6 +13,9 @@ import (
 	"github.com/labstack/fanout/internal/web"
 	"golang.org/x/sync/errgroup"
 )
+
+//go:embed favicon.svg
+var faviconSVG []byte
 
 // UIHandler handles all UI routes
 type UIHandler struct {
@@ -27,6 +31,10 @@ func NewUIHandler(svc *service.Service, cfg config.Config) *UIHandler {
 // RegisterUIRoutes registers all UI routes
 func RegisterUIRoutes(e *echo.Echo, svc *service.Service, cfg config.Config) {
 	h := NewUIHandler(svc, cfg)
+
+	// Favicon
+	e.GET("/favicon.ico", Favicon)
+	e.GET("/favicon.svg", Favicon)
 
 	// Full page routes
 	e.GET("/", h.Overview)
@@ -61,6 +69,13 @@ func ComponentCSS(c echo.Context) error {
 	c.Response().Header().Set("Content-Type", "text/css")
 	c.Response().Header().Set("Cache-Control", "public, max-age=3600")
 	return c.String(200, css)
+}
+
+// Favicon serves the SVG favicon
+func Favicon(c echo.Context) error {
+	c.Response().Header().Set("Content-Type", "image/svg+xml")
+	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
+	return c.Blob(200, "image/svg+xml", faviconSVG)
 }
 
 // Overview renders the main dashboard

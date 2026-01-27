@@ -12,6 +12,20 @@ type ServicesData struct {
 	Window   int
 }
 
+// UniqueNamespace returns the namespace if all services share it, empty otherwise
+func (d ServicesData) UniqueNamespace() string {
+	if len(d.Services) == 0 {
+		return ""
+	}
+	ns := d.Services[0].Namespace
+	for _, s := range d.Services[1:] {
+		if s.Namespace != ns {
+			return ""
+		}
+	}
+	return ns
+}
+
 type ServiceRow struct {
 	Name      string
 	Namespace string
@@ -28,7 +42,12 @@ templ Services(data ServicesData) {
 		<div class="page-header">
 			<div class="page-header-left">
 				<h1 class="page-title">Services</h1>
-				<p class="page-subtitle">{ fmt.Sprintf("%d services monitored", len(data.Services)) }</p>
+				<p class="page-subtitle">
+					{ fmt.Sprintf("%d services", len(data.Services)) }
+					if ns := data.UniqueNamespace(); ns != "" {
+						<span> in </span><sl-tag size="small" class="ns-tag">{ ns }</sl-tag>
+					}
+				</p>
 			</div>
 		</div>
 		<div class="quick-filters">
@@ -50,7 +69,9 @@ templ Services(data ServicesData) {
 					<thead>
 						<tr>
 							<th>Service</th>
-							<th>Namespace</th>
+							if data.UniqueNamespace() == "" {
+								<th>Namespace</th>
+							}
 							<th>Status</th>
 							<th>Trend</th>
 							<th>Requests</th>
@@ -62,18 +83,22 @@ templ Services(data ServicesData) {
 						for _, svc := range data.Services {
 							<tr>
 								<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc.Name), data.Window)) }>{ svc.Name }</a></td>
-								<td>
-									if svc.Namespace != "" {
-										<span class="namespace-badge">{ svc.Namespace }</span>
-									} else {
-										<span style="color: var(--text-muted);">—</span>
-									}
-								</td>
+								if data.UniqueNamespace() == "" {
+									<td>
+										if svc.Namespace != "" {
+											<sl-tag size="small" class="ns-tag">{ svc.Namespace }</sl-tag>
+										} else {
+											<span style="color: var(--text-muted);">—</span>
+										}
+									</td>
+								}
 								<td>
 									<sl-badge variant={ statusVariant(svc.Status) } pill>{ svc.Status }</sl-badge>
 								</td>
 								<td>
-									@Sparkline(svc.Trend, svc.ErrorRate > 0.05)
+									<sl-tooltip content={ sparklineTooltip(svc.Trend) }>
+										@Sparkline(svc.Trend, svc.ErrorRate > 0.05)
+									</sl-tooltip>
 								</td>
 								<td>{ fmt.Sprintf("%d", svc.SpanCount) }</td>
 								<td>{ fmt.Sprintf("%.0fms", svc.P95Ms) }</td>
@@ -153,7 +178,7 @@ templ ServiceDetail(data ServiceDetailData) {
 				</h1>
 				<p class="page-subtitle">
 					if data.Namespace != "" {
-						<span class="namespace-badge" style="margin-right: 0.5rem;">{ data.Namespace }</span>
+						<sl-tag size="small" class="ns-tag" style="margin-right: 0.5rem;">{ data.Namespace }</sl-tag>
 					}
 					Service diagnostics
 				</p>
@@ -196,7 +221,10 @@ templ ServiceDetail(data ServiceDetailData) {
 			<sl-card>
 				<div slot="header" class="card-header">Top Errors</div>
 				if len(data.TopErrors) == 0 {
-					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No errors detected</p>
+					<div class="empty-inline success">
+						<sl-icon name="check-circle"></sl-icon>
+						<span>No errors detected</span>
+					</div>
 				} else {
 					<table class="table">
 						<thead>
@@ -228,7 +256,10 @@ templ ServiceDetail(data ServiceDetailData) {
 			<sl-card>
 				<div slot="header" class="card-header">Slow Operations</div>
 				if len(data.SlowOps) == 0 {
-					<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No slow operations detected</p>
+					<div class="empty-inline success">
+						<sl-icon name="check-circle"></sl-icon>
+						<span>No slow operations</span>
+					</div>
 				} else {
 					<table class="table">
 						<thead>
@@ -255,7 +286,10 @@ templ ServiceDetail(data ServiceDetailData) {
 		<sl-card>
 			<div slot="header" class="card-header">Downstream Dependencies</div>
 			if len(data.Dependencies) == 0 {
-				<p style="color: var(--text-muted); text-align: center; padding: 2rem;">No downstream calls detected</p>
+				<div class="empty-inline">
+					<sl-icon name="diagram-3"></sl-icon>
+					<span>No downstream calls detected</span>
+				</div>
 			} else {
 				<table class="table">
 					<thead>
@@ -355,6 +389,17 @@ func sparklinePoints(data []int64) string {
 		points += fmt.Sprintf("%.1f,%.1f", x, y)
 	}
 	return points
+}
+
+func sparklineTooltip(data []int64) string {
+	if len(data) == 0 {
+		return "No data"
+	}
+	var total int64
+	for _, v := range data {
+		total += v
+	}
+	return fmt.Sprintf("Last %d intervals: %d requests", len(data), total)
 }
 
 // latencyChartSpec generates a Vega-Lite spec for latency trend

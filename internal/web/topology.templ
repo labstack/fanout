@@ -43,28 +43,39 @@ templ Topology(data TopologyData) {
 				<div class="topo-legend">
 					<div class="topo-legend-group">
 						<span class="topo-legend-title">Nodes:</span>
-						<span><span style="color: var(--success);">●</span> Healthy</span>
-						<span><span style="color: var(--warning);">●</span> Degraded</span>
-						<span><span style="color: var(--danger);">●</span> Unhealthy</span>
+						<sl-tag size="small" variant="success" pill>Healthy</sl-tag>
+						<sl-tag size="small" variant="warning" pill>Degraded</sl-tag>
+						<sl-tag size="small" variant="danger" pill>Unhealthy</sl-tag>
 					</div>
 					<div class="topo-legend-group">
 						<span class="topo-legend-title">Edges:</span>
-						<span><span class="topo-edge-sample topo-edge-ok"></span> Low errors</span>
-						<span><span class="topo-edge-sample topo-edge-warn"></span> Some errors</span>
-						<span><span class="topo-edge-sample topo-edge-error"></span> High errors</span>
+						<sl-tag size="small" variant="neutral" pill>Low errors</sl-tag>
+						<sl-tag size="small" class="edge-warn" pill>Some errors</sl-tag>
+						<sl-tag size="small" variant="danger" pill>High errors</sl-tag>
 					</div>
 					<span style="color: var(--text-muted); margin-left: auto;">Click node for details • Edge thickness = call volume</span>
 				</div>
 			</sl-card>
+			<!-- Topology Graph Controls -->
+			<div class="topo-controls-bar">
+				<span class="topo-hint">Drag to pan, scroll to zoom, click node for details</span>
+				<sl-button-group>
+					<sl-button id="topo-zoom-in" size="small" variant="default">
+						<sl-icon slot="prefix" name="zoom-in"></sl-icon>
+						Zoom In
+					</sl-button>
+					<sl-button id="topo-zoom-out" size="small" variant="default">
+						<sl-icon slot="prefix" name="zoom-out"></sl-icon>
+						Zoom Out
+					</sl-button>
+					<sl-button id="topo-reset" size="small" variant="default">
+						<sl-icon slot="prefix" name="arrows-angle-contract"></sl-icon>
+						Fit to View
+					</sl-button>
+				</sl-button-group>
+			</div>
 			<!-- Topology Graph -->
-			<sl-card style="position: relative;">
-				<div class="topo-controls">
-					<sl-button-group>
-						<sl-icon-button id="topo-zoom-in" name="zoom-in" label="Zoom in"></sl-icon-button>
-						<sl-icon-button id="topo-zoom-out" name="zoom-out" label="Zoom out"></sl-icon-button>
-						<sl-icon-button id="topo-reset" name="arrows-angle-contract" label="Reset"></sl-icon-button>
-					</sl-button-group>
-				</div>
+			<sl-card>
 				<div id="topology-wrapper" class="topology-wrapper">
 					<div id="topology-graph" class="topology-container" data-nodes={ topoNodesJSON(data.Nodes) } data-edges={ topoEdgesJSON(data.Edges) } data-window={ fmt.Sprintf("%d", data.Window) }></div>
 				</div>
@@ -297,11 +308,16 @@ templ Topology(data TopologyData) {
 			</script>
 		}
 		<style>
-			.topo-controls {
-				position: absolute;
-				top: 0.75rem;
-				right: 0.75rem;
-				z-index: 10;
+			.topo-controls-bar {
+				display: flex;
+				align-items: center;
+				justify-content: space-between;
+				padding: 0.75rem 0;
+				margin-bottom: 0.5rem;
+			}
+			.topo-hint {
+				font-size: 0.75rem;
+				color: var(--text-muted);
 			}
 			.topology-wrapper {
 				overflow: hidden;
@@ -335,17 +351,10 @@ templ Topology(data TopologyData) {
 				font-weight: 600;
 				color: var(--text-muted);
 			}
-			.topo-edge-sample {
-				display: inline-block;
-				width: 24px;
-				height: 3px;
-				vertical-align: middle;
-				margin-right: 0.25rem;
-				border-radius: 1px;
+			sl-tag.edge-warn::part(base) {
+				background: var(--sl-color-warning-100);
+				color: var(--sl-color-warning-700);
 			}
-			.topo-edge-ok { background: #94a3b8; }
-			.topo-edge-warn { background: #f59e0b; }
-			.topo-edge-error { background: #ef4444; }
 		</style>
 	}
 }

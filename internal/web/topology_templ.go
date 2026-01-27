@@ -117,14 +117,14 @@ func Topology(data TopologyData) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div><div class=\"metric-label\">Unhealthy</div></sl-card></div><!-- Legend --> <sl-card style=\"margin-bottom: 1rem;\"><div class=\"topo-legend\"><div class=\"topo-legend-group\"><span class=\"topo-legend-title\">Nodes:</span> <span><span style=\"color: var(--success);\">●</span> Healthy</span> <span><span style=\"color: var(--warning);\">●</span> Degraded</span> <span><span style=\"color: var(--danger);\">●</span> Unhealthy</span></div><div class=\"topo-legend-group\"><span class=\"topo-legend-title\">Edges:</span> <span><span class=\"topo-edge-sample topo-edge-ok\"></span> Low errors</span> <span><span class=\"topo-edge-sample topo-edge-warn\"></span> Some errors</span> <span><span class=\"topo-edge-sample topo-edge-error\"></span> High errors</span></div><span style=\"color: var(--text-muted); margin-left: auto;\">Click node for details • Edge thickness = call volume</span></div></sl-card><!-- Topology Graph --> <sl-card style=\"position: relative;\"><div class=\"topo-controls\"><sl-button-group><sl-icon-button id=\"topo-zoom-in\" name=\"zoom-in\" label=\"Zoom in\"></sl-icon-button> <sl-icon-button id=\"topo-zoom-out\" name=\"zoom-out\" label=\"Zoom out\"></sl-icon-button> <sl-icon-button id=\"topo-reset\" name=\"arrows-angle-contract\" label=\"Reset\"></sl-icon-button></sl-button-group></div><div id=\"topology-wrapper\" class=\"topology-wrapper\"><div id=\"topology-graph\" class=\"topology-container\" data-nodes=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</div><div class=\"metric-label\">Unhealthy</div></sl-card></div><!-- Legend --> <sl-card style=\"margin-bottom: 1rem;\"><div class=\"topo-legend\"><div class=\"topo-legend-group\"><span class=\"topo-legend-title\">Nodes:</span> <sl-tag size=\"small\" variant=\"success\" pill>Healthy</sl-tag> <sl-tag size=\"small\" variant=\"warning\" pill>Degraded</sl-tag> <sl-tag size=\"small\" variant=\"danger\" pill>Unhealthy</sl-tag></div><div class=\"topo-legend-group\"><span class=\"topo-legend-title\">Edges:</span> <sl-tag size=\"small\" variant=\"neutral\" pill>Low errors</sl-tag> <sl-tag size=\"small\" class=\"edge-warn\" pill>Some errors</sl-tag> <sl-tag size=\"small\" variant=\"danger\" pill>High errors</sl-tag></div><span style=\"color: var(--text-muted); margin-left: auto;\">Click node for details • Edge thickness = call volume</span></div></sl-card><!-- Topology Graph Controls --> <div class=\"topo-controls-bar\"><span class=\"topo-hint\">Drag to pan, scroll to zoom, click node for details</span> <sl-button-group><sl-button id=\"topo-zoom-in\" size=\"small\" variant=\"default\"><sl-icon slot=\"prefix\" name=\"zoom-in\"></sl-icon> Zoom In</sl-button> <sl-button id=\"topo-zoom-out\" size=\"small\" variant=\"default\"><sl-icon slot=\"prefix\" name=\"zoom-out\"></sl-icon> Zoom Out</sl-button> <sl-button id=\"topo-reset\" size=\"small\" variant=\"default\"><sl-icon slot=\"prefix\" name=\"arrows-angle-contract\"></sl-icon> Fit to View</sl-button></sl-button-group></div><!-- Topology Graph --> <sl-card><div id=\"topology-wrapper\" class=\"topology-wrapper\"><div id=\"topology-graph\" class=\"topology-container\" data-nodes=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(topoNodesJSON(data.Nodes))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 69, Col: 95}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 80, Col: 95}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -137,7 +137,7 @@ func Topology(data TopologyData) templ.Component {
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(topoEdgesJSON(data.Edges))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 69, Col: 136}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 80, Col: 136}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -150,7 +150,7 @@ func Topology(data TopologyData) templ.Component {
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Window))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 69, Col: 183}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 80, Col: 183}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
@@ -161,7 +161,7 @@ func Topology(data TopologyData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " <style>\n\t\t\t.topo-controls {\n\t\t\t\tposition: absolute;\n\t\t\t\ttop: 0.75rem;\n\t\t\t\tright: 0.75rem;\n\t\t\t\tz-index: 10;\n\t\t\t}\n\t\t\t.topology-wrapper {\n\t\t\t\toverflow: hidden;\n\t\t\t\tmin-height: 540px;\n\t\t\t\tcursor: grab;\n\t\t\t}\n\t\t\t.topology-container {\n\t\t\t\tmin-height: 540px;\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\ttransform-origin: center center;\n\t\t\t\ttransition: transform 0.1s ease-out;\n\t\t\t}\n\t\t\t.topology-container svg {\n\t\t\t\tmax-width: none;\n\t\t\t}\n\t\t\t.topo-legend {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t\tgap: 1.5rem;\n\t\t\t\talign-items: center;\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t\t.topo-legend-group {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t}\n\t\t\t.topo-legend-title {\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\t.topo-edge-sample {\n\t\t\t\tdisplay: inline-block;\n\t\t\t\twidth: 24px;\n\t\t\t\theight: 3px;\n\t\t\t\tvertical-align: middle;\n\t\t\t\tmargin-right: 0.25rem;\n\t\t\t\tborder-radius: 1px;\n\t\t\t}\n\t\t\t.topo-edge-ok { background: #94a3b8; }\n\t\t\t.topo-edge-warn { background: #f59e0b; }\n\t\t\t.topo-edge-error { background: #ef4444; }\n\t\t</style>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, " <style>\n\t\t\t.topo-controls-bar {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: space-between;\n\t\t\t\tpadding: 0.75rem 0;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.topo-hint {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\t.topology-wrapper {\n\t\t\t\toverflow: hidden;\n\t\t\t\tmin-height: 540px;\n\t\t\t\tcursor: grab;\n\t\t\t}\n\t\t\t.topology-container {\n\t\t\t\tmin-height: 540px;\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\ttransform-origin: center center;\n\t\t\t\ttransition: transform 0.1s ease-out;\n\t\t\t}\n\t\t\t.topology-container svg {\n\t\t\t\tmax-width: none;\n\t\t\t}\n\t\t\t.topo-legend {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-wrap: wrap;\n\t\t\t\tgap: 1.5rem;\n\t\t\t\talign-items: center;\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t\t.topo-legend-group {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t}\n\t\t\t.topo-legend-title {\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\tsl-tag.edge-warn::part(base) {\n\t\t\t\tbackground: var(--sl-color-warning-100);\n\t\t\t\tcolor: var(--sl-color-warning-700);\n\t\t\t}\n\t\t</style>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

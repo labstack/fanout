@@ -19,6 +19,20 @@ type TracesData struct {
 	Facets  TraceFacets
 }
 
+// UniqueNamespace returns the namespace if all traces share it, empty otherwise
+func (d TracesData) UniqueNamespace() string {
+	if len(d.Traces) == 0 {
+		return ""
+	}
+	ns := d.Traces[0].Namespace
+	for _, t := range d.Traces[1:] {
+		if t.Namespace != ns {
+			return ""
+		}
+	}
+	return ns
+}
+
 // TraceFacets contains aggregated counts for filtering
 type TraceFacets struct {
 	ByService []FacetCount
@@ -94,8 +108,8 @@ templ Traces(data TracesData) {
 					<div class="facet-group">
 						<span class="facet-label">Status</span>
 						for _, f := range data.Facets.ByStatus {
-							<a href={ facetURL(data.Query, "status", f.Value, data.Window) } class={ "facet-chip", facetChipClass(f.Value) }>
-								{ f.Value } <span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span>
+							<a href={ facetURL(data.Query, "status", f.Value, data.Window) } style="text-decoration: none;">
+								<sl-tag size="small" class={ facetTagClass(f.Value) }>{ f.Value }<span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span></sl-tag>
 							</a>
 						}
 					</div>
@@ -104,8 +118,8 @@ templ Traces(data TracesData) {
 					<div class="facet-group">
 						<span class="facet-label">Services</span>
 						for _, f := range data.Facets.ByService {
-							<a href={ facetURL(data.Query, "service", f.Value, data.Window) } class="facet-chip">
-								{ f.Value } <span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span>
+							<a href={ facetURL(data.Query, "service", f.Value, data.Window) } style="text-decoration: none;">
+								<sl-tag size="small">{ f.Value }<span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span></sl-tag>
 							</a>
 						}
 					</div>
@@ -127,7 +141,9 @@ templ Traces(data TracesData) {
 						<tr>
 							<th>Trace ID</th>
 							<th>Service</th>
-							<th>Namespace</th>
+							if data.UniqueNamespace() == "" {
+								<th>Namespace</th>
+							}
 							<th>Operation</th>
 							<th>Duration</th>
 							<th>Status</th>
@@ -145,13 +161,15 @@ templ Traces(data TracesData) {
 										<span style="color: var(--text-muted);">—</span>
 									}
 								</td>
-								<td>
-									if t.Namespace != "" {
-										<span class="namespace-badge">{ t.Namespace }</span>
-									} else {
-										<span style="color: var(--text-muted);">—</span>
-									}
-								</td>
+								if data.UniqueNamespace() == "" {
+									<td>
+										if t.Namespace != "" {
+											<sl-tag size="small" class="ns-tag">{ t.Namespace }</sl-tag>
+										} else {
+											<span style="color: var(--text-muted);">—</span>
+										}
+									</td>
+								}
 								<td>{ t.Operation }</td>
 								<td>{ fmt.Sprintf("%.0fms", t.Duration) }</td>
 								<td>
@@ -161,23 +179,23 @@ templ Traces(data TracesData) {
 										<sl-badge variant="success">ok</sl-badge>
 									}
 								</td>
-								<td>{ t.Time }</td>
+								<td><sl-relative-time date={ t.Time }></sl-relative-time></td>
 							</tr>
 						}
 					</tbody>
 				</table>
 				<!-- Pagination -->
-				if data.Offset > 0 || data.HasMore {
-					<div class="pagination">
-						if data.Offset > 0 {
-							<sl-button href={ tracesURL(data.Query, data.Window, data.Limit, data.Offset-data.Limit) } variant="default" size="small">Previous</sl-button>
-						}
-						<span class="pagination-info">Showing { fmt.Sprintf("%d", data.Offset+1) }-{ fmt.Sprintf("%d", data.Offset+len(data.Traces)) }</span>
-						if data.HasMore {
-							<sl-button href={ tracesURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small">Next</sl-button>
-						}
-					</div>
-				}
+				<div class="pagination">
+					<sl-button href={ tracesURL(data.Query, data.Window, data.Limit, maxOffset(data.Offset-data.Limit)) } variant="default" size="small" disabled?={ data.Offset == 0 }>
+						<sl-icon slot="prefix" name="chevron-left"></sl-icon>
+						Previous
+					</sl-button>
+					<span class="pagination-info">{ fmt.Sprintf("%d", data.Offset+1) } - { fmt.Sprintf("%d", data.Offset+len(data.Traces)) }</span>
+					<sl-button href={ tracesURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit) } variant="default" size="small" disabled?={ !data.HasMore }>
+						Next
+						<sl-icon slot="suffix" name="chevron-right"></sl-icon>
+					</sl-button>
+				</div>
 			}
 		</div>
 		<style>
@@ -193,51 +211,6 @@ templ Traces(data TracesData) {
 			.pagination-info {
 				color: var(--text-muted);
 				font-size: 0.875rem;
-			}
-			.facets-bar {
-				display: flex;
-				flex-wrap: wrap;
-				gap: 1rem;
-				padding: 0.75rem 1rem;
-				background: var(--card-bg);
-				border-radius: 8px;
-				margin-bottom: 1rem;
-			}
-			.facet-group {
-				display: flex;
-				align-items: center;
-				gap: 0.5rem;
-				flex-wrap: wrap;
-			}
-			.facet-label {
-				font-size: 0.75rem;
-				font-weight: 600;
-				color: var(--text-muted);
-				text-transform: uppercase;
-			}
-			.facet-chip {
-				display: inline-flex;
-				align-items: center;
-				gap: 4px;
-				padding: 2px 8px;
-				background: var(--bg-tertiary);
-				border-radius: 12px;
-				font-size: 0.75rem;
-				color: var(--text-primary);
-				text-decoration: none;
-				transition: background 0.15s;
-			}
-			.facet-chip:hover {
-				background: var(--sl-color-primary-100);
-				color: var(--sl-color-primary-700);
-			}
-			.facet-chip.facet-error {
-				background: var(--sl-color-danger-100);
-				color: var(--sl-color-danger-700);
-			}
-			.facet-count {
-				font-weight: 600;
-				opacity: 0.8;
 			}
 		</style>
 	}
@@ -354,6 +327,17 @@ templ TraceDetail(data TraceDetailData) {
 					<span class="legend-item"><span class="legend-dot legend-error"></span>Error</span>
 				</div>
 			</div>
+			<!-- Time Ruler -->
+			<div class="waterfall-ruler">
+				<div class="ruler-spacer"></div>
+				<div class="ruler-scale">
+					<span class="ruler-tick" style="left: 0%;">0ms</span>
+					<span class="ruler-tick" style="left: 25%;">{ fmt.Sprintf("%.0fms", data.Duration*0.25) }</span>
+					<span class="ruler-tick" style="left: 50%;">{ fmt.Sprintf("%.0fms", data.Duration*0.5) }</span>
+					<span class="ruler-tick" style="left: 75%;">{ fmt.Sprintf("%.0fms", data.Duration*0.75) }</span>
+					<span class="ruler-tick" style="left: 100%;">{ fmt.Sprintf("%.0fms", data.Duration) }</span>
+				</div>
+			</div>
 			<div class="waterfall">
 				for i, span := range data.Spans {
 					<div class={ "waterfall-row", spanRowClass(span.Status) } data-span-id={ span.SpanID }>
@@ -365,9 +349,11 @@ templ TraceDetail(data TraceDetailData) {
 								<span class="service">{ span.Service }</span>
 								<span class="operation">{ span.Operation }</span>
 								if span.Status == "error" && span.StatusMsg != "" {
-									<span class="error-hint" title={ span.StatusMsg }>
-										<sl-icon name="exclamation-circle"></sl-icon>
-									</span>
+									<sl-tooltip content={ span.StatusMsg }>
+										<span class="error-hint">
+											<sl-icon name="exclamation-circle"></sl-icon>
+										</span>
+									</sl-tooltip>
 								}
 								if len(span.Events) > 0 {
 									<span class="events-badge" title={ eventsTitle(span.Events) }>
@@ -535,6 +521,36 @@ templ TraceDetail(data TraceDetailData) {
 			</sl-card>
 		}
 		<style>
+			/* Time Ruler */
+			.waterfall-ruler {
+				display: grid;
+				grid-template-columns: 320px 1fr;
+				gap: 1rem;
+				padding: 0 0 0.5rem;
+				border-bottom: 1px solid var(--border-color);
+				margin-bottom: 0.5rem;
+			}
+			.ruler-spacer {
+				/* Matches waterfall-info width */
+			}
+			.ruler-scale {
+				position: relative;
+				height: 20px;
+			}
+			.ruler-tick {
+				position: absolute;
+				transform: translateX(-50%);
+				font-size: 0.65rem;
+				color: var(--text-muted);
+				white-space: nowrap;
+			}
+			.ruler-tick:first-child {
+				transform: translateX(0);
+			}
+			.ruler-tick:last-child {
+				transform: translateX(-100%);
+			}
+
 			/* Legend */
 			.waterfall-legend {
 				display: flex;
@@ -947,6 +963,13 @@ func facetChipClass(value string) string {
 	return ""
 }
 
+func facetTagClass(value string) string {
+	if value == "error" {
+		return "facet-error"
+	}
+	return ""
+}
+
 func spanRowClass(status string) string {
 	if status == "error" {
 		return "waterfall-row-error"
@@ -995,4 +1018,11 @@ func eventsTitle(events []SpanEvent) string {
 		names = append(names, e.Name)
 	}
 	return strings.Join(names, ", ")
+}
+
+func maxOffset(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
 }
