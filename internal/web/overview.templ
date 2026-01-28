@@ -165,14 +165,14 @@ templ alertBanner(anomalies []Anomaly) {
 		<span style="margin-left: 0.5rem; opacity: 0.9;">
 			for i, a := range anomalies {
 				if i > 0 {
-					<span> | </span>
+					<span>| </span>
 				}
 				if i < 3 {
 					<span>{ anomalyIcon(a.Type) } { a.Description }</span>
 				}
 			}
 			if len(anomalies) > 3 {
-				<span> and { fmt.Sprintf("%d", len(anomalies)-3) } more...</span>
+				<span>and { fmt.Sprintf("%d", len(anomalies)-3) } more...</span>
 			}
 		</span>
 	</sl-alert>

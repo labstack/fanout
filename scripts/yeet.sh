@@ -2,7 +2,7 @@
 set -e
 
 # Configuration
-DEFAULT_SERVER="root@fanout.run"
+DEFAULT_SERVER="ubuntu@fanout.run"
 EMAIL="v@labstack.com"
 
 # Parse command line arguments
@@ -32,7 +32,7 @@ while [[ $# -gt 0 ]]; do
       echo "Examples:"
       echo "  $0                                    # Deploy to $DEFAULT_SERVER"
       echo "  $0 --version v1.0.0                   # Deploy specific version"
-      echo "  $0 root@other.server --version v1.0.0 # Deploy to different server"
+      echo "  $0 ubuntu@other.server --version v1.0.0 # Deploy to different server"
       exit 0
       ;;
     *)
@@ -68,23 +68,25 @@ fi
 echo "⚡ Setting up server..."
 ssh "$SERVER" 'bash -s' << 'SETUP_EOF'
 set -e
-apt update && apt install -y curl wget
+sudo apt update && sudo apt install -y curl wget
 
 if ! command -v docker &> /dev/null; then
     echo "🐳 Installing Docker..."
-    curl -fsSL https://get.docker.com | sh
-    systemctl enable docker
-    systemctl start docker
+    curl -fsSL https://get.docker.com | sudo sh
+    sudo systemctl enable docker
+    sudo systemctl start docker
+    sudo usermod -aG docker $USER
 fi
 
-mkdir -p /data/{fanout,ssl,nginx,html,acme}
-chmod 755 /data
-mkdir -p /app
+sudo mkdir -p /data/{fanout,ssl,nginx,html,acme}
+sudo chown -R $USER:$USER /data
+sudo mkdir -p /app
+sudo chown -R $USER:$USER /app
 SETUP_EOF
 
 echo "📥 Copying config..."
 scp "$(dirname "$0")/../docker-compose.prod.yaml" "$SERVER:/app/docker-compose.yaml"
-scp "$(dirname "$0")/in.fanout.run" "$SERVER:/data/nginx/in.fanout.run_location"
+scp "$(dirname "$0")/grpc.conf" "$SERVER:/data/nginx/grpc.conf"
 
 echo "🚀 Deploying..."
 ssh "$SERVER" "

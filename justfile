@@ -105,3 +105,7 @@ hooks:
     echo 'just qcheck' > .git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
     @echo "Hooks installed"
+
+# Deploy to production
+deploy *ARGS='':
+    ./scripts/yeet.sh {{ARGS}}

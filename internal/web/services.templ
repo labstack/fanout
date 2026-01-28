@@ -45,7 +45,7 @@ templ Services(data ServicesData) {
 				<p class="page-subtitle">
 					{ fmt.Sprintf("%d services", len(data.Services)) }
 					if ns := data.UniqueNamespace(); ns != "" {
-						<span> in </span><sl-tag size="small" class="ns-tag">{ ns }</sl-tag>
+						<span>in </span><sl-tag size="small" class="ns-tag">{ ns }</sl-tag>
 					}
 				</p>
 			</div>
