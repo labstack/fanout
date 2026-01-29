@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/labstack/fanout/internal/query"
 )
+
+// isNoDataError returns true if the error indicates no parquet files exist yet
+func isNoDataError(errMsg string) bool {
+	return strings.Contains(errMsg, "No files found that match the pattern")
+}
 
 // Detector runs intelligence detection on observability data
 type Detector struct {
@@ -157,7 +163,9 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
-		log.Printf("[intelligence] error rate detection failed: %s", resp.Error)
+		if !isNoDataError(resp.Error) {
+			log.Printf("[intelligence] error rate detection failed: %s", resp.Error)
+		}
 		return nil
 	}
 
@@ -229,7 +237,9 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
-		log.Printf("[intelligence] latency detection failed: %s", resp.Error)
+		if !isNoDataError(resp.Error) {
+			log.Printf("[intelligence] latency detection failed: %s", resp.Error)
+		}
 		return nil
 	}
 
@@ -304,7 +314,9 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
-		log.Printf("[intelligence] volume detection failed: %s", resp.Error)
+		if !isNoDataError(resp.Error) {
+			log.Printf("[intelligence] volume detection failed: %s", resp.Error)
+		}
 		return nil
 	}
 
@@ -361,7 +373,9 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
-		log.Printf("[intelligence] pattern detection failed: %s", resp.Error)
+		if !isNoDataError(resp.Error) {
+			log.Printf("[intelligence] pattern detection failed: %s", resp.Error)
+		}
 		return nil
 	}
 
