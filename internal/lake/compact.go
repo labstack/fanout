@@ -2,6 +2,7 @@ package lake
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -204,7 +205,14 @@ func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
 	// Remove old hour directories
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), "hour=") {
-			os.RemoveAll(filepath.Join(dayPath, e.Name()))
+			if err := os.RemoveAll(filepath.Join(dayPath, e.Name())); err != nil {
+				// Cleanup: remove compacted file to avoid duplicates
+				compactedPath := filepath.Join(dayPath, "compacted.parquet")
+				if rmErr := os.Remove(compactedPath); rmErr != nil {
+					slog.Error("failed to clean up compacted file after hour dir removal failure", "path", compactedPath, "err", rmErr)
+				}
+				return 0, fmt.Errorf("remove hour dir %s: %w", e.Name(), err)
+			}
 		}
 	}
 
@@ -218,8 +226,7 @@ func compactFiles[T any](files []string, dayPath string) (int64, error) {
 	for _, f := range files {
 		rows, err := readParquet[T](f)
 		if err != nil {
-			slog.Error("compact read failed", "file", f, "err", err)
-			continue
+			return 0, fmt.Errorf("compact read %s: %w", f, err)
 		}
 		allRows = append(allRows, rows...)
 	}

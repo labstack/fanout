@@ -237,10 +237,19 @@ func TestWriterRetryBufferCap(t *testing.T) {
 		})
 	}
 
+	// Reset dropped counter
+	metrics.RowsDropped.Reset()
+
 	w.flushLocked()
 
 	// Buffer should be capped at maxRetry (3 * 3 = 9)
 	if len(w.bufSpans) != 9 {
 		t.Errorf("expected retry buffer capped at 9, got %d", len(w.bufSpans))
+	}
+
+	// RowsDropped metric should record the 6 dropped rows (15 - 9)
+	dropped := testutil.ToFloat64(metrics.RowsDropped.WithLabelValues("spans"))
+	if dropped != 6 {
+		t.Errorf("expected RowsDropped = 6, got %f", dropped)
 	}
 }

@@ -1,12 +1,18 @@
 package ingest
 
 import (
+	"context"
+	"errors"
 	"testing"
 
+	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	common "go.opentelemetry.io/proto/otlp/common/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
+
+	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/lake"
 )
 
 func TestToJSON(t *testing.T) {
@@ -408,5 +414,51 @@ func TestSummaryValues(t *testing.T) {
 	}
 	if result[0] != 100.0 {
 		t.Errorf("summaryValues()[0] = %f, want 100.0", result[0])
+	}
+}
+
+func TestTraceExportContextCancellation(t *testing.T) {
+	// Use an unbuffered channel so the send blocks
+	spans := make(chan lake.SpanRow)
+	logs := make(chan lake.LogRow, 1)
+	metrics := make(chan lake.MetricRow, 1)
+
+	srv := NewServer(config.Config{}, spans, logs, metrics)
+	ts := &traceService{srv: srv}
+
+	// Cancel the context before calling Export
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req := &collectortrace.ExportTraceServiceRequest{
+		ResourceSpans: []*tracepb.ResourceSpans{
+			{
+				Resource: &resourcepb.Resource{
+					Attributes: []*common.KeyValue{
+						{Key: "service.name", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "test"}}},
+					},
+				},
+				ScopeSpans: []*tracepb.ScopeSpans{
+					{
+						Spans: []*tracepb.Span{
+							{
+								TraceId: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+								SpanId:  []byte{1, 2, 3, 4, 5, 6, 7, 8},
+								Name:    "test-span",
+								Status:  &tracepb.Status{Code: tracepb.Status_STATUS_CODE_OK},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ts.Export(ctx, req)
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }

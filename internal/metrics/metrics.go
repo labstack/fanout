@@ -38,6 +38,11 @@ var (
 		Help: "Total flush write errors",
 	}, []string{"signal"})
 
+	RowsDropped = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_rows_dropped_total",
+		Help: "Total rows dropped due to retry buffer overflow",
+	}, []string{"signal"})
+
 	// Query metrics
 	QueryTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_query_total",
