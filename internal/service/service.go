@@ -27,4 +27,3 @@ func (s *Service) defaults(namespace, tenantID string) (string, string) {
 	}
 	return namespace, tenantID
 }
-
