@@ -93,10 +93,10 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 					IngestedAt:     now,
 				}
 				select {
-			case ts.srv.outSpans <- row:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+				case ts.srv.outSpans <- row:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
 			}
 		}
 	}
@@ -137,10 +137,10 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 					IngestedAt:        now,
 				}
 				select {
-			case ls.srv.outLogs <- row:
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
+				case ls.srv.outLogs <- row:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
 			}
 		}
 	}
@@ -183,10 +183,10 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-					case ms.srv.outMetrics <- row:
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
+						case ms.srv.outMetrics <- row:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
 					}
 				case *metricspb.Metric_Sum:
 					kind := "sum"
@@ -212,10 +212,10 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-					case ms.srv.outMetrics <- row:
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
+						case ms.srv.outMetrics <- row:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
 					}
 				case *metricspb.Metric_Histogram:
 					for _, dp := range d.Histogram.DataPoints {
@@ -244,10 +244,10 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-					case ms.srv.outMetrics <- row:
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
+						case ms.srv.outMetrics <- row:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
 					}
 				case *metricspb.Metric_ExponentialHistogram:
 					for _, dp := range d.ExponentialHistogram.DataPoints {
@@ -276,10 +276,10 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-					case ms.srv.outMetrics <- row:
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
+						case ms.srv.outMetrics <- row:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
 					}
 				case *metricspb.Metric_Summary:
 					for _, dp := range d.Summary.DataPoints {
@@ -303,10 +303,10 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-					case ms.srv.outMetrics <- row:
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
+						case ms.srv.outMetrics <- row:
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
 					}
 				}
 			}
