@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -88,7 +88,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 			start := time.Now()
 			rows, err := d.rollupOnce(ctx)
 			if err != nil {
-				log.Printf("[rollup] %v", err)
+				slog.Error("rollup failed", "err", err)
 				continue
 			}
 			metrics.RecordRollup(rows, time.Since(start).Seconds())

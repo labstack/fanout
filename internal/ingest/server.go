@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"time"
 
@@ -295,7 +295,7 @@ func toJSON(v interface{}) []byte {
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
-		log.Printf("[ingest] json marshal: %v", err)
+		slog.Error("json marshal failed", "err", err)
 		return nil
 	}
 	return b
@@ -311,7 +311,7 @@ func bodyString(v *common.AnyValue) string {
 	default:
 		b, err := json.Marshal(v)
 		if err != nil {
-			log.Printf("[ingest] json marshal body: %v", err)
+			slog.Error("json marshal body failed", "err", err)
 			return ""
 		}
 		return string(b)
@@ -395,7 +395,7 @@ func eventsToJSON(events []*tracepb.Span_Event) []byte {
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
-		log.Printf("[ingest] json marshal events: %v", err)
+		slog.Error("json marshal events failed", "err", err)
 		return nil
 	}
 	return b
@@ -428,7 +428,7 @@ func linksToJSON(links []*tracepb.Span_Link) []byte {
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
-		log.Printf("[ingest] json marshal links: %v", err)
+		slog.Error("json marshal links failed", "err", err)
 		return nil
 	}
 	return b
@@ -477,7 +477,7 @@ func exemplarsToJSON(exemplars []*metricspb.Exemplar) []byte {
 	}
 	b, err := json.Marshal(out)
 	if err != nil {
-		log.Printf("[ingest] json marshal exemplars: %v", err)
+		slog.Error("json marshal exemplars failed", "err", err)
 		return nil
 	}
 	return b
