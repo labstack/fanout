@@ -181,7 +181,9 @@ func (w *Writer) flushLocked() {
 		}
 		metrics.RecordFlush("spans", totalBytes, time.Since(start).Seconds())
 		if len(failed) > maxRetry {
-			slog.Warn("spans retry buffer full, dropping rows", "buffered", len(failed), "dropped", len(failed)-maxRetry)
+			dropped := len(failed) - maxRetry
+			slog.Error("spans data loss: retry buffer full, dropping rows", "buffered", len(failed), "dropped", dropped)
+			metrics.RowsDropped.WithLabelValues("spans").Add(float64(dropped))
 			failed = failed[:maxRetry]
 		}
 		w.bufSpans = append(w.bufSpans[:0], failed...)
@@ -211,7 +213,9 @@ func (w *Writer) flushLocked() {
 		}
 		metrics.RecordFlush("logs", totalBytes, time.Since(start).Seconds())
 		if len(failed) > maxRetry {
-			slog.Warn("logs retry buffer full, dropping rows", "buffered", len(failed), "dropped", len(failed)-maxRetry)
+			dropped := len(failed) - maxRetry
+			slog.Error("logs data loss: retry buffer full, dropping rows", "buffered", len(failed), "dropped", dropped)
+			metrics.RowsDropped.WithLabelValues("logs").Add(float64(dropped))
 			failed = failed[:maxRetry]
 		}
 		w.bufLogs = append(w.bufLogs[:0], failed...)
@@ -241,7 +245,9 @@ func (w *Writer) flushLocked() {
 		}
 		metrics.RecordFlush("metrics", totalBytes, time.Since(start).Seconds())
 		if len(failed) > maxRetry {
-			slog.Warn("metrics retry buffer full, dropping rows", "buffered", len(failed), "dropped", len(failed)-maxRetry)
+			dropped := len(failed) - maxRetry
+			slog.Error("metrics data loss: retry buffer full, dropping rows", "buffered", len(failed), "dropped", dropped)
+			metrics.RowsDropped.WithLabelValues("metrics").Add(float64(dropped))
 			failed = failed[:maxRetry]
 		}
 		w.bufMetrics = append(w.bufMetrics[:0], failed...)
