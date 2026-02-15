@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	common "go.opentelemetry.io/proto/otlp/common/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	common "go.opentelemetry.io/proto/otlp/common/v1"
 	metricspb "go.opentelemetry.io/proto/otlp/metrics/v1"
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
