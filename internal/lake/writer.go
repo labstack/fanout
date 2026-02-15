@@ -153,6 +153,9 @@ func (w *Writer) maybeFlush() {
 func (w *Writer) flushLocked() {
 	now := time.Now()
 	maxRetry := w.cfg.MaxRows * 3 // Cap retry buffer to prevent unbounded growth
+	if maxRetry < 0 {
+		maxRetry = 0
+	}
 
 	// Group spans by tenant/namespace
 	if len(w.bufSpans) > 0 {

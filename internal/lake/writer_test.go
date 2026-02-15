@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestPartitionPathFormat(t *testing.T) {
@@ -139,5 +141,106 @@ func TestWriterMaxRowsFlush(t *testing.T) {
 	}
 	if len(matches) == 0 {
 		t.Error("expected flush due to MaxRows")
+	}
+}
+
+func TestWriterRetryOnFailure(t *testing.T) {
+	// Use a read-only directory to force writeParquet to fail
+	lakeDir, err := os.MkdirTemp("", "fanout-retry-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(lakeDir)
+
+	chSpans := make(chan SpanRow, 100)
+	chLogs := make(chan LogRow, 100)
+	chMetrics := make(chan MetricRow, 100)
+
+	cfg := config.Config{
+		LakeDir:      filepath.Join(lakeDir, "readonly"),
+		FlushSeconds: 1,
+		MaxRows:      5,
+		DefaultNS:    "default",
+	}
+	w := NewWriter(cfg, chSpans, chLogs, chMetrics)
+
+	// Create the spans dir then make it read-only to force write failures
+	spansDir := filepath.Join(cfg.LakeDir, "spans", "tenant=", "namespace=default")
+	if err := os.MkdirAll(spansDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(spansDir, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(spansDir, 0o755)
+
+	// Reset error counter
+	metrics.FlushErrors.Reset()
+
+	// Manually add rows to buffer and flush
+	now := time.Now().UnixNano()
+	w.bufSpans = []SpanRow{
+		{TraceID: "t1", SpanID: "s1", ServiceName: "svc", Namespace: "default", Name: "op", StartUnixNanos: now, EndUnixNanos: now + 1e6, DurationMs: 1.0, IngestedAt: now},
+		{TraceID: "t1", SpanID: "s2", ServiceName: "svc", Namespace: "default", Name: "op", StartUnixNanos: now, EndUnixNanos: now + 1e6, DurationMs: 1.0, IngestedAt: now},
+	}
+
+	w.flushLocked()
+
+	// Failed rows should be retained in buffer
+	if len(w.bufSpans) != 2 {
+		t.Errorf("expected 2 rows retained in buffer after failure, got %d", len(w.bufSpans))
+	}
+
+	// FlushErrors metric should have incremented
+	errCount := testutil.ToFloat64(metrics.FlushErrors.WithLabelValues("spans"))
+	if errCount < 1 {
+		t.Errorf("expected FlushErrors > 0, got %f", errCount)
+	}
+}
+
+func TestWriterRetryBufferCap(t *testing.T) {
+	lakeDir, err := os.MkdirTemp("", "fanout-retrycap-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(lakeDir)
+
+	chSpans := make(chan SpanRow, 10)
+	chLogs := make(chan LogRow, 10)
+	chMetrics := make(chan MetricRow, 10)
+
+	cfg := config.Config{
+		LakeDir:      filepath.Join(lakeDir, "readonly"),
+		FlushSeconds: 60,
+		MaxRows:      3, // maxRetry = 9
+		DefaultNS:    "default",
+	}
+	w := NewWriter(cfg, chSpans, chLogs, chMetrics)
+
+	// Create dir then make read-only
+	spansDir := filepath.Join(cfg.LakeDir, "spans", "tenant=", "namespace=default")
+	if err := os.MkdirAll(spansDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(spansDir, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(spansDir, 0o755)
+
+	// Fill buffer with more than maxRetry (9) rows
+	now := time.Now().UnixNano()
+	for i := 0; i < 15; i++ {
+		w.bufSpans = append(w.bufSpans, SpanRow{
+			TraceID: fmt.Sprintf("t%d", i), SpanID: fmt.Sprintf("s%d", i),
+			ServiceName: "svc", Namespace: "default", Name: "op",
+			StartUnixNanos: now, EndUnixNanos: now + 1e6, DurationMs: 1.0, IngestedAt: now,
+		})
+	}
+
+	w.flushLocked()
+
+	// Buffer should be capped at maxRetry (3 * 3 = 9)
+	if len(w.bufSpans) != 9 {
+		t.Errorf("expected retry buffer capped at 9, got %d", len(w.bufSpans))
 	}
 }

@@ -19,6 +19,8 @@ func TestToJSON(t *testing.T) {
 		{"empty slice", []string{}, false},
 		{"string slice", []string{"a", "b"}, false},
 		{"map", map[string]int{"a": 1}, false},
+		{"unmarshalable chan", make(chan int), true},
+		{"unmarshalable func", func() {}, true},
 	}
 
 	for _, tc := range tests {
