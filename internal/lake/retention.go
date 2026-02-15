@@ -54,7 +54,7 @@ func (p *Pruner) pruneAll() {
 	for _, signal := range signals {
 		deleted, bytes := p.pruneSignal(signal, cutoff)
 		if deleted > 0 {
-			slog.Info("retention pruned", "signal", signal, "partitions", deleted, "freed_mb", fmt.Sprintf("%.2f", float64(bytes)/(1024*1024)))
+			slog.Info("retention pruned", "signal", signal, "partitions", deleted, "freed_bytes", bytes, "freed_mb", float64(bytes)/(1024*1024))
 		}
 	}
 }

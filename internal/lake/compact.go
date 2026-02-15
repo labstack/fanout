@@ -2,7 +2,6 @@ package lake
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -54,7 +53,7 @@ func (c *Compactor) compactAll() {
 	for _, signal := range signals {
 		compacted, saved := c.compactSignal(signal, cutoff)
 		if compacted > 0 {
-			slog.Info("compaction complete", "signal", signal, "days", compacted, "saved_mb", fmt.Sprintf("%.2f", float64(saved)/(1024*1024)))
+			slog.Info("compaction complete", "signal", signal, "days", compacted, "bytes_saved", saved, "saved_mb", float64(saved)/(1024*1024))
 		}
 	}
 }

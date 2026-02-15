@@ -162,7 +162,7 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
 		if !isNoDataError(resp.Error) {
-			slog.Error("error rate detection failed", "err", resp.Error)
+			slog.Error("error rate detection failed", "error", resp.Error)
 		}
 		return nil
 	}
@@ -236,7 +236,7 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
 		if !isNoDataError(resp.Error) {
-			slog.Error("latency detection failed", "err", resp.Error)
+			slog.Error("latency detection failed", "error", resp.Error)
 		}
 		return nil
 	}
@@ -313,7 +313,7 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
 		if !isNoDataError(resp.Error) {
-			slog.Error("volume detection failed", "err", resp.Error)
+			slog.Error("volume detection failed", "error", resp.Error)
 		}
 		return nil
 	}
@@ -372,7 +372,7 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
 		if !isNoDataError(resp.Error) {
-			slog.Error("pattern detection failed", "err", resp.Error)
+			slog.Error("pattern detection failed", "error", resp.Error)
 		}
 		return nil
 	}

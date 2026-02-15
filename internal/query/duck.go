@@ -88,7 +88,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 			start := time.Now()
 			rows, err := d.rollupOnce(ctx)
 			if err != nil {
-				slog.Error("rollup failed", "err", err)
+				slog.Error("rollup failed", "component", "rollup", "err", err)
 				continue
 			}
 			metrics.RecordRollup(rows, time.Since(start).Seconds())
