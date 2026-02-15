@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"crypto/subtle"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -30,10 +30,13 @@ import (
 )
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+
 	cfg := config.Load()
 
 	if err := os.MkdirAll(cfg.LakeDir, 0o755); err != nil {
-		log.Fatalf("create lake dir: %v", err)
+		slog.Error("create lake dir failed", "err", err)
+		os.Exit(1)
 	}
 
 	// Channels for ingest → lake writer
@@ -47,14 +50,16 @@ func main() {
 	defer cancel()
 	go func() {
 		if err := writer.Run(ctx); err != nil {
-			log.Fatalf("lake writer error: %v", err)
+			slog.Error("lake writer failed", "err", err)
+			os.Exit(1)
 		}
 	}()
 
 	// Start DuckDB + rollups
 	q, err := query.NewDuck(ctx, cfg)
 	if err != nil {
-		log.Fatalf("duckdb init: %v", err)
+		slog.Error("duckdb init failed", "err", err)
+		os.Exit(1)
 	}
 	defer q.Close()
 
@@ -75,16 +80,18 @@ func main() {
 	// Start gRPC ingest (OTLP)
 	grpcLis, err := net.Listen("tcp", cfg.OTLPGRPCAddr)
 	if err != nil {
-		log.Fatalf("listen gRPC: %v", err)
+		slog.Error("listen gRPC failed", "err", err)
+		os.Exit(1)
 	}
 	grpcSrv := grpc.NewServer()
 	ing := ingest.NewServer(cfg, chSpans, chLogs, chMetrics)
 	ingest.RegisterOTLP(grpcSrv, ing)
 
 	go func() {
-		log.Printf("[ingest] gRPC OTLP listening on %s", cfg.OTLPGRPCAddr)
+		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr)
 		if err := grpcSrv.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
-			log.Fatalf("grpc serve: %v", err)
+			slog.Error("gRPC serve failed", "err", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -101,7 +108,7 @@ func main() {
 		LogUserAgent: true,
 		LogError:     true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			log.Printf("%s %s %d %s", v.Method, v.URI, v.Status, v.Latency)
+			slog.Info("request", "method", v.Method, "uri", v.URI, "status", v.Status, "latency", v.Latency)
 			return nil
 		},
 	}))
@@ -145,7 +152,7 @@ func main() {
 	if cfg.MCPEnabled {
 		mcpServer := mcp.NewServer(svc, q, cfg)
 		mcpServer.RegisterRoutes(e)
-		log.Printf("[mcp] MCP server enabled at /mcp")
+		slog.Info("MCP server enabled", "path", "/mcp")
 
 		// Start report cleanup goroutine
 		go mcp.RunCleanup(ctx)
@@ -153,9 +160,10 @@ func main() {
 
 	// Run HTTP
 	go func() {
-		log.Printf("[api] HTTP listening on %s", cfg.HTTPAddr)
+		slog.Info("HTTP listening", "addr", cfg.HTTPAddr)
 		if err := e.Start(cfg.HTTPAddr); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("http start: %v", err)
+			slog.Error("HTTP start failed", "err", err)
+			os.Exit(1)
 		}
 	}()
 
@@ -163,7 +171,7 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
-	log.Println("shutting down...")
+	slog.Info("shutting down")
 	cancel()
 	grpcSrv.GracefulStop()
 	ctxShutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)

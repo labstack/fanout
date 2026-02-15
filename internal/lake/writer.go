@@ -3,7 +3,7 @@ package lake
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -172,7 +172,7 @@ func (w *Writer) flushLocked() {
 			base := filepath.Join(w.cfg.LakeDir, "spans", fmt.Sprintf("tenant=%s", r.TenantID), fmt.Sprintf("namespace=%s", r.Namespace))
 			_, bytes, err := writeParquet(base, now, rows)
 			if err != nil {
-				log.Printf("[lake] write spans parquet (tenant=%s, namespace=%s): %v", r.TenantID, r.Namespace, err)
+				slog.Error("write spans parquet failed", "tenant", r.TenantID, "namespace", r.Namespace, "err", err)
 				metrics.FlushErrors.WithLabelValues("spans").Inc()
 				failed = append(failed, rows...)
 			} else {
@@ -181,7 +181,7 @@ func (w *Writer) flushLocked() {
 		}
 		metrics.RecordFlush("spans", totalBytes, time.Since(start).Seconds())
 		if len(failed) > maxRetry {
-			log.Printf("[lake] spans retry buffer full (%d rows), dropping %d", len(failed), len(failed)-maxRetry)
+			slog.Warn("spans retry buffer full, dropping rows", "buffered", len(failed), "dropped", len(failed)-maxRetry)
 			failed = failed[:maxRetry]
 		}
 		w.bufSpans = append(w.bufSpans[:0], failed...)
@@ -202,7 +202,7 @@ func (w *Writer) flushLocked() {
 			base := filepath.Join(w.cfg.LakeDir, "logs", fmt.Sprintf("tenant=%s", r.TenantID), fmt.Sprintf("namespace=%s", r.Namespace))
 			_, bytes, err := writeParquet(base, now, rows)
 			if err != nil {
-				log.Printf("[lake] write logs parquet (tenant=%s, namespace=%s): %v", r.TenantID, r.Namespace, err)
+				slog.Error("write logs parquet failed", "tenant", r.TenantID, "namespace", r.Namespace, "err", err)
 				metrics.FlushErrors.WithLabelValues("logs").Inc()
 				failed = append(failed, rows...)
 			} else {
@@ -211,7 +211,7 @@ func (w *Writer) flushLocked() {
 		}
 		metrics.RecordFlush("logs", totalBytes, time.Since(start).Seconds())
 		if len(failed) > maxRetry {
-			log.Printf("[lake] logs retry buffer full (%d rows), dropping %d", len(failed), len(failed)-maxRetry)
+			slog.Warn("logs retry buffer full, dropping rows", "buffered", len(failed), "dropped", len(failed)-maxRetry)
 			failed = failed[:maxRetry]
 		}
 		w.bufLogs = append(w.bufLogs[:0], failed...)
@@ -232,7 +232,7 @@ func (w *Writer) flushLocked() {
 			base := filepath.Join(w.cfg.LakeDir, "metrics", fmt.Sprintf("tenant=%s", r.TenantID), fmt.Sprintf("namespace=%s", r.Namespace))
 			_, bytes, err := writeParquet(base, now, rows)
 			if err != nil {
-				log.Printf("[lake] write metrics parquet (tenant=%s, namespace=%s): %v", r.TenantID, r.Namespace, err)
+				slog.Error("write metrics parquet failed", "tenant", r.TenantID, "namespace", r.Namespace, "err", err)
 				metrics.FlushErrors.WithLabelValues("metrics").Inc()
 				failed = append(failed, rows...)
 			} else {
@@ -241,7 +241,7 @@ func (w *Writer) flushLocked() {
 		}
 		metrics.RecordFlush("metrics", totalBytes, time.Since(start).Seconds())
 		if len(failed) > maxRetry {
-			log.Printf("[lake] metrics retry buffer full (%d rows), dropping %d", len(failed), len(failed)-maxRetry)
+			slog.Warn("metrics retry buffer full, dropping rows", "buffered", len(failed), "dropped", len(failed)-maxRetry)
 			failed = failed[:maxRetry]
 		}
 		w.bufMetrics = append(w.bufMetrics[:0], failed...)

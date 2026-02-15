@@ -3,7 +3,7 @@ package lake
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -26,7 +26,7 @@ func NewPruner(cfg config.Config) *Pruner {
 // Run starts the retention pruner loop
 func (p *Pruner) Run(ctx context.Context) {
 	if p.cfg.RetentionDays <= 0 {
-		log.Println("[retention] disabled (RETENTION_DAYS=0)")
+		slog.Info("retention disabled")
 		return
 	}
 
@@ -48,13 +48,13 @@ func (p *Pruner) Run(ctx context.Context) {
 
 func (p *Pruner) pruneAll() {
 	cutoff := time.Now().AddDate(0, 0, -p.cfg.RetentionDays)
-	log.Printf("[retention] pruning data older than %s", cutoff.Format("2006-01-02"))
+	slog.Info("pruning data", "older_than", cutoff.Format("2006-01-02"))
 
 	signals := []string{"spans", "logs", "metrics"}
 	for _, signal := range signals {
 		deleted, bytes := p.pruneSignal(signal, cutoff)
 		if deleted > 0 {
-			log.Printf("[retention] %s: deleted %d partitions (%.2f MB)", signal, deleted, float64(bytes)/(1024*1024))
+			slog.Info("retention pruned", "signal", signal, "partitions", deleted, "freed_bytes", bytes, "freed_mb", float64(bytes)/(1024*1024))
 		}
 	}
 }

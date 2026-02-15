@@ -3,7 +3,7 @@ package intelligence
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"math"
 	"strings"
 	"time"
@@ -33,12 +33,11 @@ func NewDetector(duck *query.Duck, config DetectorConfig) *Detector {
 // Run starts the detection loop
 func (d *Detector) Run(ctx context.Context) {
 	if !d.config.Enabled {
-		log.Println("[intelligence] detector disabled")
+		slog.Info("detector disabled")
 		return
 	}
 
-	log.Printf("[intelligence] starting detector (interval: %s, lookback: %s)",
-		d.config.CheckInterval, d.config.LookbackWindow)
+	slog.Info("starting detector", "interval", d.config.CheckInterval, "lookback", d.config.LookbackWindow)
 
 	ticker := time.NewTicker(d.config.CheckInterval)
 	defer ticker.Stop()
@@ -49,7 +48,7 @@ func (d *Detector) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("[intelligence] detector stopping")
+			slog.Info("detector stopping")
 			return
 		case <-ticker.C:
 			d.runCheck(ctx)
@@ -65,8 +64,7 @@ func (d *Detector) runCheck(ctx context.Context) {
 	patternCount := len(snapshot.Patterns)
 
 	if anomalyCount > 0 || patternCount > 0 {
-		log.Printf("[intelligence] detected: %d anomalies, %d patterns (health: %.1f)",
-			anomalyCount, patternCount, snapshot.HealthScore)
+		slog.Info("detection complete", "anomalies", anomalyCount, "patterns", patternCount, "health", snapshot.HealthScore)
 	}
 }
 
@@ -164,7 +162,7 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
 		if !isNoDataError(resp.Error) {
-			log.Printf("[intelligence] error rate detection failed: %s", resp.Error)
+			slog.Error("error rate detection failed", "error", resp.Error)
 		}
 		return nil
 	}
@@ -238,7 +236,7 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
 		if !isNoDataError(resp.Error) {
-			log.Printf("[intelligence] latency detection failed: %s", resp.Error)
+			slog.Error("latency detection failed", "error", resp.Error)
 		}
 		return nil
 	}
@@ -315,7 +313,7 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
 		if !isNoDataError(resp.Error) {
-			log.Printf("[intelligence] volume detection failed: %s", resp.Error)
+			slog.Error("volume detection failed", "error", resp.Error)
 		}
 		return nil
 	}
@@ -374,7 +372,7 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
 		if !isNoDataError(resp.Error) {
-			log.Printf("[intelligence] pattern detection failed: %s", resp.Error)
+			slog.Error("pattern detection failed", "error", resp.Error)
 		}
 		return nil
 	}

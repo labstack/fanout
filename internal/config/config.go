@@ -2,7 +2,7 @@ package config
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/google/uuid"
@@ -44,7 +44,8 @@ func getenvUUID(k string) uuid.UUID {
 	if v := os.Getenv(k); v != "" {
 		id, err := uuid.Parse(v)
 		if err != nil {
-			log.Fatalf("invalid UUID for %s: %v", k, err)
+			slog.Error("invalid UUID", "key", k, "err", err)
+			os.Exit(1)
 		}
 		return id
 	}

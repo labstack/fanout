@@ -2,7 +2,7 @@ package lake
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -47,13 +47,13 @@ func (c *Compactor) Run(ctx context.Context) {
 func (c *Compactor) compactAll() {
 	// Only compact data older than 24 hours
 	cutoff := time.Now().UTC().Add(-24 * time.Hour)
-	log.Printf("[compact] compacting partitions older than %s", cutoff.Format("2006-01-02 15:04"))
+	slog.Info("compacting partitions", "older_than", cutoff.Format("2006-01-02 15:04"))
 
 	signals := []string{"spans", "logs", "metrics"}
 	for _, signal := range signals {
 		compacted, saved := c.compactSignal(signal, cutoff)
 		if compacted > 0 {
-			log.Printf("[compact] %s: compacted %d days, saved %.2f MB", signal, compacted, float64(saved)/(1024*1024))
+			slog.Info("compaction complete", "signal", signal, "days", compacted, "bytes_saved", saved, "saved_mb", float64(saved)/(1024*1024))
 		}
 	}
 }
@@ -121,7 +121,7 @@ func (c *Compactor) compactSignal(signal string, cutoff time.Time) (int, int64) 
 
 						saved, err := c.compactDay(signal, dayPath)
 						if err != nil {
-							log.Printf("[compact] %s %s: %v", signal, dayPath, err)
+							slog.Error("compaction failed", "signal", signal, "path", dayPath, "err", err)
 							continue
 						}
 						compacted++
@@ -218,7 +218,7 @@ func compactFiles[T any](files []string, dayPath string) (int64, error) {
 	for _, f := range files {
 		rows, err := readParquet[T](f)
 		if err != nil {
-			log.Printf("[compact] read %s: %v", f, err)
+			slog.Error("compact read failed", "file", f, "err", err)
 			continue
 		}
 		allRows = append(allRows, rows...)
