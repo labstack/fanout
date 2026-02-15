@@ -33,6 +33,11 @@ var (
 		Buckets: prometheus.DefBuckets,
 	}, []string{"signal"})
 
+	FlushErrors = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_flush_errors_total",
+		Help: "Total flush write errors",
+	}, []string{"signal"})
+
 	// Query metrics
 	QueryTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_query_total",

@@ -139,7 +139,10 @@ func (w *Writer) Run(ctx context.Context) error {
 }
 
 func (w *Writer) maybeFlush() {
-	if len(w.bufSpans)+len(w.bufLogs)+len(w.bufMetrics) >= w.cfg.MaxRows {
+	if len(w.bufSpans) >= w.cfg.MaxRows ||
+		len(w.bufLogs) >= w.cfg.MaxRows ||
+		len(w.bufMetrics) >= w.cfg.MaxRows ||
+		len(w.bufSpans)+len(w.bufLogs)+len(w.bufMetrics) >= w.cfg.MaxRows {
 		w.flushLocked()
 	}
 	if time.Since(w.lastFlush) >= time.Duration(w.cfg.FlushSeconds)*time.Second {
@@ -158,6 +161,7 @@ func (w *Writer) flushLocked() {
 			byPartition[key] = append(byPartition[key], r)
 		}
 		var totalBytes int64
+		var failed []SpanRow
 		start := time.Now()
 		for _, rows := range byPartition {
 			r := rows[0]
@@ -165,12 +169,14 @@ func (w *Writer) flushLocked() {
 			_, bytes, err := writeParquet(base, now, rows)
 			if err != nil {
 				log.Printf("[lake] write spans parquet (tenant=%s, namespace=%s): %v", r.TenantID, r.Namespace, err)
+				metrics.FlushErrors.WithLabelValues("spans").Inc()
+				failed = append(failed, rows...)
 			} else {
 				totalBytes += bytes
 			}
 		}
 		metrics.RecordFlush("spans", totalBytes, time.Since(start).Seconds())
-		w.bufSpans = w.bufSpans[:0]
+		w.bufSpans = append(w.bufSpans[:0], failed...)
 	}
 
 	// Group logs by tenant/namespace
@@ -181,6 +187,7 @@ func (w *Writer) flushLocked() {
 			byPartition[key] = append(byPartition[key], r)
 		}
 		var totalBytes int64
+		var failed []LogRow
 		start := time.Now()
 		for _, rows := range byPartition {
 			r := rows[0]
@@ -188,12 +195,14 @@ func (w *Writer) flushLocked() {
 			_, bytes, err := writeParquet(base, now, rows)
 			if err != nil {
 				log.Printf("[lake] write logs parquet (tenant=%s, namespace=%s): %v", r.TenantID, r.Namespace, err)
+				metrics.FlushErrors.WithLabelValues("logs").Inc()
+				failed = append(failed, rows...)
 			} else {
 				totalBytes += bytes
 			}
 		}
 		metrics.RecordFlush("logs", totalBytes, time.Since(start).Seconds())
-		w.bufLogs = w.bufLogs[:0]
+		w.bufLogs = append(w.bufLogs[:0], failed...)
 	}
 
 	// Group metrics by tenant/namespace
@@ -204,6 +213,7 @@ func (w *Writer) flushLocked() {
 			byPartition[key] = append(byPartition[key], r)
 		}
 		var totalBytes int64
+		var failed []MetricRow
 		start := time.Now()
 		for _, rows := range byPartition {
 			r := rows[0]
@@ -211,12 +221,14 @@ func (w *Writer) flushLocked() {
 			_, bytes, err := writeParquet(base, now, rows)
 			if err != nil {
 				log.Printf("[lake] write metrics parquet (tenant=%s, namespace=%s): %v", r.TenantID, r.Namespace, err)
+				metrics.FlushErrors.WithLabelValues("metrics").Inc()
+				failed = append(failed, rows...)
 			} else {
 				totalBytes += bytes
 			}
 		}
 		metrics.RecordFlush("metrics", totalBytes, time.Since(start).Seconds())
-		w.bufMetrics = w.bufMetrics[:0]
+		w.bufMetrics = append(w.bufMetrics[:0], failed...)
 	}
 
 	w.lastFlush = now

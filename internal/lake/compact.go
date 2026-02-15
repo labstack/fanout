@@ -46,7 +46,7 @@ func (c *Compactor) Run(ctx context.Context) {
 
 func (c *Compactor) compactAll() {
 	// Only compact data older than 24 hours
-	cutoff := time.Now().Add(-24 * time.Hour)
+	cutoff := time.Now().UTC().Add(-24 * time.Hour)
 	log.Printf("[compact] compacting partitions older than %s", cutoff.Format("2006-01-02 15:04"))
 
 	signals := []string{"spans", "logs", "metrics"}
@@ -109,7 +109,7 @@ func (c *Compactor) compactSignal(signal string, cutoff time.Time) (int, int64) 
 						dayPath := filepath.Join(monthPath, dayDir.Name())
 
 						// Check if this day is old enough to compact
-						dayTime := time.Date(year, time.Month(month), day, 23, 59, 59, 0, time.Local)
+						dayTime := time.Date(year, time.Month(month), day, 23, 59, 59, 0, time.UTC)
 						if dayTime.After(cutoff) {
 							continue
 						}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"log"
 	"net"
 	"net/http"
@@ -108,10 +109,15 @@ func main() {
 	// Auth (optional)
 	apiToken := strings.TrimSpace(cfg.APIToken)
 	if apiToken != "" {
+		tokenBytes := []byte(apiToken)
 		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(c echo.Context) error {
 				auth := c.Request().Header.Get("Authorization")
-				if !strings.HasPrefix(auth, "Bearer ") || strings.TrimPrefix(auth, "Bearer ") != apiToken {
+				if !strings.HasPrefix(auth, "Bearer ") {
+					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+				}
+				provided := []byte(strings.TrimPrefix(auth, "Bearer "))
+				if subtle.ConstantTimeCompare(provided, tokenBytes) != 1 {
 					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 				}
 				return next(c)
