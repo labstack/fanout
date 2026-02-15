@@ -32,7 +32,10 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 
 	data := web.OverviewData{Window: window}
 
-	status, _ := h.svc.Status(ctx, window, namespace, "")
+	status, err := h.svc.Status(ctx, window, namespace, "")
+	if err != nil {
+		return err
+	}
 	data.Healthy = status.Healthy
 	data.Summary = status.Summary
 	data.Services = web.ServiceSummary{
@@ -54,7 +57,10 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 		})
 	}
 
-	topo, _ := h.svc.Topology(ctx, window, namespace, "")
+	topo, err := h.svc.Topology(ctx, window, namespace, "")
+	if err != nil {
+		return err
+	}
 	for _, n := range topo.Nodes {
 		data.Topology.Nodes = append(data.Topology.Nodes, web.ServiceNode{
 			Name:      n.Name,
@@ -65,7 +71,10 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 		})
 	}
 
-	timeline, _ := h.svc.Timeline(ctx, "", window, 5, namespace, "")
+	timeline, err := h.svc.Timeline(ctx, "", window, 5, namespace, "")
+	if err != nil {
+		return err
+	}
 	for _, b := range timeline.Buckets {
 		data.Timeline.Buckets = append(data.Timeline.Buckets, web.TimelineBucket{
 			Time:         b.Time,
@@ -93,7 +102,10 @@ func (h *UIHandler) PartialStats(c echo.Context) error {
 	ctx := c.Request().Context()
 	window := parseWindow(c)
 	namespace := parseNamespace(c)
-	status, _ := h.svc.Status(ctx, window, namespace, "")
+	status, err := h.svc.Status(ctx, window, namespace, "")
+	if err != nil {
+		return err
+	}
 
 	data := web.ServiceSummary{
 		Total:     status.Services.Total,
@@ -111,7 +123,10 @@ func (h *UIHandler) PartialKeyMetrics(c echo.Context) error {
 	ctx := c.Request().Context()
 	window := parseWindow(c)
 	namespace := parseNamespace(c)
-	status, _ := h.svc.Status(ctx, window, namespace, "")
+	status, err := h.svc.Status(ctx, window, namespace, "")
+	if err != nil {
+		return err
+	}
 	return renderTempl(c, web.KeyMetrics(status.ThroughputPerMin, status.P95Ms, status.ErrorRate))
 }
 
@@ -121,7 +136,10 @@ func (h *UIHandler) PartialTopIssues(c echo.Context) error {
 	ctx := c.Request().Context()
 	window := parseWindow(c)
 	namespace := parseNamespace(c)
-	status, _ := h.svc.Status(ctx, window, namespace, "")
+	status, err := h.svc.Status(ctx, window, namespace, "")
+	if err != nil {
+		return err
+	}
 
 	var issues []web.TopIssue
 	for _, issue := range status.TopIssues {
@@ -142,7 +160,10 @@ func (h *UIHandler) PartialServicesTable(c echo.Context) error {
 	ctx := c.Request().Context()
 	window := parseWindow(c)
 	namespace := parseNamespace(c)
-	topo, _ := h.svc.Topology(ctx, window, namespace, "")
+	topo, err := h.svc.Topology(ctx, window, namespace, "")
+	if err != nil {
+		return err
+	}
 
 	var nodes []web.ServiceNode
 	for _, n := range topo.Nodes {
@@ -164,7 +185,10 @@ func (h *UIHandler) PartialTimeline(c echo.Context) error {
 	ctx := c.Request().Context()
 	window := parseWindow(c)
 	namespace := parseNamespace(c)
-	timeline, _ := h.svc.Timeline(ctx, "", window, 5, namespace, "")
+	timeline, err := h.svc.Timeline(ctx, "", window, 5, namespace, "")
+	if err != nil {
+		return err
+	}
 
 	var data web.TimelineData
 	for _, b := range timeline.Buckets {

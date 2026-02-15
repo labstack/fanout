@@ -78,6 +78,13 @@ func (h *HealthHandler) Readiness(c echo.Context) error {
 }
 
 func (h *HealthHandler) checkDuckDB() CheckResult {
+	if h.duck == nil {
+		return CheckResult{
+			Status: "unhealthy",
+			Error:  "duckdb not initialized",
+		}
+	}
+
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -92,7 +99,7 @@ func (h *HealthHandler) checkDuckDB() CheckResult {
 			Error:     err.Error(),
 		}
 	}
-	rows.Close()
+	defer rows.Close()
 
 	return CheckResult{
 		Status:    "ok",
