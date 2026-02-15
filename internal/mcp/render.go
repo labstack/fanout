@@ -19,7 +19,7 @@ import (
 )
 
 // validReportID matches hex-encoded report IDs (genID produces 16 hex chars from 8 bytes)
-var validReportID = regexp.MustCompile(`^[a-f0-9]+$`)
+var validReportID = regexp.MustCompile(`^[a-f0-9]{16}$`)
 
 // Report stores a shareable report snapshot
 type Report struct {

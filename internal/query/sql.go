@@ -182,29 +182,30 @@ func validateSQL(query string, lakeDir string) error {
 		}
 	}
 
-	// Block SQL comment syntax (-- line comments and /* block comments)
-	if strings.Contains(query, "--") {
+	// Block SQL comment syntax outside string literals
+	if tokenOutsideStrings(query, "--") {
 		return fmt.Errorf("SQL comments (--) are not allowed")
 	}
-	// Block /* outside of string literals (glob patterns like '/**/*.parquet' are OK)
-	if blockCommentOutsideStrings(query) {
+	if tokenOutsideStrings(query, "/*") {
 		return fmt.Errorf("SQL block comments (/* */) are not allowed")
 	}
 
 	return nil
 }
 
-// blockCommentOutsideStrings returns true if /* appears outside single-quoted strings.
-func blockCommentOutsideStrings(query string) bool {
+// tokenOutsideStrings returns true if the given token appears outside single-quoted strings.
+func tokenOutsideStrings(query, token string) bool {
 	inString := false
 	for i := 0; i < len(query); i++ {
 		if query[i] == '\'' {
-			inString = !inString
-			// Handle escaped quotes ('')
+			// When already inside a string, handle escaped single quotes ('')
+			// by consuming the second quote without leaving the string.
 			if inString && i+1 < len(query) && query[i+1] == '\'' {
 				i++ // skip escaped quote
+				continue
 			}
-		} else if !inString && i+1 < len(query) && query[i] == '/' && query[i+1] == '*' {
+			inString = !inString
+		} else if !inString && i+len(token) <= len(query) && query[i:i+len(token)] == token {
 			return true
 		}
 	}

@@ -68,7 +68,8 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 
 	if p.Query != "" {
 		filters = append(filters, `"name=name" ILIKE ?`)
-		args = append(args, "%"+p.Query+"%")
+		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Query)
+		args = append(args, "%"+escaped+"%")
 	}
 	if p.Service != "" {
 		filters = append(filters, `"name=service_name" = ?`)
