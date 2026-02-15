@@ -84,6 +84,10 @@ func (rs *ReportStore) List() []*Report {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
+		id := strings.TrimSuffix(e.Name(), ".json")
+		if !validReportID.MatchString(id) {
+			continue
+		}
 		data, err := os.ReadFile(filepath.Join(rs.dir, e.Name()))
 		if err != nil {
 			continue
