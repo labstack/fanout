@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -43,7 +44,7 @@ func (d *Detector) Run(ctx context.Context) {
 	defer ticker.Stop()
 
 	// Run once on startup
-	d.runCheck(ctx)
+	d.safeRunCheck(ctx)
 
 	for {
 		select {
@@ -51,9 +52,19 @@ func (d *Detector) Run(ctx context.Context) {
 			slog.Info("detector stopping")
 			return
 		case <-ticker.C:
-			d.runCheck(ctx)
+			d.safeRunCheck(ctx)
 		}
 	}
+}
+
+// safeRunCheck wraps runCheck with panic recovery to prevent the detector loop from dying
+func (d *Detector) safeRunCheck(ctx context.Context) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("detector panic recovered", "panic", r, "stack", string(debug.Stack()))
+		}
+	}()
+	d.runCheck(ctx)
 }
 
 // runCheck performs a single detection cycle

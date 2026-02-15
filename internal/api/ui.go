@@ -369,7 +369,7 @@ func (h *UIHandler) Traces(c echo.Context) error {
 	// Parse query DSL
 	q := search.Parse(queryStr)
 
-	result, _ := h.svc.SearchTraces(ctx, service.TraceSearchParams{
+	result, err := h.svc.SearchTraces(ctx, service.TraceSearchParams{
 		Services:   q.Service(),
 		Operations: q.Operation(),
 		Status:     q.Status(),
@@ -384,6 +384,9 @@ func (h *UIHandler) Traces(c echo.Context) error {
 		Offset:     offset,
 		Namespace:  namespace,
 	})
+	if err != nil {
+		return err
+	}
 
 	var traces []web.TraceRow
 	for _, t := range result.Traces {
@@ -427,7 +430,10 @@ func (h *UIHandler) TraceDetail(c echo.Context) error {
 	window := parseWindow(c)
 	namespace := parseNamespace(c)
 
-	result, _ := h.svc.TraceDetail(ctx, traceID, window, namespace, "")
+	result, err := h.svc.TraceDetail(ctx, traceID, window, namespace, "")
+	if err != nil {
+		return err
+	}
 
 	var spans []web.SpanInfo
 	for _, sp := range result.Spans {
@@ -530,7 +536,7 @@ func (h *UIHandler) Logs(c echo.Context) error {
 	// Parse query DSL
 	q := search.Parse(queryStr)
 
-	result, _ := h.svc.SearchLogs(ctx, service.LogSearchParams{
+	result, err := h.svc.SearchLogs(ctx, service.LogSearchParams{
 		Services:  q.Service(),
 		Severity:  q.Severity(),
 		Terms:     q.Terms,
@@ -540,6 +546,9 @@ func (h *UIHandler) Logs(c echo.Context) error {
 		Offset:    offset,
 		Namespace: namespace,
 	})
+	if err != nil {
+		return err
+	}
 
 	var logs []web.LogRow
 	for _, lg := range result.Logs {
@@ -582,7 +591,7 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 	// Parse query DSL
 	q := search.Parse(queryStr)
 
-	result, _ := h.svc.Metrics(ctx, service.MetricsParams{
+	result, err := h.svc.Metrics(ctx, service.MetricsParams{
 		Names:     q.Name(),
 		Services:  q.Service(),
 		Types:     q.Type(),
@@ -590,6 +599,9 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 		Window:    window,
 		Namespace: namespace,
 	})
+	if err != nil {
+		return err
+	}
 
 	var metrics []web.MetricSummary
 	for _, m := range result.Metrics {
@@ -630,12 +642,15 @@ func (h *UIHandler) Unified(c echo.Context) error {
 		svc = services[0]
 	}
 
-	result, _ := h.svc.Unified(ctx, service.UnifiedParams{
+	result, err := h.svc.Unified(ctx, service.UnifiedParams{
 		Service:   svc,
 		Window:    window,
 		Limit:     100,
 		Namespace: namespace,
 	})
+	if err != nil {
+		return err
+	}
 
 	var events []web.UnifiedEvent
 	for _, e := range result.Events {
