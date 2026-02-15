@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
@@ -210,11 +209,11 @@ SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%
        "name=severity" as severity
 FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=body" ~ '%s'
+  AND "name=body" ~ ?
 ORDER BY ts DESC
 LIMIT %d;
-`, d.LogsGlob(tenantID, namespace, windowMinutes), windowMinutes, escapeSQL(pattern), limit)
-	rows, err := d.DB.QueryContext(ctx, q)
+`, d.LogsGlob(tenantID, namespace, windowMinutes), windowMinutes, limit)
+	rows, err := d.DB.QueryContext(ctx, q, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -362,9 +361,4 @@ LIMIT %d;
 		out = append(out, r)
 	}
 	return out, rows.Err()
-}
-
-// escapeSQL escapes single quotes for SQL string literals.
-func escapeSQL(s string) string {
-	return strings.ReplaceAll(strings.ReplaceAll(s, "\\", "\\\\"), "'", "''")
 }

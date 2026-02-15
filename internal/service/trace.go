@@ -51,11 +51,11 @@ SELECT "name=span_id" as span_id,
        "name=scope_version" as scope_version,
        "name=attributes_json" as attributes_json
 FROM read_parquet(%s, union_by_name=true)
-WHERE "name=trace_id" = '%s'
+WHERE "name=trace_id" = ?
 ORDER BY "name=start_unix_nano" ASC;
-`, s.duck.SpansGlob(tenantID, namespace, window), escapeSQL(traceID))
+`, s.duck.SpansGlob(tenantID, namespace, window))
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, traceID)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
@@ -269,12 +269,12 @@ SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%
        "name=scope_version" as scope_version,
        "name=attributes_json" as attributes_json
 FROM read_parquet(%s, union_by_name=true)
-WHERE "name=trace_id" = '%s'
+WHERE "name=trace_id" = ?
 ORDER BY "name=time_unix_nano" ASC
 LIMIT 100;
-`, s.duck.LogsGlob(tenantID, namespace, window), escapeSQL(traceID))
+`, s.duck.LogsGlob(tenantID, namespace, window))
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, traceID)
 	if err != nil {
 		return logs
 	}

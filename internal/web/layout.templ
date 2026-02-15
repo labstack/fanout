@@ -775,7 +775,11 @@ templ Layout(title string, activePage string, window int) {
 
 							async function loadNamespaces() {
 								const displayNs = urlNamespace || storedNamespace;
-								namespaceSelect.innerHTML = `<sl-option value="${displayNs}">${displayNs}</sl-option>`;
+								namespaceSelect.replaceChildren();
+								const initOpt = document.createElement('sl-option');
+								initOpt.value = displayNs;
+								initOpt.textContent = displayNs;
+								namespaceSelect.appendChild(initOpt);
 								await customElements.whenDefined('sl-select');
 								await namespaceSelect.updateComplete;
 								namespaceSelect.value = displayNs;
@@ -801,9 +805,13 @@ templ Layout(title string, activePage string, window int) {
 										return;
 									}
 
-									namespaceSelect.innerHTML = namespaces.map(n =>
-										`<sl-option value="${n}">${n}</sl-option>`
-									).join('');
+									namespaceSelect.replaceChildren();
+									namespaces.forEach(n => {
+										const opt = document.createElement('sl-option');
+										opt.value = n;
+										opt.textContent = n;
+										namespaceSelect.appendChild(opt);
+									});
 									await namespaceSelect.updateComplete;
 									namespaceSelect.value = namespace;
 									localStorage.setItem('namespace', namespace);

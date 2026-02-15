@@ -7,27 +7,6 @@ import (
 	"time"
 )
 
-func TestEscapeSQL(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"hello", "hello"},
-		{"it's", "it''s"},
-		{"backslash\\test", "backslash\\\\test"},
-		{"combined\\and'quotes", "combined\\\\and''quotes"},
-		{"", ""},
-		{"normal text", "normal text"},
-	}
-
-	for _, tc := range tests {
-		result := escapeSQL(tc.input)
-		if result != tc.expected {
-			t.Errorf("escapeSQL(%q) = %q, want %q", tc.input, result, tc.expected)
-		}
-	}
-}
-
 func TestLatencyRowStruct(t *testing.T) {
 	r := LatencyRow{
 		ServiceName: "api-gateway",

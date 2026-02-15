@@ -33,10 +33,10 @@ SELECT
   COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
 FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=service_name" = '%s';
-`, spansGlob, window, escapeSQL(svc))
+  AND "name=service_name" = ?;
+`, spansGlob, window)
 
-	row := s.duck.DB.QueryRowContext(ctx, q)
+	row := s.duck.DB.QueryRowContext(ctx, q, svc)
 	if err := row.Scan(&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate); err != nil {
 		out.Status = "unknown"
 		return out, nil
@@ -54,16 +54,16 @@ SELECT
   FIRST("name=trace_id") as trace_id
 FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=service_name" = '%s'
+  AND "name=service_name" = ?
   AND "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')
   AND "name=status_msg" IS NOT NULL
   AND "name=status_msg" != ''
 GROUP BY "name=status_msg"
 ORDER BY cnt DESC
 LIMIT 5;
-`, spansGlob, window, escapeSQL(svc))
+`, spansGlob, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, svc)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -84,14 +84,14 @@ SELECT
   COUNT(*) as cnt
 FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=service_name" = '%s'
+  AND "name=service_name" = ?
 GROUP BY "name=name"
 HAVING p95 > 100
 ORDER BY p95 DESC
 LIMIT 5;
-`, spansGlob, window, escapeSQL(svc))
+`, spansGlob, window)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q)
+	rows, err = s.duck.DB.QueryContext(ctx, q, svc)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {
@@ -113,8 +113,8 @@ WITH downstream AS (
     ON parent."name=span_id" = child."name=parent_span_id"
     AND parent."name=trace_id" = child."name=trace_id"
   WHERE epoch_ms(CAST(parent."name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-    AND parent."name=service_name" = '%s'
-    AND child."name=service_name" != '%s'
+    AND parent."name=service_name" = ?
+    AND child."name=service_name" != ?
 )
 SELECT
   dep_service,
@@ -125,9 +125,9 @@ FROM downstream
 GROUP BY dep_service
 ORDER BY calls DESC
 LIMIT 10;
-`, spansGlob, spansGlob, window, escapeSQL(svc), escapeSQL(svc))
+`, spansGlob, spansGlob, window)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q)
+	rows, err = s.duck.DB.QueryContext(ctx, q, svc, svc)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {

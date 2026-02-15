@@ -7,54 +7,6 @@ import (
 	"github.com/labstack/fanout/internal/config"
 )
 
-func TestEscapeSQL(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"hello", "hello"},
-		{"it's", "it''s"},
-		{"'quoted'", "''quoted''"},
-		{"", ""},
-		{"no quotes here", "no quotes here"},
-		{"multiple 'single' quotes 'here'", "multiple ''single'' quotes ''here''"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.input, func(t *testing.T) {
-			result := escapeSQL(tc.input)
-			if result != tc.expected {
-				t.Errorf("escapeSQL(%q) = %q, want %q", tc.input, result, tc.expected)
-			}
-		})
-	}
-}
-
-func TestEscapeLikePattern(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"hello", "hello"},
-		{"it's", "it''s"},
-		{"100%", "100\\%"},
-		{"user_name", "user\\_name"},
-		{"50% off_sale", "50\\% off\\_sale"},
-		{"", ""},
-		{"no special chars", "no special chars"},
-		{"'quote' and % and _", "''quote'' and \\% and \\_"},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.input, func(t *testing.T) {
-			result := escapeLikePattern(tc.input)
-			if result != tc.expected {
-				t.Errorf("escapeLikePattern(%q) = %q, want %q", tc.input, result, tc.expected)
-			}
-		})
-	}
-}
-
 func TestDeriveHealth(t *testing.T) {
 	tests := []struct {
 		name      string

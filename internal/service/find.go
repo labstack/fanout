@@ -64,15 +64,20 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 
 func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bool) {
 	var filters []string
+	var args []any
 
 	if p.Query != "" {
-		filters = append(filters, fmt.Sprintf(`"name=name" ILIKE '%%%s%%'`, escapeLikePattern(p.Query)))
+		filters = append(filters, `"name=name" ILIKE ?`)
+		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Query)
+		args = append(args, "%"+escaped+"%")
 	}
 	if p.Service != "" {
-		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, escapeSQL(p.Service)))
+		filters = append(filters, `"name=service_name" = ?`)
+		args = append(args, p.Service)
 	}
 	if p.Operation != "" {
-		filters = append(filters, fmt.Sprintf(`"name=name" = '%s'`, escapeSQL(p.Operation)))
+		filters = append(filters, `"name=name" = ?`)
+		args = append(args, p.Operation)
 	}
 	if p.Status == "error" {
 		filters = append(filters, `"name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')`)
@@ -81,9 +86,8 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 	}
 	// Attribute filters
 	for key, val := range p.Attrs {
-		filters = append(filters, fmt.Sprintf(
-			`json_extract_string(from_utf8("name=attributes_json"), '$.%s') = '%s'`,
-			escapeSQL(key), escapeSQL(val)))
+		filters = append(filters, `json_extract_string(from_utf8("name=attributes_json"), ?) = ?`)
+		args = append(args, "$."+key, val)
 	}
 
 	filterStr := ""
@@ -109,7 +113,7 @@ ORDER BY "name=start_unix_nano" DESC
 LIMIT %d;
 `, s.duck.SpansGlob(p.TenantID, p.Namespace, p.Window), p.Window, filterStr, p.Limit+1)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return []SpanResult{}, false
 	}
@@ -138,19 +142,23 @@ LIMIT %d;
 
 func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool) {
 	var filters []string
+	var args []any
 
 	if p.Query != "" {
-		filters = append(filters, fmt.Sprintf(`"name=body" ~ '%s'`, escapeSQL(p.Query)))
+		filters = append(filters, `"name=body" ~ ?`)
+		args = append(args, p.Query)
 	}
 	if p.Service != "" {
-		filters = append(filters, fmt.Sprintf(`"name=service_name" = '%s'`, escapeSQL(p.Service)))
+		filters = append(filters, `"name=service_name" = ?`)
+		args = append(args, p.Service)
 	}
 	if len(p.Severity) > 0 {
-		quoted := make([]string, len(p.Severity))
+		placeholders := make([]string, len(p.Severity))
 		for i, sev := range p.Severity {
-			quoted[i] = fmt.Sprintf("'%s'", escapeSQL(sev))
+			placeholders[i] = "?"
+			args = append(args, sev)
 		}
-		filters = append(filters, fmt.Sprintf(`"name=severity" IN (%s)`, strings.Join(quoted, ",")))
+		filters = append(filters, fmt.Sprintf(`"name=severity" IN (%s)`, strings.Join(placeholders, ",")))
 	}
 
 	filterStr := ""
@@ -179,7 +187,7 @@ ORDER BY "name=time_unix_nano" DESC
 LIMIT %d;
 `, s.duck.LogsGlob(p.TenantID, p.Namespace, p.Window), p.Window, filterStr, p.Limit+1)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return []LogResult{}, false
 	}

@@ -182,12 +182,34 @@ func validateSQL(query string, lakeDir string) error {
 		}
 	}
 
-	// Basic SQL injection checks
-	if strings.Contains(query, "--") && !strings.Contains(query, "-- ") {
-		return fmt.Errorf("potential SQL comment injection detected")
+	// Block SQL comment syntax outside string literals
+	if tokenOutsideStrings(query, "--") {
+		return fmt.Errorf("SQL comments (--) are not allowed")
+	}
+	if tokenOutsideStrings(query, "/*") {
+		return fmt.Errorf("SQL block comments (/* */) are not allowed")
 	}
 
 	return nil
+}
+
+// tokenOutsideStrings returns true if the given token appears outside single-quoted strings.
+func tokenOutsideStrings(query, token string) bool {
+	inString := false
+	for i := 0; i < len(query); i++ {
+		if query[i] == '\'' {
+			// When already inside a string, handle escaped single quotes ('')
+			// by consuming the second quote without leaving the string.
+			if inString && i+1 < len(query) && query[i+1] == '\'' {
+				i++ // skip escaped quote
+				continue
+			}
+			inString = !inString
+		} else if !inString && i+len(token) <= len(query) && query[i:i+len(token)] == token {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureLimit adds or replaces LIMIT clause

@@ -20,9 +20,11 @@ func (s *Service) Timeline(ctx context.Context, svc string, window, granularity 
 		Anomalies: []Anomaly{},
 	}
 
+	var args []any
 	svcFilter := ""
 	if svc != "" {
-		svcFilter = fmt.Sprintf(`AND "name=service_name" = '%s'`, escapeSQL(svc))
+		svcFilter = `AND "name=service_name" = ?`
+		args = append(args, svc)
 	}
 	// Always scope to single partition
 	namespace, tenantID = s.defaults(namespace, tenantID)
@@ -41,7 +43,7 @@ GROUP BY bucket
 ORDER BY bucket ASC;
 `, granularity, s.duck.SpansGlob(tenantID, namespace, window), window, svcFilter)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return out, nil
 	}

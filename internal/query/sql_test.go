@@ -29,6 +29,18 @@ func TestValidateSQL(t *testing.T) {
 		{"blocked read_parquet relative", "SELECT * FROM read_parquet('../secrets.parquet')", true},
 		{"blocked path traversal", "SELECT * FROM read_parquet('lake/../../../etc/passwd')", true},
 
+		// SQL comment injection
+		{"blocked -- comment", "SELECT * FROM foo -- DROP TABLE bar", true},
+		{"blocked -- at end", "SELECT * FROM foo--", true},
+		{"blocked /* block comment */", "SELECT * FROM foo /* malicious */", true},
+		// Glob patterns with /* inside quoted strings should be allowed
+		{"allowed glob in string", "SELECT * FROM read_parquet('lake/spans/**/*.parquet')", false},
+		{"allowed -- in string", "SELECT * FROM foo WHERE x = 'a--b'", false},
+		{"allowed /* in string", "SELECT * FROM foo WHERE x = 'a/*b'", false},
+		// Escaped quotes inside strings should not break detection
+		{"blocked -- after escaped quote", "SELECT * FROM foo WHERE x = 'it''s' -- drop", true},
+		{"allowed -- inside escaped quote string", "SELECT * FROM foo WHERE x = 'a--b''s'", false},
+
 		// Must start with SELECT or WITH
 		{"blocked SHOW", "SHOW TABLES", true},
 	}
