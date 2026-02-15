@@ -106,12 +106,16 @@ func main() {
 		},
 	}))
 
-	// Auth (optional)
+	// Auth (optional) — skip health checks and metrics for orchestrators/LBs
 	apiToken := strings.TrimSpace(cfg.APIToken)
 	if apiToken != "" {
 		tokenBytes := []byte(apiToken)
 		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(c echo.Context) error {
+				path := c.Request().URL.Path
+				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" {
+					return next(c)
+				}
 				auth := c.Request().Header.Get("Authorization")
 				if !strings.HasPrefix(auth, "Bearer ") {
 					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
