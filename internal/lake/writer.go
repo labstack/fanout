@@ -178,8 +178,8 @@ func (w *Writer) flushLocked() {
 		}
 		metrics.RecordFlush("spans", totalBytes, time.Since(start).Seconds())
 		if len(failed) > maxRetry {
-			log.Printf("[lake] spans retry buffer full (%d rows), dropping %d oldest", len(failed), len(failed)-maxRetry)
-			failed = failed[len(failed)-maxRetry:]
+			log.Printf("[lake] spans retry buffer full (%d rows), dropping %d", len(failed), len(failed)-maxRetry)
+			failed = failed[:maxRetry]
 		}
 		w.bufSpans = append(w.bufSpans[:0], failed...)
 	}
@@ -208,8 +208,8 @@ func (w *Writer) flushLocked() {
 		}
 		metrics.RecordFlush("logs", totalBytes, time.Since(start).Seconds())
 		if len(failed) > maxRetry {
-			log.Printf("[lake] logs retry buffer full (%d rows), dropping %d oldest", len(failed), len(failed)-maxRetry)
-			failed = failed[len(failed)-maxRetry:]
+			log.Printf("[lake] logs retry buffer full (%d rows), dropping %d", len(failed), len(failed)-maxRetry)
+			failed = failed[:maxRetry]
 		}
 		w.bufLogs = append(w.bufLogs[:0], failed...)
 	}
@@ -238,8 +238,8 @@ func (w *Writer) flushLocked() {
 		}
 		metrics.RecordFlush("metrics", totalBytes, time.Since(start).Seconds())
 		if len(failed) > maxRetry {
-			log.Printf("[lake] metrics retry buffer full (%d rows), dropping %d oldest", len(failed), len(failed)-maxRetry)
-			failed = failed[len(failed)-maxRetry:]
+			log.Printf("[lake] metrics retry buffer full (%d rows), dropping %d", len(failed), len(failed)-maxRetry)
+			failed = failed[:maxRetry]
 		}
 		w.bufMetrics = append(w.bufMetrics[:0], failed...)
 	}
