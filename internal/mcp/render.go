@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"html"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,9 @@ import (
 	"github.com/labstack/fanout/internal/render"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+// validReportID matches hex-encoded report IDs (genID produces 16 hex chars from 8 bytes)
+var validReportID = regexp.MustCompile(`^[a-f0-9]+$`)
 
 // Report stores a shareable report snapshot
 type Report struct {
@@ -36,21 +41,27 @@ var reports = &ReportStore{}
 
 // InitReportStore sets the reports directory (call from NewServer)
 func InitReportStore(lakeDir string) {
-	reports.dir = lakeDir + "/reports"
+	reports.dir = filepath.Join(lakeDir, "reports")
 }
 
 func (rs *ReportStore) Save(r *Report) {
+	if !validReportID.MatchString(r.ID) {
+		return
+	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	_ = os.MkdirAll(rs.dir, 0755)
 	data, _ := json.Marshal(r)
-	_ = os.WriteFile(rs.dir+"/"+r.ID+".json", data, 0644)
+	_ = os.WriteFile(filepath.Join(rs.dir, r.ID+".json"), data, 0644)
 }
 
 func (rs *ReportStore) Get(id string) *Report {
+	if !validReportID.MatchString(id) {
+		return nil
+	}
 	rs.mu.RLock()
 	defer rs.mu.RUnlock()
-	data, err := os.ReadFile(rs.dir + "/" + id + ".json")
+	data, err := os.ReadFile(filepath.Join(rs.dir, id+".json"))
 	if err != nil {
 		return nil
 	}
@@ -73,7 +84,7 @@ func (rs *ReportStore) List() []*Report {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		data, err := os.ReadFile(rs.dir + "/" + e.Name())
+		data, err := os.ReadFile(filepath.Join(rs.dir, e.Name()))
 		if err != nil {
 			continue
 		}
@@ -95,9 +106,12 @@ func (rs *ReportStore) List() []*Report {
 }
 
 func (rs *ReportStore) Delete(id string) bool {
+	if !validReportID.MatchString(id) {
+		return false
+	}
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
-	err := os.Remove(rs.dir + "/" + id + ".json")
+	err := os.Remove(filepath.Join(rs.dir, id+".json"))
 	return err == nil
 }
 
@@ -114,7 +128,7 @@ func (rs *ReportStore) Cleanup() int {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		path := rs.dir + "/" + e.Name()
+		path := filepath.Join(rs.dir, e.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue

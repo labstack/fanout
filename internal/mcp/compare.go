@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/render"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -45,14 +44,16 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 
 	window := clampInt(in.Window, minWindow, maxWindow, 60) // default 60 for compare
 
-	// Build IN clause for services
-	quoted := make([]string, len(in.Services))
+	// Build parameterized IN clause for services
+	placeholders := make([]string, len(in.Services))
+	args := make([]any, len(in.Services))
 	for i, svc := range in.Services {
-		quoted[i] = fmt.Sprintf("'%s'", strings.ReplaceAll(svc, "'", "''"))
+		placeholders[i] = "?"
+		args[i] = svc
 	}
 
 	// Query metrics for all services at once
-	sql := fmt.Sprintf(`
+	q := fmt.Sprintf(`
 		SELECT
 			service,
 			COALESCE(SUM(spans), 0) as requests,
@@ -63,22 +64,20 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 		WHERE service IN (%s) AND bucket >= NOW() - INTERVAL '%d minutes'
 		GROUP BY service
 		ORDER BY requests DESC
-	`, strings.Join(quoted, ","), window)
+	`, strings.Join(placeholders, ","), window)
 
-	resp := s.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql, MaxRows: 10})
-	if resp.Error != "" {
-		return nil, CompareOut{}, fmt.Errorf("query failed: %s", resp.Error)
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, CompareOut{}, fmt.Errorf("query failed: %w", err)
 	}
+	defer rows.Close()
 
 	// Parse results
 	var metrics []CompareMetrics
-	for _, row := range resp.Results {
-		m := CompareMetrics{
-			Service:   getString(row, "service"),
-			Requests:  getInt64(row, "requests"),
-			ErrorRate: getFloat64(row, "error_rate"),
-			P50Ms:     getFloat64(row, "p50_ms"),
-			P95Ms:     getFloat64(row, "p95_ms"),
+	for rows.Next() {
+		var m CompareMetrics
+		if err := rows.Scan(&m.Service, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms); err != nil {
+			continue
 		}
 		m.ErrorCount = int64(float64(m.Requests) * m.ErrorRate)
 		if m.Requests > 0 {

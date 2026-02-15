@@ -100,10 +100,12 @@ func (s *Service) Unified(ctx context.Context, p UnifiedParams) (*UnifiedResult,
 
 func (s *Service) queryUnifiedSpans(ctx context.Context, p UnifiedParams) []UnifiedEvent {
 	var events []UnifiedEvent
+	var args []any
 
 	svcFilter := ""
 	if p.Service != "" {
-		svcFilter = fmt.Sprintf(`AND "name=service_name" = '%s'`, escapeSQL(p.Service))
+		svcFilter = `AND "name=service_name" = ?`
+		args = append(args, p.Service)
 	}
 
 	q := fmt.Sprintf(`
@@ -121,7 +123,7 @@ ORDER BY "name=start_unix_nano" DESC
 LIMIT %d;
 `, s.duck.SpansGlob(p.TenantID, p.Namespace, p.Window), p.Window, svcFilter, p.Limit)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return events
 	}
@@ -146,10 +148,12 @@ LIMIT %d;
 
 func (s *Service) queryUnifiedLogs(ctx context.Context, p UnifiedParams) []UnifiedEvent {
 	var events []UnifiedEvent
+	var args []any
 
 	svcFilter := ""
 	if p.Service != "" {
-		svcFilter = fmt.Sprintf(`AND "name=service_name" = '%s'`, escapeSQL(p.Service))
+		svcFilter = `AND "name=service_name" = ?`
+		args = append(args, p.Service)
 	}
 
 	q := fmt.Sprintf(`
@@ -166,7 +170,7 @@ ORDER BY "name=time_unix_nano" DESC
 LIMIT %d;
 `, s.duck.LogsGlob(p.TenantID, p.Namespace, p.Window), p.Window, svcFilter, p.Limit)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return events
 	}
@@ -196,10 +200,12 @@ LIMIT %d;
 
 func (s *Service) queryUnifiedMetrics(ctx context.Context, p UnifiedParams) []UnifiedEvent {
 	var events []UnifiedEvent
+	var args []any
 
 	svcFilter := ""
 	if p.Service != "" {
-		svcFilter = fmt.Sprintf(`AND "name=service_name" = '%s'`, escapeSQL(p.Service))
+		svcFilter = `AND "name=service_name" = ?`
+		args = append(args, p.Service)
 	}
 
 	q := fmt.Sprintf(`
@@ -215,7 +221,7 @@ ORDER BY "name=time_unix_nano" DESC
 LIMIT %d;
 `, s.duck.MetricsGlob(p.TenantID, p.Namespace, p.Window), p.Window, svcFilter, p.Limit)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return events
 	}

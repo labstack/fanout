@@ -28,33 +28,3 @@ func (s *Service) defaults(namespace, tenantID string) (string, string) {
 	return namespace, tenantID
 }
 
-// escapeSQL escapes single quotes for SQL string literals (used in = comparisons).
-func escapeSQL(s string) string {
-	result := ""
-	for _, c := range s {
-		if c == '\'' {
-			result += "''"
-		} else {
-			result += string(c)
-		}
-	}
-	return result
-}
-
-// escapeLikePattern escapes SQL LIKE special characters (%, _) plus quotes.
-func escapeLikePattern(s string) string {
-	result := ""
-	for _, c := range s {
-		switch c {
-		case '\'':
-			result += "''"
-		case '%':
-			result += "\\%"
-		case '_':
-			result += "\\_"
-		default:
-			result += string(c)
-		}
-	}
-	return result
-}

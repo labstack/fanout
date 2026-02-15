@@ -29,6 +29,11 @@ func TestValidateSQL(t *testing.T) {
 		{"blocked read_parquet relative", "SELECT * FROM read_parquet('../secrets.parquet')", true},
 		{"blocked path traversal", "SELECT * FROM read_parquet('lake/../../../etc/passwd')", true},
 
+		// SQL comment injection
+		{"blocked -- comment", "SELECT * FROM foo -- DROP TABLE bar", true},
+		{"blocked -- at end", "SELECT * FROM foo--", true},
+		{"blocked /* block comment */", "SELECT * FROM foo /* malicious */", true},
+
 		// Must start with SELECT or WITH
 		{"blocked SHOW", "SHOW TABLES", true},
 	}

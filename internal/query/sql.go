@@ -182,12 +182,33 @@ func validateSQL(query string, lakeDir string) error {
 		}
 	}
 
-	// Basic SQL injection checks
-	if strings.Contains(query, "--") && !strings.Contains(query, "-- ") {
-		return fmt.Errorf("potential SQL comment injection detected")
+	// Block SQL comment syntax (-- line comments and /* block comments)
+	if strings.Contains(query, "--") {
+		return fmt.Errorf("SQL comments (--) are not allowed")
+	}
+	// Block /* outside of string literals (glob patterns like '/**/*.parquet' are OK)
+	if blockCommentOutsideStrings(query) {
+		return fmt.Errorf("SQL block comments (/* */) are not allowed")
 	}
 
 	return nil
+}
+
+// blockCommentOutsideStrings returns true if /* appears outside single-quoted strings.
+func blockCommentOutsideStrings(query string) bool {
+	inString := false
+	for i := 0; i < len(query); i++ {
+		if query[i] == '\'' {
+			inString = !inString
+			// Handle escaped quotes ('')
+			if inString && i+1 < len(query) && query[i+1] == '\'' {
+				i++ // skip escaped quote
+			}
+		} else if !inString && i+1 < len(query) && query[i] == '/' && query[i+1] == '*' {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureLimit adds or replaces LIMIT clause
