@@ -213,6 +213,27 @@ func TestGenerateInsights(t *testing.T) {
 	}
 }
 
+func TestSafeRunCheckRecoversPanic(t *testing.T) {
+	// A detector with nil duck will panic in runCheck when calling GenerateSnapshot
+	d := &Detector{
+		duck: nil,
+		config: DetectorConfig{
+			Enabled:        true,
+			CheckInterval:  time.Minute,
+			LookbackWindow: 5 * time.Minute,
+		},
+	}
+
+	// safeRunCheck should recover from the panic without propagating it
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("safeRunCheck did not recover panic: %v", r)
+		}
+	}()
+
+	d.safeRunCheck(t.Context())
+}
+
 func TestNewDetector(t *testing.T) {
 	cfg := DetectorConfig{
 		Enabled:        true,

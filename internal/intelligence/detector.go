@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -60,7 +61,7 @@ func (d *Detector) Run(ctx context.Context) {
 func (d *Detector) safeRunCheck(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("detector panic recovered", "panic", r)
+			slog.Error("detector panic recovered", "panic", r, "stack", string(debug.Stack()))
 		}
 	}()
 	d.runCheck(ctx)

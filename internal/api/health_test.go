@@ -33,15 +33,41 @@ func TestLiveness(t *testing.T) {
 	}
 }
 
-func TestReadiness_NoDuck(t *testing.T) {
-	// This test requires a mock DuckDB connection
-	// In production, we'd use an interface for dependency injection
-	t.Skip("nil duck causes panic - requires mock")
-}
+func TestReadiness_NilDuck(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
 
-func TestReadiness_BadLakeDir(t *testing.T) {
-	// This test requires a mock DuckDB connection
-	t.Skip("nil duck causes panic - requires mock")
+	h := NewHealthHandler(nil, config.Config{LakeDir: os.TempDir()})
+	err := h.Readiness(c)
+	if err != nil {
+		t.Fatalf("Readiness error: %v", err)
+	}
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", rec.Code)
+	}
+
+	var resp HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if resp.Status != "unhealthy" {
+		t.Errorf("expected status 'unhealthy', got %s", resp.Status)
+	}
+
+	duckCheck, ok := resp.Checks["duckdb"]
+	if !ok {
+		t.Fatal("missing duckdb check")
+	}
+	if duckCheck.Status != "unhealthy" {
+		t.Errorf("expected duckdb check 'unhealthy', got %s", duckCheck.Status)
+	}
+	if duckCheck.Error != "duckdb not initialized" {
+		t.Errorf("expected error 'duckdb not initialized', got %s", duckCheck.Error)
+	}
 }
 
 func TestCheckResult(t *testing.T) {
