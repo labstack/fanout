@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"time"
 
@@ -292,7 +293,11 @@ func toJSON(v interface{}) []byte {
 	if v == nil {
 		return nil
 	}
-	b, _ := json.Marshal(v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		log.Printf("[ingest] json marshal: %v", err)
+		return nil
+	}
 	return b
 }
 
@@ -304,7 +309,11 @@ func bodyString(v *common.AnyValue) string {
 	case *common.AnyValue_StringValue:
 		return x.StringValue
 	default:
-		b, _ := json.Marshal(v)
+		b, err := json.Marshal(v)
+		if err != nil {
+			log.Printf("[ingest] json marshal body: %v", err)
+			return ""
+		}
 		return string(b)
 	}
 }
@@ -384,7 +393,11 @@ func eventsToJSON(events []*tracepb.Span_Event) []byte {
 		}
 		out = append(out, ev)
 	}
-	b, _ := json.Marshal(out)
+	b, err := json.Marshal(out)
+	if err != nil {
+		log.Printf("[ingest] json marshal events: %v", err)
+		return nil
+	}
 	return b
 }
 
@@ -413,7 +426,11 @@ func linksToJSON(links []*tracepb.Span_Link) []byte {
 		}
 		out = append(out, ln)
 	}
-	b, _ := json.Marshal(out)
+	b, err := json.Marshal(out)
+	if err != nil {
+		log.Printf("[ingest] json marshal links: %v", err)
+		return nil
+	}
 	return b
 }
 
@@ -458,7 +475,11 @@ func exemplarsToJSON(exemplars []*metricspb.Exemplar) []byte {
 		}
 		out = append(out, item)
 	}
-	b, _ := json.Marshal(out)
+	b, err := json.Marshal(out)
+	if err != nil {
+		log.Printf("[ingest] json marshal exemplars: %v", err)
+		return nil
+	}
 	return b
 }
 
