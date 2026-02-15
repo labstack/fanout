@@ -207,7 +207,10 @@ func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
 		if e.IsDir() && strings.HasPrefix(e.Name(), "hour=") {
 			if err := os.RemoveAll(filepath.Join(dayPath, e.Name())); err != nil {
 				// Cleanup: remove compacted file to avoid duplicates
-				os.Remove(filepath.Join(dayPath, "compacted.parquet"))
+				compactedPath := filepath.Join(dayPath, "compacted.parquet")
+				if rmErr := os.Remove(compactedPath); rmErr != nil {
+					slog.Error("failed to clean up compacted file after hour dir removal failure", "path", compactedPath, "err", rmErr)
+				}
 				return 0, fmt.Errorf("remove hour dir %s: %w", e.Name(), err)
 			}
 		}

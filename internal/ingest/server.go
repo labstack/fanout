@@ -92,6 +92,7 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 					ScopeVersion:   scopeVer,
 					IngestedAt:     now,
 				}
+				// Partial ingest is acceptable: OTLP clients retry the full batch on error.
 				select {
 				case ts.srv.outSpans <- row:
 				case <-ctx.Done():
