@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 )
 
@@ -45,6 +46,7 @@ ORDER BY bucket ASC;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
+		slog.Warn("query failed", "method", "Timeline", "err", err)
 		return out, nil
 	}
 	defer rows.Close()
@@ -56,6 +58,7 @@ ORDER BY bucket ASC;
 		var b TimeBucket
 		var bucket any
 		if err := rows.Scan(&bucket, &b.Requests, &b.Errors, &b.P50Ms, &b.P95Ms); err != nil {
+			slog.Warn("scan failed", "method", "Timeline", "err", err)
 			continue
 		}
 		b.Time = fmt.Sprintf("%v", bucket)

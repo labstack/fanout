@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 )
 
 // Diagnose returns detailed service diagnostics with root cause analysis.
@@ -38,6 +39,7 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
 
 	row := s.duck.DB.QueryRowContext(ctx, q, svc)
 	if err := row.Scan(&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate); err != nil {
+		slog.Warn("query failed", "method", "Diagnose", "err", err)
 		out.Status = "unknown"
 		return out, nil
 	}
@@ -68,7 +70,10 @@ LIMIT 5;
 		defer rows.Close()
 		for rows.Next() {
 			var e ErrorInfo
-			rows.Scan(&e.Message, &e.Count, &e.TraceID)
+			if err := rows.Scan(&e.Message, &e.Count, &e.TraceID); err != nil {
+				slog.Warn("scan failed", "method", "Diagnose.errors", "err", err)
+				continue
+			}
 			out.TopErrors = append(out.TopErrors, e)
 			if e.TraceID != "" && len(suggestedTraces) < 3 {
 				suggestedTraces = append(suggestedTraces, e.TraceID)
@@ -96,7 +101,10 @@ LIMIT 5;
 		defer rows.Close()
 		for rows.Next() {
 			var op SlowOp
-			rows.Scan(&op.Name, &op.P95Ms, &op.Count)
+			if err := rows.Scan(&op.Name, &op.P95Ms, &op.Count); err != nil {
+				slog.Warn("scan failed", "method", "Diagnose.slowOps", "err", err)
+				continue
+			}
 			out.SlowOps = append(out.SlowOps, op)
 		}
 	}
@@ -132,7 +140,10 @@ LIMIT 10;
 		defer rows.Close()
 		for rows.Next() {
 			var d Dependency
-			rows.Scan(&d.Service, &d.CallCount, &d.P95Ms, &d.ErrorRate)
+			if err := rows.Scan(&d.Service, &d.CallCount, &d.P95Ms, &d.ErrorRate); err != nil {
+				slog.Warn("scan failed", "method", "Diagnose.deps", "err", err)
+				continue
+			}
 			out.Dependencies = append(out.Dependencies, d)
 		}
 	}

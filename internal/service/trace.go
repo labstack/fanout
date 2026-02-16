@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 )
 
@@ -75,6 +76,7 @@ ORDER BY "name=start_unix_nano" ASC;
 		var parentID, statusMsg, eventsJSON, linksJSON, traceState, flags, scopeName, scopeVersion, attrsJSON any
 		if err := rows.Scan(&r.SpanID, &parentID, &r.Service, &r.Name, &r.Kind, &r.StartTime, &r.Duration, &r.Status, &statusMsg, &r.startNano,
 			&eventsJSON, &linksJSON, &traceState, &flags, &scopeName, &scopeVersion, &attrsJSON); err != nil {
+			slog.Warn("scan failed", "method", "Trace", "err", err)
 			continue
 		}
 		if parentID != nil {
@@ -285,7 +287,10 @@ LIMIT 100;
 		r.TraceID = traceID
 		var observedTime, spanID, flags, scopeName, scopeVersion, attrsJSON any
 		var severityNum any
-		rows.Scan(&r.Time, &observedTime, &r.Service, &r.Severity, &severityNum, &r.Body, &spanID, &flags, &scopeName, &scopeVersion, &attrsJSON)
+		if err := rows.Scan(&r.Time, &observedTime, &r.Service, &r.Severity, &severityNum, &r.Body, &spanID, &flags, &scopeName, &scopeVersion, &attrsJSON); err != nil {
+			slog.Warn("scan failed", "method", "fetchTraceLogs", "err", err)
+			continue
+		}
 		if observedTime != nil {
 			r.ObservedTime = fmt.Sprintf("%v", observedTime)
 		}

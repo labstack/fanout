@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -123,7 +124,10 @@ LIMIT %d;
 	for rows.Next() {
 		var r SpanResult
 		var scopeName, scopeVersion any
-		rows.Scan(&r.TraceID, &r.SpanID, &r.Service, &r.Name, &r.Duration, &r.Status, &r.StartTime, &scopeName, &scopeVersion)
+		if err := rows.Scan(&r.TraceID, &r.SpanID, &r.Service, &r.Name, &r.Duration, &r.Status, &r.StartTime, &scopeName, &scopeVersion); err != nil {
+			slog.Warn("scan failed", "method", "findSpans", "err", err)
+			continue
+		}
 		if scopeName != nil {
 			r.ScopeName = fmt.Sprintf("%v", scopeName)
 		}
@@ -198,7 +202,10 @@ LIMIT %d;
 		var r LogResult
 		var observedTime, traceID, spanID, scopeName, scopeVersion any
 		var severityNum any
-		rows.Scan(&r.Time, &observedTime, &r.Service, &r.Severity, &severityNum, &r.Body, &traceID, &spanID, &scopeName, &scopeVersion)
+		if err := rows.Scan(&r.Time, &observedTime, &r.Service, &r.Severity, &severityNum, &r.Body, &traceID, &spanID, &scopeName, &scopeVersion); err != nil {
+			slog.Warn("scan failed", "method", "findLogs", "err", err)
+			continue
+		}
 		if observedTime != nil {
 			r.ObservedTime = fmt.Sprintf("%v", observedTime)
 		}

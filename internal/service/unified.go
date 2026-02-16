@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 )
@@ -125,6 +126,7 @@ LIMIT %d;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
+		slog.Warn("query failed", "method", "queryUnifiedSpans", "err", err)
 		return events
 	}
 	defer rows.Close()
@@ -133,7 +135,10 @@ LIMIT %d;
 		var e UnifiedEvent
 		e.Type = "span"
 		var status string
-		rows.Scan(&e.Time, &e.Service, &e.Name, &e.Duration, &status, &e.TraceID, &e.SpanID)
+		if err := rows.Scan(&e.Time, &e.Service, &e.Name, &e.Duration, &status, &e.TraceID, &e.SpanID); err != nil {
+			slog.Warn("scan failed", "method", "queryUnifiedSpans", "err", err)
+			continue
+		}
 		if status == "STATUS_CODE_ERROR" || status == "ERROR" {
 			e.Status = "error"
 		} else {
@@ -172,6 +177,7 @@ LIMIT %d;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
+		slog.Warn("query failed", "method", "queryUnifiedLogs", "err", err)
 		return events
 	}
 	defer rows.Close()
@@ -180,7 +186,10 @@ LIMIT %d;
 		var e UnifiedEvent
 		var traceID, spanID any
 		e.Type = "log"
-		rows.Scan(&e.Time, &e.Service, &e.Severity, &e.Value, &traceID, &spanID)
+		if err := rows.Scan(&e.Time, &e.Service, &e.Severity, &e.Value, &traceID, &spanID); err != nil {
+			slog.Warn("scan failed", "method", "queryUnifiedLogs", "err", err)
+			continue
+		}
 		e.Name = e.Severity
 		if traceID != nil {
 			e.TraceID = fmt.Sprintf("%v", traceID)
@@ -223,6 +232,7 @@ LIMIT %d;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
+		slog.Warn("query failed", "method", "queryUnifiedMetrics", "err", err)
 		return events
 	}
 	defer rows.Close()
@@ -232,7 +242,10 @@ LIMIT %d;
 		var value float64
 		var unit any
 		e.Type = "metric"
-		rows.Scan(&e.Time, &e.Service, &e.Name, &value, &unit)
+		if err := rows.Scan(&e.Time, &e.Service, &e.Name, &value, &unit); err != nil {
+			slog.Warn("scan failed", "method", "queryUnifiedMetrics", "err", err)
+			continue
+		}
 		unitStr := ""
 		if unit != nil {
 			unitStr = fmt.Sprintf("%v", unit)

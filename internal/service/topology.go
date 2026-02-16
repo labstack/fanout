@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 )
 
 // Topology returns the service dependency map with health indicators.
@@ -54,6 +55,7 @@ LIMIT 50;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
+		slog.Warn("query failed", "method", "Topology.nodes", "err", err)
 		return out, nil
 	}
 	defer rows.Close()
@@ -61,6 +63,7 @@ LIMIT 50;
 	for rows.Next() {
 		var n ServiceNode
 		if err := rows.Scan(&n.Name, &n.SpanCount, &n.P95Ms, &n.ErrorRate); err != nil {
+			slog.Warn("scan failed", "method", "Topology.nodes", "err", err)
 			continue
 		}
 		n.Status = DeriveHealth(n.ErrorRate, n.P95Ms)
@@ -115,6 +118,7 @@ LIMIT 100;
 
 	rows, err = s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
+		slog.Warn("query failed", "method", "Topology.edges", "err", err)
 		return out, nil
 	}
 	defer rows.Close()
@@ -122,6 +126,7 @@ LIMIT 100;
 	for rows.Next() {
 		var e ServiceEdge
 		if err := rows.Scan(&e.From, &e.To, &e.CallCount, &e.AvgMs, &e.ErrorRate); err != nil {
+			slog.Warn("scan failed", "method", "Topology.edges", "err", err)
 			continue
 		}
 		e.Status = DeriveHealth(e.ErrorRate, e.AvgMs)
