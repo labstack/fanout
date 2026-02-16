@@ -95,7 +95,9 @@ templ Traces(data TracesData) {
 					if (ns) url.searchParams.set('ns', ns);
 					const win = new URL(window.location.href).searchParams.get('window');
 					if (win && win !== '60') url.searchParams.set('window', win);
-					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
+					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).catch(() => {
+						alert('Search failed. Please try again.');
+					});
 					history.pushState({}, '', url.toString());
 					return false;
 				}

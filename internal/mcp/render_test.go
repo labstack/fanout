@@ -4,6 +4,8 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func TestGenID(t *testing.T) {
@@ -20,9 +22,13 @@ func TestGenID(t *testing.T) {
 		t.Error("genID() should generate unique IDs")
 	}
 
-	// IDs should be 16 characters (8 bytes hex encoded)
-	if len(id1) != 16 {
-		t.Errorf("genID() length = %d, want 16", len(id1))
+	// IDs should be valid UUID v7
+	parsed, err := uuid.Parse(id1)
+	if err != nil {
+		t.Errorf("genID() returned invalid UUID: %v", err)
+	}
+	if parsed.Version() != 7 {
+		t.Errorf("genID() UUID version = %d, want 7", parsed.Version())
 	}
 }
 
@@ -36,8 +42,9 @@ func TestReportStore_SaveAndGet(t *testing.T) {
 
 	store := &ReportStore{dir: tmpDir + "/reports"}
 
+	id := genID()
 	report := &Report{
-		ID:        "a1b2c3d4e5f60001",
+		ID:        id,
 		Query:     "service health",
 		Summary:   "Test report",
 		HTML:      "<div>Test</div>",
@@ -48,12 +55,12 @@ func TestReportStore_SaveAndGet(t *testing.T) {
 	store.Save(report)
 
 	// Get should return the saved report
-	got := store.Get("a1b2c3d4e5f60001")
+	got := store.Get(id)
 	if got == nil {
 		t.Fatal("Get() returned nil for saved report")
 	}
-	if got.ID != "a1b2c3d4e5f60001" {
-		t.Errorf("ID = %q, want %q", got.ID, "a1b2c3d4e5f60001")
+	if got.ID != id {
+		t.Errorf("ID = %q, want %q", got.ID, id)
 	}
 	if got.Summary != "Test report" {
 		t.Errorf("Summary = %q", got.Summary)
@@ -69,7 +76,7 @@ func TestReportStore_GetNonExistent(t *testing.T) {
 
 	store := &ReportStore{dir: tmpDir + "/reports"}
 
-	got := store.Get("0000000000000000")
+	got := store.Get("00000000-0000-7000-8000-000000000000")
 	if got != nil {
 		t.Error("Get() should return nil for non-existent report")
 	}
@@ -86,9 +93,10 @@ func TestReportStore_List(t *testing.T) {
 
 	// Save multiple reports
 	now := time.Now()
-	store.Save(&Report{ID: "a1b2c3d4e5f60002", CreatedAt: now.Add(-2 * time.Hour)})
-	store.Save(&Report{ID: "a1b2c3d4e5f60003", CreatedAt: now.Add(-1 * time.Hour)})
-	store.Save(&Report{ID: "a1b2c3d4e5f60004", CreatedAt: now})
+	id1, id2, id3 := genID(), genID(), genID()
+	store.Save(&Report{ID: id1, CreatedAt: now.Add(-2 * time.Hour)})
+	store.Save(&Report{ID: id2, CreatedAt: now.Add(-1 * time.Hour)})
+	store.Save(&Report{ID: id3, CreatedAt: now})
 
 	reports := store.List()
 
@@ -97,8 +105,8 @@ func TestReportStore_List(t *testing.T) {
 	}
 
 	// Should be sorted by created_at descending (newest first)
-	if reports[0].ID != "a1b2c3d4e5f60004" {
-		t.Errorf("First report ID = %q, want %q (newest)", reports[0].ID, "a1b2c3d4e5f60004")
+	if reports[0].ID != id3 {
+		t.Errorf("First report ID = %q, want %q (newest)", reports[0].ID, id3)
 	}
 }
 
@@ -126,21 +134,22 @@ func TestReportStore_Delete(t *testing.T) {
 
 	store := &ReportStore{dir: tmpDir + "/reports"}
 
-	store.Save(&Report{ID: "a1b2c3d4e5f60005", Summary: "Will be deleted"})
+	id := genID()
+	store.Save(&Report{ID: id, Summary: "Will be deleted"})
 
 	// Verify it exists
-	if store.Get("a1b2c3d4e5f60005") == nil {
+	if store.Get(id) == nil {
 		t.Fatal("Report should exist before deletion")
 	}
 
 	// Delete
-	ok := store.Delete("a1b2c3d4e5f60005")
+	ok := store.Delete(id)
 	if !ok {
 		t.Error("Delete() should return true for existing report")
 	}
 
 	// Verify it's gone
-	if store.Get("a1b2c3d4e5f60005") != nil {
+	if store.Get(id) != nil {
 		t.Error("Report should not exist after deletion")
 	}
 }
@@ -155,7 +164,7 @@ func TestReportStore_DeleteNonExistent(t *testing.T) {
 	store := &ReportStore{dir: tmpDir + "/reports"}
 	_ = os.MkdirAll(store.dir, 0755)
 
-	ok := store.Delete("0000000000000000")
+	ok := store.Delete("00000000-0000-7000-8000-000000000000")
 	if ok {
 		t.Error("Delete() should return false for non-existent report")
 	}
@@ -173,9 +182,10 @@ func TestReportStore_Cleanup(t *testing.T) {
 	now := time.Now()
 
 	// Save some expired and non-expired reports
-	store.Save(&Report{ID: "a1b2c3d4e5f60006", ExpiresAt: now.Add(-1 * time.Hour)})
-	store.Save(&Report{ID: "a1b2c3d4e5f60007", ExpiresAt: now.Add(-30 * time.Minute)})
-	store.Save(&Report{ID: "a1b2c3d4e5f60008", ExpiresAt: now.Add(1 * time.Hour)})
+	id1, id2, id3 := genID(), genID(), genID()
+	store.Save(&Report{ID: id1, ExpiresAt: now.Add(-1 * time.Hour)})
+	store.Save(&Report{ID: id2, ExpiresAt: now.Add(-30 * time.Minute)})
+	store.Save(&Report{ID: id3, ExpiresAt: now.Add(1 * time.Hour)})
 
 	// Run cleanup
 	deleted := store.Cleanup()
@@ -185,15 +195,15 @@ func TestReportStore_Cleanup(t *testing.T) {
 	}
 
 	// Valid report should still exist
-	if store.Get("a1b2c3d4e5f60008") == nil {
+	if store.Get(id3) == nil {
 		t.Error("Valid report should not be deleted")
 	}
 
 	// Expired reports should be gone
-	if store.Get("a1b2c3d4e5f60006") != nil {
+	if store.Get(id1) != nil {
 		t.Error("Expired report 1 should be deleted")
 	}
-	if store.Get("a1b2c3d4e5f60007") != nil {
+	if store.Get(id2) != nil {
 		t.Error("Expired report 2 should be deleted")
 	}
 }
@@ -230,17 +240,19 @@ func TestReportStore_PathTraversal(t *testing.T) {
 		t.Error("path traversal ID should be rejected")
 	}
 
-	// Valid hex ID should work
-	store.Save(&Report{ID: "abcdef0123456789"})
-	if store.Get("abcdef0123456789") == nil {
-		t.Error("valid hex ID should be accepted")
+	// Valid UUID ID should work
+	id := genID()
+	store.Save(&Report{ID: id})
+	if store.Get(id) == nil {
+		t.Error("valid UUID ID should be accepted")
 	}
 }
 
 func TestReport(t *testing.T) {
 	now := time.Now()
+	id := genID()
 	r := Report{
-		ID:        "a1b2c3d4e5f60009",
+		ID:        id,
 		Query:     "status check",
 		Summary:   "All systems operational",
 		HTML:      "<div class='status'>OK</div>",
@@ -248,7 +260,7 @@ func TestReport(t *testing.T) {
 		ExpiresAt: now.Add(24 * time.Hour),
 	}
 
-	if r.ID != "a1b2c3d4e5f60009" {
+	if r.ID != id {
 		t.Errorf("ID = %q", r.ID)
 	}
 	if r.Query != "status check" {

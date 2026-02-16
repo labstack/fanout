@@ -62,7 +62,9 @@ templ Logs(data LogsData) {
 					if (ns) url.searchParams.set('ns', ns);
 					const win = new URL(window.location.href).searchParams.get('window');
 					if (win && win !== '60') url.searchParams.set('window', win);
-					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
+					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).catch(() => {
+						alert('Search failed. Please try again.');
+					});
 					history.pushState({}, '', url.toString());
 					return false;
 				}
@@ -270,7 +272,7 @@ templ Logs(data LogsData) {
 				gap: 0.5rem;
 				font-size: 0.75rem;
 				padding: 0.25rem 0.5rem;
-				background: rgba(0,0,0,0.1);
+				background: var(--sl-color-neutral-100);
 				border-radius: 0.25rem;
 				margin-bottom: 0.25rem;
 			}

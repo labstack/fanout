@@ -189,6 +189,12 @@ func (w *Writer) flushLocked() {
 	if len(w.bufSpans) > 0 {
 		byPartition := make(map[string][]SpanRow)
 		for _, r := range w.bufSpans {
+			if r.TenantID == "" {
+				r.TenantID = "default"
+			}
+			if r.Namespace == "" {
+				r.Namespace = "default"
+			}
 			key := r.TenantID + "/" + r.Namespace
 			byPartition[key] = append(byPartition[key], r)
 		}
@@ -221,6 +227,12 @@ func (w *Writer) flushLocked() {
 	if len(w.bufLogs) > 0 {
 		byPartition := make(map[string][]LogRow)
 		for _, r := range w.bufLogs {
+			if r.TenantID == "" {
+				r.TenantID = "default"
+			}
+			if r.Namespace == "" {
+				r.Namespace = "default"
+			}
 			key := r.TenantID + "/" + r.Namespace
 			byPartition[key] = append(byPartition[key], r)
 		}
@@ -253,6 +265,12 @@ func (w *Writer) flushLocked() {
 	if len(w.bufMetrics) > 0 {
 		byPartition := make(map[string][]MetricRow)
 		for _, r := range w.bufMetrics {
+			if r.TenantID == "" {
+				r.TenantID = "default"
+			}
+			if r.Namespace == "" {
+				r.Namespace = "default"
+			}
 			key := r.TenantID + "/" + r.Namespace
 			byPartition[key] = append(byPartition[key], r)
 		}
@@ -341,11 +359,11 @@ func writeParquet[T any](base string, ts time.Time, rows []T) (string, int64, er
 		_ = os.Remove(tmpPath)
 		return "", 0, err
 	}
+	_ = os.Chmod(tmpPath, 0o644)
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath)
 		return "", 0, err
 	}
-	_ = os.Chmod(finalPath, 0o644)
 
 	info, err := os.Stat(finalPath)
 	if err != nil {

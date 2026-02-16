@@ -69,7 +69,6 @@ ORDER BY "name=start_unix_nano" ASC;
 
 	var spans []spanWithNano
 	services := make(map[string]bool)
-	spanByID := make(map[string]*spanWithNano)
 
 	for rows.Next() {
 		var r spanWithNano
@@ -133,7 +132,6 @@ ORDER BY "name=start_unix_nano" ASC;
 			out.HasError = true
 		}
 		spans = append(spans, r)
-		spanByID[r.SpanID] = &spans[len(spans)-1]
 	}
 
 	// Calculate self time and find root
