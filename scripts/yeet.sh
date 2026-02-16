@@ -85,7 +85,7 @@ sudo chown -R $USER:$USER /app
 SETUP_EOF
 
 echo "📥 Copying config..."
-scp "$(dirname "$0")/../docker-compose.prod.yaml" "$SERVER:/app/docker-compose.yaml"
+scp "$(dirname "$0")/../docker-compose.yaml" "$SERVER:/app/docker-compose.yaml"
 scp "$(dirname "$0")/grpc.conf" "$SERVER:/data/nginx/grpc.conf"
 
 echo "🚀 Deploying..."
