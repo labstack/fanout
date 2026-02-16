@@ -239,8 +239,9 @@ templ Topology(data TopologyData) {
 									if (windowMinutes !== 60) {
 										href += '?window=' + encodeURIComponent(windowMinutes);
 									}
-									htmx.ajax('GET', href, {target: 'body', swap: 'innerHTML'});
-									history.pushState({}, '', href);
+									htmx.ajax('GET', href, {target: 'body', swap: 'innerHTML'}).then(() => {
+										history.pushState({}, '', href);
+									});
 								}
 							});
 						});

@@ -847,12 +847,18 @@ templ Layout(title string, activePage string, window int) {
 										const spec = JSON.parse(el.dataset.vega);
 										vegaEmbed(el, spec, { actions: false, theme: body.classList.contains('sl-theme-dark') ? 'dark' : undefined });
 									} catch(e) {
-									console.error('Vega error:', e);
-									el.textContent = 'Chart failed to load';
-									el.style.cssText = 'display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.8rem;min-height:100px;';
-								}
+										console.error('Vega error:', e);
+										el.textContent = 'Chart failed to load';
+										el.style.cssText = 'display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.8rem;min-height:100px;';
+									}
 								});
-							}).catch(e => console.error('Vega loading failed:', e));
+							}).catch(e => {
+								console.error('Vega loading failed:', e);
+								vegaEls.forEach(el => {
+									el.textContent = 'Chart library failed to load';
+									el.style.cssText = 'display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.8rem;min-height:100px;';
+								});
+							});
 						}
 
 						// Time window selector
@@ -892,8 +898,11 @@ templ Layout(title string, activePage string, window int) {
 								const url = new URL(window.location.href);
 								url.searchParams.set('window', minutes);
 								timeDropdown.hide();
-								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
-								history.pushState({}, '', url.toString());
+								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).then(() => {
+									history.pushState({}, '', url.toString());
+								}).catch((err) => {
+									console.error('Failed to apply time window:', err);
+								});
 							}
 
 							// Event listeners
@@ -929,6 +938,7 @@ templ Layout(title string, activePage string, window int) {
 
 								try {
 									const res = await fetch('/api/namespaces');
+									if (!res.ok) throw new Error('Namespace fetch failed: ' + res.status);
 									const namespaces = await res.json();
 									if (namespaces.length === 0) return;
 
@@ -943,8 +953,9 @@ templ Layout(title string, activePage string, window int) {
 										localStorage.setItem('namespace', namespace);
 										const url = new URL(window.location.href);
 										url.searchParams.set('ns', namespace);
-										htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
-										history.replaceState({}, '', url.toString());
+										htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).then(() => {
+											history.replaceState({}, '', url.toString());
+										});
 										return;
 									}
 
@@ -968,8 +979,11 @@ templ Layout(title string, activePage string, window int) {
 								const url = new URL(window.location.href);
 								url.searchParams.set('ns', namespace);
 								e.target.blur();
-								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
-								history.pushState({}, '', url.toString());
+								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).then(() => {
+									history.pushState({}, '', url.toString());
+								}).catch((err) => {
+									console.error('Failed to switch namespace:', err);
+								});
 							});
 						}
 					}
@@ -1090,8 +1104,9 @@ templ Layout(title string, activePage string, window int) {
 							clearTimeout(gTimeout);
 							gPressed = false;
 							const dest = shortcuts.g[e.key] + getWindowParam();
-							htmx.ajax('GET', dest, {target: 'body', swap: 'innerHTML'});
-							history.pushState({}, '', dest);
+							htmx.ajax('GET', dest, {target: 'body', swap: 'innerHTML'}).then(() => {
+								history.pushState({}, '', dest);
+							});
 							return;
 						}
 

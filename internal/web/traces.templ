@@ -877,10 +877,6 @@ func waterfallBarStyle(startOffset, duration, totalDuration float64) string {
 	return fmt.Sprintf("left: %.1f%%; width: %.1f%%;", left, width)
 }
 
-func spansJSON(spans []SpanInfo) string {
-	return mustJSON(spans, "[]")
-}
-
 func tracesURL(q string, window, limit, offset int) templ.SafeURL {
 	values := url.Values{}
 	if q != "" {

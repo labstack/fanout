@@ -159,7 +159,7 @@ templ Unified(data UnifiedData) {
 								</td>
 								<td>
 									if e.TraceID != "" {
-										<a href={ templ.SafeURL(withWindow("/traces/"+e.TraceID, data.Window)) } class="trace-link">
+										<a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(e.TraceID), data.Window)) } class="trace-link">
 											{ truncateID(e.TraceID) }
 										</a>
 									} else {
