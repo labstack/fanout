@@ -213,7 +213,7 @@ func Unified(data UnifiedData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"><sl-icon slot=\"prefix\" name=\"exclamation-triangle\"></sl-icon> Errors</sl-button></div><!-- Search Form --> <sl-card style=\"margin-bottom: 1.5rem;\"><form method=\"GET\" action=\"/unified\" class=\"search-form\" onsubmit=\"return cleanFormSubmit(this)\"><div class=\"form-row\"><sl-input name=\"q\" label=\"Search\" placeholder=\"service:checkout status:error type:span severity:ERROR\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"><sl-icon slot=\"prefix\" name=\"exclamation-triangle\"></sl-icon> Errors</sl-button></div><!-- Search Form --> <sl-card style=\"margin-bottom: 1rem;\"><form method=\"GET\" action=\"/unified\" class=\"search-form\" onsubmit=\"return cleanFormSubmit(this)\"><div class=\"form-row\"><sl-input name=\"q\" label=\"Search\" placeholder=\"service:checkout status:error type:span severity:ERROR\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

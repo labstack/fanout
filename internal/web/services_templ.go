@@ -574,7 +574,7 @@ func ServiceDetail(data ServiceDetailData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "Service diagnostics</p></div></div><!-- Latency Metrics --> <div class=\"grid grid-4\" style=\"margin-bottom: 1.5rem;\"><sl-card class=\"metric-card\"><div class=\"metric-value\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "Service diagnostics</p></div></div><!-- Latency Metrics --> <div class=\"grid grid-4\" style=\"margin-bottom: 1rem;\"><sl-card class=\"metric-card\"><div class=\"metric-value\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -644,7 +644,7 @@ func ServiceDetail(data ServiceDetailData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Timeline) > 1 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<div class=\"grid grid-2\" style=\"margin-bottom: 1.5rem;\"><sl-card><div slot=\"header\" class=\"card-header\">Latency Trend</div><div class=\"chart\" style=\"height: 200px;\" data-vega=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<div class=\"grid grid-2\" style=\"margin-bottom: 1rem;\"><sl-card><div slot=\"header\" class=\"card-header\">Latency Trend</div><div class=\"chart\" style=\"height: 200px;\" data-vega=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -675,7 +675,7 @@ func ServiceDetail(data ServiceDetailData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, " <div class=\"grid grid-2\" style=\"margin-bottom: 1.5rem;\"><!-- Top Errors --><sl-card><div slot=\"header\" class=\"card-header\">Top Errors</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, " <div class=\"grid grid-2\" style=\"margin-bottom: 1rem;\"><!-- Top Errors --><sl-card><div slot=\"header\" class=\"card-header\">Top Errors</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1135,7 +1135,7 @@ func latencyChartSpec(data []TimelinePoint) string {
 				},
 			},
 			{
-				"mark": map[string]any{"type": "line", "strokeWidth": 2, "color": "#6366f1"},
+				"mark": map[string]any{"type": "line", "strokeWidth": 2, "color": "#0ea5e9"},
 				"encoding": map[string]any{
 					"x": map[string]any{"field": "time", "type": "temporal", "timeUnit": "yearmonthdatehoursminutes"},
 					"y": map[string]any{"field": "p50", "type": "quantitative"},
@@ -1167,7 +1167,7 @@ func requestChartSpec(data []TimelinePoint) string {
 		"data":    map[string]any{"values": values},
 		"layer": []map[string]any{
 			{
-				"mark": map[string]any{"type": "bar", "color": "#6366f1", "opacity": 0.6},
+				"mark": map[string]any{"type": "bar", "color": "#0ea5e9", "opacity": 0.6},
 				"encoding": map[string]any{
 					"x": map[string]any{
 						"field":    "time",

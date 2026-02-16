@@ -20,7 +20,7 @@ templ Topology(data TopologyData) {
 			</sl-card>
 		} else {
 			<!-- Summary Stats -->
-			<div class="grid grid-4" style="margin-bottom: 1rem;">
+			<div class="grid grid-4" style="margin-bottom: 0.75rem;">
 				<sl-card class="metric-card">
 					<div class="metric-value">{ fmt.Sprintf("%d", len(data.Nodes)) }</div>
 					<div class="metric-label">Services</div>
@@ -39,7 +39,7 @@ templ Topology(data TopologyData) {
 				</sl-card>
 			</div>
 			<!-- Legend -->
-			<sl-card style="margin-bottom: 1rem;">
+			<sl-card style="margin-bottom: 0.75rem;">
 				<div class="topo-legend">
 					<div class="topo-legend-group">
 						<span class="topo-legend-title">Nodes:</span>
