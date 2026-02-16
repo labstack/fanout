@@ -83,12 +83,12 @@ templ Metrics(data MetricsData) {
 												for i, svc := range m.Services {
 													if i < 3 {
 														<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc), data.Window)) } class="metric-svc-link">
-															<sl-tag size="small" variant="primary" pill>{ svc }</sl-tag>
+															<sl-tag size="small" variant="primary">{ svc }</sl-tag>
 														</a>
 													}
 												}
 												if len(m.Services) > 3 {
-													<sl-tag size="small" variant="primary" pill>+{ fmt.Sprintf("%d", len(m.Services)-3) }</sl-tag>
+													<sl-tag size="small" variant="primary">+{ fmt.Sprintf("%d", len(m.Services)-3) }</sl-tag>
 												}
 											</span>
 										}

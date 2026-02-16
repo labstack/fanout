@@ -181,14 +181,14 @@ func Metrics(data MetricsData) templ.Component {
 								if templ_7745c5c3_Err != nil {
 									return templ_7745c5c3_Err
 								}
-								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" class=\"metric-svc-link\"><sl-tag size=\"small\" variant=\"primary\" pill>")
+								templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "\" class=\"metric-svc-link\"><sl-tag size=\"small\" variant=\"primary\">")
 								if templ_7745c5c3_Err != nil {
 									return templ_7745c5c3_Err
 								}
 								var templ_7745c5c3_Var9 string
 								templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(svc)
 								if templ_7745c5c3_Err != nil {
-									return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 86, Col: 64}
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 86, Col: 59}
 								}
 								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 								if templ_7745c5c3_Err != nil {
@@ -201,14 +201,14 @@ func Metrics(data MetricsData) templ.Component {
 							}
 						}
 						if len(m.Services) > 3 {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<sl-tag size=\"small\" variant=\"primary\" pill>+")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 16, "<sl-tag size=\"small\" variant=\"primary\">+")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 							var templ_7745c5c3_Var10 string
 							templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(m.Services)-3))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 91, Col: 96}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/metrics.templ`, Line: 91, Col: 91}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 							if templ_7745c5c3_Err != nil {
