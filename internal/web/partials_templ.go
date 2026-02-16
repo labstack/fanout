@@ -98,7 +98,7 @@ func OverviewContent(data OverviewData) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"grid grid-2\" style=\"margin-bottom: 1.5rem;\"><sl-card><div slot=\"header\" class=\"card-header\">Request Timeline</div>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<div class=\"grid grid-2\" style=\"margin-bottom: 1rem;\"><sl-card><div slot=\"header\" class=\"card-header\">Request Timeline</div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -148,7 +148,7 @@ func StatsGrid(s ServiceSummary) templ.Component {
 			templ_7745c5c3_Var5 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div id=\"stats-grid\" class=\"stats-bar\" style=\"margin-bottom: 1rem;\"><div class=\"stats-item\"><div class=\"stats-value\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div id=\"stats-grid\" class=\"stats-bar\" style=\"margin-bottom: 0.75rem;\"><div class=\"stats-item\"><div class=\"stats-value\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -230,7 +230,7 @@ func KeyMetrics(throughput int64, p95 float64, errorRate float64) templ.Componen
 			templ_7745c5c3_Var10 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<div id=\"key-metrics\" class=\"stats-bar\" style=\"margin-bottom: 1.5rem;\"><div class=\"stats-item\"><div class=\"stats-value\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 14, "<div id=\"key-metrics\" class=\"stats-bar\" style=\"margin-bottom: 1rem;\"><div class=\"stats-item\"><div class=\"stats-value\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -35,7 +35,7 @@ templ OverviewContent(data OverviewData) {
 	</div>
 	@StatsGrid(data.Services)
 	@KeyMetrics(data.ThroughputPerMin, data.P95Ms, data.ErrorRate)
-	<div class="grid grid-2" style="margin-bottom: 1.5rem;">
+	<div class="grid grid-2" style="margin-bottom: 1rem;">
 		<sl-card>
 			<div slot="header" class="card-header">Request Timeline</div>
 			@timelineChart(data.Timeline)
@@ -50,7 +50,7 @@ templ OverviewContent(data OverviewData) {
 
 // StatsGrid renders service health counts
 templ StatsGrid(s ServiceSummary) {
-	<div id="stats-grid" class="stats-bar" style="margin-bottom: 1rem;">
+	<div id="stats-grid" class="stats-bar" style="margin-bottom: 0.75rem;">
 		<div class="stats-item">
 			<div class="stats-value">{ fmt.Sprintf("%d", s.Total) }</div>
 			<div class="stats-label">Services</div>
@@ -72,7 +72,7 @@ templ StatsGrid(s ServiceSummary) {
 
 // KeyMetrics renders throughput, latency, error rate
 templ KeyMetrics(throughput int64, p95 float64, errorRate float64) {
-	<div id="key-metrics" class="stats-bar" style="margin-bottom: 1.5rem;">
+	<div id="key-metrics" class="stats-bar" style="margin-bottom: 1rem;">
 		<div class="stats-item">
 			<div class="stats-value">{ fmt.Sprintf("%d", throughput) }</div>
 			<div class="stats-label">Requests/min</div>

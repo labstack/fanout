@@ -265,7 +265,7 @@ templ TraceDetail(data TraceDetailData) {
 			</div>
 		</div>
 		<!-- Summary -->
-		<div class="grid grid-4" style="margin-bottom: 1.5rem;">
+		<div class="grid grid-4" style="margin-bottom: 1rem;">
 			<sl-card class="metric-card">
 				<div class="metric-value">{ fmt.Sprintf("%.0f", data.Duration) }ms</div>
 				<div class="metric-label">Total Duration</div>
@@ -288,7 +288,7 @@ templ TraceDetail(data TraceDetailData) {
 			</sl-card>
 		</div>
 		<!-- Waterfall Chart -->
-		<sl-card style="margin-bottom: 1.5rem;">
+		<sl-card style="margin-bottom: 1rem;">
 			<div slot="header" class="card-header" style="display: flex; align-items: center; justify-content: space-between;">
 				<span>Trace Waterfall</span>
 				<div class="waterfall-legend">
@@ -540,7 +540,7 @@ templ TraceDetail(data TraceDetailData) {
 				height: 10px;
 				border-radius: 2px;
 			}
-			.legend-server { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); }
+			.legend-server { background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); }
 			.legend-client { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }
 			.legend-internal { background: linear-gradient(135deg, #64748b 0%, #475569 100%); }
 			.legend-error { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }
@@ -661,7 +661,7 @@ templ TraceDetail(data TraceDetailData) {
 			}
 			/* Kind-based colors (when not error) */
 			.waterfall-bar-server {
-				background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+				background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
 			}
 			.waterfall-bar-client {
 				background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);

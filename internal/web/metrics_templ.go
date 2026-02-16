@@ -67,7 +67,7 @@ func Metrics(data MetricsData) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"page-header\"><div class=\"page-header-left\"><h1 class=\"page-title\">Metrics Explorer</h1><p class=\"page-subtitle\">Explore aggregated metrics</p></div></div><!-- Search Form --> <sl-card style=\"margin-bottom: 1.5rem;\"><form method=\"GET\" action=\"/metrics\" class=\"search-form\"><div class=\"form-row\"><sl-input name=\"q\" label=\"Search\" placeholder=\"name:http.* service:cart type:gauge\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"page-header\"><div class=\"page-header-left\"><h1 class=\"page-title\">Metrics Explorer</h1><p class=\"page-subtitle\">Explore aggregated metrics</p></div></div><!-- Search Form --> <sl-card style=\"margin-bottom: 1rem;\"><form method=\"GET\" action=\"/metrics\" class=\"search-form\"><div class=\"form-row\"><sl-input name=\"q\" label=\"Search\" placeholder=\"name:http.* service:cart type:gauge\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
