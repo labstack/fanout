@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -60,7 +61,7 @@ func main() {
 	writer := lake.NewWriter(cfg, chSpans, chLogs, chMetrics)
 	go func() {
 		if err := writer.Run(ctx); err != nil {
-			errCh <- err
+			errCh <- fmt.Errorf("lake writer: %w", err)
 		}
 	}()
 
@@ -99,7 +100,7 @@ func main() {
 	go func() {
 		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr)
 		if err := grpcSrv.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
-			errCh <- err
+			errCh <- fmt.Errorf("gRPC server: %w", err)
 		}
 	}()
 
@@ -170,7 +171,7 @@ func main() {
 	go func() {
 		slog.Info("HTTP listening", "addr", cfg.HTTPAddr)
 		if err := e.Start(cfg.HTTPAddr); err != nil && err != http.ErrServerClosed {
-			errCh <- err
+			errCh <- fmt.Errorf("HTTP server: %w", err)
 		}
 	}()
 
