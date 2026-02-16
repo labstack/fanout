@@ -39,19 +39,28 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Clean up orphaned temp files from previous crashes
+	lake.CleanupTempFiles(cfg.LakeDir)
+
 	// Channels for ingest → lake writer
 	chSpans := make(chan lake.SpanRow, 10000)
 	chLogs := make(chan lake.LogRow, 10000)
 	chMetrics := make(chan lake.MetricRow, 10000)
 
-	// Start Lake Writer
-	writer := lake.NewWriter(cfg, chSpans, chLogs, chMetrics)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialize query cache with app context (cleanup goroutine stops on cancel)
+	query.InitQueryCache(ctx)
+
+	// Error channel for goroutine failures
+	errCh := make(chan error, 3)
+
+	// Start Lake Writer
+	writer := lake.NewWriter(cfg, chSpans, chLogs, chMetrics)
 	go func() {
 		if err := writer.Run(ctx); err != nil {
-			slog.Error("lake writer failed", "err", err)
-			os.Exit(1)
+			errCh <- err
 		}
 	}()
 
@@ -90,8 +99,7 @@ func main() {
 	go func() {
 		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr)
 		if err := grpcSrv.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
-			slog.Error("gRPC serve failed", "err", err)
-			os.Exit(1)
+			errCh <- err
 		}
 	}()
 
@@ -162,17 +170,24 @@ func main() {
 	go func() {
 		slog.Info("HTTP listening", "addr", cfg.HTTPAddr)
 		if err := e.Start(cfg.HTTPAddr); err != nil && err != http.ErrServerClosed {
-			slog.Error("HTTP start failed", "err", err)
-			os.Exit(1)
+			errCh <- err
 		}
 	}()
 
-	// Shutdown
+	// Wait for shutdown signal or fatal goroutine error
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-	slog.Info("shutting down")
+
+	select {
+	case <-stop:
+		slog.Info("shutting down")
+	case err := <-errCh:
+		slog.Error("fatal error, shutting down", "err", err)
+	}
+
+	// Coordinated shutdown: cancel context → wait for writer flush → stop servers
 	cancel()
+	writer.Wait()
 	grpcSrv.GracefulStop()
 	ctxShutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()

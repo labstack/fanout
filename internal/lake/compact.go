@@ -69,7 +69,11 @@ func (c *Compactor) compactSignal(signal string, cutoff time.Time) (int, int64) 
 	var bytesSaved int64
 
 	// Walk tenant directories
-	tenants, _ := os.ReadDir(baseDir)
+	tenants, err := os.ReadDir(baseDir)
+	if err != nil {
+		slog.Warn("readdir failed", "path", baseDir, "err", err)
+		return 0, 0
+	}
 	for _, tenantDir := range tenants {
 		if !tenantDir.IsDir() || !strings.HasPrefix(tenantDir.Name(), "tenant=") {
 			continue
@@ -77,7 +81,11 @@ func (c *Compactor) compactSignal(signal string, cutoff time.Time) (int, int64) 
 		tenantPath := filepath.Join(baseDir, tenantDir.Name())
 
 		// Walk namespace directories
-		namespaces, _ := os.ReadDir(tenantPath)
+		namespaces, err := os.ReadDir(tenantPath)
+		if err != nil {
+			slog.Warn("readdir failed", "path", tenantPath, "err", err)
+			continue
+		}
 		for _, nsDir := range namespaces {
 			if !nsDir.IsDir() || !strings.HasPrefix(nsDir.Name(), "namespace=") {
 				continue
@@ -85,7 +93,11 @@ func (c *Compactor) compactSignal(signal string, cutoff time.Time) (int, int64) 
 			nsPath := filepath.Join(tenantPath, nsDir.Name())
 
 			// Walk year directories
-			years, _ := os.ReadDir(nsPath)
+			years, err := os.ReadDir(nsPath)
+			if err != nil {
+				slog.Warn("readdir failed", "path", nsPath, "err", err)
+				continue
+			}
 			for _, yearDir := range years {
 				if !yearDir.IsDir() || !strings.HasPrefix(yearDir.Name(), "year=") {
 					continue
@@ -93,7 +105,11 @@ func (c *Compactor) compactSignal(signal string, cutoff time.Time) (int, int64) 
 				year := parsePartition(yearDir.Name(), "year")
 				yearPath := filepath.Join(nsPath, yearDir.Name())
 
-				months, _ := os.ReadDir(yearPath)
+				months, err := os.ReadDir(yearPath)
+				if err != nil {
+					slog.Warn("readdir failed", "path", yearPath, "err", err)
+					continue
+				}
 				for _, monthDir := range months {
 					if !monthDir.IsDir() || !strings.HasPrefix(monthDir.Name(), "month=") {
 						continue
@@ -101,7 +117,11 @@ func (c *Compactor) compactSignal(signal string, cutoff time.Time) (int, int64) 
 					month := parsePartition(monthDir.Name(), "month")
 					monthPath := filepath.Join(yearPath, monthDir.Name())
 
-					days, _ := os.ReadDir(monthPath)
+					days, err := os.ReadDir(monthPath)
+					if err != nil {
+						slog.Warn("readdir failed", "path", monthPath, "err", err)
+						continue
+					}
 					for _, dayDir := range days {
 						if !dayDir.IsDir() || !strings.HasPrefix(dayDir.Name(), "day=") {
 							continue
@@ -140,7 +160,11 @@ func isCompacted(dayPath string) bool {
 	compactedFile := filepath.Join(dayPath, "compacted.parquet")
 	if _, err := os.Stat(compactedFile); err == nil {
 		// Check if there are still hour directories
-		entries, _ := os.ReadDir(dayPath)
+		entries, err := os.ReadDir(dayPath)
+		if err != nil {
+			slog.Warn("readdir failed", "path", dayPath, "err", err)
+			return false
+		}
 		for _, e := range entries {
 			if e.IsDir() && strings.HasPrefix(e.Name(), "hour=") {
 				return false // Has hour dirs, needs compaction

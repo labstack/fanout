@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,7 +55,7 @@ func TestSqlQuote(t *testing.T) {
 }
 
 func TestCache_SetAndGet(t *testing.T) {
-	cache := NewCache(1 * time.Second)
+	cache := NewCache(context.Background(), 1*time.Second)
 
 	// Set a value
 	cache.Set("key1", "value1")
@@ -76,7 +77,7 @@ func TestCache_SetAndGet(t *testing.T) {
 }
 
 func TestCache_Expiry(t *testing.T) {
-	cache := NewCache(50 * time.Millisecond)
+	cache := NewCache(context.Background(), 50*time.Millisecond)
 
 	cache.Set("key1", "value1")
 
@@ -97,7 +98,7 @@ func TestCache_Expiry(t *testing.T) {
 }
 
 func TestCache_OverwriteValue(t *testing.T) {
-	cache := NewCache(1 * time.Second)
+	cache := NewCache(context.Background(), 1*time.Second)
 
 	cache.Set("key1", "value1")
 	cache.Set("key1", "value2")

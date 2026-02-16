@@ -69,7 +69,11 @@ func (p *Pruner) pruneSignal(signal string, cutoff time.Time) (int, int64) {
 	var bytesDeleted int64
 
 	// Walk year directories
-	years, _ := os.ReadDir(baseDir)
+	years, err := os.ReadDir(baseDir)
+	if err != nil {
+		slog.Warn("readdir failed", "path", baseDir, "err", err)
+		return 0, 0
+	}
 	for _, yearDir := range years {
 		if !yearDir.IsDir() || !strings.HasPrefix(yearDir.Name(), "year=") {
 			continue
@@ -80,7 +84,11 @@ func (p *Pruner) pruneSignal(signal string, cutoff time.Time) (int, int64) {
 		}
 
 		yearPath := filepath.Join(baseDir, yearDir.Name())
-		months, _ := os.ReadDir(yearPath)
+		months, err := os.ReadDir(yearPath)
+		if err != nil {
+			slog.Warn("readdir failed", "path", yearPath, "err", err)
+			continue
+		}
 
 		for _, monthDir := range months {
 			if !monthDir.IsDir() || !strings.HasPrefix(monthDir.Name(), "month=") {
@@ -92,7 +100,11 @@ func (p *Pruner) pruneSignal(signal string, cutoff time.Time) (int, int64) {
 			}
 
 			monthPath := filepath.Join(yearPath, monthDir.Name())
-			days, _ := os.ReadDir(monthPath)
+			days, err := os.ReadDir(monthPath)
+			if err != nil {
+				slog.Warn("readdir failed", "path", monthPath, "err", err)
+				continue
+			}
 
 			for _, dayDir := range days {
 				if !dayDir.IsDir() || !strings.HasPrefix(dayDir.Name(), "day=") {
@@ -104,7 +116,11 @@ func (p *Pruner) pruneSignal(signal string, cutoff time.Time) (int, int64) {
 				}
 
 				dayPath := filepath.Join(monthPath, dayDir.Name())
-				hours, _ := os.ReadDir(dayPath)
+				hours, err := os.ReadDir(dayPath)
+				if err != nil {
+					slog.Warn("readdir failed", "path", dayPath, "err", err)
+					continue
+				}
 
 				for _, hourDir := range hours {
 					if !hourDir.IsDir() || !strings.HasPrefix(hourDir.Name(), "hour=") {

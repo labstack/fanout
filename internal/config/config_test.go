@@ -57,6 +57,9 @@ func TestGetenvBool(t *testing.T) {
 		{"1", false, true},
 		{"true", false, true},
 		{"yes", false, true},
+		{"True", false, true},
+		{"TRUE", false, true},
+		{"YES", false, true},
 		{"0", true, false},
 		{"false", true, false},
 		{"no", true, false},
@@ -119,4 +122,49 @@ func TestLoad(t *testing.T) {
 	if cfg.DefaultNS != "default" {
 		t.Errorf("DefaultNS = %q, want %q", cfg.DefaultNS, "default")
 	}
+}
+
+func TestValidate(t *testing.T) {
+	valid := Config{
+		FlushSeconds:   15,
+		MaxRows:        50000,
+		RollupEvery:    60,
+		RetentionDays:  30,
+		RetentionHours: 1,
+	}
+	if err := valid.Validate(); err != nil {
+		t.Errorf("valid config should pass: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		modify func(*Config)
+	}{
+		{"FlushSeconds=0", func(c *Config) { c.FlushSeconds = 0 }},
+		{"FlushSeconds=-1", func(c *Config) { c.FlushSeconds = -1 }},
+		{"MaxRows=0", func(c *Config) { c.MaxRows = 0 }},
+		{"MaxRows=-1", func(c *Config) { c.MaxRows = -1 }},
+		{"RollupEvery=0", func(c *Config) { c.RollupEvery = 0 }},
+		{"RetentionDays=-1", func(c *Config) { c.RetentionDays = -1 }},
+		{"RetentionHours=0", func(c *Config) { c.RetentionHours = 0 }},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := valid // copy
+			tc.modify(&c)
+			if err := c.Validate(); err == nil {
+				t.Error("expected validation error")
+			}
+		})
+	}
+
+	// RetentionDays=0 is valid (means "keep forever")
+	t.Run("RetentionDays=0_valid", func(t *testing.T) {
+		c := valid
+		c.RetentionDays = 0
+		if err := c.Validate(); err != nil {
+			t.Errorf("RetentionDays=0 should be valid: %v", err)
+		}
+	})
 }
