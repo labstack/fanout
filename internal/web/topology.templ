@@ -1,9 +1,6 @@
 package web
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "fmt"
 
 // Topology renders the service topology page (uses TopologyData from overview.templ)
 templ Topology(data TopologyData) {
@@ -378,8 +375,7 @@ func topoNodesJSON(nodes []ServiceNode) string {
 			ErrorRate: n.ErrorRate,
 		})
 	}
-	b, _ := json.Marshal(out)
-	return string(b)
+	return mustJSON(out, "[]")
 }
 
 func topoEdgesJSON(edges []ServiceEdge) string {
@@ -399,8 +395,7 @@ func topoEdgesJSON(edges []ServiceEdge) string {
 			ErrorRate: e.ErrorRate,
 		})
 	}
-	b, _ := json.Marshal(out)
-	return string(b)
+	return mustJSON(out, "[]")
 }
 
 // countByStatus counts nodes with a specific status

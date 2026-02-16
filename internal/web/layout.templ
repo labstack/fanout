@@ -846,7 +846,11 @@ templ Layout(title string, activePage string, window int) {
 									try {
 										const spec = JSON.parse(el.dataset.vega);
 										vegaEmbed(el, spec, { actions: false, theme: body.classList.contains('sl-theme-dark') ? 'dark' : undefined });
-									} catch(e) { console.error('Vega error:', e); }
+									} catch(e) {
+									console.error('Vega error:', e);
+									el.textContent = 'Chart failed to load';
+									el.style.cssText = 'display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.8rem;min-height:100px;';
+								}
 								});
 							}).catch(e => console.error('Vega loading failed:', e));
 						}
@@ -954,7 +958,7 @@ templ Layout(title string, activePage string, window int) {
 									await namespaceSelect.updateComplete;
 									namespaceSelect.value = namespace;
 									localStorage.setItem('namespace', namespace);
-								} catch (e) {}
+								} catch (e) { console.error('Failed to load namespaces:', e); }
 							}
 							loadNamespaces();
 
@@ -970,25 +974,34 @@ templ Layout(title string, activePage string, window int) {
 						}
 					}
 
-					// Shared form submit handler (used by traces, logs, unified)
+					// Shared form submit handler (used by traces, logs, metrics, unified)
 					window.cleanFormSubmit = function(form) {
-						const url = new URL(form.action, window.location.origin);
-						const q = form.querySelector('[name="q"]').value.trim();
-						if (q) url.searchParams.set('q', q);
-						const ns = new URL(window.location.href).searchParams.get('ns');
-						if (ns) url.searchParams.set('ns', ns);
-						const win = new URL(window.location.href).searchParams.get('window');
-						if (win && win !== '60') url.searchParams.set('window', win);
-						htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).catch(() => {
-							const toast = Object.assign(document.createElement('sl-alert'), {
-								variant: 'danger', closable: true, duration: 4000,
-								innerHTML: '<sl-icon name="exclamation-triangle" slot="icon"></sl-icon>Search failed. Please try again.'
+						try {
+							const url = new URL(form.action, window.location.origin);
+							const qInput = form.querySelector('[name="q"]');
+							if (!qInput) return true;
+							const q = qInput.value.trim();
+							if (q) url.searchParams.set('q', q);
+							const ns = new URL(window.location.href).searchParams.get('ns');
+							if (ns) url.searchParams.set('ns', ns);
+							const win = new URL(window.location.href).searchParams.get('window');
+							if (win && win !== '60') url.searchParams.set('window', win);
+							htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).then(() => {
+								history.pushState({}, '', url.toString());
+							}).catch((err) => {
+								console.error('Search failed:', err);
+								const toast = Object.assign(document.createElement('sl-alert'), {
+									variant: 'danger', closable: true, duration: 4000,
+									innerHTML: '<sl-icon name="exclamation-triangle" slot="icon"></sl-icon>Search failed. Please try again.'
+								});
+								document.body.appendChild(toast);
+								toast.toast();
 							});
-							document.body.appendChild(toast);
-							toast.toast();
-						});
-						history.pushState({}, '', url.toString());
-						return false;
+							return false;
+						} catch (err) {
+							console.error('cleanFormSubmit error, falling back to native submit:', err);
+							return true;
+						}
 					};
 
 					// Keyboard shortcuts

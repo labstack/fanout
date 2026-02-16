@@ -1,7 +1,9 @@
 package web
 
 import (
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -13,8 +15,11 @@ func clampMin(n int) int {
 	return n
 }
 
-// truncateStr truncates s to max characters, appending "..." if truncated.
+// truncateStr truncates s to max total characters, appending "..." if truncated.
 func truncateStr(s string, max int) string {
+	if max <= 0 {
+		return ""
+	}
 	if len(s) <= max {
 		return s
 	}
@@ -57,6 +62,53 @@ func fmtCount(n int64) string {
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
 	return fmt.Sprintf("%d", n)
+}
+
+// filterVariant returns "primary" if the current query matches the target filter.
+func filterVariant(current, target string) string {
+	if target == "" && current == "" {
+		return "primary"
+	}
+	if target != "" && strings.Contains(current, target) {
+		return "primary"
+	}
+	return "default"
+}
+
+// severityVariant returns a Shoelace badge variant for log severity (INFO highlighted).
+func severityVariant(severity string) string {
+	switch severity {
+	case "ERROR", "FATAL":
+		return "danger"
+	case "WARN":
+		return "warning"
+	case "INFO":
+		return "primary"
+	default:
+		return "neutral"
+	}
+}
+
+// logSeverityVariant returns a Shoelace badge variant for log severity in trace/unified contexts.
+func logSeverityVariant(severity string) string {
+	switch severity {
+	case "ERROR", "FATAL":
+		return "danger"
+	case "WARN":
+		return "warning"
+	default:
+		return "neutral"
+	}
+}
+
+// mustJSON marshals v to JSON, returning fallback on error.
+func mustJSON(v any, fallback string) string {
+	b, err := json.Marshal(v)
+	if err != nil {
+		slog.Error("json marshal failed", "error", err)
+		return fallback
+	}
+	return string(b)
 }
 
 // fmtAttrs formats a map of string attributes as "k=v, k2=v2".

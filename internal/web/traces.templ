@@ -1,7 +1,6 @@
 package web
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -65,12 +64,12 @@ templ Traces(data TracesData) {
 			</div>
 		</div>
 		<div class="quick-filters">
-			<sl-button href={ tracesURL("", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Query, "") }>All</sl-button>
-			<sl-button href={ tracesURL("status:error", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Query, "status:error") }>
+			<sl-button href={ tracesURL("", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "") }>All</sl-button>
+			<sl-button href={ tracesURL("status:error", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "status:error") }>
 				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
 				Errors
 			</sl-button>
-			<sl-button href={ tracesURL("status:slow", data.Window, data.Limit, 0) } size="small" variant={ traceFilterVariant(data.Query, "status:slow") }>
+			<sl-button href={ tracesURL("status:slow", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "status:slow") }>
 				<sl-icon slot="prefix" name="clock"></sl-icon>
 				Slow (&gt;1s)
 			</sl-button>
@@ -878,20 +877,8 @@ func waterfallBarStyle(startOffset, duration, totalDuration float64) string {
 	return fmt.Sprintf("left: %.1f%%; width: %.1f%%;", left, width)
 }
 
-func logSeverityVariant(severity string) string {
-	switch severity {
-	case "ERROR", "FATAL":
-		return "danger"
-	case "WARN":
-		return "warning"
-	default:
-		return "neutral"
-	}
-}
-
 func spansJSON(spans []SpanInfo) string {
-	b, _ := json.Marshal(spans)
-	return string(b)
+	return mustJSON(spans, "[]")
 }
 
 func tracesURL(q string, window, limit, offset int) templ.SafeURL {
@@ -914,17 +901,6 @@ func tracesURL(q string, window, limit, offset int) templ.SafeURL {
 	return templ.SafeURL("/traces?" + values.Encode())
 }
 
-func traceFilterVariant(current, target string) string {
-	// Check if current query contains the target filter
-	if target == "" && current == "" {
-		return "primary"
-	}
-	if target != "" && strings.Contains(current, target) {
-		return "primary"
-	}
-	return "default"
-}
-
 func facetURL(query, facetType, value string, window int) templ.SafeURL {
 	// Build a URL that adds/replaces the facet filter in the query
 	newQuery := query
@@ -939,13 +915,6 @@ func facetURL(query, facetType, value string, window int) templ.SafeURL {
 	}
 	newQuery += prefix + value
 	return tracesURL(newQuery, window, 0, 0)
-}
-
-func facetChipClass(value string) string {
-	if value == "error" {
-		return "facet-error"
-	}
-	return ""
 }
 
 func facetTagClass(value string) string {
@@ -979,4 +948,3 @@ func eventsTitle(events []SpanEvent) string {
 	}
 	return strings.Join(names, ", ")
 }
-

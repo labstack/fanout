@@ -101,9 +101,9 @@ func Unified(data UnifiedData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var4 string
-			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, ""))
+			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(filterVariant(data.Query, ""))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 54, Col: 125}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 54, Col: 118}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
@@ -127,9 +127,9 @@ func Unified(data UnifiedData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var6 string
-			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, "type:span"))
+			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(filterVariant(data.Query, "type:span"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 55, Col: 143}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 55, Col: 136}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -153,9 +153,9 @@ func Unified(data UnifiedData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var8 string
-			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, "type:log"))
+			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(filterVariant(data.Query, "type:log"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 59, Col: 141}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 59, Col: 134}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -179,9 +179,9 @@ func Unified(data UnifiedData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 string
-			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, "type:metric"))
+			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(filterVariant(data.Query, "type:metric"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 63, Col: 147}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 63, Col: 140}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
@@ -205,9 +205,9 @@ func Unified(data UnifiedData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var12 string
-			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedFilterVariant(data.Query, "status:error"))
+			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(filterVariant(data.Query, "status:error"))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 67, Col: 149}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 67, Col: 142}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 			if templ_7745c5c3_Err != nil {
@@ -732,16 +732,6 @@ func unifiedURL(q string, window, limit, offset int) templ.SafeURL {
 		return "/unified"
 	}
 	return templ.SafeURL("/unified?" + values.Encode())
-}
-
-func unifiedFilterVariant(current, target string) string {
-	if target == "" && current == "" {
-		return "primary"
-	}
-	if target != "" && strings.Contains(current, target) {
-		return "primary"
-	}
-	return "default"
 }
 
 func unifiedFacetURL(query, facetType, value string, window int) templ.SafeURL {

@@ -51,20 +51,20 @@ templ Unified(data UnifiedData) {
 			</div>
 		</div>
 		<div class="quick-filters">
-			<sl-button href={ unifiedURL("", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "") }>All</sl-button>
-			<sl-button href={ unifiedURL("type:span", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "type:span") }>
+			<sl-button href={ unifiedURL("", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "") }>All</sl-button>
+			<sl-button href={ unifiedURL("type:span", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "type:span") }>
 				<sl-icon slot="prefix" name="diagram-3"></sl-icon>
 				Spans
 			</sl-button>
-			<sl-button href={ unifiedURL("type:log", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "type:log") }>
+			<sl-button href={ unifiedURL("type:log", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "type:log") }>
 				<sl-icon slot="prefix" name="journal-text"></sl-icon>
 				Logs
 			</sl-button>
-			<sl-button href={ unifiedURL("type:metric", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "type:metric") }>
+			<sl-button href={ unifiedURL("type:metric", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "type:metric") }>
 				<sl-icon slot="prefix" name="graph-up"></sl-icon>
 				Metrics
 			</sl-button>
-			<sl-button href={ unifiedURL("status:error", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "status:error") }>
+			<sl-button href={ unifiedURL("status:error", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "status:error") }>
 				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
 				Errors
 			</sl-button>
@@ -250,16 +250,6 @@ func unifiedURL(q string, window, limit, offset int) templ.SafeURL {
 	return templ.SafeURL("/unified?" + values.Encode())
 }
 
-func unifiedFilterVariant(current, target string) string {
-	if target == "" && current == "" {
-		return "primary"
-	}
-	if target != "" && strings.Contains(current, target) {
-		return "primary"
-	}
-	return "default"
-}
-
 func unifiedFacetURL(query, facetType, value string, window int) templ.SafeURL {
 	newQuery := query
 	prefix := facetType + ":"
@@ -272,4 +262,3 @@ func unifiedFacetURL(query, facetType, value string, window int) templ.SafeURL {
 	newQuery += prefix + value
 	return unifiedURL(newQuery, window, 0, 0)
 }
-

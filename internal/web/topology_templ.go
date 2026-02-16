@@ -8,10 +8,7 @@ package web
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "fmt"
 
 // Topology renders the service topology page (uses TopologyData from overview.templ)
 func Topology(data TopologyData) templ.Component {
@@ -72,7 +69,7 @@ func Topology(data TopologyData) templ.Component {
 				var templ_7745c5c3_Var3 string
 				templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Nodes)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 25, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 22, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 				if templ_7745c5c3_Err != nil {
@@ -85,7 +82,7 @@ func Topology(data TopologyData) templ.Component {
 				var templ_7745c5c3_Var4 string
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Edges)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 29, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 26, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -98,7 +95,7 @@ func Topology(data TopologyData) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", countByStatus(data.Nodes, "degraded")))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 33, Col: 120}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 30, Col: 120}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -111,7 +108,7 @@ func Topology(data TopologyData) templ.Component {
 				var templ_7745c5c3_Var6 string
 				templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", countByStatus(data.Nodes, "unhealthy")))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 37, Col: 120}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 34, Col: 120}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 				if templ_7745c5c3_Err != nil {
@@ -124,7 +121,7 @@ func Topology(data TopologyData) templ.Component {
 				var templ_7745c5c3_Var7 string
 				templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(topoNodesJSON(data.Nodes))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 80, Col: 95}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 77, Col: 95}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 				if templ_7745c5c3_Err != nil {
@@ -137,7 +134,7 @@ func Topology(data TopologyData) templ.Component {
 				var templ_7745c5c3_Var8 string
 				templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(topoEdgesJSON(data.Edges))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 80, Col: 136}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 77, Col: 136}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 				if templ_7745c5c3_Err != nil {
@@ -150,7 +147,7 @@ func Topology(data TopologyData) templ.Component {
 				var templ_7745c5c3_Var9 string
 				templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Window))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 80, Col: 183}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/topology.templ`, Line: 77, Col: 183}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 				if templ_7745c5c3_Err != nil {
@@ -193,8 +190,7 @@ func topoNodesJSON(nodes []ServiceNode) string {
 			ErrorRate: n.ErrorRate,
 		})
 	}
-	b, _ := json.Marshal(out)
-	return string(b)
+	return mustJSON(out, "[]")
 }
 
 func topoEdgesJSON(edges []ServiceEdge) string {
@@ -214,8 +210,7 @@ func topoEdgesJSON(edges []ServiceEdge) string {
 			ErrorRate: e.ErrorRate,
 		})
 	}
-	b, _ := json.Marshal(out)
-	return string(b)
+	return mustJSON(out, "[]")
 }
 
 // countByStatus counts nodes with a specific status
