@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -92,13 +93,21 @@ type Writer struct {
 	bufLogs    []LogRow
 	bufMetrics []MetricRow
 	lastFlush  time.Time
+	done       chan struct{}
 }
 
 func NewWriter(cfg config.Config, spans <-chan SpanRow, logs <-chan LogRow, metrics <-chan MetricRow) *Writer {
-	return &Writer{cfg: cfg, chSpans: spans, chLogs: logs, chMetrics: metrics, lastFlush: time.Now()}
+	return &Writer{cfg: cfg, chSpans: spans, chLogs: logs, chMetrics: metrics, lastFlush: time.Now(), done: make(chan struct{})}
+}
+
+// Wait blocks until Run() has returned (final flush complete).
+func (w *Writer) Wait() {
+	<-w.done
 }
 
 func (w *Writer) Run(ctx context.Context) error {
+	defer close(w.done)
+
 	ticker := time.NewTicker(time.Duration(w.cfg.FlushSeconds) * time.Second)
 	defer ticker.Stop()
 
@@ -130,10 +139,29 @@ func (w *Writer) Run(ctx context.Context) error {
 			w.flushLocked()
 			w.mu.Unlock()
 		case <-ctx.Done():
+			// Drain any remaining items from buffered channels
 			w.mu.Lock()
+			w.drainChannels()
 			w.flushLocked()
 			w.mu.Unlock()
 			return nil
+		}
+	}
+}
+
+// drainChannels reads any remaining items from the buffered input channels.
+// Must be called with w.mu held.
+func (w *Writer) drainChannels() {
+	for {
+		select {
+		case r := <-w.chSpans:
+			w.bufSpans = append(w.bufSpans, r)
+		case r := <-w.chLogs:
+			w.bufLogs = append(w.bufLogs, r)
+		case r := <-w.chMetrics:
+			w.bufMetrics = append(w.bufMetrics, r)
+		default:
+			return
 		}
 	}
 }
@@ -254,6 +282,27 @@ func (w *Writer) flushLocked() {
 	}
 
 	w.lastFlush = now
+}
+
+// CleanupTempFiles removes orphaned .tmp-*.parquet files left by
+// a previous crash. Call before starting the writer.
+func CleanupTempFiles(lakeDir string) {
+	err := filepath.Walk(lakeDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // skip unreadable dirs
+		}
+		if !info.IsDir() && strings.HasPrefix(info.Name(), ".tmp-") && strings.HasSuffix(info.Name(), ".parquet") {
+			if rmErr := os.Remove(path); rmErr != nil {
+				slog.Warn("failed to remove temp file", "path", path, "err", rmErr)
+			} else {
+				slog.Info("removed orphaned temp file", "path", path)
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		slog.Warn("temp file cleanup walk failed", "err", err)
+	}
 }
 
 func writeParquet[T any](base string, ts time.Time, rows []T) (string, int64, error) {

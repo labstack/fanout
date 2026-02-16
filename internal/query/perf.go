@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -88,13 +89,14 @@ type cacheItem struct {
 	expiresAt time.Time
 }
 
-// NewCache creates a new cache with the given TTL
-func NewCache(ttl time.Duration) *Cache {
+// NewCache creates a new cache with the given TTL.
+// The cleanup goroutine stops when ctx is cancelled.
+func NewCache(ctx context.Context, ttl time.Duration) *Cache {
 	c := &Cache{
 		items: make(map[string]cacheItem),
 		ttl:   ttl,
 	}
-	go c.cleanup()
+	go c.cleanup(ctx)
 	return c
 }
 
@@ -121,20 +123,34 @@ func (c *Cache) Set(key string, value any) {
 	}
 }
 
-// cleanup removes expired items periodically
-func (c *Cache) cleanup() {
+// cleanup removes expired items periodically (every ttl*2).
+// Get() still enforces TTL on every access, so expired items are never
+// returned — they just linger in memory until the next cleanup tick.
+func (c *Cache) cleanup(ctx context.Context) {
 	ticker := time.NewTicker(c.ttl * 2)
-	for range ticker.C {
-		c.mu.Lock()
-		now := time.Now()
-		for k, v := range c.items {
-			if now.After(v.expiresAt) {
-				delete(c.items, k)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			c.mu.Lock()
+			now := time.Now()
+			for k, v := range c.items {
+				if now.After(v.expiresAt) {
+					delete(c.items, k)
+				}
 			}
+			c.mu.Unlock()
+		case <-ctx.Done():
+			return
 		}
-		c.mu.Unlock()
 	}
 }
 
-// Global cache instance (10 second TTL)
-var QueryCache = NewCache(10 * time.Second)
+// QueryCache is the global cache instance, initialized by InitQueryCache.
+var QueryCache *Cache
+
+// InitQueryCache initializes the global QueryCache. The cleanup goroutine
+// stops when ctx is cancelled.
+func InitQueryCache(ctx context.Context) {
+	QueryCache = NewCache(ctx, 10*time.Second)
+}
