@@ -1,9 +1,6 @@
 package web
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "fmt"
 
 // ServicesData for the services list page
 type ServicesData struct {
@@ -241,7 +238,7 @@ templ ServiceDetail(data ServiceDetailData) {
 									<td>{ fmt.Sprintf("%d", err.Count) }</td>
 									<td>
 										if err.TraceID != "" {
-											<a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(err.TraceID), data.Window)) }>{ truncate(err.TraceID, 12) }</a>
+											<a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(err.TraceID), data.Window)) }>{ truncateStr(err.TraceID, 15) }</a>
 										} else {
 											<span style="color: var(--text-muted);">-</span>
 										}
@@ -328,20 +325,6 @@ func errorColor(rate float64) string {
 		return "color: var(--warning);"
 	}
 	return "color: var(--success);"
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
-func filterVariant(current, target string) string {
-	if current == target || (current == "" && target == "") {
-		return "primary"
-	}
-	return "default"
 }
 
 // Sparkline renders an SVG sparkline chart
@@ -448,8 +431,7 @@ func latencyChartSpec(data []TimelinePoint) string {
 		},
 	}
 
-	b, _ := json.Marshal(spec)
-	return string(b)
+	return mustJSON(spec, "{}")
 }
 
 // requestChartSpec generates a Vega-Lite spec for request volume with error rate
@@ -498,6 +480,5 @@ func requestChartSpec(data []TimelinePoint) string {
 		"resolve": map[string]any{"scale": map[string]any{"y": "independent"}},
 	}
 
-	b, _ := json.Marshal(spec)
-	return string(b)
+	return mustJSON(spec, "{}")
 }

@@ -51,48 +51,47 @@ templ Unified(data UnifiedData) {
 			</div>
 		</div>
 		<div class="quick-filters">
-			<sl-button href={ unifiedURL("", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "") }>All</sl-button>
-			<sl-button href={ unifiedURL("type:span", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "type:span") }>
+			<sl-button href={ unifiedURL("", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "") }>All</sl-button>
+			<sl-button href={ unifiedURL("type:span", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "type:span") }>
 				<sl-icon slot="prefix" name="diagram-3"></sl-icon>
 				Spans
 			</sl-button>
-			<sl-button href={ unifiedURL("type:log", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "type:log") }>
+			<sl-button href={ unifiedURL("type:log", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "type:log") }>
 				<sl-icon slot="prefix" name="journal-text"></sl-icon>
 				Logs
 			</sl-button>
-			<sl-button href={ unifiedURL("type:metric", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "type:metric") }>
+			<sl-button href={ unifiedURL("type:metric", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "type:metric") }>
 				<sl-icon slot="prefix" name="graph-up"></sl-icon>
 				Metrics
 			</sl-button>
-			<sl-button href={ unifiedURL("status:error", data.Window, data.Limit, 0) } size="small" variant={ unifiedFilterVariant(data.Query, "status:error") }>
+			<sl-button href={ unifiedURL("status:error", data.Window, data.Limit, 0) } size="small" variant={ filterVariant(data.Query, "status:error") }>
 				<sl-icon slot="prefix" name="exclamation-triangle"></sl-icon>
 				Errors
 			</sl-button>
 		</div>
 		<!-- Search Form -->
-		<sl-card style="margin-bottom: 1rem;">
-			<form method="GET" action="/unified" class="search-form" onsubmit="return cleanFormSubmit(this)">
+		<div class="search-section">
+			<form method="GET" action="/unified" onsubmit="return cleanFormSubmit(this)">
 				<div class="form-row">
-					<sl-input name="q" label="Search" placeholder="service:checkout status:error type:span severity:ERROR" value={ data.Query } style="flex: 3;"></sl-input>
+					<sl-input name="q" placeholder="service:checkout status:error type:span severity:ERROR" value={ data.Query }></sl-input>
 					<sl-button type="submit" variant="primary">Search</sl-button>
 				</div>
 				<div class="search-hint">
-					<sl-icon name="lightbulb"></sl-icon>
 					<code>service:name</code> <code>type:span|log|metric</code> <code>status:error</code> <code>severity:ERROR</code> <code>op:checkout</code> <code>trace:abc123</code> <code>"phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
-		</sl-card>
+		</div>
 		<!-- Facets -->
 		<div class="facets-bar">
 			<div class="facet-group">
 				<span class="facet-label">Type</span>
-				<a href={ unifiedFacetURL(data.Query, "type", "span", data.Window) } style="text-decoration: none;">
+				<a href={ unifiedFacetURL(data.Query, "type", "span", data.Window) } class="facet-link">
 					<sl-tag size="small" class="facet-span">span<span class="facet-count">{ fmt.Sprintf("%d", data.SpanCount) }</span></sl-tag>
 				</a>
-				<a href={ unifiedFacetURL(data.Query, "type", "log", data.Window) } style="text-decoration: none;">
+				<a href={ unifiedFacetURL(data.Query, "type", "log", data.Window) } class="facet-link">
 					<sl-tag size="small" class="facet-log">log<span class="facet-count">{ fmt.Sprintf("%d", data.LogCount) }</span></sl-tag>
 				</a>
-				<a href={ unifiedFacetURL(data.Query, "type", "metric", data.Window) } style="text-decoration: none;">
+				<a href={ unifiedFacetURL(data.Query, "type", "metric", data.Window) } class="facet-link">
 					<sl-tag size="small" class="facet-metric">metric<span class="facet-count">{ fmt.Sprintf("%d", data.MetricCount) }</span></sl-tag>
 				</a>
 			</div>
@@ -100,7 +99,7 @@ templ Unified(data UnifiedData) {
 				<div class="facet-group">
 					<span class="facet-label">Services</span>
 					for _, f := range data.Facets.ByService {
-						<a href={ unifiedFacetURL(data.Query, "service", f.Value, data.Window) } style="text-decoration: none;">
+						<a href={ unifiedFacetURL(data.Query, "service", f.Value, data.Window) } class="facet-link">
 							<sl-tag size="small">{ f.Value }<span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span></sl-tag>
 						</a>
 					}
@@ -108,10 +107,10 @@ templ Unified(data UnifiedData) {
 			}
 		</div>
 		<!-- Results -->
-		<sl-card>
-			<div slot="header" class="card-header">Results ({ fmt.Sprintf("%d", len(data.Events)) } events)</div>
+		<div class="results-section">
+			<div class="results-header">Results ({ fmt.Sprintf("%d", len(data.Events)) } events)</div>
 			if len(data.Events) == 0 {
-				<div class="empty-state">
+				<div class="empty-state" style="padding: 3rem;">
 					<sl-icon name="layers"></sl-icon>
 					<div class="empty-state-title">No events found</div>
 					<div class="empty-state-message">Try adjusting your search filters or expanding the time window.</div>
@@ -143,24 +142,24 @@ templ Unified(data UnifiedData) {
 										<span style="color: var(--text-muted);">—</span>
 									}
 								</td>
-								<td class="cell-name">{ truncateName(e.Name, 40) }</td>
-								<td class="cell-value">{ truncateName(e.Value, 50) }</td>
+								<td class="cell-name">{ truncateStr(e.Name, 40) }</td>
+								<td class="cell-value">{ truncateStr(e.Value, 50) }</td>
 								<td>
 									if e.Type == "span" {
 										if e.Status == "error" {
-											<sl-badge variant="danger">error</sl-badge>
+											<sl-badge variant="danger" pill>error</sl-badge>
 										} else if e.Status != "" {
-											<sl-badge variant="success">ok</sl-badge>
+											<sl-badge variant="success" pill>ok</sl-badge>
 										}
 									} else if e.Type == "log" {
-										<sl-badge variant={ logSeverityVariant(e.Severity) }>{ e.Severity }</sl-badge>
+										<sl-badge variant={ logSeverityVariant(e.Severity) } pill>{ e.Severity }</sl-badge>
 									} else {
 										<span style="color: var(--text-muted);">—</span>
 									}
 								</td>
 								<td>
 									if e.TraceID != "" {
-										<a href={ templ.SafeURL(withWindow("/traces/"+e.TraceID, data.Window)) } class="trace-link">
+										<a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(e.TraceID), data.Window)) } class="trace-link">
 											{ truncateID(e.TraceID) }
 										</a>
 									} else {
@@ -173,7 +172,7 @@ templ Unified(data UnifiedData) {
 				</table>
 				<!-- Pagination -->
 				<div class="pagination">
-					<sl-button href={ unifiedURL(data.Query, data.Window, data.Limit, maxInt(0, data.Offset-data.Limit)) } variant="default" size="small" disabled?={ data.Offset == 0 }>
+					<sl-button href={ unifiedURL(data.Query, data.Window, data.Limit, clampMin(data.Offset-data.Limit)) } variant="default" size="small" disabled?={ data.Offset == 0 }>
 						<sl-icon slot="prefix" name="chevron-left"></sl-icon>
 						Previous
 					</sl-button>
@@ -184,7 +183,7 @@ templ Unified(data UnifiedData) {
 					</sl-button>
 				</div>
 			}
-		</sl-card>
+		</div>
 		<style>
 			/* sl-relative-time cell styling */
 			.cell-time sl-relative-time {
@@ -231,21 +230,6 @@ templ Unified(data UnifiedData) {
 	}
 }
 
-func formatTime(ts string) string {
-	// Extract time portion from ISO timestamp
-	if len(ts) >= 19 {
-		return ts[11:19] // HH:MM:SS
-	}
-	return ts
-}
-
-func truncateName(s string, max int) string {
-	if len(s) > max {
-		return s[:max-3] + "..."
-	}
-	return s
-}
-
 func unifiedURL(q string, window, limit, offset int) templ.SafeURL {
 	values := url.Values{}
 	if q != "" {
@@ -266,16 +250,6 @@ func unifiedURL(q string, window, limit, offset int) templ.SafeURL {
 	return templ.SafeURL("/unified?" + values.Encode())
 }
 
-func unifiedFilterVariant(current, target string) string {
-	if target == "" && current == "" {
-		return "primary"
-	}
-	if target != "" && strings.Contains(current, target) {
-		return "primary"
-	}
-	return "default"
-}
-
 func unifiedFacetURL(query, facetType, value string, window int) templ.SafeURL {
 	newQuery := query
 	prefix := facetType + ":"
@@ -287,11 +261,4 @@ func unifiedFacetURL(query, facetType, value string, window int) templ.SafeURL {
 	}
 	newQuery += prefix + value
 	return unifiedURL(newQuery, window, 0, 0)
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

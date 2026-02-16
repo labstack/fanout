@@ -1,9 +1,6 @@
 package web
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "fmt"
 
 // OverviewData contains all data for the overview page
 type OverviewData struct {
@@ -154,8 +151,7 @@ func timelineSpec(data TimelineData) string {
 		},
 	}
 
-	b, _ := json.Marshal(spec)
-	return string(b)
+	return mustJSON(spec, "{}")
 }
 
 templ alertBanner(anomalies []Anomaly) {

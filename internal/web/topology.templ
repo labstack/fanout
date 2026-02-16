@@ -1,9 +1,6 @@
 package web
 
-import (
-	"encoding/json"
-	"fmt"
-)
+import "fmt"
 
 // Topology renders the service topology page (uses TopologyData from overview.templ)
 templ Topology(data TopologyData) {
@@ -20,7 +17,7 @@ templ Topology(data TopologyData) {
 			</sl-card>
 		} else {
 			<!-- Summary Stats -->
-			<div class="grid grid-4" style="margin-bottom: 0.75rem;">
+			<div class="grid grid-4" style="margin-bottom: 1rem;">
 				<sl-card class="metric-card">
 					<div class="metric-value">{ fmt.Sprintf("%d", len(data.Nodes)) }</div>
 					<div class="metric-label">Services</div>
@@ -39,7 +36,7 @@ templ Topology(data TopologyData) {
 				</sl-card>
 			</div>
 			<!-- Legend -->
-			<sl-card style="margin-bottom: 0.75rem;">
+			<sl-card style="margin-bottom: 1rem;">
 				<div class="topo-legend">
 					<div class="topo-legend-group">
 						<span class="topo-legend-title">Nodes:</span>
@@ -242,8 +239,9 @@ templ Topology(data TopologyData) {
 									if (windowMinutes !== 60) {
 										href += '?window=' + encodeURIComponent(windowMinutes);
 									}
-									htmx.ajax('GET', href, {target: 'body', swap: 'innerHTML'});
-									history.pushState({}, '', href);
+									htmx.ajax('GET', href, {target: 'body', swap: 'innerHTML'}).then(() => {
+										history.pushState({}, '', href);
+									});
 								}
 							});
 						});
@@ -378,8 +376,7 @@ func topoNodesJSON(nodes []ServiceNode) string {
 			ErrorRate: n.ErrorRate,
 		})
 	}
-	b, _ := json.Marshal(out)
-	return string(b)
+	return mustJSON(out, "[]")
 }
 
 func topoEdgesJSON(edges []ServiceEdge) string {
@@ -399,19 +396,7 @@ func topoEdgesJSON(edges []ServiceEdge) string {
 			ErrorRate: e.ErrorRate,
 		})
 	}
-	b, _ := json.Marshal(out)
-	return string(b)
-}
-
-// Format large numbers
-func topoFormatCount(n int64) string {
-	if n >= 1000000 {
-		return fmt.Sprintf("%.1fM", float64(n)/1000000)
-	}
-	if n >= 1000 {
-		return fmt.Sprintf("%.1fK", float64(n)/1000)
-	}
-	return fmt.Sprintf("%d", n)
+	return mustJSON(out, "[]")
 }
 
 // countByStatus counts nodes with a specific status

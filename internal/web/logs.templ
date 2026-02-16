@@ -68,7 +68,7 @@ templ Logs(data LogsData) {
 					for i, log := range data.Logs {
 						<div class={ "log-entry", logEntryClass(log.Severity) }>
 							<div class="log-header">
-								<sl-badge variant={ severityVariant(log.Severity) }>{ log.Severity }</sl-badge>
+								<sl-badge variant={ severityVariant(log.Severity) } pill>{ log.Severity }</sl-badge>
 								<sl-relative-time class="time" date={ log.Time }></sl-relative-time>
 								if log.Namespace != "" {
 									<sl-tag size="small" class="ns-tag">{ log.Namespace }</sl-tag>
@@ -98,7 +98,7 @@ templ Logs(data LogsData) {
 										if log.ScopeName != "" {
 											<div class="log-detail-item">
 												<span class="log-detail-label">Scope</span>
-												<span class="log-detail-value">{ log.ScopeName }{ logScopeVersion(log.ScopeVersion) }</span>
+												<span class="log-detail-value">{ log.ScopeName }{ fmtScopeVersion(log.ScopeVersion) }</span>
 											</div>
 										}
 										if log.ObservedTime != "" && log.ObservedTime != log.Time {
@@ -114,7 +114,7 @@ templ Logs(data LogsData) {
 											for k, v := range log.Attributes {
 												<div class="log-attr-row">
 													<span class="log-attr-key">{ k }</span>
-													<span class="log-attr-value">{ formatLogAttr(v) }</span>
+													<span class="log-attr-value">{ fmtAttrValue(v) }</span>
 												</div>
 											}
 										</div>
@@ -139,7 +139,7 @@ templ Logs(data LogsData) {
 				</script>
 				<!-- Pagination -->
 				<div class="pagination">
-					<sl-button href={ logsPaginationURL(data.Query, data.Window, data.Limit, logsMaxOffset(data.Offset-data.Limit)) } variant="default" size="small" disabled?={ data.Offset == 0 }>
+					<sl-button href={ logsPaginationURL(data.Query, data.Window, data.Limit, clampMin(data.Offset-data.Limit)) } variant="default" size="small" disabled?={ data.Offset == 0 }>
 						<sl-icon slot="prefix" name="chevron-left"></sl-icon>
 						Previous
 					</sl-button>
@@ -155,7 +155,6 @@ templ Logs(data LogsData) {
 			.logs-list {
 				display: flex;
 				flex-direction: column;
-				gap: 0;
 				padding: 0;
 			}
 			.log-entry {
@@ -231,7 +230,7 @@ templ Logs(data LogsData) {
 				font-size: 0.65rem;
 				color: var(--text-muted);
 				text-transform: uppercase;
-				letter-spacing: 0.025em;
+				letter-spacing: 0.05em;
 			}
 			.log-detail-value {
 				font-size: 0.75rem;
@@ -248,7 +247,7 @@ templ Logs(data LogsData) {
 				font-weight: 600;
 				color: var(--text-muted);
 				text-transform: uppercase;
-				letter-spacing: 0.025em;
+				letter-spacing: 0.05em;
 				margin-bottom: 0.5rem;
 			}
 			.log-attr-row {
@@ -256,7 +255,7 @@ templ Logs(data LogsData) {
 				gap: 0.5rem;
 				font-size: 0.75rem;
 				padding: 0.25rem 0.5rem;
-				background: var(--sl-color-neutral-100);
+				background: var(--bg-tertiary);
 				border-radius: 0.25rem;
 				margin-bottom: 0.25rem;
 			}
@@ -285,20 +284,7 @@ func logEntryClass(severity string) string {
 	}
 }
 
-func severityVariant(severity string) string {
-	switch severity {
-	case "ERROR", "FATAL":
-		return "danger"
-	case "WARN":
-		return "warning"
-	case "INFO":
-		return "primary"
-	default:
-		return "neutral"
-	}
-}
-
-func logsPaginationURL(q string, window, limit, offset int) string {
+func logsPaginationURL(q string, window, limit, offset int) templ.SafeURL {
 	values := url.Values{}
 	if q != "" {
 		values.Set("q", q)
@@ -308,30 +294,9 @@ func logsPaginationURL(q string, window, limit, offset int) string {
 	}
 	values.Set("limit", strconv.Itoa(limit))
 	values.Set("offset", strconv.Itoa(offset))
-	return "/logs?" + values.Encode()
+	return templ.SafeURL("/logs?" + values.Encode())
 }
 
 func hasLogDetails(log LogRow) bool {
 	return log.SpanID != "" || log.ScopeName != "" || len(log.Attributes) > 0 || (log.ObservedTime != "" && log.ObservedTime != log.Time)
-}
-
-func logScopeVersion(v string) string {
-	if v == "" {
-		return ""
-	}
-	return "@" + v
-}
-
-func formatLogAttr(v any) string {
-	if v == nil {
-		return ""
-	}
-	return fmt.Sprintf("%v", v)
-}
-
-func logsMaxOffset(n int) int {
-	if n < 0 {
-		return 0
-	}
-	return n
 }

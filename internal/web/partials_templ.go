@@ -148,7 +148,7 @@ func StatsGrid(s ServiceSummary) templ.Component {
 			templ_7745c5c3_Var5 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div id=\"stats-grid\" class=\"stats-bar\" style=\"margin-bottom: 0.75rem;\"><div class=\"stats-item\"><div class=\"stats-value\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<div id=\"stats-grid\" class=\"stats-bar\" style=\"margin-bottom: 1rem;\"><div class=\"stats-item\"><div class=\"stats-value\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -599,12 +599,12 @@ func EmptyStateSetup(dataType string) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if dataType == "services" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<sl-icon name=\"boxes\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<sl-icon name=\"hdd-stack\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if dataType == "traces" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<sl-icon name=\"git-branch\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<sl-icon name=\"diagram-3\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -614,12 +614,12 @@ func EmptyStateSetup(dataType string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else if dataType == "metrics" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<sl-icon name=\"bar-chart-2\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<sl-icon name=\"graph-up\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if dataType == "topology" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<sl-icon name=\"share-2\"></sl-icon>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<sl-icon name=\"share\"></sl-icon>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -643,74 +643,6 @@ func EmptyStateSetup(dataType string) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, " detected</h3><p class=\"empty-state-desc\">Configure your application to send telemetry data to Fanout.</p><sl-card class=\"setup-card\"><div class=\"setup-step\"><sl-badge variant=\"primary\" pill>1</sl-badge><div class=\"step-content\"><div class=\"step-title\">Configure OTLP endpoint</div><div class=\"step-code\"><code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317</code></div></div></div><sl-divider></sl-divider><div class=\"setup-step\"><sl-badge variant=\"primary\" pill>2</sl-badge><div class=\"step-content\"><div class=\"step-title\">Set service name</div><div class=\"step-code\"><code>OTEL_SERVICE_NAME=my-service</code></div></div></div><sl-divider></sl-divider><div class=\"setup-step\"><sl-badge variant=\"primary\" pill>3</sl-badge><div class=\"step-content\"><div class=\"step-title\">Use gRPC protocol</div><div class=\"step-code\"><code>OTEL_EXPORTER_OTLP_PROTOCOL=grpc</code></div></div></div></sl-card> <sl-alert variant=\"primary\" open class=\"setup-alert\"><sl-icon slot=\"icon\" name=\"lightbulb\"></sl-icon> Data typically appears within 15 seconds after your app starts sending telemetry.</sl-alert></div></div><style>\n\t\t.empty-state-setup {\n\t\t\tdisplay: flex;\n\t\t\tflex-direction: column;\n\t\t\talign-items: center;\n\t\t\tpadding: 3rem 2rem;\n\t\t\ttext-align: center;\n\t\t}\n\t\t.empty-state-icon sl-icon {\n\t\t\tfont-size: 4rem;\n\t\t\tcolor: var(--accent);\n\t\t\topacity: 0.6;\n\t\t}\n\t\t.empty-state-content {\n\t\t\tmax-width: 480px;\n\t\t}\n\t\t.empty-state-setup .empty-state-title {\n\t\t\tfont-size: 1.25rem;\n\t\t\tfont-weight: 600;\n\t\t\tcolor: var(--text-primary);\n\t\t\tmargin: 1rem 0 0.5rem;\n\t\t}\n\t\t.empty-state-desc {\n\t\t\tcolor: var(--text-muted);\n\t\t\tmargin-bottom: 1.5rem;\n\t\t}\n\t\t.setup-card {\n\t\t\ttext-align: left;\n\t\t\t--padding: 1rem;\n\t\t}\n\t\t.setup-card sl-divider {\n\t\t\t--spacing: 0.75rem;\n\t\t}\n\t\t.setup-step {\n\t\t\tdisplay: flex;\n\t\t\tgap: 0.75rem;\n\t\t\talign-items: flex-start;\n\t\t}\n\t\t.setup-step sl-badge::part(base) {\n\t\t\tmin-width: 24px;\n\t\t\theight: 24px;\n\t\t}\n\t\t.step-content {\n\t\t\tflex: 1;\n\t\t\tmin-width: 0;\n\t\t}\n\t\t.step-title {\n\t\t\tfont-size: 0.875rem;\n\t\t\tfont-weight: 500;\n\t\t\tcolor: var(--text-primary);\n\t\t\tmargin-bottom: 0.375rem;\n\t\t}\n\t\t.step-code {\n\t\t\tbackground: var(--bg-tertiary);\n\t\t\tpadding: 0.5rem 0.75rem;\n\t\t\tborder-radius: 0.375rem;\n\t\t\toverflow-x: auto;\n\t\t}\n\t\t.step-code code {\n\t\t\tfont-family: var(--font-mono);\n\t\t\tfont-size: 0.75rem;\n\t\t\tcolor: var(--accent);\n\t\t\twhite-space: nowrap;\n\t\t}\n\t\t.setup-alert {\n\t\t\tmargin-top: 1.5rem;\n\t\t}\n\t\t.setup-alert::part(base) {\n\t\t\tfont-size: 0.8rem;\n\t\t}\n\t</style>")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		return nil
-	})
-}
-
-// EmptyStateSearch renders a simple empty state for search results
-func EmptyStateSearch(dataType string) templ.Component {
-	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
-		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
-		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
-			return templ_7745c5c3_CtxErr
-		}
-		templ_7745c5c3_Buffer, templ_7745c5c3_IsBuffer := templruntime.GetBuffer(templ_7745c5c3_W)
-		if !templ_7745c5c3_IsBuffer {
-			defer func() {
-				templ_7745c5c3_BufErr := templruntime.ReleaseBuffer(templ_7745c5c3_Buffer)
-				if templ_7745c5c3_Err == nil {
-					templ_7745c5c3_Err = templ_7745c5c3_BufErr
-				}
-			}()
-		}
-		ctx = templ.InitializeContext(ctx)
-		templ_7745c5c3_Var30 := templ.GetChildren(ctx)
-		if templ_7745c5c3_Var30 == nil {
-			templ_7745c5c3_Var30 = templ.NopComponent
-		}
-		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 52, "<div class=\"empty-state\">")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		if dataType == "traces" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<sl-icon name=\"search\"></sl-icon>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else if dataType == "logs" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<sl-icon name=\"file-text\"></sl-icon>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else if dataType == "metrics" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<sl-icon name=\"bar-chart-2\"></sl-icon>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<sl-icon name=\"search\"></sl-icon>")
-			if templ_7745c5c3_Err != nil {
-				return templ_7745c5c3_Err
-			}
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 57, "<div class=\"empty-state-title\">No ")
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		var templ_7745c5c3_Var31 string
-		templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(dataType)
-		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/partials.templ`, Line: 313, Col: 46}
-		}
-		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
-		if templ_7745c5c3_Err != nil {
-			return templ_7745c5c3_Err
-		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, " found</div><div class=\"empty-state-message\">Try adjusting your search filters or expanding the time window.</div></div>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

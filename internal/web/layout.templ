@@ -31,11 +31,11 @@ templ Layout(title string, activePage string, window int) {
 					--text-secondary: #5a6270;
 					--text-muted: #8b95a5;
 					--border-color: #e2e6ec;
-					/* Signal-typed colors */
+					/* Signal-typed colors (aligned with page accents) */
 					--signal-trace: #0ea5e9;
-					--signal-log: #f59e0b;
-					--signal-metric: #10b981;
-					--signal-error: #f43f5e;
+					--signal-log: #d97706;
+					--signal-metric: #059669;
+					--signal-error: #ef4444;
 					/* Page accent - overridden per page */
 					--accent: #6366f1;
 					--accent-hover: #4f46e5;
@@ -215,7 +215,7 @@ templ Layout(title string, activePage string, window int) {
 				}
 
 				.card-header {
-					font-size: 0.7rem;
+					font-size: 0.65rem;
 					font-weight: 600;
 					color: var(--text-muted);
 					text-transform: uppercase;
@@ -348,20 +348,17 @@ templ Layout(title string, activePage string, window int) {
 					padding: 0.875rem 1rem;
 					margin-bottom: 1rem;
 				}
-				.search-section .form-row,
-				.search-form .form-row {
+				.search-section .form-row {
 					display: flex;
 					gap: 0.75rem;
 					align-items: flex-end;
 					flex-wrap: wrap;
 				}
-				.search-section sl-input,
-				.search-form sl-input {
+				.search-section sl-input {
 					flex: 1;
 					min-width: 200px;
 				}
-				.search-section .search-hint,
-				.search-form .search-hint {
+				.search-section .search-hint {
 					margin-top: 0.75rem;
 					font-size: 0.75rem;
 					color: var(--text-muted);
@@ -370,16 +367,12 @@ templ Layout(title string, activePage string, window int) {
 					gap: 0.5rem;
 					align-items: center;
 				}
-				.search-section .search-hint code,
-				.search-form .search-hint code {
+				.search-section .search-hint code {
 					background: var(--bg-tertiary);
 					padding: 0.125rem 0.375rem;
 					border-radius: 0.25rem;
 					font-family: var(--font-mono);
 					font-size: 0.7rem;
-				}
-				.search-form .search-hint sl-icon {
-					font-size: 0.875rem;
 				}
 
 				/* Results section */
@@ -732,16 +725,9 @@ templ Layout(title string, activePage string, window int) {
 					font-feature-settings: 'tnum';
 				}
 
-				/* Expand/collapse animation */
-				.expand-panel {
-					overflow: hidden;
-					transition: max-height 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
-					max-height: 0;
-					opacity: 0;
-				}
-				.expand-panel.open {
-					max-height: 2000px;
-					opacity: 1;
+				/* Facet tag links */
+				.facet-link {
+					text-decoration: none;
 				}
 			</style>
 			<script>
@@ -860,9 +846,19 @@ templ Layout(title string, activePage string, window int) {
 									try {
 										const spec = JSON.parse(el.dataset.vega);
 										vegaEmbed(el, spec, { actions: false, theme: body.classList.contains('sl-theme-dark') ? 'dark' : undefined });
-									} catch(e) { console.error('Vega error:', e); }
+									} catch(e) {
+										console.error('Vega error:', e);
+										el.textContent = 'Chart failed to load';
+										el.style.cssText = 'display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.8rem;min-height:100px;';
+									}
 								});
-							}).catch(e => console.error('Vega loading failed:', e));
+							}).catch(e => {
+								console.error('Vega loading failed:', e);
+								vegaEls.forEach(el => {
+									el.textContent = 'Chart library failed to load';
+									el.style.cssText = 'display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.8rem;min-height:100px;';
+								});
+							});
 						}
 
 						// Time window selector
@@ -902,8 +898,11 @@ templ Layout(title string, activePage string, window int) {
 								const url = new URL(window.location.href);
 								url.searchParams.set('window', minutes);
 								timeDropdown.hide();
-								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
-								history.pushState({}, '', url.toString());
+								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).then(() => {
+									history.pushState({}, '', url.toString());
+								}).catch((err) => {
+									console.error('Failed to apply time window:', err);
+								});
 							}
 
 							// Event listeners
@@ -939,6 +938,7 @@ templ Layout(title string, activePage string, window int) {
 
 								try {
 									const res = await fetch('/api/namespaces');
+									if (!res.ok) throw new Error('Namespace fetch failed: ' + res.status);
 									const namespaces = await res.json();
 									if (namespaces.length === 0) return;
 
@@ -953,8 +953,9 @@ templ Layout(title string, activePage string, window int) {
 										localStorage.setItem('namespace', namespace);
 										const url = new URL(window.location.href);
 										url.searchParams.set('ns', namespace);
-										htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
-										history.replaceState({}, '', url.toString());
+										htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).then(() => {
+											history.replaceState({}, '', url.toString());
+										});
 										return;
 									}
 
@@ -968,7 +969,7 @@ templ Layout(title string, activePage string, window int) {
 									await namespaceSelect.updateComplete;
 									namespaceSelect.value = namespace;
 									localStorage.setItem('namespace', namespace);
-								} catch (e) {}
+								} catch (e) { console.error('Failed to load namespaces:', e); }
 							}
 							loadNamespaces();
 
@@ -978,33 +979,50 @@ templ Layout(title string, activePage string, window int) {
 								const url = new URL(window.location.href);
 								url.searchParams.set('ns', namespace);
 								e.target.blur();
-								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
-								history.pushState({}, '', url.toString());
+								htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).then(() => {
+									history.pushState({}, '', url.toString());
+								}).catch((err) => {
+									console.error('Failed to switch namespace:', err);
+								});
 							});
 						}
 					}
 
-					// Shared form submit handler (used by traces, logs, unified)
+					// Shared form submit handler (used by traces, logs, metrics, unified)
 					window.cleanFormSubmit = function(form) {
-						const url = new URL(form.action, window.location.origin);
-						const q = form.querySelector('[name="q"]').value.trim();
-						if (q) url.searchParams.set('q', q);
-						const ns = new URL(window.location.href).searchParams.get('ns');
-						if (ns) url.searchParams.set('ns', ns);
-						const win = new URL(window.location.href).searchParams.get('window');
-						if (win && win !== '60') url.searchParams.set('window', win);
-						htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).catch(() => {
-							alert('Search failed. Please try again.');
-						});
-						history.pushState({}, '', url.toString());
-						return false;
+						try {
+							const url = new URL(form.action, window.location.origin);
+							const qInput = form.querySelector('[name="q"]');
+							if (!qInput) return true;
+							const q = qInput.value.trim();
+							if (q) url.searchParams.set('q', q);
+							const ns = new URL(window.location.href).searchParams.get('ns');
+							if (ns) url.searchParams.set('ns', ns);
+							const win = new URL(window.location.href).searchParams.get('window');
+							if (win && win !== '60') url.searchParams.set('window', win);
+							htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).then(() => {
+								history.pushState({}, '', url.toString());
+							}).catch((err) => {
+								console.error('Search failed:', err);
+								const toast = Object.assign(document.createElement('sl-alert'), {
+									variant: 'danger', closable: true, duration: 4000,
+									innerHTML: '<sl-icon name="exclamation-triangle" slot="icon"></sl-icon>Search failed. Please try again.'
+								});
+								document.body.appendChild(toast);
+								toast.toast();
+							});
+							return false;
+						} catch (err) {
+							console.error('cleanFormSubmit error, falling back to native submit:', err);
+							return true;
+						}
 					};
 
 					// Keyboard shortcuts
 					let gPressed = false;
 					let gTimeout = null;
 					const shortcuts = {
-						'g': { 'o': '/', 's': '/services', 't': '/traces', 'l': '/logs', 'm': '/metrics', 'p': '/topology' }
+						'g': { 'o': '/', 's': '/services', 't': '/traces', 'l': '/logs', 'm': '/metrics', 'p': '/topology', 'u': '/unified' }
 					};
 
 					function getWindowParam() {
@@ -1086,8 +1104,9 @@ templ Layout(title string, activePage string, window int) {
 							clearTimeout(gTimeout);
 							gPressed = false;
 							const dest = shortcuts.g[e.key] + getWindowParam();
-							htmx.ajax('GET', dest, {target: 'body', swap: 'innerHTML'});
-							history.pushState({}, '', dest);
+							htmx.ajax('GET', dest, {target: 'body', swap: 'innerHTML'}).then(() => {
+								history.pushState({}, '', dest);
+							});
 							return;
 						}
 
@@ -1191,6 +1210,7 @@ templ Layout(title string, activePage string, window int) {
 						<div class="kb-row"><kbd>g</kbd> <kbd>l</kbd> <span>Logs</span></div>
 						<div class="kb-row"><kbd>g</kbd> <kbd>m</kbd> <span>Metrics</span></div>
 						<div class="kb-row"><kbd>g</kbd> <kbd>p</kbd> <span>Topology</span></div>
+						<div class="kb-row"><kbd>g</kbd> <kbd>u</kbd> <span>Unified</span></div>
 					</div>
 					<div class="kb-section">
 						<div class="kb-section-title">Tables</div>
