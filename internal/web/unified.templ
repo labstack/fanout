@@ -71,7 +71,7 @@ templ Unified(data UnifiedData) {
 		</div>
 		<!-- Search Form -->
 		<sl-card style="margin-bottom: 1.5rem;">
-			<form method="GET" action="/unified" class="search-form" onsubmit="return cleanUnifiedSubmit(this)">
+			<form method="GET" action="/unified" class="search-form" onsubmit="return cleanFormSubmit(this)">
 				<div class="form-row">
 					<sl-input name="q" label="Search" placeholder="service:checkout status:error type:span severity:ERROR" value={ data.Query } style="flex: 3;"></sl-input>
 					<sl-button type="submit" variant="primary">Search</sl-button>
@@ -81,22 +81,6 @@ templ Unified(data UnifiedData) {
 					<code>service:name</code> <code>type:span|log|metric</code> <code>status:error</code> <code>severity:ERROR</code> <code>op:checkout</code> <code>trace:abc123</code> <code>"phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
-			<script>
-				function cleanUnifiedSubmit(form) {
-					const url = new URL(form.action, window.location.origin);
-					const q = form.querySelector('[name="q"]').value.trim();
-					if (q) url.searchParams.set('q', q);
-					const ns = new URL(window.location.href).searchParams.get('ns');
-					if (ns) url.searchParams.set('ns', ns);
-					const win = new URL(window.location.href).searchParams.get('window');
-					if (win && win !== '60') url.searchParams.set('window', win);
-					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).catch(() => {
-						alert('Search failed. Please try again.');
-					});
-					history.pushState({}, '', url.toString());
-					return false;
-				}
-			</script>
 		</sl-card>
 		<!-- Facets -->
 		<div class="facets-bar">
@@ -202,46 +186,18 @@ templ Unified(data UnifiedData) {
 			}
 		</sl-card>
 		<style>
-			.search-form .form-row {
-				display: flex;
-				gap: 1rem;
-				flex-wrap: wrap;
-				align-items: flex-end;
-			}
-			.search-form sl-input {
-				flex: 1;
-				min-width: 200px;
-			}
-			.search-hint {
-				margin-top: 0.75rem;
-				font-size: 0.75rem;
-				color: var(--text-muted);
-				display: flex;
-				align-items: center;
-				gap: 0.5rem;
-				flex-wrap: wrap;
-			}
-			.search-hint sl-icon {
-				font-size: 0.875rem;
-			}
-			.search-hint code {
-				background: var(--bg-tertiary);
-				padding: 0.125rem 0.375rem;
-				border-radius: 0.25rem;
-				font-size: 0.7rem;
-			}
 			/* sl-relative-time cell styling */
 			.cell-time sl-relative-time {
-				font-family: monospace;
+				font-family: var(--font-mono);
 				font-size: 0.8rem;
 			}
 			.cell-time {
-				font-family: monospace;
+				font-family: var(--font-mono);
 				font-size: 0.8rem;
 				white-space: nowrap;
 			}
 			.cell-name {
-				font-family: monospace;
+				font-family: var(--font-mono);
 				font-size: 0.8rem;
 				max-width: 250px;
 				overflow: hidden;
@@ -257,7 +213,7 @@ templ Unified(data UnifiedData) {
 				white-space: nowrap;
 			}
 			.trace-link {
-				font-family: monospace;
+				font-family: var(--font-mono);
 				font-size: 0.75rem;
 				color: var(--accent);
 				text-decoration: none;
@@ -270,19 +226,6 @@ templ Unified(data UnifiedData) {
 			}
 			.row-error:hover td {
 				background: var(--sl-color-danger-100) !important;
-			}
-			.pagination {
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				gap: 1rem;
-				padding: 1rem;
-				border-top: 1px solid var(--border-color);
-				margin-top: 1rem;
-			}
-			.pagination-info {
-				color: var(--text-muted);
-				font-size: 0.875rem;
 			}
 		</style>
 	}

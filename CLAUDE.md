@@ -344,7 +344,7 @@ graph TB
 cd ../otel-demo && docker compose up -d
 
 # Or configure any OTLP-compatible app
-OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+OTEL_EXPORTER_OTLP_ENDPOINT=https://fanout.test:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_SERVICE_NAME=my-service
 ```

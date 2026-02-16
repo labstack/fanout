@@ -30,7 +30,7 @@ docker compose up -d
 
 ## MCP Tools
 
-Connect Claude Code or any MCP client to `http://localhost:7520/mcp`
+Connect Claude Code or any MCP client to `https://fanout.test/mcp`
 
 | Tool | Description |
 |------|-------------|

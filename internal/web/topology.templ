@@ -81,7 +81,8 @@ templ Topology(data TopologyData) {
 				</div>
 			</sl-card>
 			<script>
-				(function() {
+				(async function() {
+					await loadVega();
 					const container = document.getElementById('topology-graph');
 					const nodes = JSON.parse(container.dataset.nodes);
 					const edges = JSON.parse(container.dataset.edges);

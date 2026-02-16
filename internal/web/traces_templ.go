@@ -188,7 +188,7 @@ func Traces(data TracesData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\"></sl-input> <sl-button type=\"submit\" variant=\"primary\">Search</sl-button></div><div class=\"search-hint\"><code>service:name</code> <code>op:checkout</code> <code>status:error</code> <code>duration:&gt;1000</code> <code>attr:key=value</code> <code>\"phrase\"</code> <code>-exclude</code></div></form><script>\n\t\t\t\tfunction cleanFormSubmit(form) {\n\t\t\t\t\tconst url = new URL(form.action, window.location.origin);\n\t\t\t\t\tconst q = form.querySelector('[name=\"q\"]').value.trim();\n\t\t\t\t\tif (q) url.searchParams.set('q', q);\n\t\t\t\t\tconst ns = new URL(window.location.href).searchParams.get('ns');\n\t\t\t\t\tif (ns) url.searchParams.set('ns', ns);\n\t\t\t\t\tconst win = new URL(window.location.href).searchParams.get('window');\n\t\t\t\t\tif (win && win !== '60') url.searchParams.set('window', win);\n\t\t\t\t\thtmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});\n\t\t\t\t\thistory.pushState({}, '', url.toString());\n\t\t\t\t\treturn false;\n\t\t\t\t}\n\t\t\t</script></div><!-- Facets --> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\"></sl-input> <sl-button type=\"submit\" variant=\"primary\">Search</sl-button></div><div class=\"search-hint\"><code>service:name</code> <code>op:checkout</code> <code>status:error</code> <code>duration:&gt;1000</code> <code>attr:key=value</code> <code>\"phrase\"</code> <code>-exclude</code></div></form></div><!-- Facets --> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -210,7 +210,7 @@ func Traces(data TracesData) templ.Component {
 						var templ_7745c5c3_Var10 templ.SafeURL
 						templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinURLErrs(facetURL(data.Query, "status", f.Value, data.Window))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 111, Col: 69}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 97, Col: 69}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 						if templ_7745c5c3_Err != nil {
@@ -245,7 +245,7 @@ func Traces(data TracesData) templ.Component {
 						var templ_7745c5c3_Var13 string
 						templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(f.Value)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 112, Col: 71}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 98, Col: 71}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 						if templ_7745c5c3_Err != nil {
@@ -258,7 +258,7 @@ func Traces(data TracesData) templ.Component {
 						var templ_7745c5c3_Var14 string
 						templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", f.Count))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 112, Col: 127}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 98, Col: 127}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 						if templ_7745c5c3_Err != nil {
@@ -287,7 +287,7 @@ func Traces(data TracesData) templ.Component {
 						var templ_7745c5c3_Var15 templ.SafeURL
 						templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinURLErrs(facetURL(data.Query, "service", f.Value, data.Window))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 121, Col: 70}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 107, Col: 70}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 						if templ_7745c5c3_Err != nil {
@@ -300,7 +300,7 @@ func Traces(data TracesData) templ.Component {
 						var templ_7745c5c3_Var16 string
 						templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinStringErrs(f.Value)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 122, Col: 38}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 108, Col: 38}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 						if templ_7745c5c3_Err != nil {
@@ -313,7 +313,7 @@ func Traces(data TracesData) templ.Component {
 						var templ_7745c5c3_Var17 string
 						templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", f.Count))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 122, Col: 94}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 108, Col: 94}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 						if templ_7745c5c3_Err != nil {
@@ -341,7 +341,7 @@ func Traces(data TracesData) templ.Component {
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Traces)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 131, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 117, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 			if templ_7745c5c3_Err != nil {
@@ -379,7 +379,7 @@ func Traces(data TracesData) templ.Component {
 					var templ_7745c5c3_Var19 templ.SafeURL
 					templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/traces/"+pathEscape(t.TraceID), data.Window)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 156, Col: 94}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 142, Col: 94}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 					if templ_7745c5c3_Err != nil {
@@ -392,7 +392,7 @@ func Traces(data TracesData) templ.Component {
 					var templ_7745c5c3_Var20 string
 					templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(truncateID(t.TraceID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 156, Col: 120}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 142, Col: 120}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 					if templ_7745c5c3_Err != nil {
@@ -410,7 +410,7 @@ func Traces(data TracesData) templ.Component {
 						var templ_7745c5c3_Var21 templ.SafeURL
 						templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/services/"+pathEscape(t.Service), data.Window)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 159, Col: 94}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 145, Col: 94}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 						if templ_7745c5c3_Err != nil {
@@ -423,7 +423,7 @@ func Traces(data TracesData) templ.Component {
 						var templ_7745c5c3_Var22 string
 						templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(t.Service)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 159, Col: 108}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 145, Col: 108}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 						if templ_7745c5c3_Err != nil {
@@ -456,7 +456,7 @@ func Traces(data TracesData) templ.Component {
 							var templ_7745c5c3_Var23 string
 							templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(t.Namespace)
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 167, Col: 60}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 153, Col: 60}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 							if templ_7745c5c3_Err != nil {
@@ -484,7 +484,7 @@ func Traces(data TracesData) templ.Component {
 					var templ_7745c5c3_Var24 string
 					templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(t.Operation)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 173, Col: 25}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 159, Col: 25}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 					if templ_7745c5c3_Err != nil {
@@ -497,7 +497,7 @@ func Traces(data TracesData) templ.Component {
 					var templ_7745c5c3_Var25 string
 					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0fms", t.Duration))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 174, Col: 47}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 160, Col: 47}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 					if templ_7745c5c3_Err != nil {
@@ -525,7 +525,7 @@ func Traces(data TracesData) templ.Component {
 					var templ_7745c5c3_Var26 string
 					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(t.Time)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 182, Col: 43}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 168, Col: 43}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 					if templ_7745c5c3_Err != nil {
@@ -543,7 +543,7 @@ func Traces(data TracesData) templ.Component {
 				var templ_7745c5c3_Var27 string
 				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(tracesURL(data.Query, data.Window, data.Limit, maxOffset(data.Offset-data.Limit)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 189, Col: 104}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 175, Col: 104}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 				if templ_7745c5c3_Err != nil {
@@ -566,7 +566,7 @@ func Traces(data TracesData) templ.Component {
 				var templ_7745c5c3_Var28 string
 				templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+1))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 193, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 179, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 				if templ_7745c5c3_Err != nil {
@@ -579,7 +579,7 @@ func Traces(data TracesData) templ.Component {
 				var templ_7745c5c3_Var29 string
 				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+len(data.Traces)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 193, Col: 123}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 179, Col: 123}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
@@ -592,7 +592,7 @@ func Traces(data TracesData) templ.Component {
 				var templ_7745c5c3_Var30 string
 				templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(tracesURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 194, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 180, Col: 93}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 				if templ_7745c5c3_Err != nil {
@@ -613,7 +613,7 @@ func Traces(data TracesData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</div><style>\n\t\t\t.pagination {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 1rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t\tmargin-top: 1rem;\n\t\t\t}\n\t\t\t.pagination-info {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-size: 0.875rem;\n\t\t\t}\n\t\t</style>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -729,7 +729,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(withWindow("/", data.Window))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 285, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 256, Col: 59}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
@@ -742,7 +742,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var34 string
 			templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(withWindow("/traces", data.Window))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 286, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 257, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 			if templ_7745c5c3_Err != nil {
@@ -755,7 +755,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(truncateID(data.TraceID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 287, Col: 50}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 258, Col: 50}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {
@@ -768,7 +768,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var36 string
 			templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(truncateID(data.TraceID))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 292, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 263, Col: 59}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 			if templ_7745c5c3_Err != nil {
@@ -781,7 +781,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var37 string
 			templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(data.RootService)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 293, Col: 47}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 264, Col: 47}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 			if templ_7745c5c3_Err != nil {
@@ -794,7 +794,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var38 string
 			templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(data.RootOp)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 293, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 264, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 			if templ_7745c5c3_Err != nil {
@@ -807,7 +807,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0fms", data.Duration))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 293, Col: 108}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 264, Col: 108}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {
@@ -820,7 +820,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var40 string
 			templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0f", data.Duration))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 299, Col: 66}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 270, Col: 66}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 			if templ_7745c5c3_Err != nil {
@@ -833,7 +833,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.SpanCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 303, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 274, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {
@@ -846,7 +846,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var42 string
 			templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(data.RootService)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 307, Col: 48}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 278, Col: 48}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 			if templ_7745c5c3_Err != nil {
@@ -864,7 +864,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var43 string
 				templ_7745c5c3_Var43, templ_7745c5c3_Err = templ.JoinStringErrs(data.RootCause)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 312, Col: 94}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 283, Col: 94}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var43))
 				if templ_7745c5c3_Err != nil {
@@ -887,7 +887,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var44 string
 			templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0fms", data.Duration*0.25))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 335, Col: 92}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 306, Col: 92}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 			if templ_7745c5c3_Err != nil {
@@ -900,7 +900,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var45 string
 			templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0fms", data.Duration*0.5))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 336, Col: 91}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 307, Col: 91}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 			if templ_7745c5c3_Err != nil {
@@ -913,7 +913,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var46 string
 			templ_7745c5c3_Var46, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0fms", data.Duration*0.75))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 337, Col: 92}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 308, Col: 92}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var46))
 			if templ_7745c5c3_Err != nil {
@@ -926,7 +926,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 			var templ_7745c5c3_Var47 string
 			templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0fms", data.Duration))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 338, Col: 88}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 309, Col: 88}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 			if templ_7745c5c3_Err != nil {
@@ -962,7 +962,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var50 string
 				templ_7745c5c3_Var50, templ_7745c5c3_Err = templ.JoinStringErrs(span.SpanID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 343, Col: 89}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 314, Col: 89}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var50))
 				if templ_7745c5c3_Err != nil {
@@ -975,7 +975,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var51 string
 				templ_7745c5c3_Var51, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(fmt.Sprintf("padding-left: %dpx;", span.Depth*20+8))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 344, Col: 93}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 315, Col: 93}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 				if templ_7745c5c3_Err != nil {
@@ -988,7 +988,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var52 string
 				templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("span-detail-%d", i))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 345, Col: 110}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 316, Col: 110}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 				if templ_7745c5c3_Err != nil {
@@ -1001,7 +1001,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var53 string
 				templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(span.Service)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 349, Col: 44}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 320, Col: 44}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 				if templ_7745c5c3_Err != nil {
@@ -1014,7 +1014,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var54 string
 				templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(span.Operation)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 350, Col: 48}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 321, Col: 48}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 				if templ_7745c5c3_Err != nil {
@@ -1032,7 +1032,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var55 string
 					templ_7745c5c3_Var55, templ_7745c5c3_Err = templ.JoinStringErrs(span.StatusMsg)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 352, Col: 45}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 323, Col: 45}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var55))
 					if templ_7745c5c3_Err != nil {
@@ -1051,7 +1051,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var56 string
 					templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(eventsTitle(span.Events))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 359, Col: 68}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 330, Col: 68}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 					if templ_7745c5c3_Err != nil {
@@ -1064,7 +1064,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var57 string
 					templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(span.Events)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 361, Col: 47}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 332, Col: 47}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 					if templ_7745c5c3_Err != nil {
@@ -1083,7 +1083,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var58 string
 					templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d linked traces", len(span.Links)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 365, Col: 91}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 336, Col: 91}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 					if templ_7745c5c3_Err != nil {
@@ -1096,7 +1096,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var59 string
 					templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(span.Links)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 367, Col: 46}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 338, Col: 46}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 					if templ_7745c5c3_Err != nil {
@@ -1136,7 +1136,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var62 string
 				templ_7745c5c3_Var62, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(waterfallBarStyle(span.StartOffset, span.Duration, data.Duration))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 375, Col: 81}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 346, Col: 81}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var62))
 				if templ_7745c5c3_Err != nil {
@@ -1149,7 +1149,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var63 string
 				templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.0fms", span.Duration))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 377, Col: 46}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 348, Col: 46}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var63))
 				if templ_7745c5c3_Err != nil {
@@ -1162,7 +1162,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var64 string
 				templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("span-detail-%d", i))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 381, Col: 67}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 352, Col: 67}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 				if templ_7745c5c3_Err != nil {
@@ -1175,7 +1175,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var65 string
 				templ_7745c5c3_Var65, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(fmt.Sprintf("margin-left: %dpx;", span.Depth*20+32))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 382, Col: 98}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 353, Col: 98}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
 				if templ_7745c5c3_Err != nil {
@@ -1188,7 +1188,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var66 string
 				templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(span.SpanID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 386, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 357, Col: 59}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
 				if templ_7745c5c3_Err != nil {
@@ -1206,7 +1206,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var67 string
 					templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.JoinStringErrs(span.ParentID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 391, Col: 62}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 362, Col: 62}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var67))
 					if templ_7745c5c3_Err != nil {
@@ -1224,7 +1224,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var68 string
 				templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.2fms", span.Duration))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 396, Col: 79}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 367, Col: 79}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var68))
 				if templ_7745c5c3_Err != nil {
@@ -1237,7 +1237,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var69 string
 				templ_7745c5c3_Var69, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.2fms", span.SelfTime))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 400, Col: 79}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 371, Col: 79}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var69))
 				if templ_7745c5c3_Err != nil {
@@ -1250,7 +1250,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var70 string
 				templ_7745c5c3_Var70, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("+%.2fms", span.StartOffset))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 404, Col: 83}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 375, Col: 83}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var70))
 				if templ_7745c5c3_Err != nil {
@@ -1268,7 +1268,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var71 string
 					templ_7745c5c3_Var71, templ_7745c5c3_Err = templ.JoinStringErrs(span.Kind)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 409, Col: 53}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 380, Col: 53}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var71))
 					if templ_7745c5c3_Err != nil {
@@ -1308,7 +1308,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var74 string
 				templ_7745c5c3_Var74, templ_7745c5c3_Err = templ.JoinStringErrs(span.Status)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 414, Col: 88}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 385, Col: 88}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var74))
 				if templ_7745c5c3_Err != nil {
@@ -1326,7 +1326,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var75 string
 					templ_7745c5c3_Var75, templ_7745c5c3_Err = templ.JoinStringErrs(span.ScopeName)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 419, Col: 58}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 390, Col: 58}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var75))
 					if templ_7745c5c3_Err != nil {
@@ -1335,7 +1335,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var76 string
 					templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(scopeVersion(span.ScopeVersion))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 419, Col: 93}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 390, Col: 93}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 					if templ_7745c5c3_Err != nil {
@@ -1358,7 +1358,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var77 string
 					templ_7745c5c3_Var77, templ_7745c5c3_Err = templ.JoinStringErrs(span.StatusMsg)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 426, Col: 25}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 397, Col: 25}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var77))
 					if templ_7745c5c3_Err != nil {
@@ -1377,7 +1377,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var78 string
 					templ_7745c5c3_Var78, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(span.Events)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 431, Col: 86}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 402, Col: 86}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var78))
 					if templ_7745c5c3_Err != nil {
@@ -1395,7 +1395,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 						var templ_7745c5c3_Var79 string
 						templ_7745c5c3_Var79, templ_7745c5c3_Err = templ.JoinStringErrs(ev.Name)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 435, Col: 46}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 406, Col: 46}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var79))
 						if templ_7745c5c3_Err != nil {
@@ -1413,7 +1413,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 							var templ_7745c5c3_Var80 string
 							templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(formatAttrs(ev.Attributes))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 437, Col: 67}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 408, Col: 67}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 							if templ_7745c5c3_Err != nil {
@@ -1442,7 +1442,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var81 string
 					templ_7745c5c3_Var81, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(span.Links)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 446, Col: 84}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 417, Col: 84}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var81))
 					if templ_7745c5c3_Err != nil {
@@ -1460,7 +1460,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 						var templ_7745c5c3_Var82 templ.SafeURL
 						templ_7745c5c3_Var82, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/traces/"+pathEscape(ln.TraceID), data.Window)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 450, Col: 95}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 421, Col: 95}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var82))
 						if templ_7745c5c3_Err != nil {
@@ -1473,7 +1473,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 						var templ_7745c5c3_Var83 string
 						templ_7745c5c3_Var83, templ_7745c5c3_Err = templ.JoinStringErrs(truncateID(ln.TraceID))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 450, Col: 141}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 421, Col: 141}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var83))
 						if templ_7745c5c3_Err != nil {
@@ -1486,7 +1486,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 						var templ_7745c5c3_Var84 string
 						templ_7745c5c3_Var84, templ_7745c5c3_Err = templ.JoinStringErrs(truncateID(ln.SpanID))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 451, Col: 65}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 422, Col: 65}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var84))
 						if templ_7745c5c3_Err != nil {
@@ -1515,7 +1515,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 						var templ_7745c5c3_Var85 string
 						templ_7745c5c3_Var85, templ_7745c5c3_Err = templ.JoinStringErrs(k)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 463, Col: 38}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 434, Col: 38}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var85))
 						if templ_7745c5c3_Err != nil {
@@ -1528,7 +1528,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 						var templ_7745c5c3_Var86 string
 						templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.JoinStringErrs(formatAttrValue(v))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 464, Col: 57}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 435, Col: 57}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var86))
 						if templ_7745c5c3_Err != nil {
@@ -1561,7 +1561,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 				var templ_7745c5c3_Var87 string
 				templ_7745c5c3_Var87, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Logs)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 498, Col: 95}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 469, Col: 95}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var87))
 				if templ_7745c5c3_Err != nil {
@@ -1579,7 +1579,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var88 string
 					templ_7745c5c3_Var88, templ_7745c5c3_Err = templ.JoinStringErrs(log.Time)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 511, Col: 22}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 482, Col: 22}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var88))
 					if templ_7745c5c3_Err != nil {
@@ -1592,7 +1592,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var89 string
 					templ_7745c5c3_Var89, templ_7745c5c3_Err = templ.JoinStringErrs(log.Service)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 512, Col: 25}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 483, Col: 25}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var89))
 					if templ_7745c5c3_Err != nil {
@@ -1605,7 +1605,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var90 string
 					templ_7745c5c3_Var90, templ_7745c5c3_Err = templ.JoinStringErrs(logSeverityVariant(log.Severity))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 514, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 485, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var90))
 					if templ_7745c5c3_Err != nil {
@@ -1618,20 +1618,20 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					var templ_7745c5c3_Var91 string
 					templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.JoinStringErrs(log.Severity)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 514, Col: 78}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 485, Col: 78}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var91))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "</sl-badge></td><td style=\"font-family: monospace; font-size: 0.8rem;\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 148, "</sl-badge></td><td style=\"font-family: var(--font-mono); font-size: 0.8rem;\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var92 string
 					templ_7745c5c3_Var92, templ_7745c5c3_Err = templ.JoinStringErrs(log.Body)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 516, Col: 73}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 487, Col: 80}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var92))
 					if templ_7745c5c3_Err != nil {
@@ -1647,7 +1647,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, " <style>\n\t\t\t/* Time Ruler */\n\t\t\t.waterfall-ruler {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: 320px 1fr;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 0 0 0.5rem;\n\t\t\t\tborder-bottom: 1px solid var(--border-color);\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.ruler-spacer {\n\t\t\t\t/* Matches waterfall-info width */\n\t\t\t}\n\t\t\t.ruler-scale {\n\t\t\t\tposition: relative;\n\t\t\t\theight: 20px;\n\t\t\t}\n\t\t\t.ruler-tick {\n\t\t\t\tposition: absolute;\n\t\t\t\ttransform: translateX(-50%);\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.ruler-tick:first-child {\n\t\t\t\ttransform: translateX(0);\n\t\t\t}\n\t\t\t.ruler-tick:last-child {\n\t\t\t\ttransform: translateX(-100%);\n\t\t\t}\n\n\t\t\t/* Legend */\n\t\t\t.waterfall-legend {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tfont-weight: 400;\n\t\t\t}\n\t\t\t.legend-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.375rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\t.legend-dot {\n\t\t\t\twidth: 10px;\n\t\t\t\theight: 10px;\n\t\t\t\tborder-radius: 2px;\n\t\t\t}\n\t\t\t.legend-server { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); }\n\t\t\t.legend-client { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }\n\t\t\t.legend-internal { background: linear-gradient(135deg, #64748b 0%, #475569 100%); }\n\t\t\t.legend-error { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }\n\n\t\t\t.waterfall {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t}\n\t\t\t.waterfall-row {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: 320px 1fr;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t\tpadding: 0.375rem 0;\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tcursor: pointer;\n\t\t\t\ttransition: background 0.1s;\n\t\t\t}\n\t\t\t.waterfall-row:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t}\n\t\t\t.waterfall-row-error {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.05);\n\t\t\t}\n\t\t\t.waterfall-row-error:hover {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t}\n\t\t\t.waterfall-info {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t}\n\t\t\t.waterfall-toggle {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\twidth: 20px;\n\t\t\t\theight: 20px;\n\t\t\t\tpadding: 0;\n\t\t\t\tborder: none;\n\t\t\t\tbackground: none;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tcursor: pointer;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-toggle:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.waterfall-toggle .toggle-icon {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.waterfall-label {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\toverflow: hidden;\n\t\t\t\tmin-width: 0;\n\t\t\t}\n\t\t\t.waterfall-label .service {\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-label .operation {\n\t\t\t\tcolor: var(--text-secondary);\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.waterfall-label .error-hint {\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-label .events-badge,\n\t\t\t.waterfall-label .links-badge {\n\t\t\t\tdisplay: inline-flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 2px;\n\t\t\t\tfont-size: 10px;\n\t\t\t\tpadding: 1px 4px;\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tcursor: help;\n\t\t\t}\n\t\t\t.waterfall-label .events-badge {\n\t\t\t\tbackground: var(--sl-color-warning-100);\n\t\t\t\tcolor: var(--sl-color-warning-700);\n\t\t\t}\n\t\t\t.waterfall-label .links-badge {\n\t\t\t\tbackground: var(--sl-color-primary-100);\n\t\t\t\tcolor: var(--sl-color-primary-700);\n\t\t\t}\n\t\t\t.waterfall-bar-container {\n\t\t\t\theight: 24px;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tposition: relative;\n\t\t\t}\n\t\t\t.waterfall-bar {\n\t\t\t\tposition: absolute;\n\t\t\t\theight: 100%;\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tpadding: 0 0.5rem;\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t\tcolor: white;\n\t\t\t\tmin-width: 40px;\n\t\t\t\tfont-weight: 500;\n\t\t\t\ttext-shadow: 0 1px 1px rgba(0,0,0,0.2);\n\t\t\t}\n\t\t\t/* Error always takes priority */\n\t\t\t.waterfall-bar-error {\n\t\t\t\tbackground: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);\n\t\t\t}\n\t\t\t/* Kind-based colors (when not error) */\n\t\t\t.waterfall-bar-server {\n\t\t\t\tbackground: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-client {\n\t\t\t\tbackground: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-producer {\n\t\t\t\tbackground: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-consumer {\n\t\t\t\tbackground: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-internal {\n\t\t\t\tbackground: linear-gradient(135deg, #64748b 0%, #475569 100%);\n\t\t\t}\n\t\t\t/* Default fallback */\n\t\t\t.waterfall-bar-ok {\n\t\t\t\tbackground: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);\n\t\t\t}\n\t\t\t/* Span detail panel */\n\t\t\t.span-detail {\n\t\t\t\toverflow: hidden;\n\t\t\t}\n\t\t\t.span-detail-content {\n\t\t\t\tpadding: 0.75rem 1rem;\n\t\t\t\tmargin: 0.25rem 0 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tborder-left: 3px solid var(--accent);\n\t\t\t}\n\t\t\t.waterfall-row-error + .span-detail .span-detail-content {\n\t\t\t\tborder-left-color: var(--danger);\n\t\t\t}\n\t\t\t.span-detail-grid {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: repeat(auto-fit, minmax(180px, 1fr));\n\t\t\t\tgap: 0.75rem;\n\t\t\t}\n\t\t\t.span-detail-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.125rem;\n\t\t\t}\n\t\t\t.span-detail-label {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t}\n\t\t\t.span-detail-value {\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.span-detail-value.mono {\n\t\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.span-detail-value.status-error {\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tfont-weight: 600;\n\t\t\t}\n\t\t\t.span-detail-value.status-ok {\n\t\t\t\tcolor: var(--success);\n\t\t\t}\n\t\t\t.span-error-msg {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: flex-start;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding: 0.625rem 0.75rem;\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tfont-family: 'SF Mono', Monaco, monospace;\n\t\t\t\tword-break: break-word;\n\t\t\t}\n\t\t\t.span-error-msg sl-icon {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmargin-top: 0.125rem;\n\t\t\t}\n\t\t\t/* New sections for events, links, attributes */\n\t\t\t.span-section {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding-top: 0.75rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.span-section-title {\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.span-events, .span-links {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.25rem;\n\t\t\t}\n\t\t\t.span-event {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.event-name {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.event-attrs {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: monospace;\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t}\n\t\t\t.span-link {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.link-trace {\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t\tfont-family: monospace;\n\t\t\t}\n\t\t\t.link-trace:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.link-span {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: monospace;\n\t\t\t}\n\t\t\t.span-attributes {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.25rem;\n\t\t\t}\n\t\t\t.attr-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.attr-key {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tmin-width: 120px;\n\t\t\t}\n\t\t\t.attr-value {\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\tfont-family: monospace;\n\t\t\t\tword-break: break-all;\n\t\t\t}\n\t\t</style>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, " <style>\n\t\t\t/* Time Ruler */\n\t\t\t.waterfall-ruler {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: 320px 1fr;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 0 0 0.5rem;\n\t\t\t\tborder-bottom: 1px solid var(--border-color);\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.ruler-spacer {\n\t\t\t\t/* Matches waterfall-info width */\n\t\t\t}\n\t\t\t.ruler-scale {\n\t\t\t\tposition: relative;\n\t\t\t\theight: 20px;\n\t\t\t}\n\t\t\t.ruler-tick {\n\t\t\t\tposition: absolute;\n\t\t\t\ttransform: translateX(-50%);\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.ruler-tick:first-child {\n\t\t\t\ttransform: translateX(0);\n\t\t\t}\n\t\t\t.ruler-tick:last-child {\n\t\t\t\ttransform: translateX(-100%);\n\t\t\t}\n\n\t\t\t/* Legend */\n\t\t\t.waterfall-legend {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tfont-weight: 400;\n\t\t\t}\n\t\t\t.legend-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.375rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\t.legend-dot {\n\t\t\t\twidth: 10px;\n\t\t\t\theight: 10px;\n\t\t\t\tborder-radius: 2px;\n\t\t\t}\n\t\t\t.legend-server { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); }\n\t\t\t.legend-client { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }\n\t\t\t.legend-internal { background: linear-gradient(135deg, #64748b 0%, #475569 100%); }\n\t\t\t.legend-error { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }\n\n\t\t\t.waterfall {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t}\n\t\t\t.waterfall-row {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: 320px 1fr;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t\tpadding: 0.375rem 0;\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tcursor: pointer;\n\t\t\t\ttransition: background 0.1s;\n\t\t\t}\n\t\t\t.waterfall-row:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t}\n\t\t\t.waterfall-row-error {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.05);\n\t\t\t}\n\t\t\t.waterfall-row-error:hover {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t}\n\t\t\t.waterfall-info {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t}\n\t\t\t.waterfall-toggle {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\twidth: 20px;\n\t\t\t\theight: 20px;\n\t\t\t\tpadding: 0;\n\t\t\t\tborder: none;\n\t\t\t\tbackground: none;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tcursor: pointer;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-toggle:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.waterfall-toggle .toggle-icon {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.waterfall-label {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\toverflow: hidden;\n\t\t\t\tmin-width: 0;\n\t\t\t}\n\t\t\t.waterfall-label .service {\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-label .operation {\n\t\t\t\tcolor: var(--text-secondary);\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.waterfall-label .error-hint {\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-label .events-badge,\n\t\t\t.waterfall-label .links-badge {\n\t\t\t\tdisplay: inline-flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 2px;\n\t\t\t\tfont-size: 10px;\n\t\t\t\tpadding: 1px 4px;\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tcursor: help;\n\t\t\t}\n\t\t\t.waterfall-label .events-badge {\n\t\t\t\tbackground: var(--sl-color-warning-100);\n\t\t\t\tcolor: var(--sl-color-warning-700);\n\t\t\t}\n\t\t\t.waterfall-label .links-badge {\n\t\t\t\tbackground: var(--sl-color-primary-100);\n\t\t\t\tcolor: var(--sl-color-primary-700);\n\t\t\t}\n\t\t\t.waterfall-bar-container {\n\t\t\t\theight: 24px;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tposition: relative;\n\t\t\t}\n\t\t\t.waterfall-bar {\n\t\t\t\tposition: absolute;\n\t\t\t\theight: 100%;\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tpadding: 0 0.5rem;\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t\tcolor: white;\n\t\t\t\tmin-width: 40px;\n\t\t\t\tfont-weight: 500;\n\t\t\t\ttext-shadow: 0 1px 1px rgba(0,0,0,0.2);\n\t\t\t}\n\t\t\t/* Error always takes priority */\n\t\t\t.waterfall-bar-error {\n\t\t\t\tbackground: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);\n\t\t\t}\n\t\t\t/* Kind-based colors (when not error) */\n\t\t\t.waterfall-bar-server {\n\t\t\t\tbackground: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-client {\n\t\t\t\tbackground: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-producer {\n\t\t\t\tbackground: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-consumer {\n\t\t\t\tbackground: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-internal {\n\t\t\t\tbackground: linear-gradient(135deg, #64748b 0%, #475569 100%);\n\t\t\t}\n\t\t\t/* Default fallback */\n\t\t\t.waterfall-bar-ok {\n\t\t\t\tbackground: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);\n\t\t\t}\n\t\t\t/* Span detail panel */\n\t\t\t.span-detail {\n\t\t\t\toverflow: hidden;\n\t\t\t}\n\t\t\t.span-detail-content {\n\t\t\t\tpadding: 0.75rem 1rem;\n\t\t\t\tmargin: 0.25rem 0 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tborder-left: 3px solid var(--accent);\n\t\t\t}\n\t\t\t.waterfall-row-error + .span-detail .span-detail-content {\n\t\t\t\tborder-left-color: var(--danger);\n\t\t\t}\n\t\t\t.span-detail-grid {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: repeat(auto-fit, minmax(180px, 1fr));\n\t\t\t\tgap: 0.75rem;\n\t\t\t}\n\t\t\t.span-detail-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.125rem;\n\t\t\t}\n\t\t\t.span-detail-label {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t}\n\t\t\t.span-detail-value {\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.span-detail-value.mono {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.span-detail-value.status-error {\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tfont-weight: 600;\n\t\t\t}\n\t\t\t.span-detail-value.status-ok {\n\t\t\t\tcolor: var(--success);\n\t\t\t}\n\t\t\t.span-error-msg {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: flex-start;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding: 0.625rem 0.75rem;\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tword-break: break-word;\n\t\t\t}\n\t\t\t.span-error-msg sl-icon {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmargin-top: 0.125rem;\n\t\t\t}\n\t\t\t/* New sections for events, links, attributes */\n\t\t\t.span-section {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding-top: 0.75rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.span-section-title {\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.span-events, .span-links {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.25rem;\n\t\t\t}\n\t\t\t.span-event {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.event-name {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.event-attrs {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t}\n\t\t\t.span-link {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.link-trace {\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.link-trace:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.link-span {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.span-attributes {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.25rem;\n\t\t\t}\n\t\t\t.attr-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.attr-key {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tmin-width: 120px;\n\t\t\t}\n\t\t\t.attr-value {\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tword-break: break-all;\n\t\t\t}\n\t\t\t/* Mobile responsive waterfall */\n\t\t\t@media (max-width: 768px) {\n\t\t\t\t.waterfall-ruler {\n\t\t\t\t\tgrid-template-columns: 1fr;\n\t\t\t\t\tgap: 0;\n\t\t\t\t}\n\t\t\t\t.ruler-spacer { display: none; }\n\t\t\t\t.waterfall-row {\n\t\t\t\t\tgrid-template-columns: 1fr;\n\t\t\t\t\tgap: 0.25rem;\n\t\t\t\t}\n\t\t\t\t.waterfall-info {\n\t\t\t\t\tpadding-left: 8px !important;\n\t\t\t\t}\n\t\t\t\t.waterfall-bar-container {\n\t\t\t\t\tmargin-left: 28px;\n\t\t\t\t}\n\t\t\t\t.span-detail-content {\n\t\t\t\t\tmargin-left: 8px !important;\n\t\t\t\t}\n\t\t\t}\n\t\t</style>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

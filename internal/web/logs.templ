@@ -53,22 +53,6 @@ templ Logs(data LogsData) {
 					<code>service:name</code> <code>severity:ERROR,WARN</code> <code>"exact phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
-			<script>
-				function cleanFormSubmit(form) {
-					const url = new URL(form.action, window.location.origin);
-					const q = form.querySelector('[name="q"]').value.trim();
-					if (q) url.searchParams.set('q', q);
-					const ns = new URL(window.location.href).searchParams.get('ns');
-					if (ns) url.searchParams.set('ns', ns);
-					const win = new URL(window.location.href).searchParams.get('window');
-					if (win && win !== '60') url.searchParams.set('window', win);
-					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).catch(() => {
-						alert('Search failed. Please try again.');
-					});
-					history.pushState({}, '', url.toString());
-					return false;
-				}
-			</script>
 		</div>
 		<!-- Results -->
 		<div class="results-section">
@@ -199,7 +183,7 @@ templ Logs(data LogsData) {
 			}
 			.time {
 				color: var(--text-muted);
-				font-family: monospace;
+				font-family: var(--font-mono);
 			}
 			.service {
 				color: var(--accent);
@@ -209,7 +193,7 @@ templ Logs(data LogsData) {
 				text-decoration: underline;
 			}
 			.log-body {
-				font-family: 'SF Mono', Monaco, monospace;
+				font-family: var(--font-mono);
 				font-size: 0.8rem;
 				color: var(--text-primary);
 				white-space: pre-wrap;
@@ -254,7 +238,7 @@ templ Logs(data LogsData) {
 				color: var(--text-primary);
 			}
 			.log-detail-value.mono {
-				font-family: 'SF Mono', Monaco, monospace;
+				font-family: var(--font-mono);
 			}
 			.log-attributes {
 				margin-top: 0.75rem;
@@ -283,21 +267,8 @@ templ Logs(data LogsData) {
 			}
 			.log-attr-value {
 				color: var(--text-primary);
-				font-family: monospace;
+				font-family: var(--font-mono);
 				word-break: break-all;
-			}
-			.pagination {
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				gap: 1rem;
-				padding: 1rem;
-				border-top: 1px solid var(--border-color);
-				margin-top: 1rem;
-			}
-			.pagination-info {
-				color: var(--text-muted);
-				font-size: 0.875rem;
 			}
 		</style>
 	}

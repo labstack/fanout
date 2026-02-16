@@ -1,7 +1,7 @@
 #!/bin/bash
 # Test MCP tools
 
-SID=$(curl -s -i -X POST http://localhost:7520/mcp \
+SID=$(curl -s -i -X POST https://fanout.test/mcp \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}' \
   | grep 'Mcp-Session-Id' | cut -d' ' -f2 | tr -d '\r')
@@ -12,7 +12,7 @@ echo ""
 call_tool() {
   local tool=$1
   local args=$2
-  curl -s -X POST http://localhost:7520/mcp \
+  curl -s -X POST https://fanout.test/mcp \
     -H "Content-Type: application/json" \
     -H "Mcp-Session-Id: $SID" \
     -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$tool\",\"arguments\":$args}}" \
