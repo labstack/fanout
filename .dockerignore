@@ -1,6 +1,26 @@
+# Git
+.git/
+.gitignore
+
+# Data
 lake/
 testdata/
 *.parquet
-.git/
-.gitignore
+
+# Build
+fanout
+
+# Dev files
+.env
+.env.*
+
+# Docs
 *.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
