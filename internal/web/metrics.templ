@@ -107,36 +107,8 @@ templ Metrics(data MetricsData) {
 			}
 		</sl-card>
 		<style>
-			.search-form .form-row {
-				display: flex;
-				gap: 1rem;
-				flex-wrap: wrap;
-				align-items: flex-end;
-			}
-			.search-form sl-input {
-				flex: 1;
-				min-width: 200px;
-			}
-			.search-hint {
-				margin-top: 0.75rem;
-				font-size: 0.75rem;
-				color: var(--text-muted);
-				display: flex;
-				align-items: center;
-				gap: 0.5rem;
-				flex-wrap: wrap;
-			}
-			.search-hint sl-icon {
-				font-size: 0.875rem;
-			}
-			.search-hint code {
-				background: var(--bg-tertiary);
-				padding: 0.125rem 0.375rem;
-				border-radius: 0.25rem;
-				font-size: 0.7rem;
-			}
 			.metric-name {
-				font-family: 'SF Mono', Monaco, monospace;
+				font-family: var(--font-mono);
 				font-size: 0.85rem;
 				color: var(--text-primary);
 			}
@@ -150,10 +122,6 @@ templ Metrics(data MetricsData) {
 				background: var(--accent);
 				color: white;
 			}
-			.mono {
-				font-family: 'SF Mono', Monaco, monospace;
-				font-size: 0.8rem;
-			}
 			.sparkline {
 				width: 80px;
 				height: 24px;
@@ -164,25 +132,6 @@ templ Metrics(data MetricsData) {
 				stroke-width: 1.5;
 				stroke-linecap: round;
 				stroke-linejoin: round;
-			}
-			.empty-state {
-				text-align: center;
-				padding: 3rem 1rem;
-				color: var(--text-muted);
-			}
-			.empty-state sl-icon {
-				font-size: 3rem;
-				margin-bottom: 1rem;
-				opacity: 0.5;
-			}
-			.empty-state-title {
-				font-size: 1.1rem;
-				font-weight: 500;
-				margin-bottom: 0.5rem;
-				color: var(--text-primary);
-			}
-			.empty-state-message {
-				font-size: 0.875rem;
 			}
 		</style>
 	}

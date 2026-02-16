@@ -1135,7 +1135,7 @@ func latencyChartSpec(data []TimelinePoint) string {
 				},
 			},
 			{
-				"mark": map[string]any{"type": "line", "strokeWidth": 2, "color": "#3b82f6"},
+				"mark": map[string]any{"type": "line", "strokeWidth": 2, "color": "#6366f1"},
 				"encoding": map[string]any{
 					"x": map[string]any{"field": "time", "type": "temporal", "timeUnit": "yearmonthdatehoursminutes"},
 					"y": map[string]any{"field": "p50", "type": "quantitative"},
@@ -1167,7 +1167,7 @@ func requestChartSpec(data []TimelinePoint) string {
 		"data":    map[string]any{"values": values},
 		"layer": []map[string]any{
 			{
-				"mark": map[string]any{"type": "bar", "color": "#3b82f6", "opacity": 0.6},
+				"mark": map[string]any{"type": "bar", "color": "#6366f1", "opacity": 0.6},
 				"encoding": map[string]any{
 					"x": map[string]any{
 						"field":    "time",

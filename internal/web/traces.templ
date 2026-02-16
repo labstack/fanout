@@ -86,22 +86,6 @@ templ Traces(data TracesData) {
 					<code>service:name</code> <code>op:checkout</code> <code>status:error</code> <code>duration:&gt;1000</code> <code>attr:key=value</code> <code>"phrase"</code> <code>-exclude</code>
 				</div>
 			</form>
-			<script>
-				function cleanFormSubmit(form) {
-					const url = new URL(form.action, window.location.origin);
-					const q = form.querySelector('[name="q"]').value.trim();
-					if (q) url.searchParams.set('q', q);
-					const ns = new URL(window.location.href).searchParams.get('ns');
-					if (ns) url.searchParams.set('ns', ns);
-					const win = new URL(window.location.href).searchParams.get('window');
-					if (win && win !== '60') url.searchParams.set('window', win);
-					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).catch(() => {
-						alert('Search failed. Please try again.');
-					});
-					history.pushState({}, '', url.toString());
-					return false;
-				}
-			</script>
 		</div>
 		<!-- Facets -->
 		if len(data.Facets.ByService) > 0 || len(data.Facets.ByStatus) > 0 {
@@ -200,21 +184,6 @@ templ Traces(data TracesData) {
 				</div>
 			}
 		</div>
-		<style>
-			.pagination {
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				gap: 1rem;
-				padding: 1rem;
-				border-top: 1px solid var(--border-color);
-				margin-top: 1rem;
-			}
-			.pagination-info {
-				color: var(--text-muted);
-				font-size: 0.875rem;
-			}
-		</style>
 	}
 }
 
@@ -515,7 +484,7 @@ templ TraceDetail(data TraceDetailData) {
 								<td>
 									<sl-badge variant={ logSeverityVariant(log.Severity) }>{ log.Severity }</sl-badge>
 								</td>
-								<td style="font-family: monospace; font-size: 0.8rem;">{ log.Body }</td>
+								<td style="font-family: var(--font-mono); font-size: 0.8rem;">{ log.Body }</td>
 							</tr>
 						}
 					</tbody>
@@ -745,7 +714,7 @@ templ TraceDetail(data TraceDetailData) {
 				color: var(--text-primary);
 			}
 			.span-detail-value.mono {
-				font-family: 'SF Mono', Monaco, monospace;
+				font-family: var(--font-mono);
 				font-size: 0.75rem;
 			}
 			.span-detail-value.status-error {
@@ -765,7 +734,7 @@ templ TraceDetail(data TraceDetailData) {
 				border-radius: 0.375rem;
 				font-size: 0.8rem;
 				color: var(--danger);
-				font-family: 'SF Mono', Monaco, monospace;
+				font-family: var(--font-mono);
 				word-break: break-word;
 			}
 			.span-error-msg sl-icon {
@@ -805,7 +774,7 @@ templ TraceDetail(data TraceDetailData) {
 			}
 			.event-attrs {
 				color: var(--text-muted);
-				font-family: monospace;
+				font-family: var(--font-mono);
 				font-size: 0.7rem;
 			}
 			.span-link {
@@ -819,14 +788,14 @@ templ TraceDetail(data TraceDetailData) {
 			.link-trace {
 				color: var(--accent);
 				text-decoration: none;
-				font-family: monospace;
+				font-family: var(--font-mono);
 			}
 			.link-trace:hover {
 				text-decoration: underline;
 			}
 			.link-span {
 				color: var(--text-muted);
-				font-family: monospace;
+				font-family: var(--font-mono);
 			}
 			.span-attributes {
 				display: flex;
@@ -848,8 +817,29 @@ templ TraceDetail(data TraceDetailData) {
 			}
 			.attr-value {
 				color: var(--text-primary);
-				font-family: monospace;
+				font-family: var(--font-mono);
 				word-break: break-all;
+			}
+			/* Mobile responsive waterfall */
+			@media (max-width: 768px) {
+				.waterfall-ruler {
+					grid-template-columns: 1fr;
+					gap: 0;
+				}
+				.ruler-spacer { display: none; }
+				.waterfall-row {
+					grid-template-columns: 1fr;
+					gap: 0.25rem;
+				}
+				.waterfall-info {
+					padding-left: 8px !important;
+				}
+				.waterfall-bar-container {
+					margin-left: 28px;
+				}
+				.span-detail-content {
+					margin-left: 8px !important;
+				}
 			}
 		</style>
 	}

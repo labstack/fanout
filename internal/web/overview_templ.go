@@ -250,7 +250,7 @@ func timelineSpec(data TimelineData) string {
 				"encoding": map[string]any{
 					"x":     map[string]any{"field": "time", "type": "temporal", "timeUnit": "yearmonthdatehoursminutes"},
 					"y":     map[string]any{"field": "requests", "type": "quantitative"},
-					"color": map[string]any{"condition": map[string]any{"test": "datum.anomaly", "value": "#ef4444"}, "value": "#3b82f6"},
+					"color": map[string]any{"condition": map[string]any{"test": "datum.anomaly", "value": "#ef4444"}, "value": "#6366f1"},
 				},
 			},
 		},
