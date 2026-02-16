@@ -213,40 +213,40 @@ func Unified(data UnifiedData) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"><sl-icon slot=\"prefix\" name=\"exclamation-triangle\"></sl-icon> Errors</sl-button></div><!-- Search Form --> <sl-card style=\"margin-bottom: 1rem;\"><form method=\"GET\" action=\"/unified\" class=\"search-form\" onsubmit=\"return cleanFormSubmit(this)\"><div class=\"form-row\"><sl-input name=\"q\" label=\"Search\" placeholder=\"service:checkout status:error type:span severity:ERROR\" value=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "\"><sl-icon slot=\"prefix\" name=\"exclamation-triangle\"></sl-icon> Errors</sl-button></div><!-- Search Form --> <div class=\"search-section\"><form method=\"GET\" action=\"/unified\" onsubmit=\"return cleanFormSubmit(this)\"><div class=\"form-row\"><sl-input name=\"q\" placeholder=\"service:checkout status:error type:span severity:ERROR\" value=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(data.Query)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 76, Col: 126}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 76, Col: 111}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" style=\"flex: 3;\"></sl-input> <sl-button type=\"submit\" variant=\"primary\">Search</sl-button></div><div class=\"search-hint\"><sl-icon name=\"lightbulb\"></sl-icon> <code>service:name</code> <code>type:span|log|metric</code> <code>status:error</code> <code>severity:ERROR</code> <code>op:checkout</code> <code>trace:abc123</code> <code>\"phrase\"</code> <code>-exclude</code></div></form></sl-card><!-- Facets --> <div class=\"facets-bar\"><div class=\"facet-group\"><span class=\"facet-label\">Type</span> <a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\"></sl-input> <sl-button type=\"submit\" variant=\"primary\">Search</sl-button></div><div class=\"search-hint\"><code>service:name</code> <code>type:span|log|metric</code> <code>status:error</code> <code>severity:ERROR</code> <code>op:checkout</code> <code>trace:abc123</code> <code>\"phrase\"</code> <code>-exclude</code></div></form></div><!-- Facets --> <div class=\"facets-bar\"><div class=\"facet-group\"><span class=\"facet-label\">Type</span> <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var14 templ.SafeURL
 			templ_7745c5c3_Var14, templ_7745c5c3_Err = templ.JoinURLErrs(unifiedFacetURL(data.Query, "type", "span", data.Window))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 89, Col: 70}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 88, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var14))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" style=\"text-decoration: none;\"><sl-tag size=\"small\" class=\"facet-span\">span<span class=\"facet-count\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "\" class=\"facet-link\"><sl-tag size=\"small\" class=\"facet-span\">span<span class=\"facet-count\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var15 string
 			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.SpanCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 90, Col: 110}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 89, Col: 110}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 			if templ_7745c5c3_Err != nil {
@@ -259,20 +259,20 @@ func Unified(data UnifiedData) templ.Component {
 			var templ_7745c5c3_Var16 templ.SafeURL
 			templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.JoinURLErrs(unifiedFacetURL(data.Query, "type", "log", data.Window))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 92, Col: 69}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 91, Col: 69}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var16))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" style=\"text-decoration: none;\"><sl-tag size=\"small\" class=\"facet-log\">log<span class=\"facet-count\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "\" class=\"facet-link\"><sl-tag size=\"small\" class=\"facet-log\">log<span class=\"facet-count\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var17 string
 			templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.LogCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 93, Col: 107}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 92, Col: 107}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var17))
 			if templ_7745c5c3_Err != nil {
@@ -285,20 +285,20 @@ func Unified(data UnifiedData) templ.Component {
 			var templ_7745c5c3_Var18 templ.SafeURL
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinURLErrs(unifiedFacetURL(data.Query, "type", "metric", data.Window))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 95, Col: 72}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 94, Col: 72}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" style=\"text-decoration: none;\"><sl-tag size=\"small\" class=\"facet-metric\">metric<span class=\"facet-count\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "\" class=\"facet-link\"><sl-tag size=\"small\" class=\"facet-metric\">metric<span class=\"facet-count\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.MetricCount))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 96, Col: 116}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 95, Col: 116}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 			if templ_7745c5c3_Err != nil {
@@ -321,20 +321,20 @@ func Unified(data UnifiedData) templ.Component {
 					var templ_7745c5c3_Var20 templ.SafeURL
 					templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinURLErrs(unifiedFacetURL(data.Query, "service", f.Value, data.Window))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 103, Col: 76}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 102, Col: 76}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" style=\"text-decoration: none;\"><sl-tag size=\"small\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 21, "\" class=\"facet-link\"><sl-tag size=\"small\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var21 string
 					templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(f.Value)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 104, Col: 37}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 103, Col: 37}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 					if templ_7745c5c3_Err != nil {
@@ -347,7 +347,7 @@ func Unified(data UnifiedData) templ.Component {
 					var templ_7745c5c3_Var22 string
 					templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", f.Count))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 104, Col: 93}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 103, Col: 93}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 					if templ_7745c5c3_Err != nil {
@@ -363,14 +363,14 @@ func Unified(data UnifiedData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</div><!-- Results --> <sl-card><div slot=\"header\" class=\"card-header\">Results (")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</div><!-- Results --> <div class=\"results-section\"><div class=\"results-header\">Results (")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var23 string
 			templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", len(data.Events)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 112, Col: 88}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 111, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 			if templ_7745c5c3_Err != nil {
@@ -381,7 +381,7 @@ func Unified(data UnifiedData) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(data.Events) == 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div class=\"empty-state\"><sl-icon name=\"layers\"></sl-icon><div class=\"empty-state-title\">No events found</div><div class=\"empty-state-message\">Try adjusting your search filters or expanding the time window.</div></div>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<div class=\"empty-state\" style=\"padding: 3rem;\"><sl-icon name=\"layers\"></sl-icon><div class=\"empty-state-title\">No events found</div><div class=\"empty-state-message\">Try adjusting your search filters or expanding the time window.</div></div>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -416,7 +416,7 @@ func Unified(data UnifiedData) templ.Component {
 					var templ_7745c5c3_Var26 string
 					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(e.Time)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 135, Col: 61}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 134, Col: 61}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 					if templ_7745c5c3_Err != nil {
@@ -451,7 +451,7 @@ func Unified(data UnifiedData) templ.Component {
 					var templ_7745c5c3_Var29 string
 					templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(e.Type)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 137, Col: 66}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 136, Col: 66}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 					if templ_7745c5c3_Err != nil {
@@ -469,7 +469,7 @@ func Unified(data UnifiedData) templ.Component {
 						var templ_7745c5c3_Var30 templ.SafeURL
 						templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/services/"+pathEscape(e.Service), data.Window)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 141, Col: 94}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 140, Col: 94}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 						if templ_7745c5c3_Err != nil {
@@ -482,7 +482,7 @@ func Unified(data UnifiedData) templ.Component {
 						var templ_7745c5c3_Var31 string
 						templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(e.Service)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 141, Col: 108}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 140, Col: 108}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 						if templ_7745c5c3_Err != nil {
@@ -503,9 +503,9 @@ func Unified(data UnifiedData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var32 string
-					templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(truncateName(e.Name, 40))
+					templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(truncateStr(e.Name, 40))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 146, Col: 56}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 145, Col: 55}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 					if templ_7745c5c3_Err != nil {
@@ -516,9 +516,9 @@ func Unified(data UnifiedData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var33 string
-					templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(truncateName(e.Value, 50))
+					templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(truncateStr(e.Value, 50))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 147, Col: 58}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 146, Col: 57}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 					if templ_7745c5c3_Err != nil {
@@ -530,12 +530,12 @@ func Unified(data UnifiedData) templ.Component {
 					}
 					if e.Type == "span" {
 						if e.Status == "error" {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<sl-badge variant=\"danger\">error</sl-badge>")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "<sl-badge variant=\"danger\" pill>error</sl-badge>")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
 						} else if e.Status != "" {
-							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<sl-badge variant=\"success\">ok</sl-badge>")
+							templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<sl-badge variant=\"success\" pill>ok</sl-badge>")
 							if templ_7745c5c3_Err != nil {
 								return templ_7745c5c3_Err
 							}
@@ -548,20 +548,20 @@ func Unified(data UnifiedData) templ.Component {
 						var templ_7745c5c3_Var34 string
 						templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(logSeverityVariant(e.Severity))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 156, Col: 60}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 155, Col: 60}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "\" pill>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var35 string
 						templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(e.Severity)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 156, Col: 75}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 155, Col: 80}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 						if templ_7745c5c3_Err != nil {
@@ -589,7 +589,7 @@ func Unified(data UnifiedData) templ.Component {
 						var templ_7745c5c3_Var36 templ.SafeURL
 						templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/traces/"+e.TraceID, data.Window)))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 163, Col: 80}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 162, Col: 80}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 						if templ_7745c5c3_Err != nil {
@@ -602,7 +602,7 @@ func Unified(data UnifiedData) templ.Component {
 						var templ_7745c5c3_Var37 string
 						templ_7745c5c3_Var37, templ_7745c5c3_Err = templ.JoinStringErrs(truncateID(e.TraceID))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 164, Col: 34}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 163, Col: 34}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var37))
 						if templ_7745c5c3_Err != nil {
@@ -628,9 +628,9 @@ func Unified(data UnifiedData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var38 string
-				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL(data.Query, data.Window, data.Limit, maxInt(0, data.Offset-data.Limit)))
+				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL(data.Query, data.Window, data.Limit, clampMin(data.Offset-data.Limit)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 176, Col: 105}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 175, Col: 104}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 				if templ_7745c5c3_Err != nil {
@@ -653,7 +653,7 @@ func Unified(data UnifiedData) templ.Component {
 				var templ_7745c5c3_Var39 string
 				templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+1))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 180, Col: 69}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 179, Col: 69}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 				if templ_7745c5c3_Err != nil {
@@ -666,7 +666,7 @@ func Unified(data UnifiedData) templ.Component {
 				var templ_7745c5c3_Var40 string
 				templ_7745c5c3_Var40, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Offset+len(data.Events)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 180, Col: 123}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 179, Col: 123}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var40))
 				if templ_7745c5c3_Err != nil {
@@ -679,7 +679,7 @@ func Unified(data UnifiedData) templ.Component {
 				var templ_7745c5c3_Var41 string
 				templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(unifiedURL(data.Query, data.Window, data.Limit, data.Offset+data.Limit))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 181, Col: 94}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/unified.templ`, Line: 180, Col: 94}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 				if templ_7745c5c3_Err != nil {
@@ -700,7 +700,7 @@ func Unified(data UnifiedData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "</sl-card><style>\n\t\t\t/* sl-relative-time cell styling */\n\t\t\t.cell-time sl-relative-time {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t}\n\t\t\t.cell-time {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.cell-name {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tmax-width: 250px;\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.cell-value {\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-secondary);\n\t\t\t\tmax-width: 200px;\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.trace-link {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t}\n\t\t\t.trace-link:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.row-error {\n\t\t\t\tbackground: var(--sl-color-danger-50);\n\t\t\t}\n\t\t\t.row-error:hover td {\n\t\t\t\tbackground: var(--sl-color-danger-100) !important;\n\t\t\t}\n\t\t</style>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 63, "</div><style>\n\t\t\t/* sl-relative-time cell styling */\n\t\t\t.cell-time sl-relative-time {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t}\n\t\t\t.cell-time {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.cell-name {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tmax-width: 250px;\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.cell-value {\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-secondary);\n\t\t\t\tmax-width: 200px;\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.trace-link {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t}\n\t\t\t.trace-link:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.row-error {\n\t\t\t\tbackground: var(--sl-color-danger-50);\n\t\t\t}\n\t\t\t.row-error:hover td {\n\t\t\t\tbackground: var(--sl-color-danger-100) !important;\n\t\t\t}\n\t\t</style>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -712,21 +712,6 @@ func Unified(data UnifiedData) templ.Component {
 		}
 		return nil
 	})
-}
-
-func formatTime(ts string) string {
-	// Extract time portion from ISO timestamp
-	if len(ts) >= 19 {
-		return ts[11:19] // HH:MM:SS
-	}
-	return ts
-}
-
-func truncateName(s string, max int) string {
-	if len(s) > max {
-		return s[:max-3] + "..."
-	}
-	return s
 }
 
 func unifiedURL(q string, window, limit, offset int) templ.SafeURL {
@@ -770,13 +755,6 @@ func unifiedFacetURL(query, facetType, value string, window int) templ.SafeURL {
 	}
 	newQuery += prefix + value
 	return unifiedURL(newQuery, window, 0, 0)
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 var _ = templruntime.GeneratedTemplate

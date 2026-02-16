@@ -31,11 +31,11 @@ templ Layout(title string, activePage string, window int) {
 					--text-secondary: #5a6270;
 					--text-muted: #8b95a5;
 					--border-color: #e2e6ec;
-					/* Signal-typed colors */
+					/* Signal-typed colors (aligned with page accents) */
 					--signal-trace: #0ea5e9;
-					--signal-log: #f59e0b;
-					--signal-metric: #10b981;
-					--signal-error: #f43f5e;
+					--signal-log: #d97706;
+					--signal-metric: #059669;
+					--signal-error: #ef4444;
 					/* Page accent - overridden per page */
 					--accent: #6366f1;
 					--accent-hover: #4f46e5;
@@ -215,7 +215,7 @@ templ Layout(title string, activePage string, window int) {
 				}
 
 				.card-header {
-					font-size: 0.7rem;
+					font-size: 0.65rem;
 					font-weight: 600;
 					color: var(--text-muted);
 					text-transform: uppercase;
@@ -732,16 +732,9 @@ templ Layout(title string, activePage string, window int) {
 					font-feature-settings: 'tnum';
 				}
 
-				/* Expand/collapse animation */
-				.expand-panel {
-					overflow: hidden;
-					transition: max-height 200ms cubic-bezier(0.4, 0, 0.2, 1), opacity 200ms ease;
-					max-height: 0;
-					opacity: 0;
-				}
-				.expand-panel.open {
-					max-height: 2000px;
-					opacity: 1;
+				/* Facet tag links */
+				.facet-link {
+					text-decoration: none;
 				}
 			</style>
 			<script>
@@ -994,7 +987,12 @@ templ Layout(title string, activePage string, window int) {
 						const win = new URL(window.location.href).searchParams.get('window');
 						if (win && win !== '60') url.searchParams.set('window', win);
 						htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).catch(() => {
-							alert('Search failed. Please try again.');
+							const toast = Object.assign(document.createElement('sl-alert'), {
+								variant: 'danger', closable: true, duration: 4000,
+								innerHTML: '<sl-icon name="exclamation-triangle" slot="icon"></sl-icon>Search failed. Please try again.'
+							});
+							document.body.appendChild(toast);
+							toast.toast();
 						});
 						history.pushState({}, '', url.toString());
 						return false;
@@ -1004,7 +1002,7 @@ templ Layout(title string, activePage string, window int) {
 					let gPressed = false;
 					let gTimeout = null;
 					const shortcuts = {
-						'g': { 'o': '/', 's': '/services', 't': '/traces', 'l': '/logs', 'm': '/metrics', 'p': '/topology' }
+						'g': { 'o': '/', 's': '/services', 't': '/traces', 'l': '/logs', 'm': '/metrics', 'p': '/topology', 'u': '/unified' }
 					};
 
 					function getWindowParam() {
@@ -1191,6 +1189,7 @@ templ Layout(title string, activePage string, window int) {
 						<div class="kb-row"><kbd>g</kbd> <kbd>l</kbd> <span>Logs</span></div>
 						<div class="kb-row"><kbd>g</kbd> <kbd>m</kbd> <span>Metrics</span></div>
 						<div class="kb-row"><kbd>g</kbd> <kbd>p</kbd> <span>Topology</span></div>
+						<div class="kb-row"><kbd>g</kbd> <kbd>u</kbd> <span>Unified</span></div>
 					</div>
 					<div class="kb-section">
 						<div class="kb-section-title">Tables</div>

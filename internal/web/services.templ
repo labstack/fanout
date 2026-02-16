@@ -241,7 +241,7 @@ templ ServiceDetail(data ServiceDetailData) {
 									<td>{ fmt.Sprintf("%d", err.Count) }</td>
 									<td>
 										if err.TraceID != "" {
-											<a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(err.TraceID), data.Window)) }>{ truncate(err.TraceID, 12) }</a>
+											<a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(err.TraceID), data.Window)) }>{ truncateStr(err.TraceID, 12) }</a>
 										} else {
 											<span style="color: var(--text-muted);">-</span>
 										}
@@ -328,13 +328,6 @@ func errorColor(rate float64) string {
 		return "color: var(--warning);"
 	}
 	return "color: var(--success);"
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }
 
 func filterVariant(current, target string) string {

@@ -216,7 +216,7 @@ func Traces(data TracesData) templ.Component {
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" style=\"text-decoration: none;\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "\" class=\"facet-link\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -293,7 +293,7 @@ func Traces(data TracesData) templ.Component {
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" style=\"text-decoration: none;\"><sl-tag size=\"small\">")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "\" class=\"facet-link\"><sl-tag size=\"small\">")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -508,12 +508,12 @@ func Traces(data TracesData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					if t.Status == "error" {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<sl-badge variant=\"danger\">error</sl-badge>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<sl-badge variant=\"danger\" pill>error</sl-badge>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
 					} else {
-						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<sl-badge variant=\"success\">ok</sl-badge>")
+						templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 48, "<sl-badge variant=\"success\" pill>ok</sl-badge>")
 						if templ_7745c5c3_Err != nil {
 							return templ_7745c5c3_Err
 						}
@@ -541,9 +541,9 @@ func Traces(data TracesData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var27 string
-				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(tracesURL(data.Query, data.Window, data.Limit, maxOffset(data.Offset-data.Limit)))
+				templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(tracesURL(data.Query, data.Window, data.Limit, clampMin(data.Offset-data.Limit)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 175, Col: 104}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 175, Col: 103}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 				if templ_7745c5c3_Err != nil {
@@ -1333,9 +1333,9 @@ func TraceDetail(data TraceDetailData) templ.Component {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var76 string
-					templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(scopeVersion(span.ScopeVersion))
+					templ_7745c5c3_Var76, templ_7745c5c3_Err = templ.JoinStringErrs(fmtScopeVersion(span.ScopeVersion))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 390, Col: 93}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 390, Col: 96}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var76))
 					if templ_7745c5c3_Err != nil {
@@ -1411,9 +1411,9 @@ func TraceDetail(data TraceDetailData) templ.Component {
 								return templ_7745c5c3_Err
 							}
 							var templ_7745c5c3_Var80 string
-							templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(formatAttrs(ev.Attributes))
+							templ_7745c5c3_Var80, templ_7745c5c3_Err = templ.JoinStringErrs(fmtAttrs(ev.Attributes))
 							if templ_7745c5c3_Err != nil {
-								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 408, Col: 67}
+								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 408, Col: 64}
 							}
 							_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var80))
 							if templ_7745c5c3_Err != nil {
@@ -1526,9 +1526,9 @@ func TraceDetail(data TraceDetailData) templ.Component {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var86 string
-						templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.JoinStringErrs(formatAttrValue(v))
+						templ_7745c5c3_Var86, templ_7745c5c3_Err = templ.JoinStringErrs(fmtAttrValue(v))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 435, Col: 57}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 435, Col: 54}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var86))
 						if templ_7745c5c3_Err != nil {
@@ -1611,14 +1611,14 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, "\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 147, "\" pill>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var91 string
 					templ_7745c5c3_Var91, templ_7745c5c3_Err = templ.JoinStringErrs(log.Severity)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 485, Col: 78}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/traces.templ`, Line: 485, Col: 83}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var91))
 					if templ_7745c5c3_Err != nil {
@@ -1647,7 +1647,7 @@ func TraceDetail(data TraceDetailData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, " <style>\n\t\t\t/* Time Ruler */\n\t\t\t.waterfall-ruler {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: 320px 1fr;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 0 0 0.5rem;\n\t\t\t\tborder-bottom: 1px solid var(--border-color);\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.ruler-spacer {\n\t\t\t\t/* Matches waterfall-info width */\n\t\t\t}\n\t\t\t.ruler-scale {\n\t\t\t\tposition: relative;\n\t\t\t\theight: 20px;\n\t\t\t}\n\t\t\t.ruler-tick {\n\t\t\t\tposition: absolute;\n\t\t\t\ttransform: translateX(-50%);\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.ruler-tick:first-child {\n\t\t\t\ttransform: translateX(0);\n\t\t\t}\n\t\t\t.ruler-tick:last-child {\n\t\t\t\ttransform: translateX(-100%);\n\t\t\t}\n\n\t\t\t/* Legend */\n\t\t\t.waterfall-legend {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tfont-weight: 400;\n\t\t\t}\n\t\t\t.legend-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.375rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\t.legend-dot {\n\t\t\t\twidth: 10px;\n\t\t\t\theight: 10px;\n\t\t\t\tborder-radius: 2px;\n\t\t\t}\n\t\t\t.legend-server { background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); }\n\t\t\t.legend-client { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }\n\t\t\t.legend-internal { background: linear-gradient(135deg, #64748b 0%, #475569 100%); }\n\t\t\t.legend-error { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }\n\n\t\t\t.waterfall {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t}\n\t\t\t.waterfall-row {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: 320px 1fr;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t\tpadding: 0.375rem 0;\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tcursor: pointer;\n\t\t\t\ttransition: background 0.1s;\n\t\t\t}\n\t\t\t.waterfall-row:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t}\n\t\t\t.waterfall-row-error {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.05);\n\t\t\t}\n\t\t\t.waterfall-row-error:hover {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t}\n\t\t\t.waterfall-info {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t}\n\t\t\t.waterfall-toggle {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\twidth: 20px;\n\t\t\t\theight: 20px;\n\t\t\t\tpadding: 0;\n\t\t\t\tborder: none;\n\t\t\t\tbackground: none;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tcursor: pointer;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-toggle:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.waterfall-toggle .toggle-icon {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.waterfall-label {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\toverflow: hidden;\n\t\t\t\tmin-width: 0;\n\t\t\t}\n\t\t\t.waterfall-label .service {\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-label .operation {\n\t\t\t\tcolor: var(--text-secondary);\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.waterfall-label .error-hint {\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-label .events-badge,\n\t\t\t.waterfall-label .links-badge {\n\t\t\t\tdisplay: inline-flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 2px;\n\t\t\t\tfont-size: 10px;\n\t\t\t\tpadding: 1px 4px;\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tcursor: help;\n\t\t\t}\n\t\t\t.waterfall-label .events-badge {\n\t\t\t\tbackground: var(--sl-color-warning-100);\n\t\t\t\tcolor: var(--sl-color-warning-700);\n\t\t\t}\n\t\t\t.waterfall-label .links-badge {\n\t\t\t\tbackground: var(--sl-color-primary-100);\n\t\t\t\tcolor: var(--sl-color-primary-700);\n\t\t\t}\n\t\t\t.waterfall-bar-container {\n\t\t\t\theight: 24px;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tposition: relative;\n\t\t\t}\n\t\t\t.waterfall-bar {\n\t\t\t\tposition: absolute;\n\t\t\t\theight: 100%;\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tpadding: 0 0.5rem;\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t\tcolor: white;\n\t\t\t\tmin-width: 40px;\n\t\t\t\tfont-weight: 500;\n\t\t\t\ttext-shadow: 0 1px 1px rgba(0,0,0,0.2);\n\t\t\t}\n\t\t\t/* Error always takes priority */\n\t\t\t.waterfall-bar-error {\n\t\t\t\tbackground: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);\n\t\t\t}\n\t\t\t/* Kind-based colors (when not error) */\n\t\t\t.waterfall-bar-server {\n\t\t\t\tbackground: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-client {\n\t\t\t\tbackground: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-producer {\n\t\t\t\tbackground: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-consumer {\n\t\t\t\tbackground: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-internal {\n\t\t\t\tbackground: linear-gradient(135deg, #64748b 0%, #475569 100%);\n\t\t\t}\n\t\t\t/* Default fallback */\n\t\t\t.waterfall-bar-ok {\n\t\t\t\tbackground: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);\n\t\t\t}\n\t\t\t/* Span detail panel */\n\t\t\t.span-detail {\n\t\t\t\toverflow: hidden;\n\t\t\t}\n\t\t\t.span-detail-content {\n\t\t\t\tpadding: 0.75rem 1rem;\n\t\t\t\tmargin: 0.25rem 0 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tborder-left: 3px solid var(--accent);\n\t\t\t}\n\t\t\t.waterfall-row-error + .span-detail .span-detail-content {\n\t\t\t\tborder-left-color: var(--danger);\n\t\t\t}\n\t\t\t.span-detail-grid {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: repeat(auto-fit, minmax(180px, 1fr));\n\t\t\t\tgap: 0.75rem;\n\t\t\t}\n\t\t\t.span-detail-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.125rem;\n\t\t\t}\n\t\t\t.span-detail-label {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t}\n\t\t\t.span-detail-value {\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.span-detail-value.mono {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.span-detail-value.status-error {\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tfont-weight: 600;\n\t\t\t}\n\t\t\t.span-detail-value.status-ok {\n\t\t\t\tcolor: var(--success);\n\t\t\t}\n\t\t\t.span-error-msg {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: flex-start;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding: 0.625rem 0.75rem;\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tword-break: break-word;\n\t\t\t}\n\t\t\t.span-error-msg sl-icon {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmargin-top: 0.125rem;\n\t\t\t}\n\t\t\t/* New sections for events, links, attributes */\n\t\t\t.span-section {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding-top: 0.75rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.span-section-title {\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.span-events, .span-links {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.25rem;\n\t\t\t}\n\t\t\t.span-event {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.event-name {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.event-attrs {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t}\n\t\t\t.span-link {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.link-trace {\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.link-trace:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.link-span {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.span-attributes {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.25rem;\n\t\t\t}\n\t\t\t.attr-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.attr-key {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tmin-width: 120px;\n\t\t\t}\n\t\t\t.attr-value {\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tword-break: break-all;\n\t\t\t}\n\t\t\t/* Mobile responsive waterfall */\n\t\t\t@media (max-width: 768px) {\n\t\t\t\t.waterfall-ruler {\n\t\t\t\t\tgrid-template-columns: 1fr;\n\t\t\t\t\tgap: 0;\n\t\t\t\t}\n\t\t\t\t.ruler-spacer { display: none; }\n\t\t\t\t.waterfall-row {\n\t\t\t\t\tgrid-template-columns: 1fr;\n\t\t\t\t\tgap: 0.25rem;\n\t\t\t\t}\n\t\t\t\t.waterfall-info {\n\t\t\t\t\tpadding-left: 8px !important;\n\t\t\t\t}\n\t\t\t\t.waterfall-bar-container {\n\t\t\t\t\tmargin-left: 28px;\n\t\t\t\t}\n\t\t\t\t.span-detail-content {\n\t\t\t\t\tmargin-left: 8px !important;\n\t\t\t\t}\n\t\t\t}\n\t\t</style>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 151, " <style>\n\t\t\t/* Time Ruler */\n\t\t\t.waterfall-ruler {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: 320px 1fr;\n\t\t\t\tgap: 1rem;\n\t\t\t\tpadding: 0 0 0.5rem;\n\t\t\t\tborder-bottom: 1px solid var(--border-color);\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.ruler-spacer {\n\t\t\t\t/* Matches waterfall-info width */\n\t\t\t}\n\t\t\t.ruler-scale {\n\t\t\t\tposition: relative;\n\t\t\t\theight: 20px;\n\t\t\t}\n\t\t\t.ruler-tick {\n\t\t\t\tposition: absolute;\n\t\t\t\ttransform: translateX(-50%);\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.ruler-tick:first-child {\n\t\t\t\ttransform: translateX(0);\n\t\t\t}\n\t\t\t.ruler-tick:last-child {\n\t\t\t\ttransform: translateX(-100%);\n\t\t\t}\n\n\t\t\t/* Legend */\n\t\t\t.waterfall-legend {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tfont-weight: 400;\n\t\t\t}\n\t\t\t.legend-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.375rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t}\n\t\t\t.legend-dot {\n\t\t\t\twidth: 10px;\n\t\t\t\theight: 10px;\n\t\t\t\tborder-radius: 2px;\n\t\t\t}\n\t\t\t.legend-server { background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%); }\n\t\t\t.legend-client { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%); }\n\t\t\t.legend-internal { background: linear-gradient(135deg, #64748b 0%, #475569 100%); }\n\t\t\t.legend-error { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); }\n\n\t\t\t.waterfall {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t}\n\t\t\t.waterfall-row {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: 320px 1fr;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t\tpadding: 0.375rem 0;\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tcursor: pointer;\n\t\t\t\ttransition: background 0.1s;\n\t\t\t}\n\t\t\t.waterfall-row:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t}\n\t\t\t.waterfall-row-error {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.05);\n\t\t\t}\n\t\t\t.waterfall-row-error:hover {\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t}\n\t\t\t.waterfall-info {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t}\n\t\t\t.waterfall-toggle {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tjustify-content: center;\n\t\t\t\twidth: 20px;\n\t\t\t\theight: 20px;\n\t\t\t\tpadding: 0;\n\t\t\t\tborder: none;\n\t\t\t\tbackground: none;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tcursor: pointer;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-toggle:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.waterfall-toggle .toggle-icon {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.waterfall-label {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\toverflow: hidden;\n\t\t\t\tmin-width: 0;\n\t\t\t}\n\t\t\t.waterfall-label .service {\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-label .operation {\n\t\t\t\tcolor: var(--text-secondary);\n\t\t\t\toverflow: hidden;\n\t\t\t\ttext-overflow: ellipsis;\n\t\t\t\twhite-space: nowrap;\n\t\t\t}\n\t\t\t.waterfall-label .error-hint {\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tflex-shrink: 0;\n\t\t\t}\n\t\t\t.waterfall-label .events-badge,\n\t\t\t.waterfall-label .links-badge {\n\t\t\t\tdisplay: inline-flex;\n\t\t\t\talign-items: center;\n\t\t\t\tgap: 2px;\n\t\t\t\tfont-size: 10px;\n\t\t\t\tpadding: 1px 4px;\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tcursor: help;\n\t\t\t}\n\t\t\t.waterfall-label .events-badge {\n\t\t\t\tbackground: var(--sl-color-warning-100);\n\t\t\t\tcolor: var(--sl-color-warning-700);\n\t\t\t}\n\t\t\t.waterfall-label .links-badge {\n\t\t\t\tbackground: var(--sl-color-primary-100);\n\t\t\t\tcolor: var(--sl-color-primary-700);\n\t\t\t}\n\t\t\t.waterfall-bar-container {\n\t\t\t\theight: 24px;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tposition: relative;\n\t\t\t}\n\t\t\t.waterfall-bar {\n\t\t\t\tposition: absolute;\n\t\t\t\theight: 100%;\n\t\t\t\tborder-radius: 4px;\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: center;\n\t\t\t\tpadding: 0 0.5rem;\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t\tcolor: white;\n\t\t\t\tmin-width: 40px;\n\t\t\t\tfont-weight: 500;\n\t\t\t\ttext-shadow: 0 1px 1px rgba(0,0,0,0.2);\n\t\t\t}\n\t\t\t/* Error always takes priority */\n\t\t\t.waterfall-bar-error {\n\t\t\t\tbackground: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);\n\t\t\t}\n\t\t\t/* Kind-based colors (when not error) */\n\t\t\t.waterfall-bar-server {\n\t\t\t\tbackground: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-client {\n\t\t\t\tbackground: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-producer {\n\t\t\t\tbackground: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-consumer {\n\t\t\t\tbackground: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);\n\t\t\t}\n\t\t\t.waterfall-bar-internal {\n\t\t\t\tbackground: linear-gradient(135deg, #64748b 0%, #475569 100%);\n\t\t\t}\n\t\t\t/* Default fallback */\n\t\t\t.waterfall-bar-ok {\n\t\t\t\tbackground: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);\n\t\t\t}\n\t\t\t/* Span detail panel */\n\t\t\t.span-detail {\n\t\t\t\toverflow: hidden;\n\t\t\t}\n\t\t\t.span-detail-content {\n\t\t\t\tpadding: 0.75rem 1rem;\n\t\t\t\tmargin: 0.25rem 0 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.5rem;\n\t\t\t\tborder-left: 3px solid var(--accent);\n\t\t\t}\n\t\t\t.waterfall-row-error + .span-detail .span-detail-content {\n\t\t\t\tborder-left-color: var(--danger);\n\t\t\t}\n\t\t\t.span-detail-grid {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: repeat(auto-fit, minmax(180px, 1fr));\n\t\t\t\tgap: 0.75rem;\n\t\t\t}\n\t\t\t.span-detail-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.125rem;\n\t\t\t}\n\t\t\t.span-detail-label {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.05em;\n\t\t\t}\n\t\t\t.span-detail-value {\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.span-detail-value.mono {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.span-detail-value.status-error {\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tfont-weight: 600;\n\t\t\t}\n\t\t\t.span-detail-value.status-ok {\n\t\t\t\tcolor: var(--success);\n\t\t\t}\n\t\t\t.span-error-msg {\n\t\t\t\tdisplay: flex;\n\t\t\t\talign-items: flex-start;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding: 0.625rem 0.75rem;\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t\tborder-radius: 0.375rem;\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--danger);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tword-break: break-word;\n\t\t\t}\n\t\t\t.span-error-msg sl-icon {\n\t\t\t\tflex-shrink: 0;\n\t\t\t\tmargin-top: 0.125rem;\n\t\t\t}\n\t\t\t/* New sections for events, links, attributes */\n\t\t\t.span-section {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding-top: 0.75rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.span-section-title {\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.05em;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.span-events, .span-links {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.25rem;\n\t\t\t}\n\t\t\t.span-event {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.event-name {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.event-attrs {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.7rem;\n\t\t\t}\n\t\t\t.span-link {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.link-trace {\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.link-trace:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.link-span {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.span-attributes {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.25rem;\n\t\t\t}\n\t\t\t.attr-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.attr-key {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tmin-width: 120px;\n\t\t\t}\n\t\t\t.attr-value {\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tword-break: break-all;\n\t\t\t}\n\t\t\t/* Mobile responsive waterfall */\n\t\t\t@media (max-width: 768px) {\n\t\t\t\t.waterfall-ruler {\n\t\t\t\t\tgrid-template-columns: 1fr;\n\t\t\t\t\tgap: 0;\n\t\t\t\t}\n\t\t\t\t.ruler-spacer { display: none; }\n\t\t\t\t.waterfall-row {\n\t\t\t\t\tgrid-template-columns: 1fr;\n\t\t\t\t\tgap: 0.25rem;\n\t\t\t\t}\n\t\t\t\t.waterfall-info {\n\t\t\t\t\tpadding-left: 8px !important;\n\t\t\t\t}\n\t\t\t\t.waterfall-bar-container {\n\t\t\t\t\tmargin-left: 28px;\n\t\t\t\t}\n\t\t\t\t.span-detail-content {\n\t\t\t\t\tmargin-left: 8px !important;\n\t\t\t\t}\n\t\t\t}\n\t\t</style>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1659,13 +1659,6 @@ func TraceDetail(data TraceDetailData) templ.Component {
 		}
 		return nil
 	})
-}
-
-func truncateID(id string) string {
-	if len(id) > 16 {
-		return id[:16] + "..."
-	}
-	return id
 }
 
 func waterfallBarClass(status, kind string) string {
@@ -1792,31 +1785,6 @@ func spanStatusClass(status string) string {
 	return "status-ok"
 }
 
-func scopeVersion(v string) string {
-	if v == "" {
-		return ""
-	}
-	return "@" + v
-}
-
-func formatAttrs(attrs map[string]string) string {
-	if len(attrs) == 0 {
-		return ""
-	}
-	var parts []string
-	for k, v := range attrs {
-		parts = append(parts, k+"="+v)
-	}
-	return strings.Join(parts, ", ")
-}
-
-func formatAttrValue(v any) string {
-	if v == nil {
-		return ""
-	}
-	return fmt.Sprintf("%v", v)
-}
-
 func eventsTitle(events []SpanEvent) string {
 	if len(events) == 0 {
 		return ""
@@ -1826,13 +1794,6 @@ func eventsTitle(events []SpanEvent) string {
 		names = append(names, e.Name)
 	}
 	return strings.Join(names, ", ")
-}
-
-func maxOffset(n int) int {
-	if n < 0 {
-		return 0
-	}
-	return n
 }
 
 var _ = templruntime.GeneratedTemplate

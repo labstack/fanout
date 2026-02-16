@@ -739,9 +739,9 @@ func ServiceDetail(data ServiceDetailData) templ.Component {
 							return templ_7745c5c3_Err
 						}
 						var templ_7745c5c3_Var39 string
-						templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(truncate(err.TraceID, 12))
+						templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(truncateStr(err.TraceID, 12))
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 244, Col: 125}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 244, Col: 128}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 						if templ_7745c5c3_Err != nil {
@@ -971,13 +971,6 @@ func errorColor(rate float64) string {
 	return "color: var(--success);"
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
 func filterVariant(current, target string) string {
 	if current == target || (current == "" && target == "") {
 		return "primary"
@@ -1038,7 +1031,7 @@ func Sparkline(data []int64, isError bool) templ.Component {
 			var templ_7745c5c3_Var53 string
 			templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(sparklinePoints(data))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 354, Col: 67}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 347, Col: 67}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 			if templ_7745c5c3_Err != nil {

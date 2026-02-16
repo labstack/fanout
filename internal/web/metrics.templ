@@ -35,27 +35,23 @@ templ Metrics(data MetricsData) {
 			</div>
 		</div>
 		<!-- Search Form -->
-		<sl-card style="margin-bottom: 1rem;">
-			<form method="GET" action="/metrics" class="search-form">
+		<div class="search-section">
+			<form method="GET" action="/metrics" onsubmit="return cleanFormSubmit(this)">
 				<div class="form-row">
-					<sl-input name="q" label="Search" placeholder="name:http.* service:cart type:gauge" value={ data.Query } style="flex: 3;"></sl-input>
-					if data.Window != 60 {
-						<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
-					}
+					<sl-input name="q" placeholder="name:http.* service:cart type:gauge" value={ data.Query }></sl-input>
 					<sl-button type="submit" variant="primary">Search</sl-button>
 				</div>
 				<div class="search-hint">
-					<sl-icon name="lightbulb"></sl-icon>
 					<code>name:pattern</code> <code>service:name</code> <code>namespace:default</code> <code>type:gauge,sum</code>
 				</div>
 			</form>
-		</sl-card>
+		</div>
 		<!-- Results -->
-		<sl-card>
-			<div slot="header" class="card-header">Results ({ fmt.Sprintf("%d", len(data.Metrics)) } metrics)</div>
+		<div class="results-section">
+			<div class="results-header">Results ({ fmt.Sprintf("%d", len(data.Metrics)) } metrics)</div>
 			if len(data.Metrics) == 0 {
-				<div class="empty-state">
-					<sl-icon name="bar-chart-2"></sl-icon>
+				<div class="empty-state" style="padding: 3rem;">
+					<sl-icon name="graph-up"></sl-icon>
 					<div class="empty-state-title">No metrics found</div>
 					<div class="empty-state-message">Try adjusting your search filters or check if metrics are being collected.</div>
 				</div>
@@ -94,8 +90,8 @@ templ Metrics(data MetricsData) {
 										}
 									</div>
 								</td>
-								<td><sl-badge variant={ metricTypeVariant(m.Type) }>{ m.Type }</sl-badge></td>
-								<td class="mono">{ formatCount(m.Count) }</td>
+								<td><sl-badge variant={ metricTypeVariant(m.Type) } pill>{ m.Type }</sl-badge></td>
+								<td class="mono">{ fmtCount(m.Count) }</td>
 								<td class="mono">{ formatValue(m.Avg) }</td>
 								<td class="mono">{ formatValue(m.Min) }</td>
 								<td class="mono">{ formatValue(m.Max) }</td>
@@ -107,7 +103,7 @@ templ Metrics(data MetricsData) {
 					</tbody>
 				</table>
 			}
-		</sl-card>
+		</div>
 		<style>
 			.metric-cell {
 				display: flex;
@@ -223,16 +219,6 @@ func metricTypeVariant(mtype string) string {
 	default:
 		return "neutral"
 	}
-}
-
-func formatCount(n int64) string {
-	if n >= 1000000 {
-		return fmt.Sprintf("%.1fM", float64(n)/1000000)
-	}
-	if n >= 1000 {
-		return fmt.Sprintf("%.1fk", float64(n)/1000)
-	}
-	return fmt.Sprintf("%d", n)
 }
 
 func formatValue(v float64) string {

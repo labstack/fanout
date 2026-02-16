@@ -147,14 +147,14 @@ func Logs(data LogsData) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" pill>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var8 string
 					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(log.Severity)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 71, Col: 74}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 71, Col: 79}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 					if templ_7745c5c3_Err != nil {
@@ -335,7 +335,7 @@ func Logs(data LogsData) templ.Component {
 								return templ_7745c5c3_Err
 							}
 							var templ_7745c5c3_Var19 string
-							templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(logScopeVersion(log.ScopeVersion))
+							templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(fmtScopeVersion(log.ScopeVersion))
 							if templ_7745c5c3_Err != nil {
 								return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 101, Col: 95}
 							}
@@ -395,9 +395,9 @@ func Logs(data LogsData) templ.Component {
 									return templ_7745c5c3_Err
 								}
 								var templ_7745c5c3_Var22 string
-								templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(formatLogAttr(v))
+								templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(fmtAttrValue(v))
 								if templ_7745c5c3_Err != nil {
-									return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 117, Col: 60}
+									return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 117, Col: 59}
 								}
 								_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 								if templ_7745c5c3_Err != nil {
@@ -428,9 +428,9 @@ func Logs(data LogsData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var23 string
-				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(logsPaginationURL(data.Query, data.Window, data.Limit, logsMaxOffset(data.Offset-data.Limit)))
+				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(logsPaginationURL(data.Query, data.Window, data.Limit, clampMin(data.Offset-data.Limit)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 142, Col: 116}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/logs.templ`, Line: 142, Col: 111}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 				if templ_7745c5c3_Err != nil {
@@ -500,7 +500,7 @@ func Logs(data LogsData) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</div><style>\n\t\t\t.logs-list {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0;\n\t\t\t\tpadding: 0;\n\t\t\t}\n\t\t\t.log-entry {\n\t\t\t\tpadding: 0.875rem 1rem;\n\t\t\t\tborder-left: 3px solid var(--border-color);\n\t\t\t\tborder-bottom: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.log-entry:last-child {\n\t\t\t\tborder-bottom: none;\n\t\t\t}\n\t\t\t.log-entry-error {\n\t\t\t\tborder-left-color: var(--danger);\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t}\n\t\t\t.log-entry-warn {\n\t\t\t\tborder-left-color: var(--warning);\n\t\t\t\tbackground: rgba(245, 158, 11, 0.1);\n\t\t\t}\n\t\t\t.log-header {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.time {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.service {\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t}\n\t\t\t.service:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.log-body {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\twhite-space: pre-wrap;\n\t\t\t\tword-break: break-word;\n\t\t\t}\n\t\t\t.log-expand {\n\t\t\t\tmargin-left: auto;\n\t\t\t\tpadding: 0.25rem;\n\t\t\t\tborder: none;\n\t\t\t\tbackground: none;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tcursor: pointer;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.log-expand:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.log-detail {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding-top: 0.75rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.log-detail-grid {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: repeat(auto-fit, minmax(150px, 1fr));\n\t\t\t\tgap: 0.75rem;\n\t\t\t}\n\t\t\t.log-detail-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.125rem;\n\t\t\t}\n\t\t\t.log-detail-label {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t}\n\t\t\t.log-detail-value {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.log-detail-value.mono {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.log-attributes {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t}\n\t\t\t.log-attr-title {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.025em;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.log-attr-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--sl-color-neutral-100);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tmargin-bottom: 0.25rem;\n\t\t\t}\n\t\t\t.log-attr-key {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tmin-width: 100px;\n\t\t\t}\n\t\t\t.log-attr-value {\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tword-break: break-all;\n\t\t\t}\n\t\t</style>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "</div><style>\n\t\t\t.logs-list {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0;\n\t\t\t\tpadding: 0;\n\t\t\t}\n\t\t\t.log-entry {\n\t\t\t\tpadding: 0.875rem 1rem;\n\t\t\t\tborder-left: 3px solid var(--border-color);\n\t\t\t\tborder-bottom: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.log-entry:last-child {\n\t\t\t\tborder-bottom: none;\n\t\t\t}\n\t\t\t.log-entry-error {\n\t\t\t\tborder-left-color: var(--danger);\n\t\t\t\tbackground: rgba(239, 68, 68, 0.1);\n\t\t\t}\n\t\t\t.log-entry-warn {\n\t\t\t\tborder-left-color: var(--warning);\n\t\t\t\tbackground: rgba(245, 158, 11, 0.1);\n\t\t\t}\n\t\t\t.log-header {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 1rem;\n\t\t\t\talign-items: center;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t}\n\t\t\t.time {\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.service {\n\t\t\t\tcolor: var(--accent);\n\t\t\t\ttext-decoration: none;\n\t\t\t}\n\t\t\t.service:hover {\n\t\t\t\ttext-decoration: underline;\n\t\t\t}\n\t\t\t.log-body {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tfont-size: 0.8rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\twhite-space: pre-wrap;\n\t\t\t\tword-break: break-word;\n\t\t\t}\n\t\t\t.log-expand {\n\t\t\t\tmargin-left: auto;\n\t\t\t\tpadding: 0.25rem;\n\t\t\t\tborder: none;\n\t\t\t\tbackground: none;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\tcursor: pointer;\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t}\n\t\t\t.log-expand:hover {\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.log-detail {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t\tpadding-top: 0.75rem;\n\t\t\t\tborder-top: 1px solid var(--border-color);\n\t\t\t}\n\t\t\t.log-detail-grid {\n\t\t\t\tdisplay: grid;\n\t\t\t\tgrid-template-columns: repeat(auto-fit, minmax(150px, 1fr));\n\t\t\t\tgap: 0.75rem;\n\t\t\t}\n\t\t\t.log-detail-item {\n\t\t\t\tdisplay: flex;\n\t\t\t\tflex-direction: column;\n\t\t\t\tgap: 0.125rem;\n\t\t\t}\n\t\t\t.log-detail-label {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.05em;\n\t\t\t}\n\t\t\t.log-detail-value {\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t}\n\t\t\t.log-detail-value.mono {\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t}\n\t\t\t.log-attributes {\n\t\t\t\tmargin-top: 0.75rem;\n\t\t\t}\n\t\t\t.log-attr-title {\n\t\t\t\tfont-size: 0.65rem;\n\t\t\t\tfont-weight: 600;\n\t\t\t\tcolor: var(--text-muted);\n\t\t\t\ttext-transform: uppercase;\n\t\t\t\tletter-spacing: 0.05em;\n\t\t\t\tmargin-bottom: 0.5rem;\n\t\t\t}\n\t\t\t.log-attr-row {\n\t\t\t\tdisplay: flex;\n\t\t\t\tgap: 0.5rem;\n\t\t\t\tfont-size: 0.75rem;\n\t\t\t\tpadding: 0.25rem 0.5rem;\n\t\t\t\tbackground: var(--bg-tertiary);\n\t\t\t\tborder-radius: 0.25rem;\n\t\t\t\tmargin-bottom: 0.25rem;\n\t\t\t}\n\t\t\t.log-attr-key {\n\t\t\t\tfont-weight: 500;\n\t\t\t\tcolor: var(--accent);\n\t\t\t\tmin-width: 100px;\n\t\t\t}\n\t\t\t.log-attr-value {\n\t\t\t\tcolor: var(--text-primary);\n\t\t\t\tfont-family: var(--font-mono);\n\t\t\t\tword-break: break-all;\n\t\t\t}\n\t\t</style>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -538,7 +538,7 @@ func severityVariant(severity string) string {
 	}
 }
 
-func logsPaginationURL(q string, window, limit, offset int) string {
+func logsPaginationURL(q string, window, limit, offset int) templ.SafeURL {
 	values := url.Values{}
 	if q != "" {
 		values.Set("q", q)
@@ -548,32 +548,11 @@ func logsPaginationURL(q string, window, limit, offset int) string {
 	}
 	values.Set("limit", strconv.Itoa(limit))
 	values.Set("offset", strconv.Itoa(offset))
-	return "/logs?" + values.Encode()
+	return templ.SafeURL("/logs?" + values.Encode())
 }
 
 func hasLogDetails(log LogRow) bool {
 	return log.SpanID != "" || log.ScopeName != "" || len(log.Attributes) > 0 || (log.ObservedTime != "" && log.ObservedTime != log.Time)
-}
-
-func logScopeVersion(v string) string {
-	if v == "" {
-		return ""
-	}
-	return "@" + v
-}
-
-func formatLogAttr(v any) string {
-	if v == nil {
-		return ""
-	}
-	return fmt.Sprintf("%v", v)
-}
-
-func logsMaxOffset(n int) int {
-	if n < 0 {
-		return 0
-	}
-	return n
 }
 
 var _ = templruntime.GeneratedTemplate

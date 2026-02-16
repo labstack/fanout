@@ -94,7 +94,7 @@ templ Traces(data TracesData) {
 					<div class="facet-group">
 						<span class="facet-label">Status</span>
 						for _, f := range data.Facets.ByStatus {
-							<a href={ facetURL(data.Query, "status", f.Value, data.Window) } style="text-decoration: none;">
+							<a href={ facetURL(data.Query, "status", f.Value, data.Window) } class="facet-link">
 								<sl-tag size="small" class={ facetTagClass(f.Value) }>{ f.Value }<span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span></sl-tag>
 							</a>
 						}
@@ -104,7 +104,7 @@ templ Traces(data TracesData) {
 					<div class="facet-group">
 						<span class="facet-label">Services</span>
 						for _, f := range data.Facets.ByService {
-							<a href={ facetURL(data.Query, "service", f.Value, data.Window) } style="text-decoration: none;">
+							<a href={ facetURL(data.Query, "service", f.Value, data.Window) } class="facet-link">
 								<sl-tag size="small">{ f.Value }<span class="facet-count">{ fmt.Sprintf("%d", f.Count) }</span></sl-tag>
 							</a>
 						}
@@ -160,9 +160,9 @@ templ Traces(data TracesData) {
 								<td>{ fmt.Sprintf("%.0fms", t.Duration) }</td>
 								<td>
 									if t.Status == "error" {
-										<sl-badge variant="danger">error</sl-badge>
+										<sl-badge variant="danger" pill>error</sl-badge>
 									} else {
-										<sl-badge variant="success">ok</sl-badge>
+										<sl-badge variant="success" pill>ok</sl-badge>
 									}
 								</td>
 								<td><sl-relative-time date={ t.Time }></sl-relative-time></td>
@@ -172,7 +172,7 @@ templ Traces(data TracesData) {
 				</table>
 				<!-- Pagination -->
 				<div class="pagination">
-					<sl-button href={ tracesURL(data.Query, data.Window, data.Limit, maxOffset(data.Offset-data.Limit)) } variant="default" size="small" disabled?={ data.Offset == 0 }>
+					<sl-button href={ tracesURL(data.Query, data.Window, data.Limit, clampMin(data.Offset-data.Limit)) } variant="default" size="small" disabled?={ data.Offset == 0 }>
 						<sl-icon slot="prefix" name="chevron-left"></sl-icon>
 						Previous
 					</sl-button>
@@ -387,7 +387,7 @@ templ TraceDetail(data TraceDetailData) {
 								if span.ScopeName != "" {
 									<div class="span-detail-item">
 										<span class="span-detail-label">Scope</span>
-										<span class="span-detail-value">{ span.ScopeName }{ scopeVersion(span.ScopeVersion) }</span>
+										<span class="span-detail-value">{ span.ScopeName }{ fmtScopeVersion(span.ScopeVersion) }</span>
 									</div>
 								}
 							</div>
@@ -405,7 +405,7 @@ templ TraceDetail(data TraceDetailData) {
 											<div class="span-event">
 												<span class="event-name">{ ev.Name }</span>
 												if len(ev.Attributes) > 0 {
-													<span class="event-attrs">{ formatAttrs(ev.Attributes) }</span>
+													<span class="event-attrs">{ fmtAttrs(ev.Attributes) }</span>
 												}
 											</div>
 										}
@@ -432,7 +432,7 @@ templ TraceDetail(data TraceDetailData) {
 										for k, v := range span.Attributes {
 											<div class="attr-row">
 												<span class="attr-key">{ k }</span>
-												<span class="attr-value">{ formatAttrValue(v) }</span>
+												<span class="attr-value">{ fmtAttrValue(v) }</span>
 											</div>
 										}
 									</div>
@@ -482,7 +482,7 @@ templ TraceDetail(data TraceDetailData) {
 								<td>{ log.Time }</td>
 								<td>{ log.Service }</td>
 								<td>
-									<sl-badge variant={ logSeverityVariant(log.Severity) }>{ log.Severity }</sl-badge>
+									<sl-badge variant={ logSeverityVariant(log.Severity) } pill>{ log.Severity }</sl-badge>
 								</td>
 								<td style="font-family: var(--font-mono); font-size: 0.8rem;">{ log.Body }</td>
 							</tr>
@@ -707,7 +707,7 @@ templ TraceDetail(data TraceDetailData) {
 				font-size: 0.65rem;
 				color: var(--text-muted);
 				text-transform: uppercase;
-				letter-spacing: 0.025em;
+				letter-spacing: 0.05em;
 			}
 			.span-detail-value {
 				font-size: 0.8rem;
@@ -752,7 +752,7 @@ templ TraceDetail(data TraceDetailData) {
 				font-weight: 600;
 				color: var(--text-muted);
 				text-transform: uppercase;
-				letter-spacing: 0.025em;
+				letter-spacing: 0.05em;
 				margin-bottom: 0.5rem;
 			}
 			.span-events, .span-links {
@@ -843,13 +843,6 @@ templ TraceDetail(data TraceDetailData) {
 			}
 		</style>
 	}
-}
-
-func truncateID(id string) string {
-	if len(id) > 16 {
-		return id[:16] + "..."
-	}
-	return id
 }
 
 func waterfallBarClass(status, kind string) string {
@@ -976,31 +969,6 @@ func spanStatusClass(status string) string {
 	return "status-ok"
 }
 
-func scopeVersion(v string) string {
-	if v == "" {
-		return ""
-	}
-	return "@" + v
-}
-
-func formatAttrs(attrs map[string]string) string {
-	if len(attrs) == 0 {
-		return ""
-	}
-	var parts []string
-	for k, v := range attrs {
-		parts = append(parts, k+"="+v)
-	}
-	return strings.Join(parts, ", ")
-}
-
-func formatAttrValue(v any) string {
-	if v == nil {
-		return ""
-	}
-	return fmt.Sprintf("%v", v)
-}
-
 func eventsTitle(events []SpanEvent) string {
 	if len(events) == 0 {
 		return ""
@@ -1012,9 +980,3 @@ func eventsTitle(events []SpanEvent) string {
 	return strings.Join(names, ", ")
 }
 
-func maxOffset(n int) int {
-	if n < 0 {
-		return 0
-	}
-	return n
-}

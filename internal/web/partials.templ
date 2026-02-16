@@ -50,7 +50,7 @@ templ OverviewContent(data OverviewData) {
 
 // StatsGrid renders service health counts
 templ StatsGrid(s ServiceSummary) {
-	<div id="stats-grid" class="stats-bar" style="margin-bottom: 0.75rem;">
+	<div id="stats-grid" class="stats-bar" style="margin-bottom: 1rem;">
 		<div class="stats-item">
 			<div class="stats-value">{ fmt.Sprintf("%d", s.Total) }</div>
 			<div class="stats-label">Services</div>
@@ -172,15 +172,15 @@ templ EmptyStateSetup(dataType string) {
 	<div class="empty-state-setup">
 		<div class="empty-state-icon">
 			if dataType == "services" {
-				<sl-icon name="boxes"></sl-icon>
+				<sl-icon name="hdd-stack"></sl-icon>
 			} else if dataType == "traces" {
-				<sl-icon name="git-branch"></sl-icon>
+				<sl-icon name="diagram-3"></sl-icon>
 			} else if dataType == "logs" {
 				<sl-icon name="file-text"></sl-icon>
 			} else if dataType == "metrics" {
-				<sl-icon name="bar-chart-2"></sl-icon>
+				<sl-icon name="graph-up"></sl-icon>
 			} else if dataType == "topology" {
-				<sl-icon name="share-2"></sl-icon>
+				<sl-icon name="share"></sl-icon>
 			} else {
 				<sl-icon name="database"></sl-icon>
 			}
