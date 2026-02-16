@@ -42,7 +42,7 @@ services:
         condition: service_healthy
 
   fanout:
-    image: ghcr.io/labstack/fanout:${VERSION:-latest}
+    image: ghcr.io/labstack/fanout:${VERSION:-main}
     container_name: fanout
     restart: unless-stopped
     env_file: .env

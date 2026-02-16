@@ -26,7 +26,7 @@ while [[ $# -gt 0 ]]; do
       echo ""
       echo "Options:"
       echo "  --email EMAIL       Let's Encrypt email (default: $EMAIL)"
-      echo "  --version VERSION   Docker image version (default: latest)"
+      echo "  --version VERSION   Docker image version (default: main)"
       echo "  --help              Show this help"
       echo ""
       echo "Examples:"
@@ -55,7 +55,7 @@ done
 
 echo "🚀 Deploying Fanout to $SERVER..."
 echo "📧 Email: $EMAIL"
-echo "🏷️  Version: ${VERSION:-latest}"
+echo "🏷️  Version: ${VERSION:-main}"
 echo ""
 
 # Test SSH
@@ -94,7 +94,7 @@ set -e
 cd /app
 
 cat > .env << EOF
-VERSION=${VERSION:-latest}
+VERSION=${VERSION:-main}
 LETSENCRYPT_EMAIL=$EMAIL
 EOF
 
