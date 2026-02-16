@@ -76,21 +76,23 @@ templ Metrics(data MetricsData) {
 						for _, m := range data.Metrics {
 							<tr>
 								<td>
-									<div class="metric-name">{ m.Name }</div>
-									if len(m.Services) > 0 {
-										<div class="metric-services">
-											for i, svc := range m.Services {
-												if i < 3 {
-													<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc), data.Window)) } style="text-decoration: none;">
-														<sl-tag size="small" variant="primary" pill>{ svc }</sl-tag>
-													</a>
+									<div class="metric-cell">
+										<span class="metric-name"><span class="metric-prefix">{ metricPrefix(m.Name) }</span>{ metricLeaf(m.Name) }</span>
+										if len(m.Services) > 0 {
+											<span class="metric-services">
+												for i, svc := range m.Services {
+													if i < 3 {
+														<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc), data.Window)) } class="metric-svc-link">
+															<sl-tag size="small" variant="primary" pill>{ svc }</sl-tag>
+														</a>
+													}
 												}
-											}
-											if len(m.Services) > 3 {
-												<sl-tag size="small" variant="neutral" pill>+{ fmt.Sprintf("%d", len(m.Services)-3) }</sl-tag>
-											}
-										</div>
-									}
+												if len(m.Services) > 3 {
+													<sl-tag size="small" variant="primary" pill>+{ fmt.Sprintf("%d", len(m.Services)-3) }</sl-tag>
+												}
+											</span>
+										}
+									</div>
 								</td>
 								<td><sl-badge variant={ metricTypeVariant(m.Type) }>{ m.Type }</sl-badge></td>
 								<td class="mono">{ formatCount(m.Count) }</td>
@@ -107,20 +109,33 @@ templ Metrics(data MetricsData) {
 			}
 		</sl-card>
 		<style>
+			.metric-cell {
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
+				min-width: 0;
+			}
 			.metric-name {
 				font-family: var(--font-mono);
-				font-size: 0.85rem;
+				font-size: 0.8125rem;
 				color: var(--text-primary);
+				white-space: nowrap;
+			}
+			.metric-prefix {
+				color: var(--text-muted);
 			}
 			.metric-services {
 				display: flex;
+				align-items: center;
 				gap: 0.25rem;
-				margin-top: 0.25rem;
-				flex-wrap: wrap;
+				flex-shrink: 0;
 			}
-			.metric-services a:hover sl-tag::part(base) {
-				background: var(--accent);
-				color: white;
+			.metric-svc-link {
+				text-decoration: none;
+			}
+			.metric-svc-link:hover sl-tag::part(base) {
+				border-color: var(--accent);
+				color: var(--accent);
 			}
 			.sparkline {
 				width: 80px;
@@ -181,6 +196,20 @@ func metricSparklinePoints(values []float64) string {
 	}
 
 	return strings.Join(points, " ")
+}
+
+func metricPrefix(name string) string {
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		return name[:idx+1]
+	}
+	return ""
+}
+
+func metricLeaf(name string) string {
+	if idx := strings.LastIndex(name, "."); idx >= 0 {
+		return name[idx+1:]
+	}
+	return name
 }
 
 func metricTypeVariant(mtype string) string {
