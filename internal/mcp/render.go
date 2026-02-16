@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -99,13 +100,9 @@ func (rs *ReportStore) List() []*Report {
 		reports = append(reports, &r)
 	}
 	// Sort by created_at descending
-	for i := 0; i < len(reports)-1; i++ {
-		for j := i + 1; j < len(reports); j++ {
-			if reports[j].CreatedAt.After(reports[i].CreatedAt) {
-				reports[i], reports[j] = reports[j], reports[i]
-			}
-		}
-	}
+	sort.Slice(reports, func(i, j int) bool {
+		return reports[j].CreatedAt.Before(reports[i].CreatedAt)
+	})
 	return reports
 }
 

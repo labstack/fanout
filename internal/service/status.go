@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 )
 
 // Status returns system health overview.
@@ -29,6 +30,7 @@ LIMIT 100;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
+		slog.Warn("query failed", "method", "Status", "err", err)
 		return &StatusResult{
 			Healthy:   true,
 			Summary:   "No telemetry data yet",
@@ -57,6 +59,7 @@ LIMIT 100;
 			status    string
 		}
 		if err := rows.Scan(&svc.name, &svc.count, &svc.p95, &svc.errorRate); err != nil {
+			slog.Warn("scan failed", "method", "Status", "err", err)
 			continue
 		}
 		svc.status = DeriveHealth(svc.errorRate, svc.p95)
