@@ -139,10 +139,29 @@ func (w *Writer) Run(ctx context.Context) error {
 			w.flushLocked()
 			w.mu.Unlock()
 		case <-ctx.Done():
+			// Drain any remaining items from buffered channels
 			w.mu.Lock()
+			w.drainChannels()
 			w.flushLocked()
 			w.mu.Unlock()
 			return nil
+		}
+	}
+}
+
+// drainChannels reads any remaining items from the buffered input channels.
+// Must be called with w.mu held.
+func (w *Writer) drainChannels() {
+	for {
+		select {
+		case r := <-w.chSpans:
+			w.bufSpans = append(w.bufSpans, r)
+		case r := <-w.chLogs:
+			w.bufLogs = append(w.bufLogs, r)
+		case r := <-w.chMetrics:
+			w.bufMetrics = append(w.bufMetrics, r)
+		default:
+			return
 		}
 	}
 }

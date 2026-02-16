@@ -123,7 +123,9 @@ func (c *Cache) Set(key string, value any) {
 	}
 }
 
-// cleanup removes expired items periodically
+// cleanup removes expired items periodically (every ttl*2).
+// Get() still enforces TTL on every access, so expired items are never
+// returned — they just linger in memory until the next cleanup tick.
 func (c *Cache) cleanup(ctx context.Context) {
 	ticker := time.NewTicker(c.ttl * 2)
 	defer ticker.Stop()

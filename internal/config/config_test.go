@@ -145,8 +145,10 @@ func TestValidate(t *testing.T) {
 		{"MaxRows=0", func(c *Config) { c.MaxRows = 0 }},
 		{"MaxRows=-1", func(c *Config) { c.MaxRows = -1 }},
 		{"RollupEvery=0", func(c *Config) { c.RollupEvery = 0 }},
+		{"RollupEvery=-1", func(c *Config) { c.RollupEvery = -1 }},
 		{"RetentionDays=-1", func(c *Config) { c.RetentionDays = -1 }},
 		{"RetentionHours=0", func(c *Config) { c.RetentionHours = 0 }},
+		{"RetentionHours=-1", func(c *Config) { c.RetentionHours = -1 }},
 	}
 
 	for _, tc := range tests {

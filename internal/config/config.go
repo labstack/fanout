@@ -49,19 +49,19 @@ func Load() Config {
 // Validate checks that config values are sane.
 func (c Config) Validate() error {
 	if c.FlushSeconds <= 0 {
-		return fmt.Errorf("FLUSH_SECONDS must be > 0, got %d", c.FlushSeconds)
+		return fmt.Errorf("FlushSeconds (FLUSH_SECONDS) must be > 0, got %d", c.FlushSeconds)
 	}
 	if c.MaxRows <= 0 {
-		return fmt.Errorf("MAX_ROWS must be > 0, got %d", c.MaxRows)
+		return fmt.Errorf("MaxRows (MAX_ROWS) must be > 0, got %d", c.MaxRows)
 	}
 	if c.RollupEvery <= 0 {
-		return fmt.Errorf("ROLLUP_EVERY must be > 0, got %d", c.RollupEvery)
+		return fmt.Errorf("RollupEvery (ROLLUP_EVERY) must be > 0, got %d", c.RollupEvery)
 	}
 	if c.RetentionDays < 0 {
-		return fmt.Errorf("RETENTION_DAYS must be >= 0, got %d", c.RetentionDays)
+		return fmt.Errorf("RetentionDays (RETENTION_DAYS) must be >= 0, got %d", c.RetentionDays)
 	}
 	if c.RetentionHours <= 0 {
-		return fmt.Errorf("RETENTION_HOURS must be > 0, got %d", c.RetentionHours)
+		return fmt.Errorf("RetentionHours (RETENTION_HOURS) must be > 0, got %d", c.RetentionHours)
 	}
 	return nil
 }
