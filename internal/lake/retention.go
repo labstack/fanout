@@ -47,7 +47,7 @@ func (p *Pruner) Run(ctx context.Context) {
 }
 
 func (p *Pruner) pruneAll() {
-	cutoff := time.Now().AddDate(0, 0, -p.cfg.RetentionDays)
+	cutoff := time.Now().UTC().AddDate(0, 0, -p.cfg.RetentionDays)
 	slog.Info("pruning data", "older_than", cutoff.Format("2006-01-02"))
 
 	signals := []string{"spans", "logs", "metrics"}

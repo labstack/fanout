@@ -14,6 +14,8 @@
 //   - Auto-generated tool descriptions
 package render
 
+import "strings"
+
 // Legacy types for backward compatibility with existing code.
 // These are superseded by the Component interface in registry.go.
 
@@ -52,7 +54,7 @@ func (t *Tree) Render(format Format) Output {
 }
 
 func (t *Tree) renderASCII() string {
-	var sb stringBuilder
+	var sb strings.Builder
 	if t.Title != "" {
 		sb.WriteString(t.Title + "\n")
 	}
@@ -62,7 +64,7 @@ func (t *Tree) renderASCII() string {
 	return trimSuffix(sb.String(), "\n")
 }
 
-func renderNode(sb *stringBuilder, n *Node, prefix string, last bool) {
+func renderNode(sb *strings.Builder, n *Node, prefix string, last bool) {
 	connector := "├── "
 	if last {
 		connector = "└── "
@@ -91,7 +93,7 @@ func renderNode(sb *stringBuilder, n *Node, prefix string, last bool) {
 }
 
 func (t *Tree) renderHTML() string {
-	var sb stringBuilder
+	var sb strings.Builder
 	sb.WriteString(`<sl-tree>`)
 	if t.Root != nil {
 		renderHTMLNode(&sb, t.Root)
@@ -100,7 +102,7 @@ func (t *Tree) renderHTML() string {
 	return sb.String()
 }
 
-func renderHTMLNode(sb *stringBuilder, n *Node) {
+func renderHTMLNode(sb *strings.Builder, n *Node) {
 	sb.WriteString(`<sl-tree-item>`)
 	sb.WriteString(n.Label)
 	if n.Value != "" {
@@ -150,19 +152,6 @@ func (c *Compose) Render(format Format) Output {
 		out.HTML = `<div class="compose compose-` + dir + `">` + join(htmlParts, "") + `</div>`
 	}
 	return out
-}
-
-// stringBuilder is a simple string builder
-type stringBuilder struct {
-	s string
-}
-
-func (sb *stringBuilder) WriteString(s string) {
-	sb.s += s
-}
-
-func (sb *stringBuilder) String() string {
-	return sb.s
 }
 
 func trimSuffix(s, suffix string) string {

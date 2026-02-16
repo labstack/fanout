@@ -2,25 +2,26 @@ package mcp
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/render"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// validReportID matches hex-encoded report IDs (genID produces 16 hex chars from 8 bytes)
-var validReportID = regexp.MustCompile(`^[a-f0-9]{16}$`)
+// isValidReportID checks if the string is a valid UUID
+func isValidReportID(id string) bool {
+	_, err := uuid.Parse(id)
+	return err == nil
+}
 
 // Report stores a shareable report snapshot
 type Report struct {
@@ -46,7 +47,7 @@ func InitReportStore(lakeDir string) {
 }
 
 func (rs *ReportStore) Save(r *Report) {
-	if !validReportID.MatchString(r.ID) {
+	if !isValidReportID(r.ID) {
 		return
 	}
 	rs.mu.Lock()
@@ -57,7 +58,7 @@ func (rs *ReportStore) Save(r *Report) {
 }
 
 func (rs *ReportStore) Get(id string) *Report {
-	if !validReportID.MatchString(id) {
+	if !isValidReportID(id) {
 		return nil
 	}
 	rs.mu.RLock()
@@ -86,7 +87,7 @@ func (rs *ReportStore) List() []*Report {
 			continue
 		}
 		id := strings.TrimSuffix(e.Name(), ".json")
-		if !validReportID.MatchString(id) {
+		if !isValidReportID(id) {
 			continue
 		}
 		data, err := os.ReadFile(filepath.Join(rs.dir, e.Name()))
@@ -107,7 +108,7 @@ func (rs *ReportStore) List() []*Report {
 }
 
 func (rs *ReportStore) Delete(id string) bool {
-	if !validReportID.MatchString(id) {
+	if !isValidReportID(id) {
 		return false
 	}
 	rs.mu.Lock()
@@ -216,9 +217,11 @@ func (s *Server) render(ctx context.Context, req *mcp.CallToolRequest, in Render
 }
 
 func genID() string {
-	b := make([]byte, 8)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	id, err := uuid.NewV7()
+	if err != nil {
+		panic("uuid v7 generation failed: " + err.Error())
+	}
+	return id.String()
 }
 
 // GetReport retrieves a report by ID

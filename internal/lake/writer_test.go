@@ -165,7 +165,7 @@ func TestWriterRetryOnFailure(t *testing.T) {
 	w := NewWriter(cfg, chSpans, chLogs, chMetrics)
 
 	// Create the spans dir then make it read-only to force write failures
-	spansDir := filepath.Join(cfg.LakeDir, "spans", "tenant=", "namespace=default")
+	spansDir := filepath.Join(cfg.LakeDir, "spans", "tenant=default", "namespace=default")
 	if err := os.MkdirAll(spansDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -180,8 +180,8 @@ func TestWriterRetryOnFailure(t *testing.T) {
 	// Manually add rows to buffer and flush
 	now := time.Now().UnixNano()
 	w.bufSpans = []SpanRow{
-		{TraceID: "t1", SpanID: "s1", ServiceName: "svc", Namespace: "default", Name: "op", StartUnixNanos: now, EndUnixNanos: now + 1e6, DurationMs: 1.0, IngestedAt: now},
-		{TraceID: "t1", SpanID: "s2", ServiceName: "svc", Namespace: "default", Name: "op", StartUnixNanos: now, EndUnixNanos: now + 1e6, DurationMs: 1.0, IngestedAt: now},
+		{TraceID: "t1", SpanID: "s1", ServiceName: "svc", TenantID: "default", Namespace: "default", Name: "op", StartUnixNanos: now, EndUnixNanos: now + 1e6, DurationMs: 1.0, IngestedAt: now},
+		{TraceID: "t1", SpanID: "s2", ServiceName: "svc", TenantID: "default", Namespace: "default", Name: "op", StartUnixNanos: now, EndUnixNanos: now + 1e6, DurationMs: 1.0, IngestedAt: now},
 	}
 
 	w.flushLocked()
@@ -218,7 +218,7 @@ func TestWriterRetryBufferCap(t *testing.T) {
 	w := NewWriter(cfg, chSpans, chLogs, chMetrics)
 
 	// Create dir then make read-only
-	spansDir := filepath.Join(cfg.LakeDir, "spans", "tenant=", "namespace=default")
+	spansDir := filepath.Join(cfg.LakeDir, "spans", "tenant=default", "namespace=default")
 	if err := os.MkdirAll(spansDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -232,7 +232,7 @@ func TestWriterRetryBufferCap(t *testing.T) {
 	for i := 0; i < 15; i++ {
 		w.bufSpans = append(w.bufSpans, SpanRow{
 			TraceID: fmt.Sprintf("t%d", i), SpanID: fmt.Sprintf("s%d", i),
-			ServiceName: "svc", Namespace: "default", Name: "op",
+			ServiceName: "svc", TenantID: "default", Namespace: "default", Name: "op",
 			StartUnixNanos: now, EndUnixNanos: now + 1e6, DurationMs: 1.0, IngestedAt: now,
 		})
 	}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/parquet-go/parquet-go"
@@ -18,6 +19,7 @@ import (
 // Compactor merges small hourly parquet files into larger daily files
 type Compactor struct {
 	cfg config.Config
+	mu  sync.Mutex
 }
 
 // NewCompactor creates a new compactor
@@ -46,6 +48,12 @@ func (c *Compactor) Run(ctx context.Context) {
 }
 
 func (c *Compactor) compactAll() {
+	if !c.mu.TryLock() {
+		slog.Info("compaction already running, skipping")
+		return
+	}
+	defer c.mu.Unlock()
+
 	// Only compact data older than 24 hours
 	cutoff := time.Now().UTC().Add(-24 * time.Hour)
 	slog.Info("compacting partitions", "older_than", cutoff.Format("2006-01-02 15:04"))

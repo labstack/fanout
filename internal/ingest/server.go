@@ -325,7 +325,7 @@ func toJSON(v interface{}) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
 		slog.Error("json marshal failed", "err", err)
-		return nil
+		return []byte("null")
 	}
 	return b
 }

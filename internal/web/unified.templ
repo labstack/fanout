@@ -90,7 +90,9 @@ templ Unified(data UnifiedData) {
 					if (ns) url.searchParams.set('ns', ns);
 					const win = new URL(window.location.href).searchParams.get('window');
 					if (win && win !== '60') url.searchParams.set('window', win);
-					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'});
+					htmx.ajax('GET', url.pathname + url.search, {target: 'body', swap: 'innerHTML'}).catch(() => {
+						alert('Search failed. Please try again.');
+					});
 					history.pushState({}, '', url.toString());
 					return false;
 				}
@@ -264,10 +266,10 @@ templ Unified(data UnifiedData) {
 				text-decoration: underline;
 			}
 			.row-error {
-				background: rgba(239, 68, 68, 0.05);
+				background: var(--sl-color-danger-50);
 			}
 			.row-error:hover td {
-				background: rgba(239, 68, 68, 0.1) !important;
+				background: var(--sl-color-danger-100) !important;
 			}
 			.pagination {
 				display: flex;
