@@ -348,20 +348,17 @@ templ Layout(title string, activePage string, window int) {
 					padding: 0.875rem 1rem;
 					margin-bottom: 1rem;
 				}
-				.search-section .form-row,
-				.search-form .form-row {
+				.search-section .form-row {
 					display: flex;
 					gap: 0.75rem;
 					align-items: flex-end;
 					flex-wrap: wrap;
 				}
-				.search-section sl-input,
-				.search-form sl-input {
+				.search-section sl-input {
 					flex: 1;
 					min-width: 200px;
 				}
-				.search-section .search-hint,
-				.search-form .search-hint {
+				.search-section .search-hint {
 					margin-top: 0.75rem;
 					font-size: 0.75rem;
 					color: var(--text-muted);
@@ -370,16 +367,12 @@ templ Layout(title string, activePage string, window int) {
 					gap: 0.5rem;
 					align-items: center;
 				}
-				.search-section .search-hint code,
-				.search-form .search-hint code {
+				.search-section .search-hint code {
 					background: var(--bg-tertiary);
 					padding: 0.125rem 0.375rem;
 					border-radius: 0.25rem;
 					font-family: var(--font-mono);
 					font-size: 0.7rem;
-				}
-				.search-form .search-hint sl-icon {
-					font-size: 0.875rem;
 				}
 
 				/* Results section */
