@@ -79,6 +79,16 @@ func (d *Duck) DefaultNamespace() string {
 }
 
 func (d *Duck) RunRollups(ctx context.Context) {
+	// Run once immediately at startup so dashboards have data right away
+	start := time.Now()
+	rows, err := d.rollupOnce(ctx)
+	if err != nil {
+		slog.Error("startup rollup failed", "err", err)
+	} else if rows > 0 {
+		slog.Info("startup rollup complete", "rows", rows, "duration", time.Since(start))
+		metrics.RecordRollup(rows, time.Since(start).Seconds())
+	}
+
 	ticker := time.NewTicker(time.Duration(d.cfg.RollupEvery) * time.Second)
 	defer ticker.Stop()
 	for {
@@ -108,10 +118,10 @@ SELECT
   quantile_cont("name=duration_ms", 0.50) AS p50_ms,
   quantile_cont("name=duration_ms", 0.95) AS p95_ms,
   avg(CASE WHEN "name=status_code" = 'STATUS_CODE_ERROR' OR "name=status_code" = 'ERROR' THEN 1 ELSE 0 END) AS error_rate
-FROM read_parquet('%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/part-*.parquet', hive_partitioning=true)
+FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/part-*.parquet','%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/compacted.parquet'], union_by_name=true, hive_partitioning=true)
 WHERE bucket > COALESCE((SELECT max(bucket) FROM service_rollup), TIMESTAMP '1970-01-01')
 GROUP BY ALL;
-`, d.cfg.LakeDir))
+`, d.cfg.LakeDir, d.cfg.LakeDir))
 	if err != nil {
 		return 0, err
 	}
@@ -127,8 +137,8 @@ WITH calls AS (
     child."name=service_name" as callee,
     child."name=duration_ms" as duration_ms,
     child."name=status_code" as status
-  FROM read_parquet('%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/part-*.parquet', hive_partitioning=true) child
-  JOIN read_parquet('%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/part-*.parquet', hive_partitioning=true) parent
+  FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/part-*.parquet','%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/compacted.parquet'], union_by_name=true, hive_partitioning=true) child
+  JOIN read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/part-*.parquet','%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/compacted.parquet'], union_by_name=true, hive_partitioning=true) parent
     ON child."name=parent_span_id" = parent."name=span_id"
     AND child."name=trace_id" = parent."name=trace_id"
   WHERE bucket > COALESCE((SELECT max(bucket) FROM edge_rollup), TIMESTAMP '1970-01-01')
@@ -143,7 +153,7 @@ SELECT
   AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) as error_rate
 FROM calls
 GROUP BY bucket, caller, callee;
-`, d.cfg.LakeDir, d.cfg.LakeDir))
+`, d.cfg.LakeDir, d.cfg.LakeDir, d.cfg.LakeDir, d.cfg.LakeDir))
 	if edgeErr != nil {
 		slog.Error("edge rollup failed", "err", edgeErr)
 	}

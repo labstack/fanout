@@ -2,6 +2,7 @@ package lake
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,12 +20,14 @@ import (
 // Compactor merges small hourly parquet files into larger daily files
 type Compactor struct {
 	cfg config.Config
+	db  *sql.DB
 	mu  sync.Mutex
 }
 
-// NewCompactor creates a new compactor
-func NewCompactor(cfg config.Config) *Compactor {
-	return &Compactor{cfg: cfg}
+// NewCompactor creates a new compactor. If db is non-nil, uses DuckDB COPY
+// for streaming compaction (constant memory). Falls back to in-memory merge.
+func NewCompactor(cfg config.Config, db *sql.DB) *Compactor {
+	return &Compactor{cfg: cfg, db: db}
 }
 
 // Run starts the compaction loop
@@ -217,38 +220,79 @@ func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
 		return 0, nil
 	}
 
-	// Compact based on signal type
+	// Compact: prefer DuckDB streaming (constant memory) over in-memory merge
 	var sizeAfter int64
 	var compactErr error
 
-	switch signal {
-	case "spans":
-		sizeAfter, compactErr = compactFiles[SpanRow](files, dayPath)
-	case "logs":
-		sizeAfter, compactErr = compactFiles[LogRow](files, dayPath)
-	case "metrics":
-		sizeAfter, compactErr = compactFiles[MetricRow](files, dayPath)
+	if c.db != nil {
+		sizeAfter, compactErr = c.compactWithDuckDB(files, dayPath)
+	} else {
+		switch signal {
+		case "spans":
+			sizeAfter, compactErr = compactFiles[SpanRow](files, dayPath)
+		case "logs":
+			sizeAfter, compactErr = compactFiles[LogRow](files, dayPath)
+		case "metrics":
+			sizeAfter, compactErr = compactFiles[MetricRow](files, dayPath)
+		}
 	}
 
 	if compactErr != nil {
 		return 0, compactErr
 	}
 
-	// Remove old hour directories
+	// Remove old hour directories.
+	// Keep compacted file on partial failure — duplicates are safer than data loss.
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), "hour=") {
 			if err := os.RemoveAll(filepath.Join(dayPath, e.Name())); err != nil {
-				// Cleanup: remove compacted file to avoid duplicates
-				compactedPath := filepath.Join(dayPath, "compacted.parquet")
-				if rmErr := os.Remove(compactedPath); rmErr != nil {
-					slog.Error("failed to clean up compacted file after hour dir removal failure", "path", compactedPath, "err", rmErr)
-				}
+				slog.Error("failed to remove hour dir after compaction, duplicates may exist",
+					"dir", e.Name(), "path", dayPath, "err", err)
 				return 0, fmt.Errorf("remove hour dir %s: %w", e.Name(), err)
 			}
 		}
 	}
 
 	return sizeBefore - sizeAfter, nil
+}
+
+// compactWithDuckDB uses DuckDB COPY for streaming compaction (constant memory).
+func (c *Compactor) compactWithDuckDB(files []string, dayPath string) (int64, error) {
+	compactedPath := filepath.Join(dayPath, "compacted.parquet")
+	tmpPath := compactedPath + ".tmp"
+
+	// Build file list for read_parquet
+	quoted := make([]string, len(files))
+	for i, f := range files {
+		quoted[i] = "'" + strings.ReplaceAll(f, "'", "''") + "'"
+	}
+	fileList := "[" + strings.Join(quoted, ",") + "]"
+
+	q := fmt.Sprintf(
+		`COPY (SELECT * FROM read_parquet(%s, union_by_name=true)) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)`,
+		fileList, strings.ReplaceAll(tmpPath, "'", "''"),
+	)
+
+	if _, err := c.db.Exec(q); err != nil {
+		if rmErr := os.Remove(tmpPath); rmErr != nil {
+			slog.Warn("failed to clean up temp file", "path", tmpPath, "err", rmErr)
+		}
+		return 0, fmt.Errorf("duckdb compact: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, compactedPath); err != nil {
+		if rmErr := os.Remove(tmpPath); rmErr != nil {
+			slog.Warn("failed to clean up temp file", "path", tmpPath, "err", rmErr)
+		}
+		return 0, fmt.Errorf("rename compacted file: %w", err)
+	}
+
+	info, err := os.Stat(compactedPath)
+	if err != nil {
+		slog.Warn("stat compacted file failed", "path", compactedPath, "err", err)
+		return 0, nil
+	}
+	return info.Size(), nil
 }
 
 func compactFiles[T any](files []string, dayPath string) (int64, error) {

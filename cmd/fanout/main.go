@@ -80,7 +80,7 @@ func main() {
 	go pruner.Run(ctx)
 
 	// Start compactor (merges small hourly files into daily files)
-	compactor := lake.NewCompactor(cfg)
+	compactor := lake.NewCompactor(cfg, q.DB)
 	go compactor.Run(ctx)
 
 	// Start intelligence detector
@@ -155,7 +155,8 @@ func main() {
 	svc := service.New(q, cfg)
 
 	// UI routes (Templ + HTMX + Vega-Lite)
-	api.RegisterUIRoutes(e, svc, cfg)
+	uiHandler := api.RegisterUIRoutes(e, svc, cfg)
+	uiHandler.SetDetector(detector)
 
 	// MCP server (Model Context Protocol)
 	if cfg.MCPEnabled {

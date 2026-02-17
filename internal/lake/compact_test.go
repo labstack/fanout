@@ -11,7 +11,7 @@ import (
 
 func TestNewCompactor(t *testing.T) {
 	cfg := config.Config{LakeDir: "/tmp/test"}
-	c := NewCompactor(cfg)
+	c := NewCompactor(cfg, nil)
 	if c == nil {
 		t.Fatal("NewCompactor returned nil")
 	}

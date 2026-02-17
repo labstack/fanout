@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -24,32 +25,51 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 		startDay := start.Truncate(24 * time.Hour)
 		endDay := now.Truncate(24 * time.Hour)
 		for t := startDay; !t.After(endDay); t = t.Add(24 * time.Hour) {
-			pattern := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d/hour=*/part-*.parquet",
+			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
 				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
-			matches, _ := filepath.Glob(pattern)
-			for _, m := range matches {
-				filesSet[m] = struct{}{}
+			// Match hourly part files and day-level compacted files
+			for _, pattern := range []string{
+				filepath.Join(dayBase, "hour=*/part-*.parquet"),
+				filepath.Join(dayBase, "compacted.parquet"),
+			} {
+				matches, _ := filepath.Glob(pattern)
+				for _, m := range matches {
+					filesSet[m] = struct{}{}
+				}
 			}
 		}
 	} else {
 		// For smaller windows, use hour-level precision
 		startHour := start.Truncate(time.Hour)
 		endHour := now.Truncate(time.Hour)
+		seenDays := make(map[string]struct{})
 		for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
-			pattern := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d/hour=%02d/part-*.parquet",
-				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day(), t.Hour())
+			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
+				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
+			pattern := filepath.Join(dayBase, fmt.Sprintf("hour=%02d/part-*.parquet", t.Hour()))
 			matches, _ := filepath.Glob(pattern)
 			for _, m := range matches {
 				filesSet[m] = struct{}{}
 			}
+			// Also check for day-level compacted file (once per day)
+			if _, seen := seenDays[dayBase]; !seen {
+				seenDays[dayBase] = struct{}{}
+				compacted := filepath.Join(dayBase, "compacted.parquet")
+				if _, err := os.Stat(compacted); err == nil {
+					filesSet[compacted] = struct{}{}
+				}
+			}
 		}
 	}
 
-	// If there are no files in the window, return a broad glob for the partition.
-	// Callers may treat the resulting read_parquet error as "no data yet".
+	// If there are no files in the window, return broad globs for the partition
+	// covering both hourly part files and day-level compacted files.
 	if len(filesSet) == 0 {
-		return sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/part-*.parquet",
+		hourly := sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/part-*.parquet",
 			lakeDir, signal, tenant, namespace))
+		compacted := sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/compacted.parquet",
+			lakeDir, signal, tenant, namespace))
+		return fmt.Sprintf("[%s,%s]", hourly, compacted)
 	}
 
 	files := make([]string, 0, len(filesSet))
@@ -92,6 +112,9 @@ type cacheItem struct {
 // NewCache creates a new cache with the given TTL.
 // The cleanup goroutine stops when ctx is cancelled.
 func NewCache(ctx context.Context, ttl time.Duration) *Cache {
+	if ttl <= 0 {
+		ttl = 10 * time.Second
+	}
 	c := &Cache{
 		items: make(map[string]cacheItem),
 		ttl:   ttl,
@@ -153,4 +176,21 @@ var QueryCache *Cache
 // stops when ctx is cancelled.
 func InitQueryCache(ctx context.Context) {
 	QueryCache = NewCache(ctx, 10*time.Second)
+}
+
+// GetCached retrieves a value from QueryCache. Returns (nil, false) if the
+// cache is not initialized or the key is missing/expired.
+func GetCached(key string) (any, bool) {
+	if QueryCache == nil {
+		return nil, false
+	}
+	return QueryCache.Get(key)
+}
+
+// SetCached stores a value in QueryCache. No-op if the cache is not initialized.
+func SetCached(key string, value any) {
+	if QueryCache == nil {
+		return
+	}
+	QueryCache.Set(key, value)
 }

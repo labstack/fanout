@@ -79,6 +79,9 @@ LIMIT 5;
 				suggestedTraces = append(suggestedTraces, e.TraceID)
 			}
 		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("iteration error", "method", "Diagnose.errors", "err", err)
+		}
 	}
 
 	// Get slow operations
@@ -106,6 +109,9 @@ LIMIT 5;
 				continue
 			}
 			out.SlowOps = append(out.SlowOps, op)
+		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("iteration error", "method", "Diagnose.slowOps", "err", err)
 		}
 	}
 
@@ -145,6 +151,9 @@ LIMIT 10;
 				continue
 			}
 			out.Dependencies = append(out.Dependencies, d)
+		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("iteration error", "method", "Diagnose.deps", "err", err)
 		}
 	}
 

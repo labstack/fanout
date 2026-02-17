@@ -85,6 +85,9 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 		}
 		metrics = append(metrics, m)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, CompareOut{}, fmt.Errorf("compare iteration: %w", err)
+	}
 
 	// Add empty entries for services with no data
 	found := make(map[string]bool)

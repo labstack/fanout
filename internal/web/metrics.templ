@@ -73,7 +73,7 @@ templ Metrics(data MetricsData) {
 							<tr>
 								<td>
 									<div class="metric-cell">
-										<span class="metric-name"><span class="metric-prefix">{ metricPrefix(m.Name) }</span>{ metricLeaf(m.Name) }</span>
+										<a href={ templ.SafeURL(withWindow("/metrics/"+pathEscape(m.Name), data.Window)) } class="metric-name"><span class="metric-prefix">{ metricPrefix(m.Name) }</span>{ metricLeaf(m.Name) }</a>
 										if len(m.Services) > 0 {
 											<span class="metric-services">
 												for i, svc := range m.Services {
@@ -219,6 +219,126 @@ func metricTypeVariant(mtype string) string {
 	default:
 		return "neutral"
 	}
+}
+
+// MetricDetailData for the metric detail page
+type MetricDetailData struct {
+	Name     string
+	Type     string
+	Services []string
+	Count    int64
+	Avg      float64
+	Min      float64
+	Max      float64
+	Points   []MetricDataPoint
+	Window   int
+}
+
+// MetricDataPoint for time series chart
+type MetricDataPoint struct {
+	Time string
+	Avg  float64
+	Min  float64
+	Max  float64
+}
+
+// MetricDetail renders the metric drill-down page
+templ MetricDetail(data MetricDetailData) {
+	@Layout(data.Name, "metrics", data.Window) {
+		<nav class="breadcrumbs">
+			<sl-breadcrumb>
+				<sl-breadcrumb-item href={ withWindow("/", data.Window) }>Overview</sl-breadcrumb-item>
+				<sl-breadcrumb-item href={ withWindow("/metrics", data.Window) }>Metrics</sl-breadcrumb-item>
+				<sl-breadcrumb-item>{ data.Name }</sl-breadcrumb-item>
+			</sl-breadcrumb>
+		</nav>
+		<div class="page-header">
+			<div class="page-header-left">
+				<h1 class="page-title">
+					<span class="metric-prefix">{ metricPrefix(data.Name) }</span>{ metricLeaf(data.Name) }
+					<sl-badge variant={ metricTypeVariant(data.Type) } pill style="margin-left: 0.75rem; vertical-align: middle;">{ data.Type }</sl-badge>
+				</h1>
+				<p class="page-subtitle">
+					if len(data.Services) > 0 {
+						for _, svc := range data.Services {
+							<a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc), data.Window)) }>
+								<sl-tag size="small" variant="primary" style="margin-right: 0.25rem;">{ svc }</sl-tag>
+							</a>
+						}
+					}
+				</p>
+			</div>
+		</div>
+		<!-- Summary Stats -->
+		<div class="grid grid-4" style="margin-bottom: 1rem;">
+			<sl-card class="metric-card">
+				<div class="metric-value">{ fmtCount(data.Count) }</div>
+				<div class="metric-label">Data Points</div>
+			</sl-card>
+			<sl-card class="metric-card">
+				<div class="metric-value">{ formatValue(data.Avg) }</div>
+				<div class="metric-label">Average</div>
+			</sl-card>
+			<sl-card class="metric-card">
+				<div class="metric-value">{ formatValue(data.Min) }</div>
+				<div class="metric-label">Min</div>
+			</sl-card>
+			<sl-card class="metric-card">
+				<div class="metric-value">{ formatValue(data.Max) }</div>
+				<div class="metric-label">Max</div>
+			</sl-card>
+		</div>
+		<!-- Time Series Chart -->
+		if len(data.Points) > 1 {
+			<sl-card style="margin-bottom: 1rem;">
+				<div slot="header" class="card-header">Time Series</div>
+				<div class="chart" style="height: 300px;" data-vega={ metricDetailChartSpec(data.Points, data.Name) }></div>
+			</sl-card>
+		}
+	}
+}
+
+func metricDetailChartSpec(points []MetricDataPoint, name string) string {
+	values := make([]map[string]any, len(points))
+	for i, p := range points {
+		values[i] = map[string]any{
+			"time": p.Time,
+			"avg":  p.Avg,
+			"min":  p.Min,
+			"max":  p.Max,
+		}
+	}
+
+	spec := map[string]any{
+		"$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+		"width":   "container",
+		"height":  280,
+		"data":    map[string]any{"values": values},
+		"layer": []map[string]any{
+			{
+				"mark": map[string]any{"type": "area", "opacity": 0.15, "color": "#0ea5e9"},
+				"encoding": map[string]any{
+					"x": map[string]any{
+						"field":    "time",
+						"type":     "temporal",
+						"timeUnit": "yearmonthdatehoursminutes",
+						"axis":     map[string]any{"title": nil, "format": "%H:%M", "labelAngle": 0},
+					},
+					"y":  map[string]any{"field": "max", "type": "quantitative", "axis": map[string]any{"title": name}},
+					"y2": map[string]any{"field": "min"},
+				},
+			},
+			{
+				"mark": map[string]any{"type": "line", "strokeWidth": 2, "color": "#0ea5e9"},
+				"encoding": map[string]any{
+					"x": map[string]any{"field": "time", "type": "temporal", "timeUnit": "yearmonthdatehoursminutes"},
+					"y": map[string]any{"field": "avg", "type": "quantitative"},
+				},
+			},
+		},
+	}
+
+	return mustJSON(spec, "{}")
 }
 
 func formatValue(v float64) string {

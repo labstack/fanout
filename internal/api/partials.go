@@ -1,7 +1,11 @@
 package api
 
 import (
+	"golang.org/x/sync/errgroup"
+
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/fanout/internal/search"
+	"github.com/labstack/fanout/internal/service"
 	"github.com/labstack/fanout/internal/web"
 )
 
@@ -21,6 +25,12 @@ func RegisterPartialRoutes(e *echo.Echo, h *UIHandler) {
 	p.GET("/overview/issues", h.PartialTopIssues)
 	p.GET("/overview/services", h.PartialServicesTable)
 	p.GET("/overview/timeline", h.PartialTimeline)
+
+	// Page content partials (for HTMX refresh)
+	p.GET("/services", h.PartialServices)
+	p.GET("/services/:name", h.PartialServiceDetail)
+	p.GET("/traces", h.PartialTraces)
+	p.GET("/logs", h.PartialLogs)
 }
 
 // PartialOverview returns the full overview content (no layout)
@@ -32,10 +42,30 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 
 	data := web.OverviewData{Window: window}
 
-	status, err := h.svc.Status(ctx, window, namespace, "")
-	if err != nil {
+	var status *service.StatusResult
+	var topo *service.TopologyResult
+	var timeline *service.TimelineResult
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		var err error
+		status, err = h.svc.Status(gctx, window, namespace, "")
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		topo, err = h.svc.Topology(gctx, window, namespace, "")
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		timeline, err = h.svc.Timeline(gctx, "", window, 5, namespace, "")
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		return err
 	}
+
 	data.Healthy = status.Healthy
 	data.Summary = status.Summary
 	data.Services = web.ServiceSummary{
@@ -57,10 +87,6 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 		})
 	}
 
-	topo, err := h.svc.Topology(ctx, window, namespace, "")
-	if err != nil {
-		return err
-	}
 	for _, n := range topo.Nodes {
 		data.Topology.Nodes = append(data.Topology.Nodes, web.ServiceNode{
 			Name:      n.Name,
@@ -71,10 +97,6 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 		})
 	}
 
-	timeline, err := h.svc.Timeline(ctx, "", window, 5, namespace, "")
-	if err != nil {
-		return err
-	}
 	for _, b := range timeline.Buckets {
 		data.Timeline.Buckets = append(data.Timeline.Buckets, web.TimelineBucket{
 			Time:         b.Time,
@@ -177,6 +199,126 @@ func (h *UIHandler) PartialServicesTable(c echo.Context) error {
 	}
 
 	return renderTempl(c, web.ServicesTable(nodes, window))
+}
+
+// PartialServices returns the services list content (no layout)
+func (h *UIHandler) PartialServices(c echo.Context) error {
+	cachePartial(c)
+	data, err := h.fetchServicesData(c)
+	if err != nil {
+		return err
+	}
+	return renderTempl(c, web.ServicesContent(data))
+}
+
+// PartialServiceDetail returns the service detail content (no layout)
+func (h *UIHandler) PartialServiceDetail(c echo.Context) error {
+	cachePartial(c)
+	data, err := h.fetchServiceDetailData(c)
+	if err != nil {
+		return err
+	}
+	return renderTempl(c, web.ServiceDetailContent(data))
+}
+
+// PartialTraces returns traces results (no layout)
+func (h *UIHandler) PartialTraces(c echo.Context) error {
+	cachePartial(c)
+	ctx := c.Request().Context()
+	queryStr := c.QueryParam("q")
+	window := parseWindow(c)
+	namespace := parseNamespace(c)
+	limit, offset := parsePagination(c, 50, 100)
+
+	q := search.Parse(queryStr)
+	result, err := h.svc.SearchTraces(ctx, service.TraceSearchParams{
+		Services:   q.Service(),
+		Operations: q.Operation(),
+		Status:     q.Status(),
+		Duration:   q.Duration(),
+		Attrs:      q.Attr(),
+		TraceID:    q.TraceID(),
+		SpanID:     q.SpanID(),
+		Terms:      q.Terms,
+		Exclude:    q.Exclude,
+		Window:     window,
+		Limit:      limit,
+		Offset:     offset,
+		Namespace:  namespace,
+	})
+	if err != nil {
+		return err
+	}
+
+	var traces []web.TraceRow
+	for _, t := range result.Traces {
+		traces = append(traces, web.TraceRow{
+			TraceID:   t.TraceID,
+			Service:   t.Service,
+			Namespace: t.Namespace,
+			Operation: t.Operation,
+			Duration:  t.Duration,
+			Status:    t.Status,
+			Time:      t.Time,
+		})
+	}
+
+	data := web.TracesData{
+		Query:   queryStr,
+		Traces:  traces,
+		Limit:   limit,
+		Offset:  offset,
+		HasMore: result.HasMore,
+		Window:  window,
+	}
+
+	return renderTempl(c, web.TraceResultsContent(data))
+}
+
+// PartialLogs returns log results (no layout)
+func (h *UIHandler) PartialLogs(c echo.Context) error {
+	cachePartial(c)
+	ctx := c.Request().Context()
+	queryStr := c.QueryParam("q")
+	window := parseWindow(c)
+	namespace := parseNamespace(c)
+	limit, offset := parsePagination(c, 100, 200)
+
+	q := search.Parse(queryStr)
+	result, err := h.svc.SearchLogs(ctx, service.LogSearchParams{
+		Services:  q.Service(),
+		Severity:  q.Severity(),
+		Terms:     q.Terms,
+		Exclude:   q.Exclude,
+		Window:    window,
+		Limit:     limit,
+		Offset:    offset,
+		Namespace: namespace,
+	})
+	if err != nil {
+		return err
+	}
+
+	var logs []web.LogRow
+	for _, lg := range result.Logs {
+		logs = append(logs, web.LogRow{
+			Time:     lg.Time,
+			Service:  lg.Service,
+			Severity: lg.Severity,
+			Body:     lg.Body,
+		})
+	}
+
+	data := web.LogsData{
+		Query:   queryStr,
+		Logs:    logs,
+		Limit:   limit,
+		Offset:  offset,
+		Window:  window,
+		HasMore: result.HasMore,
+	}
+
+	return renderTempl(c, web.LogResultsContent(data))
 }
 
 // PartialTimeline returns just the timeline chart

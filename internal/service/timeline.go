@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+
+	"github.com/labstack/fanout/internal/query"
 )
 
 // Timeline returns time-bucketed metrics with anomaly detection.
@@ -21,14 +23,23 @@ func (s *Service) Timeline(ctx context.Context, svc string, window, granularity 
 		Anomalies: []Anomaly{},
 	}
 
+	// Always scope to single partition
+	namespace, tenantID = s.defaults(namespace, tenantID)
+
+	// Check cache
+	cacheKey := fmt.Sprintf("timeline:%s:%d:%d:%s:%s", svc, window, granularity, namespace, tenantID)
+	if v, ok := query.GetCached(cacheKey); ok {
+		if result, ok := v.(*TimelineResult); ok {
+			return result, nil
+		}
+	}
+
 	var args []any
 	svcFilter := ""
 	if svc != "" {
 		svcFilter = `AND "name=service_name" = ?`
 		args = append(args, svc)
 	}
-	// Always scope to single partition
-	namespace, tenantID = s.defaults(namespace, tenantID)
 
 	q := fmt.Sprintf(`
 SELECT
@@ -146,5 +157,6 @@ ORDER BY bucket ASC;
 	}
 
 	out.Buckets = buckets
+	query.SetCached(cacheKey, out)
 	return out, nil
 }
