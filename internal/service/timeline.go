@@ -29,7 +29,9 @@ func (s *Service) Timeline(ctx context.Context, svc string, window, granularity 
 	// Check cache
 	cacheKey := fmt.Sprintf("timeline:%s:%d:%d:%s:%s", svc, window, granularity, namespace, tenantID)
 	if v, ok := query.GetCached(cacheKey); ok {
-		return v.(*TimelineResult), nil
+		if result, ok := v.(*TimelineResult); ok {
+			return result, nil
+		}
 	}
 
 	var args []any

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -910,6 +911,7 @@ GROUP BY "name=mtype";
 	var services any
 	row := s.duck.DB.QueryRowContext(ctx, q, name)
 	if err := row.Scan(&out.Type, &out.Count, &out.Avg, &out.Min, &out.Max, &services); err != nil {
+		slog.Warn("query failed", "method", "MetricDetail.summary", "metric", name, "err", err)
 		return out, nil
 	}
 	out.Services = parseServiceList(services)
@@ -934,6 +936,7 @@ ORDER BY bucket ASC;
 
 	rows, err := s.duck.DB.QueryContext(ctx, tsQ, name)
 	if err != nil {
+		slog.Warn("query failed", "method", "MetricDetail.timeseries", "metric", name, "err", err)
 		return out, nil
 	}
 	defer rows.Close()
@@ -941,6 +944,7 @@ ORDER BY bucket ASC;
 	for rows.Next() {
 		var p MetricPoint
 		if err := rows.Scan(&p.Time, &p.Avg, &p.Min, &p.Max); err != nil {
+			slog.Warn("scan failed", "method", "MetricDetail.timeseries", "err", err)
 			continue
 		}
 		out.Points = append(out.Points, p)
@@ -978,6 +982,7 @@ ORDER BY metric_name, bucket ASC;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
+		slog.Warn("query failed", "method", "metricSparklines", "err", err)
 		return out
 	}
 	defer rows.Close()
@@ -987,6 +992,7 @@ ORDER BY metric_name, bucket ASC;
 		var bucket any
 		var avg float64
 		if err := rows.Scan(&name, &bucket, &avg); err != nil {
+			slog.Warn("scan failed", "method", "metricSparklines", "err", err)
 			continue
 		}
 		out[name] = append(out[name], avg)
@@ -1043,6 +1049,7 @@ ORDER BY requests DESC;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
+		slog.Warn("query failed", "method", "Compare", "err", err)
 		return &CompareResult{}, nil
 	}
 	defer rows.Close()
@@ -1051,6 +1058,7 @@ ORDER BY requests DESC;
 	for rows.Next() {
 		var m CompareService
 		if err := rows.Scan(&m.Name, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms); err != nil {
+			slog.Warn("scan failed", "method", "Compare", "err", err)
 			continue
 		}
 		m.ErrorCount = int64(float64(m.Requests) * m.ErrorRate)

@@ -241,15 +241,13 @@ func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
 		return 0, compactErr
 	}
 
-	// Remove old hour directories
+	// Remove old hour directories.
+	// Keep compacted file on partial failure — duplicates are safer than data loss.
 	for _, e := range entries {
 		if e.IsDir() && strings.HasPrefix(e.Name(), "hour=") {
 			if err := os.RemoveAll(filepath.Join(dayPath, e.Name())); err != nil {
-				// Cleanup: remove compacted file to avoid duplicates
-				compactedPath := filepath.Join(dayPath, "compacted.parquet")
-				if rmErr := os.Remove(compactedPath); rmErr != nil {
-					slog.Error("failed to clean up compacted file after hour dir removal failure", "path", compactedPath, "err", rmErr)
-				}
+				slog.Error("failed to remove hour dir after compaction, duplicates may exist",
+					"dir", e.Name(), "path", dayPath, "err", err)
 				return 0, fmt.Errorf("remove hour dir %s: %w", e.Name(), err)
 			}
 		}
@@ -276,20 +274,25 @@ func (c *Compactor) compactWithDuckDB(files []string, dayPath string) (int64, er
 	)
 
 	if _, err := c.db.Exec(q); err != nil {
-		os.Remove(tmpPath)
+		if rmErr := os.Remove(tmpPath); rmErr != nil {
+			slog.Warn("failed to clean up temp file", "path", tmpPath, "err", rmErr)
+		}
 		return 0, fmt.Errorf("duckdb compact: %w", err)
 	}
 
 	if err := os.Rename(tmpPath, compactedPath); err != nil {
-		os.Remove(tmpPath)
+		if rmErr := os.Remove(tmpPath); rmErr != nil {
+			slog.Warn("failed to clean up temp file", "path", tmpPath, "err", rmErr)
+		}
 		return 0, err
 	}
 
-	info, _ := os.Stat(compactedPath)
-	if info != nil {
-		return info.Size(), nil
+	info, err := os.Stat(compactedPath)
+	if err != nil {
+		slog.Warn("stat compacted file failed", "path", compactedPath, "err", err)
+		return 0, nil
 	}
-	return 0, nil
+	return info.Size(), nil
 }
 
 func compactFiles[T any](files []string, dayPath string) (int64, error) {
