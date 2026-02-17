@@ -2,6 +2,7 @@ package lake
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,12 +20,14 @@ import (
 // Compactor merges small hourly parquet files into larger daily files
 type Compactor struct {
 	cfg config.Config
+	db  *sql.DB
 	mu  sync.Mutex
 }
 
-// NewCompactor creates a new compactor
-func NewCompactor(cfg config.Config) *Compactor {
-	return &Compactor{cfg: cfg}
+// NewCompactor creates a new compactor. If db is non-nil, uses DuckDB COPY
+// for streaming compaction (constant memory). Falls back to in-memory merge.
+func NewCompactor(cfg config.Config, db *sql.DB) *Compactor {
+	return &Compactor{cfg: cfg, db: db}
 }
 
 // Run starts the compaction loop
@@ -217,17 +220,21 @@ func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
 		return 0, nil
 	}
 
-	// Compact based on signal type
+	// Compact: prefer DuckDB streaming (constant memory) over in-memory merge
 	var sizeAfter int64
 	var compactErr error
 
-	switch signal {
-	case "spans":
-		sizeAfter, compactErr = compactFiles[SpanRow](files, dayPath)
-	case "logs":
-		sizeAfter, compactErr = compactFiles[LogRow](files, dayPath)
-	case "metrics":
-		sizeAfter, compactErr = compactFiles[MetricRow](files, dayPath)
+	if c.db != nil {
+		sizeAfter, compactErr = c.compactWithDuckDB(files, dayPath)
+	} else {
+		switch signal {
+		case "spans":
+			sizeAfter, compactErr = compactFiles[SpanRow](files, dayPath)
+		case "logs":
+			sizeAfter, compactErr = compactFiles[LogRow](files, dayPath)
+		case "metrics":
+			sizeAfter, compactErr = compactFiles[MetricRow](files, dayPath)
+		}
 	}
 
 	if compactErr != nil {
@@ -249,6 +256,40 @@ func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
 	}
 
 	return sizeBefore - sizeAfter, nil
+}
+
+// compactWithDuckDB uses DuckDB COPY for streaming compaction (constant memory).
+func (c *Compactor) compactWithDuckDB(files []string, dayPath string) (int64, error) {
+	compactedPath := filepath.Join(dayPath, "compacted.parquet")
+	tmpPath := compactedPath + ".tmp"
+
+	// Build file list for read_parquet
+	quoted := make([]string, len(files))
+	for i, f := range files {
+		quoted[i] = "'" + strings.ReplaceAll(f, "'", "''") + "'"
+	}
+	fileList := "[" + strings.Join(quoted, ",") + "]"
+
+	q := fmt.Sprintf(
+		`COPY (SELECT * FROM read_parquet(%s, union_by_name=true)) TO '%s' (FORMAT PARQUET, COMPRESSION ZSTD)`,
+		fileList, strings.ReplaceAll(tmpPath, "'", "''"),
+	)
+
+	if _, err := c.db.Exec(q); err != nil {
+		os.Remove(tmpPath)
+		return 0, fmt.Errorf("duckdb compact: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, compactedPath); err != nil {
+		os.Remove(tmpPath)
+		return 0, err
+	}
+
+	info, _ := os.Stat(compactedPath)
+	if info != nil {
+		return info.Size(), nil
+	}
+	return 0, nil
 }
 
 func compactFiles[T any](files []string, dayPath string) (int64, error) {

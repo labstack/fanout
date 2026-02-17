@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	"github.com/labstack/fanout/internal/query"
 )
 
 // Status returns system health overview.
@@ -14,6 +16,14 @@ func (s *Service) Status(ctx context.Context, window int, namespace, tenantID st
 
 	// Always scope to single partition
 	namespace, tenantID = s.defaults(namespace, tenantID)
+
+	// Check cache
+	cacheKey := fmt.Sprintf("status:%d:%s:%s", window, namespace, tenantID)
+	if c := query.QueryCache; c != nil {
+		if v, ok := c.Get(cacheKey); ok {
+			return v.(*StatusResult), nil
+		}
+	}
 
 	q := fmt.Sprintf(`
 SELECT
@@ -123,6 +133,9 @@ LIMIT 100;
 			out.Services.Degraded, out.Services.Unhealthy, out.Services.Total)
 	}
 
+	if c := query.QueryCache; c != nil {
+		c.Set(cacheKey, out)
+	}
 	return out, nil
 }
 

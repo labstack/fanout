@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	"github.com/labstack/fanout/internal/query"
 )
 
 // Topology returns the service dependency map with health indicators.
@@ -12,13 +14,21 @@ func (s *Service) Topology(ctx context.Context, window int, namespace, tenantID 
 		window = 60
 	}
 
+	// Always scope to single partition
+	namespace, tenantID = s.defaults(namespace, tenantID)
+
+	// Check cache
+	cacheKey := fmt.Sprintf("topology:%d:%s:%s", window, namespace, tenantID)
+	if c := query.QueryCache; c != nil {
+		if v, ok := c.Get(cacheKey); ok {
+			return v.(*TopologyResult), nil
+		}
+	}
+
 	out := &TopologyResult{
 		Nodes: []ServiceNode{},
 		Edges: []ServiceEdge{},
 	}
-
-	// Always scope to single partition
-	namespace, tenantID = s.defaults(namespace, tenantID)
 
 	// Use rollups for long time ranges (>60 min), raw parquet for short
 	var q string
@@ -133,5 +143,8 @@ LIMIT 100;
 		out.Edges = append(out.Edges, e)
 	}
 
+	if c := query.QueryCache; c != nil {
+		c.Set(cacheKey, out)
+	}
 	return out, nil
 }

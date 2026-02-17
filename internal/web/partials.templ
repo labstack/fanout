@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"net/url"
 	"time"
 )
 
@@ -296,6 +297,260 @@ templ EmptyStateSetup(dataType string) {
 			font-size: 0.8rem;
 		}
 	</style>
+}
+
+// ServicesContent renders the services list without layout
+templ ServicesContent(data ServicesData) {
+	<div class="page-header">
+		<div class="page-header-left">
+			<h1 class="page-title">Services</h1>
+			<p class="page-subtitle">
+				{ fmt.Sprintf("%d services", len(data.Services)) }
+			</p>
+		</div>
+		<div class="page-header-right">
+			<span class="last-updated">
+				Updated <sl-relative-time date={ nowISO() } sync></sl-relative-time>
+			</span>
+			<sl-icon-button
+				name="arrow-clockwise"
+				label="Refresh"
+				hx-get={ fmt.Sprintf("/partials/services?window=%d", data.Window) }
+				hx-target="#services-content"
+				hx-swap="innerHTML"
+			></sl-icon-button>
+		</div>
+	</div>
+	<sl-card>
+		if len(data.Services) == 0 {
+			@EmptyStateSetup("services")
+		} else {
+			<table class="table">
+				<thead>
+					<tr>
+						<th>Service</th>
+						<th>Status</th>
+						<th>Trend</th>
+						<th>Requests</th>
+						<th>P95 Latency</th>
+						<th>Error Rate</th>
+					</tr>
+				</thead>
+				<tbody>
+					for _, svc := range data.Services {
+						<tr>
+							<td><a href={ templ.SafeURL(withWindow("/services/"+pathEscape(svc.Name), data.Window)) }>{ svc.Name }</a></td>
+							<td>
+								<sl-badge variant={ statusVariant(svc.Status) } pill>{ svc.Status }</sl-badge>
+							</td>
+							<td>
+								<sl-tooltip content={ sparklineTooltip(svc.Trend) }>
+									@Sparkline(svc.Trend, svc.ErrorRate > 0.05)
+								</sl-tooltip>
+							</td>
+							<td>{ fmt.Sprintf("%d", svc.SpanCount) }</td>
+							<td>{ fmt.Sprintf("%.0fms", svc.P95Ms) }</td>
+							<td>{ fmt.Sprintf("%.1f%%", svc.ErrorRate*100) }</td>
+						</tr>
+					}
+				</tbody>
+			</table>
+		}
+	</sl-card>
+}
+
+// ServiceDetailContent renders the service detail page content without layout
+templ ServiceDetailContent(data ServiceDetailData) {
+	<div class="page-header">
+		<div class="page-header-left">
+			<h1 class="page-title">
+				{ data.Name }
+				<sl-badge variant={ statusVariant(data.Status) } pill style="margin-left: 0.75rem; vertical-align: middle;">{ data.Status }</sl-badge>
+			</h1>
+		</div>
+		<div class="page-header-right">
+			<span class="last-updated">
+				Updated <sl-relative-time date={ nowISO() } sync></sl-relative-time>
+			</span>
+			<sl-icon-button
+				name="arrow-clockwise"
+				label="Refresh"
+				hx-get={ fmt.Sprintf("/partials/services/%s?window=%d", pathEscape(data.Name), data.Window) }
+				hx-target="#service-detail-content"
+				hx-swap="innerHTML"
+			></sl-icon-button>
+		</div>
+	</div>
+	<!-- Latency Metrics -->
+	<div class="grid grid-4" style="margin-bottom: 1rem;">
+		<sl-card class="metric-card">
+			<div class="metric-value">{ fmt.Sprintf("%.0f", data.P50Ms) }ms</div>
+			<div class="metric-label">P50 Latency</div>
+		</sl-card>
+		<sl-card class="metric-card">
+			<div class="metric-value">{ fmt.Sprintf("%.0f", data.P95Ms) }ms</div>
+			<div class="metric-label">P95 Latency</div>
+		</sl-card>
+		<sl-card class="metric-card">
+			<div class="metric-value">{ fmt.Sprintf("%.0f", data.P99Ms) }ms</div>
+			<div class="metric-label">P99 Latency</div>
+		</sl-card>
+		<sl-card class="metric-card">
+			<div class="metric-value" style={ errorColor(data.ErrorRate) }>{ fmt.Sprintf("%.1f", data.ErrorRate*100) }%</div>
+			<div class="metric-label">Error Rate</div>
+		</sl-card>
+	</div>
+	<!-- Trend Charts -->
+	if len(data.Timeline) > 1 {
+		<div class="grid grid-2" style="margin-bottom: 1rem;">
+			<sl-card>
+				<div slot="header" class="card-header">Latency Trend</div>
+				<div class="chart" style="height: 200px;" data-vega={ latencyChartSpec(data.Timeline) }></div>
+			</sl-card>
+			<sl-card>
+				<div slot="header" class="card-header">Request Volume</div>
+				<div class="chart" style="height: 200px;" data-vega={ requestChartSpec(data.Timeline) }></div>
+			</sl-card>
+		</div>
+	}
+	<div class="grid grid-2" style="margin-bottom: 1rem;">
+		<sl-card>
+			<div slot="header" class="card-header">Top Errors</div>
+			if len(data.TopErrors) == 0 {
+				<div class="empty-inline success">
+					<sl-icon name="check-circle"></sl-icon>
+					<span>No errors detected</span>
+				</div>
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Operation</th>
+							<th>Count</th>
+							<th>Example Trace</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, err := range data.TopErrors {
+							<tr>
+								<td>{ err.Operation }</td>
+								<td>{ fmt.Sprintf("%d", err.Count) }</td>
+								<td>
+									if err.TraceID != "" {
+										<a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(err.TraceID), data.Window)) }>{ truncateStr(err.TraceID, 15) }</a>
+									}
+								</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</sl-card>
+		<sl-card>
+			<div slot="header" class="card-header">Slow Operations</div>
+			if len(data.SlowOps) == 0 {
+				<div class="empty-inline success">
+					<sl-icon name="check-circle"></sl-icon>
+					<span>No slow operations</span>
+				</div>
+			} else {
+				<table class="table">
+					<thead>
+						<tr>
+							<th>Operation</th>
+							<th>P95 Latency</th>
+							<th>Count</th>
+						</tr>
+					</thead>
+					<tbody>
+						for _, op := range data.SlowOps {
+							<tr>
+								<td>{ op.Operation }</td>
+								<td>{ fmt.Sprintf("%.0fms", op.P95Ms) }</td>
+								<td>{ fmt.Sprintf("%d", op.Count) }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			}
+		</sl-card>
+	</div>
+}
+
+// TraceResultsContent renders just the traces results table
+templ TraceResultsContent(data TracesData) {
+	<table class="table">
+		<thead>
+			<tr>
+				<th>Trace ID</th>
+				<th>Service</th>
+				<th>Operation</th>
+				<th>Duration</th>
+				<th>Status</th>
+				<th>Time</th>
+			</tr>
+		</thead>
+		<tbody>
+			for _, t := range data.Traces {
+				<tr>
+					<td><a href={ templ.SafeURL(withWindow("/traces/"+pathEscape(t.TraceID), data.Window)) }>{ truncateStr(t.TraceID, 15) }</a></td>
+					<td>{ t.Service }</td>
+					<td>{ t.Operation }</td>
+					<td>{ fmt.Sprintf("%.1fms", t.Duration) }</td>
+					<td>
+						<sl-badge variant={ statusVariant(t.Status) } pill>{ t.Status }</sl-badge>
+					</td>
+					<td>{ t.Time }</td>
+				</tr>
+			}
+		</tbody>
+	</table>
+	if data.HasMore {
+		<div style="text-align: center; padding: 1rem;">
+			<sl-button
+				size="small"
+				hx-get={ fmt.Sprintf("/partials/traces?q=%s&window=%d&offset=%d&limit=%d", url.QueryEscape(data.Query), data.Window, data.Offset+data.Limit, data.Limit) }
+				hx-target="#trace-results"
+				hx-swap="innerHTML"
+			>Load More</sl-button>
+		</div>
+	}
+}
+
+// LogResultsContent renders just the logs results table
+templ LogResultsContent(data LogsData) {
+	<table class="table logs-table">
+		<thead>
+			<tr>
+				<th>Time</th>
+				<th>Severity</th>
+				<th>Service</th>
+				<th>Body</th>
+			</tr>
+		</thead>
+		<tbody>
+			for _, lg := range data.Logs {
+				<tr>
+					<td class="nowrap">{ lg.Time }</td>
+					<td>
+						<sl-badge variant={ severityVariant(lg.Severity) } pill>{ lg.Severity }</sl-badge>
+					</td>
+					<td>{ lg.Service }</td>
+					<td class="log-body">{ lg.Body }</td>
+				</tr>
+			}
+		</tbody>
+	</table>
+	if data.HasMore {
+		<div style="text-align: center; padding: 1rem;">
+			<sl-button
+				size="small"
+				hx-get={ fmt.Sprintf("/partials/logs?q=%s&window=%d&offset=%d&limit=%d", url.QueryEscape(data.Query), data.Window, data.Offset+data.Limit, data.Limit) }
+				hx-target="#log-results"
+				hx-swap="innerHTML"
+			>Load More</sl-button>
+		</div>
+	}
 }
 
 // nowISO returns current time in ISO 8601 format for sl-relative-time

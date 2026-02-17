@@ -863,6 +863,92 @@ LIMIT 100;
 	return &MetricsResult{Metrics: metrics}, nil
 }
 
+// MetricDetailResult contains time-series data for a single metric.
+type MetricDetailResult struct {
+	Name     string
+	Type     string
+	Services []string
+	Count    int64
+	Avg      float64
+	Min      float64
+	Max      float64
+	Points   []MetricPoint
+}
+
+// MetricPoint is a single time-series point.
+type MetricPoint struct {
+	Time string
+	Avg  float64
+	Min  float64
+	Max  float64
+}
+
+// MetricDetail returns time-series detail for a single metric.
+func (s *Service) MetricDetail(ctx context.Context, name string, window int, namespace, tenantID string) (*MetricDetailResult, error) {
+	if window == 0 {
+		window = 60
+	}
+	namespace, tenantID = s.defaults(namespace, tenantID)
+	metricsGlob := s.duck.MetricsGlob(tenantID, namespace, window)
+
+	// Summary
+	q := fmt.Sprintf(`
+SELECT
+  COALESCE("name=mtype", 'unknown') as mtype,
+  COUNT(*) as cnt,
+  AVG(COALESCE("name=value", 0)) as avg_val,
+  MIN(COALESCE("name=value", 0)) as min_val,
+  MAX(COALESCE("name=value", 0)) as max_val,
+  LIST(DISTINCT "name=service_name") as services
+FROM read_parquet(%s, union_by_name=true)
+WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+  AND "name=name" = ?
+GROUP BY "name=mtype";
+`, metricsGlob, window)
+
+	out := &MetricDetailResult{Name: name}
+	var services any
+	row := s.duck.DB.QueryRowContext(ctx, q, name)
+	if err := row.Scan(&out.Type, &out.Count, &out.Avg, &out.Min, &out.Max, &services); err != nil {
+		return out, nil
+	}
+	out.Services = parseServiceList(services)
+
+	// Time series
+	bucketMins := window / 30
+	if bucketMins < 1 {
+		bucketMins = 1
+	}
+	tsQ := fmt.Sprintf(`
+SELECT
+  strftime(time_bucket(INTERVAL '%d minutes', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT))), '%%Y-%%m-%%dT%%H:%%M:00Z') as bucket,
+  AVG(COALESCE("name=value", 0)) as avg_val,
+  MIN(COALESCE("name=value", 0)) as min_val,
+  MAX(COALESCE("name=value", 0)) as max_val
+FROM read_parquet(%s, union_by_name=true)
+WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+  AND "name=name" = ?
+GROUP BY bucket
+ORDER BY bucket ASC;
+`, bucketMins, metricsGlob, window)
+
+	rows, err := s.duck.DB.QueryContext(ctx, tsQ, name)
+	if err != nil {
+		return out, nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var p MetricPoint
+		if err := rows.Scan(&p.Time, &p.Avg, &p.Min, &p.Max); err != nil {
+			continue
+		}
+		out.Points = append(out.Points, p)
+	}
+
+	return out, nil
+}
+
 func (s *Service) metricSparklines(ctx context.Context, names []string, window int, namespace, tenantID string) map[string][]float64 {
 	out := make(map[string][]float64)
 
@@ -907,6 +993,101 @@ ORDER BY metric_name, bucket ASC;
 	}
 
 	return out
+}
+
+// CompareResult contains comparison data for multiple services.
+type CompareResult struct {
+	Services []CompareService
+	Winner   string
+	Summary  string
+}
+
+// CompareService holds metrics for one service in a comparison.
+type CompareService struct {
+	Name       string
+	Requests   int64
+	ErrorRate  float64
+	P50Ms      float64
+	P95Ms      float64
+	ErrorCount int64
+}
+
+// Compare returns side-by-side metrics for 2-4 services.
+func (s *Service) Compare(ctx context.Context, services []string, window int) (*CompareResult, error) {
+	if window == 0 {
+		window = 60
+	}
+
+	placeholders := makePlaceholders(len(services))
+	var args []any
+	for _, svc := range services {
+		args = append(args, svc)
+	}
+
+	q := fmt.Sprintf(`
+SELECT
+  service,
+  COALESCE(SUM(spans), 0)::BIGINT as requests,
+  COALESCE(AVG(error_rate), 0) as error_rate,
+  COALESCE(AVG(p50_ms), 0) as p50_ms,
+  COALESCE(AVG(p95_ms), 0) as p95_ms
+FROM service_rollup
+WHERE service IN (%s) AND bucket >= NOW() - INTERVAL %d MINUTE
+GROUP BY service
+ORDER BY requests DESC;
+`, placeholders, window)
+
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return &CompareResult{}, nil
+	}
+	defer rows.Close()
+
+	var metrics []CompareService
+	for rows.Next() {
+		var m CompareService
+		if err := rows.Scan(&m.Name, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms); err != nil {
+			continue
+		}
+		m.ErrorCount = int64(float64(m.Requests) * m.ErrorRate)
+		metrics = append(metrics, m)
+	}
+
+	// Add empty entries for services with no data
+	found := make(map[string]bool)
+	for _, m := range metrics {
+		found[m.Name] = true
+	}
+	for _, svc := range services {
+		if !found[svc] {
+			metrics = append(metrics, CompareService{Name: svc})
+		}
+	}
+
+	// Determine winner
+	winner := ""
+	bestScore := float64(-1)
+	for _, m := range metrics {
+		if m.Requests == 0 {
+			continue
+		}
+		score := m.P95Ms * (1 + m.ErrorRate*10)
+		if bestScore < 0 || score < bestScore {
+			bestScore = score
+			winner = m.Name
+		}
+	}
+
+	summary := fmt.Sprintf("Compared %d services over %d minutes.", len(metrics), window)
+	if winner != "" {
+		summary += fmt.Sprintf(" %s has best performance.", winner)
+	}
+
+	return &CompareResult{
+		Services: metrics,
+		Winner:   winner,
+		Summary:  summary,
+	}, nil
 }
 
 // Namespaces discovers namespaces from filesystem.

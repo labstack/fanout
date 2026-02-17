@@ -7,6 +7,7 @@ import (
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/render"
 	"github.com/labstack/fanout/internal/search"
 	"github.com/labstack/fanout/internal/service"
@@ -19,8 +20,9 @@ var faviconSVG []byte
 
 // UIHandler handles all UI routes
 type UIHandler struct {
-	svc *service.Service
-	cfg config.Config
+	svc      *service.Service
+	cfg      config.Config
+	detector *intelligence.Detector
 }
 
 // NewUIHandler creates a new UI handler
@@ -28,8 +30,13 @@ func NewUIHandler(svc *service.Service, cfg config.Config) *UIHandler {
 	return &UIHandler{svc: svc, cfg: cfg}
 }
 
-// RegisterUIRoutes registers all UI routes
-func RegisterUIRoutes(e *echo.Echo, svc *service.Service, cfg config.Config) {
+// SetDetector sets the intelligence detector for the API handler.
+func (h *UIHandler) SetDetector(d *intelligence.Detector) {
+	h.detector = d
+}
+
+// RegisterUIRoutes registers all UI routes and returns the handler for additional setup.
+func RegisterUIRoutes(e *echo.Echo, svc *service.Service, cfg config.Config) *UIHandler {
 	h := NewUIHandler(svc, cfg)
 
 	// Favicon
@@ -45,22 +52,39 @@ func RegisterUIRoutes(e *echo.Echo, svc *service.Service, cfg config.Config) {
 	e.GET("/traces/:id", h.TraceDetail)
 	e.GET("/logs", h.Logs)
 	e.GET("/metrics", h.Metrics)
+	e.GET("/metrics/:name", h.MetricDetail)
+	e.GET("/compare", h.Compare)
 	e.GET("/unified", h.Unified)
 
 	// API routes
 	e.GET("/api/namespaces", h.Namespaces)
+	e.GET("/api/intelligence", h.Intelligence)
 
 	// Component CSS (dynamic from registry)
 	e.GET("/css/components.css", ComponentCSS)
 
 	// htmx partial routes
 	RegisterPartialRoutes(e, h)
+
+	return h
 }
 
 // Namespaces returns discovered namespaces from the data
 func (h *UIHandler) Namespaces(c echo.Context) error {
 	namespaces := h.svc.Namespaces(h.cfg.LakeDir, "")
 	return c.JSON(200, namespaces)
+}
+
+// Intelligence returns the latest intelligence snapshot as JSON
+func (h *UIHandler) Intelligence(c echo.Context) error {
+	if h.detector == nil {
+		return c.JSON(200, map[string]string{"summary": "Intelligence detector not enabled"})
+	}
+	snap := h.detector.LatestSnapshot()
+	if snap == nil {
+		return c.JSON(200, map[string]string{"summary": "No snapshot available yet"})
+	}
+	return c.JSON(200, snap)
 }
 
 // ComponentCSS serves combined CSS from all registered components
@@ -624,6 +648,98 @@ func (h *UIHandler) Metrics(c echo.Context) error {
 	}
 
 	return renderTempl(c, web.Metrics(data))
+}
+
+// MetricDetail renders the metric drill-down page
+func (h *UIHandler) MetricDetail(c echo.Context) error {
+	ctx := c.Request().Context()
+	name := c.Param("name")
+	window := parseWindow(c)
+	namespace := parseNamespace(c)
+
+	result, err := h.svc.MetricDetail(ctx, name, window, namespace, "")
+	if err != nil {
+		return err
+	}
+
+	var points []web.MetricDataPoint
+	for _, p := range result.Points {
+		points = append(points, web.MetricDataPoint{
+			Time: p.Time,
+			Avg:  p.Avg,
+			Min:  p.Min,
+			Max:  p.Max,
+		})
+	}
+
+	data := web.MetricDetailData{
+		Name:     result.Name,
+		Type:     result.Type,
+		Services: result.Services,
+		Count:    result.Count,
+		Avg:      result.Avg,
+		Min:      result.Min,
+		Max:      result.Max,
+		Points:   points,
+		Window:   window,
+	}
+
+	return renderTempl(c, web.MetricDetail(data))
+}
+
+// Compare renders the service comparison page
+func (h *UIHandler) Compare(c echo.Context) error {
+	ctx := c.Request().Context()
+	window := parseWindow(c)
+	namespace := parseNamespace(c)
+
+	// Get selected services from query params
+	selectedSvcs := c.QueryParams()["svc"]
+	// Filter out empty strings
+	var selected []string
+	for _, s := range selectedSvcs {
+		if s != "" {
+			selected = append(selected, s)
+		}
+	}
+
+	// Get available services for the selector
+	topo, err := h.svc.Topology(ctx, window, namespace, "")
+	if err != nil {
+		return err
+	}
+	var available []string
+	for _, n := range topo.Nodes {
+		available = append(available, n.Name)
+	}
+
+	data := web.CompareData{
+		AvailableSvcs: available,
+		SelectedSvcs:  selected,
+		Window:        window,
+	}
+
+	// Compare if we have enough services
+	if len(selected) >= 2 {
+		result, err := h.svc.Compare(ctx, selected, window)
+		if err != nil {
+			return err
+		}
+		data.Winner = result.Winner
+		data.Summary = result.Summary
+		for _, svc := range result.Services {
+			data.Services = append(data.Services, web.CompareServiceRow{
+				Name:       svc.Name,
+				Requests:   svc.Requests,
+				ErrorRate:  svc.ErrorRate,
+				P50Ms:      svc.P50Ms,
+				P95Ms:      svc.P95Ms,
+				ErrorCount: svc.ErrorCount,
+			})
+		}
+	}
+
+	return renderTempl(c, web.Compare(data))
 }
 
 // Unified renders the unified timeline page

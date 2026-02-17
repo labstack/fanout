@@ -7,6 +7,7 @@ import (
 	"math"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/labstack/fanout/internal/query"
@@ -19,8 +20,10 @@ func isNoDataError(errMsg string) bool {
 
 // Detector runs intelligence detection on observability data
 type Detector struct {
-	duck   *query.Duck
-	config DetectorConfig
+	duck     *query.Duck
+	config   DetectorConfig
+	mu       sync.Mutex
+	snapshot *IntelligenceSnapshot
 }
 
 // NewDetector creates a new intelligence detector
@@ -71,12 +74,23 @@ func (d *Detector) safeRunCheck(ctx context.Context) {
 func (d *Detector) runCheck(ctx context.Context) {
 	snapshot := d.GenerateSnapshot(ctx)
 
+	d.mu.Lock()
+	d.snapshot = &snapshot
+	d.mu.Unlock()
+
 	anomalyCount := len(snapshot.Anomalies)
 	patternCount := len(snapshot.Patterns)
 
 	if anomalyCount > 0 || patternCount > 0 {
 		slog.Info("detection complete", "anomalies", anomalyCount, "patterns", patternCount, "health", snapshot.HealthScore)
 	}
+}
+
+// LatestSnapshot returns the most recent intelligence snapshot, or nil if none.
+func (d *Detector) LatestSnapshot() *IntelligenceSnapshot {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.snapshot
 }
 
 // GenerateSnapshot generates a complete intelligence snapshot

@@ -79,6 +79,16 @@ func (d *Duck) DefaultNamespace() string {
 }
 
 func (d *Duck) RunRollups(ctx context.Context) {
+	// Run once immediately at startup so dashboards have data right away
+	start := time.Now()
+	rows, err := d.rollupOnce(ctx)
+	if err != nil {
+		slog.Error("startup rollup failed", "err", err)
+	} else if rows > 0 {
+		slog.Info("startup rollup complete", "rows", rows, "duration", time.Since(start))
+		metrics.RecordRollup(rows, time.Since(start).Seconds())
+	}
+
 	ticker := time.NewTicker(time.Duration(d.cfg.RollupEvery) * time.Second)
 	defer ticker.Stop()
 	for {
