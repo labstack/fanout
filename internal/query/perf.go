@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -41,21 +42,34 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 		// For smaller windows, use hour-level precision
 		startHour := start.Truncate(time.Hour)
 		endHour := now.Truncate(time.Hour)
+		seenDays := make(map[string]struct{})
 		for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
-			pattern := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d/hour=%02d/part-*.parquet",
-				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day(), t.Hour())
+			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
+				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
+			pattern := filepath.Join(dayBase, fmt.Sprintf("hour=%02d/part-*.parquet", t.Hour()))
 			matches, _ := filepath.Glob(pattern)
 			for _, m := range matches {
 				filesSet[m] = struct{}{}
 			}
+			// Also check for day-level compacted file (once per day)
+			if _, seen := seenDays[dayBase]; !seen {
+				seenDays[dayBase] = struct{}{}
+				compacted := filepath.Join(dayBase, "compacted.parquet")
+				if _, err := os.Stat(compacted); err == nil {
+					filesSet[compacted] = struct{}{}
+				}
+			}
 		}
 	}
 
-	// If there are no files in the window, return a broad glob for the partition.
-	// Callers may treat the resulting read_parquet error as "no data yet".
+	// If there are no files in the window, return broad globs for the partition
+	// covering both hourly part files and day-level compacted files.
 	if len(filesSet) == 0 {
-		return sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/part-*.parquet",
+		hourly := sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/part-*.parquet",
 			lakeDir, signal, tenant, namespace))
+		compacted := sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/compacted.parquet",
+			lakeDir, signal, tenant, namespace))
+		return fmt.Sprintf("[%s,%s]", hourly, compacted)
 	}
 
 	files := make([]string, 0, len(filesSet))
