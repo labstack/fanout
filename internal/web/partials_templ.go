@@ -356,12 +356,12 @@ func TopIssues(issues []TopIssue, window int) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				if issue.Issue == "high_error_rate" {
+				if issue.Issue == "Errors" {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "<sl-badge variant=\"danger\" pill>Errors</sl-badge>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-				} else if issue.Issue == "high_latency" {
+				} else if issue.Issue == "Latency" {
 					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<sl-badge variant=\"warning\" pill>Slow</sl-badge>")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err

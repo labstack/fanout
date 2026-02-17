@@ -949,6 +949,9 @@ ORDER BY bucket ASC;
 		}
 		out.Points = append(out.Points, p)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("iteration error", "method", "MetricDetail.timeseries", "err", err)
+	}
 
 	return out, nil
 }
@@ -996,6 +999,9 @@ ORDER BY metric_name, bucket ASC;
 			continue
 		}
 		out[name] = append(out[name], avg)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("iteration error", "method", "metricSparklines", "err", err)
 	}
 
 	return out
@@ -1063,6 +1069,9 @@ ORDER BY requests DESC;
 		}
 		m.ErrorCount = int64(float64(m.Requests) * m.ErrorRate)
 		metrics = append(metrics, m)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("iteration error", "method", "Compare", "err", err)
 	}
 
 	// Add empty entries for services with no data

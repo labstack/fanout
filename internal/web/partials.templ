@@ -116,9 +116,9 @@ templ TopIssues(issues []TopIssue, window int) {
 							}
 						</td>
 						<td>
-							if issue.Issue == "high_error_rate" {
+							if issue.Issue == "Errors" {
 								<sl-badge variant="danger" pill>Errors</sl-badge>
-							} else if issue.Issue == "high_latency" {
+							} else if issue.Issue == "Latency" {
 								<sl-badge variant="warning" pill>Slow</sl-badge>
 							} else if issue.Issue != "" {
 								<sl-badge variant="warning" pill>{ issue.Issue }</sl-badge>

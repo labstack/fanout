@@ -24,11 +24,17 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 		startDay := start.Truncate(24 * time.Hour)
 		endDay := now.Truncate(24 * time.Hour)
 		for t := startDay; !t.After(endDay); t = t.Add(24 * time.Hour) {
-			pattern := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d/hour=*/part-*.parquet",
+			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
 				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
-			matches, _ := filepath.Glob(pattern)
-			for _, m := range matches {
-				filesSet[m] = struct{}{}
+			// Match hourly part files and day-level compacted files
+			for _, pattern := range []string{
+				filepath.Join(dayBase, "hour=*/part-*.parquet"),
+				filepath.Join(dayBase, "compacted.parquet"),
+			} {
+				matches, _ := filepath.Glob(pattern)
+				for _, m := range matches {
+					filesSet[m] = struct{}{}
+				}
 			}
 		}
 	} else {

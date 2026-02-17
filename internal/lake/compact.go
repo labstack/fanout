@@ -284,7 +284,7 @@ func (c *Compactor) compactWithDuckDB(files []string, dayPath string) (int64, er
 		if rmErr := os.Remove(tmpPath); rmErr != nil {
 			slog.Warn("failed to clean up temp file", "path", tmpPath, "err", rmErr)
 		}
-		return 0, err
+		return 0, fmt.Errorf("rename compacted file: %w", err)
 	}
 
 	info, err := os.Stat(compactedPath)
