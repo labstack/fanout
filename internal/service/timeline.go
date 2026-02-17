@@ -28,10 +28,8 @@ func (s *Service) Timeline(ctx context.Context, svc string, window, granularity 
 
 	// Check cache
 	cacheKey := fmt.Sprintf("timeline:%s:%d:%d:%s:%s", svc, window, granularity, namespace, tenantID)
-	if c := query.QueryCache; c != nil {
-		if v, ok := c.Get(cacheKey); ok {
-			return v.(*TimelineResult), nil
-		}
+	if v, ok := query.GetCached(cacheKey); ok {
+		return v.(*TimelineResult), nil
 	}
 
 	var args []any
@@ -157,8 +155,6 @@ ORDER BY bucket ASC;
 	}
 
 	out.Buckets = buckets
-	if c := query.QueryCache; c != nil {
-		c.Set(cacheKey, out)
-	}
+	query.SetCached(cacheKey, out)
 	return out, nil
 }

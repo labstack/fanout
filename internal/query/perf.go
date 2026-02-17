@@ -154,3 +154,20 @@ var QueryCache *Cache
 func InitQueryCache(ctx context.Context) {
 	QueryCache = NewCache(ctx, 10*time.Second)
 }
+
+// GetCached retrieves a value from QueryCache. Returns (nil, false) if the
+// cache is not initialized or the key is missing/expired.
+func GetCached(key string) (any, bool) {
+	if QueryCache == nil {
+		return nil, false
+	}
+	return QueryCache.Get(key)
+}
+
+// SetCached stores a value in QueryCache. No-op if the cache is not initialized.
+func SetCached(key string, value any) {
+	if QueryCache == nil {
+		return
+	}
+	QueryCache.Set(key, value)
+}

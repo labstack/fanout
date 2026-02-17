@@ -376,12 +376,12 @@ func sparklinePoints(data []int64) string {
 
 // CompareData for the compare page
 type CompareData struct {
-	Services       []CompareServiceRow
-	AvailableSvcs  []string
-	SelectedSvcs   []string
-	Winner         string
-	Summary        string
-	Window         int
+	Services      []CompareServiceRow
+	AvailableSvcs []string
+	SelectedSvcs  []string
+	Winner        string
+	Summary       string
+	Window        int
 }
 
 // CompareServiceRow is a row in the comparison table
@@ -406,6 +406,7 @@ templ Compare(data CompareData) {
 		<!-- Service Selector -->
 		<sl-card style="margin-bottom: 1rem;">
 			<form method="GET" action="/compare">
+				<input type="hidden" name="window" value={ fmt.Sprintf("%d", data.Window) }/>
 				<div class="compare-form">
 					<div class="compare-inputs">
 						for i := 0; i < 4; i++ {

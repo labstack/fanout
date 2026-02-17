@@ -19,10 +19,8 @@ func (s *Service) Status(ctx context.Context, window int, namespace, tenantID st
 
 	// Check cache
 	cacheKey := fmt.Sprintf("status:%d:%s:%s", window, namespace, tenantID)
-	if c := query.QueryCache; c != nil {
-		if v, ok := c.Get(cacheKey); ok {
-			return v.(*StatusResult), nil
-		}
+	if v, ok := query.GetCached(cacheKey); ok {
+		return v.(*StatusResult), nil
 	}
 
 	q := fmt.Sprintf(`
@@ -133,9 +131,7 @@ LIMIT 100;
 			out.Services.Degraded, out.Services.Unhealthy, out.Services.Total)
 	}
 
-	if c := query.QueryCache; c != nil {
-		c.Set(cacheKey, out)
-	}
+	query.SetCached(cacheKey, out)
 	return out, nil
 }
 

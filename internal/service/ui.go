@@ -1013,10 +1013,11 @@ type CompareService struct {
 }
 
 // Compare returns side-by-side metrics for 2-4 services.
-func (s *Service) Compare(ctx context.Context, services []string, window int) (*CompareResult, error) {
+func (s *Service) Compare(ctx context.Context, services []string, window int, namespace, tenantID string) (*CompareResult, error) {
 	if window == 0 {
 		window = 60
 	}
+	namespace, tenantID = s.defaults(namespace, tenantID)
 
 	placeholders := makePlaceholders(len(services))
 	var args []any
@@ -1024,18 +1025,21 @@ func (s *Service) Compare(ctx context.Context, services []string, window int) (*
 		args = append(args, svc)
 	}
 
+	// Use raw spans for accurate comparison scoped by namespace/tenant
+	spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
 	q := fmt.Sprintf(`
 SELECT
-  service,
-  COALESCE(SUM(spans), 0)::BIGINT as requests,
-  COALESCE(AVG(error_rate), 0) as error_rate,
-  COALESCE(AVG(p50_ms), 0) as p50_ms,
-  COALESCE(AVG(p95_ms), 0) as p95_ms
-FROM service_rollup
-WHERE service IN (%s) AND bucket >= NOW() - INTERVAL %d MINUTE
-GROUP BY service
+  "name=service_name" as service,
+  COUNT(*)::BIGINT as requests,
+  COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate,
+  COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p50_ms,
+  COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95_ms
+FROM read_parquet(%s, union_by_name=true, hive_partitioning=true)
+WHERE "name=service_name" IN (%s)
+  AND epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+GROUP BY "name=service_name"
 ORDER BY requests DESC;
-`, placeholders, window)
+`, spansGlob, placeholders, window)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {

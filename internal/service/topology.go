@@ -19,10 +19,8 @@ func (s *Service) Topology(ctx context.Context, window int, namespace, tenantID 
 
 	// Check cache
 	cacheKey := fmt.Sprintf("topology:%d:%s:%s", window, namespace, tenantID)
-	if c := query.QueryCache; c != nil {
-		if v, ok := c.Get(cacheKey); ok {
-			return v.(*TopologyResult), nil
-		}
+	if v, ok := query.GetCached(cacheKey); ok {
+		return v.(*TopologyResult), nil
 	}
 
 	out := &TopologyResult{
@@ -143,8 +141,6 @@ LIMIT 100;
 		out.Edges = append(out.Edges, e)
 	}
 
-	if c := query.QueryCache; c != nil {
-		c.Set(cacheKey, out)
-	}
+	query.SetCached(cacheKey, out)
 	return out, nil
 }

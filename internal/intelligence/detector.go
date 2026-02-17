@@ -22,7 +22,7 @@ func isNoDataError(errMsg string) bool {
 type Detector struct {
 	duck     *query.Duck
 	config   DetectorConfig
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	snapshot *IntelligenceSnapshot
 }
 
@@ -88,8 +88,8 @@ func (d *Detector) runCheck(ctx context.Context) {
 
 // LatestSnapshot returns the most recent intelligence snapshot, or nil if none.
 func (d *Detector) LatestSnapshot() *IntelligenceSnapshot {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return d.snapshot
 }
 

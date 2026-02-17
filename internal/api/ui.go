@@ -193,8 +193,8 @@ func (h *UIHandler) Overview(c echo.Context) error {
 	return renderTempl(c, web.Overview(data))
 }
 
-// Services renders the services list page
-func (h *UIHandler) Services(c echo.Context) error {
+// fetchServicesData fetches and assembles the services list data.
+func (h *UIHandler) fetchServicesData(c echo.Context) (web.ServicesData, error) {
 	ctx := c.Request().Context()
 	filter := c.QueryParam("filter")
 	window := parseWindow(c)
@@ -215,12 +215,11 @@ func (h *UIHandler) Services(c echo.Context) error {
 		return err
 	})
 	if err := g.Wait(); err != nil {
-		return err
+		return web.ServicesData{}, err
 	}
 
 	data := web.ServicesData{Filter: filter, Window: window}
 	for _, n := range topo.Nodes {
-		// Apply filter
 		switch filter {
 		case "errors":
 			if n.ErrorRate < 0.01 {
@@ -242,11 +241,20 @@ func (h *UIHandler) Services(c echo.Context) error {
 		})
 	}
 
+	return data, nil
+}
+
+// Services renders the services list page
+func (h *UIHandler) Services(c echo.Context) error {
+	data, err := h.fetchServicesData(c)
+	if err != nil {
+		return err
+	}
 	return renderTempl(c, web.Services(data))
 }
 
-// ServiceDetail renders a service detail page
-func (h *UIHandler) ServiceDetail(c echo.Context) error {
+// fetchServiceDetailData fetches and assembles the service detail data.
+func (h *UIHandler) fetchServiceDetailData(c echo.Context) (web.ServiceDetailData, error) {
 	ctx := c.Request().Context()
 	name := c.Param("name")
 	window := parseWindow(c)
@@ -267,7 +275,7 @@ func (h *UIHandler) ServiceDetail(c echo.Context) error {
 		return err
 	})
 	if err := g.Wait(); err != nil {
-		return err
+		return web.ServiceDetailData{}, err
 	}
 
 	data := web.ServiceDetailData{
@@ -281,7 +289,6 @@ func (h *UIHandler) ServiceDetail(c echo.Context) error {
 		Window:    window,
 	}
 
-	// Map timeline
 	for _, b := range timeline.Buckets {
 		data.Timeline = append(data.Timeline, web.TimelinePoint{
 			Time:         b.Time,
@@ -293,16 +300,15 @@ func (h *UIHandler) ServiceDetail(c echo.Context) error {
 		})
 	}
 
-	// Map errors
 	for _, e := range diag.TopErrors {
 		data.TopErrors = append(data.TopErrors, web.ErrorInfo{
-			Count:   e.Count,
-			TraceID: e.TraceID,
-			Message: e.Message,
+			Operation: e.Message,
+			Count:     e.Count,
+			TraceID:   e.TraceID,
+			Message:   e.Message,
 		})
 	}
 
-	// Map slow ops
 	for _, op := range diag.SlowOps {
 		data.SlowOps = append(data.SlowOps, web.SlowOp{
 			Operation: op.Name,
@@ -311,7 +317,6 @@ func (h *UIHandler) ServiceDetail(c echo.Context) error {
 		})
 	}
 
-	// Map dependencies
 	for _, dep := range diag.Dependencies {
 		data.Dependencies = append(data.Dependencies, web.Dependency{
 			Service:   dep.Service,
@@ -322,6 +327,15 @@ func (h *UIHandler) ServiceDetail(c echo.Context) error {
 		})
 	}
 
+	return data, nil
+}
+
+// ServiceDetail renders a service detail page
+func (h *UIHandler) ServiceDetail(c echo.Context) error {
+	data, err := h.fetchServiceDetailData(c)
+	if err != nil {
+		return err
+	}
 	return renderTempl(c, web.ServiceDetail(data))
 }
 
@@ -373,22 +387,7 @@ func (h *UIHandler) Traces(c echo.Context) error {
 	queryStr := c.QueryParam("q")
 	window := parseWindow(c)
 	namespace := parseNamespace(c)
-
-	// Pagination
-	limit := 50
-	if l := c.QueryParam("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
-		if limit <= 0 || limit > 100 {
-			limit = 50
-		}
-	}
-	offset := 0
-	if o := c.QueryParam("offset"); o != "" {
-		fmt.Sscanf(o, "%d", &offset)
-		if offset < 0 {
-			offset = 0
-		}
-	}
+	limit, offset := parsePagination(c, 50, 100)
 
 	// Parse query DSL
 	q := search.Parse(queryStr)
@@ -540,22 +539,7 @@ func (h *UIHandler) Logs(c echo.Context) error {
 	queryStr := c.QueryParam("q")
 	window := parseWindow(c)
 	namespace := parseNamespace(c)
-
-	// Pagination
-	limit := 100
-	if l := c.QueryParam("limit"); l != "" {
-		fmt.Sscanf(l, "%d", &limit)
-		if limit <= 0 || limit > 200 {
-			limit = 100
-		}
-	}
-	offset := 0
-	if o := c.QueryParam("offset"); o != "" {
-		fmt.Sscanf(o, "%d", &offset)
-		if offset < 0 {
-			offset = 0
-		}
-	}
+	limit, offset := parsePagination(c, 100, 200)
 
 	// Parse query DSL
 	q := search.Parse(queryStr)
@@ -721,7 +705,7 @@ func (h *UIHandler) Compare(c echo.Context) error {
 
 	// Compare if we have enough services
 	if len(selected) >= 2 {
-		result, err := h.svc.Compare(ctx, selected, window)
+		result, err := h.svc.Compare(ctx, selected, window, namespace, "")
 		if err != nil {
 			return err
 		}
@@ -836,4 +820,23 @@ func parseWindow(c echo.Context) int {
 // parseNamespace reads namespace query param
 func parseNamespace(c echo.Context) string {
 	return c.QueryParam("ns")
+}
+
+// parsePagination reads limit and offset from query params with defaults and bounds.
+func parsePagination(c echo.Context, defaultLimit, maxLimit int) (limit, offset int) {
+	limit = defaultLimit
+	if l := c.QueryParam("limit"); l != "" {
+		fmt.Sscanf(l, "%d", &limit)
+		if limit <= 0 || limit > maxLimit {
+			limit = defaultLimit
+		}
+	}
+	offset = 0
+	if o := c.QueryParam("offset"); o != "" {
+		fmt.Sscanf(o, "%d", &offset)
+		if offset < 0 {
+			offset = 0
+		}
+	}
+	return limit, offset
 }
