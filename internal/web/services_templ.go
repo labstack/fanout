@@ -1058,7 +1058,10 @@ func sparklinePoints(data []int64) string {
 
 	// Generate points
 	points := ""
-	w := 80.0 / float64(len(data)-1)
+	w := 0.0
+	if len(data) > 1 {
+		w = 80.0 / float64(len(data)-1)
+	}
 	for i, v := range data {
 		x := float64(i) * w
 		y := 18.0 - (float64(v)/float64(max))*16.0 // Leave 2px margin top/bottom
@@ -1131,7 +1134,7 @@ func Compare(data CompareData) templ.Component {
 			var templ_7745c5c3_Var56 string
 			templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", data.Window))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 409, Col: 77}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 412, Col: 77}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 			if templ_7745c5c3_Err != nil {
@@ -1149,7 +1152,7 @@ func Compare(data CompareData) templ.Component {
 				var templ_7745c5c3_Var57 string
 				templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("Service %d", i+1))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 413, Col: 73}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 416, Col: 73}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 				if templ_7745c5c3_Err != nil {
@@ -1167,7 +1170,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var58 string
 					templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinStringErrs(svc)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 415, Col: 31}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 418, Col: 31}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 					if templ_7745c5c3_Err != nil {
@@ -1190,7 +1193,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var59 string
 					templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(svc)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 415, Col: 91}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 418, Col: 91}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 					if templ_7745c5c3_Err != nil {
@@ -1219,7 +1222,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var60 string
 					templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinStringErrs(data.Summary)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 429, Col: 19}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 432, Col: 19}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
 					if templ_7745c5c3_Err != nil {
@@ -1242,7 +1245,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var61 templ.SafeURL
 					templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(withWindow("/services/"+pathEscape(svc.Name), data.Window)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 449, Col: 92}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 452, Col: 92}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var61))
 					if templ_7745c5c3_Err != nil {
@@ -1255,7 +1258,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var62 string
 					templ_7745c5c3_Var62, templ_7745c5c3_Err = templ.JoinStringErrs(svc.Name)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 449, Col: 105}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 452, Col: 105}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var62))
 					if templ_7745c5c3_Err != nil {
@@ -1278,7 +1281,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var63 string
 					templ_7745c5c3_Var63, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", svc.Requests))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 454, Col: 58}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 457, Col: 58}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var63))
 					if templ_7745c5c3_Err != nil {
@@ -1291,7 +1294,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var64 string
 					templ_7745c5c3_Var64, templ_7745c5c3_Err = templruntime.SanitizeStyleAttributeValues(errorColor(svc.ErrorRate))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 455, Col: 58}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 458, Col: 58}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 					if templ_7745c5c3_Err != nil {
@@ -1304,7 +1307,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var65 string
 					templ_7745c5c3_Var65, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.2f%%", svc.ErrorRate*100))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 455, Col: 103}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 458, Col: 103}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var65))
 					if templ_7745c5c3_Err != nil {
@@ -1317,7 +1320,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var66 string
 					templ_7745c5c3_Var66, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.1fms", svc.P50Ms))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 456, Col: 59}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 459, Col: 59}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var66))
 					if templ_7745c5c3_Err != nil {
@@ -1330,7 +1333,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var67 string
 					templ_7745c5c3_Var67, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%.1fms", svc.P95Ms))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 457, Col: 59}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 460, Col: 59}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var67))
 					if templ_7745c5c3_Err != nil {
@@ -1343,7 +1346,7 @@ func Compare(data CompareData) templ.Component {
 					var templ_7745c5c3_Var68 string
 					templ_7745c5c3_Var68, templ_7745c5c3_Err = templ.JoinStringErrs(fmt.Sprintf("%d", svc.ErrorCount))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 458, Col: 60}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/web/services.templ`, Line: 461, Col: 60}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var68))
 					if templ_7745c5c3_Err != nil {

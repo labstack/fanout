@@ -92,6 +92,9 @@ type cacheItem struct {
 // NewCache creates a new cache with the given TTL.
 // The cleanup goroutine stops when ctx is cancelled.
 func NewCache(ctx context.Context, ttl time.Duration) *Cache {
+	if ttl <= 0 {
+		ttl = 10 * time.Second
+	}
 	c := &Cache{
 		items: make(map[string]cacheItem),
 		ttl:   ttl,

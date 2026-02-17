@@ -1,6 +1,8 @@
 package api
 
 import (
+	"golang.org/x/sync/errgroup"
+
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/fanout/internal/search"
 	"github.com/labstack/fanout/internal/service"
@@ -40,10 +42,30 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 
 	data := web.OverviewData{Window: window}
 
-	status, err := h.svc.Status(ctx, window, namespace, "")
-	if err != nil {
+	var status *service.StatusResult
+	var topo *service.TopologyResult
+	var timeline *service.TimelineResult
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.Go(func() error {
+		var err error
+		status, err = h.svc.Status(gctx, window, namespace, "")
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		topo, err = h.svc.Topology(gctx, window, namespace, "")
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		timeline, err = h.svc.Timeline(gctx, "", window, 5, namespace, "")
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		return err
 	}
+
 	data.Healthy = status.Healthy
 	data.Summary = status.Summary
 	data.Services = web.ServiceSummary{
@@ -65,10 +87,6 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 		})
 	}
 
-	topo, err := h.svc.Topology(ctx, window, namespace, "")
-	if err != nil {
-		return err
-	}
 	for _, n := range topo.Nodes {
 		data.Topology.Nodes = append(data.Topology.Nodes, web.ServiceNode{
 			Name:      n.Name,
@@ -79,10 +97,6 @@ func (h *UIHandler) PartialOverview(c echo.Context) error {
 		})
 	}
 
-	timeline, err := h.svc.Timeline(ctx, "", window, 5, namespace, "")
-	if err != nil {
-		return err
-	}
 	for _, b := range timeline.Buckets {
 		data.Timeline.Buckets = append(data.Timeline.Buckets, web.TimelineBucket{
 			Time:         b.Time,

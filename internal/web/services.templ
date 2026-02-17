@@ -362,7 +362,10 @@ func sparklinePoints(data []int64) string {
 
 	// Generate points
 	points := ""
-	w := 80.0 / float64(len(data)-1)
+	w := 0.0
+	if len(data) > 1 {
+		w = 80.0 / float64(len(data)-1)
+	}
 	for i, v := range data {
 		x := float64(i) * w
 		y := 18.0 - (float64(v)/float64(max))*16.0 // Leave 2px margin top/bottom
