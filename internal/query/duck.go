@@ -118,7 +118,7 @@ GROUP BY ALL;
 	affected, _ := res.RowsAffected()
 
 	// Edge rollup (caller -> callee relationships)
-	_, _ = d.DB.ExecContext(ctx, fmt.Sprintf(`
+	_, edgeErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
 INSERT INTO edge_rollup
 WITH calls AS (
   SELECT
@@ -144,6 +144,9 @@ SELECT
 FROM calls
 GROUP BY bucket, caller, callee;
 `, d.cfg.LakeDir, d.cfg.LakeDir))
+	if edgeErr != nil {
+		slog.Error("edge rollup failed", "err", edgeErr)
+	}
 
 	return int(affected), nil
 }

@@ -13,6 +13,7 @@ type UnifiedParams struct {
 	Service   string
 	Window    int
 	Limit     int
+	Offset    int
 	Namespace string
 	TenantID  string
 }
@@ -55,6 +56,11 @@ func (s *Service) Unified(ctx context.Context, p UnifiedParams) (*UnifiedResult,
 		Events: []UnifiedEvent{},
 	}
 
+	// Each sub-query must fetch enough rows to cover offset + limit after merge
+	fetchLimit := p.Offset + p.Limit + 1
+	fetchParams := p
+	fetchParams.Limit = fetchLimit
+
 	// Run queries in parallel
 	var wg sync.WaitGroup
 	var spans, logs, metrics []UnifiedEvent
@@ -62,21 +68,17 @@ func (s *Service) Unified(ctx context.Context, p UnifiedParams) (*UnifiedResult,
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		spans = s.queryUnifiedSpans(ctx, p)
+		spans = s.queryUnifiedSpans(ctx, fetchParams)
 	}()
 	go func() {
 		defer wg.Done()
-		logs = s.queryUnifiedLogs(ctx, p)
+		logs = s.queryUnifiedLogs(ctx, fetchParams)
 	}()
 	go func() {
 		defer wg.Done()
-		metrics = s.queryUnifiedMetrics(ctx, p)
+		metrics = s.queryUnifiedMetrics(ctx, fetchParams)
 	}()
 	wg.Wait()
-
-	out.SpanCount = len(spans)
-	out.LogCount = len(logs)
-	out.MetricCount = len(metrics)
 
 	// Merge all events
 	all := make([]UnifiedEvent, 0, len(spans)+len(logs)+len(metrics))
@@ -89,10 +91,31 @@ func (s *Service) Unified(ctx context.Context, p UnifiedParams) (*UnifiedResult,
 		return all[i].Time > all[j].Time
 	})
 
-	// Apply limit
+	// Apply offset
+	if p.Offset > 0 {
+		if p.Offset >= len(all) {
+			all = nil
+		} else {
+			all = all[p.Offset:]
+		}
+	}
+
+	// Apply limit (fetch one extra to detect HasMore)
 	if len(all) > p.Limit {
 		out.HasMore = true
 		all = all[:p.Limit]
+	}
+
+	// Count by type from the final page of events
+	for _, e := range all {
+		switch e.Type {
+		case "span":
+			out.SpanCount++
+		case "log":
+			out.LogCount++
+		case "metric":
+			out.MetricCount++
+		}
 	}
 
 	out.Events = all

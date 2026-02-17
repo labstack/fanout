@@ -62,11 +62,13 @@ func TestPruneSignal(t *testing.T) {
 	recent := now.AddDate(0, 0, -5) // 5 days ago
 
 	oldPath := filepath.Join(lakeDir, "spans",
+		"tenant=default", "namespace=default",
 		"year="+old.Format("2006"),
 		"month="+old.Format("01"),
 		"day="+old.Format("02"),
 		"hour="+old.Format("15"))
 	recentPath := filepath.Join(lakeDir, "spans",
+		"tenant=default", "namespace=default",
 		"year="+recent.Format("2006"),
 		"month="+recent.Format("01"),
 		"day="+recent.Format("02"),

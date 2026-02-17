@@ -642,10 +642,22 @@ func (h *UIHandler) Unified(c echo.Context) error {
 		svc = services[0]
 	}
 
+	offset := 0
+	if o := c.QueryParam("offset"); o != "" {
+		fmt.Sscanf(o, "%d", &offset)
+		if offset < 0 {
+			offset = 0
+		}
+		if offset > 10000 {
+			offset = 10000
+		}
+	}
+
 	result, err := h.svc.Unified(ctx, service.UnifiedParams{
 		Service:   svc,
 		Window:    window,
 		Limit:     100,
+		Offset:    offset,
 		Namespace: namespace,
 	})
 	if err != nil {
@@ -678,7 +690,7 @@ func (h *UIHandler) Unified(c echo.Context) error {
 		HasMore:     result.HasMore,
 		Window:      window,
 		Limit:       100,
-		Offset:      0,
+		Offset:      offset,
 	}
 
 	return renderTempl(c, web.Unified(data))

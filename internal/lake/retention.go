@@ -68,10 +68,51 @@ func (p *Pruner) pruneSignal(signal string, cutoff time.Time) (int, int64) {
 	var deleted int
 	var bytesDeleted int64
 
-	// Walk year directories
-	years, err := os.ReadDir(baseDir)
+	// Walk tenant directories: lake/{signal}/tenant={t}/namespace={ns}/year=.../
+	tenants, err := os.ReadDir(baseDir)
 	if err != nil {
 		slog.Warn("readdir failed", "path", baseDir, "err", err)
+		return 0, 0
+	}
+	for _, tenantDir := range tenants {
+		if !tenantDir.IsDir() || !strings.HasPrefix(tenantDir.Name(), "tenant=") {
+			continue
+		}
+		tenantPath := filepath.Join(baseDir, tenantDir.Name())
+
+		namespaces, err := os.ReadDir(tenantPath)
+		if err != nil {
+			slog.Warn("readdir failed", "path", tenantPath, "err", err)
+			continue
+		}
+		for _, nsDir := range namespaces {
+			if !nsDir.IsDir() || !strings.HasPrefix(nsDir.Name(), "namespace=") {
+				continue
+			}
+			nsPath := filepath.Join(tenantPath, nsDir.Name())
+
+			d, b := p.prunePartition(nsPath, cutoff)
+			deleted += d
+			bytesDeleted += b
+
+			cleanEmptyDir(nsPath)
+		}
+
+		cleanEmptyDir(tenantPath)
+	}
+
+	return deleted, bytesDeleted
+}
+
+// prunePartition prunes hour directories older than cutoff within a
+// tenant/namespace partition root (the directory containing year= dirs).
+func (p *Pruner) prunePartition(partRoot string, cutoff time.Time) (int, int64) {
+	var deleted int
+	var bytesDeleted int64
+
+	years, err := os.ReadDir(partRoot)
+	if err != nil {
+		slog.Warn("readdir failed", "path", partRoot, "err", err)
 		return 0, 0
 	}
 	for _, yearDir := range years {
@@ -83,7 +124,7 @@ func (p *Pruner) pruneSignal(signal string, cutoff time.Time) (int, int64) {
 			continue
 		}
 
-		yearPath := filepath.Join(baseDir, yearDir.Name())
+		yearPath := filepath.Join(partRoot, yearDir.Name())
 		months, err := os.ReadDir(yearPath)
 		if err != nil {
 			slog.Warn("readdir failed", "path", yearPath, "err", err)
@@ -134,7 +175,9 @@ func (p *Pruner) pruneSignal(signal string, cutoff time.Time) (int, int64) {
 					if partTime.Before(cutoff) {
 						hourPath := filepath.Join(dayPath, hourDir.Name())
 						bytes := dirSize(hourPath)
-						if err := os.RemoveAll(hourPath); err == nil {
+						if err := os.RemoveAll(hourPath); err != nil {
+							slog.Error("retention delete failed", "path", hourPath, "err", err)
+						} else {
 							deleted++
 							bytesDeleted += bytes
 						}

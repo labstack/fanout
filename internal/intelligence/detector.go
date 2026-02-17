@@ -215,29 +215,36 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 		WITH current_period AS (
 			SELECT
 				"name=service_name" as service_name,
-				AVG(("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS avg_latency,
 				PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS p95_latency
 			FROM read_parquet(%s, union_by_name=true)
 			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
 			AND "name=kind" = 'SPAN_KIND_SERVER'
 			GROUP BY "name=service_name"
 		),
-		baseline_period AS (
+		baseline_buckets AS (
 			SELECT
 				"name=service_name" as service_name,
-				AVG(("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS avg_latency,
-				STDDEV(("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS latency_stddev
+				time_bucket(INTERVAL '5 minutes', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
+				PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS p95_latency
 			FROM read_parquet(%s, union_by_name=true)
 			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
 			AND "name=kind" = 'SPAN_KIND_SERVER'
-			GROUP BY "name=service_name"
+			GROUP BY "name=service_name", bucket
+		),
+		baseline_period AS (
+			SELECT
+				service_name,
+				AVG(p95_latency) AS avg_p95,
+				STDDEV(p95_latency) AS p95_stddev
+			FROM baseline_buckets
+			GROUP BY service_name
 		)
 		SELECT
 			c.service_name,
 			c.p95_latency AS current_p95,
-			COALESCE(b.avg_latency, 0.0) AS baseline_avg,
+			COALESCE(b.avg_p95, 0.0) AS baseline_p95,
 			CASE
-				WHEN b.latency_stddev > 0 THEN (c.p95_latency - b.avg_latency) / b.latency_stddev
+				WHEN b.p95_stddev > 0 THEN (c.p95_latency - b.avg_p95) / b.p95_stddev
 				ELSE 0.0
 			END AS z_score
 		FROM current_period c
@@ -256,7 +263,7 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 	for _, row := range resp.Results {
 		serviceName, _ := row["service_name"].(string)
 		currentP95, _ := row["current_p95"].(float64)
-		baselineAvg, _ := row["baseline_avg"].(float64)
+		baselineP95, _ := row["baseline_p95"].(float64)
 		zScore, _ := row["z_score"].(float64)
 
 		if zScore >= d.config.LatencyThreshold {
@@ -265,11 +272,11 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 				ServiceName: serviceName,
 				Metric:      "p95_latency",
 				Current:     currentP95,
-				Baseline:    baselineAvg,
+				Baseline:    baselineP95,
 				ZScore:      zScore,
 				DetectedAt:  time.Now(),
-				Description: fmt.Sprintf("%s P95 latency: %.1fms (baseline avg: %.1fms, z-score: %.2f)",
-					serviceName, currentP95, baselineAvg, zScore),
+				Description: fmt.Sprintf("%s P95 latency: %.1fms (baseline P95: %.1fms, z-score: %.2f)",
+					serviceName, currentP95, baselineP95, zScore),
 			})
 		}
 	}
