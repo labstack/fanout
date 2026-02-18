@@ -166,6 +166,14 @@
     renderers.push({ className: className, dataAttr: dataAttr, renderFn: renderFn });
   }
 
+  function safeRender(entry, el, expanded) {
+    try {
+      entry.renderFn(el, expanded);
+    } catch (e) {
+      console.error('FanoutViz render error (' + entry.className + '):', e);
+    }
+  }
+
   function init(root) {
     if (!root || root.nodeType !== 1) return;
     renderers.forEach(function(entry) {
@@ -173,12 +181,12 @@
       els.forEach(function(el) {
         if (el._vizInit) return;
         el._vizInit = true;
-        entry.renderFn(el, false);
+        safeRender(entry, el, false);
       });
       // Also check root itself
       if (root.classList && root.classList.contains(entry.className) && root.hasAttribute(entry.dataAttr) && !root._vizInit) {
         root._vizInit = true;
-        entry.renderFn(root, false);
+        safeRender(entry, root, false);
       }
     });
 

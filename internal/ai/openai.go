@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 )
@@ -243,8 +244,14 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 		if choice.FinishReason != nil {
 			switch *choice.FinishReason {
 			case "tool_calls":
-				// Emit all accumulated tool calls
-				for _, acc := range toolCalls {
+				// Emit all accumulated tool calls in index order
+				indices := make([]int, 0, len(toolCalls))
+				for idx := range toolCalls {
+					indices = append(indices, idx)
+				}
+				sort.Ints(indices)
+				for _, idx := range indices {
+					acc := toolCalls[idx]
 					inputStr := acc.args.String()
 					if inputStr == "" {
 						inputStr = "{}"
@@ -280,7 +287,7 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 
 	// Ensure EventStop is always emitted, even if stream ended unexpectedly
 	if !gotStop {
-		slog.Warn("openai SSE stream ended without finish_reason")
+		slog.Error("openai SSE stream ended without finish_reason — response may be incomplete")
 		return cb(StreamEvent{Type: EventStop, StopReason: "end_turn"})
 	}
 

@@ -55,7 +55,7 @@
       svg += '<rect class="bc-bar" x="' + x + '" y="' + y + '" width="' + barW + '" height="' + h + '" fill="' + color + '" data-idx="' + i + '" />';
 
       // Value label above bar
-      svg += '<text class="bc-value-label" x="' + (x + barW / 2) + '" y="' + (y - 4) + '" text-anchor="middle">' + b.value + '</text>';
+      svg += '<text class="bc-value-label" x="' + (x + barW / 2) + '" y="' + (y - 4) + '" text-anchor="middle">' + V.util.escapeHtml(String(b.value)) + '</text>';
 
       // X-axis label
       var labelText = V.util.truncate(b.label, barW + gap - 4, 6);
@@ -105,7 +105,7 @@
       svg += '<rect class="bc-bar" x="' + padL + '" y="' + y + '" width="' + w + '" height="' + barH + '" fill="' + color + '" data-idx="' + i + '" />';
 
       // Value label
-      svg += '<text class="bc-value-label" x="' + (padL + w + 6) + '" y="' + (y + barH / 2 + 3) + '" text-anchor="start">' + b.value + '</text>';
+      svg += '<text class="bc-value-label" x="' + (padL + w + 6) + '" y="' + (y + barH / 2 + 3) + '" text-anchor="start">' + V.util.escapeHtml(String(b.value)) + '</text>';
 
       // Y-axis label
       svg += '<text class="bc-axis-label" x="' + (padL - 6) + '" y="' + (y + barH / 2 + 3) + '" text-anchor="end">' + V.util.escapeHtml(V.util.truncate(b.label, padL - 16, 6)) + '</text>';

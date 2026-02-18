@@ -118,7 +118,13 @@ func main() {
 		LogUserAgent: true,
 		LogError:     true,
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			slog.Info("request", "method", v.Method, "uri", v.URI, "status", v.Status, "latency", v.Latency)
+			uri := v.URI
+			if strings.Contains(uri, "token=") {
+				if idx := strings.Index(uri, "?"); idx >= 0 {
+					uri = uri[:idx] + "?token=REDACTED"
+				}
+			}
+			slog.Info("request", "method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency)
 			return nil
 		},
 	}))
@@ -187,6 +193,9 @@ func main() {
 		tools := ai.NewToolRegistry(svc, q, cfg.LakeDir)
 		orch = ai.NewOrchestrator(provider, tools, svc, cfg)
 		wsHandler = ai.NewWSHandler(orch)
+		if cfg.APIToken == "" {
+			slog.Warn("AI chat enabled without API_TOKEN — chat endpoint is unauthenticated")
+		}
 	} else {
 		slog.Warn("AI_API_KEY not set — chat disabled, ingest + health active")
 	}

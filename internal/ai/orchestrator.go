@@ -44,8 +44,17 @@ func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Servic
 	p.AllowElements("sl-card", "sl-badge", "sl-tag", "sl-icon", "sl-progress-bar",
 		"sl-spinner", "sl-tooltip", "sl-alert", "sl-button", "sl-divider",
 		"sl-details", "sl-tab-group", "sl-tab", "sl-tab-panel")
-	// Allow style and data attributes (needed for CSS vars and Vega specs)
-	p.AllowAttrs("style").Globally()
+	// Allow specific CSS properties (not blanket style attr, to prevent UI redressing)
+	p.AllowStyles(
+		"color", "background", "background-color", "font-size", "font-weight",
+		"text-align", "display", "grid-template-columns", "gap", "padding", "margin",
+		"border", "border-color", "border-radius", "width", "height", "max-width", "min-width",
+		"flex", "flex-direction", "align-items", "justify-content",
+		"opacity", "text-transform", "letter-spacing", "line-height",
+		"overflow", "white-space", "text-overflow",
+		"padding-left", "padding-right", "padding-top", "padding-bottom",
+		"margin-left", "margin-right", "margin-top", "margin-bottom",
+	).Globally()
 	p.AllowDataAttributes()
 	p.AllowAttrs("class").Globally()
 	p.AllowAttrs("slot").Globally()
@@ -161,7 +170,9 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			case strings.Contains(errStr, "API error 429"):
 				errMsg = "LLM rate limited — please try again shortly"
 			}
-			_ = send(ClientEvent{Type: CEError, Error: errMsg})
+			if sendErr := send(ClientEvent{Type: CEError, Error: errMsg}); sendErr != nil {
+				slog.Warn("failed to send error to client", "send_err", sendErr)
+			}
 			return conversation, err
 		}
 
@@ -356,18 +367,19 @@ func (o *Orchestrator) buildSystemPrompt(ctx context.Context, window int, namesp
 	return sb.String()
 }
 
-// truncateJSON shortens a JSON string for display.
+// truncateJSON shortens a JSON string for display in tool_call events.
 func truncateJSON(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "..."
+	return s[:maxLen] + "...(truncated)"
 }
 
 // truncateResult shortens tool results to fit context windows.
+// Returns a plain text summary rather than broken JSON.
 func truncateResult(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "\n... [truncated]"
+	return s[:maxLen] + "\n\n[Result truncated. Ask the user to refine their query for more specific data.]"
 }

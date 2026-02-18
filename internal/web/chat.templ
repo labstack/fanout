@@ -739,9 +739,12 @@ templ Chat(data ChatData) {
 
 					function updateToolStatus(name) {
 						if (!currentAiMsg) return;
-						const el = currentAiMsg.querySelector('.tool-status[data-tool="' + name + '"]');
-						if (el) {
-							el.innerHTML = '<sl-icon name="check2-circle" style="color:var(--success)"></sl-icon> ' + escapeHtml(name);
+						var els = currentAiMsg.querySelectorAll('.tool-status');
+						for (var i = 0; i < els.length; i++) {
+							if (els[i].dataset.tool === name) {
+								els[i].innerHTML = '<sl-icon name="check2-circle" style="color:var(--success)"></sl-icon> ' + escapeHtml(name);
+								break;
+							}
 						}
 					}
 
@@ -1020,8 +1023,8 @@ templ Chat(data ChatData) {
 									'<div style="padding:0.75rem;border-bottom:1px solid var(--border-color)">' +
 									'<div style="font-weight:500;font-size:0.875rem;margin-bottom:0.25rem">' + escapeHtml(b.question) + '</div>' +
 									'<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem">' +
-									'<sl-button size="small" onclick="loadBookmark(\'' + b.id + '\')">View</sl-button>' +
-									'<sl-button size="small" variant="danger" outline onclick="deleteBookmark(\'' + b.id + '\')">Delete</sl-button>' +
+									'<sl-button size="small" onclick="loadBookmark(\\'' + escapeHtml(b.id) + '\\')">View</sl-button>' +
+									'<sl-button size="small" variant="danger" outline onclick="deleteBookmark(\\'' + escapeHtml(b.id) + '\\')">Delete</sl-button>' +
 									'</div></div>'
 								).join('');
 							})

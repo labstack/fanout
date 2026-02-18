@@ -91,7 +91,7 @@ func (p *AnthropicProvider) buildRequest(params StreamParams) map[string]any {
 				for _, tc := range m.ToolCalls {
 					var input any
 					if err := json.Unmarshal([]byte(tc.Input), &input); err != nil {
-						slog.Warn("failed to parse tool call input for request", "tool", tc.Name, "err", err)
+						slog.Error("failed to parse tool call input for request", "tool", tc.Name, "input", tc.Input, "err", err)
 						input = map[string]any{}
 					}
 					content = append(content, map[string]any{
@@ -273,7 +273,7 @@ func (p *AnthropicProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 
 	// Ensure EventStop is always emitted, even if stream ended unexpectedly
 	if !gotStop {
-		slog.Warn("anthropic SSE stream ended without message_delta")
+		slog.Error("anthropic SSE stream ended without message_delta — response may be incomplete")
 		return cb(StreamEvent{Type: EventStop, StopReason: "end_turn"})
 	}
 

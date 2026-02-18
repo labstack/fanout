@@ -52,6 +52,7 @@ func (h *WSHandler) Handle(c echo.Context) error {
 		return err
 	}
 	defer ws.Close()
+	ws.SetReadLimit(64 * 1024) // 64KB max message
 
 	session := &chatSession{
 		ws:           ws,
@@ -162,6 +163,8 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 
 		if err != nil && ctx.Err() == nil {
 			slog.Error("orchestrator error", "err", err)
+			// Ensure client gets a done event so UI doesn't stay stuck
+			_ = s.send(ClientEvent{Type: CEDone, ID: "error"})
 		}
 
 		// Write back updated conversation (with assistant/tool messages added)

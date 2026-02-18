@@ -89,7 +89,7 @@ func buildCSSBundle() []byte {
 func listRenderers() []string {
 	entries, err := fs.ReadDir(staticFS, "static/renderers")
 	if err != nil {
-		return nil
+		panic("web: failed to read renderers directory: " + err.Error())
 	}
 	var names []string
 	for _, e := range entries {

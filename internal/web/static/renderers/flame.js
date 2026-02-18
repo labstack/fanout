@@ -39,7 +39,7 @@
       svg += '<g class="flame-frame" data-idx="' + i + '">';
       svg += '<rect x="' + x + '" y="' + y + '" width="' + Math.max(w - 0.5, 1) + '" height="' + frameH + '" fill="' + color + '" rx="2" ry="2" opacity="0.85"/>';
       if (label) {
-        svg += '<text class="flame-label" x="' + (x + 4) + '" y="' + (y + frameH/2 + 3) + '" style="font-size:' + (expanded ? '10px' : '9px') + '">' + V.util.truncate(label, w - 8, expanded ? 6 : 5) + '</text>';
+        svg += '<text class="flame-label" x="' + (x + 4) + '" y="' + (y + frameH/2 + 3) + '" style="font-size:' + (expanded ? '10px' : '9px') + '">' + V.util.escapeHtml(V.util.truncate(label, w - 8, expanded ? 6 : 5)) + '</text>';
       }
       svg += '</g>';
     });

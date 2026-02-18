@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
@@ -325,6 +326,9 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 		}
 		if err := json.Unmarshal(input, &p); err != nil {
 			return "", fmt.Errorf("invalid input: %w", err)
+		}
+		if strings.TrimSpace(p.HTML) == "" {
+			return "", fmt.Errorf("render tool requires non-empty html")
 		}
 		return p.HTML, nil
 	})

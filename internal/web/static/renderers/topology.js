@@ -103,7 +103,7 @@
       svg += '<rect class="topo-node-bg" width="' + nodeW + '" height="' + nodeH + '" />';
       svg += '<circle class="topo-node-status" cx="12" cy="' + (nodeH/2) + '" fill="' + statusCol + '" />';
       svg += '<text class="topo-node-label" x="' + (nodeW/2 + 6) + '" y="' + (nodeH/2 - 4) + '">' + V.util.escapeHtml(n.id) + '</text>';
-      svg += '<text class="topo-node-metric" x="' + (nodeW/2 + 6) + '" y="' + (nodeH/2 + 10) + '">' + n.rpm + ' rpm · P95 ' + n.p95 + 'ms</text>';
+      svg += '<text class="topo-node-metric" x="' + (nodeW/2 + 6) + '" y="' + (nodeH/2 + 10) + '">' + V.util.escapeHtml(String(n.rpm)) + ' rpm · P95 ' + V.util.escapeHtml(String(n.p95)) + 'ms</text>';
       svg += '</g>';
     });
 
