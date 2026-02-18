@@ -53,7 +53,8 @@ SELECT "name=span_id" as span_id,
        "name=attributes_json" as attributes_json
 FROM read_parquet(%s, union_by_name=true)
 WHERE "name=trace_id" = ?
-ORDER BY "name=start_unix_nano" ASC;
+ORDER BY "name=start_unix_nano" ASC
+LIMIT 200;
 `, s.duck.SpansGlob(tenantID, namespace, window))
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, traceID)

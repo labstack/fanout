@@ -72,7 +72,19 @@ func (p *OpenAIProvider) buildRequest(params StreamParams) map[string]any {
 	messages := make([]map[string]any, 0, len(params.Messages)+1)
 
 	// System message
-	if params.System != "" {
+	if len(params.SystemBlocks) > 0 {
+		var sb strings.Builder
+		for i, b := range params.SystemBlocks {
+			if i > 0 {
+				sb.WriteString("\n\n")
+			}
+			sb.WriteString(b.Text)
+		}
+		messages = append(messages, map[string]any{
+			"role":    "system",
+			"content": sb.String(),
+		})
+	} else if params.System != "" {
 		messages = append(messages, map[string]any{
 			"role":    "system",
 			"content": params.System,

@@ -293,8 +293,8 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 		Name:        "query",
 		Description: "Execute raw SQL against DuckDB. Use for custom analysis when built-in tools aren't sufficient. Tables: service_rollup, read_parquet for spans/logs/metrics parquet files.",
 		InputSchema: jsonSchema(map[string]property{
-			"sql":      {Type: "string", Desc: "SQL query (SELECT only, 30s timeout, 1000 row limit)", Required: true},
-			"max_rows": {Type: "integer", Desc: "Maximum rows to return (default 1000)"},
+			"sql":      {Type: "string", Desc: "SQL query (SELECT only, 30s timeout)", Required: true},
+			"max_rows": {Type: "integer", Desc: "Maximum rows to return (default 200, max 1000)"},
 		}),
 	}, func(ctx context.Context, input json.RawMessage) (string, error) {
 		var p struct {
@@ -303,6 +303,9 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 		}
 		if err := json.Unmarshal(input, &p); err != nil {
 			return "", fmt.Errorf("invalid input: %w", err)
+		}
+		if p.MaxRows == 0 {
+			p.MaxRows = 200
 		}
 		res := duck.ExecuteSQL(ctx, query.SQLRequest{
 			Query:   p.SQL,
@@ -316,7 +319,27 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 	// (via bluemonday) before being sent to the browser. Never bypass sanitization.
 	r.register(ToolDef{
 		Name:        "render",
-		Description: "Display rich HTML visualization inline in chat. Generate HTML using Shoelace web components, CSS custom properties, and Vega-Lite specs. The HTML will be shown as a card in the conversation.",
+		Description: `Display rich HTML visualization inline in chat. The HTML will be shown as a card in the conversation.
+
+CSS vars (light+dark): --text-primary, --text-secondary, --text-muted, --bg-primary, --bg-secondary, --bg-tertiary, --border-color, --success (#22c55e), --warning (#f59e0b), --danger (#ef4444), --signal-trace (blue), --signal-log (amber), --signal-metric (green), --signal-error (red), --font-sans, --font-mono, --radius (0.5rem).
+
+Shoelace: <sl-card>, <sl-badge>, <sl-tag>, <sl-icon>, <sl-progress-bar>, <sl-tooltip>.
+
+Layout: Grid: <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">. Metric card: <sl-card><div style="font-size:1.5rem;font-weight:700">99.9%</div><div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase">Label</div></sl-card>. Table: <table class="table"><thead>...</thead><tbody>...</tbody></table>.
+
+SVG Viz Renderers (auto-initialized, no inline event handlers):
+- trace-waterfall data-spans: [{id, parent, service, op, start, dur, status}]
+- topology-graph data-graph: {nodes:[{id,status,rpm,p95,errors}], edges:[{source,target,rpm,errorRate}]}
+- flow-sankey data-flow: {nodes:[{id,label,rpm,status?}], links:[{source,target,value}]}
+- flame-graph data-frames: [{name,depth,x,w,self,total,samples,service}]
+- latency-heatmap data-heatmap: {buckets:[], times:[], values:[[]]}
+- dep-matrix data-matrix: {services:[], cells:[{from,to,errorRate,rpm,p95}]}
+- endpoint-breakdown data-endpoints: {endpoints:[{method,path,rpm,p50,p95,p99,errorRate,status,trend:[]}]}
+- correlation-view data-correlation: {times:[], panels:[{label,color,values:[],baseline?,markers?:[{t,label,severity}]}]}
+- timeseries-chart data-timeseries: {series:[{label,color,values:[],type:"line"|"area"}], labels:[], yLabel}
+- bar-chart data-barchart: {bars:[{label,value,color?}], yLabel?, horizontal?:bool}
+
+Wrap viz in: <div class="viz-card"><div class="viz-card-header"><div class="viz-card-title"><span class="signal-dot" style="background:var(--signal-trace)"></span> Title</div><div class="viz-card-actions"><button class="btn-icon btn-viz-expand" title="Expand"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4"/></svg></button></div></div><div class="viz-card-body"><div class="CLASS" data-ATTR='JSON'></div></div></div>`,
 		InputSchema: jsonSchema(map[string]property{
 			"html": {Type: "string", Desc: "HTML content to render (Shoelace components, CSS vars, Vega-Lite supported)", Required: true},
 		}),

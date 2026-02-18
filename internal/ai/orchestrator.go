@@ -117,7 +117,7 @@ type SendFunc func(event ClientEvent) error
 // Run executes the agentic loop for a user message.
 // Returns the updated conversation (with assistant/tool messages appended) and any error.
 func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) ([]Message, error) {
-	system := o.buildSystemPrompt(ctx, window, namespace)
+	systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
 
 	for i := 0; i < maxIterations; i++ {
 		// Check for cancellation between iterations
@@ -131,10 +131,10 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		var hadError bool
 
 		err := o.provider.Stream(ctx, StreamParams{
-			System:    system,
-			Messages:  conversation,
-			Tools:     o.tools.Defs(),
-			MaxTokens: 4096,
+			SystemBlocks: systemBlocks,
+			Messages:     conversation,
+			Tools:        o.tools.Defs(),
+			MaxTokens:    4096,
 		}, func(event StreamEvent) error {
 			switch event.Type {
 			case EventText:
@@ -199,38 +199,59 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}); err != nil {
 				return conversation, err
 			}
+			conversation = compactToolResults(conversation)
 			return conversation, nil
 		}
 
-		// Execute tool calls
-		for _, tc := range toolCalls {
-			// Check for cancellation between tool calls
-			if ctx.Err() != nil {
-				return conversation, ctx.Err()
-			}
+		// Execute tool calls in parallel
+		type toolExecResult struct {
+			tc      ToolCall
+			result  string
+			isError bool
+		}
+		results := make([]toolExecResult, len(toolCalls))
 
-			result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
-			isError := err != nil
-			if isError {
-				result = fmt.Sprintf(`{"error": %q}`, err.Error())
-			}
+		var wg sync.WaitGroup
+		for i, tc := range toolCalls {
+			results[i].tc = tc
+			wg.Add(1)
+			go func(idx int, tc ToolCall) {
+				defer wg.Done()
+				result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
+				if err != nil {
+					results[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
+					results[idx].isError = true
+				} else {
+					results[idx].result = result
+				}
+			}(i, tc)
+		}
+		wg.Wait()
+
+		if ctx.Err() != nil {
+			return conversation, ctx.Err()
+		}
+
+		// Send results to WebSocket sequentially (preserves order)
+		for idx := range results {
+			r := &results[idx]
 
 			// Special handling for render tool: sanitize HTML and send as card
-			if tc.Name == "render" && !isError {
-				sanitized := o.sanitizer.Sanitize(result)
+			if r.tc.Name == "render" && !r.isError {
+				sanitized := o.sanitizer.Sanitize(r.result)
 				if sendErr := send(ClientEvent{Type: CECard, HTML: sanitized}); sendErr != nil {
 					return conversation, sendErr
 				}
-				result = `{"rendered": true}`
+				r.result = `{"rendered": true}`
 			}
 
 			// Always send tool_result to clear the spinner
-			if sendErr := send(ClientEvent{Type: CEToolResult, Name: tc.Name}); sendErr != nil {
+			if sendErr := send(ClientEvent{Type: CEToolResult, Name: r.tc.Name}); sendErr != nil {
 				return conversation, sendErr
 			}
 
 			// Add tool result to conversation
-			conversation = append(conversation, ToolMessage(tc.ID, truncateResult(result, 30000), isError))
+			conversation = append(conversation, ToolMessage(r.tc.ID, truncateResult(r.result, 8192), r.isError))
 		}
 
 		// Loop back for next LLM call with tool results
@@ -243,6 +264,7 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}); err != nil {
 		return conversation, err
 	}
+	conversation = compactToolResults(conversation)
 	return conversation, nil
 }
 
@@ -307,79 +329,38 @@ func (o *Orchestrator) cachedServices(ctx context.Context) []string {
 	return services
 }
 
-func (o *Orchestrator) buildSystemPrompt(ctx context.Context, window int, namespace string) string {
+// staticSystemPrompt contains the cacheable portion of the system prompt.
+// Keep this as a const so it can be used as a single cache-friendly block.
+const staticSystemPrompt = `You are the AI assistant for Fanout, an observability platform. You help users understand system health, investigate issues, and analyze telemetry data.
+
+Tools: status (start here) → diagnose (deep-dive) → find (search spans/logs) → trace (full trace, needs trace_id) → timeline (trends) → topology (dependency map) → compare (side-by-side) → metrics (explore metrics) → query (custom SQL, last resort) → render (visual HTML cards — see render tool description for design system).
+
+Be direct, cite specific numbers, use render for visual data, explain root causes with next steps.`
+
+func (o *Orchestrator) buildSystemBlocks(ctx context.Context, window int, namespace string) []SystemBlock {
 	services := o.cachedServices(ctx)
 
-	var sb strings.Builder
-	sb.WriteString("You are the AI assistant for Fanout, an observability platform. ")
-	sb.WriteString("You help users understand their system's health, investigate issues, and analyze telemetry data.\n\n")
+	// Static block — eligible for Anthropic prompt caching
+	static := SystemBlock{
+		Text:         staticSystemPrompt,
+		CacheControl: "ephemeral",
+	}
 
-	// Context
+	// Dynamic block — changes every request (time, window, services)
+	var sb strings.Builder
 	sb.WriteString("## Context\n")
-	sb.WriteString(fmt.Sprintf("- Current time: %s UTC\n", time.Now().UTC().Format(time.RFC3339)))
-	sb.WriteString(fmt.Sprintf("- Time window: last %d minutes\n", window))
+	sb.WriteString(fmt.Sprintf("- Time: %s UTC | Window: %dm", time.Now().UTC().Format("2006-01-02T15:04:05"), window))
 	if namespace != "" {
-		sb.WriteString(fmt.Sprintf("- Namespace: %s\n", namespace))
+		sb.WriteString(fmt.Sprintf(" | Namespace: %s", namespace))
 	}
 	if len(services) > 0 {
-		sb.WriteString(fmt.Sprintf("- Active services: %s\n", strings.Join(services, ", ")))
+		sb.WriteString(fmt.Sprintf("\n- Services: %s", strings.Join(services, ", ")))
 	}
-	sb.WriteString("\n")
+	sb.WriteByte('\n')
 
-	// Tool usage
-	sb.WriteString("## Tool Usage\n")
-	sb.WriteString("- Use `status` first to get system overview\n")
-	sb.WriteString("- Use `diagnose` to deep-dive into a specific service\n")
-	sb.WriteString("- Use `find` to search spans/logs by pattern\n")
-	sb.WriteString("- Use `trace` to inspect a full distributed trace (needs trace_id from find/diagnose)\n")
-	sb.WriteString("- Use `timeline` for time-series trends and anomaly detection\n")
-	sb.WriteString("- Use `topology` for service dependency maps\n")
-	sb.WriteString("- Use `compare` to compare 2-4 services side-by-side\n")
-	sb.WriteString("- Use `metrics` to explore available metric names\n")
-	sb.WriteString("- Use `query` for custom SQL only when built-in tools aren't sufficient\n")
-	sb.WriteString("- Use `render` to display visual HTML cards (charts, tables, grids)\n\n")
+	dynamic := SystemBlock{Text: sb.String()}
 
-	// Design system for render tool
-	sb.WriteString("## Design System (for render tool)\n")
-	sb.WriteString("When using the `render` tool, generate HTML using these building blocks:\n\n")
-	sb.WriteString("**CSS Custom Properties** (work in light and dark mode):\n")
-	sb.WriteString("- Colors: `var(--text-primary)`, `var(--text-secondary)`, `var(--text-muted)`\n")
-	sb.WriteString("- Backgrounds: `var(--bg-primary)`, `var(--bg-secondary)`, `var(--bg-tertiary)`\n")
-	sb.WriteString("- Borders: `var(--border-color)`\n")
-	sb.WriteString("- Status: `var(--success)` (#22c55e), `var(--warning)` (#f59e0b), `var(--danger)` (#ef4444)\n")
-	sb.WriteString("- Signals: `var(--signal-trace)` (blue), `var(--signal-log)` (amber), `var(--signal-metric)` (green), `var(--signal-error)` (red)\n")
-	sb.WriteString("- Typography: `var(--font-sans)`, `var(--font-mono)`\n")
-	sb.WriteString("- Radius: `var(--radius)` (0.5rem)\n\n")
-	sb.WriteString("**Shoelace Components**: `<sl-card>`, `<sl-badge>`, `<sl-tag>`, `<sl-icon>`, `<sl-progress-bar>`, `<sl-tooltip>`\n\n")
-	sb.WriteString("**Layout Patterns**:\n")
-	sb.WriteString("- Grid: `<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:1rem\">`\n")
-	sb.WriteString("- Metric card: `<sl-card><div class=\"metric-value\" style=\"font-size:1.5rem;font-weight:700\">99.9%</div><div class=\"metric-label\" style=\"font-size:0.7rem;color:var(--text-muted);text-transform:uppercase\">Uptime</div></sl-card>`\n")
-	sb.WriteString("- Table: `<table class=\"table\"><thead><tr><th>Col</th></tr></thead><tbody>...</tbody></table>`\n\n")
-	sb.WriteString("**Visualization Renderers** (pure SVG, zero dependencies, auto-initialized):\n")
-	sb.WriteString("Output HTML with the correct class and data attribute. Do NOT use inline event handlers (onclick, onmouseover). The viz framework handles tooltips, expand, and interactivity automatically.\n\n")
-	sb.WriteString("| Type | Class | Data Attr | Schema |\n")
-	sb.WriteString("|------|-------|-----------|--------|\n")
-	sb.WriteString("| Trace Waterfall | `trace-waterfall` | `data-spans` | `[{id, parent, service, op, start, dur, status}]` |\n")
-	sb.WriteString("| Service Topology | `topology-graph` | `data-graph` | `{nodes:[{id,status,rpm,p95,errors}], edges:[{source,target,rpm,errorRate}]}` |\n")
-	sb.WriteString("| Request Flow | `flow-sankey` | `data-flow` | `{nodes:[{id,label,rpm,status?}], links:[{source,target,value}]}` |\n")
-	sb.WriteString("| Flame Graph | `flame-graph` | `data-frames` | `[{name,depth,x,w,self,total,samples,service}]` |\n")
-	sb.WriteString("| Latency Heatmap | `latency-heatmap` | `data-heatmap` | `{buckets:[], times:[], values:[[]]}` |\n")
-	sb.WriteString("| Dependency Matrix | `dep-matrix` | `data-matrix` | `{services:[], cells:[{from,to,errorRate,rpm,p95}]}` |\n")
-	sb.WriteString("| Endpoint Breakdown | `endpoint-breakdown` | `data-endpoints` | `{endpoints:[{method,path,rpm,p50,p95,p99,errorRate,status,trend:[]}]}` |\n")
-	sb.WriteString("| Correlation View | `correlation-view` | `data-correlation` | `{times:[], panels:[{label,color,values:[],baseline?,markers?:[{t,label,severity}]}]}` |\n")
-	sb.WriteString("| Time Series | `timeseries-chart` | `data-timeseries` | `{series:[{label,color,values:[],type:\"line\"|\"area\"}], labels:[], yLabel}` |\n")
-	sb.WriteString("| Bar Chart | `bar-chart` | `data-barchart` | `{bars:[{label,value,color?}], yLabel?, horizontal?:bool}` |\n\n")
-	sb.WriteString("Wrap in a viz card: `<div class=\"viz-card\"><div class=\"viz-card-header\"><div class=\"viz-card-title\"><span class=\"signal-dot\" style=\"background:var(--signal-trace)\"></span> Title</div><div class=\"viz-card-actions\"><button class=\"btn-icon btn-viz-expand\" title=\"Expand\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path d=\"M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4\"/></svg></button></div></div><div class=\"viz-card-body\"><div class=\"CLASS\" data-ATTR='JSON'></div></div></div>`\n\n")
-
-	// Response style
-	sb.WriteString("## Response Style\n")
-	sb.WriteString("- Be direct and concise. Lead with the answer.\n")
-	sb.WriteString("- Cite specific numbers (e.g., \"P95 latency is 450ms, up from 120ms\").\n")
-	sb.WriteString("- Use the `render` tool for visual data: charts, metric grids, comparison tables.\n")
-	sb.WriteString("- Don't describe what you're about to render—just render it.\n")
-	sb.WriteString("- When investigating issues, explain root cause and suggest actionable next steps.\n")
-
-	return sb.String()
+	return []SystemBlock{static, dynamic}
 }
 
 // truncateJSON shortens a JSON string for display in tool_call events.
@@ -397,4 +378,72 @@ func truncateResult(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen] + "\n\n[Result truncated. Ask the user to refine their query for more specific data.]"
+}
+
+// compactToolResults replaces tool results from older turns with short summaries,
+// keeping only the most recent tool result batch intact (the LLM may reference it).
+func compactToolResults(msgs []Message) []Message {
+	// Find the index of the last assistant message with tool calls —
+	// everything after that is the "recent batch" we preserve.
+	lastAssistantWithTools := -1
+	for i := len(msgs) - 1; i >= 0; i-- {
+		if msgs[i].Role == RoleAssistant && len(msgs[i].ToolCalls) > 0 {
+			lastAssistantWithTools = i
+			break
+		}
+	}
+
+	for i := range msgs {
+		if i > lastAssistantWithTools {
+			break // preserve recent batch
+		}
+		if msgs[i].Role == RoleTool && msgs[i].ToolResult != nil && !msgs[i].ToolResult.IsError {
+			if len(msgs[i].ToolResult.Content) > 200 {
+				msgs[i].ToolResult.Content = summarizeToolResult(msgs[i].ToolResult.Content)
+			}
+		}
+	}
+	return msgs
+}
+
+// summarizeToolResult produces a ~150 byte summary of a JSON tool result,
+// showing top-level key names and array lengths.
+func summarizeToolResult(s string) string {
+	var v any
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		// Not valid JSON — just truncate
+		if len(s) > 150 {
+			return s[:150] + "..."
+		}
+		return s
+	}
+
+	var sb strings.Builder
+	sb.WriteString("{")
+	switch obj := v.(type) {
+	case map[string]any:
+		first := true
+		for k, val := range obj {
+			if !first {
+				sb.WriteString(", ")
+			}
+			first = false
+			switch arr := val.(type) {
+			case []any:
+				sb.WriteString(fmt.Sprintf("%q: [%d items]", k, len(arr)))
+			default:
+				sb.WriteString(fmt.Sprintf("%q: ...", k))
+			}
+			if sb.Len() > 140 {
+				sb.WriteString(", ...")
+				break
+			}
+		}
+	case []any:
+		sb.WriteString(fmt.Sprintf("[%d items]", len(obj)))
+	default:
+		sb.WriteString("...")
+	}
+	sb.WriteString("} [compacted]")
+	return sb.String()
 }

@@ -29,12 +29,20 @@ type Provider interface {
 	Stream(ctx context.Context, params StreamParams, cb StreamCallback) error
 }
 
+// SystemBlock is a segment of the system prompt. Blocks with CacheControl set
+// to "ephemeral" are eligible for Anthropic prompt caching.
+type SystemBlock struct {
+	Text         string
+	CacheControl string // "" or "ephemeral"
+}
+
 // StreamParams configures a streaming request.
 type StreamParams struct {
-	System    string
-	Messages  []Message
-	Tools     []ToolDef
-	MaxTokens int
+	System       string        // simple system prompt (used if SystemBlocks is empty)
+	SystemBlocks []SystemBlock // structured system prompt with cache hints
+	Messages     []Message
+	Tools        []ToolDef
+	MaxTokens    int
 }
 
 // StreamCallback receives streaming events from a Provider. The provider must:

@@ -53,6 +53,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, params StreamParams, cb 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", p.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -133,7 +134,20 @@ func (p *AnthropicProvider) buildRequest(params StreamParams) map[string]any {
 		"messages":   messages,
 	}
 
-	if params.System != "" {
+	if len(params.SystemBlocks) > 0 {
+		blocks := make([]map[string]any, len(params.SystemBlocks))
+		for i, b := range params.SystemBlocks {
+			block := map[string]any{
+				"type": "text",
+				"text": b.Text,
+			}
+			if b.CacheControl != "" {
+				block["cache_control"] = map[string]string{"type": b.CacheControl}
+			}
+			blocks[i] = block
+		}
+		body["system"] = blocks
+	} else if params.System != "" {
 		body["system"] = params.System
 	}
 
