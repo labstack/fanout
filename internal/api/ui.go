@@ -7,6 +7,8 @@ import (
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
+	"github.com/microcosm-cc/bluemonday"
+
 	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/web"
@@ -21,6 +23,7 @@ type UIHandler struct {
 	orch      *ai.Orchestrator
 	wsHandler *ai.WSHandler
 	bookmarks *ai.BookmarkStore
+	sanitizer *bluemonday.Policy
 }
 
 // RegisterUIRoutes registers all routes and returns the handler.
@@ -30,6 +33,7 @@ func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, ws
 		orch:      orch,
 		wsHandler: wsHandler,
 		bookmarks: bookmarks,
+		sanitizer: ai.NewSanitizer(),
 	}
 
 	// Favicon
@@ -116,7 +120,9 @@ func (h *UIHandler) CreateBookmark(c echo.Context) error {
 	if strings.TrimSpace(req.Question) == "" {
 		return echo.NewHTTPError(400, "question is required")
 	}
-	b, err := h.bookmarks.Create(req.Question, req.AnswerHTML)
+	// Sanitize HTML to prevent stored XSS
+	answerHTML := h.sanitizer.Sanitize(req.AnswerHTML)
+	b, err := h.bookmarks.Create(req.Question, answerHTML)
 	if err != nil {
 		slog.Error("create bookmark failed", "err", err)
 		return echo.NewHTTPError(500, "failed to create bookmark")
@@ -152,5 +158,9 @@ func (h *UIHandler) Suggestions(c echo.Context) error {
 // renderTempl renders a templ component.
 func renderTempl(c echo.Context, component templ.Component) error {
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTML)
-	return component.Render(c.Request().Context(), c.Response().Writer)
+	if err := component.Render(c.Request().Context(), c.Response().Writer); err != nil {
+		slog.Error("template render failed", "err", err)
+		return err
+	}
+	return nil
 }

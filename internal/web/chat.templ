@@ -1076,8 +1076,26 @@ templ Chat(data ChatData) {
 					};
 
 					window.loadBookmark = function(id) {
-						// For now just close drawer - could restore answer
-						document.getElementById('bookmarks-drawer').hide();
+						fetch('/api/bookmarks', { headers: authHeaders() })
+							.then(r => {
+								if (r.status === 401 || r.status === 403) throw new Error('auth');
+								if (!r.ok) throw new Error('HTTP ' + r.status);
+								return r.json();
+							})
+							.then(list => {
+								const b = list.find(x => x.id === id);
+								if (!b) { showToast('Bookmark not found', 'warning'); return; }
+								document.getElementById('bookmarks-drawer').hide();
+								startAiMessage();
+								if (b.answer_html) addCard(b.answer_html);
+								finishAiMessage();
+								showToast('Loaded bookmark', 'success');
+							})
+							.catch((e) => {
+								console.error('Failed to load bookmark:', e);
+								if (e.message === 'auth') { promptForToken(); return; }
+								showToast('Failed to load bookmark', 'danger');
+							});
 					};
 
 					// Connect WebSocket

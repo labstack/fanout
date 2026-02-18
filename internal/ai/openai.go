@@ -62,7 +62,7 @@ func (p *OpenAIProvider) Stream(ctx context.Context, params StreamParams, cb Str
 
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("openai API error %d: %s", resp.StatusCode, string(b))
+		return &APIError{StatusCode: resp.StatusCode, Body: string(b)}
 	}
 
 	return p.parseSSE(resp.Body, cb)
@@ -197,7 +197,7 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 				slog.Error("too many SSE parse failures", "err", err, "consecutive", parseErrors)
 				return fmt.Errorf("SSE parse: %d consecutive failures: %w", parseErrors, err)
 			}
-			slog.Debug("failed to parse SSE event", "err", err)
+			slog.Warn("failed to parse SSE event", "err", err)
 			continue
 		}
 		parseErrors = 0 // reset on successful parse
@@ -297,13 +297,14 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return err
+		return fmt.Errorf("openai SSE read: %w", err)
 	}
 
-	// Ensure EventStop is always emitted, even if stream ended unexpectedly
+	// If stream ended without a stop event, report as error rather than
+	// fabricating a successful end_turn (which hides truncated responses).
 	if !gotStop {
 		slog.Error("openai SSE stream ended without finish_reason — response may be incomplete")
-		return cb(StreamEvent{Type: EventStop, StopReason: "end_turn"})
+		return cb(StreamEvent{Type: EventError, Error: "Response incomplete — stream ended unexpectedly"})
 	}
 
 	return nil

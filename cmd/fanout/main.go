@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -30,6 +31,8 @@ import (
 	"github.com/labstack/fanout/internal/service"
 	"github.com/labstack/fanout/internal/web"
 )
+
+var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -120,9 +123,7 @@ func main() {
 		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
 			uri := v.URI
 			if strings.Contains(uri, "token=") {
-				if idx := strings.Index(uri, "?"); idx >= 0 {
-					uri = uri[:idx] + "?token=REDACTED"
-				}
+				uri = tokenRedactRe.ReplaceAllString(uri, "token=REDACTED")
 			}
 			slog.Info("request", "method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency)
 			return nil

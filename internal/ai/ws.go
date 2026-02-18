@@ -164,7 +164,9 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 		if err != nil && ctx.Err() == nil {
 			slog.Error("orchestrator error", "err", err)
 			// Ensure client gets a done event so UI doesn't stay stuck
-			_ = s.send(ClientEvent{Type: CEDone, ID: "error"})
+			if sendErr := s.send(ClientEvent{Type: CEDone, ID: "error"}); sendErr != nil {
+				slog.Warn("failed to send done-on-error to client", "err", sendErr)
+			}
 		}
 
 		// Write back updated conversation (with assistant/tool messages added)
@@ -190,7 +192,9 @@ func (s *chatSession) send(event ClientEvent) error {
 }
 
 func (s *chatSession) sendError(msg string) {
-	_ = s.send(ClientEvent{Type: CEError, Error: msg})
+	if err := s.send(ClientEvent{Type: CEError, Error: msg}); err != nil {
+		slog.Warn("failed to send error to client", "msg", msg, "err", err)
+	}
 }
 
 // trimConversation keeps the conversation manageable.

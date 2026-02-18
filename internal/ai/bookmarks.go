@@ -97,13 +97,13 @@ func (s *BookmarkStore) List() ([]Bookmark, error) {
 
 		data, err := os.ReadFile(filepath.Join(s.dir, entry.Name()))
 		if err != nil {
-			slog.Warn("failed to read bookmark file", "file", entry.Name(), "err", err)
+			slog.Error("failed to read bookmark file", "file", entry.Name(), "err", err)
 			continue
 		}
 
 		var b Bookmark
 		if err := json.Unmarshal(data, &b); err != nil {
-			slog.Warn("failed to parse bookmark file", "file", entry.Name(), "err", err)
+			slog.Error("corrupt bookmark file", "file", entry.Name(), "err", err)
 			continue
 		}
 		bookmarks = append(bookmarks, b)

@@ -1,6 +1,9 @@
 package ai
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // Role identifies the sender of a message.
 type Role string
@@ -86,6 +89,16 @@ type ToolResult struct {
 	ToolCallID string
 	Content    string // JSON result
 	IsError    bool
+}
+
+// APIError represents an HTTP error from an LLM provider.
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("API error %d: %s", e.StatusCode, e.Body)
 }
 
 // ToolDef describes a tool available to the LLM.

@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -30,15 +31,9 @@ type Orchestrator struct {
 	servicesStale time.Time
 }
 
-// NewOrchestrator creates an orchestrator with the given provider and tools.
-// Panics if provider or tools are nil.
-func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Service, cfg config.Config) *Orchestrator {
-	if provider == nil {
-		panic("ai: NewOrchestrator called with nil provider")
-	}
-	if tools == nil {
-		panic("ai: NewOrchestrator called with nil tools")
-	}
+// NewSanitizer creates the shared bluemonday HTML sanitizer policy.
+// Used by both the Orchestrator and the UI handler for bookmark sanitization.
+func NewSanitizer() *bluemonday.Policy {
 	p := bluemonday.UGCPolicy()
 	// Allow Shoelace custom elements
 	p.AllowElements("sl-card", "sl-badge", "sl-tag", "sl-icon", "sl-progress-bar",
@@ -70,13 +65,25 @@ func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Servic
 		"fill-opacity", "stroke-opacity", "stroke-linecap", "stroke-linejoin",
 		"stroke-dasharray", "font-weight", "font-family", "letter-spacing",
 		"text-transform", "dominant-baseline", "text-decoration").Globally()
+	return p
+}
+
+// NewOrchestrator creates an orchestrator with the given provider and tools.
+// Panics if provider or tools are nil.
+func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Service, cfg config.Config) *Orchestrator {
+	if provider == nil {
+		panic("ai: NewOrchestrator called with nil provider")
+	}
+	if tools == nil {
+		panic("ai: NewOrchestrator called with nil tools")
+	}
 
 	return &Orchestrator{
 		provider:  provider,
 		tools:     tools,
 		svc:       svc,
 		cfg:       cfg,
-		sanitizer: p,
+		sanitizer: NewSanitizer(),
 	}
 }
 
@@ -121,6 +128,7 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		var textBuf strings.Builder
 		var toolCalls []ToolCall
 		var stopReason string
+		var hadError bool
 
 		err := o.provider.Stream(ctx, StreamParams{
 			System:    system,
@@ -149,6 +157,7 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 				return nil
 
 			case EventError:
+				hadError = true
 				return send(ClientEvent{Type: CEError, Error: event.Error})
 
 			default:
@@ -159,15 +168,15 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 
 		if err != nil {
 			slog.Error("provider stream error", "err", err, "iteration", i)
-			// Provide more specific error messages based on the error
 			errMsg := "LLM request failed"
-			errStr := err.Error()
+			var apiErr *APIError
+			isAPIErr := errors.As(err, &apiErr)
 			switch {
 			case ctx.Err() != nil:
 				errMsg = "Request cancelled"
-			case strings.Contains(errStr, "API error 401") || strings.Contains(errStr, "API error 403"):
+			case isAPIErr && (apiErr.StatusCode == 401 || apiErr.StatusCode == 403):
 				errMsg = "LLM authentication failed — check AI_API_KEY"
-			case strings.Contains(errStr, "API error 429"):
+			case isAPIErr && apiErr.StatusCode == 429:
 				errMsg = "LLM rate limited — please try again shortly"
 			}
 			if sendErr := send(ClientEvent{Type: CEError, Error: errMsg}); sendErr != nil {
@@ -176,11 +185,17 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			return conversation, err
 		}
 
+		// If the provider emitted an error event (e.g. premature stream end),
+		// don't send CEDone — the client already received CEError.
+		if hadError {
+			return conversation, fmt.Errorf("provider emitted error event (already sent to client)")
+		}
+
 		// Record assistant message
 		conversation = append(conversation, AssistantMessage(textBuf.String(), toolCalls))
 
-		// If no tool calls, we're done
-		if stopReason == "end_turn" || len(toolCalls) == 0 {
+		// If the LLM didn't request tool use, we're done
+		if stopReason != "tool_use" {
 			if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}); err != nil {
 				return conversation, err
 			}
