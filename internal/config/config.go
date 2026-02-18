@@ -17,11 +17,15 @@ type Config struct {
 	MaxRows        int       // 50000 per file
 	APIToken       string    // bearer for API (optional)
 	RollupEvery    int       // seconds
-	MCPEnabled     bool      // enable MCP server
 	RetentionDays  int       // days to keep data (0 = forever)
 	RetentionHours int       // how often to check retention (hours)
 	TenantID       uuid.UUID // tenant identifier (UUIDv7)
 	DefaultNS      string    // default namespace if not set
+	// AI chat
+	AIProvider string // anthropic or openai
+	AIAPIKey   string // LLM API key
+	AIModel    string // model ID override
+	AIBaseURL  string // base URL override (OpenAI-compatible)
 }
 
 func Load() Config {
@@ -33,11 +37,14 @@ func Load() Config {
 		MaxRows:        getenvInt("MAX_ROWS", 50000),
 		APIToken:       os.Getenv("API_TOKEN"),
 		RollupEvery:    getenvInt("ROLLUP_EVERY", 60),
-		MCPEnabled:     getenvBool("MCP_ENABLED", true),
 		RetentionDays:  getenvInt("RETENTION_DAYS", 30),
 		RetentionHours: getenvInt("RETENTION_HOURS", 1),
 		TenantID:       getenvUUID("TENANT_ID"),
 		DefaultNS:      getenv("DEFAULT_NAMESPACE", "default"),
+		AIProvider:     getenv("AI_PROVIDER", "anthropic"),
+		AIAPIKey:       os.Getenv("AI_API_KEY"),
+		AIModel:        os.Getenv("AI_MODEL"),
+		AIBaseURL:      os.Getenv("AI_BASE_URL"),
 	}
 	if err := cfg.Validate(); err != nil {
 		slog.Error("invalid config", "err", err)

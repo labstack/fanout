@@ -20,12 +20,12 @@ import (
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip" // Register gzip decompressor
 
+	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/lake"
-	"github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
 )
@@ -132,6 +132,16 @@ func main() {
 				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" {
 					return next(c)
 				}
+
+				// WebSocket: accept token via query param since browsers can't set headers
+				if path == "/ws/chat" {
+					token := c.QueryParam("token")
+					if subtle.ConstantTimeCompare([]byte(token), tokenBytes) != 1 {
+						return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+					}
+					return next(c)
+				}
+
 				auth := c.Request().Header.Get("Authorization")
 				if !strings.HasPrefix(auth, "Bearer ") {
 					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
@@ -151,22 +161,39 @@ func main() {
 	// Prometheus metrics (internal/ops)
 	e.GET("/-/metrics", echo.WrapHandler(promhttp.Handler()))
 
-	// Create shared service layer (used by both UI and MCP)
+	// Create shared service layer
 	svc := service.New(q, cfg)
 
-	// UI routes (Templ + HTMX + Vega-Lite)
-	uiHandler := api.RegisterUIRoutes(e, svc, cfg)
-	uiHandler.SetDetector(detector)
+	// AI orchestrator (optional — needs API key)
+	var orch *ai.Orchestrator
+	var wsHandler *ai.WSHandler
 
-	// MCP server (Model Context Protocol)
-	if cfg.MCPEnabled {
-		mcpServer := mcp.NewServer(svc, q, cfg)
-		mcpServer.RegisterRoutes(e)
-		slog.Info("MCP server enabled", "path", "/mcp")
+	if cfg.AIAPIKey != "" {
+		var provider ai.Provider
+		switch cfg.AIProvider {
+		case "openai":
+			provider = ai.NewOpenAIProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
+			slog.Info("AI provider: OpenAI", "model", cfg.AIModel)
+		default:
+			provider = ai.NewAnthropicProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
+			slog.Info("AI provider: Anthropic", "model", cfg.AIModel)
+		}
 
-		// Start report cleanup goroutine
-		go mcp.RunCleanup(ctx)
+		tools := ai.NewToolRegistry(svc, q, cfg.LakeDir)
+		orch = ai.NewOrchestrator(provider, tools, svc, cfg)
+		wsHandler = ai.NewWSHandler(orch)
+	} else {
+		slog.Warn("AI_API_KEY not set — chat disabled, ingest + health active")
 	}
+
+	bookmarks, err := ai.NewBookmarkStore(cfg.LakeDir)
+	if err != nil {
+		slog.Error("bookmarks init failed", "err", err)
+		os.Exit(1)
+	}
+
+	// UI routes (chat page + WebSocket + bookmarks + suggestions)
+	api.RegisterUIRoutes(e, cfg, orch, wsHandler, bookmarks)
 
 	// Run HTTP
 	go func() {
