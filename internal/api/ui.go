@@ -2,6 +2,7 @@ package api
 
 import (
 	_ "embed"
+	"log/slog"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
@@ -15,10 +16,10 @@ var faviconSVG []byte
 
 // UIHandler handles the chat UI and API routes.
 type UIHandler struct {
-	cfg        config.Config
-	orch       *ai.Orchestrator
-	wsHandler  *ai.WSHandler
-	bookmarks  *ai.BookmarkStore
+	cfg       config.Config
+	orch      *ai.Orchestrator
+	wsHandler *ai.WSHandler
+	bookmarks *ai.BookmarkStore
 }
 
 // RegisterUIRoutes registers all routes and returns the handler.
@@ -68,9 +69,9 @@ func (h *UIHandler) ChatPage(c echo.Context) error {
 	}
 
 	data := web.ChatData{
-		HasAPIKey:   h.cfg.AIAPIKey != "",
+		HasAPIKey: h.cfg.AIAPIKey != "",
+		NeedsAuth: h.cfg.APIToken != "",
 		Suggestions: suggestions,
-		APIToken:    h.cfg.APIToken,
 	}
 
 	return renderTempl(c, web.Chat(data))
@@ -91,7 +92,8 @@ func (h *UIHandler) ListBookmarks(c echo.Context) error {
 	}
 	bookmarks, err := h.bookmarks.List()
 	if err != nil {
-		return echo.NewHTTPError(500, err.Error())
+		slog.Error("list bookmarks failed", "err", err)
+		return echo.NewHTTPError(500, "failed to list bookmarks")
 	}
 	return c.JSON(200, bookmarks)
 }
@@ -110,7 +112,8 @@ func (h *UIHandler) CreateBookmark(c echo.Context) error {
 	}
 	b, err := h.bookmarks.Create(req.Question, req.AnswerHTML)
 	if err != nil {
-		return echo.NewHTTPError(500, err.Error())
+		slog.Error("create bookmark failed", "err", err)
+		return echo.NewHTTPError(500, "failed to create bookmark")
 	}
 	return c.JSON(201, b)
 }
@@ -122,7 +125,8 @@ func (h *UIHandler) DeleteBookmark(c echo.Context) error {
 	}
 	id := c.Param("id")
 	if err := h.bookmarks.Delete(id); err != nil {
-		return echo.NewHTTPError(404, err.Error())
+		slog.Warn("delete bookmark failed", "id", id, "err", err)
+		return echo.NewHTTPError(404, "bookmark not found")
 	}
 	return c.NoContent(204)
 }

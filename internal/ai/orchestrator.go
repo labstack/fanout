@@ -31,7 +31,14 @@ type Orchestrator struct {
 }
 
 // NewOrchestrator creates an orchestrator with the given provider and tools.
+// Panics if provider or tools are nil.
 func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Service, cfg config.Config) *Orchestrator {
+	if provider == nil {
+		panic("ai: NewOrchestrator called with nil provider")
+	}
+	if tools == nil {
+		panic("ai: NewOrchestrator called with nil tools")
+	}
 	p := bluemonday.UGCPolicy()
 	// Allow Shoelace custom elements
 	p.AllowElements("sl-card", "sl-badge", "sl-tag", "sl-icon", "sl-progress-bar",
@@ -60,19 +67,22 @@ func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Servic
 	}
 }
 
+// ClientEventType identifies the kind of event sent to the browser.
+type ClientEventType = string
+
 // ClientEvent type constants.
 const (
-	CEToken      = "token"
-	CEToolCall   = "tool_call"
-	CEToolResult = "tool_result"
-	CECard       = "card"
-	CEError      = "error"
-	CEDone       = "done"
+	CEToken      ClientEventType = "token"
+	CEToolCall   ClientEventType = "tool_call"
+	CEToolResult ClientEventType = "tool_result"
+	CECard       ClientEventType = "card"
+	CEError      ClientEventType = "error"
+	CEDone       ClientEventType = "done"
 )
 
 // ClientEvent is sent from the orchestrator to the WebSocket client.
 type ClientEvent struct {
-	Type    string `json:"type"`              // CEToken, CEToolCall, CEToolResult, CECard, CEError, CEDone
+	Type    ClientEventType `json:"type"`  // CEToken, CEToolCall, CEToolResult, CECard, CEError, CEDone
 	Content string `json:"content,omitempty"` // text content
 	Name    string `json:"name,omitempty"`    // tool name
 	Input   string `json:"input,omitempty"`   // tool input (for display)
@@ -136,17 +146,23 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 
 		if err != nil {
 			slog.Error("provider stream error", "err", err, "iteration", i)
-			_ = send(ClientEvent{Type: CEError, Error: "LLM request failed"})
+			// Provide more specific error messages based on the error
+			errMsg := "LLM request failed"
+			errStr := err.Error()
+			switch {
+			case strings.Contains(errStr, "401") || strings.Contains(errStr, "403"):
+				errMsg = "LLM authentication failed — check AI_API_KEY"
+			case strings.Contains(errStr, "429"):
+				errMsg = "LLM rate limited — please try again shortly"
+			case ctx.Err() != nil:
+				errMsg = "Request cancelled"
+			}
+			_ = send(ClientEvent{Type: CEError, Error: errMsg})
 			return conversation, err
 		}
 
 		// Record assistant message
-		assistantMsg := Message{
-			Role:      RoleAssistant,
-			Content:   textBuf.String(),
-			ToolCalls: toolCalls,
-		}
-		conversation = append(conversation, assistantMsg)
+		conversation = append(conversation, AssistantMessage(textBuf.String(), toolCalls))
 
 		// If no tool calls, we're done
 		if stopReason == "end_turn" || len(toolCalls) == 0 {
@@ -171,30 +187,24 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			if tc.Name == "render" && !isError {
 				sanitized := o.sanitizer.Sanitize(result)
 				if sendErr := send(ClientEvent{Type: CECard, HTML: sanitized}); sendErr != nil {
-					slog.Warn("send card failed", "err", sendErr)
+					return conversation, sendErr
 				}
 				result = `{"rendered": true}`
 			} else {
 				if sendErr := send(ClientEvent{Type: CEToolResult, Name: tc.Name}); sendErr != nil {
-					slog.Warn("send tool_result failed", "err", sendErr)
+					return conversation, sendErr
 				}
 			}
 
 			// Add tool result to conversation
-			conversation = append(conversation, Message{
-				Role: RoleTool,
-				ToolResult: &ToolResult{
-					ToolCallID: tc.ID,
-					Content:    truncateResult(result, 30000),
-					IsError:    isError,
-				},
-			})
+			conversation = append(conversation, ToolMessage(tc.ID, truncateResult(result, 30000), isError))
 		}
 
 		// Loop back for next LLM call with tool results
 	}
 
 	slog.Warn("orchestrator hit max iterations", "max", maxIterations)
+	_ = send(ClientEvent{Type: CEToken, Content: "\n\n*Reached maximum tool iterations. Please refine your question for more details.*"})
 	_ = send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())})
 	return conversation, nil
 }

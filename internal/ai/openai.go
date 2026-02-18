@@ -154,6 +154,8 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 		args strings.Builder
 	}
 	toolCalls := make(map[int]*toolCallAcc)
+	var gotStop bool
+	var parseErrors int
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -185,9 +187,15 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 		}
 
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+			parseErrors++
+			if parseErrors >= 5 {
+				slog.Error("too many SSE parse failures", "err", err, "consecutive", parseErrors)
+				return fmt.Errorf("SSE parse: %d consecutive failures: %w", parseErrors, err)
+			}
 			slog.Debug("failed to parse SSE event", "err", err)
 			continue
 		}
+		parseErrors = 0 // reset on successful parse
 
 		if len(chunk.Choices) == 0 {
 			continue
@@ -240,10 +248,12 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 					}
 				}
 				toolCalls = make(map[int]*toolCallAcc)
+				gotStop = true
 				if err := cb(StreamEvent{Type: EventStop, StopReason: "tool_use"}); err != nil {
 					return err
 				}
 			case "stop":
+				gotStop = true
 				if err := cb(StreamEvent{Type: EventStop, StopReason: "end_turn"}); err != nil {
 					return err
 				}
@@ -251,5 +261,15 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 		}
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	// Ensure EventStop is always emitted, even if stream ended unexpectedly
+	if !gotStop {
+		slog.Warn("openai SSE stream ended without finish_reason")
+		return cb(StreamEvent{Type: EventStop, StopReason: "end_turn"})
+	}
+
+	return nil
 }

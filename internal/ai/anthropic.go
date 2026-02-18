@@ -91,9 +91,9 @@ func (p *AnthropicProvider) buildRequest(params StreamParams) map[string]any {
 				for _, tc := range m.ToolCalls {
 					var input any
 					if err := json.Unmarshal([]byte(tc.Input), &input); err != nil {
-					slog.Warn("failed to parse tool call input for request", "tool", tc.Name, "err", err)
-					input = map[string]any{}
-				}
+						slog.Warn("failed to parse tool call input for request", "tool", tc.Name, "err", err)
+						input = map[string]any{}
+					}
 					content = append(content, map[string]any{
 						"type":  "tool_use",
 						"id":    tc.ID,
@@ -159,6 +159,8 @@ func (p *AnthropicProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 	// State for accumulating tool use input
 	var currentToolID, currentToolName string
 	var toolInputBuf strings.Builder
+	var gotStop bool
+	var parseErrors int
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -187,17 +189,20 @@ func (p *AnthropicProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 				Type        string `json:"type"`
 				Text        string `json:"text"`
 				PartialJSON string `json:"partial_json"`
+				StopReason  string `json:"stop_reason"`
 			} `json:"delta"`
-			// message_delta
-			Message struct {
-				StopReason string `json:"stop_reason"`
-			} `json:"message"`
 		}
 
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			parseErrors++
+			if parseErrors >= 5 {
+				slog.Error("too many SSE parse failures", "err", err, "consecutive", parseErrors)
+				return fmt.Errorf("SSE parse: %d consecutive failures: %w", parseErrors, err)
+			}
 			slog.Debug("failed to parse SSE event", "err", err)
 			continue
 		}
+		parseErrors = 0 // reset on successful parse
 
 		switch event.Type {
 		case "content_block_start":
@@ -239,17 +244,9 @@ func (p *AnthropicProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 			}
 
 		case "message_delta":
-			stopReason := event.Delta.Text
-			// message_delta has stop_reason in the delta
-			var msgDelta struct {
-				Delta struct {
-					StopReason string `json:"stop_reason"`
-				} `json:"delta"`
-			}
-			if err := json.Unmarshal([]byte(data), &msgDelta); err == nil && msgDelta.Delta.StopReason != "" {
-				stopReason = msgDelta.Delta.StopReason
-			}
-			if err := cb(StreamEvent{Type: EventStop, StopReason: stopReason}); err != nil {
+			// stop_reason is in the delta object
+			gotStop = true
+			if err := cb(StreamEvent{Type: EventStop, StopReason: event.Delta.StopReason}); err != nil {
 				return err
 			}
 
@@ -269,5 +266,15 @@ func (p *AnthropicProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 		}
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	// Ensure EventStop is always emitted, even if stream ended unexpectedly
+	if !gotStop {
+		slog.Warn("anthropic SSE stream ended without message_delta")
+		return cb(StreamEvent{Type: EventStop, StopReason: "end_turn"})
+	}
+
+	return nil
 }

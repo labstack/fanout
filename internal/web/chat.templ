@@ -4,8 +4,8 @@ import "strings"
 
 type ChatData struct {
 	HasAPIKey   bool
+	NeedsAuth   bool
 	Suggestions []string
-	APIToken    string
 }
 
 templ Chat(data ChatData) {
@@ -424,9 +424,13 @@ templ Chat(data ChatData) {
 				<div id="bookmarks-list"></div>
 				<sl-button slot="footer" variant="primary" onclick="document.getElementById('bookmarks-drawer').hide()">Close</sl-button>
 			</sl-drawer>
-			<!-- API token for WS auth (empty string if no auth) -->
+			<!-- Auth config -->
 			<script id="cfg" type="application/json">
-				{ escapeJSONString(data.APIToken) }
+				if data.NeedsAuth {
+					{ "{\"needsAuth\":true}" }
+				} else {
+					{ "{\"needsAuth\":false}" }
+				}
 			</script>
 			<script>
 				(function() {
@@ -445,11 +449,22 @@ templ Chat(data ChatData) {
 						localStorage.setItem('theme', isDark ? 'light' : 'dark');
 					});
 
-					// Config
-					const apiToken = (function() {
+					// Config — token stored in localStorage, never embedded in HTML
+					const cfg = (function() {
 						try { return JSON.parse(document.getElementById('cfg').textContent); }
-						catch(e) { return ''; }
+						catch(e) { return { needsAuth: false }; }
 					})();
+
+					function getApiToken() {
+						if (!cfg.needsAuth) return '';
+						return localStorage.getItem('fanout_token') || '';
+					}
+
+					function authHeaders() {
+						const token = getApiToken();
+						if (!token) return {};
+						return { 'Authorization': 'Bearer ' + token };
+					}
 
 					// WebSocket
 					const messagesEl = document.getElementById('messages');
@@ -461,19 +476,65 @@ templ Chat(data ChatData) {
 					let currentTextEl = null;
 					let textBuffer = '';
 					let rafPending = false;
+					let reconnectDelay = 1000;
+					const maxReconnectDelay = 30000;
 
 					function connect() {
 						const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
 						let url = proto + '//' + location.host + '/ws/chat';
-						if (apiToken) url += '?token=' + encodeURIComponent(apiToken);
+						const token = getApiToken();
+						if (token) url += '?token=' + encodeURIComponent(token);
 						ws = new WebSocket(url);
+						ws.onopen = () => {
+							reconnectDelay = 1000;
+							updateConnectionStatus(true);
+						};
 						ws.onmessage = handleEvent;
-						ws.onclose = () => { setTimeout(connect, 2000); };
+						ws.onclose = (e) => {
+							updateConnectionStatus(false);
+							// Auth failure — prompt for token
+							if (e.code === 1008 || e.code === 4401) {
+								promptForToken();
+								return;
+							}
+							setTimeout(connect, reconnectDelay);
+							reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
+						};
 						ws.onerror = () => { ws.close(); };
 					}
 
+					function updateConnectionStatus(connected) {
+						let indicator = document.getElementById('ws-status');
+						if (!indicator) {
+							indicator = document.createElement('div');
+							indicator.id = 'ws-status';
+							indicator.style.cssText = 'position:fixed;bottom:60px;right:1rem;font-size:0.7rem;color:var(--text-muted);display:flex;align-items:center;gap:0.25rem;';
+							document.body.appendChild(indicator);
+						}
+						if (connected) {
+							indicator.style.display = 'none';
+						} else {
+							indicator.style.display = 'flex';
+							indicator.innerHTML = '<span style="width:6px;height:6px;background:var(--warning);border-radius:50%;"></span> Reconnecting...';
+						}
+					}
+
+					function promptForToken() {
+						const token = prompt('Enter API token:');
+						if (token) {
+							localStorage.setItem('fanout_token', token);
+							connect();
+						}
+					}
+
 					function handleEvent(e) {
-						const data = JSON.parse(e.data);
+						let data;
+						try {
+							data = JSON.parse(e.data);
+						} catch(err) {
+							console.error('failed to parse WS message:', err);
+							return;
+						}
 						switch (data.type) {
 							case 'token':
 								if (!currentAiMsg) startAiMessage();
@@ -592,6 +653,15 @@ templ Chat(data ChatData) {
 					function getLastUserMessage() {
 						const msgs = messagesInner.querySelectorAll('.msg-user .msg-content');
 						return msgs.length > 0 ? msgs[msgs.length - 1].textContent : '';
+					}
+
+					function showToast(message, variant) {
+						const toast = Object.assign(document.createElement('sl-alert'), {
+							variant: variant || 'primary', closable: true, duration: 3000,
+							innerHTML: '<sl-icon name="' + (variant === 'danger' ? 'exclamation-triangle' : 'check2-circle') + '" slot="icon"></sl-icon> ' + escapeHtml(message)
+						});
+						document.body.appendChild(toast);
+						toast.toast();
 					}
 
 					// Send message
@@ -749,7 +819,7 @@ templ Chat(data ChatData) {
 									el.style.cssText = 'display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.8rem;min-height:100px;';
 								}
 							});
-						}).catch(() => {});
+						}).catch((e) => { console.error('Failed to load Vega libraries:', e); });
 					}
 
 					// MutationObserver for auto-upgrading Vega charts in dynamically added content
@@ -771,7 +841,7 @@ templ Chat(data ChatData) {
 					});
 
 					function loadBookmarks() {
-						fetch('/api/bookmarks')
+						fetch('/api/bookmarks', { headers: authHeaders() })
 							.then(r => r.json())
 							.then(bookmarks => {
 								const list = document.getElementById('bookmarks-list');
@@ -788,28 +858,36 @@ templ Chat(data ChatData) {
 									'</div></div>'
 								).join('');
 							})
-							.catch(() => {});
+							.catch((e) => {
+								console.error('Failed to load bookmarks:', e);
+								showToast('Failed to load bookmarks', 'danger');
+							});
 					}
 
 					window.saveBookmark = function(question, html) {
 						fetch('/api/bookmarks', {
 							method: 'POST',
-							headers: { 'Content-Type': 'application/json' },
+							headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
 							body: JSON.stringify({ question: question, answer_html: html })
-						}).then(() => {
-							const toast = Object.assign(document.createElement('sl-alert'), {
-								variant: 'success', closable: true, duration: 3000,
-								innerHTML: '<sl-icon name="check2-circle" slot="icon"></sl-icon> Bookmark saved'
-							});
-							document.body.appendChild(toast);
-							toast.toast();
-						}).catch(() => {});
+						}).then(r => {
+							if (!r.ok) throw new Error('save failed');
+							showToast('Bookmark saved', 'success');
+						}).catch((e) => {
+							console.error('Failed to save bookmark:', e);
+							showToast('Failed to save bookmark', 'danger');
+						});
 					};
 
 					window.deleteBookmark = function(id) {
-						fetch('/api/bookmarks/' + id, { method: 'DELETE' })
-							.then(() => loadBookmarks())
-							.catch(() => {});
+						fetch('/api/bookmarks/' + id, { method: 'DELETE', headers: authHeaders() })
+							.then(r => {
+								if (!r.ok) throw new Error('delete failed');
+								loadBookmarks();
+							})
+							.catch((e) => {
+								console.error('Failed to delete bookmark:', e);
+								showToast('Failed to delete bookmark', 'danger');
+							});
 					};
 
 					window.loadBookmark = function(id) {
@@ -819,7 +897,11 @@ templ Chat(data ChatData) {
 
 					// Connect WebSocket
 					if (document.querySelector('[id="chat-input"]:not([disabled])')) {
-						connect();
+						if (cfg.needsAuth && !getApiToken()) {
+							promptForToken();
+						} else {
+							connect();
+						}
 					}
 				})();
 			</script>
@@ -836,10 +918,3 @@ func escapeJS(s string) string {
 	return s
 }
 
-func escapeJSONString(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	s = strings.ReplaceAll(s, "<", "\\u003c")
-	s = strings.ReplaceAll(s, ">", "\\u003e")
-	return "\"" + s + "\""
-}

@@ -310,7 +310,9 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 		return marshal(res)
 	})
 
-	// The render tool — LLM generates HTML, we sanitize and pass through
+	// The render tool — LLM generates HTML, we sanitize and pass through.
+	// SECURITY: The raw HTML returned here is sanitized by the orchestrator
+	// (via bluemonday) before being sent to the browser. Never bypass sanitization.
 	r.register(ToolDef{
 		Name:        "render",
 		Description: "Display rich HTML visualization inline in chat. Generate HTML using Shoelace web components, CSS custom properties, and Vega-Lite specs. The HTML will be shown as a card in the conversation.",
@@ -324,7 +326,6 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 		if err := json.Unmarshal(input, &p); err != nil {
 			return "", fmt.Errorf("invalid input: %w", err)
 		}
-		// Sanitization happens in the orchestrator before sending to client
 		return p.HTML, nil
 	})
 
@@ -352,6 +353,9 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawM
 }
 
 func (r *ToolRegistry) register(def ToolDef, handler ToolHandler) {
+	if _, exists := r.handlers[def.Name]; exists {
+		panic("ai: duplicate tool registration: " + def.Name)
+	}
 	r.defs = append(r.defs, def)
 	r.handlers[def.Name] = handler
 }

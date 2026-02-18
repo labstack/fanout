@@ -109,6 +109,8 @@ func (s *chatSession) run() error {
 				s.cancel()
 			}
 			s.mu.Unlock()
+		default:
+			slog.Debug("unknown client message type", "type", msg.Type)
 		}
 	}
 }
@@ -188,11 +190,12 @@ func (s *chatSession) send(event ClientEvent) error {
 }
 
 func (s *chatSession) sendError(msg string) {
-	_ = s.send(ClientEvent{Type: "error", Error: msg})
+	_ = s.send(ClientEvent{Type: CEError, Error: msg})
 }
 
 // trimConversation keeps the conversation manageable.
-// Keeps the last N messages, dropping oldest entries.
+// Trims to approximately maxMessages, cutting at a RoleUser boundary
+// to avoid orphaning tool_use/tool_result pairs.
 // Must be called with s.mu held.
 func (s *chatSession) trimConversation() {
 	const maxMessages = 40
@@ -201,5 +204,21 @@ func (s *chatSession) trimConversation() {
 		return
 	}
 
-	s.messages = s.messages[len(s.messages)-maxMessages:]
+	// Start from the target cut point and scan forward to find the first
+	// RoleUser message, which is always a safe boundary.
+	start := len(s.messages) - maxMessages
+	for start < len(s.messages) {
+		if s.messages[start].Role == RoleUser {
+			break
+		}
+		start++
+	}
+
+	// If we couldn't find a safe boundary, keep everything (shouldn't happen
+	// in practice since conversations always start with a user message).
+	if start >= len(s.messages) {
+		return
+	}
+
+	s.messages = s.messages[start:]
 }

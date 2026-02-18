@@ -37,7 +37,8 @@ type StreamParams struct {
 // StreamCallback receives streaming events from a Provider. The provider must:
 //   - Emit zero or more EventText events with text deltas
 //   - Emit zero or more EventToolUse events (ToolCall must be non-nil)
-//   - Emit exactly one EventStop as the final event
+//   - Emit exactly one EventStop OR EventError as the final event
+//   - EventError is terminal: the provider must return after emitting it
 //   - Stop streaming if the callback returns a non-nil error
 type StreamCallback func(event StreamEvent) error
 
@@ -54,8 +55,23 @@ type StreamEvent struct {
 type Message struct {
 	Role       Role
 	Content    string
-	ToolCalls  []ToolCall   // assistant tool calls
-	ToolResult *ToolResult  // tool result
+	ToolCalls  []ToolCall  // assistant tool calls
+	ToolResult *ToolResult // tool result
+}
+
+// UserMessage creates a user message.
+func UserMessage(content string) Message {
+	return Message{Role: RoleUser, Content: content}
+}
+
+// AssistantMessage creates an assistant message with optional tool calls.
+func AssistantMessage(content string, toolCalls []ToolCall) Message {
+	return Message{Role: RoleAssistant, Content: content, ToolCalls: toolCalls}
+}
+
+// ToolMessage creates a tool result message.
+func ToolMessage(toolCallID, content string, isError bool) Message {
+	return Message{Role: RoleTool, ToolResult: &ToolResult{ToolCallID: toolCallID, Content: content, IsError: isError}}
 }
 
 // ToolCall is a request from the LLM to invoke a tool.

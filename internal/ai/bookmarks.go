@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,6 +28,7 @@ type Bookmark struct {
 
 // BookmarkStore manages bookmark CRUD in lake/bookmarks/.
 type BookmarkStore struct {
+	mu  sync.RWMutex
 	dir string
 }
 
@@ -38,8 +41,15 @@ func NewBookmarkStore(lakeDir string) (*BookmarkStore, error) {
 	return &BookmarkStore{dir: dir}, nil
 }
 
-// Create saves a new bookmark.
+// Create saves a new bookmark. Returns an error if question is empty.
 func (s *BookmarkStore) Create(question, answerHTML string) (*Bookmark, error) {
+	if strings.TrimSpace(question) == "" {
+		return nil, fmt.Errorf("bookmark question is required")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	b := &Bookmark{
 		ID:         uuid.New().String()[:8],
 		Question:   question,
@@ -68,6 +78,9 @@ func (s *BookmarkStore) Create(question, answerHTML string) (*Bookmark, error) {
 
 // List returns all bookmarks sorted by creation time (newest first).
 func (s *BookmarkStore) List() ([]Bookmark, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -105,6 +118,9 @@ func (s *BookmarkStore) List() ([]Bookmark, error) {
 
 // Delete removes a bookmark by ID.
 func (s *BookmarkStore) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if !validBookmarkID.MatchString(id) {
 		return fmt.Errorf("invalid bookmark ID: %s", id)
 	}

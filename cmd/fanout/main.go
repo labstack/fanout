@@ -129,7 +129,10 @@ func main() {
 		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(c echo.Context) error {
 				path := c.Request().URL.Path
-				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" {
+
+				// Skip auth for health, metrics, and UI page routes
+				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" ||
+					path == "/" || path == "/favicon.ico" || path == "/favicon.svg" {
 					return next(c)
 				}
 
