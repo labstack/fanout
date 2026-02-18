@@ -42,7 +42,7 @@
   }
 
   function render(container, expanded) {
-    var data = JSON.parse(container.getAttribute('data-endpoints'));
+    var data = V.util.parseData(container, 'data-endpoints');
     if (!data || !data.endpoints) return;
 
     var endpoints = data.endpoints;
@@ -63,11 +63,11 @@
       var color = ep.status === 'degraded' ? '#ef4444' : ep.errorRate > 0.3 ? '#f59e0b' : '#0ea5e9';
       html += '<tr>' +
         '<td class="endpoint-name"><code>' + V.util.escapeHtml(ep.method) + '</code> ' + V.util.escapeHtml(ep.path) + '</td>' +
-        '<td class="num">' + ep.rpm + '</td>' +
-        '<td class="num">' + ep.p50 + 'ms</td>' +
-        '<td class="num" style="color:' + (ep.p95 > 200 ? '#ef4444' : ep.p95 > 100 ? '#f59e0b' : 'inherit') + '">' + ep.p95 + 'ms</td>' +
-        '<td class="num" style="color:' + (ep.p99 > 500 ? '#ef4444' : ep.p99 > 200 ? '#f59e0b' : 'inherit') + '">' + ep.p99 + 'ms</td>' +
-        '<td class="num" style="color:' + (ep.errorRate > 1 ? '#ef4444' : ep.errorRate > 0.3 ? '#f59e0b' : 'inherit') + '">' + ep.errorRate + '%</td>' +
+        '<td class="num">' + V.util.escapeHtml(String(ep.rpm)) + '</td>' +
+        '<td class="num">' + V.util.escapeHtml(String(ep.p50)) + 'ms</td>' +
+        '<td class="num" style="color:' + (ep.p95 > 200 ? '#ef4444' : ep.p95 > 100 ? '#f59e0b' : 'inherit') + '">' + V.util.escapeHtml(String(ep.p95)) + 'ms</td>' +
+        '<td class="num" style="color:' + (ep.p99 > 500 ? '#ef4444' : ep.p99 > 200 ? '#f59e0b' : 'inherit') + '">' + V.util.escapeHtml(String(ep.p99)) + 'ms</td>' +
+        '<td class="num" style="color:' + (ep.errorRate > 1 ? '#ef4444' : ep.errorRate > 0.3 ? '#f59e0b' : 'inherit') + '">' + V.util.escapeHtml(String(ep.errorRate)) + '%</td>' +
         '<td class="sparkline-cell">' + sparklineSVG(ep.trend, color, expanded) + '</td>' +
         '<td>' + statusPill(ep.status, ep.errorRate) + '</td>' +
       '</tr>';

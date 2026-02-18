@@ -158,6 +158,17 @@
       var d = document.createElement('div');
       d.textContent = s;
       return d.innerHTML;
+    },
+    parseData: function(container, attr) {
+      var raw = container.getAttribute(attr);
+      if (!raw) return null;
+      try {
+        return JSON.parse(raw);
+      } catch (e) {
+        container.innerHTML = '<div style="color:var(--danger);font-size:0.8rem;padding:0.5rem">Chart data could not be parsed</div>';
+        console.error('FanoutViz: invalid JSON in ' + attr + ':', e);
+        return null;
+      }
     }
   };
 

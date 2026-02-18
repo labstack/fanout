@@ -3,7 +3,7 @@
   var V = window.FanoutViz;
 
   function render(container, expanded) {
-    var data = JSON.parse(container.getAttribute('data-flow'));
+    var data = V.util.parseData(container, 'data-flow');
     if (!data || !data.nodes) return;
 
     var nodes = data.nodes;
@@ -117,7 +117,7 @@
       var labelY = pos.y + pos.h / 2;
 
       svg += '<text class="sankey-node-label" x="' + labelX + '" y="' + (labelY - 4) + '" text-anchor="' + anchor + '">' + V.util.escapeHtml(n.label) + '</text>';
-      svg += '<text class="sankey-node-value" x="' + labelX + '" y="' + (labelY + 9) + '" text-anchor="' + anchor + '">' + n.rpm + ' rpm</text>';
+      svg += '<text class="sankey-node-value" x="' + labelX + '" y="' + (labelY + 9) + '" text-anchor="' + anchor + '">' + V.util.escapeHtml(String(n.rpm)) + ' rpm</text>';
     });
 
     svg += '</svg>';
@@ -133,7 +133,7 @@
       if (!l) return;
       V.tooltip.show(
         '<div class="tt-title">' + V.util.escapeHtml(l.source) + ' \u2192 ' + V.util.escapeHtml(l.target) + '</div>' +
-        '<div class="tt-row"><span>Volume</span><span class="tt-val">' + l.value + ' rpm</span></div>',
+        '<div class="tt-row"><span>Volume</span><span class="tt-val">' + V.util.escapeHtml(String(l.value)) + ' rpm</span></div>',
         ev
       );
     });

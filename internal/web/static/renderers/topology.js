@@ -3,7 +3,7 @@
   var V = window.FanoutViz;
 
   function render(container, expanded) {
-    var data = JSON.parse(container.getAttribute('data-graph'));
+    var data = V.util.parseData(container, 'data-graph');
     if (!data || !data.nodes) return;
 
     var nodes = data.nodes;
@@ -123,10 +123,10 @@
         if (!n) return;
         V.tooltip.show(
           '<div class="tt-title">' + V.util.escapeHtml(n.id) + '</div>' +
-          '<div class="tt-row"><span>Status</span><span class="tt-val" style="color:' + V.colors.statusHex(n.status) + '">' + n.status + '</span></div>' +
-          '<div class="tt-row"><span>Throughput</span><span class="tt-val">' + n.rpm + ' rpm</span></div>' +
-          '<div class="tt-row"><span>P95 Latency</span><span class="tt-val">' + n.p95 + 'ms</span></div>' +
-          '<div class="tt-row"><span>Error Rate</span><span class="tt-val">' + n.errors + '%</span></div>',
+          '<div class="tt-row"><span>Status</span><span class="tt-val" style="color:' + V.colors.statusHex(n.status) + '">' + V.util.escapeHtml(String(n.status)) + '</span></div>' +
+          '<div class="tt-row"><span>Throughput</span><span class="tt-val">' + V.util.escapeHtml(String(n.rpm)) + ' rpm</span></div>' +
+          '<div class="tt-row"><span>P95 Latency</span><span class="tt-val">' + V.util.escapeHtml(String(n.p95)) + 'ms</span></div>' +
+          '<div class="tt-row"><span>Error Rate</span><span class="tt-val">' + V.util.escapeHtml(String(n.errors)) + '%</span></div>',
           ev
         );
         return;
@@ -138,8 +138,8 @@
         if (!edge) return;
         V.tooltip.show(
           '<div class="tt-title">' + V.util.escapeHtml(edge.source) + ' \u2192 ' + V.util.escapeHtml(edge.target) + '</div>' +
-          '<div class="tt-row"><span>Volume</span><span class="tt-val">' + edge.rpm + ' rpm</span></div>' +
-          '<div class="tt-row"><span>Error Rate</span><span class="tt-val" style="color:' + (edge.errorRate > 1 ? '#f59e0b' : 'inherit') + '">' + edge.errorRate + '%</span></div>',
+          '<div class="tt-row"><span>Volume</span><span class="tt-val">' + V.util.escapeHtml(String(edge.rpm)) + ' rpm</span></div>' +
+          '<div class="tt-row"><span>Error Rate</span><span class="tt-val" style="color:' + (edge.errorRate > 1 ? '#f59e0b' : 'inherit') + '">' + V.util.escapeHtml(String(edge.errorRate)) + '%</span></div>',
           ev
         );
       }

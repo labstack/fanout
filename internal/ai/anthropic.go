@@ -91,8 +91,8 @@ func (p *AnthropicProvider) buildRequest(params StreamParams) map[string]any {
 				for _, tc := range m.ToolCalls {
 					var input any
 					if err := json.Unmarshal([]byte(tc.Input), &input); err != nil {
-						slog.Error("failed to parse tool call input for request", "tool", tc.Name, "input", tc.Input, "err", err)
-						input = map[string]any{}
+						slog.Error("corrupt tool call input, using raw string", "tool", tc.Name, "err", err)
+						input = map[string]any{"_raw": tc.Input}
 					}
 					content = append(content, map[string]any{
 						"type":  "tool_use",

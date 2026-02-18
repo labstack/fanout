@@ -185,9 +185,12 @@ func main() {
 		case "openai":
 			provider = ai.NewOpenAIProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
 			slog.Info("AI provider: OpenAI", "model", cfg.AIModel)
-		default:
+		case "anthropic", "":
 			provider = ai.NewAnthropicProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
 			slog.Info("AI provider: Anthropic", "model", cfg.AIModel)
+		default:
+			slog.Error("unsupported AI_PROVIDER", "value", cfg.AIProvider, "supported", "anthropic, openai")
+			os.Exit(1)
 		}
 
 		tools := ai.NewToolRegistry(svc, q, cfg.LakeDir)
@@ -237,5 +240,7 @@ func main() {
 	grpcSrv.GracefulStop()
 	ctxShutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelShutdown()
-	_ = e.Shutdown(ctxShutdown)
+	if err := e.Shutdown(ctxShutdown); err != nil {
+		slog.Warn("HTTP server shutdown error", "err", err)
+	}
 }

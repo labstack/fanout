@@ -277,6 +277,21 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 				if err := cb(StreamEvent{Type: EventStop, StopReason: "end_turn"}); err != nil {
 					return err
 				}
+			case "length":
+				slog.Warn("openai response truncated (max_tokens reached)")
+				gotStop = true
+				if err := cb(StreamEvent{Type: EventStop, StopReason: "end_turn"}); err != nil {
+					return err
+				}
+			case "content_filter":
+				gotStop = true
+				return cb(StreamEvent{Type: EventError, Error: "Response blocked by content filter"})
+			default:
+				slog.Warn("unrecognized finish_reason from OpenAI", "reason", *choice.FinishReason)
+				gotStop = true
+				if err := cb(StreamEvent{Type: EventStop, StopReason: "end_turn"}); err != nil {
+					return err
+				}
 			}
 		}
 	}

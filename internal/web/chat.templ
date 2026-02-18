@@ -603,6 +603,7 @@ templ Chat(data ChatData) {
 					let rafPending = false;
 					let reconnectDelay = 1000;
 					const maxReconnectDelay = 30000;
+					let reconnectAttempts = 0;
 
 					function connect() {
 						const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -612,6 +613,7 @@ templ Chat(data ChatData) {
 						ws = new WebSocket(url);
 						ws.onopen = () => {
 							reconnectDelay = 1000;
+							reconnectAttempts = 0;
 							updateConnectionStatus(true);
 						};
 						ws.onmessage = handleEvent;
@@ -620,6 +622,16 @@ templ Chat(data ChatData) {
 							// Auth failure — prompt for token
 							if (e.code === 1008 || e.code === 4401) {
 								promptForToken();
+								return;
+							}
+							// HTTP 401 during WS upgrade results in code 1006 on first attempt
+							if (e.code === 1006 && reconnectAttempts === 0 && cfg.needsAuth) {
+								promptForToken();
+								return;
+							}
+							reconnectAttempts++;
+							if (reconnectAttempts > 20) {
+								addError('Connection lost. Please reload the page.');
 								return;
 							}
 							setTimeout(connect, reconnectDelay);
@@ -967,7 +979,10 @@ templ Chat(data ChatData) {
 						text = escapeHtml(text);
 						text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 						text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
-						text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+						text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, label, url) {
+							if (!/^(https?:\/\/|\/)/i.test(url.trim())) return label;
+							return '<a href="' + url + '" target="_blank" rel="noopener">' + label + '</a>';
+						});
 						// Restore inline code placeholders that survived escaping
 						text = text.replace(/__IC(\d+)__/g, function(_, idx) { return inlineCode[idx]; });
 						return text;

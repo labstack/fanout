@@ -14,7 +14,7 @@
   }
 
   function render(container, expanded) {
-    var data = JSON.parse(container.getAttribute('data-heatmap'));
+    var data = V.util.parseData(container, 'data-heatmap');
     if (!data) return;
 
     var buckets = data.buckets;
@@ -84,8 +84,8 @@
       var d = container._data;
       var val = d.values[ti].slice().reverse()[bi];
       V.tooltip.show(
-        '<div class="tt-title">' + d.times[ti] + ' \u00b7 ' + d.reversedBuckets[bi] + 'ms</div>' +
-        '<div class="tt-row"><span>Requests</span><span class="tt-val">' + val + '</span></div>',
+        '<div class="tt-title">' + V.util.escapeHtml(String(d.times[ti])) + ' \u00b7 ' + V.util.escapeHtml(String(d.reversedBuckets[bi])) + 'ms</div>' +
+        '<div class="tt-row"><span>Requests</span><span class="tt-val">' + V.util.escapeHtml(String(val)) + '</span></div>',
         ev
       );
     });

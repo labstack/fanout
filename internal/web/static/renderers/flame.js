@@ -14,7 +14,7 @@
   };
 
   function render(container, expanded) {
-    var frames = JSON.parse(container.getAttribute('data-frames'));
+    var frames = V.util.parseData(container, 'data-frames');
     if (!frames || frames.length === 0) return;
 
     var totalW = expanded ? 1200 : 780;

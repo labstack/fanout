@@ -3,7 +3,7 @@
   var V = window.FanoutViz;
 
   function render(container, expanded) {
-    var spans = JSON.parse(container.getAttribute('data-spans'));
+    var spans = V.util.parseData(container, 'data-spans');
     if (!spans || spans.length === 0) return;
 
     // Build tree
@@ -81,7 +81,7 @@
       svg += '<rect class="wf-span-bar" x="' + barX + '" y="' + (y + 4) + '" width="' + barW + '" height="' + (rowH - 8) + '" fill="' + color + '" data-idx="' + idx + '" />';
 
       // Duration label
-      svg += '<text class="wf-span-dur" x="' + (barX + barW + 6) + '" y="' + (y + rowH / 2 + 3) + '">' + span.dur + 'ms</text>';
+      svg += '<text class="wf-span-dur" x="' + (barX + barW + 6) + '" y="' + (y + rowH / 2 + 3) + '">' + V.util.escapeHtml(String(span.dur)) + 'ms</text>';
 
       svg += '</g>';
     });
@@ -107,10 +107,10 @@
       if (!s) return;
       V.tooltip.show(
         '<div class="tt-title">' + V.util.escapeHtml(s.service) + ': ' + V.util.escapeHtml(s.op) + '</div>' +
-        '<div class="tt-row"><span>Duration</span><span class="tt-val">' + s.dur + 'ms</span></div>' +
-        '<div class="tt-row"><span>Start</span><span class="tt-val">' + s.start + 'ms</span></div>' +
-        '<div class="tt-row"><span>Status</span><span class="tt-val" style="color:' + V.colors.statusHex(s.status) + '">' + s.status + '</span></div>' +
-        '<div class="tt-row"><span>Span ID</span><span class="tt-val">' + s.id + '</span></div>',
+        '<div class="tt-row"><span>Duration</span><span class="tt-val">' + V.util.escapeHtml(String(s.dur)) + 'ms</span></div>' +
+        '<div class="tt-row"><span>Start</span><span class="tt-val">' + V.util.escapeHtml(String(s.start)) + 'ms</span></div>' +
+        '<div class="tt-row"><span>Status</span><span class="tt-val" style="color:' + V.colors.statusHex(s.status) + '">' + V.util.escapeHtml(String(s.status)) + '</span></div>' +
+        '<div class="tt-row"><span>Span ID</span><span class="tt-val">' + V.util.escapeHtml(String(s.id)) + '</span></div>',
         e
       );
     });

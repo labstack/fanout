@@ -3,7 +3,7 @@
   var V = window.FanoutViz;
 
   function render(container, expanded) {
-    var data = JSON.parse(container.getAttribute('data-barchart'));
+    var data = V.util.parseData(container, 'data-barchart');
     if (!data || !data.bars || data.bars.length === 0) return;
 
     var bars = data.bars;

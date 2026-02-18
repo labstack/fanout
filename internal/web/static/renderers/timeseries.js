@@ -3,7 +3,7 @@
   var V = window.FanoutViz;
 
   function render(container, expanded) {
-    var data = JSON.parse(container.getAttribute('data-timeseries'));
+    var data = V.util.parseData(container, 'data-timeseries');
     if (!data || !data.series || data.series.length === 0) return;
 
     var series = data.series;

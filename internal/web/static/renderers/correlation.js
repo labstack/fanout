@@ -9,7 +9,7 @@
   }
 
   function render(container, expanded) {
-    var data = JSON.parse(container.getAttribute('data-correlation'));
+    var data = V.util.parseData(container, 'data-correlation');
     if (!data || !data.panels) return;
 
     var times = data.times;
@@ -115,9 +115,9 @@
       var sevColor = m.severity === 'critical' ? '#ef4444' : '#f59e0b';
       V.tooltip.show(
         '<div class="tt-title">' + V.util.escapeHtml(m.label) + '</div>' +
-        '<div class="tt-row"><span>Severity</span><span class="tt-val" style="color:' + sevColor + '">' + m.severity + '</span></div>' +
-        '<div class="tt-row"><span>Time</span><span class="tt-val">' + container._data.times[m.t] + '</span></div>' +
-        '<div class="tt-row"><span>Value</span><span class="tt-val">' + panel.values[m.t] + '</span></div>',
+        '<div class="tt-row"><span>Severity</span><span class="tt-val" style="color:' + sevColor + '">' + V.util.escapeHtml(String(m.severity)) + '</span></div>' +
+        '<div class="tt-row"><span>Time</span><span class="tt-val">' + V.util.escapeHtml(String(container._data.times[m.t])) + '</span></div>' +
+        '<div class="tt-row"><span>Value</span><span class="tt-val">' + V.util.escapeHtml(String(panel.values[m.t])) + '</span></div>',
         ev
       );
     });

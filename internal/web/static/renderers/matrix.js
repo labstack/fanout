@@ -12,7 +12,7 @@
   }
 
   function render(container, expanded) {
-    var data = JSON.parse(container.getAttribute('data-matrix'));
+    var data = V.util.parseData(container, 'data-matrix');
     if (!data) return;
 
     var services = data.services;
@@ -57,7 +57,7 @@
           svg += '<rect class="dm-cell" x="' + (x + 0.5) + '" y="' + (y + 0.5) + '" width="' + (cellSize - 1) + '" height="' + (cellSize - 1) + '" fill="' + color + '" rx="2" ry="2"' +
             ' data-from="' + V.util.escapeHtml(from) + '" data-to="' + V.util.escapeHtml(to) + '" />';
           if (cellSize >= 36) {
-            svg += '<text class="dm-value" x="' + (x + cellSize/2) + '" y="' + (y + cellSize/2 + 3) + '">' + cell.errorRate + '%</text>';
+            svg += '<text class="dm-value" x="' + (x + cellSize/2) + '" y="' + (y + cellSize/2 + 3) + '">' + V.util.escapeHtml(String(cell.errorRate)) + '%</text>';
           }
         } else {
           svg += '<rect x="' + (x + 0.5) + '" y="' + (y + 0.5) + '" width="' + (cellSize - 1) + '" height="' + (cellSize - 1) + '" fill="var(--bg-primary)" rx="2" ry="2" opacity="0.5"/>';
@@ -93,9 +93,9 @@
       if (!cell) return;
       V.tooltip.show(
         '<div class="tt-title">' + V.util.escapeHtml(from) + ' \u2192 ' + V.util.escapeHtml(to) + '</div>' +
-        '<div class="tt-row"><span>Error Rate</span><span class="tt-val" style="color:' + (cell.errorRate > 1 ? '#ef4444' : cell.errorRate > 0.5 ? '#f59e0b' : 'inherit') + '">' + cell.errorRate + '%</span></div>' +
-        '<div class="tt-row"><span>Volume</span><span class="tt-val">' + cell.rpm + ' rpm</span></div>' +
-        '<div class="tt-row"><span>P95 Latency</span><span class="tt-val">' + cell.p95 + 'ms</span></div>',
+        '<div class="tt-row"><span>Error Rate</span><span class="tt-val" style="color:' + (cell.errorRate > 1 ? '#ef4444' : cell.errorRate > 0.5 ? '#f59e0b' : 'inherit') + '">' + V.util.escapeHtml(String(cell.errorRate)) + '%</span></div>' +
+        '<div class="tt-row"><span>Volume</span><span class="tt-val">' + V.util.escapeHtml(String(cell.rpm)) + ' rpm</span></div>' +
+        '<div class="tt-row"><span>P95 Latency</span><span class="tt-val">' + V.util.escapeHtml(String(cell.p95)) + 'ms</span></div>',
         ev
       );
     });
