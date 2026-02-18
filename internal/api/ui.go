@@ -3,6 +3,7 @@ package api
 import (
 	_ "embed"
 	"log/slog"
+	"strings"
 
 	"github.com/a-h/templ"
 	"github.com/labstack/echo/v4"
@@ -69,8 +70,8 @@ func (h *UIHandler) ChatPage(c echo.Context) error {
 	}
 
 	data := web.ChatData{
-		HasAPIKey: h.cfg.AIAPIKey != "",
-		NeedsAuth: h.cfg.APIToken != "",
+		HasAPIKey:   h.cfg.AIAPIKey != "",
+		NeedsAuth:   h.cfg.APIToken != "",
 		Suggestions: suggestions,
 	}
 
@@ -110,6 +111,9 @@ func (h *UIHandler) CreateBookmark(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(400, "invalid request")
 	}
+	if strings.TrimSpace(req.Question) == "" {
+		return echo.NewHTTPError(400, "question is required")
+	}
 	b, err := h.bookmarks.Create(req.Question, req.AnswerHTML)
 	if err != nil {
 		slog.Error("create bookmark failed", "err", err)
@@ -125,8 +129,12 @@ func (h *UIHandler) DeleteBookmark(c echo.Context) error {
 	}
 	id := c.Param("id")
 	if err := h.bookmarks.Delete(id); err != nil {
-		slog.Warn("delete bookmark failed", "id", id, "err", err)
-		return echo.NewHTTPError(404, "bookmark not found")
+		errStr := err.Error()
+		if strings.Contains(errStr, "not found") || strings.Contains(errStr, "invalid bookmark ID") {
+			return echo.NewHTTPError(404, "bookmark not found")
+		}
+		slog.Error("delete bookmark failed", "id", id, "err", err)
+		return echo.NewHTTPError(500, "failed to delete bookmark")
 	}
 	return c.NoContent(204)
 }

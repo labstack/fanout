@@ -184,6 +184,10 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 				} `json:"delta"`
 				FinishReason *string `json:"finish_reason"`
 			} `json:"choices"`
+			Error *struct {
+				Message string `json:"message"`
+				Type    string `json:"type"`
+			} `json:"error"`
 		}
 
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
@@ -196,6 +200,15 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 			continue
 		}
 		parseErrors = 0 // reset on successful parse
+
+		// Handle mid-stream error events
+		if chunk.Error != nil {
+			errMsg := chunk.Error.Message
+			if errMsg == "" {
+				errMsg = "unknown OpenAI stream error"
+			}
+			return cb(StreamEvent{Type: EventError, Error: errMsg})
+		}
 
 		if len(chunk.Choices) == 0 {
 			continue

@@ -68,7 +68,7 @@ func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Servic
 }
 
 // ClientEventType identifies the kind of event sent to the browser.
-type ClientEventType = string
+type ClientEventType string
 
 // ClientEvent type constants.
 const (
@@ -82,13 +82,13 @@ const (
 
 // ClientEvent is sent from the orchestrator to the WebSocket client.
 type ClientEvent struct {
-	Type    ClientEventType `json:"type"`  // CEToken, CEToolCall, CEToolResult, CECard, CEError, CEDone
-	Content string `json:"content,omitempty"` // text content
-	Name    string `json:"name,omitempty"`    // tool name
-	Input   string `json:"input,omitempty"`   // tool input (for display)
-	HTML    string `json:"html,omitempty"`    // sanitized HTML for cards
-	Error   string `json:"error,omitempty"`   // error message
-	ID      string `json:"id,omitempty"`      // response ID
+	Type    ClientEventType `json:"type"`              // CEToken, CEToolCall, CEToolResult, CECard, CEError, CEDone
+	Content string          `json:"content,omitempty"` // text content
+	Name    string          `json:"name,omitempty"`    // tool name
+	Input   string          `json:"input,omitempty"`   // tool input (for display)
+	HTML    string          `json:"html,omitempty"`    // sanitized HTML for cards
+	Error   string          `json:"error,omitempty"`   // error message
+	ID      string          `json:"id,omitempty"`      // response ID
 }
 
 // SendFunc writes a client event to the WebSocket.
@@ -150,12 +150,12 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			errMsg := "LLM request failed"
 			errStr := err.Error()
 			switch {
-			case strings.Contains(errStr, "401") || strings.Contains(errStr, "403"):
-				errMsg = "LLM authentication failed — check AI_API_KEY"
-			case strings.Contains(errStr, "429"):
-				errMsg = "LLM rate limited — please try again shortly"
 			case ctx.Err() != nil:
 				errMsg = "Request cancelled"
+			case strings.Contains(errStr, "API error 401") || strings.Contains(errStr, "API error 403"):
+				errMsg = "LLM authentication failed — check AI_API_KEY"
+			case strings.Contains(errStr, "API error 429"):
+				errMsg = "LLM rate limited — please try again shortly"
 			}
 			_ = send(ClientEvent{Type: CEError, Error: errMsg})
 			return conversation, err
@@ -166,7 +166,9 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 
 		// If no tool calls, we're done
 		if stopReason == "end_turn" || len(toolCalls) == 0 {
-			_ = send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())})
+			if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}); err != nil {
+				return conversation, err
+			}
 			return conversation, nil
 		}
 
@@ -204,8 +206,12 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	}
 
 	slog.Warn("orchestrator hit max iterations", "max", maxIterations)
-	_ = send(ClientEvent{Type: CEToken, Content: "\n\n*Reached maximum tool iterations. Please refine your question for more details.*"})
-	_ = send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())})
+	if err := send(ClientEvent{Type: CEToken, Content: "\n\n*Reached maximum tool iterations. Please refine your question for more details.*"}); err != nil {
+		return conversation, err
+	}
+	if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}); err != nil {
+		return conversation, err
+	}
 	return conversation, nil
 }
 

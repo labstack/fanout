@@ -138,10 +138,7 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 	doneCh := s.done
 
 	// Add user message to conversation
-	s.messages = append(s.messages, Message{
-		Role:    RoleUser,
-		Content: msg.Content,
-	})
+	s.messages = append(s.messages, UserMessage(msg.Content))
 
 	// Copy messages for the goroutine (orchestrator may append to the slice)
 	msgs := make([]Message, len(s.messages))
@@ -194,7 +191,7 @@ func (s *chatSession) sendError(msg string) {
 }
 
 // trimConversation keeps the conversation manageable.
-// Trims to approximately maxMessages, cutting at a RoleUser boundary
+// Trims to at most maxMessages, cutting at a RoleUser boundary
 // to avoid orphaning tool_use/tool_result pairs.
 // Must be called with s.mu held.
 func (s *chatSession) trimConversation() {

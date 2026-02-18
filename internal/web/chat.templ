@@ -1,6 +1,9 @@
 package web
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 type ChatData struct {
 	HasAPIKey   bool
@@ -365,7 +368,7 @@ templ Chat(data ChatData) {
 				}
 			</style>
 		</head>
-		<body class="sl-theme-light">
+		<body class="sl-theme-light" data-needs-auth={ strconv.FormatBool(data.NeedsAuth) }>
 			<header class="header">
 				<a href="/" class="header-brand">
 					<img src="/favicon.svg" class="header-logo" alt="Fanout"/>
@@ -424,14 +427,6 @@ templ Chat(data ChatData) {
 				<div id="bookmarks-list"></div>
 				<sl-button slot="footer" variant="primary" onclick="document.getElementById('bookmarks-drawer').hide()">Close</sl-button>
 			</sl-drawer>
-			<!-- Auth config -->
-			<script id="cfg" type="application/json">
-				if data.NeedsAuth {
-					{ "{\"needsAuth\":true}" }
-				} else {
-					{ "{\"needsAuth\":false}" }
-				}
-			</script>
 			<script>
 				(function() {
 					// Theme
@@ -449,11 +444,8 @@ templ Chat(data ChatData) {
 						localStorage.setItem('theme', isDark ? 'light' : 'dark');
 					});
 
-					// Config — token stored in localStorage, never embedded in HTML
-					const cfg = (function() {
-						try { return JSON.parse(document.getElementById('cfg').textContent); }
-						catch(e) { return { needsAuth: false }; }
-					})();
+					// Config — read from data attribute on body, token stored in localStorage
+					const cfg = { needsAuth: body.dataset.needsAuth === 'true' };
 
 					function getApiToken() {
 						if (!cfg.needsAuth) return '';
@@ -519,11 +511,17 @@ templ Chat(data ChatData) {
 						}
 					}
 
+					let authPromptShown = false;
 					function promptForToken() {
+						if (authPromptShown) return;
+						authPromptShown = true;
 						const token = prompt('Enter API token:');
 						if (token) {
 							localStorage.setItem('fanout_token', token);
+							authPromptShown = false;
 							connect();
+						} else {
+							showToast('Authentication required — reload to try again', 'warning');
 						}
 					}
 
@@ -564,6 +562,8 @@ templ Chat(data ChatData) {
 								finishAiMessage();
 								enableInput();
 								break;
+							default:
+								console.debug('unknown event type:', data.type);
 						}
 					}
 
@@ -842,7 +842,7 @@ templ Chat(data ChatData) {
 
 					function loadBookmarks() {
 						fetch('/api/bookmarks', { headers: authHeaders() })
-							.then(r => r.json())
+							.then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
 							.then(bookmarks => {
 								const list = document.getElementById('bookmarks-list');
 								if (!bookmarks || bookmarks.length === 0) {
@@ -917,4 +917,3 @@ func escapeJS(s string) string {
 	s = strings.ReplaceAll(s, "</", "<\\/")
 	return s
 }
-

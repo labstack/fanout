@@ -260,6 +260,7 @@ func (p *AnthropicProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 				} `json:"error"`
 			}
 			if err := json.Unmarshal([]byte(data), &errEvent); err != nil {
+				slog.Error("failed to parse Anthropic error event", "err", err, "raw", data)
 				return cb(StreamEvent{Type: EventError, Error: "unparseable error from API"})
 			}
 			return cb(StreamEvent{Type: EventError, Error: errEvent.Error.Message})
