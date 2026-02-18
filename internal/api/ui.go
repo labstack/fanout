@@ -73,6 +73,8 @@ func (h *UIHandler) ChatPage(c echo.Context) error {
 		HasAPIKey:   h.cfg.AIAPIKey != "",
 		NeedsAuth:   h.cfg.APIToken != "",
 		Suggestions: suggestions,
+		VizJSPath:   web.VizJSPath(),
+		VizCSSPath:  web.VizCSSPath(),
 	}
 
 	return renderTempl(c, web.Chat(data))

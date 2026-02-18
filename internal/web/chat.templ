@@ -9,6 +9,8 @@ type ChatData struct {
 	HasAPIKey   bool
 	NeedsAuth   bool
 	Suggestions []string
+	VizJSPath   string
+	VizCSSPath  string
 }
 
 templ Chat(data ChatData) {
@@ -21,43 +23,52 @@ templ Chat(data ChatData) {
 			<link rel="icon" type="image/svg+xml" href="/favicon.svg"/>
 			<link rel="preconnect" href="https://fonts.googleapis.com"/>
 			<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-			<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"/>
+			<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300;12..96,400;12..96,500;12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500&display=swap"/>
 			<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css" integrity="sha384-VNjXcWTFgkXi1VXtuRlXBLNB44AvISAfti9WbOPCBCiNPnUpJ6dHx1Y3XmTii9pB" crossorigin="anonymous"/>
 			<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/themes/dark.css" integrity="sha384-GWYIqFA394qpD/MvZTDi2pLPBjEux2y3wDvsvEa/s+DXOt1YxPYCRsisFUKlaJf/" crossorigin="anonymous"/>
 			<script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js" integrity="sha384-of8LXlkyMCAT14b4mQEBHRclQhowQAA+z328bANMFZBR6em9yjBEmyaeq59nXe/x" crossorigin="anonymous"></script>
+			if data.VizCSSPath != "" {
+				<link rel="stylesheet" href={ data.VizCSSPath }/>
+			}
 			<style>
 				:root {
-					--bg-primary: #f5f6f8;
+					--bg-primary: #f6f4f1;
 					--bg-secondary: #ffffff;
-					--bg-tertiary: #edf0f4;
-					--text-primary: #1a1d23;
-					--text-secondary: #5a6270;
-					--text-muted: #8b95a5;
-					--border-color: #e2e6ec;
-					--accent: #6366f1;
-					--accent-hover: #4f46e5;
-					--accent-subtle: rgba(99, 102, 241, 0.06);
-					--success: #22c55e;
-					--warning: #f59e0b;
-					--danger: #ef4444;
-					--signal-trace: #0ea5e9;
-					--signal-log: #d97706;
-					--signal-metric: #059669;
-					--signal-error: #ef4444;
-					--font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+					--bg-tertiary: #edeae4;
+					--text-primary: #1a1816;
+					--text-secondary: #635e58;
+					--text-muted: #9a958e;
+					--border-color: #ddd8d0;
+					--accent: #b87820;
+					--accent-hover: #9c6518;
+					--accent-subtle: rgba(184, 120, 32, 0.07);
+					--success: #18864a;
+					--warning: #c27a0c;
+					--danger: #c23030;
+					--signal-trace: #0972b8;
+					--signal-log: #b73c0a;
+					--signal-metric: #0c7c74;
+					--signal-error: #c23030;
+					--font-sans: 'Bricolage Grotesque', 'Helvetica Neue', Helvetica, sans-serif;
 					--font-mono: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
 					--radius: 0.5rem;
-					--transition: 120ms cubic-bezier(0.4, 0, 0.2, 1);
+					--transition: 140ms ease;
+					--shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
+					--shadow-md: 0 3px 10px rgba(0,0,0,0.06);
 				}
 				.sl-theme-dark {
-					--bg-primary: #0d1117;
-					--bg-secondary: #161b22;
-					--bg-tertiary: #21262d;
-					--text-primary: #e6edf3;
-					--text-secondary: #8b949e;
-					--text-muted: #6e7681;
-					--border-color: #30363d;
-					--accent-subtle: rgba(99, 102, 241, 0.12);
+					--bg-primary: #09090c;
+					--bg-secondary: #111318;
+					--bg-tertiary: #1a1c24;
+					--text-primary: #d4d8e1;
+					--text-secondary: #7b8296;
+					--text-muted: #4e5570;
+					--border-color: #1f2433;
+					--accent: #d4943a;
+					--accent-hover: #e8a849;
+					--accent-subtle: rgba(212, 148, 58, 0.1);
+					--shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
+					--shadow-md: 0 3px 10px rgba(0,0,0,0.3);
 				}
 				* { margin: 0; padding: 0; box-sizing: border-box; }
 				body {
@@ -67,6 +78,8 @@ templ Chat(data ChatData) {
 					height: 100vh;
 					display: flex;
 					flex-direction: column;
+					-webkit-font-smoothing: antialiased;
+					-moz-osx-font-smoothing: grayscale;
 				}
 
 				/* Header */
@@ -75,88 +88,170 @@ templ Chat(data ChatData) {
 					border-bottom: 1px solid var(--border-color);
 					display: flex;
 					align-items: center;
-					padding: 0 1rem;
-					height: 52px;
+					padding: 0 1.25rem;
+					height: 48px;
 					flex-shrink: 0;
 					gap: 0.75rem;
 				}
 				.header-brand {
-					font-size: 1rem;
+					font-size: 0.95rem;
 					font-weight: 700;
 					color: var(--text-primary);
 					text-decoration: none;
 					display: flex;
 					align-items: center;
 					gap: 0.5rem;
+					letter-spacing: -0.01em;
 				}
-				.header-logo { width: 24px; height: 24px; border-radius: 5px; }
+				.header-logo { width: 22px; height: 22px; border-radius: 4px; }
 				.header-spacer { flex: 1; }
 
 				/* Messages area */
 				#messages {
 					flex: 1;
 					overflow-y: auto;
-					padding: 1rem 0;
+					padding: 1.5rem 0;
 				}
 				.messages-inner {
-					max-width: 800px;
+					max-width: 780px;
 					margin: 0 auto;
-					padding: 0 1rem;
+					padding: 0 1.25rem;
 				}
 
 				/* Message bubbles */
-				.msg { margin-bottom: 1.5rem; }
+				.msg { margin-bottom: 1.75rem; }
 				.msg-user {
 					display: flex;
 					justify-content: flex-end;
 				}
 				.msg-user .msg-content {
 					background: var(--accent);
-					color: white;
+					color: #fff;
 					padding: 0.625rem 1rem;
-					border-radius: var(--radius) var(--radius) 0.125rem var(--radius);
-					max-width: 80%;
-					font-size: 0.9rem;
-					line-height: 1.5;
+					border-radius: var(--radius) var(--radius) 2px var(--radius);
+					max-width: 75%;
+					font-size: 0.875rem;
+					line-height: 1.6;
+					font-weight: 400;
 				}
 				.msg-ai { display: flex; flex-direction: column; gap: 0.5rem; }
 				.msg-ai .msg-text {
-					font-size: 0.9rem;
-					line-height: 1.7;
+					font-size: 0.875rem;
+					line-height: 1.75;
 					color: var(--text-primary);
 				}
-				.msg-ai .msg-text p { margin-bottom: 0.5rem; }
+				.msg-ai .msg-text p { margin-bottom: 0.75rem; }
 				.msg-ai .msg-text p:last-child { margin-bottom: 0; }
+				.msg-ai .msg-text strong { font-weight: 600; }
+				.msg-ai .msg-text em { font-style: italic; color: var(--text-secondary); }
 				.msg-ai .msg-text code {
 					background: var(--bg-tertiary);
-					padding: 0.125rem 0.375rem;
+					padding: 0.15rem 0.4rem;
 					border-radius: 0.25rem;
 					font-family: var(--font-mono);
-					font-size: 0.85em;
+					font-size: 0.8em;
+					border: 1px solid var(--border-color);
 				}
 				.msg-ai .msg-text pre {
 					background: var(--bg-tertiary);
-					padding: 0.75rem;
+					padding: 0.875rem 1rem;
 					border-radius: var(--radius);
 					overflow-x: auto;
-					margin: 0.5rem 0;
+					margin: 0.75rem 0;
+					border: 1px solid var(--border-color);
+					font-size: 0.8rem;
+					line-height: 1.6;
 				}
 				.msg-ai .msg-text pre code {
 					background: none;
 					padding: 0;
+					border: none;
 				}
-				.msg-ai .msg-text strong { font-weight: 600; }
+				/* Headings in messages */
+				.msg-ai .msg-text h1, .msg-ai .msg-text h2,
+				.msg-ai .msg-text h3, .msg-ai .msg-text h4 {
+					font-weight: 600;
+					letter-spacing: -0.02em;
+					margin: 1.25rem 0 0.5rem;
+					line-height: 1.3;
+				}
+				.msg-ai .msg-text h1:first-child, .msg-ai .msg-text h2:first-child,
+				.msg-ai .msg-text h3:first-child, .msg-ai .msg-text h4:first-child {
+					margin-top: 0;
+				}
+				.msg-ai .msg-text h1 { font-size: 1.125rem; }
+				.msg-ai .msg-text h2 { font-size: 1rem; }
+				.msg-ai .msg-text h3 { font-size: 0.9rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 500; }
+				.msg-ai .msg-text h4 { font-size: 0.85rem; color: var(--text-secondary); }
+				/* Lists */
+				.msg-ai .msg-text ul, .msg-ai .msg-text ol {
+					margin: 0.5rem 0 0.75rem;
+					padding-left: 1.5rem;
+				}
+				.msg-ai .msg-text li {
+					margin-bottom: 0.35rem;
+					line-height: 1.65;
+				}
+				.msg-ai .msg-text li:last-child { margin-bottom: 0; }
+				.msg-ai .msg-text ul li::marker { color: var(--accent); }
+				.msg-ai .msg-text ol li::marker { color: var(--accent); font-weight: 600; font-size: 0.8em; }
+				/* Blockquotes */
+				.msg-ai .msg-text blockquote {
+					border-left: 3px solid var(--accent);
+					padding: 0.5rem 0 0.5rem 1rem;
+					margin: 0.75rem 0;
+					color: var(--text-secondary);
+					font-style: italic;
+				}
+				.msg-ai .msg-text blockquote p { margin-bottom: 0.25rem; }
+				/* Horizontal rules */
+				.msg-ai .msg-text hr {
+					border: none;
+					border-top: 1px solid var(--border-color);
+					margin: 1rem 0;
+				}
+				/* Links */
+				.msg-ai .msg-text a {
+					color: var(--accent);
+					text-decoration: none;
+					border-bottom: 1px solid transparent;
+					transition: border-color var(--transition);
+				}
+				.msg-ai .msg-text a:hover { border-bottom-color: var(--accent); }
+				/* Tables in markdown */
+				.msg-ai .msg-text table {
+					width: 100%;
+					border-collapse: collapse;
+					margin: 0.75rem 0;
+					font-size: 0.825rem;
+				}
+				.msg-ai .msg-text table th, .msg-ai .msg-text table td {
+					padding: 0.5rem 0.75rem;
+					text-align: left;
+					border-bottom: 1px solid var(--border-color);
+				}
+				.msg-ai .msg-text table th {
+					font-weight: 600;
+					font-size: 0.7rem;
+					text-transform: uppercase;
+					letter-spacing: 0.04em;
+					color: var(--text-muted);
+				}
+				.msg-ai .msg-text table tr:last-child td { border-bottom: none; }
 
 				/* Tool status */
 				.tool-status {
 					display: inline-flex;
 					align-items: center;
 					gap: 0.375rem;
-					font-size: 0.75rem;
+					font-size: 0.675rem;
 					color: var(--text-muted);
-					padding: 0.25rem 0;
+					padding: 0.2rem 0;
+					font-weight: 500;
+					text-transform: uppercase;
+					letter-spacing: 0.04em;
 				}
-				.tool-status sl-spinner { font-size: 0.875rem; }
+				.tool-status sl-spinner { font-size: 0.8rem; }
 
 				/* Cards from render tool */
 				.chat-card {
@@ -164,9 +259,15 @@ templ Chat(data ChatData) {
 					border: 1px solid var(--border-color);
 					border-radius: var(--radius);
 					padding: 1rem;
-					margin: 0.5rem 0;
+					margin: 0.625rem 0;
 					overflow-x: auto;
+					box-shadow: var(--shadow-sm);
+					font-family: var(--font-sans);
+					font-size: 0.875rem;
+					line-height: 1.6;
+					color: var(--text-primary);
 				}
+				.chat-card * { font-family: inherit; }
 
 				/* Support LLM-generated styles inside cards */
 				.chat-card sl-card { display: block; width: 100%; }
@@ -176,19 +277,21 @@ templ Chat(data ChatData) {
 				}
 				.chat-card sl-card::part(body) { padding: 0.75rem; }
 				.chat-card .metric-value {
-					font-size: 1.25rem;
+					font-size: 1.125rem;
 					font-weight: 700;
 					color: var(--text-primary);
 					line-height: 1;
 					font-feature-settings: 'tnum';
+					font-family: var(--font-sans);
 				}
 				.chat-card .metric-label {
-					font-size: 0.65rem;
+					font-size: 0.625rem;
 					color: var(--text-muted);
 					margin-top: 0.25rem;
 					text-transform: uppercase;
 					letter-spacing: 0.05em;
 					font-weight: 500;
+					font-family: var(--font-sans);
 				}
 				.chat-card .table {
 					width: 100%;
@@ -203,11 +306,11 @@ templ Chat(data ChatData) {
 				.chat-card .table th {
 					font-weight: 600;
 					color: var(--text-muted);
-					font-size: 0.65rem;
+					font-size: 0.625rem;
 					text-transform: uppercase;
 					letter-spacing: 0.05em;
+					font-family: var(--font-sans);
 				}
-				.chat-card .vega-chart { min-height: 200px; }
 				.chat-card .mono {
 					font-family: var(--font-mono);
 					font-size: 0.8rem;
@@ -229,7 +332,7 @@ templ Chat(data ChatData) {
 					align-items: center;
 					gap: 0.5rem;
 					color: var(--text-muted);
-					font-size: 0.8rem;
+					font-size: 0.775rem;
 					padding: 0.5rem 0;
 				}
 				.thinking-dots {
@@ -237,16 +340,16 @@ templ Chat(data ChatData) {
 					gap: 0.25rem;
 				}
 				.thinking-dots span {
-					width: 6px;
-					height: 6px;
-					background: var(--text-muted);
+					width: 5px;
+					height: 5px;
+					background: var(--accent);
 					border-radius: 50%;
 					animation: thinking 1.4s infinite;
 				}
 				.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
 				.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
 				@keyframes thinking {
-					0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+					0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
 					40% { opacity: 1; transform: scale(1); }
 				}
 
@@ -259,15 +362,36 @@ templ Chat(data ChatData) {
 					min-height: 60vh;
 					text-align: center;
 					gap: 2rem;
+					position: relative;
+				}
+				.cold-start::before {
+					content: '';
+					position: absolute;
+					width: 480px;
+					height: 480px;
+					background: radial-gradient(circle, var(--accent-subtle) 0%, transparent 65%);
+					border-radius: 50%;
+					top: 42%;
+					left: 50%;
+					transform: translate(-50%, -50%);
+					pointer-events: none;
+					animation: cold-glow 8s ease-in-out infinite;
+				}
+				@keyframes cold-glow {
+					0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
+					50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
 				}
 				.cold-start-title {
-					font-size: 1.5rem;
+					font-size: 1.625rem;
 					font-weight: 700;
-					letter-spacing: -0.025em;
+					letter-spacing: -0.03em;
+					position: relative;
 				}
 				.cold-start-subtitle {
 					color: var(--text-secondary);
-					font-size: 0.9rem;
+					font-size: 0.875rem;
+					font-weight: 300;
+					position: relative;
 				}
 				.suggestions {
 					display: flex;
@@ -275,33 +399,38 @@ templ Chat(data ChatData) {
 					gap: 0.5rem;
 					justify-content: center;
 					max-width: 600px;
+					position: relative;
 				}
 				.suggestion-chip {
 					background: var(--bg-secondary);
 					border: 1px solid var(--border-color);
 					border-radius: 2rem;
-					padding: 0.5rem 1rem;
-					font-size: 0.85rem;
+					padding: 0.5rem 1.125rem;
+					font-size: 0.825rem;
 					color: var(--text-secondary);
 					cursor: pointer;
 					transition: all var(--transition);
 					font-family: var(--font-sans);
+					font-weight: 400;
+					box-shadow: var(--shadow-sm);
 				}
 				.suggestion-chip:hover {
 					border-color: var(--accent);
 					color: var(--accent);
 					background: var(--accent-subtle);
+					box-shadow: var(--shadow-md);
+					transform: translateY(-1px);
 				}
 
 				/* Input area */
 				.input-area {
 					background: var(--bg-secondary);
 					border-top: 1px solid var(--border-color);
-					padding: 0.75rem 1rem;
+					padding: 0.75rem 1.25rem;
 					flex-shrink: 0;
 				}
 				.input-inner {
-					max-width: 800px;
+					max-width: 780px;
 					margin: 0 auto;
 					display: flex;
 					gap: 0.5rem;
@@ -312,19 +441,20 @@ templ Chat(data ChatData) {
 					resize: none;
 					border: 1px solid var(--border-color);
 					border-radius: var(--radius);
-					padding: 0.625rem 0.75rem;
+					padding: 0.625rem 0.875rem;
 					font-family: var(--font-sans);
-					font-size: 0.9rem;
+					font-size: 0.875rem;
 					line-height: 1.5;
 					background: var(--bg-primary);
 					color: var(--text-primary);
 					outline: none;
 					min-height: 42px;
 					max-height: 200px;
-					transition: border-color var(--transition);
+					transition: border-color var(--transition), box-shadow var(--transition);
 				}
 				.input-inner textarea:focus {
 					border-color: var(--accent);
+					box-shadow: 0 0 0 3px var(--accent-subtle);
 				}
 				.input-inner textarea::placeholder {
 					color: var(--text-muted);
@@ -341,11 +471,11 @@ templ Chat(data ChatData) {
 					align-items: center;
 					justify-content: center;
 					flex-shrink: 0;
-					transition: background var(--transition);
+					transition: all var(--transition);
 				}
-				#send-btn:hover { background: var(--accent-hover); }
-				#send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-				#send-btn svg { width: 20px; height: 20px; }
+				#send-btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
+				#send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+				#send-btn svg { width: 18px; height: 18px; }
 
 				/* Setup message */
 				.setup-msg {
@@ -427,6 +557,9 @@ templ Chat(data ChatData) {
 				<div id="bookmarks-list"></div>
 				<sl-button slot="footer" variant="primary" onclick="document.getElementById('bookmarks-drawer').hide()">Close</sl-button>
 			</sl-drawer>
+			if data.VizJSPath != "" {
+				<script src={ data.VizJSPath }></script>
+			}
 			<script>
 				(function() {
 					// Theme
@@ -618,7 +751,7 @@ templ Chat(data ChatData) {
 						card.innerHTML = html;
 						if (currentAiMsg) {
 							currentAiMsg.appendChild(card);
-							initVegaCharts(card);
+							if (window.FanoutViz) FanoutViz.init(card);
 							scrollToBottom();
 						}
 					}
@@ -737,37 +870,117 @@ templ Chat(data ChatData) {
 						messagesEl.scrollTop = messagesEl.scrollHeight;
 					}
 
-					// Markdown renderer (lightweight, XSS-safe)
+					// Markdown renderer (line-based, XSS-safe)
 					function renderMarkdown(text) {
-						// Extract code blocks first to protect from escaping
-						const codeBlocks = [];
+						// 1. Extract fenced code blocks into safe placeholders
+						var codeBlocks = [];
 						text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
 							codeBlocks.push('<pre><code>' + escapeHtml(code) + '</code></pre>');
-							return '\x00CB' + (codeBlocks.length - 1) + '\x00';
+							return '\n__CB' + (codeBlocks.length - 1) + '__\n';
 						});
-						// Extract inline code
-						const inlineCode = [];
+						// 2. Extract inline code
+						var inlineCode = [];
 						text = text.replace(/`([^`]+)`/g, function(_, code) {
 							inlineCode.push('<code>' + escapeHtml(code) + '</code>');
-							return '\x00IC' + (inlineCode.length - 1) + '\x00';
+							return '__IC' + (inlineCode.length - 1) + '__';
 						});
-						// HTML-escape remaining text to prevent XSS
-						text = escapeHtml(text);
-						// Bold
-						text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-						// Italic
-						text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
-						// Line breaks to paragraphs
-						const lines = text.split('\n\n');
-						if (lines.length > 1) {
-							text = lines.map(function(l) { return '<p>' + l.replace(/\n/g, '<br>') + '</p>'; }).join('');
-						} else {
-							text = text.replace(/\n/g, '<br>');
+						// 3. Normalize: ensure headings start on their own line
+						text = text.replace(/([^\n])(#{1,4}\s)/g, '$1\n$2');
+						// 4. Line-by-line parsing
+						var lines = text.split('\n');
+						var html = '';
+						var i = 0;
+						while (i < lines.length) {
+							var line = lines[i];
+							// Skip blank lines
+							if (line.trim() === '') { i++; continue; }
+							// Code block placeholder
+							var cbMatch = line.trim().match(/^__CB(\d+)__$/);
+							if (cbMatch) { html += codeBlocks[cbMatch[1]]; i++; continue; }
+							// Heading
+							var hMatch = line.match(/^(#{1,4})\s+(.+)$/);
+							if (hMatch) {
+								var lvl = hMatch[1].length;
+								html += '<h' + lvl + '>' + inlineFmt(hMatch[2]) + '</h' + lvl + '>';
+								i++; continue;
+							}
+							// Horizontal rule
+							if (/^[-*_]{3,}\s*$/.test(line.trim())) { html += '<hr>'; i++; continue; }
+							// Blockquote
+							if (/^>\s?/.test(line)) {
+								var bq = [];
+								while (i < lines.length && /^>\s?/.test(lines[i])) {
+									bq.push(lines[i].replace(/^>\s?/, ''));
+									i++;
+								}
+								html += '<blockquote><p>' + inlineFmt(bq.join('<br>')) + '</p></blockquote>';
+								continue;
+							}
+							// Unordered list
+							if (/^\s*[-*+]\s/.test(line)) {
+								html += '<ul>';
+								while (i < lines.length && /^\s*[-*+]\s/.test(lines[i])) {
+									html += '<li>' + inlineFmt(lines[i].replace(/^\s*[-*+]\s/, '')) + '</li>';
+									i++;
+								}
+								html += '</ul>';
+								continue;
+							}
+							// Ordered list
+							if (/^\s*\d+[.)]\s/.test(line)) {
+								html += '<ol>';
+								while (i < lines.length && /^\s*\d+[.)]\s/.test(lines[i])) {
+									html += '<li>' + inlineFmt(lines[i].replace(/^\s*\d+[.)]\s/, '')) + '</li>';
+									i++;
+								}
+								html += '</ol>';
+								continue;
+							}
+							// Table
+							if (i + 1 < lines.length && line.indexOf('|') !== -1 && /^\|?[\s-:|]+\|?$/.test(lines[i + 1])) {
+								var tLines = [];
+								while (i < lines.length && lines[i].indexOf('|') !== -1) { tLines.push(lines[i]); i++; }
+								html += renderTable(tLines);
+								continue;
+							}
+							// Paragraph: collect consecutive non-special lines
+							var para = [];
+							while (i < lines.length && lines[i].trim() !== '' &&
+								!/^#{1,4}\s/.test(lines[i]) && !/^\s*[-*+]\s/.test(lines[i]) &&
+								!/^\s*\d+[.)]\s/.test(lines[i]) && !/^>\s?/.test(lines[i]) &&
+								!/^[-*_]{3,}\s*$/.test(lines[i].trim()) && !/^__CB\d+__$/.test(lines[i].trim()) &&
+								!(i + 1 < lines.length && lines[i].indexOf('|') !== -1 && /^\|?[\s-:|]+\|?$/.test(lines[i + 1]))) {
+								para.push(lines[i]);
+								i++;
+							}
+							if (para.length) html += '<p>' + inlineFmt(para.join('<br>')) + '</p>';
 						}
-						// Restore code blocks and inline code
-						text = text.replace(/\x00CB(\d+)\x00/g, function(_, i) { return codeBlocks[i]; });
-						text = text.replace(/\x00IC(\d+)\x00/g, function(_, i) { return inlineCode[i]; });
+						// 4. Restore inline code placeholders
+						html = html.replace(/__IC(\d+)__/g, function(_, idx) { return inlineCode[idx]; });
+						return html;
+					}
+
+					function inlineFmt(text) {
+						text = escapeHtml(text);
+						text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+						text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+						text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+						// Restore inline code placeholders that survived escaping
+						text = text.replace(/__IC(\d+)__/g, function(_, idx) { return inlineCode[idx]; });
 						return text;
+					}
+
+					function renderTable(tLines) {
+						var hdr = tLines[0].split('|').map(function(c) { return c.trim(); }).filter(Boolean);
+						var t = '<table><thead><tr>';
+						hdr.forEach(function(h) { t += '<th>' + inlineFmt(h) + '</th>'; });
+						t += '</tr></thead><tbody>';
+						for (var r = 2; r < tLines.length; r++) {
+							var cells = tLines[r].split('|').map(function(c) { return c.trim(); }).filter(Boolean);
+							if (cells.length) { t += '<tr>'; cells.forEach(function(c) { t += '<td>' + inlineFmt(c) + '</td>'; }); t += '</tr>'; }
+						}
+						t += '</tbody></table>';
+						return t;
 					}
 
 					function escapeHtml(s) {
@@ -776,58 +989,12 @@ templ Chat(data ChatData) {
 						return d.innerHTML;
 					}
 
-					// Vega-Lite chart initializer
-					let vegaLoadPromise = null;
-					function loadVega() {
-						if (vegaLoadPromise) return vegaLoadPromise;
-						if (window.vegaEmbed) return Promise.resolve();
-						vegaLoadPromise = new Promise(async (resolve, reject) => {
-							try {
-								await loadScript('https://cdn.jsdelivr.net/npm/vega@6.2.0', 'sha384-0Wc8+KeboSkAq/fK81pd4uFbWKu4ouB+y4KWCYxlC69hRWol7vnc6zZSruXOtc0F');
-								await loadScript('https://cdn.jsdelivr.net/npm/vega-lite@6.4.1', 'sha384-QtG7pnWvq1Tk0Rcvl53B1TEVw7U1PUqfciCz3XMUqSmi1fNpJwiv5ml+m5NeOOzH');
-								await loadScript('https://cdn.jsdelivr.net/npm/vega-embed@7.1.0', 'sha384-giTAWqsEDsWuWzWKi6NCvjgwi160SClnTYYXWPLuy/DnaQTqmk4soinrpxcCS4dx');
-								resolve();
-							} catch(e) { reject(e); }
-						});
-						return vegaLoadPromise;
-					}
-					function loadScript(src, integrity) {
-						return new Promise((resolve, reject) => {
-							const existing = document.querySelector('script[src="' + src + '"]');
-							if (existing) { if (existing._loaded) resolve(); else existing.addEventListener('load', resolve); return; }
-							const s = document.createElement('script');
-							s.src = src;
-							if (integrity) { s.integrity = integrity; s.crossOrigin = 'anonymous'; }
-							s.onload = () => { s._loaded = true; resolve(); };
-							s.onerror = reject;
-							document.head.appendChild(s);
-						});
-					}
-					function initVegaCharts(container) {
-						const els = container.querySelectorAll('.vega-chart');
-						if (els.length === 0) return;
-						loadVega().then(() => {
-							els.forEach(el => {
-								if (el._vegaInit) return;
-								el._vegaInit = true;
-								try {
-									const spec = JSON.parse(el.dataset.spec || el.getAttribute('data-spec'));
-									vegaEmbed(el, spec, { actions: false, theme: body.classList.contains('sl-theme-dark') ? 'dark' : undefined });
-								} catch(e) {
-									console.error('Vega error:', e);
-									el.textContent = 'Chart failed to load';
-									el.style.cssText = 'display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.8rem;min-height:100px;';
-								}
-							});
-						}).catch((e) => { console.error('Failed to load Vega libraries:', e); });
-					}
-
-					// MutationObserver for auto-upgrading Vega charts in dynamically added content
+					// MutationObserver for auto-initializing viz renderers in dynamically added content
 					const observer = new MutationObserver((mutations) => {
 						for (const mutation of mutations) {
 							for (const node of mutation.addedNodes) {
-								if (node.nodeType === 1) {
-									initVegaCharts(node);
+								if (node.nodeType === 1 && window.FanoutViz) {
+									FanoutViz.init(node);
 								}
 							}
 						}

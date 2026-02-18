@@ -28,6 +28,7 @@ import (
 	"github.com/labstack/fanout/internal/lake"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
+	"github.com/labstack/fanout/internal/web"
 )
 
 func main() {
@@ -132,7 +133,8 @@ func main() {
 
 				// Skip auth for health, metrics, and UI page routes
 				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" ||
-					path == "/" || path == "/favicon.ico" || path == "/favicon.svg" {
+					path == "/" || path == "/favicon.ico" || path == "/favicon.svg" ||
+					strings.HasPrefix(path, "/static/") {
 					return next(c)
 				}
 
@@ -194,6 +196,9 @@ func main() {
 		slog.Error("bookmarks init failed", "err", err)
 		os.Exit(1)
 	}
+
+	// Static viz assets (cache-busted JS/CSS bundles)
+	web.RegisterStaticRoutes(e)
 
 	// UI routes (chat page + WebSocket + bookmarks + suggestions)
 	api.RegisterUIRoutes(e, cfg, orch, wsHandler, bookmarks)

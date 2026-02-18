@@ -50,13 +50,17 @@ func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Servic
 	p.AllowAttrs("class").Globally()
 	p.AllowAttrs("slot").Globally()
 	p.AllowAttrs("variant", "size", "pill", "name", "label", "value", "open", "closable").Globally()
-	// Allow SVG for inline charts
+	// Allow SVG for inline charts and viz renderers
 	p.AllowElements("svg", "path", "line", "rect", "circle", "text", "g", "defs",
-		"linearGradient", "stop", "polyline", "polygon")
+		"linearGradient", "stop", "polyline", "polygon", "marker", "tspan")
 	p.AllowAttrs("viewBox", "xmlns", "fill", "stroke", "stroke-width", "d", "x", "y",
 		"x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height",
 		"transform", "text-anchor", "font-size", "opacity", "points",
-		"offset", "stop-color", "id", "gradientUnits").Globally()
+		"offset", "stop-color", "id", "gradientUnits",
+		"refX", "refY", "markerWidth", "markerHeight", "orient", "marker-end",
+		"fill-opacity", "stroke-opacity", "stroke-linecap", "stroke-linejoin",
+		"stroke-dasharray", "font-weight", "font-family", "letter-spacing",
+		"text-transform", "dominant-baseline", "text-decoration").Globally()
 
 	return &Orchestrator{
 		provider:  provider,
@@ -192,10 +196,11 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 					return conversation, sendErr
 				}
 				result = `{"rendered": true}`
-			} else {
-				if sendErr := send(ClientEvent{Type: CEToolResult, Name: tc.Name}); sendErr != nil {
-					return conversation, sendErr
-				}
+			}
+
+			// Always send tool_result to clear the spinner
+			if sendErr := send(ClientEvent{Type: CEToolResult, Name: tc.Name}); sendErr != nil {
+				return conversation, sendErr
 			}
 
 			// Add tool result to conversation
@@ -324,10 +329,21 @@ func (o *Orchestrator) buildSystemPrompt(ctx context.Context, window int, namesp
 	sb.WriteString("- Grid: `<div style=\"display:grid;grid-template-columns:repeat(3,1fr);gap:1rem\">`\n")
 	sb.WriteString("- Metric card: `<sl-card><div class=\"metric-value\" style=\"font-size:1.5rem;font-weight:700\">99.9%</div><div class=\"metric-label\" style=\"font-size:0.7rem;color:var(--text-muted);text-transform:uppercase\">Uptime</div></sl-card>`\n")
 	sb.WriteString("- Table: `<table class=\"table\"><thead><tr><th>Col</th></tr></thead><tbody>...</tbody></table>`\n\n")
-	sb.WriteString("**Vega-Lite Charts**: Embed as `<div class=\"vega-chart\" data-spec='JSON_SPEC_HERE'></div>`\n")
-	sb.WriteString("- Use `$schema: https://vega.github.io/schema/vega-lite/v5.json`\n")
-	sb.WriteString("- Set `width: \"container\"` and `height: 200` for responsive sizing\n")
-	sb.WriteString("- Use dark-aware colors from CSS vars or explicit hex values\n\n")
+	sb.WriteString("**Visualization Renderers** (pure SVG, zero dependencies, auto-initialized):\n")
+	sb.WriteString("Output HTML with the correct class and data attribute. Do NOT use inline event handlers (onclick, onmouseover). The viz framework handles tooltips, expand, and interactivity automatically.\n\n")
+	sb.WriteString("| Type | Class | Data Attr | Schema |\n")
+	sb.WriteString("|------|-------|-----------|--------|\n")
+	sb.WriteString("| Trace Waterfall | `trace-waterfall` | `data-spans` | `[{id, parent, service, op, start, dur, status}]` |\n")
+	sb.WriteString("| Service Topology | `topology-graph` | `data-graph` | `{nodes:[{id,status,rpm,p95,errors}], edges:[{source,target,rpm,errorRate}]}` |\n")
+	sb.WriteString("| Request Flow | `flow-sankey` | `data-flow` | `{nodes:[{id,label,rpm,status?}], links:[{source,target,value}]}` |\n")
+	sb.WriteString("| Flame Graph | `flame-graph` | `data-frames` | `[{name,depth,x,w,self,total,samples,service}]` |\n")
+	sb.WriteString("| Latency Heatmap | `latency-heatmap` | `data-heatmap` | `{buckets:[], times:[], values:[[]]}` |\n")
+	sb.WriteString("| Dependency Matrix | `dep-matrix` | `data-matrix` | `{services:[], cells:[{from,to,errorRate,rpm,p95}]}` |\n")
+	sb.WriteString("| Endpoint Breakdown | `endpoint-breakdown` | `data-endpoints` | `{endpoints:[{method,path,rpm,p50,p95,p99,errorRate,status,trend:[]}]}` |\n")
+	sb.WriteString("| Correlation View | `correlation-view` | `data-correlation` | `{times:[], panels:[{label,color,values:[],baseline?,markers?:[{t,label,severity}]}]}` |\n")
+	sb.WriteString("| Time Series | `timeseries-chart` | `data-timeseries` | `{series:[{label,color,values:[],type:\"line\"|\"area\"}], labels:[], yLabel}` |\n")
+	sb.WriteString("| Bar Chart | `bar-chart` | `data-barchart` | `{bars:[{label,value,color?}], yLabel?, horizontal?:bool}` |\n\n")
+	sb.WriteString("Wrap in a viz card: `<div class=\"viz-card\"><div class=\"viz-card-header\"><div class=\"viz-card-title\"><span class=\"signal-dot\" style=\"background:var(--signal-trace)\"></span> Title</div><div class=\"viz-card-actions\"><button class=\"btn-icon btn-viz-expand\" title=\"Expand\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 16 16\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.5\"><path d=\"M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4\"/></svg></button></div></div><div class=\"viz-card-body\"><div class=\"CLASS\" data-ATTR='JSON'></div></div></div>`\n\n")
 
 	// Response style
 	sb.WriteString("## Response Style\n")
