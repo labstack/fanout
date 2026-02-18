@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -380,8 +381,9 @@ func truncateResult(s string, maxLen int) string {
 	return s[:maxLen] + "\n\n[Result truncated. Ask the user to refine their query for more specific data.]"
 }
 
-// compactToolResults replaces tool results from older turns with short summaries,
-// keeping only the most recent tool result batch intact (the LLM may reference it).
+// compactToolResults returns a copy of the conversation with tool results from
+// older turns replaced by short summaries. The most recent tool result batch is
+// kept intact (the LLM may reference it). The original slice is not mutated.
 func compactToolResults(msgs []Message) []Message {
 	// Find the index of the last assistant message with tool calls —
 	// everything after that is the "recent batch" we preserve.
@@ -393,21 +395,27 @@ func compactToolResults(msgs []Message) []Message {
 		}
 	}
 
-	for i := range msgs {
+	out := make([]Message, len(msgs))
+	copy(out, msgs)
+
+	for i := range out {
 		if i > lastAssistantWithTools {
 			break // preserve recent batch
 		}
-		if msgs[i].Role == RoleTool && msgs[i].ToolResult != nil && !msgs[i].ToolResult.IsError {
-			if len(msgs[i].ToolResult.Content) > 200 {
-				msgs[i].ToolResult.Content = summarizeToolResult(msgs[i].ToolResult.Content)
+		if out[i].Role == RoleTool && out[i].ToolResult != nil && !out[i].ToolResult.IsError {
+			if len(out[i].ToolResult.Content) > 200 {
+				// Copy the ToolResult to avoid mutating the original
+				tr := *out[i].ToolResult
+				tr.Content = summarizeToolResult(tr.Content)
+				out[i].ToolResult = &tr
 			}
 		}
 	}
-	return msgs
+	return out
 }
 
 // summarizeToolResult produces a ~150 byte summary of a JSON tool result,
-// showing top-level key names and array lengths.
+// showing top-level key names (sorted) and array lengths.
 func summarizeToolResult(s string) string {
 	var v any
 	if err := json.Unmarshal([]byte(s), &v); err != nil {
@@ -422,13 +430,17 @@ func summarizeToolResult(s string) string {
 	sb.WriteString("{")
 	switch obj := v.(type) {
 	case map[string]any:
-		first := true
-		for k, val := range obj {
-			if !first {
+		keys := make([]string, 0, len(obj))
+		for k := range obj {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+
+		for i, k := range keys {
+			if i > 0 {
 				sb.WriteString(", ")
 			}
-			first = false
-			switch arr := val.(type) {
+			switch arr := obj[k].(type) {
 			case []any:
 				sb.WriteString(fmt.Sprintf("%q: [%d items]", k, len(arr)))
 			default:

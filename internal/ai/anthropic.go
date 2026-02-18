@@ -53,7 +53,6 @@ func (p *AnthropicProvider) Stream(ctx context.Context, params StreamParams, cb 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", p.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
-	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 
 	resp, err := p.client.Do(req)
 	if err != nil {

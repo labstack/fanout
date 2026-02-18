@@ -294,7 +294,7 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 		Description: "Execute raw SQL against DuckDB. Use for custom analysis when built-in tools aren't sufficient. Tables: service_rollup, read_parquet for spans/logs/metrics parquet files.",
 		InputSchema: jsonSchema(map[string]property{
 			"sql":      {Type: "string", Desc: "SQL query (SELECT only, 30s timeout)", Required: true},
-			"max_rows": {Type: "integer", Desc: "Maximum rows to return (default 200, max 1000)"},
+			"max_rows": {Type: "integer", Desc: "Maximum rows to return (default 200; set up to 1000 if needed)"},
 		}),
 	}, func(ctx context.Context, input json.RawMessage) (string, error) {
 		var p struct {
@@ -318,7 +318,7 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 	// SECURITY: The raw HTML returned here is sanitized by the orchestrator
 	// (via bluemonday) before being sent to the browser. Never bypass sanitization.
 	r.register(ToolDef{
-		Name:        "render",
+		Name: "render",
 		Description: `Display rich HTML visualization inline in chat. The HTML will be shown as a card in the conversation.
 
 CSS vars (light+dark): --text-primary, --text-secondary, --text-muted, --bg-primary, --bg-secondary, --bg-tertiary, --border-color, --success (#22c55e), --warning (#f59e0b), --danger (#ef4444), --signal-trace (blue), --signal-log (amber), --signal-metric (green), --signal-error (red), --font-sans, --font-mono, --radius (0.5rem).
