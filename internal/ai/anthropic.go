@@ -53,6 +53,7 @@ func (p *AnthropicProvider) Stream(ctx context.Context, params StreamParams, cb 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-api-key", p.apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
+	req.Header.Set("anthropic-beta", "prompt-caching-2024-07-31")
 
 	resp, err := p.client.Do(req)
 	if err != nil {
@@ -153,11 +154,16 @@ func (p *AnthropicProvider) buildRequest(params StreamParams) map[string]any {
 	if len(params.Tools) > 0 {
 		tools := make([]map[string]any, len(params.Tools))
 		for i, t := range params.Tools {
-			tools[i] = map[string]any{
+			tool := map[string]any{
 				"name":         t.Name,
 				"description":  t.Description,
 				"input_schema": t.InputSchema,
 			}
+			// Mark last tool with cache_control so the entire tools block is cached
+			if i == len(params.Tools)-1 {
+				tool["cache_control"] = map[string]string{"type": "ephemeral"}
+			}
+			tools[i] = tool
 		}
 		body["tools"] = tools
 	}

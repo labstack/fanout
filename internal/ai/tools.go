@@ -312,6 +312,12 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 			Query:   p.SQL,
 			MaxRows: p.MaxRows,
 		})
+		if res.Error == "" && res.RowsReturned >= p.MaxRows {
+			return marshal(struct {
+				query.SQLResponse
+				Truncated string `json:"truncated"`
+			}{res, fmt.Sprintf("Capped at %d rows — add WHERE or LIMIT to narrow.", p.MaxRows)})
+		}
 		return marshal(res)
 	})
 
@@ -386,27 +392,11 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 	// (via bluemonday) before being sent to the browser. Never bypass sanitization.
 	r.register(ToolDef{
 		Name: "render",
-		Description: `Display rich HTML visualization inline in chat. The HTML will be shown as a card in the conversation.
+		Description: `Render HTML card inline in chat. CSS vars: --text-primary/secondary/muted, --bg-primary/secondary/tertiary, --border-color, --success, --warning, --danger, --signal-trace/log/metric/error, --font-sans/mono, --radius. Shoelace: <sl-card>, <sl-badge>, <sl-tag>, <sl-icon>, <sl-progress-bar>, <sl-tooltip>. Use grid layouts, <table class="table">.
 
-CSS vars (light+dark): --text-primary, --text-secondary, --text-muted, --bg-primary, --bg-secondary, --bg-tertiary, --border-color, --success (#22c55e), --warning (#f59e0b), --danger (#ef4444), --signal-trace (blue), --signal-log (amber), --signal-metric (green), --signal-error (red), --font-sans, --font-mono, --radius (0.5rem).
+SVG viz (class + data-attr JSON): trace-waterfall(data-spans:[{id,parent,service,op,start,dur,status}]), topology-graph(data-graph:{nodes:[{id,status,rpm,p95,errors}],edges:[{source,target,rpm,errorRate}]}), flow-sankey(data-flow:{nodes:[{id,label,rpm,status?}],links:[{source,target,value}]}), flame-graph(data-frames:[{name,depth,x,w,self,total,samples,service}]), latency-heatmap(data-heatmap:{buckets:[],times:[],values:[[]]}), dep-matrix(data-matrix:{services:[],cells:[{from,to,errorRate,rpm,p95}]}), endpoint-breakdown(data-endpoints:{endpoints:[{method,path,rpm,p50,p95,p99,errorRate,status,trend:[]}]}), correlation-view(data-correlation:{times:[],panels:[{label,color,values:[],baseline?,markers?:[{t,label,severity}]}]}), timeseries-chart(data-timeseries:{series:[{label,color,values:[],type}],labels:[],yLabel}), bar-chart(data-barchart:{bars:[{label,value,color?}],yLabel?,horizontal?}).
 
-Shoelace: <sl-card>, <sl-badge>, <sl-tag>, <sl-icon>, <sl-progress-bar>, <sl-tooltip>.
-
-Layout: Grid: <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem">. Metric card: <sl-card><div style="font-size:1.5rem;font-weight:700">99.9%</div><div style="font-size:0.7rem;color:var(--text-muted);text-transform:uppercase">Label</div></sl-card>. Table: <table class="table"><thead>...</thead><tbody>...</tbody></table>.
-
-SVG Viz Renderers (auto-initialized, no inline event handlers):
-- trace-waterfall data-spans: [{id, parent, service, op, start, dur, status}]
-- topology-graph data-graph: {nodes:[{id,status,rpm,p95,errors}], edges:[{source,target,rpm,errorRate}]}
-- flow-sankey data-flow: {nodes:[{id,label,rpm,status?}], links:[{source,target,value}]}
-- flame-graph data-frames: [{name,depth,x,w,self,total,samples,service}]
-- latency-heatmap data-heatmap: {buckets:[], times:[], values:[[]]}
-- dep-matrix data-matrix: {services:[], cells:[{from,to,errorRate,rpm,p95}]}
-- endpoint-breakdown data-endpoints: {endpoints:[{method,path,rpm,p50,p95,p99,errorRate,status,trend:[]}]}
-- correlation-view data-correlation: {times:[], panels:[{label,color,values:[],baseline?,markers?:[{t,label,severity}]}]}
-- timeseries-chart data-timeseries: {series:[{label,color,values:[],type:"line"|"area"}], labels:[], yLabel}
-- bar-chart data-barchart: {bars:[{label,value,color?}], yLabel?, horizontal?:bool}
-
-Wrap viz in: <div class="viz-card"><div class="viz-card-header"><div class="viz-card-title"><span class="signal-dot" style="background:var(--signal-trace)"></span> Title</div><div class="viz-card-actions"><button class="btn-icon btn-viz-expand" title="Expand"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4"/></svg></button></div></div><div class="viz-card-body"><div class="CLASS" data-ATTR='JSON'></div></div></div>`,
+Wrap viz: <div class="viz-card"><div class="viz-card-header"><div class="viz-card-title"><span class="signal-dot" style="background:var(--signal-trace)"></span>Title</div><div class="viz-card-actions"><button class="btn-icon btn-viz-expand" title="Expand"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4"/></svg></button></div></div><div class="viz-card-body"><div class="CLASS" data-ATTR='JSON'></div></div></div>`,
 		InputSchema: jsonSchema(map[string]property{
 			"html": {Type: "string", Desc: "HTML content to render (Shoelace components, CSS vars, Vega-Lite supported)", Required: true},
 		}),

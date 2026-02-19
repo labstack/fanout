@@ -286,7 +286,8 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			conversation = append(conversation, ToolMessage(r.tc.ID, truncateResult(r.result, 8192), r.isError))
 		}
 
-		// Loop back for next LLM call with tool results
+		// Compact older tool results before next iteration to reduce tokens
+		conversation = compactToolResults(conversation)
 	}
 
 	slog.Warn("orchestrator hit max iterations", "max", maxIterations)
