@@ -160,8 +160,9 @@ func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool
 	var args []any
 
 	if p.Query != "" {
-		filters = append(filters, `"name=body" ~ ?`)
-		args = append(args, p.Query)
+		filters = append(filters, `"name=body" ILIKE ?`)
+		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Query)
+		args = append(args, "%"+escaped+"%")
 	}
 	if p.Service != "" {
 		filters = append(filters, `"name=service_name" = ?`)
@@ -281,8 +282,9 @@ func (s *Service) TailLogs(ctx context.Context, p TailParams) ([]LogResult, erro
 		args = append(args, p.Service)
 	}
 	if p.Pattern != "" {
-		filters = append(filters, `"name=body" ~ ?`)
-		args = append(args, p.Pattern)
+		filters = append(filters, `"name=body" ILIKE ?`)
+		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Pattern)
+		args = append(args, "%"+escaped+"%")
 	}
 	if p.Severity != "" {
 		filters = append(filters, `"name=severity" = ?`)

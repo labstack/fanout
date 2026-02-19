@@ -351,9 +351,16 @@ func TestAnthropicBuildRequest_CorruptToolInput(t *testing.T) {
 
 	msgs := body["messages"].([]map[string]any)
 	content := msgs[0]["content"].([]map[string]any)
-	input := content[0]["input"].(map[string]any)
-	if len(input) != 0 {
-		t.Errorf("corrupt input should be empty object, got %v", input)
+	// Corrupt input should produce a text block (not tool_use) explaining the skip
+	if len(content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(content))
+	}
+	if content[0]["type"] != "text" {
+		t.Errorf("corrupt input block type = %q, want %q", content[0]["type"], "text")
+	}
+	text, _ := content[0]["text"].(string)
+	if !strings.Contains(text, "skipped") {
+		t.Errorf("corrupt input text = %q, want mention of 'skipped'", text)
 	}
 }
 

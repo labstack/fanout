@@ -92,9 +92,13 @@ func (p *AnthropicProvider) buildRequest(params StreamParams) map[string]any {
 				for _, tc := range m.ToolCalls {
 					var input any
 					if err := json.Unmarshal([]byte(tc.Input), &input); err != nil {
-						slog.Error("corrupt tool call input, using empty object",
+						slog.Error("corrupt tool call input, skipping tool_use block",
 							"tool", tc.Name, "id", tc.ID, "input_len", len(tc.Input), "err", err)
-						input = map[string]any{}
+						content = append(content, map[string]any{
+							"type": "text",
+							"text": fmt.Sprintf("[tool_use %s skipped: corrupt input]", tc.Name),
+						})
+						continue
 					}
 					content = append(content, map[string]any{
 						"type":  "tool_use",

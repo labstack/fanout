@@ -51,7 +51,17 @@ func NewSanitizer() *bluemonday.Policy {
 		"padding-left", "padding-right", "padding-top", "padding-bottom",
 		"margin-left", "margin-right", "margin-top", "margin-bottom",
 	).Globally()
-	p.AllowDataAttributes()
+	// Allow only the data-* attributes used by viz renderers (not blanket AllowDataAttributes)
+	p.AllowAttrs(
+		// Container data attributes parsed by V.util.parseData
+		"data-graph", "data-timeseries", "data-spans", "data-matrix",
+		"data-frames", "data-barchart", "data-heatmap", "data-correlation",
+		"data-flow", "data-endpoints",
+		// Interactive element indices used by renderer event handlers
+		"data-idx", "data-edge-idx", "data-node-id", "data-series",
+		"data-ti", "data-bi", "data-link-idx", "data-from", "data-to",
+		"data-marker-panel", "data-marker-t",
+	).Globally()
 	p.AllowAttrs("class").Globally()
 	p.AllowAttrs("slot").Globally()
 	p.AllowAttrs("variant", "size", "pill", "name", "label", "value", "open", "closable").Globally()
