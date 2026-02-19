@@ -382,6 +382,9 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 			// Logs are returned newest-first from Find
 			if t, err := time.Parse("2006-01-02T15:04:05Z", res.Logs[0].Time); err == nil {
 				out.Tail.Since = t
+			} else {
+				slog.Warn("tail tool: failed to parse log time for Since cursor",
+					"time", res.Logs[0].Time, "err", err)
 			}
 		}
 		return marshal(out)

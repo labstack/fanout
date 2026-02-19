@@ -187,9 +187,16 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 		s.trimConversation()
 		s.mu.Unlock()
 
-		// Start tailing if the orchestrator detected a tail tool call
-		if tailCfg != nil && ctx.Err() == nil {
-			s.runTail(ctx, tailCfg, send)
+		// Start tailing if the orchestrator detected a tail tool call.
+		// runTail blocks until done; new messages wait for it to exit on cancel.
+		if tailCfg != nil {
+			if ctx.Err() != nil {
+				if sendErr := s.send(ClientEvent{Type: CETailEnd, Content: "cancel"}); sendErr != nil {
+					slog.Debug("tail end send error on context cancel", "err", sendErr)
+				}
+			} else {
+				s.runTail(ctx, tailCfg, send)
+			}
 		}
 	}()
 }

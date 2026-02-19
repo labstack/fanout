@@ -352,8 +352,8 @@ func TestAnthropicBuildRequest_CorruptToolInput(t *testing.T) {
 	msgs := body["messages"].([]map[string]any)
 	content := msgs[0]["content"].([]map[string]any)
 	input := content[0]["input"].(map[string]any)
-	if _, ok := input["_raw"]; !ok {
-		t.Error("corrupt input should be wrapped in _raw key")
+	if len(input) != 0 {
+		t.Errorf("corrupt input should be empty object, got %v", input)
 	}
 }
 

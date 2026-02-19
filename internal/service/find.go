@@ -45,7 +45,10 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 
 	// Search spans
 	if p.Type == "spans" || p.Type == "both" {
-		spans, hasMore := s.findSpans(ctx, p)
+		spans, hasMore, err := s.findSpans(ctx, p)
+		if err != nil {
+			return out, fmt.Errorf("findSpans: %w", err)
+		}
 		out.Spans = spans
 		if hasMore {
 			out.HasMore = true
@@ -54,7 +57,10 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 
 	// Search logs
 	if p.Type == "logs" || p.Type == "both" {
-		logs, hasMore := s.findLogs(ctx, p)
+		logs, hasMore, err := s.findLogs(ctx, p)
+		if err != nil {
+			return out, fmt.Errorf("findLogs: %w", err)
+		}
 		out.Logs = logs
 		if hasMore {
 			out.HasMore = true
@@ -64,7 +70,7 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 	return out, nil
 }
 
-func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bool) {
+func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bool, error) {
 	var filters []string
 	var args []any
 
@@ -117,7 +123,8 @@ LIMIT %d;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
-		return []SpanResult{}, false
+		slog.Warn("findSpans query failed", "err", err)
+		return []SpanResult{}, false, fmt.Errorf("findSpans query: %w", err)
 	}
 	defer rows.Close()
 
@@ -138,17 +145,17 @@ LIMIT %d;
 		spans = append(spans, r)
 	}
 	if err := rows.Err(); err != nil {
-		slog.Warn("rows iteration error", "method", "findSpans", "err", err)
+		return spans, false, fmt.Errorf("findSpans rows iteration: %w", err)
 	}
 
 	hasMore := len(spans) > p.Limit
 	if hasMore {
 		spans = spans[:p.Limit]
 	}
-	return spans, hasMore
+	return spans, hasMore, nil
 }
 
-func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool) {
+func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool, error) {
 	var filters []string
 	var args []any
 
@@ -197,7 +204,8 @@ LIMIT %d;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
-		return []LogResult{}, false
+		slog.Warn("findLogs query failed", "err", err)
+		return []LogResult{}, false, fmt.Errorf("findLogs query: %w", err)
 	}
 	defer rows.Close()
 
@@ -235,14 +243,14 @@ LIMIT %d;
 		logs = append(logs, r)
 	}
 	if err := rows.Err(); err != nil {
-		slog.Warn("rows iteration error", "method", "findLogs", "err", err)
+		return logs, false, fmt.Errorf("findLogs rows iteration: %w", err)
 	}
 
 	hasMore := len(logs) > p.Limit
 	if hasMore {
 		logs = logs[:p.Limit]
 	}
-	return logs, hasMore
+	return logs, hasMore, nil
 }
 
 // TailParams defines filters for live log tailing.
