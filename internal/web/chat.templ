@@ -873,7 +873,7 @@ templ Chat(data ChatData) {
 							setTimeout(connect, reconnectDelay);
 							reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
 						};
-						ws.onerror = () => { ws.close(); };
+						ws.onerror = (e) => { console.error('WebSocket error:', e); ws.close(); };
 					}
 
 					function updateConnectionStatus(connected) {
@@ -1127,11 +1127,21 @@ templ Chat(data ChatData) {
 						sendMessage(input.value.trim());
 					});
 
-					// Cmd+K to clear
+					// Cmd+K to clear — cancel in-flight, reset state, clear server conversation
 					document.addEventListener('keydown', (e) => {
 						if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
 							e.preventDefault();
+							if (ws && ws.readyState === 1) {
+								ws.send(JSON.stringify({ type: 'clear' }));
+							}
+							currentAiMsg = null;
+							currentTextEl = null;
+							textBuffer = '';
+							tailContainer = null;
+							tailBody = null;
+							tailCount = 0;
 							messagesInner.innerHTML = '';
+							enableInput();
 						}
 					});
 
@@ -1215,6 +1225,10 @@ templ Chat(data ChatData) {
 					};
 
 					window.loadBookmark = function(id) {
+						if (currentAiMsg) {
+							showToast('Wait for the current response to finish', 'warning');
+							return;
+						}
 						fetch('/api/bookmarks', { headers: authHeaders() })
 							.then(r => {
 								if (r.status === 401 || r.status === 403) throw new Error('auth');
@@ -1245,7 +1259,7 @@ templ Chat(data ChatData) {
 
 					function handleTailEvent(content) {
 						var payload;
-						try { payload = JSON.parse(content); } catch(e) { return; }
+						try { payload = JSON.parse(content); } catch(e) { console.error('Failed to parse tail event:', e); return; }
 						if (!payload.entries || !payload.entries.length) return;
 
 						if (!tailContainer) createTailContainer();

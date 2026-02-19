@@ -20,9 +20,10 @@ var upgrader = websocket.Upgrader{
 		if origin == "" {
 			return true // No origin header (non-browser clients)
 		}
-		// Accept if origin matches the Host header
+		// Compare host portion only — works behind TLS-terminating proxies
+		// where scheme may differ between origin and upstream request.
 		host := r.Host
-		return origin == "http://"+host || origin == "https://"+host
+		return strings.HasSuffix(origin, "://"+host)
 	},
 	ReadBufferSize:  1024,
 	WriteBufferSize: 4096,
@@ -87,16 +88,17 @@ func (s *chatSession) run() error {
 	for {
 		_, raw, err := s.ws.ReadMessage()
 		if err != nil {
-			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				slog.Warn("websocket read error", "err", err)
-			}
 			// Cancel any in-flight request on disconnect
 			s.mu.Lock()
 			if s.cancel != nil {
 				s.cancel()
 			}
 			s.mu.Unlock()
-			return nil
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
+				slog.Warn("websocket read error", "err", err)
+				return err
+			}
+			return nil // clean close
 		}
 
 		var msg clientMessage
@@ -118,6 +120,13 @@ func (s *chatSession) run() error {
 				s.cancel()
 			}
 			s.mu.Unlock()
+		case "clear":
+			s.mu.Lock()
+			if s.cancel != nil {
+				s.cancel()
+			}
+			s.messages = s.messages[:0]
+			s.mu.Unlock()
 		default:
 			slog.Debug("unknown client message type", "type", msg.Type)
 		}
@@ -134,9 +143,14 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 	done := s.done
 	s.mu.Unlock()
 
-	// Wait for previous goroutine to finish (outside lock to avoid deadlock)
+	// Wait for previous goroutine to finish (outside lock to avoid deadlock).
+	// Timeout prevents blocking the read loop if the goroutine is stuck.
 	if done != nil {
-		<-done
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			slog.Warn("timed out waiting for previous request goroutine")
+		}
 	}
 
 	s.mu.Lock()
@@ -218,6 +232,7 @@ func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send Send
 	defer ticker.Stop()
 
 	idleSince := time.Now()
+	var consecutivePollErrors int
 
 	for {
 		select {
@@ -245,9 +260,18 @@ func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send Send
 					}
 					return
 				}
-				slog.Warn("tail poll error", "err", err)
+				consecutivePollErrors++
+				slog.Warn("tail poll error", "err", err, "consecutive", consecutivePollErrors)
+				if consecutivePollErrors >= 3 {
+					s.sendError("Log polling failed repeatedly — check service name and try again")
+					if sendErr := s.send(ClientEvent{Type: CETailEnd, Content: "error"}); sendErr != nil {
+						slog.Debug("tail end send error", "reason", "error", "err", sendErr)
+					}
+					return
+				}
 				continue
 			}
+			consecutivePollErrors = 0
 
 			if len(logs) == 0 {
 				if time.Since(idleSince) > 30*time.Second {
@@ -312,6 +336,7 @@ func (s *chatSession) send(event ClientEvent) error {
 		return err
 	}
 
+	s.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	return s.ws.WriteMessage(websocket.TextMessage, data)
 }
 

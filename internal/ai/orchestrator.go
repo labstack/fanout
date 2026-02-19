@@ -362,7 +362,13 @@ func (o *Orchestrator) cachedServices(ctx context.Context) []string {
 
 	topo, err := o.svc.Topology(ctx, 60, ns, "")
 	if err != nil {
-		slog.Warn("failed to refresh services cache", "err", err)
+		if o.servicesList == nil {
+			slog.Error("initial services cache load failed — system prompt will lack service context", "err", err)
+		} else {
+			slog.Warn("failed to refresh services cache, using stale data", "err", err)
+		}
+		// Backoff: don't retry for at least 10 seconds on failure
+		o.servicesStale = time.Now().Add(10 * time.Second)
 		return o.servicesList
 	}
 
@@ -421,12 +427,25 @@ func truncateJSON(s string, maxLen int) string {
 }
 
 // truncateResult shortens tool results to fit context windows.
-// Returns a plain text summary rather than broken JSON.
+// Tries to cut at a JSON structure boundary to avoid broken JSON.
 func truncateResult(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen] + "\n\n[Result truncated. Ask the user to refine their query for more specific data.]"
+	// Walk backwards from the cut point to find a clean JSON boundary
+	cutAt := maxLen
+	for cutAt > maxLen-200 && cutAt > 0 {
+		c := s[cutAt]
+		if c == ',' || c == ']' || c == '}' {
+			cutAt++ // include the boundary character
+			break
+		}
+		cutAt--
+	}
+	if cutAt <= 0 || cutAt > maxLen {
+		cutAt = maxLen
+	}
+	return s[:cutAt] + "\n\n[Result truncated. Ask the user to refine their query for more specific data.]"
 }
 
 // compactToolResults returns a copy of the conversation with tool results from

@@ -129,10 +129,12 @@ LIMIT %d;
 	defer rows.Close()
 
 	var spans []SpanResult
+	var scanErrors int
 	for rows.Next() {
 		var r SpanResult
 		var scopeName, scopeVersion any
 		if err := rows.Scan(&r.TraceID, &r.SpanID, &r.Service, &r.Name, &r.Duration, &r.Status, &r.StartTime, &scopeName, &scopeVersion); err != nil {
+			scanErrors++
 			slog.Warn("scan failed", "method", "findSpans", "err", err)
 			continue
 		}
@@ -146,6 +148,9 @@ LIMIT %d;
 	}
 	if err := rows.Err(); err != nil {
 		return spans, false, fmt.Errorf("findSpans rows iteration: %w", err)
+	}
+	if scanErrors > 0 && len(spans) == 0 {
+		return nil, false, fmt.Errorf("findSpans: all %d rows failed to scan (possible schema mismatch)", scanErrors)
 	}
 
 	hasMore := len(spans) > p.Limit
@@ -211,11 +216,13 @@ LIMIT %d;
 	defer rows.Close()
 
 	var logs []LogResult
+	var scanErrors int
 	for rows.Next() {
 		var r LogResult
 		var observedTime, traceID, spanID, scopeName, scopeVersion any
 		var severityNum any
 		if err := rows.Scan(&r.Time, &observedTime, &r.Service, &r.Severity, &severityNum, &r.Body, &traceID, &spanID, &scopeName, &scopeVersion); err != nil {
+			scanErrors++
 			slog.Warn("scan failed", "method", "findLogs", "err", err)
 			continue
 		}
@@ -245,6 +252,9 @@ LIMIT %d;
 	}
 	if err := rows.Err(); err != nil {
 		return logs, false, fmt.Errorf("findLogs rows iteration: %w", err)
+	}
+	if scanErrors > 0 && len(logs) == 0 {
+		return nil, false, fmt.Errorf("findLogs: all %d rows failed to scan (possible schema mismatch)", scanErrors)
 	}
 
 	hasMore := len(logs) > p.Limit
@@ -318,11 +328,13 @@ LIMIT 100;
 	defer rows.Close()
 
 	var logs []LogResult
+	var scanErrors int
 	for rows.Next() {
 		var r LogResult
 		var traceID any
 		var timeNano int64
 		if err := rows.Scan(&r.Time, &r.Service, &r.Severity, &r.Body, &traceID, &timeNano); err != nil {
+			scanErrors++
 			slog.Warn("scan failed", "method", "TailLogs", "err", err)
 			continue
 		}
@@ -333,6 +345,9 @@ LIMIT 100;
 	}
 	if err := rows.Err(); err != nil {
 		return logs, fmt.Errorf("TailLogs rows iteration: %w", err)
+	}
+	if scanErrors > 0 && len(logs) == 0 {
+		return nil, fmt.Errorf("TailLogs: all %d rows failed to scan (possible schema mismatch)", scanErrors)
 	}
 
 	return logs, nil
