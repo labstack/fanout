@@ -99,7 +99,18 @@ const (
 	CECard       ClientEventType = "card"
 	CEError      ClientEventType = "error"
 	CEDone       ClientEventType = "done"
+	CETail       ClientEventType = "tail"
+	CETailEnd    ClientEventType = "tail_end"
 )
+
+// TailConfig holds parameters for a live log tailing session.
+type TailConfig struct {
+	Service   string    `json:"service"`
+	Pattern   string    `json:"pattern,omitempty"`
+	Severity  string    `json:"severity,omitempty"`
+	Namespace string    `json:"namespace,omitempty"`
+	Since     time.Time `json:"since"`
+}
 
 // ClientEvent is sent from the orchestrator to the WebSocket client.
 type ClientEvent struct {
@@ -116,14 +127,15 @@ type ClientEvent struct {
 type SendFunc func(event ClientEvent) error
 
 // Run executes the agentic loop for a user message.
-// Returns the updated conversation (with assistant/tool messages appended) and any error.
-func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) ([]Message, error) {
+// Returns the updated conversation, an optional TailConfig if the tail tool was invoked, and any error.
+func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) ([]Message, *TailConfig, error) {
 	systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
+	var tailCfg *TailConfig
 
 	for i := 0; i < maxIterations; i++ {
 		// Check for cancellation between iterations
 		if ctx.Err() != nil {
-			return conversation, ctx.Err()
+			return conversation, tailCfg, ctx.Err()
 		}
 
 		var textBuf strings.Builder
@@ -183,13 +195,13 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			if sendErr := send(ClientEvent{Type: CEError, Error: errMsg}); sendErr != nil {
 				slog.Warn("failed to send error to client", "send_err", sendErr)
 			}
-			return conversation, err
+			return conversation, tailCfg, err
 		}
 
 		// If the provider emitted an error event (e.g. premature stream end),
 		// don't send CEDone — the client already received CEError.
 		if hadError {
-			return conversation, fmt.Errorf("provider emitted error event (already sent to client)")
+			return conversation, tailCfg, fmt.Errorf("provider emitted error event (already sent to client)")
 		}
 
 		// Record assistant message
@@ -197,11 +209,15 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 
 		// If the LLM didn't request tool use, we're done
 		if stopReason != "tool_use" {
-			if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}); err != nil {
-				return conversation, err
+			doneEvt := ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}
+			if text := textBuf.String(); text != "" {
+				doneEvt.HTML = o.sanitizer.Sanitize(text)
+			}
+			if err := send(doneEvt); err != nil {
+				return conversation, tailCfg, err
 			}
 			conversation = compactToolResults(conversation)
-			return conversation, nil
+			return conversation, tailCfg, nil
 		}
 
 		// Execute tool calls in parallel
@@ -230,7 +246,7 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		wg.Wait()
 
 		if ctx.Err() != nil {
-			return conversation, ctx.Err()
+			return conversation, tailCfg, ctx.Err()
 		}
 
 		// Send results to WebSocket sequentially (preserves order)
@@ -241,14 +257,29 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			if r.tc.Name == "render" && !r.isError {
 				sanitized := o.sanitizer.Sanitize(r.result)
 				if sendErr := send(ClientEvent{Type: CECard, HTML: sanitized}); sendErr != nil {
-					return conversation, sendErr
+					return conversation, tailCfg, sendErr
 				}
 				r.result = `{"rendered": true}`
 			}
 
+			// Special handling for tail tool: extract TailConfig
+			if r.tc.Name == "tail" && !r.isError {
+				var tailResult struct {
+					Tail *TailConfig `json:"tail"`
+				}
+				if err := json.Unmarshal([]byte(r.result), &tailResult); err == nil && tailResult.Tail != nil {
+					tailCfg = tailResult.Tail
+					if tailCfg.Namespace == "" {
+						tailCfg.Namespace = namespace
+					}
+					// Since is set by the tail tool from the latest log timestamp.
+					// If zero (no initial logs), runTail applies a lookback.
+				}
+			}
+
 			// Always send tool_result to clear the spinner
 			if sendErr := send(ClientEvent{Type: CEToolResult, Name: r.tc.Name}); sendErr != nil {
-				return conversation, sendErr
+				return conversation, tailCfg, sendErr
 			}
 
 			// Add tool result to conversation
@@ -259,14 +290,14 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	}
 
 	slog.Warn("orchestrator hit max iterations", "max", maxIterations)
-	if err := send(ClientEvent{Type: CEToken, Content: "\n\n*Reached maximum tool iterations. Please refine your question for more details.*"}); err != nil {
-		return conversation, err
+	if err := send(ClientEvent{Type: CEToken, Content: "<p><em>Reached maximum tool iterations. Please refine your question for more details.</em></p>"}); err != nil {
+		return conversation, tailCfg, err
 	}
 	if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}); err != nil {
-		return conversation, err
+		return conversation, tailCfg, err
 	}
 	conversation = compactToolResults(conversation)
-	return conversation, nil
+	return conversation, tailCfg, nil
 }
 
 // SuggestedQuestions returns contextual starter questions.
@@ -334,9 +365,11 @@ func (o *Orchestrator) cachedServices(ctx context.Context) []string {
 // Keep this as a const so it can be used as a single cache-friendly block.
 const staticSystemPrompt = `You are the AI assistant for Fanout, an observability platform. You help users understand system health, investigate issues, and analyze telemetry data.
 
-Tools: status (start here) → diagnose (deep-dive) → find (search spans/logs) → trace (full trace, needs trace_id) → timeline (trends) → topology (dependency map) → compare (side-by-side) → metrics (explore metrics) → query (custom SQL, last resort) → render (visual HTML cards — see render tool description for design system).
+Tools: status (start here) → diagnose (deep-dive) → find (search spans/logs) → tail (live log streaming) → trace (full trace, needs trace_id) → timeline (trends) → topology (dependency map) → compare (side-by-side) → metrics (explore metrics) → query (custom SQL, last resort) → render (visual HTML cards — see render tool description for design system).
 
-Be direct, cite specific numbers, use render for visual data, explain root causes with next steps.`
+Reply in HTML, not Markdown. Use <p> for prose, <strong>/<em> for emphasis, <ul>/<ol> for lists, <h2>/<h3> for headings, <code> for inline code, <pre><code> for code blocks, <table> for data. Do NOT use Markdown syntax.
+
+Be direct, cite specific numbers, use render for visual data, explain root causes with next steps. Never use emoji. For status indicators use Shoelace icons with utility classes: <sl-icon name="check-circle-fill" class="i-ok"></sl-icon> (healthy), <sl-icon name="exclamation-triangle-fill" class="i-err"></sl-icon> (error), <sl-icon name="exclamation-circle-fill" class="i-warn"></sl-icon> (warning), <sl-icon name="dash-circle" class="i-muted"></sl-icon> (neutral).`
 
 func (o *Orchestrator) buildSystemBlocks(ctx context.Context, window int, namespace string) []SystemBlock {
 	services := o.cachedServices(ctx)

@@ -13,6 +13,10 @@ type ChatData struct {
 	VizCSSPath  string
 }
 
+script suggestionClick(text string) {
+	sendMessage(text)
+}
+
 templ Chat(data ChatData) {
 	<!DOCTYPE html>
 	<html lang="en">
@@ -32,16 +36,16 @@ templ Chat(data ChatData) {
 			}
 			<style>
 				:root {
-					--bg-primary: #f6f4f1;
+					--bg-primary: #f5f3ef;
 					--bg-secondary: #ffffff;
-					--bg-tertiary: #edeae4;
+					--bg-tertiary: #ebe8e2;
 					--text-primary: #1a1816;
-					--text-secondary: #635e58;
-					--text-muted: #9a958e;
-					--border-color: #ddd8d0;
+					--text-secondary: #5c5650;
+					--text-muted: #948e86;
+					--border-color: #d8d3ca;
 					--accent: #b87820;
-					--accent-hover: #9c6518;
-					--accent-subtle: rgba(184, 120, 32, 0.07);
+					--accent-hover: #a06a1a;
+					--accent-subtle: rgba(184, 120, 32, 0.08);
 					--success: #18864a;
 					--warning: #c27a0c;
 					--danger: #c23030;
@@ -51,24 +55,26 @@ templ Chat(data ChatData) {
 					--signal-error: #c23030;
 					--font-sans: 'Bricolage Grotesque', 'Helvetica Neue', Helvetica, sans-serif;
 					--font-mono: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
-					--radius: 0.5rem;
-					--transition: 140ms ease;
-					--shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
-					--shadow-md: 0 3px 10px rgba(0,0,0,0.06);
+					--radius: 0.625rem;
+					--transition: 150ms ease;
+					--shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 1px 4px rgba(0,0,0,0.02);
+					--shadow-md: 0 4px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
+					--shadow-lg: 0 8px 24px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
 				}
 				.sl-theme-dark {
-					--bg-primary: #09090c;
-					--bg-secondary: #111318;
-					--bg-tertiary: #1a1c24;
-					--text-primary: #d4d8e1;
-					--text-secondary: #7b8296;
-					--text-muted: #4e5570;
-					--border-color: #1f2433;
+					--bg-primary: #0a0a0e;
+					--bg-secondary: #131520;
+					--bg-tertiary: #1b1d2a;
+					--text-primary: #d6dae4;
+					--text-secondary: #7e8599;
+					--text-muted: #505770;
+					--border-color: #222638;
 					--accent: #d4943a;
 					--accent-hover: #e8a849;
 					--accent-subtle: rgba(212, 148, 58, 0.1);
-					--shadow-sm: 0 1px 3px rgba(0,0,0,0.2);
-					--shadow-md: 0 3px 10px rgba(0,0,0,0.3);
+					--shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+					--shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+					--shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
 				}
 				* { margin: 0; padding: 0; box-sizing: border-box; }
 				body {
@@ -82,44 +88,50 @@ templ Chat(data ChatData) {
 					-moz-osx-font-smoothing: grayscale;
 				}
 
+				/* Scrollbar */
+				#messages::-webkit-scrollbar { width: 6px; }
+				#messages::-webkit-scrollbar-track { background: transparent; }
+				#messages::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+				#messages::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
 				/* Header */
 				.header {
 					background: var(--bg-secondary);
 					border-bottom: 1px solid var(--border-color);
 					display: flex;
 					align-items: center;
-					padding: 0 1.25rem;
-					height: 48px;
+					padding: 0 1.5rem;
+					height: 54px;
 					flex-shrink: 0;
 					gap: 0.75rem;
 				}
 				.header-brand {
-					font-size: 0.95rem;
+					font-size: 1.1rem;
 					font-weight: 700;
 					color: var(--text-primary);
 					text-decoration: none;
 					display: flex;
 					align-items: center;
-					gap: 0.5rem;
-					letter-spacing: -0.01em;
+					gap: 0.625rem;
+					letter-spacing: -0.02em;
 				}
-				.header-logo { width: 22px; height: 22px; border-radius: 4px; }
+				.header-logo { width: 24px; height: 24px; border-radius: 5px; }
 				.header-spacer { flex: 1; }
 
 				/* Messages area */
 				#messages {
 					flex: 1;
 					overflow-y: auto;
-					padding: 1.5rem 0;
+					padding: 2rem 0;
 				}
 				.messages-inner {
-					max-width: 780px;
+					max-width: 960px;
 					margin: 0 auto;
-					padding: 0 1.25rem;
+					padding: 0 2.5rem;
 				}
 
 				/* Message bubbles */
-				.msg { margin-bottom: 1.75rem; }
+				.msg { margin-bottom: 2rem; }
 				.msg-user {
 					display: flex;
 					justify-content: flex-end;
@@ -127,40 +139,41 @@ templ Chat(data ChatData) {
 				.msg-user .msg-content {
 					background: var(--accent);
 					color: #fff;
-					padding: 0.625rem 1rem;
-					border-radius: var(--radius) var(--radius) 2px var(--radius);
-					max-width: 75%;
-					font-size: 0.875rem;
+					padding: 0.8rem 1.2rem;
+					border-radius: 1.125rem 1.125rem 0.25rem 1.125rem;
+					max-width: 70%;
+					font-size: 1rem;
 					line-height: 1.6;
 					font-weight: 400;
+					box-shadow: 0 1px 4px rgba(184, 120, 32, 0.2);
 				}
 				.msg-ai { display: flex; flex-direction: column; gap: 0.5rem; }
 				.msg-ai .msg-text {
-					font-size: 0.875rem;
-					line-height: 1.75;
+					font-size: 1rem;
+					line-height: 1.8;
 					color: var(--text-primary);
 				}
-				.msg-ai .msg-text p { margin-bottom: 0.75rem; }
+				.msg-ai .msg-text p { margin-bottom: 0.875rem; }
 				.msg-ai .msg-text p:last-child { margin-bottom: 0; }
 				.msg-ai .msg-text strong { font-weight: 600; }
 				.msg-ai .msg-text em { font-style: italic; color: var(--text-secondary); }
 				.msg-ai .msg-text code {
 					background: var(--bg-tertiary);
-					padding: 0.15rem 0.4rem;
-					border-radius: 0.25rem;
+					padding: 0.175rem 0.45rem;
+					border-radius: 0.3rem;
 					font-family: var(--font-mono);
-					font-size: 0.8em;
+					font-size: 0.82em;
 					border: 1px solid var(--border-color);
 				}
 				.msg-ai .msg-text pre {
 					background: var(--bg-tertiary);
-					padding: 0.875rem 1rem;
+					padding: 1.125rem 1.25rem;
 					border-radius: var(--radius);
 					overflow-x: auto;
-					margin: 0.75rem 0;
+					margin: 1rem 0;
 					border: 1px solid var(--border-color);
-					font-size: 0.8rem;
-					line-height: 1.6;
+					font-size: 0.875rem;
+					line-height: 1.65;
 				}
 				.msg-ai .msg-text pre code {
 					background: none;
@@ -171,35 +184,35 @@ templ Chat(data ChatData) {
 				.msg-ai .msg-text h1, .msg-ai .msg-text h2,
 				.msg-ai .msg-text h3, .msg-ai .msg-text h4 {
 					font-weight: 600;
-					letter-spacing: -0.02em;
-					margin: 1.25rem 0 0.5rem;
+					letter-spacing: -0.025em;
+					margin: 1.5rem 0 0.625rem;
 					line-height: 1.3;
 				}
 				.msg-ai .msg-text h1:first-child, .msg-ai .msg-text h2:first-child,
 				.msg-ai .msg-text h3:first-child, .msg-ai .msg-text h4:first-child {
 					margin-top: 0;
 				}
-				.msg-ai .msg-text h1 { font-size: 1.125rem; }
-				.msg-ai .msg-text h2 { font-size: 1rem; }
-				.msg-ai .msg-text h3 { font-size: 0.9rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 500; }
-				.msg-ai .msg-text h4 { font-size: 0.85rem; color: var(--text-secondary); }
+				.msg-ai .msg-text h1 { font-size: 1.35rem; }
+				.msg-ai .msg-text h2 { font-size: 1.2rem; }
+				.msg-ai .msg-text h3 { font-size: 1rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 500; }
+				.msg-ai .msg-text h4 { font-size: 0.95rem; color: var(--text-secondary); }
 				/* Lists */
 				.msg-ai .msg-text ul, .msg-ai .msg-text ol {
-					margin: 0.5rem 0 0.75rem;
-					padding-left: 1.5rem;
+					margin: 0.625rem 0 1rem;
+					padding-left: 1.625rem;
 				}
 				.msg-ai .msg-text li {
-					margin-bottom: 0.35rem;
-					line-height: 1.65;
+					margin-bottom: 0.4rem;
+					line-height: 1.7;
 				}
 				.msg-ai .msg-text li:last-child { margin-bottom: 0; }
 				.msg-ai .msg-text ul li::marker { color: var(--accent); }
-				.msg-ai .msg-text ol li::marker { color: var(--accent); font-weight: 600; font-size: 0.8em; }
+				.msg-ai .msg-text ol li::marker { color: var(--accent); font-weight: 600; font-size: 0.85em; }
 				/* Blockquotes */
 				.msg-ai .msg-text blockquote {
 					border-left: 3px solid var(--accent);
-					padding: 0.5rem 0 0.5rem 1rem;
-					margin: 0.75rem 0;
+					padding: 0.625rem 0 0.625rem 1.125rem;
+					margin: 1rem 0;
 					color: var(--text-secondary);
 					font-style: italic;
 				}
@@ -208,7 +221,7 @@ templ Chat(data ChatData) {
 				.msg-ai .msg-text hr {
 					border: none;
 					border-top: 1px solid var(--border-color);
-					margin: 1rem 0;
+					margin: 1.25rem 0;
 				}
 				/* Links */
 				.msg-ai .msg-text a {
@@ -222,51 +235,68 @@ templ Chat(data ChatData) {
 				.msg-ai .msg-text table {
 					width: 100%;
 					border-collapse: collapse;
-					margin: 0.75rem 0;
-					font-size: 0.825rem;
+					margin: 1rem 0;
+					font-size: 0.925rem;
 				}
 				.msg-ai .msg-text table th, .msg-ai .msg-text table td {
-					padding: 0.5rem 0.75rem;
+					padding: 0.625rem 0.875rem;
 					text-align: left;
 					border-bottom: 1px solid var(--border-color);
 				}
 				.msg-ai .msg-text table th {
 					font-weight: 600;
-					font-size: 0.7rem;
+					font-size: 0.75rem;
 					text-transform: uppercase;
 					letter-spacing: 0.04em;
 					color: var(--text-muted);
 				}
 				.msg-ai .msg-text table tr:last-child td { border-bottom: none; }
 
+				/* Status icon utilities */
+				.i-ok { color: var(--success); }
+				.i-warn { color: var(--warning); }
+				.i-err { color: var(--danger); }
+				.i-muted { color: var(--text-muted); }
+				.i-trace { color: var(--signal-trace); }
+
 				/* Tool status */
 				.tool-status {
 					display: inline-flex;
 					align-items: center;
-					gap: 0.375rem;
-					font-size: 0.675rem;
+					gap: 0.4rem;
+					font-size: 0.75rem;
 					color: var(--text-muted);
-					padding: 0.2rem 0;
+					padding: 0.3rem 0;
 					font-weight: 500;
 					text-transform: uppercase;
 					letter-spacing: 0.04em;
 				}
-				.tool-status sl-spinner { font-size: 0.8rem; }
+				.tool-status sl-spinner { font-size: 0.85rem; }
+
+				/* Card grid — consecutive cards flow into rows */
+				.chat-cards-grid {
+					display: grid;
+					gap: 0.75rem;
+					margin: 0.75rem 0;
+				}
+				.chat-cards-grid .chat-card { margin: 0; }
 
 				/* Cards from render tool */
 				.chat-card {
 					background: var(--bg-secondary);
 					border: 1px solid var(--border-color);
 					border-radius: var(--radius);
-					padding: 1rem;
-					margin: 0.625rem 0;
+					padding: 1.25rem;
+					margin: 0.75rem 0;
 					overflow-x: auto;
 					box-shadow: var(--shadow-sm);
 					font-family: var(--font-sans);
-					font-size: 0.875rem;
+					font-size: 0.9375rem;
 					line-height: 1.6;
 					color: var(--text-primary);
+					transition: box-shadow var(--transition);
 				}
+				.chat-card:hover { box-shadow: var(--shadow-md); }
 				.chat-card * { font-family: inherit; }
 
 				/* Support LLM-generated styles inside cards */
@@ -275,9 +305,9 @@ templ Chat(data ChatData) {
 					background: var(--bg-secondary);
 					border: 1px solid var(--border-color);
 				}
-				.chat-card sl-card::part(body) { padding: 0.75rem; }
+				.chat-card sl-card::part(body) { padding: 0.875rem; }
 				.chat-card .metric-value {
-					font-size: 1.125rem;
+					font-size: 1.4rem;
 					font-weight: 700;
 					color: var(--text-primary);
 					line-height: 1;
@@ -285,9 +315,9 @@ templ Chat(data ChatData) {
 					font-family: var(--font-sans);
 				}
 				.chat-card .metric-label {
-					font-size: 0.625rem;
+					font-size: 0.675rem;
 					color: var(--text-muted);
-					margin-top: 0.25rem;
+					margin-top: 0.3rem;
 					text-transform: uppercase;
 					letter-spacing: 0.05em;
 					font-weight: 500;
@@ -296,31 +326,51 @@ templ Chat(data ChatData) {
 				.chat-card .table {
 					width: 100%;
 					border-collapse: collapse;
-					font-size: 0.8125rem;
+					font-size: 0.9rem;
 				}
 				.chat-card .table th, .chat-card .table td {
-					padding: 0.5rem 0.75rem;
+					padding: 0.5rem 0.875rem;
 					text-align: left;
 					border-bottom: 1px solid var(--border-color);
 				}
 				.chat-card .table th {
 					font-weight: 600;
 					color: var(--text-muted);
-					font-size: 0.625rem;
+					font-size: 0.675rem;
 					text-transform: uppercase;
 					letter-spacing: 0.05em;
 					font-family: var(--font-sans);
 				}
 				.chat-card .mono {
 					font-family: var(--font-mono);
-					font-size: 0.8rem;
+					font-size: 0.825rem;
 				}
+
+				/* Log tail container */
+				.log-tail { border: 1px solid var(--border-color); border-radius: var(--radius); margin: 0.75rem 0; overflow: hidden; box-shadow: var(--shadow-sm); }
+				.log-tail-header { background: var(--bg-tertiary); padding: 0.625rem 1rem; display: flex; justify-content: space-between; align-items: center; font-size: 0.8rem; color: var(--text-secondary); }
+				.log-tail-header .log-tail-stop { background: none; border: 1px solid var(--border-color); border-radius: var(--radius); padding: 0.25rem 0.625rem; font-size: 0.7rem; color: var(--text-secondary); cursor: pointer; font-family: var(--font-sans); transition: all var(--transition); }
+				.log-tail-header .log-tail-stop:hover { border-color: var(--danger); color: var(--danger); }
+				.log-tail-body { max-height: 420px; overflow-y: auto; font-family: var(--font-mono); font-size: 0.8rem; line-height: 1.65; }
+				.log-entry { padding: 0.25rem 1rem; border-bottom: 1px solid var(--border-color); display: flex; gap: 0.625rem; white-space: nowrap; }
+				.log-entry:last-child { background: var(--accent-subtle); }
+				.log-sev { font-weight: 600; min-width: 3ch; }
+				.log-sev-error { color: var(--danger); }
+				.log-sev-warn { color: var(--warning); }
+				.log-sev-info { color: var(--text-secondary); }
+				.log-sev-debug { color: var(--text-muted); }
+				.log-time { color: var(--text-muted); min-width: 8ch; }
+				.log-service { color: var(--accent); min-width: 12ch; overflow: hidden; text-overflow: ellipsis; }
+				.log-body { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+				.log-trace { cursor: pointer; color: var(--signal-trace); text-decoration: none; flex-shrink: 0; }
+				.log-trace:hover { text-decoration: underline; }
+				.log-tail-stopped { padding: 0.625rem 1rem; font-size: 0.75rem; color: var(--text-muted); text-align: center; background: var(--bg-tertiary); }
 
 				/* Bookmark button on messages */
 				.msg-actions {
 					display: flex;
 					gap: 0.25rem;
-					margin-top: 0.25rem;
+					margin-top: 0.375rem;
 					opacity: 0;
 					transition: opacity var(--transition);
 				}
@@ -332,16 +382,16 @@ templ Chat(data ChatData) {
 					align-items: center;
 					gap: 0.5rem;
 					color: var(--text-muted);
-					font-size: 0.775rem;
+					font-size: 0.875rem;
 					padding: 0.5rem 0;
 				}
 				.thinking-dots {
 					display: flex;
-					gap: 0.25rem;
+					gap: 0.3rem;
 				}
 				.thinking-dots span {
-					width: 5px;
-					height: 5px;
+					width: 6px;
+					height: 6px;
 					background: var(--accent);
 					border-radius: 50%;
 					animation: thinking 1.4s infinite;
@@ -349,7 +399,7 @@ templ Chat(data ChatData) {
 				.thinking-dots span:nth-child(2) { animation-delay: 0.2s; }
 				.thinking-dots span:nth-child(3) { animation-delay: 0.4s; }
 				@keyframes thinking {
-					0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+					0%, 80%, 100% { opacity: 0.2; transform: scale(0.75); }
 					40% { opacity: 1; transform: scale(1); }
 				}
 
@@ -359,54 +409,55 @@ templ Chat(data ChatData) {
 					flex-direction: column;
 					align-items: center;
 					justify-content: center;
-					min-height: 60vh;
+					min-height: 65vh;
 					text-align: center;
-					gap: 2rem;
+					gap: 2.5rem;
 					position: relative;
 				}
 				.cold-start::before {
 					content: '';
 					position: absolute;
-					width: 480px;
-					height: 480px;
-					background: radial-gradient(circle, var(--accent-subtle) 0%, transparent 65%);
+					width: 520px;
+					height: 520px;
+					background: radial-gradient(circle, var(--accent-subtle) 0%, transparent 60%);
 					border-radius: 50%;
-					top: 42%;
+					top: 40%;
 					left: 50%;
 					transform: translate(-50%, -50%);
 					pointer-events: none;
 					animation: cold-glow 8s ease-in-out infinite;
 				}
 				@keyframes cold-glow {
-					0%, 100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1); }
-					50% { opacity: 1; transform: translate(-50%, -50%) scale(1.08); }
+					0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(1); }
+					50% { opacity: 1; transform: translate(-50%, -50%) scale(1.1); }
 				}
 				.cold-start-title {
-					font-size: 1.625rem;
+					font-size: 2rem;
 					font-weight: 700;
-					letter-spacing: -0.03em;
+					letter-spacing: -0.035em;
 					position: relative;
 				}
 				.cold-start-subtitle {
 					color: var(--text-secondary);
-					font-size: 0.875rem;
+					font-size: 1.0625rem;
 					font-weight: 300;
 					position: relative;
+					margin-top: 0.5rem;
 				}
 				.suggestions {
 					display: flex;
 					flex-wrap: wrap;
-					gap: 0.5rem;
+					gap: 0.625rem;
 					justify-content: center;
-					max-width: 600px;
+					max-width: 640px;
 					position: relative;
 				}
 				.suggestion-chip {
 					background: var(--bg-secondary);
 					border: 1px solid var(--border-color);
 					border-radius: 2rem;
-					padding: 0.5rem 1.125rem;
-					font-size: 0.825rem;
+					padding: 0.5625rem 1.375rem;
+					font-size: 0.9375rem;
 					color: var(--text-secondary);
 					cursor: pointer;
 					transition: all var(--transition);
@@ -419,18 +470,29 @@ templ Chat(data ChatData) {
 					color: var(--accent);
 					background: var(--accent-subtle);
 					box-shadow: var(--shadow-md);
-					transform: translateY(-1px);
+					transform: translateY(-2px);
 				}
 
 				/* Input area */
 				.input-area {
+					position: relative;
 					background: var(--bg-secondary);
 					border-top: 1px solid var(--border-color);
-					padding: 0.75rem 1.25rem;
+					padding: 1rem 2.5rem 1.25rem;
 					flex-shrink: 0;
 				}
+				.input-area::before {
+					content: '';
+					position: absolute;
+					top: -40px;
+					left: 0;
+					right: 0;
+					height: 40px;
+					background: linear-gradient(to bottom, transparent, var(--bg-primary));
+					pointer-events: none;
+				}
 				.input-inner {
-					max-width: 780px;
+					max-width: 960px;
 					margin: 0 auto;
 					display: flex;
 					gap: 0.5rem;
@@ -440,15 +502,15 @@ templ Chat(data ChatData) {
 					flex: 1;
 					resize: none;
 					border: 1px solid var(--border-color);
-					border-radius: var(--radius);
-					padding: 0.625rem 0.875rem;
+					border-radius: 1.375rem;
+					padding: 0.75rem 1.25rem;
 					font-family: var(--font-sans);
-					font-size: 0.875rem;
+					font-size: 1rem;
 					line-height: 1.5;
 					background: var(--bg-primary);
 					color: var(--text-primary);
 					outline: none;
-					min-height: 42px;
+					min-height: 48px;
 					max-height: 200px;
 					transition: border-color var(--transition), box-shadow var(--transition);
 				}
@@ -460,9 +522,9 @@ templ Chat(data ChatData) {
 					color: var(--text-muted);
 				}
 				#send-btn {
-					width: 42px;
-					height: 42px;
-					border-radius: var(--radius);
+					width: 48px;
+					height: 48px;
+					border-radius: 50%;
 					background: var(--accent);
 					color: white;
 					border: none;
@@ -472,29 +534,31 @@ templ Chat(data ChatData) {
 					justify-content: center;
 					flex-shrink: 0;
 					transition: all var(--transition);
+					box-shadow: 0 2px 8px rgba(184, 120, 32, 0.25);
 				}
-				#send-btn:hover { background: var(--accent-hover); transform: translateY(-1px); }
-				#send-btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+				#send-btn:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(184, 120, 32, 0.3); }
+				#send-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; box-shadow: none; }
 				#send-btn svg { width: 18px; height: 18px; }
 
 				/* Setup message */
 				.setup-msg {
-					max-width: 500px;
+					max-width: 520px;
 					text-align: center;
-					padding: 2rem;
+					padding: 2.5rem;
 				}
 				.setup-msg h2 {
 					margin-bottom: 1rem;
-					font-size: 1.25rem;
+					font-size: 1.3rem;
 				}
 				.setup-msg code {
 					background: var(--bg-tertiary);
-					padding: 0.5rem 0.75rem;
+					padding: 0.625rem 1rem;
 					border-radius: var(--radius);
 					display: block;
-					margin: 1rem 0;
+					margin: 1.25rem 0;
 					font-family: var(--font-mono);
-					font-size: 0.85rem;
+					font-size: 0.875rem;
+					border: 1px solid var(--border-color);
 				}
 			</style>
 		</head>
@@ -519,7 +583,7 @@ templ Chat(data ChatData) {
 							if len(data.Suggestions) > 0 {
 								<div class="suggestions">
 									for _, s := range data.Suggestions {
-										<button class="suggestion-chip" onclick={ templ.ComponentScript{Call: "sendMessage('" + escapeJS(s) + "')"} }>{ s }</button>
+										<button class="suggestion-chip" onclick={ suggestionClick(s) }>{ s }</button>
 									}
 								</div>
 							}
@@ -703,9 +767,17 @@ templ Chat(data ChatData) {
 								enableInput();
 								break;
 							case 'done':
-								flushText();
+								if (currentTextEl && data.html) {
+									currentTextEl.innerHTML = data.html;
+								}
 								finishAiMessage();
 								enableInput();
+								break;
+							case 'tail':
+								handleTailEvent(data.content);
+								break;
+							case 'tail_end':
+								handleTailEnd(data.content);
 								break;
 							default:
 								console.debug('unknown event type:', data.type);
@@ -729,7 +801,7 @@ templ Chat(data ChatData) {
 					function flushText() {
 						rafPending = false;
 						if (currentTextEl && textBuffer) {
-							currentTextEl.innerHTML = renderMarkdown(textBuffer);
+							currentTextEl.innerHTML = textBuffer;
 							scrollToBottom();
 						}
 					}
@@ -765,7 +837,21 @@ templ Chat(data ChatData) {
 						card.className = 'chat-card';
 						card.innerHTML = html;
 						if (currentAiMsg) {
-							currentAiMsg.appendChild(card);
+							// Group consecutive cards into a grid (skip over tool-status elements)
+							var grid = null;
+							var children = currentAiMsg.children;
+							for (var i = children.length - 1; i >= 0; i--) {
+								if (children[i].classList.contains('chat-cards-grid')) { grid = children[i]; break; }
+								if (!children[i].classList.contains('tool-status')) break;
+							}
+							if (!grid) {
+								grid = document.createElement('div');
+								grid.className = 'chat-cards-grid';
+								currentAiMsg.appendChild(grid);
+							}
+							grid.appendChild(card);
+							var cols = Math.min(grid.children.length, 4);
+							grid.style.gridTemplateColumns = 'repeat(' + cols + ', 1fr)';
 							if (window.FanoutViz) FanoutViz.init(card);
 							scrollToBottom();
 						}
@@ -885,122 +971,6 @@ templ Chat(data ChatData) {
 						messagesEl.scrollTop = messagesEl.scrollHeight;
 					}
 
-					// Markdown renderer (line-based, XSS-safe)
-					function renderMarkdown(text) {
-						// 1. Extract fenced code blocks into safe placeholders
-						var codeBlocks = [];
-						text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
-							codeBlocks.push('<pre><code>' + escapeHtml(code) + '</code></pre>');
-							return '\n__CB' + (codeBlocks.length - 1) + '__\n';
-						});
-						// 2. Extract inline code
-						var inlineCode = [];
-						text = text.replace(/`([^`]+)`/g, function(_, code) {
-							inlineCode.push('<code>' + escapeHtml(code) + '</code>');
-							return '__IC' + (inlineCode.length - 1) + '__';
-						});
-						// 3. Normalize: ensure headings start on their own line
-						text = text.replace(/([^\n])(#{1,4}\s)/g, '$1\n$2');
-						// 4. Line-by-line parsing
-						var lines = text.split('\n');
-						var html = '';
-						var i = 0;
-						while (i < lines.length) {
-							var line = lines[i];
-							// Skip blank lines
-							if (line.trim() === '') { i++; continue; }
-							// Code block placeholder
-							var cbMatch = line.trim().match(/^__CB(\d+)__$/);
-							if (cbMatch) { html += codeBlocks[cbMatch[1]]; i++; continue; }
-							// Heading
-							var hMatch = line.match(/^(#{1,4})\s+(.+)$/);
-							if (hMatch) {
-								var lvl = hMatch[1].length;
-								html += '<h' + lvl + '>' + inlineFmt(hMatch[2]) + '</h' + lvl + '>';
-								i++; continue;
-							}
-							// Horizontal rule
-							if (/^[-*_]{3,}\s*$/.test(line.trim())) { html += '<hr>'; i++; continue; }
-							// Blockquote
-							if (/^>\s?/.test(line)) {
-								var bq = [];
-								while (i < lines.length && /^>\s?/.test(lines[i])) {
-									bq.push(lines[i].replace(/^>\s?/, ''));
-									i++;
-								}
-								html += '<blockquote><p>' + inlineFmt(bq.join('<br>')) + '</p></blockquote>';
-								continue;
-							}
-							// Unordered list
-							if (/^\s*[-*+]\s/.test(line)) {
-								html += '<ul>';
-								while (i < lines.length && /^\s*[-*+]\s/.test(lines[i])) {
-									html += '<li>' + inlineFmt(lines[i].replace(/^\s*[-*+]\s/, '')) + '</li>';
-									i++;
-								}
-								html += '</ul>';
-								continue;
-							}
-							// Ordered list
-							if (/^\s*\d+[.)]\s/.test(line)) {
-								html += '<ol>';
-								while (i < lines.length && /^\s*\d+[.)]\s/.test(lines[i])) {
-									html += '<li>' + inlineFmt(lines[i].replace(/^\s*\d+[.)]\s/, '')) + '</li>';
-									i++;
-								}
-								html += '</ol>';
-								continue;
-							}
-							// Table
-							if (i + 1 < lines.length && line.indexOf('|') !== -1 && /^\|?[\s-:|]+\|?$/.test(lines[i + 1])) {
-								var tLines = [];
-								while (i < lines.length && lines[i].indexOf('|') !== -1) { tLines.push(lines[i]); i++; }
-								html += renderTable(tLines);
-								continue;
-							}
-							// Paragraph: collect consecutive non-special lines
-							var para = [];
-							while (i < lines.length && lines[i].trim() !== '' &&
-								!/^#{1,4}\s/.test(lines[i]) && !/^\s*[-*+]\s/.test(lines[i]) &&
-								!/^\s*\d+[.)]\s/.test(lines[i]) && !/^>\s?/.test(lines[i]) &&
-								!/^[-*_]{3,}\s*$/.test(lines[i].trim()) && !/^__CB\d+__$/.test(lines[i].trim()) &&
-								!(i + 1 < lines.length && lines[i].indexOf('|') !== -1 && /^\|?[\s-:|]+\|?$/.test(lines[i + 1]))) {
-								para.push(lines[i]);
-								i++;
-							}
-							if (para.length) html += '<p>' + inlineFmt(para.join('<br>')) + '</p>';
-						}
-						// 4. Restore inline code placeholders
-						html = html.replace(/__IC(\d+)__/g, function(_, idx) { return inlineCode[idx]; });
-						return html;
-					}
-
-					function inlineFmt(text) {
-						text = escapeHtml(text);
-						text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-						text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
-						text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function(_, label, url) {
-							if (!/^(https?:\/\/|\/)/i.test(url.trim())) return label;
-							return '<a href="' + url + '" target="_blank" rel="noopener">' + label + '</a>';
-						});
-						// Restore inline code placeholders that survived escaping
-						text = text.replace(/__IC(\d+)__/g, function(_, idx) { return inlineCode[idx]; });
-						return text;
-					}
-
-					function renderTable(tLines) {
-						var hdr = tLines[0].split('|').map(function(c) { return c.trim(); }).filter(Boolean);
-						var t = '<table><thead><tr>';
-						hdr.forEach(function(h) { t += '<th>' + inlineFmt(h) + '</th>'; });
-						t += '</tr></thead><tbody>';
-						for (var r = 2; r < tLines.length; r++) {
-							var cells = tLines[r].split('|').map(function(c) { return c.trim(); }).filter(Boolean);
-							if (cells.length) { t += '<tr>'; cells.forEach(function(c) { t += '<td>' + inlineFmt(c) + '</td>'; }); t += '</tr>'; }
-						}
-						t += '</tbody></table>';
-						return t;
-					}
-
 					function escapeHtml(s) {
 						const d = document.createElement('div');
 						d.textContent = s;
@@ -1038,8 +1008,8 @@ templ Chat(data ChatData) {
 									'<div style="padding:0.75rem;border-bottom:1px solid var(--border-color)">' +
 									'<div style="font-weight:500;font-size:0.875rem;margin-bottom:0.25rem">' + escapeHtml(b.question) + '</div>' +
 									'<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.5rem">' +
-									'<sl-button size="small" onclick="loadBookmark(\\'' + escapeHtml(b.id) + '\\')">View</sl-button>' +
-									'<sl-button size="small" variant="danger" outline onclick="deleteBookmark(\\'' + escapeHtml(b.id) + '\\')">Delete</sl-button>' +
+									'<sl-button size="small" onclick="loadBookmark(\x27' + escapeHtml(b.id) + '\x27)">View</sl-button>' +
+									'<sl-button size="small" variant="danger" outline onclick="deleteBookmark(\x27' + escapeHtml(b.id) + '\x27)">Delete</sl-button>' +
 									'</div></div>'
 								).join('');
 							})
@@ -1097,6 +1067,133 @@ templ Chat(data ChatData) {
 								showToast('Failed to load bookmark', 'danger');
 							});
 					};
+
+					// --- Log Tail ---
+					var tailContainer = null;
+					var tailBody = null;
+					var tailCount = 0;
+					var tailAutoScroll = true;
+
+					function handleTailEvent(content) {
+						var payload;
+						try { payload = JSON.parse(content); } catch(e) { return; }
+						if (!payload.entries || !payload.entries.length) return;
+
+						if (!tailContainer) createTailContainer();
+
+						for (var i = 0; i < payload.entries.length; i++) {
+							appendLogEntry(payload.entries[i]);
+						}
+
+						var countEl = tailContainer.querySelector('.log-tail-count');
+						if (countEl) countEl.textContent = tailCount;
+
+						if (tailAutoScroll && tailBody) {
+							tailBody.scrollTop = tailBody.scrollHeight;
+						}
+						scrollToBottom();
+					}
+
+					function handleTailEnd(reason) {
+						if (tailContainer) {
+							var stopBtn = tailContainer.querySelector('.log-tail-stop');
+							if (stopBtn) stopBtn.remove();
+
+							var footer = document.createElement('div');
+							footer.className = 'log-tail-stopped';
+							var msg = 'Tail stopped';
+							if (reason === 'timeout') msg = 'Tail stopped (2 min timeout)';
+							else if (reason === 'idle') msg = 'Tail stopped (no new logs)';
+							footer.textContent = msg;
+							tailContainer.appendChild(footer);
+						}
+						tailContainer = null;
+						tailBody = null;
+						tailCount = 0;
+						tailAutoScroll = true;
+						enableInput();
+					}
+
+					function createTailContainer() {
+						var container = document.createElement('div');
+						container.className = 'log-tail';
+
+						var header = document.createElement('div');
+						header.className = 'log-tail-header';
+						header.innerHTML = '<span>Live tail \u00b7 <span class="log-tail-count">0</span> entries</span>';
+
+						var stopBtn = document.createElement('button');
+						stopBtn.className = 'log-tail-stop';
+						stopBtn.textContent = 'Stop';
+						stopBtn.addEventListener('click', function() {
+							if (ws && ws.readyState === 1) {
+								ws.send(JSON.stringify({ type: 'cancel' }));
+							}
+						});
+						header.appendChild(stopBtn);
+
+						var body = document.createElement('div');
+						body.className = 'log-tail-body';
+						body.addEventListener('scroll', function() {
+							var atBottom = body.scrollHeight - body.scrollTop - body.clientHeight < 20;
+							tailAutoScroll = atBottom;
+						});
+
+						container.appendChild(header);
+						container.appendChild(body);
+
+						// Append to the current AI message or messagesInner
+						var target = currentAiMsg || messagesInner.lastElementChild;
+						if (target) {
+							target.appendChild(container);
+						} else {
+							messagesInner.appendChild(container);
+						}
+
+						tailContainer = container;
+						tailBody = body;
+					}
+
+					function appendLogEntry(entry) {
+						tailCount++;
+						var row = document.createElement('div');
+						row.className = 'log-entry';
+
+						// Time — show HH:MM:SS
+						var timeStr = '';
+						if (entry.time) {
+							var parts = entry.time.split('T');
+							timeStr = parts.length > 1 ? parts[1].replace('Z', '') : entry.time;
+						}
+
+						var sevClass = 'log-sev-info';
+						var sevLabel = (entry.severity || 'INFO').substring(0, 3).toUpperCase();
+						if (entry.severity === 'ERROR') sevClass = 'log-sev-error';
+						else if (entry.severity === 'WARN') sevClass = 'log-sev-warn';
+						else if (entry.severity === 'DEBUG') sevClass = 'log-sev-debug';
+
+						var html = '<span class="log-time">' + escapeHtml(timeStr) + '</span>' +
+							'<span class="log-sev ' + sevClass + '">' + escapeHtml(sevLabel) + '</span>' +
+							'<span class="log-service">' + escapeHtml(entry.service || '') + '</span>' +
+							'<span class="log-body">' + escapeHtml(entry.body || '') + '</span>';
+
+						if (entry.trace_id) {
+							html += '<span class="log-trace" data-trace="' + escapeHtml(entry.trace_id) + '" title="Investigate trace">\u2197</span>';
+						}
+
+						row.innerHTML = html;
+
+						// Trace pivot click handler
+						var traceEl = row.querySelector('.log-trace');
+						if (traceEl) {
+							traceEl.addEventListener('click', function() {
+								var tid = this.dataset.trace;
+								if (tid) sendMessage('trace ' + tid);
+							});
+						}
+
+						tailBody.appendChild(row);
+					}
 
 					// Connect WebSocket
 					if (document.querySelector('[id="chat-input"]:not([disabled])')) {
