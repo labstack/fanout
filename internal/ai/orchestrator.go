@@ -191,6 +191,8 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 				errMsg = "LLM authentication failed — check AI_API_KEY"
 			case isAPIErr && apiErr.StatusCode == 429:
 				errMsg = "LLM rate limited — please try again shortly"
+			case isAPIErr && apiErr.StatusCode >= 500:
+				errMsg = "LLM provider error — please try again"
 			}
 			if sendErr := send(ClientEvent{Type: CEError, Error: errMsg}); sendErr != nil {
 				slog.Warn("failed to send error to client", "send_err", sendErr)
@@ -267,7 +269,9 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 				var tailResult struct {
 					Tail *TailConfig `json:"tail"`
 				}
-				if err := json.Unmarshal([]byte(r.result), &tailResult); err == nil && tailResult.Tail != nil {
+				if err := json.Unmarshal([]byte(r.result), &tailResult); err != nil {
+					slog.Warn("failed to unmarshal tail config", "err", err)
+				} else if tailResult.Tail != nil {
 					tailCfg = tailResult.Tail
 					if tailCfg.Namespace == "" {
 						tailCfg.Namespace = namespace

@@ -137,6 +137,9 @@ LIMIT %d;
 		}
 		spans = append(spans, r)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rows iteration error", "method", "findSpans", "err", err)
+	}
 
 	hasMore := len(spans) > p.Limit
 	if hasMore {
@@ -231,6 +234,9 @@ LIMIT %d;
 		}
 		logs = append(logs, r)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rows iteration error", "method", "findLogs", "err", err)
+	}
 
 	hasMore := len(logs) > p.Limit
 	if hasMore {
@@ -314,6 +320,9 @@ LIMIT 100;
 			r.TraceID = fmt.Sprintf("%v", traceID)
 		}
 		logs = append(logs, r)
+	}
+	if err := rows.Err(); err != nil {
+		return logs, fmt.Errorf("TailLogs rows iteration: %w", err)
 	}
 
 	return logs, nil

@@ -40,11 +40,13 @@ type clientMessage struct {
 type WSHandler struct {
 	orchestrator *Orchestrator
 	svc          *service.Service
+	appCtx       context.Context // parent context for graceful shutdown
 }
 
 // NewWSHandler creates a WebSocket handler.
-func NewWSHandler(orchestrator *Orchestrator, svc *service.Service) *WSHandler {
-	return &WSHandler{orchestrator: orchestrator, svc: svc}
+// The appCtx should be the application-level context that is cancelled on shutdown.
+func NewWSHandler(appCtx context.Context, orchestrator *Orchestrator, svc *service.Service) *WSHandler {
+	return &WSHandler{appCtx: appCtx, orchestrator: orchestrator, svc: svc}
 }
 
 // Handle upgrades to WebSocket and manages the chat session.
@@ -60,6 +62,7 @@ func (h *WSHandler) Handle(c *echo.Context) error {
 		ws:           ws,
 		orchestrator: h.orchestrator,
 		svc:          h.svc,
+		appCtx:       h.appCtx,
 		messages:     []Message{},
 	}
 
@@ -70,6 +73,7 @@ type chatSession struct {
 	ws           *websocket.Conn
 	orchestrator *Orchestrator
 	svc          *service.Service
+	appCtx       context.Context
 
 	mu       sync.Mutex // protects messages, cancel, done
 	messages []Message
@@ -137,7 +141,7 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 
 	s.mu.Lock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	ctx, cancel := context.WithTimeout(s.appCtx, 5*time.Minute)
 	s.cancel = cancel
 	s.done = make(chan struct{})
 	doneCh := s.done
@@ -215,7 +219,9 @@ func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send Send
 			if parent.Err() != nil {
 				reason = "cancel"
 			}
-			_ = s.send(ClientEvent{Type: CETailEnd, Content: reason})
+			if err := s.send(ClientEvent{Type: CETailEnd, Content: reason}); err != nil {
+				slog.Debug("tail end send error", "reason", reason, "err", err)
+			}
 			return
 		case <-ticker.C:
 			logs, err := s.svc.TailLogs(ctx, service.TailParams{
@@ -227,7 +233,9 @@ func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send Send
 			})
 			if err != nil {
 				if ctx.Err() != nil {
-					_ = s.send(ClientEvent{Type: CETailEnd, Content: "cancel"})
+					if sendErr := s.send(ClientEvent{Type: CETailEnd, Content: "cancel"}); sendErr != nil {
+						slog.Debug("tail end send error", "reason", "cancel", "err", sendErr)
+					}
 					return
 				}
 				slog.Warn("tail poll error", "err", err)
@@ -237,7 +245,9 @@ func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send Send
 			if len(logs) == 0 {
 				if time.Since(idleSince) > 30*time.Second {
 					slog.Info("tail stopped", "reason", "idle")
-					_ = s.send(ClientEvent{Type: CETailEnd, Content: "idle"})
+					if sendErr := s.send(ClientEvent{Type: CETailEnd, Content: "idle"}); sendErr != nil {
+						slog.Debug("tail end send error", "reason", "idle", "err", sendErr)
+					}
 					return
 				}
 				continue
@@ -249,6 +259,9 @@ func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send Send
 			if last := logs[len(logs)-1]; last.Time != "" {
 				if t, err := time.Parse("2006-01-02T15:04:05Z", last.Time); err == nil {
 					cfg.Since = t
+				} else {
+					slog.Warn("tail: failed to parse log time, advancing cursor to now", "time", last.Time, "err", err)
+					cfg.Since = time.Now()
 				}
 			}
 
