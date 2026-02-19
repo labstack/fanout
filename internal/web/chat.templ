@@ -36,52 +36,52 @@ templ Chat(data ChatData) {
 			}
 			<style>
 				:root {
-					--bg-primary: #f5f3ef;
-					--bg-secondary: #ffffff;
-					--bg-tertiary: #ebe8e2;
-					--text-primary: #1a1816;
-					--text-secondary: #5c5650;
-					--text-muted: #948e86;
-					--border-color: #d8d3ca;
-					--accent: #b87820;
-					--accent-hover: #a06a1a;
-					--accent-subtle: rgba(184, 120, 32, 0.08);
-					--success: #2d8f6f;
-					--warning: #b88a28;
-					--danger: #b84540;
-					--signal-trace: #4a7ea8;
-					--signal-log: #b87838;
-					--signal-metric: #2a887a;
-					--signal-error: #b84540;
+					--bg-primary: #f6f4f0;
+					--bg-secondary: #fefefe;
+					--bg-tertiary: #eceae4;
+					--text-primary: #1c1a14;
+					--text-secondary: #585248;
+					--text-muted: #928c82;
+					--border-color: #d8d4ca;
+					--accent: #c07c1e;
+					--accent-hover: #a86a14;
+					--accent-subtle: rgba(192, 124, 30, 0.07);
+					--success: #2e8e6c;
+					--warning: #be8820;
+					--danger: #c24440;
+					--signal-trace: #4878a4;
+					--signal-log: #be8830;
+					--signal-metric: #2a8878;
+					--signal-error: #c24440;
 					--font-sans: 'Bricolage Grotesque', 'Helvetica Neue', Helvetica, sans-serif;
 					--font-mono: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
 					--radius: 0.625rem;
 					--transition: 150ms ease;
-					--shadow-sm: 0 1px 2px rgba(0,0,0,0.04), 0 1px 4px rgba(0,0,0,0.02);
-					--shadow-md: 0 4px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04);
-					--shadow-lg: 0 8px 24px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+					--shadow-sm: 0 1px 2px rgba(26,24,18,0.04), 0 1px 4px rgba(26,24,18,0.02);
+					--shadow-md: 0 4px 12px rgba(26,24,18,0.07), 0 1px 3px rgba(26,24,18,0.04);
+					--shadow-lg: 0 8px 24px rgba(26,24,18,0.09), 0 2px 6px rgba(26,24,18,0.04);
 				}
 				.sl-theme-dark {
-					--bg-primary: #0a0a0e;
-					--bg-secondary: #131520;
-					--bg-tertiary: #1b1d2a;
-					--text-primary: #d6dae4;
-					--text-secondary: #7e8599;
-					--text-muted: #505770;
-					--border-color: #222638;
-					--accent: #d4943a;
-					--accent-hover: #e8a849;
-					--accent-subtle: rgba(212, 148, 58, 0.1);
+					--bg-primary: #0e0d0c;
+					--bg-secondary: #1a1918;
+					--bg-tertiary: #242220;
+					--text-primary: #dcdad4;
+					--text-secondary: #8a8580;
+					--text-muted: #585450;
+					--border-color: #2e2c28;
+					--accent: #daa040;
+					--accent-hover: #e8b050;
+					--accent-subtle: rgba(218, 160, 64, 0.1);
 					--success: #48b890;
-					--warning: #d4a848;
-					--danger: #e06058;
-					--signal-trace: #6a9ec0;
-					--signal-log: #d49838;
-					--signal-metric: #48b0a0;
-					--signal-error: #e06058;
-					--shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
-					--shadow-md: 0 4px 12px rgba(0,0,0,0.4);
-					--shadow-lg: 0 8px 24px rgba(0,0,0,0.5);
+					--warning: #daa040;
+					--danger: #e05850;
+					--signal-trace: #6898b8;
+					--signal-log: #daa040;
+					--signal-metric: #48a898;
+					--signal-error: #e05850;
+					--shadow-sm: 0 1px 3px rgba(0,0,0,0.35);
+					--shadow-md: 0 4px 12px rgba(0,0,0,0.45);
+					--shadow-lg: 0 8px 24px rgba(0,0,0,0.55);
 				}
 				* { margin: 0; padding: 0; box-sizing: border-box; }
 				body {
@@ -103,7 +103,9 @@ templ Chat(data ChatData) {
 
 				/* Header */
 				.header {
-					background: var(--bg-secondary);
+					background: color-mix(in srgb, var(--bg-secondary) 85%, transparent);
+					backdrop-filter: blur(12px);
+					-webkit-backdrop-filter: blur(12px);
 					border-bottom: 1px solid var(--border-color);
 					display: flex;
 					align-items: center;
@@ -111,6 +113,9 @@ templ Chat(data ChatData) {
 					height: 54px;
 					flex-shrink: 0;
 					gap: 0.75rem;
+					position: sticky;
+					top: 0;
+					z-index: 10;
 				}
 				.header-brand {
 					font-size: 1.1rem;
@@ -124,6 +129,32 @@ templ Chat(data ChatData) {
 				}
 				.header-logo { width: 24px; height: 24px; border-radius: 5px; }
 				.header-spacer { flex: 1; }
+				.header-status {
+					display: flex;
+					align-items: center;
+					gap: 0.375rem;
+					font-size: 0.7rem;
+					color: var(--text-muted);
+					letter-spacing: 0.03em;
+					text-transform: uppercase;
+					font-weight: 500;
+				}
+				.header-status-dot {
+					width: 7px;
+					height: 7px;
+					border-radius: 50%;
+					background: var(--success);
+					box-shadow: 0 0 6px color-mix(in srgb, var(--success) 40%, transparent);
+					animation: pulse-dot 3s ease-in-out infinite;
+				}
+				.header-status-dot.disconnected {
+					background: var(--warning);
+					box-shadow: 0 0 6px color-mix(in srgb, var(--warning) 40%, transparent);
+				}
+				@keyframes pulse-dot {
+					0%, 100% { opacity: 1; }
+					50% { opacity: 0.5; }
+				}
 
 				/* Messages area */
 				#messages {
@@ -152,7 +183,7 @@ templ Chat(data ChatData) {
 					font-size: 1rem;
 					line-height: 1.6;
 					font-weight: 400;
-					box-shadow: 0 1px 4px rgba(184, 120, 32, 0.2);
+					box-shadow: 0 1px 4px rgba(192, 124, 30, 0.2);
 				}
 				.msg-ai { display: flex; flex-direction: column; gap: 0.5rem; }
 				.msg-ai .msg-text {
@@ -477,6 +508,22 @@ templ Chat(data ChatData) {
 					40% { opacity: 1; transform: scale(1); }
 				}
 
+				/* Entrance animations */
+				@keyframes fade-up {
+					from { opacity: 0; transform: translateY(16px); }
+					to { opacity: 1; transform: translateY(0); }
+				}
+				@keyframes fade-in {
+					from { opacity: 0; }
+					to { opacity: 1; }
+				}
+				.animate-in {
+					animation: fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+				}
+				.animate-in-delay-1 { animation-delay: 0.1s; }
+				.animate-in-delay-2 { animation-delay: 0.25s; }
+				.animate-in-delay-3 { animation-delay: 0.4s; }
+
 				/* Cold start panel */
 				.cold-start {
 					display: flex;
@@ -529,30 +576,53 @@ templ Chat(data ChatData) {
 				.suggestion-chip {
 					background: var(--bg-secondary);
 					border: 1px solid var(--border-color);
-					border-radius: 2rem;
-					padding: 0.5625rem 1.375rem;
+					border-radius: var(--radius);
+					padding: 0.75rem 1.25rem;
 					font-size: 0.9375rem;
 					color: var(--text-secondary);
 					cursor: pointer;
-					transition: all var(--transition);
+					transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
 					font-family: var(--font-sans);
 					font-weight: 400;
 					box-shadow: var(--shadow-sm);
+					display: flex;
+					align-items: center;
+					gap: 0.5rem;
+					text-align: left;
+					line-height: 1.4;
+				}
+				.suggestion-chip::before {
+					content: '\2192';
+					color: var(--accent);
+					font-size: 0.85em;
+					opacity: 0;
+					transform: translateX(-4px);
+					transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
 				}
 				.suggestion-chip:hover {
 					border-color: var(--accent);
-					color: var(--accent);
+					color: var(--text-primary);
 					background: var(--accent-subtle);
 					box-shadow: var(--shadow-md);
 					transform: translateY(-2px);
+				}
+				.suggestion-chip:hover::before {
+					opacity: 1;
+					transform: translateX(0);
+				}
+				.suggestion-chip:active {
+					transform: translateY(0);
+					box-shadow: var(--shadow-sm);
 				}
 
 				/* Input area */
 				.input-area {
 					position: relative;
-					background: var(--bg-secondary);
+					background: color-mix(in srgb, var(--bg-secondary) 90%, transparent);
+					backdrop-filter: blur(12px);
+					-webkit-backdrop-filter: blur(12px);
 					border-top: 1px solid var(--border-color);
-					padding: 1rem 2.5rem 1.25rem;
+					padding: 1rem 2.5rem 0.75rem;
 					flex-shrink: 0;
 				}
 				.input-area::before {
@@ -608,11 +678,32 @@ templ Chat(data ChatData) {
 					justify-content: center;
 					flex-shrink: 0;
 					transition: all var(--transition);
-					box-shadow: 0 2px 8px rgba(184, 120, 32, 0.25);
+					box-shadow: 0 2px 8px rgba(192, 124, 30, 0.25);
 				}
-				#send-btn:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(184, 120, 32, 0.3); }
+				#send-btn:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(192, 124, 30, 0.3); }
 				#send-btn:disabled { opacity: 0.3; cursor: not-allowed; transform: none; box-shadow: none; }
 				#send-btn svg { width: 18px; height: 18px; }
+				.input-hints {
+					max-width: 960px;
+					margin: 0.375rem auto 0;
+					display: flex;
+					justify-content: center;
+					gap: 1.25rem;
+					font-size: 0.675rem;
+					color: var(--text-muted);
+					letter-spacing: 0.02em;
+				}
+				.input-hints kbd {
+					display: inline-block;
+					background: var(--bg-tertiary);
+					border: 1px solid var(--border-color);
+					border-radius: 3px;
+					padding: 0 0.3rem;
+					font-family: var(--font-mono);
+					font-size: 0.625rem;
+					line-height: 1.6;
+					margin: 0 0.125rem;
+				}
 
 				/* Setup message */
 				.setup-msg {
@@ -642,6 +733,10 @@ templ Chat(data ChatData) {
 					<img src="/favicon.svg" class="header-logo" alt="Fanout"/>
 					Fanout
 				</a>
+				<div class="header-status" id="header-status">
+					<span class="header-status-dot" id="header-status-dot"></span>
+					<span id="header-status-text">Connecting</span>
+				</div>
 				<div class="header-spacer"></div>
 				<sl-icon-button name="bookmark" id="bookmarks-btn" label="Bookmarks"></sl-icon-button>
 				<sl-icon-button name="moon" id="theme-toggle" label="Toggle theme"></sl-icon-button>
@@ -650,12 +745,12 @@ templ Chat(data ChatData) {
 				<div class="messages-inner">
 					if data.HasAPIKey {
 						<div class="cold-start" id="cold-start">
-							<div>
+							<div class="animate-in">
 								<div class="cold-start-title">Ask anything about your system</div>
-								<div class="cold-start-subtitle">I can analyze traces, logs, metrics, and service health</div>
+								<div class="cold-start-subtitle">Traces, logs, metrics, and service health — all in one place</div>
 							</div>
 							if len(data.Suggestions) > 0 {
-								<div class="suggestions">
+								<div class="suggestions animate-in animate-in-delay-2">
 									for _, s := range data.Suggestions {
 										<button class="suggestion-chip" onclick={ suggestionClick(s) }>{ s }</button>
 									}
@@ -688,6 +783,12 @@ templ Chat(data ChatData) {
 							<polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
 						</svg>
 					</button>
+				</div>
+				<div class="input-hints">
+					<span><kbd>Enter</kbd> Send</span>
+					<span><kbd>Shift+Enter</kbd> New line</span>
+					<span><kbd>Esc</kbd> Cancel</span>
+					<span><kbd>&#8984;K</kbd> Clear</span>
 				</div>
 			</div>
 			<!-- Bookmarks drawer -->
@@ -779,18 +880,15 @@ templ Chat(data ChatData) {
 					}
 
 					function updateConnectionStatus(connected) {
-						let indicator = document.getElementById('ws-status');
-						if (!indicator) {
-							indicator = document.createElement('div');
-							indicator.id = 'ws-status';
-							indicator.style.cssText = 'position:fixed;bottom:60px;right:1rem;font-size:0.7rem;color:var(--text-muted);display:flex;align-items:center;gap:0.25rem;';
-							document.body.appendChild(indicator);
-						}
+						var dot = document.getElementById('header-status-dot');
+						var text = document.getElementById('header-status-text');
+						if (!dot || !text) return;
 						if (connected) {
-							indicator.style.display = 'none';
+							dot.classList.remove('disconnected');
+							text.textContent = 'Connected';
 						} else {
-							indicator.style.display = 'flex';
-							indicator.innerHTML = '<span style="width:6px;height:6px;background:var(--warning);border-radius:50%;"></span> Reconnecting...';
+							dot.classList.add('disconnected');
+							text.textContent = 'Reconnecting';
 						}
 					}
 
@@ -875,7 +973,7 @@ templ Chat(data ChatData) {
 					function flushText() {
 						rafPending = false;
 						if (currentTextEl && textBuffer) {
-							currentTextEl.innerHTML = textBuffer;
+							currentTextEl.textContent = textBuffer;
 							scrollToBottom();
 						}
 					}
