@@ -215,7 +215,7 @@ func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send Send
 			if parent.Err() != nil {
 				reason = "cancel"
 			}
-			s.send(ClientEvent{Type: CETailEnd, Content: reason})
+			_ = s.send(ClientEvent{Type: CETailEnd, Content: reason})
 			return
 		case <-ticker.C:
 			logs, err := s.svc.TailLogs(ctx, service.TailParams{
@@ -227,7 +227,7 @@ func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send Send
 			})
 			if err != nil {
 				if ctx.Err() != nil {
-					s.send(ClientEvent{Type: CETailEnd, Content: "cancel"})
+					_ = s.send(ClientEvent{Type: CETailEnd, Content: "cancel"})
 					return
 				}
 				slog.Warn("tail poll error", "err", err)
@@ -237,7 +237,7 @@ func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send Send
 			if len(logs) == 0 {
 				if time.Since(idleSince) > 30*time.Second {
 					slog.Info("tail stopped", "reason", "idle")
-					s.send(ClientEvent{Type: CETailEnd, Content: "idle"})
+					_ = s.send(ClientEvent{Type: CETailEnd, Content: "idle"})
 					return
 				}
 				continue

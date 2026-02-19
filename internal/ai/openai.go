@@ -296,7 +296,6 @@ func (p *OpenAIProvider) parseSSE(r io.Reader, cb StreamCallback) error {
 					return err
 				}
 			case "content_filter":
-				gotStop = true
 				return cb(StreamEvent{Type: EventError, Error: "Response blocked by content filter"})
 			default:
 				slog.Warn("unrecognized finish_reason from OpenAI", "reason", *choice.FinishReason)

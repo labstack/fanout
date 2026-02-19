@@ -41,9 +41,10 @@ func TestIsCompacted(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "compacted with hour dirs",
+			name: "compacted with other hour dirs",
 			setup: func(d string) {
-				os.WriteFile(filepath.Join(d, "compacted.parquet"), []byte("data"), 0644)
+				os.MkdirAll(filepath.Join(d, "hour=00"), 0755)
+				os.WriteFile(filepath.Join(d, "hour=00", "compacted.parquet"), []byte("data"), 0644)
 				os.MkdirAll(filepath.Join(d, "hour=10"), 0755)
 			},
 			want: false,
@@ -51,7 +52,8 @@ func TestIsCompacted(t *testing.T) {
 		{
 			name: "fully compacted",
 			setup: func(d string) {
-				os.WriteFile(filepath.Join(d, "compacted.parquet"), []byte("data"), 0644)
+				os.MkdirAll(filepath.Join(d, "hour=00"), 0755)
+				os.WriteFile(filepath.Join(d, "hour=00", "compacted.parquet"), []byte("data"), 0644)
 			},
 			want: true,
 		},
