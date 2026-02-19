@@ -93,7 +93,7 @@ func (p *AnthropicProvider) buildRequest(params StreamParams) map[string]any {
 					var input any
 					if err := json.Unmarshal([]byte(tc.Input), &input); err != nil {
 						slog.Error("corrupt tool call input, using empty object",
-						"tool", tc.Name, "id", tc.ID, "input_len", len(tc.Input), "err", err)
+							"tool", tc.Name, "id", tc.ID, "input_len", len(tc.Input), "err", err)
 						input = map[string]any{}
 					}
 					content = append(content, map[string]any{
