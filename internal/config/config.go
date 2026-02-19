@@ -17,6 +17,7 @@ type Config struct {
 	MaxRows        int       // 50000 per file
 	APIToken       string    // bearer for API (optional)
 	RollupEvery    int       // seconds
+	MCPEnabled     bool      // enable MCP server
 	RetentionDays  int       // days to keep data (0 = forever)
 	RetentionHours int       // how often to check retention (hours)
 	TenantID       uuid.UUID // tenant identifier (UUIDv7)
@@ -37,6 +38,7 @@ func Load() Config {
 		MaxRows:        getenvInt("MAX_ROWS", 50000),
 		APIToken:       os.Getenv("API_TOKEN"),
 		RollupEvery:    getenvInt("ROLLUP_EVERY", 60),
+		MCPEnabled:     getenvBool("MCP_ENABLED", true),
 		RetentionDays:  getenvInt("RETENTION_DAYS", 30),
 		RetentionHours: getenvInt("RETENTION_HOURS", 1),
 		TenantID:       getenvUUID("TENANT_ID"),

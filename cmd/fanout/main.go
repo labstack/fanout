@@ -27,6 +27,7 @@ import (
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/lake"
+	"github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
 	"github.com/labstack/fanout/internal/web"
@@ -215,6 +216,14 @@ func main() {
 
 	// UI routes (chat page + WebSocket + bookmarks + suggestions)
 	api.RegisterUIRoutes(e, cfg, orch, wsHandler, bookmarks)
+
+	// MCP server (Model Context Protocol) — parallel to AI chat
+	if cfg.MCPEnabled {
+		mcpServer := mcp.NewServer(svc, q, cfg)
+		mcpServer.RegisterRoutes(e)
+		slog.Info("MCP server enabled", "path", "/mcp")
+		go mcp.RunCleanup(ctx)
+	}
 
 	// Run HTTP
 	go func() {
