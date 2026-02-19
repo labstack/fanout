@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/a-h/templ"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/microcosm-cc/bluemonday"
 
 	"github.com/labstack/fanout/internal/ai"
@@ -58,14 +58,14 @@ func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, ws
 }
 
 // Favicon serves the SVG favicon.
-func Favicon(c echo.Context) error {
+func Favicon(c *echo.Context) error {
 	c.Response().Header().Set("Content-Type", "image/svg+xml")
 	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
 	return c.Blob(200, "image/svg+xml", faviconSVG)
 }
 
 // ChatPage renders the single-page chat UI.
-func (h *UIHandler) ChatPage(c echo.Context) error {
+func (h *UIHandler) ChatPage(c *echo.Context) error {
 	ctx := c.Request().Context()
 
 	var suggestions []string
@@ -85,7 +85,7 @@ func (h *UIHandler) ChatPage(c echo.Context) error {
 }
 
 // WebSocket upgrades to WS and handles the chat session.
-func (h *UIHandler) WebSocket(c echo.Context) error {
+func (h *UIHandler) WebSocket(c *echo.Context) error {
 	if h.wsHandler == nil {
 		return echo.NewHTTPError(503, "AI chat not configured")
 	}
@@ -93,7 +93,7 @@ func (h *UIHandler) WebSocket(c echo.Context) error {
 }
 
 // ListBookmarks returns all bookmarks.
-func (h *UIHandler) ListBookmarks(c echo.Context) error {
+func (h *UIHandler) ListBookmarks(c *echo.Context) error {
 	if h.bookmarks == nil {
 		return c.JSON(200, []ai.Bookmark{})
 	}
@@ -106,7 +106,7 @@ func (h *UIHandler) ListBookmarks(c echo.Context) error {
 }
 
 // CreateBookmark saves a new bookmark.
-func (h *UIHandler) CreateBookmark(c echo.Context) error {
+func (h *UIHandler) CreateBookmark(c *echo.Context) error {
 	if h.bookmarks == nil {
 		return echo.NewHTTPError(503, "bookmarks not configured")
 	}
@@ -131,7 +131,7 @@ func (h *UIHandler) CreateBookmark(c echo.Context) error {
 }
 
 // DeleteBookmark removes a bookmark by ID.
-func (h *UIHandler) DeleteBookmark(c echo.Context) error {
+func (h *UIHandler) DeleteBookmark(c *echo.Context) error {
 	if h.bookmarks == nil {
 		return echo.NewHTTPError(503, "bookmarks not configured")
 	}
@@ -148,7 +148,7 @@ func (h *UIHandler) DeleteBookmark(c echo.Context) error {
 }
 
 // Suggestions returns contextual starter questions.
-func (h *UIHandler) Suggestions(c echo.Context) error {
+func (h *UIHandler) Suggestions(c *echo.Context) error {
 	if h.orch == nil {
 		return c.JSON(200, []string{})
 	}
@@ -156,9 +156,9 @@ func (h *UIHandler) Suggestions(c echo.Context) error {
 }
 
 // renderTempl renders a templ component.
-func renderTempl(c echo.Context, component templ.Component) error {
+func renderTempl(c *echo.Context, component templ.Component) error {
 	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTML)
-	if err := component.Render(c.Request().Context(), c.Response().Writer); err != nil {
+	if err := component.Render(c.Request().Context(), c.Response()); err != nil {
 		slog.Error("template render failed", "err", err)
 		return err
 	}

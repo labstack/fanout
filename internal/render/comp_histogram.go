@@ -88,7 +88,7 @@ func (c *histogramComponent) Render(config json.RawMessage, format Format) (Outp
 			}
 			values = append(values, `{"bucket":"`+bucket+`","count":`+itoa(cnt)+`}`)
 		}
-		spec := `{"$schema":"https://vega.github.io/schema/vega-lite/v5.json",` +
+		spec := `{"$schema":"https://vega.github.io/schema/vega-lite/v6.json",` +
 			`"width":"container","height":180,` +
 			`"data":{"values":[` + strings.Join(values, ",") + `]},` +
 			`"mark":"bar",` +

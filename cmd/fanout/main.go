@@ -14,8 +14,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"google.golang.org/grpc"
@@ -111,7 +111,6 @@ func main() {
 
 	// Start Echo HTTP API
 	e := echo.New()
-	e.HideBanner = true
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogURI:       true,
@@ -120,8 +119,8 @@ func main() {
 		LogMethod:    true,
 		LogRemoteIP:  true,
 		LogUserAgent: true,
-		LogError:     true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
+		HandleError:  true,
+		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
 			uri := v.URI
 			if strings.Contains(uri, "token=") {
 				uri = tokenRedactRe.ReplaceAllString(uri, "token=REDACTED")
@@ -136,7 +135,7 @@ func main() {
 	if apiToken != "" {
 		tokenBytes := []byte(apiToken)
 		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-			return func(c echo.Context) error {
+			return func(c *echo.Context) error {
 				path := c.Request().URL.Path
 
 				// Skip auth for health, metrics, and UI page routes
@@ -226,9 +225,15 @@ func main() {
 	}
 
 	// Run HTTP
+	httpCtx, httpCancel := context.WithCancel(context.Background())
 	go func() {
+		sc := echo.StartConfig{
+			Address:         cfg.HTTPAddr,
+			HideBanner:      true,
+			GracefulTimeout: 5 * time.Second,
+		}
 		slog.Info("HTTP listening", "addr", cfg.HTTPAddr)
-		if err := e.Start(cfg.HTTPAddr); err != nil && err != http.ErrServerClosed {
+		if err := sc.Start(httpCtx, e); err != nil && err != http.ErrServerClosed {
 			errCh <- fmt.Errorf("HTTP server: %w", err)
 		}
 	}()
@@ -248,9 +253,5 @@ func main() {
 	cancel()
 	writer.Wait()
 	grpcSrv.GracefulStop()
-	ctxShutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelShutdown()
-	if err := e.Shutdown(ctxShutdown); err != nil {
-		slog.Warn("HTTP server shutdown error", "err", err)
-	}
+	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/service"
 )
 
@@ -48,7 +48,7 @@ func NewWSHandler(orchestrator *Orchestrator, svc *service.Service) *WSHandler {
 }
 
 // Handle upgrades to WebSocket and manages the chat session.
-func (h *WSHandler) Handle(c echo.Context) error {
+func (h *WSHandler) Handle(c *echo.Context) error {
 	ws, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
 		return err

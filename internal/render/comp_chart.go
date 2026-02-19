@@ -70,7 +70,7 @@ func (c *chartComponent) Render(config json.RawMessage, format Format) (Output, 
 			}
 
 			built := map[string]any{
-				"$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+				"$schema": "https://vega.github.io/schema/vega-lite/v6.json",
 				"width":   "container",
 				"height":  height,
 			}

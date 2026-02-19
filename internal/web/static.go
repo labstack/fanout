@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 )
 
 //go:embed static
@@ -41,13 +41,13 @@ func RegisterStaticRoutes(e *echo.Echo) {
 	e.GET(vizCSSPath, serveVizCSS)
 }
 
-func serveVizJS(c echo.Context) error {
+func serveVizJS(c *echo.Context) error {
 	c.Response().Header().Set("Content-Type", "application/javascript; charset=utf-8")
 	c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	return c.Blob(http.StatusOK, "application/javascript", vizJSBundle)
 }
 
-func serveVizCSS(c echo.Context) error {
+func serveVizCSS(c *echo.Context) error {
 	c.Response().Header().Set("Content-Type", "text/css; charset=utf-8")
 	c.Response().Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	return c.Blob(http.StatusOK, "text/css", vizCSSBundle)
