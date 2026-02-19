@@ -106,6 +106,10 @@ hooks:
     chmod +x .git/hooks/pre-commit
     @echo "Hooks installed"
 
+# Sync demo data from server
+sync-data SERVER="ubuntu@fanout.run" SRC="/data/fanout-demo/":
+    rsync -avz --progress {{SERVER}}:{{SRC}} lake/
+
 # Deploy to production
 deploy *ARGS='':
     ./scripts/yeet.sh {{ARGS}}

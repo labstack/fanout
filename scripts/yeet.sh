@@ -93,6 +93,8 @@ ssh "$SERVER" "
 set -e
 cd /app
 
+docker network create webproxy 2>/dev/null || true
+
 cat > .env << EOF
 VERSION=${VERSION:-main}
 LETSENCRYPT_EMAIL=$EMAIL

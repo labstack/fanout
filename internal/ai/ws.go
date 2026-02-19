@@ -11,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/fanout/internal/service"
 )
 
 var upgrader = websocket.Upgrader{
@@ -38,11 +39,12 @@ type clientMessage struct {
 // WSHandler handles WebSocket connections for the chat interface.
 type WSHandler struct {
 	orchestrator *Orchestrator
+	svc          *service.Service
 }
 
 // NewWSHandler creates a WebSocket handler.
-func NewWSHandler(orchestrator *Orchestrator) *WSHandler {
-	return &WSHandler{orchestrator: orchestrator}
+func NewWSHandler(orchestrator *Orchestrator, svc *service.Service) *WSHandler {
+	return &WSHandler{orchestrator: orchestrator, svc: svc}
 }
 
 // Handle upgrades to WebSocket and manages the chat session.
@@ -57,6 +59,7 @@ func (h *WSHandler) Handle(c echo.Context) error {
 	session := &chatSession{
 		ws:           ws,
 		orchestrator: h.orchestrator,
+		svc:          h.svc,
 		messages:     []Message{},
 	}
 
@@ -66,6 +69,7 @@ func (h *WSHandler) Handle(c echo.Context) error {
 type chatSession struct {
 	ws           *websocket.Conn
 	orchestrator *Orchestrator
+	svc          *service.Service
 
 	mu       sync.Mutex // protects messages, cancel, done
 	messages []Message
@@ -157,9 +161,11 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 		defer close(doneCh)
 		defer cancel()
 
-		updated, err := s.orchestrator.Run(ctx, msgs, window, msg.Namespace, func(event ClientEvent) error {
+		send := func(event ClientEvent) error {
 			return s.send(event)
-		})
+		}
+
+		updated, tailCfg, err := s.orchestrator.Run(ctx, msgs, window, msg.Namespace, send)
 
 		if err != nil && ctx.Err() == nil {
 			slog.Error("orchestrator error", "err", err)
@@ -176,7 +182,105 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 		}
 		s.trimConversation()
 		s.mu.Unlock()
+
+		// Start tailing if the orchestrator detected a tail tool call
+		if tailCfg != nil && ctx.Err() == nil {
+			s.runTail(ctx, tailCfg, send)
+		}
 	}()
+}
+
+// runTail polls for new log entries and streams them to the client.
+// Stops on context cancellation, 2-minute timeout, or 30s of no new results.
+func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send SendFunc) {
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	defer cancel()
+
+	slog.Info("tail started", "service", cfg.Service, "namespace", cfg.Namespace, "since", cfg.Since)
+
+	// Set Since to now if zero (initial batch had no logs)
+	if cfg.Since.IsZero() {
+		cfg.Since = time.Now().Add(-5 * time.Minute)
+	}
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	idleSince := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			reason := "timeout"
+			if parent.Err() != nil {
+				reason = "cancel"
+			}
+			s.send(ClientEvent{Type: CETailEnd, Content: reason})
+			return
+		case <-ticker.C:
+			logs, err := s.svc.TailLogs(ctx, service.TailParams{
+				Service:   cfg.Service,
+				Pattern:   cfg.Pattern,
+				Severity:  cfg.Severity,
+				Namespace: cfg.Namespace,
+				Since:     cfg.Since,
+			})
+			if err != nil {
+				if ctx.Err() != nil {
+					s.send(ClientEvent{Type: CETailEnd, Content: "cancel"})
+					return
+				}
+				slog.Warn("tail poll error", "err", err)
+				continue
+			}
+
+			if len(logs) == 0 {
+				if time.Since(idleSince) > 30*time.Second {
+					slog.Info("tail stopped", "reason", "idle")
+					s.send(ClientEvent{Type: CETailEnd, Content: "idle"})
+					return
+				}
+				continue
+			}
+
+			idleSince = time.Now()
+
+			// Update Since to the latest log time
+			if last := logs[len(logs)-1]; last.Time != "" {
+				if t, err := time.Parse("2006-01-02T15:04:05Z", last.Time); err == nil {
+					cfg.Since = t
+				}
+			}
+
+			// Marshal and send entries
+			type tailEntry struct {
+				Time     string `json:"time"`
+				Severity string `json:"severity"`
+				Body     string `json:"body"`
+				Service  string `json:"service"`
+				TraceID  string `json:"trace_id,omitempty"`
+			}
+			entries := make([]tailEntry, len(logs))
+			for i, l := range logs {
+				entries[i] = tailEntry{
+					Time:     l.Time,
+					Severity: l.Severity,
+					Body:     l.Body,
+					Service:  l.Service,
+					TraceID:  l.TraceID,
+				}
+			}
+			data, err := json.Marshal(map[string]any{"entries": entries})
+			if err != nil {
+				slog.Warn("tail marshal error", "err", err)
+				continue
+			}
+			if err := send(ClientEvent{Type: CETail, Content: string(data)}); err != nil {
+				slog.Debug("tail send error, stopping", "err", err)
+				return
+			}
+		}
+	}
 }
 
 func (s *chatSession) send(event ClientEvent) error {

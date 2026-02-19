@@ -15,7 +15,7 @@ import (
 // scoped to a single tenant/namespace partition.
 // Path structure: lake/{signal}/tenant={tenant}/namespace={namespace}/year=*/month=*/day=*/hour=*/part-*.parquet
 func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) string {
-	now := time.Now() // Use local time to match lake writer partitions
+	now := time.Now().UTC() // Writer uses UTC partitions (see lake/writer.go:327)
 	start := now.Add(-time.Duration(windowMinutes) * time.Minute)
 
 	filesSet := make(map[string]struct{})
@@ -27,15 +27,10 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 		for t := startDay; !t.After(endDay); t = t.Add(24 * time.Hour) {
 			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
 				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
-			// Match hourly part files and day-level compacted files
-			for _, pattern := range []string{
-				filepath.Join(dayBase, "hour=*/part-*.parquet"),
-				filepath.Join(dayBase, "compacted.parquet"),
-			} {
-				matches, _ := filepath.Glob(pattern)
-				for _, m := range matches {
-					filesSet[m] = struct{}{}
-				}
+			// Match all parquet files under hour directories
+			matches, _ := filepath.Glob(filepath.Join(dayBase, "hour=*/*.parquet"))
+			for _, m := range matches {
+				filesSet[m] = struct{}{}
 			}
 		}
 	} else {
@@ -46,15 +41,16 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 		for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
 			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
 				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
-			pattern := filepath.Join(dayBase, fmt.Sprintf("hour=%02d/part-*.parquet", t.Hour()))
+			// Match all parquet files for this hour (part files and compacted)
+			pattern := filepath.Join(dayBase, fmt.Sprintf("hour=%02d/*.parquet", t.Hour()))
 			matches, _ := filepath.Glob(pattern)
 			for _, m := range matches {
 				filesSet[m] = struct{}{}
 			}
-			// Also check for day-level compacted file (once per day)
+			// Also check for compacted file in hour=00 (once per day)
 			if _, seen := seenDays[dayBase]; !seen {
 				seenDays[dayBase] = struct{}{}
-				compacted := filepath.Join(dayBase, "compacted.parquet")
+				compacted := filepath.Join(dayBase, "hour=00", "compacted.parquet")
 				if _, err := os.Stat(compacted); err == nil {
 					filesSet[compacted] = struct{}{}
 				}
@@ -65,11 +61,9 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 	// If there are no files in the window, return broad globs for the partition
 	// covering both hourly part files and day-level compacted files.
 	if len(filesSet) == 0 {
-		hourly := sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/part-*.parquet",
+		all := sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/*.parquet",
 			lakeDir, signal, tenant, namespace))
-		compacted := sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/compacted.parquet",
-			lakeDir, signal, tenant, namespace))
-		return fmt.Sprintf("[%s,%s]", hourly, compacted)
+		return fmt.Sprintf("[%s]", all)
 	}
 
 	files := make([]string, 0, len(filesSet))

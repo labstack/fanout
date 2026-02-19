@@ -196,7 +196,7 @@ func main() {
 
 		tools := ai.NewToolRegistry(svc, q, cfg.LakeDir)
 		orch = ai.NewOrchestrator(provider, tools, svc, cfg)
-		wsHandler = ai.NewWSHandler(orch)
+		wsHandler = ai.NewWSHandler(orch, svc)
 		if cfg.APIToken == "" {
 			slog.Warn("AI chat enabled without API_TOKEN — chat endpoint is unauthenticated")
 		}

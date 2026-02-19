@@ -27,3 +27,9 @@ func (s *Service) defaults(namespace, tenantID string) (string, string) {
 	}
 	return namespace, tenantID
 }
+
+// ResolveNamespace returns the effective namespace (applying default if empty).
+func (s *Service) ResolveNamespace(namespace string) string {
+	ns, _ := s.defaults(namespace, "")
+	return ns
+}

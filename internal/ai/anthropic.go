@@ -24,7 +24,7 @@ type AnthropicProvider struct {
 // NewAnthropicProvider creates a provider for the Anthropic Messages API.
 func NewAnthropicProvider(apiKey, model, baseURL string) *AnthropicProvider {
 	if model == "" {
-		model = "claude-sonnet-4-20250514"
+		model = "claude-sonnet-4-6"
 	}
 	if baseURL == "" {
 		baseURL = "https://api.anthropic.com"
