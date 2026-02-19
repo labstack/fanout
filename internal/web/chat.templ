@@ -286,7 +286,7 @@ templ Chat(data ChatData) {
 					background: var(--bg-secondary);
 					border: 1px solid var(--border-color);
 					border-radius: var(--radius);
-					padding: 1.25rem;
+					padding: 1.5rem;
 					margin: 0.75rem 0;
 					overflow-x: auto;
 					box-shadow: var(--shadow-sm);
@@ -299,51 +299,118 @@ templ Chat(data ChatData) {
 				.chat-card:hover { box-shadow: var(--shadow-md); }
 				.chat-card * { font-family: inherit; }
 
-				/* Support LLM-generated styles inside cards */
+				/* Card interior: flex containers get gap for icon+text alignment */
+				.chat-card div[style*="display: flex"],
+				.chat-card div[style*="display:flex"] {
+					gap: 0.875rem;
+				}
+				/* Card interior: grid containers get default columns + gap fallback */
+				.chat-card div[style*="display: grid"],
+				.chat-card div[style*="display:grid"] {
+					grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+					gap: 1rem;
+					margin: 1.25rem 0 0.5rem;
+				}
+				/* Card sections: add spacing between major blocks */
+				.chat-card > div > table,
+				.chat-card > div > div > table {
+					margin-top: 0.75rem;
+				}
+
+				/* Metric values — inline style or class-based */
+				.chat-card .metric-value,
+				.chat-card div[style*="font-size: 1.5rem"],
+				.chat-card div[style*="font-size:1.5rem"] {
+					font-feature-settings: 'tnum';
+					letter-spacing: -0.02em;
+				}
+				.chat-card .metric-value {
+					font-size: 1.4rem;
+					font-weight: 700;
+					color: var(--text-primary);
+					line-height: 1.2;
+					font-family: var(--font-sans);
+				}
+				/* Metric labels — inline style or class-based */
+				.chat-card .metric-label,
+				.chat-card div[style*="font-size: 0.7rem"],
+				.chat-card div[style*="font-size:0.7rem"] {
+					color: var(--text-muted) !important;
+					letter-spacing: 0.06em;
+					font-weight: 500;
+					line-height: 1.3;
+					margin-top: 0.25rem;
+				}
+				.chat-card .metric-label {
+					font-size: 0.675rem;
+					text-transform: uppercase;
+					font-family: var(--font-sans);
+				}
+
+				/* Shoelace card support */
 				.chat-card sl-card { display: block; width: 100%; }
 				.chat-card sl-card::part(base) {
 					background: var(--bg-secondary);
 					border: 1px solid var(--border-color);
 				}
 				.chat-card sl-card::part(body) { padding: 0.875rem; }
-				.chat-card .metric-value {
-					font-size: 1.4rem;
-					font-weight: 700;
-					color: var(--text-primary);
-					line-height: 1;
-					font-feature-settings: 'tnum';
-					font-family: var(--font-sans);
-				}
-				.chat-card .metric-label {
-					font-size: 0.675rem;
-					color: var(--text-muted);
-					margin-top: 0.3rem;
-					text-transform: uppercase;
-					letter-spacing: 0.05em;
-					font-weight: 500;
-					font-family: var(--font-sans);
-				}
+				/* Shoelace icons inside cards: consistent sizing */
+				.chat-card sl-icon { vertical-align: -0.15em; }
+
+				/* Tables */
 				.chat-card .table {
 					width: 100%;
 					border-collapse: collapse;
-					font-size: 0.9rem;
+					font-size: 0.85rem;
 				}
 				.chat-card .table th, .chat-card .table td {
-					padding: 0.5rem 0.875rem;
+					padding: 0.5rem 0.75rem;
 					text-align: left;
 					border-bottom: 1px solid var(--border-color);
 				}
 				.chat-card .table th {
 					font-weight: 600;
 					color: var(--text-muted);
-					font-size: 0.675rem;
+					font-size: 0.65rem;
 					text-transform: uppercase;
-					letter-spacing: 0.05em;
+					letter-spacing: 0.06em;
 					font-family: var(--font-sans);
+					padding-bottom: 0.625rem;
 				}
+				/* Numeric columns: right-align, tabular figures, mono */
+				.chat-card .table td:nth-child(n+3),
+				.chat-card .table th:nth-child(n+3) {
+					text-align: right;
+					font-feature-settings: 'tnum';
+				}
+				.chat-card .table td:nth-child(n+3) {
+					font-family: var(--font-mono);
+					font-size: 0.8rem;
+				}
+				/* Status icon column: narrow + centered */
+				.chat-card .table th:first-child,
+				.chat-card .table td:first-child {
+					width: 2rem;
+					text-align: center;
+					padding-left: 0.5rem;
+					padding-right: 0.25rem;
+				}
+				/* Hover on table rows */
+				.chat-card .table tbody tr:hover td { background: var(--bg-tertiary); }
+				.chat-card .table tbody tr:last-child td { border-bottom: none; }
 				.chat-card .mono {
 					font-family: var(--font-mono);
 					font-size: 0.825rem;
+				}
+				/* Section headings inside cards */
+				.chat-card div[style*="font-weight: 700"],
+				.chat-card div[style*="font-weight:700"] {
+					letter-spacing: -0.01em;
+					margin-top: 1.25rem;
+				}
+				.chat-card div[style*="font-weight: 700"]:first-child,
+				.chat-card div[style*="font-weight:700"]:first-child {
+					margin-top: 0;
 				}
 
 				/* Log tail container */

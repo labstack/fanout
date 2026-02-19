@@ -392,7 +392,9 @@ func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *To
 	// (via bluemonday) before being sent to the browser. Never bypass sanitization.
 	r.register(ToolDef{
 		Name: "render",
-		Description: `Render HTML card inline in chat. CSS vars: --text-primary/secondary/muted, --bg-primary/secondary/tertiary, --border-color, --success, --warning, --danger, --signal-trace/log/metric/error, --font-sans/mono, --radius. Shoelace: <sl-card>, <sl-badge>, <sl-tag>, <sl-icon>, <sl-progress-bar>, <sl-tooltip>. Use grid layouts, <table class="table">.
+		Description: `Render HTML card inline in chat. CSS vars: --text-primary/secondary/muted, --bg-primary/secondary/tertiary, --border-color, --success, --warning, --danger, --signal-trace/log/metric/error, --font-sans/mono, --radius. Shoelace: <sl-card>, <sl-badge>, <sl-tag>, <sl-icon>, <sl-progress-bar>, <sl-tooltip>.
+
+Metric grid (MUST wrap each metric in a div): <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem"><div><div class="metric-value">99.9%</div><div class="metric-label">Label</div></div>...</div>. Table: <table class="table"><thead>...</thead><tbody>...</tbody></table> — put status/icon in col 1, name in col 2, numeric cols 3+ (auto right-aligned).
 
 SVG viz (class + data-attr JSON): trace-waterfall(data-spans:[{id,parent,service,op,start,dur,status}]), topology-graph(data-graph:{nodes:[{id,status,rpm,p95,errors}],edges:[{source,target,rpm,errorRate}]}), flow-sankey(data-flow:{nodes:[{id,label,rpm,status?}],links:[{source,target,value}]}), flame-graph(data-frames:[{name,depth,x,w,self,total,samples,service}]), latency-heatmap(data-heatmap:{buckets:[],times:[],values:[[]]}), dep-matrix(data-matrix:{services:[],cells:[{from,to,errorRate,rpm,p95}]}), endpoint-breakdown(data-endpoints:{endpoints:[{method,path,rpm,p50,p95,p99,errorRate,status,trend:[]}]}), correlation-view(data-correlation:{times:[],panels:[{label,color,values:[],baseline?,markers?:[{t,label,severity}]}]}), timeseries-chart(data-timeseries:{series:[{label,color,values:[],type}],labels:[],yLabel}), bar-chart(data-barchart:{bars:[{label,value,color?}],yLabel?,horizontal?}).
 
