@@ -78,6 +78,7 @@
       // Event markers
       if (panel.markers) {
         panel.markers.forEach(function(m) {
+          if (m.t < 0 || m.t >= values.length) return;
           var mx = padL + m.t * step;
           var my = yOff + yScale(values[m.t]);
           var markerColor = m.severity === 'critical' ? '#ef4444' : '#f59e0b';

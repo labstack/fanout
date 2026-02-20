@@ -109,7 +109,7 @@
     clone.className = entry.className;
     clone.setAttribute(entry.dataAttr, el.getAttribute(entry.dataAttr));
     body.appendChild(clone);
-    entry.renderFn(clone, true);
+    safeRender(entry, clone, true);
 
     overlayEl.classList.add('active');
     currentExpanded = entry;

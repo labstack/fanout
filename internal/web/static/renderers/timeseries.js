@@ -22,6 +22,7 @@
     // Global min/max
     var allVals = [];
     series.forEach(function(s) { allVals = allVals.concat(s.values); });
+    if (allVals.length === 0) return;
     var minVal = Math.min.apply(null, allVals);
     var maxVal = Math.max.apply(null, allVals);
     var range = maxVal - minVal || 1;
