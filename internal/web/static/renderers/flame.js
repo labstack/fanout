@@ -14,7 +14,7 @@
     var totalH = padY * 2 + (maxDepth + 1) * (frameH + 1) + 20;
     var barAreaW = totalW - padX * 2;
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     frames.forEach(function(frame, i) {
       var x = padX + frame.x * barAreaW;
@@ -29,7 +29,7 @@
       out += V.svg.rect(x, y, Math.max(w - 0.5, 1), frameH, 'fill="' + color + '" rx="2" ry="2" opacity="0.85"');
       if (label) {
         out += V.svg.text(x + 4, y + frameH/2 + 3,
-          V.util.escapeHtml(V.util.truncate(label, w - 8, expanded ? 6 : 5)),
+          V.util.truncate(label, w - 8, expanded ? 6 : 5),
           'class="flame-label" style="font-size:' + (expanded ? '10px' : '9px') + '"');
       }
       out += '</g>';

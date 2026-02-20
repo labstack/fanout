@@ -11,7 +11,7 @@
     var horizontal = data.horizontal || false;
 
     var maxVal = Math.max.apply(null, bars.map(function(b) { return b.value; })) * 1.15;
-    if (maxVal === 0) maxVal = 1;
+    if (maxVal <= 0) maxVal = 1;
 
     if (horizontal) {
       renderHorizontal(container, bars, maxVal, yLabel, expanded);
@@ -38,7 +38,7 @@
     var yTicks = [];
     for (var g = 0; g <= 5; g++) yTicks.push((g / 5) * maxVal);
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     // Gridlines + Y-axis labels
     out += '<g transform="translate(' + padL + ',' + padT + ')">';
@@ -55,15 +55,15 @@
       var color = b.color || V.colors.service(b.label);
 
       out += V.svg.rect(x, y, barW, h, 'class="bc-bar" fill="' + color + '" data-idx="' + i + '"');
-      out += V.svg.text(x + barW / 2, y - 4, V.util.escapeHtml(String(b.value)), 'class="bc-value-label" text-anchor="middle"');
+      out += V.svg.text(x + barW / 2, y - 4, b.value, 'class="bc-value-label" text-anchor="middle"');
 
       var labelText = V.util.truncate(b.label, barW + gap - 4, 6);
-      out += V.svg.text(x + barW / 2, chartH + padB - 6, V.util.escapeHtml(labelText), 'class="bc-axis-label" text-anchor="middle"');
+      out += V.svg.text(x + barW / 2, chartH + padB - 6, labelText, 'class="bc-axis-label" text-anchor="middle"');
     });
     out += '</g>';
 
     if (yLabel) {
-      out += V.svg.text(10, padT + chartH / 2, V.util.escapeHtml(yLabel),
+      out += V.svg.text(10, padT + chartH / 2, yLabel,
         'class="bc-axis-title" text-anchor="middle" transform="rotate(-90 10 ' + (padT + chartH / 2) + ')"');
     }
 
@@ -89,7 +89,7 @@
     var xTicks = [];
     for (var g = 0; g <= 5; g++) xTicks.push((g / 5) * maxVal);
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     // X-axis gridlines
     xTicks.forEach(function(t) {
@@ -105,8 +105,8 @@
       var color = b.color || V.colors.service(b.label);
 
       out += V.svg.rect(padL, y, w, barH, 'class="bc-bar" fill="' + color + '" data-idx="' + i + '"');
-      out += V.svg.text(padL + w + 6, y + barH / 2 + 3, V.util.escapeHtml(String(b.value)), 'class="bc-value-label" text-anchor="start"');
-      out += V.svg.text(padL - 6, y + barH / 2 + 3, V.util.escapeHtml(V.util.truncate(b.label, padL - 16, 6)), 'class="bc-axis-label" text-anchor="end"');
+      out += V.svg.text(padL + w + 6, y + barH / 2 + 3, b.value, 'class="bc-value-label" text-anchor="start"');
+      out += V.svg.text(padL - 6, y + barH / 2 + 3, V.util.truncate(b.label, padL - 16, 6), 'class="bc-axis-label" text-anchor="end"');
     });
 
     out += '</svg>';
@@ -120,7 +120,7 @@
       var b = container._bars[parseInt(el.getAttribute('data-idx'), 10)];
       if (!b) return '';
       return '<div class="tt-title">' + V.util.escapeHtml(b.label) + '</div>' +
-        '<div class="tt-row"><span>Value</span><span class="tt-val">' + b.value + '</span></div>';
+        '<div class="tt-row"><span>Value</span><span class="tt-val">' + V.util.escapeHtml(String(b.value)) + '</span></div>';
     });
   }
 

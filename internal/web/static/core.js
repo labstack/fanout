@@ -140,6 +140,7 @@
     },
     threshold: function(value, stops) {
       if (!stops || stops.length === 0) return '#888';
+      if (typeof value !== 'number' || isNaN(value)) return '#888';
       for (var i = stops.length - 1; i >= 0; i--) {
         if (value >= stops[i][0]) return stops[i][1];
       }
@@ -179,23 +180,15 @@
     }
   };
 
-  // ─── Dimensions ─────────────────────────────
-  function dims(container, expanded, overrides) {
-    var o = overrides || {};
-    var w = container.clientWidth || 400;
-    var h = expanded ? Math.min(window.innerHeight * 0.7, 700) : (o.height || 260);
-    var pad = Object.assign({top: 20, right: 20, bottom: 30, left: 50}, o.pad || {});
-    return {w: w, h: h, pad: pad, innerW: w - pad.left - pad.right, innerH: h - pad.top - pad.bottom};
-  }
-
   // ─── SVG element builders ──────────────────
   var svg = {
     open: function(w, h) { return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'">'; },
+    viewBox: function(w, h) { return '<svg viewBox="0 0 '+w+' '+h+'" xmlns="http://www.w3.org/2000/svg">'; },
     close: '</svg>',
     g: function(transform, content) { return '<g transform="'+transform+'">'+content+'</g>'; },
     line: function(x1,y1,x2,y2,attrs) { return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" '+(attrs||'')+' />'; },
     rect: function(x,y,w,h,attrs) { return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" '+(attrs||'')+' />'; },
-    text: function(x,y,text,attrs) { return '<text x="'+x+'" y="'+y+'" '+(attrs||'')+'>'+text+'</text>'; },
+    text: function(x,y,text,attrs) { return '<text x="'+x+'" y="'+y+'" '+(attrs||'')+'>'+util.escapeHtml(String(text))+'</text>'; },
     circle: function(cx,cy,r,attrs) { return '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" '+(attrs||'')+' />'; },
     path: function(d,attrs) { return '<path d="'+d+'" '+(attrs||'')+' />'; }
   };
@@ -203,7 +196,13 @@
   // ─── Scales ────────────────────────────────
   var scale = {
     linear: function(domain, range) {
-      var d0=domain[0], d1=domain[1], r0=range[0], r1=range[1];
+      var d0=+domain[0], d1=+domain[1], r0=+range[0], r1=+range[1];
+      if (isNaN(d0) || isNaN(d1) || isNaN(r0) || isNaN(r1)) {
+        var fallback = function() { return r0 || 0; };
+        fallback.domain = domain; fallback.range = range;
+        fallback.invert = function() { return 0; };
+        return fallback;
+      }
       var span = d1 - d0;
       if (span === 0) {
         var mid = (r0 + r1) / 2;
@@ -213,7 +212,7 @@
         return fn;
       }
       var m = (r1-r0)/span;
-      var fn = function(v) { return r0 + (v-d0)*m; };
+      var fn = function(v) { var n = +v; return isNaN(n) ? r0 : r0 + (n-d0)*m; };
       fn.domain = domain; fn.range = range;
       fn.invert = function(px) { return d0 + (px-r0)/m; };
       return fn;
@@ -253,26 +252,33 @@
     axisX: function(labels, xScale, innerH, bandwidth) {
       return labels.map(function(l) {
         var x = xScale(l) + (bandwidth||0)/2;
-        return '<text x="'+x+'" y="'+(innerH+16)+'" text-anchor="middle" fill="var(--text-muted)" font-size="10">'+l+'</text>';
+        return '<text x="'+x+'" y="'+(innerH+16)+'" text-anchor="middle" fill="var(--text-muted)" font-size="10">'+util.escapeHtml(String(l))+'</text>';
       }).join('');
     },
     axisY: function(yScale, ticks, attrs) {
       var a = attrs || 'text-anchor="end" fill="var(--text-muted)" font-size="10"';
       return ticks.map(function(t) {
         var y = Math.round(yScale(t));
-        return '<text x="-6" y="'+(y+3)+'" '+a+'>'+t+'</text>';
+        return '<text x="-6" y="'+(y+3)+'" '+a+'>'+util.escapeHtml(String(t))+'</text>';
       }).join('');
     },
     linePath: function(points, xFn, yFn) {
       if (points.length === 0) return '';
-      return points.map(function(p,i) {
-        return (i===0?'M':'L')+xFn(p)+','+yFn(p);
-      }).join(' ');
+      var segs = [], started = false;
+      points.forEach(function(p) {
+        var x = xFn(p), y = yFn(p);
+        if (!isFinite(x) || !isFinite(y)) return;
+        segs.push((started ? 'L' : 'M') + x + ',' + y);
+        started = true;
+      });
+      return segs.join(' ');
     },
     areaPath: function(points, xFn, yFn, baseline) {
       if (points.length === 0) return '';
-      var top = points.map(function(p,i) { return (i===0?'M':'L')+xFn(p)+','+yFn(p); }).join(' ');
-      return top + 'L'+xFn(points[points.length-1])+','+baseline+'L'+xFn(points[0])+','+baseline+'Z';
+      var valid = points.filter(function(p) { return isFinite(xFn(p)) && isFinite(yFn(p)); });
+      if (valid.length === 0) return '';
+      var top = valid.map(function(p,i) { return (i===0?'M':'L')+xFn(p)+','+yFn(p); }).join(' ');
+      return top + 'L'+xFn(valid[valid.length-1])+','+baseline+'L'+xFn(valid[0])+','+baseline+'Z';
     },
     arc: function(cx, cy, r, startAngle, endAngle) {
       var x1=cx+r*Math.cos(startAngle), y1=cy+r*Math.sin(startAngle);
@@ -294,13 +300,17 @@
         }
       });
 
-      // BFS from roots — push all neighbors (handles cycles like original)
+      // BFS from roots — push all neighbors (handles cycles)
       var layers = {};
       var queued = {};
       var queue = [];
       nodes.forEach(function(n) {
         if (inDeg[n.id] === 0) { layers[n.id] = 0; queue.push(n.id); queued[n.id] = true; }
       });
+      // If no roots (pure cycle), seed first node to break the cycle
+      if (queue.length === 0 && nodes.length > 0) {
+        layers[nodes[0].id] = 0; queue.push(nodes[0].id); queued[nodes[0].id] = true;
+      }
       var head = 0;
       while (head < queue.length) {
         var curr = queue[head++];
@@ -339,11 +349,18 @@
     }).join('<br>') + '</div>';
   };
   tooltip.wire = function(container, selector, buildFn) {
+    var key = '_tw_' + selector;
+    if (container[key]) return;
+    container[key] = true;
     container.addEventListener('mouseover', function(e) {
       var el = e.target.closest(selector);
       if (!el) return;
-      var html = buildFn(el);
-      if (html) tooltip.show(html, e);
+      try {
+        var html = buildFn(el);
+        if (html) tooltip.show(html, e);
+      } catch (err) {
+        console.error('FanoutViz: tooltip error for ' + selector + ':', err);
+      }
     });
     container.addEventListener('mouseout', function(e) {
       if (e.target.closest(selector)) tooltip.hide();
@@ -408,7 +425,6 @@
     tooltip: tooltip,
     colors: colors,
     util: util,
-    dims: dims,
     svg: svg,
     scale: scale,
     draw: draw,

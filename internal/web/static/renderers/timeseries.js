@@ -35,7 +35,7 @@
     for (var g = 0; g <= 5; g++) yTicks.push(minVal + (g / 5) * (maxVal - minVal));
     var fmtType = yLabel.indexOf('%') !== -1 ? 'pct' : 'ms';
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     // Y-axis gridlines + labels
     out += '<g transform="translate(' + padL + ',' + padT + ')">';
@@ -56,7 +56,7 @@
 
     // Y-axis title
     if (yLabel) {
-      out += V.svg.text(12, padT + chartH / 2, V.util.escapeHtml(yLabel),
+      out += V.svg.text(12, padT + chartH / 2, yLabel,
         'class="ts-axis-title" text-anchor="middle" transform="rotate(-90 12 ' + (padT + chartH / 2) + ')"');
     }
 
@@ -108,7 +108,7 @@
       var val = s.values[idx];
       var lbl = d.labels && d.labels[idx] ? d.labels[idx] : '#' + idx;
       return '<div class="tt-title">' + V.util.escapeHtml(s.label || ('Series ' + (si + 1))) + '</div>' +
-        '<div class="tt-row"><span>' + V.util.escapeHtml(lbl) + '</span><span class="tt-val">' + val + '</span></div>';
+        '<div class="tt-row"><span>' + V.util.escapeHtml(lbl) + '</span><span class="tt-val">' + V.util.escapeHtml(String(val)) + '</span></div>';
     });
   }
 

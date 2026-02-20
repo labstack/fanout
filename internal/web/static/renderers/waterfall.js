@@ -33,7 +33,7 @@
     var maxTime = Math.max.apply(null, spans.map(function(s) { return s.start + s.dur; })) || 1;
     var timeScale = barAreaW / maxTime;
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     // Ruler
     out += '<g class="wf-ruler">';
@@ -78,7 +78,7 @@
       out += V.svg.rect(barX, y + 4, barW, rowH - 8, 'class="wf-span-bar" fill="' + color + '" data-idx="' + idx + '"');
 
       // Duration label
-      out += V.svg.text(barX + barW + 6, y + rowH / 2 + 3, V.util.escapeHtml(String(span.dur)) + 'ms', 'class="wf-span-dur"');
+      out += V.svg.text(barX + barW + 6, y + rowH / 2 + 3, span.dur + 'ms', 'class="wf-span-dur"');
 
       out += '</g>';
     });

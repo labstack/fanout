@@ -34,7 +34,7 @@
 
     var reversedBuckets = buckets.slice().reverse();
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     // Y-axis labels
     reversedBuckets.forEach(function(b, bi) {

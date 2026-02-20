@@ -48,7 +48,7 @@
 
     var sortedLinks = links.slice().sort(function(a, b) { return b.value - a.value; });
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     // Links
     sortedLinks.forEach(function(link, idx) {
@@ -90,8 +90,8 @@
       var anchor = lyr === maxLayer ? 'start' : 'end';
       var labelY = pos.y + pos.h / 2;
 
-      out += V.svg.text(labelX, labelY - 4, V.util.escapeHtml(n.label), 'class="sankey-node-label" text-anchor="' + anchor + '"');
-      out += V.svg.text(labelX, labelY + 9, V.util.escapeHtml(String(n.rpm)) + ' rpm', 'class="sankey-node-value" text-anchor="' + anchor + '"');
+      out += V.svg.text(labelX, labelY - 4, n.label, 'class="sankey-node-label" text-anchor="' + anchor + '"');
+      out += V.svg.text(labelX, labelY + 9, n.rpm + ' rpm', 'class="sankey-node-value" text-anchor="' + anchor + '"');
     });
 
     out += '</svg>';

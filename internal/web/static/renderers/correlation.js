@@ -13,6 +13,7 @@
     if (!data || !data.panels) return;
 
     var times = data.times;
+    if (!times || times.length < 2) return;
     var panels = data.panels;
     var n = times.length;
 
@@ -27,7 +28,7 @@
 
     var step = chartW / (n - 1);
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     // X-axis labels
     times.forEach(function(t, i) {
@@ -45,7 +46,7 @@
       var yScale = V.scale.linear([0, maxVal], [panelH, 0]);
 
       // Panel title
-      out += V.svg.text(padL - 4, yOff + 10, V.util.escapeHtml(panel.label),
+      out += V.svg.text(padL - 4, yOff + 10, panel.label,
         'class="corr-panel-title" text-anchor="end" style="font-size:' + (expanded ? '9px' : '8px') + '"');
 
       // Gridlines + labels

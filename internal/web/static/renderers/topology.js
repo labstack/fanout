@@ -37,7 +37,7 @@
     var totalW = padX * 2 + maxLayer * layerGap + nodeW;
     var totalH = padY * 2 + maxPerLayer * (nodeH + nodeGap) - nodeGap;
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     // Arrowhead markers
     out += '<defs>' +
@@ -74,8 +74,8 @@
       out += '<g class="topo-node" data-node-id="' + V.util.escapeHtml(n.id) + '" transform="translate(' + pos.x + ', ' + pos.y + ')">';
       out += V.svg.rect(0, 0, nodeW, nodeH, 'class="topo-node-bg"');
       out += '<circle class="topo-node-status" cx="12" cy="' + (nodeH/2) + '" fill="' + statusCol + '" />';
-      out += V.svg.text(nodeW/2 + 6, nodeH/2 - 4, V.util.escapeHtml(n.id), 'class="topo-node-label"');
-      out += V.svg.text(nodeW/2 + 6, nodeH/2 + 10, V.util.escapeHtml(String(n.rpm)) + ' rpm \u00b7 P95 ' + V.util.escapeHtml(String(n.p95)) + 'ms', 'class="topo-node-metric"');
+      out += V.svg.text(nodeW/2 + 6, nodeH/2 - 4, n.id, 'class="topo-node-label"');
+      out += V.svg.text(nodeW/2 + 6, nodeH/2 + 10, n.rpm + ' rpm \u00b7 P95 ' + n.p95 + 'ms', 'class="topo-node-metric"');
       out += '</g>';
     });
 

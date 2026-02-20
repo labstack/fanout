@@ -30,20 +30,20 @@
     var lookup = {};
     cells.forEach(function(c) { lookup[c.from + '\u2192' + c.to] = c; });
 
-    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = V.svg.viewBox(totalW, totalH);
 
     // Column headers
     services.forEach(function(svc, i) {
       var x = padX + labelW + i * cellSize + cellSize / 2;
       var y = padY + headerH - 4;
-      out += V.svg.text(x, y, V.util.escapeHtml(svc),
+      out += V.svg.text(x, y, svc,
         'class="dm-label" text-anchor="end" transform="rotate(-45 ' + x + ' ' + y + ')" style="font-size:' + (expanded ? '9px' : '8px') + '"');
     });
 
     // Row headers + cells
     services.forEach(function(from, ri) {
       var y = padY + headerH + ri * cellSize;
-      out += V.svg.text(padX + labelW - 6, y + cellSize/2 + 3, V.util.escapeHtml(from),
+      out += V.svg.text(padX + labelW - 6, y + cellSize/2 + 3, from,
         'class="dm-label" text-anchor="end" style="font-size:' + (expanded ? '9px' : '8px') + '"');
 
       services.forEach(function(to, ci) {
@@ -58,7 +58,7 @@
           out += V.svg.rect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1,
             'class="dm-cell" fill="' + color + '" rx="2" ry="2" data-from="' + V.util.escapeHtml(from) + '" data-to="' + V.util.escapeHtml(to) + '"');
           if (cellSize >= 36) {
-            out += V.svg.text(x + cellSize/2, y + cellSize/2 + 3, V.util.escapeHtml(String(cell.errorRate)) + '%', 'class="dm-value"');
+            out += V.svg.text(x + cellSize/2, y + cellSize/2 + 3, cell.errorRate + '%', 'class="dm-value"');
           }
         } else {
           out += V.svg.rect(x + 0.5, y + 0.5, cellSize - 1, cellSize - 1, 'fill="var(--bg-primary)" rx="2" ry="2" opacity="0.5"');
