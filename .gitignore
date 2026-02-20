@@ -19,7 +19,14 @@ testdata/
 .playwright-mcp/
 *.pid
 tmp/
+.tmp/
 .air.toml
 coverage.out
 coverage.html
 cover.out
+
+# Env
+.env
+
+# Screenshots
+*.png

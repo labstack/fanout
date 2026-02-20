@@ -9,17 +9,19 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v5"
+	"github.com/labstack/echo/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip" // Register gzip decompressor
 
+	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/ingest"
@@ -28,7 +30,10 @@ import (
 	"github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
+	"github.com/labstack/fanout/internal/web"
 )
+
+var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
@@ -106,7 +111,6 @@ func main() {
 
 	// Start Echo HTTP API
 	e := echo.New()
-	e.HideBanner = true
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogURI:       true,
@@ -115,9 +119,13 @@ func main() {
 		LogMethod:    true,
 		LogRemoteIP:  true,
 		LogUserAgent: true,
-		LogError:     true,
-		LogValuesFunc: func(c echo.Context, v middleware.RequestLoggerValues) error {
-			slog.Info("request", "method", v.Method, "uri", v.URI, "status", v.Status, "latency", v.Latency)
+		HandleError:  true,
+		LogValuesFunc: func(c *echo.Context, v middleware.RequestLoggerValues) error {
+			uri := v.URI
+			if strings.Contains(uri, "token=") {
+				uri = tokenRedactRe.ReplaceAllString(uri, "token=REDACTED")
+			}
+			slog.Info("request", "method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency)
 			return nil
 		},
 	}))
@@ -127,11 +135,25 @@ func main() {
 	if apiToken != "" {
 		tokenBytes := []byte(apiToken)
 		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-			return func(c echo.Context) error {
+			return func(c *echo.Context) error {
 				path := c.Request().URL.Path
-				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" {
+
+				// Skip auth for health, metrics, and UI page routes
+				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" ||
+					path == "/" || path == "/favicon.ico" || path == "/favicon.svg" ||
+					strings.HasPrefix(path, "/static/") {
 					return next(c)
 				}
+
+				// WebSocket: accept token via query param since browsers can't set headers
+				if path == "/ws/chat" {
+					token := c.QueryParam("token")
+					if subtle.ConstantTimeCompare([]byte(token), tokenBytes) != 1 {
+						return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+					}
+					return next(c)
+				}
+
 				auth := c.Request().Header.Get("Authorization")
 				if !strings.HasPrefix(auth, "Bearer ") {
 					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
@@ -151,27 +173,67 @@ func main() {
 	// Prometheus metrics (internal/ops)
 	e.GET("/-/metrics", echo.WrapHandler(promhttp.Handler()))
 
-	// Create shared service layer (used by both UI and MCP)
+	// Create shared service layer
 	svc := service.New(q, cfg)
 
-	// UI routes (Templ + HTMX + Vega-Lite)
-	uiHandler := api.RegisterUIRoutes(e, svc, cfg)
-	uiHandler.SetDetector(detector)
+	// AI orchestrator (optional — needs API key)
+	var orch *ai.Orchestrator
+	var wsHandler *ai.WSHandler
 
-	// MCP server (Model Context Protocol)
+	if cfg.AIAPIKey != "" {
+		var provider ai.Provider
+		switch cfg.AIProvider {
+		case "openai":
+			provider = ai.NewOpenAIProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
+			slog.Info("AI provider: OpenAI", "model", cfg.AIModel)
+		case "anthropic", "":
+			provider = ai.NewAnthropicProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
+			slog.Info("AI provider: Anthropic", "model", cfg.AIModel)
+		default:
+			slog.Error("unsupported AI_PROVIDER", "value", cfg.AIProvider, "supported", "anthropic, openai")
+			os.Exit(1)
+		}
+
+		tools := ai.NewToolRegistry(svc, q, cfg.LakeDir)
+		orch = ai.NewOrchestrator(provider, tools, svc, cfg)
+		wsHandler = ai.NewWSHandler(ctx, orch, svc)
+		if cfg.APIToken == "" {
+			slog.Warn("AI chat enabled without API_TOKEN — chat endpoint is unauthenticated")
+		}
+	} else {
+		slog.Warn("AI_API_KEY not set — chat disabled, ingest + health active")
+	}
+
+	bookmarks, err := ai.NewBookmarkStore(cfg.LakeDir)
+	if err != nil {
+		slog.Error("bookmarks init failed", "err", err)
+		os.Exit(1)
+	}
+
+	// Static viz assets (cache-busted JS/CSS bundles)
+	web.RegisterStaticRoutes(e)
+
+	// UI routes (chat page + WebSocket + bookmarks + suggestions)
+	api.RegisterUIRoutes(e, cfg, orch, wsHandler, bookmarks)
+
+	// MCP server (Model Context Protocol) — parallel to AI chat
 	if cfg.MCPEnabled {
 		mcpServer := mcp.NewServer(svc, q, cfg)
 		mcpServer.RegisterRoutes(e)
 		slog.Info("MCP server enabled", "path", "/mcp")
-
-		// Start report cleanup goroutine
 		go mcp.RunCleanup(ctx)
 	}
 
 	// Run HTTP
+	httpCtx, httpCancel := context.WithCancel(context.Background())
 	go func() {
+		sc := echo.StartConfig{
+			Address:         cfg.HTTPAddr,
+			HideBanner:      true,
+			GracefulTimeout: 5 * time.Second,
+		}
 		slog.Info("HTTP listening", "addr", cfg.HTTPAddr)
-		if err := e.Start(cfg.HTTPAddr); err != nil && err != http.ErrServerClosed {
+		if err := sc.Start(httpCtx, e); err != nil && err != http.ErrServerClosed {
 			errCh <- fmt.Errorf("HTTP server: %w", err)
 		}
 	}()
@@ -191,7 +253,5 @@ func main() {
 	cancel()
 	writer.Wait()
 	grpcSrv.GracefulStop()
-	ctxShutdown, cancelShutdown := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelShutdown()
-	_ = e.Shutdown(ctxShutdown)
+	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }

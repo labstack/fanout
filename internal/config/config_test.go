@@ -86,8 +86,9 @@ func TestGetenvBool(t *testing.T) {
 func TestLoad(t *testing.T) {
 	// Clear all env vars that might affect config
 	vars := []string{"HTTP_ADDR", "OTLP_GRPC_ADDR", "LAKE_DIR", "FLUSH_SECONDS",
-		"MAX_ROWS", "API_TOKEN", "ROLLUP_EVERY", "MCP_ENABLED",
-		"RETENTION_DAYS", "RETENTION_HOURS", "TENANT_ID", "DEFAULT_NAMESPACE"}
+		"MAX_ROWS", "API_TOKEN", "ROLLUP_EVERY",
+		"RETENTION_DAYS", "RETENTION_HOURS", "TENANT_ID", "DEFAULT_NAMESPACE",
+		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL"}
 	for _, v := range vars {
 		os.Unsetenv(v)
 	}
@@ -112,9 +113,6 @@ func TestLoad(t *testing.T) {
 	}
 	if cfg.RollupEvery != 60 {
 		t.Errorf("RollupEvery = %d, want %d", cfg.RollupEvery, 60)
-	}
-	if !cfg.MCPEnabled {
-		t.Error("MCPEnabled should be true by default")
 	}
 	if cfg.RetentionDays != 30 {
 		t.Errorf("RetentionDays = %d, want %d", cfg.RetentionDays, 30)

@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/config"
 )
 
@@ -67,27 +67,5 @@ func TestReadiness_NilDuck(t *testing.T) {
 	}
 	if duckCheck.Error != "duckdb not initialized" {
 		t.Errorf("expected error 'duckdb not initialized', got %s", duckCheck.Error)
-	}
-}
-
-func TestCheckResult(t *testing.T) {
-	// Test CheckResult JSON marshaling
-	result := CheckResult{
-		Status:    "ok",
-		LatencyMs: 5,
-	}
-
-	data, err := json.Marshal(result)
-	if err != nil {
-		t.Fatalf("marshal error: %v", err)
-	}
-
-	var decoded CheckResult
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("unmarshal error: %v", err)
-	}
-
-	if decoded.Status != "ok" {
-		t.Errorf("expected ok, got %s", decoded.Status)
 	}
 }

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -274,19 +275,22 @@ func TestFind_QueryError(t *testing.T) {
 	defer svc.duck.DB.Close()
 
 	mock.ExpectQuery("SELECT").WillReturnError(errors.New("db error"))
-	mock.ExpectQuery("SELECT").WillReturnError(errors.New("db error"))
 
-	// Should return empty results on error, not fail
+	// Should propagate query errors
 	result, err := svc.Find(context.Background(), FindParams{})
-	if err != nil {
-		t.Fatalf("Find() error = %v", err)
+	if err == nil {
+		t.Fatal("Find() should return error on query failure")
+	}
+	if !strings.Contains(err.Error(), "db error") {
+		t.Errorf("error should contain 'db error', got: %v", err)
 	}
 
+	// Should still return a valid (empty) result struct
+	if result == nil {
+		t.Fatal("Find() should return non-nil result even on error")
+	}
 	if len(result.Spans) != 0 {
 		t.Errorf("Spans count = %d, want 0", len(result.Spans))
-	}
-	if len(result.Logs) != 0 {
-		t.Errorf("Logs count = %d, want 0", len(result.Logs))
 	}
 }
 

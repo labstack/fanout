@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
@@ -57,7 +57,7 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 	e.DELETE("/api/reports/:id", s.apiDeleteReport)
 }
 
-func (s *Server) viewReport(c echo.Context) error {
+func (s *Server) viewReport(c *echo.Context) error {
 	id := c.Param("id")
 	report := GetReport(id)
 	if report == nil {
@@ -66,17 +66,17 @@ func (s *Server) viewReport(c echo.Context) error {
 	return c.HTML(http.StatusOK, wrapReportHTML(report))
 }
 
-func (s *Server) listReports(c echo.Context) error {
+func (s *Server) listReports(c *echo.Context) error {
 	reports := ListReports()
 	return c.HTML(http.StatusOK, renderReportsPage(reports))
 }
 
-func (s *Server) apiListReports(c echo.Context) error {
+func (s *Server) apiListReports(c *echo.Context) error {
 	reports := ListReports()
 	return c.JSON(http.StatusOK, reports)
 }
 
-func (s *Server) apiDeleteReport(c echo.Context) error {
+func (s *Server) apiDeleteReport(c *echo.Context) error {
 	id := c.Param("id")
 	if DeleteReport(id) {
 		return c.JSON(http.StatusOK, map[string]string{"status": "deleted"})
@@ -227,9 +227,9 @@ func wrapReportHTML(r *Report) string {
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/themes/light.css"/>
 <link rel="stylesheet" href="/css/components.css"/>
 <script type="module" src="https://cdn.jsdelivr.net/npm/@shoelace-style/shoelace@2.20.1/cdn/shoelace-autoloader.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/vega@5"></script>
-<script src="https://cdn.jsdelivr.net/npm/vega-lite@5"></script>
-<script src="https://cdn.jsdelivr.net/npm/vega-embed@6"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega@6"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@6"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@7"></script>
 <style>
 :root {
   --accent: #3b82f6;

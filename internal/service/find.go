@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // FindParams contains search parameters.
@@ -44,7 +45,10 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 
 	// Search spans
 	if p.Type == "spans" || p.Type == "both" {
-		spans, hasMore := s.findSpans(ctx, p)
+		spans, hasMore, err := s.findSpans(ctx, p)
+		if err != nil {
+			return out, fmt.Errorf("findSpans: %w", err)
+		}
 		out.Spans = spans
 		if hasMore {
 			out.HasMore = true
@@ -53,7 +57,10 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 
 	// Search logs
 	if p.Type == "logs" || p.Type == "both" {
-		logs, hasMore := s.findLogs(ctx, p)
+		logs, hasMore, err := s.findLogs(ctx, p)
+		if err != nil {
+			return out, fmt.Errorf("findLogs: %w", err)
+		}
 		out.Logs = logs
 		if hasMore {
 			out.HasMore = true
@@ -63,7 +70,7 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 	return out, nil
 }
 
-func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bool) {
+func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bool, error) {
 	var filters []string
 	var args []any
 
@@ -116,15 +123,18 @@ LIMIT %d;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
-		return []SpanResult{}, false
+		slog.Warn("findSpans query failed", "err", err)
+		return []SpanResult{}, false, fmt.Errorf("findSpans query: %w", err)
 	}
 	defer rows.Close()
 
 	var spans []SpanResult
+	var scanErrors int
 	for rows.Next() {
 		var r SpanResult
 		var scopeName, scopeVersion any
 		if err := rows.Scan(&r.TraceID, &r.SpanID, &r.Service, &r.Name, &r.Duration, &r.Status, &r.StartTime, &scopeName, &scopeVersion); err != nil {
+			scanErrors++
 			slog.Warn("scan failed", "method", "findSpans", "err", err)
 			continue
 		}
@@ -136,21 +146,28 @@ LIMIT %d;
 		}
 		spans = append(spans, r)
 	}
+	if err := rows.Err(); err != nil {
+		return spans, false, fmt.Errorf("findSpans rows iteration: %w", err)
+	}
+	if scanErrors > 0 && len(spans) == 0 {
+		return nil, false, fmt.Errorf("findSpans: all %d rows failed to scan (possible schema mismatch)", scanErrors)
+	}
 
 	hasMore := len(spans) > p.Limit
 	if hasMore {
 		spans = spans[:p.Limit]
 	}
-	return spans, hasMore
+	return spans, hasMore, nil
 }
 
-func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool) {
+func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool, error) {
 	var filters []string
 	var args []any
 
 	if p.Query != "" {
-		filters = append(filters, `"name=body" ~ ?`)
-		args = append(args, p.Query)
+		filters = append(filters, `"name=body" ILIKE ?`)
+		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Query)
+		args = append(args, "%"+escaped+"%")
 	}
 	if p.Service != "" {
 		filters = append(filters, `"name=service_name" = ?`)
@@ -193,16 +210,19 @@ LIMIT %d;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
-		return []LogResult{}, false
+		slog.Warn("findLogs query failed", "err", err)
+		return []LogResult{}, false, fmt.Errorf("findLogs query: %w", err)
 	}
 	defer rows.Close()
 
 	var logs []LogResult
+	var scanErrors int
 	for rows.Next() {
 		var r LogResult
 		var observedTime, traceID, spanID, scopeName, scopeVersion any
 		var severityNum any
 		if err := rows.Scan(&r.Time, &observedTime, &r.Service, &r.Severity, &severityNum, &r.Body, &traceID, &spanID, &scopeName, &scopeVersion); err != nil {
+			scanErrors++
 			slog.Warn("scan failed", "method", "findLogs", "err", err)
 			continue
 		}
@@ -230,10 +250,105 @@ LIMIT %d;
 		}
 		logs = append(logs, r)
 	}
+	if err := rows.Err(); err != nil {
+		return logs, false, fmt.Errorf("findLogs rows iteration: %w", err)
+	}
+	if scanErrors > 0 && len(logs) == 0 {
+		return nil, false, fmt.Errorf("findLogs: all %d rows failed to scan (possible schema mismatch)", scanErrors)
+	}
 
 	hasMore := len(logs) > p.Limit
 	if hasMore {
 		logs = logs[:p.Limit]
 	}
-	return logs, hasMore
+	return logs, hasMore, nil
+}
+
+// TailParams defines filters for live log tailing.
+type TailParams struct {
+	Service   string
+	Pattern   string
+	Severity  string
+	Namespace string
+	TenantID  string
+	Since     time.Time // only return logs after this timestamp
+}
+
+// TailLogs returns log entries newer than Since, ordered ascending (oldest first).
+// Limited to 100 entries per call to prevent flooding.
+func (s *Service) TailLogs(ctx context.Context, p TailParams) ([]LogResult, error) {
+	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
+
+	sinceNano := p.Since.UnixNano()
+
+	var filters []string
+	var args []any
+
+	// Inline the timestamp comparison to avoid parameter binding issues with INT64
+	filters = append(filters, fmt.Sprintf(`"name=time_unix_nano" > %d`, sinceNano))
+
+	if p.Service != "" {
+		filters = append(filters, `"name=service_name" = ?`)
+		args = append(args, p.Service)
+	}
+	if p.Pattern != "" {
+		filters = append(filters, `"name=body" ILIKE ?`)
+		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Pattern)
+		args = append(args, "%"+escaped+"%")
+	}
+	if p.Severity != "" {
+		filters = append(filters, `"name=severity" = ?`)
+		args = append(args, p.Severity)
+	}
+
+	filterStr := ""
+	if len(filters) > 0 {
+		filterStr = "AND " + strings.Join(filters, " AND ")
+	}
+
+	// Use a 10-minute window for glob scoping — tail sessions look at recent data
+	q := fmt.Sprintf(`
+SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+       "name=service_name" as service,
+       "name=severity" as severity,
+       "name=body" as body,
+       "name=trace_id" as trace_id,
+       "name=time_unix_nano" as time_nano
+FROM read_parquet(%s, union_by_name=true)
+WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL 10 MINUTE
+  %s
+ORDER BY "name=time_unix_nano" ASC
+LIMIT 100;
+`, s.duck.LogsGlob(p.TenantID, p.Namespace, 10), filterStr)
+
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []LogResult
+	var scanErrors int
+	for rows.Next() {
+		var r LogResult
+		var traceID any
+		var timeNano int64
+		if err := rows.Scan(&r.Time, &r.Service, &r.Severity, &r.Body, &traceID, &timeNano); err != nil {
+			scanErrors++
+			slog.Warn("scan failed", "method", "TailLogs", "err", err)
+			continue
+		}
+		if traceID != nil {
+			r.TraceID = fmt.Sprintf("%v", traceID)
+		}
+		logs = append(logs, r)
+	}
+	if err := rows.Err(); err != nil {
+		return logs, fmt.Errorf("TailLogs rows iteration: %w", err)
+	}
+	if scanErrors > 0 && len(logs) == 0 {
+		return nil, fmt.Errorf("TailLogs: all %d rows failed to scan (possible schema mismatch)", scanErrors)
+	}
+
+	return logs, nil
 }

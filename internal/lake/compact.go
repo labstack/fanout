@@ -168,20 +168,22 @@ func (c *Compactor) compactSignal(signal string, cutoff time.Time) (int, int64) 
 }
 
 func isCompacted(dayPath string) bool {
-	compactedFile := filepath.Join(dayPath, "compacted.parquet")
+	// Check new location (hour=00/compacted.parquet)
+	compactedFile := filepath.Join(dayPath, "hour=00", "compacted.parquet")
 	if _, err := os.Stat(compactedFile); err == nil {
-		// Check if there are still hour directories
+		// Already compacted if only hour=00 remains
 		entries, err := os.ReadDir(dayPath)
 		if err != nil {
 			slog.Warn("readdir failed", "path", dayPath, "err", err)
 			return false
 		}
+		hourDirs := 0
 		for _, e := range entries {
 			if e.IsDir() && strings.HasPrefix(e.Name(), "hour=") {
-				return false // Has hour dirs, needs compaction
+				hourDirs++
 			}
 		}
-		return true // Already compacted
+		return hourDirs <= 1 // Only hour=00 (the compacted dir)
 	}
 	return false
 }
@@ -241,10 +243,10 @@ func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
 		return 0, compactErr
 	}
 
-	// Remove old hour directories.
+	// Remove old hour directories (keep hour=00 which has the compacted file).
 	// Keep compacted file on partial failure — duplicates are safer than data loss.
 	for _, e := range entries {
-		if e.IsDir() && strings.HasPrefix(e.Name(), "hour=") {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "hour=") && e.Name() != "hour=00" {
 			if err := os.RemoveAll(filepath.Join(dayPath, e.Name())); err != nil {
 				slog.Error("failed to remove hour dir after compaction, duplicates may exist",
 					"dir", e.Name(), "path", dayPath, "err", err)
@@ -252,13 +254,30 @@ func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
 			}
 		}
 	}
+	// Remove old part-*.parquet files from hour=00, keeping only compacted.parquet
+	hour0Path := filepath.Join(dayPath, "hour=00")
+	if oldParts, _ := filepath.Glob(filepath.Join(hour0Path, "part-*.parquet")); len(oldParts) > 0 {
+		for _, f := range oldParts {
+			os.Remove(f)
+		}
+	}
+	// Also remove old-style compacted.parquet at day level if present
+	oldCompacted := filepath.Join(dayPath, "compacted.parquet")
+	if _, err := os.Stat(oldCompacted); err == nil {
+		os.Remove(oldCompacted)
+	}
 
 	return sizeBefore - sizeAfter, nil
 }
 
 // compactWithDuckDB uses DuckDB COPY for streaming compaction (constant memory).
 func (c *Compactor) compactWithDuckDB(files []string, dayPath string) (int64, error) {
-	compactedPath := filepath.Join(dayPath, "compacted.parquet")
+	// Write into hour=00 to maintain consistent Hive partitioning
+	hourDir := filepath.Join(dayPath, "hour=00")
+	if err := os.MkdirAll(hourDir, 0o755); err != nil {
+		return 0, fmt.Errorf("create hour dir: %w", err)
+	}
+	compactedPath := filepath.Join(hourDir, "compacted.parquet")
 	tmpPath := compactedPath + ".tmp"
 
 	// Build file list for read_parquet
@@ -311,8 +330,12 @@ func compactFiles[T any](files []string, dayPath string) (int64, error) {
 		return 0, nil
 	}
 
-	// Write compacted file
-	compactedPath := filepath.Join(dayPath, "compacted.parquet")
+	// Write into hour=00 to maintain consistent Hive partitioning
+	hourDir := filepath.Join(dayPath, "hour=00")
+	if err := os.MkdirAll(hourDir, 0o755); err != nil {
+		return 0, fmt.Errorf("create hour dir: %w", err)
+	}
+	compactedPath := filepath.Join(hourDir, "compacted.parquet")
 	tmpPath := compactedPath + ".tmp"
 
 	tmp, err := os.Create(tmpPath)

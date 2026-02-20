@@ -52,7 +52,7 @@ func TestChartComponent_Render(t *testing.T) {
 			config: map[string]any{
 				"title": "Request Latency",
 				"spec": map[string]any{
-					"$schema": "https://vega.github.io/schema/vega-lite/v5.json",
+					"$schema": "https://vega.github.io/schema/vega-lite/v6.json",
 					"mark":    "line",
 					"data":    map[string]any{"values": []map[string]any{{"x": 1, "y": 10}}},
 				},

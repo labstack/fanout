@@ -119,13 +119,9 @@ func TestCache_OverwriteValue(t *testing.T) {
 }
 
 func TestParquetGlob_OnlyReturnsExistingFiles(t *testing.T) {
-	lakeDir, err := os.MkdirTemp("", "fanout-parquetglob-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(lakeDir)
+	lakeDir := t.TempDir()
 
-	now := time.Now()
+	now := time.Now().UTC() // Writer and glob both use UTC
 	// Path structure: lake/{signal}/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/
 	dir := filepath.Join(
 		lakeDir,
@@ -156,14 +152,10 @@ func TestParquetGlob_OnlyReturnsExistingFiles(t *testing.T) {
 }
 
 func TestParquetGlob_NoFilesFallsBackToBroadGlob(t *testing.T) {
-	lakeDir, err := os.MkdirTemp("", "fanout-parquetglob-nofiles-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(lakeDir)
+	lakeDir := t.TempDir()
 
 	glob := ParquetGlob(lakeDir, "spans", "test-tenant", "test-namespace", 15)
-	if !strings.Contains(glob, "tenant=test-tenant/namespace=test-namespace/year=*/month=*/day=*/hour=*/part-*.parquet") {
+	if !strings.Contains(glob, "tenant=test-tenant/namespace=test-namespace/year=*/month=*/day=*/hour=*/*.parquet") {
 		t.Fatalf("expected broad glob fallback, got: %s", glob)
 	}
 }

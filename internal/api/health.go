@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
 )
@@ -37,12 +37,12 @@ type HealthResponse struct {
 }
 
 // Liveness returns 200 if process is running (Kubernetes liveness probe)
-func (h *HealthHandler) Liveness(c echo.Context) error {
+func (h *HealthHandler) Liveness(c *echo.Context) error {
 	return c.String(http.StatusOK, "ok")
 }
 
 // Readiness checks all dependencies (Kubernetes readiness probe)
-func (h *HealthHandler) Readiness(c echo.Context) error {
+func (h *HealthHandler) Readiness(c *echo.Context) error {
 	resp := HealthResponse{
 		Status: "ready",
 		Checks: make(map[string]CheckResult),

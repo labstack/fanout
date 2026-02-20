@@ -22,6 +22,11 @@ type Config struct {
 	RetentionHours int       // how often to check retention (hours)
 	TenantID       uuid.UUID // tenant identifier (UUIDv7)
 	DefaultNS      string    // default namespace if not set
+	// AI chat
+	AIProvider string // anthropic or openai
+	AIAPIKey   string // LLM API key
+	AIModel    string // model ID override
+	AIBaseURL  string // base URL override (OpenAI-compatible)
 }
 
 func Load() Config {
@@ -38,6 +43,10 @@ func Load() Config {
 		RetentionHours: getenvInt("RETENTION_HOURS", 1),
 		TenantID:       getenvUUID("TENANT_ID"),
 		DefaultNS:      getenv("DEFAULT_NAMESPACE", "default"),
+		AIProvider:     getenv("AI_PROVIDER", "anthropic"),
+		AIAPIKey:       os.Getenv("AI_API_KEY"),
+		AIModel:        os.Getenv("AI_MODEL"),
+		AIBaseURL:      os.Getenv("AI_BASE_URL"),
 	}
 	if err := cfg.Validate(); err != nil {
 		slog.Error("invalid config", "err", err)

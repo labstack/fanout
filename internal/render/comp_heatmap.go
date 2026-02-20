@@ -101,7 +101,7 @@ func (c *heatmapComponent) Render(config json.RawMessage, format Format) (Output
 				values = append(values, `{"x":"`+xLabel+`","y":"`+yLabel+`","value":`+formatFloat(v)+`}`)
 			}
 		}
-		spec := `{"$schema":"https://vega.github.io/schema/vega-lite/v5.json",` +
+		spec := `{"$schema":"https://vega.github.io/schema/vega-lite/v6.json",` +
 			`"width":"container","height":150,` +
 			`"data":{"values":[` + strings.Join(values, ",") + `]},` +
 			`"mark":"rect",` +
