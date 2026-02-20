@@ -25,15 +25,14 @@
     var chartW = totalW - padL - padR;
     var totalH = padT + panels.length * (panelH + panelGap) + 20;
 
-    var svg = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
-
     var step = chartW / (n - 1);
 
-    // X-axis labels at bottom
+    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+
+    // X-axis labels
     times.forEach(function(t, i) {
       if (i % (expanded ? 1 : 2) === 0) {
-        var x = padL + i * step;
-        svg += '<text class="corr-axis-label" x="' + x + '" y="' + (totalH - 4) + '" text-anchor="middle">' + t + '</text>';
+        out += V.svg.text(padL + i * step, totalH - 4, t, 'class="corr-axis-label" text-anchor="middle"');
       }
     });
 
@@ -42,87 +41,71 @@
       var values = panel.values;
       var color = panel.color;
       var maxVal = Math.max.apply(null, values) * 1.2;
-      var minVal = 0;
-      var range = maxVal - minVal || 1;
+      var range = maxVal || 1;
+
+      var yScale = V.scale.linear([0, maxVal], [panelH, 0]);
 
       // Panel title
-      svg += '<text class="corr-panel-title" x="' + (padL - 4) + '" y="' + (yOff + 10) + '" text-anchor="end" style="font-size:' + (expanded ? '9px' : '8px') + '">' + V.util.escapeHtml(panel.label) + '</text>';
+      out += V.svg.text(padL - 4, yOff + 10, V.util.escapeHtml(panel.label),
+        'class="corr-panel-title" text-anchor="end" style="font-size:' + (expanded ? '9px' : '8px') + '"');
 
-      // Gridlines
+      // Gridlines + labels
       for (var g = 0; g <= 3; g++) {
         var gy = yOff + panelH - (g / 3) * panelH;
-        var gval = minVal + (g / 3) * range;
-        svg += '<line class="corr-gridline" x1="' + padL + '" y1="' + gy + '" x2="' + (padL + chartW) + '" y2="' + gy + '"/>';
-        svg += '<text class="corr-axis-label" x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end">' + formatValue(gval, panel.label) + '</text>';
+        var gval = (g / 3) * maxVal;
+        out += V.svg.line(padL, gy, padL + chartW, gy, 'class="corr-gridline"');
+        out += V.svg.text(padL - 6, gy + 3, formatValue(gval, panel.label), 'class="corr-axis-label" text-anchor="end"');
       }
 
       // Baseline
       if (panel.baseline !== undefined) {
-        var by = yOff + panelH - ((panel.baseline - minVal) / range) * panelH;
-        svg += '<line x1="' + padL + '" y1="' + by + '" x2="' + (padL + chartW) + '" y2="' + by + '" stroke="' + color + '" stroke-width="0.5" stroke-dasharray="4 3" opacity="0.4"/>';
+        var by = yOff + yScale(panel.baseline);
+        out += V.svg.line(padL, by, padL + chartW, by,
+          'stroke="' + color + '" stroke-width="0.5" stroke-dasharray="4 3" opacity="0.4"');
       }
 
-      // Area + Line
-      var linePath = '';
-      var areaPath = '';
-      values.forEach(function(v, i) {
-        var x = padL + i * step;
-        var y = yOff + panelH - ((v - minVal) / range) * panelH;
-        if (i === 0) {
-          linePath += 'M ' + x + ' ' + y;
-          areaPath += 'M ' + x + ' ' + (yOff + panelH) + ' L ' + x + ' ' + y;
-        } else {
-          linePath += ' L ' + x + ' ' + y;
-          areaPath += ' L ' + x + ' ' + y;
-        }
-      });
-      areaPath += ' L ' + (padL + (n - 1) * step) + ' ' + (yOff + panelH) + ' Z';
+      // Area + Line using draw helpers
+      var points = values.map(function(v, i) { return {i: i, v: v}; });
+      var xFn = function(p) { return padL + p.i * step; };
+      var yFn = function(p) { return yOff + yScale(p.v); };
 
-      svg += '<path class="corr-area" d="' + areaPath + '" fill="' + color + '"/>';
-      svg += '<path class="corr-line" d="' + linePath + '" stroke="' + color + '"/>';
+      var areaPath = V.draw.areaPath(points, xFn, yFn, yOff + panelH);
+      var linePath = V.draw.linePath(points, xFn, yFn);
+
+      out += V.svg.path(areaPath, 'class="corr-area" fill="' + color + '"');
+      out += V.svg.path(linePath, 'class="corr-line" stroke="' + color + '"');
 
       // Event markers
       if (panel.markers) {
         panel.markers.forEach(function(m) {
           var mx = padL + m.t * step;
-          var mv = values[m.t];
-          var my = yOff + panelH - ((mv - minVal) / range) * panelH;
+          var my = yOff + yScale(values[m.t]);
           var markerColor = m.severity === 'critical' ? '#ef4444' : '#f59e0b';
-          svg += '<circle class="corr-marker" cx="' + mx + '" cy="' + my + '" r="3.5" fill="' + markerColor + '" stroke="var(--bg-secondary)" stroke-width="1.5"' +
-            ' data-marker-panel="' + pi + '" data-marker-t="' + m.t + '" />';
+          out += V.svg.circle(mx, my, 3.5,
+            'class="corr-marker" fill="' + markerColor + '" stroke="var(--bg-secondary)" stroke-width="1.5" data-marker-panel="' + pi + '" data-marker-t="' + m.t + '"');
         });
       }
     });
 
-    svg += '</svg>';
-
-    container.innerHTML = svg;
+    out += '</svg>';
+    container.innerHTML = out;
     container._data = data;
 
-    // Event delegation for markers
-    container.addEventListener('mouseover', function(ev) {
-      var marker = ev.target.closest('.corr-marker');
-      if (!marker) return;
-      var pi = parseInt(marker.getAttribute('data-marker-panel'), 10);
-      var t = parseInt(marker.getAttribute('data-marker-t'), 10);
+    V.tooltip.wire(container, '.corr-marker', function(el) {
+      var pi = parseInt(el.getAttribute('data-marker-panel'), 10);
+      var t = parseInt(el.getAttribute('data-marker-t'), 10);
       var panel = container._data.panels[pi];
-      if (!panel || !panel.markers) return;
+      if (!panel || !panel.markers) return '';
       var m = null;
       for (var i = 0; i < panel.markers.length; i++) {
         if (panel.markers[i].t === t) { m = panel.markers[i]; break; }
       }
-      if (!m) return;
+      if (!m) return '';
       var sevColor = m.severity === 'critical' ? '#ef4444' : '#f59e0b';
-      V.tooltip.show(
-        '<div class="tt-title">' + V.util.escapeHtml(m.label) + '</div>' +
+      return '<div class="tt-title">' + V.util.escapeHtml(m.label) + '</div>' +
         '<div class="tt-row"><span>Severity</span><span class="tt-val" style="color:' + sevColor + '">' + V.util.escapeHtml(String(m.severity)) + '</span></div>' +
         '<div class="tt-row"><span>Time</span><span class="tt-val">' + V.util.escapeHtml(String(container._data.times[m.t])) + '</span></div>' +
-        '<div class="tt-row"><span>Value</span><span class="tt-val">' + V.util.escapeHtml(String(panel.values[m.t])) + '</span></div>',
-        ev
-      );
-    });
-    container.addEventListener('mouseout', function(ev) {
-      if (ev.target.closest('.corr-marker')) V.tooltip.hide();
+        '<div class="tt-row"><span>Value</span><span class="tt-val">' + V.util.escapeHtml(String(panel.values[m.t])) + '</span></div>';
     });
   }
 

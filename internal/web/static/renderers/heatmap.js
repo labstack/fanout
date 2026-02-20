@@ -32,20 +32,20 @@
 
     var maxVal = Math.max.apply(null, values.map(function(row) { return Math.max.apply(null, row); }));
 
-    var svg = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
-
-    // Y-axis labels (reversed so low latency at bottom)
     var reversedBuckets = buckets.slice().reverse();
+
+    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+
+    // Y-axis labels
     reversedBuckets.forEach(function(b, bi) {
       var y = padY + labelH + bi * cellH;
-      svg += '<text class="hm-axis-label" x="' + (padX + labelW - 4) + '" y="' + (y + cellH/2 + 3) + '" text-anchor="end">' + b + 'ms</text>';
+      out += V.svg.text(padX + labelW - 4, y + cellH/2 + 3, b + 'ms', 'class="hm-axis-label" text-anchor="end"');
     });
 
     // X-axis labels
     times.forEach(function(t, ti) {
-      var x = padX + labelW + ti * cellW;
       if (ti % (expanded ? 1 : 2) === 0) {
-        svg += '<text class="hm-axis-label" x="' + (x + cellW/2) + '" y="' + (totalH - 8) + '" text-anchor="middle">' + t + '</text>';
+        out += V.svg.text(padX + labelW + ti * cellW + cellW/2, totalH - 8, t, 'class="hm-axis-label" text-anchor="middle"');
       }
     });
 
@@ -55,42 +55,31 @@
       reversedVals.forEach(function(val, bi) {
         var x = padX + labelW + ti * cellW;
         var y = padY + labelH + bi * cellH;
-        var color = heatColor(val, maxVal);
-        svg += '<rect class="hm-cell" x="' + (x + 0.5) + '" y="' + (y + 0.5) + '" width="' + (cellW - 1) + '" height="' + (cellH - 1) + '" fill="' + color + '" rx="2" ry="2"' +
-          ' data-ti="' + ti + '" data-bi="' + bi + '" />';
+        out += V.svg.rect(x + 0.5, y + 0.5, cellW - 1, cellH - 1,
+          'class="hm-cell" fill="' + heatColor(val, maxVal) + '" rx="2" ry="2" data-ti="' + ti + '" data-bi="' + bi + '"');
       });
     });
 
-    svg += '<text class="hm-axis-title" x="' + padX + '" y="' + (padY + 2) + '" text-anchor="start">Latency</text>';
-    svg += '</svg>';
+    out += V.svg.text(padX, padY + 2, 'Latency', 'class="hm-axis-title" text-anchor="start"');
+    out += '</svg>';
 
-    // Color legend
-    svg += '<div class="viz-legend">' +
-      '<div class="viz-legend-item"><span class="swatch" style="background:rgba(14,165,233,0.15)"></span> Low</div>' +
-      '<div class="viz-legend-item"><span class="swatch" style="background:rgba(14,165,233,0.6)"></span> Medium</div>' +
-      '<div class="viz-legend-item"><span class="swatch" style="background:rgba(234,179,8,0.6)"></span> High</div>' +
-      '<div class="viz-legend-item"><span class="swatch" style="background:rgba(239,68,68,0.8)"></span> Critical</div>' +
-    '</div>';
+    out += V.legend([
+      { color: 'rgba(14,165,233,0.15)', label: 'Low' },
+      { color: 'rgba(14,165,233,0.6)', label: 'Medium' },
+      { color: 'rgba(234,179,8,0.6)', label: 'High' },
+      { color: 'rgba(239,68,68,0.8)', label: 'Critical' }
+    ]);
 
-    container.innerHTML = svg;
+    container.innerHTML = out;
     container._data = { times: times, reversedBuckets: reversedBuckets, values: values };
 
-    // Event delegation
-    container.addEventListener('mouseover', function(ev) {
-      var cell = ev.target.closest('.hm-cell');
-      if (!cell) return;
-      var ti = parseInt(cell.getAttribute('data-ti'), 10);
-      var bi = parseInt(cell.getAttribute('data-bi'), 10);
+    V.tooltip.wire(container, '.hm-cell', function(el) {
+      var ti = parseInt(el.getAttribute('data-ti'), 10);
+      var bi = parseInt(el.getAttribute('data-bi'), 10);
       var d = container._data;
       var val = d.values[ti].slice().reverse()[bi];
-      V.tooltip.show(
-        '<div class="tt-title">' + V.util.escapeHtml(String(d.times[ti])) + ' \u00b7 ' + V.util.escapeHtml(String(d.reversedBuckets[bi])) + 'ms</div>' +
-        '<div class="tt-row"><span>Requests</span><span class="tt-val">' + V.util.escapeHtml(String(val)) + '</span></div>',
-        ev
-      );
-    });
-    container.addEventListener('mouseout', function(ev) {
-      if (ev.target.closest('.hm-cell')) V.tooltip.hide();
+      return '<div class="tt-title">' + V.util.escapeHtml(String(d.times[ti])) + ' \u00b7 ' + V.util.escapeHtml(String(d.reversedBuckets[bi])) + 'ms</div>' +
+        '<div class="tt-row"><span>Requests</span><span class="tt-val">' + V.util.escapeHtml(String(val)) + '</span></div>';
     });
   }
 

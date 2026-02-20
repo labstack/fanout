@@ -137,7 +137,15 @@
       var idx = hashStr(name) % SERVICE_PALETTE.length;
       serviceColorMap[name] = SERVICE_PALETTE[idx];
       return SERVICE_PALETTE[idx];
-    }
+    },
+    threshold: function(value, stops) {
+      for (var i = stops.length - 1; i >= 0; i--) {
+        if (value >= stops[i][0]) return stops[i][1];
+      }
+      return stops[0][1];
+    },
+    HEAT_STOPS: [[0,'#1a1a2e'],[0.01,'#22c55e'],[0.25,'#84cc16'],[0.5,'#f59e0b'],[0.75,'#ef4444'],[1,'#dc2626']],
+    MATRIX_STOPS: [[0,'#1e293b'],[0.01,'#0ea5e9'],[0.25,'#22c55e'],[0.5,'#f59e0b'],[0.75,'#ef4444'],[1,'#dc2626']]
   };
 
   // ─── Utilities ───────────────────────────────
@@ -170,6 +178,154 @@
         return null;
       }
     }
+  };
+
+  // ─── Dimensions ─────────────────────────────
+  function dims(container, expanded, overrides) {
+    var o = overrides || {};
+    var w = container.clientWidth || 400;
+    var h = expanded ? Math.min(window.innerHeight * 0.7, 700) : (o.height || 260);
+    var pad = Object.assign({top: 20, right: 20, bottom: 30, left: 50}, o.pad || {});
+    return {w: w, h: h, pad: pad, innerW: w - pad.left - pad.right, innerH: h - pad.top - pad.bottom};
+  }
+
+  // ─── SVG element builders ──────────────────
+  var svg = {
+    open: function(w, h) { return '<svg width="'+w+'" height="'+h+'" viewBox="0 0 '+w+' '+h+'">'; },
+    close: '</svg>',
+    g: function(transform, content) { return '<g transform="'+transform+'">'+content+'</g>'; },
+    line: function(x1,y1,x2,y2,attrs) { return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" '+(attrs||'')+' />'; },
+    rect: function(x,y,w,h,attrs) { return '<rect x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" '+(attrs||'')+' />'; },
+    text: function(x,y,text,attrs) { return '<text x="'+x+'" y="'+y+'" '+(attrs||'')+'>'+text+'</text>'; },
+    circle: function(cx,cy,r,attrs) { return '<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" '+(attrs||'')+' />'; },
+    path: function(d,attrs) { return '<path d="'+d+'" '+(attrs||'')+' />'; }
+  };
+
+  // ─── Scales ────────────────────────────────
+  var scale = {
+    linear: function(domain, range) {
+      var d0=domain[0], d1=domain[1], r0=range[0], r1=range[1];
+      var m = (r1-r0)/(d1-d0||1);
+      var fn = function(v) { return r0 + (v-d0)*m; };
+      fn.domain = domain; fn.range = range;
+      fn.invert = function(px) { return d0 + (px-r0)/m; };
+      return fn;
+    },
+    band: function(labels, range, padding) {
+      var p = padding || 0.1;
+      var n = labels.length;
+      var total = range[1]-range[0];
+      var step = total / (n + (n+1)*p);
+      var gap = step*p;
+      var fn = function(label) {
+        var i = labels.indexOf(label);
+        return range[0] + gap + i*(step+gap);
+      };
+      fn.bandwidth = function() { return step; };
+      fn.step = function() { return step + gap; };
+      return fn;
+    }
+  };
+
+  // ─── Drawing primitives ────────────────────
+  var draw = {
+    gridY: function(yScale, ticks, innerW, attrs) {
+      var a = attrs || 'stroke="var(--border-subtle)" stroke-dasharray="2,2"';
+      return ticks.map(function(t) {
+        var y = Math.round(yScale(t));
+        return '<line x1="0" y1="'+y+'" x2="'+innerW+'" y2="'+y+'" '+a+' />';
+      }).join('');
+    },
+    axisX: function(labels, xScale, innerH, bandwidth) {
+      return labels.map(function(l) {
+        var x = xScale(l) + (bandwidth||0)/2;
+        return '<text x="'+x+'" y="'+(innerH+16)+'" text-anchor="middle" fill="var(--text-muted)" font-size="10">'+l+'</text>';
+      }).join('');
+    },
+    axisY: function(yScale, ticks, attrs) {
+      var a = attrs || 'text-anchor="end" fill="var(--text-muted)" font-size="10"';
+      return ticks.map(function(t) {
+        var y = Math.round(yScale(t));
+        return '<text x="-6" y="'+(y+3)+'" '+a+'>'+t+'</text>';
+      }).join('');
+    },
+    linePath: function(points, xFn, yFn) {
+      return points.map(function(p,i) {
+        return (i===0?'M':'L')+xFn(p)+','+yFn(p);
+      }).join(' ');
+    },
+    areaPath: function(points, xFn, yFn, baseline) {
+      if (points.length === 0) return '';
+      var top = points.map(function(p,i) { return (i===0?'M':'L')+xFn(p)+','+yFn(p); }).join(' ');
+      return top + 'L'+xFn(points[points.length-1])+','+baseline+'L'+xFn(points[0])+','+baseline+'Z';
+    },
+    arc: function(cx, cy, r, startAngle, endAngle) {
+      var x1=cx+r*Math.cos(startAngle), y1=cy+r*Math.sin(startAngle);
+      var x2=cx+r*Math.cos(endAngle), y2=cy+r*Math.sin(endAngle);
+      var large = (endAngle-startAngle > Math.PI) ? 1 : 0;
+      return 'M'+x1+','+y1+' A'+r+','+r+' 0 '+large+' 1 '+x2+','+y2;
+    }
+  };
+
+  // ─── Layout algorithms ─────────────────────
+  var layout = {
+    dagLayers: function(nodes, edges) {
+      var inDeg = {}, adj = {};
+      nodes.forEach(function(n) { inDeg[n.id] = 0; adj[n.id] = []; });
+      edges.forEach(function(e) {
+        if (inDeg[e.target] !== undefined) inDeg[e.target]++;
+        if (adj[e.source]) adj[e.source].push(e.target);
+      });
+      var queue = [];
+      nodes.forEach(function(n) { if (inDeg[n.id] === 0) { n.layer = 0; queue.push(n.id); } });
+      var head = 0;
+      while (head < queue.length) {
+        var id = queue[head++];
+        var node = nodes.find(function(n) { return n.id === id; });
+        (adj[id]||[]).forEach(function(tid) {
+          var tn = nodes.find(function(n) { return n.id === tid; });
+          if (tn) {
+            tn.layer = Math.max(tn.layer||0, (node.layer||0)+1);
+            inDeg[tid]--;
+            if (inDeg[tid] === 0) queue.push(tid);
+          }
+        });
+      }
+      nodes.forEach(function(n) { if (n.layer === undefined) n.layer = 0; });
+
+      var groups = {};
+      nodes.forEach(function(n) {
+        if (!groups[n.layer]) groups[n.layer] = [];
+        groups[n.layer].push(n);
+      });
+      return groups;
+    }
+  };
+
+  // ─── Legend builder ────────────────────────
+  function legend(items) {
+    return '<div class="viz-legend">' + items.map(function(it) {
+      return '<div class="viz-legend-item"><span class="swatch" style="background:'+it.color+'"></span> '+util.escapeHtml(it.label)+'</div>';
+    }).join('') + '</div>';
+  }
+
+  // ─── Tooltip extensions ────────────────────
+  tooltip.html = function(rows) {
+    return '<div style="font-size:12px;line-height:1.6">' + rows.map(function(r) {
+      var label = Array.isArray(r) ? r[0] : r.label;
+      var value = Array.isArray(r) ? r[1] : r.value;
+      var dot = r.color ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+r.color+';margin-right:4px"></span>' : '';
+      return dot + '<strong>' + label + '</strong> ' + value;
+    }).join('<br>') + '</div>';
+  };
+  tooltip.wire = function(container, selector, buildFn) {
+    container.addEventListener('mouseover', function(e) {
+      var el = e.target.closest(selector);
+      if (el) tooltip.show(buildFn(el), e);
+    });
+    container.addEventListener('mouseout', function(e) {
+      if (e.target.closest(selector)) tooltip.hide();
+    });
   };
 
   // ─── Registry ────────────────────────────────
@@ -228,6 +384,12 @@
     closeExpand: closeExpand,
     tooltip: tooltip,
     colors: colors,
-    util: util
+    util: util,
+    dims: dims,
+    svg: svg,
+    scale: scale,
+    draw: draw,
+    layout: layout,
+    legend: legend
   };
 })();

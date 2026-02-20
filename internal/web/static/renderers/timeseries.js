@@ -19,114 +19,96 @@
     var chartW = totalW - padL - padR;
     var chartH = totalH - padT - padB;
 
-    // Compute global min/max across all series
+    // Global min/max
     var allVals = [];
     series.forEach(function(s) { allVals = allVals.concat(s.values); });
     var minVal = Math.min.apply(null, allVals);
     var maxVal = Math.max.apply(null, allVals);
-    // Add some padding
     var range = maxVal - minVal || 1;
     minVal = Math.max(0, minVal - range * 0.05);
     maxVal = maxVal + range * 0.1;
-    range = maxVal - minVal;
 
     var n = series[0].values.length;
     var stepX = chartW / Math.max(n - 1, 1);
+    var yScale = V.scale.linear([minVal, maxVal], [chartH, 0]);
+    var yTicks = [];
+    for (var g = 0; g <= 5; g++) yTicks.push(minVal + (g / 5) * (maxVal - minVal));
+    var fmtType = yLabel.indexOf('%') !== -1 ? 'pct' : 'ms';
 
-    var svg = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
 
-    // Y-axis gridlines and labels
-    var yTicks = 5;
-    for (var g = 0; g <= yTicks; g++) {
-      var yVal = minVal + (g / yTicks) * range;
-      var gy = padT + chartH - (g / yTicks) * chartH;
-      svg += '<line class="ts-gridline" x1="' + padL + '" y1="' + gy + '" x2="' + (padL + chartW) + '" y2="' + gy + '"/>';
-      svg += '<text class="ts-axis-label" x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end">' + V.util.format(yVal, yLabel.indexOf('%') !== -1 ? 'pct' : 'ms') + '</text>';
-    }
+    // Y-axis gridlines + labels
+    out += '<g transform="translate(' + padL + ',' + padT + ')">';
+    out += V.draw.gridY(yScale, yTicks, chartW, 'class="ts-gridline"');
+    yTicks.forEach(function(t) {
+      out += V.svg.text(-6, Math.round(yScale(t)) + 3, V.util.format(t, fmtType), 'class="ts-axis-label" text-anchor="end"');
+    });
+    out += '</g>';
 
     // X-axis labels
     if (labels.length > 0) {
       var xSkip = Math.max(1, Math.ceil(labels.length / (expanded ? 12 : 8)));
       labels.forEach(function(lbl, i) {
         if (i % xSkip !== 0 && i !== labels.length - 1) return;
-        var x = padL + i * stepX;
-        svg += '<text class="ts-axis-label" x="' + x + '" y="' + (totalH - 4) + '" text-anchor="middle">' + lbl + '</text>';
+        out += V.svg.text(padL + i * stepX, totalH - 4, lbl, 'class="ts-axis-label" text-anchor="middle"');
       });
     }
 
     // Y-axis title
     if (yLabel) {
-      svg += '<text class="ts-axis-title" x="' + 12 + '" y="' + (padT + chartH / 2) + '" text-anchor="middle" transform="rotate(-90 12 ' + (padT + chartH / 2) + ')">' + V.util.escapeHtml(yLabel) + '</text>';
+      out += V.svg.text(12, padT + chartH / 2, V.util.escapeHtml(yLabel),
+        'class="ts-axis-title" text-anchor="middle" transform="rotate(-90 12 ' + (padT + chartH / 2) + ')"');
     }
 
-    // Render each series
+    // Series
     series.forEach(function(s, si) {
       var color = s.color || V.colors.service(s.label || ('series-' + si));
       var type = s.type || 'line';
       var values = s.values;
 
-      var linePath = '';
-      var areaPath = '';
-      values.forEach(function(v, i) {
-        var x = padL + i * stepX;
-        var y = padT + chartH - ((v - minVal) / range) * chartH;
-        if (i === 0) {
-          linePath += 'M ' + x + ' ' + y;
-          areaPath += 'M ' + x + ' ' + (padT + chartH) + ' L ' + x + ' ' + y;
-        } else {
-          linePath += ' L ' + x + ' ' + y;
-          areaPath += ' L ' + x + ' ' + y;
-        }
-      });
-      areaPath += ' L ' + (padL + (values.length - 1) * stepX) + ' ' + (padT + chartH) + ' Z';
+      // Build points array for draw helpers
+      var xFn = function(p) { return padL + p.i * stepX; };
+      var yFn = function(p) { return padT + yScale(p.v); };
+      var points = values.map(function(v, i) { return {i: i, v: v}; });
+
+      var linePath = V.draw.linePath(points, xFn, yFn);
 
       if (type === 'area') {
-        svg += '<path class="ts-area" d="' + areaPath + '" fill="' + color + '"/>';
+        var areaPath = V.draw.areaPath(points, xFn, yFn, padT + chartH);
+        out += V.svg.path(areaPath, 'class="ts-area" fill="' + color + '"');
       }
-      svg += '<path class="ts-line" d="' + linePath + '" stroke="' + color + '"/>';
+      out += V.svg.path(linePath, 'class="ts-line" stroke="' + color + '"');
 
-      // Data points (hover targets)
+      // Data points
       values.forEach(function(v, i) {
         var x = padL + i * stepX;
-        var y = padT + chartH - ((v - minVal) / range) * chartH;
-        svg += '<circle class="ts-dot" cx="' + x + '" cy="' + y + '" r="3" fill="' + color + '" stroke="var(--bg-secondary)" stroke-width="1.5"' +
-          ' data-series="' + si + '" data-idx="' + i + '" />';
+        var y = padT + yScale(v);
+        out += V.svg.circle(x, y, 3,
+          'class="ts-dot" fill="' + color + '" stroke="var(--bg-secondary)" stroke-width="1.5" data-series="' + si + '" data-idx="' + i + '"');
       });
     });
 
-    svg += '</svg>';
+    out += '</svg>';
 
     // Legend
     if (series.length > 1) {
-      svg += '<div class="viz-legend">';
-      series.forEach(function(s, si) {
-        var color = s.color || V.colors.service(s.label || ('series-' + si));
-        svg += '<div class="viz-legend-item"><span class="swatch" style="background:' + color + '"></span> ' + V.util.escapeHtml(s.label || ('Series ' + (si + 1))) + '</div>';
-      });
-      svg += '</div>';
+      out += V.legend(series.map(function(s, si) {
+        return { color: s.color || V.colors.service(s.label || ('series-' + si)), label: s.label || ('Series ' + (si + 1)) };
+      }));
     }
 
-    container.innerHTML = svg;
+    container.innerHTML = out;
     container._data = data;
 
-    // Event delegation
-    container.addEventListener('mouseover', function(ev) {
-      var dot = ev.target.closest('.ts-dot');
-      if (!dot) return;
-      var si = parseInt(dot.getAttribute('data-series'), 10);
-      var idx = parseInt(dot.getAttribute('data-idx'), 10);
+    V.tooltip.wire(container, '.ts-dot', function(el) {
+      var si = parseInt(el.getAttribute('data-series'), 10);
+      var idx = parseInt(el.getAttribute('data-idx'), 10);
       var d = container._data;
       var s = d.series[si];
       var val = s.values[idx];
       var lbl = d.labels && d.labels[idx] ? d.labels[idx] : '#' + idx;
-      V.tooltip.show(
-        '<div class="tt-title">' + V.util.escapeHtml(s.label || ('Series ' + (si + 1))) + '</div>' +
-        '<div class="tt-row"><span>' + V.util.escapeHtml(lbl) + '</span><span class="tt-val">' + val + '</span></div>',
-        ev
-      );
-    });
-    container.addEventListener('mouseout', function(ev) {
-      if (ev.target.closest('.ts-dot')) V.tooltip.hide();
+      return '<div class="tt-title">' + V.util.escapeHtml(s.label || ('Series ' + (si + 1))) + '</div>' +
+        '<div class="tt-row"><span>' + V.util.escapeHtml(lbl) + '</span><span class="tt-val">' + val + '</span></div>';
     });
   }
 

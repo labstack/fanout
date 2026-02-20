@@ -10,25 +10,17 @@
     var range = max - min || 1;
     var step = sparkW / (values.length - 1);
 
-    var path = '';
-    var areaPath = '';
-    values.forEach(function(v, i) {
-      var x = i * step;
-      var y = sparkH - ((v - min) / range) * (sparkH - 4) - 2;
-      if (i === 0) {
-        path += 'M ' + x + ' ' + y;
-        areaPath += 'M ' + x + ' ' + sparkH + 'L ' + x + ' ' + y;
-      } else {
-        path += ' L ' + x + ' ' + y;
-        areaPath += ' L ' + x + ' ' + y;
-      }
-    });
-    areaPath += ' L ' + ((values.length - 1) * step) + ' ' + sparkH + ' Z';
+    var points = values.map(function(v, i) { return {i: i, v: v}; });
+    var xFn = function(p) { return p.i * step; };
+    var yFn = function(p) { return sparkH - ((p.v - min) / range) * (sparkH - 4) - 2; };
 
-    return '<svg width="' + sparkW + '" height="' + sparkH + '" viewBox="0 0 ' + sparkW + ' ' + sparkH + '">' +
-      '<path d="' + areaPath + '" fill="' + color + '" opacity="0.15"/>' +
-      '<path d="' + path + '" fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>' +
-    '</svg>';
+    var linePath = V.draw.linePath(points, xFn, yFn);
+    var areaPath = V.draw.areaPath(points, xFn, yFn, sparkH);
+
+    return V.svg.open(sparkW, sparkH) +
+      V.svg.path(areaPath, 'fill="' + color + '" opacity="0.15"') +
+      V.svg.path(linePath, 'fill="none" stroke="' + color + '" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"') +
+      V.svg.close;
   }
 
   function statusPill(status, errorRate) {

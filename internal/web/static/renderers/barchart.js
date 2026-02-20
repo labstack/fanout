@@ -10,8 +10,7 @@
     var yLabel = data.yLabel || '';
     var horizontal = data.horizontal || false;
 
-    var maxVal = Math.max.apply(null, bars.map(function(b) { return b.value; }));
-    maxVal = maxVal * 1.15; // headroom
+    var maxVal = Math.max.apply(null, bars.map(function(b) { return b.value; })) * 1.15;
 
     if (horizontal) {
       renderHorizontal(container, bars, maxVal, yLabel, expanded);
@@ -34,41 +33,41 @@
     var barW = Math.min(expanded ? 60 : 40, chartW / n * 0.7);
     var gap = (chartW - n * barW) / (n + 1);
 
-    var svg = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var yScale = V.scale.linear([0, maxVal], [chartH, 0]);
+    var yTicks = [];
+    for (var g = 0; g <= 5; g++) yTicks.push((g / 5) * maxVal);
 
-    // Y-axis gridlines
-    var yTicks = 5;
-    for (var g = 0; g <= yTicks; g++) {
-      var yVal = (g / yTicks) * maxVal;
-      var gy = padT + chartH - (g / yTicks) * chartH;
-      svg += '<line class="bc-gridline" x1="' + padL + '" y1="' + gy + '" x2="' + (padL + chartW) + '" y2="' + gy + '"/>';
-      svg += '<text class="bc-axis-label" x="' + (padL - 6) + '" y="' + (gy + 3) + '" text-anchor="end">' + Math.round(yVal) + '</text>';
-    }
+    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+
+    // Gridlines + Y-axis labels
+    out += '<g transform="translate(' + padL + ',' + padT + ')">';
+    out += V.draw.gridY(yScale, yTicks, chartW, 'class="bc-gridline"');
+    yTicks.forEach(function(t) {
+      out += V.svg.text(-6, Math.round(yScale(t)) + 3, Math.round(t), 'class="bc-axis-label" text-anchor="end"');
+    });
 
     // Bars
     bars.forEach(function(b, i) {
-      var x = padL + gap + i * (barW + gap);
+      var x = gap + i * (barW + gap);
       var h = (b.value / maxVal) * chartH;
-      var y = padT + chartH - h;
+      var y = chartH - h;
       var color = b.color || V.colors.service(b.label);
 
-      svg += '<rect class="bc-bar" x="' + x + '" y="' + y + '" width="' + barW + '" height="' + h + '" fill="' + color + '" data-idx="' + i + '" />';
+      out += V.svg.rect(x, y, barW, h, 'class="bc-bar" fill="' + color + '" data-idx="' + i + '"');
+      out += V.svg.text(x + barW / 2, y - 4, V.util.escapeHtml(String(b.value)), 'class="bc-value-label" text-anchor="middle"');
 
-      // Value label above bar
-      svg += '<text class="bc-value-label" x="' + (x + barW / 2) + '" y="' + (y - 4) + '" text-anchor="middle">' + V.util.escapeHtml(String(b.value)) + '</text>';
-
-      // X-axis label
       var labelText = V.util.truncate(b.label, barW + gap - 4, 6);
-      svg += '<text class="bc-axis-label" x="' + (x + barW / 2) + '" y="' + (totalH - 6) + '" text-anchor="middle">' + V.util.escapeHtml(labelText) + '</text>';
+      out += V.svg.text(x + barW / 2, chartH + padB - 6, V.util.escapeHtml(labelText), 'class="bc-axis-label" text-anchor="middle"');
     });
+    out += '</g>';
 
-    // Y-axis title
     if (yLabel) {
-      svg += '<text class="bc-axis-title" x="' + 10 + '" y="' + (padT + chartH / 2) + '" text-anchor="middle" transform="rotate(-90 10 ' + (padT + chartH / 2) + ')">' + V.util.escapeHtml(yLabel) + '</text>';
+      out += V.svg.text(10, padT + chartH / 2, V.util.escapeHtml(yLabel),
+        'class="bc-axis-title" text-anchor="middle" transform="rotate(-90 10 ' + (padT + chartH / 2) + ')"');
     }
 
-    svg += '</svg>';
-    container.innerHTML = svg;
+    out += '</svg>';
+    container.innerHTML = out;
     container._bars = bars;
     wireEvents(container);
   }
@@ -85,53 +84,42 @@
     var totalH = padT + n * (barH + gap) + padB;
     var chartW = totalW - padL - padR;
 
-    var svg = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
+    var xScale = V.scale.linear([0, maxVal], [0, chartW]);
+    var xTicks = [];
+    for (var g = 0; g <= 5; g++) xTicks.push((g / 5) * maxVal);
+
+    var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';
 
     // X-axis gridlines
-    var xTicks = 5;
-    for (var g = 0; g <= xTicks; g++) {
-      var xVal = (g / xTicks) * maxVal;
-      var gx = padL + (g / xTicks) * chartW;
-      svg += '<line class="bc-gridline" x1="' + gx + '" y1="' + padT + '" x2="' + gx + '" y2="' + (totalH - padB) + '"/>';
-      svg += '<text class="bc-axis-label" x="' + gx + '" y="' + (totalH - 4) + '" text-anchor="middle">' + Math.round(xVal) + '</text>';
-    }
+    xTicks.forEach(function(t) {
+      var gx = padL + xScale(t);
+      out += V.svg.line(gx, padT, gx, totalH - padB, 'class="bc-gridline"');
+      out += V.svg.text(gx, totalH - 4, Math.round(t), 'class="bc-axis-label" text-anchor="middle"');
+    });
 
     // Bars
     bars.forEach(function(b, i) {
       var y = padT + i * (barH + gap);
-      var w = (b.value / maxVal) * chartW;
+      var w = xScale(b.value);
       var color = b.color || V.colors.service(b.label);
 
-      svg += '<rect class="bc-bar" x="' + padL + '" y="' + y + '" width="' + w + '" height="' + barH + '" fill="' + color + '" data-idx="' + i + '" />';
-
-      // Value label
-      svg += '<text class="bc-value-label" x="' + (padL + w + 6) + '" y="' + (y + barH / 2 + 3) + '" text-anchor="start">' + V.util.escapeHtml(String(b.value)) + '</text>';
-
-      // Y-axis label
-      svg += '<text class="bc-axis-label" x="' + (padL - 6) + '" y="' + (y + barH / 2 + 3) + '" text-anchor="end">' + V.util.escapeHtml(V.util.truncate(b.label, padL - 16, 6)) + '</text>';
+      out += V.svg.rect(padL, y, w, barH, 'class="bc-bar" fill="' + color + '" data-idx="' + i + '"');
+      out += V.svg.text(padL + w + 6, y + barH / 2 + 3, V.util.escapeHtml(String(b.value)), 'class="bc-value-label" text-anchor="start"');
+      out += V.svg.text(padL - 6, y + barH / 2 + 3, V.util.escapeHtml(V.util.truncate(b.label, padL - 16, 6)), 'class="bc-axis-label" text-anchor="end"');
     });
 
-    svg += '</svg>';
-    container.innerHTML = svg;
+    out += '</svg>';
+    container.innerHTML = out;
     container._bars = bars;
     wireEvents(container);
   }
 
   function wireEvents(container) {
-    container.addEventListener('mouseover', function(ev) {
-      var bar = ev.target.closest('.bc-bar');
-      if (!bar) return;
-      var idx = parseInt(bar.getAttribute('data-idx'), 10);
-      var b = container._bars[idx];
-      if (!b) return;
-      V.tooltip.show(
-        '<div class="tt-title">' + V.util.escapeHtml(b.label) + '</div>' +
-        '<div class="tt-row"><span>Value</span><span class="tt-val">' + b.value + '</span></div>',
-        ev
-      );
-    });
-    container.addEventListener('mouseout', function(ev) {
-      if (ev.target.closest('.bc-bar')) V.tooltip.hide();
+    V.tooltip.wire(container, '.bc-bar', function(el) {
+      var b = container._bars[parseInt(el.getAttribute('data-idx'), 10)];
+      if (!b) return '';
+      return '<div class="tt-title">' + V.util.escapeHtml(b.label) + '</div>' +
+        '<div class="tt-row"><span>Value</span><span class="tt-val">' + b.value + '</span></div>';
     });
   }
 
