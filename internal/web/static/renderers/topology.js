@@ -11,7 +11,9 @@
 
     // DAG layout
     var layerGroups = V.layout.dagLayers(nodes, edges);
-    var maxLayer = Math.max.apply(null, Object.keys(layerGroups).map(Number));
+    var layerKeys = Object.keys(layerGroups);
+    if (layerKeys.length === 0) return;
+    var maxLayer = Math.max.apply(null, layerKeys.map(Number));
     var nodeW = expanded ? 120 : 100;
     var nodeH = expanded ? 48 : 40;
     var layerGap = expanded ? 180 : 140;
@@ -71,7 +73,7 @@
       var statusCol = V.colors.statusHex(n.status);
       out += '<g class="topo-node" data-node-id="' + V.util.escapeHtml(n.id) + '" transform="translate(' + pos.x + ', ' + pos.y + ')">';
       out += V.svg.rect(0, 0, nodeW, nodeH, 'class="topo-node-bg"');
-      out += V.svg.circle(12, nodeH/2, 0, 'class="topo-node-status" fill="' + statusCol + '"');
+      out += '<circle class="topo-node-status" cx="12" cy="' + (nodeH/2) + '" fill="' + statusCol + '" />';
       out += V.svg.text(nodeW/2 + 6, nodeH/2 - 4, V.util.escapeHtml(n.id), 'class="topo-node-label"');
       out += V.svg.text(nodeW/2 + 6, nodeH/2 + 10, V.util.escapeHtml(String(n.rpm)) + ' rpm \u00b7 P95 ' + V.util.escapeHtml(String(n.p95)) + 'ms', 'class="topo-node-metric"');
       out += '</g>';

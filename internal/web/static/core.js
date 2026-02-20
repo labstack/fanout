@@ -139,13 +139,12 @@
       return SERVICE_PALETTE[idx];
     },
     threshold: function(value, stops) {
+      if (!stops || stops.length === 0) return '#888';
       for (var i = stops.length - 1; i >= 0; i--) {
         if (value >= stops[i][0]) return stops[i][1];
       }
       return stops[0][1];
-    },
-    HEAT_STOPS: [[0,'#1a1a2e'],[0.01,'#22c55e'],[0.25,'#84cc16'],[0.5,'#f59e0b'],[0.75,'#ef4444'],[1,'#dc2626']],
-    MATRIX_STOPS: [[0,'#1e293b'],[0.01,'#0ea5e9'],[0.25,'#22c55e'],[0.5,'#f59e0b'],[0.75,'#ef4444'],[1,'#dc2626']]
+    }
   };
 
   // ─── Utilities ───────────────────────────────
@@ -205,7 +204,15 @@
   var scale = {
     linear: function(domain, range) {
       var d0=domain[0], d1=domain[1], r0=range[0], r1=range[1];
-      var m = (r1-r0)/(d1-d0||1);
+      var span = d1 - d0;
+      if (span === 0) {
+        var mid = (r0 + r1) / 2;
+        var fn = function() { return mid; };
+        fn.domain = domain; fn.range = range;
+        fn.invert = function() { return d0; };
+        return fn;
+      }
+      var m = (r1-r0)/span;
       var fn = function(v) { return r0 + (v-d0)*m; };
       fn.domain = domain; fn.range = range;
       fn.invert = function(px) { return d0 + (px-r0)/m; };
@@ -214,11 +221,18 @@
     band: function(labels, range, padding) {
       var p = padding || 0.1;
       var n = labels.length;
+      if (n === 0) {
+        var fn = function() { return range[0]; };
+        fn.bandwidth = function() { return 0; };
+        fn.step = function() { return 0; };
+        return fn;
+      }
       var total = range[1]-range[0];
       var step = total / (n + (n+1)*p);
       var gap = step*p;
       var fn = function(label) {
         var i = labels.indexOf(label);
+        if (i === -1) return range[0];
         return range[0] + gap + i*(step+gap);
       };
       fn.bandwidth = function() { return step; };
@@ -250,6 +264,7 @@
       }).join('');
     },
     linePath: function(points, xFn, yFn) {
+      if (points.length === 0) return '';
       return points.map(function(p,i) {
         return (i===0?'M':'L')+xFn(p)+','+yFn(p);
       }).join(' ');
@@ -270,28 +285,33 @@
   // ─── Layout algorithms ─────────────────────
   var layout = {
     dagLayers: function(nodes, edges) {
-      var inDeg = {}, adj = {};
-      nodes.forEach(function(n) { inDeg[n.id] = 0; adj[n.id] = []; });
+      var adj = {}, inDeg = {};
+      nodes.forEach(function(n) { adj[n.id] = []; inDeg[n.id] = 0; });
       edges.forEach(function(e) {
-        if (inDeg[e.target] !== undefined) inDeg[e.target]++;
-        if (adj[e.source]) adj[e.source].push(e.target);
+        if (adj[e.source] && inDeg[e.target] !== undefined) {
+          adj[e.source].push(e.target);
+          inDeg[e.target]++;
+        }
       });
+
+      // BFS from roots — push all neighbors (handles cycles like original)
+      var layers = {};
+      var queued = {};
       var queue = [];
-      nodes.forEach(function(n) { if (inDeg[n.id] === 0) { n.layer = 0; queue.push(n.id); } });
+      nodes.forEach(function(n) {
+        if (inDeg[n.id] === 0) { layers[n.id] = 0; queue.push(n.id); queued[n.id] = true; }
+      });
       var head = 0;
       while (head < queue.length) {
-        var id = queue[head++];
-        var node = nodes.find(function(n) { return n.id === id; });
-        (adj[id]||[]).forEach(function(tid) {
-          var tn = nodes.find(function(n) { return n.id === tid; });
-          if (tn) {
-            tn.layer = Math.max(tn.layer||0, (node.layer||0)+1);
-            inDeg[tid]--;
-            if (inDeg[tid] === 0) queue.push(tid);
-          }
+        var curr = queue[head++];
+        (adj[curr]||[]).forEach(function(next) {
+          layers[next] = Math.max(layers[next]||0, layers[curr]+1);
+          if (!queued[next]) { queue.push(next); queued[next] = true; }
         });
       }
-      nodes.forEach(function(n) { if (n.layer === undefined) n.layer = 0; });
+
+      // Assign layers to nodes (always overwrite to avoid stale state on re-render)
+      nodes.forEach(function(n) { n.layer = layers[n.id] || 0; });
 
       var groups = {};
       nodes.forEach(function(n) {
@@ -315,13 +335,15 @@
       var label = Array.isArray(r) ? r[0] : r.label;
       var value = Array.isArray(r) ? r[1] : r.value;
       var dot = r.color ? '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+r.color+';margin-right:4px"></span>' : '';
-      return dot + '<strong>' + label + '</strong> ' + value;
+      return dot + '<strong>' + util.escapeHtml(String(label)) + '</strong> ' + util.escapeHtml(String(value));
     }).join('<br>') + '</div>';
   };
   tooltip.wire = function(container, selector, buildFn) {
     container.addEventListener('mouseover', function(e) {
       var el = e.target.closest(selector);
-      if (el) tooltip.show(buildFn(el), e);
+      if (!el) return;
+      var html = buildFn(el);
+      if (html) tooltip.show(html, e);
     });
     container.addEventListener('mouseout', function(e) {
       if (e.target.closest(selector)) tooltip.hide();
@@ -338,6 +360,7 @@
       entry.renderFn(el, expanded);
     } catch (e) {
       console.error('FanoutViz render error (' + entry.className + '):', e);
+      el.innerHTML = '<div style="color:var(--danger);font-size:0.8rem;padding:0.5rem">Chart failed to render</div>';
     }
   }
 

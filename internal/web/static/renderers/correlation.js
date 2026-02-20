@@ -40,8 +40,7 @@
       var yOff = padT + pi * (panelH + panelGap);
       var values = panel.values;
       var color = panel.color;
-      var maxVal = Math.max.apply(null, values) * 1.2;
-      var range = maxVal || 1;
+      var maxVal = Math.max.apply(null, values) * 1.2 || 1;
 
       var yScale = V.scale.linear([0, maxVal], [panelH, 0]);
 

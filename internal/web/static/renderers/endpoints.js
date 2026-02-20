@@ -5,6 +5,7 @@
   function sparklineSVG(values, color, expanded) {
     var sparkW = expanded ? 120 : 80;
     var sparkH = 20;
+    if (!values || values.length < 2) return V.svg.open(sparkW, sparkH) + V.svg.close;
     var max = Math.max.apply(null, values);
     var min = Math.min.apply(null, values);
     var range = max - min || 1;

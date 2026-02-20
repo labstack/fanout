@@ -30,7 +30,7 @@
     var totalW = padX + labelW + times.length * cellW + 10;
     var totalH = padY + labelH + buckets.length * cellH + 30;
 
-    var maxVal = Math.max.apply(null, values.map(function(row) { return Math.max.apply(null, row); }));
+    var maxVal = Math.max.apply(null, values.map(function(row) { return row.length ? Math.max.apply(null, row) : 0; })) || 1;
 
     var reversedBuckets = buckets.slice().reverse();
 

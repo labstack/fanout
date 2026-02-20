@@ -11,6 +11,7 @@
     var horizontal = data.horizontal || false;
 
     var maxVal = Math.max.apply(null, bars.map(function(b) { return b.value; })) * 1.15;
+    if (maxVal === 0) maxVal = 1;
 
     if (horizontal) {
       renderHorizontal(container, bars, maxVal, yLabel, expanded);

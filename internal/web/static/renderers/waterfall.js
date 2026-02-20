@@ -30,7 +30,7 @@
     var barAreaW = totalW - labelW - 60;
     var totalH = rulerH + flat.length * rowH + 8;
 
-    var maxTime = Math.max.apply(null, spans.map(function(s) { return s.start + s.dur; }));
+    var maxTime = Math.max.apply(null, spans.map(function(s) { return s.start + s.dur; })) || 1;
     var timeScale = barAreaW / maxTime;
 
     var out = '<svg viewBox="0 0 ' + totalW + ' ' + totalH + '" xmlns="http://www.w3.org/2000/svg">';

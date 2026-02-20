@@ -11,7 +11,9 @@
 
     // DAG layout
     var layerGroups = V.layout.dagLayers(nodes, links);
-    var maxLayer = Math.max.apply(null, Object.keys(layerGroups).map(Number));
+    var layerKeys = Object.keys(layerGroups);
+    if (layerKeys.length === 0) return;
+    var maxLayer = Math.max.apply(null, layerKeys.map(Number));
 
     var padX = expanded ? 60 : 20;
     var padY = expanded ? 40 : 24;
@@ -19,7 +21,7 @@
     var nodeW = expanded ? 14 : 10;
     var maxNodeH = expanded ? 300 : 180;
 
-    var maxRPM = Math.max.apply(null, nodes.map(function(n) { return n.rpm; }));
+    var maxRPM = Math.max.apply(null, nodes.map(function(n) { return n.rpm; })) || 1;
     var nodeById = {};
     nodes.forEach(function(n) {
       n._h = Math.max(20, (n.rpm / maxRPM) * maxNodeH);
@@ -56,8 +58,8 @@
       var tgtNode = nodeById[link.target];
       if (!srcPos || !tgtPos) return;
 
-      var linkH = Math.max(4, (link.value / srcNode.rpm) * srcPos.h);
-      var linkHTarget = Math.max(4, (link.value / tgtNode.rpm) * tgtPos.h);
+      var linkH = Math.max(4, (link.value / (srcNode.rpm || 1)) * srcPos.h);
+      var linkHTarget = Math.max(4, (link.value / (tgtNode.rpm || 1)) * tgtPos.h);
 
       var x1 = srcPos.x + nodeW, y1 = srcPos.y + outOffset[link.source];
       var x2 = tgtPos.x, y2 = tgtPos.y + inOffset[link.target];
