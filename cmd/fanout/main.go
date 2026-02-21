@@ -232,6 +232,16 @@ func main() {
 		slog.Info("MCP server enabled", "path", "/mcp")
 	}
 
+	// SPA catch-all — serves the embedded React app for any unmatched route.
+	// API routes registered above take priority; everything else falls through here.
+	spaFS, spaErr := web.ClientDist()
+	if spaErr != nil {
+		slog.Warn("React SPA not available (not built?)", "err", spaErr)
+	} else {
+		web.RegisterSPARoutes(e, spaFS)
+		slog.Info("React SPA enabled", "path", "/*")
+	}
+
 	// Run HTTP
 	httpCtx, httpCancel := context.WithCancel(context.Background())
 	go func() {

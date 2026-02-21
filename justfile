@@ -10,8 +10,14 @@ addr := env("HTTP_ADDR", ":7520")
 default:
     @just --list
 
+# Build React client
+build-client:
+    cd client && bun run build
+    rm -rf internal/web/dist/*
+    cp -r client/dist/* internal/web/dist/
+
 # Build binary
-build:
+build: build-client
     templ generate
     go build -o {{bin}} ./cmd/fanout
 
@@ -59,6 +65,7 @@ qcheck: fmt
 clean:
     rm -f {{bin}} coverage.out coverage.html
     rm -rf tmp/
+    find internal/web/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
 
 # Clean everything including data
 clean-all: clean
