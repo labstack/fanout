@@ -224,20 +224,20 @@ The LLM's system prompt changes from "Reply in HTML" to just providing analysis 
 
 ## Frontend Stack
 
-| Layer | Choice | Why |
-|-------|--------|-----|
-| Build | Bun | Fast, already used in Goal |
-| Framework | React | Interactive UI, block rendering, shared patterns with Goal |
-| Routing | React Router | Standard SPA routing |
-| Components | shadcn/ui + Radix UI | Accessible, owned (copy-paste), Tailwind-native |
-| Styling | Tailwind CSS | Utility-first, consistent with other projects |
-| Tables | TanStack Table | Headless, styled with shadcn/ui |
-| Standard charts | Recharts | Timeseries, bar, area, pie, heatmap. Built on D3. |
-| Domain viz | React + D3 | Waterfall, topology, flame graph, dep matrix, sankey |
-| LLM text | react-markdown | Render markdown from text blocks |
-| State | Zustand | Lightweight, same as Goal |
-| Icons | Lucide React | Tree-shakeable, clean |
-| Embedding | Go `embed.FS` | Single binary deployment |
+| Layer | Choice | Version |
+|-------|--------|---------|
+| Build | Bun + Vite | 7.3 |
+| Framework | React | 19.2 |
+| Routing | react-router | 7.13 |
+| Components | shadcn/ui + Radix UI | unified radix-ui package |
+| Styling | Tailwind CSS | 4.2 |
+| Tables | @tanstack/react-table | 8.21 |
+| Standard charts | Recharts | 3.7 |
+| Domain viz | React + D3 | 7.9 |
+| LLM text | react-markdown | 10.1 |
+| State | Zustand | 5.0 |
+| Icons | Lucide React | 0.575 |
+| Embedding | Go embed.FS | — |
 
 ## Build
 
