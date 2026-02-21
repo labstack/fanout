@@ -30,17 +30,16 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 	// Create in-memory transport pair
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 
-	// Connect server side in a goroutine. net.Pipe() is symmetric, so both
-	// sides can connect concurrently — the MCP handshake resolves when both
-	// ends start reading/writing. If the server fails to connect, the client
-	// Connect below will also fail (pipe closed).
+	// Connect server side in a goroutine first — per the MCP SDK, servers
+	// must be connected before clients, as the client initializes the session.
+	// The goroutine ensures the server is reading before client.Connect below.
+	serverErr := make(chan error, 1)
 	go func() {
-		if _, err := mcpServer.Connect(ctx, serverTransport, nil); err != nil {
-			slog.Error("MCP in-memory server connect failed", "err", err)
-		}
+		_, err := mcpServer.Connect(ctx, serverTransport, nil)
+		serverErr <- err
 	}()
 
-	// Connect client side
+	// Connect client side (blocks until handshake completes)
 	client := mcp.NewClient(&mcp.Implementation{
 		Name:    "fanout-ai",
 		Version: "1.0.0",
@@ -48,6 +47,10 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		return nil, fmt.Errorf("MCP in-memory client connect: %w", err)
+	}
+	if err := <-serverErr; err != nil {
+		session.Close()
+		return nil, fmt.Errorf("MCP in-memory server connect: %w", err)
 	}
 
 	// List tools from MCP server and convert to ToolDefs
@@ -58,6 +61,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 
 	toolsResult, err := session.ListTools(ctx, nil)
 	if err != nil {
+		session.Close()
 		return nil, fmt.Errorf("MCP ListTools: %w", err)
 	}
 	for _, t := range toolsResult.Tools {
@@ -220,13 +224,19 @@ Wrap viz: <div class="viz-card"><div class="viz-card-header"><div class="viz-car
 		return p.HTML, nil
 	})
 
+	slog.Info("AI tool registry initialized",
+		"mcp_tools", len(r.defs)-len(r.handlers),
+		"ai_only_tools", len(r.handlers),
+		"total", len(r.defs))
 	return r, nil
 }
 
 // Close cleanly shuts down the in-process MCP client session.
 func (r *ToolRegistry) Close() error {
 	if r.session != nil {
-		return r.session.Close()
+		err := r.session.Close()
+		r.session = nil
+		return err
 	}
 	return nil
 }
@@ -250,6 +260,9 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawM
 	}
 
 	// Fall through to MCP server via in-memory session
+	if r.session == nil {
+		return "", fmt.Errorf("tool %s: registry is closed", name)
+	}
 	var args any
 	if len(input) > 0 {
 		if err := json.Unmarshal(input, &args); err != nil {
@@ -297,12 +310,15 @@ func extractMCPText(result *mcp.CallToolResult) string {
 			parts = append(parts, tc.Text)
 			continue
 		}
+		// For non-TextContent types, attempt to extract a "text" field from JSON.
 		data, err := c.MarshalJSON()
 		if err != nil {
+			slog.Warn("extractMCPText: MarshalJSON failed", "err", err)
 			continue
 		}
 		var m map[string]any
 		if err := json.Unmarshal(data, &m); err != nil {
+			slog.Warn("extractMCPText: Unmarshal failed", "err", err)
 			continue
 		}
 		if text, ok := m["text"].(string); ok {

@@ -257,10 +257,12 @@ func main() {
 		slog.Error("fatal error, shutting down", "err", err)
 	}
 
-	// Coordinated shutdown: cancel context → wait for writer flush → stop servers
+	// Coordinated shutdown: cancel context → close AI session → flush writer → stop servers
 	cancel()
 	if aiTools != nil {
-		aiTools.Close()
+		if err := aiTools.Close(); err != nil {
+			slog.Error("AI tool registry close failed", "err", err)
+		}
 	}
 	writer.Wait()
 	grpcSrv.GracefulStop()

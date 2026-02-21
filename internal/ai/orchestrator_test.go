@@ -276,12 +276,86 @@ func TestToolRegistryMCPIntegration(t *testing.T) {
 		t.Error("Execute('nonexistent') should return an error")
 	}
 
-	// 8. Close the registry and verify subsequent Execute fails.
+	// 8. Execute with empty input — MCP validates schema, returns error (not a panic).
+	_, err = registry.Execute(ctx, "greet", json.RawMessage(`{}`))
+	if err == nil {
+		t.Error("Execute('greet') with empty input should fail schema validation")
+	}
+
+	// 9. Close the registry and verify subsequent Execute fails with clear message.
 	if err := registry.Close(); err != nil {
 		t.Fatalf("Close() failed: %v", err)
 	}
 	_, err = registry.Execute(ctx, "greet", json.RawMessage(input))
 	if err == nil {
 		t.Error("Execute after Close() should return an error")
+	}
+	if !strings.Contains(err.Error(), "closed") {
+		t.Errorf("Execute after Close() error = %q, want it to mention 'closed'", err)
+	}
+}
+
+func TestExtractMCPText(t *testing.T) {
+	// Single text content
+	result := &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: "hello"},
+		},
+	}
+	got := extractMCPText(result)
+	if got != "hello" {
+		t.Errorf("extractMCPText single = %q, want %q", got, "hello")
+	}
+
+	// Multiple text contents joined with newline
+	result = &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{Text: "line1"},
+			&mcp.TextContent{Text: "line2"},
+		},
+	}
+	got = extractMCPText(result)
+	if got != "line1\nline2" {
+		t.Errorf("extractMCPText multi = %q, want %q", got, "line1\nline2")
+	}
+
+	// Empty content
+	result = &mcp.CallToolResult{}
+	got = extractMCPText(result)
+	if got != "" {
+		t.Errorf("extractMCPText empty = %q, want empty", got)
+	}
+}
+
+func TestToolRegistryMCPIntegration_IsError(t *testing.T) {
+	ctx := context.Background()
+
+	mcpServer := mcp.NewServer(&mcp.Implementation{
+		Name:    "test-server",
+		Version: "0.1.0",
+	}, nil)
+
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "fail",
+		Description: "Always fails",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, struct{}, error) {
+		return &mcp.CallToolResult{
+			IsError: true,
+			Content: []mcp.Content{&mcp.TextContent{Text: "something broke"}},
+		}, struct{}{}, nil
+	})
+
+	registry, err := NewToolRegistry(ctx, mcpServer, nil, config.Config{})
+	if err != nil {
+		t.Fatalf("NewToolRegistry failed: %v", err)
+	}
+	defer registry.Close()
+
+	_, err = registry.Execute(ctx, "fail", json.RawMessage(`{}`))
+	if err == nil {
+		t.Fatal("Execute('fail') should return an error")
+	}
+	if !strings.Contains(err.Error(), "something broke") {
+		t.Errorf("error = %q, want it to contain %q", err, "something broke")
 	}
 }
