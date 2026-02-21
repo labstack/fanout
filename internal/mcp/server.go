@@ -20,9 +20,6 @@ type Server struct {
 	cfg  config.Config
 }
 
-// MCP returns the inner MCP server for in-process client connections.
-func (s *Server) MCP() *mcp.Server { return s.mcp }
-
 func NewServer(svc *service.Service, duck *query.Duck, cfg config.Config) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "fanout",

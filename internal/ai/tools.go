@@ -8,9 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ToolHandler executes a tool and returns JSON result.
@@ -18,61 +17,229 @@ type ToolHandler func(ctx context.Context, input json.RawMessage) (string, error
 
 // ToolRegistry maps tool names to definitions and handlers.
 type ToolRegistry struct {
-	session  *mcp.ClientSession
 	defs     []ToolDef
 	handlers map[string]ToolHandler
 }
 
-// NewToolRegistry creates the registry by connecting to the MCP server
-// in-process and importing its tool definitions, then registering AI-only
-// tools (metrics, tail, render) directly.
-func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Service, cfg config.Config) (*ToolRegistry, error) {
-	// Create in-memory transport pair
-	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+// NewToolRegistry creates the registry with all 11 tools (10 data + render).
+func NewToolRegistry(svc *service.Service, duck *query.Duck, lakeDir string) *ToolRegistry {
+	r := &ToolRegistry{handlers: make(map[string]ToolHandler)}
 
-	// Connect server side in a goroutine. net.Pipe() is symmetric, so both
-	// sides can connect concurrently — the MCP handshake resolves when both
-	// ends start reading/writing. If the server fails to connect, the client
-	// Connect below will also fail (pipe closed).
-	go func() {
-		if _, err := mcpServer.Connect(ctx, serverTransport, nil); err != nil {
-			slog.Error("MCP in-memory server connect failed", "err", err)
+	r.register(ToolDef{
+		Name:        "status",
+		Description: "System health overview: service counts, top issues, throughput, P95 latency, error rate. Start here.",
+		InputSchema: jsonSchema(map[string]property{
+			"window":    {Type: "integer", Desc: "Time window in minutes (default 60)"},
+			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
+		}),
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+		var p struct {
+			Window    int    `json:"window"`
+			Namespace string `json:"namespace"`
 		}
-	}()
-
-	// Connect client side
-	client := mcp.NewClient(&mcp.Implementation{
-		Name:    "fanout-ai",
-		Version: "1.0.0",
-	}, nil)
-	session, err := client.Connect(ctx, clientTransport, nil)
-	if err != nil {
-		return nil, fmt.Errorf("MCP in-memory client connect: %w", err)
-	}
-
-	// List tools from MCP server and convert to ToolDefs
-	r := &ToolRegistry{
-		session:  session,
-		handlers: make(map[string]ToolHandler),
-	}
-
-	toolsResult, err := session.ListTools(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("MCP ListTools: %w", err)
-	}
-	for _, t := range toolsResult.Tools {
-		// Skip MCP's render tool — AI has its own (raw HTML passthrough)
-		if t.Name == "render" {
-			continue
+		if err := json.Unmarshal(input, &p); err != nil {
+			return "", fmt.Errorf("invalid input: %w", err)
 		}
-		r.defs = append(r.defs, ToolDef{
-			Name:        t.Name,
-			Description: t.Description,
-			InputSchema: t.InputSchema,
+		if p.Window == 0 {
+			p.Window = 60
+		}
+		res, err := svc.Status(ctx, p.Window, p.Namespace, "")
+		if err != nil {
+			return "", err
+		}
+		return marshal(res)
+	})
+
+	r.register(ToolDef{
+		Name:        "diagnose",
+		Description: "Deep-dive into a specific service: P50/P95/P99 latency, error rate, top errors with example trace IDs, slow operations, downstream dependencies.",
+		InputSchema: jsonSchema(map[string]property{
+			"service":   {Type: "string", Desc: "Service name (required)", Required: true},
+			"window":    {Type: "integer", Desc: "Time window in minutes (default 60)"},
+			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
+		}),
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+		var p struct {
+			Service   string `json:"service"`
+			Window    int    `json:"window"`
+			Namespace string `json:"namespace"`
+		}
+		if err := json.Unmarshal(input, &p); err != nil {
+			return "", fmt.Errorf("invalid input: %w", err)
+		}
+		if p.Window == 0 {
+			p.Window = 60
+		}
+		res, err := svc.Diagnose(ctx, p.Service, p.Window, p.Namespace, "")
+		if err != nil {
+			return "", err
+		}
+		return marshal(res)
+	})
+
+	r.register(ToolDef{
+		Name:        "find",
+		Description: "Search spans and logs by pattern, service, status (error/slow), or severity. Returns matching items with trace IDs for drill-down.",
+		InputSchema: jsonSchema(map[string]property{
+			"pattern":   {Type: "string", Desc: "Search pattern (text search across names/bodies)"},
+			"service":   {Type: "string", Desc: "Filter by service name"},
+			"status":    {Type: "string", Desc: "Filter by status: error, slow"},
+			"severity":  {Type: "string", Desc: "Filter log severity: ERROR, WARN, INFO, DEBUG"},
+			"type":      {Type: "string", Desc: "Search type: spans, logs, both (default both)"},
+			"window":    {Type: "integer", Desc: "Time window in minutes (default 60)"},
+			"limit":     {Type: "integer", Desc: "Max results (default 20)"},
+			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
+		}),
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+		var p struct {
+			Pattern   string `json:"pattern"`
+			Service   string `json:"service"`
+			Status    string `json:"status"`
+			Severity  string `json:"severity"`
+			Type      string `json:"type"`
+			Window    int    `json:"window"`
+			Limit     int    `json:"limit"`
+			Namespace string `json:"namespace"`
+		}
+		if err := json.Unmarshal(input, &p); err != nil {
+			return "", fmt.Errorf("invalid input: %w", err)
+		}
+		if p.Window == 0 {
+			p.Window = 60
+		}
+		if p.Limit == 0 {
+			p.Limit = 20
+		}
+
+		var severities []string
+		if p.Severity != "" {
+			severities = []string{p.Severity}
+		}
+
+		res, err := svc.Find(ctx, service.FindParams{
+			Query:     p.Pattern,
+			Service:   p.Service,
+			Status:    p.Status,
+			Severity:  severities,
+			Type:      p.Type,
+			Window:    p.Window,
+			Limit:     p.Limit,
+			Namespace: p.Namespace,
 		})
-	}
+		if err != nil {
+			return "", err
+		}
+		return marshal(res)
+	})
 
-	// Register AI-only tools: metrics, tail, render
+	r.register(ToolDef{
+		Name:        "trace",
+		Description: "Retrieve a complete distributed trace by trace ID. Shows full span tree, correlated logs, root-cause analysis, and critical path.",
+		InputSchema: jsonSchema(map[string]property{
+			"trace_id": {Type: "string", Desc: "Trace ID (required)", Required: true},
+			"window":   {Type: "integer", Desc: "Time window in minutes (default 1440)"},
+		}),
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+		var p struct {
+			TraceID string `json:"trace_id"`
+			Window  int    `json:"window"`
+		}
+		if err := json.Unmarshal(input, &p); err != nil {
+			return "", fmt.Errorf("invalid input: %w", err)
+		}
+		if p.Window == 0 {
+			p.Window = 1440
+		}
+		res, err := svc.Trace(ctx, p.TraceID, true, p.Window)
+		if err != nil {
+			return "", err
+		}
+		return marshal(res)
+	})
+
+	r.register(ToolDef{
+		Name:        "timeline",
+		Description: "Time-bucketed metrics for a service (or all services) with anomaly detection. Returns request counts, error rates, P95 latency per bucket, and detected anomalies.",
+		InputSchema: jsonSchema(map[string]property{
+			"service":   {Type: "string", Desc: "Service name (empty for all services)"},
+			"window":    {Type: "integer", Desc: "Time window in minutes (default 60)"},
+			"buckets":   {Type: "integer", Desc: "Number of time buckets (default 5)"},
+			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
+		}),
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+		var p struct {
+			Service   string `json:"service"`
+			Window    int    `json:"window"`
+			Buckets   int    `json:"buckets"`
+			Namespace string `json:"namespace"`
+		}
+		if err := json.Unmarshal(input, &p); err != nil {
+			return "", fmt.Errorf("invalid input: %w", err)
+		}
+		if p.Window == 0 {
+			p.Window = 60
+		}
+		if p.Buckets == 0 {
+			p.Buckets = 5
+		}
+		res, err := svc.Timeline(ctx, p.Service, p.Window, p.Buckets, p.Namespace, "")
+		if err != nil {
+			return "", err
+		}
+		return marshal(res)
+	})
+
+	r.register(ToolDef{
+		Name:        "topology",
+		Description: "Service dependency map with health status for each node. Shows call relationships, request counts, error rates, and latency.",
+		InputSchema: jsonSchema(map[string]property{
+			"window":    {Type: "integer", Desc: "Time window in minutes (default 60)"},
+			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
+		}),
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+		var p struct {
+			Window    int    `json:"window"`
+			Namespace string `json:"namespace"`
+		}
+		if err := json.Unmarshal(input, &p); err != nil {
+			return "", fmt.Errorf("invalid input: %w", err)
+		}
+		if p.Window == 0 {
+			p.Window = 60
+		}
+		res, err := svc.Topology(ctx, p.Window, p.Namespace, "")
+		if err != nil {
+			return "", err
+		}
+		return marshal(res)
+	})
+
+	r.register(ToolDef{
+		Name:        "compare",
+		Description: "Side-by-side comparison of 2-4 services: requests, error rate, P50/P95 latency, and overall winner.",
+		InputSchema: jsonSchema(map[string]property{
+			"services":  {Type: "array", Desc: "Service names to compare (2-4 required)", Required: true, Items: &property{Type: "string"}},
+			"window":    {Type: "integer", Desc: "Time window in minutes (default 60)"},
+			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
+		}),
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+		var p struct {
+			Services  []string `json:"services"`
+			Window    int      `json:"window"`
+			Namespace string   `json:"namespace"`
+		}
+		if err := json.Unmarshal(input, &p); err != nil {
+			return "", fmt.Errorf("invalid input: %w", err)
+		}
+		if p.Window == 0 {
+			p.Window = 60
+		}
+		res, err := svc.Compare(ctx, p.Services, p.Window, p.Namespace, "")
+		if err != nil {
+			return "", err
+		}
+		return marshal(res)
+	})
 
 	r.register(ToolDef{
 		Name:        "metrics",
@@ -119,6 +286,37 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 		})
 		if err != nil {
 			return "", err
+		}
+		return marshal(res)
+	})
+
+	r.register(ToolDef{
+		Name:        "query",
+		Description: "Execute raw SQL against DuckDB. Use for custom analysis when built-in tools aren't sufficient. Tables: service_rollup, read_parquet for spans/logs/metrics parquet files.",
+		InputSchema: jsonSchema(map[string]property{
+			"sql":      {Type: "string", Desc: "SQL query (SELECT only, 30s timeout)", Required: true},
+			"max_rows": {Type: "integer", Desc: "Maximum rows to return (default 200; set up to 1000 if needed)"},
+		}),
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+		var p struct {
+			SQL     string `json:"sql"`
+			MaxRows int    `json:"max_rows"`
+		}
+		if err := json.Unmarshal(input, &p); err != nil {
+			return "", fmt.Errorf("invalid input: %w", err)
+		}
+		if p.MaxRows == 0 {
+			p.MaxRows = 200
+		}
+		res := duck.ExecuteSQL(ctx, query.SQLRequest{
+			Query:   p.SQL,
+			MaxRows: p.MaxRows,
+		})
+		if res.Error == "" && res.RowsReturned >= p.MaxRows {
+			return marshal(struct {
+				query.SQLResponse
+				Truncated string `json:"truncated"`
+			}{res, fmt.Sprintf("Capped at %d rows — add WHERE or LIMIT to narrow.", p.MaxRows)})
 		}
 		return marshal(res)
 	})
@@ -220,15 +418,7 @@ Wrap viz: <div class="viz-card"><div class="viz-card-header"><div class="viz-car
 		return p.HTML, nil
 	})
 
-	return r, nil
-}
-
-// Close cleanly shuts down the in-process MCP client session.
-func (r *ToolRegistry) Close() error {
-	if r.session != nil {
-		return r.session.Close()
-	}
-	return nil
+	return r
 }
 
 // Defs returns all tool definitions for the LLM.
@@ -237,40 +427,18 @@ func (r *ToolRegistry) Defs() []ToolDef {
 }
 
 // Execute runs a tool by name and returns the result.
-// AI-only tools are checked first; all others are dispatched to the MCP server.
+// Tool execution errors are returned as errors (not swallowed).
 func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
-	// Check AI-only handlers first
-	if h, ok := r.handlers[name]; ok {
-		result, err := h(ctx, input)
-		if err != nil {
-			slog.Warn("tool execution failed", "tool", name, "err", err)
-			return "", err
-		}
-		return result, nil
+	h, ok := r.handlers[name]
+	if !ok {
+		return "", fmt.Errorf("unknown tool: %s", name)
 	}
-
-	// Fall through to MCP server via in-memory session
-	var args any
-	if len(input) > 0 {
-		if err := json.Unmarshal(input, &args); err != nil {
-			return "", fmt.Errorf("invalid tool arguments: %w", err)
-		}
-	}
-
-	result, err := r.session.CallTool(ctx, &mcp.CallToolParams{
-		Name:      name,
-		Arguments: args,
-	})
+	result, err := h(ctx, input)
 	if err != nil {
-		slog.Warn("MCP tool execution failed", "tool", name, "err", err)
+		slog.Warn("tool execution failed", "tool", name, "err", err)
 		return "", err
 	}
-	if result.IsError {
-		text := extractMCPText(result)
-		slog.Warn("MCP tool returned error", "tool", name, "text", text)
-		return "", fmt.Errorf("tool %s: %s", name, text)
-	}
-	return extractMCPText(result), nil
+	return result, nil
 }
 
 func (r *ToolRegistry) register(def ToolDef, handler ToolHandler) {
@@ -287,29 +455,6 @@ func marshal(v any) (string, error) {
 		return "", err
 	}
 	return string(b), nil
-}
-
-// extractMCPText pulls text content from an MCP CallToolResult.
-func extractMCPText(result *mcp.CallToolResult) string {
-	var parts []string
-	for _, c := range result.Content {
-		if tc, ok := c.(*mcp.TextContent); ok {
-			parts = append(parts, tc.Text)
-			continue
-		}
-		data, err := c.MarshalJSON()
-		if err != nil {
-			continue
-		}
-		var m map[string]any
-		if err := json.Unmarshal(data, &m); err != nil {
-			continue
-		}
-		if text, ok := m["text"].(string); ok {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, "\n")
 }
 
 // JSON Schema helpers
