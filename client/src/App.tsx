@@ -22,6 +22,26 @@ const testBlocks: Block[] = [
     },
   },
   {
+    type: "table",
+    data: {
+      columns: [
+        { key: "endpoint", label: "Endpoint", align: "left" },
+        { key: "method", label: "Method", align: "left" },
+        { key: "rpm", label: "RPM", align: "right" },
+        { key: "p50", label: "P50 (ms)", align: "right" },
+        { key: "p95", label: "P95 (ms)", align: "right" },
+        { key: "errorRate", label: "Error %", align: "right" },
+      ],
+      rows: [
+        { endpoint: "/api/checkout", method: "POST", rpm: 420, p50: 45, p95: 320, errorRate: 4.2 },
+        { endpoint: "/api/products", method: "GET", rpm: 1800, p50: 12, p95: 48, errorRate: 0.1 },
+        { endpoint: "/api/cart", method: "PUT", rpm: 650, p50: 28, p95: 95, errorRate: 1.3 },
+        { endpoint: "/api/users/me", method: "GET", rpm: 920, p50: 8, p95: 22, errorRate: 0.0 },
+        { endpoint: "/api/search", method: "GET", rpm: 340, p50: 110, p95: 580, errorRate: 2.8 },
+      ],
+    },
+  },
+  {
     type: "topology",
     data: {
       nodes: [
