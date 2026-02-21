@@ -1,13 +1,35 @@
-import { Button } from "@/components/ui/button"
+import type { Block } from "@/lib/types";
+import { BlockRenderer } from "@/components/blocks/BlockRenderer";
+
+const testBlocks: Block[] = [
+  {
+    type: "text",
+    data: {
+      content:
+        "## Service Health\n\nThe **checkout** service is experiencing elevated error rates.\n\n- P95 latency: `320ms`\n- Error rate: **4.2%**\n- Throughput: 1,200 rpm",
+    },
+  },
+  {
+    type: "topology",
+    data: {
+      nodes: [
+        { id: "frontend", status: "ok", rpm: 500 },
+        { id: "checkout", status: "danger", rpm: 200 },
+      ],
+      edges: [{ source: "frontend", target: "checkout", rpm: 200 }],
+    },
+  },
+];
 
 function App() {
   return (
-    <div className="flex min-h-screen items-center justify-center gap-4">
-      <h1 className="text-4xl font-bold">Fanout</h1>
-      <Button>Get Started</Button>
-      <Button variant="outline">Learn More</Button>
+    <div className="mx-auto max-w-3xl space-y-4 p-8">
+      <h1 className="text-2xl font-bold">Block Renderer Test</h1>
+      {testBlocks.map((block, i) => (
+        <BlockRenderer key={i} block={block} />
+      ))}
     </div>
-  )
+  );
 }
 
-export default App
+export default App;
