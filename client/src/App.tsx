@@ -10,6 +10,18 @@ const testBlocks: Block[] = [
     },
   },
   {
+    type: "metrics",
+    data: {
+      items: [
+        { label: "Throughput", value: 1200, unit: "rpm", status: "ok" as const },
+        { label: "P95 Latency", value: 320, unit: "ms", status: "warning" as const },
+        { label: "Error Rate", value: 4.2, unit: "%", status: "danger" as const },
+        { label: "Uptime", value: 99.97, unit: "%", status: "ok" as const },
+        { label: "Saturation", value: 78, unit: "%", status: "warning" as const },
+      ],
+    },
+  },
+  {
     type: "topology",
     data: {
       nodes: [
