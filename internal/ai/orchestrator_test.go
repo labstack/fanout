@@ -2,10 +2,12 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestTruncateJSON(t *testing.T) {
@@ -187,4 +189,99 @@ type mockProvider struct{}
 
 func (m *mockProvider) Stream(_ context.Context, _ StreamParams, _ StreamCallback) error {
 	return nil
+}
+
+// --- MCP integration test ---
+
+type greetInput struct {
+	Name string `json:"name" jsonschema:"The name to greet"`
+}
+type greetOutput struct {
+	Greeting string `json:"greeting"`
+}
+
+func TestToolRegistryMCPIntegration(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Create a standalone MCP server and register a test tool.
+	mcpServer := mcp.NewServer(&mcp.Implementation{
+		Name:    "test-server",
+		Version: "0.1.0",
+	}, nil)
+
+	mcp.AddTool(mcpServer, &mcp.Tool{
+		Name:        "greet",
+		Description: "Say hello",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in greetInput) (*mcp.CallToolResult, greetOutput, error) {
+		return nil, greetOutput{Greeting: "hello " + in.Name}, nil
+	})
+
+	// 2. Create the AI tool registry connected to this test server.
+	//    Pass nil for svc — AI-only tools won't be called in this test.
+	registry, err := NewToolRegistry(ctx, mcpServer, nil, config.Config{})
+	if err != nil {
+		t.Fatalf("NewToolRegistry failed: %v", err)
+	}
+	defer registry.Close()
+
+	defs := registry.Defs()
+
+	// 3. Verify the "greet" MCP tool appears in Defs() with correct name and description.
+	var greetDef *ToolDef
+	for i := range defs {
+		if defs[i].Name == "greet" {
+			greetDef = &defs[i]
+			break
+		}
+	}
+	if greetDef == nil {
+		t.Fatal("expected 'greet' tool in registry defs, not found")
+	}
+	if greetDef.Description != "Say hello" {
+		t.Errorf("greet description = %q, want %q", greetDef.Description, "Say hello")
+	}
+
+	// 4. Verify InputSchema is non-nil (schema was generated from struct tags).
+	if greetDef.InputSchema == nil {
+		t.Error("greet InputSchema should not be nil")
+	}
+
+	// 5. Verify AI-only tools (metrics, tail, render) are present in Defs().
+	//    They get registered even with nil svc (closures capture svc but don't call it during registration).
+	aiTools := map[string]bool{"metrics": false, "tail": false, "render": false}
+	for _, d := range defs {
+		if _, ok := aiTools[d.Name]; ok {
+			aiTools[d.Name] = true
+		}
+	}
+	for name, found := range aiTools {
+		if !found {
+			t.Errorf("expected AI-only tool %q in registry defs, not found", name)
+		}
+	}
+
+	// 6. Execute the greet tool via the MCP session and verify the result.
+	input, _ := json.Marshal(map[string]string{"name": "world"})
+	result, err := registry.Execute(ctx, "greet", json.RawMessage(input))
+	if err != nil {
+		t.Fatalf("Execute('greet') failed: %v", err)
+	}
+	if !strings.Contains(result, "hello world") {
+		t.Errorf("Execute('greet') = %q, want it to contain %q", result, "hello world")
+	}
+
+	// 7. Verify executing an unknown tool returns an error.
+	_, err = registry.Execute(ctx, "nonexistent", json.RawMessage(`{}`))
+	if err == nil {
+		t.Error("Execute('nonexistent') should return an error")
+	}
+
+	// 8. Close the registry and verify subsequent Execute fails.
+	if err := registry.Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+	_, err = registry.Execute(ctx, "greet", json.RawMessage(input))
+	if err == nil {
+		t.Error("Execute after Close() should return an error")
+	}
 }
