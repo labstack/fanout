@@ -102,7 +102,7 @@ docker TAG="local":
 
 # Install git hooks
 hooks:
-    echo 'just qcheck' > .git/hooks/pre-commit
+    echo 'just check' > .git/hooks/pre-commit
     chmod +x .git/hooks/pre-commit
     @echo "Hooks installed"
 
