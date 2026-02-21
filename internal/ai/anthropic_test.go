@@ -1,7 +1,6 @@
 package ai
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -380,10 +379,4 @@ func TestAnthropicBuildRequest_SimpleSystem(t *testing.T) {
 // lines joins SSE lines with \n
 func lines(ss ...string) string {
 	return strings.Join(ss, "\n") + "\n"
-}
-
-// toJSON is a test helper for compact JSON marshaling.
-func toJSON(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
 }

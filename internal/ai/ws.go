@@ -336,7 +336,9 @@ func (s *chatSession) send(event ClientEvent) error {
 		return err
 	}
 
-	s.ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	if err := s.ws.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return err
+	}
 	return s.ws.WriteMessage(websocket.TextMessage, data)
 }
 

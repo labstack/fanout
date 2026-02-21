@@ -53,10 +53,12 @@ func TestVizPaths_CacheBusted(t *testing.T) {
 
 func TestVizPaths_Stable(t *testing.T) {
 	// Paths should be deterministic across calls
-	if VizJSPath() != VizJSPath() {
+	jsPath := VizJSPath()
+	if jsPath != VizJSPath() {
 		t.Error("VizJSPath() is not deterministic")
 	}
-	if VizCSSPath() != VizCSSPath() {
+	cssPath := VizCSSPath()
+	if cssPath != VizCSSPath() {
 		t.Error("VizCSSPath() is not deterministic")
 	}
 }
