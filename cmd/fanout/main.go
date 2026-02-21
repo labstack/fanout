@@ -140,7 +140,7 @@ func main() {
 
 				// Skip auth for health, metrics, and UI page routes
 				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" ||
-					path == "/" || path == "/favicon.ico" || path == "/favicon.svg" ||
+					path == "/" || path == "/viz" || path == "/favicon.ico" || path == "/favicon.svg" ||
 					strings.HasPrefix(path, "/static/") {
 					return next(c)
 				}
@@ -176,9 +176,14 @@ func main() {
 	// Create shared service layer
 	svc := service.New(q, cfg)
 
+	// Create MCP server unconditionally (AI orchestrator connects to it in-process)
+	mcpServer := mcp.NewServer(svc, q, cfg)
+	go mcp.RunCleanup(ctx)
+
 	// AI orchestrator (optional — needs API key)
 	var orch *ai.Orchestrator
 	var wsHandler *ai.WSHandler
+	var aiTools *ai.ToolRegistry
 
 	if cfg.AIAPIKey != "" {
 		var provider ai.Provider
@@ -194,8 +199,13 @@ func main() {
 			os.Exit(1)
 		}
 
-		tools := ai.NewToolRegistry(svc, q, cfg.LakeDir)
-		orch = ai.NewOrchestrator(provider, tools, svc, cfg)
+		var err error
+		aiTools, err = ai.NewToolRegistry(ctx, mcpServer.MCP(), svc, cfg)
+		if err != nil {
+			slog.Error("AI tool registry init failed", "err", err)
+			os.Exit(1)
+		}
+		orch = ai.NewOrchestrator(provider, aiTools, svc, cfg)
 		wsHandler = ai.NewWSHandler(ctx, orch, svc)
 		if cfg.APIToken == "" {
 			slog.Warn("AI chat enabled without API_TOKEN — chat endpoint is unauthenticated")
@@ -216,12 +226,10 @@ func main() {
 	// UI routes (chat page + WebSocket + bookmarks + suggestions)
 	api.RegisterUIRoutes(e, cfg, orch, wsHandler, bookmarks)
 
-	// MCP server (Model Context Protocol) — parallel to AI chat
+	// MCP HTTP routes (Model Context Protocol) — expose if enabled
 	if cfg.MCPEnabled {
-		mcpServer := mcp.NewServer(svc, q, cfg)
 		mcpServer.RegisterRoutes(e)
 		slog.Info("MCP server enabled", "path", "/mcp")
-		go mcp.RunCleanup(ctx)
 	}
 
 	// Run HTTP
@@ -251,6 +259,9 @@ func main() {
 
 	// Coordinated shutdown: cancel context → wait for writer flush → stop servers
 	cancel()
+	if aiTools != nil {
+		aiTools.Close()
+	}
 	writer.Wait()
 	grpcSrv.GracefulStop()
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
