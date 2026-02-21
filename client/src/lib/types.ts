@@ -1,9 +1,13 @@
 // Chat event types (WebSocket protocol)
+// Matches the Go ClientEvent struct in internal/ai/orchestrator.go.
+// Includes legacy fields (html) that the server currently sends alongside
+// the newer block-based fields that will replace them.
 export interface ChatEvent {
-  type: "token" | "tool_call" | "tool_result" | "error" | "done";
+  type: "token" | "tool_call" | "tool_result" | "card" | "error" | "done" | "tail" | "tail_end";
   content?: string;
   name?: string;
-  input?: Record<string, unknown>;
+  input?: string;
+  html?: string;
   error?: string;
   id?: string;
   blocks?: Block[];
