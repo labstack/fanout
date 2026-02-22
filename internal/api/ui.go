@@ -5,13 +5,11 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/a-h/templ"
 	"github.com/labstack/echo/v5"
 	"github.com/microcosm-cc/bluemonday"
 
 	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/web"
 )
 
 //go:embed favicon.svg
@@ -40,9 +38,6 @@ func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, ws
 	e.GET("/favicon.ico", Favicon)
 	e.GET("/favicon.svg", Favicon)
 
-	// Chat page (single page)
-	e.GET("/", h.ChatPage)
-
 	// WebSocket
 	e.GET("/ws/chat", h.WebSocket)
 
@@ -62,26 +57,6 @@ func Favicon(c *echo.Context) error {
 	c.Response().Header().Set("Content-Type", "image/svg+xml")
 	c.Response().Header().Set("Cache-Control", "public, max-age=86400")
 	return c.Blob(200, "image/svg+xml", faviconSVG)
-}
-
-// ChatPage renders the single-page chat UI.
-func (h *UIHandler) ChatPage(c *echo.Context) error {
-	ctx := c.Request().Context()
-
-	var suggestions []string
-	if h.orch != nil {
-		suggestions = h.orch.SuggestedQuestions(ctx)
-	}
-
-	data := web.ChatData{
-		HasAPIKey:   h.cfg.AIAPIKey != "",
-		NeedsAuth:   h.cfg.APIToken != "",
-		Suggestions: suggestions,
-		VizJSPath:   web.VizJSPath(),
-		VizCSSPath:  web.VizCSSPath(),
-	}
-
-	return renderTempl(c, web.Chat(data))
 }
 
 // WebSocket upgrades to WS and handles the chat session.
@@ -153,14 +128,4 @@ func (h *UIHandler) Suggestions(c *echo.Context) error {
 		return c.JSON(200, []string{})
 	}
 	return c.JSON(200, h.orch.SuggestedQuestions(c.Request().Context()))
-}
-
-// renderTempl renders a templ component.
-func renderTempl(c *echo.Context, component templ.Component) error {
-	c.Response().Header().Set(echo.HeaderContentType, echo.MIMETextHTML)
-	if err := component.Render(c.Request().Context(), c.Response()); err != nil {
-		slog.Error("template render failed", "err", err)
-		return err
-	}
-	return nil
 }
