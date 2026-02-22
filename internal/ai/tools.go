@@ -13,8 +13,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ToolHandler executes a tool and returns JSON result.
-type ToolHandler func(ctx context.Context, input json.RawMessage) (string, error)
+// ToolHandler executes a tool and returns JSON result text plus optional
+// structured blocks for client-side rendering.
+type ToolHandler func(ctx context.Context, input json.RawMessage) (string, []Block, error)
 
 // ToolRegistry maps tool names to definitions and handlers.
 type ToolRegistry struct {
@@ -88,7 +89,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			"window":    {Type: "integer", Desc: "Time window in minutes (default 60)"},
 			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
 		}),
-	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+	}, func(ctx context.Context, input json.RawMessage) (string, []Block, error) {
 		var p struct {
 			Name      string `json:"name"`
 			Service   string `json:"service"`
@@ -97,7 +98,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			Namespace string `json:"namespace"`
 		}
 		if err := json.Unmarshal(input, &p); err != nil {
-			return "", fmt.Errorf("invalid input: %w", err)
+			return "", nil, fmt.Errorf("invalid input: %w", err)
 		}
 		if p.Window == 0 {
 			p.Window = 60
@@ -122,9 +123,10 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			Namespace: p.Namespace,
 		})
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return marshal(res)
+		s, err := marshal(res)
+		return s, nil, err
 	})
 
 	r.register(ToolDef{
@@ -136,7 +138,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			"severity":  {Type: "string", Desc: "Minimum severity: ERROR, WARN, INFO, DEBUG (optional)"},
 			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
 		}),
-	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+	}, func(ctx context.Context, input json.RawMessage) (string, []Block, error) {
 		var p struct {
 			Service   string `json:"service"`
 			Pattern   string `json:"pattern"`
@@ -144,10 +146,10 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			Namespace string `json:"namespace"`
 		}
 		if err := json.Unmarshal(input, &p); err != nil {
-			return "", fmt.Errorf("invalid input: %w", err)
+			return "", nil, fmt.Errorf("invalid input: %w", err)
 		}
 		if p.Service == "" {
-			return "", fmt.Errorf("service is required")
+			return "", nil, fmt.Errorf("service is required")
 		}
 
 		var severities []string
@@ -165,7 +167,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			Namespace: p.Namespace,
 		})
 		if err != nil {
-			return "", err
+			return "", nil, err
 		}
 
 		type tailResult struct {
@@ -193,7 +195,8 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 					"time", res.Logs[0].Time, "err", err)
 			}
 		}
-		return marshal(out)
+		s, err := marshal(out)
+		return s, nil, err
 	})
 
 	// The render tool — LLM generates HTML, we sanitize and pass through.
@@ -211,17 +214,17 @@ Wrap viz: <div class="viz-card"><div class="viz-card-header"><div class="viz-car
 		InputSchema: jsonSchema(map[string]property{
 			"html": {Type: "string", Desc: "HTML content to render (Shoelace components, CSS vars, Vega-Lite supported)", Required: true},
 		}),
-	}, func(ctx context.Context, input json.RawMessage) (string, error) {
+	}, func(ctx context.Context, input json.RawMessage) (string, []Block, error) {
 		var p struct {
 			HTML string `json:"html"`
 		}
 		if err := json.Unmarshal(input, &p); err != nil {
-			return "", fmt.Errorf("invalid input: %w", err)
+			return "", nil, fmt.Errorf("invalid input: %w", err)
 		}
 		if strings.TrimSpace(p.HTML) == "" {
-			return "", fmt.Errorf("render tool requires non-empty html")
+			return "", nil, fmt.Errorf("render tool requires non-empty html")
 		}
-		return p.HTML, nil
+		return p.HTML, nil, nil
 	})
 
 	slog.Info("AI tool registry initialized",
@@ -246,27 +249,28 @@ func (r *ToolRegistry) Defs() []ToolDef {
 	return r.defs
 }
 
-// Execute runs a tool by name and returns the result.
+// Execute runs a tool by name and returns the result text plus optional
+// structured blocks for client rendering.
 // AI-only tools are checked first; all others are dispatched to the MCP server.
-func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
+func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawMessage) (string, []Block, error) {
 	// Check AI-only handlers first
 	if h, ok := r.handlers[name]; ok {
-		result, err := h(ctx, input)
+		result, blocks, err := h(ctx, input)
 		if err != nil {
 			slog.Warn("tool execution failed", "tool", name, "err", err)
-			return "", err
+			return "", nil, err
 		}
-		return result, nil
+		return result, blocks, nil
 	}
 
 	// Fall through to MCP server via in-memory session
 	if r.session == nil {
-		return "", fmt.Errorf("tool %s: registry is closed", name)
+		return "", nil, fmt.Errorf("tool %s: registry is closed", name)
 	}
 	var args any
 	if len(input) > 0 {
 		if err := json.Unmarshal(input, &args); err != nil {
-			return "", fmt.Errorf("invalid tool arguments: %w", err)
+			return "", nil, fmt.Errorf("invalid tool arguments: %w", err)
 		}
 	}
 
@@ -276,14 +280,16 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawM
 	})
 	if err != nil {
 		slog.Warn("MCP tool execution failed", "tool", name, "err", err)
-		return "", err
+		return "", nil, err
 	}
 	if result.IsError {
 		text := extractMCPText(result)
 		slog.Warn("MCP tool returned error", "tool", name, "text", text)
-		return "", fmt.Errorf("tool %s: %s", name, text)
+		return "", nil, fmt.Errorf("tool %s: %s", name, text)
 	}
-	return extractMCPText(result), nil
+	text := extractMCPText(result)
+	blocks := toolResultToBlocks(name, text)
+	return text, blocks, nil
 }
 
 func (r *ToolRegistry) register(def ToolDef, handler ToolHandler) {
