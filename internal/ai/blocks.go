@@ -136,8 +136,8 @@ type TopologyNode struct {
 // TopologyEdge is a dependency between two services.
 type TopologyEdge struct {
 	Source    string  `json:"source"`
-	Target   string  `json:"target"`
-	RPM      float64 `json:"rpm"`
+	Target    string  `json:"target"`
+	RPM       float64 `json:"rpm"`
 	ErrorRate float64 `json:"errorRate"`
 }
 
