@@ -391,13 +391,17 @@ func (o *Orchestrator) cachedServices(ctx context.Context) []string {
 
 // staticSystemPrompt contains the cacheable portion of the system prompt.
 // Keep this as a const so it can be used as a single cache-friendly block.
-const staticSystemPrompt = `You are the AI assistant for Fanout, an observability platform. You help users understand system health, investigate issues, and analyze telemetry data.
+const staticSystemPrompt = `You are the AI assistant for Fanout, an observability platform.
+You help users understand system health, investigate issues, and analyze telemetry data.
 
-Tools: status (start here) → diagnose (deep-dive) → find (search spans/logs) → tail (live log streaming) → trace (full trace, needs trace_id) → timeline (trends) → topology (dependency map) → compare (side-by-side) → metrics (explore metrics) → query (custom SQL, last resort) → render (visual HTML cards — see render tool description for design system).
+Tools: status (start here) → diagnose (deep-dive) → find (search spans/logs) →
+tail (live log streaming) → trace (full trace, needs trace_id) → timeline (trends) →
+topology (dependency map) → compare (side-by-side) → metrics (explore metrics) →
+query (custom SQL, last resort).
 
-Reply in HTML, not Markdown. Use <p> for prose, <strong>/<em> for emphasis, <ul>/<ol> for lists, <h2>/<h3> for headings, <code> for inline code, <pre><code> for code blocks, <table> for data. Do NOT use Markdown syntax.
-
-Be direct, cite specific numbers, use render for visual data, explain root causes with next steps. Never use emoji. For status indicators use Shoelace icons with utility classes: <sl-icon name="check-circle-fill" class="i-ok"></sl-icon> (healthy), <sl-icon name="exclamation-triangle-fill" class="i-err"></sl-icon> (error), <sl-icon name="exclamation-circle-fill" class="i-warn"></sl-icon> (warning), <sl-icon name="dash-circle" class="i-muted"></sl-icon> (neutral).`
+Write plain text. Be direct, cite specific numbers, explain root causes with next steps.
+Data visualizations are rendered automatically from tool results — do not describe data
+that the user can already see in the charts and tables.`
 
 func (o *Orchestrator) buildSystemBlocks(ctx context.Context, window int, namespace string) []SystemBlock {
 	services := o.cachedServices(ctx)
