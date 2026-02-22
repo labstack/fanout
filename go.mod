@@ -4,7 +4,6 @@ go 1.26
 
 require (
 	github.com/DATA-DOG/go-sqlmock v1.5.2
-	github.com/a-h/templ v0.3.977
 	github.com/duckdb/duckdb-go/v2 v2.5.5
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.3

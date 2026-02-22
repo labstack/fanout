@@ -18,7 +18,6 @@ build-client:
 
 # Build binary
 build: build-client
-    templ generate
     go build -o {{bin}} ./cmd/fanout
 
 # Run server
@@ -47,7 +46,6 @@ bench:
 # Format code
 fmt:
     go fmt ./...
-    templ fmt .
 
 # Run checks
 check: fmt
@@ -77,7 +75,6 @@ update:
 
 # Install tools
 tools:
-    go install github.com/a-h/templ/cmd/templ@latest
     go install github.com/air-verse/air@latest
     go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
