@@ -131,6 +131,7 @@ type ClientEvent struct {
 	HTML    string          `json:"html,omitempty"`    // sanitized HTML for cards
 	Error   string          `json:"error,omitempty"`   // error message
 	ID      string          `json:"id,omitempty"`      // response ID
+	Blocks  []Block         `json:"blocks,omitempty"`  // structured blocks for client rendering
 }
 
 // SendFunc writes a client event to the WebSocket.
@@ -141,6 +142,7 @@ type SendFunc func(event ClientEvent) error
 func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) ([]Message, *TailConfig, error) {
 	systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
 	var tailCfg *TailConfig
+	var blocks []Block
 
 	for i := 0; i < maxIterations; i++ {
 		// Check for cancellation between iterations
@@ -224,7 +226,9 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			doneEvt := ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}
 			if text := textBuf.String(); text != "" {
 				doneEvt.HTML = o.sanitizer.Sanitize(text)
+				blocks = append([]Block{MakeTextBlock(text)}, blocks...)
 			}
+			doneEvt.Blocks = blocks
 			if err := send(doneEvt); err != nil {
 				return conversation, tailCfg, err
 			}
@@ -305,10 +309,12 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	}
 
 	slog.Warn("orchestrator hit max iterations", "max", maxIterations)
-	if err := send(ClientEvent{Type: CEToken, Content: "<p><em>Reached maximum tool iterations. Please refine your question for more details.</em></p>"}); err != nil {
+	maxIterMsg := "<p><em>Reached maximum tool iterations. Please refine your question for more details.</em></p>"
+	if err := send(ClientEvent{Type: CEToken, Content: maxIterMsg}); err != nil {
 		return conversation, tailCfg, err
 	}
-	if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}); err != nil {
+	blocks = append([]Block{MakeTextBlock(maxIterMsg)}, blocks...)
+	if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli()), Blocks: blocks}); err != nil {
 		return conversation, tailCfg, err
 	}
 	conversation = compactToolResults(conversation)
