@@ -20,11 +20,10 @@ const maxIterations = 10
 
 // Orchestrator manages the agentic loop: user question → LLM → tools → stream.
 type Orchestrator struct {
-	provider  Provider
-	tools     *ToolRegistry
-	svc       *service.Service
-	cfg       config.Config
-	sanitizer *bluemonday.Policy
+	provider Provider
+	tools    *ToolRegistry
+	svc      *service.Service
+	cfg      config.Config
 
 	// Cached services list (refreshed every 60s)
 	servicesMu    sync.RWMutex
@@ -90,11 +89,10 @@ func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Servic
 	}
 
 	return &Orchestrator{
-		provider:  provider,
-		tools:     tools,
-		svc:       svc,
-		cfg:       cfg,
-		sanitizer: NewSanitizer(),
+		provider: provider,
+		tools:    tools,
+		svc:      svc,
+		cfg:      cfg,
 	}
 }
 
@@ -106,7 +104,6 @@ const (
 	CEToken      ClientEventType = "token"
 	CEToolCall   ClientEventType = "tool_call"
 	CEToolResult ClientEventType = "tool_result"
-	CECard       ClientEventType = "card"
 	CEError      ClientEventType = "error"
 	CEDone       ClientEventType = "done"
 	CETail       ClientEventType = "tail"
@@ -124,11 +121,10 @@ type TailConfig struct {
 
 // ClientEvent is sent from the orchestrator to the WebSocket client.
 type ClientEvent struct {
-	Type    ClientEventType `json:"type"`              // CEToken, CEToolCall, CEToolResult, CECard, CEError, CEDone
+	Type    ClientEventType `json:"type"`              // CEToken, CEToolCall, CEToolResult, CEError, CEDone
 	Content string          `json:"content,omitempty"` // text content
 	Name    string          `json:"name,omitempty"`    // tool name
 	Input   string          `json:"input,omitempty"`   // tool input (for display)
-	HTML    string          `json:"html,omitempty"`    // sanitized HTML for cards
 	Error   string          `json:"error,omitempty"`   // error message
 	ID      string          `json:"id,omitempty"`      // response ID
 	Blocks  []Block         `json:"blocks,omitempty"`  // structured blocks for client rendering
@@ -225,7 +221,6 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		if stopReason != "tool_use" {
 			doneEvt := ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}
 			if text := textBuf.String(); text != "" {
-				doneEvt.HTML = o.sanitizer.Sanitize(text)
 				blocks = append([]Block{MakeTextBlock(text)}, blocks...)
 			}
 			doneEvt.Blocks = blocks
@@ -269,15 +264,6 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		// Send results to WebSocket sequentially (preserves order)
 		for idx := range results {
 			r := &results[idx]
-
-			// Special handling for render tool: sanitize HTML and send as card
-			if r.tc.Name == "render" && !r.isError {
-				sanitized := o.sanitizer.Sanitize(r.result)
-				if sendErr := send(ClientEvent{Type: CECard, HTML: sanitized}); sendErr != nil {
-					return conversation, tailCfg, sendErr
-				}
-				r.result = `{"rendered": true}`
-			}
 
 			// Special handling for tail tool: extract TailConfig
 			if r.tc.Name == "tail" && !r.isError {

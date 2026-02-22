@@ -435,8 +435,8 @@ func topologyToBlocks(result string) []Block {
 	for _, e := range out.Edges {
 		edges = append(edges, TopologyEdge{
 			Source:    e.From,
-			Target:   e.To,
-			RPM:      float64(e.CallCount),
+			Target:    e.To,
+			RPM:       float64(e.CallCount),
 			ErrorRate: e.ErrorRate * 100,
 		})
 	}
