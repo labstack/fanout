@@ -140,8 +140,7 @@ func main() {
 
 				// Skip auth for health, metrics, and UI page routes
 				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" ||
-					path == "/" || path == "/viz" || path == "/favicon.ico" || path == "/favicon.svg" ||
-					strings.HasPrefix(path, "/static/") {
+					path == "/" || path == "/favicon.ico" || path == "/favicon.svg" {
 					return next(c)
 				}
 
@@ -220,10 +219,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Static viz assets (cache-busted JS/CSS bundles)
-	web.RegisterStaticRoutes(e)
-
-	// UI routes (chat page + WebSocket + bookmarks + suggestions)
+	// UI routes (WebSocket + bookmarks + suggestions)
 	api.RegisterUIRoutes(e, cfg, orch, wsHandler, bookmarks)
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled

@@ -3,8 +3,6 @@ package mcp
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"html"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,8 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/labstack/fanout/internal/render"
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // isValidReportID checks if the string is a valid UUID
@@ -147,75 +143,6 @@ func (rs *ReportStore) Cleanup() int {
 	return deleted
 }
 
-// RenderIn is the input for the render tool
-type RenderIn struct {
-	Title    string    `json:"title" jsonschema:"Report title,required"`
-	Sections []Section `json:"sections" jsonschema:"Report sections,required"`
-}
-
-// Section represents a report section
-type Section struct {
-	Type   string         `json:"type"`
-	Title  string         `json:"title,omitempty"`
-	Config map[string]any `json:"config"`
-}
-
-// RenderOut is the output of the render tool
-type RenderOut struct {
-	HTML     string `json:"html"`
-	ShareURL string `json:"share_url"`
-	ReportID string `json:"report_id"`
-}
-
-func (s *Server) render(ctx context.Context, req *mcp.CallToolRequest, in RenderIn) (*mcp.CallToolResult, RenderOut, error) {
-	var htmlParts []string
-
-	for _, sec := range in.Sections {
-		// Marshal config to JSON for registry
-		cfgJSON, err := json.Marshal(sec.Config)
-		if err != nil {
-			return nil, RenderOut{}, fmt.Errorf("section %q: invalid config: %w", sec.Type, err)
-		}
-
-		// Validate config before rendering
-		if err := render.Validate(sec.Type, cfgJSON); err != nil {
-			return nil, RenderOut{}, fmt.Errorf("section %q: %w", sec.Type, err)
-		}
-
-		// Use registry to render
-		out, err := render.RenderSection(sec.Type, cfgJSON, render.HTML)
-		if err != nil {
-			return nil, RenderOut{}, fmt.Errorf("section %q: %w", sec.Type, err)
-		}
-
-		// Wrap in titled section if title provided
-		sectionHTML := out.HTML
-		if sec.Title != "" && sectionHTML != "" {
-			sectionHTML = `<div class="section"><div class="section-title">` + html.EscapeString(sec.Title) + `</div>` + sectionHTML + `</div>`
-		}
-		htmlParts = append(htmlParts, sectionHTML)
-	}
-
-	composedHTML := `<div class="compose compose-column">` + strings.Join(htmlParts, "") + `</div>`
-
-	id := genID()
-	report := &Report{
-		ID:        id,
-		Query:     html.EscapeString(in.Title),
-		Summary:   html.EscapeString(in.Title),
-		HTML:      composedHTML,
-		CreatedAt: time.Now(),
-		ExpiresAt: time.Now().Add(24 * time.Hour),
-	}
-	reports.Save(report)
-
-	return nil, RenderOut{
-		HTML:     composedHTML,
-		ShareURL: "/view/r/" + id,
-		ReportID: id,
-	}, nil
-}
-
 func genID() string {
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -252,14 +179,4 @@ func RunCleanup(ctx context.Context) {
 			reports.Cleanup()
 		}
 	}
-}
-
-// ComponentTypes returns all available component types
-func ComponentTypes() []string {
-	return render.Types()
-}
-
-// ComponentToolDescription returns the tool description for all components
-func ComponentToolDescription() string {
-	return render.ToolDescription()
 }
