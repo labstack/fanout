@@ -8,6 +8,11 @@ import type {
   HeatmapBlockData,
   TraceWaterfallData,
   TopologyData,
+  FlameGraphData,
+  SankeyData,
+  DepMatrixData,
+  EndpointsData,
+  CorrelationData,
 } from "@/lib/types";
 import { TextBlock } from "./TextBlock";
 import { MetricsBlock } from "./MetricsBlock";
@@ -17,6 +22,11 @@ import { BarBlock } from "./BarBlock";
 import { HeatmapBlock } from "./HeatmapBlock";
 import { TraceWaterfallBlock } from "./TraceWaterfallBlock";
 import { TopologyBlock } from "./TopologyBlock";
+import { FlameGraphBlock } from "./FlameGraphBlock";
+import { SankeyBlock } from "./SankeyBlock";
+import { DepMatrixBlock } from "./DepMatrixBlock";
+import { EndpointsBlock } from "./EndpointsBlock";
+import { CorrelationBlock } from "./CorrelationBlock";
 import { GenericBlock } from "./GenericBlock";
 
 export function BlockRenderer({ block }: { block: Block }) {
@@ -37,6 +47,16 @@ export function BlockRenderer({ block }: { block: Block }) {
       return <TraceWaterfallBlock data={block.data as TraceWaterfallData} />;
     case "topology":
       return <TopologyBlock data={block.data as TopologyData} />;
+    case "flame_graph":
+      return <FlameGraphBlock data={block.data as FlameGraphData} />;
+    case "sankey":
+      return <SankeyBlock data={block.data as SankeyData} />;
+    case "dep_matrix":
+      return <DepMatrixBlock data={block.data as DepMatrixData} />;
+    case "endpoints":
+      return <EndpointsBlock data={block.data as EndpointsData} />;
+    case "correlation":
+      return <CorrelationBlock data={block.data as CorrelationData} />;
     default:
       return <GenericBlock type={block.type} data={block.data} />;
   }
