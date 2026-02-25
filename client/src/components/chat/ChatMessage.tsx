@@ -7,7 +7,7 @@ export function ChatMessage({ message }: { message: Message }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="bg-primary text-primary-foreground rounded-lg px-4 py-2 max-w-[80%]">
+        <div className="bg-primary/15 text-foreground rounded-2xl rounded-br-md px-4 py-2.5 max-w-[80%] text-sm leading-relaxed">
           {message.content}
         </div>
       </div>
@@ -19,7 +19,7 @@ export function ChatMessage({ message }: { message: Message }) {
     <div className="space-y-3">
       {/* Tool calls */}
       {message.toolCalls.length > 0 && (
-        <div className="space-y-1">
+        <div className="flex flex-wrap gap-1.5">
           {message.toolCalls.map((tc, i) => (
             <ToolStatus key={i} toolCall={tc} />
           ))}
@@ -30,25 +30,27 @@ export function ChatMessage({ message }: { message: Message }) {
       {message.loading ? (
         // Streaming: render accumulated tokens as markdown
         message.content ? (
-          <div className="prose prose-sm dark:prose-invert max-w-none">
+          <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-relaxed prose-headings:text-foreground prose-strong:text-foreground">
             <ReactMarkdown>{message.content}</ReactMarkdown>
           </div>
         ) : null
       ) : message.blocks?.length ? (
         // Done with blocks: render each block
-        message.blocks.map((block, i) => (
-          <BlockRenderer key={i} block={block} />
-        ))
+        <div className="space-y-4">
+          {message.blocks.map((block, i) => (
+            <BlockRenderer key={i} block={block} />
+          ))}
+        </div>
       ) : message.content ? (
         // Done without blocks (legacy/text-only): render as markdown
-        <div className="prose prose-sm dark:prose-invert max-w-none">
+        <div className="prose prose-sm dark:prose-invert max-w-none prose-p:leading-relaxed prose-headings:text-foreground prose-strong:text-foreground">
           <ReactMarkdown>{message.content}</ReactMarkdown>
         </div>
       ) : null}
 
       {/* Error */}
       {message.error && (
-        <div className="text-sm text-destructive bg-destructive/10 rounded-md px-3 py-2">
+        <div className="text-sm text-destructive bg-destructive/10 border border-destructive/20 rounded-xl px-4 py-2.5">
           {message.error}
         </div>
       )}
@@ -57,8 +59,22 @@ export function ChatMessage({ message }: { message: Message }) {
       {message.loading &&
         !message.content &&
         message.toolCalls.length === 0 && (
-          <div className="text-sm text-muted-foreground animate-pulse">
-            Thinking...
+          <div className="flex items-center gap-2.5">
+            <div className="flex gap-1">
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce"
+                style={{ animationDelay: "0ms" }}
+              />
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce"
+                style={{ animationDelay: "150ms" }}
+              />
+              <span
+                className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce"
+                style={{ animationDelay: "300ms" }}
+              />
+            </div>
+            <span className="text-sm text-muted-foreground">Thinking</span>
           </div>
         )}
     </div>

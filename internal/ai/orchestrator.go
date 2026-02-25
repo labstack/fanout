@@ -207,7 +207,11 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			}
 		}
 
-		if respondCall != nil {
+			if respondCall != nil {
+			// Add a synthetic tool_result so the conversation stays valid
+			// for subsequent turns (Anthropic requires tool_result after tool_use).
+			conversation = append(conversation, ToolMessage(respondCall.ID, `{"ok":true}`, false))
+
 			// Parse structured response
 			var resp struct {
 				Text   string  `json:"text"`

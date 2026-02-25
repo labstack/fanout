@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -319,6 +320,53 @@ func TestOpenAIBuildRequest_ToolCallMessages(t *testing.T) {
 	}
 	if msgs[2]["tool_call_id"] != "tc1" {
 		t.Errorf("tool_call_id = %q, want %q", msgs[2]["tool_call_id"], "tc1")
+	}
+}
+
+func TestOpenAIBuildRequest_RespondToolStrict(t *testing.T) {
+	p := NewOpenAIProvider("sk-test", "", "")
+	body := p.buildRequest(StreamParams{
+		Messages: []Message{UserMessage("hi")},
+		Tools: []ToolDef{
+			{Name: "status", Description: "Check status", InputSchema: map[string]any{"type": "object"}},
+			respondToolDef(),
+		},
+		MaxTokens: 1024,
+	})
+
+	tools := body["tools"].([]map[string]any)
+	if len(tools) != 2 {
+		t.Fatalf("tools = %d, want 2", len(tools))
+	}
+
+	// status tool should NOT have strict
+	statusFn := tools[0]["function"].(map[string]any)
+	if statusFn["name"] != "status" {
+		t.Fatalf("first tool = %q, want status", statusFn["name"])
+	}
+	if _, ok := statusFn["strict"]; ok {
+		t.Error("non-respond tool should not have strict field")
+	}
+
+	// respond tool should have strict: true
+	respondFn := tools[1]["function"].(map[string]any)
+	if respondFn["name"] != respondToolName {
+		t.Fatalf("second tool = %q, want %s", respondFn["name"], respondToolName)
+	}
+	if respondFn["strict"] != true {
+		t.Error("respond tool should have strict: true")
+	}
+
+	// respond tool parameters should have additionalProperties: false (strictified)
+	params := respondFn["parameters"]
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	var schema map[string]any
+	json.Unmarshal(paramsBytes, &schema)
+	if schema["additionalProperties"] != false {
+		t.Error("respond tool schema should have additionalProperties: false after strictify")
 	}
 }
 

@@ -29,6 +29,10 @@ dev:
     @command -v air >/dev/null || go install github.com/air-verse/air@latest
     air
 
+# Generate TypeScript types from Go block structs
+gen:
+    go generate ./internal/ai/...
+
 # Run tests
 test *ARGS='./...':
     go test {{ARGS}}

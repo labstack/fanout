@@ -1,5 +1,7 @@
 package ai
 
+//go:generate sh -c "go run ../../cmd/genblocks > ../../client/src/lib/types.ts"
+
 import "encoding/json"
 
 // BlockType identifies the kind of block for the client to render.

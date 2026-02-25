@@ -7,12 +7,15 @@ import (
 	"sync"
 )
 
-// blockTypeRegistry maps each BlockType constant to its corresponding Go data struct.
-// Used by generateResponseSchema to produce a JSON Schema for the discriminated union.
-var blockTypeRegistry = []struct {
+// BlockTypeEntry maps a BlockType constant to its Go data struct.
+type BlockTypeEntry struct {
 	Type BlockType
 	Data any
-}{
+}
+
+// BlockTypeRegistry maps each BlockType constant to its corresponding Go data struct.
+// Used by generateResponseSchema and cmd/genblocks for TypeScript generation.
+var BlockTypeRegistry = []BlockTypeEntry{
 	{BlockText, TextBlockData{}},
 	{BlockMetrics, MetricsBlockData{}},
 	{BlockTable, TableBlockData{}},
@@ -40,8 +43,8 @@ var (
 func generateResponseSchema() json.RawMessage {
 	responseSchemaOnce.Do(func() {
 		// Build the oneOf variants from the registry.
-		variants := make([]map[string]any, 0, len(blockTypeRegistry))
-		for _, entry := range blockTypeRegistry {
+		variants := make([]map[string]any, 0, len(BlockTypeRegistry))
+		for _, entry := range BlockTypeRegistry {
 			variant := map[string]any{
 				"type":                 "object",
 				"required":             []string{"type", "data"},
