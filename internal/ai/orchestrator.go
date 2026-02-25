@@ -18,6 +18,19 @@ import (
 
 const maxIterations = 10
 
+const respondToolName = "respond"
+
+// respondToolDef builds the synthetic respond tool definition.
+// This tool is NOT registered in the ToolRegistry — it is appended to the
+// tools list for the provider call and intercepted by the orchestrator.
+func respondToolDef() ToolDef {
+	return ToolDef{
+		Name:        respondToolName,
+		Description: "Produce your final response with markdown text and visualization blocks. Call this as your last action.",
+		InputSchema: generateResponseSchema(), // from schema_gen.go
+	}
+}
+
 // Orchestrator manages the agentic loop: user question → LLM → tools → stream.
 type Orchestrator struct {
 	provider Provider
@@ -138,7 +151,6 @@ type SendFunc func(event ClientEvent) error
 func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) ([]Message, *TailConfig, error) {
 	systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
 	var tailCfg *TailConfig
-	var blocks []Block
 
 	for i := 0; i < maxIterations; i++ {
 		// Check for cancellation between iterations
@@ -151,10 +163,12 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		var stopReason string
 		var hadError bool
 
+		tools := append(o.tools.Defs(), respondToolDef())
+
 		err := o.provider.Stream(ctx, StreamParams{
 			SystemBlocks: systemBlocks,
 			Messages:     conversation,
-			Tools:        o.tools.Defs(),
+			Tools:        tools,
 			MaxTokens:    4096,
 		}, func(event StreamEvent) error {
 			switch event.Type {
@@ -217,19 +231,76 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		// Record assistant message
 		conversation = append(conversation, AssistantMessage(textBuf.String(), toolCalls))
 
-		// If the LLM didn't request tool use, we're done
+		// If the LLM didn't request tool use, we're done (graceful fallback)
 		if stopReason != "tool_use" {
 			doneEvt := ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}
 			if text := textBuf.String(); text != "" {
-				blocks = append([]Block{MakeTextBlock(text)}, blocks...)
+				doneEvt.Blocks = []Block{MakeTextBlock(text)}
 			}
-			doneEvt.Blocks = blocks
 			if err := send(doneEvt); err != nil {
 				return conversation, tailCfg, err
 			}
 			conversation = compactToolResults(conversation)
 			return conversation, tailCfg, nil
 		}
+
+		// Check for respond tool call
+		var respondCall *ToolCall
+		var realToolCalls []ToolCall
+		for i := range toolCalls {
+			if toolCalls[i].Name == respondToolName {
+				respondCall = &toolCalls[i]
+			} else {
+				realToolCalls = append(realToolCalls, toolCalls[i])
+			}
+		}
+
+		if respondCall != nil {
+			// Parse structured response
+			var resp struct {
+				Text   string  `json:"text"`
+				Blocks []Block `json:"blocks"`
+			}
+			if err := json.Unmarshal([]byte(respondCall.Input), &resp); err != nil {
+				slog.Error("failed to parse respond tool input", "err", err)
+				// Fallback: use streamed text
+				text := textBuf.String()
+				if text == "" {
+					text = "I encountered an error formatting my response."
+				}
+				doneEvt := ClientEvent{
+					Type:   CEDone,
+					ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+					Blocks: []Block{MakeTextBlock(text)},
+				}
+				if err := send(doneEvt); err != nil {
+					return conversation, tailCfg, err
+				}
+				return conversation, tailCfg, nil
+			}
+
+			// Validate blocks
+			blocks := validateBlocks(resp.Blocks)
+
+			// Prepend text as a TextBlock
+			if resp.Text != "" {
+				blocks = append([]Block{MakeTextBlock(resp.Text)}, blocks...)
+			}
+
+			doneEvt := ClientEvent{
+				Type:   CEDone,
+				ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+				Blocks: blocks,
+			}
+			if err := send(doneEvt); err != nil {
+				return conversation, tailCfg, err
+			}
+			conversation = compactToolResults(conversation)
+			return conversation, tailCfg, nil
+		}
+
+		// Otherwise execute real tool calls (existing logic)
+		toolCalls = realToolCalls
 
 		// Execute tool calls in parallel
 		type toolExecResult struct {
@@ -295,12 +366,16 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	}
 
 	slog.Warn("orchestrator hit max iterations", "max", maxIterations)
-	maxIterMsg := "<p><em>Reached maximum tool iterations. Please refine your question for more details.</em></p>"
+	maxIterMsg := "Reached maximum tool iterations. Please refine your question for more details."
 	if err := send(ClientEvent{Type: CEToken, Content: maxIterMsg}); err != nil {
 		return conversation, tailCfg, err
 	}
-	blocks = append([]Block{MakeTextBlock(maxIterMsg)}, blocks...)
-	if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli()), Blocks: blocks}); err != nil {
+	doneEvt := ClientEvent{
+		Type:   CEDone,
+		ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+		Blocks: []Block{MakeTextBlock(maxIterMsg)},
+	}
+	if err := send(doneEvt); err != nil {
 		return conversation, tailCfg, err
 	}
 	conversation = compactToolResults(conversation)
@@ -331,6 +406,10 @@ func (o *Orchestrator) SuggestedQuestions(ctx context.Context) []string {
 }
 
 func (o *Orchestrator) cachedServices(ctx context.Context) []string {
+	if o.svc == nil {
+		return nil
+	}
+
 	o.servicesMu.RLock()
 	if time.Now().Before(o.servicesStale) {
 		defer o.servicesMu.RUnlock()
@@ -379,14 +458,43 @@ func (o *Orchestrator) cachedServices(ctx context.Context) []string {
 const staticSystemPrompt = `You are the AI assistant for Fanout, an observability platform.
 You help users understand system health, investigate issues, and analyze telemetry data.
 
-Tools: status (start here) → diagnose (deep-dive) → find (search spans/logs) →
+## Tools
+
+Investigation tools (use these to gather data):
+status (start here) → diagnose (deep-dive) → find (search spans/logs) →
 tail (live log streaming) → trace (full trace, needs trace_id) → timeline (trends) →
 topology (dependency map) → compare (side-by-side) → metrics (explore metrics) →
 query (custom SQL, last resort).
 
-Write plain text. Be direct, cite specific numbers, explain root causes with next steps.
-Data visualizations are rendered automatically from tool results — do not describe data
-that the user can already see in the charts and tables.`
+## Response
+
+After gathering data, call the respond tool with:
+- text: Markdown analysis. Be direct, cite specific numbers, explain root causes with next steps.
+- blocks: Visualization blocks from the types below.
+
+## Block Types
+
+- metrics       — 2-6 KPI summary cards (throughput, latency, error rate)
+- table         — tabular data, top errors, search results, comparisons
+- timeseries    — trends over time (latency, throughput, error rate over time)
+- bar           — ranked comparisons (top endpoints, slowest operations)
+- heatmap       — latency distributions over time buckets
+- trace_waterfall — single distributed trace visualization
+- topology      — service dependency graph with health
+- flame_graph   — aggregated span breakdowns
+- sankey        — request flow between services
+- dep_matrix    — NxN service health grid
+- endpoints     — per-endpoint performance breakdown
+- correlation   — multi-signal correlation (latency vs errors vs throughput)
+- tail          — log entries
+
+## Rules
+
+- Block data MUST come from tool results. Never fabricate data points.
+- Prefer visualization over text. Don't describe data the user can see in charts.
+- 1-3 blocks per response. More is clutter.
+- Most specific type wins: endpoints > table for endpoint data, trace_waterfall > table for traces.
+- Do not include a text block in the blocks array — use the text field instead.`
 
 func (o *Orchestrator) buildSystemBlocks(ctx context.Context, window int, namespace string) []SystemBlock {
 	services := o.cachedServices(ctx)
