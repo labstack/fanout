@@ -262,7 +262,7 @@ func TestToolRegistryMCPIntegration(t *testing.T) {
 
 	// 6. Execute the greet tool via the MCP session and verify the result.
 	input, _ := json.Marshal(map[string]string{"name": "world"})
-	result, _, err := registry.Execute(ctx, "greet", json.RawMessage(input))
+	result, err := registry.Execute(ctx, "greet", json.RawMessage(input))
 	if err != nil {
 		t.Fatalf("Execute('greet') failed: %v", err)
 	}
@@ -271,13 +271,13 @@ func TestToolRegistryMCPIntegration(t *testing.T) {
 	}
 
 	// 7. Verify executing an unknown tool returns an error.
-	_, _, err = registry.Execute(ctx, "nonexistent", json.RawMessage(`{}`))
+	_, err = registry.Execute(ctx, "nonexistent", json.RawMessage(`{}`))
 	if err == nil {
 		t.Error("Execute('nonexistent') should return an error")
 	}
 
 	// 8. Execute with empty input — MCP validates schema, returns error (not a panic).
-	_, _, err = registry.Execute(ctx, "greet", json.RawMessage(`{}`))
+	_, err = registry.Execute(ctx, "greet", json.RawMessage(`{}`))
 	if err == nil {
 		t.Error("Execute('greet') with empty input should fail schema validation")
 	}
@@ -286,7 +286,7 @@ func TestToolRegistryMCPIntegration(t *testing.T) {
 	if err := registry.Close(); err != nil {
 		t.Fatalf("Close() failed: %v", err)
 	}
-	_, _, err = registry.Execute(ctx, "greet", json.RawMessage(input))
+	_, err = registry.Execute(ctx, "greet", json.RawMessage(input))
 	if err == nil {
 		t.Error("Execute after Close() should return an error")
 	}
@@ -351,7 +351,7 @@ func TestToolRegistryMCPIntegration_IsError(t *testing.T) {
 	}
 	defer registry.Close()
 
-	_, _, err = registry.Execute(ctx, "fail", json.RawMessage(`{}`))
+	_, err = registry.Execute(ctx, "fail", json.RawMessage(`{}`))
 	if err == nil {
 		t.Fatal("Execute('fail') should return an error")
 	}

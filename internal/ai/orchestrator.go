@@ -245,13 +245,12 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			wg.Add(1)
 			go func(idx int, tc ToolCall) {
 				defer wg.Done()
-				result, toolBlocks, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
+				result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
 				if err != nil {
 					results[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
 					results[idx].isError = true
 				} else {
 					results[idx].result = result
-					blocks = append(blocks, toolBlocks...)
 				}
 			}(i, tc)
 		}

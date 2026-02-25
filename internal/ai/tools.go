@@ -13,9 +13,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ToolHandler executes a tool and returns JSON result text plus optional
-// structured blocks for client-side rendering.
-type ToolHandler func(ctx context.Context, input json.RawMessage) (string, []Block, error)
+// ToolHandler executes a tool and returns JSON result text.
+type ToolHandler func(ctx context.Context, input json.RawMessage) (string, error)
 
 // ToolRegistry maps tool names to definitions and handlers.
 type ToolRegistry struct {
@@ -85,7 +84,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			"window":    {Type: "integer", Desc: "Time window in minutes (default 60)"},
 			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
 		}),
-	}, func(ctx context.Context, input json.RawMessage) (string, []Block, error) {
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
 		var p struct {
 			Name      string `json:"name"`
 			Service   string `json:"service"`
@@ -94,7 +93,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			Namespace string `json:"namespace"`
 		}
 		if err := json.Unmarshal(input, &p); err != nil {
-			return "", nil, fmt.Errorf("invalid input: %w", err)
+			return "", fmt.Errorf("invalid input: %w", err)
 		}
 		if p.Window == 0 {
 			p.Window = 60
@@ -119,10 +118,9 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			Namespace: p.Namespace,
 		})
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
-		s, err := marshal(res)
-		return s, nil, err
+		return marshal(res)
 	})
 
 	r.register(ToolDef{
@@ -134,7 +132,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			"severity":  {Type: "string", Desc: "Minimum severity: ERROR, WARN, INFO, DEBUG (optional)"},
 			"namespace": {Type: "string", Desc: "Namespace filter (optional)"},
 		}),
-	}, func(ctx context.Context, input json.RawMessage) (string, []Block, error) {
+	}, func(ctx context.Context, input json.RawMessage) (string, error) {
 		var p struct {
 			Service   string `json:"service"`
 			Pattern   string `json:"pattern"`
@@ -142,10 +140,10 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			Namespace string `json:"namespace"`
 		}
 		if err := json.Unmarshal(input, &p); err != nil {
-			return "", nil, fmt.Errorf("invalid input: %w", err)
+			return "", fmt.Errorf("invalid input: %w", err)
 		}
 		if p.Service == "" {
-			return "", nil, fmt.Errorf("service is required")
+			return "", fmt.Errorf("service is required")
 		}
 
 		var severities []string
@@ -163,7 +161,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 			Namespace: p.Namespace,
 		})
 		if err != nil {
-			return "", nil, err
+			return "", err
 		}
 
 		type tailResult struct {
@@ -191,8 +189,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 					"time", res.Logs[0].Time, "err", err)
 			}
 		}
-		s, err := marshal(out)
-		return s, nil, err
+		return marshal(out)
 	})
 
 	slog.Info("AI tool registry initialized",
@@ -217,28 +214,27 @@ func (r *ToolRegistry) Defs() []ToolDef {
 	return r.defs
 }
 
-// Execute runs a tool by name and returns the result text plus optional
-// structured blocks for client rendering.
+// Execute runs a tool by name and returns the result text.
 // AI-only tools are checked first; all others are dispatched to the MCP server.
-func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawMessage) (string, []Block, error) {
+func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
 	// Check AI-only handlers first
 	if h, ok := r.handlers[name]; ok {
-		result, blocks, err := h(ctx, input)
+		result, err := h(ctx, input)
 		if err != nil {
 			slog.Warn("tool execution failed", "tool", name, "err", err)
-			return "", nil, err
+			return "", err
 		}
-		return result, blocks, nil
+		return result, nil
 	}
 
 	// Fall through to MCP server via in-memory session
 	if r.session == nil {
-		return "", nil, fmt.Errorf("tool %s: registry is closed", name)
+		return "", fmt.Errorf("tool %s: registry is closed", name)
 	}
 	var args any
 	if len(input) > 0 {
 		if err := json.Unmarshal(input, &args); err != nil {
-			return "", nil, fmt.Errorf("invalid tool arguments: %w", err)
+			return "", fmt.Errorf("invalid tool arguments: %w", err)
 		}
 	}
 
@@ -248,16 +244,14 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawM
 	})
 	if err != nil {
 		slog.Warn("MCP tool execution failed", "tool", name, "err", err)
-		return "", nil, err
+		return "", err
 	}
 	if result.IsError {
 		text := extractMCPText(result)
 		slog.Warn("MCP tool returned error", "tool", name, "text", text)
-		return "", nil, fmt.Errorf("tool %s: %s", name, text)
+		return "", fmt.Errorf("tool %s: %s", name, text)
 	}
-	text := extractMCPText(result)
-	blocks := toolResultToBlocks(name, text)
-	return text, blocks, nil
+	return extractMCPText(result), nil
 }
 
 func (r *ToolRegistry) register(def ToolDef, handler ToolHandler) {

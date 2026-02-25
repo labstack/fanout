@@ -44,7 +44,7 @@ func generateResponseSchema() json.RawMessage {
 		for _, entry := range blockTypeRegistry {
 			variant := map[string]any{
 				"type":                 "object",
-				"required":            []string{"type", "data"},
+				"required":             []string{"type", "data"},
 				"additionalProperties": false,
 				"properties": map[string]any{
 					"type": map[string]any{
@@ -58,8 +58,8 @@ func generateResponseSchema() json.RawMessage {
 		}
 
 		schema := map[string]any{
-			"type":     "object",
-			"required": []string{"text", "blocks"},
+			"type":                 "object",
+			"required":             []string{"text", "blocks"},
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"text": map[string]any{
