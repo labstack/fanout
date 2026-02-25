@@ -13,7 +13,6 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/service"
-	"github.com/microcosm-cc/bluemonday"
 )
 
 const maxIterations = 10
@@ -42,53 +41,6 @@ type Orchestrator struct {
 	servicesMu    sync.RWMutex
 	servicesList  []string
 	servicesStale time.Time
-}
-
-// NewSanitizer creates the shared bluemonday HTML sanitizer policy.
-// Used by both the Orchestrator and the UI handler for bookmark sanitization.
-func NewSanitizer() *bluemonday.Policy {
-	p := bluemonday.UGCPolicy()
-	// Allow Shoelace custom elements
-	p.AllowElements("sl-card", "sl-badge", "sl-tag", "sl-icon", "sl-progress-bar",
-		"sl-spinner", "sl-tooltip", "sl-alert", "sl-button", "sl-divider",
-		"sl-details", "sl-tab-group", "sl-tab", "sl-tab-panel")
-	// Allow specific CSS properties (not blanket style attr, to prevent UI redressing)
-	p.AllowStyles(
-		"color", "background", "background-color", "font-size", "font-weight",
-		"text-align", "display", "grid-template-columns", "gap", "padding", "margin",
-		"border", "border-color", "border-radius", "width", "height", "max-width", "min-width",
-		"flex", "flex-direction", "align-items", "justify-content",
-		"opacity", "text-transform", "letter-spacing", "line-height",
-		"overflow", "white-space", "text-overflow",
-		"padding-left", "padding-right", "padding-top", "padding-bottom",
-		"margin-left", "margin-right", "margin-top", "margin-bottom",
-	).Globally()
-	// Allow only the data-* attributes used by viz renderers (not blanket AllowDataAttributes)
-	p.AllowAttrs(
-		// Container data attributes parsed by V.util.parseData
-		"data-graph", "data-timeseries", "data-spans", "data-matrix",
-		"data-frames", "data-barchart", "data-heatmap", "data-correlation",
-		"data-flow", "data-endpoints",
-		// Interactive element indices used by renderer event handlers
-		"data-idx", "data-edge-idx", "data-node-id", "data-series",
-		"data-ti", "data-bi", "data-link-idx", "data-from", "data-to",
-		"data-marker-panel", "data-marker-t",
-	).Globally()
-	p.AllowAttrs("class").Globally()
-	p.AllowAttrs("slot").Globally()
-	p.AllowAttrs("variant", "size", "pill", "name", "label", "value", "open", "closable").Globally()
-	// Allow SVG for inline charts and viz renderers
-	p.AllowElements("svg", "path", "line", "rect", "circle", "text", "g", "defs",
-		"linearGradient", "stop", "polyline", "polygon", "marker", "tspan")
-	p.AllowAttrs("viewBox", "xmlns", "fill", "stroke", "stroke-width", "d", "x", "y",
-		"x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height",
-		"transform", "text-anchor", "font-size", "opacity", "points",
-		"offset", "stop-color", "id", "gradientUnits",
-		"refX", "refY", "markerWidth", "markerHeight", "orient", "marker-end",
-		"fill-opacity", "stroke-opacity", "stroke-linecap", "stroke-linejoin",
-		"stroke-dasharray", "font-weight", "font-family", "letter-spacing",
-		"text-transform", "dominant-baseline", "text-decoration").Globally()
-	return p
 }
 
 // NewOrchestrator creates an orchestrator with the given provider and tools.

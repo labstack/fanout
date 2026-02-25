@@ -12,6 +12,38 @@ import (
 	"github.com/labstack/fanout/internal/config"
 )
 
+// newSanitizer creates the bluemonday HTML sanitizer policy for bookmark content.
+func newSanitizer() *bluemonday.Policy {
+	p := bluemonday.UGCPolicy()
+	p.AllowElements("sl-card", "sl-badge", "sl-tag", "sl-icon", "sl-progress-bar",
+		"sl-spinner", "sl-tooltip", "sl-alert", "sl-button", "sl-divider",
+		"sl-details", "sl-tab-group", "sl-tab", "sl-tab-panel")
+	p.AllowStyles(
+		"color", "background", "background-color", "font-size", "font-weight",
+		"text-align", "display", "grid-template-columns", "gap", "padding", "margin",
+		"border", "border-color", "border-radius", "width", "height", "max-width", "min-width",
+		"flex", "flex-direction", "align-items", "justify-content",
+		"opacity", "text-transform", "letter-spacing", "line-height",
+		"overflow", "white-space", "text-overflow",
+		"padding-left", "padding-right", "padding-top", "padding-bottom",
+		"margin-left", "margin-right", "margin-top", "margin-bottom",
+	).Globally()
+	p.AllowAttrs("class").Globally()
+	p.AllowAttrs("slot").Globally()
+	p.AllowAttrs("variant", "size", "pill", "name", "label", "value", "open", "closable").Globally()
+	p.AllowElements("svg", "path", "line", "rect", "circle", "text", "g", "defs",
+		"linearGradient", "stop", "polyline", "polygon", "marker", "tspan")
+	p.AllowAttrs("viewBox", "xmlns", "fill", "stroke", "stroke-width", "d", "x", "y",
+		"x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height",
+		"transform", "text-anchor", "font-size", "opacity", "points",
+		"offset", "stop-color", "id", "gradientUnits",
+		"refX", "refY", "markerWidth", "markerHeight", "orient", "marker-end",
+		"fill-opacity", "stroke-opacity", "stroke-linecap", "stroke-linejoin",
+		"stroke-dasharray", "font-weight", "font-family", "letter-spacing",
+		"text-transform", "dominant-baseline", "text-decoration").Globally()
+	return p
+}
+
 //go:embed favicon.svg
 var faviconSVG []byte
 
@@ -31,7 +63,7 @@ func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, ws
 		orch:      orch,
 		wsHandler: wsHandler,
 		bookmarks: bookmarks,
-		sanitizer: ai.NewSanitizer(),
+		sanitizer: newSanitizer(),
 	}
 
 	// Favicon
