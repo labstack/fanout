@@ -24,8 +24,14 @@ func TestValidateBlocks_DropsNaN(t *testing.T) {
 		}}),
 	}
 	valid := validateBlocks(blocks)
-	if len(valid) != 0 {
-		t.Errorf("got %d blocks, want 0 (NaN dropped)", len(valid))
+	// NewBlock returns a text fallback when marshal fails (NaN can't be marshaled)
+	if len(valid) != 1 || valid[0].Type != BlockText {
+		t.Errorf("got %d blocks (type=%v), want 1 text fallback block", len(valid), func() BlockType {
+			if len(valid) > 0 {
+				return valid[0].Type
+			}
+			return ""
+		}())
 	}
 }
 
@@ -36,8 +42,14 @@ func TestValidateBlocks_DropsInfinity(t *testing.T) {
 		}}),
 	}
 	valid := validateBlocks(blocks)
-	if len(valid) != 0 {
-		t.Errorf("got %d blocks, want 0 (Inf dropped)", len(valid))
+	// NewBlock returns a text fallback when marshal fails (Inf can't be marshaled)
+	if len(valid) != 1 || valid[0].Type != BlockText {
+		t.Errorf("got %d blocks (type=%v), want 1 text fallback block", len(valid), func() BlockType {
+			if len(valid) > 0 {
+				return valid[0].Type
+			}
+			return ""
+		}())
 	}
 }
 

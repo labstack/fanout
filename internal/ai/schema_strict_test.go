@@ -14,7 +14,7 @@ func TestStrictifySchema_AddsAdditionalProperties(t *testing.T) {
 		"required": ["name"]
 	}`
 
-	result := strictifySchema(json.RawMessage(input))
+	result, _ := strictifySchema(json.RawMessage(input))
 	var m map[string]any
 	if err := json.Unmarshal(result, &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -40,7 +40,7 @@ func TestStrictifySchema_NestedObjects(t *testing.T) {
 		}
 	}`
 
-	result := strictifySchema(json.RawMessage(input))
+	result, _ := strictifySchema(json.RawMessage(input))
 	var m map[string]any
 	json.Unmarshal(result, &m)
 
@@ -67,7 +67,7 @@ func TestStrictifySchema_OptionalFieldsNullable(t *testing.T) {
 		}
 	}`
 
-	result := strictifySchema(json.RawMessage(input))
+	result, _ := strictifySchema(json.RawMessage(input))
 	var m map[string]any
 	json.Unmarshal(result, &m)
 
@@ -120,7 +120,7 @@ func TestStrictifySchema_PreservesRequiredAsIs(t *testing.T) {
 		}
 	}`
 
-	result := strictifySchema(json.RawMessage(input))
+	result, _ := strictifySchema(json.RawMessage(input))
 	var m map[string]any
 	json.Unmarshal(result, &m)
 
@@ -148,7 +148,7 @@ func TestStrictifySchema_ArrayItems(t *testing.T) {
 		}
 	}`
 
-	result := strictifySchema(json.RawMessage(input))
+	result, _ := strictifySchema(json.RawMessage(input))
 	var m map[string]any
 	json.Unmarshal(result, &m)
 
@@ -181,7 +181,7 @@ func TestStrictifySchema_OneOfVariants(t *testing.T) {
 		}
 	}`
 
-	result := strictifySchema(json.RawMessage(input))
+	result, _ := strictifySchema(json.RawMessage(input))
 	var m map[string]any
 	json.Unmarshal(result, &m)
 
@@ -198,7 +198,7 @@ func TestStrictifySchema_OneOfVariants(t *testing.T) {
 func TestStrictifySchema_ResponseSchema(t *testing.T) {
 	// Run against the actual generated response schema
 	schema := generateResponseSchema()
-	strict := strictifySchema(schema)
+	strict, _ := strictifySchema(schema)
 
 	var m map[string]any
 	if err := json.Unmarshal(strict, &m); err != nil {
@@ -225,10 +225,11 @@ func TestStrictifySchema_ResponseSchema(t *testing.T) {
 		if variant["additionalProperties"] != false {
 			t.Errorf("variant[%d] missing additionalProperties: false", i)
 		}
-		// Check that the data object also has additionalProperties: false
+		// Check that the data object also has additionalProperties: false (if it has properties)
 		vProps := variant["properties"].(map[string]any)
 		data := vProps["data"].(map[string]any)
-		if data["type"] == "object" && data["additionalProperties"] != false {
+		_, hasProps := data["properties"].(map[string]any)
+		if data["type"] == "object" && hasProps && data["additionalProperties"] != false {
 			t.Errorf("variant[%d] data object missing additionalProperties: false", i)
 		}
 	}
@@ -236,7 +237,10 @@ func TestStrictifySchema_ResponseSchema(t *testing.T) {
 
 func TestStrictifySchema_InvalidJSON(t *testing.T) {
 	input := json.RawMessage(`{invalid`)
-	result := strictifySchema(input)
+	result, err := strictifySchema(input)
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
 	// Should return input unchanged
 	if string(result) != string(input) {
 		t.Errorf("invalid JSON should be returned as-is")

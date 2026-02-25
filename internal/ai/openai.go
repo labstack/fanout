@@ -147,9 +147,11 @@ func (p *OpenAIProvider) buildRequest(params StreamParams) map[string]any {
 				"parameters":  t.InputSchema,
 			}
 			if t.Name == respondToolName {
-				funcDef["strict"] = true
 				if raw, err := json.Marshal(t.InputSchema); err == nil {
-					funcDef["parameters"] = strictifySchema(raw)
+					if strict, sErr := strictifySchema(raw); sErr == nil {
+						funcDef["strict"] = true
+						funcDef["parameters"] = strict
+					}
 				}
 			}
 			tools[i] = map[string]any{

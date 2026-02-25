@@ -209,9 +209,11 @@ func (r *ToolRegistry) Close() error {
 	return nil
 }
 
-// Defs returns all tool definitions for the LLM.
+// Defs returns a copy of all tool definitions for the LLM.
 func (r *ToolRegistry) Defs() []ToolDef {
-	return r.defs
+	out := make([]ToolDef, len(r.defs))
+	copy(out, r.defs)
+	return out
 }
 
 // Execute runs a tool by name and returns the result text.

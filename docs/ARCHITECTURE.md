@@ -36,7 +36,7 @@ graph TB
     W --> R[BlockRenderer: React]
 ```
 
-The orchestrator runs an agentic loop. On each iteration, the LLM can call tools (DuckDB queries) or produce its final response. Iterations 1..N stream text tokens freely — the user sees "Checking system status..." in real time. Only the **final** iteration uses schema-constrained output, producing `{ text, blocks[] }`. The user never stares at a blank screen.
+The orchestrator runs an agentic loop. On each iteration, the LLM can call tools (DuckDB queries) or produce its final response. Iterations 1..N stream text tokens freely — the user sees "Checking system status..." in real time. Only the **final** iteration uses schema-constrained output via the `respond` tool, producing `{ text, blocks[] }`. The user never stares at a blank screen.
 
 After schema enforcement, a validation layer checks semantic invariants (finite numbers, array lengths, internal references). Valid blocks are sent over WebSocket and rendered by the React `BlockRenderer`.
 
@@ -44,9 +44,11 @@ After schema enforcement, a validation layer checks semantic invariants (finite 
 
 ## 3. Schema
 
-The LLM's final response is constrained to a JSON schema enforced by the provider at the API level. The LLM cannot return non-conforming output.
+The LLM's final response is constrained by a JSON schema passed as the `respond` tool's `input_schema`. The schema is generated at runtime via `sync.Once` from Go struct reflection — not from `$ref`/`$defs`.
 
 ### Response Shape
+
+The actual schema uses inline `oneOf` with all variant schemas directly embedded:
 
 ```json
 {
@@ -56,44 +58,38 @@ The LLM's final response is constrained to a JSON schema enforced by the provide
   "properties": {
     "text": {
       "type": "string",
-      "description": "Markdown narrative."
+      "description": "Markdown text response to the user."
     },
     "blocks": {
       "type": "array",
-      "items": { "$ref": "#/$defs/Block" }
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["type", "data"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "type": "string", "const": "metrics" },
+              "data": { "type": "object", "properties": { "items": { ... } } }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["type", "data"],
+            "additionalProperties": false,
+            "properties": {
+              "type": { "type": "string", "const": "timeseries" },
+              "data": { "type": "object", "properties": { ... } }
+            }
+          }
+        ]
+      }
     }
   }
 }
 ```
 
-### Block Discriminated Union
-
-Each block is a tagged union on `type`. The `data` shape varies per type:
-
-```json
-{
-  "$defs": {
-    "Block": {
-      "oneOf": [
-        {
-          "properties": {
-            "type": { "const": "metrics" },
-            "data": { "$ref": "#/$defs/MetricsBlockData" }
-          }
-        },
-        {
-          "properties": {
-            "type": { "const": "timeseries" },
-            "data": { "$ref": "#/$defs/TimeseriesBlockData" }
-          }
-        }
-      ]
-    }
-  }
-}
-```
-
-Repeats for all 14 types. Generated from Go structs at build time.
+Repeats for all 14 types. Generated from Go structs on first use via `sync.Once`.
 
 ### Block Type Reference
 
@@ -120,22 +116,22 @@ Repeats for all 14 types. Generated from Go structs at build time.
 
 ```mermaid
 graph LR
-    G[Go structs: blocks.go] -- generated --> S{{JSON Schema: for LLM providers}}
-    G -- manually mirrored --> T[TypeScript: types.ts]
-    T -- manually mirrored --> B[BlockRenderer: switch dispatch]
+    G[Go structs: blocks.go] -- reflection --> S{{JSON Schema: for LLM providers}}
+    G -- "go generate (cmd/genblocks)" --> T[TypeScript: types.ts]
+    T --> B[BlockRenderer: switch dispatch]
 ```
 
-Go structs in `internal/ai/blocks.go` are the single source. The JSON Schema is generated from them at build time via reflection. TypeScript types (`client/src/lib/types.ts`) and `BlockRenderer` are manually mirrored today — future improvement: generate TS from Go too.
+Go structs in `internal/ai/blocks.go` are the single source of truth. The JSON schema is generated from them at runtime via reflection (`internal/ai/schema_gen.go`). TypeScript types (`client/src/lib/types.ts`) are auto-generated from the same Go structs via `cmd/genblocks` (`go generate ./internal/ai/...`).
 
 ---
 
 ## 5. Provider Abstraction
 
-The orchestrator passes a JSON schema. Each provider enforces it using its native mechanism. The orchestrator doesn't care which:
+Both providers use a synthetic "respond" tool. The schema is embedded in the tool's `InputSchema`, not passed through `StreamParams`. Each provider enforces it using its native mechanism:
 
 ```mermaid
 graph TB
-    G[Go Structs: blocks.go] -- generated --> S{{JSON Schema}}
+    G[Go Structs: blocks.go] -- reflection --> S{{JSON Schema}}
 
     S --> A
     S --> OA
@@ -148,8 +144,8 @@ graph TB
     end
 
     subgraph OA[OpenAI]
-        O1[Schema → response_format.json_schema]
-        O2[strict: true]
+        O1[Schema → respond tool with strict: true]
+        O2[strictifySchema transforms for strict mode]
         O3[API enforces conformance]
         O1 --> O2 --> O3
     end
@@ -161,17 +157,17 @@ graph TB
 
 **Anthropic:** defines a synthetic "respond" tool whose `input_schema` is the response schema. The LLM is instructed to call it as its final action. The orchestrator intercepts this tool call — it's not executed, it's the structured response.
 
-**OpenAI:** uses the native `response_format.json_schema` with `strict: true`. The API enforces conformance directly.
+**OpenAI:** uses the same respond tool but with `strict: true` on the function definition. The `strictifySchema()` function transforms the schema to meet OpenAI's strict mode requirements (`additionalProperties: false`, all properties required, optional fields wrapped in `anyOf` with null).
 
 ### Provider Interface
 
 ```go
 type StreamParams struct {
-    SystemBlocks   []SystemBlock
-    Messages       []Message
-    Tools          []ToolDef
-    MaxTokens      int
-    ResponseSchema json.RawMessage  // the Block[] schema
+    System       string
+    SystemBlocks []SystemBlock
+    Messages     []Message
+    Tools        []ToolDef
+    MaxTokens    int
 }
 ```
 
@@ -180,40 +176,41 @@ type StreamParams struct {
 ## 6. Orchestrator Loop
 
 ```go
-func (o *Orchestrator) Run(ctx context.Context, conv []Message, send SendFunc) ([]Message, error) {
+func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) ([]Message, *TailConfig, error) {
+    systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
+
     for i := 0; i < maxIterations; i++ {
-        resp, err := o.provider.Stream(ctx, StreamParams{
-            SystemBlocks:   o.systemBlocks(ctx),
-            Messages:       conv,
-            Tools:          o.tools.Defs(),
-            ResponseSchema: o.responseSchema,
-            MaxTokens:      4096,
+        tools := append(o.tools.Defs(), respondToolDef())
+
+        // Stream with callback — tokens are sent to client in real time
+        err := o.provider.Stream(ctx, StreamParams{
+            SystemBlocks: systemBlocks,
+            Messages:     conversation,
+            Tools:        tools,
+            MaxTokens:    4096,
+        }, func(event StreamEvent) error {
+            // Forward text tokens and tool call events to WebSocket
         })
 
-        // Tool calls: execute and loop
-        if resp.StopReason == "tool_use" && !resp.IsRespondTool() {
-            continue
+        // Check for respond tool call
+        if respondCall != nil {
+            // Parse structured response from tool input
+            var resp struct {
+                Text   string  `json:"text"`
+                Blocks []Block `json:"blocks"`
+            }
+            json.Unmarshal([]byte(respondCall.Input), &resp)
+            blocks := validateBlocks(resp.Blocks)
+            send(ClientEvent{Type: CEDone, Blocks: blocks})
+            return conversation, tailCfg, nil
         }
 
-        // Final response: parse schema-enforced output
-        var result struct {
-            Text   string  `json:"text"`
-            Blocks []Block `json:"blocks"`
-        }
-        json.Unmarshal(resp.StructuredOutput, &result)
-
-        blocks := o.validate(result.Blocks, toolResults)
-        if result.Text != "" {
-            blocks = append([]Block{MakeTextBlock(result.Text)}, blocks...)
-        }
-
-        send(ClientEvent{Type: CEDone, Blocks: blocks})
-        return conv, nil
+        // Otherwise execute real tool calls and loop
     }
 }
 ```
 
-The loop is the same agentic loop used today. The only change: the final LLM call uses schema-constrained output instead of free text, and there are no per-tool `*ToBlocks()` mapping functions.
+The `respondToolDef()` function builds the synthetic tool definition with the generated schema as its `InputSchema`. It is NOT in the `ToolRegistry` — it is appended to the tools list and intercepted by the orchestrator when called.
 
 ---
 
@@ -275,63 +272,48 @@ Your final response must include:
 
 ## 9. Schema Generation
 
-The schema is generated from Go structs, ensuring Go types, TypeScript types, and JSON schema stay in sync:
+The schema is generated from Go structs using reflection, ensuring Go types, TypeScript types, and JSON schema stay in sync:
 
 ```go
 // internal/ai/schema_gen.go
 
-func GenerateResponseSchema() json.RawMessage {
-    schema := jsonschema.Reflect(&ResponseShape{})
-    b, _ := json.Marshal(schema)
-    return b
-}
-
-type ResponseShape struct {
-    Text   string  `json:"text" jsonschema:"description=Markdown narrative"`
-    Blocks []Block `json:"blocks" jsonschema:"description=Visualization blocks"`
+func generateResponseSchema() json.RawMessage {
+    // Built once via sync.Once, cached for all subsequent requests.
+    // Iterates BlockTypeRegistry, calling reflectSchema() on each
+    // entry's Data struct to produce inline oneOf variants.
 }
 ```
 
-The schema is compiled once at startup and reused for every request.
+TypeScript types are generated from the same Go structs via `cmd/genblocks`:
+
+```go
+//go:generate sh -c "go run ../../cmd/genblocks > ../../client/src/lib/types.ts"
+```
+
+Run `just gen` or `go generate ./internal/ai/...` to regenerate TypeScript types.
 
 ---
 
 ## 10. Client
 
-No client changes. The client already handles all 14 block types via `BlockRenderer`. The `Block` interface and rendering pipeline are unchanged. Blocks arrive over the same WebSocket `CEDone` event in the same shape — the only difference is that all 14 types are now reachable.
+The React client in `client/` renders block responses:
+
+- **WebSocket** (`client/src/lib/ws.ts`): Connects to `/ws/chat`, handles reconnection with exponential backoff
+- **Zustand store** (`client/src/stores/chat.ts`): Manages conversation state, processes `ChatEvent` messages
+- **BlockRenderer** (`client/src/components/blocks/BlockRenderer.tsx`): Dispatches to per-type components based on `block.type`
+- **Block components**: D3 (topology, flame graph, sankey), Recharts (timeseries, bar, heatmap, correlation), TanStack Table (table), custom (metrics cards, trace waterfall, endpoints)
+
+All 14 block types are rendered via a `switch` on `block.type` in `BlockRenderer`.
 
 ---
 
-## 11. Migration
-
-```mermaid
-graph LR
-    P1[Phase 1: Dual Mode] --> P2[Phase 2: Validate Parity] --> P3[Phase 3: Remove Fallback]
-```
-
-**Phase 1 — Dual mode:** schema-driven blocks preferred, existing `toolResultToBlocks()` as fallback for schema failures or unsupported providers.
-
-```go
-if len(result.Blocks) > 0 {
-    blocks = o.validate(result.Blocks, toolResults)
-} else {
-    blocks = toolResultToBlocks(toolName, toolResult)
-}
-```
-
-**Phase 2 — Validate parity:** run both paths in parallel, log discrepancies. Verify the LLM consistently picks appropriate visualizations.
-
-**Phase 3 — Remove fallback:** delete `tool_blocks.go` (~550 lines). The LLM is the sole block source.
-
----
-
-## 12. Risks
+## 11. Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |------|-----------|--------|------------|
 | Wrong viz type | Medium | Low | System prompt guidance, easy to iterate |
 | Fabricated data | Low | Medium | Validation + "must come from tool results" |
 | Schema output latency | Low | Low | Only final call is constrained |
-| Provider unsupported | Low | High | Dual mode fallback (Phase 1) |
-| Schema drift Go/TS | Medium | Medium | Generate schema from Go structs |
+| Provider unsupported | Low | High | Both Anthropic and OpenAI supported |
+| Schema drift Go/TS | Medium | Medium | TS generated from Go structs via go:generate |
 | Too many blocks | Low | Low | System prompt caps at 1-3 |

@@ -60,11 +60,14 @@ export class ChatSocket {
     this.ws = ws;
   }
 
-  /** Send a client message (message, cancel, or clear). */
-  send(msg: ClientMessage): void {
+  /** Send a client message (message, cancel, or clear). Returns false if dropped. */
+  send(msg: ClientMessage): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
+      return true;
     }
+    console.warn("[ChatSocket] message dropped (not connected):", msg.type);
+    return false;
   }
 
   /**
@@ -90,12 +93,17 @@ export class ChatSocket {
   }
 
   private handleMessage(data: string): void {
+    let event: ChatEvent;
     try {
-      const event: ChatEvent = JSON.parse(data);
+      event = JSON.parse(data);
+    } catch (err) {
+      console.warn("[ChatSocket] failed to parse message:", err);
+      return;
+    }
+    try {
       this.onEvent(event);
     } catch (err) {
-      // Malformed messages are silently ignored after logging.
-      console.warn("[ChatSocket] failed to parse message:", err);
+      console.error("[ChatSocket] event handler error:", err);
     }
   }
 

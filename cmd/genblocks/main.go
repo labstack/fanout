@@ -233,11 +233,10 @@ func parseJSONTag(tag string) (string, jsonTagOptions) {
 
 const protocolTypes = `// Chat event types (WebSocket protocol)
 export interface ChatEvent {
-  type: "token" | "tool_call" | "tool_result" | "card" | "error" | "done" | "tail" | "tail_end";
+  type: "token" | "tool_call" | "tool_result" | "error" | "done" | "tail" | "tail_end";
   content?: string;
   name?: string;
   input?: string;
-  html?: string;
   error?: string;
   id?: string;
   blocks?: Block[];

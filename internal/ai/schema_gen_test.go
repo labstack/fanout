@@ -191,7 +191,7 @@ func TestSchemaCoversAllBlockTypes(t *testing.T) {
 // appear in required.
 func TestStrictSchemaValid(t *testing.T) {
 	schema := generateResponseSchema()
-	strict := strictifySchema(schema)
+	strict, _ := strictifySchema(schema)
 
 	var m map[string]any
 	if err := json.Unmarshal(strict, &m); err != nil {
@@ -208,11 +208,10 @@ func TestStrictSchemaValid(t *testing.T) {
 
 		typ, _ := obj["type"].(string)
 		if typ == "object" {
-			if obj["additionalProperties"] != false {
-				t.Errorf("%s: missing additionalProperties: false", path)
-			}
-
 			if props, ok := obj["properties"].(map[string]any); ok && len(props) > 0 {
+				if obj["additionalProperties"] != false {
+					t.Errorf("%s: missing additionalProperties: false", path)
+				}
 				req, _ := obj["required"].([]any)
 				reqSet := map[string]bool{}
 				for _, r := range req {

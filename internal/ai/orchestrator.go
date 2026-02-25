@@ -86,7 +86,7 @@ type TailConfig struct {
 
 // ClientEvent is sent from the orchestrator to the WebSocket client.
 type ClientEvent struct {
-	Type    ClientEventType `json:"type"`              // CEToken, CEToolCall, CEToolResult, CEError, CEDone
+	Type    ClientEventType `json:"type"`
 	Content string          `json:"content,omitempty"` // text content
 	Name    string          `json:"name,omitempty"`    // tool name
 	Input   string          `json:"input,omitempty"`   // tool input (for display)
@@ -207,7 +207,63 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			}
 		}
 
-			if respondCall != nil {
+		if respondCall != nil {
+			// If the LLM called both respond and real tools, execute the real
+			// tools first so their results are in the conversation history.
+			if len(realToolCalls) > 0 {
+				type toolExecResult struct {
+					tc      ToolCall
+					result  string
+					isError bool
+				}
+				sideResults := make([]toolExecResult, len(realToolCalls))
+				var sideWg sync.WaitGroup
+				for si, stc := range realToolCalls {
+					sideResults[si].tc = stc
+					sideWg.Add(1)
+					go func(idx int, tc ToolCall) {
+						defer sideWg.Done()
+						defer func() {
+							if r := recover(); r != nil {
+								slog.Error("tool execution panicked", "tool", tc.Name, "panic", r)
+								sideResults[idx].result = fmt.Sprintf(`{"error": "internal error executing %s"}`, tc.Name)
+								sideResults[idx].isError = true
+							}
+						}()
+						result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
+						if err != nil {
+							sideResults[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
+							sideResults[idx].isError = true
+						} else {
+							sideResults[idx].result = result
+						}
+					}(si, stc)
+				}
+				sideWg.Wait()
+				if ctx.Err() != nil {
+					return conversation, tailCfg, ctx.Err()
+				}
+				for _, r := range sideResults {
+					if r.tc.Name == "tail" && !r.isError {
+						var tailResult struct {
+							Tail *TailConfig `json:"tail"`
+						}
+						if err := json.Unmarshal([]byte(r.result), &tailResult); err != nil {
+							slog.Warn("failed to unmarshal tail config", "err", err)
+						} else if tailResult.Tail != nil {
+							tailCfg = tailResult.Tail
+							if tailCfg.Namespace == "" {
+								tailCfg.Namespace = namespace
+							}
+						}
+					}
+					if sendErr := send(ClientEvent{Type: CEToolResult, Name: r.tc.Name}); sendErr != nil {
+						return conversation, tailCfg, sendErr
+					}
+					conversation = append(conversation, ToolMessage(r.tc.ID, truncateResult(r.result, 8192), r.isError))
+				}
+			}
+
 			// Add a synthetic tool_result so the conversation stays valid
 			// for subsequent turns (Anthropic requires tool_result after tool_use).
 			conversation = append(conversation, ToolMessage(respondCall.ID, `{"ok":true}`, false))
@@ -218,7 +274,7 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 				Blocks []Block `json:"blocks"`
 			}
 			if err := json.Unmarshal([]byte(respondCall.Input), &resp); err != nil {
-				slog.Error("failed to parse respond tool input", "err", err)
+				slog.Error("failed to parse respond tool input", "err", err, "input_preview", truncateJSON(respondCall.Input, 500))
 				// Fallback: use streamed text
 				text := textBuf.String()
 				if text == "" {
@@ -272,6 +328,13 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			wg.Add(1)
 			go func(idx int, tc ToolCall) {
 				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("tool execution panicked", "tool", tc.Name, "panic", r)
+						results[idx].result = fmt.Sprintf(`{"error": "internal error executing %s"}`, tc.Name)
+						results[idx].isError = true
+					}
+				}()
 				result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
 				if err != nil {
 					results[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())

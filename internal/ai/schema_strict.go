@@ -1,24 +1,30 @@
 package ai
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"log/slog"
+	"sort"
+)
 
 // strictifySchema transforms a JSON Schema to satisfy OpenAI's strict mode requirements:
-//   - Every object gets additionalProperties: false
+//   - Objects with properties get additionalProperties: false (property-less objects like map[string]any are left open)
 //   - All properties are listed in required
 //   - Formerly-optional properties are wrapped in anyOf: [{original}, {type: "null"}]
 //
 // The input and output are both raw JSON schema bytes.
-func strictifySchema(schema json.RawMessage) json.RawMessage {
+func strictifySchema(schema json.RawMessage) (json.RawMessage, error) {
 	var node any
 	if err := json.Unmarshal(schema, &node); err != nil {
-		return schema
+		slog.Error("strictifySchema: failed to unmarshal schema", "err", err)
+		return schema, err
 	}
 	result := strictifyNode(node)
 	out, err := json.Marshal(result)
 	if err != nil {
-		return schema
+		slog.Error("strictifySchema: failed to remarshal schema", "err", err)
+		return schema, err
 	}
-	return out
+	return out, nil
 }
 
 func strictifyNode(node any) any {
@@ -35,9 +41,11 @@ func strictifyNode(node any) any {
 	typ, _ := result["type"].(string)
 
 	if typ == "object" {
-		result["additionalProperties"] = false
-
+		// Only add additionalProperties: false when properties are defined.
+		// Property-less objects (e.g. map[string]any → {"type":"object"}) must
+		// remain open or OpenAI rejects any keys.
 		if props, ok := result["properties"].(map[string]any); ok {
+			result["additionalProperties"] = false
 			// Collect existing required set
 			existingRequired := map[string]bool{}
 			if req, ok := result["required"].([]any); ok {
@@ -68,7 +76,7 @@ func strictifyNode(node any) any {
 			result["properties"] = newProps
 			if len(allRequired) > 0 {
 				// Sort for deterministic output
-				sortStrings(allRequired)
+				sort.Strings(allRequired)
 				result["required"] = allRequired
 			}
 		}
@@ -99,6 +107,15 @@ func strictifyNode(node any) any {
 		result["anyOf"] = newAnyOf
 	}
 
+	// Recurse into allOf variants
+	if allOf, ok := result["allOf"].([]any); ok {
+		newAllOf := make([]any, len(allOf))
+		for i, v := range allOf {
+			newAllOf[i] = strictifyNode(v)
+		}
+		result["allOf"] = newAllOf
+	}
+
 	return result
 }
 
@@ -125,20 +142,13 @@ func wrapNullable(schema any) any {
 		for k, v := range obj {
 			result[k] = v
 		}
-		result["anyOf"] = append(existing, map[string]any{"type": "null"})
+		extended := make([]any, len(existing), len(existing)+1)
+		copy(extended, existing)
+		result["anyOf"] = append(extended, map[string]any{"type": "null"})
 		return result
 	}
 
 	return map[string]any{
 		"anyOf": []any{obj, map[string]any{"type": "null"}},
-	}
-}
-
-// sortStrings sorts a string slice in place (avoids importing sort for this small helper).
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j] < s[j-1]; j-- {
-			s[j], s[j-1] = s[j-1], s[j]
-		}
 	}
 }

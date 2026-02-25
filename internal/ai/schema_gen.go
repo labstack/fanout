@@ -2,6 +2,7 @@ package ai
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -76,7 +77,11 @@ func generateResponseSchema() json.RawMessage {
 			},
 		}
 
-		responseSchemaJSON, _ = json.Marshal(schema)
+		var err error
+		responseSchemaJSON, err = json.Marshal(schema)
+		if err != nil {
+			panic(fmt.Sprintf("ai: failed to marshal response schema: %v", err))
+		}
 	})
 	return responseSchemaJSON
 }

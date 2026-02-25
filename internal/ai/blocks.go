@@ -2,7 +2,11 @@ package ai
 
 //go:generate sh -c "go run ../../cmd/genblocks > ../../client/src/lib/types.ts"
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
+)
 
 // BlockType identifies the kind of block for the client to render.
 type BlockType string
@@ -32,7 +36,12 @@ type Block struct {
 
 // NewBlock creates a Block by marshaling the data to JSON.
 func NewBlock(t BlockType, data any) Block {
-	b, _ := json.Marshal(data)
+	b, err := json.Marshal(data)
+	if err != nil {
+		slog.Error("NewBlock marshal failed", "type", t, "err", err)
+		errData, _ := json.Marshal(TextBlockData{Content: fmt.Sprintf("[Error rendering %s block]", t)})
+		return Block{Type: BlockText, Data: errData}
+	}
 	return Block{Type: t, Data: b}
 }
 

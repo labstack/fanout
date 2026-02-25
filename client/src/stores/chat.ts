@@ -86,14 +86,6 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
         };
         break;
 
-      case "card":
-        // Legacy: append HTML to content (will be replaced by blocks)
-        messages[lastIdx] = {
-          ...last,
-          content: last.content + (event.html ?? event.content ?? ""),
-        };
-        break;
-
       case "done":
         messages[lastIdx] = {
           ...last,
@@ -112,16 +104,17 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
         break;
 
       case "tail":
-        // Future: parse event.content as JSON for log tail entries
+        // TODO: parse event.content as JSON for log tail entries (server already emits these)
         console.debug("[chat] tail event:", event.content);
         break;
 
       case "tail_end":
-        // Future: mark tail stopped
+        // TODO: mark tail stopped (server already emits these)
         console.debug("[chat] tail_end event");
         break;
 
       default:
+        console.warn("[chat] unrecognized event type:", event.type);
         break;
     }
 
@@ -175,11 +168,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       messages: [...state.messages, userMsg, assistantMsg],
     }));
 
-    socket?.send({ type: "message", content: text, window, namespace });
+    if (!socket?.send({ type: "message", content: text, window, namespace })) {
+      set((state) => {
+        const messages = [...state.messages];
+        const last = messages[messages.length - 1];
+        if (last?.role === "assistant" && last.loading) {
+          messages[messages.length - 1] = {
+            ...last,
+            loading: false,
+            error: "Not connected. Please wait for reconnection and try again.",
+          };
+        }
+        return { messages };
+      });
+    }
   },
 
   cancel: () => {
-    socket?.send({ type: "cancel" });
+    if (!socket?.send({ type: "cancel" })) {
+      console.warn("[chat] cancel message dropped (not connected)");
+    }
 
     set((state) => {
       const messages = [...state.messages];
@@ -192,7 +200,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   clear: () => {
-    socket?.send({ type: "clear" });
+    if (!socket?.send({ type: "clear" })) {
+      console.warn("[chat] clear message dropped (not connected)");
+    }
     set({ messages: [] });
   },
 }));
