@@ -141,6 +141,7 @@ services:
       - PAYMENT_ADDR
       - PRODUCT_CATALOG_ADDR
       - SHIPPING_ADDR
+      - KAFKA_ADDR
       - GOMEMLIMIT=16MiB
       - OTEL_EXPORTER_OTLP_ENDPOINT
       - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
@@ -161,6 +162,8 @@ services:
         condition: service_started
       otel-collector:
         condition: service_started
+      kafka:
+        condition: service_healthy
       flagd:
         condition: service_started
     logging: *logging
@@ -385,19 +388,21 @@ services:
     restart: unless-stopped
     environment:
       - PRODUCT_CATALOG_PORT
-      - PRODUCT_CATALOG_RELOAD_INTERVAL
       - FLAGD_HOST
       - FLAGD_PORT
+      - GOMEMLIMIT=16MiB
       - OTEL_EXPORTER_OTLP_ENDPOINT
       - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
       - OTEL_RESOURCE_ATTRIBUTES
       - OTEL_SERVICE_NAME=product-catalog
-    volumes:
-      - ./products:/usr/src/app/products
+      - OTEL_SEMCONV_STABILITY_OPT_IN=database
+      - DB_CONNECTION_STRING=postgres://otelu:otelp@postgresql/otel?sslmode=disable
     depends_on:
       otel-collector:
         condition: service_started
       flagd:
+        condition: service_started
+      postgresql:
         condition: service_started
     logging: *logging
 
@@ -473,8 +478,100 @@ services:
     logging: *logging
 
   # ******************
+  # Core Demo Services (async pipeline)
+  # ******************
+  accounting:
+    image: ${IMAGE_NAME}:${DEMO_VERSION}-accounting
+    container_name: accounting-demo
+    deploy:
+      resources:
+        limits:
+          memory: 160M
+    restart: unless-stopped
+    environment:
+      - KAFKA_ADDR
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PORT_HTTP}
+      - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+      - OTEL_RESOURCE_ATTRIBUTES
+      - OTEL_SERVICE_NAME=accounting
+      - DB_CONNECTION_STRING=Host=postgresql;Username=otelu;Password=otelp;Database=otel
+      - OTEL_DOTNET_AUTO_TRACES_ENTITYFRAMEWORKCORE_INSTRUMENTATION_ENABLED=false
+    depends_on:
+      otel-collector:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    logging: *logging
+
+  fraud-detection:
+    image: ${IMAGE_NAME}:${DEMO_VERSION}-fraud-detection
+    container_name: fraud-detection-demo
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+    restart: unless-stopped
+    environment:
+      - FLAGD_HOST
+      - FLAGD_PORT
+      - KAFKA_ADDR
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PORT_HTTP}
+      - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+      - OTEL_INSTRUMENTATION_KAFKA_EXPERIMENTAL_SPAN_ATTRIBUTES=true
+      - OTEL_INSTRUMENTATION_MESSAGING_EXPERIMENTAL_RECEIVE_TELEMETRY_ENABLED=true
+      - OTEL_RESOURCE_ATTRIBUTES
+      - OTEL_SERVICE_NAME=fraud-detection
+    depends_on:
+      otel-collector:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+    logging: *logging
+
+  # ******************
   # Dependent Services
   # ******************
+  kafka:
+    image: ${IMAGE_NAME}:${DEMO_VERSION}-kafka
+    container_name: kafka-demo
+    deploy:
+      resources:
+        limits:
+          memory: 620M
+    restart: unless-stopped
+    environment:
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://${KAFKA_HOST}:9092
+      - KAFKA_LISTENERS=PLAINTEXT://${KAFKA_HOST}:9092,CONTROLLER://${KAFKA_HOST}:9093
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@${KAFKA_HOST}:9093
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PORT_HTTP}
+      - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
+      - OTEL_RESOURCE_ATTRIBUTES
+      - OTEL_SERVICE_NAME=kafka
+      - KAFKA_HEAP_OPTS=-Xmx400m -Xms400m
+    healthcheck:
+      test: nc -z kafka 9092
+      start_period: 10s
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    logging: *logging
+
+  postgresql:
+    image: ${POSTGRES_IMAGE}
+    container_name: postgresql-demo
+    deploy:
+      resources:
+        limits:
+          memory: 80M
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=root
+      - POSTGRES_PASSWORD
+      - POSTGRES_DB
+    volumes:
+      - ./src/postgresql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    logging: *logging
+
   flagd:
     image: ${FLAGD_IMAGE}
     container_name: flagd-demo
