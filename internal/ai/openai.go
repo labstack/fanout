@@ -141,13 +141,22 @@ func (p *OpenAIProvider) buildRequest(params StreamParams) map[string]any {
 	if len(params.Tools) > 0 {
 		tools := make([]map[string]any, len(params.Tools))
 		for i, t := range params.Tools {
+			funcDef := map[string]any{
+				"name":        t.Name,
+				"description": t.Description,
+				"parameters":  t.InputSchema,
+			}
+			if t.Name == respondToolName {
+				if raw, err := json.Marshal(t.InputSchema); err == nil {
+					if strict, sErr := strictifySchema(raw); sErr == nil {
+						funcDef["strict"] = true
+						funcDef["parameters"] = strict
+					}
+				}
+			}
 			tools[i] = map[string]any{
-				"type": "function",
-				"function": map[string]any{
-					"name":        t.Name,
-					"description": t.Description,
-					"parameters":  t.InputSchema,
-				},
+				"type":     "function",
+				"function": funcDef,
 			}
 		}
 		body["tools"] = tools

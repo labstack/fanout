@@ -164,13 +164,7 @@ Call this before writing complex SQL to get full column details and working exam
 Returns: schema (markdown with all tables/columns), examples (working SQL queries for common tasks)`,
 	}, s.schema)
 
-	// 9. render - Universal HTML renderer for custom reports
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "render",
-		Description: renderToolDescription(),
-	}, s.render)
-
-	// 10. compare - Side-by-side service comparison
+	// 9. compare - Side-by-side service comparison
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "compare",
 		Description: `Compare 2-4 services side-by-side. Returns requests, error rate, P50/P95 latency for each service with winner determination.
@@ -205,14 +199,6 @@ SELECT "name=name", COUNT(*) as cnt, ROUND(quantile_cont("name=duration_ms", 0.9
 FROM read_parquet('lake/spans/**/*.parquet', union_by_name=true)
 WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 900) * 1000000000
 GROUP BY "name=name" ORDER BY p95 DESC LIMIT 10`
-}
-
-// renderToolDescription generates the MCP tool description dynamically
-func renderToolDescription() string {
-	return `Generate custom HTML reports from declarative sections. Returns shareable URL.
-
-` + ComponentToolDescription() + `
-Example section: {"type": "metric", "config": {"label": "Requests", "value": "1.2k"}}`
 }
 
 const notFoundHTML = `<!DOCTYPE html>

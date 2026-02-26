@@ -117,7 +117,7 @@ func TestCreateBookmark_Success(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	h := &UIHandler{bookmarks: store, sanitizer: ai.NewSanitizer()}
+	h := &UIHandler{bookmarks: store, sanitizer: newSanitizer()}
 	if err := h.CreateBookmark(c); err != nil {
 		t.Fatalf("CreateBookmark: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestCreateBookmark_EmptyQuestion(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	h := &UIHandler{bookmarks: store, sanitizer: ai.NewSanitizer()}
+	h := &UIHandler{bookmarks: store, sanitizer: newSanitizer()}
 	err := h.CreateBookmark(c)
 	if err == nil {
 		t.Fatal("expected error for empty question")
@@ -187,7 +187,7 @@ func TestCreateBookmark_SanitizesXSS(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	h := &UIHandler{bookmarks: store, sanitizer: ai.NewSanitizer()}
+	h := &UIHandler{bookmarks: store, sanitizer: newSanitizer()}
 	h.CreateBookmark(c)
 
 	var result ai.Bookmark

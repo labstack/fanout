@@ -13,7 +13,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ToolHandler executes a tool and returns JSON result.
+// ToolHandler executes a tool and returns JSON result text.
 type ToolHandler func(ctx context.Context, input json.RawMessage) (string, error)
 
 // ToolRegistry maps tool names to definitions and handlers.
@@ -25,7 +25,7 @@ type ToolRegistry struct {
 
 // NewToolRegistry creates the registry by connecting to the MCP server
 // in-process and importing its tool definitions, then registering AI-only
-// tools (metrics, tail, render) directly.
+// tools (metrics, tail) directly.
 func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Service, cfg config.Config) (*ToolRegistry, error) {
 	// Create in-memory transport pair
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
@@ -65,10 +65,6 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 		return nil, fmt.Errorf("MCP ListTools: %w", err)
 	}
 	for _, t := range toolsResult.Tools {
-		// Skip MCP's render tool — AI has its own (raw HTML passthrough)
-		if t.Name == "render" {
-			continue
-		}
 		r.defs = append(r.defs, ToolDef{
 			Name:        t.Name,
 			Description: t.Description,
@@ -76,7 +72,7 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 		})
 	}
 
-	// Register AI-only tools: metrics, tail, render
+	// Register AI-only tools: metrics, tail
 
 	r.register(ToolDef{
 		Name:        "metrics",
@@ -196,34 +192,6 @@ func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Se
 		return marshal(out)
 	})
 
-	// The render tool — LLM generates HTML, we sanitize and pass through.
-	// SECURITY: The raw HTML returned here is sanitized by the orchestrator
-	// (via bluemonday) before being sent to the browser. Never bypass sanitization.
-	r.register(ToolDef{
-		Name: "render",
-		Description: `Render HTML card inline in chat. CSS vars: --text-primary/secondary/muted, --bg-primary/secondary/tertiary, --border-color, --success, --warning, --danger, --signal-trace/log/metric/error, --font-sans/mono, --radius. Shoelace: <sl-card>, <sl-badge>, <sl-tag>, <sl-icon>, <sl-progress-bar>, <sl-tooltip>.
-
-Metric grid (MUST wrap each metric in a div): <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem"><div><div class="metric-value">99.9%</div><div class="metric-label">Label</div></div>...</div>. Table: <table class="table"><thead>...</thead><tbody>...</tbody></table> — put status/icon in col 1, name in col 2, numeric cols 3+ (auto right-aligned).
-
-SVG viz (class + data-attr JSON): trace-waterfall(data-spans:[{id,parent,service,op,start,dur,status}]), topology-graph(data-graph:{nodes:[{id,status,rpm,p95,errors}],edges:[{source,target,rpm,errorRate}]}), flow-sankey(data-flow:{nodes:[{id,label,rpm,status?}],links:[{source,target,value}]}), flame-graph(data-frames:[{name,depth,x,w,self,total,samples,service}]), latency-heatmap(data-heatmap:{buckets:[],times:[],values:[[]]}), dep-matrix(data-matrix:{services:[],cells:[{from,to,errorRate,rpm,p95}]}), endpoint-breakdown(data-endpoints:{endpoints:[{method,path,rpm,p50,p95,p99,errorRate,status,trend:[]}]}), correlation-view(data-correlation:{times:[],panels:[{label,color,values:[],baseline?,markers?:[{t,label,severity}]}]}), timeseries-chart(data-timeseries:{series:[{label,color,values:[],type}],labels:[],yLabel}), bar-chart(data-barchart:{bars:[{label,value,color?}],yLabel?,horizontal?}).
-
-Wrap viz: <div class="viz-card"><div class="viz-card-header"><div class="viz-card-title"><span class="signal-dot" style="background:var(--signal-trace)"></span>Title</div><div class="viz-card-actions"><button class="btn-icon btn-viz-expand" title="Expand"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 2H2v4M10 2h4v4M6 14H2v-4M10 14h4v-4"/></svg></button></div></div><div class="viz-card-body"><div class="CLASS" data-ATTR='JSON'></div></div></div>`,
-		InputSchema: jsonSchema(map[string]property{
-			"html": {Type: "string", Desc: "HTML content to render (Shoelace components, CSS vars, Vega-Lite supported)", Required: true},
-		}),
-	}, func(ctx context.Context, input json.RawMessage) (string, error) {
-		var p struct {
-			HTML string `json:"html"`
-		}
-		if err := json.Unmarshal(input, &p); err != nil {
-			return "", fmt.Errorf("invalid input: %w", err)
-		}
-		if strings.TrimSpace(p.HTML) == "" {
-			return "", fmt.Errorf("render tool requires non-empty html")
-		}
-		return p.HTML, nil
-	})
-
 	slog.Info("AI tool registry initialized",
 		"mcp_tools", len(r.defs)-len(r.handlers),
 		"ai_only_tools", len(r.handlers),
@@ -241,12 +209,14 @@ func (r *ToolRegistry) Close() error {
 	return nil
 }
 
-// Defs returns all tool definitions for the LLM.
+// Defs returns a copy of all tool definitions for the LLM.
 func (r *ToolRegistry) Defs() []ToolDef {
-	return r.defs
+	out := make([]ToolDef, len(r.defs))
+	copy(out, r.defs)
+	return out
 }
 
-// Execute runs a tool by name and returns the result.
+// Execute runs a tool by name and returns the result text.
 // AI-only tools are checked first; all others are dispatched to the MCP server.
 func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
 	// Check AI-only handlers first

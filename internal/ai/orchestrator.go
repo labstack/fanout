@@ -13,70 +13,34 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/service"
-	"github.com/microcosm-cc/bluemonday"
 )
 
 const maxIterations = 10
 
+const respondToolName = "respond"
+
+// respondToolDef builds the synthetic respond tool definition.
+// This tool is NOT registered in the ToolRegistry — it is appended to the
+// tools list for the provider call and intercepted by the orchestrator.
+func respondToolDef() ToolDef {
+	return ToolDef{
+		Name:        respondToolName,
+		Description: "Produce your final response with markdown text and visualization blocks. Call this as your last action.",
+		InputSchema: generateResponseSchema(), // from schema_gen.go
+	}
+}
+
 // Orchestrator manages the agentic loop: user question → LLM → tools → stream.
 type Orchestrator struct {
-	provider  Provider
-	tools     *ToolRegistry
-	svc       *service.Service
-	cfg       config.Config
-	sanitizer *bluemonday.Policy
+	provider Provider
+	tools    *ToolRegistry
+	svc      *service.Service
+	cfg      config.Config
 
 	// Cached services list (refreshed every 60s)
 	servicesMu    sync.RWMutex
 	servicesList  []string
 	servicesStale time.Time
-}
-
-// NewSanitizer creates the shared bluemonday HTML sanitizer policy.
-// Used by both the Orchestrator and the UI handler for bookmark sanitization.
-func NewSanitizer() *bluemonday.Policy {
-	p := bluemonday.UGCPolicy()
-	// Allow Shoelace custom elements
-	p.AllowElements("sl-card", "sl-badge", "sl-tag", "sl-icon", "sl-progress-bar",
-		"sl-spinner", "sl-tooltip", "sl-alert", "sl-button", "sl-divider",
-		"sl-details", "sl-tab-group", "sl-tab", "sl-tab-panel")
-	// Allow specific CSS properties (not blanket style attr, to prevent UI redressing)
-	p.AllowStyles(
-		"color", "background", "background-color", "font-size", "font-weight",
-		"text-align", "display", "grid-template-columns", "gap", "padding", "margin",
-		"border", "border-color", "border-radius", "width", "height", "max-width", "min-width",
-		"flex", "flex-direction", "align-items", "justify-content",
-		"opacity", "text-transform", "letter-spacing", "line-height",
-		"overflow", "white-space", "text-overflow",
-		"padding-left", "padding-right", "padding-top", "padding-bottom",
-		"margin-left", "margin-right", "margin-top", "margin-bottom",
-	).Globally()
-	// Allow only the data-* attributes used by viz renderers (not blanket AllowDataAttributes)
-	p.AllowAttrs(
-		// Container data attributes parsed by V.util.parseData
-		"data-graph", "data-timeseries", "data-spans", "data-matrix",
-		"data-frames", "data-barchart", "data-heatmap", "data-correlation",
-		"data-flow", "data-endpoints",
-		// Interactive element indices used by renderer event handlers
-		"data-idx", "data-edge-idx", "data-node-id", "data-series",
-		"data-ti", "data-bi", "data-link-idx", "data-from", "data-to",
-		"data-marker-panel", "data-marker-t",
-	).Globally()
-	p.AllowAttrs("class").Globally()
-	p.AllowAttrs("slot").Globally()
-	p.AllowAttrs("variant", "size", "pill", "name", "label", "value", "open", "closable").Globally()
-	// Allow SVG for inline charts and viz renderers
-	p.AllowElements("svg", "path", "line", "rect", "circle", "text", "g", "defs",
-		"linearGradient", "stop", "polyline", "polygon", "marker", "tspan")
-	p.AllowAttrs("viewBox", "xmlns", "fill", "stroke", "stroke-width", "d", "x", "y",
-		"x1", "y1", "x2", "y2", "cx", "cy", "r", "rx", "ry", "width", "height",
-		"transform", "text-anchor", "font-size", "opacity", "points",
-		"offset", "stop-color", "id", "gradientUnits",
-		"refX", "refY", "markerWidth", "markerHeight", "orient", "marker-end",
-		"fill-opacity", "stroke-opacity", "stroke-linecap", "stroke-linejoin",
-		"stroke-dasharray", "font-weight", "font-family", "letter-spacing",
-		"text-transform", "dominant-baseline", "text-decoration").Globally()
-	return p
 }
 
 // NewOrchestrator creates an orchestrator with the given provider and tools.
@@ -90,11 +54,10 @@ func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Servic
 	}
 
 	return &Orchestrator{
-		provider:  provider,
-		tools:     tools,
-		svc:       svc,
-		cfg:       cfg,
-		sanitizer: NewSanitizer(),
+		provider: provider,
+		tools:    tools,
+		svc:      svc,
+		cfg:      cfg,
 	}
 }
 
@@ -106,7 +69,6 @@ const (
 	CEToken      ClientEventType = "token"
 	CEToolCall   ClientEventType = "tool_call"
 	CEToolResult ClientEventType = "tool_result"
-	CECard       ClientEventType = "card"
 	CEError      ClientEventType = "error"
 	CEDone       ClientEventType = "done"
 	CETail       ClientEventType = "tail"
@@ -124,13 +86,13 @@ type TailConfig struct {
 
 // ClientEvent is sent from the orchestrator to the WebSocket client.
 type ClientEvent struct {
-	Type    ClientEventType `json:"type"`              // CEToken, CEToolCall, CEToolResult, CECard, CEError, CEDone
+	Type    ClientEventType `json:"type"`
 	Content string          `json:"content,omitempty"` // text content
 	Name    string          `json:"name,omitempty"`    // tool name
 	Input   string          `json:"input,omitempty"`   // tool input (for display)
-	HTML    string          `json:"html,omitempty"`    // sanitized HTML for cards
 	Error   string          `json:"error,omitempty"`   // error message
 	ID      string          `json:"id,omitempty"`      // response ID
+	Blocks  []Block         `json:"blocks,omitempty"`  // structured blocks for client rendering
 }
 
 // SendFunc writes a client event to the WebSocket.
@@ -153,10 +115,12 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		var stopReason string
 		var hadError bool
 
+		tools := append(o.tools.Defs(), respondToolDef())
+
 		err := o.provider.Stream(ctx, StreamParams{
 			SystemBlocks: systemBlocks,
 			Messages:     conversation,
-			Tools:        o.tools.Defs(),
+			Tools:        tools,
 			MaxTokens:    4096,
 		}, func(event StreamEvent) error {
 			switch event.Type {
@@ -219,11 +183,11 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		// Record assistant message
 		conversation = append(conversation, AssistantMessage(textBuf.String(), toolCalls))
 
-		// If the LLM didn't request tool use, we're done
+		// If the LLM didn't request tool use, we're done (graceful fallback)
 		if stopReason != "tool_use" {
 			doneEvt := ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}
 			if text := textBuf.String(); text != "" {
-				doneEvt.HTML = o.sanitizer.Sanitize(text)
+				doneEvt.Blocks = []Block{MakeTextBlock(text)}
 			}
 			if err := send(doneEvt); err != nil {
 				return conversation, tailCfg, err
@@ -231,6 +195,124 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			conversation = compactToolResults(conversation)
 			return conversation, tailCfg, nil
 		}
+
+		// Check for respond tool call
+		var respondCall *ToolCall
+		var realToolCalls []ToolCall
+		for i := range toolCalls {
+			if toolCalls[i].Name == respondToolName {
+				respondCall = &toolCalls[i]
+			} else {
+				realToolCalls = append(realToolCalls, toolCalls[i])
+			}
+		}
+
+		if respondCall != nil {
+			// If the LLM called both respond and real tools, execute the real
+			// tools first so their results are in the conversation history.
+			if len(realToolCalls) > 0 {
+				type toolExecResult struct {
+					tc      ToolCall
+					result  string
+					isError bool
+				}
+				sideResults := make([]toolExecResult, len(realToolCalls))
+				var sideWg sync.WaitGroup
+				for si, stc := range realToolCalls {
+					sideResults[si].tc = stc
+					sideWg.Add(1)
+					go func(idx int, tc ToolCall) {
+						defer sideWg.Done()
+						defer func() {
+							if r := recover(); r != nil {
+								slog.Error("tool execution panicked", "tool", tc.Name, "panic", r)
+								sideResults[idx].result = fmt.Sprintf(`{"error": "internal error executing %s"}`, tc.Name)
+								sideResults[idx].isError = true
+							}
+						}()
+						result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
+						if err != nil {
+							sideResults[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
+							sideResults[idx].isError = true
+						} else {
+							sideResults[idx].result = result
+						}
+					}(si, stc)
+				}
+				sideWg.Wait()
+				if ctx.Err() != nil {
+					return conversation, tailCfg, ctx.Err()
+				}
+				for _, r := range sideResults {
+					if r.tc.Name == "tail" && !r.isError {
+						var tailResult struct {
+							Tail *TailConfig `json:"tail"`
+						}
+						if err := json.Unmarshal([]byte(r.result), &tailResult); err != nil {
+							slog.Warn("failed to unmarshal tail config", "err", err)
+						} else if tailResult.Tail != nil {
+							tailCfg = tailResult.Tail
+							if tailCfg.Namespace == "" {
+								tailCfg.Namespace = namespace
+							}
+						}
+					}
+					if sendErr := send(ClientEvent{Type: CEToolResult, Name: r.tc.Name}); sendErr != nil {
+						return conversation, tailCfg, sendErr
+					}
+					conversation = append(conversation, ToolMessage(r.tc.ID, truncateResult(r.result, 8192), r.isError))
+				}
+			}
+
+			// Add a synthetic tool_result so the conversation stays valid
+			// for subsequent turns (Anthropic requires tool_result after tool_use).
+			conversation = append(conversation, ToolMessage(respondCall.ID, `{"ok":true}`, false))
+
+			// Parse structured response
+			var resp struct {
+				Text   string  `json:"text"`
+				Blocks []Block `json:"blocks"`
+			}
+			if err := json.Unmarshal([]byte(respondCall.Input), &resp); err != nil {
+				slog.Error("failed to parse respond tool input", "err", err, "input_preview", truncateJSON(respondCall.Input, 500))
+				// Fallback: use streamed text
+				text := textBuf.String()
+				if text == "" {
+					text = "I encountered an error formatting my response."
+				}
+				doneEvt := ClientEvent{
+					Type:   CEDone,
+					ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+					Blocks: []Block{MakeTextBlock(text)},
+				}
+				if err := send(doneEvt); err != nil {
+					return conversation, tailCfg, err
+				}
+				return conversation, tailCfg, nil
+			}
+
+			// Validate blocks
+			blocks := validateBlocks(resp.Blocks)
+
+			// Prepend text as a TextBlock
+			if resp.Text != "" {
+				blocks = append([]Block{MakeTextBlock(resp.Text)}, blocks...)
+			}
+
+			doneEvt := ClientEvent{
+				Type:   CEDone,
+				ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+				Blocks: blocks,
+			}
+			if err := send(doneEvt); err != nil {
+				return conversation, tailCfg, err
+			}
+			conversation = compactToolResults(conversation)
+			return conversation, tailCfg, nil
+		}
+
+		// Otherwise execute real tool calls (existing logic)
+		toolCalls = realToolCalls
 
 		// Execute tool calls in parallel
 		type toolExecResult struct {
@@ -246,6 +328,13 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			wg.Add(1)
 			go func(idx int, tc ToolCall) {
 				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						slog.Error("tool execution panicked", "tool", tc.Name, "panic", r)
+						results[idx].result = fmt.Sprintf(`{"error": "internal error executing %s"}`, tc.Name)
+						results[idx].isError = true
+					}
+				}()
 				result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
 				if err != nil {
 					results[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
@@ -264,15 +353,6 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		// Send results to WebSocket sequentially (preserves order)
 		for idx := range results {
 			r := &results[idx]
-
-			// Special handling for render tool: sanitize HTML and send as card
-			if r.tc.Name == "render" && !r.isError {
-				sanitized := o.sanitizer.Sanitize(r.result)
-				if sendErr := send(ClientEvent{Type: CECard, HTML: sanitized}); sendErr != nil {
-					return conversation, tailCfg, sendErr
-				}
-				r.result = `{"rendered": true}`
-			}
 
 			// Special handling for tail tool: extract TailConfig
 			if r.tc.Name == "tail" && !r.isError {
@@ -305,10 +385,16 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	}
 
 	slog.Warn("orchestrator hit max iterations", "max", maxIterations)
-	if err := send(ClientEvent{Type: CEToken, Content: "<p><em>Reached maximum tool iterations. Please refine your question for more details.</em></p>"}); err != nil {
+	maxIterMsg := "Reached maximum tool iterations. Please refine your question for more details."
+	if err := send(ClientEvent{Type: CEToken, Content: maxIterMsg}); err != nil {
 		return conversation, tailCfg, err
 	}
-	if err := send(ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}); err != nil {
+	doneEvt := ClientEvent{
+		Type:   CEDone,
+		ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+		Blocks: []Block{MakeTextBlock(maxIterMsg)},
+	}
+	if err := send(doneEvt); err != nil {
 		return conversation, tailCfg, err
 	}
 	conversation = compactToolResults(conversation)
@@ -339,6 +425,10 @@ func (o *Orchestrator) SuggestedQuestions(ctx context.Context) []string {
 }
 
 func (o *Orchestrator) cachedServices(ctx context.Context) []string {
+	if o.svc == nil {
+		return nil
+	}
+
 	o.servicesMu.RLock()
 	if time.Now().Before(o.servicesStale) {
 		defer o.servicesMu.RUnlock()
@@ -384,13 +474,46 @@ func (o *Orchestrator) cachedServices(ctx context.Context) []string {
 
 // staticSystemPrompt contains the cacheable portion of the system prompt.
 // Keep this as a const so it can be used as a single cache-friendly block.
-const staticSystemPrompt = `You are the AI assistant for Fanout, an observability platform. You help users understand system health, investigate issues, and analyze telemetry data.
+const staticSystemPrompt = `You are the AI assistant for Fanout, an observability platform.
+You help users understand system health, investigate issues, and analyze telemetry data.
 
-Tools: status (start here) → diagnose (deep-dive) → find (search spans/logs) → tail (live log streaming) → trace (full trace, needs trace_id) → timeline (trends) → topology (dependency map) → compare (side-by-side) → metrics (explore metrics) → query (custom SQL, last resort) → render (visual HTML cards — see render tool description for design system).
+## Tools
 
-Reply in HTML, not Markdown. Use <p> for prose, <strong>/<em> for emphasis, <ul>/<ol> for lists, <h2>/<h3> for headings, <code> for inline code, <pre><code> for code blocks, <table> for data. Do NOT use Markdown syntax.
+Investigation tools (use these to gather data):
+status (start here) → diagnose (deep-dive) → find (search spans/logs) →
+tail (live log streaming) → trace (full trace, needs trace_id) → timeline (trends) →
+topology (dependency map) → compare (side-by-side) → metrics (explore metrics) →
+query (custom SQL, last resort).
 
-Be direct, cite specific numbers, use render for visual data, explain root causes with next steps. Never use emoji. For status indicators use Shoelace icons with utility classes: <sl-icon name="check-circle-fill" class="i-ok"></sl-icon> (healthy), <sl-icon name="exclamation-triangle-fill" class="i-err"></sl-icon> (error), <sl-icon name="exclamation-circle-fill" class="i-warn"></sl-icon> (warning), <sl-icon name="dash-circle" class="i-muted"></sl-icon> (neutral).`
+## Response
+
+After gathering data, call the respond tool with:
+- text: Markdown analysis. Be direct, cite specific numbers, explain root causes with next steps.
+- blocks: Visualization blocks from the types below.
+
+## Block Types
+
+- metrics       — 2-6 KPI summary cards (throughput, latency, error rate)
+- table         — tabular data, top errors, search results, comparisons
+- timeseries    — trends over time (latency, throughput, error rate over time)
+- bar           — ranked comparisons (top endpoints, slowest operations)
+- heatmap       — latency distributions over time buckets
+- trace_waterfall — single distributed trace visualization
+- topology      — service dependency graph with health
+- flame_graph   — aggregated span breakdowns
+- sankey        — request flow between services
+- dep_matrix    — NxN service health grid
+- endpoints     — per-endpoint performance breakdown
+- correlation   — multi-signal correlation (latency vs errors vs throughput)
+- tail          — log entries
+
+## Rules
+
+- Block data MUST come from tool results. Never fabricate data points.
+- Prefer visualization over text. Don't describe data the user can see in charts.
+- 1-3 blocks per response. More is clutter.
+- Most specific type wins: endpoints > table for endpoint data, trace_waterfall > table for traces.
+- Do not include a text block in the blocks array — use the text field instead.`
 
 func (o *Orchestrator) buildSystemBlocks(ctx context.Context, window int, namespace string) []SystemBlock {
 	services := o.cachedServices(ctx)

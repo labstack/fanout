@@ -9,7 +9,7 @@ on:
 jobs:
   changes:
     name: Detect changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       pull-requests: read
@@ -32,7 +32,7 @@ jobs:
     name: Server (fmt + vet + lint + test + build)
     needs: changes
     if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
 
@@ -82,7 +82,7 @@ jobs:
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       needs.changes.outputs.go == 'true'
     needs: [changes, server]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write

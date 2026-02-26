@@ -246,9 +246,9 @@ func TestToolRegistryMCPIntegration(t *testing.T) {
 		t.Error("greet InputSchema should not be nil")
 	}
 
-	// 5. Verify AI-only tools (metrics, tail, render) are present in Defs().
+	// 5. Verify AI-only tools (metrics, tail) are present in Defs().
 	//    They get registered even with nil svc (closures capture svc but don't call it during registration).
-	aiTools := map[string]bool{"metrics": false, "tail": false, "render": false}
+	aiTools := map[string]bool{"metrics": false, "tail": false}
 	for _, d := range defs {
 		if _, ok := aiTools[d.Name]; ok {
 			aiTools[d.Name] = true
