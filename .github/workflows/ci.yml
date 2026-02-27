@@ -15,6 +15,7 @@ jobs:
       pull-requests: read
     outputs:
       go: ${{ steps.filter.outputs.go }}
+      docker: ${{ steps.filter.outputs.docker }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v3
@@ -27,6 +28,10 @@ jobs:
               - 'go.sum'
               - '.github/workflows/ci.yml'
               - '.golangci.yml'
+            docker:
+              - 'Dockerfile'
+              - '.dockerignore'
+              - 'client/**'
 
   server:
     name: Server (fmt + vet + lint + test + build)
@@ -79,7 +84,7 @@ jobs:
       always() &&
       !failure() && !cancelled() &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      needs.changes.outputs.go == 'true'
+      (needs.changes.outputs.go == 'true' || needs.changes.outputs.docker == 'true')
     needs: [changes, server]
     runs-on: ubuntu-24.04
     permissions:
