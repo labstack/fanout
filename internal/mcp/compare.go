@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/labstack/fanout/internal/render"
@@ -80,6 +81,7 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 		var m CompareMetrics
 		var logCount, metricCount int64
 		if err := rows.Scan(&m.Service, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms, &logCount, &metricCount); err != nil {
+			slog.Warn("scan failed", "method", "compare", "err", err)
 			continue
 		}
 		// Count all signals for determining if service has data
@@ -111,8 +113,8 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 	winner := ""
 	bestScore := float64(-1)
 	for _, m := range metrics {
-		if m.Requests == 0 {
-			continue
+		if m.Requests == 0 || (m.P50Ms == 0 && m.P95Ms == 0) {
+			continue // skip services with no span-based latency data
 		}
 		// Score: lower is better (P95 * (1 + error_rate*10))
 		score := m.P95Ms * (1 + m.ErrorRate*10)

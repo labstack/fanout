@@ -108,7 +108,7 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 	for _, d := range result.Dependencies {
 		out.Dependencies = append(out.Dependencies, Dependency{
 			Service:   d.Service,
-			Status:    service.DeriveHealth(d.ErrorRate, d.AvgMs),
+			Status:    service.DeriveHealth(d.ErrorRate, d.AvgMs, d.CallCount),
 			ErrorRate: d.ErrorRate,
 			AvgMs:     d.AvgMs,
 			Calls:     d.CallCount,

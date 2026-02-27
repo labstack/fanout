@@ -44,7 +44,7 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
 		return out, nil
 	}
 
-	out.Status = DeriveHealth(out.ErrorRate, out.P95Ms)
+	out.Status = DeriveHealth(out.ErrorRate, out.P95Ms, out.SpanCount)
 
 	var suggestedTraces []string
 

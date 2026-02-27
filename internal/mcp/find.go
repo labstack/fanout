@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/labstack/fanout/internal/render"
 	"github.com/labstack/fanout/internal/service"
@@ -91,7 +92,13 @@ func (s *Server) find(ctx context.Context, req *mcp.CallToolRequest, in FindIn) 
 		Limit:     limit,
 	})
 	if err != nil {
-		return nil, FindOut{Spans: []FoundSpan{}, Logs: []FoundLog{}, Metrics: []FoundMetric{}}, nil
+		slog.Warn("find query failed", "method", "find", "err", err)
+		return nil, FindOut{
+			Spans:      []FoundSpan{},
+			Logs:       []FoundLog{},
+			Metrics:    []FoundMetric{},
+			Suggestion: fmt.Sprintf("Query failed: %s", err.Error()),
+		}, nil
 	}
 
 	out := FindOut{

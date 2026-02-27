@@ -294,12 +294,13 @@ func (d *Duck) LatencyOverview(ctx context.Context, windowMinutes int) ([]Latenc
 	q := fmt.Sprintf(`
 SELECT
   service as service_name,
-  AVG(p95_ms) as p95_ms,
-  AVG(error_rate) as error_rate,
+  AVG(CASE WHEN spans > 0 THEN p95_ms END) as p95_ms,
+  AVG(CASE WHEN spans > 0 THEN error_rate END) as error_rate,
   SUM(spans)::BIGINT as spans
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
 GROUP BY service
+HAVING SUM(spans) > 0
 ORDER BY p95_ms DESC
 LIMIT 100;
 `, windowMinutes)

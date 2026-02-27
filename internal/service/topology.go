@@ -99,7 +99,7 @@ LIMIT 100;
 			slog.Warn("scan failed", "method", "Topology.edges", "err", err)
 			continue
 		}
-		e.Status = DeriveHealth(e.ErrorRate, e.AvgMs)
+		e.Status = DeriveHealth(e.ErrorRate, e.AvgMs, e.CallCount)
 		out.Edges = append(out.Edges, e)
 	}
 

@@ -79,7 +79,7 @@ func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in Topo
 			CallCount: e.CallCount,
 			AvgMs:     e.AvgMs,
 			ErrorRate: e.ErrorRate,
-			Status:    service.DeriveHealth(e.ErrorRate, e.AvgMs),
+			Status:    service.DeriveHealth(e.ErrorRate, e.AvgMs, e.CallCount),
 			EdgeType:  e.EdgeType,
 		})
 	}
