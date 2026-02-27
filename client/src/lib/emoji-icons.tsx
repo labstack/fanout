@@ -46,44 +46,57 @@ const emojiMap = new Map<string, EmojiDef>([
   ["🚨", { icon: Siren, className: "text-red-400" }],
 ]);
 
-const regex = emojiRegex();
+let regex: RegExp;
+try {
+  regex = emojiRegex();
+} catch {
+  console.error("[emoji-icons] failed to compile emoji regex, replacement disabled");
+  regex = /(?!)/; // never-matching fallback
+}
 
 /**
- * Replace mapped emojis with Lucide icons. Unmapped emojis pass through as text.
+ * Replace mapped emojis with Lucide icons; unmapped emojis pass through as text.
+ * Always returns a non-empty array (returns [text] when no emojis are found).
  */
 export function replaceEmojis(text: string): React.ReactNode[] {
-  const result: React.ReactNode[] = [];
-  let lastIndex = 0;
-  let key = 0;
+  try {
+    const result: React.ReactNode[] = [];
+    let lastIndex = 0;
 
-  for (const match of text.matchAll(regex)) {
-    const emoji = match[0];
-    const index = match.index!;
+    for (const match of text.matchAll(regex)) {
+      const emoji = match[0];
+      const index = match.index;
+      if (index === undefined) continue;
 
-    if (index > lastIndex) {
-      result.push(text.slice(lastIndex, index));
+      if (index > lastIndex) {
+        result.push(text.slice(lastIndex, index));
+      }
+
+      // Strip variation selector (U+FE0F) for lookup — some LLMs emit bare forms
+      const def = emojiMap.get(emoji) ?? emojiMap.get(emoji.replace(/\uFE0F/g, ""));
+      if (def) {
+        const Icon = def.icon;
+        result.push(
+          <Icon
+            key={index}
+            className={`inline-block h-3.5 w-3.5 align-middle ${def.className}`}
+            style={{ transform: "translateY(-1px)" }}
+          />,
+        );
+      } else {
+        result.push(emoji);
+      }
+
+      lastIndex = index + emoji.length;
     }
 
-    const def = emojiMap.get(emoji);
-    if (def) {
-      const Icon = def.icon;
-      result.push(
-        <Icon
-          key={key++}
-          className={`inline-block h-3.5 w-3.5 align-middle ${def.className}`}
-          style={{ transform: "translateY(-1px)" }}
-        />,
-      );
-    } else {
-      result.push(emoji);
+    if (lastIndex < text.length) {
+      result.push(text.slice(lastIndex));
     }
 
-    lastIndex = index + emoji.length;
+    return result.length > 0 ? result : [text];
+  } catch (err) {
+    console.error("[emoji-icons] replaceEmojis failed, returning raw text:", err);
+    return [text];
   }
-
-  if (lastIndex < text.length) {
-    result.push(text.slice(lastIndex));
-  }
-
-  return result.length > 0 ? result : [text];
 }

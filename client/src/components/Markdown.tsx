@@ -1,12 +1,21 @@
+import { Component, type ReactNode, type ErrorInfo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { replaceEmojis } from "@/lib/emoji-icons";
 
-function processChildren(children: React.ReactNode): React.ReactNode {
+/**
+ * Shared Markdown renderer with GFM support and emoji-to-icon replacement.
+ * Intercepts text-containing elements (p, li, td, th, strong, em) to swap
+ * recognized emoji characters for Lucide SVG icons.
+ */
+
+function processChildren(children: React.ReactNode, depth = 0): React.ReactNode {
+  if (depth > 20) return children;
   if (typeof children === "string") return replaceEmojis(children);
-  if (Array.isArray(children)) return children.map(processChildren);
-  return children;
+  if (Array.isArray(children))
+    return children.map((c) => processChildren(c, depth + 1));
+  return children; // React elements (code, a, etc.) pass through unprocessed
 }
 
 const components: Components = {
@@ -28,10 +37,42 @@ const components: Components = {
   ),
 };
 
-export function Markdown({ children }: { children: string }) {
+const plugins = [remarkGfm];
+
+class MarkdownErrorBoundary extends Component<
+  { children: ReactNode; fallback: string },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("[Markdown] render failed:", error, info);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <pre className="text-sm text-muted-foreground whitespace-pre-wrap">
+          {this.props.fallback}
+        </pre>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+type MarkdownProps = { children: string };
+
+export function Markdown({ children }: MarkdownProps) {
   return (
-    <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-      {children}
-    </ReactMarkdown>
+    <MarkdownErrorBoundary fallback={children}>
+      <ReactMarkdown remarkPlugins={plugins} components={components}>
+        {children}
+      </ReactMarkdown>
+    </MarkdownErrorBoundary>
   );
 }

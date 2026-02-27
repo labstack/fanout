@@ -28,8 +28,11 @@ export function TableBlock({ data }: { data: TableBlockData }) {
           cell: (info) => {
             const v = info.getValue();
             if (v == null) return "";
-            const s = String(v);
-            return <>{replaceEmojis(s)}</>;
+            try {
+              return <>{replaceEmojis(String(v))}</>;
+            } catch {
+              return String(v);
+            }
           },
           meta: { align: col.align ?? "left" },
         }),

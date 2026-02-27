@@ -78,6 +78,8 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
         break;
 
       case "tool_result":
+        // Clear streamed content so the skeleton placeholder shows while tools run.
+        // Final content arrives via token events after the last tool result.
         messages[lastIdx] = {
           ...last,
           content: "",
@@ -87,7 +89,16 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
         };
         break;
 
-      case "done":
+      case "done": {
+        // Ensure all tool calls show as complete when the response is finalized,
+        // in case individual tool_result events were missed or arrived out of order.
+        const incomplete = last.toolCalls.filter((tc) => !tc.done);
+        if (incomplete.length > 0) {
+          console.warn(
+            "[chat] done with incomplete tool calls, force-completing:",
+            incomplete.map((tc) => tc.name),
+          );
+        }
         messages[lastIdx] = {
           ...last,
           loading: false,
@@ -98,6 +109,7 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
           ),
         };
         break;
+      }
 
       case "error":
         messages[lastIdx] = {
