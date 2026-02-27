@@ -15,10 +15,6 @@ services:
       - /data/ssl:/etc/nginx/certs
       - /data/nginx:/etc/nginx/vhost.d
       - /data/html:/usr/share/nginx/html
-    environment:
-      PROXY_READ_TIMEOUT: 180
-      PROXY_CONNECT_TIMEOUT: 180
-      PROXY_SEND_TIMEOUT: 180
     networks:
       - webproxy
       - default

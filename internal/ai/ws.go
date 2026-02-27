@@ -14,6 +14,11 @@ import (
 	"github.com/labstack/fanout/internal/service"
 )
 
+const (
+	pingInterval = 30 * time.Second
+	pongWait     = 60 * time.Second
+)
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
@@ -58,6 +63,11 @@ func (h *WSHandler) Handle(c *echo.Context) error {
 	}
 	defer ws.Close()
 	ws.SetReadLimit(64 * 1024) // 64KB max message
+	ws.SetReadDeadline(time.Now().Add(pongWait))
+	ws.SetPongHandler(func(string) error {
+		ws.SetReadDeadline(time.Now().Add(pongWait))
+		return nil
+	})
 
 	session := &chatSession{
 		ws:           ws,
@@ -67,7 +77,27 @@ func (h *WSHandler) Handle(c *echo.Context) error {
 		messages:     []Message{},
 	}
 
-	return session.run()
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(pingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				session.writeMu.Lock()
+				err := ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second))
+				session.writeMu.Unlock()
+				if err != nil {
+					return
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	err = session.run()
+	close(done)
+	return err
 }
 
 type chatSession struct {
