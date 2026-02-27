@@ -85,9 +85,9 @@ func (d *Duck) DefaultTenantID() string {
 	return d.cfg.TenantID.String()
 }
 
-// DefaultNamespace returns the configured default namespace
+// DefaultNamespace returns empty string so queries search all namespaces.
 func (d *Duck) DefaultNamespace() string {
-	return d.cfg.DefaultNS
+	return ""
 }
 
 func (d *Duck) RunRollups(ctx context.Context) {

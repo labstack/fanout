@@ -17,19 +17,15 @@ func New(duck *query.Duck, cfg config.Config) *Service {
 }
 
 // defaults returns namespace and tenantID with defaults applied.
-// Queries are always scoped to a single partition.
+// Empty namespace means search all namespaces (wildcard).
 func (s *Service) defaults(namespace, tenantID string) (string, string) {
-	if namespace == "" {
-		namespace = s.cfg.DefaultNS
-	}
 	if tenantID == "" {
 		tenantID = s.cfg.TenantID.String()
 	}
 	return namespace, tenantID
 }
 
-// ResolveNamespace returns the effective namespace (applying default if empty).
+// ResolveNamespace returns the effective namespace (empty means all).
 func (s *Service) ResolveNamespace(namespace string) string {
-	ns, _ := s.defaults(namespace, "")
-	return ns
+	return namespace
 }

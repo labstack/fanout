@@ -76,7 +76,7 @@ func TestDefaults(t *testing.T) {
 			name:       "both empty uses defaults",
 			namespace:  "",
 			tenantID:   "",
-			wantNS:     "default-ns",
+			wantNS:     "",
 			wantTenant: tenantID.String(),
 		},
 		{
@@ -90,7 +90,7 @@ func TestDefaults(t *testing.T) {
 			name:       "custom tenant",
 			namespace:  "",
 			tenantID:   "custom-tenant",
-			wantNS:     "default-ns",
+			wantNS:     "",
 			wantTenant: "custom-tenant",
 		},
 		{
