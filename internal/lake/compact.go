@@ -11,9 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/parquet-go/parquet-go"
-	"github.com/parquet-go/parquet-go/compress/zstd"
-
 	"github.com/labstack/fanout/internal/config"
 )
 
@@ -24,8 +21,8 @@ type Compactor struct {
 	mu  sync.Mutex
 }
 
-// NewCompactor creates a new compactor. If db is non-nil, uses DuckDB COPY
-// for streaming compaction (constant memory). Falls back to in-memory merge.
+// NewCompactor creates a new compactor using DuckDB COPY for streaming
+// compaction (constant memory).
 func NewCompactor(cfg config.Config, db *sql.DB) *Compactor {
 	return &Compactor{cfg: cfg, db: db}
 }
@@ -151,7 +148,7 @@ func (c *Compactor) compactSignal(signal string, cutoff time.Time) (int, int64) 
 							continue
 						}
 
-						saved, err := c.compactDay(signal, dayPath)
+						saved, err := c.compactDay(dayPath)
 						if err != nil {
 							slog.Error("compaction failed", "signal", signal, "path", dayPath, "err", err)
 							continue
@@ -188,7 +185,7 @@ func isCompacted(dayPath string) bool {
 	return false
 }
 
-func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
+func (c *Compactor) compactDay(dayPath string) (int64, error) {
 	// Collect all parquet files from hour directories
 	var files []string
 	var sizeBefore int64
@@ -222,25 +219,9 @@ func (c *Compactor) compactDay(signal, dayPath string) (int64, error) {
 		return 0, nil
 	}
 
-	// Compact: prefer DuckDB streaming (constant memory) over in-memory merge
-	var sizeAfter int64
-	var compactErr error
-
-	if c.db != nil {
-		sizeAfter, compactErr = c.compactWithDuckDB(files, dayPath)
-	} else {
-		switch signal {
-		case "spans":
-			sizeAfter, compactErr = compactFiles[SpanRow](files, dayPath)
-		case "logs":
-			sizeAfter, compactErr = compactFiles[LogRow](files, dayPath)
-		case "metrics":
-			sizeAfter, compactErr = compactFiles[MetricRow](files, dayPath)
-		}
-	}
-
-	if compactErr != nil {
-		return 0, compactErr
+	sizeAfter, err := c.compactWithDuckDB(files, dayPath)
+	if err != nil {
+		return 0, err
 	}
 
 	// Remove old hour directories (keep hour=00 which has the compacted file).
@@ -312,62 +293,4 @@ func (c *Compactor) compactWithDuckDB(files []string, dayPath string) (int64, er
 		return 0, nil
 	}
 	return info.Size(), nil
-}
-
-func compactFiles[T any](files []string, dayPath string) (int64, error) {
-	// Read all rows from all files
-	var allRows []T
-
-	for _, f := range files {
-		rows, err := readParquet[T](f)
-		if err != nil {
-			return 0, fmt.Errorf("compact read %s: %w", f, err)
-		}
-		allRows = append(allRows, rows...)
-	}
-
-	if len(allRows) == 0 {
-		return 0, nil
-	}
-
-	// Write into hour=00 to maintain consistent Hive partitioning
-	hourDir := filepath.Join(dayPath, "hour=00")
-	if err := os.MkdirAll(hourDir, 0o755); err != nil {
-		return 0, fmt.Errorf("create hour dir: %w", err)
-	}
-	compactedPath := filepath.Join(hourDir, "compacted.parquet")
-	tmpPath := compactedPath + ".tmp"
-
-	tmp, err := os.Create(tmpPath)
-	if err != nil {
-		return 0, err
-	}
-
-	if err := parquet.Write(tmp, allRows, parquet.Compression(&zstd.Codec{})); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return 0, err
-	}
-
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
-		return 0, err
-	}
-	tmp.Close()
-
-	if err := os.Rename(tmpPath, compactedPath); err != nil {
-		os.Remove(tmpPath)
-		return 0, err
-	}
-
-	info, _ := os.Stat(compactedPath)
-	if info != nil {
-		return info.Size(), nil
-	}
-	return 0, nil
-}
-
-func readParquet[T any](path string) ([]T, error) {
-	return parquet.ReadFile[T](path)
 }

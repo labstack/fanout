@@ -29,7 +29,7 @@ jobs:
               - '.golangci.yml'
 
   server:
-    name: Server (fmt + vet + lint + test + build)
+    name: Server (fmt + lint + test + build)
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
@@ -42,16 +42,17 @@ jobs:
           cache: false
           cache-dependency-path: go.sum
 
-      - name: Install tools
-        run: go install github.com/a-h/templ/cmd/templ@latest
+      - uses: extractions/setup-just@v3
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install client deps
+        run: cd client && bun install --frozen-lockfile
 
       - name: Format check
-        run: |
-          templ fmt .
-          if [ -n "$(gofmt -l .)" ]; then
-            gofmt -d .
-            exit 1
-          fi
+        run: just fmt-check
 
       - name: Vet
         run: go vet ./...
@@ -62,12 +63,10 @@ jobs:
           version: v2.9
 
       - name: Test
-        run: go test -race -coverprofile=coverage.txt ./...
+        run: just test -race -coverprofile=coverage.txt
 
       - name: Build
-        run: |
-          templ generate
-          CGO_ENABLED=1 go build -ldflags="-s -w" -o fanout ./cmd/fanout
+        run: just build
 
       - name: Upload coverage
         uses: codecov/codecov-action@v5

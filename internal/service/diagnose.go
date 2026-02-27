@@ -115,33 +115,22 @@ LIMIT 5;
 		}
 	}
 
-	// Get downstream dependencies
+	// Get downstream dependencies from edge rollup
 	q = fmt.Sprintf(`
-WITH downstream AS (
-  SELECT
-    child."name=service_name" as dep_service,
-    child."name=duration_ms" as duration_ms,
-    child."name=status_code" as status
-  FROM read_parquet(%s, union_by_name=true) parent
-  JOIN read_parquet(%s, union_by_name=true) child
-    ON parent."name=span_id" = child."name=parent_span_id"
-    AND parent."name=trace_id" = child."name=trace_id"
-  WHERE epoch_ms(CAST(parent."name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-    AND parent."name=service_name" = ?
-    AND child."name=service_name" != ?
-)
 SELECT
-  dep_service,
-  COUNT(*) as calls,
-  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) as p95,
-  AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) as error_rate
-FROM downstream
-GROUP BY dep_service
+  callee as dep_service,
+  SUM(calls)::BIGINT as calls,
+  AVG(avg_ms) as avg_ms,
+  AVG(error_rate) as error_rate
+FROM edge_rollup
+WHERE caller = ?
+  AND bucket >= now() - INTERVAL %d MINUTE
+GROUP BY callee
 ORDER BY calls DESC
 LIMIT 10;
-`, spansGlob, spansGlob, window)
+`, window)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q, svc, svc)
+	rows, err = s.duck.DB.QueryContext(ctx, q, svc)
 	if err == nil {
 		defer rows.Close()
 		for rows.Next() {

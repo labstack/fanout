@@ -27,16 +27,16 @@ func (s *Service) Status(ctx context.Context, window int, namespace, tenantID st
 
 	q := fmt.Sprintf(`
 SELECT
-  "name=service_name" as service,
-  COUNT(*) as cnt,
-  COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95_ms,
-  COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-GROUP BY "name=service_name"
+  service,
+  SUM(spans)::BIGINT as cnt,
+  AVG(p95_ms) as p95_ms,
+  AVG(error_rate) as error_rate
+FROM service_rollup
+WHERE bucket >= now() - INTERVAL %d MINUTE
+GROUP BY service
 ORDER BY cnt DESC
 LIMIT 100;
-`, s.duck.SpansGlob(tenantID, namespace, window), window)
+`, window)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {

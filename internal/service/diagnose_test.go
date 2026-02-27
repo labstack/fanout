@@ -36,8 +36,8 @@ func TestDiagnose_DefaultWindow(t *testing.T) {
 		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
 
 	// Dependencies query
-	mock.ExpectQuery("WITH").WillReturnRows(
-		sqlmock.NewRows([]string{"dep_service", "calls", "p95", "error_rate"}))
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
 	result, err := svc.Diagnose(context.Background(), "my-service", 0, "", "")
 	if err != nil {
@@ -67,8 +67,8 @@ func TestDiagnose_HealthyService(t *testing.T) {
 		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
 
 	// Dependencies - none
-	mock.ExpectQuery("WITH").WillReturnRows(
-		sqlmock.NewRows([]string{"dep_service", "calls", "p95", "error_rate"}))
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
 	result, err := svc.Diagnose(context.Background(), "healthy-service", 15, "", "")
 	if err != nil {
@@ -102,8 +102,8 @@ func TestDiagnose_DegradedService(t *testing.T) {
 		sqlmock.NewRows([]string{"msg", "cnt", "trace_id"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
-	mock.ExpectQuery("WITH").WillReturnRows(
-		sqlmock.NewRows([]string{"dep_service", "calls", "p95", "error_rate"}))
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
 	result, err := svc.Diagnose(context.Background(), "slow-service", 15, "", "")
 	if err != nil {
@@ -128,8 +128,8 @@ func TestDiagnose_UnhealthyService(t *testing.T) {
 		sqlmock.NewRows([]string{"msg", "cnt", "trace_id"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
-	mock.ExpectQuery("WITH").WillReturnRows(
-		sqlmock.NewRows([]string{"dep_service", "calls", "p95", "error_rate"}))
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
 	result, err := svc.Diagnose(context.Background(), "bad-service", 15, "", "")
 	if err != nil {
@@ -157,8 +157,8 @@ func TestDiagnose_WithTopErrors(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
-	mock.ExpectQuery("WITH").WillReturnRows(
-		sqlmock.NewRows([]string{"dep_service", "calls", "p95", "error_rate"}))
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
 	result, err := svc.Diagnose(context.Background(), "error-service", 15, "", "")
 	if err != nil {
@@ -193,8 +193,8 @@ func TestDiagnose_WithSlowOps(t *testing.T) {
 			AddRow("GET /api/heavy", 500.0, int64(100)).
 			AddRow("POST /api/import", 800.0, int64(50)))
 
-	mock.ExpectQuery("WITH").WillReturnRows(
-		sqlmock.NewRows([]string{"dep_service", "calls", "p95", "error_rate"}))
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
 	result, err := svc.Diagnose(context.Background(), "my-service", 15, "", "")
 	if err != nil {
@@ -223,8 +223,8 @@ func TestDiagnose_WithDependencies(t *testing.T) {
 		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
 
 	// Dependencies with data
-	mock.ExpectQuery("WITH").WillReturnRows(
-		sqlmock.NewRows([]string{"dep_service", "calls", "p95", "error_rate"}).
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}).
 			AddRow("database", int64(500), 10.0, 0.001).
 			AddRow("cache", int64(1000), 2.0, 0.0).
 			AddRow("auth-service", int64(200), 25.0, 0.01))
@@ -273,8 +273,8 @@ func TestDiagnose_SQLEscaping(t *testing.T) {
 		sqlmock.NewRows([]string{"msg", "cnt", "trace_id"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
-	mock.ExpectQuery("WITH").WillReturnRows(
-		sqlmock.NewRows([]string{"dep_service", "calls", "p95", "error_rate"}))
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
 	// This should be escaped properly
 	result, err := svc.Diagnose(context.Background(), "service'; DROP TABLE--", 15, "", "")

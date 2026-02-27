@@ -101,8 +101,13 @@ type SendFunc func(event ClientEvent) error
 // Run executes the agentic loop for a user message.
 // Returns the updated conversation, an optional TailConfig if the tail tool was invoked, and any error.
 func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) ([]Message, *TailConfig, error) {
+	runStart := time.Now()
 	systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
 	var tailCfg *TailConfig
+
+	defer func() {
+		slog.Info("orchestrator complete", "total_ms", time.Since(runStart).Milliseconds())
+	}()
 
 	for i := 0; i < maxIterations; i++ {
 		// Check for cancellation between iterations
@@ -117,6 +122,7 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 
 		tools := append(o.tools.Defs(), respondToolDef())
 
+		llmStart := time.Now()
 		err := o.provider.Stream(ctx, StreamParams{
 			SystemBlocks: systemBlocks,
 			Messages:     conversation,
@@ -152,6 +158,15 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			}
 			return nil
 		})
+
+		llmMs := time.Since(llmStart).Milliseconds()
+
+		// Log tool names requested by the LLM
+		var toolNames []string
+		for _, tc := range toolCalls {
+			toolNames = append(toolNames, tc.Name)
+		}
+		slog.Info("llm stream complete", "iteration", i, "llm_ms", llmMs, "stop", stopReason, "tools", toolNames)
 
 		if err != nil {
 			slog.Error("provider stream error", "err", err, "iteration", i)
@@ -208,6 +223,11 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		}
 
 		if respondCall != nil {
+			// Mark the respond tool as complete on the client
+			if err := send(ClientEvent{Type: CEToolResult, Name: respondToolName}); err != nil {
+				return conversation, tailCfg, err
+			}
+
 			// If the LLM called both respond and real tools, execute the real
 			// tools first so their results are in the conversation history.
 			if len(realToolCalls) > 0 {
@@ -316,12 +336,14 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 
 		// Execute tool calls in parallel
 		type toolExecResult struct {
-			tc      ToolCall
-			result  string
-			isError bool
+			tc       ToolCall
+			result   string
+			isError  bool
+			duration time.Duration
 		}
 		results := make([]toolExecResult, len(toolCalls))
 
+		toolsStart := time.Now()
 		var wg sync.WaitGroup
 		for i, tc := range toolCalls {
 			results[i].tc = tc
@@ -335,7 +357,9 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 						results[idx].isError = true
 					}
 				}()
+				t0 := time.Now()
 				result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
+				results[idx].duration = time.Since(t0)
 				if err != nil {
 					results[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
 					results[idx].isError = true
@@ -345,6 +369,12 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			}(i, tc)
 		}
 		wg.Wait()
+
+		// Log tool execution timing
+		for _, r := range results {
+			slog.Info("tool executed", "tool", r.tc.Name, "ms", r.duration.Milliseconds(), "error", r.isError, "result_bytes", len(r.result))
+		}
+		slog.Info("tools batch complete", "iteration", i, "count", len(results), "wall_ms", time.Since(toolsStart).Milliseconds())
 
 		if ctx.Err() != nil {
 			return conversation, tailCfg, ctx.Err()

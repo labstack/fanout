@@ -16,7 +16,7 @@ func TestTopology_Empty(t *testing.T) {
 		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate"}))
 
 	// Edges query - empty
-	mock.ExpectQuery("WITH").WillReturnRows(
+	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}))
 
 	result, err := svc.Topology(context.Background(), 60, "", "")
@@ -44,7 +44,7 @@ func TestTopology_WithNodes(t *testing.T) {
 			AddRow("payment-service", int64(1000), 200.0, 0.02))
 
 	// Edges query - empty
-	mock.ExpectQuery("WITH").WillReturnRows(
+	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}))
 
 	result, err := svc.Topology(context.Background(), 60, "", "")
@@ -79,7 +79,7 @@ func TestTopology_WithEdges(t *testing.T) {
 			AddRow("backend", int64(800), 100.0, 0.02))
 
 	// Edges query
-	mock.ExpectQuery("WITH").WillReturnRows(
+	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}).
 			AddRow("frontend", "backend", int64(800), 25.0, 0.01).
 			AddRow("backend", "database", int64(1500), 5.0, 0.001))
@@ -111,7 +111,7 @@ func TestTopology_DefaultWindow(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate"}))
-	mock.ExpectQuery("WITH").WillReturnRows(
+	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}))
 
 	// Pass 0 window, should default to 60
@@ -135,7 +135,7 @@ func TestTopology_NodeHealthStatus(t *testing.T) {
 			AddRow("degraded-svc", int64(100), 2000.0, 0.03). // degraded (high latency)
 			AddRow("unhealthy-svc", int64(100), 50.0, 0.15))  // unhealthy (high errors)
 
-	mock.ExpectQuery("WITH").WillReturnRows(
+	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}))
 
 	result, err := svc.Topology(context.Background(), 60, "", "")
@@ -167,7 +167,7 @@ func TestTopology_EdgeHealthStatus(t *testing.T) {
 		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate"}))
 
 	// Edges with different health statuses
-	mock.ExpectQuery("WITH").WillReturnRows(
+	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}).
 			AddRow("a", "b", int64(100), 50.0, 0.005).  // healthy
 			AddRow("b", "c", int64(100), 2000.0, 0.03). // degraded

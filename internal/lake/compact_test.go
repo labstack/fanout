@@ -92,7 +92,7 @@ func TestCompactDay(t *testing.T) {
 			tc.setup(dir)
 
 			c := &Compactor{cfg: config.Config{LakeDir: dir}}
-			saved, err := c.compactDay("spans", dir)
+			saved, err := c.compactDay(dir)
 			if err != nil {
 				t.Fatalf("compactDay: %v", err)
 			}

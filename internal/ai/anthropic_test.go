@@ -7,7 +7,7 @@ import (
 
 func TestAnthropicProvider_Defaults(t *testing.T) {
 	p := NewAnthropicProvider("sk-test", "", "")
-	if p.model != "claude-sonnet-4-6" {
+	if p.model != "claude-haiku-4-5" {
 		t.Errorf("model = %q, want default", p.model)
 	}
 	if p.baseURL != "https://api.anthropic.com" {
