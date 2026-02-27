@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
@@ -19,10 +21,20 @@ type Duck struct {
 }
 
 func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
-	// DuckDB config: memory limit and thread count for better performance
-	db, err := sql.Open("duckdb", "?threads=4&memory_limit=256MB")
+	dbPath := filepath.Join(cfg.LakeDir, "fanout.duckdb")
+	dsn := dbPath + "?threads=4&memory_limit=256MB"
+
+	db, err := sql.Open("duckdb", dsn)
 	if err != nil {
-		return nil, err
+		// Corruption recovery: remove DB + WAL, retry once
+		slog.Warn("duckdb open failed, attempting recovery", "err", err)
+		os.Remove(dbPath)
+		os.Remove(dbPath + ".wal")
+		db, err = sql.Open("duckdb", dsn)
+		if err != nil {
+			return nil, fmt.Errorf("duckdb open after recovery: %w", err)
+		}
+		slog.Info("duckdb recovered with fresh database")
 	}
 	d := &Duck{DB: db, cfg: cfg}
 	// Create rollup tables
@@ -158,6 +170,17 @@ GROUP BY bucket, caller, callee;
 		slog.Error("edge rollup failed", "err", edgeErr)
 	}
 
+	// Prune old rollup data
+	if d.cfg.RetentionDays > 0 {
+		for _, tbl := range []string{"service_rollup", "edge_rollup"} {
+			_, err := d.DB.ExecContext(ctx, fmt.Sprintf(
+				`DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY`, tbl, d.cfg.RetentionDays))
+			if err != nil {
+				slog.Warn("rollup retention failed", "table", tbl, "err", err)
+			}
+		}
+	}
+
 	return int(affected), nil
 }
 
@@ -171,25 +194,18 @@ type LatencyRow struct {
 }
 
 func (d *Duck) LatencyOverview(ctx context.Context, windowMinutes int) ([]LatencyRow, error) {
-	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
-WITH S AS (
-  SELECT "name=service_name" as service_name,
-         "name=duration_ms" as duration_ms,
-         "name=status_code" as status_code,
-         "name=start_unix_nano" as start_unix_nano
-  FROM read_parquet(%s, union_by_name=true)
-  WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-)
-SELECT service_name,
-       quantile_cont(duration_ms, 0.95) AS p95_ms,
-       avg(CASE WHEN status_code = 'STATUS_CODE_ERROR' OR status_code = 'ERROR' THEN 1 ELSE 0 END) AS error_rate,
-       count(*) AS spans
-FROM S
-GROUP BY service_name
+SELECT
+  service as service_name,
+  AVG(p95_ms) as p95_ms,
+  AVG(error_rate) as error_rate,
+  SUM(spans)::BIGINT as spans
+FROM service_rollup
+WHERE bucket >= now() - INTERVAL %d MINUTE
+GROUP BY service
 ORDER BY p95_ms DESC
 LIMIT 100;
-`, d.SpansGlob(tenantID, namespace, windowMinutes), windowMinutes)
+`, windowMinutes)
 	rows, err := d.DB.QueryContext(ctx, q)
 	if err != nil {
 		return nil, err

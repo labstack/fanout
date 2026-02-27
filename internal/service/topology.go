@@ -30,11 +30,7 @@ func (s *Service) Topology(ctx context.Context, window int, namespace, tenantID 
 		Edges: []ServiceEdge{},
 	}
 
-	// Use rollups for long time ranges (>60 min), raw parquet for short
-	var q string
-	if window > 60 {
-		// Fast path: use pre-aggregated rollup table
-		q = fmt.Sprintf(`
+	q := fmt.Sprintf(`
 SELECT
   service,
   SUM(spans)::BIGINT as cnt,
@@ -46,22 +42,6 @@ GROUP BY service
 ORDER BY cnt DESC
 LIMIT 50;
 `, window)
-	} else {
-		// Detailed path: scan raw parquet for accurate percentiles
-		spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
-		q = fmt.Sprintf(`
-SELECT
-  "name=service_name" as service,
-  COUNT(*) as cnt,
-  COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95,
-  COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-GROUP BY "name=service_name"
-ORDER BY cnt DESC
-LIMIT 50;
-`, spansGlob, window)
-	}
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
@@ -81,9 +61,7 @@ LIMIT 50;
 	}
 
 	// Get service edges (caller -> callee)
-	if window > 60 {
-		// Fast path: use edge rollup table
-		q = fmt.Sprintf(`
+	q = fmt.Sprintf(`
 SELECT
   caller,
   callee,
@@ -96,35 +74,6 @@ GROUP BY caller, callee
 ORDER BY call_count DESC
 LIMIT 100;
 `, window)
-	} else {
-		// Detailed path: scan raw parquet
-		spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
-		q = fmt.Sprintf(`
-WITH calls AS (
-  SELECT
-    parent."name=service_name" as caller,
-    child."name=service_name" as callee,
-    child."name=duration_ms" as duration_ms,
-    child."name=status_code" as status
-  FROM read_parquet(%s, union_by_name=true) child
-  JOIN read_parquet(%s, union_by_name=true) parent
-    ON child."name=parent_span_id" = parent."name=span_id"
-    AND child."name=trace_id" = parent."name=trace_id"
-  WHERE epoch_ms(CAST(child."name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-    AND parent."name=service_name" != child."name=service_name"
-)
-SELECT
-  caller,
-  callee,
-  COUNT(*) as call_count,
-  AVG(duration_ms) as avg_ms,
-  AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) as error_rate
-FROM calls
-GROUP BY caller, callee
-ORDER BY call_count DESC
-LIMIT 100;
-`, spansGlob, spansGlob, window)
-	}
 
 	rows, err = s.duck.DB.QueryContext(ctx, q)
 	if err != nil {

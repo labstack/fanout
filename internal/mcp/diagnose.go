@@ -43,7 +43,7 @@ type Dependency struct {
 	Service   string  `json:"service"`
 	Status    string  `json:"status"`
 	ErrorRate float64 `json:"error_rate"`
-	P95Ms     float64 `json:"p95_ms"`
+	AvgMs     float64 `json:"avg_ms"`
 	Calls     int64   `json:"calls"`
 }
 
@@ -108,9 +108,9 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 	for _, d := range result.Dependencies {
 		out.Dependencies = append(out.Dependencies, Dependency{
 			Service:   d.Service,
-			Status:    service.DeriveHealth(d.ErrorRate, d.P95Ms),
+			Status:    service.DeriveHealth(d.ErrorRate, d.AvgMs),
 			ErrorRate: d.ErrorRate,
-			P95Ms:     d.P95Ms,
+			AvgMs:     d.AvgMs,
 			Calls:     d.CallCount,
 		})
 	}
@@ -186,14 +186,14 @@ func renderDiagnose(d *DiagnoseOut) render.Output {
 		depRows = append(depRows, []string{
 			dep.Service,
 			dep.Status,
-			fmt.Sprintf("%.1fms", dep.P95Ms),
+			fmt.Sprintf("%.1fms", dep.AvgMs),
 			fmt.Sprintf("%.2f%%", dep.ErrorRate*100),
 			fmt.Sprintf("%d", dep.Calls),
 		})
 	}
 	depsTable := &render.Table{
 		Title:   "Dependencies",
-		Headers: []string{"Service", "Status", "P95", "Errors", "Calls"},
+		Headers: []string{"Service", "Status", "Avg", "Errors", "Calls"},
 		Rows:    depRows,
 	}
 

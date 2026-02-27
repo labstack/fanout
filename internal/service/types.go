@@ -115,7 +115,7 @@ type Dependency struct {
 	Service   string
 	CallCount int64
 	ErrorRate float64
-	P95Ms     float64
+	AvgMs     float64
 }
 
 // TraceResult contains a complete distributed trace.
