@@ -135,7 +135,7 @@ LIMIT 10;
 		defer rows.Close()
 		for rows.Next() {
 			var d Dependency
-			if err := rows.Scan(&d.Service, &d.CallCount, &d.P95Ms, &d.ErrorRate); err != nil {
+			if err := rows.Scan(&d.Service, &d.CallCount, &d.AvgMs, &d.ErrorRate); err != nil {
 				slog.Warn("scan failed", "method", "Diagnose.deps", "err", err)
 				continue
 			}

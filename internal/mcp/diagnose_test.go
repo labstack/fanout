@@ -56,7 +56,7 @@ func TestRenderDiagnose(t *testing.T) {
 			{Name: "GET /api/heavy", P95Ms: 500.0, Count: 100},
 		},
 		Dependencies: []Dependency{
-			{Service: "database", Status: "healthy", ErrorRate: 0.001, P95Ms: 10.0, Calls: 5000},
+			{Service: "database", Status: "healthy", ErrorRate: 0.001, AvgMs: 10.0, Calls: 5000},
 		},
 	}
 
@@ -105,7 +105,7 @@ func TestRenderDiagnose_Unhealthy(t *testing.T) {
 		},
 		SlowOperations: []SlowOperation{},
 		Dependencies: []Dependency{
-			{Service: "database", Status: "unhealthy", ErrorRate: 0.30, P95Ms: 8000.0, Calls: 100},
+			{Service: "database", Status: "unhealthy", ErrorRate: 0.30, AvgMs: 8000.0, Calls: 100},
 		},
 	}
 
@@ -174,7 +174,7 @@ func TestDependency(t *testing.T) {
 		Service:   "redis",
 		Status:    "healthy",
 		ErrorRate: 0.001,
-		P95Ms:     2.0,
+		AvgMs:     2.0,
 		Calls:     10000,
 	}
 

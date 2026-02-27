@@ -29,7 +29,7 @@ jobs:
               - '.golangci.yml'
 
   server:
-    name: Server (fmt + lint + test + build)
+    name: Server (fmt + vet + lint + test + build)
     needs: changes
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-24.04
@@ -63,7 +63,7 @@ jobs:
           version: v2.9
 
       - name: Test
-        run: just test -race -coverprofile=coverage.txt
+        run: just test -race -coverprofile=coverage.txt ./...
 
       - name: Build
         run: just build
