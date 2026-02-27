@@ -80,18 +80,18 @@ fi
 
 sudo mkdir -p /data/{fanout,ssl,nginx,html,acme}
 sudo chown -R $USER:$USER /data
-sudo mkdir -p /app
-sudo chown -R $USER:$USER /app
+sudo mkdir -p /opt/fanout
+sudo chown -R $USER:$USER /opt/fanout
 SETUP_EOF
 
 echo "📥 Copying config..."
-scp "$(dirname "$0")/../docker-compose.yaml" "$SERVER:/app/docker-compose.yaml"
+scp "$(dirname "$0")/../docker-compose.yaml" "$SERVER:/opt/fanout/docker-compose.yaml"
 scp "$(dirname "$0")/grpc.conf" "$SERVER:/data/nginx/grpc.conf"
 
 echo "🚀 Deploying..."
 ssh "$SERVER" "
 set -e
-cd /app
+cd /opt/fanout
 
 docker network create webproxy 2>/dev/null || true
 
@@ -111,5 +111,5 @@ docker compose ps
 echo ""
 echo "🎯 YEET SUCCESSFUL! 💥"
 echo "🌐 https://fanout.run"
-echo "📊 Status: ssh $SERVER 'cd /app && docker compose ps'"
-echo "📋 Logs: ssh $SERVER 'cd /app && docker compose logs -f fanout'"
+echo "📊 Status: ssh $SERVER 'cd /opt/fanout && docker compose ps'"
+echo "📋 Logs: ssh $SERVER 'cd /opt/fanout && docker compose logs -f fanout'"
