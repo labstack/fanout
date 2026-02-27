@@ -42,6 +42,21 @@ func TestDeriveHealth(t *testing.T) {
 	}
 }
 
+func TestDeriveHealth_Active(t *testing.T) {
+	// Services with 0 spans but discovered via logs/metrics
+	if got := DeriveHealth(0, 0, 0); got != "active" {
+		t.Errorf("DeriveHealth(0, 0, 0) = %q, want %q", got, "active")
+	}
+	// Services with spans should not be "active"
+	if got := DeriveHealth(0, 0, 100); got != "healthy" {
+		t.Errorf("DeriveHealth(0, 0, 100) = %q, want %q", got, "healthy")
+	}
+	// No spans arg defaults to 0, but non-zero error/p95 should still degrade
+	if got := DeriveHealth(0.02, 500); got != "degraded" {
+		t.Errorf("DeriveHealth(0.02, 500) = %q, want %q", got, "degraded")
+	}
+}
+
 func TestNew(t *testing.T) {
 	cfg := config.Config{
 		DefaultNS: "test-ns",

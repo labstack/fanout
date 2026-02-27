@@ -129,6 +129,23 @@ Columns:
 - error_rate (DOUBLE): Error rate (0.0 to 1.0)
 - p50_ms (DOUBLE): P50 (median) duration
 - p95_ms (DOUBLE): 95th percentile duration
+- log_count (BIGINT): Number of log entries in this bucket (0 for span-only rows)
+- metric_count (BIGINT): Number of distinct metric names in this bucket (0 for span-only rows)
+
+Note: Services discovered only via logs/metrics will have spans=0 with non-zero log_count/metric_count.
+Use AVG(CASE WHEN spans > 0 THEN p95_ms END) to avoid diluting latency with zero-span rows.
+
+### 5. Edge Rollup Table (edge_rollup)
+Pre-aggregated service-to-service call data:
+Table: edge_rollup
+Columns:
+- bucket (TIMESTAMP): 1-minute time bucket
+- caller (VARCHAR): Calling service name
+- callee (VARCHAR): Called service name
+- calls (BIGINT): Number of calls in this bucket
+- avg_ms (DOUBLE): Average call duration in milliseconds
+- error_rate (DOUBLE): Error rate (0.0 to 1.0)
+- edge_type (TEXT): Edge type - 'call' (parent-child spans) or 'messaging' (producer/consumer spans)
 
 Time range:
 - Recent data: WHERE bucket >= NOW() - INTERVAL '<minutes> minutes'

@@ -35,13 +35,15 @@ type TopologyResult struct {
 
 // ServiceNode represents a service in the topology.
 type ServiceNode struct {
-	Name      string
-	Namespace string
-	Status    string
-	SpanCount int64
-	P95Ms     float64
-	ErrorRate float64
-	Trend     []int64 // optional sparkline data
+	Name        string
+	Namespace   string
+	Status      string
+	SpanCount   int64
+	P95Ms       float64
+	ErrorRate   float64
+	LogCount    int64
+	MetricCount int64
+	Trend       []int64 // optional sparkline data
 }
 
 // ServiceEdge represents a call between services.
@@ -52,6 +54,7 @@ type ServiceEdge struct {
 	AvgMs     float64
 	ErrorRate float64
 	Status    string
+	EdgeType  string // "call" or "messaging"
 }
 
 // TimelineResult contains time-bucketed metrics with anomalies.
@@ -193,10 +196,11 @@ type RootCause struct {
 	Description string
 }
 
-// FindResult contains search results for spans and logs.
+// FindResult contains search results for spans, logs, and metrics.
 type FindResult struct {
 	Spans   []SpanResult
 	Logs    []LogResult
+	Metrics []MetricInfo
 	HasMore bool
 }
 

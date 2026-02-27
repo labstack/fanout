@@ -32,6 +32,9 @@ func TestFind_Empty(t *testing.T) {
 	if len(result.Logs) != 0 {
 		t.Errorf("Logs count = %d, want 0", len(result.Logs))
 	}
+	if len(result.Metrics) != 0 {
+		t.Errorf("Metrics count = %d, want 0", len(result.Metrics))
+	}
 }
 
 func TestFind_DefaultParams(t *testing.T) {
@@ -351,5 +354,123 @@ func TestFind_ScopeInfo(t *testing.T) {
 	}
 	if result.Logs[0].ObservedTime != "2024-01-01T10:00:01Z" {
 		t.Errorf("Logs[0].ObservedTime = %q, want %q", result.Logs[0].ObservedTime, "2024-01-01T10:00:01Z")
+	}
+}
+
+func TestFind_MetricsOnly(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"metric_name", "mtype", "service", "value", "ts", "unit", "description", "scope_name", "scope_version"}).
+			AddRow("kafka.consumer.lag", "gauge", "kafka", 42.0, "2024-01-01T10:00:00Z", "messages", "Consumer group lag", "otel-kafka", "1.0"))
+
+	result, err := svc.Find(context.Background(), FindParams{Type: "metrics"})
+	if err != nil {
+		t.Fatalf("Find() error = %v", err)
+	}
+
+	if len(result.Spans) != 0 {
+		t.Errorf("Spans count = %d, want 0", len(result.Spans))
+	}
+	if len(result.Logs) != 0 {
+		t.Errorf("Logs count = %d, want 0", len(result.Logs))
+	}
+	if len(result.Metrics) != 1 {
+		t.Fatalf("Metrics count = %d, want 1", len(result.Metrics))
+	}
+	m := result.Metrics[0]
+	if m.Name != "kafka.consumer.lag" {
+		t.Errorf("Metrics[0].Name = %q, want %q", m.Name, "kafka.consumer.lag")
+	}
+	if m.Type != "gauge" {
+		t.Errorf("Metrics[0].Type = %q, want %q", m.Type, "gauge")
+	}
+	if m.Service != "kafka" {
+		t.Errorf("Metrics[0].Service = %q, want %q", m.Service, "kafka")
+	}
+	if m.Value != 42.0 {
+		t.Errorf("Metrics[0].Value = %f, want 42.0", m.Value)
+	}
+	if m.Unit != "messages" {
+		t.Errorf("Metrics[0].Unit = %q, want %q", m.Unit, "messages")
+	}
+	if m.ScopeName != "otel-kafka" {
+		t.Errorf("Metrics[0].ScopeName = %q, want %q", m.ScopeName, "otel-kafka")
+	}
+}
+
+func TestFind_MetricsNullable(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"metric_name", "mtype", "service", "value", "ts", "unit", "description", "scope_name", "scope_version"}).
+			AddRow("cpu.usage", "gauge", nil, 0.85, "2024-01-01T10:00:00Z", nil, nil, nil, nil))
+
+	result, err := svc.Find(context.Background(), FindParams{Type: "metrics"})
+	if err != nil {
+		t.Fatalf("Find() error = %v", err)
+	}
+
+	if len(result.Metrics) != 1 {
+		t.Fatalf("Metrics count = %d, want 1", len(result.Metrics))
+	}
+	if result.Metrics[0].Service != "" {
+		t.Errorf("Metrics[0].Service = %q, want empty", result.Metrics[0].Service)
+	}
+	if result.Metrics[0].Unit != "" {
+		t.Errorf("Metrics[0].Unit = %q, want empty", result.Metrics[0].Unit)
+	}
+}
+
+func TestFind_All(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	// Spans
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"trace_id", "span_id", "service", "operation", "duration_ms", "status", "start_time", "scope_name", "scope_version"}).
+			AddRow("trace-1", "span-1", "api", "GET /", 10.0, "OK", "2024-01-01T10:00:00Z", nil, nil))
+	// Logs
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"ts", "observed_ts", "service", "severity", "severity_number", "body", "trace_id", "span_id", "scope_name", "scope_version"}).
+			AddRow("2024-01-01T10:00:00Z", nil, "api", "INFO", int64(9), "hello", nil, nil, nil, nil))
+	// Metrics
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"metric_name", "mtype", "service", "value", "ts", "unit", "description", "scope_name", "scope_version"}).
+			AddRow("http.requests", "counter", "api", 100.0, "2024-01-01T10:00:00Z", "requests", nil, nil, nil))
+
+	result, err := svc.Find(context.Background(), FindParams{Type: "all"})
+	if err != nil {
+		t.Fatalf("Find() error = %v", err)
+	}
+
+	if len(result.Spans) != 1 {
+		t.Errorf("Spans count = %d, want 1", len(result.Spans))
+	}
+	if len(result.Logs) != 1 {
+		t.Errorf("Logs count = %d, want 1", len(result.Logs))
+	}
+	if len(result.Metrics) != 1 {
+		t.Errorf("Metrics count = %d, want 1", len(result.Metrics))
+	}
+}
+
+func TestFind_MetricsQueryError(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	mock.ExpectQuery("SELECT").WillReturnError(errors.New("metrics db error"))
+
+	result, err := svc.Find(context.Background(), FindParams{Type: "metrics"})
+	if err == nil {
+		t.Fatal("Find() should return error on metrics query failure")
+	}
+	if !strings.Contains(err.Error(), "metrics db error") {
+		t.Errorf("error should contain 'metrics db error', got: %v", err)
+	}
+	if result == nil {
+		t.Fatal("Find() should return non-nil result even on error")
 	}
 }

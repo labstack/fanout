@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 
@@ -33,13 +34,15 @@ func (s *Service) Topology(ctx context.Context, window int, namespace, tenantID 
 	q := fmt.Sprintf(`
 SELECT
   service,
-  SUM(spans)::BIGINT as cnt,
-  AVG(p95_ms) as p95,
-  AVG(error_rate) as error_rate
+  SUM(spans)::BIGINT AS cnt,
+  AVG(CASE WHEN spans > 0 THEN p95_ms END) AS p95,
+  AVG(CASE WHEN spans > 0 THEN error_rate END) AS error_rate,
+  SUM(COALESCE(log_count, 0))::BIGINT AS log_cnt,
+  SUM(COALESCE(metric_count, 0))::BIGINT AS metric_cnt
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
 GROUP BY service
-ORDER BY cnt DESC
+ORDER BY (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0))) DESC
 LIMIT 50;
 `, window)
 
@@ -52,11 +55,18 @@ LIMIT 50;
 
 	for rows.Next() {
 		var n ServiceNode
-		if err := rows.Scan(&n.Name, &n.SpanCount, &n.P95Ms, &n.ErrorRate); err != nil {
+		var p95null, errNull sql.NullFloat64
+		if err := rows.Scan(&n.Name, &n.SpanCount, &p95null, &errNull, &n.LogCount, &n.MetricCount); err != nil {
 			slog.Warn("scan failed", "method", "Topology.nodes", "err", err)
 			continue
 		}
-		n.Status = DeriveHealth(n.ErrorRate, n.P95Ms)
+		if p95null.Valid {
+			n.P95Ms = p95null.Float64
+		}
+		if errNull.Valid {
+			n.ErrorRate = errNull.Float64
+		}
+		n.Status = DeriveHealth(n.ErrorRate, n.P95Ms, n.SpanCount)
 		out.Nodes = append(out.Nodes, n)
 	}
 
@@ -65,12 +75,13 @@ LIMIT 50;
 SELECT
   caller,
   callee,
-  SUM(calls)::BIGINT as call_count,
-  AVG(avg_ms) as avg_ms,
-  AVG(error_rate) as error_rate
+  SUM(calls)::BIGINT AS call_count,
+  AVG(avg_ms) AS avg_ms,
+  AVG(error_rate) AS error_rate,
+  COALESCE(edge_type, 'call') AS edge_type
 FROM edge_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-GROUP BY caller, callee
+GROUP BY caller, callee, edge_type
 ORDER BY call_count DESC
 LIMIT 100;
 `, window)
@@ -84,7 +95,7 @@ LIMIT 100;
 
 	for rows.Next() {
 		var e ServiceEdge
-		if err := rows.Scan(&e.From, &e.To, &e.CallCount, &e.AvgMs, &e.ErrorRate); err != nil {
+		if err := rows.Scan(&e.From, &e.To, &e.CallCount, &e.AvgMs, &e.ErrorRate, &e.EdgeType); err != nil {
 			slog.Warn("scan failed", "method", "Topology.edges", "err", err)
 			continue
 		}

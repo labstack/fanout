@@ -19,11 +19,13 @@ type TopologyIn struct {
 }
 
 type ServiceNode struct {
-	Name      string  `json:"name"`
-	Status    string  `json:"status"`
-	SpanCount int64   `json:"span_count"`
-	P95Ms     float64 `json:"p95_ms"`
-	ErrorRate float64 `json:"error_rate"`
+	Name        string  `json:"name"`
+	Status      string  `json:"status"`
+	SpanCount   int64   `json:"span_count"`
+	P95Ms       float64 `json:"p95_ms"`
+	ErrorRate   float64 `json:"error_rate"`
+	LogCount    int64   `json:"log_count,omitempty"`
+	MetricCount int64   `json:"metric_count,omitempty"`
 }
 
 type ServiceEdge struct {
@@ -33,6 +35,7 @@ type ServiceEdge struct {
 	AvgMs     float64 `json:"avg_ms"`
 	ErrorRate float64 `json:"error_rate"`
 	Status    string  `json:"status"`
+	EdgeType  string  `json:"edge_type,omitempty"`
 }
 
 type TopologyOut struct {
@@ -59,11 +62,13 @@ func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in Topo
 
 	for _, n := range result.Nodes {
 		out.Nodes = append(out.Nodes, ServiceNode{
-			Name:      n.Name,
-			Status:    n.Status,
-			SpanCount: n.SpanCount,
-			P95Ms:     n.P95Ms,
-			ErrorRate: n.ErrorRate,
+			Name:        n.Name,
+			Status:      n.Status,
+			SpanCount:   n.SpanCount,
+			P95Ms:       n.P95Ms,
+			ErrorRate:   n.ErrorRate,
+			LogCount:    n.LogCount,
+			MetricCount: n.MetricCount,
 		})
 	}
 
@@ -75,6 +80,7 @@ func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in Topo
 			AvgMs:     e.AvgMs,
 			ErrorRate: e.ErrorRate,
 			Status:    service.DeriveHealth(e.ErrorRate, e.AvgMs),
+			EdgeType:  e.EdgeType,
 		})
 	}
 
@@ -97,7 +103,7 @@ func renderTopology(t *TopologyOut) render.Output {
 	unhealthy := 0
 	for _, n := range t.Nodes {
 		switch n.Status {
-		case "healthy":
+		case "healthy", "active":
 			healthy++
 		case "degraded":
 			degraded++
@@ -126,11 +132,13 @@ func renderTopology(t *TopologyOut) render.Output {
 			fmt.Sprintf("%.1fms", n.P95Ms),
 			fmt.Sprintf("%.2f%%", n.ErrorRate*100),
 			fmt.Sprintf("%d", n.SpanCount),
+			fmt.Sprintf("%d", n.LogCount),
+			fmt.Sprintf("%d", n.MetricCount),
 		})
 	}
 	servicesTable := &render.Table{
 		Title:   "Services",
-		Headers: []string{"Name", "Status", "P95", "Errors", "Spans"},
+		Headers: []string{"Name", "Status", "P95", "Errors", "Spans", "Logs", "Metrics"},
 		Rows:    nodeRows,
 	}
 	items = append(items, servicesTable)
@@ -139,6 +147,10 @@ func renderTopology(t *TopologyOut) render.Output {
 	if len(t.Edges) > 0 {
 		var edgeRows [][]string
 		for _, e := range t.Edges {
+			edgeType := e.EdgeType
+			if edgeType == "" {
+				edgeType = "call"
+			}
 			edgeRows = append(edgeRows, []string{
 				e.From,
 				"→",
@@ -146,11 +158,12 @@ func renderTopology(t *TopologyOut) render.Output {
 				fmt.Sprintf("%d", e.CallCount),
 				fmt.Sprintf("%.1fms", e.AvgMs),
 				fmt.Sprintf("%.2f%%", e.ErrorRate*100),
+				edgeType,
 			})
 		}
 		edgesTable := &render.Table{
 			Title:   "Dependencies",
-			Headers: []string{"From", "", "To", "Calls", "Avg", "Errors"},
+			Headers: []string{"From", "", "To", "Calls", "Avg", "Errors", "Type"},
 			Rows:    edgeRows,
 		}
 		items = append(items, edgesTable)

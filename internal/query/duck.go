@@ -60,6 +60,18 @@ CREATE TABLE IF NOT EXISTS edge_rollup (
 );`); err != nil {
 		return nil, err
 	}
+
+	// Add multi-signal columns (idempotent)
+	for _, ddl := range []string{
+		`ALTER TABLE service_rollup ADD COLUMN IF NOT EXISTS log_count BIGINT DEFAULT 0`,
+		`ALTER TABLE service_rollup ADD COLUMN IF NOT EXISTS metric_count BIGINT DEFAULT 0`,
+		`ALTER TABLE edge_rollup ADD COLUMN IF NOT EXISTS edge_type TEXT DEFAULT 'call'`,
+	} {
+		if _, err := db.Exec(ddl); err != nil {
+			return nil, fmt.Errorf("migration %q: %w", ddl, err)
+		}
+	}
+
 	return d, nil
 }
 
@@ -139,6 +151,50 @@ GROUP BY ALL;
 	}
 	affected, _ := res.RowsAffected()
 
+	// Log rollup — services that emit logs
+	logRes, logErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
+INSERT INTO service_rollup (bucket, service, spans, p50_ms, p95_ms, error_rate, log_count, metric_count)
+SELECT
+  date_trunc('minute', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT))) AS bucket,
+  "name=service_name" AS service,
+  0 AS spans, 0 AS p50_ms, 0 AS p95_ms, 0 AS error_rate,
+  COUNT(*) AS log_count,
+  0 AS metric_count
+FROM read_parquet(['%s/logs/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
+WHERE "name=service_name" IS NOT NULL AND "name=service_name" != ''
+  AND date_trunc('minute', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)))
+      > COALESCE((SELECT max(bucket) FROM service_rollup WHERE log_count > 0), TIMESTAMP '1970-01-01')
+GROUP BY ALL;
+`, d.cfg.LakeDir))
+	if logErr != nil {
+		slog.Error("log rollup failed", "err", logErr)
+	} else {
+		n, _ := logRes.RowsAffected()
+		affected += n
+	}
+
+	// Metric rollup — services that emit metrics
+	metricRes, metricErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
+INSERT INTO service_rollup (bucket, service, spans, p50_ms, p95_ms, error_rate, log_count, metric_count)
+SELECT
+  date_trunc('minute', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT))) AS bucket,
+  "name=service_name" AS service,
+  0 AS spans, 0 AS p50_ms, 0 AS p95_ms, 0 AS error_rate,
+  0 AS log_count,
+  COUNT(DISTINCT "name=name") AS metric_count
+FROM read_parquet(['%s/metrics/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
+WHERE "name=service_name" IS NOT NULL AND "name=service_name" != ''
+  AND date_trunc('minute', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)))
+      > COALESCE((SELECT max(bucket) FROM service_rollup WHERE metric_count > 0), TIMESTAMP '1970-01-01')
+GROUP BY ALL;
+`, d.cfg.LakeDir))
+	if metricErr != nil {
+		slog.Error("metric rollup failed", "err", metricErr)
+	} else {
+		n, _ := metricRes.RowsAffected()
+		affected += n
+	}
+
 	// Edge rollup (caller -> callee relationships)
 	_, edgeErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
 INSERT INTO edge_rollup
@@ -168,6 +224,47 @@ GROUP BY bucket, caller, callee;
 `, d.cfg.LakeDir, d.cfg.LakeDir))
 	if edgeErr != nil {
 		slog.Error("edge rollup failed", "err", edgeErr)
+	}
+
+	// Messaging edge rollup (producer -> broker -> consumer via messaging spans)
+	_, msgErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
+INSERT INTO edge_rollup (bucket, caller, callee, calls, avg_ms, error_rate, edge_type)
+WITH producers AS (
+  SELECT
+    date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
+    "name=service_name" AS service,
+    json_extract_string(from_utf8("name=attributes_json"), '$.messaging.destination.name') AS destination,
+    json_extract_string(from_utf8("name=attributes_json"), '$.messaging.system') AS msg_system
+  FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
+  WHERE "name=kind" = 'SPAN_KIND_PRODUCER'
+    AND json_extract_string(from_utf8("name=attributes_json"), '$.messaging.destination.name') IS NOT NULL
+),
+consumers AS (
+  SELECT
+    date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
+    "name=service_name" AS service,
+    json_extract_string(from_utf8("name=attributes_json"), '$.messaging.destination.name') AS destination,
+    json_extract_string(from_utf8("name=attributes_json"), '$.messaging.system') AS msg_system
+  FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
+  WHERE "name=kind" = 'SPAN_KIND_CONSUMER'
+    AND json_extract_string(from_utf8("name=attributes_json"), '$.messaging.destination.name') IS NOT NULL
+)
+SELECT
+  p.bucket,
+  p.service AS caller,
+  c.service AS callee,
+  COUNT(*) AS calls,
+  0 AS avg_ms,
+  0 AS error_rate,
+  'messaging' AS edge_type
+FROM producers p
+JOIN consumers c ON p.destination = c.destination AND p.msg_system = c.msg_system AND p.bucket = c.bucket
+WHERE p.service != c.service
+  AND p.bucket > COALESCE((SELECT max(bucket) FROM edge_rollup WHERE edge_type = 'messaging'), TIMESTAMP '1970-01-01')
+GROUP BY p.bucket, p.service, c.service;
+`, d.cfg.LakeDir, d.cfg.LakeDir))
+	if msgErr != nil {
+		slog.Error("messaging edge rollup failed", "err", msgErr)
 	}
 
 	// Prune old rollup data
@@ -265,7 +362,8 @@ type ThroughputRow struct {
 
 func (d *Duck) Throughput(ctx context.Context, windowMinutes int) ([]ThroughputRow, error) {
 	q := fmt.Sprintf(`
-SELECT strftime(bucket, '%%Y-%%m-%%dT%%H:%%M:00Z') AS bucket, SUM(spans) AS spans
+SELECT strftime(bucket, '%%Y-%%m-%%dT%%H:%%M:00Z') AS bucket,
+  (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0))) AS spans
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
 GROUP BY bucket
@@ -294,7 +392,7 @@ type ServiceThroughputRow struct {
 
 func (d *Duck) ServiceThroughput(ctx context.Context, windowMinutes int) ([]ServiceThroughputRow, error) {
 	q := fmt.Sprintf(`
-SELECT service, SUM(spans)::BIGINT / %d AS spans_per_minute
+SELECT service, (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0)))::BIGINT / %d AS spans_per_minute
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
 GROUP BY service
