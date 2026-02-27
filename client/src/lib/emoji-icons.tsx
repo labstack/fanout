@@ -72,8 +72,11 @@ export function replaceEmojis(text: string): React.ReactNode[] {
         result.push(text.slice(lastIndex, index));
       }
 
-      // Strip variation selector (U+FE0F) for lookup — some LLMs emit bare forms
-      const def = emojiMap.get(emoji) ?? emojiMap.get(emoji.replace(/\uFE0F/g, ""));
+      // Normalize variation selector (U+FE0F) — LLMs may emit with or without it
+      const def =
+        emojiMap.get(emoji) ??
+        emojiMap.get(emoji.replace(/\uFE0F/g, "")) ??
+        emojiMap.get(emoji + "\uFE0F");
       if (def) {
         const Icon = def.icon;
         result.push(

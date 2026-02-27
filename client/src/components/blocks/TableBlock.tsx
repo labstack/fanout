@@ -30,7 +30,8 @@ export function TableBlock({ data }: { data: TableBlockData }) {
             if (v == null) return "";
             try {
               return <>{replaceEmojis(String(v))}</>;
-            } catch {
+            } catch (err) {
+              console.error("[TableBlock] cell render error:", err);
               return String(v);
             }
           },
