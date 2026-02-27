@@ -1,6 +1,15 @@
 # syntax=docker/dockerfile:1
 
-# --- Build stage ---
+# --- Client build stage ---
+FROM oven/bun:latest AS client
+
+WORKDIR /app/client
+COPY client/package.json client/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY client/ .
+RUN bun run build
+
+# --- Server build stage ---
 FROM golang:1.26-bookworm AS builder
 
 WORKDIR /app
@@ -10,6 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY . .
+COPY --from=client /app/client/dist/ internal/web/dist/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 go build -ldflags="-s -w" -o fanout ./cmd/fanout
