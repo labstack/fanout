@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-table";
 import { useMemo } from "react";
 import type { TableBlockData, TableColumn } from "@/lib/types";
+import { replaceEmojis } from "@/lib/emoji-icons";
 
 const alignClass: Record<NonNullable<TableColumn["align"]>, string> = {
   left: "text-left",
@@ -26,7 +27,13 @@ export function TableBlock({ data }: { data: TableBlockData }) {
           header: () => col.label,
           cell: (info) => {
             const v = info.getValue();
-            return v == null ? "" : String(v);
+            if (v == null) return "";
+            try {
+              return <>{replaceEmojis(String(v))}</>;
+            } catch (err) {
+              console.error("[TableBlock] cell render error:", err);
+              return String(v);
+            }
           },
           meta: { align: col.align ?? "left" },
         }),
