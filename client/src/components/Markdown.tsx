@@ -19,6 +19,18 @@ function processChildren(children: React.ReactNode, depth = 0): React.ReactNode 
 }
 
 const components: Components = {
+  h1: ({ children, ...props }) => (
+    <h1 {...props}>{processChildren(children)}</h1>
+  ),
+  h2: ({ children, ...props }) => (
+    <h2 {...props}>{processChildren(children)}</h2>
+  ),
+  h3: ({ children, ...props }) => (
+    <h3 {...props}>{processChildren(children)}</h3>
+  ),
+  h4: ({ children, ...props }) => (
+    <h4 {...props}>{processChildren(children)}</h4>
+  ),
   p: ({ children, ...props }) => <p {...props}>{processChildren(children)}</p>,
   li: ({ children, ...props }) => (
     <li {...props}>{processChildren(children)}</li>

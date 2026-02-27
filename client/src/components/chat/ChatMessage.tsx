@@ -3,16 +3,6 @@ import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { ToolStatus } from "./ToolStatus";
 import { Markdown } from "@/components/Markdown";
 
-function SkeletonShimmer() {
-  return (
-    <div className="space-y-3 py-1">
-      <div className="skeleton-bar w-3/4" />
-      <div className="skeleton-bar w-full" />
-      <div className="skeleton-bar w-5/8" />
-      <div className="skeleton-bar w-2/5" />
-    </div>
-  );
-}
 
 export function ChatMessage({ message }: { message: Message }) {
   if (message.role === "user") {
@@ -30,34 +20,24 @@ export function ChatMessage({ message }: { message: Message }) {
   // Assistant message
   return (
     <div className="space-y-3">
-      {/* Tool calls */}
+      {/* Tool calls (deduplicated by name, keeping latest) */}
       {hasTools && (
         <div className="flex flex-wrap gap-1.5">
-          {message.toolCalls.map((tc, i) => (
+          {[...new Map(message.toolCalls.map((tc) => [tc.name, tc])).values()].map((tc, i) => (
             <ToolStatus key={i} toolCall={tc} />
           ))}
         </div>
       )}
 
-      {/* Content: blocks (if done + blocks exist) or streaming markdown */}
-      {message.loading ? (
-        message.content ? (
-          <div className="prose dark:prose-invert max-w-none prose-p:leading-relaxed prose-headings:text-foreground prose-strong:text-foreground streaming-cursor">
-            <Markdown>{message.content}</Markdown>
-          </div>
-        ) : hasTools ? (
-          <SkeletonShimmer />
-        ) : null
-      ) : message.blocks?.length ? (
-        // Done with blocks: render each block
+      {/* Content: blocks (if done + blocks exist) or markdown */}
+      {!message.loading && message.blocks?.length ? (
         <div className="space-y-4">
           {message.blocks.map((block, i) => (
             <BlockRenderer key={i} block={block} />
           ))}
         </div>
       ) : message.content ? (
-        // Done without blocks (legacy/text-only): render as markdown
-        <div className="prose dark:prose-invert max-w-none prose-p:leading-relaxed prose-headings:text-foreground prose-strong:text-foreground">
+        <div className={`prose dark:prose-invert max-w-none prose-p:leading-relaxed prose-headings:text-foreground prose-strong:text-foreground ${message.loading ? "shimmer-text" : ""}`}>
           <Markdown>{message.content}</Markdown>
         </div>
       ) : null}
@@ -69,28 +49,14 @@ export function ChatMessage({ message }: { message: Message }) {
         </div>
       )}
 
-      {/* Loading indicator — initial state before any tools or text */}
-      {message.loading &&
-        !message.content &&
-        !hasTools && (
-          <div className="flex items-center gap-2.5">
-            <div className="flex gap-1">
-              <span
-                className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce"
-                style={{ animationDelay: "0ms" }}
-              />
-              <span
-                className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce"
-                style={{ animationDelay: "150ms" }}
-              />
-              <span
-                className="h-1.5 w-1.5 rounded-full bg-primary/60 animate-bounce"
-                style={{ animationDelay: "300ms" }}
-              />
-            </div>
-            <span className="text-sm text-muted-foreground">Thinking</span>
-          </div>
-        )}
+      {/* Loading indicator — scaling dots */}
+      {message.loading && (
+        <div className="flex gap-[5px] items-center">
+          <span className="h-1.5 w-1.5 rounded-full bg-primary" style={{ animation: "scale-dot 1.4s ease-in-out infinite" }} />
+          <span className="h-1.5 w-1.5 rounded-full bg-primary" style={{ animation: "scale-dot 1.4s ease-in-out infinite 0.2s" }} />
+          <span className="h-1.5 w-1.5 rounded-full bg-primary" style={{ animation: "scale-dot 1.4s ease-in-out infinite 0.4s" }} />
+        </div>
+      )}
     </div>
   );
 }

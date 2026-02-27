@@ -78,14 +78,8 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
         break;
 
       case "tool_result":
-        // Clear streamed content so the skeleton placeholder shows while tools run.
-        // Final content arrives via token events after the last tool result.
-        if (last.content) {
-          console.debug("[chat] clearing streamed content on tool_result:", last.content.length, "chars");
-        }
         messages[lastIdx] = {
           ...last,
-          content: "",
           toolCalls: last.toolCalls.map((tc) =>
             tc.name === event.name && !tc.done ? { ...tc, done: true } : tc,
           ),
