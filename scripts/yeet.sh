@@ -95,10 +95,10 @@ cd /opt/fanout
 
 docker network create webproxy 2>/dev/null || true
 
-# Update deploy vars without clobbering existing keys
-touch .env
-grep -q '^VERSION=' .env && sed -i 's/^VERSION=.*/VERSION=${VERSION:-main}/' .env || echo 'VERSION=${VERSION:-main}' >> .env
-grep -q '^LETSENCRYPT_EMAIL=' .env && sed -i 's/^LETSENCRYPT_EMAIL=.*/LETSENCRYPT_EMAIL=$EMAIL/' .env || echo 'LETSENCRYPT_EMAIL=$EMAIL' >> .env
+cat > .env << EOF
+VERSION=${VERSION:-main}
+LETSENCRYPT_EMAIL=$EMAIL
+EOF
 
 docker compose pull
 docker compose up -d

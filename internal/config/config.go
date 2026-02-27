@@ -44,7 +44,7 @@ func Load() Config {
 		TenantID:       getenvUUID("TENANT_ID"),
 		DefaultNS:      getenv("DEFAULT_NAMESPACE", "default"),
 		AIProvider:     getenv("AI_PROVIDER", "anthropic"),
-		AIAPIKey:       coalesce("AI_API_KEY", "ANTHROPIC_API_KEY"),
+		AIAPIKey:       os.Getenv("AI_API_KEY"),
 		AIModel:        os.Getenv("AI_MODEL"),
 		AIBaseURL:      os.Getenv("AI_BASE_URL"),
 	}
@@ -73,15 +73,6 @@ func (c Config) Validate() error {
 		return fmt.Errorf("RetentionHours (RETENTION_HOURS) must be > 0, got %d", c.RetentionHours)
 	}
 	return nil
-}
-
-func coalesce(keys ...string) string {
-	for _, k := range keys {
-		if v := os.Getenv(k); v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 func getenvUUID(k string) uuid.UUID {
