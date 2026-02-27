@@ -16,7 +16,7 @@ export function MessageList() {
       <div className="absolute top-0 left-0 right-0 h-6 bg-gradient-to-b from-background to-transparent z-10 pointer-events-none" />
 
       <div className="h-full overflow-y-auto">
-        <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+        <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
           {messages.map((msg, i) => (
             <div
               key={msg.id}

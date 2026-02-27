@@ -80,6 +80,7 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
       case "tool_result":
         messages[lastIdx] = {
           ...last,
+          content: "",
           toolCalls: last.toolCalls.map((tc) =>
             tc.name === event.name && !tc.done ? { ...tc, done: true } : tc,
           ),
@@ -92,6 +93,9 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
           loading: false,
           blocks: event.blocks ?? undefined,
           id: event.id ?? last.id,
+          toolCalls: last.toolCalls.map((tc) =>
+            tc.done ? tc : { ...tc, done: true },
+          ),
         };
         break;
 

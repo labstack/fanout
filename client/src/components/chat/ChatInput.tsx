@@ -34,15 +34,15 @@ export function ChatInput() {
 
   return (
     <div className="px-4 pb-4 pt-2 shrink-0">
-      <div className="input-glow max-w-3xl mx-auto">
-        <div className="flex items-end gap-2 rounded-2xl border border-border/60 bg-card/80 backdrop-blur-sm px-4 py-3">
+      <div className="input-glow max-w-4xl mx-auto">
+        <div className="flex items-end gap-2 rounded-2xl border border-border bg-card/80 backdrop-blur-sm px-4 py-3">
           <textarea
             ref={textareaRef}
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder="Ask about your services..."
-            className="flex-1 resize-none bg-transparent text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none min-h-[24px] max-h-[120px] leading-6"
+            className="flex-1 resize-none bg-transparent text-base text-foreground placeholder:text-muted-foreground/70 focus:outline-none min-h-[24px] max-h-[120px] leading-6"
             rows={1}
           />
           {isLoading ? (
@@ -65,7 +65,7 @@ export function ChatInput() {
           )}
         </div>
       </div>
-      <p className="text-center text-[11px] text-muted-foreground/40 mt-2 max-w-3xl mx-auto">
+      <p className="text-center text-xs text-muted-foreground mt-2 max-w-4xl mx-auto">
         Fanout can make mistakes. Verify important data.
       </p>
     </div>

@@ -20,7 +20,7 @@ export function EmptyState() {
         <h1 className="font-mono text-lg font-bold tracking-widest text-center text-foreground/80 uppercase">
           Fanout
         </h1>
-        <p className="text-sm text-muted-foreground text-center mt-1">
+        <p className="text-base text-muted-foreground text-center mt-1">
           Observability, conversational
         </p>
       </div>
@@ -30,7 +30,7 @@ export function EmptyState() {
           <button
             key={s}
             onClick={() => sendMessage(s)}
-            className="group flex items-center justify-between gap-3 px-4 py-3 text-sm text-left rounded-xl border border-border/50 bg-card/50 hover:bg-card hover:border-border transition-all duration-200"
+            className="group flex items-center justify-between gap-3 px-4 py-3 text-base text-left rounded-xl border border-border/50 bg-card/50 hover:bg-card hover:border-border transition-all duration-200"
           >
             <span className="text-muted-foreground group-hover:text-foreground transition-colors">
               {s}
