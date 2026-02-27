@@ -69,6 +69,9 @@ LIMIT 50;
 		n.Status = DeriveHealth(n.ErrorRate, n.P95Ms, n.SpanCount)
 		out.Nodes = append(out.Nodes, n)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rows iteration error", "method", "Topology.nodes", "err", err)
+	}
 
 	// Get service edges (caller -> callee)
 	q = fmt.Sprintf(`
@@ -101,6 +104,9 @@ LIMIT 100;
 		}
 		e.Status = DeriveHealth(e.ErrorRate, e.AvgMs, e.CallCount)
 		out.Edges = append(out.Edges, e)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rows iteration error", "method", "Topology.edges", "err", err)
 	}
 
 	query.SetCached(cacheKey, out)

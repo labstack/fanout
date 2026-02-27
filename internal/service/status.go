@@ -95,6 +95,9 @@ LIMIT 100;
 		totalErrorRate += svc.errorRate * float64(svc.spans)
 		services = append(services, svc)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rows iteration error", "method", "Status", "err", err)
+	}
 
 	out := &StatusResult{
 		TopIssues: []TopIssue{},
