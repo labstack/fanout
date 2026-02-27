@@ -3,7 +3,6 @@ package query
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -11,59 +10,49 @@ import (
 	"time"
 )
 
-// ParquetGlob returns an optimized glob pattern for parquet files
-// scoped to a single tenant/namespace partition.
-// Path structure: lake/{signal}/tenant={tenant}/namespace={namespace}/year=*/month=*/day=*/hour=*/part-*.parquet
+// ParquetGlob returns a DuckDB-ready file list or glob for parquet files.
+// Empty namespace searches all namespaces via wildcard.
 func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) string {
-	now := time.Now().UTC() // Writer uses UTC partitions (see lake/writer.go:327)
+	if namespace == "" {
+		namespace = "*"
+	}
+	now := time.Now().UTC()
 	start := now.Add(-time.Duration(windowMinutes) * time.Minute)
 
 	filesSet := make(map[string]struct{})
 
-	// For windows > 24h, use day-level globs to reduce filesystem calls
 	if windowMinutes > 1440 {
-		startDay := start.Truncate(24 * time.Hour)
-		endDay := now.Truncate(24 * time.Hour)
-		for t := startDay; !t.After(endDay); t = t.Add(24 * time.Hour) {
+		for t := start.Truncate(24 * time.Hour); !t.After(now.Truncate(24 * time.Hour)); t = t.Add(24 * time.Hour) {
 			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
 				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
-			// Match all parquet files under hour directories
 			matches, _ := filepath.Glob(filepath.Join(dayBase, "hour=*/*.parquet"))
 			for _, m := range matches {
 				filesSet[m] = struct{}{}
 			}
 		}
 	} else {
-		// For smaller windows, use hour-level precision
-		startHour := start.Truncate(time.Hour)
-		endHour := now.Truncate(time.Hour)
 		seenDays := make(map[string]struct{})
-		for t := startHour; !t.After(endHour); t = t.Add(time.Hour) {
+		for t := start.Truncate(time.Hour); !t.After(now.Truncate(time.Hour)); t = t.Add(time.Hour) {
 			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
 				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
-			// Match all parquet files for this hour (part files and compacted)
-			pattern := filepath.Join(dayBase, fmt.Sprintf("hour=%02d/*.parquet", t.Hour()))
-			matches, _ := filepath.Glob(pattern)
+			matches, _ := filepath.Glob(filepath.Join(dayBase, fmt.Sprintf("hour=%02d/*.parquet", t.Hour())))
 			for _, m := range matches {
 				filesSet[m] = struct{}{}
 			}
-			// Also check for compacted file in hour=00 (once per day)
 			if _, seen := seenDays[dayBase]; !seen {
 				seenDays[dayBase] = struct{}{}
-				compacted := filepath.Join(dayBase, "hour=00", "compacted.parquet")
-				if _, err := os.Stat(compacted); err == nil {
-					filesSet[compacted] = struct{}{}
+				// Use Glob for compacted files — os.Stat doesn't expand wildcards
+				compacted, _ := filepath.Glob(filepath.Join(dayBase, "hour=00", "compacted.parquet"))
+				for _, m := range compacted {
+					filesSet[m] = struct{}{}
 				}
 			}
 		}
 	}
 
-	// If there are no files in the window, return broad globs for the partition
-	// covering both hourly part files and day-level compacted files.
 	if len(filesSet) == 0 {
-		all := sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/*.parquet",
+		return sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/*.parquet",
 			lakeDir, signal, tenant, namespace))
-		return fmt.Sprintf("[%s]", all)
 	}
 
 	files := make([]string, 0, len(filesSet))
@@ -71,8 +60,6 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 		files = append(files, f)
 	}
 	sort.Strings(files)
-
-	// DuckDB supports list of files (all paths must be quoted).
 	if len(files) == 1 {
 		return sqlQuote(files[0])
 	}

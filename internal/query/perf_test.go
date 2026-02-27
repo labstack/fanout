@@ -159,3 +159,61 @@ func TestParquetGlob_NoFilesFallsBackToBroadGlob(t *testing.T) {
 		t.Fatalf("expected broad glob fallback, got: %s", glob)
 	}
 }
+
+func TestParquetGlob_EmptyNamespaceUsesWildcard(t *testing.T) {
+	lakeDir := t.TempDir()
+
+	glob := ParquetGlob(lakeDir, "spans", "test-tenant", "", 15)
+	if !strings.Contains(glob, "namespace=*") {
+		t.Fatalf("expected namespace=* wildcard, got: %s", glob)
+	}
+}
+
+func TestParquetGlob_WildcardNamespaceFindsMultipleNamespaces(t *testing.T) {
+	lakeDir := t.TempDir()
+	now := time.Now().UTC()
+	tenant := "test-tenant"
+
+	// Create files in two namespaces
+	for _, ns := range []string{"prod", "staging"} {
+		dir := filepath.Join(lakeDir, "spans", "tenant="+tenant, "namespace="+ns,
+			now.Format("year=2006"), now.Format("month=01"), now.Format("day=02"), now.Format("hour=15"))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "part-1.parquet"), []byte("test"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	glob := ParquetGlob(lakeDir, "spans", tenant, "", 120)
+	if !strings.Contains(glob, "namespace=prod") {
+		t.Fatalf("expected prod namespace in result, got: %s", glob)
+	}
+	if !strings.Contains(glob, "namespace=staging") {
+		t.Fatalf("expected staging namespace in result, got: %s", glob)
+	}
+}
+
+func TestParquetGlob_WildcardNamespaceFindsCompactedFiles(t *testing.T) {
+	lakeDir := t.TempDir()
+	now := time.Now().UTC()
+	tenant := "test-tenant"
+
+	// Create compacted file at hour=00 (matches compactor output path)
+	dayBase := filepath.Join(lakeDir, "spans", "tenant="+tenant, "namespace=myns",
+		now.Format("year=2006"), now.Format("month=01"), now.Format("day=02"))
+	compactedDir := filepath.Join(dayBase, "hour=00")
+	if err := os.MkdirAll(compactedDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(compactedDir, "compacted.parquet"), []byte("test"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Use wildcard namespace
+	glob := ParquetGlob(lakeDir, "spans", tenant, "", 120)
+	if !strings.Contains(glob, "compacted.parquet") {
+		t.Fatalf("expected compacted file in result, got: %s", glob)
+	}
+}
