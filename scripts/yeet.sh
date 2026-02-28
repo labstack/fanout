@@ -85,8 +85,22 @@ sudo chown -R $USER:$USER /opt/fanout
 SETUP_EOF
 
 echo "📥 Copying config..."
-scp "$(dirname "$0")/../docker-compose.yaml" "$SERVER:/opt/fanout/docker-compose.yaml"
+REPO_DIR="$(dirname "$0")/.."
+scp "$REPO_DIR/docker-compose.yaml" "$SERVER:/opt/fanout/docker-compose.yaml"
 scp "$(dirname "$0")/grpc.conf" "$SERVER:/data/nginx/grpc.conf"
+
+# Build single .env: secrets (.env) + production config (.env.production) + compose vars
+TMPENV=$(mktemp)
+cat "$REPO_DIR/.env" > "$TMPENV"
+echo "" >> "$TMPENV"
+cat "$REPO_DIR/.env.production" >> "$TMPENV"
+echo "" >> "$TMPENV"
+echo "# Compose" >> "$TMPENV"
+echo "VERSION=${VERSION:-main}" >> "$TMPENV"
+
+scp "$TMPENV" "$SERVER:/opt/fanout/.env"
+rm "$TMPENV"
+ssh "$SERVER" "chmod 600 /opt/fanout/.env"
 
 echo "🚀 Deploying..."
 ssh "$SERVER" "
@@ -94,11 +108,6 @@ set -e
 cd /opt/fanout
 
 docker network create webproxy 2>/dev/null || true
-
-cat > .env << EOF
-VERSION=${VERSION:-main}
-LETSENCRYPT_EMAIL=$EMAIL
-EOF
 
 docker compose pull
 docker compose up -d
