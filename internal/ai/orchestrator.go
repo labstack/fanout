@@ -98,7 +98,7 @@ type SendFunc func(event ClientEvent) error
 
 // stepResult captures the outcome of a single LLM call.
 type stepResult struct {
-	done    bool       // true if response is complete (respond called or text-only)
+	done    bool // true if response is complete (respond called or text-only)
 	tailCfg *TailConfig
 	err     error
 }
@@ -280,6 +280,10 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 	}
 
 	// No respond call — execute real tool calls and return (not done yet)
+	if len(realToolCalls) == 0 {
+		slog.Warn("LLM returned tool_use stop reason but no tool calls", "step", stepName)
+		return stepResult{}
+	}
 	tc, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
 	if err != nil {
 		return stepResult{tailCfg: tc, err: err}
@@ -402,11 +406,8 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	// Step 2: Respond — only respond tool available
 	respondOnly := []ToolDef{respondToolDef()}
 	r2 := o.step(ctx, &conversation, systemBlocks, respondOnly, "respond", send, namespace)
-	// Merge tailCfg: prefer step 2 if set, otherwise keep step 1's
-	tailCfg := r2.tailCfg
-	if tailCfg == nil {
-		tailCfg = r.tailCfg
-	}
+	// Step 2 only has respond — tail config always comes from step 1.
+	tailCfg := r.tailCfg
 	if r2.err != nil {
 		conversation = compactToolResults(conversation)
 		return conversation, tailCfg, r2.err
@@ -414,12 +415,18 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	if !r2.done {
 		// Fallback: LLM didn't call respond
 		msg := "I wasn't able to complete my analysis. Please try rephrasing your question."
-		_ = send(ClientEvent{Type: CEToken, Content: msg})
-		_ = send(ClientEvent{
+		if err := send(ClientEvent{Type: CEToken, Content: msg}); err != nil {
+			conversation = compactToolResults(conversation)
+			return conversation, tailCfg, err
+		}
+		if err := send(ClientEvent{
 			Type:   CEDone,
 			ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
 			Blocks: []Block{MakeTextBlock(msg)},
-		})
+		}); err != nil {
+			conversation = compactToolResults(conversation)
+			return conversation, tailCfg, err
+		}
 	}
 
 	conversation = compactToolResults(conversation)
