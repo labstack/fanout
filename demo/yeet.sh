@@ -42,7 +42,7 @@ for f in docker-compose.yaml .env otelcol-config.yaml; do
     exit 1
   fi
 done
-for d in flagd products; do
+for d in flagd products src/postgresql; do
   if [[ ! -d "$SCRIPT_DIR/$d" ]]; then
     echo "Required directory not found: $SCRIPT_DIR/$d"
     exit 1
@@ -80,9 +80,10 @@ rm "$TMPENV"
 ssh "$SERVER" "chmod 600 $REMOTE_DIR/.env"
 
 echo "Copying data..."
-ssh "$SERVER" "mkdir -p $REMOTE_DIR/flagd $REMOTE_DIR/products"
+ssh "$SERVER" "mkdir -p $REMOTE_DIR/flagd $REMOTE_DIR/products $REMOTE_DIR/src/postgresql"
 scp "$SCRIPT_DIR/flagd/"* "$SERVER:$REMOTE_DIR/flagd/"
 scp "$SCRIPT_DIR/products/"* "$SERVER:$REMOTE_DIR/products/"
+scp "$SCRIPT_DIR/src/postgresql/"* "$SERVER:$REMOTE_DIR/src/postgresql/"
 
 # Deploy
 echo "Deploying..."
