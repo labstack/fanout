@@ -15,8 +15,6 @@ import (
 	"github.com/labstack/fanout/internal/service"
 )
 
-const maxIterations = 10
-
 const respondToolName = "respond"
 
 // respondToolDef builds the synthetic respond tool definition.
@@ -98,335 +96,332 @@ type ClientEvent struct {
 // SendFunc writes a client event to the WebSocket.
 type SendFunc func(event ClientEvent) error
 
-// Run executes the agentic loop for a user message.
+// stepResult captures the outcome of a single LLM call.
+type stepResult struct {
+	done    bool       // true if response is complete (respond called or text-only)
+	tailCfg *TailConfig
+	err     error
+}
+
+// step executes one LLM call: stream → handle tool calls → execute tools.
+// It appends to *conversation so the caller sees updates.
+func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
+	systemBlocks []SystemBlock, tools []ToolDef, stepName string, send SendFunc, namespace string) stepResult {
+
+	if ctx.Err() != nil {
+		return stepResult{err: ctx.Err()}
+	}
+
+	var textBuf strings.Builder
+	var toolCalls []ToolCall
+	var stopReason string
+	var hadError bool
+	var tailCfg *TailConfig
+
+	llmStart := time.Now()
+	err := o.provider.Stream(ctx, StreamParams{
+		SystemBlocks: systemBlocks,
+		Messages:     *conversation,
+		Tools:        tools,
+		MaxTokens:    4096,
+	}, func(event StreamEvent) error {
+		switch event.Type {
+		case EventText:
+			textBuf.WriteString(event.Delta)
+			return send(ClientEvent{Type: CEToken, Content: event.Delta})
+
+		case EventToolUse:
+			if event.ToolCall == nil {
+				return fmt.Errorf("EventToolUse with nil ToolCall")
+			}
+			toolCalls = append(toolCalls, *event.ToolCall)
+			return send(ClientEvent{
+				Type:  CEToolCall,
+				Name:  event.ToolCall.Name,
+				Input: truncateJSON(event.ToolCall.Input, 200),
+			})
+
+		case EventStop:
+			stopReason = event.StopReason
+			return nil
+
+		case EventError:
+			hadError = true
+			return send(ClientEvent{Type: CEError, Error: event.Error})
+
+		default:
+			slog.Warn("unknown stream event type", "type", event.Type)
+		}
+		return nil
+	})
+
+	llmMs := time.Since(llmStart).Milliseconds()
+
+	// Log tool names requested by the LLM
+	var toolNames []string
+	for _, tc := range toolCalls {
+		toolNames = append(toolNames, tc.Name)
+	}
+	slog.Info("llm stream complete", "step", stepName, "llm_ms", llmMs, "stop", stopReason, "tools", toolNames)
+
+	if err != nil {
+		slog.Error("provider stream error", "err", err, "step", stepName)
+		errMsg := "LLM request failed"
+		var apiErr *APIError
+		isAPIErr := errors.As(err, &apiErr)
+		switch {
+		case ctx.Err() != nil:
+			errMsg = "Request cancelled"
+		case isAPIErr && (apiErr.StatusCode == 401 || apiErr.StatusCode == 403):
+			errMsg = "LLM authentication failed — check AI_API_KEY"
+		case isAPIErr && apiErr.StatusCode == 429:
+			errMsg = "LLM rate limited — please try again shortly"
+		case isAPIErr && apiErr.StatusCode >= 500:
+			errMsg = "LLM provider error — please try again"
+		}
+		if sendErr := send(ClientEvent{Type: CEError, Error: errMsg}); sendErr != nil {
+			slog.Warn("failed to send error to client", "send_err", sendErr)
+		}
+		return stepResult{err: err}
+	}
+
+	// If the provider emitted an error event (e.g. premature stream end),
+	// don't send CEDone — the client already received CEError.
+	if hadError {
+		return stepResult{err: fmt.Errorf("provider emitted error event (already sent to client)")}
+	}
+
+	// Record assistant message
+	*conversation = append(*conversation, AssistantMessage(textBuf.String(), toolCalls))
+
+	// If the LLM didn't request tool use, we're done (graceful fallback)
+	if stopReason != "tool_use" {
+		doneEvt := ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}
+		if text := textBuf.String(); text != "" {
+			doneEvt.Blocks = []Block{MakeTextBlock(text)}
+		}
+		if err := send(doneEvt); err != nil {
+			return stepResult{err: err}
+		}
+		return stepResult{done: true}
+	}
+
+	// Separate respond call from real tool calls
+	var respondCall *ToolCall
+	var realToolCalls []ToolCall
+	for i := range toolCalls {
+		if toolCalls[i].Name == respondToolName {
+			respondCall = &toolCalls[i]
+		} else {
+			realToolCalls = append(realToolCalls, toolCalls[i])
+		}
+	}
+
+	if respondCall != nil {
+		// Mark the respond tool as complete on the client
+		if err := send(ClientEvent{Type: CEToolResult, Name: respondToolName}); err != nil {
+			return stepResult{err: err}
+		}
+
+		// If the LLM called both respond and real tools, execute the real
+		// tools first so their results are in the conversation history.
+		if len(realToolCalls) > 0 {
+			tc, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
+			if err != nil {
+				return stepResult{tailCfg: tc, err: err}
+			}
+			tailCfg = tc
+		}
+
+		// Add a synthetic tool_result so the conversation stays valid
+		// for subsequent turns (Anthropic requires tool_result after tool_use).
+		*conversation = append(*conversation, ToolMessage(respondCall.ID, `{"ok":true}`, false))
+
+		// Parse structured response
+		var resp struct {
+			Text   string  `json:"text"`
+			Blocks []Block `json:"blocks"`
+		}
+		if err := json.Unmarshal([]byte(respondCall.Input), &resp); err != nil {
+			slog.Error("failed to parse respond tool input", "err", err, "input_preview", truncateJSON(respondCall.Input, 500))
+			// Fallback: use streamed text
+			text := textBuf.String()
+			if text == "" {
+				text = "I encountered an error formatting my response."
+			}
+			doneEvt := ClientEvent{
+				Type:   CEDone,
+				ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+				Blocks: []Block{MakeTextBlock(text)},
+			}
+			if err := send(doneEvt); err != nil {
+				return stepResult{tailCfg: tailCfg, err: err}
+			}
+			return stepResult{done: true, tailCfg: tailCfg}
+		}
+
+		// Validate blocks
+		blocks := validateBlocks(resp.Blocks)
+
+		// Prepend text as a TextBlock
+		if resp.Text != "" {
+			blocks = append([]Block{MakeTextBlock(resp.Text)}, blocks...)
+		}
+
+		doneEvt := ClientEvent{
+			Type:   CEDone,
+			ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+			Blocks: blocks,
+		}
+		if err := send(doneEvt); err != nil {
+			return stepResult{tailCfg: tailCfg, err: err}
+		}
+		return stepResult{done: true, tailCfg: tailCfg}
+	}
+
+	// No respond call — execute real tool calls and return (not done yet)
+	tc, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
+	if err != nil {
+		return stepResult{tailCfg: tc, err: err}
+	}
+	return stepResult{tailCfg: tc}
+}
+
+// executeTools runs tool calls in parallel, sends results to the client,
+// and appends tool result messages to the conversation.
+func (o *Orchestrator) executeTools(ctx context.Context, toolCalls []ToolCall,
+	conversation *[]Message, send SendFunc, namespace string, stepName string) (*TailConfig, error) {
+
+	type toolExecResult struct {
+		tc       ToolCall
+		result   string
+		isError  bool
+		duration time.Duration
+	}
+	results := make([]toolExecResult, len(toolCalls))
+
+	toolsStart := time.Now()
+	var wg sync.WaitGroup
+	for i, tc := range toolCalls {
+		results[i].tc = tc
+		wg.Add(1)
+		go func(idx int, tc ToolCall) {
+			defer wg.Done()
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("tool execution panicked", "tool", tc.Name, "panic", r)
+					results[idx].result = fmt.Sprintf(`{"error": "internal error executing %s"}`, tc.Name)
+					results[idx].isError = true
+				}
+			}()
+			t0 := time.Now()
+			result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
+			results[idx].duration = time.Since(t0)
+			if err != nil {
+				results[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
+				results[idx].isError = true
+			} else {
+				results[idx].result = result
+			}
+		}(i, tc)
+	}
+	wg.Wait()
+
+	// Log tool execution timing
+	for _, r := range results {
+		level := slog.LevelInfo
+		attrs := []slog.Attr{
+			slog.String("tool", r.tc.Name),
+			slog.Int64("ms", r.duration.Milliseconds()),
+			slog.Bool("error", r.isError),
+			slog.Int("result_bytes", len(r.result)),
+		}
+		if r.tc.Name == "query" {
+			level = slog.LevelWarn
+			attrs = append(attrs, slog.String("hint", "consider a specialized tool"))
+			attrs = append(attrs, slog.String("sql", truncateJSON(r.tc.Input, 500)))
+		}
+		slog.LogAttrs(ctx, level, "tool executed", attrs...)
+	}
+	slog.Info("tools batch complete", "step", stepName, "count", len(results), "wall_ms", time.Since(toolsStart).Milliseconds())
+
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// Send results to WebSocket sequentially (preserves order)
+	var tailCfg *TailConfig
+	for idx := range results {
+		r := &results[idx]
+
+		// Special handling for tail tool: extract TailConfig
+		if r.tc.Name == "tail" && !r.isError {
+			var tailResult struct {
+				Tail *TailConfig `json:"tail"`
+			}
+			if err := json.Unmarshal([]byte(r.result), &tailResult); err != nil {
+				slog.Warn("failed to unmarshal tail config", "err", err)
+			} else if tailResult.Tail != nil {
+				tailCfg = tailResult.Tail
+				if tailCfg.Namespace == "" {
+					tailCfg.Namespace = namespace
+				}
+			}
+		}
+
+		// Always send tool_result to clear the spinner
+		if sendErr := send(ClientEvent{Type: CEToolResult, Name: r.tc.Name}); sendErr != nil {
+			return tailCfg, sendErr
+		}
+
+		// Add tool result to conversation
+		*conversation = append(*conversation, ToolMessage(r.tc.ID, truncateResult(r.result, 8192), r.isError))
+	}
+
+	return tailCfg, nil
+}
+
+// Run executes a two-step orchestration for a user message: gather data, then respond.
 // Returns the updated conversation, an optional TailConfig if the tail tool was invoked, and any error.
 func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) ([]Message, *TailConfig, error) {
 	runStart := time.Now()
 	systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
-	var tailCfg *TailConfig
 
 	defer func() {
 		slog.Info("orchestrator complete", "total_ms", time.Since(runStart).Milliseconds())
 	}()
 
-	for i := 0; i < maxIterations; i++ {
-		// Check for cancellation between iterations
-		if ctx.Err() != nil {
-			return conversation, tailCfg, ctx.Err()
-		}
-
-		var textBuf strings.Builder
-		var toolCalls []ToolCall
-		var stopReason string
-		var hadError bool
-
-		tools := append(o.tools.Defs(), respondToolDef())
-
-		llmStart := time.Now()
-		err := o.provider.Stream(ctx, StreamParams{
-			SystemBlocks: systemBlocks,
-			Messages:     conversation,
-			Tools:        tools,
-			MaxTokens:    4096,
-		}, func(event StreamEvent) error {
-			switch event.Type {
-			case EventText:
-				textBuf.WriteString(event.Delta)
-				return send(ClientEvent{Type: CEToken, Content: event.Delta})
-
-			case EventToolUse:
-				if event.ToolCall == nil {
-					return fmt.Errorf("EventToolUse with nil ToolCall")
-				}
-				toolCalls = append(toolCalls, *event.ToolCall)
-				return send(ClientEvent{
-					Type:  CEToolCall,
-					Name:  event.ToolCall.Name,
-					Input: truncateJSON(event.ToolCall.Input, 200),
-				})
-
-			case EventStop:
-				stopReason = event.StopReason
-				return nil
-
-			case EventError:
-				hadError = true
-				return send(ClientEvent{Type: CEError, Error: event.Error})
-
-			default:
-				slog.Warn("unknown stream event type", "type", event.Type)
-			}
-			return nil
-		})
-
-		llmMs := time.Since(llmStart).Milliseconds()
-
-		// Log tool names requested by the LLM
-		var toolNames []string
-		for _, tc := range toolCalls {
-			toolNames = append(toolNames, tc.Name)
-		}
-		slog.Info("llm stream complete", "iteration", i, "llm_ms", llmMs, "stop", stopReason, "tools", toolNames)
-
-		if err != nil {
-			slog.Error("provider stream error", "err", err, "iteration", i)
-			errMsg := "LLM request failed"
-			var apiErr *APIError
-			isAPIErr := errors.As(err, &apiErr)
-			switch {
-			case ctx.Err() != nil:
-				errMsg = "Request cancelled"
-			case isAPIErr && (apiErr.StatusCode == 401 || apiErr.StatusCode == 403):
-				errMsg = "LLM authentication failed — check AI_API_KEY"
-			case isAPIErr && apiErr.StatusCode == 429:
-				errMsg = "LLM rate limited — please try again shortly"
-			case isAPIErr && apiErr.StatusCode >= 500:
-				errMsg = "LLM provider error — please try again"
-			}
-			if sendErr := send(ClientEvent{Type: CEError, Error: errMsg}); sendErr != nil {
-				slog.Warn("failed to send error to client", "send_err", sendErr)
-			}
-			return conversation, tailCfg, err
-		}
-
-		// If the provider emitted an error event (e.g. premature stream end),
-		// don't send CEDone — the client already received CEError.
-		if hadError {
-			return conversation, tailCfg, fmt.Errorf("provider emitted error event (already sent to client)")
-		}
-
-		// Record assistant message
-		conversation = append(conversation, AssistantMessage(textBuf.String(), toolCalls))
-
-		// If the LLM didn't request tool use, we're done (graceful fallback)
-		if stopReason != "tool_use" {
-			doneEvt := ClientEvent{Type: CEDone, ID: fmt.Sprintf("r-%d", time.Now().UnixMilli())}
-			if text := textBuf.String(); text != "" {
-				doneEvt.Blocks = []Block{MakeTextBlock(text)}
-			}
-			if err := send(doneEvt); err != nil {
-				return conversation, tailCfg, err
-			}
-			conversation = compactToolResults(conversation)
-			return conversation, tailCfg, nil
-		}
-
-		// Check for respond tool call
-		var respondCall *ToolCall
-		var realToolCalls []ToolCall
-		for i := range toolCalls {
-			if toolCalls[i].Name == respondToolName {
-				respondCall = &toolCalls[i]
-			} else {
-				realToolCalls = append(realToolCalls, toolCalls[i])
-			}
-		}
-
-		if respondCall != nil {
-			// Mark the respond tool as complete on the client
-			if err := send(ClientEvent{Type: CEToolResult, Name: respondToolName}); err != nil {
-				return conversation, tailCfg, err
-			}
-
-			// If the LLM called both respond and real tools, execute the real
-			// tools first so their results are in the conversation history.
-			if len(realToolCalls) > 0 {
-				type toolExecResult struct {
-					tc      ToolCall
-					result  string
-					isError bool
-				}
-				sideResults := make([]toolExecResult, len(realToolCalls))
-				var sideWg sync.WaitGroup
-				for si, stc := range realToolCalls {
-					sideResults[si].tc = stc
-					sideWg.Add(1)
-					go func(idx int, tc ToolCall) {
-						defer sideWg.Done()
-						defer func() {
-							if r := recover(); r != nil {
-								slog.Error("tool execution panicked", "tool", tc.Name, "panic", r)
-								sideResults[idx].result = fmt.Sprintf(`{"error": "internal error executing %s"}`, tc.Name)
-								sideResults[idx].isError = true
-							}
-						}()
-						result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
-						if err != nil {
-							sideResults[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
-							sideResults[idx].isError = true
-						} else {
-							sideResults[idx].result = result
-						}
-					}(si, stc)
-				}
-				sideWg.Wait()
-				if ctx.Err() != nil {
-					return conversation, tailCfg, ctx.Err()
-				}
-				for _, r := range sideResults {
-					if r.tc.Name == "tail" && !r.isError {
-						var tailResult struct {
-							Tail *TailConfig `json:"tail"`
-						}
-						if err := json.Unmarshal([]byte(r.result), &tailResult); err != nil {
-							slog.Warn("failed to unmarshal tail config", "err", err)
-						} else if tailResult.Tail != nil {
-							tailCfg = tailResult.Tail
-							if tailCfg.Namespace == "" {
-								tailCfg.Namespace = namespace
-							}
-						}
-					}
-					if sendErr := send(ClientEvent{Type: CEToolResult, Name: r.tc.Name}); sendErr != nil {
-						return conversation, tailCfg, sendErr
-					}
-					conversation = append(conversation, ToolMessage(r.tc.ID, truncateResult(r.result, 8192), r.isError))
-				}
-			}
-
-			// Add a synthetic tool_result so the conversation stays valid
-			// for subsequent turns (Anthropic requires tool_result after tool_use).
-			conversation = append(conversation, ToolMessage(respondCall.ID, `{"ok":true}`, false))
-
-			// Parse structured response
-			var resp struct {
-				Text   string  `json:"text"`
-				Blocks []Block `json:"blocks"`
-			}
-			if err := json.Unmarshal([]byte(respondCall.Input), &resp); err != nil {
-				slog.Error("failed to parse respond tool input", "err", err, "input_preview", truncateJSON(respondCall.Input, 500))
-				// Fallback: use streamed text
-				text := textBuf.String()
-				if text == "" {
-					text = "I encountered an error formatting my response."
-				}
-				doneEvt := ClientEvent{
-					Type:   CEDone,
-					ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
-					Blocks: []Block{MakeTextBlock(text)},
-				}
-				if err := send(doneEvt); err != nil {
-					return conversation, tailCfg, err
-				}
-				return conversation, tailCfg, nil
-			}
-
-			// Validate blocks
-			blocks := validateBlocks(resp.Blocks)
-
-			// Prepend text as a TextBlock
-			if resp.Text != "" {
-				blocks = append([]Block{MakeTextBlock(resp.Text)}, blocks...)
-			}
-
-			doneEvt := ClientEvent{
-				Type:   CEDone,
-				ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
-				Blocks: blocks,
-			}
-			if err := send(doneEvt); err != nil {
-				return conversation, tailCfg, err
-			}
-			conversation = compactToolResults(conversation)
-			return conversation, tailCfg, nil
-		}
-
-		// Otherwise execute real tool calls (existing logic)
-		toolCalls = realToolCalls
-
-		// Execute tool calls in parallel
-		type toolExecResult struct {
-			tc       ToolCall
-			result   string
-			isError  bool
-			duration time.Duration
-		}
-		results := make([]toolExecResult, len(toolCalls))
-
-		toolsStart := time.Now()
-		var wg sync.WaitGroup
-		for i, tc := range toolCalls {
-			results[i].tc = tc
-			wg.Add(1)
-			go func(idx int, tc ToolCall) {
-				defer wg.Done()
-				defer func() {
-					if r := recover(); r != nil {
-						slog.Error("tool execution panicked", "tool", tc.Name, "panic", r)
-						results[idx].result = fmt.Sprintf(`{"error": "internal error executing %s"}`, tc.Name)
-						results[idx].isError = true
-					}
-				}()
-				t0 := time.Now()
-				result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
-				results[idx].duration = time.Since(t0)
-				if err != nil {
-					results[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
-					results[idx].isError = true
-				} else {
-					results[idx].result = result
-				}
-			}(i, tc)
-		}
-		wg.Wait()
-
-		// Log tool execution timing
-		for _, r := range results {
-			slog.Info("tool executed", "tool", r.tc.Name, "ms", r.duration.Milliseconds(), "error", r.isError, "result_bytes", len(r.result))
-		}
-		slog.Info("tools batch complete", "iteration", i, "count", len(results), "wall_ms", time.Since(toolsStart).Milliseconds())
-
-		if ctx.Err() != nil {
-			return conversation, tailCfg, ctx.Err()
-		}
-
-		// Send results to WebSocket sequentially (preserves order)
-		for idx := range results {
-			r := &results[idx]
-
-			// Special handling for tail tool: extract TailConfig
-			if r.tc.Name == "tail" && !r.isError {
-				var tailResult struct {
-					Tail *TailConfig `json:"tail"`
-				}
-				if err := json.Unmarshal([]byte(r.result), &tailResult); err != nil {
-					slog.Warn("failed to unmarshal tail config", "err", err)
-				} else if tailResult.Tail != nil {
-					tailCfg = tailResult.Tail
-					if tailCfg.Namespace == "" {
-						tailCfg.Namespace = namespace
-					}
-					// Since is set by the tail tool from the latest log timestamp.
-					// If zero (no initial logs), runTail applies a lookback.
-				}
-			}
-
-			// Always send tool_result to clear the spinner
-			if sendErr := send(ClientEvent{Type: CEToolResult, Name: r.tc.Name}); sendErr != nil {
-				return conversation, tailCfg, sendErr
-			}
-
-			// Add tool result to conversation
-			conversation = append(conversation, ToolMessage(r.tc.ID, truncateResult(r.result, 8192), r.isError))
-		}
-
-		// Compact older tool results before next iteration to reduce tokens
+	// Step 1: Gather — all tools available
+	allTools := append(o.tools.Defs(), respondToolDef())
+	r := o.step(ctx, &conversation, systemBlocks, allTools, "gather", send, namespace)
+	if r.done || r.err != nil {
 		conversation = compactToolResults(conversation)
+		return conversation, r.tailCfg, r.err
 	}
 
-	slog.Warn("orchestrator hit max iterations", "max", maxIterations)
-	maxIterMsg := "Reached maximum tool iterations. Please refine your question for more details."
-	if err := send(ClientEvent{Type: CEToken, Content: maxIterMsg}); err != nil {
-		return conversation, tailCfg, err
+	// Step 2: Respond — only respond tool available
+	respondOnly := []ToolDef{respondToolDef()}
+	r2 := o.step(ctx, &conversation, systemBlocks, respondOnly, "respond", send, namespace)
+	// Merge tailCfg: prefer step 2 if set, otherwise keep step 1's
+	tailCfg := r2.tailCfg
+	if tailCfg == nil {
+		tailCfg = r.tailCfg
 	}
-	doneEvt := ClientEvent{
-		Type:   CEDone,
-		ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
-		Blocks: []Block{MakeTextBlock(maxIterMsg)},
+	if r2.err != nil {
+		conversation = compactToolResults(conversation)
+		return conversation, tailCfg, r2.err
 	}
-	if err := send(doneEvt); err != nil {
-		return conversation, tailCfg, err
+	if !r2.done {
+		// Fallback: LLM didn't call respond
+		msg := "I wasn't able to complete my analysis. Please try rephrasing your question."
+		_ = send(ClientEvent{Type: CEToken, Content: msg})
+		_ = send(ClientEvent{
+			Type:   CEDone,
+			ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+			Blocks: []Block{MakeTextBlock(msg)},
+		})
 	}
+
 	conversation = compactToolResults(conversation)
 	return conversation, tailCfg, nil
 }
