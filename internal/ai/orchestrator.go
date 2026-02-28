@@ -392,10 +392,13 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		return conversation, tailCfg, r.err
 	}
 
-	// Step 2: Respond — no tools, LLM just produces text.
-	// Passing nil tools prevents the LLM from hallucinating tool calls
-	// it saw in step 1's conversation history.
-	r2 := o.step(ctx, &conversation, systemBlocks, nil, "respond", send, namespace)
+	// Step 2: Respond — respond tool only.
+	// Inject a synthesis directive so the LLM focuses on analyzing
+	// the data it already gathered rather than trailing off.
+	conversation = append(conversation, UserMessage(
+		"Now synthesize the tool results into a complete response. "+
+			"Do NOT suggest further investigation — analyze what you have."))
+	r2 := o.step(ctx, &conversation, systemBlocks, []ToolDef{respondToolDef()}, "respond", send, namespace)
 	if r2.err != nil {
 		return conversation, tailCfg, r2.err
 	}
@@ -481,17 +484,25 @@ You help users understand system health, investigate issues, and analyze telemet
 
 ## Tools
 
-Investigation tools (use these to gather data):
-status (start here) → diagnose (deep-dive) → find (search spans/logs) →
-tail (live log streaming) → trace (full trace, needs trace_id) → timeline (trends) →
-topology (dependency map) → compare (side-by-side) → metrics (explore metrics) →
-query (custom SQL, last resort).
+You get ONE tool call to gather data — pick the best tool for the question:
+- status — system health overview (start here for general questions)
+- diagnose — deep-dive into a specific service (latency, errors, dependencies)
+- find — search spans/logs by pattern, service, status, severity
+- tail — live log streaming
+- trace — full distributed trace (needs trace_id from find results)
+- timeline — time-bucketed metrics with anomaly detection
+- topology — service dependency map with health
+- compare — side-by-side service comparison
+- metrics — explore available metrics
+- query — custom SQL (last resort)
+
+You may call multiple tools in parallel if they are independent (e.g. diagnose for two services).
+After tools execute, respond with your analysis — do NOT plan further tool calls.
 
 ## Response
 
-After gathering data, call the respond tool with:
-- text: Markdown analysis. Be direct, cite specific numbers, explain root causes with next steps.
-- blocks: Visualization blocks from the types below.
+Call the respond tool OR write markdown directly. Either way:
+- Be direct, cite specific numbers, explain root causes with next steps.
 
 ## Block Types
 
