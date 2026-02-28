@@ -45,7 +45,9 @@ CREATE TABLE IF NOT EXISTS service_rollup (
   spans BIGINT,
   p50_ms DOUBLE,
   p95_ms DOUBLE,
-  error_rate DOUBLE
+  error_rate DOUBLE,
+  log_count BIGINT DEFAULT 0,
+  metric_count BIGINT DEFAULT 0
 );`); err != nil {
 		return nil, err
 	}
@@ -56,20 +58,10 @@ CREATE TABLE IF NOT EXISTS edge_rollup (
   callee TEXT,
   calls BIGINT,
   avg_ms DOUBLE,
-  error_rate DOUBLE
+  error_rate DOUBLE,
+  edge_type TEXT DEFAULT 'call'
 );`); err != nil {
 		return nil, err
-	}
-
-	// Add multi-signal columns (idempotent)
-	for _, ddl := range []string{
-		`ALTER TABLE service_rollup ADD COLUMN IF NOT EXISTS log_count BIGINT DEFAULT 0`,
-		`ALTER TABLE service_rollup ADD COLUMN IF NOT EXISTS metric_count BIGINT DEFAULT 0`,
-		`ALTER TABLE edge_rollup ADD COLUMN IF NOT EXISTS edge_type TEXT DEFAULT 'call'`,
-	} {
-		if _, err := db.Exec(ddl); err != nil {
-			return nil, fmt.Errorf("migration %q: %w", ddl, err)
-		}
 	}
 
 	return d, nil
@@ -134,7 +126,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 	// Service rollup
 	res, err := d.DB.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO service_rollup
+INSERT INTO service_rollup (bucket, service, spans, p50_ms, p95_ms, error_rate)
 SELECT
   date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
   "name=service_name" as service,
@@ -197,7 +189,7 @@ GROUP BY ALL;
 
 	// Edge rollup (caller -> callee relationships)
 	_, edgeErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO edge_rollup
+INSERT INTO edge_rollup (bucket, caller, callee, calls, avg_ms, error_rate)
 WITH calls AS (
   SELECT
     date_trunc('minute', epoch_ms(CAST(child."name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
