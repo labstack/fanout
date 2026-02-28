@@ -15,6 +15,7 @@ services:
     image: ghcr.io/labstack/fanout:main
     container_name: fanout-demo
     restart: unless-stopped
+    env_file: .env
     environment:
       VIRTUAL_HOST: demo.fanout.run
       VIRTUAL_PORT: "7520"

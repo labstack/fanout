@@ -65,8 +65,19 @@ ssh "$SERVER" "sudo mkdir -p /data/fanout-demo $REMOTE_DIR && sudo chown -R \$US
 # Copy files
 echo "Copying config..."
 scp "$SCRIPT_DIR/docker-compose.yaml" "$SERVER:$REMOTE_DIR/docker-compose.yaml"
-scp "$SCRIPT_DIR/.env" "$SERVER:$REMOTE_DIR/.env"
 scp "$SCRIPT_DIR/otelcol-config.yaml" "$SERVER:$REMOTE_DIR/otelcol-config.yaml"
+
+# Build single .env: secrets (root .env, gitignored) + demo config (demo/.env, tracked)
+REPO_DIR="$SCRIPT_DIR/.."
+TMPENV=$(mktemp)
+if [[ -f "$REPO_DIR/.env" ]]; then
+  cat "$REPO_DIR/.env" > "$TMPENV"
+  echo "" >> "$TMPENV"
+fi
+cat "$SCRIPT_DIR/.env" >> "$TMPENV"
+scp "$TMPENV" "$SERVER:$REMOTE_DIR/.env"
+rm "$TMPENV"
+ssh "$SERVER" "chmod 600 $REMOTE_DIR/.env"
 
 echo "Copying data..."
 ssh "$SERVER" "mkdir -p $REMOTE_DIR/flagd $REMOTE_DIR/products"
