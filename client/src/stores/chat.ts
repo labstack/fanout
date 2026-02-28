@@ -21,6 +21,8 @@ export interface Message {
   toolCalls: ToolCall[];
   loading: boolean;
   error?: string;
+  /** When true, the next token should replace content instead of appending. */
+  pendingReplace?: boolean;
 }
 
 interface ChatStore {
@@ -63,7 +65,10 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
       case "token":
         messages[lastIdx] = {
           ...last,
-          content: last.content + (event.content ?? ""),
+          content: last.pendingReplace
+            ? (event.content ?? "")
+            : last.content + (event.content ?? ""),
+          pendingReplace: false,
         };
         break;
 
@@ -83,6 +88,7 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
           toolCalls: last.toolCalls.map((tc) =>
             tc.name === event.name && !tc.done ? { ...tc, done: true } : tc,
           ),
+          pendingReplace: true,
         };
         break;
 
