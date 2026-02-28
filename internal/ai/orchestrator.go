@@ -205,14 +205,27 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		return stepResult{done: true}
 	}
 
-	// Separate respond call from real tool calls
+	// Build set of tool names the LLM was actually offered this step.
+	allowed := make(map[string]struct{}, len(tools))
+	for _, t := range tools {
+		allowed[t.Name] = struct{}{}
+	}
+
+	// Separate respond call from real tool calls; drop hallucinated tools.
 	var respondCall *ToolCall
 	var realToolCalls []ToolCall
 	for i := range toolCalls {
 		if toolCalls[i].Name == respondToolName {
 			respondCall = &toolCalls[i]
-		} else {
+		} else if _, ok := allowed[toolCalls[i].Name]; ok {
 			realToolCalls = append(realToolCalls, toolCalls[i])
+		} else {
+			slog.Warn("LLM called tool not in offered set — dropping",
+				"tool", toolCalls[i].Name, "step", stepName)
+			// Add synthetic error result so conversation stays valid.
+			*conversation = append(*conversation,
+				ToolMessage(toolCalls[i].ID, `{"error":"tool not available in this step"}`, true))
+			_ = send(ClientEvent{Type: CEToolResult, Name: toolCalls[i].Name})
 		}
 	}
 
@@ -267,9 +280,21 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		return stepResult{done: true, tailCfg: tailCfg}
 	}
 
-	// No respond call — execute real tool calls and return (not done yet)
+	// No respond call — execute real tool calls and return (not done yet).
+	// If all tool calls were filtered (hallucinated tools), treat any
+	// streamed text as the response so the user gets something useful.
 	if len(realToolCalls) == 0 {
-		slog.Warn("LLM returned tool_use stop reason but no tool calls", "step", stepName)
+		slog.Warn("LLM returned tool_use stop reason but no executable tool calls", "step", stepName)
+		if text := textBuf.String(); text != "" {
+			if err := send(ClientEvent{
+				Type:   CEDone,
+				ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+				Blocks: []Block{MakeTextBlock(text)},
+			}); err != nil {
+				return stepResult{err: err}
+			}
+			return stepResult{done: true}
+		}
 		return stepResult{}
 	}
 	tc, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
