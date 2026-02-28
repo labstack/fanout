@@ -116,7 +116,6 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 	var toolCalls []ToolCall
 	var stopReason string
 	var hadError bool
-	var tailCfg *TailConfig
 
 	llmStart := time.Now()
 	err := o.provider.Stream(ctx, StreamParams{
@@ -225,6 +224,7 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 
 		// If the LLM called both respond and real tools, execute the real
 		// tools first so their results are in the conversation history.
+		var tailCfg *TailConfig
 		if len(realToolCalls) > 0 {
 			tc, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
 			if err != nil {
@@ -237,43 +237,31 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		// for subsequent turns (Anthropic requires tool_result after tool_use).
 		*conversation = append(*conversation, ToolMessage(respondCall.ID, `{"ok":true}`, false))
 
-		// Parse structured response
+		// Parse structured response; fall back to streamed text on failure
+		var blocks []Block
 		var resp struct {
 			Text   string  `json:"text"`
 			Blocks []Block `json:"blocks"`
 		}
 		if err := json.Unmarshal([]byte(respondCall.Input), &resp); err != nil {
 			slog.Error("failed to parse respond tool input", "err", err, "input_preview", truncateJSON(respondCall.Input, 500))
-			// Fallback: use streamed text
 			text := textBuf.String()
 			if text == "" {
 				text = "I encountered an error formatting my response."
 			}
-			doneEvt := ClientEvent{
-				Type:   CEDone,
-				ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
-				Blocks: []Block{MakeTextBlock(text)},
+			blocks = []Block{MakeTextBlock(text)}
+		} else {
+			blocks = validateBlocks(resp.Blocks)
+			if resp.Text != "" {
+				blocks = append([]Block{MakeTextBlock(resp.Text)}, blocks...)
 			}
-			if err := send(doneEvt); err != nil {
-				return stepResult{tailCfg: tailCfg, err: err}
-			}
-			return stepResult{done: true, tailCfg: tailCfg}
 		}
 
-		// Validate blocks
-		blocks := validateBlocks(resp.Blocks)
-
-		// Prepend text as a TextBlock
-		if resp.Text != "" {
-			blocks = append([]Block{MakeTextBlock(resp.Text)}, blocks...)
-		}
-
-		doneEvt := ClientEvent{
+		if err := send(ClientEvent{
 			Type:   CEDone,
 			ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
 			Blocks: blocks,
-		}
-		if err := send(doneEvt); err != nil {
+		}); err != nil {
 			return stepResult{tailCfg: tailCfg, err: err}
 		}
 		return stepResult{done: true, tailCfg: tailCfg}
@@ -387,36 +375,33 @@ func (o *Orchestrator) executeTools(ctx context.Context, toolCalls []ToolCall,
 
 // Run executes a two-step orchestration for a user message: gather data, then respond.
 // Returns the updated conversation, an optional TailConfig if the tail tool was invoked, and any error.
-func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) ([]Message, *TailConfig, error) {
+func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) (msgs []Message, tailCfg *TailConfig, retErr error) {
 	runStart := time.Now()
 	systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
 
 	defer func() {
+		msgs = compactToolResults(conversation)
 		slog.Info("orchestrator complete", "total_ms", time.Since(runStart).Milliseconds())
 	}()
 
 	// Step 1: Gather — all tools available
 	allTools := append(o.tools.Defs(), respondToolDef())
 	r := o.step(ctx, &conversation, systemBlocks, allTools, "gather", send, namespace)
+	tailCfg = r.tailCfg
 	if r.done || r.err != nil {
-		conversation = compactToolResults(conversation)
-		return conversation, r.tailCfg, r.err
+		return conversation, tailCfg, r.err
 	}
 
 	// Step 2: Respond — only respond tool available
 	respondOnly := []ToolDef{respondToolDef()}
 	r2 := o.step(ctx, &conversation, systemBlocks, respondOnly, "respond", send, namespace)
-	// Step 2 only has respond — tail config always comes from step 1.
-	tailCfg := r.tailCfg
 	if r2.err != nil {
-		conversation = compactToolResults(conversation)
 		return conversation, tailCfg, r2.err
 	}
 	if !r2.done {
 		// Fallback: LLM didn't call respond
 		msg := "I wasn't able to complete my analysis. Please try rephrasing your question."
 		if err := send(ClientEvent{Type: CEToken, Content: msg}); err != nil {
-			conversation = compactToolResults(conversation)
 			return conversation, tailCfg, err
 		}
 		if err := send(ClientEvent{
@@ -424,12 +409,10 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 			ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
 			Blocks: []Block{MakeTextBlock(msg)},
 		}); err != nil {
-			conversation = compactToolResults(conversation)
 			return conversation, tailCfg, err
 		}
 	}
 
-	conversation = compactToolResults(conversation)
 	return conversation, tailCfg, nil
 }
 
