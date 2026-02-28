@@ -13,11 +13,11 @@ func TestTopology_Empty(t *testing.T) {
 
 	// Nodes query - empty
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate"}))
+		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate", "log_cnt", "metric_cnt"}))
 
 	// Edges query - empty
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}))
+		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}))
 
 	result, err := svc.Topology(context.Background(), 60, "", "")
 	if err != nil {
@@ -38,14 +38,14 @@ func TestTopology_WithNodes(t *testing.T) {
 
 	// Nodes query
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate"}).
-			AddRow("api-gateway", int64(5000), 50.0, 0.001).
-			AddRow("user-service", int64(3000), 100.0, 0.005).
-			AddRow("payment-service", int64(1000), 200.0, 0.02))
+		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate", "log_cnt", "metric_cnt"}).
+			AddRow("api-gateway", int64(5000), 50.0, 0.001, int64(0), int64(0)).
+			AddRow("user-service", int64(3000), 100.0, 0.005, int64(0), int64(0)).
+			AddRow("payment-service", int64(1000), 200.0, 0.02, int64(0), int64(0)))
 
 	// Edges query - empty
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}))
+		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}))
 
 	result, err := svc.Topology(context.Background(), 60, "", "")
 	if err != nil {
@@ -74,15 +74,15 @@ func TestTopology_WithEdges(t *testing.T) {
 
 	// Nodes query
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate"}).
-			AddRow("frontend", int64(1000), 50.0, 0.01).
-			AddRow("backend", int64(800), 100.0, 0.02))
+		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate", "log_cnt", "metric_cnt"}).
+			AddRow("frontend", int64(1000), 50.0, 0.01, int64(0), int64(0)).
+			AddRow("backend", int64(800), 100.0, 0.02, int64(0), int64(0)))
 
 	// Edges query
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}).
-			AddRow("frontend", "backend", int64(800), 25.0, 0.01).
-			AddRow("backend", "database", int64(1500), 5.0, 0.001))
+		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}).
+			AddRow("frontend", "backend", int64(800), 25.0, 0.01, "call").
+			AddRow("backend", "database", int64(1500), 5.0, 0.001, "call"))
 
 	result, err := svc.Topology(context.Background(), 60, "", "")
 	if err != nil {
@@ -110,9 +110,9 @@ func TestTopology_DefaultWindow(t *testing.T) {
 	defer svc.duck.DB.Close()
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate"}))
+		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate", "log_cnt", "metric_cnt"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}))
+		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}))
 
 	// Pass 0 window, should default to 60
 	result, err := svc.Topology(context.Background(), 0, "", "")
@@ -130,13 +130,13 @@ func TestTopology_NodeHealthStatus(t *testing.T) {
 
 	// Nodes with different health statuses
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate"}).
-			AddRow("healthy-svc", int64(100), 50.0, 0.005).   // healthy
-			AddRow("degraded-svc", int64(100), 2000.0, 0.03). // degraded (high latency)
-			AddRow("unhealthy-svc", int64(100), 50.0, 0.15))  // unhealthy (high errors)
+		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate", "log_cnt", "metric_cnt"}).
+			AddRow("healthy-svc", int64(100), 50.0, 0.005, int64(0), int64(0)).   // healthy
+			AddRow("degraded-svc", int64(100), 2000.0, 0.03, int64(0), int64(0)). // degraded (high latency)
+			AddRow("unhealthy-svc", int64(100), 50.0, 0.15, int64(0), int64(0)))  // unhealthy (high errors)
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}))
+		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}))
 
 	result, err := svc.Topology(context.Background(), 60, "", "")
 	if err != nil {
@@ -164,14 +164,14 @@ func TestTopology_EdgeHealthStatus(t *testing.T) {
 	defer svc.duck.DB.Close()
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate"}))
+		sqlmock.NewRows([]string{"service", "cnt", "p95", "error_rate", "log_cnt", "metric_cnt"}))
 
 	// Edges with different health statuses
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate"}).
-			AddRow("a", "b", int64(100), 50.0, 0.005).  // healthy
-			AddRow("b", "c", int64(100), 2000.0, 0.03). // degraded
-			AddRow("c", "d", int64(100), 50.0, 0.15))   // unhealthy
+		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}).
+			AddRow("a", "b", int64(100), 50.0, 0.005, "call").  // healthy
+			AddRow("b", "c", int64(100), 2000.0, 0.03, "call"). // degraded
+			AddRow("c", "d", int64(100), 50.0, 0.15, "call"))   // unhealthy
 
 	result, err := svc.Topology(context.Background(), 60, "", "")
 	if err != nil {

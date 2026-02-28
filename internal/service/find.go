@@ -13,7 +13,7 @@ type FindParams struct {
 	Query     string
 	Service   string
 	Operation string // filter by operation name
-	Type      string // spans, logs, both
+	Type      string // spans, logs, metrics, both, all
 	Status    string // error, slow, all
 	Window    int
 	Severity  []string
@@ -39,12 +39,13 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
 
 	out := &FindResult{
-		Spans: []SpanResult{},
-		Logs:  []LogResult{},
+		Spans:   []SpanResult{},
+		Logs:    []LogResult{},
+		Metrics: []MetricInfo{},
 	}
 
 	// Search spans
-	if p.Type == "spans" || p.Type == "both" {
+	if p.Type == "spans" || p.Type == "both" || p.Type == "all" {
 		spans, hasMore, err := s.findSpans(ctx, p)
 		if err != nil {
 			return out, fmt.Errorf("findSpans: %w", err)
@@ -56,12 +57,24 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 	}
 
 	// Search logs
-	if p.Type == "logs" || p.Type == "both" {
+	if p.Type == "logs" || p.Type == "both" || p.Type == "all" {
 		logs, hasMore, err := s.findLogs(ctx, p)
 		if err != nil {
 			return out, fmt.Errorf("findLogs: %w", err)
 		}
 		out.Logs = logs
+		if hasMore {
+			out.HasMore = true
+		}
+	}
+
+	// Search metrics
+	if p.Type == "metrics" || p.Type == "all" {
+		metrics, hasMore, err := s.findMetrics(ctx, p)
+		if err != nil {
+			return out, fmt.Errorf("findMetrics: %w", err)
+		}
+		out.Metrics = metrics
 		if hasMore {
 			out.HasMore = true
 		}
@@ -262,6 +275,90 @@ LIMIT %d;
 		logs = logs[:p.Limit]
 	}
 	return logs, hasMore, nil
+}
+
+func (s *Service) findMetrics(ctx context.Context, p FindParams) ([]MetricInfo, bool, error) {
+	var filters []string
+	var args []any
+
+	if p.Query != "" {
+		filters = append(filters, `"name=name" ILIKE ?`)
+		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Query)
+		args = append(args, "%"+escaped+"%")
+	}
+	if p.Service != "" {
+		filters = append(filters, `"name=service_name" = ?`)
+		args = append(args, p.Service)
+	}
+
+	filterStr := ""
+	if len(filters) > 0 {
+		filterStr = "AND " + strings.Join(filters, " AND ")
+	}
+
+	q := fmt.Sprintf(`
+SELECT "name=name" as metric_name,
+       "name=mtype" as mtype,
+       "name=service_name" as service,
+       "name=value" as value,
+       strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+       "name=unit" as unit,
+       "name=description" as description,
+       "name=scope_name" as scope_name,
+       "name=scope_version" as scope_version
+FROM read_parquet(%s, union_by_name=true)
+WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+  %s
+ORDER BY "name=time_unix_nano" DESC
+LIMIT %d;
+`, s.duck.MetricsGlob(p.TenantID, p.Namespace, p.Window), p.Window, filterStr, p.Limit+1)
+
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		slog.Warn("findMetrics query failed", "err", err)
+		return []MetricInfo{}, false, fmt.Errorf("findMetrics query: %w", err)
+	}
+	defer rows.Close()
+
+	var metrics []MetricInfo
+	var scanErrors int
+	for rows.Next() {
+		var m MetricInfo
+		var service, unit, description, scopeName, scopeVersion any
+		if err := rows.Scan(&m.Name, &m.Type, &service, &m.Value, &m.Time, &unit, &description, &scopeName, &scopeVersion); err != nil {
+			scanErrors++
+			slog.Warn("scan failed", "method", "findMetrics", "err", err)
+			continue
+		}
+		if service != nil {
+			m.Service = fmt.Sprintf("%v", service)
+		}
+		if unit != nil {
+			m.Unit = fmt.Sprintf("%v", unit)
+		}
+		if description != nil {
+			m.Description = fmt.Sprintf("%v", description)
+		}
+		if scopeName != nil {
+			m.ScopeName = fmt.Sprintf("%v", scopeName)
+		}
+		if scopeVersion != nil {
+			m.ScopeVersion = fmt.Sprintf("%v", scopeVersion)
+		}
+		metrics = append(metrics, m)
+	}
+	if err := rows.Err(); err != nil {
+		return metrics, false, fmt.Errorf("findMetrics rows iteration: %w", err)
+	}
+	if scanErrors > 0 && len(metrics) == 0 {
+		return nil, false, fmt.Errorf("findMetrics: all %d rows failed to scan (possible schema mismatch)", scanErrors)
+	}
+
+	hasMore := len(metrics) > p.Limit
+	if hasMore {
+		metrics = metrics[:p.Limit]
+	}
+	return metrics, hasMore, nil
 }
 
 // TailParams defines filters for live log tailing.

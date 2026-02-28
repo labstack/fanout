@@ -12,10 +12,12 @@ func TestRenderFind(t *testing.T) {
 			{Timestamp: "12:00:01", Service: "api", Severity: "INFO", Body: "Request received", TraceID: "trace-123"},
 			{Timestamp: "12:00:02", Service: "api", Severity: "ERROR", Body: "Connection timeout", TraceID: "trace-456"},
 		},
-		SpanCount:  2,
-		LogCount:   2,
-		HasMore:    false,
-		Suggestion: "Found spans. Use trace tool for details.",
+		Metrics:     []FoundMetric{},
+		SpanCount:   2,
+		LogCount:    2,
+		MetricCount: 0,
+		HasMore:     false,
+		Suggestion:  "Found spans. Use trace tool for details.",
 	}
 
 	output := renderFind(find)
@@ -95,6 +97,74 @@ func TestRenderFind_HasMore(t *testing.T) {
 
 	if output.ASCII == "" || output.HTML == "" {
 		t.Error("renderFind() should produce output when hasMore is true")
+	}
+}
+
+func TestRenderFind_MetricsOnly(t *testing.T) {
+	find := &FindOut{
+		Spans: []FoundSpan{},
+		Logs:  []FoundLog{},
+		Metrics: []FoundMetric{
+			{Name: "kafka.consumer.lag", Type: "gauge", Service: "kafka", Value: 42.0, Unit: "messages", Time: "12:00:00"},
+			{Name: "http.requests", Type: "counter", Service: "api", Value: 1000.0, Unit: "requests", Time: "12:00:00"},
+		},
+		SpanCount:   0,
+		LogCount:    0,
+		MetricCount: 2,
+		HasMore:     false,
+		Suggestion:  "Found 2 metrics. Use diagnose or timeline tool for deeper analysis.",
+	}
+
+	output := renderFind(find)
+
+	if output.ASCII == "" || output.HTML == "" {
+		t.Error("renderFind() should produce output with metrics only")
+	}
+}
+
+func TestRenderFind_AllSignals(t *testing.T) {
+	find := &FindOut{
+		Spans: []FoundSpan{
+			{TraceID: "trace-1", SpanID: "span-1", Service: "api", Operation: "GET /", DurationMs: 10.0, Status: "ok"},
+		},
+		Logs: []FoundLog{
+			{Timestamp: "12:00", Service: "api", Severity: "INFO", Body: "hello"},
+		},
+		Metrics: []FoundMetric{
+			{Name: "cpu.usage", Type: "gauge", Service: "api", Value: 0.85, Time: "12:00"},
+		},
+		SpanCount:   1,
+		LogCount:    1,
+		MetricCount: 1,
+		HasMore:     false,
+	}
+
+	output := renderFind(find)
+
+	if output.ASCII == "" || output.HTML == "" {
+		t.Error("renderFind() should produce output with all signal types")
+	}
+}
+
+func TestFoundMetric(t *testing.T) {
+	m := FoundMetric{
+		Name:        "kafka.consumer.lag",
+		Type:        "gauge",
+		Service:     "kafka",
+		Value:       42.0,
+		Unit:        "messages",
+		Time:        "2024-01-01T12:00:00Z",
+		Description: "Consumer group lag",
+	}
+
+	if m.Name != "kafka.consumer.lag" {
+		t.Errorf("Name = %q", m.Name)
+	}
+	if m.Value != 42.0 {
+		t.Errorf("Value = %f, want 42.0", m.Value)
+	}
+	if m.Unit != "messages" {
+		t.Errorf("Unit = %q, want %q", m.Unit, "messages")
 	}
 }
 

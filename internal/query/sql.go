@@ -303,10 +303,12 @@ LIMIT 100`,
 			Description: "P50, P95 latencies by service from rollup table",
 			Query: `SELECT
   service,
-  AVG(p50_ms) as p50_ms,
-  AVG(p95_ms) as p95_ms,
+  AVG(CASE WHEN spans > 0 THEN p50_ms END) as p50_ms,
+  AVG(CASE WHEN spans > 0 THEN p95_ms END) as p95_ms,
   SUM(spans) as total_requests,
-  AVG(error_rate) as avg_error_rate
+  AVG(CASE WHEN spans > 0 THEN error_rate END) as avg_error_rate,
+  SUM(COALESCE(log_count, 0)) as total_logs,
+  SUM(COALESCE(metric_count, 0)) as total_metrics
 FROM service_rollup
 WHERE bucket >= NOW() - INTERVAL '15 minutes'
 GROUP BY service

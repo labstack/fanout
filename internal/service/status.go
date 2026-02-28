@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 
@@ -28,13 +29,15 @@ func (s *Service) Status(ctx context.Context, window int, namespace, tenantID st
 	q := fmt.Sprintf(`
 SELECT
   service,
-  SUM(spans)::BIGINT as cnt,
-  AVG(p95_ms) as p95_ms,
-  AVG(error_rate) as error_rate
+  SUM(spans)::BIGINT AS span_cnt,
+  AVG(CASE WHEN spans > 0 THEN p95_ms END) AS p95_ms,
+  AVG(CASE WHEN spans > 0 THEN error_rate END) AS error_rate,
+  SUM(COALESCE(log_count, 0))::BIGINT AS log_cnt,
+  SUM(COALESCE(metric_count, 0))::BIGINT AS metric_cnt
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
 GROUP BY service
-ORDER BY cnt DESC
+ORDER BY (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0))) DESC
 LIMIT 100;
 `, window)
 
@@ -51,48 +54,65 @@ LIMIT 100;
 	defer rows.Close()
 
 	var totalCount int64
+	var totalSpans int64
 	var totalP95, totalErrorRate float64
 	var services []struct {
-		name      string
-		count     int64
-		p95       float64
-		errorRate float64
-		status    string
+		name        string
+		spans       int64
+		p95         float64
+		errorRate   float64
+		logCount    int64
+		metricCount int64
+		status      string
 	}
 
 	for rows.Next() {
 		var svc struct {
-			name      string
-			count     int64
-			p95       float64
-			errorRate float64
-			status    string
+			name        string
+			spans       int64
+			p95         float64
+			errorRate   float64
+			logCount    int64
+			metricCount int64
+			status      string
 		}
-		if err := rows.Scan(&svc.name, &svc.count, &svc.p95, &svc.errorRate); err != nil {
+		var p95null, errNull sql.NullFloat64
+		if err := rows.Scan(&svc.name, &svc.spans, &p95null, &errNull, &svc.logCount, &svc.metricCount); err != nil {
 			slog.Warn("scan failed", "method", "Status", "err", err)
 			continue
 		}
-		svc.status = DeriveHealth(svc.errorRate, svc.p95)
-		totalCount += svc.count
-		totalP95 += svc.p95 * float64(svc.count)
-		totalErrorRate += svc.errorRate * float64(svc.count)
+		if p95null.Valid {
+			svc.p95 = p95null.Float64
+		}
+		if errNull.Valid {
+			svc.errorRate = errNull.Float64
+		}
+		svc.status = DeriveHealth(svc.errorRate, svc.p95, svc.spans)
+		count := svc.spans + svc.logCount + svc.metricCount
+		totalCount += count
+		totalSpans += svc.spans
+		totalP95 += svc.p95 * float64(svc.spans)
+		totalErrorRate += svc.errorRate * float64(svc.spans)
 		services = append(services, svc)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rows iteration error", "method", "Status", "err", err)
 	}
 
 	out := &StatusResult{
 		TopIssues: []TopIssue{},
 	}
 
-	if len(services) > 0 {
-		out.P95Ms = totalP95 / float64(totalCount)
-		out.ErrorRate = totalErrorRate / float64(totalCount)
+	if totalSpans > 0 {
+		out.P95Ms = totalP95 / float64(totalSpans)
+		out.ErrorRate = totalErrorRate / float64(totalSpans)
 	}
 	out.ThroughputPerMin = totalCount / int64(window)
 
 	for _, svc := range services {
 		out.Services.Total++
 		switch svc.status {
-		case "healthy":
+		case "healthy", "active":
 			out.Services.Healthy++
 		case "degraded":
 			out.Services.Degraded++
@@ -127,7 +147,7 @@ LIMIT 100;
 	out.Healthy = out.Services.Unhealthy == 0 && out.Services.Degraded == 0
 
 	if out.Healthy {
-		out.Summary = fmt.Sprintf("%d services healthy, %.0f req/min", out.Services.Total, float64(out.ThroughputPerMin))
+		out.Summary = fmt.Sprintf("%d services healthy, %.0f signals/min", out.Services.Total, float64(out.ThroughputPerMin))
 	} else {
 		out.Summary = fmt.Sprintf("%d degraded, %d unhealthy of %d services",
 			out.Services.Degraded, out.Services.Unhealthy, out.Services.Total)
@@ -138,7 +158,16 @@ LIMIT 100;
 }
 
 // DeriveHealth determines service health from error rate and p95 latency.
-func DeriveHealth(errorRate, p95 float64) string {
+// If spans is provided and is 0 (with zero error rate and latency), returns "active"
+// for services discovered only via logs/metrics.
+func DeriveHealth(errorRate, p95 float64, spans ...int64) string {
+	spanCount := int64(0)
+	if len(spans) > 0 {
+		spanCount = spans[0]
+	}
+	if spanCount == 0 && errorRate == 0 && p95 == 0 {
+		return "active"
+	}
 	if errorRate > 0.1 || p95 > 5000 {
 		return "unhealthy"
 	}

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/labstack/fanout/internal/render"
@@ -56,14 +57,16 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 	q := fmt.Sprintf(`
 		SELECT
 			service,
-			COALESCE(SUM(spans), 0) as requests,
-			COALESCE(AVG(error_rate), 0) as error_rate,
-			COALESCE(AVG(p50_ms), 0) as p50_ms,
-			COALESCE(AVG(p95_ms), 0) as p95_ms
+			COALESCE(SUM(spans), 0) AS requests,
+			COALESCE(AVG(CASE WHEN spans > 0 THEN error_rate END), 0) AS error_rate,
+			COALESCE(AVG(CASE WHEN spans > 0 THEN p50_ms END), 0) AS p50_ms,
+			COALESCE(AVG(CASE WHEN spans > 0 THEN p95_ms END), 0) AS p95_ms,
+			COALESCE(SUM(log_count), 0) AS log_count,
+			COALESCE(SUM(metric_count), 0) AS metric_count
 		FROM service_rollup
 		WHERE service IN (%s) AND bucket >= NOW() - INTERVAL '%d minutes'
 		GROUP BY service
-		ORDER BY requests DESC
+		ORDER BY (COALESCE(SUM(spans), 0) + COALESCE(SUM(log_count), 0) + COALESCE(SUM(metric_count), 0)) DESC
 	`, strings.Join(placeholders, ","), window)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
@@ -76,8 +79,14 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 	var metrics []CompareMetrics
 	for rows.Next() {
 		var m CompareMetrics
-		if err := rows.Scan(&m.Service, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms); err != nil {
+		var logCount, metricCount int64
+		if err := rows.Scan(&m.Service, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms, &logCount, &metricCount); err != nil {
+			slog.Warn("scan failed", "method", "compare", "err", err)
 			continue
+		}
+		// Count all signals for determining if service has data
+		if m.Requests == 0 && (logCount > 0 || metricCount > 0) {
+			m.Requests = logCount + metricCount
 		}
 		m.ErrorCount = int64(float64(m.Requests) * m.ErrorRate)
 		if m.Requests > 0 {
@@ -104,8 +113,8 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 	winner := ""
 	bestScore := float64(-1)
 	for _, m := range metrics {
-		if m.Requests == 0 {
-			continue
+		if m.Requests == 0 || (m.P50Ms == 0 && m.P95Ms == 0) {
+			continue // skip services with no span-based latency data
 		}
 		// Score: lower is better (P95 * (1 + error_rate*10))
 		score := m.P95Ms * (1 + m.ErrorRate*10)
