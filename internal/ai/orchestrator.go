@@ -205,27 +205,14 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		return stepResult{done: true}
 	}
 
-	// Build set of tool names the LLM was actually offered this step.
-	allowed := make(map[string]struct{}, len(tools))
-	for _, t := range tools {
-		allowed[t.Name] = struct{}{}
-	}
-
-	// Separate respond call from real tool calls; drop hallucinated tools.
+	// Separate respond call from real tool calls
 	var respondCall *ToolCall
 	var realToolCalls []ToolCall
 	for i := range toolCalls {
 		if toolCalls[i].Name == respondToolName {
 			respondCall = &toolCalls[i]
-		} else if _, ok := allowed[toolCalls[i].Name]; ok {
-			realToolCalls = append(realToolCalls, toolCalls[i])
 		} else {
-			slog.Warn("LLM called tool not in offered set — dropping",
-				"tool", toolCalls[i].Name, "step", stepName)
-			// Add synthetic error result so conversation stays valid.
-			*conversation = append(*conversation,
-				ToolMessage(toolCalls[i].ID, `{"error":"tool not available in this step"}`, true))
-			_ = send(ClientEvent{Type: CEToolResult, Name: toolCalls[i].Name})
+			realToolCalls = append(realToolCalls, toolCalls[i])
 		}
 	}
 
@@ -280,21 +267,9 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		return stepResult{done: true, tailCfg: tailCfg}
 	}
 
-	// No respond call — execute real tool calls and return (not done yet).
-	// If all tool calls were filtered (hallucinated tools), treat any
-	// streamed text as the response so the user gets something useful.
+	// No respond call — execute real tool calls and return (not done yet)
 	if len(realToolCalls) == 0 {
-		slog.Warn("LLM returned tool_use stop reason but no executable tool calls", "step", stepName)
-		if text := textBuf.String(); text != "" {
-			if err := send(ClientEvent{
-				Type:   CEDone,
-				ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
-				Blocks: []Block{MakeTextBlock(text)},
-			}); err != nil {
-				return stepResult{err: err}
-			}
-			return stepResult{done: true}
-		}
+		slog.Warn("LLM returned tool_use stop reason but no tool calls", "step", stepName)
 		return stepResult{}
 	}
 	tc, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
@@ -417,25 +392,12 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		return conversation, tailCfg, r.err
 	}
 
-	// Step 2: Respond — only respond tool available
-	respondOnly := []ToolDef{respondToolDef()}
-	r2 := o.step(ctx, &conversation, systemBlocks, respondOnly, "respond", send, namespace)
+	// Step 2: Respond — no tools, LLM just produces text.
+	// Passing nil tools prevents the LLM from hallucinating tool calls
+	// it saw in step 1's conversation history.
+	r2 := o.step(ctx, &conversation, systemBlocks, nil, "respond", send, namespace)
 	if r2.err != nil {
 		return conversation, tailCfg, r2.err
-	}
-	if !r2.done {
-		// Fallback: LLM didn't call respond
-		msg := "I wasn't able to complete my analysis. Please try rephrasing your question."
-		if err := send(ClientEvent{Type: CEToken, Content: msg}); err != nil {
-			return conversation, tailCfg, err
-		}
-		if err := send(ClientEvent{
-			Type:   CEDone,
-			ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
-			Blocks: []Block{MakeTextBlock(msg)},
-		}); err != nil {
-			return conversation, tailCfg, err
-		}
 	}
 
 	return conversation, tailCfg, nil
