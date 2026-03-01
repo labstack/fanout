@@ -171,6 +171,9 @@ func (p *AnthropicProvider) buildRequest(params StreamParams) map[string]any {
 			tools[i] = tool
 		}
 		body["tools"] = tools
+		if params.ToolChoice != nil {
+			body["tool_choice"] = map[string]string{"type": "tool", "name": params.ToolChoice.Name}
+		}
 	}
 
 	return body

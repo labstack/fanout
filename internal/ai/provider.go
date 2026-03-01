@@ -36,12 +36,18 @@ type SystemBlock struct {
 	CacheControl string // "" or "ephemeral"
 }
 
+// ToolChoice controls which tool the LLM must call.
+type ToolChoice struct {
+	Name string // force this specific tool (e.g. "respond")
+}
+
 // StreamParams configures a streaming request.
 type StreamParams struct {
 	System       string        // simple system prompt (used if SystemBlocks is empty)
 	SystemBlocks []SystemBlock // structured system prompt with cache hints
 	Messages     []Message
 	Tools        []ToolDef
+	ToolChoice   *ToolChoice // nil = auto, set to force a specific tool
 	MaxTokens    int
 }
 

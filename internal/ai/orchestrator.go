@@ -106,7 +106,7 @@ type stepResult struct {
 // step executes one LLM call: stream → handle tool calls → execute tools.
 // It appends to *conversation so the caller sees updates.
 func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
-	systemBlocks []SystemBlock, tools []ToolDef, stepName string, send SendFunc, namespace string) stepResult {
+	systemBlocks []SystemBlock, tools []ToolDef, toolChoice *ToolChoice, stepName string, send SendFunc, namespace string) stepResult {
 
 	if ctx.Err() != nil {
 		return stepResult{err: ctx.Err()}
@@ -122,6 +122,7 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		SystemBlocks: systemBlocks,
 		Messages:     *conversation,
 		Tools:        tools,
+		ToolChoice:   toolChoice,
 		MaxTokens:    4096,
 	}, func(event StreamEvent) error {
 		switch event.Type {
@@ -386,7 +387,7 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 
 	// Step 1: Gather — all tools available
 	allTools := append(o.tools.Defs(), respondToolDef())
-	r := o.step(ctx, &conversation, systemBlocks, allTools, "gather", send, namespace)
+	r := o.step(ctx, &conversation, systemBlocks, allTools, nil, "gather", send, namespace)
 	tailCfg = r.tailCfg
 	if r.done || r.err != nil {
 		return conversation, tailCfg, r.err
@@ -398,23 +399,12 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	conversation = append(conversation, UserMessage(
 		"Now synthesize the tool results into a complete response. "+
 			"Do NOT suggest further investigation — analyze what you have."))
-	r2 := o.step(ctx, &conversation, systemBlocks, []ToolDef{respondToolDef()}, "respond", send, namespace)
+	r2 := o.step(ctx, &conversation, systemBlocks, []ToolDef{respondToolDef()}, &ToolChoice{Name: respondToolName}, "respond", send, namespace)
 	if r2.tailCfg != nil {
 		tailCfg = r2.tailCfg
 	}
 	if r2.err != nil {
 		return conversation, tailCfg, r2.err
-	}
-
-	// If step 2 didn't produce a response (LLM called tools instead of respond),
-	// send a fallback CEDone so the client isn't left with infinite loading dots.
-	if !r2.done {
-		slog.Warn("step 2 did not produce a response, sending fallback")
-		_ = send(ClientEvent{
-			Type:   CEDone,
-			ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
-			Blocks: []Block{MakeTextBlock("I gathered the data but couldn't format a response. Please try again.")},
-		})
 	}
 
 	return conversation, tailCfg, nil
