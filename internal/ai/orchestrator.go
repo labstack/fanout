@@ -399,8 +399,22 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		"Now synthesize the tool results into a complete response. "+
 			"Do NOT suggest further investigation — analyze what you have."))
 	r2 := o.step(ctx, &conversation, systemBlocks, []ToolDef{respondToolDef()}, "respond", send, namespace)
+	if r2.tailCfg != nil {
+		tailCfg = r2.tailCfg
+	}
 	if r2.err != nil {
 		return conversation, tailCfg, r2.err
+	}
+
+	// If step 2 didn't produce a response (LLM called tools instead of respond),
+	// send a fallback CEDone so the client isn't left with infinite loading dots.
+	if !r2.done {
+		slog.Warn("step 2 did not produce a response, sending fallback")
+		_ = send(ClientEvent{
+			Type:   CEDone,
+			ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
+			Blocks: []Block{MakeTextBlock("I gathered the data but couldn't format a response. Please try again.")},
+		})
 	}
 
 	return conversation, tailCfg, nil
