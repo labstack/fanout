@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"html"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -151,7 +152,7 @@ Returns: nodes (service, status, request_count, error_rate, p95_ms), edges (sour
 	// 7. query - Raw SQL escape hatch
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "query",
-		Description: queryToolDescription(),
+		Description: queryToolDescription(s.cfg.LakeDir),
 	}, s.query)
 
 	// 8. schema - Database schema reference for LLM
@@ -175,20 +176,20 @@ Returns: services (array with service, requests, error_rate, p50_ms, p95_ms), wi
 	}, s.compare)
 }
 
-func queryToolDescription() string {
-	return `Execute raw SQL against the data lake. For advanced analysis not covered by other tools. Call with empty sql to get schema reference.
+func queryToolDescription(lakeDir string) string {
+	return strings.ReplaceAll(`Execute raw SQL against the data lake. For advanced analysis not covered by other tools. Call with empty sql to get schema reference.
 
 Tables:
 - service_rollup: Pre-aggregated 1-min buckets (fastest)
   Columns: bucket (TIMESTAMP), service, spans, p50_ms, p95_ms, error_rate
 
-- read_parquet('lake/spans/**/*.parquet'): Raw trace spans
+- read_parquet('{LAKE}/spans/**/*.parquet'): Raw trace spans
   Key columns (quote as "name=..."): trace_id, span_id, service_name, name, duration_ms, status_code, start_unix_nano, attributes_json
 
-- read_parquet('lake/logs/**/*.parquet'): Log entries
+- read_parquet('{LAKE}/logs/**/*.parquet'): Log entries
   Key columns: time_unix_nano, severity, body, service_name, trace_id
 
-- read_parquet('lake/metrics/**/*.parquet'): Metric points
+- read_parquet('{LAKE}/metrics/**/*.parquet'): Metric points
   Key columns: time_unix_nano, name, mtype, service_name, value
 
 Time filter (last N minutes):
@@ -196,9 +197,9 @@ WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - N*60) * 1000000000
 
 Example - top endpoints by P95:
 SELECT "name=name", COUNT(*) as cnt, ROUND(quantile_cont("name=duration_ms", 0.95), 2) as p95
-FROM read_parquet('lake/spans/**/*.parquet', union_by_name=true)
+FROM read_parquet('{LAKE}/spans/**/*.parquet', union_by_name=true)
 WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 900) * 1000000000
-GROUP BY "name=name" ORDER BY p95 DESC LIMIT 10`
+GROUP BY "name=name" ORDER BY p95 DESC LIMIT 10`, "{LAKE}", lakeDir)
 }
 
 const notFoundHTML = `<!DOCTYPE html>

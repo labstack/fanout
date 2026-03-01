@@ -18,7 +18,7 @@ type SchemaOut struct {
 func (s *Server) schema(ctx context.Context, req *mcp.CallToolRequest, in SchemaIn) (*mcp.CallToolResult, SchemaOut, error) {
 	lakeDir := s.cfg.LakeDir
 	return nil, SchemaOut{
-		Schema: query.GetSchema(),
+		Schema: query.GetSchema(s.cfg.LakeDir),
 		Examples: []string{
 			// Recent errors
 			fmt.Sprintf(`SELECT "name=service_name", "name=name", "name=status_msg", "name=duration_ms"

@@ -1,18 +1,23 @@
 package query
 
+import "strings"
+
 // GetSchema returns a description of the data schema for MCP/LLM context
-func GetSchema() string {
-	return `
+func GetSchema(lakeDir string) string {
+	return strings.ReplaceAll(schemaTemplate, "{LAKE}", lakeDir)
+}
+
+const schemaTemplate = `
 ## Fanout Data Schema
 
 The data is stored in Parquet files partitioned by tenant, namespace, and time:
-/lake/{signal}/tenant={tenant}/namespace={namespace}/year=YYYY/month=MM/day=DD/hour=HH/part-<ts>.parquet
+{LAKE}/{signal}/tenant={tenant}/namespace={namespace}/year=YYYY/month=MM/day=DD/hour=HH/part-<ts>.parquet
 
 **IMPORTANT**: Use hive_partitioning=true to access partition columns (tenant, namespace, year, month, day, hour).
 Use union_by_name=true to handle schema evolution (old files may not have new columns).
 
 ### 1. Spans (Traces)
-Table: read_parquet('lake/spans/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true, union_by_name=true)
+Table: read_parquet('{LAKE}/spans/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true, union_by_name=true)
 
 **IMPORTANT**: Data columns are named with a literal "name=" prefix (e.g. "name=trace_id") and must be double-quoted.
 Partition columns (tenant, namespace, year, month, day, hour) have NO prefix.
@@ -62,7 +67,7 @@ Common queries:
 - Root spans only: WHERE "name=parent_span_id" IS NULL OR "name=parent_span_id" = ''
 
 ### 2. Logs
-Table: read_parquet('lake/logs/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true, union_by_name=true)
+Table: read_parquet('{LAKE}/logs/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true, union_by_name=true)
 
 Data columns:
 - "name=time_unix_nano" (BIGINT): Log timestamp in nanoseconds since epoch
@@ -90,7 +95,7 @@ Common queries:
 - By instrumentation: WHERE "name=scope_name" = 'my-logger'
 
 ### 3. Metrics
-Table: read_parquet('lake/metrics/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true, union_by_name=true)
+Table: read_parquet('{LAKE}/metrics/tenant=*/namespace=*/**/*.parquet', hive_partitioning=true, union_by_name=true)
 
 Data columns:
 - "name=time_unix_nano" (BIGINT): Metric timestamp in nanoseconds since epoch
@@ -171,4 +176,3 @@ Time range:
 - strftime(timestamp, format): Format timestamp as string
 - REGEXP_MATCHES(column, 'pattern'): Regex matching
 `
-}

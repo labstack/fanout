@@ -28,7 +28,7 @@ func (s *Server) query(ctx context.Context, req *mcp.CallToolRequest, in QueryIn
 		// Return schema help
 		return nil, QueryOut{
 			Results:  []query.RowMap{},
-			Schema:   query.GetSchema(),
+			Schema:   query.GetSchema(s.cfg.LakeDir),
 			RowCount: 0,
 		}, nil
 	}
@@ -48,7 +48,7 @@ func (s *Server) query(ctx context.Context, req *mcp.CallToolRequest, in QueryIn
 	if resp.Error != "" {
 		return nil, QueryOut{
 			Results: []query.RowMap{},
-			Schema:  query.GetSchema(),
+			Schema:  query.GetSchema(s.cfg.LakeDir),
 		}, fmt.Errorf("%s", resp.Error)
 	}
 
