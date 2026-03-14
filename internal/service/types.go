@@ -121,6 +121,34 @@ type DiagnoseResult struct {
 	TopErrors    []ErrorInfo
 	SlowOps      []SlowOp
 	Dependencies []Dependency
+
+	// Enhanced fields (populated by DiagnoseEnhanced)
+	SymptomDetected       string              `json:"symptom_detected,omitempty"`
+	Baseline              *BaselineComparison `json:"comparison_to_baseline,omitempty"`
+	ChangePoints          []ChangePoint       `json:"change_points,omitempty"`
+	CorrelatedLogPatterns []LogPattern        `json:"correlated_log_patterns,omitempty"`
+}
+
+// BaselineComparison compares current metrics against historical same-time-of-day baselines.
+type BaselineComparison struct {
+	P95Ratio       float64 `json:"p95_ratio"`
+	BaselineP95Ms  float64 `json:"baseline_p95_ms"`
+	BaselineWindow string  `json:"baseline_window"`
+}
+
+// ChangePoint represents a statistically significant jump in a metric.
+type ChangePoint struct {
+	Time   string  `json:"time"`
+	Metric string  `json:"metric"`
+	Before float64 `json:"before"`
+	After  float64 `json:"after"`
+}
+
+// LogPattern describes a recurring log message pattern near a change point.
+type LogPattern struct {
+	Pattern  string `json:"pattern"`
+	Count    int64  `json:"count"`
+	Severity string `json:"severity"`
 }
 
 // ErrorInfo describes a recurring error.
@@ -147,15 +175,48 @@ type Dependency struct {
 
 // TraceResult contains a complete distributed trace.
 type TraceResult struct {
-	TraceID      string
-	Duration     float64
-	SpanCount    int
-	Services     []string
-	HasError     bool
-	Spans        []SpanInfo
-	Logs         []LogInfo
-	RootCause    *RootCause
-	CriticalPath []string
+	TraceID       string
+	Duration      float64
+	SpanCount     int
+	Services      []string
+	HasError      bool
+	Spans         []SpanInfo
+	Logs          []LogInfo
+	RootCause     *RootCause
+	CriticalPath  []string
+	Comparison    *TraceComparison `json:"comparison,omitempty"`
+	MetricContext []MetricContext  `json:"metric_context,omitempty"`
+}
+
+// TraceComparison holds a side-by-side comparison between two traces.
+type TraceComparison struct {
+	OtherTraceID    string     `json:"other_trace_id"`
+	OtherDurationMs float64    `json:"other_duration_ms"`
+	DurationDeltaMs float64    `json:"duration_delta_ms"`
+	SpanDiffs       []SpanDiff `json:"span_diffs"`
+}
+
+// SpanDiff describes the latency difference for a matched operation between two traces.
+type SpanDiff struct {
+	Operation string  `json:"operation"`
+	Service   string  `json:"service"`
+	ThisMs    float64 `json:"this_ms"`
+	OtherMs   float64 `json:"other_ms"`
+	DeltaMs   float64 `json:"delta_ms"`
+}
+
+// MetricContext captures rollup metric snapshots for a service around a trace's time.
+type MetricContext struct {
+	Service     string         `json:"service"`
+	AtTraceTime MetricSnapshot `json:"at_trace_time"`
+}
+
+// MetricSnapshot is a point-in-time view of service_rollup metrics.
+type MetricSnapshot struct {
+	P50Ms       float64 `json:"p50_ms"`
+	P95Ms       float64 `json:"p95_ms"`
+	ErrorRate   float64 `json:"error_rate"`
+	SpansPerMin float64 `json:"spans_per_min"`
 }
 
 // SpanInfo describes a span in a trace.

@@ -107,14 +107,14 @@ func TestCompareMetrics(t *testing.T) {
 func TestCompareIn(t *testing.T) {
 	in := CompareIn{
 		Services: []string{"api-v1", "api-v2", "api-v3"},
-		Window:   120,
+		Window:   "1h",
 	}
 
 	if len(in.Services) != 3 {
 		t.Errorf("Services count = %d, want 3", len(in.Services))
 	}
-	if in.Window != 120 {
-		t.Errorf("Window = %d, want 120", in.Window)
+	if in.Window != "1h" {
+		t.Errorf("Window = %q, want %q", in.Window, "1h")
 	}
 }
 

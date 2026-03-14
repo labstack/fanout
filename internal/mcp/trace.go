@@ -11,9 +11,11 @@ import (
 // trace - Request journey with auto root cause analysis
 
 type TraceIn struct {
-	TraceID     string `json:"trace_id" jsonschema:"Trace ID to analyze"`
-	IncludeLogs *bool  `json:"include_logs,omitempty" jsonschema:"Include correlated logs,default=true"`
-	Window      int    `json:"window,omitempty" jsonschema:"Time window in minutes to search,default=1440 (24h)"`
+	TraceID        string `json:"trace_id" jsonschema:"Trace ID to analyze"`
+	IncludeLogs    *bool  `json:"include_logs,omitempty" jsonschema:"Include correlated logs,default=true"`
+	Window         int    `json:"window,omitempty" jsonschema:"Time window in minutes to search,default=1440 (24h)"`
+	CompareTo      string `json:"compare_to,omitempty" jsonschema:"Another trace ID for side-by-side latency comparison"`
+	IncludeMetrics *bool  `json:"include_metrics,omitempty" jsonschema:"Include service_rollup metric snapshots around trace time,default=false"`
 }
 
 type TraceSpan struct {
@@ -68,16 +70,45 @@ type RootCause struct {
 	Service     string `json:"service,omitempty"`
 }
 
+type TraceComparison struct {
+	OtherTraceID    string          `json:"other_trace_id"`
+	OtherDurationMs float64         `json:"other_duration_ms"`
+	DurationDeltaMs float64         `json:"duration_delta_ms"`
+	SpanDiffs       []TraceSpanDiff `json:"span_diffs"`
+}
+
+type TraceSpanDiff struct {
+	Operation string  `json:"operation"`
+	Service   string  `json:"service"`
+	ThisMs    float64 `json:"this_ms"`
+	OtherMs   float64 `json:"other_ms"`
+	DeltaMs   float64 `json:"delta_ms"`
+}
+
+type TraceMetricContext struct {
+	Service     string              `json:"service"`
+	AtTraceTime TraceMetricSnapshot `json:"at_trace_time"`
+}
+
+type TraceMetricSnapshot struct {
+	P50Ms       float64 `json:"p50_ms"`
+	P95Ms       float64 `json:"p95_ms"`
+	ErrorRate   float64 `json:"error_rate"`
+	SpansPerMin float64 `json:"spans_per_min"`
+}
+
 type TraceOut struct {
-	TraceID       string          `json:"trace_id"`
-	TotalDuration float64         `json:"total_duration_ms"`
-	SpanCount     int             `json:"span_count"`
-	Services      []string        `json:"services"`
-	HasError      bool            `json:"has_error"`
-	Spans         []TraceSpan     `json:"spans"`
-	Logs          []CorrelatedLog `json:"logs"`
-	RootCause     *RootCause      `json:"root_cause,omitempty"`
-	CriticalPath  []string        `json:"critical_path"`
+	TraceID       string               `json:"trace_id"`
+	TotalDuration float64              `json:"total_duration_ms"`
+	SpanCount     int                  `json:"span_count"`
+	Services      []string             `json:"services"`
+	HasError      bool                 `json:"has_error"`
+	Spans         []TraceSpan          `json:"spans"`
+	Logs          []CorrelatedLog      `json:"logs"`
+	RootCause     *RootCause           `json:"root_cause,omitempty"`
+	CriticalPath  []string             `json:"critical_path"`
+	Comparison    *TraceComparison     `json:"comparison,omitempty"`
+	MetricContext []TraceMetricContext `json:"metric_context,omitempty"`
 }
 
 func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn) (*mcp.CallToolResult, TraceOut, error) {
@@ -173,6 +204,48 @@ func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn
 			Description: result.RootCause.Description,
 			SpanID:      result.RootCause.SpanID,
 			Service:     result.RootCause.Service,
+		}
+	}
+
+	// Optional: side-by-side trace comparison
+	if in.CompareTo != "" {
+		cmp := s.svc.CompareTrace(ctx, result, in.CompareTo, window)
+		if cmp != nil {
+			outCmp := &TraceComparison{
+				OtherTraceID:    cmp.OtherTraceID,
+				OtherDurationMs: cmp.OtherDurationMs,
+				DurationDeltaMs: cmp.DurationDeltaMs,
+			}
+			for _, d := range cmp.SpanDiffs {
+				outCmp.SpanDiffs = append(outCmp.SpanDiffs, TraceSpanDiff{
+					Operation: d.Operation,
+					Service:   d.Service,
+					ThisMs:    d.ThisMs,
+					OtherMs:   d.OtherMs,
+					DeltaMs:   d.DeltaMs,
+				})
+			}
+			out.Comparison = outCmp
+		}
+	}
+
+	// Optional: metric context from service_rollup
+	includeMetrics := false
+	if in.IncludeMetrics != nil {
+		includeMetrics = *in.IncludeMetrics
+	}
+	if includeMetrics {
+		mcs := s.svc.FetchMetricContext(ctx, result)
+		for _, mc := range mcs {
+			out.MetricContext = append(out.MetricContext, TraceMetricContext{
+				Service: mc.Service,
+				AtTraceTime: TraceMetricSnapshot{
+					P50Ms:       mc.AtTraceTime.P50Ms,
+					P95Ms:       mc.AtTraceTime.P95Ms,
+					ErrorRate:   mc.AtTraceTime.ErrorRate,
+					SpansPerMin: mc.AtTraceTime.SpansPerMin,
+				},
+			})
 		}
 	}
 

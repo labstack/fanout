@@ -251,6 +251,149 @@ LIMIT 200;
 	return out, nil
 }
 
+// CompareTrace fetches a second trace and aligns spans by operation name to produce
+// a side-by-side comparison against the primary trace result.
+func (s *Service) CompareTrace(ctx context.Context, primary *TraceResult, otherTraceID string, window int) *TraceComparison {
+	other, err := s.Trace(ctx, otherTraceID, false, window)
+	if err != nil {
+		slog.Warn("CompareTrace: failed to fetch other trace", "other_trace_id", otherTraceID, "err", err)
+		return nil
+	}
+
+	// Build a map of operation -> total duration for each trace (service+operation key).
+	type opKey struct {
+		service   string
+		operation string
+	}
+	primaryMap := make(map[opKey]float64)
+	for _, sp := range primary.Spans {
+		k := opKey{sp.Service, sp.Name}
+		primaryMap[k] += sp.Duration
+	}
+
+	otherMap := make(map[opKey]float64)
+	for _, sp := range other.Spans {
+		k := opKey{sp.Service, sp.Name}
+		otherMap[k] += sp.Duration
+	}
+
+	// Compute diffs for operations present in both traces.
+	var diffs []SpanDiff
+	seen := make(map[opKey]bool)
+	for k, thisMs := range primaryMap {
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		otherMs := otherMap[k]
+		delta := thisMs - otherMs
+		if delta < 0 {
+			delta = -delta
+		}
+		diffs = append(diffs, SpanDiff{
+			Operation: k.operation,
+			Service:   k.service,
+			ThisMs:    thisMs,
+			OtherMs:   otherMs,
+			DeltaMs:   delta,
+		})
+	}
+	// Also include operations only in the other trace.
+	for k, otherMs := range otherMap {
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		diffs = append(diffs, SpanDiff{
+			Operation: k.operation,
+			Service:   k.service,
+			ThisMs:    0,
+			OtherMs:   otherMs,
+			DeltaMs:   otherMs,
+		})
+	}
+
+	// Sort by delta descending so biggest differences appear first.
+	sort.Slice(diffs, func(i, j int) bool {
+		return diffs[i].DeltaMs > diffs[j].DeltaMs
+	})
+
+	delta := primary.Duration - other.Duration
+	if delta < 0 {
+		delta = -delta
+	}
+
+	return &TraceComparison{
+		OtherTraceID:    otherTraceID,
+		OtherDurationMs: other.Duration,
+		DurationDeltaMs: delta,
+		SpanDiffs:       diffs,
+	}
+}
+
+// FetchMetricContext queries service_rollup for a 5-minute window around the trace's
+// earliest span start time and returns per-service metric snapshots.
+func (s *Service) FetchMetricContext(ctx context.Context, result *TraceResult) []MetricContext {
+	if len(result.Spans) == 0 {
+		return nil
+	}
+
+	// Derive the earliest start time from span start times (stored as RFC3339 strings).
+	// We use the first span since spans are already ordered by start_unix_nano ASC.
+	// Re-query for the start nano directly from the TraceResult's first span StartTime.
+	// Instead of reparsing, we rely on the Trace() internals having ordered spans by
+	// start_unix_nano, so we can derive a reasonable timestamp via a direct rollup query.
+
+	// Build service list from result.
+	if len(result.Services) == 0 {
+		return nil
+	}
+
+	// Query service_rollup using the first span's start_time.
+	// We convert the ISO8601 start_time to a timestamp and search ±2.5 min around it.
+	startTime := result.Spans[0].StartTime // e.g. "2024-01-01T10:00:00Z"
+
+	placeholders := makePlaceholders(len(result.Services))
+	args := make([]any, 0, len(result.Services)+2)
+	args = append(args, startTime, startTime)
+	for _, svc := range result.Services {
+		args = append(args, svc)
+	}
+
+	q := fmt.Sprintf(`
+SELECT service,
+       AVG(p50_ms) as p50_ms,
+       AVG(p95_ms) as p95_ms,
+       AVG(error_rate) as error_rate,
+       SUM(spans) as total_spans
+FROM service_rollup
+WHERE bucket BETWEEN (TIMESTAMPTZ ? - INTERVAL '2.5 minutes') AND (TIMESTAMPTZ ? + INTERVAL '2.5 minutes')
+  AND service IN (%s)
+GROUP BY service
+ORDER BY service ASC;
+`, placeholders)
+
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		slog.Warn("FetchMetricContext: rollup query failed", "err", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var contexts []MetricContext
+	for rows.Next() {
+		var mc MetricContext
+		var totalSpans float64
+		if err := rows.Scan(&mc.Service, &mc.AtTraceTime.P50Ms, &mc.AtTraceTime.P95Ms, &mc.AtTraceTime.ErrorRate, &totalSpans); err != nil {
+			slog.Warn("FetchMetricContext: scan failed", "err", err)
+			continue
+		}
+		mc.AtTraceTime.SpansPerMin = totalSpans / 5.0
+		contexts = append(contexts, mc)
+	}
+	return contexts
+}
+
 func (s *Service) fetchTraceLogs(ctx context.Context, traceID string, window int) []LogInfo {
 	logs := []LogInfo{}
 	namespace, tenantID := s.defaults("", "")
