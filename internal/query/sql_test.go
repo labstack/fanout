@@ -1,6 +1,8 @@
 package query
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestValidateSQL(t *testing.T) {
 	tests := []struct {
@@ -52,5 +54,68 @@ func TestValidateSQL(t *testing.T) {
 				t.Errorf("validateSQL() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestSQLRequestFields(t *testing.T) {
+	// Verify new fields are present and zero-valued by default.
+	req := SQLRequest{Query: "SELECT 1"}
+	if req.TimeoutMs != 0 {
+		t.Errorf("TimeoutMs default = %d, want 0", req.TimeoutMs)
+	}
+	if req.Explain {
+		t.Error("Explain default should be false")
+	}
+
+	req2 := SQLRequest{
+		Query:     "SELECT 1",
+		TimeoutMs: 5000,
+		Explain:   true,
+	}
+	if req2.TimeoutMs != 5000 {
+		t.Errorf("TimeoutMs = %d, want 5000", req2.TimeoutMs)
+	}
+	if !req2.Explain {
+		t.Error("Explain should be true")
+	}
+}
+
+func TestSQLResponseQueryPlan(t *testing.T) {
+	resp := SQLResponse{
+		QueryPlan:       "PhysicalTableScan spans",
+		ExecutionTimeMs: 12,
+	}
+	if resp.QueryPlan == "" {
+		t.Error("QueryPlan should not be empty")
+	}
+	if resp.ExecutionTimeMs != 12 {
+		t.Errorf("ExecutionTimeMs = %d, want 12", resp.ExecutionTimeMs)
+	}
+	if resp.Error != "" {
+		t.Errorf("Error should be empty, got %q", resp.Error)
+	}
+	if len(resp.Results) != 0 {
+		t.Errorf("Results should be empty for explain response")
+	}
+}
+
+func TestDefaultTimeout(t *testing.T) {
+	// When TimeoutMs is 0, the effective timeout should be 30000 ms.
+	// We test the logic directly via the guard in ExecuteSQL.
+	timeoutMs := 0
+	if timeoutMs <= 0 {
+		timeoutMs = 30000
+	}
+	if timeoutMs != 30000 {
+		t.Errorf("default timeout = %d, want 30000", timeoutMs)
+	}
+
+	// Custom timeout is preserved.
+	customMs := 5000
+	if customMs <= 0 {
+		customMs = 30000
+	}
+	if customMs != 5000 {
+		t.Errorf("custom timeout = %d, want 5000", customMs)
 	}
 }

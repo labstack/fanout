@@ -10,8 +10,10 @@ import (
 
 // SQLRequest represents a direct SQL query request
 type SQLRequest struct {
-	Query   string `json:"query"`
-	MaxRows int    `json:"max_rows,omitempty"`
+	Query     string `json:"query"`
+	MaxRows   int    `json:"max_rows,omitempty"`
+	TimeoutMs int    `json:"timeout_ms,omitempty"`
+	Explain   bool   `json:"explain,omitempty"`
 }
 
 // SQLResponse represents the response from a SQL query
@@ -20,6 +22,7 @@ type SQLResponse struct {
 	ExecutionTimeMs int64    `json:"execution_time_ms"`
 	RowsReturned    int      `json:"rows_returned"`
 	Error           string   `json:"error,omitempty"`
+	QueryPlan       string   `json:"query_plan,omitempty"`
 }
 
 // RowMap represents a single row as a map of column name to value
@@ -34,22 +37,35 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 		req.MaxRows = 1000
 	}
 
-	// Validate SQL
+	// Set default timeout
+	timeoutMs := req.TimeoutMs
+	if timeoutMs <= 0 {
+		timeoutMs = 30000
+	}
+
+	// Validate SQL (skip validation for EXPLAIN-prefixed queries that we construct)
 	if err := validateSQL(req.Query, d.cfg.LakeDir); err != nil {
 		return SQLResponse{
 			Error: fmt.Sprintf("SQL validation failed: %v", err),
 		}
 	}
 
-	// Add LIMIT if not present
-	query := ensureLimit(req.Query, req.MaxRows)
+	// Build the query to execute
+	var execQuery string
+	if req.Explain {
+		// EXPLAIN does not need LIMIT
+		execQuery = "EXPLAIN " + req.Query
+	} else {
+		// Add LIMIT if not present
+		execQuery = ensureLimit(req.Query, req.MaxRows)
+	}
 
 	// Add timeout to context
-	queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
 	// Execute query
-	rows, err := d.DB.QueryContext(queryCtx, query)
+	rows, err := d.DB.QueryContext(queryCtx, execQuery)
 	if err != nil {
 		return SQLResponse{
 			Error:           fmt.Sprintf("Query execution failed: %v", err),
@@ -69,8 +85,9 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 
 	// Read results
 	results := make([]RowMap, 0, req.MaxRows)
+	var planLines []string
 	for rows.Next() {
-		if len(results) >= req.MaxRows {
+		if !req.Explain && len(results) >= req.MaxRows {
 			break
 		}
 
@@ -88,23 +105,44 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 			}
 		}
 
-		// Convert to map
-		row := make(RowMap)
-		for i, col := range columns {
-			val := values[i]
-			// Convert []uint8 to string for better JSON representation
-			if b, ok := val.([]byte); ok {
-				row[col] = string(b)
-			} else {
-				row[col] = val
+		if req.Explain {
+			// EXPLAIN returns text rows; collect them into a plan string
+			for _, val := range values {
+				switch v := val.(type) {
+				case []byte:
+					planLines = append(planLines, string(v))
+				case string:
+					planLines = append(planLines, v)
+				default:
+					planLines = append(planLines, fmt.Sprintf("%v", v))
+				}
 			}
+		} else {
+			// Convert to map
+			row := make(RowMap)
+			for i, col := range columns {
+				val := values[i]
+				// Convert []uint8 to string for better JSON representation
+				if b, ok := val.([]byte); ok {
+					row[col] = string(b)
+				} else {
+					row[col] = val
+				}
+			}
+			results = append(results, row)
 		}
-		results = append(results, row)
 	}
 
 	if err := rows.Err(); err != nil {
 		return SQLResponse{
 			Error:           fmt.Sprintf("Error reading rows: %v", err),
+			ExecutionTimeMs: time.Since(start).Milliseconds(),
+		}
+	}
+
+	if req.Explain {
+		return SQLResponse{
+			QueryPlan:       strings.Join(planLines, "\n"),
 			ExecutionTimeMs: time.Since(start).Milliseconds(),
 		}
 	}

@@ -150,16 +150,6 @@ Returns: nodes (service, status, request_count, error_rate, p95_ms), edges (sour
 		Description: queryToolDescription(s.cfg.LakeDir),
 	}, s.query)
 
-	// 8. schema - Database schema reference for LLM
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "schema",
-		Description: `Get database schema reference with table definitions and example queries. Use this to understand the data model before writing SQL queries.
-
-Call this before writing complex SQL to get full column details and working examples.
-
-Returns: schema (markdown with all tables/columns), examples (working SQL queries for common tasks)`,
-	}, s.schema)
-
 	// 9. compare - Side-by-side service comparison
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "compare",
