@@ -27,6 +27,42 @@ type TopIssue struct {
 	Detail  string
 }
 
+// OverviewResult contains the structured health overview.
+type OverviewResult struct {
+	Health   OverviewHealth
+	Services []OverviewService
+	Issues   []OverviewIssue
+}
+
+// OverviewHealth contains global health metrics.
+type OverviewHealth struct {
+	Score            float64
+	TotalServices    int
+	ByStatus         map[string]int
+	ThroughputPerMin float64
+	GlobalErrorRate  float64
+	GlobalP95Ms      float64
+}
+
+// OverviewService contains per-service metrics.
+type OverviewService struct {
+	Service   string
+	Status    string
+	Requests  int64
+	ErrorRate float64
+	P50Ms     float64
+	P95Ms     float64
+}
+
+// OverviewIssue represents a service issue to surface.
+type OverviewIssue struct {
+	Service   string
+	Issue     string
+	Value     float64
+	Threshold float64
+	Since     string // ISO8601 timestamp (optional)
+}
+
 // TopologyResult contains service dependency map data.
 type TopologyResult struct {
 	Nodes []ServiceNode

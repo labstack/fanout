@@ -89,15 +89,17 @@ func (s *Server) apiDeleteReport(c *echo.Context) error {
 }
 
 func (s *Server) registerTools() {
-	// 1. status - Entry point, zero-config health overview
+	// 1. overview - Entry point, zero-config health overview with health score
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "status",
-		Description: `Get system health overview. Start here. Returns service health counts, top issues, and key metrics. No parameters required.
+		Name: "overview",
+		Description: `Get system health overview with health score. Start here. Returns a composite health score (0–1), per-service status, top issues, and global metrics.
 
-Workflow: status → diagnose (problem service) → find/trace (specific errors)
+Workflow: overview → diagnose (problem service) → find/trace (specific errors)
 
-Returns: healthy (bool), services (total/healthy/degraded/unhealthy counts), top_issues (service, issue type, value), throughput_per_min, p95_ms, error_rate`,
-	}, s.status)
+Params: window ("15m","1h","7d" or ISO range), include (["health","services","issues"]), sort_services_by ("severity","error_rate","latency","throughput")
+
+Returns: health (score, total_services, by_status, throughput_per_min, global_error_rate, global_p95_ms), services (service, status, requests, error_rate, p50_ms, p95_ms), top_issues (service, issue, value, threshold)`,
+	}, s.overview)
 
 	// 2. diagnose - Deep-dive into a specific service
 	mcp.AddTool(s.mcp, &mcp.Tool{
