@@ -50,16 +50,6 @@ func TestGranularityMinutes(t *testing.T) {
 	}
 }
 
-func TestMetrics_UnknownAction(t *testing.T) {
-	svc, _ := newMockService(t)
-	defer svc.duck.DB.Close()
-
-	_, err := svc.MetricsTool(context.Background(), MetricParams{Action: "bad"})
-	if err == nil {
-		t.Error("expected error for unknown action")
-	}
-}
-
 func TestMetricsList_Empty(t *testing.T) {
 	svc, mock := newMockService(t)
 	defer svc.duck.DB.Close()
@@ -67,7 +57,7 @@ func TestMetricsList_Empty(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"name", "type", "unit", "description", "services"}))
 
-	result, err := svc.MetricsList(context.Background(), MetricParams{Window: 15})
+	result, err := svc.MetricsList(context.Background(), MetricListParams{Window: 15})
 	if err != nil {
 		t.Fatalf("MetricsList() error = %v", err)
 	}
@@ -85,7 +75,7 @@ func TestMetricsList_WithRows(t *testing.T) {
 			AddRow("http.server.duration", "histogram", "ms", "HTTP server request duration", []byte(`["frontend","checkout"]`)).
 			AddRow("db.query.duration", "gauge", "ms", "DB query latency", []byte(`["db-service"]`)))
 
-	result, err := svc.MetricsList(context.Background(), MetricParams{Window: 60})
+	result, err := svc.MetricsList(context.Background(), MetricListParams{Window: 60})
 	if err != nil {
 		t.Fatalf("MetricsList() error = %v", err)
 	}
@@ -109,7 +99,7 @@ func TestMetricsList_QueryError(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnError(errors.New("db error"))
 
-	result, err := svc.MetricsList(context.Background(), MetricParams{Window: 15})
+	result, err := svc.MetricsList(context.Background(), MetricListParams{Window: 15})
 	if err != nil {
 		t.Fatalf("MetricsList() should not return error, got %v", err)
 	}
@@ -122,7 +112,7 @@ func TestMetricsQuery_NoName(t *testing.T) {
 	svc, _ := newMockService(t)
 	defer svc.duck.DB.Close()
 
-	_, err := svc.MetricsQuery(context.Background(), MetricParams{
+	_, err := svc.MetricsQuery(context.Background(), MetricQueryParams{
 		Window:      15,
 		Aggregation: "avg",
 	})
@@ -135,7 +125,7 @@ func TestMetricsQuery_InvalidAggregation(t *testing.T) {
 	svc, _ := newMockService(t)
 	defer svc.duck.DB.Close()
 
-	_, err := svc.MetricsQuery(context.Background(), MetricParams{
+	_, err := svc.MetricsQuery(context.Background(), MetricQueryParams{
 		Name:        "http.server.duration",
 		Aggregation: "median",
 		Window:      15,
@@ -152,7 +142,7 @@ func TestMetricsQuery_Empty(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"bucket", "service", "value", "unit"}))
 
-	result, err := svc.MetricsQuery(context.Background(), MetricParams{
+	result, err := svc.MetricsQuery(context.Background(), MetricQueryParams{
 		Name:        "http.server.duration",
 		Aggregation: "avg",
 		Window:      15,
@@ -181,7 +171,7 @@ func TestMetricsQuery_WithData(t *testing.T) {
 			AddRow(b1, "", 14.2, "ms").
 			AddRow(b2, "", 15.8, "ms"))
 
-	result, err := svc.MetricsQuery(context.Background(), MetricParams{
+	result, err := svc.MetricsQuery(context.Background(), MetricQueryParams{
 		Name:        "http.server.duration",
 		Aggregation: "avg",
 		Window:      15,
@@ -216,7 +206,7 @@ func TestMetricsQuery_GroupByService(t *testing.T) {
 			AddRow(now.Add(-10*time.Minute), "frontend", 10.0, "ms").
 			AddRow(now.Add(-10*time.Minute), "checkout", 20.0, "ms"))
 
-	result, err := svc.MetricsQuery(context.Background(), MetricParams{
+	result, err := svc.MetricsQuery(context.Background(), MetricQueryParams{
 		Name:        "http.server.duration",
 		Aggregation: "avg",
 		GroupBy:     []string{"service"},
@@ -306,61 +296,39 @@ func TestDetectMetricAnomalies_TooFewPoints(t *testing.T) {
 	}
 }
 
-func TestMetrics_DispatchList(t *testing.T) {
+func TestMetricsList_DefaultWindow(t *testing.T) {
 	svc, mock := newMockService(t)
 	defer svc.duck.DB.Close()
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"name", "type", "unit", "description", "services"}))
 
-	result, err := svc.MetricsTool(context.Background(), MetricParams{Action: "list", Window: 15})
+	// Window=0 should default to 15
+	result, err := svc.MetricsList(context.Background(), MetricListParams{})
 	if err != nil {
-		t.Fatalf("Metrics(list) error = %v", err)
+		t.Fatalf("MetricsList() error = %v", err)
 	}
-	if _, ok := result.(*MetricsListResult); !ok {
-		t.Errorf("Metrics(list) returned %T, want *MetricsListResult", result)
+	if result == nil {
+		t.Fatal("MetricsList() returned nil")
 	}
 }
 
-func TestMetrics_DispatchQuery(t *testing.T) {
+func TestMetricsQuery_DefaultAggregation(t *testing.T) {
 	svc, mock := newMockService(t)
 	defer svc.duck.DB.Close()
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"bucket", "service", "value", "unit"}))
 
-	result, err := svc.MetricsTool(context.Background(), MetricParams{
-		Action:      "query",
-		Name:        "http.server.duration",
-		Aggregation: "avg",
-		Window:      15,
+	// Aggregation="" should default to "avg"
+	result, err := svc.MetricsQuery(context.Background(), MetricQueryParams{
+		Name:   "some.metric",
+		Window: 15,
 	})
 	if err != nil {
-		t.Fatalf("Metrics(query) error = %v", err)
+		t.Fatalf("MetricsQuery() error = %v", err)
 	}
-	if _, ok := result.(*MetricsQueryResult); !ok {
-		t.Errorf("Metrics(query) returned %T, want *MetricsQueryResult", result)
-	}
-}
-
-func TestMetrics_DefaultActionIsQuery(t *testing.T) {
-	svc, mock := newMockService(t)
-	defer svc.duck.DB.Close()
-
-	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"bucket", "service", "value", "unit"}))
-
-	// Action is empty string — should default to query
-	result, err := svc.MetricsTool(context.Background(), MetricParams{
-		Action:      "",
-		Name:        "some.metric",
-		Aggregation: "avg",
-		Window:      15,
-	})
-	if err != nil {
-		t.Fatalf("Metrics() with empty action error = %v", err)
-	}
-	if _, ok := result.(*MetricsQueryResult); !ok {
-		t.Errorf("empty action returned %T, want *MetricsQueryResult", result)
+	if result == nil {
+		t.Fatal("MetricsQuery() returned nil")
 	}
 }

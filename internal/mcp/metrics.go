@@ -88,37 +88,22 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 		action = "query"
 	}
 
-	p := service.MetricParams{
-		Action:      action,
-		Name:        in.Name,
-		Names:       in.Names,
-		Aggregation: in.Aggregation,
-		GroupBy:     in.GroupBy,
-		Granularity: in.Granularity,
-		Service:     in.Service,
-		Attrs:       in.Attrs,
-		Window:      tw.Minutes,
-		Namespace:   in.Namespace,
-		TenantID:    in.Tenant,
-		Limit:       limit,
-	}
-
-	result, err := s.svc.MetricsTool(ctx, p)
-	if err != nil {
-		slog.Warn("metrics tool failed", "err", err)
-		suggestion := fmt.Sprintf("Query failed: %s", err)
-		if action == "list" {
-			return nil, MetricsListOut{Metrics: []MetricListEntryOut{}, Suggestion: suggestion}, nil
-		}
-		return nil, MetricsQueryOut{Series: []MetricSeriesOut{}, Anomalies: []MetricAnomalyOut{}, Suggestion: suggestion}, nil
-	}
-
 	switch action {
 	case "list":
-		listResult, ok := result.(*service.MetricsListResult)
-		if !ok {
-			slog.Error("metrics list: unexpected result type", "type", fmt.Sprintf("%T", result))
-			return nil, MetricsListOut{Metrics: []MetricListEntryOut{}, Suggestion: "Internal error: unexpected result type"}, nil
+		p := service.MetricListParams{
+			Service:   in.Service,
+			Window:    tw.Minutes,
+			Namespace: in.Namespace,
+			TenantID:  in.Tenant,
+			Attrs:     in.Attrs,
+			Limit:     limit,
+			GroupBy:   in.GroupBy,
+		}
+
+		listResult, err := s.svc.MetricsList(ctx, p)
+		if err != nil {
+			slog.Warn("metrics list failed", "err", err)
+			return nil, MetricsListOut{Metrics: []MetricListEntryOut{}, Suggestion: fmt.Sprintf("Query failed: %s", err)}, nil
 		}
 		out := MetricsListOut{
 			Metrics: make([]MetricListEntryOut, 0, len(listResult.Metrics)),
@@ -143,11 +128,25 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 		}
 		return nil, out, nil
 
-	default: // "query"
-		queryResult, ok := result.(*service.MetricsQueryResult)
-		if !ok {
-			slog.Error("metrics query: unexpected result type", "type", fmt.Sprintf("%T", result))
-			return nil, MetricsQueryOut{Series: []MetricSeriesOut{}, Anomalies: []MetricAnomalyOut{}, Suggestion: "Internal error: unexpected result type"}, nil
+	case "query":
+		p := service.MetricQueryParams{
+			Name:        in.Name,
+			Names:       in.Names,
+			Aggregation: in.Aggregation,
+			GroupBy:     in.GroupBy,
+			Granularity: in.Granularity,
+			Service:     in.Service,
+			Window:      tw.Minutes,
+			Namespace:   in.Namespace,
+			TenantID:    in.Tenant,
+			Attrs:       in.Attrs,
+			Limit:       limit,
+		}
+
+		queryResult, err := s.svc.MetricsQuery(ctx, p)
+		if err != nil {
+			slog.Warn("metrics query failed", "err", err)
+			return nil, MetricsQueryOut{Series: []MetricSeriesOut{}, Anomalies: []MetricAnomalyOut{}, Suggestion: fmt.Sprintf("Query failed: %s", err)}, nil
 		}
 		out := MetricsQueryOut{
 			Series:    make([]MetricSeriesOut, 0, len(queryResult.Series)),
@@ -181,5 +180,12 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 			out.Suggestion = fmt.Sprintf("%d anomaly(ies) detected in the time range.", len(out.Anomalies))
 		}
 		return nil, out, nil
+
+	default:
+		return nil, MetricsQueryOut{
+			Series:     []MetricSeriesOut{},
+			Anomalies:  []MetricAnomalyOut{},
+			Suggestion: fmt.Sprintf("Unknown action %q: use 'list' or 'query'", action),
+		}, nil
 	}
 }

@@ -324,7 +324,7 @@ ORDER BY bucket ASC;`, window)
 	}
 
 	// Compute mean and stddev for the whole window.
-	mean, stddev := meanStddev(series)
+	mean, stddev := MeanStdDev(series)
 	threshold := mean + 2*stddev
 	if threshold == mean {
 		// Flat signal — nothing to detect.
@@ -417,21 +417,8 @@ LIMIT 5;`, logsGlob)
 	return patterns, nil
 }
 
-// meanStddev computes the population mean and standard deviation.
+// meanStddev is a backward-compatible alias for MeanStdDev.
+// Deprecated: use MeanStdDev directly.
 func meanStddev(vals []float64) (mean, stddev float64) {
-	if len(vals) == 0 {
-		return 0, 0
-	}
-	sum := 0.0
-	for _, v := range vals {
-		sum += v
-	}
-	mean = sum / float64(len(vals))
-	varSum := 0.0
-	for _, v := range vals {
-		d := v - mean
-		varSum += d * d
-	}
-	stddev = math.Sqrt(varSum / float64(len(vals)))
-	return mean, stddev
+	return MeanStdDev(vals)
 }

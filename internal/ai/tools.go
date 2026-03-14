@@ -160,4 +160,3 @@ func extractMCPText(result *mcp.CallToolResult) string {
 	}
 	return strings.Join(parts, "\n")
 }
-

@@ -439,19 +439,29 @@ type LogGroup struct {
 	SampleTraceIDs []string
 }
 
-// MetricParams contains parameters for the metrics tool (list and query actions).
-type MetricParams struct {
-	Action      string // "list" or "query"
+// MetricListParams contains parameters for discovering available metrics.
+type MetricListParams struct {
+	Service   string
+	Window    int // minutes
+	Namespace string
+	TenantID  string
+	Attrs     map[string]string
+	Limit     int
+	GroupBy   []string
+}
+
+// MetricQueryParams contains parameters for querying metric timeseries.
+type MetricQueryParams struct {
 	Name        string
 	Names       []string
 	Aggregation string // "avg", "sum", "min", "max", "count"
 	GroupBy     []string
 	Granularity string // "1m", "5m", "15m", "1h", "auto"
 	Service     string
-	Attrs       map[string]string
 	Window      int // minutes
 	Namespace   string
 	TenantID    string
+	Attrs       map[string]string
 	Limit       int
 }
 

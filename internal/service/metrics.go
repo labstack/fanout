@@ -57,35 +57,15 @@ func granularityMinutes(g string) int {
 	}
 }
 
-// MetricsTool dispatches to MetricsList or MetricsQuery based on p.Action.
-func (s *Service) MetricsTool(ctx context.Context, p MetricParams) (any, error) {
+// MetricsList returns distinct metric names and metadata seen in the window.
+func (s *Service) MetricsList(ctx context.Context, p MetricListParams) (*MetricsListResult, error) {
 	if p.Window == 0 {
 		p.Window = 15
 	}
 	if p.Limit == 0 {
 		p.Limit = 100
 	}
-	if p.Aggregation == "" {
-		p.Aggregation = "avg"
-	}
-	if p.Granularity == "" {
-		p.Granularity = "auto"
-	}
-
 	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
-
-	switch p.Action {
-	case "list":
-		return s.MetricsList(ctx, p)
-	case "query", "":
-		return s.MetricsQuery(ctx, p)
-	default:
-		return nil, fmt.Errorf("unknown action %q: use 'list' or 'query'", p.Action)
-	}
-}
-
-// MetricsList returns distinct metric names and metadata seen in the window.
-func (s *Service) MetricsList(ctx context.Context, p MetricParams) (*MetricsListResult, error) {
 	out := &MetricsListResult{Metrics: []MetricListEntry{}}
 
 	var clauses []string
@@ -158,7 +138,20 @@ LIMIT %d`, where, p.Limit)
 }
 
 // MetricsQuery returns time-bucketed metric series with anomaly detection.
-func (s *Service) MetricsQuery(ctx context.Context, p MetricParams) (*MetricsQueryResult, error) {
+func (s *Service) MetricsQuery(ctx context.Context, p MetricQueryParams) (*MetricsQueryResult, error) {
+	if p.Window == 0 {
+		p.Window = 15
+	}
+	if p.Limit == 0 {
+		p.Limit = 100
+	}
+	if p.Aggregation == "" {
+		p.Aggregation = "avg"
+	}
+	if p.Granularity == "" {
+		p.Granularity = "auto"
+	}
+	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
 	out := &MetricsQueryResult{
 		Series:    []MetricSeries{},
 		Anomalies: []MetricAnomaly{},
