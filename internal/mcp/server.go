@@ -189,6 +189,19 @@ Params: query (substring on operation/status_message), operation (exact), servic
 Returns (ungrouped): spans (trace_id, span_id, service, operation, kind, start_time, duration_ms, status, attributes), total_matched, returned
 Returns (grouped): groups (key, count, error_count, error_rate, p50_ms, p95_ms, p99_ms, exemplar_trace_ids), total_groups`,
 	}, s.spans)
+
+	// 11. logs - Dedicated log search and aggregation tool
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "logs",
+		Description: `Search, filter, and aggregate log entries. Supports ungrouped raw log listing and group_by aggregation with sample bodies and trace correlation.
+
+Use to find specific log messages, search by severity, correlate logs to a trace, or aggregate by service/severity.
+
+Params: query (substring on body), severity (TRACE|DEBUG|INFO|WARN|ERROR|FATAL), trace_id (correlate to a trace), service, attrs (key-value), group_by (service|severity), order_by (time|count|severity), window, namespace, tenant, limit
+
+Returns (ungrouped): logs (time, service, severity, body, trace_id, span_id, attributes), total_matched, returned
+Returns (grouped): groups (key, count, sample_bodies, sample_trace_ids), total_groups`,
+	}, s.logs)
 }
 
 func queryToolDescription(lakeDir string) string {

@@ -360,3 +360,48 @@ type SpanGroup struct {
 	P99Ms            float64
 	ExemplarTraceIDs []string
 }
+
+// LogParams contains search and aggregation parameters for the logs tool.
+type LogParams struct {
+	Query     string
+	Severity  []string
+	TraceID   string
+	Service   string
+	Attrs     map[string]string
+	GroupBy   []string // "service", "severity"
+	OrderBy   string
+	Window    int // minutes
+	Namespace string
+	TenantID  string
+	Limit     int
+}
+
+// LogsResult holds either raw log rows (ungrouped) or aggregated groups.
+type LogsResult struct {
+	// Ungrouped path
+	Logs         []LogRow
+	TotalMatched int
+
+	// Grouped path
+	Groups      []LogGroup
+	TotalGroups int
+}
+
+// LogRow is a single log entry in ungrouped search results.
+type LogRow struct {
+	Time       string
+	Service    string
+	Severity   string
+	Body       string
+	TraceID    string
+	SpanID     string
+	Attributes map[string]string
+}
+
+// LogGroup is one bucket in a group-by aggregation of logs.
+type LogGroup struct {
+	Key            map[string]string
+	Count          int64
+	SampleBodies   []string
+	SampleTraceIDs []string
+}
