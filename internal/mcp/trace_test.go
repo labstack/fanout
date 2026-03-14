@@ -2,79 +2,6 @@ package mcp
 
 import "testing"
 
-func TestRenderTrace(t *testing.T) {
-	trace := &TraceOut{
-		TraceID:       "abc123def456",
-		TotalDuration: 250.0,
-		SpanCount:     5,
-		Services:      []string{"api", "db", "cache"},
-		HasError:      false,
-		Spans: []TraceSpan{
-			{SpanID: "span-1", Service: "api", Operation: "GET /users", DurationMs: 250.0, Status: "ok", SelfTimeMs: 50.0},
-			{SpanID: "span-2", ParentSpanID: "span-1", Service: "db", Operation: "SELECT", DurationMs: 100.0, Status: "ok", SelfTimeMs: 100.0},
-			{SpanID: "span-3", ParentSpanID: "span-1", Service: "cache", Operation: "GET", DurationMs: 10.0, Status: "ok", SelfTimeMs: 10.0},
-		},
-		Logs: []CorrelatedLog{
-			{Timestamp: "12:00:00", Service: "api", Severity: "INFO", Body: "Request started"},
-		},
-		CriticalPath: []string{"api", "db"},
-	}
-
-	output := renderTrace(trace)
-
-	if output.ASCII == "" {
-		t.Error("renderTrace() should produce ASCII output")
-	}
-	if output.HTML == "" {
-		t.Error("renderTrace() should produce HTML output")
-	}
-}
-
-func TestRenderTrace_WithError(t *testing.T) {
-	trace := &TraceOut{
-		TraceID:       "error-trace",
-		TotalDuration: 500.0,
-		SpanCount:     3,
-		Services:      []string{"api", "db"},
-		HasError:      true,
-		Spans: []TraceSpan{
-			{SpanID: "span-1", Service: "api", Operation: "POST /orders", DurationMs: 500.0, Status: "error", StatusMsg: "Internal error"},
-		},
-		RootCause: &RootCause{
-			Type:        "error",
-			Description: "Database connection failed",
-			SpanID:      "span-2",
-			Service:     "db",
-		},
-		CriticalPath: []string{"api", "db"},
-	}
-
-	output := renderTrace(trace)
-
-	if output.ASCII == "" || output.HTML == "" {
-		t.Error("renderTrace() should produce output with error")
-	}
-}
-
-func TestRenderTrace_Empty(t *testing.T) {
-	trace := &TraceOut{
-		TraceID:       "empty-trace",
-		TotalDuration: 0,
-		SpanCount:     0,
-		Services:      []string{},
-		HasError:      false,
-		Spans:         []TraceSpan{},
-		Logs:          []CorrelatedLog{},
-		CriticalPath:  []string{},
-	}
-
-	output := renderTrace(trace)
-
-	if output.ASCII == "" {
-		t.Error("renderTrace() should produce ASCII output for empty trace")
-	}
-}
-
 func TestBuildTraceTree(t *testing.T) {
 	spans := []TraceSpan{
 		{SpanID: "root", ParentSpanID: "", Service: "api", Operation: "GET /users", DurationMs: 100.0, Status: "ok"},
@@ -251,7 +178,6 @@ func TestTraceIn(t *testing.T) {
 		TraceID:     "abc123",
 		IncludeLogs: &includeLogs,
 		Window:      1440,
-		Format:      "both",
 	}
 
 	if in.TraceID != "abc123" {

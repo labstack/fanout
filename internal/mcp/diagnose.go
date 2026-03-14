@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/labstack/fanout/internal/render"
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -16,7 +15,6 @@ type DiagnoseIn struct {
 	Window    int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
 	TenantID  string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
-	Format    string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
 type ServiceMetrics struct {
@@ -54,7 +52,6 @@ type DiagnoseOut struct {
 	TopErrors      []ErrorDetail   `json:"top_errors"`
 	SlowOperations []SlowOperation `json:"slow_operations"`
 	Dependencies   []Dependency    `json:"dependencies"`
-	Render         *render.Output  `json:"render,omitempty"`
 }
 
 func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in DiagnoseIn) (*mcp.CallToolResult, DiagnoseOut, error) {
@@ -115,105 +112,7 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 		})
 	}
 
-	// Render output
-	format := parseFormat(in.Format)
-	if format != render.Data {
-		rendered := renderDiagnose(&out)
-		out.Render = &rendered
-	}
-
 	return nil, out, nil
-}
-
-func renderDiagnose(d *DiagnoseOut) render.Output {
-	// Header with status badge
-	header := &render.Panel{
-		Title: d.Service,
-		Content: []render.Renderer{
-			&render.Badge{Label: d.Status, Status: d.Status},
-		},
-	}
-
-	// Latency metrics
-	metrics := &render.Grid{
-		Cols: 4,
-		Items: []render.Renderer{
-			&render.Metric{Label: "P50", Value: fmt.Sprintf("%.1f", d.Metrics.P50Ms), Unit: "ms"},
-			&render.Metric{Label: "P95", Value: fmt.Sprintf("%.1f", d.Metrics.P95Ms), Unit: "ms"},
-			&render.Metric{Label: "P99", Value: fmt.Sprintf("%.1f", d.Metrics.P99Ms), Unit: "ms"},
-			&render.Metric{Label: "Error Rate", Value: fmt.Sprintf("%.2f", d.Metrics.ErrorRate*100), Unit: "%"},
-		},
-	}
-
-	// Request count
-	reqCount := &render.Metric{Label: "Requests", Value: fmt.Sprintf("%d", d.Metrics.Count)}
-
-	// Top errors table
-	var errorRows [][]string
-	for _, e := range d.TopErrors {
-		errorRows = append(errorRows, []string{
-			truncate(e.Message, 50),
-			fmt.Sprintf("%d", e.Count),
-			truncate(e.ExampleTrace, 16),
-		})
-	}
-	errorsTable := &render.Table{
-		Title:    "Top Errors",
-		Headers:  []string{"Message", "Count", "Trace"},
-		Rows:     errorRows,
-		MaxWidth: 50,
-	}
-
-	// Slow operations table
-	var slowRows [][]string
-	for _, op := range d.SlowOperations {
-		slowRows = append(slowRows, []string{
-			truncate(op.Name, 40),
-			fmt.Sprintf("%.1fms", op.P95Ms),
-			fmt.Sprintf("%d", op.Count),
-		})
-	}
-	slowTable := &render.Table{
-		Title:    "Slow Operations",
-		Headers:  []string{"Operation", "P95", "Count"},
-		Rows:     slowRows,
-		MaxWidth: 40,
-	}
-
-	// Dependencies table
-	var depRows [][]string
-	for _, dep := range d.Dependencies {
-		depRows = append(depRows, []string{
-			dep.Service,
-			dep.Status,
-			fmt.Sprintf("%.1fms", dep.AvgMs),
-			fmt.Sprintf("%.2f%%", dep.ErrorRate*100),
-			fmt.Sprintf("%d", dep.Calls),
-		})
-	}
-	depsTable := &render.Table{
-		Title:   "Dependencies",
-		Headers: []string{"Service", "Status", "Avg", "Errors", "Calls"},
-		Rows:    depRows,
-	}
-
-	// Compose
-	composed := &render.Compose{
-		Vertical: true,
-		Items:    []render.Renderer{header, metrics, reqCount},
-	}
-
-	if len(errorRows) > 0 {
-		composed.Items = append(composed.Items, errorsTable)
-	}
-	if len(slowRows) > 0 {
-		composed.Items = append(composed.Items, slowTable)
-	}
-	if len(depRows) > 0 {
-		composed.Items = append(composed.Items, depsTable)
-	}
-
-	return composed.Render(render.Both)
 }
 
 func truncate(s string, max int) string {

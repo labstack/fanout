@@ -2,9 +2,7 @@ package mcp
 
 import (
 	"context"
-	"fmt"
 
-	"github.com/labstack/fanout/internal/render"
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -15,7 +13,6 @@ type TopologyIn struct {
 	Window    int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=60"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
 	TenantID  string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
-	Format    string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
 type ServiceNode struct {
@@ -39,11 +36,10 @@ type ServiceEdge struct {
 }
 
 type TopologyOut struct {
-	Nodes        []ServiceNode  `json:"nodes"`
-	Edges        []ServiceEdge  `json:"edges"`
-	ServiceCount int            `json:"service_count"`
-	EdgeCount    int            `json:"edge_count"`
-	Render       *render.Output `json:"render,omitempty"`
+	Nodes        []ServiceNode `json:"nodes"`
+	Edges        []ServiceEdge `json:"edges"`
+	ServiceCount int           `json:"service_count"`
+	EdgeCount    int           `json:"edge_count"`
 }
 
 func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in TopologyIn) (*mcp.CallToolResult, TopologyOut, error) {
@@ -84,91 +80,5 @@ func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in Topo
 		})
 	}
 
-	// Render output
-	format := parseFormat(in.Format)
-	if format != render.Data {
-		rendered := renderTopology(&out)
-		out.Render = &rendered
-	}
-
 	return nil, out, nil
-}
-
-func renderTopology(t *TopologyOut) render.Output {
-	var items []render.Renderer
-
-	// Summary
-	healthy := 0
-	degraded := 0
-	unhealthy := 0
-	for _, n := range t.Nodes {
-		switch n.Status {
-		case "healthy", "active":
-			healthy++
-		case "degraded":
-			degraded++
-		default:
-			unhealthy++
-		}
-	}
-
-	summary := &render.Grid{
-		Cols: 4,
-		Items: []render.Renderer{
-			&render.Metric{Label: "Services", Value: fmt.Sprintf("%d", t.ServiceCount)},
-			&render.Badge{Label: fmt.Sprintf("%d healthy", healthy), Status: "healthy"},
-			&render.Badge{Label: fmt.Sprintf("%d degraded", degraded), Status: "degraded"},
-			&render.Badge{Label: fmt.Sprintf("%d unhealthy", unhealthy), Status: "unhealthy"},
-		},
-	}
-	items = append(items, summary)
-
-	// Services table
-	var nodeRows [][]string
-	for _, n := range t.Nodes {
-		nodeRows = append(nodeRows, []string{
-			n.Name,
-			n.Status,
-			fmt.Sprintf("%.1fms", n.P95Ms),
-			fmt.Sprintf("%.2f%%", n.ErrorRate*100),
-			fmt.Sprintf("%d", n.SpanCount),
-			fmt.Sprintf("%d", n.LogCount),
-			fmt.Sprintf("%d", n.MetricCount),
-		})
-	}
-	servicesTable := &render.Table{
-		Title:   "Services",
-		Headers: []string{"Name", "Status", "P95", "Errors", "Spans", "Logs", "Metrics"},
-		Rows:    nodeRows,
-	}
-	items = append(items, servicesTable)
-
-	// Dependencies table
-	if len(t.Edges) > 0 {
-		var edgeRows [][]string
-		for _, e := range t.Edges {
-			edgeType := e.EdgeType
-			if edgeType == "" {
-				edgeType = "call"
-			}
-			edgeRows = append(edgeRows, []string{
-				e.From,
-				"→",
-				e.To,
-				fmt.Sprintf("%d", e.CallCount),
-				fmt.Sprintf("%.1fms", e.AvgMs),
-				fmt.Sprintf("%.2f%%", e.ErrorRate*100),
-				edgeType,
-			})
-		}
-		edgesTable := &render.Table{
-			Title:   "Dependencies",
-			Headers: []string{"From", "", "To", "Calls", "Avg", "Errors", "Type"},
-			Rows:    edgeRows,
-		}
-		items = append(items, edgesTable)
-	}
-
-	composed := &render.Compose{Vertical: true, Items: items}
-	return composed.Render(render.Both)
 }

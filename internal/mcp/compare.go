@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/labstack/fanout/internal/render"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -15,7 +14,6 @@ import (
 type CompareIn struct {
 	Services []string `json:"services" jsonschema:"Services to compare (2-4),required"`
 	Window   int      `json:"window,omitempty" jsonschema:"Time window in minutes,default=60"`
-	Format   string   `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
 }
 
 type CompareMetrics struct {
@@ -32,7 +30,6 @@ type CompareOut struct {
 	Services []CompareMetrics `json:"services"`
 	Winner   string           `json:"winner"`
 	Summary  string           `json:"summary"`
-	Render   *render.Output   `json:"render,omitempty"`
 }
 
 func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in CompareIn) (*mcp.CallToolResult, CompareOut, error) {
@@ -136,61 +133,7 @@ func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in Compa
 		Summary:  summary,
 	}
 
-	// Render
-	format := parseFormat(in.Format)
-	if format != render.Data {
-		rendered := renderCompare(&out)
-		out.Render = &rendered
-	}
-
 	return nil, out, nil
-}
-
-func renderCompare(c *CompareOut) render.Output {
-	// Build comparison table
-	headers := []string{"Service", "Requests", "Error Rate", "P50", "P95"}
-	var rows [][]string
-	for _, m := range c.Services {
-		status := ""
-		if m.Service == c.Winner {
-			status = " ★"
-		}
-		rows = append(rows, []string{
-			m.Service + status,
-			fmt.Sprintf("%d", m.Requests),
-			fmt.Sprintf("%.2f%%", m.ErrorRate*100),
-			fmt.Sprintf("%.1fms", m.P50Ms),
-			fmt.Sprintf("%.1fms", m.P95Ms),
-		})
-	}
-
-	table := &render.Table{
-		Title:   "Service Comparison",
-		Headers: headers,
-		Rows:    rows,
-	}
-
-	// Winner badge
-	var badge *render.Badge
-	if c.Winner != "" {
-		badge = &render.Badge{Label: c.Winner + " wins", Status: "healthy"}
-	}
-
-	// Compose
-	items := []render.Renderer{
-		&render.Text{Content: c.Summary},
-		table,
-	}
-	if badge != nil {
-		items = append(items, badge)
-	}
-
-	composed := &render.Compose{
-		Vertical: true,
-		Items:    items,
-	}
-
-	return composed.Render(render.Both)
 }
 
 // Helper functions for row parsing

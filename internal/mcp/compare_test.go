@@ -2,61 +2,6 @@ package mcp
 
 import "testing"
 
-func TestRenderCompare(t *testing.T) {
-	compare := &CompareOut{
-		Services: []CompareMetrics{
-			{Service: "api-v1", Requests: 1000, ErrorRate: 0.01, P50Ms: 20.0, P95Ms: 50.0, AvgMs: 35.0, ErrorCount: 10},
-			{Service: "api-v2", Requests: 800, ErrorRate: 0.005, P50Ms: 15.0, P95Ms: 40.0, AvgMs: 27.5, ErrorCount: 4},
-		},
-		Winner:  "api-v2",
-		Summary: "Compared 2 services over 60 minutes. api-v2 has best performance.",
-	}
-
-	output := renderCompare(compare)
-
-	if output.ASCII == "" {
-		t.Error("renderCompare() should produce ASCII output")
-	}
-	if output.HTML == "" {
-		t.Error("renderCompare() should produce HTML output")
-	}
-}
-
-func TestRenderCompare_NoWinner(t *testing.T) {
-	compare := &CompareOut{
-		Services: []CompareMetrics{
-			{Service: "new-service", Requests: 0, ErrorRate: 0, P50Ms: 0, P95Ms: 0},
-			{Service: "another-new", Requests: 0, ErrorRate: 0, P50Ms: 0, P95Ms: 0},
-		},
-		Winner:  "",
-		Summary: "Compared 2 services over 60 minutes. ",
-	}
-
-	output := renderCompare(compare)
-
-	if output.ASCII == "" || output.HTML == "" {
-		t.Error("renderCompare() should produce output with no winner")
-	}
-}
-
-func TestRenderCompare_ThreeServices(t *testing.T) {
-	compare := &CompareOut{
-		Services: []CompareMetrics{
-			{Service: "svc-a", Requests: 1000, ErrorRate: 0.01, P50Ms: 20.0, P95Ms: 50.0},
-			{Service: "svc-b", Requests: 500, ErrorRate: 0.02, P50Ms: 30.0, P95Ms: 80.0},
-			{Service: "svc-c", Requests: 200, ErrorRate: 0.005, P50Ms: 10.0, P95Ms: 25.0},
-		},
-		Winner:  "svc-c",
-		Summary: "Compared 3 services over 60 minutes. svc-c has best performance.",
-	}
-
-	output := renderCompare(compare)
-
-	if output.ASCII == "" || output.HTML == "" {
-		t.Error("renderCompare() should produce output for 3 services")
-	}
-}
-
 func TestGetString(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -163,7 +108,6 @@ func TestCompareIn(t *testing.T) {
 	in := CompareIn{
 		Services: []string{"api-v1", "api-v2", "api-v3"},
 		Window:   120,
-		Format:   "both",
 	}
 
 	if len(in.Services) != 3 {
@@ -171,9 +115,6 @@ func TestCompareIn(t *testing.T) {
 	}
 	if in.Window != 120 {
 		t.Errorf("Window = %d, want 120", in.Window)
-	}
-	if in.Format != "both" {
-		t.Errorf("Format = %q, want %q", in.Format, "both")
 	}
 }
 
