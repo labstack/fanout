@@ -378,7 +378,7 @@ func queryOperationStats(ctx context.Context, s *Server, service, operation stri
 		SELECT
 			COALESCE(quantile_cont(duration_ms, 0.95), 0) AS p95_ms,
 			COALESCE(quantile_cont(duration_ms, 0.50), 0) AS p50_ms,
-			COALESCE(AVG(CASE WHEN status = 'ERROR' THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
+			COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
 			COUNT(*) AS total_spans
 		FROM spans
 		WHERE service = ?

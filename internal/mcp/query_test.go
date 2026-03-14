@@ -91,7 +91,8 @@ func TestSchemaResponseSpansColumns(t *testing.T) {
 
 	requiredCols := []string{
 		"trace_id", "span_id", "service", "operation",
-		"duration_ms", "start_time", "status", "attributes",
+		"duration_ms", "start_time", "status",
+		"attributes_json", "resource_json", "events_json", "tenant",
 	}
 	colMap := map[string]bool{}
 	for _, c := range spansView.Columns {

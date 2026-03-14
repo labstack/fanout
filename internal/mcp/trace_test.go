@@ -177,7 +177,7 @@ func TestTraceIn(t *testing.T) {
 	in := TraceIn{
 		TraceID:     "abc123",
 		IncludeLogs: &includeLogs,
-		Window:      1440,
+		Window:      "24h",
 	}
 
 	if in.TraceID != "abc123" {

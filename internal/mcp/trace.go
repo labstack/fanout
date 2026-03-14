@@ -13,7 +13,7 @@ import (
 type TraceIn struct {
 	TraceID        string `json:"trace_id" jsonschema:"Trace ID to analyze"`
 	IncludeLogs    *bool  `json:"include_logs,omitempty" jsonschema:"Include correlated logs,default=true"`
-	Window         int    `json:"window,omitempty" jsonschema:"Time window in minutes to search,default=1440 (24h)"`
+	Window         string `json:"window,omitempty" jsonschema:"Time window: duration (15m, 1h, 24h, 7d) or ISO range,default=24h"`
 	CompareTo      string `json:"compare_to,omitempty" jsonschema:"Another trace ID for side-by-side latency comparison"`
 	IncludeMetrics *bool  `json:"include_metrics,omitempty" jsonschema:"Include service_rollup metric snapshots around trace time,default=false"`
 }
@@ -122,8 +122,16 @@ func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn
 		includeLogs = *in.IncludeLogs
 	}
 
-	// Default to 24h (1440 min) for trace lookups
-	window := clampInt(in.Window, minWindow, maxWindow, 1440)
+	// Parse window; default to 24h for trace lookups
+	windowStr := in.Window
+	if windowStr == "" {
+		windowStr = "24h"
+	}
+	tw, err := parseWindow(windowStr)
+	if err != nil {
+		return nil, TraceOut{}, fmt.Errorf("invalid window: %w", err)
+	}
+	window := clampInt(tw.Minutes, minWindow, maxWindow, 1440)
 
 	result, err := s.svc.Trace(ctx, in.TraceID, includeLogs, window)
 	if err != nil {

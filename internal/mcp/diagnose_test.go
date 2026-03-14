@@ -225,7 +225,7 @@ func TestDiagnoseIn_SymptomField(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			in := DiagnoseIn{
 				Service: "my-service",
-				Window:  15,
+				Window:  "15m",
 				Symptom: tc.symptom,
 			}
 			// Verify the field is accessible and holds the expected value.

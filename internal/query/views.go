@@ -143,6 +143,11 @@ WHERE false
 // ensures the views are always registered in the catalog and return empty result
 // sets until real data arrives.
 func CreateViews(db *sql.DB, lakeDir string) error {
+	// Validate lakeDir before substituting into SQL strings.
+	if strings.ContainsAny(lakeDir, "'\"\\;") {
+		return fmt.Errorf("lake dir contains unsafe characters: %q", lakeDir)
+	}
+
 	// Write sentinel Parquet files so read_parquet globs are non-empty.
 	for signal, copySQLTemplate := range placeholders {
 		dir := filepath.Join(lakeDir, signal)
