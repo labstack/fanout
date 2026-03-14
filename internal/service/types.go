@@ -109,34 +109,6 @@ type TopologyParams struct {
 	TenantID        string
 }
 
-// TimelineResult contains time-bucketed metrics with anomalies.
-type TimelineResult struct {
-	Buckets   []TimeBucket
-	Anomalies []Anomaly
-}
-
-// TimeBucket represents metrics for a time window.
-type TimeBucket struct {
-	Time        string
-	Requests    int64
-	Errors      int64
-	P50Ms       float64
-	P95Ms       float64
-	ErrorRate   float64
-	IsAnomaly   bool
-	AnomalyType string
-}
-
-// Anomaly represents a detected anomaly.
-type Anomaly struct {
-	Time        string
-	Type        string
-	Description string
-	Service     string
-	Value       float64
-	Expected    float64
-}
-
 // DiagnoseResult contains detailed service diagnostics.
 type DiagnoseResult struct {
 	Service      string
@@ -404,4 +376,64 @@ type LogGroup struct {
 	Count          int64
 	SampleBodies   []string
 	SampleTraceIDs []string
+}
+
+// MetricParams contains parameters for the metrics tool (list and query actions).
+type MetricParams struct {
+	Action      string // "list" or "query"
+	Name        string
+	Names       []string
+	Aggregation string // "avg", "sum", "min", "max", "count"
+	GroupBy     []string
+	Granularity string // "1m", "5m", "15m", "1h", "auto"
+	Service     string
+	Attrs       map[string]string
+	Window      int // minutes
+	Namespace   string
+	TenantID    string
+	Limit       int
+}
+
+// MetricsListResult holds the result of the metrics list action.
+type MetricsListResult struct {
+	Metrics []MetricListEntry
+}
+
+// MetricListEntry describes a discovered metric.
+type MetricListEntry struct {
+	Name        string
+	Type        string
+	Unit        string
+	Services    []string
+	Description string
+}
+
+// MetricsQueryResult holds the result of the metrics query action.
+type MetricsQueryResult struct {
+	Series    []MetricSeries
+	Anomalies []MetricAnomaly
+}
+
+// MetricSeries is one timeseries stream returned by the query action.
+type MetricSeries struct {
+	Labels      map[string]string
+	Metric      string
+	Aggregation string
+	Unit        string
+	Datapoints  []MetricDatapoint
+}
+
+// MetricDatapoint is a single timestamped value in a series.
+type MetricDatapoint struct {
+	Time  string
+	Value float64
+}
+
+// MetricAnomaly describes a statistical anomaly detected in metric data.
+type MetricAnomaly struct {
+	Time           string
+	Type           string
+	Value          float64
+	Expected       float64
+	DeviationSigma float64
 }

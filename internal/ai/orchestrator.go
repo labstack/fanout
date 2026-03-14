@@ -494,10 +494,9 @@ You get ONE tool call to gather data — pick the best tool for the question:
 - find — search spans/logs by pattern, service, status, severity
 - tail — live log streaming
 - trace — full distributed trace (needs trace_id from find results)
-- timeline — time-bucketed metrics with anomaly detection
 - topology — service dependency map with health
 - compare — side-by-side service comparison
-- metrics — explore available metrics
+- metrics — discover and query OTLP metric timeseries with anomaly detection
 - query — custom SQL (last resort)
 
 You may call multiple tools in parallel if they are independent (e.g. diagnose for two services).

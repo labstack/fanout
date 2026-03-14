@@ -131,15 +131,18 @@ Use with trace_id from find or diagnose results.
 Returns: spans (full tree with timing), logs (correlated by trace), critical_path (slowest chain), root_cause (identified issue with confidence)`,
 	}, s.trace)
 
-	// 5. timeline - Events with anomaly detection
+	// 5. metrics - Metric discovery and timeseries query
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "timeline",
-		Description: `Get time-bucketed metrics with automatic anomaly detection. Identifies latency spikes, error rate increases, and traffic drops.
+		Name: "metrics",
+		Description: `Discover and query OTLP metric timeseries with anomaly detection. Two actions: 'list' discovers available metrics; 'query' returns bucketed timeseries.
 
-Use for trend analysis and finding when issues started.
+Use 'list' to find metric names, then 'query' to retrieve data. Anomalies (spikes/drops > 2σ) are automatically detected.
 
-Returns: buckets (time, request_count, error_count, p95_ms, error_rate, is_anomaly), anomalies (time, type, description, value, expected)`,
-	}, s.timeline)
+Params: action (list|query), name (metric name for query), names (multiple for overlay), aggregation (avg|sum|min|max|count), group_by (["service"]), granularity (1m|5m|15m|1h|auto), service, attrs, window, namespace, tenant, limit
+
+Returns (list): metrics (name, type, unit, services, description)
+Returns (query): series (labels, metric, aggregation, unit, datapoints), anomalies (time, type, value, expected, deviation_sigma)`,
+	}, s.metrics)
 
 	// 6. topology - Service map with health
 	mcp.AddTool(s.mcp, &mcp.Tool{

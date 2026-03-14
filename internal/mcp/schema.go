@@ -66,7 +66,7 @@ WHERE "name=kind" = 'SPAN_KIND_CLIENT'
   AND json_extract_string(from_utf8("name=attributes_json"), '$.peer.service') IS NOT NULL
   AND "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000`, lakeDir),
 
-			// Timeline (requests per minute)
+			// Requests per minute from rollup
 			`SELECT bucket, service, spans,
        ROUND(error_rate * 100, 2) as error_pct,
        ROUND(p95_ms, 2) as p95
