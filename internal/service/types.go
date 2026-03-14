@@ -65,21 +65,26 @@ type OverviewIssue struct {
 
 // TopologyResult contains service dependency map data.
 type TopologyResult struct {
-	Nodes []ServiceNode
-	Edges []ServiceEdge
+	Nodes         []ServiceNode
+	Edges         []ServiceEdge
+	CriticalPaths [][]string
 }
 
 // ServiceNode represents a service in the topology.
 type ServiceNode struct {
-	Name        string
-	Namespace   string
-	Status      string
-	SpanCount   int64
-	P95Ms       float64
-	ErrorRate   float64
-	LogCount    int64
-	MetricCount int64
-	Trend       []int64 // optional sparkline data
+	Name            string
+	Namespace       string
+	Status          string
+	SpanCount       int64
+	P50Ms           float64
+	P95Ms           float64
+	ErrorRate       float64
+	LogCount        int64
+	MetricCount     int64
+	Trend           []int64 // optional sparkline data
+	UpstreamCount   int
+	DownstreamCount int
+	BlastRadius     float64
 }
 
 // ServiceEdge represents a call between services.
@@ -91,6 +96,17 @@ type ServiceEdge struct {
 	ErrorRate float64
 	Status    string
 	EdgeType  string // "call" or "messaging"
+}
+
+// TopologyParams contains parameters for the Topology query.
+type TopologyParams struct {
+	Window          int
+	EdgeType        string // "call", "messaging", "all"
+	Depth           int    // BFS depth from Service; 0 means no limit
+	Service         string // focus service for depth filter
+	IncludeInactive bool
+	Namespace       string
+	TenantID        string
 }
 
 // TimelineResult contains time-bucketed metrics with anomalies.
