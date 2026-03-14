@@ -15,14 +15,38 @@ type DiagnoseIn struct {
 	Window    int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
 	TenantID  string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
+	Symptom   string `json:"symptom,omitempty" jsonschema:"Focus diagnosis on: latency, errors, throughput_drop, or auto (default)"`
 }
 
 type ServiceMetrics struct {
-	P50Ms     float64 `json:"p50_ms"`
-	P95Ms     float64 `json:"p95_ms"`
-	P99Ms     float64 `json:"p99_ms"`
-	ErrorRate float64 `json:"error_rate"`
-	Count     int64   `json:"request_count"`
+	P50Ms                float64             `json:"p50_ms"`
+	P95Ms                float64             `json:"p95_ms"`
+	P99Ms                float64             `json:"p99_ms"`
+	ErrorRate            float64             `json:"error_rate"`
+	Count                int64               `json:"request_count"`
+	ComparisonToBaseline *BaselineComparison `json:"comparison_to_baseline,omitempty"`
+}
+
+// BaselineComparison compares current P95 against historical same-time-of-day averages.
+type BaselineComparison struct {
+	P95Ratio       float64 `json:"p95_ratio"`
+	BaselineP95Ms  float64 `json:"baseline_p95_ms"`
+	BaselineWindow string  `json:"baseline_window"`
+}
+
+// ChangePoint represents a statistically significant metric jump.
+type ChangePoint struct {
+	Time   string  `json:"time"`
+	Metric string  `json:"metric"`
+	Before float64 `json:"before"`
+	After  float64 `json:"after"`
+}
+
+// LogPattern describes a recurring log message pattern near a change point.
+type LogPattern struct {
+	Pattern  string `json:"pattern"`
+	Count    int64  `json:"count"`
+	Severity string `json:"severity"`
 }
 
 type ErrorDetail struct {
@@ -46,12 +70,15 @@ type Dependency struct {
 }
 
 type DiagnoseOut struct {
-	Service        string          `json:"service"`
-	Status         string          `json:"status"`
-	Metrics        ServiceMetrics  `json:"metrics"`
-	TopErrors      []ErrorDetail   `json:"top_errors"`
-	SlowOperations []SlowOperation `json:"slow_operations"`
-	Dependencies   []Dependency    `json:"dependencies"`
+	Service               string          `json:"service"`
+	Status                string          `json:"status"`
+	SymptomDetected       string          `json:"symptom_detected,omitempty"`
+	Metrics               ServiceMetrics  `json:"metrics"`
+	TopErrors             []ErrorDetail   `json:"top_errors"`
+	SlowOperations        []SlowOperation `json:"slow_operations"`
+	Dependencies          []Dependency    `json:"dependencies"`
+	ChangePoints          []ChangePoint   `json:"change_points,omitempty"`
+	CorrelatedLogPatterns []LogPattern    `json:"correlated_log_patterns,omitempty"`
 }
 
 func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in DiagnoseIn) (*mcp.CallToolResult, DiagnoseOut, error) {
@@ -60,7 +87,7 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 	}
 
 	window := clampInt(in.Window, minWindow, maxWindow, defWindow)
-	result, err := s.svc.Diagnose(ctx, in.Service, window, in.Namespace, in.TenantID)
+	result, err := s.svc.DiagnoseEnhanced(ctx, in.Service, window, in.Symptom, in.Namespace, in.TenantID)
 	if err != nil {
 		return nil, DiagnoseOut{
 			Service:        in.Service,
@@ -71,19 +98,33 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 		}, nil
 	}
 
+	metrics := ServiceMetrics{
+		P50Ms:     result.P50Ms,
+		P95Ms:     result.P95Ms,
+		P99Ms:     result.P99Ms,
+		ErrorRate: result.ErrorRate,
+		Count:     result.SpanCount,
+	}
+	if result.Baseline != nil {
+		p95Ratio := 0.0
+		if result.Baseline.BaselineP95Ms > 0 {
+			p95Ratio = result.P95Ms / result.Baseline.BaselineP95Ms
+		}
+		metrics.ComparisonToBaseline = &BaselineComparison{
+			P95Ratio:       p95Ratio,
+			BaselineP95Ms:  result.Baseline.BaselineP95Ms,
+			BaselineWindow: result.Baseline.BaselineWindow,
+		}
+	}
+
 	out := DiagnoseOut{
-		Service: result.Service,
-		Status:  result.Status,
-		Metrics: ServiceMetrics{
-			P50Ms:     result.P50Ms,
-			P95Ms:     result.P95Ms,
-			P99Ms:     result.P99Ms,
-			ErrorRate: result.ErrorRate,
-			Count:     result.SpanCount,
-		},
-		TopErrors:      make([]ErrorDetail, 0, len(result.TopErrors)),
-		SlowOperations: make([]SlowOperation, 0, len(result.SlowOps)),
-		Dependencies:   make([]Dependency, 0, len(result.Dependencies)),
+		Service:         result.Service,
+		Status:          result.Status,
+		SymptomDetected: result.SymptomDetected,
+		Metrics:         metrics,
+		TopErrors:       make([]ErrorDetail, 0, len(result.TopErrors)),
+		SlowOperations:  make([]SlowOperation, 0, len(result.SlowOps)),
+		Dependencies:    make([]Dependency, 0, len(result.Dependencies)),
 	}
 
 	for _, e := range result.TopErrors {
@@ -109,6 +150,25 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 			ErrorRate: d.ErrorRate,
 			AvgMs:     d.AvgMs,
 			Calls:     d.CallCount,
+		})
+	}
+
+	// Populate change points.
+	for _, cp := range result.ChangePoints {
+		out.ChangePoints = append(out.ChangePoints, ChangePoint{
+			Time:   cp.Time,
+			Metric: cp.Metric,
+			Before: cp.Before,
+			After:  cp.After,
+		})
+	}
+
+	// Populate correlated log patterns.
+	for _, lp := range result.CorrelatedLogPatterns {
+		out.CorrelatedLogPatterns = append(out.CorrelatedLogPatterns, LogPattern{
+			Pattern:  lp.Pattern,
+			Count:    lp.Count,
+			Severity: lp.Severity,
 		})
 	}
 

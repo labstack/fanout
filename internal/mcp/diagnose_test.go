@@ -1,6 +1,8 @@
 package mcp
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestTruncate(t *testing.T) {
 	tests := []struct {
@@ -108,5 +110,128 @@ func TestDependency(t *testing.T) {
 	}
 	if d.Calls != 10000 {
 		t.Errorf("Calls = %d", d.Calls)
+	}
+}
+
+func TestBaselineComparison(t *testing.T) {
+	b := BaselineComparison{
+		P95Ratio:       18.9,
+		BaselineP95Ms:  500.0,
+		BaselineWindow: "7d",
+	}
+
+	if b.P95Ratio != 18.9 {
+		t.Errorf("P95Ratio = %f, want 18.9", b.P95Ratio)
+	}
+	if b.BaselineP95Ms != 500.0 {
+		t.Errorf("BaselineP95Ms = %f, want 500.0", b.BaselineP95Ms)
+	}
+	if b.BaselineWindow != "7d" {
+		t.Errorf("BaselineWindow = %q, want %q", b.BaselineWindow, "7d")
+	}
+}
+
+func TestChangePoint(t *testing.T) {
+	cp := ChangePoint{
+		Time:   "2026-03-14T16:28:00Z",
+		Metric: "p95_ms",
+		Before: 480.0,
+		After:  9200.0,
+	}
+
+	if cp.Time != "2026-03-14T16:28:00Z" {
+		t.Errorf("Time = %q", cp.Time)
+	}
+	if cp.Metric != "p95_ms" {
+		t.Errorf("Metric = %q, want %q", cp.Metric, "p95_ms")
+	}
+	if cp.Before != 480.0 {
+		t.Errorf("Before = %f, want 480.0", cp.Before)
+	}
+	if cp.After != 9200.0 {
+		t.Errorf("After = %f, want 9200.0", cp.After)
+	}
+}
+
+func TestLogPattern(t *testing.T) {
+	lp := LogPattern{
+		Pattern:  "Batch size exceeds threshold",
+		Count:    12,
+		Severity: "WARN",
+	}
+
+	if lp.Pattern != "Batch size exceeds threshold" {
+		t.Errorf("Pattern = %q", lp.Pattern)
+	}
+	if lp.Count != 12 {
+		t.Errorf("Count = %d, want 12", lp.Count)
+	}
+	if lp.Severity != "WARN" {
+		t.Errorf("Severity = %q, want %q", lp.Severity, "WARN")
+	}
+}
+
+func TestDiagnoseOut_NewFields(t *testing.T) {
+	out := DiagnoseOut{
+		Service:         "checkout",
+		Status:          "degraded",
+		SymptomDetected: "latency",
+		Metrics: ServiceMetrics{
+			P95Ms: 9200.0,
+			ComparisonToBaseline: &BaselineComparison{
+				P95Ratio:       18.9,
+				BaselineP95Ms:  500.0,
+				BaselineWindow: "7d",
+			},
+		},
+		ChangePoints: []ChangePoint{
+			{Time: "2026-03-14T16:28:00Z", Metric: "p95_ms", Before: 480.0, After: 9200.0},
+		},
+		CorrelatedLogPatterns: []LogPattern{
+			{Pattern: "Batch size exceeds threshold", Count: 12, Severity: "WARN"},
+		},
+	}
+
+	if out.SymptomDetected != "latency" {
+		t.Errorf("SymptomDetected = %q, want %q", out.SymptomDetected, "latency")
+	}
+	if out.Metrics.ComparisonToBaseline == nil {
+		t.Fatal("ComparisonToBaseline should not be nil")
+	}
+	if out.Metrics.ComparisonToBaseline.P95Ratio != 18.9 {
+		t.Errorf("P95Ratio = %f, want 18.9", out.Metrics.ComparisonToBaseline.P95Ratio)
+	}
+	if len(out.ChangePoints) != 1 {
+		t.Errorf("ChangePoints count = %d, want 1", len(out.ChangePoints))
+	}
+	if len(out.CorrelatedLogPatterns) != 1 {
+		t.Errorf("CorrelatedLogPatterns count = %d, want 1", len(out.CorrelatedLogPatterns))
+	}
+}
+
+func TestDiagnoseIn_SymptomField(t *testing.T) {
+	tests := []struct {
+		name    string
+		symptom string
+	}{
+		{"auto (default)", ""},
+		{"latency", "latency"},
+		{"errors", "errors"},
+		{"throughput_drop", "throughput_drop"},
+		{"explicit auto", "auto"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			in := DiagnoseIn{
+				Service: "my-service",
+				Window:  15,
+				Symptom: tc.symptom,
+			}
+			// Verify the field is accessible and holds the expected value.
+			if in.Symptom != tc.symptom {
+				t.Errorf("Symptom = %q, want %q", in.Symptom, tc.symptom)
+			}
+		})
 	}
 }
