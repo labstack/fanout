@@ -49,11 +49,11 @@ type OverviewIssue struct {
 
 // OverviewOut is the full MCP output for the overview tool.
 type OverviewOut struct {
-	Timestamp string          `json:"timestamp"`
-	Window    string          `json:"window"`
-	Health    OverviewHealth  `json:"health,omitempty"`
+	Timestamp string            `json:"timestamp"`
+	Window    string            `json:"window"`
+	Health    OverviewHealth    `json:"health,omitempty"`
 	Services  []OverviewService `json:"services,omitempty"`
-	TopIssues []OverviewIssue  `json:"top_issues,omitempty"`
+	TopIssues []OverviewIssue   `json:"top_issues,omitempty"`
 }
 
 func (s *Server) overview(ctx context.Context, req *mcp.CallToolRequest, in OverviewIn) (*mcp.CallToolResult, OverviewOut, error) {

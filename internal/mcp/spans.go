@@ -95,9 +95,9 @@ func (s *Server) spans(ctx context.Context, req *mcp.CallToolRequest, in SpansIn
 	if err != nil {
 		slog.Warn("spans tool failed", "err", err)
 		return nil, SpansOut{
-			Spans:       []SpanRowOut{},
-			Groups:      []SpanGroupOut{},
-			Suggestion:  fmt.Sprintf("Query failed: %s", err),
+			Spans:      []SpanRowOut{},
+			Groups:     []SpanGroupOut{},
+			Suggestion: fmt.Sprintf("Query failed: %s", err),
 		}, nil
 	}
 

@@ -134,9 +134,9 @@ func TestTopology_NodeHealthStatus(t *testing.T) {
 	// Nodes with different health statuses
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "cnt", "p50", "p95", "error_rate", "log_cnt", "metric_cnt"}).
-			AddRow("healthy-svc", int64(100), 25.0, 50.0, 0.005, int64(0), int64(0)).   // healthy
+			AddRow("healthy-svc", int64(100), 25.0, 50.0, 0.005, int64(0), int64(0)).    // healthy
 			AddRow("degraded-svc", int64(100), 500.0, 2000.0, 0.03, int64(0), int64(0)). // degraded (high latency)
-			AddRow("unhealthy-svc", int64(100), 25.0, 50.0, 0.15, int64(0), int64(0)))  // unhealthy (high errors)
+			AddRow("unhealthy-svc", int64(100), 25.0, 50.0, 0.15, int64(0), int64(0)))   // unhealthy (high errors)
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}))

@@ -333,9 +333,9 @@ func TestOverview_ByStatus(t *testing.T) {
 	defer svc.duck.DB.Close()
 
 	rows := sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
-		AddRow("healthy-svc", int64(1000), 10.0, 100.0, 0.001).  // healthy: score = 1.0
-		AddRow("degraded-svc", int64(500), 50.0, 800.0, 0.02).   // degraded: 0.7*0.4+0.7*0.3+0.3 = 0.28+0.21+0.3 = 0.79
-		AddRow("unhealthy-svc", int64(100), 200.0, 100.0, 0.15)  // unhealthy: 0.0*0.4+1.0*0.3+1.0*0.3 = 0.6
+		AddRow("healthy-svc", int64(1000), 10.0, 100.0, 0.001). // healthy: score = 1.0
+		AddRow("degraded-svc", int64(500), 50.0, 800.0, 0.02).  // degraded: 0.7*0.4+0.7*0.3+0.3 = 0.28+0.21+0.3 = 0.79
+		AddRow("unhealthy-svc", int64(100), 200.0, 100.0, 0.15) // unhealthy: 0.0*0.4+1.0*0.3+1.0*0.3 = 0.6
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
