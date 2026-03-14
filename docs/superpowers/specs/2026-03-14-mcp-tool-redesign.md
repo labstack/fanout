@@ -29,7 +29,7 @@ Incremental evolution of the existing 9 tools. No rewrite, no adapter layer. Ext
 |-----------|------|---------|-------------|
 | `service` | `string` | — | Filter to a single service |
 | `services` | `string[]` | — | Filter to multiple services |
-| `window` | `string` | `"15m"` | Time window: `5m`, `1h`, `6h`, `24h`, `7d`, or ISO range |
+| `window` | `string` | `"15m"` | Time window: `5m`, `1h`, `6h`, `24h`, `7d`, or absolute range as `"<ISO8601>/<ISO8601>"` (e.g. `"2026-03-14T12:00Z/2026-03-14T14:00Z"`) |
 | `namespace` | `string` | — | OTel namespace filter |
 | `tenant` | `string` | — | Tenant ID filter |
 | `limit` | `integer` | 100 | Max rows returned |
@@ -72,8 +72,7 @@ Single-call system health check with health scoring and sortable service list.
       "requests": 4397,
       "error_rate": 0.036,
       "p50_ms": 2.62,
-      "p95_ms": 16.17,
-      "p99_ms": 21.96
+      "p95_ms": 16.17
     }
   ],
   "top_issues": [
@@ -88,7 +87,15 @@ Single-call system health check with health scoring and sortable service list.
 }
 ```
 
-**Health score computation:** Weighted average across services — error_rate (40%), latency vs baseline (30%), throughput stability (30%). Per-service status: healthy (score >= 0.9), degraded (>= 0.7), unhealthy (< 0.7).
+Note: `p99_ms` is not available from `service_rollup`. Use the `diagnose` tool (which scans raw spans) or the `query` tool for p99.
+
+**Health score computation:** Threshold-based per service, then averaged globally:
+- `error_score = 1.0` if error_rate < 0.01, `0.7` if < 0.05, `0.3` if < 0.10, `0.0` otherwise
+- `latency_score = 1.0` if p95 < 500ms, `0.7` if < 2000ms, `0.3` if < 5000ms, `0.0` otherwise
+- `throughput_score = 1.0` if spans > 0, `0.0` if no traffic in window
+- `service_score = error_score * 0.4 + latency_score * 0.3 + throughput_score * 0.3`
+- Per-service status: healthy (>= 0.9), degraded (>= 0.7), unhealthy (< 0.7)
+- Global `health.score` = average of all service scores
 
 **Data source:** `service_rollup` table (fast, pre-aggregated).
 
@@ -118,7 +125,6 @@ Service dependency graph with impact analysis.
       "error_rate": 0.036,
       "p50_ms": 2.62,
       "p95_ms": 16.17,
-      "p99_ms": 21.96,
       "upstream_count": 2,
       "downstream_count": 5,
       "blast_radius": 0.85
@@ -131,8 +137,7 @@ Service dependency graph with impact analysis.
       "edge_type": "call",
       "calls": 1770,
       "error_rate": 0.0,
-      "avg_ms": 1.86,
-      "p95_ms": 4.02
+      "avg_ms": 1.86
     }
   ],
   "critical_paths": [
@@ -141,9 +146,9 @@ Service dependency graph with impact analysis.
 }
 ```
 
-**`blast_radius`:** Fraction of total traffic flowing through this node, computed from `edge_rollup` call counts.
+**`blast_radius`:** `sum(calls on edges where this node is source or target) / sum(all edge calls)`. Computed from `edge_rollup`. Value 0.0–1.0.
 
-**`critical_paths`:** Longest weighted paths through the dependency graph (by call volume * latency).
+**`critical_paths`:** Top 3 longest weighted paths through the dependency DAG. Weight = `calls * avg_ms` per edge. Algorithm: DFS from root nodes (nodes with no callers), break cycles at first revisit, track cumulative weight, return top 3 by total weight. Max path length: 10 hops.
 
 **Data source:** `edge_rollup` + `service_rollup` tables.
 
@@ -167,7 +172,7 @@ Search, filter, and aggregate trace spans.
 | `max_duration_ms` | `number` | — | Maximum span duration |
 | `attrs` | `object` | — | Attribute filters as key-value pairs |
 | `group_by` | `string[]` | — | Aggregate by fixed fields (see below) |
-| `order_by` | `string` | `"time"` | Sort: `time`, `duration`, `error_rate`, `count` |
+| `order_by` | `string` | `"time"` | Sort: `time`, `duration` (ungrouped only), `error_rate`, `count` (grouped only) |
 | `include_exemplars` | `boolean` | `false` | Include example trace IDs per group |
 
 **Groupable fields:** `service`, `operation`, `status`, `kind`, `http.method`, `http.status_code`
@@ -291,7 +296,7 @@ Explore and query OTel metrics as time series.
 | `action` | `string` | `"query"` | Action: `list` (discover metrics), `query` (retrieve timeseries) |
 | `name` | `string` | — | Metric name for `query` |
 | `names` | `string[]` | — | Multiple metric names for overlay |
-| `aggregation` | `string` | `"avg"` | Aggregation: `avg`, `sum`, `min`, `max`, `count`, `p50`, `p95`, `p99`, `rate` |
+| `aggregation` | `string` | `"avg"` | Aggregation: `avg`, `sum`, `min`, `max`, `count` |
 | `group_by` | `string[]` | — | Group timeseries by: `service` |
 | `granularity` | `string` | `"auto"` | Bucket size: `1m`, `5m`, `15m`, `1h`, `auto` |
 | `attrs` | `object` | — | Attribute filters |
@@ -345,6 +350,11 @@ Explore and query OTel metrics as time series.
 **`auto` granularity:** `window <= 1h` → 1m, `<= 6h` → 5m, `<= 24h` → 15m, `> 24h` → 1h.
 
 **Anomaly detection:** Reuses existing `internal/intelligence/` anomaly detection on the timeseries buckets (same as current `timeline` tool).
+
+**Validation rules:**
+- `query` action requires at least one of `name` or `names`
+- `list` action ignores `aggregation`, `granularity`, `group_by`
+- `description` and `unit` may be empty strings in `list` results
 
 ---
 
@@ -417,9 +427,44 @@ Distributed trace with root cause analysis and optional comparison.
 }
 ```
 
-**`compare_to`:** Fetches both traces, aligns spans by operation name, returns a `comparison` object with per-operation duration deltas. Added to the response only when `compare_to` is provided.
+**`compare_to`:** Fetches both traces, aligns spans by operation name. Added to the response only when `compare_to` is provided:
 
-**`include_metrics`:** Queries `service_rollup` for a 5-minute window around the trace start time. Returns a `metric_context` object showing service health at trace time.
+```json
+{
+  "comparison": {
+    "other_trace_id": "def456",
+    "other_duration_ms": 85.2,
+    "duration_delta_ms": 57.3,
+    "span_diffs": [
+      {
+        "operation": "process_payment",
+        "service": "payment",
+        "this_ms": 89.3,
+        "other_ms": 12.1,
+        "delta_ms": 77.2
+      }
+    ]
+  }
+}
+```
+
+**`include_metrics`:** Queries `service_rollup` for a 5-minute window around the trace start time. Added to the response only when `include_metrics` is true:
+
+```json
+{
+  "metric_context": [
+    {
+      "service": "payment",
+      "at_trace_time": {
+        "p50_ms": 5200,
+        "p95_ms": 9444,
+        "error_rate": 0.0,
+        "spans_per_min": 12
+      }
+    }
+  ]
+}
+```
 
 **Data source:** Span + log Parquet files, `service_rollup` for metric context.
 
@@ -502,7 +547,7 @@ Multi-signal root cause analysis with baseline comparison.
 }
 ```
 
-**Baseline comparison:** Queries `service_rollup` for the same time-of-day over the past 7 days. Computes ratio of current vs baseline for latency percentiles.
+**Baseline comparison:** Queries `service_rollup` for the same time-of-day over the past 7 days. Computes ratio of current vs baseline for latency percentiles. **Fallback:** If fewer than 3 days of baseline data exist, omit `comparison_to_baseline` from the response.
 
 **Change point detection:** Scans `service_rollup` buckets within the window for the largest jump (>2 standard deviations) in the symptom metric.
 
@@ -530,6 +575,8 @@ Side-by-side comparison.
 - `services`: `left: { "service": "A" }`, `right: { "service": "B" }`
 - `time`: `service` required, `left: { "window": "ISO/ISO" }`, `right: { "window": "ISO/ISO" }`
 - `operations`: `service` required, `left: { "operation": "GET /a" }`, `right: { "operation": "GET /b" }`
+
+**Parameter precedence:** For `compare`, mode-specific inputs in `left`/`right` take precedence over shared parameters. The shared `service` parameter is used by `time` and `operations` modes to scope the comparison. The shared `window` parameter is used by `services` mode to set the time range.
 
 **Returns:**
 
@@ -569,7 +616,7 @@ Side-by-side comparison.
 }
 ```
 
-**Statistical significance:** Two-sample t-test on per-bucket values. Reports `statistically_significant: true` when p < 0.05.
+**Statistical significance:** Heuristic — `statistically_significant: true` when the change exceeds 2x the standard deviation of the smaller sample's per-bucket values AND both samples have >= 5 buckets. Simple, no external stats library needed.
 
 **Data source:** `services` mode → `service_rollup`. `time` mode → `service_rollup` for the two windows. `operations` mode → span Parquet grouped by operation.
 
@@ -665,7 +712,37 @@ CREATE OR REPLACE MACRO attr(json_col, key) AS
         { "name": "duration_ms", "type": "DOUBLE", "description": "Span duration in milliseconds" },
         { "name": "status", "type": "VARCHAR", "description": "STATUS_CODE_OK, STATUS_CODE_ERROR, STATUS_CODE_UNSET" },
         { "name": "start_time", "type": "TIMESTAMP", "description": "Span start time" },
-        { "name": "attributes_json", "type": "VARCHAR", "description": "Span attributes as JSON string" }
+        { "name": "attributes_json", "type": "VARCHAR", "description": "Span attributes as JSON. Use attr(attributes_json, 'key') to extract." },
+        { "name": "resource_json", "type": "VARCHAR", "description": "Resource attributes as JSON" },
+        { "name": "events_json", "type": "VARCHAR", "description": "Span events as JSON" }
+      ]
+    },
+    {
+      "name": "logs",
+      "columns": [
+        { "name": "time", "type": "TIMESTAMP", "description": "Log timestamp" },
+        { "name": "severity", "type": "VARCHAR", "description": "TRACE, DEBUG, INFO, WARN, ERROR, FATAL" },
+        { "name": "body", "type": "VARCHAR", "description": "Log message body" },
+        { "name": "service", "type": "VARCHAR", "description": "Service name" },
+        { "name": "trace_id", "type": "VARCHAR", "description": "Correlated trace ID (may be empty)" },
+        { "name": "span_id", "type": "VARCHAR", "description": "Correlated span ID (may be empty)" },
+        { "name": "attributes_json", "type": "VARCHAR", "description": "Log attributes as JSON" },
+        { "name": "namespace", "type": "VARCHAR", "description": "OTel namespace" },
+        { "name": "tenant", "type": "VARCHAR", "description": "Tenant ID" }
+      ]
+    },
+    {
+      "name": "metrics",
+      "columns": [
+        { "name": "time", "type": "TIMESTAMP", "description": "Metric timestamp" },
+        { "name": "name", "type": "VARCHAR", "description": "Metric name (e.g. http.server.duration)" },
+        { "name": "type", "type": "VARCHAR", "description": "Metric type: gauge, sum, histogram" },
+        { "name": "value", "type": "DOUBLE", "description": "Metric value (null for histograms)" },
+        { "name": "unit", "type": "VARCHAR", "description": "Metric unit (may be empty)" },
+        { "name": "service", "type": "VARCHAR", "description": "Service name" },
+        { "name": "attributes_json", "type": "VARCHAR", "description": "Metric attributes as JSON" },
+        { "name": "namespace", "type": "VARCHAR", "description": "OTel namespace" },
+        { "name": "tenant", "type": "VARCHAR", "description": "Tenant ID" }
       ]
     }
   ],
@@ -771,8 +848,9 @@ When `group_by` is provided, SQL switches from `SELECT columns ... LIMIT N` to `
 | `compare` | `compare` | Add mode param and 2 new modes |
 | `query` | `query` | Add DuckDB views, merge schema, add explain/timeout |
 | `schema` | `query` (no sql) | Merge into query tool |
+| `render` | — (removed) | Deferred to Phase 3 with report system redesign |
 
-**Breaking change:** All tools switch to JSON-only. `format` parameter removed. Clients expecting ASCII/HTML must update.
+**Breaking change:** All tools switch to JSON-only. `format` parameter removed. `render` tool removed. Clients expecting ASCII/HTML must update.
 
 ---
 
