@@ -253,11 +253,10 @@ LIMIT 200;
 
 // CompareTrace fetches a second trace and aligns spans by operation name to produce
 // a side-by-side comparison against the primary trace result.
-func (s *Service) CompareTrace(ctx context.Context, primary *TraceResult, otherTraceID string, window int) *TraceComparison {
+func (s *Service) CompareTrace(ctx context.Context, primary *TraceResult, otherTraceID string, window int) (*TraceComparison, error) {
 	other, err := s.Trace(ctx, otherTraceID, false, window)
 	if err != nil {
-		slog.Warn("CompareTrace: failed to fetch other trace", "other_trace_id", otherTraceID, "err", err)
-		return nil
+		return nil, fmt.Errorf("failed to fetch trace %s: %w", otherTraceID, err)
 	}
 
 	// Build a map of operation -> total duration for each trace (service+operation key).
@@ -328,7 +327,7 @@ func (s *Service) CompareTrace(ctx context.Context, primary *TraceResult, otherT
 		OtherDurationMs: other.Duration,
 		DurationDeltaMs: delta,
 		SpanDiffs:       diffs,
-	}
+	}, nil
 }
 
 // FetchMetricContext queries service_rollup for a 5-minute window around the trace's
@@ -390,6 +389,9 @@ ORDER BY service ASC;
 		}
 		mc.AtTraceTime.SpansPerMin = totalSpans / 5.0
 		contexts = append(contexts, mc)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("FetchMetricContext: rows iteration error", "err", err)
 	}
 	return contexts
 }

@@ -117,7 +117,8 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 	case "list":
 		listResult, ok := result.(*service.MetricsListResult)
 		if !ok {
-			return nil, MetricsListOut{Metrics: []MetricListEntryOut{}}, nil
+			slog.Error("metrics list: unexpected result type", "type", fmt.Sprintf("%T", result))
+			return nil, MetricsListOut{Metrics: []MetricListEntryOut{}, Suggestion: "Internal error: unexpected result type"}, nil
 		}
 		out := MetricsListOut{
 			Metrics: make([]MetricListEntryOut, 0, len(listResult.Metrics)),
@@ -145,7 +146,8 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 	default: // "query"
 		queryResult, ok := result.(*service.MetricsQueryResult)
 		if !ok {
-			return nil, MetricsQueryOut{Series: []MetricSeriesOut{}, Anomalies: []MetricAnomalyOut{}}, nil
+			slog.Error("metrics query: unexpected result type", "type", fmt.Sprintf("%T", result))
+			return nil, MetricsQueryOut{Series: []MetricSeriesOut{}, Anomalies: []MetricAnomalyOut{}, Suggestion: "Internal error: unexpected result type"}, nil
 		}
 		out := MetricsQueryOut{
 			Series:    make([]MetricSeriesOut, 0, len(queryResult.Series)),

@@ -3,8 +3,8 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
-	"github.com/labstack/fanout/internal/render"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -217,7 +217,10 @@ func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn
 
 	// Optional: side-by-side trace comparison
 	if in.CompareTo != "" {
-		cmp := s.svc.CompareTrace(ctx, result, in.CompareTo, window)
+		cmp, cmpErr := s.svc.CompareTrace(ctx, result, in.CompareTo, window)
+		if cmpErr != nil {
+			slog.Warn("trace comparison failed", "compare_to", in.CompareTo, "err", cmpErr)
+		}
 		if cmp != nil {
 			outCmp := &TraceComparison{
 				OtherTraceID:    cmp.OtherTraceID,
@@ -258,53 +261,4 @@ func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn
 	}
 
 	return nil, out, nil
-}
-
-func buildTraceTree(spans []TraceSpan) *render.Tree {
-	if len(spans) == 0 {
-		return &render.Tree{Root: &render.Node{Label: "No spans"}}
-	}
-
-	nodeMap := make(map[string]*render.Node)
-	var root *render.Node
-
-	// Create nodes
-	for _, sp := range spans {
-		statusIcon := "○"
-		if sp.Status == "error" || sp.Status == "ERROR" {
-			statusIcon = "✗"
-		} else if sp.IsCritical {
-			statusIcon = "●"
-		}
-
-		node := &render.Node{
-			Label: fmt.Sprintf("%s %s/%s", statusIcon, sp.Service, sp.Operation),
-			Value: fmt.Sprintf("%.1fms", sp.DurationMs),
-			Meta: map[string]string{
-				"status":    sp.Status,
-				"self_time": fmt.Sprintf("%.1fms", sp.SelfTimeMs),
-			},
-		}
-		nodeMap[sp.SpanID] = node
-
-		if sp.ParentSpanID == "" {
-			root = node
-		}
-	}
-
-	// Link children to parents
-	for _, sp := range spans {
-		if sp.ParentSpanID != "" {
-			if parent, ok := nodeMap[sp.ParentSpanID]; ok {
-				parent.Children = append(parent.Children, nodeMap[sp.SpanID])
-			}
-		}
-	}
-
-	// Fallback if no root found
-	if root == nil && len(spans) > 0 {
-		root = nodeMap[spans[0].SpanID]
-	}
-
-	return &render.Tree{Root: root}
 }

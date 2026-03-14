@@ -59,8 +59,7 @@ type OverviewOut struct {
 func (s *Server) overview(ctx context.Context, req *mcp.CallToolRequest, in OverviewIn) (*mcp.CallToolResult, OverviewOut, error) {
 	tw, err := parseWindow(in.Window)
 	if err != nil {
-		// Fall back to default on parse error
-		tw, _ = parseWindow("")
+		return nil, OverviewOut{}, fmt.Errorf("invalid window: %w", err)
 	}
 
 	window := tw.Minutes

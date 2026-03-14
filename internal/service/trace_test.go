@@ -348,7 +348,10 @@ func TestCompareTrace_MatchingOperations(t *testing.T) {
 			AddRow("s4", "s3", "payment", "process_payment", "CLIENT", "2024-01-01T10:00:00Z",
 				12.1, "OK", nil, int64(1704106800100000000), nil, nil, nil, nil, nil, nil, nil))
 
-	cmp := svc.CompareTrace(context.Background(), primary, "trace-def", 60)
+	cmp, err := svc.CompareTrace(context.Background(), primary, "trace-def", 60)
+	if err != nil {
+		t.Fatalf("CompareTrace() returned error: %v", err)
+	}
 	if cmp == nil {
 		t.Fatal("CompareTrace() returned nil")
 	}
@@ -376,10 +379,13 @@ func TestCompareTrace_FetchError(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnError(errors.New("db error"))
 
-	cmp := svc.CompareTrace(context.Background(), primary, "trace-def", 60)
-	// Should return nil on error, not panic.
+	cmp, err := svc.CompareTrace(context.Background(), primary, "trace-def", 60)
+	// Should return error when other trace fetch fails.
+	if err == nil {
+		t.Error("CompareTrace() should return error when other trace fetch fails")
+	}
 	if cmp != nil {
-		t.Error("CompareTrace() should return nil when other trace fetch fails")
+		t.Error("CompareTrace() should return nil result on error")
 	}
 }
 
@@ -403,7 +409,10 @@ func TestCompareTrace_DeltaIsAbsolute(t *testing.T) {
 		}).AddRow("s2", nil, "api", "op", "SERVER", "2024-01-01T10:00:00Z",
 			200.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil))
 
-	cmp := svc.CompareTrace(context.Background(), primary, "trace-def", 60)
+	cmp, err := svc.CompareTrace(context.Background(), primary, "trace-def", 60)
+	if err != nil {
+		t.Fatalf("CompareTrace() returned error: %v", err)
+	}
 	if cmp == nil {
 		t.Fatal("CompareTrace() returned nil")
 	}

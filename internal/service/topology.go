@@ -179,8 +179,8 @@ func applyDepthFilter(nodes []ServiceNode, edges []ServiceEdge, focus string, de
 		queue = next
 	}
 
-	// Filter nodes
-	filteredNodes := nodes[:0]
+	// Filter nodes (new slices to avoid mutating caller's backing array)
+	filteredNodes := make([]ServiceNode, 0, len(nodes))
 	for _, n := range nodes {
 		if visited[n.Name] {
 			filteredNodes = append(filteredNodes, n)
@@ -188,7 +188,7 @@ func applyDepthFilter(nodes []ServiceNode, edges []ServiceEdge, focus string, de
 	}
 
 	// Filter edges to only those between visited nodes
-	filteredEdges := edges[:0]
+	filteredEdges := make([]ServiceEdge, 0, len(edges))
 	for _, e := range edges {
 		if visited[e.From] && visited[e.To] {
 			filteredEdges = append(filteredEdges, e)
@@ -263,10 +263,14 @@ func computeCriticalPaths(edges []ServiceEdge, topN int) [][]string {
 		weight float64
 	}
 
+	const maxPaths = 10000
 	var allPaths []pathEntry
 
 	var dfs func(node string, path []string, visited map[string]bool, weight float64)
 	dfs = func(node string, path []string, visited map[string]bool, weight float64) {
+		if len(allPaths) >= maxPaths {
+			return
+		}
 		path = append(path, node)
 		if len(path) > 10 {
 			// Max path length exceeded; record what we have

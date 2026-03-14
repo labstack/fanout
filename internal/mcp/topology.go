@@ -50,8 +50,7 @@ type TopologyOut struct {
 func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in TopologyIn) (*mcp.CallToolResult, TopologyOut, error) {
 	tw, err := parseWindow(in.Window)
 	if err != nil {
-		// Fall back to default window on parse error
-		tw, _ = parseWindow("60m")
+		return nil, TopologyOut{}, fmt.Errorf("invalid window: %w", err)
 	}
 	window := clampInt(tw.Minutes, minWindow, maxWindow, 60)
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"math"
@@ -214,11 +215,23 @@ func (s *Service) queryBaseline(ctx context.Context, svc string, window int) (*B
 	now := time.Now()
 	startHour := now.Add(-time.Duration(window) * time.Minute).Hour()
 	endHour := now.Hour()
-	if startHour > endHour {
-		startHour = 0
-	}
 
-	q := `
+	var q string
+	var row *sql.Row
+	if startHour > endHour {
+		// Window crosses midnight: match hours >= startHour OR <= endHour
+		q = `
+SELECT
+  AVG(CASE WHEN spans > 0 THEN p95_ms END) as baseline_p95,
+  COUNT(DISTINCT DATE_TRUNC('day', bucket)) as day_count
+FROM service_rollup
+WHERE service = ?
+  AND bucket >= NOW() - INTERVAL 7 DAY
+  AND (EXTRACT(HOUR FROM bucket) >= ? OR EXTRACT(HOUR FROM bucket) <= ?)
+  AND spans > 0;`
+		row = s.duck.DB.QueryRowContext(ctx, q, svc, startHour, endHour)
+	} else {
+		q = `
 SELECT
   AVG(CASE WHEN spans > 0 THEN p95_ms END) as baseline_p95,
   COUNT(DISTINCT DATE_TRUNC('day', bucket)) as day_count
@@ -227,11 +240,11 @@ WHERE service = ?
   AND bucket >= NOW() - INTERVAL 7 DAY
   AND EXTRACT(HOUR FROM bucket) BETWEEN ? AND ?
   AND spans > 0;`
+		row = s.duck.DB.QueryRowContext(ctx, q, svc, startHour, endHour)
+	}
 
 	var baselineP95 *float64
 	var dayCount int64
-
-	row := s.duck.DB.QueryRowContext(ctx, q, svc, startHour, endHour)
 	if err := row.Scan(&baselineP95, &dayCount); err != nil {
 		return nil, fmt.Errorf("baseline scan: %w", err)
 	}

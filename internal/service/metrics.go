@@ -150,6 +150,9 @@ LIMIT %d`, where, p.Limit)
 		}
 		out.Metrics = append(out.Metrics, entry)
 	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rows iteration error", "method", "MetricsList", "err", err)
+	}
 
 	return out, nil
 }
@@ -171,9 +174,9 @@ func (s *Service) MetricsQuery(ctx context.Context, p MetricParams) (*MetricsQue
 	if p.Name != "" {
 		names = append([]string{p.Name}, names...)
 	}
-	// Deduplicate
+	// Deduplicate (new slice to avoid mutating caller's p.Names)
 	seen := map[string]bool{}
-	dedupNames := names[:0]
+	dedupNames := make([]string, 0, len(names))
 	for _, n := range names {
 		if !seen[n] {
 			seen[n] = true
@@ -294,6 +297,9 @@ LIMIT %d`, selectCols, where, groupCols, p.Limit)
 				seriesMap[key] = &seriesData{unit: unit, datapoints: []MetricDatapoint{dp}}
 				seriesOrder = append(seriesOrder, key)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("rows iteration error", "method", "MetricsQuery", "metric", metricName, "err", err)
 		}
 		rows.Close()
 	}
