@@ -325,7 +325,7 @@ Explore and query OTel metrics as time series.
     {
       "labels": { "service": "frontend" },
       "metric": "http.server.duration",
-      "aggregation": "p95",
+      "aggregation": "avg",
       "unit": "ms",
       "datapoints": [
         { "time": "2026-03-14T16:30:00Z", "value": 14.2 },
@@ -682,6 +682,7 @@ SELECT
   "name=value" AS value,
   "name=unit" AS unit,
   "name=service_name" AS service,
+  "name=description" AS description,
   from_utf8("name=attributes_json") AS attributes_json,
   from_utf8("name=resource_json") AS resource_json,
   namespace, tenant
@@ -707,14 +708,21 @@ CREATE OR REPLACE MACRO attr(json_col, key) AS
       "name": "spans",
       "columns": [
         { "name": "trace_id", "type": "VARCHAR", "description": "Distributed trace identifier" },
+        { "name": "span_id", "type": "VARCHAR", "description": "Unique span identifier" },
+        { "name": "parent_span_id", "type": "VARCHAR", "description": "Parent span ID (empty for root spans)" },
         { "name": "service", "type": "VARCHAR", "description": "Service name" },
         { "name": "operation", "type": "VARCHAR", "description": "Span/operation name" },
+        { "name": "kind", "type": "VARCHAR", "description": "SPAN_KIND_SERVER, CLIENT, PRODUCER, CONSUMER, INTERNAL" },
+        { "name": "start_time", "type": "TIMESTAMP", "description": "Span start time" },
+        { "name": "end_time", "type": "TIMESTAMP", "description": "Span end time" },
         { "name": "duration_ms", "type": "DOUBLE", "description": "Span duration in milliseconds" },
         { "name": "status", "type": "VARCHAR", "description": "STATUS_CODE_OK, STATUS_CODE_ERROR, STATUS_CODE_UNSET" },
-        { "name": "start_time", "type": "TIMESTAMP", "description": "Span start time" },
+        { "name": "status_message", "type": "VARCHAR", "description": "Error/status message" },
         { "name": "attributes_json", "type": "VARCHAR", "description": "Span attributes as JSON. Use attr(attributes_json, 'key') to extract." },
         { "name": "resource_json", "type": "VARCHAR", "description": "Resource attributes as JSON" },
-        { "name": "events_json", "type": "VARCHAR", "description": "Span events as JSON" }
+        { "name": "events_json", "type": "VARCHAR", "description": "Span events as JSON" },
+        { "name": "namespace", "type": "VARCHAR", "description": "OTel namespace (partition column)" },
+        { "name": "tenant", "type": "VARCHAR", "description": "Tenant ID (partition column)" }
       ]
     },
     {
@@ -737,7 +745,8 @@ CREATE OR REPLACE MACRO attr(json_col, key) AS
         { "name": "time", "type": "TIMESTAMP", "description": "Metric timestamp" },
         { "name": "name", "type": "VARCHAR", "description": "Metric name (e.g. http.server.duration)" },
         { "name": "type", "type": "VARCHAR", "description": "Metric type: gauge, sum, histogram" },
-        { "name": "value", "type": "DOUBLE", "description": "Metric value (null for histograms)" },
+        { "name": "value", "type": "DOUBLE", "description": "Metric value (null for histograms — use query tool for histogram bucket analysis)" },
+        { "name": "description", "type": "VARCHAR", "description": "Metric description (may be empty)" },
         { "name": "unit", "type": "VARCHAR", "description": "Metric unit (may be empty)" },
         { "name": "service", "type": "VARCHAR", "description": "Service name" },
         { "name": "attributes_json", "type": "VARCHAR", "description": "Metric attributes as JSON" },
@@ -755,7 +764,9 @@ CREATE OR REPLACE MACRO attr(json_col, key) AS
         { "name": "spans", "type": "BIGINT" },
         { "name": "error_rate", "type": "DOUBLE" },
         { "name": "p50_ms", "type": "DOUBLE" },
-        { "name": "p95_ms", "type": "DOUBLE" }
+        { "name": "p95_ms", "type": "DOUBLE" },
+        { "name": "log_count", "type": "BIGINT" },
+        { "name": "metric_count", "type": "BIGINT" }
       ]
     },
     {
@@ -766,7 +777,8 @@ CREATE OR REPLACE MACRO attr(json_col, key) AS
         { "name": "callee", "type": "VARCHAR" },
         { "name": "calls", "type": "BIGINT" },
         { "name": "error_rate", "type": "DOUBLE" },
-        { "name": "avg_ms", "type": "DOUBLE" }
+        { "name": "avg_ms", "type": "DOUBLE" },
+        { "name": "edge_type", "type": "VARCHAR", "description": "'call' or 'messaging'" }
       ]
     }
   ],
