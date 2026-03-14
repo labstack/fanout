@@ -574,4 +574,3 @@ func meanStdDev(vals []float64) (mean, stddev float64) {
 	stddev = math.Sqrt(varSum / float64(len(vals)))
 	return mean, stddev
 }
-

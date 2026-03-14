@@ -275,4 +275,3 @@ func ensureLimit(query string, maxRows int) string {
 	query = strings.TrimSuffix(query, ";")
 	return fmt.Sprintf("%s LIMIT %d", query, maxRows)
 }
-
