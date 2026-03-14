@@ -305,3 +305,58 @@ type Exemplar struct {
 	Value      float64
 	Attributes map[string]string
 }
+
+// SpanParams contains search and aggregation parameters for the spans tool.
+type SpanParams struct {
+	Query            string
+	Operation        string
+	Service          string
+	Status           string // "error", "ok", "slow", "all"
+	Kind             string
+	MinDurationMs    *float64
+	MaxDurationMs    *float64
+	Attrs            map[string]string
+	GroupBy          []string // fixed fields only
+	OrderBy          string
+	IncludeExemplars bool
+	Window           int // minutes
+	Namespace        string
+	TenantID         string
+	Limit            int
+}
+
+// SpansResult holds either raw spans (ungrouped) or aggregated groups.
+type SpansResult struct {
+	// Ungrouped path
+	Spans        []SpanRow
+	TotalMatched int
+
+	// Grouped path
+	Groups      []SpanGroup
+	TotalGroups int
+}
+
+// SpanRow is a single span in ungrouped search results.
+type SpanRow struct {
+	TraceID    string
+	SpanID     string
+	Service    string
+	Operation  string
+	Kind       string
+	StartTime  string
+	DurationMs float64
+	Status     string
+	Attributes map[string]string
+}
+
+// SpanGroup is one bucket in a group-by aggregation.
+type SpanGroup struct {
+	Key              map[string]string
+	Count            int64
+	ErrorCount       int64
+	ErrorRate        float64
+	P50Ms            float64
+	P95Ms            float64
+	P99Ms            float64
+	ExemplarTraceIDs []string
+}

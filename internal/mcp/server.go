@@ -176,6 +176,19 @@ Use to benchmark services or compare before/after deployments.
 
 Returns: services (array with service, requests, error_rate, p50_ms, p95_ms), winner (best performing service), summary`,
 	}, s.compare)
+
+	// 10. spans - Dedicated span search and aggregation tool
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "spans",
+		Description: `Search, filter, and aggregate trace spans. Supports ungrouped raw span listing and group_by aggregation with P50/P95/P99 latency.
+
+Use to find specific spans, analyze operation latency, or aggregate by service/operation/status/kind/http attributes.
+
+Params: query (substring on operation/status_message), operation (exact), service, status (error|ok|slow|all), kind (server|client|producer|consumer|internal), min_duration_ms, max_duration_ms, attrs (key-value), group_by (service|operation|status|kind|http.method|http.status_code), order_by (time|duration|error_rate|count), include_exemplars, window, namespace, tenant, limit
+
+Returns (ungrouped): spans (trace_id, span_id, service, operation, kind, start_time, duration_ms, status, attributes), total_matched, returned
+Returns (grouped): groups (key, count, error_count, error_rate, p50_ms, p95_ms, p99_ms, exemplar_trace_ids), total_groups`,
+	}, s.spans)
 }
 
 func queryToolDescription(lakeDir string) string {
