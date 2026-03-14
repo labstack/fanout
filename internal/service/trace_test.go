@@ -503,3 +503,70 @@ func TestFetchMetricContext_WithData(t *testing.T) {
 		t.Errorf("SpansPerMin = %f, want 12.0", mcs[0].AtTraceTime.SpansPerMin)
 	}
 }
+
+func TestCompareTrace_AsymmetricOperations(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	// Primary trace: api/GET /users + db/SELECT users
+	primary := &TraceResult{
+		TraceID:  "trace-primary",
+		Duration: 150.0,
+		Services: []string{"api", "db"},
+		Spans: []SpanInfo{
+			{SpanID: "s1", Service: "api", Name: "GET /users", Duration: 100.0},
+			{SpanID: "s2", Service: "db", Name: "SELECT users", Duration: 50.0},
+		},
+	}
+
+	// Other trace: api/GET /users + cache/REDIS GET (no db span, has cache span instead)
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{
+			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
+			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+		}).
+			AddRow("s3", nil, "api", "GET /users", "SERVER", "2024-01-01T10:00:00Z",
+				80.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil).
+			AddRow("s4", "s3", "cache", "REDIS GET", "CLIENT", "2024-01-01T10:00:00Z",
+				20.0, "OK", nil, int64(1704106800100000000), nil, nil, nil, nil, nil, nil, nil))
+
+	cmp, err := svc.CompareTrace(context.Background(), primary, "trace-other", 60)
+	if err != nil {
+		t.Fatalf("CompareTrace() error = %v", err)
+	}
+	if cmp == nil {
+		t.Fatal("CompareTrace() returned nil")
+	}
+
+	// Should have at least 3 diffs: api/GET /users (both), db/SELECT users (primary only), cache/REDIS GET (other only)
+	if len(cmp.SpanDiffs) < 3 {
+		t.Fatalf("SpanDiffs len = %d, want >= 3", len(cmp.SpanDiffs))
+	}
+
+	// Build a lookup for easier assertions
+	type diffKey struct {
+		service   string
+		operation string
+	}
+	diffMap := make(map[diffKey]SpanDiff)
+	for _, d := range cmp.SpanDiffs {
+		diffMap[diffKey{d.Service, d.Operation}] = d
+	}
+
+	// db/SELECT users should only be in primary (OtherMs == 0)
+	dbDiff, ok := diffMap[diffKey{"db", "SELECT users"}]
+	if !ok {
+		t.Error("missing diff for db/SELECT users")
+	} else if dbDiff.OtherMs != 0 {
+		t.Errorf("db/SELECT users OtherMs = %f, want 0 (only in primary)", dbDiff.OtherMs)
+	}
+
+	// cache/REDIS GET should only be in other (ThisMs == 0)
+	cacheDiff, ok := diffMap[diffKey{"cache", "REDIS GET"}]
+	if !ok {
+		t.Error("missing diff for cache/REDIS GET")
+	} else if cacheDiff.ThisMs != 0 {
+		t.Errorf("cache/REDIS GET ThisMs = %f, want 0 (only in other)", cacheDiff.ThisMs)
+	}
+}

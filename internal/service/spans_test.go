@@ -437,3 +437,56 @@ func TestValidGroupByFields(t *testing.T) {
 		t.Error("validGroupByFields[invalid] should be false")
 	}
 }
+
+func TestSpans_ZeroWindow(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows(spanCols))
+
+	result, err := svc.Spans(context.Background(), SpanParams{Window: 0})
+	if err != nil {
+		t.Fatalf("Spans(Window:0) error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("Spans(Window:0) returned nil")
+	}
+	if len(result.Spans) != 0 {
+		t.Errorf("Spans count = %d, want 0", len(result.Spans))
+	}
+}
+
+func TestSpans_ZeroLimit(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows(spanCols))
+
+	result, err := svc.Spans(context.Background(), SpanParams{Limit: 0})
+	if err != nil {
+		t.Fatalf("Spans(Limit:0) error = %v", err)
+	}
+	if result == nil {
+		t.Fatal("Spans(Limit:0) returned nil")
+	}
+	if len(result.Spans) != 0 {
+		t.Errorf("Spans count = %d, want 0", len(result.Spans))
+	}
+}
+
+func TestBuildSpanFilters_SpecialChars(t *testing.T) {
+	p := SpanParams{Query: "50%_discount"}
+	filters, args := buildSpanFilters(p)
+	if len(filters) != 1 {
+		t.Fatalf("expected 1 filter, got %d", len(filters))
+	}
+	// The args should contain escaped versions
+	want := "%50\\%\\_discount%"
+	if args[0] != want {
+		t.Errorf("LIKE arg = %q, want %q", args[0], want)
+	}
+	// Second arg is same (for status_message ILIKE)
+	if args[1] != want {
+		t.Errorf("LIKE arg[1] = %q, want %q", args[1], want)
+	}
+}

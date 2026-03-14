@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
@@ -534,5 +535,49 @@ func TestMeanStddev_Flat(t *testing.T) {
 	}
 	if stddev != 0.0 {
 		t.Errorf("stddev = %f, want 0.0", stddev)
+	}
+}
+
+func TestDiagnoseEnhanced_WithChangePoints(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	// 4 base Diagnose queries
+	expectDiagnoseQueries(mock, 100, 100.0, 6000.0, 12000.0, 0.01)
+
+	// Baseline query: insufficient data
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"baseline_p95", "day_count"}).
+			AddRow(nil, int64(0)))
+
+	// Change-point query: 10 rollup buckets with a clear latency spike.
+	// First 9 buckets at p95=50ms, last 1 at p95=100000ms.
+	// The 2-sigma detection requires: delta > 2*stddev AND series[i] > mean+2*stddev.
+	// With 9 baseline values the spike must be extreme to exceed the inflated threshold.
+	now := time.Now()
+	cpRows := sqlmock.NewRows([]string{"bucket", "p95_ms", "error_rate", "spans"})
+	for i := 9; i >= 0; i-- {
+		bucket := now.Add(-time.Duration(i) * time.Minute)
+		if i >= 1 {
+			// First 9 buckets: low latency
+			cpRows.AddRow(bucket, 50.0, 0.01, int64(100))
+		} else {
+			// Last bucket: extreme latency spike
+			cpRows.AddRow(bucket, 100000.0, 0.01, int64(100))
+		}
+	}
+	mock.ExpectQuery("SELECT").WillReturnRows(cpRows)
+
+	// Log correlation query: no logs
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"pattern", "severity", "cnt"}))
+
+	result, err := svc.DiagnoseEnhanced(context.Background(), "spike-svc", 15, "auto", "", "")
+	if err != nil {
+		t.Fatalf("DiagnoseEnhanced() error = %v", err)
+	}
+
+	if len(result.ChangePoints) == 0 {
+		t.Error("expected at least one change point from the latency spike, got 0")
 	}
 }

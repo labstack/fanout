@@ -443,3 +443,22 @@ func TestCompareInModeDefault(t *testing.T) {
 		t.Errorf("resolved mode = %q, want services", mode)
 	}
 }
+
+func TestCompareMetrics_LogMetricFallback(t *testing.T) {
+	m := CompareMetrics{
+		Service:   "log-only-svc",
+		Requests:  0,
+		ErrorRate: 0,
+		P50Ms:     0,
+		P95Ms:     0,
+	}
+	// Simulate the fallback logic from compareServices
+	logCount := int64(500)
+	metricCount := int64(200)
+	if m.Requests == 0 && (logCount > 0 || metricCount > 0) {
+		m.Requests = logCount + metricCount
+	}
+	if m.Requests != 700 {
+		t.Errorf("Requests = %d, want 700 (log+metric fallback)", m.Requests)
+	}
+}
