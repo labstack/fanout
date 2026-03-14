@@ -111,17 +111,7 @@ Use after status identifies a problem service.
 Returns: metrics (p50/p95/p99_ms, error_rate, request_count), top_errors (message, count, example_trace), slow_operations (name, p95_ms, count), dependencies (service, status, error_rate, p95_ms, calls)`,
 	}, s.diagnose)
 
-	// 3. find - Unified span/log search
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "find",
-		Description: `Search spans and logs. Filter by pattern, service, status (error/slow), severity. Returns matching spans/logs with trace IDs for deeper investigation.
-
-Use to find specific errors or patterns. Pass trace_id to trace tool for full context.
-
-Returns: spans (trace_id, span_id, service, operation, duration_ms, status), logs (ts, service, severity, body, trace_id), suggestion (next action hint)`,
-	}, s.find)
-
-	// 4. trace - Request journey with auto root cause
+	// 3. trace - Request journey with auto root cause
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "trace",
 		Description: `Get complete distributed trace with auto root-cause analysis. Shows all spans, correlated logs, critical path, and identifies the likely cause of errors or latency.
