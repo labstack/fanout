@@ -64,6 +64,12 @@ CREATE TABLE IF NOT EXISTS edge_rollup (
 		return nil, err
 	}
 
+	// Create clean-name views over Parquet files plus the attr() macro.
+	// Warn but do not fail — lake directories may not exist yet at startup.
+	if err := CreateViews(db, cfg.LakeDir); err != nil {
+		slog.Warn("view creation deferred", "err", err)
+	}
+
 	return d, nil
 }
 
