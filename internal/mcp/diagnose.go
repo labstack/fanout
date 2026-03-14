@@ -93,13 +93,7 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 	window := clampInt(tw.Minutes, minWindow, maxWindow, defWindow)
 	result, err := s.svc.DiagnoseEnhanced(ctx, in.Service, window, in.Symptom, in.Namespace, in.TenantID)
 	if err != nil {
-		return nil, DiagnoseOut{
-			Service:        in.Service,
-			Status:         "unknown",
-			TopErrors:      []ErrorDetail{},
-			SlowOperations: []SlowOperation{},
-			Dependencies:   []Dependency{},
-		}, nil
+		return nil, DiagnoseOut{}, fmt.Errorf("diagnose failed for %s: %w", in.Service, err)
 	}
 
 	metrics := ServiceMetrics{

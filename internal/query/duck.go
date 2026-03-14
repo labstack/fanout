@@ -65,9 +65,10 @@ CREATE TABLE IF NOT EXISTS edge_rollup (
 	}
 
 	// Create clean-name views over Parquet files plus the attr() macro.
-	// Warn but do not fail — lake directories may not exist yet at startup.
+	// CreateViews handles directory creation internally, so failures here
+	// indicate a real problem (permissions, disk full, DuckDB error).
 	if err := CreateViews(db, cfg.LakeDir); err != nil {
-		slog.Warn("view creation deferred", "err", err)
+		return nil, fmt.Errorf("create views: %w", err)
 	}
 
 	return d, nil

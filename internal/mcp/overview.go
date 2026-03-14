@@ -75,16 +75,7 @@ func (s *Server) overview(ctx context.Context, req *mcp.CallToolRequest, in Over
 
 	result, err := s.svc.Overview(ctx, window, in.Include, in.SortServicesBy, in.Namespace, in.Tenant, limit)
 	if err != nil {
-		empty := OverviewOut{
-			Timestamp: time.Now().UTC().Format(time.RFC3339),
-			Window:    tw.String(),
-			Health: OverviewHealth{
-				ByStatus: map[string]int{"healthy": 0, "degraded": 0, "unhealthy": 0},
-			},
-			Services:  []OverviewService{},
-			TopIssues: []OverviewIssue{},
-		}
-		return nil, empty, nil
+		return nil, OverviewOut{}, fmt.Errorf("overview query failed: %w", err)
 	}
 
 	// Map service types to MCP output types

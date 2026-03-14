@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -69,7 +70,7 @@ func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in Topo
 		TenantID:        in.TenantID,
 	})
 	if err != nil {
-		return nil, TopologyOut{Nodes: []ServiceNode{}, Edges: []ServiceEdge{}, CriticalPaths: [][]string{}}, nil
+		return nil, TopologyOut{}, fmt.Errorf("topology query failed: %w", err)
 	}
 
 	out := TopologyOut{

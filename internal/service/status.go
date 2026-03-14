@@ -161,6 +161,8 @@ LIMIT 100;
 // DeriveHealth determines service health from error rate and p95 latency.
 // If spans is provided and is 0 (with zero error rate and latency), returns "active"
 // for services discovered only via logs/metrics.
+// This is the single source of truth for health status — Overview also uses it
+// to ensure consistent classification across all APIs.
 func DeriveHealth(errorRate, p95 float64, spans ...int64) string {
 	spanCount := int64(0)
 	if len(spans) > 0 {
@@ -298,7 +300,7 @@ LIMIT %d;
 			r.errorRate = errNull.Float64
 		}
 		r.score = HealthScore(r.errorRate, r.p95, r.spans)
-		r.status = DeriveHealthFromScore(r.score)
+		r.status = DeriveHealth(r.errorRate, r.p95, r.spans)
 		svcs = append(svcs, r)
 	}
 	if err := rows.Err(); err != nil {

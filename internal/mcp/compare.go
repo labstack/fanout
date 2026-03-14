@@ -215,13 +215,17 @@ func (s *Server) compareTime(ctx context.Context, in CompareIn) (*mcp.CallToolRe
 	focus := resolveFocus(in.Focus)
 
 	// Query per-bucket stats for each window for statistical significance
-	leftBuckets, err := queryRollupBuckets(ctx, s, in.Service, leftTW)
-	if err != nil {
-		slog.Warn("left window query failed", "method", "compareTime", "err", err)
+	leftBuckets, leftErr := queryRollupBuckets(ctx, s, in.Service, leftTW)
+	rightBuckets, rightErr := queryRollupBuckets(ctx, s, in.Service, rightTW)
+
+	if leftErr != nil && rightErr != nil {
+		return nil, CompareOut{}, fmt.Errorf("both window queries failed: left: %v, right: %v", leftErr, rightErr)
 	}
-	rightBuckets, err := queryRollupBuckets(ctx, s, in.Service, rightTW)
-	if err != nil {
-		slog.Warn("right window query failed", "method", "compareTime", "err", err)
+	if leftErr != nil {
+		slog.Warn("left window query failed", "method", "compareTime", "err", leftErr)
+	}
+	if rightErr != nil {
+		slog.Warn("right window query failed", "method", "compareTime", "err", rightErr)
 	}
 
 	// Aggregate summary stats for each window
@@ -269,13 +273,17 @@ func (s *Server) compareOperations(ctx context.Context, in CompareIn) (*mcp.Call
 
 	focus := resolveFocus(in.Focus)
 
-	leftStats, err := queryOperationStats(ctx, s, in.Service, leftOp, tw)
-	if err != nil {
-		slog.Warn("left operation query failed", "method", "compareOperations", "err", err)
+	leftStats, leftErr := queryOperationStats(ctx, s, in.Service, leftOp, tw)
+	rightStats, rightErr := queryOperationStats(ctx, s, in.Service, rightOp, tw)
+
+	if leftErr != nil && rightErr != nil {
+		return nil, CompareOut{}, fmt.Errorf("both operation queries failed: left: %v, right: %v", leftErr, rightErr)
 	}
-	rightStats, err := queryOperationStats(ctx, s, in.Service, rightOp, tw)
-	if err != nil {
-		slog.Warn("right operation query failed", "method", "compareOperations", "err", err)
+	if leftErr != nil {
+		slog.Warn("left operation query failed", "method", "compareOperations", "err", leftErr)
+	}
+	if rightErr != nil {
+		slog.Warn("right operation query failed", "method", "compareOperations", "err", rightErr)
 	}
 
 	// For operations mode, we don't have bucket-level data for significance testing
