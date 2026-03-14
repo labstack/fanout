@@ -89,128 +89,115 @@ func (s *Server) apiDeleteReport(c *echo.Context) error {
 }
 
 func (s *Server) registerTools() {
-	// 1. overview - Entry point, zero-config health overview with health score
+	// 1. overview — system health entry point
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "overview",
-		Description: `Get system health overview with health score. Start here. Returns a composite health score (0–1), per-service status, top issues, and global metrics.
+		Description: `System health overview. Start here. Returns composite health score (0–1), per-service status, and top issues.
 
-Workflow: overview → diagnose (problem service) → find/trace (specific errors)
+Workflow: overview → diagnose (problem service) → spans/logs/trace (specific errors)
 
 Params: window ("15m","1h","7d" or ISO range), include (["health","services","issues"]), sort_services_by ("severity","error_rate","latency","throughput")
 
 Returns: health (score, total_services, by_status, throughput_per_min, global_error_rate, global_p95_ms), services (service, status, requests, error_rate, p50_ms, p95_ms), top_issues (service, issue, value, threshold)`,
 	}, s.overview)
 
-	// 2. diagnose - Deep-dive into a specific service
+	// 2. topology — service dependency map
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "diagnose",
-		Description: `Deep-dive into a service. Returns P50/P95/P99 latency, error rate, top errors with example traces, slow operations, and downstream dependencies.
+		Name: "topology",
+		Description: `Service dependency map with health status, blast radius, and critical paths.
 
-Use after status identifies a problem service.
+Params: window, edge_type (call|messaging|all), depth (BFS hops from service), service (focus node), include_inactive, namespace, tenant
 
-Returns: metrics (p50/p95/p99_ms, error_rate, request_count), top_errors (message, count, example_trace), slow_operations (name, p95_ms, count), dependencies (service, status, error_rate, p95_ms, calls)`,
-	}, s.diagnose)
+Returns: nodes (service, status, requests, error_rate, p50_ms, p95_ms, blast_radius, upstream_count, downstream_count), edges (source, target, calls, avg_ms, error_rate, edge_type), critical_paths (top 3 weighted paths)`,
+	}, s.topology)
 
-	// 3. trace - Request journey with auto root cause
+	// 3. spans — span search and aggregation
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "trace",
-		Description: `Get complete distributed trace with auto root-cause analysis. Shows all spans, correlated logs, critical path, and identifies the likely cause of errors or latency.
+		Name: "spans",
+		Description: `Search, filter, and aggregate trace spans. Supports raw listing or group_by aggregation with percentile latency.
 
-Use with trace_id from find or diagnose results.
+Params: query (substring match), operation (exact), service, status (error|ok|slow|all), kind (server|client|producer|consumer|internal), min_duration_ms, max_duration_ms, attrs (key-value), group_by (service|operation|status|kind|http.method|http.status_code), order_by (time|duration|error_rate|count), include_exemplars, window, namespace, tenant, limit
 
-Returns: spans (full tree with timing), logs (correlated by trace), critical_path (slowest chain), root_cause (identified issue with confidence)`,
-	}, s.trace)
+Returns (ungrouped): spans (trace_id, span_id, service, operation, kind, start_time, duration_ms, status, attributes), total_matched
+Returns (grouped): groups (key, count, error_count, error_rate, p50_ms, p95_ms, p99_ms, exemplar_trace_ids), total_groups`,
+	}, s.spans)
 
-	// 5. metrics - Metric discovery and timeseries query
+	// 4. logs — log search and aggregation
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "logs",
+		Description: `Search, filter, and aggregate log entries. Supports raw listing or group_by aggregation with sample bodies and trace correlation.
+
+Params: query (substring on body), severity (TRACE|DEBUG|INFO|WARN|ERROR|FATAL), trace_id (correlate to trace), service, attrs (key-value), group_by (service|severity), order_by (time|count|severity), window, namespace, tenant, limit
+
+Returns (ungrouped): logs (time, service, severity, body, trace_id, span_id, attributes), total_matched
+Returns (grouped): groups (key, count, sample_bodies, sample_trace_ids), total_groups`,
+	}, s.logs)
+
+	// 5. metrics — metric discovery and timeseries query
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "metrics",
-		Description: `Discover and query OTLP metric timeseries with anomaly detection. Two actions: 'list' discovers available metrics; 'query' returns bucketed timeseries.
+		Description: `Discover and query OTLP metric timeseries with anomaly detection. Two actions: 'list' discovers metrics; 'query' returns bucketed timeseries.
 
-Use 'list' to find metric names, then 'query' to retrieve data. Anomalies (spikes/drops > 2σ) are automatically detected.
-
-Params: action (list|query), name (metric name for query), names (multiple for overlay), aggregation (avg|sum|min|max|count), group_by (["service"]), granularity (1m|5m|15m|1h|auto), service, attrs, window, namespace, tenant, limit
+Params: action (list|query), name, names (overlay multiple), aggregation (avg|sum|min|max|count), group_by, granularity (1m|5m|15m|1h|auto), service, attrs, window, namespace, tenant, limit
 
 Returns (list): metrics (name, type, unit, services, description)
 Returns (query): series (labels, metric, aggregation, unit, datapoints), anomalies (time, type, value, expected, deviation_sigma)`,
 	}, s.metrics)
 
-	// 6. topology - Service map with health
+	// 6. trace — distributed trace with root cause analysis
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "topology",
-		Description: `Get service dependency map. Shows all services as nodes with health status, and edges representing inter-service calls with call counts and error rates.
+		Name: "trace",
+		Description: `Distributed trace with auto root-cause analysis. Shows spans, correlated logs, critical path, and identifies the likely error or latency cause.
 
-Use to understand service relationships and identify dependency issues.
+Params: trace_id (required), include_logs (default true), include_metrics (adds service_rollup context around trace time), compare_to (another trace_id for side-by-side diff)
 
-Returns: nodes (service, status, request_count, error_rate, p95_ms), edges (source, target, calls, error_rate)`,
-	}, s.topology)
+Returns: spans (tree with timing/self_time), logs (correlated), critical_path, root_cause (reason, evidence), comparison (when compare_to set), metric_context (when include_metrics set)`,
+	}, s.trace)
 
-	// 7. query - Raw SQL escape hatch
+	// 7. diagnose — multi-signal root cause analysis
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "diagnose",
+		Description: `Deep-dive into a service with baseline comparison, change point detection, and log correlation.
+
+Params: service (required), symptom (auto|latency|errors|throughput_drop), window, namespace, tenant
+
+Returns: metrics (p50/p95/p99_ms, error_rate, request_count, comparison_to_baseline), top_errors (message, count, example_trace), slow_operations, dependencies, change_points (time, metric, before, after), correlated_log_patterns (pattern, count, severity)`,
+	}, s.diagnose)
+
+	// 8. compare — side-by-side comparison (3 modes)
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "compare",
+		Description: `Side-by-side comparison with 3 modes. Services mode compares 2-4 services. Time mode compares same service across two windows. Operations mode compares two operations within a service.
+
+Params: mode (services|time|operations), services (for services mode), service (for time/operations), left/right (mode-specific config), focus (["latency","errors","throughput"]), window
+
+Returns: comparison (per-metric left/right values, change_pct, direction, statistically_significant), verdict`,
+	}, s.compare)
+
+	// 9. query — raw SQL with DuckDB views
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "query",
 		Description: queryToolDescription(s.cfg.LakeDir),
 	}, s.query)
-
-	// 9. compare - Side-by-side service comparison
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "compare",
-		Description: `Compare 2-4 services side-by-side. Returns requests, error rate, P50/P95 latency for each service with winner determination.
-
-Use to benchmark services or compare before/after deployments.
-
-Returns: services (array with service, requests, error_rate, p50_ms, p95_ms), winner (best performing service), summary`,
-	}, s.compare)
-
-	// 10. spans - Dedicated span search and aggregation tool
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "spans",
-		Description: `Search, filter, and aggregate trace spans. Supports ungrouped raw span listing and group_by aggregation with P50/P95/P99 latency.
-
-Use to find specific spans, analyze operation latency, or aggregate by service/operation/status/kind/http attributes.
-
-Params: query (substring on operation/status_message), operation (exact), service, status (error|ok|slow|all), kind (server|client|producer|consumer|internal), min_duration_ms, max_duration_ms, attrs (key-value), group_by (service|operation|status|kind|http.method|http.status_code), order_by (time|duration|error_rate|count), include_exemplars, window, namespace, tenant, limit
-
-Returns (ungrouped): spans (trace_id, span_id, service, operation, kind, start_time, duration_ms, status, attributes), total_matched, returned
-Returns (grouped): groups (key, count, error_count, error_rate, p50_ms, p95_ms, p99_ms, exemplar_trace_ids), total_groups`,
-	}, s.spans)
-
-	// 11. logs - Dedicated log search and aggregation tool
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "logs",
-		Description: `Search, filter, and aggregate log entries. Supports ungrouped raw log listing and group_by aggregation with sample bodies and trace correlation.
-
-Use to find specific log messages, search by severity, correlate logs to a trace, or aggregate by service/severity.
-
-Params: query (substring on body), severity (TRACE|DEBUG|INFO|WARN|ERROR|FATAL), trace_id (correlate to a trace), service, attrs (key-value), group_by (service|severity), order_by (time|count|severity), window, namespace, tenant, limit
-
-Returns (ungrouped): logs (time, service, severity, body, trace_id, span_id, attributes), total_matched, returned
-Returns (grouped): groups (key, count, sample_bodies, sample_trace_ids), total_groups`,
-	}, s.logs)
 }
 
 func queryToolDescription(lakeDir string) string {
-	return strings.ReplaceAll(`Execute raw SQL against the data lake. For advanced analysis not covered by other tools. Call with empty sql to get schema reference.
+	return strings.ReplaceAll(`Execute raw SQL against DuckDB. For advanced analysis not covered by other tools. Omit sql to get structured schema reference.
 
-Tables:
-- service_rollup: Pre-aggregated 1-min buckets (fastest)
-  Columns: bucket (TIMESTAMP), service, spans, p50_ms, p95_ms, error_rate
+DuckDB Views (clean column names — use these instead of raw Parquet):
+- spans: trace_id, span_id, service, operation, kind, start_time, end_time, duration_ms, status, status_message, attributes_json, resource_json, events_json, namespace, tenant
+- logs: time, severity, body, service, trace_id, span_id, attributes_json, resource_json, namespace, tenant
+- metrics: time, name, type, value, unit, service, description, attributes_json, resource_json, namespace, tenant
 
-- read_parquet('{LAKE}/spans/**/*.parquet'): Raw trace spans
-  Key columns (quote as "name=..."): trace_id, span_id, service_name, name, duration_ms, status_code, start_unix_nano, attributes_json
+Rollup tables:
+- service_rollup: bucket, service, spans, error_rate, p50_ms, p95_ms, log_count, metric_count
+- edge_rollup: bucket, caller, callee, calls, avg_ms, error_rate, edge_type
 
-- read_parquet('{LAKE}/logs/**/*.parquet'): Log entries
-  Key columns: time_unix_nano, severity, body, service_name, trace_id
+Macro: attr(json_col, 'key') — extracts JSON key from attributes_json
 
-- read_parquet('{LAKE}/metrics/**/*.parquet'): Metric points
-  Key columns: time_unix_nano, name, mtype, service_name, value
+Params: sql, explain (returns query plan), max_rows (default 1000), timeout_ms (default 30000)
 
-Time filter (last N minutes):
-WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - N*60) * 1000000000
-
-Example - top endpoints by P95:
-SELECT "name=name", COUNT(*) as cnt, ROUND(quantile_cont("name=duration_ms", 0.95), 2) as p95
-FROM read_parquet('{LAKE}/spans/**/*.parquet', union_by_name=true)
-WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 900) * 1000000000
-GROUP BY "name=name" ORDER BY p95 DESC LIMIT 10`, "{LAKE}", lakeDir)
+Example: SELECT service, approx_quantile(duration_ms, 0.95) as p95 FROM spans WHERE start_time > now() - INTERVAL 15 MINUTE GROUP BY service ORDER BY p95 DESC`, "{LAKE}", lakeDir)
 }
 
 const notFoundHTML = `<!DOCTYPE html>
