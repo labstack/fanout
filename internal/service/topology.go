@@ -65,8 +65,7 @@ LIMIT 50;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
-		slog.Warn("query failed", "method", "Topology.nodes", "err", err)
-		return out, nil
+		return nil, fmt.Errorf("topology nodes query failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -120,8 +119,7 @@ LIMIT 100;
 
 	rows, err = s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
-		slog.Warn("query failed", "method", "Topology.edges", "err", err)
-		return out, nil
+		return nil, fmt.Errorf("topology edges query failed: %w", err)
 	}
 	defer rows.Close()
 

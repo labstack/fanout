@@ -42,9 +42,7 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
 
 	row := s.duck.DB.QueryRowContext(ctx, q, svc)
 	if err := row.Scan(&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate); err != nil {
-		slog.Warn("query failed", "method", "Diagnose", "err", err)
-		out.Status = "unknown"
-		return out, nil
+		return nil, fmt.Errorf("diagnose query failed: %w", err)
 	}
 
 	out.Status = DeriveHealth(out.ErrorRate, out.P95Ms, out.SpanCount)

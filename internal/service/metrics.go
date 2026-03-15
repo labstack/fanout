@@ -110,8 +110,7 @@ LIMIT %d`, where, p.Limit)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
-		slog.Warn("query failed", "method", "MetricsList", "err", err)
-		return out, nil
+		return nil, fmt.Errorf("metrics list query failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -123,7 +122,9 @@ LIMIT %d`, where, p.Limit)
 			continue
 		}
 		if len(servicesJSON) > 0 {
-			_ = json.Unmarshal(servicesJSON, &entry.Services)
+			if err := json.Unmarshal(servicesJSON, &entry.Services); err != nil {
+				slog.Debug("MetricsList: failed to parse services JSON", "metric", entry.Name, "err", err)
+			}
 		}
 		if entry.Services == nil {
 			entry.Services = []string{}

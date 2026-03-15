@@ -74,11 +74,7 @@ type MetricsQueryOut struct {
 func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in MetricsIn) (*mcp.CallToolResult, any, error) {
 	tw, err := parseWindow(in.Window)
 	if err != nil {
-		return nil, MetricsQueryOut{
-			Series:     []MetricSeriesOut{},
-			Anomalies:  []MetricAnomalyOut{},
-			Suggestion: fmt.Sprintf("Invalid window: %s", err),
-		}, nil
+		return nil, nil, fmt.Errorf("invalid window: %w", err)
 	}
 
 	limit := clampInt(in.Limit, minLimit, maxLimit, 100)

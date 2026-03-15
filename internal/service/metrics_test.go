@@ -99,12 +99,9 @@ func TestMetricsList_QueryError(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnError(errors.New("db error"))
 
-	result, err := svc.MetricsList(context.Background(), MetricListParams{Window: 15})
-	if err != nil {
-		t.Fatalf("MetricsList() should not return error, got %v", err)
-	}
-	if len(result.Metrics) != 0 {
-		t.Errorf("Metrics len = %d, want 0 on error", len(result.Metrics))
+	_, err := svc.MetricsList(context.Background(), MetricListParams{Window: 15})
+	if err == nil {
+		t.Fatal("MetricsList() should return error on query failure")
 	}
 }
 

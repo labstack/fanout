@@ -250,14 +250,9 @@ func TestDiagnose_QueryError(t *testing.T) {
 	// Main query fails
 	mock.ExpectQuery("SELECT").WillReturnError(errors.New("db error"))
 
-	result, err := svc.Diagnose(context.Background(), "failing-service", 15, "", "")
-	if err != nil {
-		t.Fatalf("Diagnose() error = %v", err)
-	}
-
-	// Should return result with unknown status
-	if result.Status != "unknown" {
-		t.Errorf("Status = %q, want %q", result.Status, "unknown")
+	_, err := svc.Diagnose(context.Background(), "failing-service", 15, "", "")
+	if err == nil {
+		t.Fatal("Diagnose() should return error on query failure")
 	}
 }
 

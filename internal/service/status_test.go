@@ -499,16 +499,9 @@ func TestOverview_QueryError(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnError(errTest)
 
-	result, err := svc.Overview(context.Background(), 15, nil, "", "", "", 0)
-	if err != nil {
-		t.Fatalf("Overview() should not return error on query failure, got %v", err)
-	}
-	if result == nil {
-		t.Fatal("Overview() returned nil on query error")
-	}
-	// Should return empty result, not panic
-	if result.Health.TotalServices != 0 {
-		t.Errorf("TotalServices = %d, want 0 on error", result.Health.TotalServices)
+	_, err := svc.Overview(context.Background(), 15, nil, "", "", "", 0)
+	if err == nil {
+		t.Fatal("Overview() should return error on query failure")
 	}
 }
 

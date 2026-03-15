@@ -271,14 +271,7 @@ LIMIT %d;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q)
 	if err != nil {
-		slog.Warn("query failed", "method", "Overview", "err", err)
-		return &OverviewResult{
-			Health: OverviewHealth{
-				ByStatus: map[string]int{"healthy": 0, "degraded": 0, "unhealthy": 0},
-			},
-			Services: []OverviewService{},
-			Issues:   []OverviewIssue{},
-		}, nil
+		return nil, fmt.Errorf("overview query failed: %w", err)
 	}
 	defer rows.Close()
 

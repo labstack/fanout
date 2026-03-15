@@ -205,16 +205,12 @@ func (s *Service) CompareTime(ctx context.Context, params CompareTimeParams) (*C
 	focus := ResolveFocus(params.Focus)
 
 	leftBuckets, leftErr := s.QueryRollupBuckets(ctx, params.Service, params.Left.Start, params.Left.End)
-	rightBuckets, rightErr := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End)
-
-	if leftErr != nil && rightErr != nil {
-		return nil, fmt.Errorf("both window queries failed: left: %v, right: %v", leftErr, rightErr)
-	}
 	if leftErr != nil {
-		slog.Warn("left window query failed", "method", "CompareTime", "err", leftErr)
+		return nil, fmt.Errorf("left window query failed: %w", leftErr)
 	}
+	rightBuckets, rightErr := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End)
 	if rightErr != nil {
-		slog.Warn("right window query failed", "method", "CompareTime", "err", rightErr)
+		return nil, fmt.Errorf("right window query failed: %w", rightErr)
 	}
 
 	leftAgg := AggregateBuckets(leftBuckets)
@@ -244,16 +240,12 @@ func (s *Service) CompareOperations(ctx context.Context, params CompareOperation
 	start := end.Add(-time.Duration(window) * time.Minute)
 
 	leftStats, leftErr := s.queryOperationStats(ctx, params.Service, params.LeftOperation, start, end)
-	rightStats, rightErr := s.queryOperationStats(ctx, params.Service, params.RightOperation, start, end)
-
-	if leftErr != nil && rightErr != nil {
-		return nil, fmt.Errorf("both operation queries failed: left: %v, right: %v", leftErr, rightErr)
-	}
 	if leftErr != nil {
-		slog.Warn("left operation query failed", "method", "CompareOperations", "err", leftErr)
+		return nil, fmt.Errorf("left operation query failed: %w", leftErr)
 	}
+	rightStats, rightErr := s.queryOperationStats(ctx, params.Service, params.RightOperation, start, end)
 	if rightErr != nil {
-		slog.Warn("right operation query failed", "method", "CompareOperations", "err", rightErr)
+		return nil, fmt.Errorf("right operation query failed: %w", rightErr)
 	}
 
 	// No bucket-level data for operations, so skip statistical significance.

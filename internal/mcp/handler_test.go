@@ -98,17 +98,11 @@ func TestOverviewHandler_Error(t *testing.T) {
 	s, mock := newTestServer(t)
 	ctx := context.Background()
 
-	// Simulate query failure - service layer catches this and returns a result
 	mock.ExpectQuery("SELECT").WillReturnError(errors.New("database is down"))
 
-	_, out, err := s.overview(ctx, nil, OverviewIn{})
-	if err != nil {
-		t.Fatalf("overview() should not propagate error when service layer handles it, got: %v", err)
-	}
-
-	// Service layer returns empty result on error, not nil
-	if out.Health.TotalServices != 0 {
-		t.Errorf("Health.TotalServices = %d, want 0 on error", out.Health.TotalServices)
+	_, _, err := s.overview(ctx, nil, OverviewIn{})
+	if err == nil {
+		t.Fatal("overview() should return error on query failure")
 	}
 }
 
