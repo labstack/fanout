@@ -27,6 +27,9 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 	if mem == "" {
 		mem = "512MB"
 	}
+	if strings.ContainsAny(mem, "&?'\"\\; ") {
+		return nil, fmt.Errorf("invalid DUCKDB_MEMORY value: %q", mem)
+	}
 	dsn := dbPath + "?threads=4&memory_limit=" + mem
 
 	db, err := sql.Open("duckdb", dsn)

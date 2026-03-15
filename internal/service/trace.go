@@ -440,6 +440,7 @@ LIMIT 100;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, traceID)
 	if err != nil {
+		slog.Warn("fetch trace logs query failed", "method", "fetchTraceLogs", "trace_id", traceID, "err", err)
 		return logs
 	}
 	defer rows.Close()
@@ -482,12 +483,17 @@ LIMIT 100;
 		if attrsJSON != nil {
 			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
 				var attrs map[string]any
-				if err := json.Unmarshal(b, &attrs); err == nil {
+				if err := json.Unmarshal(b, &attrs); err != nil {
+					slog.Debug("log attributes JSON parse failed", "trace_id", traceID, "err", err)
+				} else {
 					r.Attributes = attrs
 				}
 			}
 		}
 		logs = append(logs, r)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("fetch trace logs iteration error", "method", "fetchTraceLogs", "trace_id", traceID, "err", err)
 	}
 	return logs
 }
