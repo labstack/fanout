@@ -50,10 +50,10 @@ type CompareOut struct {
 
 	// All modes
 	Mode       string                       `json:"mode"`
-	LeftLabel  string                        `json:"left_label,omitempty"`
-	RightLabel string                        `json:"right_label,omitempty"`
-	Comparison map[string]CompareMetricDiff  `json:"comparison,omitempty"`
-	Verdict    string                        `json:"verdict,omitempty"`
+	LeftLabel  string                       `json:"left_label,omitempty"`
+	RightLabel string                       `json:"right_label,omitempty"`
+	Comparison map[string]CompareMetricDiff `json:"comparison,omitempty"`
+	Verdict    string                       `json:"verdict,omitempty"`
 }
 
 func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in CompareIn) (*mcp.CallToolResult, CompareOut, error) {
