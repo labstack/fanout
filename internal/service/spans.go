@@ -240,7 +240,7 @@ func (s *Service) spansGrouped(ctx context.Context, p SpanParams) (*SpansResult,
 
 	exemplarCol := "NULL::VARCHAR[]"
 	if p.IncludeExemplars {
-		exemplarCol = "list(trace_id ORDER BY random() LIMIT 3)"
+		exemplarCol = "list_slice(list(DISTINCT trace_id), 1, 3)"
 	}
 
 	selectList := strings.Join(selectCols, ", ")
