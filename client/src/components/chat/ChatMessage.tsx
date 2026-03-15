@@ -1,10 +1,12 @@
 import type { Message } from "@/stores/chat";
+import { useChatStore } from "@/stores/chat";
 import { BlockRenderer } from "@/components/blocks/BlockRenderer";
 import { ToolStatus } from "./ToolStatus";
 import { Markdown } from "@/components/Markdown";
 
 
 export function ChatMessage({ message }: { message: Message }) {
+  const sendMessage = useChatStore((s) => s.sendMessage);
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
@@ -33,7 +35,7 @@ export function ChatMessage({ message }: { message: Message }) {
       {!message.loading && message.blocks?.length ? (
         <div className="space-y-4">
           {message.blocks.map((block, i) => (
-            <BlockRenderer key={i} block={block} />
+            <BlockRenderer key={i} block={block} onAction={(prompt) => sendMessage(prompt)} />
           ))}
         </div>
       ) : message.content ? (

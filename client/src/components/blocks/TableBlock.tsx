@@ -18,7 +18,15 @@ type Row = Record<string, unknown>;
 
 const columnHelper = createColumnHelper<Row>();
 
-export function TableBlock({ data }: { data: TableBlockData }) {
+const SERVICE_KEYS = new Set(["service", "service_name", "servicename", "svc"]);
+
+function isServiceColumn(col: TableColumn): boolean {
+  const key = col.key.toLowerCase();
+  const label = col.label.toLowerCase();
+  return SERVICE_KEYS.has(key) || label.includes("service");
+}
+
+export function TableBlock({ data, onAction }: { data: TableBlockData; onAction?: (prompt: string) => void }) {
   const columns = useMemo(
     () =>
       data.columns.map((col) =>
@@ -29,7 +37,18 @@ export function TableBlock({ data }: { data: TableBlockData }) {
             const v = info.getValue();
             if (v == null) return "";
             try {
-              return <>{replaceEmojis(String(v))}</>;
+              const str = String(v);
+              if (onAction && isServiceColumn(col) && str.length > 0) {
+                return (
+                  <button
+                    className="text-left text-blue-400 hover:text-blue-300 hover:underline cursor-pointer"
+                    onClick={() => onAction(`Diagnose ${str}`)}
+                  >
+                    {replaceEmojis(str)}
+                  </button>
+                );
+              }
+              return <>{replaceEmojis(str)}</>;
             } catch (err) {
               console.error("[TableBlock] cell render error:", err);
               return String(v);
@@ -38,7 +57,7 @@ export function TableBlock({ data }: { data: TableBlockData }) {
           meta: { align: col.align ?? "left" },
         }),
       ),
-    [data.columns],
+    [data.columns, onAction],
   );
 
   const table = useReactTable({

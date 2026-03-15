@@ -23,7 +23,7 @@ function formatTimestamp(time: number): string {
   return `${hh}:${mm}:${ss}.${sss}`;
 }
 
-function EntryLine({ entry }: { entry: LogEntry }) {
+function EntryLine({ entry, onAction }: { entry: LogEntry; onAction?: (prompt: string) => void }) {
   const sevCls = severityClass(entry.severity);
 
   return (
@@ -35,19 +35,19 @@ function EntryLine({ entry }: { entry: LogEntry }) {
       <span className="shrink-0 text-zinc-500">{entry.service}</span>
       <span className="break-all">{entry.body}</span>
       {entry.traceId && (
-        <a
-          href={`/traces/${entry.traceId}`}
-          className="shrink-0 ml-auto text-blue-400/70 hover:text-blue-400 hover:underline"
-          title={entry.traceId}
+        <button
+          className="shrink-0 ml-auto text-blue-400/70 hover:text-blue-400 hover:underline cursor-pointer"
+          onClick={() => onAction?.(`Show trace ${entry.traceId}`)}
+          title={`Trace ${entry.traceId}`}
         >
           {entry.traceId.slice(0, 8)}
-        </a>
+        </button>
       )}
     </div>
   );
 }
 
-export function TailBlock({ data }: { data: TailData }) {
+export function TailBlock({ data, onAction }: { data: TailData; onAction?: (prompt: string) => void }) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when new entries arrive
@@ -73,7 +73,7 @@ export function TailBlock({ data }: { data: TailData }) {
       style={{ maxHeight: 300 }}
     >
       {data.entries.map((entry, i) => (
-        <EntryLine key={i} entry={entry} />
+        <EntryLine key={i} entry={entry} onAction={onAction} />
       ))}
     </div>
   );
