@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -116,11 +117,15 @@ LIMIT %d`, where, p.Limit)
 
 	for rows.Next() {
 		var entry MetricListEntry
+		var mtype, unit, description sql.NullString
 		var servicesJSON []byte
-		if err := rows.Scan(&entry.Name, &entry.Type, &entry.Unit, &entry.Description, &servicesJSON); err != nil {
+		if err := rows.Scan(&entry.Name, &mtype, &unit, &description, &servicesJSON); err != nil {
 			slog.Warn("scan failed", "method", "MetricsList", "err", err)
 			continue
 		}
+		entry.Type = mtype.String
+		entry.Unit = unit.String
+		entry.Description = description.String
 		if len(servicesJSON) > 0 {
 			if err := json.Unmarshal(servicesJSON, &entry.Services); err != nil {
 				slog.Debug("MetricsList: failed to parse services JSON", "metric", entry.Name, "err", err)

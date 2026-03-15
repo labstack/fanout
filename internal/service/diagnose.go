@@ -49,19 +49,22 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
 
 	var suggestedTraces []string
 
-	// Get top errors with example traces
+	// Get top errors with example traces.
+	// COALESCE chain: prefer status_msg, then exception.type from events, then operation name.
 	q = fmt.Sprintf(`
 SELECT
-  "name=status_msg" as msg,
+  COALESCE(
+    NULLIF("name=status_msg", ''),
+    json_extract_string(from_utf8("name=events_json"), '$[0].attributes."exception.type"'),
+    "name=name"
+  ) as msg,
   COUNT(*) as cnt,
   FIRST("name=trace_id") as trace_id
 FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=service_name" = ?
   AND "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')
-  AND "name=status_msg" IS NOT NULL
-  AND "name=status_msg" != ''
-GROUP BY "name=status_msg"
+GROUP BY msg
 ORDER BY cnt DESC
 LIMIT 5;
 `, spansGlob, window)
@@ -370,14 +373,22 @@ func (s *Service) correlatedLogs(ctx context.Context, svc string, around time.Ti
 	}
 
 	// Use the logs view for a clean query. Fall back to parquet glob if view fails.
-	q := `
-SELECT LEFT(body, 50) as pattern, severity, COUNT(*) as cnt
+	// Tokenize log bodies: replace UUIDs, timestamps, and numbers with placeholders
+	// so similar log lines cluster together instead of returning raw truncated text.
+	const tokenize = `regexp_replace(
+    regexp_replace(
+      regexp_replace(LEFT(body, 200),
+        '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<ID>', 'gi'),
+      '\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\s]*', '<TS>', 'g'),
+    '\b\d+\b', '<N>', 'g')`
+	q := fmt.Sprintf(`
+SELECT %s as pattern, severity, COUNT(*) as cnt
 FROM logs
 WHERE service = ?
   AND time BETWEEN ? AND ?
-GROUP BY LEFT(body, 50), severity
+GROUP BY pattern, severity
 ORDER BY cnt DESC
-LIMIT 5;`
+LIMIT 5;`, tokenize)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, svc, from, to)
 	if err != nil {
@@ -385,14 +396,20 @@ LIMIT 5;`
 		logsGlob := s.duck.LogsGlob(tenantID, namespace, window)
 		fromNano := from.UnixNano()
 		toNano := to.UnixNano()
+		tokenizePQ := `regexp_replace(
+    regexp_replace(
+      regexp_replace(LEFT("name=body", 200),
+        '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<ID>', 'gi'),
+      '\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\s]*', '<TS>', 'g'),
+    '\b\d+\b', '<N>', 'g')`
 		q2 := fmt.Sprintf(`
-SELECT LEFT("name=body", 50) as pattern, "name=severity" as severity, COUNT(*) as cnt
+SELECT %s as pattern, "name=severity" as severity, COUNT(*) as cnt
 FROM read_parquet(%s, union_by_name=true)
 WHERE "name=service_name" = ?
   AND "name=time_unix_nano" BETWEEN ? AND ?
-GROUP BY LEFT("name=body", 50), "name=severity"
+GROUP BY pattern, "name=severity"
 ORDER BY cnt DESC
-LIMIT 5;`, logsGlob)
+LIMIT 5;`, tokenizePQ, logsGlob)
 		rows, err = s.duck.DB.QueryContext(ctx, q2, svc, fromNano, toNano)
 		if err != nil {
 			return nil, fmt.Errorf("correlated logs query: %w", err)

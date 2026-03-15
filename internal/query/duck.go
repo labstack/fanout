@@ -22,7 +22,11 @@ type Duck struct {
 
 func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 	dbPath := filepath.Join(cfg.LakeDir, "fanout.duckdb")
-	dsn := dbPath + "?threads=4&memory_limit=256MB"
+	mem := cfg.DuckDBMemory
+	if mem == "" {
+		mem = "512MB"
+	}
+	dsn := dbPath + "?threads=4&memory_limit=" + mem
 
 	db, err := sql.Open("duckdb", dsn)
 	if err != nil {
@@ -35,6 +39,15 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 			return nil, fmt.Errorf("duckdb open after recovery: %w", err)
 		}
 		slog.Info("duckdb recovered with fresh database")
+	}
+
+	// Enable spill-to-disk so large queries don't OOM.
+	tmpDir := filepath.Join(cfg.LakeDir, "tmp")
+	if mkErr := os.MkdirAll(tmpDir, 0o755); mkErr != nil {
+		slog.Warn("failed to create temp directory", "path", tmpDir, "err", mkErr)
+	}
+	if _, err := db.Exec(fmt.Sprintf("SET temp_directory='%s'", tmpDir)); err != nil {
+		slog.Warn("failed to set temp_directory for spill-to-disk", "err", err)
 	}
 	d := &Duck{DB: db, cfg: cfg}
 	// Create rollup tables
