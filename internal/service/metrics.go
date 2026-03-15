@@ -393,11 +393,15 @@ LIMIT 20`, where)
 		for rows.Next() {
 			var entry HistogramEntry
 			var attrsStr, boundsStr, countsStr sql.NullString
+			var histCount sql.NullInt64
+			var histSum sql.NullFloat64
 			entry.Metric = metricName
-			if err := rows.Scan(&entry.Time, &entry.Service, &attrsStr, &boundsStr, &countsStr, &entry.Count, &entry.Sum); err != nil {
+			if err := rows.Scan(&entry.Time, &entry.Service, &attrsStr, &boundsStr, &countsStr, &histCount, &histSum); err != nil {
 				slog.Warn("histogram scan failed", "err", err)
 				continue
 			}
+			entry.Count = histCount.Int64
+			entry.Sum = histSum.Float64
 			if boundsStr.Valid {
 				if err := json.Unmarshal([]byte(boundsStr.String), &entry.Bounds); err != nil {
 					slog.Warn("histogram bounds parse failed", "metric", metricName, "err", err)
