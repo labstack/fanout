@@ -60,7 +60,7 @@ function statusColor(status: string): string {
   }
 }
 
-export function TraceWaterfallBlock({ data }: { data: TraceWaterfallData }) {
+export function TraceWaterfallBlock({ data, onAction }: { data: TraceWaterfallData; onAction?: (prompt: string) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(800);
   const [tooltip, setTooltip] = useState<{
@@ -201,17 +201,21 @@ export function TraceWaterfallBlock({ data }: { data: TraceWaterfallData }) {
                 className="hover:fill-muted/50"
               />
 
-              {/* Label */}
+              {/* Label: clickable service name + operation */}
               <text
                 x={indent + 14}
                 y={y + ROW_HEIGHT / 2 + 4}
-                className="fill-foreground text-[11px]"
+                className={`text-[11px] font-medium ${onAction ? "fill-blue-400 cursor-pointer hover:underline" : "fill-foreground"}`}
+                onClick={() => onAction?.(`Diagnose ${span.service}`)}
               >
-                <tspan className="font-medium">{span.service}</tspan>
-                <tspan className="fill-muted-foreground">
-                  {" "}
-                  {truncatedLabel.slice(span.service.length + 2)}
-                </tspan>
+                {span.service}
+              </text>
+              <text
+                x={indent + 14 + span.service.length * 6.5 + 4}
+                y={y + ROW_HEIGHT / 2 + 4}
+                className="fill-muted-foreground text-[11px]"
+              >
+                {truncatedLabel.slice(span.service.length + 2)}
               </text>
 
               {/* Span bar */}

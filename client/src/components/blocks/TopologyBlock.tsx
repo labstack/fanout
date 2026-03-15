@@ -103,7 +103,7 @@ function computeLayout(
   return { nodes: simNodes, links: simLinks };
 }
 
-export function TopologyBlock({ data }: { data: TopologyData }) {
+export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction?: (prompt: string) => void }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(700);
   const [tooltip, setTooltip] = useState<{
@@ -246,6 +246,7 @@ export function TopologyBlock({ data }: { data: TopologyData }) {
             key={node.id}
             transform={`translate(${node.x ?? 0},${node.y ?? 0})`}
             className="cursor-pointer"
+            onClick={() => onAction?.(`Diagnose ${node.id}`)}
             onMouseEnter={(e) => {
               const rect = containerRef.current?.getBoundingClientRect();
               if (rect) {

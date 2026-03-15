@@ -31,14 +31,14 @@ import { CorrelationBlock } from "./CorrelationBlock";
 import { TailBlock } from "./TailBlock";
 import { GenericBlock } from "./GenericBlock";
 
-export function BlockRenderer({ block }: { block: Block }) {
+export function BlockRenderer({ block, onAction }: { block: Block; onAction?: (prompt: string) => void }) {
   switch (block.type) {
     case "text":
       return <TextBlock data={block.data as TextBlockData} />;
     case "metrics":
       return <MetricsBlock data={block.data as MetricsBlockData} />;
     case "table":
-      return <TableBlock data={block.data as TableBlockData} />;
+      return <TableBlock data={block.data as TableBlockData} onAction={onAction} />;
     case "timeseries":
       return <TimeseriesBlock data={block.data as TimeseriesBlockData} />;
     case "bar":
@@ -46,9 +46,9 @@ export function BlockRenderer({ block }: { block: Block }) {
     case "heatmap":
       return <HeatmapBlock data={block.data as HeatmapBlockData} />;
     case "trace_waterfall":
-      return <TraceWaterfallBlock data={block.data as TraceWaterfallData} />;
+      return <TraceWaterfallBlock data={block.data as TraceWaterfallData} onAction={onAction} />;
     case "topology":
-      return <TopologyBlock data={block.data as TopologyData} />;
+      return <TopologyBlock data={block.data as TopologyData} onAction={onAction} />;
     case "flame_graph":
       return <FlameGraphBlock data={block.data as FlameGraphData} />;
     case "sankey":
@@ -60,7 +60,7 @@ export function BlockRenderer({ block }: { block: Block }) {
     case "correlation":
       return <CorrelationBlock data={block.data as CorrelationData} />;
     case "tail":
-      return <TailBlock data={block.data as TailData} />;
+      return <TailBlock data={block.data as TailData} onAction={onAction} />;
     default:
       return <GenericBlock type={block.type} data={block.data} />;
   }
