@@ -333,11 +333,11 @@ type MetricInfo struct {
 
 // Exemplar links a metric data point to a trace.
 type Exemplar struct {
-	Time       int64
-	TraceID    string
-	SpanID     string
-	Value      float64
-	Attributes map[string]string
+	Time       int64             `json:"time_unix_nano"`
+	TraceID    string            `json:"trace_id"`
+	SpanID     string            `json:"span_id"`
+	Value      float64           `json:"value"`
+	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
 // SpanParams contains search and aggregation parameters for the spans tool.

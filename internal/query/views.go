@@ -170,15 +170,22 @@ func MigrateOldPartitions(lakeDir string) {
 	for _, signal := range []string{"spans", "logs", "metrics"} {
 		pattern := filepath.Join(lakeDir, signal, "tenant=*", "namespace=*",
 			"year=*", "month=*", "day=*", "*.parquet")
-		matches, _ := filepath.Glob(pattern)
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			slog.Warn("migrate glob failed", "pattern", pattern, "err", err)
+			continue
+		}
 		for _, f := range matches {
 			dayDir := filepath.Dir(f)
 			hourDir := filepath.Join(dayDir, "hour=00")
 			if err := os.MkdirAll(hourDir, 0o755); err != nil {
+				slog.Warn("migrate mkdir failed", "path", hourDir, "err", err)
 				continue
 			}
 			dest := filepath.Join(hourDir, filepath.Base(f))
-			if err := os.Rename(f, dest); err == nil {
+			if err := os.Rename(f, dest); err != nil {
+				slog.Warn("migrate rename failed", "from", f, "to", dest, "err", err)
+			} else {
 				slog.Info("migrated old partition file", "from", f, "to", dest)
 			}
 		}

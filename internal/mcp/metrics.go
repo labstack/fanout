@@ -190,6 +190,7 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 		}
 		histResult, err := s.svc.MetricsHistogram(ctx, p)
 		if err != nil {
+			slog.Warn("metrics histogram failed", "err", err)
 			return nil, map[string]any{"histograms": []any{}, "suggestion": fmt.Sprintf("Query failed: %s", err)}, nil
 		}
 		type histOut struct {
@@ -228,6 +229,7 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 		}
 		exResult, err := s.svc.MetricsExemplars(ctx, p)
 		if err != nil {
+			slog.Warn("metrics exemplars failed", "err", err)
 			return nil, map[string]any{"exemplars": []any{}, "suggestion": fmt.Sprintf("Query failed: %s", err)}, nil
 		}
 		type exOut struct {

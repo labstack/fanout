@@ -399,12 +399,21 @@ LIMIT 20`, where)
 				continue
 			}
 			if boundsStr.Valid {
-				json.Unmarshal([]byte(boundsStr.String), &entry.Bounds) //nolint:errcheck
+				if err := json.Unmarshal([]byte(boundsStr.String), &entry.Bounds); err != nil {
+					slog.Warn("histogram bounds parse failed", "metric", metricName, "err", err)
+					continue
+				}
 			}
 			if countsStr.Valid {
-				json.Unmarshal([]byte(countsStr.String), &entry.BucketCounts) //nolint:errcheck
+				if err := json.Unmarshal([]byte(countsStr.String), &entry.BucketCounts); err != nil {
+					slog.Warn("histogram counts parse failed", "metric", metricName, "err", err)
+					continue
+				}
 			}
 			out.Histograms = append(out.Histograms, entry)
+		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("histogram rows iteration error", "metric", metricName, "err", err)
 		}
 		rows.Close()
 	}
@@ -476,6 +485,7 @@ LIMIT 50`, where)
 			}
 			var rawExemplars []Exemplar
 			if err := json.Unmarshal([]byte(exemplarsStr), &rawExemplars); err != nil {
+				slog.Warn("exemplar JSON parse failed", "metric", metricName, "err", err)
 				continue
 			}
 			for _, ex := range rawExemplars {
@@ -490,6 +500,9 @@ LIMIT 50`, where)
 					})
 				}
 			}
+		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("exemplar rows iteration error", "metric", metricName, "err", err)
 		}
 		rows.Close()
 	}
