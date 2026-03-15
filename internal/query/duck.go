@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
@@ -43,11 +44,15 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 
 	// Enable spill-to-disk so large queries don't OOM.
 	tmpDir := filepath.Join(cfg.LakeDir, "tmp")
-	if mkErr := os.MkdirAll(tmpDir, 0o755); mkErr != nil {
-		slog.Warn("failed to create temp directory", "path", tmpDir, "err", mkErr)
-	}
-	if _, err := db.Exec(fmt.Sprintf("SET temp_directory='%s'", tmpDir)); err != nil {
-		slog.Warn("failed to set temp_directory for spill-to-disk", "err", err)
+	if strings.ContainsAny(tmpDir, "'\"\\;") {
+		slog.Warn("temp_directory contains unsafe characters, skipping", "path", tmpDir)
+	} else {
+		if mkErr := os.MkdirAll(tmpDir, 0o755); mkErr != nil {
+			slog.Warn("failed to create temp directory", "path", tmpDir, "err", mkErr)
+		}
+		if _, err := db.Exec(fmt.Sprintf("SET temp_directory='%s'", tmpDir)); err != nil {
+			slog.Warn("failed to set temp_directory for spill-to-disk", "err", err)
+		}
 	}
 	d := &Duck{DB: db, cfg: cfg}
 	// Create rollup tables

@@ -358,10 +358,10 @@ func bodyString(v *common.AnyValue) string {
 }
 
 // spanAttr extracts a string attribute value from a span's KeyValue list.
-// Supports OTel convention fallbacks (e.g. http.method → http.request.method).
+// Keys are checked in priority order (e.g. http.method before http.request.method).
 func spanAttr(attrs []*common.KeyValue, keys ...string) string {
-	for _, kv := range attrs {
-		for _, key := range keys {
+	for _, key := range keys {
+		for _, kv := range attrs {
 			if kv.Key == key {
 				if s := asString(kv.Value); s != "" {
 					return s
@@ -373,9 +373,10 @@ func spanAttr(attrs []*common.KeyValue, keys ...string) string {
 }
 
 // spanAttrInt extracts an integer attribute as a string (e.g. http.status_code: 200 → "200").
+// Keys are checked in priority order.
 func spanAttrInt(attrs []*common.KeyValue, keys ...string) string {
-	for _, kv := range attrs {
-		for _, key := range keys {
+	for _, key := range keys {
+		for _, kv := range attrs {
 			if kv.Key == key {
 				if s := asString(kv.Value); s != "" {
 					return s

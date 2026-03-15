@@ -71,6 +71,11 @@ SELECT
   "name=description" AS description,
   decode("name=attributes_json") AS attributes_json,
   decode("name=resource_json") AS resource_json,
+  decode("name=hist_bounds_json") AS hist_bounds_json,
+  decode("name=hist_counts_json") AS hist_counts_json,
+  "name=hist_count" AS hist_count,
+  "name=hist_sum" AS hist_sum,
+  decode("name=exemplars_json") AS exemplars_json,
   namespace, tenant
 FROM read_parquet('{lake}/metrics/**/*.parquet',
      hive_partitioning=true, union_by_name=true);`
@@ -146,6 +151,11 @@ SELECT
   NULL::VARCHAR AS "name=description",
   NULL::BLOB    AS "name=attributes_json",
   NULL::BLOB    AS "name=resource_json",
+  NULL::BLOB    AS "name=hist_bounds_json",
+  NULL::BLOB    AS "name=hist_counts_json",
+  NULL::BIGINT  AS "name=hist_count",
+  NULL::DOUBLE  AS "name=hist_sum",
+  NULL::BLOB    AS "name=exemplars_json",
   NULL::VARCHAR AS namespace,
   NULL::VARCHAR AS tenant
 WHERE false
