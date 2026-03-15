@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -170,7 +171,9 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 				DeviationSigma: a.DeviationSigma,
 			})
 		}
-		if len(out.Series) == 0 {
+		if len(queryResult.FailedMetrics) > 0 {
+			out.Suggestion = fmt.Sprintf("Queries failed for: %s. Results shown are partial.", strings.Join(queryResult.FailedMetrics, ", "))
+		} else if len(out.Series) == 0 {
 			out.Suggestion = "No data found. Try action='list' to discover available metrics, or widen the time window."
 		} else if len(out.Anomalies) > 0 {
 			out.Suggestion = fmt.Sprintf("%d anomaly(ies) detected in the time range.", len(out.Anomalies))

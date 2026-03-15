@@ -216,6 +216,7 @@ func (s *Service) MetricsQuery(ctx context.Context, p MetricQueryParams) (*Metri
 	}
 	seriesMap := map[seriesKey]*seriesData{}
 	var seriesOrder []seriesKey
+	var failedMetrics []string
 
 	for _, metricName := range names {
 		var clauses []string
@@ -273,6 +274,7 @@ LIMIT %d`, selectCols, where, groupCols, p.Limit)
 		rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 		if err != nil {
 			slog.Warn("query failed", "method", "MetricsQuery", "metric", metricName, "err", err)
+			failedMetrics = append(failedMetrics, metricName)
 			continue
 		}
 
@@ -325,6 +327,7 @@ LIMIT %d`, selectCols, where, groupCols, p.Limit)
 		anomalies := detectMetricAnomalies(key.metric, sd.datapoints)
 		out.Anomalies = append(out.Anomalies, anomalies...)
 	}
+	out.FailedMetrics = failedMetrics
 
 	return out, nil
 }

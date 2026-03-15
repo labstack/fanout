@@ -482,8 +482,9 @@ type MetricListEntry struct {
 
 // MetricsQueryResult holds the result of the metrics query action.
 type MetricsQueryResult struct {
-	Series    []MetricSeries
-	Anomalies []MetricAnomaly
+	Series        []MetricSeries
+	Anomalies     []MetricAnomaly
+	FailedMetrics []string // metric names whose queries failed
 }
 
 // MetricSeries is one timeseries stream returned by the query action.
