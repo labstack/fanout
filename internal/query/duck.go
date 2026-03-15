@@ -64,6 +64,13 @@ CREATE TABLE IF NOT EXISTS edge_rollup (
 		return nil, err
 	}
 
+	// Create clean-name views over Parquet files plus the attr() macro.
+	// CreateViews handles directory creation internally, so failures here
+	// indicate a real problem (permissions, disk full, DuckDB error).
+	if err := CreateViews(db, cfg.LakeDir); err != nil {
+		return nil, fmt.Errorf("create views: %w", err)
+	}
+
 	return d, nil
 }
 

@@ -246,19 +246,7 @@ func TestToolRegistryMCPIntegration(t *testing.T) {
 		t.Error("greet InputSchema should not be nil")
 	}
 
-	// 5. Verify AI-only tools (metrics, tail) are present in Defs().
-	//    They get registered even with nil svc (closures capture svc but don't call it during registration).
-	aiTools := map[string]bool{"metrics": false, "tail": false}
-	for _, d := range defs {
-		if _, ok := aiTools[d.Name]; ok {
-			aiTools[d.Name] = true
-		}
-	}
-	for name, found := range aiTools {
-		if !found {
-			t.Errorf("expected AI-only tool %q in registry defs, not found", name)
-		}
-	}
+	// 5. All tools now come from MCP — no AI-only tools remain.
 
 	// 6. Execute the greet tool via the MCP session and verify the result.
 	input, _ := json.Marshal(map[string]string{"name": "world"})

@@ -3,21 +3,25 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"log/slog"
-	"strings"
 
-	"github.com/labstack/fanout/internal/render"
+	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// compare - Side-by-side service comparison
+// compare - Side-by-side service comparison with multiple modes
 
 type CompareIn struct {
-	Services []string `json:"services" jsonschema:"Services to compare (2-4),required"`
-	Window   int      `json:"window,omitempty" jsonschema:"Time window in minutes,default=60"`
-	Format   string   `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
+	Mode     string            `json:"mode,omitempty" jsonschema:"Comparison mode: services, time, operations,default=services"`
+	Services []string          `json:"services,omitempty" jsonschema:"Services to compare (2-4) for services mode"`
+	Service  string            `json:"service,omitempty" jsonschema:"Service for time/operations mode"`
+	Left     map[string]string `json:"left,omitempty" jsonschema:"Left side config: window (ISO range) for time mode, operation for operations mode"`
+	Right    map[string]string `json:"right,omitempty" jsonschema:"Right side config: window (ISO range) for time mode, operation for operations mode"`
+	Focus    []string          `json:"focus,omitempty" jsonschema:"Metrics to compare,default=[latency,errors,throughput]"`
+	Window   string            `json:"window,omitempty" jsonschema:"Time window for services mode,default=1h"`
 }
 
+// CompareMetrics is the JSON-serializable representation of per-service metrics
+// in the MCP compare response.
 type CompareMetrics struct {
 	Service    string  `json:"service"`
 	Requests   int64   `json:"requests"`
@@ -28,205 +32,210 @@ type CompareMetrics struct {
 	ErrorCount int64   `json:"error_count"`
 }
 
+// CompareMetricDiff is the JSON-serializable representation of a metric difference
+// in the MCP compare response.
+type CompareMetricDiff struct {
+	LeftValue                float64 `json:"left_value"`
+	RightValue               float64 `json:"right_value"`
+	ChangePct                float64 `json:"change_pct"`
+	Direction                string  `json:"direction"` // "regression", "improvement", "stable"
+	StatisticallySignificant bool    `json:"statistically_significant"`
+}
+
 type CompareOut struct {
-	Services []CompareMetrics `json:"services"`
-	Winner   string           `json:"winner"`
-	Summary  string           `json:"summary"`
-	Render   *render.Output   `json:"render,omitempty"`
+	// Services mode (existing)
+	Services []CompareMetrics `json:"services,omitempty"`
+	Winner   string           `json:"winner,omitempty"`
+	Summary  string           `json:"summary,omitempty"`
+
+	// All modes
+	Mode       string                       `json:"mode"`
+	LeftLabel  string                       `json:"left_label,omitempty"`
+	RightLabel string                       `json:"right_label,omitempty"`
+	Comparison map[string]CompareMetricDiff `json:"comparison,omitempty"`
+	Verdict    string                       `json:"verdict,omitempty"`
 }
 
 func (s *Server) compare(ctx context.Context, req *mcp.CallToolRequest, in CompareIn) (*mcp.CallToolResult, CompareOut, error) {
-	if len(in.Services) < 2 {
-		return nil, CompareOut{}, fmt.Errorf("need at least 2 services to compare")
-	}
-	if len(in.Services) > 4 {
-		return nil, CompareOut{}, fmt.Errorf("max 4 services to compare")
+	mode := in.Mode
+	if mode == "" {
+		mode = "services"
 	}
 
-	window := clampInt(in.Window, minWindow, maxWindow, 60) // default 60 for compare
-
-	// Build parameterized IN clause for services
-	placeholders := make([]string, len(in.Services))
-	args := make([]any, len(in.Services))
-	for i, svc := range in.Services {
-		placeholders[i] = "?"
-		args[i] = svc
+	switch mode {
+	case "services":
+		return s.compareServices(ctx, in)
+	case "time":
+		return s.compareTime(ctx, in)
+	case "operations":
+		return s.compareOperations(ctx, in)
+	default:
+		return nil, CompareOut{}, fmt.Errorf("invalid mode %q: must be services, time, or operations", mode)
 	}
+}
 
-	// Query metrics for all services at once
-	q := fmt.Sprintf(`
-		SELECT
-			service,
-			COALESCE(SUM(spans), 0) AS requests,
-			COALESCE(AVG(CASE WHEN spans > 0 THEN error_rate END), 0) AS error_rate,
-			COALESCE(AVG(CASE WHEN spans > 0 THEN p50_ms END), 0) AS p50_ms,
-			COALESCE(AVG(CASE WHEN spans > 0 THEN p95_ms END), 0) AS p95_ms,
-			COALESCE(SUM(log_count), 0) AS log_count,
-			COALESCE(SUM(metric_count), 0) AS metric_count
-		FROM service_rollup
-		WHERE service IN (%s) AND bucket >= NOW() - INTERVAL '%d minutes'
-		GROUP BY service
-		ORDER BY (COALESCE(SUM(spans), 0) + COALESCE(SUM(log_count), 0) + COALESCE(SUM(metric_count), 0)) DESC
-	`, strings.Join(placeholders, ","), window)
-
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+// compareServices handles the services-mode comparison.
+func (s *Server) compareServices(ctx context.Context, in CompareIn) (*mcp.CallToolResult, CompareOut, error) {
+	// Parse window string; default to 1h
+	windowStr := in.Window
+	if windowStr == "" {
+		windowStr = "1h"
+	}
+	tw, err := parseWindow(windowStr)
 	if err != nil {
-		return nil, CompareOut{}, fmt.Errorf("query failed: %w", err)
+		return nil, CompareOut{}, fmt.Errorf("invalid window: %w", err)
 	}
-	defer rows.Close()
+	window := clampInt(tw.Minutes, minWindow, maxWindow, 60)
 
-	// Parse results
-	var metrics []CompareMetrics
-	for rows.Next() {
-		var m CompareMetrics
-		var logCount, metricCount int64
-		if err := rows.Scan(&m.Service, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms, &logCount, &metricCount); err != nil {
-			slog.Warn("scan failed", "method", "compare", "err", err)
-			continue
-		}
-		// Count all signals for determining if service has data
-		if m.Requests == 0 && (logCount > 0 || metricCount > 0) {
-			m.Requests = logCount + metricCount
-		}
-		m.ErrorCount = int64(float64(m.Requests) * m.ErrorRate)
-		if m.Requests > 0 {
-			m.AvgMs = (m.P50Ms + m.P95Ms) / 2
-		}
-		metrics = append(metrics, m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, CompareOut{}, fmt.Errorf("compare iteration: %w", err)
+	result, err := s.svc.CompareServices(ctx, service.CompareServicesParams{
+		Services: in.Services,
+		Window:   window,
+	})
+	if err != nil {
+		return nil, CompareOut{}, err
 	}
 
-	// Add empty entries for services with no data
-	found := make(map[string]bool)
-	for _, m := range metrics {
-		found[m.Service] = true
-	}
-	for _, svc := range in.Services {
-		if !found[svc] {
-			metrics = append(metrics, CompareMetrics{Service: svc})
+	// Map service types to MCP types
+	metrics := make([]CompareMetrics, len(result.Services))
+	for i, m := range result.Services {
+		metrics[i] = CompareMetrics{
+			Service:    m.Service,
+			Requests:   m.Requests,
+			ErrorRate:  m.ErrorRate,
+			P50Ms:      m.P50Ms,
+			P95Ms:      m.P95Ms,
+			AvgMs:      m.AvgMs,
+			ErrorCount: m.ErrorCount,
 		}
-	}
-
-	// Determine winner (lowest P95 with acceptable error rate)
-	winner := ""
-	bestScore := float64(-1)
-	for _, m := range metrics {
-		if m.Requests == 0 || (m.P50Ms == 0 && m.P95Ms == 0) {
-			continue // skip services with no span-based latency data
-		}
-		// Score: lower is better (P95 * (1 + error_rate*10))
-		score := m.P95Ms * (1 + m.ErrorRate*10)
-		if bestScore < 0 || score < bestScore {
-			bestScore = score
-			winner = m.Service
-		}
-	}
-
-	// Build summary
-	summary := fmt.Sprintf("Compared %d services over %d minutes. ", len(metrics), window)
-	if winner != "" {
-		summary += fmt.Sprintf("%s has best performance.", winner)
 	}
 
 	out := CompareOut{
+		Mode:     "services",
 		Services: metrics,
-		Winner:   winner,
-		Summary:  summary,
-	}
-
-	// Render
-	format := parseFormat(in.Format)
-	if format != render.Data {
-		rendered := renderCompare(&out)
-		out.Render = &rendered
+		Winner:   result.Winner,
+		Summary:  result.Summary,
 	}
 
 	return nil, out, nil
 }
 
-func renderCompare(c *CompareOut) render.Output {
-	// Build comparison table
-	headers := []string{"Service", "Requests", "Error Rate", "P50", "P95"}
-	var rows [][]string
-	for _, m := range c.Services {
-		status := ""
-		if m.Service == c.Winner {
-			status = " ★"
-		}
-		rows = append(rows, []string{
-			m.Service + status,
-			fmt.Sprintf("%d", m.Requests),
-			fmt.Sprintf("%.2f%%", m.ErrorRate*100),
-			fmt.Sprintf("%.1fms", m.P50Ms),
-			fmt.Sprintf("%.1fms", m.P95Ms),
-		})
+// compareTime compares the same service across two time windows.
+func (s *Server) compareTime(ctx context.Context, in CompareIn) (*mcp.CallToolResult, CompareOut, error) {
+	if in.Service == "" {
+		return nil, CompareOut{}, fmt.Errorf("service is required for time mode")
+	}
+	if in.Left == nil || in.Left["window"] == "" {
+		return nil, CompareOut{}, fmt.Errorf("left.window is required for time mode (ISO range: start/end)")
+	}
+	if in.Right == nil || in.Right["window"] == "" {
+		return nil, CompareOut{}, fmt.Errorf("right.window is required for time mode (ISO range: start/end)")
 	}
 
-	table := &render.Table{
-		Title:   "Service Comparison",
-		Headers: headers,
-		Rows:    rows,
+	leftTW, err := parseWindow(in.Left["window"])
+	if err != nil {
+		return nil, CompareOut{}, fmt.Errorf("invalid left.window: %w", err)
+	}
+	rightTW, err := parseWindow(in.Right["window"])
+	if err != nil {
+		return nil, CompareOut{}, fmt.Errorf("invalid right.window: %w", err)
 	}
 
-	// Winner badge
-	var badge *render.Badge
-	if c.Winner != "" {
-		badge = &render.Badge{Label: c.Winner + " wins", Status: "healthy"}
+	leftLabel := fmt.Sprintf("Before (%s)", formatWindowLabel(leftTW))
+	rightLabel := fmt.Sprintf("After (%s)", formatWindowLabel(rightTW))
+
+	result, err := s.svc.CompareTime(ctx, service.CompareTimeParams{
+		Service: in.Service,
+		Left:    service.TimeRange{Start: leftTW.Start, End: leftTW.End},
+		Right:   service.TimeRange{Start: rightTW.Start, End: rightTW.End},
+		Focus:   in.Focus,
+	})
+	if err != nil {
+		return nil, CompareOut{}, err
 	}
 
-	// Compose
-	items := []render.Renderer{
-		&render.Text{Content: c.Summary},
-		table,
-	}
-	if badge != nil {
-		items = append(items, badge)
+	comparison := mapMetricDiffs(result.Comparison)
+	verdict := service.BuildVerdict(result.Comparison)
+
+	out := CompareOut{
+		Mode:       "time",
+		LeftLabel:  leftLabel,
+		RightLabel: rightLabel,
+		Comparison: comparison,
+		Verdict:    verdict,
 	}
 
-	composed := &render.Compose{
-		Vertical: true,
-		Items:    items,
-	}
-
-	return composed.Render(render.Both)
+	return nil, out, nil
 }
 
-// Helper functions for row parsing
-func getString(row map[string]interface{}, key string) string {
-	if v, ok := row[key]; ok {
-		if s, ok := v.(string); ok {
-			return s
-		}
+// compareOperations compares two operations within the same service.
+func (s *Server) compareOperations(ctx context.Context, in CompareIn) (*mcp.CallToolResult, CompareOut, error) {
+	if in.Service == "" {
+		return nil, CompareOut{}, fmt.Errorf("service is required for operations mode")
 	}
-	return ""
+	if in.Left == nil || in.Left["operation"] == "" {
+		return nil, CompareOut{}, fmt.Errorf("left.operation is required for operations mode")
+	}
+	if in.Right == nil || in.Right["operation"] == "" {
+		return nil, CompareOut{}, fmt.Errorf("right.operation is required for operations mode")
+	}
+
+	leftOp := in.Left["operation"]
+	rightOp := in.Right["operation"]
+
+	windowStr := in.Window
+	if windowStr == "" {
+		windowStr = "1h"
+	}
+	tw, err := parseWindow(windowStr)
+	if err != nil {
+		return nil, CompareOut{}, fmt.Errorf("invalid window: %w", err)
+	}
+
+	result, err := s.svc.CompareOperations(ctx, service.CompareOperationsParams{
+		Service:        in.Service,
+		LeftOperation:  leftOp,
+		RightOperation: rightOp,
+		Window:         tw.Minutes,
+		Focus:          in.Focus,
+	})
+	if err != nil {
+		return nil, CompareOut{}, err
+	}
+
+	comparison := mapMetricDiffs(result.Comparison)
+	verdict := service.BuildVerdict(result.Comparison)
+
+	out := CompareOut{
+		Mode:       "operations",
+		LeftLabel:  leftOp,
+		RightLabel: rightOp,
+		Comparison: comparison,
+		Verdict:    verdict,
+	}
+
+	return nil, out, nil
 }
 
-func getInt64(row map[string]interface{}, key string) int64 {
-	if v, ok := row[key]; ok {
-		switch n := v.(type) {
-		case int64:
-			return n
-		case float64:
-			return int64(n)
-		case int:
-			return int64(n)
-		}
-	}
-	return 0
+// --- Presentation-level helpers (stay in MCP layer) ---
+
+// formatWindowLabel formats a TimeWindow as a short human-readable label.
+func formatWindowLabel(tw TimeWindow) string {
+	start := tw.Start.Format("15:04")
+	end := tw.End.Format("15:04")
+	return fmt.Sprintf("%s\u2013%s", start, end)
 }
 
-func getFloat64(row map[string]interface{}, key string) float64 {
-	if v, ok := row[key]; ok {
-		switch n := v.(type) {
-		case float64:
-			return n
-		case int64:
-			return float64(n)
-		case int:
-			return float64(n)
+// mapMetricDiffs converts service.MetricDiff map to MCP CompareMetricDiff map.
+func mapMetricDiffs(src map[string]service.MetricDiff) map[string]CompareMetricDiff {
+	out := make(map[string]CompareMetricDiff, len(src))
+	for k, v := range src {
+		out[k] = CompareMetricDiff{
+			LeftValue:                v.LeftValue,
+			RightValue:               v.RightValue,
+			ChangePct:                v.ChangePct,
+			Direction:                v.Direction,
+			StatisticallySignificant: v.StatisticallySignificant,
 		}
 	}
-	return 0
+	return out
 }

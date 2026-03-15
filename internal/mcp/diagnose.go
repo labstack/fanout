@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/labstack/fanout/internal/render"
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -13,18 +12,41 @@ import (
 
 type DiagnoseIn struct {
 	Service   string `json:"service" jsonschema:"Service name to diagnose"`
-	Window    int    `json:"window,omitempty" jsonschema:"Time window in minutes,default=15"`
+	Window    string `json:"window,omitempty" jsonschema:"Time window: duration (15m, 1h, 7d) or ISO range,default=15m"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
 	TenantID  string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
-	Format    string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
+	Symptom   string `json:"symptom,omitempty" jsonschema:"Focus diagnosis on: latency, errors, throughput_drop, or auto (default)"`
 }
 
 type ServiceMetrics struct {
-	P50Ms     float64 `json:"p50_ms"`
-	P95Ms     float64 `json:"p95_ms"`
-	P99Ms     float64 `json:"p99_ms"`
-	ErrorRate float64 `json:"error_rate"`
-	Count     int64   `json:"request_count"`
+	P50Ms                float64             `json:"p50_ms"`
+	P95Ms                float64             `json:"p95_ms"`
+	P99Ms                float64             `json:"p99_ms"`
+	ErrorRate            float64             `json:"error_rate"`
+	Count                int64               `json:"request_count"`
+	ComparisonToBaseline *BaselineComparison `json:"comparison_to_baseline,omitempty"`
+}
+
+// BaselineComparison compares current P95 against historical same-time-of-day averages.
+type BaselineComparison struct {
+	P95Ratio       float64 `json:"p95_ratio"`
+	BaselineP95Ms  float64 `json:"baseline_p95_ms"`
+	BaselineWindow string  `json:"baseline_window"`
+}
+
+// ChangePoint represents a statistically significant metric jump.
+type ChangePoint struct {
+	Time   string  `json:"time"`
+	Metric string  `json:"metric"`
+	Before float64 `json:"before"`
+	After  float64 `json:"after"`
+}
+
+// LogPattern describes a recurring log message pattern near a change point.
+type LogPattern struct {
+	Pattern  string `json:"pattern"`
+	Count    int64  `json:"count"`
+	Severity string `json:"severity"`
 }
 
 type ErrorDetail struct {
@@ -48,13 +70,15 @@ type Dependency struct {
 }
 
 type DiagnoseOut struct {
-	Service        string          `json:"service"`
-	Status         string          `json:"status"`
-	Metrics        ServiceMetrics  `json:"metrics"`
-	TopErrors      []ErrorDetail   `json:"top_errors"`
-	SlowOperations []SlowOperation `json:"slow_operations"`
-	Dependencies   []Dependency    `json:"dependencies"`
-	Render         *render.Output  `json:"render,omitempty"`
+	Service               string          `json:"service"`
+	Status                string          `json:"status"`
+	SymptomDetected       string          `json:"symptom_detected,omitempty"`
+	Metrics               ServiceMetrics  `json:"metrics"`
+	TopErrors             []ErrorDetail   `json:"top_errors"`
+	SlowOperations        []SlowOperation `json:"slow_operations"`
+	Dependencies          []Dependency    `json:"dependencies"`
+	ChangePoints          []ChangePoint   `json:"change_points,omitempty"`
+	CorrelatedLogPatterns []LogPattern    `json:"correlated_log_patterns,omitempty"`
 }
 
 func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in DiagnoseIn) (*mcp.CallToolResult, DiagnoseOut, error) {
@@ -62,31 +86,43 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 		return nil, DiagnoseOut{}, fmt.Errorf("service is required")
 	}
 
-	window := clampInt(in.Window, minWindow, maxWindow, defWindow)
-	result, err := s.svc.Diagnose(ctx, in.Service, window, in.Namespace, in.TenantID)
+	tw, err := parseWindow(in.Window)
 	if err != nil {
-		return nil, DiagnoseOut{
-			Service:        in.Service,
-			Status:         "unknown",
-			TopErrors:      []ErrorDetail{},
-			SlowOperations: []SlowOperation{},
-			Dependencies:   []Dependency{},
-		}, nil
+		return nil, DiagnoseOut{}, fmt.Errorf("invalid window: %w", err)
+	}
+	window := clampInt(tw.Minutes, minWindow, maxWindow, defWindow)
+	result, err := s.svc.DiagnoseEnhanced(ctx, in.Service, window, in.Symptom, in.Namespace, in.TenantID)
+	if err != nil {
+		return nil, DiagnoseOut{}, fmt.Errorf("diagnose failed for %s: %w", in.Service, err)
+	}
+
+	metrics := ServiceMetrics{
+		P50Ms:     result.P50Ms,
+		P95Ms:     result.P95Ms,
+		P99Ms:     result.P99Ms,
+		ErrorRate: result.ErrorRate,
+		Count:     result.SpanCount,
+	}
+	if result.Baseline != nil {
+		p95Ratio := 0.0
+		if result.Baseline.BaselineP95Ms > 0 {
+			p95Ratio = result.P95Ms / result.Baseline.BaselineP95Ms
+		}
+		metrics.ComparisonToBaseline = &BaselineComparison{
+			P95Ratio:       p95Ratio,
+			BaselineP95Ms:  result.Baseline.BaselineP95Ms,
+			BaselineWindow: result.Baseline.BaselineWindow,
+		}
 	}
 
 	out := DiagnoseOut{
-		Service: result.Service,
-		Status:  result.Status,
-		Metrics: ServiceMetrics{
-			P50Ms:     result.P50Ms,
-			P95Ms:     result.P95Ms,
-			P99Ms:     result.P99Ms,
-			ErrorRate: result.ErrorRate,
-			Count:     result.SpanCount,
-		},
-		TopErrors:      make([]ErrorDetail, 0, len(result.TopErrors)),
-		SlowOperations: make([]SlowOperation, 0, len(result.SlowOps)),
-		Dependencies:   make([]Dependency, 0, len(result.Dependencies)),
+		Service:         result.Service,
+		Status:          result.Status,
+		SymptomDetected: result.SymptomDetected,
+		Metrics:         metrics,
+		TopErrors:       make([]ErrorDetail, 0, len(result.TopErrors)),
+		SlowOperations:  make([]SlowOperation, 0, len(result.SlowOps)),
+		Dependencies:    make([]Dependency, 0, len(result.Dependencies)),
 	}
 
 	for _, e := range result.TopErrors {
@@ -115,105 +151,26 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 		})
 	}
 
-	// Render output
-	format := parseFormat(in.Format)
-	if format != render.Data {
-		rendered := renderDiagnose(&out)
-		out.Render = &rendered
+	// Populate change points.
+	for _, cp := range result.ChangePoints {
+		out.ChangePoints = append(out.ChangePoints, ChangePoint{
+			Time:   cp.Time,
+			Metric: cp.Metric,
+			Before: cp.Before,
+			After:  cp.After,
+		})
+	}
+
+	// Populate correlated log patterns.
+	for _, lp := range result.CorrelatedLogPatterns {
+		out.CorrelatedLogPatterns = append(out.CorrelatedLogPatterns, LogPattern{
+			Pattern:  lp.Pattern,
+			Count:    lp.Count,
+			Severity: lp.Severity,
+		})
 	}
 
 	return nil, out, nil
-}
-
-func renderDiagnose(d *DiagnoseOut) render.Output {
-	// Header with status badge
-	header := &render.Panel{
-		Title: d.Service,
-		Content: []render.Renderer{
-			&render.Badge{Label: d.Status, Status: d.Status},
-		},
-	}
-
-	// Latency metrics
-	metrics := &render.Grid{
-		Cols: 4,
-		Items: []render.Renderer{
-			&render.Metric{Label: "P50", Value: fmt.Sprintf("%.1f", d.Metrics.P50Ms), Unit: "ms"},
-			&render.Metric{Label: "P95", Value: fmt.Sprintf("%.1f", d.Metrics.P95Ms), Unit: "ms"},
-			&render.Metric{Label: "P99", Value: fmt.Sprintf("%.1f", d.Metrics.P99Ms), Unit: "ms"},
-			&render.Metric{Label: "Error Rate", Value: fmt.Sprintf("%.2f", d.Metrics.ErrorRate*100), Unit: "%"},
-		},
-	}
-
-	// Request count
-	reqCount := &render.Metric{Label: "Requests", Value: fmt.Sprintf("%d", d.Metrics.Count)}
-
-	// Top errors table
-	var errorRows [][]string
-	for _, e := range d.TopErrors {
-		errorRows = append(errorRows, []string{
-			truncate(e.Message, 50),
-			fmt.Sprintf("%d", e.Count),
-			truncate(e.ExampleTrace, 16),
-		})
-	}
-	errorsTable := &render.Table{
-		Title:    "Top Errors",
-		Headers:  []string{"Message", "Count", "Trace"},
-		Rows:     errorRows,
-		MaxWidth: 50,
-	}
-
-	// Slow operations table
-	var slowRows [][]string
-	for _, op := range d.SlowOperations {
-		slowRows = append(slowRows, []string{
-			truncate(op.Name, 40),
-			fmt.Sprintf("%.1fms", op.P95Ms),
-			fmt.Sprintf("%d", op.Count),
-		})
-	}
-	slowTable := &render.Table{
-		Title:    "Slow Operations",
-		Headers:  []string{"Operation", "P95", "Count"},
-		Rows:     slowRows,
-		MaxWidth: 40,
-	}
-
-	// Dependencies table
-	var depRows [][]string
-	for _, dep := range d.Dependencies {
-		depRows = append(depRows, []string{
-			dep.Service,
-			dep.Status,
-			fmt.Sprintf("%.1fms", dep.AvgMs),
-			fmt.Sprintf("%.2f%%", dep.ErrorRate*100),
-			fmt.Sprintf("%d", dep.Calls),
-		})
-	}
-	depsTable := &render.Table{
-		Title:   "Dependencies",
-		Headers: []string{"Service", "Status", "Avg", "Errors", "Calls"},
-		Rows:    depRows,
-	}
-
-	// Compose
-	composed := &render.Compose{
-		Vertical: true,
-		Items:    []render.Renderer{header, metrics, reqCount},
-	}
-
-	if len(errorRows) > 0 {
-		composed.Items = append(composed.Items, errorsTable)
-	}
-	if len(slowRows) > 0 {
-		composed.Items = append(composed.Items, slowTable)
-	}
-	if len(depRows) > 0 {
-		composed.Items = append(composed.Items, depsTable)
-	}
-
-	return composed.Render(render.Both)
 }
 
 func truncate(s string, max int) string {

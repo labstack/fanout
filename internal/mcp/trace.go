@@ -3,18 +3,19 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
-	"github.com/labstack/fanout/internal/render"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // trace - Request journey with auto root cause analysis
 
 type TraceIn struct {
-	TraceID     string `json:"trace_id" jsonschema:"Trace ID to analyze"`
-	IncludeLogs *bool  `json:"include_logs,omitempty" jsonschema:"Include correlated logs,default=true"`
-	Window      int    `json:"window,omitempty" jsonschema:"Time window in minutes to search,default=1440 (24h)"`
-	Format      string `json:"format,omitempty" jsonschema:"Output format: ascii, html, both, data (default=ascii)"`
+	TraceID        string `json:"trace_id" jsonschema:"Trace ID to analyze"`
+	IncludeLogs    *bool  `json:"include_logs,omitempty" jsonschema:"Include correlated logs,default=true"`
+	Window         string `json:"window,omitempty" jsonschema:"Time window: duration (15m, 1h, 24h, 7d) or ISO range,default=24h"`
+	CompareTo      string `json:"compare_to,omitempty" jsonschema:"Another trace ID for side-by-side latency comparison"`
+	IncludeMetrics *bool  `json:"include_metrics,omitempty" jsonschema:"Include service_rollup metric snapshots around trace time,default=false"`
 }
 
 type TraceSpan struct {
@@ -69,17 +70,45 @@ type RootCause struct {
 	Service     string `json:"service,omitempty"`
 }
 
+type TraceComparison struct {
+	OtherTraceID    string          `json:"other_trace_id"`
+	OtherDurationMs float64         `json:"other_duration_ms"`
+	DurationDeltaMs float64         `json:"duration_delta_ms"`
+	SpanDiffs       []TraceSpanDiff `json:"span_diffs"`
+}
+
+type TraceSpanDiff struct {
+	Operation string  `json:"operation"`
+	Service   string  `json:"service"`
+	ThisMs    float64 `json:"this_ms"`
+	OtherMs   float64 `json:"other_ms"`
+	DeltaMs   float64 `json:"delta_ms"`
+}
+
+type TraceMetricContext struct {
+	Service     string              `json:"service"`
+	AtTraceTime TraceMetricSnapshot `json:"at_trace_time"`
+}
+
+type TraceMetricSnapshot struct {
+	P50Ms       float64 `json:"p50_ms"`
+	P95Ms       float64 `json:"p95_ms"`
+	ErrorRate   float64 `json:"error_rate"`
+	SpansPerMin float64 `json:"spans_per_min"`
+}
+
 type TraceOut struct {
-	TraceID       string          `json:"trace_id"`
-	TotalDuration float64         `json:"total_duration_ms"`
-	SpanCount     int             `json:"span_count"`
-	Services      []string        `json:"services"`
-	HasError      bool            `json:"has_error"`
-	Spans         []TraceSpan     `json:"spans"`
-	Logs          []CorrelatedLog `json:"logs"`
-	RootCause     *RootCause      `json:"root_cause,omitempty"`
-	CriticalPath  []string        `json:"critical_path"`
-	Render        *render.Output  `json:"render,omitempty"`
+	TraceID       string               `json:"trace_id"`
+	TotalDuration float64              `json:"total_duration_ms"`
+	SpanCount     int                  `json:"span_count"`
+	Services      []string             `json:"services"`
+	HasError      bool                 `json:"has_error"`
+	Spans         []TraceSpan          `json:"spans"`
+	Logs          []CorrelatedLog      `json:"logs"`
+	RootCause     *RootCause           `json:"root_cause,omitempty"`
+	CriticalPath  []string             `json:"critical_path"`
+	Comparison    *TraceComparison     `json:"comparison,omitempty"`
+	MetricContext []TraceMetricContext `json:"metric_context,omitempty"`
 }
 
 func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn) (*mcp.CallToolResult, TraceOut, error) {
@@ -93,8 +122,16 @@ func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn
 		includeLogs = *in.IncludeLogs
 	}
 
-	// Default to 24h (1440 min) for trace lookups
-	window := clampInt(in.Window, minWindow, maxWindow, 1440)
+	// Parse window; default to 24h for trace lookups
+	windowStr := in.Window
+	if windowStr == "" {
+		windowStr = "24h"
+	}
+	tw, err := parseWindow(windowStr)
+	if err != nil {
+		return nil, TraceOut{}, fmt.Errorf("invalid window: %w", err)
+	}
+	window := clampInt(tw.Minutes, minWindow, maxWindow, 1440)
 
 	result, err := s.svc.Trace(ctx, in.TraceID, includeLogs, window)
 	if err != nil {
@@ -178,136 +215,50 @@ func (s *Server) trace(ctx context.Context, req *mcp.CallToolRequest, in TraceIn
 		}
 	}
 
-	// Render output
-	format := parseFormat(in.Format)
-	if format != render.Data {
-		rendered := renderTrace(&out)
-		out.Render = &rendered
+	// Optional: side-by-side trace comparison
+	if in.CompareTo != "" {
+		cmp, cmpErr := s.svc.CompareTrace(ctx, result, in.CompareTo, window)
+		if cmpErr != nil {
+			slog.Warn("trace comparison failed", "compare_to", in.CompareTo, "err", cmpErr)
+		}
+		if cmp != nil {
+			outCmp := &TraceComparison{
+				OtherTraceID:    cmp.OtherTraceID,
+				OtherDurationMs: cmp.OtherDurationMs,
+				DurationDeltaMs: cmp.DurationDeltaMs,
+			}
+			for _, d := range cmp.SpanDiffs {
+				outCmp.SpanDiffs = append(outCmp.SpanDiffs, TraceSpanDiff{
+					Operation: d.Operation,
+					Service:   d.Service,
+					ThisMs:    d.ThisMs,
+					OtherMs:   d.OtherMs,
+					DeltaMs:   d.DeltaMs,
+				})
+			}
+			out.Comparison = outCmp
+		}
+	}
+
+	// Optional: metric context from service_rollup
+	includeMetrics := false
+	if in.IncludeMetrics != nil {
+		includeMetrics = *in.IncludeMetrics
+	}
+	if includeMetrics {
+		mcs := s.svc.FetchMetricContext(ctx, result)
+		for _, mc := range mcs {
+			out.MetricContext = append(out.MetricContext, TraceMetricContext{
+				Service: mc.Service,
+				AtTraceTime: TraceMetricSnapshot{
+					P50Ms:       mc.AtTraceTime.P50Ms,
+					P95Ms:       mc.AtTraceTime.P95Ms,
+					ErrorRate:   mc.AtTraceTime.ErrorRate,
+					SpansPerMin: mc.AtTraceTime.SpansPerMin,
+				},
+			})
+		}
 	}
 
 	return nil, out, nil
-}
-
-func renderTrace(t *TraceOut) render.Output {
-	var items []render.Renderer
-
-	// Header with key metrics
-	status := "healthy"
-	if t.HasError {
-		status = "unhealthy"
-	}
-	header := &render.Grid{
-		Cols: 4,
-		Items: []render.Renderer{
-			&render.Badge{Label: status, Status: status},
-			&render.Metric{Label: "Duration", Value: fmt.Sprintf("%.1f", t.TotalDuration), Unit: "ms"},
-			&render.Metric{Label: "Spans", Value: fmt.Sprintf("%d", t.SpanCount)},
-			&render.Metric{Label: "Services", Value: fmt.Sprintf("%d", len(t.Services))},
-		},
-	}
-	items = append(items, header)
-
-	// Root cause alert if present
-	if t.RootCause != nil {
-		rootCause := &render.Panel{
-			Title: "Root Cause",
-			Content: []render.Renderer{
-				&render.Badge{Label: t.RootCause.Type, Status: "unhealthy"},
-				&render.Text{Content: t.RootCause.Description},
-				&render.Text{Content: fmt.Sprintf("Service: %s", t.RootCause.Service), Style: "dim"},
-			},
-		}
-		items = append(items, rootCause)
-	}
-
-	// Build span tree
-	tree := buildTraceTree(t.Spans)
-	items = append(items, &render.Panel{
-		Title:   "Trace Tree",
-		Content: []render.Renderer{tree},
-	})
-
-	// Critical path
-	if len(t.CriticalPath) > 0 {
-		pathText := ""
-		for i, p := range t.CriticalPath {
-			if i > 0 {
-				pathText += " → "
-			}
-			pathText += p
-		}
-		items = append(items, &render.Text{Content: "Critical Path: " + pathText, Style: "bold"})
-	}
-
-	// Logs table if present
-	if len(t.Logs) > 0 {
-		var rows [][]string
-		for _, lg := range t.Logs {
-			rows = append(rows, []string{
-				lg.Timestamp,
-				lg.Service,
-				lg.Severity,
-				truncate(lg.Body, 50),
-			})
-		}
-		logsTable := &render.Table{
-			Title:    "Correlated Logs",
-			Headers:  []string{"Time", "Service", "Severity", "Body"},
-			Rows:     rows,
-			MaxWidth: 50,
-		}
-		items = append(items, logsTable)
-	}
-
-	composed := &render.Compose{Vertical: true, Items: items}
-	return composed.Render(render.Both)
-}
-
-func buildTraceTree(spans []TraceSpan) *render.Tree {
-	if len(spans) == 0 {
-		return &render.Tree{Root: &render.Node{Label: "No spans"}}
-	}
-
-	nodeMap := make(map[string]*render.Node)
-	var root *render.Node
-
-	// Create nodes
-	for _, sp := range spans {
-		statusIcon := "○"
-		if sp.Status == "error" || sp.Status == "ERROR" {
-			statusIcon = "✗"
-		} else if sp.IsCritical {
-			statusIcon = "●"
-		}
-
-		node := &render.Node{
-			Label: fmt.Sprintf("%s %s/%s", statusIcon, sp.Service, sp.Operation),
-			Value: fmt.Sprintf("%.1fms", sp.DurationMs),
-			Meta: map[string]string{
-				"status":    sp.Status,
-				"self_time": fmt.Sprintf("%.1fms", sp.SelfTimeMs),
-			},
-		}
-		nodeMap[sp.SpanID] = node
-
-		if sp.ParentSpanID == "" {
-			root = node
-		}
-	}
-
-	// Link children to parents
-	for _, sp := range spans {
-		if sp.ParentSpanID != "" {
-			if parent, ok := nodeMap[sp.ParentSpanID]; ok {
-				parent.Children = append(parent.Children, nodeMap[sp.SpanID])
-			}
-		}
-	}
-
-	// Fallback if no root found
-	if root == nil && len(spans) > 0 {
-		root = nodeMap[spans[0].SpanID]
-	}
-
-	return &render.Tree{Root: root}
 }

@@ -10,8 +10,10 @@ import (
 
 // SQLRequest represents a direct SQL query request
 type SQLRequest struct {
-	Query   string `json:"query"`
-	MaxRows int    `json:"max_rows,omitempty"`
+	Query     string `json:"query"`
+	MaxRows   int    `json:"max_rows,omitempty"`
+	TimeoutMs int    `json:"timeout_ms,omitempty"`
+	Explain   bool   `json:"explain,omitempty"`
 }
 
 // SQLResponse represents the response from a SQL query
@@ -20,6 +22,7 @@ type SQLResponse struct {
 	ExecutionTimeMs int64    `json:"execution_time_ms"`
 	RowsReturned    int      `json:"rows_returned"`
 	Error           string   `json:"error,omitempty"`
+	QueryPlan       string   `json:"query_plan,omitempty"`
 }
 
 // RowMap represents a single row as a map of column name to value
@@ -34,22 +37,35 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 		req.MaxRows = 1000
 	}
 
-	// Validate SQL
+	// Set default timeout
+	timeoutMs := req.TimeoutMs
+	if timeoutMs <= 0 {
+		timeoutMs = 30000
+	}
+
+	// Validate SQL (skip validation for EXPLAIN-prefixed queries that we construct)
 	if err := validateSQL(req.Query, d.cfg.LakeDir); err != nil {
 		return SQLResponse{
 			Error: fmt.Sprintf("SQL validation failed: %v", err),
 		}
 	}
 
-	// Add LIMIT if not present
-	query := ensureLimit(req.Query, req.MaxRows)
+	// Build the query to execute
+	var execQuery string
+	if req.Explain {
+		// EXPLAIN does not need LIMIT
+		execQuery = "EXPLAIN " + req.Query
+	} else {
+		// Add LIMIT if not present
+		execQuery = ensureLimit(req.Query, req.MaxRows)
+	}
 
 	// Add timeout to context
-	queryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
 	// Execute query
-	rows, err := d.DB.QueryContext(queryCtx, query)
+	rows, err := d.DB.QueryContext(queryCtx, execQuery)
 	if err != nil {
 		return SQLResponse{
 			Error:           fmt.Sprintf("Query execution failed: %v", err),
@@ -69,8 +85,9 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 
 	// Read results
 	results := make([]RowMap, 0, req.MaxRows)
+	var planLines []string
 	for rows.Next() {
-		if len(results) >= req.MaxRows {
+		if !req.Explain && len(results) >= req.MaxRows {
 			break
 		}
 
@@ -88,23 +105,44 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 			}
 		}
 
-		// Convert to map
-		row := make(RowMap)
-		for i, col := range columns {
-			val := values[i]
-			// Convert []uint8 to string for better JSON representation
-			if b, ok := val.([]byte); ok {
-				row[col] = string(b)
-			} else {
-				row[col] = val
+		if req.Explain {
+			// EXPLAIN returns text rows; collect them into a plan string
+			for _, val := range values {
+				switch v := val.(type) {
+				case []byte:
+					planLines = append(planLines, string(v))
+				case string:
+					planLines = append(planLines, v)
+				default:
+					planLines = append(planLines, fmt.Sprintf("%v", v))
+				}
 			}
+		} else {
+			// Convert to map
+			row := make(RowMap)
+			for i, col := range columns {
+				val := values[i]
+				// Convert []uint8 to string for better JSON representation
+				if b, ok := val.([]byte); ok {
+					row[col] = string(b)
+				} else {
+					row[col] = val
+				}
+			}
+			results = append(results, row)
 		}
-		results = append(results, row)
 	}
 
 	if err := rows.Err(); err != nil {
 		return SQLResponse{
 			Error:           fmt.Sprintf("Error reading rows: %v", err),
+			ExecutionTimeMs: time.Since(start).Milliseconds(),
+		}
+	}
+
+	if req.Explain {
+		return SQLResponse{
+			QueryPlan:       strings.Join(planLines, "\n"),
 			ExecutionTimeMs: time.Since(start).Milliseconds(),
 		}
 	}
@@ -236,90 +274,4 @@ func ensureLimit(query string, maxRows int) string {
 	query = strings.TrimSpace(query)
 	query = strings.TrimSuffix(query, ";")
 	return fmt.Sprintf("%s LIMIT %d", query, maxRows)
-}
-
-// GetQueryExamples returns example queries for documentation
-func GetQueryExamples() []QueryExample {
-	return []QueryExample{
-		{
-			Title:       "Error logs in last hour",
-			Description: "Find all error and fatal logs from the last hour",
-			Query: `SELECT
-  epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) as timestamp,
-  "name=service_name" as service_name,
-  "name=severity" as severity,
-  "name=body" as body
-FROM read_parquet('lake/logs/tenant=*/namespace=*/**/*.parquet')
-WHERE "name=severity" IN ('ERROR', 'FATAL')
-  AND "name=time_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000
-ORDER BY "name=time_unix_nano" DESC
-LIMIT 100`,
-		},
-		{
-			Title:       "Slowest traces",
-			Description: "Top 20 slowest traces in the last 15 minutes",
-			Query: `SELECT
-  "name=trace_id" as trace_id,
-  "name=service_name" as service_name,
-  "name=name" as operation,
-  "name=duration_ms" as duration_ms,
-  "name=status_code" as status_code
-FROM read_parquet('lake/spans/tenant=*/namespace=*/**/*.parquet')
-WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 900) * 1000000000
-  AND ("name=parent_span_id" IS NULL OR "name=parent_span_id" = '')
-ORDER BY "name=duration_ms" DESC
-LIMIT 20`,
-		},
-		{
-			Title:       "HTTP 5xx errors by endpoint",
-			Description: "Count of 5xx errors grouped by service and endpoint",
-			Query: `SELECT
-  "name=service_name" as service_name,
-  "name=name" as endpoint,
-  COUNT(*) as error_count
-FROM read_parquet('lake/spans/tenant=*/namespace=*/**/*.parquet')
-WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 1800) * 1000000000
-  AND from_utf8("name=attributes_json") ILIKE '%http.status_code%'
-GROUP BY "name=service_name", "name=name"
-ORDER BY error_count DESC
-LIMIT 20`,
-		},
-		{
-			Title:       "Service throughput per minute",
-			Description: "Request count per service per minute in last hour",
-			Query: `SELECT
-  DATE_TRUNC('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) as minute,
-  "name=service_name" as service_name,
-  COUNT(*) as request_count
-FROM read_parquet('lake/spans/tenant=*/namespace=*/**/*.parquet')
-WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - 3600) * 1000000000
-  AND "name=kind" = 'SPAN_KIND_SERVER'
-GROUP BY minute, "name=service_name"
-ORDER BY minute DESC, request_count DESC
-LIMIT 100`,
-		},
-		{
-			Title:       "Service latency from rollup",
-			Description: "P50, P95 latencies by service from rollup table",
-			Query: `SELECT
-  service,
-  AVG(CASE WHEN spans > 0 THEN p50_ms END) as p50_ms,
-  AVG(CASE WHEN spans > 0 THEN p95_ms END) as p95_ms,
-  SUM(spans) as total_requests,
-  AVG(CASE WHEN spans > 0 THEN error_rate END) as avg_error_rate,
-  SUM(COALESCE(log_count, 0)) as total_logs,
-  SUM(COALESCE(metric_count, 0)) as total_metrics
-FROM service_rollup
-WHERE bucket >= NOW() - INTERVAL '15 minutes'
-GROUP BY service
-ORDER BY total_requests DESC`,
-		},
-	}
-}
-
-// QueryExample represents an example query
-type QueryExample struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Query       string `json:"query"`
 }

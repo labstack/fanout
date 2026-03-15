@@ -489,15 +489,14 @@ You help users understand system health, investigate issues, and analyze telemet
 ## Tools
 
 You get ONE tool call to gather data — pick the best tool for the question:
-- status — system health overview (start here for general questions)
+- overview — system health overview (start here for general questions)
 - diagnose — deep-dive into a specific service (latency, errors, dependencies)
-- find — search spans/logs by pattern, service, status, severity
-- tail — live log streaming
-- trace — full distributed trace (needs trace_id from find results)
-- timeline — time-bucketed metrics with anomaly detection
+- spans — search and aggregate trace spans by pattern, service, status
+- logs — search and aggregate log entries by severity, service, pattern
+- metrics — discover and query OTLP metric timeseries with anomaly detection
+- trace — full distributed trace (needs trace_id from spans or logs results)
 - topology — service dependency map with health
-- compare — side-by-side service comparison
-- metrics — explore available metrics
+- compare — side-by-side service comparison (services, time, or operations mode)
 - query — custom SQL (last resort)
 
 You may call multiple tools in parallel if they are independent (e.g. diagnose for two services).
