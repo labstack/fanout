@@ -144,13 +144,13 @@ func groupOrderByClause(orderBy string) string {
 }
 
 // groupByExpr maps a group_by field name to its SQL expression.
-// For attribute fields (http.*) we use json_extract_string on attributes_json.
+// Uses pre-extracted columns when available, falling back to JSON for old data.
 func groupByExpr(field string) string {
 	switch field {
 	case "http.method":
-		return `json_extract_string(attributes_json, '$.http.method')`
+		return `COALESCE(http_method, json_extract_string(attributes_json, '$.http.method'))`
 	case "http.status_code":
-		return `json_extract_string(attributes_json, '$.http.status_code')`
+		return `COALESCE(http_status_code, json_extract_string(attributes_json, '$.http.status_code'))`
 	default:
 		return field
 	}

@@ -11,7 +11,7 @@ import (
 
 // MetricsIn holds input parameters for the metrics tool.
 type MetricsIn struct {
-	Action      string            `json:"action,omitempty"      jsonschema:"Action: 'list' to discover metrics, 'query' to retrieve timeseries. Default: query"`
+	Action      string            `json:"action,omitempty"      jsonschema:"Action: 'list' to discover metrics, 'query' to retrieve timeseries, 'histogram' for bucket distributions, 'exemplars' for trace links. Default: query"`
 	Name        string            `json:"name,omitempty"        jsonschema:"Metric name for query action"`
 	Names       []string          `json:"names,omitempty"       jsonschema:"Multiple metric names for overlay in query action"`
 	Aggregation string            `json:"aggregation,omitempty" jsonschema:"Aggregation: avg|sum|min|max|count. Default: avg"`
@@ -177,11 +177,87 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 		}
 		return nil, out, nil
 
+	case "histogram":
+		p := service.MetricQueryParams{
+			Name:      in.Name,
+			Names:     in.Names,
+			Service:   in.Service,
+			Window:    tw.Minutes,
+			Namespace: in.Namespace,
+			TenantID:  in.Tenant,
+			Attrs:     in.Attrs,
+			Limit:     limit,
+		}
+		histResult, err := s.svc.MetricsHistogram(ctx, p)
+		if err != nil {
+			return nil, map[string]any{"histograms": []any{}, "suggestion": fmt.Sprintf("Query failed: %s", err)}, nil
+		}
+		type histOut struct {
+			Metric       string    `json:"metric"`
+			Service      string    `json:"service"`
+			Time         string    `json:"time"`
+			Bounds       []float64 `json:"bounds"`
+			BucketCounts []uint64  `json:"bucket_counts"`
+			Count        int64     `json:"count"`
+			Sum          float64   `json:"sum"`
+		}
+		hists := make([]histOut, 0, len(histResult.Histograms))
+		for _, h := range histResult.Histograms {
+			hists = append(hists, histOut{
+				Metric: h.Metric, Service: h.Service, Time: h.Time,
+				Bounds: h.Bounds, BucketCounts: h.BucketCounts,
+				Count: h.Count, Sum: h.Sum,
+			})
+		}
+		suggestion := ""
+		if len(hists) == 0 {
+			suggestion = "No histogram data found. Ensure the metric is a histogram type. Try action='list' to discover available metrics."
+		}
+		return nil, map[string]any{"histograms": hists, "suggestion": suggestion}, nil
+
+	case "exemplars":
+		p := service.MetricQueryParams{
+			Name:      in.Name,
+			Names:     in.Names,
+			Service:   in.Service,
+			Window:    tw.Minutes,
+			Namespace: in.Namespace,
+			TenantID:  in.Tenant,
+			Attrs:     in.Attrs,
+			Limit:     limit,
+		}
+		exResult, err := s.svc.MetricsExemplars(ctx, p)
+		if err != nil {
+			return nil, map[string]any{"exemplars": []any{}, "suggestion": fmt.Sprintf("Query failed: %s", err)}, nil
+		}
+		type exOut struct {
+			Metric  string  `json:"metric"`
+			Service string  `json:"service"`
+			Time    string  `json:"time"`
+			TraceID string  `json:"trace_id"`
+			SpanID  string  `json:"span_id,omitempty"`
+			Value   float64 `json:"value"`
+		}
+		exemplars := make([]exOut, 0, len(exResult.Exemplars))
+		for _, e := range exResult.Exemplars {
+			exemplars = append(exemplars, exOut{
+				Metric: e.Metric, Service: e.Service, Time: e.Time,
+				TraceID: e.TraceID, SpanID: e.SpanID, Value: e.Value,
+			})
+		}
+		suggestion := ""
+		if len(exemplars) == 0 {
+			suggestion = "No exemplars found. Exemplars require instrumentation to emit them (e.g., OpenTelemetry histogram with exemplar recording)."
+		} else {
+			suggestion = fmt.Sprintf("Found %d exemplar(s). Use the trace tool with any trace_id to investigate.", len(exemplars))
+		}
+		return nil, map[string]any{"exemplars": exemplars, "suggestion": suggestion}, nil
+
 	default:
 		return nil, MetricsQueryOut{
 			Series:     []MetricSeriesOut{},
 			Anomalies:  []MetricAnomalyOut{},
-			Suggestion: fmt.Sprintf("Unknown action %q: use 'list' or 'query'", action),
+			Suggestion: fmt.Sprintf("Unknown action %q: use 'list', 'query', 'histogram', or 'exemplars'", action),
 		}, nil
 	}
 }

@@ -321,8 +321,8 @@ func TestGroupByExpr(t *testing.T) {
 		{"operation", "operation"},
 		{"status", "status"},
 		{"kind", "kind"},
-		{"http.method", `json_extract_string(attributes_json, '$.http.method')`},
-		{"http.status_code", `json_extract_string(attributes_json, '$.http.status_code')`},
+		{"http.method", `COALESCE(http_method, json_extract_string(attributes_json, '$.http.method'))`},
+		{"http.status_code", `COALESCE(http_status_code, json_extract_string(attributes_json, '$.http.status_code'))`},
 	}
 	for _, c := range cases {
 		got := groupByExpr(c.field)

@@ -239,6 +239,7 @@ type SpanInfo struct {
 	ScopeName    string
 	ScopeVersion string
 	Attributes   map[string]any
+	Resource     map[string]any `json:"resource,omitempty"`
 }
 
 // SpanEvent is an annotation within a span's lifetime.
@@ -498,6 +499,37 @@ type MetricSeries struct {
 type MetricDatapoint struct {
 	Time  string
 	Value float64
+}
+
+// HistogramResult holds the result of the metrics histogram action.
+type HistogramResult struct {
+	Histograms []HistogramEntry
+}
+
+// HistogramEntry is a single histogram data point.
+type HistogramEntry struct {
+	Metric       string
+	Service      string
+	Time         string
+	Bounds       []float64
+	BucketCounts []uint64
+	Count        int64
+	Sum          float64
+}
+
+// ExemplarResult holds the result of the metrics exemplars action.
+type ExemplarResult struct {
+	Exemplars []ExemplarEntry
+}
+
+// ExemplarEntry links a metric data point to a trace.
+type ExemplarEntry struct {
+	Metric  string
+	Service string
+	Time    string
+	TraceID string
+	SpanID  string
+	Value   float64
 }
 
 // MetricAnomaly describes a statistical anomaly detected in metric data.
