@@ -205,17 +205,18 @@ export function TraceWaterfallBlock({ data, onAction }: { data: TraceWaterfallDa
               <text
                 x={indent + 14}
                 y={y + ROW_HEIGHT / 2 + 4}
-                className={`text-[11px] font-medium ${onAction ? "fill-blue-400 cursor-pointer hover:underline" : "fill-foreground"}`}
-                onClick={() => onAction?.(`Diagnose ${span.service}`)}
+                className="fill-foreground text-[11px]"
               >
-                {span.service}
-              </text>
-              <text
-                x={indent + 14 + span.service.length * 6.5 + 4}
-                y={y + ROW_HEIGHT / 2 + 4}
-                className="fill-muted-foreground text-[11px]"
-              >
-                {truncatedLabel.slice(span.service.length + 2)}
+                <tspan
+                  className={`font-medium ${onAction ? "fill-blue-400 cursor-pointer" : ""}`}
+                  onClick={() => onAction?.(`Diagnose ${span.service}`)}
+                >
+                  {span.service}
+                </tspan>
+                <tspan className="fill-muted-foreground">
+                  {" "}
+                  {truncatedLabel.slice(span.service.length + 2)}
+                </tspan>
               </text>
 
               {/* Span bar */}
