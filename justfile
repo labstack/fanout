@@ -59,3 +59,7 @@ docker TAG="local":
 # Deploy to production
 deploy *ARGS='':
     ./scripts/yeet.sh {{ARGS}}
+
+# Deploy demo (otel-demo + fanout)
+deploy-demo *ARGS='':
+    ./demo/yeet.sh {{ARGS}}

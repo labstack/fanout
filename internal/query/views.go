@@ -149,12 +149,20 @@ func CreateViews(db *sql.DB, lakeDir string) error {
 	}
 
 	// Write sentinel Parquet files so read_parquet globs are non-empty.
+	// Skip if real data already exists — the placeholder lacks hive partition
+	// columns and conflicts with hive-partitioned real files.
 	for signal, copySQLTemplate := range placeholders {
 		dir := filepath.Join(lakeDir, signal)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 		dest := filepath.Join(dir, "_placeholder.parquet")
+		// If real data exists (any subdirectory with parquet files),
+		// remove stale placeholder and skip creation.
+		if hasRealData(dir) {
+			os.Remove(dest) // clean up stale placeholder if present
+			continue
+		}
 		// Skip if placeholder already exists — avoid repeated COPY on every restart.
 		if _, statErr := os.Stat(dest); statErr == nil {
 			continue
@@ -182,4 +190,20 @@ func CreateViews(db *sql.DB, lakeDir string) error {
 		}
 	}
 	return nil
+}
+
+// hasRealData checks if a signal directory contains any parquet files beyond
+// the root-level placeholder (i.e., in hive-partitioned subdirectories).
+func hasRealData(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			// Any subdirectory means hive-partitioned data exists
+			return true
+		}
+	}
+	return false
 }
