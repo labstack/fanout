@@ -193,28 +193,11 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 			slog.Warn("metrics histogram failed", "err", err)
 			return nil, map[string]any{"histograms": []any{}, "suggestion": fmt.Sprintf("Query failed: %s", err)}, nil
 		}
-		type histOut struct {
-			Metric       string    `json:"metric"`
-			Service      string    `json:"service"`
-			Time         string    `json:"time"`
-			Bounds       []float64 `json:"bounds"`
-			BucketCounts []uint64  `json:"bucket_counts"`
-			Count        int64     `json:"count"`
-			Sum          float64   `json:"sum"`
-		}
-		hists := make([]histOut, 0, len(histResult.Histograms))
-		for _, h := range histResult.Histograms {
-			hists = append(hists, histOut{
-				Metric: h.Metric, Service: h.Service, Time: h.Time,
-				Bounds: h.Bounds, BucketCounts: h.BucketCounts,
-				Count: h.Count, Sum: h.Sum,
-			})
-		}
 		suggestion := ""
-		if len(hists) == 0 {
+		if len(histResult.Histograms) == 0 {
 			suggestion = "No histogram data found. Ensure the metric is a histogram type. Try action='list' to discover available metrics."
 		}
-		return nil, map[string]any{"histograms": hists, "suggestion": suggestion}, nil
+		return nil, map[string]any{"histograms": histResult.Histograms, "suggestion": suggestion}, nil
 
 	case "exemplars":
 		p := service.MetricQueryParams{
@@ -232,28 +215,13 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 			slog.Warn("metrics exemplars failed", "err", err)
 			return nil, map[string]any{"exemplars": []any{}, "suggestion": fmt.Sprintf("Query failed: %s", err)}, nil
 		}
-		type exOut struct {
-			Metric  string  `json:"metric"`
-			Service string  `json:"service"`
-			Time    string  `json:"time"`
-			TraceID string  `json:"trace_id"`
-			SpanID  string  `json:"span_id,omitempty"`
-			Value   float64 `json:"value"`
-		}
-		exemplars := make([]exOut, 0, len(exResult.Exemplars))
-		for _, e := range exResult.Exemplars {
-			exemplars = append(exemplars, exOut{
-				Metric: e.Metric, Service: e.Service, Time: e.Time,
-				TraceID: e.TraceID, SpanID: e.SpanID, Value: e.Value,
-			})
-		}
 		suggestion := ""
-		if len(exemplars) == 0 {
+		if len(exResult.Exemplars) == 0 {
 			suggestion = "No exemplars found. Exemplars require instrumentation to emit them (e.g., OpenTelemetry histogram with exemplar recording)."
 		} else {
-			suggestion = fmt.Sprintf("Found %d exemplar(s). Use the trace tool with any trace_id to investigate.", len(exemplars))
+			suggestion = fmt.Sprintf("Found %d exemplar(s). Use the trace tool with any trace_id to investigate.", len(exResult.Exemplars))
 		}
-		return nil, map[string]any{"exemplars": exemplars, "suggestion": suggestion}, nil
+		return nil, map[string]any{"exemplars": exResult.Exemplars, "suggestion": suggestion}, nil
 
 	default:
 		return nil, MetricsQueryOut{

@@ -508,13 +508,13 @@ type HistogramResult struct {
 
 // HistogramEntry is a single histogram data point.
 type HistogramEntry struct {
-	Metric       string
-	Service      string
-	Time         string
-	Bounds       []float64
-	BucketCounts []uint64
-	Count        int64
-	Sum          float64
+	Metric       string    `json:"metric"`
+	Service      string    `json:"service"`
+	Time         string    `json:"time"`
+	Bounds       []float64 `json:"bounds"`
+	BucketCounts []uint64  `json:"bucket_counts"`
+	Count        int64     `json:"count"`
+	Sum          float64   `json:"sum"`
 }
 
 // ExemplarResult holds the result of the metrics exemplars action.
@@ -524,12 +524,12 @@ type ExemplarResult struct {
 
 // ExemplarEntry links a metric data point to a trace.
 type ExemplarEntry struct {
-	Metric  string
-	Service string
-	Time    string
-	TraceID string
-	SpanID  string
-	Value   float64
+	Metric  string  `json:"metric"`
+	Service string  `json:"service"`
+	Time    string  `json:"time"`
+	TraceID string  `json:"trace_id"`
+	SpanID  string  `json:"span_id,omitempty"`
+	Value   float64 `json:"value"`
 }
 
 // MetricAnomaly describes a statistical anomaly detected in metric data.

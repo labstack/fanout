@@ -70,7 +70,9 @@ LIMIT 5;
 `, spansGlob, window)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, svc)
-	if err == nil {
+	if err != nil {
+		slog.Warn("top errors query failed", "method", "Diagnose.errors", "service", svc, "err", err)
+	} else {
 		defer rows.Close()
 		for rows.Next() {
 			var e ErrorInfo
@@ -104,7 +106,9 @@ LIMIT 5;
 `, spansGlob, window)
 
 	rows, err = s.duck.DB.QueryContext(ctx, q, svc)
-	if err == nil {
+	if err != nil {
+		slog.Warn("slow ops query failed", "method", "Diagnose.slowOps", "service", svc, "err", err)
+	} else {
 		defer rows.Close()
 		for rows.Next() {
 			var op SlowOp
@@ -135,7 +139,9 @@ LIMIT 10;
 `, window)
 
 	rows, err = s.duck.DB.QueryContext(ctx, q, svc)
-	if err == nil {
+	if err != nil {
+		slog.Warn("dependencies query failed", "method", "Diagnose.deps", "service", svc, "err", err)
+	} else {
 		defer rows.Close()
 		for rows.Next() {
 			var d Dependency

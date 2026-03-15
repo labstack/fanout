@@ -106,7 +106,9 @@ LIMIT 200;
 		if eventsJSON != nil {
 			if b, ok := eventsJSON.([]byte); ok && len(b) > 0 {
 				var events []SpanEvent
-				if err := json.Unmarshal(b, &events); err == nil {
+				if err := json.Unmarshal(b, &events); err != nil {
+					slog.Debug("events JSON parse failed", "span_id", r.SpanID, "err", err)
+				} else {
 					r.Events = events
 				}
 			}
@@ -115,7 +117,9 @@ LIMIT 200;
 		if linksJSON != nil {
 			if b, ok := linksJSON.([]byte); ok && len(b) > 0 {
 				var links []SpanLink
-				if err := json.Unmarshal(b, &links); err == nil {
+				if err := json.Unmarshal(b, &links); err != nil {
+					slog.Debug("links JSON parse failed", "span_id", r.SpanID, "err", err)
+				} else {
 					r.Links = links
 				}
 			}
@@ -124,7 +128,9 @@ LIMIT 200;
 		if attrsJSON != nil {
 			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
 				var attrs map[string]any
-				if err := json.Unmarshal(b, &attrs); err == nil {
+				if err := json.Unmarshal(b, &attrs); err != nil {
+					slog.Debug("attributes JSON parse failed", "span_id", r.SpanID, "err", err)
+				} else {
 					r.Attributes = attrs
 				}
 			}
@@ -133,7 +139,9 @@ LIMIT 200;
 		if resourceJSON != nil {
 			if b, ok := resourceJSON.([]byte); ok && len(b) > 0 {
 				var res map[string]any
-				if err := json.Unmarshal(b, &res); err == nil {
+				if err := json.Unmarshal(b, &res); err != nil {
+					slog.Debug("resource JSON parse failed", "span_id", r.SpanID, "err", err)
+				} else {
 					r.Resource = res
 				}
 			}

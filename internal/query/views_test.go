@@ -153,3 +153,46 @@ func TestNewDuck_ViewsCreated(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrateOldPartitions(t *testing.T) {
+	lakeDir := t.TempDir()
+
+	// Create old-style day-level parquet files (no hour partition)
+	for _, signal := range []string{"spans", "logs"} {
+		dayDir := lakeDir + "/" + signal + "/tenant=t1/namespace=ns1/year=2024/month=01/day=15"
+		if err := os.MkdirAll(dayDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dayDir+"/compacted.parquet", []byte("data"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create a file already in hour=00 (should not be affected)
+	hourDir := lakeDir + "/spans/tenant=t1/namespace=ns1/year=2024/month=01/day=16/hour=00"
+	if err := os.MkdirAll(hourDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(hourDir+"/part-1.parquet", []byte("data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	MigrateOldPartitions(lakeDir)
+
+	// Old files should be moved to hour=00/
+	for _, signal := range []string{"spans", "logs"} {
+		oldPath := lakeDir + "/" + signal + "/tenant=t1/namespace=ns1/year=2024/month=01/day=15/compacted.parquet"
+		if _, err := os.Stat(oldPath); err == nil {
+			t.Errorf("old file still exists: %s", oldPath)
+		}
+		newPath := lakeDir + "/" + signal + "/tenant=t1/namespace=ns1/year=2024/month=01/day=15/hour=00/compacted.parquet"
+		if _, err := os.Stat(newPath); err != nil {
+			t.Errorf("migrated file not found: %s", newPath)
+		}
+	}
+
+	// Existing hour=00 file should still exist
+	if _, err := os.Stat(hourDir + "/part-1.parquet"); err != nil {
+		t.Errorf("existing hour file was affected: %v", err)
+	}
+}

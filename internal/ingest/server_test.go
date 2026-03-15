@@ -417,6 +417,68 @@ func TestSummaryValues(t *testing.T) {
 	}
 }
 
+func TestSpanAttr(t *testing.T) {
+	attrs := []*common.KeyValue{
+		{Key: "http.request.method", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "POST"}}},
+		{Key: "http.method", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "GET"}}},
+		{Key: "db.system", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "postgresql"}}},
+	}
+
+	tests := []struct {
+		name string
+		keys []string
+		want string
+	}{
+		{"first key matches", []string{"db.system"}, "postgresql"},
+		{"priority order respected", []string{"http.method", "http.request.method"}, "GET"},
+		{"fallback key used", []string{"http.route", "http.request.method"}, "POST"},
+		{"no match", []string{"rpc.method"}, ""},
+		{"nil attrs", nil, ""},
+		{"empty keys", []string{}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input := attrs
+			if tt.name == "nil attrs" {
+				input = nil
+			}
+			got := spanAttr(input, tt.keys...)
+			if got != tt.want {
+				t.Errorf("spanAttr() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSpanAttrInt(t *testing.T) {
+	attrs := []*common.KeyValue{
+		{Key: "http.status_code", Value: &common.AnyValue{Value: &common.AnyValue_IntValue{IntValue: 200}}},
+		{Key: "http.response.status_code", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "404"}}},
+	}
+
+	tests := []struct {
+		name string
+		keys []string
+		want string
+	}{
+		{"int value extracted", []string{"http.status_code"}, "200"},
+		{"string value extracted", []string{"http.response.status_code"}, "404"},
+		{"priority order", []string{"http.status_code", "http.response.status_code"}, "200"},
+		{"fallback to second key", []string{"missing", "http.response.status_code"}, "404"},
+		{"no match", []string{"missing"}, ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := spanAttrInt(attrs, tt.keys...)
+			if got != tt.want {
+				t.Errorf("spanAttrInt() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTraceExportContextCancellation(t *testing.T) {
 	// Use an unbuffered channel so the send blocks
 	spans := make(chan lake.SpanRow)
