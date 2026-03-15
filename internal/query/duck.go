@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS edge_rollup (
 		return nil, err
 	}
 
+	// Migrate old partition layout (day-level parquet → hour=00/) before
+	// creating views so DuckDB sees consistent Hive partition depth.
+	MigrateOldPartitions(cfg.LakeDir)
+
 	// Create clean-name views over Parquet files plus the attr() macro.
 	// CreateViews handles directory creation internally, so failures here
 	// indicate a real problem (permissions, disk full, DuckDB error).

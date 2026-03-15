@@ -3,6 +3,7 @@ package query
 import (
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -130,6 +131,29 @@ SELECT
   NULL::VARCHAR AS tenant
 WHERE false
 ) TO '{path}' (FORMAT parquet);`,
+}
+
+// MigrateOldPartitions moves parquet files that sit directly under day=
+// directories into hour=00/ subdirectories. Older compaction code wrote
+// compacted.parquet at the day level, but DuckDB requires consistent Hive
+// partition depth across all files.
+func MigrateOldPartitions(lakeDir string) {
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		pattern := filepath.Join(lakeDir, signal, "tenant=*", "namespace=*",
+			"year=*", "month=*", "day=*", "*.parquet")
+		matches, _ := filepath.Glob(pattern)
+		for _, f := range matches {
+			dayDir := filepath.Dir(f)
+			hourDir := filepath.Join(dayDir, "hour=00")
+			if err := os.MkdirAll(hourDir, 0o755); err != nil {
+				continue
+			}
+			dest := filepath.Join(hourDir, filepath.Base(f))
+			if err := os.Rename(f, dest); err == nil {
+				slog.Info("migrated old partition file", "from", f, "to", dest)
+			}
+		}
+	}
 }
 
 // CreateViews creates (or replaces) the clean-name DuckDB views over Parquet
