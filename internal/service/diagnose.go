@@ -162,6 +162,8 @@ LIMIT 10;
 		}
 	}
 
+	out.SuggestedTraces = suggestedTraces
+
 	return out, nil
 }
 
@@ -499,6 +501,7 @@ UNION ALL
 	for rows.Next() {
 		var tid string
 		if err := rows.Scan(&tid); err != nil {
+			slog.Warn("scan failed", "method", "suggestedTraces", "err", err)
 			continue
 		}
 		if tid != "" && !seen[tid] {

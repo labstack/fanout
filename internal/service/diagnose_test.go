@@ -323,6 +323,9 @@ func TestDiagnoseEnhanced_SymptomAuto_Latency(t *testing.T) {
 	// Log correlation: no logs
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"pattern", "severity", "cnt"}))
+	// Suggested traces
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"tid"}))
 
 	result, err := svc.DiagnoseEnhanced(context.Background(), "slow-svc", 15, "auto", "", "")
 	if err != nil {
@@ -357,6 +360,9 @@ func TestDiagnoseEnhanced_SymptomAuto_Errors(t *testing.T) {
 	// Log correlation
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"pattern", "severity", "cnt"}))
+	// Suggested traces
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"tid"}))
 
 	result, err := svc.DiagnoseEnhanced(context.Background(), "error-svc", 15, "auto", "", "")
 	if err != nil {
@@ -383,6 +389,9 @@ func TestDiagnoseEnhanced_ExplicitSymptom(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"pattern", "severity", "cnt"}))
+	// Suggested traces
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"tid"}))
 
 	result, err := svc.DiagnoseEnhanced(context.Background(), "my-svc", 15, "throughput_drop", "", "")
 	if err != nil {
@@ -414,6 +423,9 @@ func TestDiagnoseEnhanced_WithBaseline(t *testing.T) {
 	// Log correlation
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"pattern", "severity", "cnt"}))
+	// Suggested traces
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"tid"}))
 
 	result, err := svc.DiagnoseEnhanced(context.Background(), "checkout", 15, "latency", "", "")
 	if err != nil {
@@ -451,6 +463,9 @@ func TestDiagnoseEnhanced_WithLogPatterns(t *testing.T) {
 		sqlmock.NewRows([]string{"pattern", "severity", "cnt"}).
 			AddRow("Batch size exceeds threshold", "WARN", int64(12)).
 			AddRow("Connection pool exhausted", "ERROR", int64(3)))
+	// Suggested traces
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"tid"}))
 
 	result, err := svc.DiagnoseEnhanced(context.Background(), "worker", 15, "auto", "", "")
 	if err != nil {
@@ -572,6 +587,11 @@ func TestDiagnoseEnhanced_WithChangePoints(t *testing.T) {
 	// Log correlation query: no logs
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"pattern", "severity", "cnt"}))
+	// Suggested traces around the change point
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"tid"}).
+			AddRow("trace-error-1").
+			AddRow("trace-slow-1"))
 
 	result, err := svc.DiagnoseEnhanced(context.Background(), "spike-svc", 15, "auto", "", "")
 	if err != nil {
@@ -580,5 +600,8 @@ func TestDiagnoseEnhanced_WithChangePoints(t *testing.T) {
 
 	if len(result.ChangePoints) == 0 {
 		t.Error("expected at least one change point from the latency spike, got 0")
+	}
+	if len(result.SuggestedTraces) != 2 {
+		t.Errorf("SuggestedTraces count = %d, want 2", len(result.SuggestedTraces))
 	}
 }
