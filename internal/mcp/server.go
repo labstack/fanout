@@ -174,7 +174,19 @@ Params: mode (services|time|operations), services (for services mode), service (
 Returns: comparison (per-metric left/right values, change_pct, direction, statistically_significant), verdict`,
 	}, s.compare)
 
-	// 9. query — raw SQL with DuckDB views
+	// 9. attributes — attribute discovery
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "attributes",
+		Description: `Discover what OTel attributes exist in the data. Returns attribute keys with occurrence count, cardinality, and sample values per signal (spans/logs/metrics). Use this before filtering to learn what keys are available.
+
+Params: signal (spans|logs|metrics, default: spans), service, operation (spans only), window (default: 1h), namespace, tenant, limit (default: 50)
+
+Returns: attributes (key, count, cardinality, samples[]), resource_attributes (key, count, cardinality, samples[])
+
+Example: attributes(signal="spans", service="checkout") → discovers http.method (4 values), http.status_code (8 values), db.system (2 values), etc.`,
+	}, s.attributes)
+
+	// 10. query — raw SQL with DuckDB views
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "query",
 		Description: queryToolDescription(s.cfg.LakeDir),
