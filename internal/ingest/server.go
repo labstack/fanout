@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"time"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
@@ -138,7 +139,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 					Namespace:         namespace,
 					TimeUnixNanos:     int64(lr.TimeUnixNano),
 					ObservedTimeNanos: int64(lr.ObservedTimeUnixNano),
-					Severity:          lr.SeverityText,
+					Severity:          strings.ToUpper(lr.SeverityText),
 					SeverityNumber:    int32(lr.SeverityNumber),
 					Body:              bodyString(lr.Body),
 					ServiceName:       svc,
