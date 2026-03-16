@@ -49,24 +49,28 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
 
 	var suggestedTraces []string
 
-	// Get top errors with example traces.
-	// COALESCE chain: prefer status_msg, then exception.type from events, then operation name.
+	// Get top errors grouped by operation with exception details from events_json.
 	q = fmt.Sprintf(`
 SELECT
+  "name=name" AS operation,
   COALESCE(
     NULLIF("name=status_msg", ''),
+    json_extract_string(from_utf8("name=events_json"), '$[0].attributes[''exception.message'']'),
+    'error'
+  ) AS message,
+  COALESCE(
     json_extract_string(from_utf8("name=events_json"), '$[0].attributes[''exception.type'']'),
-    "name=name"
-  ) as msg,
-  COUNT(*) as cnt,
-  FIRST("name=trace_id") as trace_id
+    ''
+  ) AS exception_type,
+  COUNT(*) AS cnt,
+  FIRST("name=trace_id") AS trace_id
 FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=service_name" = ?
   AND "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')
-GROUP BY msg
+GROUP BY operation, message, exception_type
 ORDER BY cnt DESC
-LIMIT 5;
+LIMIT 10;
 `, spansGlob, window)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, svc)
@@ -76,10 +80,12 @@ LIMIT 5;
 		defer rows.Close()
 		for rows.Next() {
 			var e ErrorInfo
-			if err := rows.Scan(&e.Message, &e.Count, &e.TraceID); err != nil {
+			var excType sql.NullString
+			if err := rows.Scan(&e.Operation, &e.Message, &excType, &e.Count, &e.TraceID); err != nil {
 				slog.Warn("scan failed", "method", "Diagnose.errors", "err", err)
 				continue
 			}
+			e.ExceptionType = excType.String
 			out.TopErrors = append(out.TopErrors, e)
 			if e.TraceID != "" && len(suggestedTraces) < 3 {
 				suggestedTraces = append(suggestedTraces, e.TraceID)
@@ -196,6 +202,11 @@ func (s *Service) DiagnoseEnhanced(ctx context.Context, svc string, window int, 
 		slog.Warn("log correlation failed", "method", "DiagnoseEnhanced", "err", lerr)
 	} else {
 		out.CorrelatedLogPatterns = logPatterns
+	}
+
+	// Find representative traces around the change point for direct investigation.
+	if traces := s.suggestedTraces(ctx, svc, cpTime, window, namespace, tenantID); len(traces) > 0 {
+		out.SuggestedTraces = traces
 	}
 
 	return out, nil
@@ -436,6 +447,69 @@ LIMIT 5;`, tokenizePQ, logsGlob)
 		slog.Warn("log pattern iteration error", "err", err)
 	}
 	return patterns, nil
+}
+
+// suggestedTraces finds representative error trace IDs around the change point
+// so the user has concrete traces to investigate with the trace tool.
+func (s *Service) suggestedTraces(ctx context.Context, svc string, around time.Time, window int, namespace, tenantID string) []string {
+	namespace, tenantID = s.defaults(namespace, tenantID)
+	spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
+
+	// Search ±2 minutes around the change point.
+	windowStart := time.Now().Add(-time.Duration(window) * time.Minute)
+	from := around.Add(-2 * time.Minute)
+	if from.Before(windowStart) {
+		from = windowStart
+	}
+	to := around.Add(2 * time.Minute)
+	if to.After(time.Now()) {
+		to = time.Now()
+	}
+	fromNano := from.UnixNano()
+	toNano := to.UnixNano()
+
+	// Get a mix: error traces first, then slow traces.
+	q := fmt.Sprintf(`
+(SELECT DISTINCT "name=trace_id" AS tid
+ FROM read_parquet(%s, union_by_name=true)
+ WHERE "name=service_name" = ?
+   AND "name=start_unix_nano" BETWEEN ? AND ?
+   AND "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')
+ ORDER BY random()
+ LIMIT 2)
+UNION ALL
+(SELECT DISTINCT "name=trace_id" AS tid
+ FROM read_parquet(%s, union_by_name=true)
+ WHERE "name=service_name" = ?
+   AND "name=start_unix_nano" BETWEEN ? AND ?
+   AND "name=duration_ms" > 1000
+ ORDER BY "name=duration_ms" DESC
+ LIMIT 1)
+`, spansGlob, spansGlob)
+
+	rows, err := s.duck.DB.QueryContext(ctx, q, svc, fromNano, toNano, svc, fromNano, toNano)
+	if err != nil {
+		slog.Warn("suggested traces query failed", "method", "suggestedTraces", "service", svc, "err", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var traces []string
+	seen := map[string]bool{}
+	for rows.Next() {
+		var tid string
+		if err := rows.Scan(&tid); err != nil {
+			continue
+		}
+		if tid != "" && !seen[tid] {
+			seen[tid] = true
+			traces = append(traces, tid)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("suggested traces iteration error", "err", err)
+	}
+	return traces
 }
 
 // meanStddev is a backward-compatible alias for MeanStdDev.

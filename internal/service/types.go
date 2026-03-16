@@ -127,6 +127,7 @@ type DiagnoseResult struct {
 	Baseline              *BaselineComparison `json:"comparison_to_baseline,omitempty"`
 	ChangePoints          []ChangePoint       `json:"change_points,omitempty"`
 	CorrelatedLogPatterns []LogPattern        `json:"correlated_log_patterns,omitempty"`
+	SuggestedTraces       []string            `json:"suggested_traces,omitempty"`
 }
 
 // BaselineComparison compares current metrics against historical same-time-of-day baselines.
@@ -151,11 +152,13 @@ type LogPattern struct {
 	Severity string `json:"severity"`
 }
 
-// ErrorInfo describes a recurring error.
+// ErrorInfo describes a recurring error with exception details.
 type ErrorInfo struct {
-	Message string
-	Count   int64
-	TraceID string
+	Operation     string `json:"operation"`
+	Message       string `json:"message"`
+	ExceptionType string `json:"exception_type,omitempty"`
+	Count         int64  `json:"count"`
+	TraceID       string `json:"trace_id"`
 }
 
 // SlowOp describes a slow operation.

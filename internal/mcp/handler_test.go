@@ -446,10 +446,10 @@ func TestDiagnoseHandler(t *testing.T) {
 		sqlmock.NewRows([]string{"cnt", "p50", "p95", "p99", "error_rate"}).
 			AddRow(int64(1000), 5.0, 25.0, 50.0, 0.001))
 
-	// Top errors query
+	// Top errors query (operation, message, exception_type, count, trace_id)
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"msg", "cnt", "trace_id"}).
-			AddRow("connection timeout", int64(10), "trace-err-1"))
+		sqlmock.NewRows([]string{"operation", "message", "exception_type", "cnt", "trace_id"}).
+			AddRow("GET /api/users", "connection timeout", "ConnectionError", int64(10), "trace-err-1"))
 
 	// Slow ops query
 	mock.ExpectQuery("SELECT").WillReturnRows(
@@ -473,6 +473,10 @@ func TestDiagnoseHandler(t *testing.T) {
 	// Correlated logs query
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"pattern", "severity", "cnt"}))
+
+	// Suggested traces query
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"tid"}))
 
 	_, out, err := s.diagnose(ctx, nil, DiagnoseIn{Service: "api", Window: "15m"})
 	if err != nil {
@@ -562,7 +566,7 @@ func TestDiagnoseHandler_DegradedService(t *testing.T) {
 		sqlmock.NewRows([]string{"cnt", "p50", "p95", "p99", "error_rate"}).
 			AddRow(int64(500), 100.0, 1500.0, 3000.0, 0.02))
 
-	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"msg", "cnt", "trace_id"}))
+	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"operation", "message", "exception_type", "cnt", "trace_id"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"op", "p95", "cnt"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
@@ -578,6 +582,10 @@ func TestDiagnoseHandler_DegradedService(t *testing.T) {
 	// Correlated logs
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"pattern", "severity", "cnt"}))
+
+	// Suggested traces
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"tid"}))
 
 	_, out, err := s.diagnose(ctx, nil, DiagnoseIn{Service: "slow-svc", Window: "15m"})
 	if err != nil {
