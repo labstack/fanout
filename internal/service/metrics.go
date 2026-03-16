@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -116,11 +117,15 @@ LIMIT %d`, where, p.Limit)
 
 	for rows.Next() {
 		var entry MetricListEntry
+		var mtype, unit, description sql.NullString
 		var servicesJSON []byte
-		if err := rows.Scan(&entry.Name, &entry.Type, &entry.Unit, &entry.Description, &servicesJSON); err != nil {
+		if err := rows.Scan(&entry.Name, &mtype, &unit, &description, &servicesJSON); err != nil {
 			slog.Warn("scan failed", "method", "MetricsList", "err", err)
 			continue
 		}
+		entry.Type = mtype.String
+		entry.Unit = unit.String
+		entry.Description = description.String
 		if len(servicesJSON) > 0 {
 			if err := json.Unmarshal(servicesJSON, &entry.Services); err != nil {
 				slog.Debug("MetricsList: failed to parse services JSON", "metric", entry.Name, "err", err)
@@ -211,6 +216,7 @@ func (s *Service) MetricsQuery(ctx context.Context, p MetricQueryParams) (*Metri
 	}
 	seriesMap := map[seriesKey]*seriesData{}
 	var seriesOrder []seriesKey
+	var failedMetrics []string
 
 	for _, metricName := range names {
 		var clauses []string
@@ -268,6 +274,7 @@ LIMIT %d`, selectCols, where, groupCols, p.Limit)
 		rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 		if err != nil {
 			slog.Warn("query failed", "method", "MetricsQuery", "metric", metricName, "err", err)
+			failedMetrics = append(failedMetrics, metricName)
 			continue
 		}
 
@@ -319,6 +326,192 @@ LIMIT %d`, selectCols, where, groupCols, p.Limit)
 		// Anomaly detection: flag points > 2σ from mean
 		anomalies := detectMetricAnomalies(key.metric, sd.datapoints)
 		out.Anomalies = append(out.Anomalies, anomalies...)
+	}
+	out.FailedMetrics = failedMetrics
+
+	return out, nil
+}
+
+// MetricsHistogram returns histogram bucket distributions for a metric.
+func (s *Service) MetricsHistogram(ctx context.Context, p MetricQueryParams) (*HistogramResult, error) {
+	if p.Window == 0 {
+		p.Window = 15
+	}
+	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
+
+	names := p.Names
+	if p.Name != "" {
+		names = append([]string{p.Name}, names...)
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("histogram action requires 'name'")
+	}
+
+	out := &HistogramResult{Histograms: []HistogramEntry{}}
+
+	for _, metricName := range names {
+		var clauses []string
+		var args []any
+		clauses = append(clauses, fmt.Sprintf("time >= now() - INTERVAL '%d' MINUTE", p.Window))
+		clauses = append(clauses, "name = ?")
+		args = append(args, metricName)
+		clauses = append(clauses, "type IN ('histogram', 'exp_histogram', 'summary')")
+
+		if p.Service != "" {
+			clauses = append(clauses, "service = ?")
+			args = append(args, p.Service)
+		}
+		if p.Namespace != "" {
+			clauses = append(clauses, "namespace = ?")
+			args = append(args, p.Namespace)
+		}
+		if p.TenantID != "" {
+			clauses = append(clauses, "tenant = ?")
+			args = append(args, p.TenantID)
+		}
+
+		where := "WHERE " + strings.Join(clauses, " AND ")
+
+		// Get the most recent histogram data points
+		q := fmt.Sprintf(`
+SELECT
+  strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS time,
+  service,
+  CAST(decode(attributes_json) AS VARCHAR) AS attrs,
+  CAST(decode(hist_bounds_json) AS VARCHAR) AS bounds,
+  CAST(decode(hist_counts_json) AS VARCHAR) AS counts,
+  hist_count,
+  hist_sum
+FROM metrics
+%s
+ORDER BY time DESC
+LIMIT 20`, where)
+
+		rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+		if err != nil {
+			slog.Warn("histogram query failed", "metric", metricName, "err", err)
+			continue
+		}
+
+		for rows.Next() {
+			var entry HistogramEntry
+			var attrsStr, boundsStr, countsStr sql.NullString
+			var histCount sql.NullInt64
+			var histSum sql.NullFloat64
+			entry.Metric = metricName
+			if err := rows.Scan(&entry.Time, &entry.Service, &attrsStr, &boundsStr, &countsStr, &histCount, &histSum); err != nil {
+				slog.Warn("histogram scan failed", "err", err)
+				continue
+			}
+			entry.Count = histCount.Int64
+			entry.Sum = histSum.Float64
+			if boundsStr.Valid {
+				if err := json.Unmarshal([]byte(boundsStr.String), &entry.Bounds); err != nil {
+					slog.Warn("histogram bounds parse failed", "metric", metricName, "err", err)
+					continue
+				}
+			}
+			if countsStr.Valid {
+				if err := json.Unmarshal([]byte(countsStr.String), &entry.BucketCounts); err != nil {
+					slog.Warn("histogram counts parse failed", "metric", metricName, "err", err)
+					continue
+				}
+			}
+			out.Histograms = append(out.Histograms, entry)
+		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("histogram rows iteration error", "metric", metricName, "err", err)
+		}
+		rows.Close()
+	}
+
+	return out, nil
+}
+
+// MetricsExemplars returns exemplar trace IDs linked to metric data points.
+func (s *Service) MetricsExemplars(ctx context.Context, p MetricQueryParams) (*ExemplarResult, error) {
+	if p.Window == 0 {
+		p.Window = 15
+	}
+	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
+
+	names := p.Names
+	if p.Name != "" {
+		names = append([]string{p.Name}, names...)
+	}
+	if len(names) == 0 {
+		return nil, fmt.Errorf("exemplars action requires 'name'")
+	}
+
+	out := &ExemplarResult{Exemplars: []ExemplarEntry{}}
+
+	for _, metricName := range names {
+		var clauses []string
+		var args []any
+		clauses = append(clauses, fmt.Sprintf("time >= now() - INTERVAL '%d' MINUTE", p.Window))
+		clauses = append(clauses, "name = ?")
+		args = append(args, metricName)
+		clauses = append(clauses, "exemplars_json IS NOT NULL")
+
+		if p.Service != "" {
+			clauses = append(clauses, "service = ?")
+			args = append(args, p.Service)
+		}
+		if p.Namespace != "" {
+			clauses = append(clauses, "namespace = ?")
+			args = append(args, p.Namespace)
+		}
+		if p.TenantID != "" {
+			clauses = append(clauses, "tenant = ?")
+			args = append(args, p.TenantID)
+		}
+
+		where := "WHERE " + strings.Join(clauses, " AND ")
+
+		q := fmt.Sprintf(`
+SELECT
+  strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS time,
+  service,
+  CAST(decode(exemplars_json) AS VARCHAR) AS exemplars
+FROM metrics
+%s
+ORDER BY time DESC
+LIMIT 50`, where)
+
+		rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+		if err != nil {
+			slog.Warn("exemplars query failed", "metric", metricName, "err", err)
+			continue
+		}
+
+		for rows.Next() {
+			var ts, svcName, exemplarsStr string
+			if err := rows.Scan(&ts, &svcName, &exemplarsStr); err != nil {
+				slog.Warn("exemplar scan failed", "err", err)
+				continue
+			}
+			var rawExemplars []Exemplar
+			if err := json.Unmarshal([]byte(exemplarsStr), &rawExemplars); err != nil {
+				slog.Warn("exemplar JSON parse failed", "metric", metricName, "err", err)
+				continue
+			}
+			for _, ex := range rawExemplars {
+				if ex.TraceID != "" {
+					out.Exemplars = append(out.Exemplars, ExemplarEntry{
+						Metric:  metricName,
+						Service: svcName,
+						Time:    ts,
+						TraceID: ex.TraceID,
+						SpanID:  ex.SpanID,
+						Value:   ex.Value,
+					})
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			slog.Warn("exemplar rows iteration error", "metric", metricName, "err", err)
+		}
+		rows.Close()
 	}
 
 	return out, nil

@@ -91,6 +91,16 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 					ScopeName:      scopeName,
 					ScopeVersion:   scopeVer,
 					IngestedAt:     now,
+					// Pre-extracted OTel semantic convention attributes.
+					HTTPMethod:     spanAttr(sp.Attributes, "http.method", "http.request.method"),
+					HTTPStatusCode: spanAttrInt(sp.Attributes, "http.status_code", "http.response.status_code"),
+					HTTPRoute:      spanAttr(sp.Attributes, "http.route"),
+					DBSystem:       spanAttr(sp.Attributes, "db.system"),
+					RPCMethod:      spanAttr(sp.Attributes, "rpc.method"),
+					RPCService:     spanAttr(sp.Attributes, "rpc.service"),
+					PeerService:    spanAttr(sp.Attributes, "peer.service", "server.address"),
+					ServiceVersion: getResourceAttr(rs.Resource, "service.version"),
+					DeploymentEnv:  getResourceAttr(rs.Resource, "deployment.environment"),
 				}
 				// Partial ingest is acceptable: OTLP clients retry the full batch on error.
 				select {
@@ -345,6 +355,42 @@ func bodyString(v *common.AnyValue) string {
 		}
 		return string(b)
 	}
+}
+
+// spanAttr extracts a string attribute value from a span's KeyValue list.
+// Keys are checked in priority order (e.g. http.method before http.request.method).
+func spanAttr(attrs []*common.KeyValue, keys ...string) string {
+	for _, key := range keys {
+		for _, kv := range attrs {
+			if kv.Key == key {
+				if s := asString(kv.Value); s != "" {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// spanAttrInt extracts an integer attribute as a string (e.g. http.status_code: 200 → "200").
+// Keys are checked in priority order.
+func spanAttrInt(attrs []*common.KeyValue, keys ...string) string {
+	for _, key := range keys {
+		for _, kv := range attrs {
+			if kv.Key == key {
+				if s := asString(kv.Value); s != "" {
+					return s
+				}
+				// Handle integer values (common for status codes)
+				if kv.Value != nil {
+					if iv, ok := kv.Value.Value.(*common.AnyValue_IntValue); ok {
+						return fmt.Sprintf("%d", iv.IntValue)
+					}
+				}
+			}
+		}
+	}
+	return ""
 }
 
 func getServiceName(r *resourcepb.Resource) string {

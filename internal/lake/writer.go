@@ -40,6 +40,17 @@ type SpanRow struct {
 	ScopeName      string  `parquet:"name=scope_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	ScopeVersion   string  `parquet:"name=scope_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	IngestedAt     int64   `parquet:"name=ingested_unix_nano, type=INT64"`
+	// Pre-extracted OTel semantic convention attributes (avoids JSON parsing at query time).
+	HTTPMethod     string `parquet:"name=attr_http_method, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	HTTPStatusCode string `parquet:"name=attr_http_status_code, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	HTTPRoute      string `parquet:"name=attr_http_route, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	DBSystem       string `parquet:"name=attr_db_system, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	RPCMethod      string `parquet:"name=attr_rpc_method, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	RPCService     string `parquet:"name=attr_rpc_service, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	PeerService    string `parquet:"name=attr_peer_service, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	// Pre-extracted resource attributes.
+	ServiceVersion string `parquet:"name=res_service_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	DeploymentEnv  string `parquet:"name=res_deployment_env, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 }
 
 type LogRow struct {

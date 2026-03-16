@@ -50,7 +50,8 @@ SELECT "name=span_id" as span_id,
        "name=flags" as flags,
        "name=scope_name" as scope_name,
        "name=scope_version" as scope_version,
-       "name=attributes_json" as attributes_json
+       "name=attributes_json" as attributes_json,
+       "name=resource_json" as resource_json
 FROM read_parquet(%s, union_by_name=true)
 WHERE "name=trace_id" = ?
 ORDER BY "name=start_unix_nano" ASC
@@ -73,9 +74,9 @@ LIMIT 200;
 
 	for rows.Next() {
 		var r spanWithNano
-		var parentID, statusMsg, eventsJSON, linksJSON, traceState, flags, scopeName, scopeVersion, attrsJSON any
+		var parentID, statusMsg, eventsJSON, linksJSON, traceState, flags, scopeName, scopeVersion, attrsJSON, resourceJSON any
 		if err := rows.Scan(&r.SpanID, &parentID, &r.Service, &r.Name, &r.Kind, &r.StartTime, &r.Duration, &r.Status, &statusMsg, &r.startNano,
-			&eventsJSON, &linksJSON, &traceState, &flags, &scopeName, &scopeVersion, &attrsJSON); err != nil {
+			&eventsJSON, &linksJSON, &traceState, &flags, &scopeName, &scopeVersion, &attrsJSON, &resourceJSON); err != nil {
 			slog.Warn("scan failed", "method", "Trace", "err", err)
 			continue
 		}
@@ -105,7 +106,9 @@ LIMIT 200;
 		if eventsJSON != nil {
 			if b, ok := eventsJSON.([]byte); ok && len(b) > 0 {
 				var events []SpanEvent
-				if err := json.Unmarshal(b, &events); err == nil {
+				if err := json.Unmarshal(b, &events); err != nil {
+					slog.Debug("events JSON parse failed", "span_id", r.SpanID, "err", err)
+				} else {
 					r.Events = events
 				}
 			}
@@ -114,7 +117,9 @@ LIMIT 200;
 		if linksJSON != nil {
 			if b, ok := linksJSON.([]byte); ok && len(b) > 0 {
 				var links []SpanLink
-				if err := json.Unmarshal(b, &links); err == nil {
+				if err := json.Unmarshal(b, &links); err != nil {
+					slog.Debug("links JSON parse failed", "span_id", r.SpanID, "err", err)
+				} else {
 					r.Links = links
 				}
 			}
@@ -123,8 +128,21 @@ LIMIT 200;
 		if attrsJSON != nil {
 			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
 				var attrs map[string]any
-				if err := json.Unmarshal(b, &attrs); err == nil {
+				if err := json.Unmarshal(b, &attrs); err != nil {
+					slog.Debug("attributes JSON parse failed", "span_id", r.SpanID, "err", err)
+				} else {
 					r.Attributes = attrs
+				}
+			}
+		}
+		// Parse resource JSON
+		if resourceJSON != nil {
+			if b, ok := resourceJSON.([]byte); ok && len(b) > 0 {
+				var res map[string]any
+				if err := json.Unmarshal(b, &res); err != nil {
+					slog.Debug("resource JSON parse failed", "span_id", r.SpanID, "err", err)
+				} else {
+					r.Resource = res
 				}
 			}
 		}
@@ -422,6 +440,7 @@ LIMIT 100;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, traceID)
 	if err != nil {
+		slog.Warn("fetch trace logs query failed", "method", "fetchTraceLogs", "trace_id", traceID, "err", err)
 		return logs
 	}
 	defer rows.Close()
@@ -464,12 +483,17 @@ LIMIT 100;
 		if attrsJSON != nil {
 			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
 				var attrs map[string]any
-				if err := json.Unmarshal(b, &attrs); err == nil {
+				if err := json.Unmarshal(b, &attrs); err != nil {
+					slog.Debug("log attributes JSON parse failed", "trace_id", traceID, "err", err)
+				} else {
 					r.Attributes = attrs
 				}
 			}
 		}
 		logs = append(logs, r)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("fetch trace logs iteration error", "method", "fetchTraceLogs", "trace_id", traceID, "err", err)
 	}
 	return logs
 }

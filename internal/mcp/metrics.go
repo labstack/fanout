@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -11,7 +12,7 @@ import (
 
 // MetricsIn holds input parameters for the metrics tool.
 type MetricsIn struct {
-	Action      string            `json:"action,omitempty"      jsonschema:"Action: 'list' to discover metrics, 'query' to retrieve timeseries. Default: query"`
+	Action      string            `json:"action,omitempty"      jsonschema:"Action: 'list' to discover metrics, 'query' to retrieve timeseries, 'histogram' for bucket distributions, 'exemplars' for trace links. Default: query"`
 	Name        string            `json:"name,omitempty"        jsonschema:"Metric name for query action"`
 	Names       []string          `json:"names,omitempty"       jsonschema:"Multiple metric names for overlay in query action"`
 	Aggregation string            `json:"aggregation,omitempty" jsonschema:"Aggregation: avg|sum|min|max|count. Default: avg"`
@@ -170,18 +171,66 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 				DeviationSigma: a.DeviationSigma,
 			})
 		}
-		if len(out.Series) == 0 {
+		if len(queryResult.FailedMetrics) > 0 {
+			out.Suggestion = fmt.Sprintf("Queries failed for: %s. Results shown are partial.", strings.Join(queryResult.FailedMetrics, ", "))
+		} else if len(out.Series) == 0 {
 			out.Suggestion = "No data found. Try action='list' to discover available metrics, or widen the time window."
 		} else if len(out.Anomalies) > 0 {
 			out.Suggestion = fmt.Sprintf("%d anomaly(ies) detected in the time range.", len(out.Anomalies))
 		}
 		return nil, out, nil
 
+	case "histogram":
+		p := service.MetricQueryParams{
+			Name:      in.Name,
+			Names:     in.Names,
+			Service:   in.Service,
+			Window:    tw.Minutes,
+			Namespace: in.Namespace,
+			TenantID:  in.Tenant,
+			Attrs:     in.Attrs,
+			Limit:     limit,
+		}
+		histResult, err := s.svc.MetricsHistogram(ctx, p)
+		if err != nil {
+			slog.Warn("metrics histogram failed", "err", err)
+			return nil, map[string]any{"histograms": []any{}, "suggestion": fmt.Sprintf("Query failed: %s", err)}, nil
+		}
+		suggestion := ""
+		if len(histResult.Histograms) == 0 {
+			suggestion = "No histogram data found. Ensure the metric is a histogram type. Try action='list' to discover available metrics."
+		}
+		return nil, map[string]any{"histograms": histResult.Histograms, "suggestion": suggestion}, nil
+
+	case "exemplars":
+		p := service.MetricQueryParams{
+			Name:      in.Name,
+			Names:     in.Names,
+			Service:   in.Service,
+			Window:    tw.Minutes,
+			Namespace: in.Namespace,
+			TenantID:  in.Tenant,
+			Attrs:     in.Attrs,
+			Limit:     limit,
+		}
+		exResult, err := s.svc.MetricsExemplars(ctx, p)
+		if err != nil {
+			slog.Warn("metrics exemplars failed", "err", err)
+			return nil, map[string]any{"exemplars": []any{}, "suggestion": fmt.Sprintf("Query failed: %s", err)}, nil
+		}
+		suggestion := ""
+		if len(exResult.Exemplars) == 0 {
+			suggestion = "No exemplars found. Exemplars require instrumentation to emit them (e.g., OpenTelemetry histogram with exemplar recording)."
+		} else {
+			suggestion = fmt.Sprintf("Found %d exemplar(s). Use the trace tool with any trace_id to investigate.", len(exResult.Exemplars))
+		}
+		return nil, map[string]any{"exemplars": exResult.Exemplars, "suggestion": suggestion}, nil
+
 	default:
 		return nil, MetricsQueryOut{
 			Series:     []MetricSeriesOut{},
 			Anomalies:  []MetricAnomalyOut{},
-			Suggestion: fmt.Sprintf("Unknown action %q: use 'list' or 'query'", action),
+			Suggestion: fmt.Sprintf("Unknown action %q: use 'list', 'query', 'histogram', or 'exemplars'", action),
 		}, nil
 	}
 }

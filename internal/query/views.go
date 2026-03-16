@@ -28,6 +28,16 @@ SELECT
   decode("name=attributes_json") AS attributes_json,
   decode("name=resource_json") AS resource_json,
   decode("name=events_json") AS events_json,
+  -- Pre-extracted OTel semantic convention attributes (NULL for old data).
+  "name=attr_http_method" AS http_method,
+  "name=attr_http_status_code" AS http_status_code,
+  "name=attr_http_route" AS http_route,
+  "name=attr_db_system" AS db_system,
+  "name=attr_rpc_method" AS rpc_method,
+  "name=attr_rpc_service" AS rpc_service,
+  "name=attr_peer_service" AS peer_service,
+  "name=res_service_version" AS service_version,
+  "name=res_deployment_env" AS deployment_env,
   namespace, tenant
 FROM read_parquet('{lake}/spans/**/*.parquet',
      hive_partitioning=true, union_by_name=true);`
@@ -61,6 +71,11 @@ SELECT
   "name=description" AS description,
   decode("name=attributes_json") AS attributes_json,
   decode("name=resource_json") AS resource_json,
+  decode("name=hist_bounds_json") AS hist_bounds_json,
+  decode("name=hist_counts_json") AS hist_counts_json,
+  "name=hist_count" AS hist_count,
+  "name=hist_sum" AS hist_sum,
+  decode("name=exemplars_json") AS exemplars_json,
   namespace, tenant
 FROM read_parquet('{lake}/metrics/**/*.parquet',
      hive_partitioning=true, union_by_name=true);`
@@ -96,6 +111,15 @@ SELECT
   NULL::BLOB    AS "name=attributes_json",
   NULL::BLOB    AS "name=resource_json",
   NULL::BLOB    AS "name=events_json",
+  NULL::VARCHAR AS "name=attr_http_method",
+  NULL::VARCHAR AS "name=attr_http_status_code",
+  NULL::VARCHAR AS "name=attr_http_route",
+  NULL::VARCHAR AS "name=attr_db_system",
+  NULL::VARCHAR AS "name=attr_rpc_method",
+  NULL::VARCHAR AS "name=attr_rpc_service",
+  NULL::VARCHAR AS "name=attr_peer_service",
+  NULL::VARCHAR AS "name=res_service_version",
+  NULL::VARCHAR AS "name=res_deployment_env",
   NULL::VARCHAR AS namespace,
   NULL::VARCHAR AS tenant
 WHERE false
@@ -127,6 +151,11 @@ SELECT
   NULL::VARCHAR AS "name=description",
   NULL::BLOB    AS "name=attributes_json",
   NULL::BLOB    AS "name=resource_json",
+  NULL::BLOB    AS "name=hist_bounds_json",
+  NULL::BLOB    AS "name=hist_counts_json",
+  NULL::BIGINT  AS "name=hist_count",
+  NULL::DOUBLE  AS "name=hist_sum",
+  NULL::BLOB    AS "name=exemplars_json",
   NULL::VARCHAR AS namespace,
   NULL::VARCHAR AS tenant
 WHERE false
@@ -141,15 +170,22 @@ func MigrateOldPartitions(lakeDir string) {
 	for _, signal := range []string{"spans", "logs", "metrics"} {
 		pattern := filepath.Join(lakeDir, signal, "tenant=*", "namespace=*",
 			"year=*", "month=*", "day=*", "*.parquet")
-		matches, _ := filepath.Glob(pattern)
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			slog.Warn("migrate glob failed", "pattern", pattern, "err", err)
+			continue
+		}
 		for _, f := range matches {
 			dayDir := filepath.Dir(f)
 			hourDir := filepath.Join(dayDir, "hour=00")
 			if err := os.MkdirAll(hourDir, 0o755); err != nil {
+				slog.Warn("migrate mkdir failed", "path", hourDir, "err", err)
 				continue
 			}
 			dest := filepath.Join(hourDir, filepath.Base(f))
-			if err := os.Rename(f, dest); err == nil {
+			if err := os.Rename(f, dest); err != nil {
+				slog.Warn("migrate rename failed", "from", f, "to", dest, "err", err)
+			} else {
 				slog.Info("migrated old partition file", "from", f, "to", dest)
 			}
 		}

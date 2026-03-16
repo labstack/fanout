@@ -26,7 +26,7 @@ func TestTrace_NotFound(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}))
 
 	result, err := svc.Trace(context.Background(), "nonexistent-trace", false, 60)
@@ -47,11 +47,11 @@ func TestTrace_SingleSpan(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).AddRow(
 			"span-1", nil, "api-gateway", "GET /users", "SERVER", "2024-01-01T10:00:00Z",
 			150.0, "OK", nil, int64(1704106800000000000), nil, nil,
-			nil, nil, "otel-go", "1.0", nil,
+			nil, nil, "otel-go", "1.0", nil, nil,
 		))
 
 	result, err := svc.Trace(context.Background(), "trace-123", false, 60)
@@ -81,14 +81,14 @@ func TestTrace_MultiSpan(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).
 			AddRow("span-1", nil, "api", "GET /users", "SERVER", "2024-01-01T10:00:00Z",
-				200.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil).
+				200.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil).
 			AddRow("span-2", "span-1", "user-service", "fetch-user", "CLIENT", "2024-01-01T10:00:01Z",
-				50.0, "OK", nil, int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil).
+				50.0, "OK", nil, int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil, nil).
 			AddRow("span-3", "span-1", "cache", "get-cache", "CLIENT", "2024-01-01T10:00:01Z",
-				10.0, "OK", nil, int64(1704106801100000000), nil, nil, nil, nil, nil, nil, nil))
+				10.0, "OK", nil, int64(1704106801100000000), nil, nil, nil, nil, nil, nil, nil, nil))
 
 	result, err := svc.Trace(context.Background(), "trace-multi", false, 60)
 	if err != nil {
@@ -114,12 +114,12 @@ func TestTrace_WithError(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).
 			AddRow("span-1", nil, "api", "GET /users", "SERVER", "2024-01-01T10:00:00Z",
-				200.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil).
+				200.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil).
 			AddRow("span-2", "span-1", "database", "SELECT", "CLIENT", "2024-01-01T10:00:01Z",
-				50.0, "STATUS_CODE_ERROR", "connection refused", int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil))
+				50.0, "STATUS_CODE_ERROR", "connection refused", int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil, nil))
 
 	result, err := svc.Trace(context.Background(), "trace-error", false, 60)
 	if err != nil {
@@ -148,12 +148,12 @@ func TestTrace_SlowOperation(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).
 			AddRow("span-1", nil, "api", "POST /process", "SERVER", "2024-01-01T10:00:00Z",
-				2000.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil).
+				2000.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil).
 			AddRow("span-2", "span-1", "processor", "heavy-compute", "INTERNAL", "2024-01-01T10:00:01Z",
-				1800.0, "OK", nil, int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil))
+				1800.0, "OK", nil, int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil, nil))
 
 	result, err := svc.Trace(context.Background(), "trace-slow", false, 60)
 	if err != nil {
@@ -177,10 +177,10 @@ func TestTrace_WithLogs(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).AddRow(
 			"span-1", nil, "api", "GET /users", "SERVER", "2024-01-01T10:00:00Z",
-			100.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil,
+			100.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil,
 		))
 
 	// Logs query
@@ -210,7 +210,7 @@ func TestTrace_DefaultWindow(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}))
 
 	// Pass 0 window, should default to 1440 (24h)
@@ -244,14 +244,14 @@ func TestTrace_CriticalPath(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).
 			AddRow("span-1", nil, "api", "GET /data", "SERVER", "2024-01-01T10:00:00Z",
-				500.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil).
+				500.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil).
 			AddRow("span-2", "span-1", "db", "SELECT", "CLIENT", "2024-01-01T10:00:01Z",
-				300.0, "OK", nil, int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil).
+				300.0, "OK", nil, int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil, nil).
 			AddRow("span-3", "span-1", "cache", "GET", "CLIENT", "2024-01-01T10:00:01Z",
-				150.0, "STATUS_CODE_ERROR", "timeout", int64(1704106801100000000), nil, nil, nil, nil, nil, nil, nil))
+				150.0, "STATUS_CODE_ERROR", "timeout", int64(1704106801100000000), nil, nil, nil, nil, nil, nil, nil, nil))
 
 	result, err := svc.Trace(context.Background(), "trace-critical", false, 60)
 	if err != nil {
@@ -273,12 +273,12 @@ func TestTrace_SelfTime(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).
 			AddRow("span-1", nil, "api", "GET /", "SERVER", "2024-01-01T10:00:00Z",
-				200.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil).
+				200.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil).
 			AddRow("span-2", "span-1", "db", "query", "CLIENT", "2024-01-01T10:00:01Z",
-				50.0, "OK", nil, int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil))
+				50.0, "OK", nil, int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil, nil))
 
 	result, err := svc.Trace(context.Background(), "trace-selftime", false, 60)
 	if err != nil {
@@ -307,7 +307,7 @@ func TestTrace_SQLEscaping(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}))
 
 	// SQL injection attempt should be escaped
@@ -341,12 +341,12 @@ func TestCompareTrace_MatchingOperations(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).
 			AddRow("s3", nil, "api", "GET /checkout", "SERVER", "2024-01-01T10:00:00Z",
-				85.2, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil).
+				85.2, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil).
 			AddRow("s4", "s3", "payment", "process_payment", "CLIENT", "2024-01-01T10:00:00Z",
-				12.1, "OK", nil, int64(1704106800100000000), nil, nil, nil, nil, nil, nil, nil))
+				12.1, "OK", nil, int64(1704106800100000000), nil, nil, nil, nil, nil, nil, nil, nil))
 
 	cmp, err := svc.CompareTrace(context.Background(), primary, "trace-def", 60)
 	if err != nil {
@@ -405,9 +405,9 @@ func TestCompareTrace_DeltaIsAbsolute(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).AddRow("s2", nil, "api", "op", "SERVER", "2024-01-01T10:00:00Z",
-			200.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil))
+			200.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil))
 
 	cmp, err := svc.CompareTrace(context.Background(), primary, "trace-def", 60)
 	if err != nil {
@@ -524,12 +524,12 @@ func TestCompareTrace_AsymmetricOperations(t *testing.T) {
 		sqlmock.NewRows([]string{
 			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
 			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
-			"trace_state", "flags", "scope_name", "scope_version", "attributes_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
 		}).
 			AddRow("s3", nil, "api", "GET /users", "SERVER", "2024-01-01T10:00:00Z",
-				80.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil).
+				80.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil).
 			AddRow("s4", "s3", "cache", "REDIS GET", "CLIENT", "2024-01-01T10:00:00Z",
-				20.0, "OK", nil, int64(1704106800100000000), nil, nil, nil, nil, nil, nil, nil))
+				20.0, "OK", nil, int64(1704106800100000000), nil, nil, nil, nil, nil, nil, nil, nil))
 
 	cmp, err := svc.CompareTrace(context.Background(), primary, "trace-other", 60)
 	if err != nil {

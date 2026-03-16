@@ -239,6 +239,7 @@ type SpanInfo struct {
 	ScopeName    string
 	ScopeVersion string
 	Attributes   map[string]any
+	Resource     map[string]any `json:"resource,omitempty"`
 }
 
 // SpanEvent is an annotation within a span's lifetime.
@@ -332,11 +333,11 @@ type MetricInfo struct {
 
 // Exemplar links a metric data point to a trace.
 type Exemplar struct {
-	Time       int64
-	TraceID    string
-	SpanID     string
-	Value      float64
-	Attributes map[string]string
+	Time       int64             `json:"time_unix_nano"`
+	TraceID    string            `json:"trace_id"`
+	SpanID     string            `json:"span_id"`
+	Value      float64           `json:"value"`
+	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
 // SpanParams contains search and aggregation parameters for the spans tool.
@@ -481,8 +482,9 @@ type MetricListEntry struct {
 
 // MetricsQueryResult holds the result of the metrics query action.
 type MetricsQueryResult struct {
-	Series    []MetricSeries
-	Anomalies []MetricAnomaly
+	Series        []MetricSeries
+	Anomalies     []MetricAnomaly
+	FailedMetrics []string // metric names whose queries failed
 }
 
 // MetricSeries is one timeseries stream returned by the query action.
@@ -498,6 +500,37 @@ type MetricSeries struct {
 type MetricDatapoint struct {
 	Time  string
 	Value float64
+}
+
+// HistogramResult holds the result of the metrics histogram action.
+type HistogramResult struct {
+	Histograms []HistogramEntry
+}
+
+// HistogramEntry is a single histogram data point.
+type HistogramEntry struct {
+	Metric       string    `json:"metric"`
+	Service      string    `json:"service"`
+	Time         string    `json:"time"`
+	Bounds       []float64 `json:"bounds"`
+	BucketCounts []uint64  `json:"bucket_counts"`
+	Count        int64     `json:"count"`
+	Sum          float64   `json:"sum"`
+}
+
+// ExemplarResult holds the result of the metrics exemplars action.
+type ExemplarResult struct {
+	Exemplars []ExemplarEntry
+}
+
+// ExemplarEntry links a metric data point to a trace.
+type ExemplarEntry struct {
+	Metric  string  `json:"metric"`
+	Service string  `json:"service"`
+	Time    string  `json:"time"`
+	TraceID string  `json:"trace_id"`
+	SpanID  string  `json:"span_id,omitempty"`
+	Value   float64 `json:"value"`
 }
 
 // MetricAnomaly describes a statistical anomaly detected in metric data.

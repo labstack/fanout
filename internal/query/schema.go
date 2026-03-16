@@ -43,6 +43,15 @@ Data columns:
 - "name=scope_name" (VARCHAR): Instrumentation scope/library name
 - "name=scope_version" (VARCHAR): Instrumentation scope/library version
 - "name=ingested_unix_nano" (BIGINT): Ingestion timestamp in nanoseconds
+- "name=attr_http_method" (VARCHAR): Pre-extracted http.method (NULL for old data, use attr() macro as fallback)
+- "name=attr_http_status_code" (VARCHAR): Pre-extracted http.status_code
+- "name=attr_http_route" (VARCHAR): Pre-extracted http.route
+- "name=attr_db_system" (VARCHAR): Pre-extracted db.system (postgresql, redis, etc.)
+- "name=attr_rpc_method" (VARCHAR): Pre-extracted rpc.method
+- "name=attr_rpc_service" (VARCHAR): Pre-extracted rpc.service
+- "name=attr_peer_service" (VARCHAR): Pre-extracted peer.service / server.address
+- "name=res_service_version" (VARCHAR): Pre-extracted service.version from resource
+- "name=res_deployment_env" (VARCHAR): Pre-extracted deployment.environment from resource
 
 Partition columns (extracted from path, no "name=" prefix):
 - tenant (VARCHAR): Tenant identifier (UUIDv7)
@@ -57,6 +66,9 @@ Time conversions and filtering:
 - For display: strftime(to_timestamp("name=start_unix_nano" / 1000000000.0), '%Y-%m-%d %H:%M:%S')
 - For ordering by time: ORDER BY "name=start_unix_nano" DESC
 - Recent data (last N minutes): WHERE "name=start_unix_nano" >= (EXTRACT(EPOCH FROM NOW()) - <minutes>*60) * 1000000000
+
+**Clean views**: The 'spans' view provides clean column aliases (e.g. 'service', 'operation', 'http_method', 'http_status_code').
+Use 'SELECT * FROM spans WHERE ...' for simpler queries vs raw read_parquet.
 
 Common queries:
 - Error spans: WHERE "name=status_code" = 'STATUS_CODE_ERROR'
