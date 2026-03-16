@@ -281,11 +281,13 @@ WITH bucketed AS (
   GROUP BY %s
 )
 SELECT bucket, service,
-  CASE WHEN mtype = 'sum'
-       AND LAG(value) OVER w IS NOT NULL
-       AND value >= LAG(value) OVER w
-    THEN value - LAG(value) OVER w
-    ELSE value
+  CASE WHEN mtype = 'sum' AND LAG(value) OVER w IS NULL
+    THEN 0  -- first bucket: no prior value to compute delta
+  WHEN mtype = 'sum' AND value >= LAG(value) OVER w
+    THEN value - LAG(value) OVER w  -- normal delta
+  WHEN mtype = 'sum'
+    THEN value  -- counter reset: show raw value
+  ELSE value  -- gauge/delta: show as-is
   END AS value,
   unit
 FROM bucketed

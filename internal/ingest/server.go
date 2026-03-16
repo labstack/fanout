@@ -139,7 +139,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 					Namespace:         namespace,
 					TimeUnixNanos:     int64(lr.TimeUnixNano),
 					ObservedTimeNanos: int64(lr.ObservedTimeUnixNano),
-					Severity:          strings.ToUpper(lr.SeverityText),
+					Severity:          normalizeSeverity(lr.SeverityText, int32(lr.SeverityNumber)),
 					SeverityNumber:    int32(lr.SeverityNumber),
 					Body:              bodyString(lr.Body),
 					ServiceName:       svc,
@@ -402,22 +402,67 @@ func spanAttrInt(attrs []*common.KeyValue, keys ...string) string {
 // and returns (exception.type, exception.message).
 func extractException(events []*tracepb.Span_Event) (string, string) {
 	for _, e := range events {
-		if e.Name == "exception" {
-			var excType, excMsg string
-			for _, kv := range e.Attributes {
-				switch kv.Key {
-				case "exception.type":
-					excType = asString(kv.Value)
-				case "exception.message":
-					excMsg = asString(kv.Value)
-				}
+		if e == nil || e.Name != "exception" {
+			continue
+		}
+		var excType, excMsg string
+		for _, kv := range e.Attributes {
+			switch kv.Key {
+			case "exception.type":
+				excType = anyValueString(kv.Value)
+			case "exception.message":
+				excMsg = anyValueString(kv.Value)
 			}
-			if excType != "" || excMsg != "" {
-				return excType, excMsg
-			}
+		}
+		if excType != "" || excMsg != "" {
+			return excType, excMsg
 		}
 	}
 	return "", ""
+}
+
+// anyValueString extracts a string from any AnyValue type (not just StringValue).
+func anyValueString(v *common.AnyValue) string {
+	if v == nil {
+		return ""
+	}
+	switch x := v.Value.(type) {
+	case *common.AnyValue_StringValue:
+		return x.StringValue
+	case *common.AnyValue_IntValue:
+		return fmt.Sprintf("%d", x.IntValue)
+	case *common.AnyValue_BoolValue:
+		return fmt.Sprintf("%t", x.BoolValue)
+	case *common.AnyValue_DoubleValue:
+		return fmt.Sprintf("%g", x.DoubleValue)
+	default:
+		return ""
+	}
+}
+
+// normalizeSeverity returns uppercase severity text. If text is empty,
+// derives it from the OTel severity number (1-24).
+func normalizeSeverity(text string, number int32) string {
+	s := strings.ToUpper(text)
+	if s != "" {
+		return s
+	}
+	switch {
+	case number >= 21:
+		return "FATAL"
+	case number >= 17:
+		return "ERROR"
+	case number >= 13:
+		return "WARN"
+	case number >= 9:
+		return "INFO"
+	case number >= 5:
+		return "DEBUG"
+	case number >= 1:
+		return "TRACE"
+	default:
+		return ""
+	}
 }
 
 func getServiceName(r *resourcepb.Resource) string {
