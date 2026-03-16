@@ -49,6 +49,8 @@ var spanAttrColumns = []struct {
 	{"rpc_method", "rpc.method"},
 	{"rpc_service", "rpc.service"},
 	{"peer_service", "peer.service"},
+	{"exception_type", "exception.type"},
+	{"exception_message", "exception.message"},
 }
 
 // spanResourceColumns maps pre-extracted resource column names to their OTel keys.

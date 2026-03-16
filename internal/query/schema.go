@@ -52,6 +52,8 @@ Data columns:
 - "name=attr_peer_service" (VARCHAR): Pre-extracted peer.service / server.address
 - "name=res_service_version" (VARCHAR): Pre-extracted service.version from resource
 - "name=res_deployment_env" (VARCHAR): Pre-extracted deployment.environment from resource
+- "name=exc_type" (VARCHAR): Pre-extracted exception.type from span events
+- "name=exc_message" (VARCHAR): Pre-extracted exception.message from span events
 
 Partition columns (extracted from path, no "name=" prefix):
 - tenant (VARCHAR): Tenant identifier (UUIDv7)
