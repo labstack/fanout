@@ -102,7 +102,7 @@ SELECT
   first(type) AS type,
   first(unit) AS unit,
   first(description) AS description,
-  list(DISTINCT service) AS services
+  to_json(list(DISTINCT service)) AS services
 FROM metrics
 %s
 GROUP BY name
@@ -118,7 +118,7 @@ LIMIT %d`, where, p.Limit)
 	for rows.Next() {
 		var entry MetricListEntry
 		var mtype, unit, description sql.NullString
-		var servicesJSON []byte
+		var servicesJSON sql.NullString
 		if err := rows.Scan(&entry.Name, &mtype, &unit, &description, &servicesJSON); err != nil {
 			slog.Warn("scan failed", "method", "MetricsList", "err", err)
 			continue
@@ -126,8 +126,8 @@ LIMIT %d`, where, p.Limit)
 		entry.Type = mtype.String
 		entry.Unit = unit.String
 		entry.Description = description.String
-		if len(servicesJSON) > 0 {
-			if err := json.Unmarshal(servicesJSON, &entry.Services); err != nil {
+		if servicesJSON.Valid && servicesJSON.String != "" {
+			if err := json.Unmarshal([]byte(servicesJSON.String), &entry.Services); err != nil {
 				slog.Debug("MetricsList: failed to parse services JSON", "metric", entry.Name, "err", err)
 			}
 		}

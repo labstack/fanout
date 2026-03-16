@@ -55,7 +55,7 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
 SELECT
   COALESCE(
     NULLIF("name=status_msg", ''),
-    json_extract_string(from_utf8("name=events_json"), '$[0].attributes."exception.type"'),
+    json_extract_string(from_utf8("name=events_json"), '$[0].attributes[''exception.type'']'),
     "name=name"
   ) as msg,
   COUNT(*) as cnt,

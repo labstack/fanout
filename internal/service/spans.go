@@ -238,9 +238,9 @@ func (s *Service) spansGrouped(ctx context.Context, p SpanParams) (*SpansResult,
 		groupCols = append(groupCols, expr)
 	}
 
-	exemplarCol := "NULL::VARCHAR[]"
+	exemplarCol := "NULL::VARCHAR"
 	if p.IncludeExemplars {
-		exemplarCol = "list_slice(list(DISTINCT trace_id), 1, 3)"
+		exemplarCol = "to_json(list_slice(list(DISTINCT trace_id), 1, 3))"
 	}
 
 	selectList := strings.Join(selectCols, ", ")
