@@ -9,16 +9,6 @@ import (
 	"strings"
 )
 
-// validSignals is the allowlist of signals for attribute discovery.
-var validSignals = map[string]bool{
-	"spans": true, "logs": true, "metrics": true,
-}
-
-// validJSONCols is the allowlist of JSON columns for attribute discovery.
-var validJSONCols = map[string]bool{
-	"attributes_json": true, "resource_json": true,
-}
-
 // AttributeParams contains parameters for attribute discovery.
 type AttributeParams struct {
 	Signal    string // "spans", "logs", "metrics"
@@ -47,6 +37,29 @@ type AttributeInfo struct {
 	Samples     []string `json:"samples"`
 }
 
+// spanAttrColumns maps pre-extracted span column names to their OTel attribute keys.
+var spanAttrColumns = []struct {
+	Column string
+	Key    string
+}{
+	{"http_method", "http.method"},
+	{"http_status_code", "http.status_code"},
+	{"http_route", "http.route"},
+	{"db_system", "db.system"},
+	{"rpc_method", "rpc.method"},
+	{"rpc_service", "rpc.service"},
+	{"peer_service", "peer.service"},
+}
+
+// spanResourceColumns maps pre-extracted resource column names to their OTel keys.
+var spanResourceColumns = []struct {
+	Column string
+	Key    string
+}{
+	{"service_version", "service.version"},
+	{"deployment_env", "deployment.environment"},
+}
+
 // Attributes discovers attribute keys present in the data for a signal.
 func (s *Service) Attributes(ctx context.Context, p AttributeParams) (*AttributesResult, error) {
 	if p.Signal == "" {
@@ -60,38 +73,43 @@ func (s *Service) Attributes(ctx context.Context, p AttributeParams) (*Attribute
 	}
 	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
 
-	if !validSignals[p.Signal] {
+	switch p.Signal {
+	case "spans":
+		return s.attributesFromColumns(ctx, p)
+	case "logs", "metrics":
+		// Logs and metrics don't have pre-extracted columns yet.
+		// Return a helpful message instead of failing with OOM.
+		return &AttributesResult{
+			Signal:             p.Signal,
+			Attributes:         []AttributeInfo{},
+			ResourceAttributes: []AttributeInfo{},
+			Warnings:           []string{fmt.Sprintf("Attribute discovery for %s is not yet supported. Use the query tool with json_keys() on a small sample.", p.Signal)},
+		}, nil
+	default:
 		return nil, fmt.Errorf("invalid signal %q: use spans, logs, or metrics", p.Signal)
 	}
+}
 
+// attributesFromColumns discovers span attributes using pre-extracted Parquet columns.
+// Uses UNPIVOT to efficiently scan all columns in a single query — no JSON parsing.
+func (s *Service) attributesFromColumns(ctx context.Context, p AttributeParams) (*AttributesResult, error) {
 	out := &AttributesResult{
-		Signal:             p.Signal,
+		Signal:             "spans",
 		Attributes:         []AttributeInfo{},
 		ResourceAttributes: []AttributeInfo{},
 	}
 
-	// Build filters
+	// Build WHERE clause
 	var clauses []string
 	var args []any
-
-	// Time column differs by signal
-	timeCol := "start_time"
-	if p.Signal == "logs" || p.Signal == "metrics" {
-		timeCol = "time"
-	}
-	clauses = append(clauses, fmt.Sprintf("%s >= now() - INTERVAL %d MINUTE", timeCol, p.Window))
-
+	clauses = append(clauses, fmt.Sprintf("start_time >= now() - INTERVAL %d MINUTE", p.Window))
 	if p.Service != "" {
 		clauses = append(clauses, "service = ?")
 		args = append(args, p.Service)
 	}
 	if p.Operation != "" {
-		if p.Signal == "spans" {
-			clauses = append(clauses, "operation = ?")
-			args = append(args, p.Operation)
-		} else {
-			out.Warnings = append(out.Warnings, fmt.Sprintf("operation filter ignored for signal %q (only applies to spans)", p.Signal))
-		}
+		clauses = append(clauses, "operation = ?")
+		args = append(args, p.Operation)
 	}
 	if p.Namespace != "" {
 		clauses = append(clauses, "namespace = ?")
@@ -101,86 +119,55 @@ func (s *Service) Attributes(ctx context.Context, p AttributeParams) (*Attribute
 		clauses = append(clauses, "tenant = ?")
 		args = append(args, p.TenantID)
 	}
-
 	where := "WHERE " + strings.Join(clauses, " AND ")
 
-	// Query attribute keys from attributes_json
-	attrs, totalRows, err := s.discoverKeys(ctx, p.Signal, "attributes_json", where, args, p.Limit)
-	if err != nil {
-		return nil, fmt.Errorf("discover attributes: %w", err)
+	// Get total row count
+	countQ := fmt.Sprintf("SELECT COUNT(*) FROM spans %s", where)
+	var totalRows int64
+	if err := s.duck.DB.QueryRowContext(ctx, countQ, args...).Scan(&totalRows); err != nil {
+		slog.Warn("attributes count query failed", "err", err)
 	}
-	out.Attributes = attrs
 	out.TotalRows = totalRows
 
-	// Query resource attribute keys from resource_json
-	resAttrs, _, err := s.discoverKeys(ctx, p.Signal, "resource_json", where, args, p.Limit)
-	if err != nil {
-		slog.Warn("discover resource attributes failed", "signal", p.Signal, "err", err)
-		out.Warnings = append(out.Warnings, fmt.Sprintf("resource attribute discovery failed: %s", err))
-	} else {
-		out.ResourceAttributes = resAttrs
+	// Discover span attributes via UNPIVOT on pre-extracted columns.
+	// Build column list for UNPIVOT.
+	var cols []string
+	colToKey := map[string]string{}
+	for _, c := range spanAttrColumns {
+		cols = append(cols, c.Column)
+		colToKey[c.Column] = c.Key
 	}
 
-	return out, nil
-}
-
-// discoverKeys extracts JSON keys from a column, counting occurrences,
-// cardinality, and sample values in a single query pass.
-func (s *Service) discoverKeys(ctx context.Context, signal, jsonCol, where string, args []any, limit int) ([]AttributeInfo, int64, error) {
-	// Defense-in-depth: validate signal and jsonCol against allowlists
-	// even though callers should have already validated.
-	if !validSignals[signal] {
-		return nil, 0, fmt.Errorf("invalid signal %q", signal)
-	}
-	if !validJSONCols[jsonCol] {
-		return nil, 0, fmt.Errorf("invalid json column %q", jsonCol)
-	}
-
-	// Single-pass: unnest json_keys, extract each key's value, and aggregate
-	// counts + distinct values together. Avoids N+1 per-key queries.
-	//
-	// The WHERE clause appears twice (in `total` CTE and `kv` CTE), so args
-	// must be doubled via append(args, args...) to match placeholder count.
-	// The time filter uses fmt.Sprintf (not a placeholder), so both WHEREs
-	// have identical placeholder counts.
 	q := fmt.Sprintf(`
-WITH total AS (
-  SELECT COUNT(*) AS cnt FROM %s %s
-),
-kv AS (
-  SELECT
-    unnest(json_keys(CAST(%s AS VARCHAR))) AS key,
-    CAST(%s AS VARCHAR) AS doc
-  FROM (SELECT %s FROM %s %s AND %s IS NOT NULL AND %s != '' AND json_valid(CAST(%s AS VARCHAR)) LIMIT 10000) sampled
+WITH data AS (
+  SELECT %s FROM spans %s
 )
-SELECT
-  key,
-  COUNT(*) AS count,
-  COUNT(DISTINCT json_extract_string(doc, '$.' || key)) AS cardinality,
-  to_json(list_slice(list(DISTINCT json_extract_string(doc, '$.' || key)), 1, 5))::VARCHAR AS samples,
-  (SELECT cnt FROM total) AS total_rows
-FROM kv
+SELECT key, COUNT(*) AS count,
+       COUNT(DISTINCT val) AS cardinality,
+       to_json(list_slice(list(DISTINCT val), 1, 5))::VARCHAR AS samples
+FROM (UNPIVOT data ON %s INTO NAME key VALUE val)
+WHERE val IS NOT NULL AND val != ''
 GROUP BY key
-ORDER BY count DESC
-LIMIT %d`,
-		signal, where,
-		jsonCol, jsonCol, jsonCol, signal, where, jsonCol, jsonCol, jsonCol,
-		limit)
+ORDER BY count DESC`,
+		strings.Join(cols, ", "), where,
+		strings.Join(cols, ", "))
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, append(args, args...)...)
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("keys query: %w", err)
+		return nil, fmt.Errorf("attributes query: %w", err)
 	}
 	defer rows.Close()
 
-	var result []AttributeInfo
-	var totalRows int64
 	for rows.Next() {
 		var info AttributeInfo
 		var samplesJSON sql.NullString
-		if err := rows.Scan(&info.Key, &info.Count, &info.Cardinality, &samplesJSON, &totalRows); err != nil {
-			slog.Warn("keys scan failed", "err", err)
+		if err := rows.Scan(&info.Key, &info.Count, &info.Cardinality, &samplesJSON); err != nil {
+			slog.Warn("attributes scan failed", "err", err)
 			continue
+		}
+		// Map column name back to OTel key
+		if otelKey, ok := colToKey[info.Key]; ok {
+			info.Key = otelKey
 		}
 		if samplesJSON.Valid {
 			if err := json.Unmarshal([]byte(samplesJSON.String), &info.Samples); err != nil {
@@ -190,14 +177,62 @@ LIMIT %d`,
 		if info.Samples == nil {
 			info.Samples = []string{}
 		}
-		result = append(result, info)
+		out.Attributes = append(out.Attributes, info)
 	}
 	if err := rows.Err(); err != nil {
-		return result, totalRows, fmt.Errorf("keys iteration incomplete: %w", err)
+		return out, fmt.Errorf("attributes iteration: %w", err)
 	}
 
-	if result == nil {
-		result = []AttributeInfo{}
+	// Discover resource attributes from pre-extracted columns
+	var resCols []string
+	resColToKey := map[string]string{}
+	for _, c := range spanResourceColumns {
+		resCols = append(resCols, c.Column)
+		resColToKey[c.Column] = c.Key
 	}
-	return result, totalRows, nil
+
+	resQ := fmt.Sprintf(`
+WITH data AS (
+  SELECT %s FROM spans %s
+)
+SELECT key, COUNT(*) AS count,
+       COUNT(DISTINCT val) AS cardinality,
+       to_json(list_slice(list(DISTINCT val), 1, 5))::VARCHAR AS samples
+FROM (UNPIVOT data ON %s INTO NAME key VALUE val)
+WHERE val IS NOT NULL AND val != ''
+GROUP BY key
+ORDER BY count DESC`,
+		strings.Join(resCols, ", "), where,
+		strings.Join(resCols, ", "))
+
+	resRows, err := s.duck.DB.QueryContext(ctx, resQ, args...)
+	if err != nil {
+		slog.Warn("resource attributes query failed", "err", err)
+		out.Warnings = append(out.Warnings, fmt.Sprintf("resource attribute discovery failed: %s", err))
+	} else {
+		defer resRows.Close()
+		for resRows.Next() {
+			var info AttributeInfo
+			var samplesJSON sql.NullString
+			if err := resRows.Scan(&info.Key, &info.Count, &info.Cardinality, &samplesJSON); err != nil {
+				slog.Warn("resource attributes scan failed", "err", err)
+				continue
+			}
+			if otelKey, ok := resColToKey[info.Key]; ok {
+				info.Key = otelKey
+			}
+			if samplesJSON.Valid {
+				json.Unmarshal([]byte(samplesJSON.String), &info.Samples) //nolint:errcheck
+			}
+			if info.Samples == nil {
+				info.Samples = []string{}
+			}
+			out.ResourceAttributes = append(out.ResourceAttributes, info)
+		}
+		if err := resRows.Err(); err != nil {
+			slog.Warn("resource attributes iteration error", "err", err)
+		}
+	}
+
+	return out, nil
 }

@@ -19,14 +19,20 @@ var validMetricAggregations = map[string]bool{
 	"count": true,
 }
 
-// aggSQL maps aggregation names to SQL expressions over the value column.
+// aggSQL maps aggregation names to SQL expressions.
+// Uses effective_value which handles both gauge/sum (value column) and
+// histogram types (hist_sum/hist_count as mean).
 var aggSQL = map[string]string{
-	"avg":   "AVG(value)",
-	"sum":   "SUM(value)",
-	"min":   "MIN(value)",
-	"max":   "MAX(value)",
-	"count": "COUNT(value)",
+	"avg":   "AVG(effective_value)",
+	"sum":   "SUM(effective_value)",
+	"min":   "MIN(effective_value)",
+	"max":   "MAX(effective_value)",
+	"count": "COUNT(effective_value)",
 }
+
+// effectiveValueExpr returns a SQL expression that extracts the correct value
+// depending on metric type: value for gauge/sum, hist_sum/hist_count for histograms.
+const effectiveValueExpr = `CASE WHEN type IN ('histogram', 'exp_histogram') THEN hist_sum / NULLIF(hist_count, 0) ELSE value END`
 
 // autoGranularity picks a sensible bucket size for a given window in minutes.
 func autoGranularity(windowMinutes int) string {
@@ -265,11 +271,10 @@ func (s *Service) MetricsQuery(ctx context.Context, p MetricQueryParams) (*Metri
 
 		q := fmt.Sprintf(`
 SELECT %s
-FROM metrics
-%s
+FROM (SELECT *, %s AS effective_value FROM metrics %s) sub
 GROUP BY %s
 ORDER BY bucket ASC
-LIMIT %d`, selectCols, where, groupCols, p.Limit)
+LIMIT %d`, selectCols, effectiveValueExpr, where, groupCols, p.Limit)
 
 		rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 		if err != nil {
