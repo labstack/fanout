@@ -3,7 +3,6 @@ package mcp
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -34,6 +33,7 @@ type AttributesOut struct {
 	TotalRows          int64          `json:"total_rows"`
 	Attributes         []AttributeOut `json:"attributes"`
 	ResourceAttributes []AttributeOut `json:"resource_attributes"`
+	Warnings           []string       `json:"warnings,omitempty"`
 	Suggestion         string         `json:"suggestion,omitempty"`
 }
 
@@ -63,20 +63,15 @@ func (s *Server) attributes(ctx context.Context, req *mcp.CallToolRequest, in At
 
 	result, err := s.svc.Attributes(ctx, p)
 	if err != nil {
-		slog.Warn("attributes discovery failed", "err", err)
-		return nil, AttributesOut{
-			Signal:             p.Signal,
-			Attributes:         []AttributeOut{},
-			ResourceAttributes: []AttributeOut{},
-			Suggestion:         fmt.Sprintf("Discovery failed: %s", err),
-		}, nil
+		return nil, nil, fmt.Errorf("attributes discovery: %w", err)
 	}
 
 	out := AttributesOut{
 		Signal:             result.Signal,
-		TotalRows:          result.TotalSpans,
+		TotalRows:          result.TotalRows,
 		Attributes:         make([]AttributeOut, 0, len(result.Attributes)),
 		ResourceAttributes: make([]AttributeOut, 0, len(result.ResourceAttributes)),
+		Warnings:           result.Warnings,
 	}
 
 	for _, a := range result.Attributes {
