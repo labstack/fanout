@@ -38,6 +38,8 @@ SELECT
   "name=attr_peer_service" AS peer_service,
   "name=res_service_version" AS service_version,
   "name=res_deployment_env" AS deployment_env,
+  "name=exc_type" AS exception_type,
+  "name=exc_message" AS exception_message,
   namespace, tenant
 FROM read_parquet('{lake}/spans/**/*.parquet',
      hive_partitioning=true, union_by_name=true);`
@@ -120,6 +122,8 @@ SELECT
   NULL::VARCHAR AS "name=attr_peer_service",
   NULL::VARCHAR AS "name=res_service_version",
   NULL::VARCHAR AS "name=res_deployment_env",
+  NULL::VARCHAR AS "name=exc_type",
+  NULL::VARCHAR AS "name=exc_message",
   NULL::VARCHAR AS namespace,
   NULL::VARCHAR AS tenant
 WHERE false

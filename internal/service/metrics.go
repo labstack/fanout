@@ -259,20 +259,39 @@ func (s *Service) MetricsQuery(ctx context.Context, p MetricQueryParams) (*Metri
 			selectCols = fmt.Sprintf(`time_bucket(INTERVAL '%d minutes', time) AS bucket,
   service,
   %s AS value,
-  first(unit) AS unit`, granMins, agg)
+  first(unit) AS unit,
+  first(type) AS mtype`, granMins, agg)
 			groupCols = "bucket, service"
 		} else {
 			selectCols = fmt.Sprintf(`time_bucket(INTERVAL '%d minutes', time) AS bucket,
   '' AS service,
   %s AS value,
-  first(unit) AS unit`, granMins, agg)
+  first(unit) AS unit,
+  first(type) AS mtype`, granMins, agg)
 			groupCols = "bucket"
 		}
 
+		// CTE computes bucketed aggregates, then outer query applies LAG
+		// for cumulative sum metrics to show per-bucket deltas instead of
+		// raw monotonically increasing counters.
 		q := fmt.Sprintf(`
-SELECT %s
-FROM (SELECT *, %s AS effective_value FROM metrics %s) sub
-GROUP BY %s
+WITH bucketed AS (
+  SELECT %s
+  FROM (SELECT *, %s AS effective_value FROM metrics %s) sub
+  GROUP BY %s
+)
+SELECT bucket, service,
+  CASE WHEN mtype = 'sum' AND LAG(value) OVER w IS NULL
+    THEN 0  -- first bucket: no prior value to compute delta
+  WHEN mtype = 'sum' AND value >= LAG(value) OVER w
+    THEN value - LAG(value) OVER w  -- normal delta
+  WHEN mtype = 'sum'
+    THEN value  -- counter reset: show raw value
+  ELSE value  -- gauge/delta: show as-is
+  END AS value,
+  unit
+FROM bucketed
+WINDOW w AS (PARTITION BY service ORDER BY bucket)
 ORDER BY bucket ASC
 LIMIT %d`, selectCols, effectiveValueExpr, where, groupCols, p.Limit)
 
