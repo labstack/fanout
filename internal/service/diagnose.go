@@ -49,21 +49,20 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
 
 	var suggestedTraces []string
 
-	// Get top errors grouped by operation.
-	// Uses status_msg when available, falls back to generic 'error'.
-	// Avoids expensive from_utf8(events_json) parsing which OOMs on large datasets.
+	// Get top errors grouped by operation with exception details.
+	// Uses pre-extracted exc_type/exc_message columns (no JSON parsing, no OOM).
 	q = fmt.Sprintf(`
 SELECT
   "name=name" AS operation,
-  COALESCE(NULLIF("name=status_msg", ''), 'error') AS message,
-  '' AS exception_type,
+  COALESCE(NULLIF("name=status_msg", ''), NULLIF("name=exc_message", ''), 'error') AS message,
+  COALESCE("name=exc_type", '') AS exception_type,
   COUNT(*) AS cnt,
   FIRST("name=trace_id") AS trace_id
 FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
   AND "name=service_name" = ?
   AND "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')
-GROUP BY operation, message
+GROUP BY operation, message, exception_type
 ORDER BY cnt DESC
 LIMIT 10;
 `, spansGlob, window)
