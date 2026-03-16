@@ -51,6 +51,9 @@ type SpanRow struct {
 	// Pre-extracted resource attributes.
 	ServiceVersion string `parquet:"name=res_service_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	DeploymentEnv  string `parquet:"name=res_deployment_env, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	// Pre-extracted exception info from span events.
+	ExceptionType    string `parquet:"name=exc_type, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	ExceptionMessage string `parquet:"name=exc_message, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 }
 
 type LogRow struct {

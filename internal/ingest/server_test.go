@@ -479,6 +479,32 @@ func TestSpanAttrInt(t *testing.T) {
 	}
 }
 
+func TestExtractException(t *testing.T) {
+	events := []*tracepb.Span_Event{
+		{Name: "log", Attributes: []*common.KeyValue{
+			{Key: "message", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "debug"}}},
+		}},
+		{Name: "exception", Attributes: []*common.KeyValue{
+			{Key: "exception.type", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "ConnectionRefusedError"}}},
+			{Key: "exception.message", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "payment:5432 refused"}}},
+		}},
+	}
+
+	excType, excMsg := extractException(events)
+	if excType != "ConnectionRefusedError" {
+		t.Errorf("excType = %q, want ConnectionRefusedError", excType)
+	}
+	if excMsg != "payment:5432 refused" {
+		t.Errorf("excMsg = %q, want 'payment:5432 refused'", excMsg)
+	}
+
+	// No exception event
+	excType, excMsg = extractException(nil)
+	if excType != "" || excMsg != "" {
+		t.Errorf("expected empty for nil events, got %q %q", excType, excMsg)
+	}
+}
+
 func TestTraceExportContextCancellation(t *testing.T) {
 	// Use an unbuffered channel so the send blocks
 	spans := make(chan lake.SpanRow)

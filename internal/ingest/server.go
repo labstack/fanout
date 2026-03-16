@@ -102,6 +102,10 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 					ServiceVersion: getResourceAttr(rs.Resource, "service.version"),
 					DeploymentEnv:  getResourceAttr(rs.Resource, "deployment.environment"),
 				}
+				// Pre-extracted exception info from span events.
+				excType, excMsg := extractException(sp.Events)
+				row.ExceptionType = excType
+				row.ExceptionMessage = excMsg
 				// Partial ingest is acceptable: OTLP clients retry the full batch on error.
 				select {
 				case ts.srv.outSpans <- row:
@@ -391,6 +395,28 @@ func spanAttrInt(attrs []*common.KeyValue, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+// extractException finds the first exception event in a span's events list
+// and returns (exception.type, exception.message).
+func extractException(events []*tracepb.Span_Event) (string, string) {
+	for _, e := range events {
+		if e.Name == "exception" {
+			var excType, excMsg string
+			for _, kv := range e.Attributes {
+				switch kv.Key {
+				case "exception.type":
+					excType = asString(kv.Value)
+				case "exception.message":
+					excMsg = asString(kv.Value)
+				}
+			}
+			if excType != "" || excMsg != "" {
+				return excType, excMsg
+			}
+		}
+	}
+	return "", ""
 }
 
 func getServiceName(r *resourcepb.Resource) string {
