@@ -50,9 +50,11 @@ type LogPattern struct {
 }
 
 type ErrorDetail struct {
-	Message      string `json:"message"`
-	Count        int64  `json:"count"`
-	ExampleTrace string `json:"example_trace,omitempty"`
+	Operation     string `json:"operation"`
+	Message       string `json:"message"`
+	ExceptionType string `json:"exception_type,omitempty"`
+	Count         int64  `json:"count"`
+	ExampleTrace  string `json:"example_trace,omitempty"`
 }
 
 type SlowOperation struct {
@@ -79,6 +81,7 @@ type DiagnoseOut struct {
 	Dependencies          []Dependency    `json:"dependencies"`
 	ChangePoints          []ChangePoint   `json:"change_points,omitempty"`
 	CorrelatedLogPatterns []LogPattern    `json:"correlated_log_patterns,omitempty"`
+	SuggestedTraces       []string        `json:"suggested_traces,omitempty"`
 }
 
 func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in DiagnoseIn) (*mcp.CallToolResult, DiagnoseOut, error) {
@@ -127,9 +130,11 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 
 	for _, e := range result.TopErrors {
 		out.TopErrors = append(out.TopErrors, ErrorDetail{
-			Message:      e.Message,
-			Count:        e.Count,
-			ExampleTrace: e.TraceID,
+			Operation:     e.Operation,
+			Message:       e.Message,
+			ExceptionType: e.ExceptionType,
+			Count:         e.Count,
+			ExampleTrace:  e.TraceID,
 		})
 	}
 
@@ -169,6 +174,9 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 			Severity: lp.Severity,
 		})
 	}
+
+	// Suggested traces for direct investigation.
+	out.SuggestedTraces = result.SuggestedTraces
 
 	return nil, out, nil
 }
