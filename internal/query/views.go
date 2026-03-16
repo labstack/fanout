@@ -208,28 +208,45 @@ func CreateViews(db *sql.DB, lakeDir string) error {
 		return fmt.Errorf("lake dir contains unsafe characters: %q", lakeDir)
 	}
 
-	// Write sentinel Parquet files so read_parquet globs are non-empty.
-	// Skip if real data already exists — the placeholder lacks hive partition
-	// columns and conflicts with hive-partitioned real files.
+	// Write sentinel Parquet files so read_parquet globs are non-empty and
+	// DuckDB can resolve all column names (including new ones from schema
+	// evolution). Two cases:
+	//
+	// 1. No real data: write root-level _placeholder.parquet
+	// 2. Real data exists: write a hive-partitioned _schema.parquet so it
+	//    coexists with real data and provides column definitions for new
+	//    columns that old parquet files lack (union_by_name=true fills NULL).
 	for signal, copySQLTemplate := range placeholders {
 		dir := filepath.Join(lakeDir, signal)
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("mkdir %s: %w", dir, err)
 		}
-		dest := filepath.Join(dir, "_placeholder.parquet")
-		// If real data exists (any subdirectory with parquet files),
-		// remove stale placeholder and skip creation.
+
 		if hasRealData(dir) {
-			os.Remove(dest) // clean up stale placeholder if present
-			continue
-		}
-		// Skip if placeholder already exists — avoid repeated COPY on every restart.
-		if _, statErr := os.Stat(dest); statErr == nil {
-			continue
-		}
-		copySQL := strings.ReplaceAll(copySQLTemplate, "{path}", dest)
-		if _, err := db.Exec(copySQL); err != nil {
-			return fmt.Errorf("write placeholder for %s: %w", signal, err)
+			// Clean up root placeholder (conflicts with hive partitioning).
+			os.Remove(filepath.Join(dir, "_placeholder.parquet"))
+			// Write schema sentinel into a hive-partitioned path so DuckDB
+			// sees new columns. Re-written every startup to track schema changes.
+			schemaDir := filepath.Join(dir, "tenant=_schema", "namespace=_schema",
+				"year=1970", "month=01", "day=01", "hour=00")
+			if err := os.MkdirAll(schemaDir, 0o755); err != nil {
+				return fmt.Errorf("mkdir schema dir %s: %w", schemaDir, err)
+			}
+			dest := filepath.Join(schemaDir, "_schema.parquet")
+			copySQL := strings.ReplaceAll(copySQLTemplate, "{path}", dest)
+			if _, err := db.Exec(copySQL); err != nil {
+				return fmt.Errorf("write schema sentinel for %s: %w", signal, err)
+			}
+		} else {
+			dest := filepath.Join(dir, "_placeholder.parquet")
+			// Skip if placeholder already exists.
+			if _, statErr := os.Stat(dest); statErr == nil {
+				continue
+			}
+			copySQL := strings.ReplaceAll(copySQLTemplate, "{path}", dest)
+			if _, err := db.Exec(copySQL); err != nil {
+				return fmt.Errorf("write placeholder for %s: %w", signal, err)
+			}
 		}
 	}
 
