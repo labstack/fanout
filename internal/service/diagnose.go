@@ -480,7 +480,7 @@ func (s *Service) suggestedTraces(ctx context.Context, svc string, around time.T
  ORDER BY random()
  LIMIT 2)
 UNION ALL
-(SELECT DISTINCT "name=trace_id" AS tid
+(SELECT "name=trace_id" AS tid
  FROM read_parquet(%s, union_by_name=true)
  WHERE "name=service_name" = ?
    AND "name=start_unix_nano" BETWEEN ? AND ?
