@@ -238,11 +238,9 @@ func CreateViews(db *sql.DB, lakeDir string) error {
 				return fmt.Errorf("write schema sentinel for %s: %w", signal, err)
 			}
 		} else {
+			// Always re-write placeholder to track schema evolution
+			// (old placeholder may lack new columns).
 			dest := filepath.Join(dir, "_placeholder.parquet")
-			// Skip if placeholder already exists.
-			if _, statErr := os.Stat(dest); statErr == nil {
-				continue
-			}
 			copySQL := strings.ReplaceAll(copySQLTemplate, "{path}", dest)
 			if _, err := db.Exec(copySQL); err != nil {
 				return fmt.Errorf("write placeholder for %s: %w", signal, err)
