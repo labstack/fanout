@@ -55,11 +55,11 @@ SELECT
   "name=name" AS operation,
   COALESCE(
     NULLIF("name=status_msg", ''),
-    json_extract_string(from_utf8("name=events_json"), '$[0].attributes[''exception.message'']'),
+    json_extract_string(from_utf8("name=events_json"), '$[0].attributes["exception.message"]'),
     'error'
   ) AS message,
   COALESCE(
-    json_extract_string(from_utf8("name=events_json"), '$[0].attributes[''exception.type'']'),
+    json_extract_string(from_utf8("name=events_json"), '$[0].attributes["exception.type"]'),
     ''
   ) AS exception_type,
   COUNT(*) AS cnt,

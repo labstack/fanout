@@ -160,7 +160,7 @@ SELECT
   key,
   COUNT(*) AS count,
   COUNT(DISTINCT json_extract_string(doc, '$.' || key)) AS cardinality,
-  to_json(list_slice(list(DISTINCT json_extract_string(doc, '$.' || key) ORDER BY random()), 1, 5)) AS samples,
+  to_json(list_slice(list(DISTINCT json_extract_string(doc, '$.' || key)), 1, 5))::VARCHAR AS samples,
   (SELECT cnt FROM total) AS total_rows
 FROM kv
 GROUP BY key

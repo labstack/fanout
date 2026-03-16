@@ -102,7 +102,7 @@ SELECT
   first(type) AS type,
   first(unit) AS unit,
   first(description) AS description,
-  to_json(list(DISTINCT service)) AS services
+  to_json(list(DISTINCT service))::VARCHAR AS services
 FROM metrics
 %s
 GROUP BY name
