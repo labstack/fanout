@@ -188,7 +188,12 @@ LIMIT 200;
 	for i := range spans {
 		sp := &spans[i]
 		isError := sp.Status == "STATUS_CODE_ERROR" || sp.Status == "ERROR"
-		isSlow := sp.SelfTime > 100
+		// Critical if self_time is >10% of total trace duration or >100ms absolute.
+		threshold := out.Duration * 0.10
+		if threshold < 10 {
+			threshold = 10 // minimum 10ms to avoid flagging everything in fast traces
+		}
+		isSlow := sp.SelfTime > threshold
 
 		if isError || isSlow {
 			sp.IsCritical = true

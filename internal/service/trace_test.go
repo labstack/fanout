@@ -299,6 +299,34 @@ func TestTrace_SelfTime(t *testing.T) {
 	}
 }
 
+func TestTrace_CriticalPathRelativeThreshold(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	// Fast trace: 25ms total, child span takes 20ms (80% of duration)
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{
+			"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
+			"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
+			"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
+		}).
+			AddRow("span-1", nil, "api", "GET /fast", "SERVER", "2024-01-01T10:00:00Z",
+				25.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil).
+			AddRow("span-2", "span-1", "db", "SELECT", "CLIENT", "2024-01-01T10:00:00Z",
+				20.0, "OK", nil, int64(1704106800001000000), nil, nil, nil, nil, nil, nil, nil, nil))
+
+	result, err := svc.Trace(context.Background(), "trace-fast", false, 60)
+	if err != nil {
+		t.Fatalf("Trace() error = %v", err)
+	}
+
+	// With relative threshold (10% of 25ms = 2.5ms, min 10ms),
+	// span-2 (20ms self time) should be critical
+	if len(result.CriticalPath) == 0 {
+		t.Error("CriticalPath should not be empty — span-2 takes 80% of trace duration")
+	}
+}
+
 func TestTrace_SQLEscaping(t *testing.T) {
 	svc, mock := newMockService(t)
 	defer svc.duck.DB.Close()
