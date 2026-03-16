@@ -53,7 +53,7 @@ func buildLogFilters(p LogParams) (filters []string, args []any) {
 			placeholders[i] = "?"
 			args = append(args, strings.ToUpper(s))
 		}
-		filters = append(filters, `severity IN (`+strings.Join(placeholders, ", ")+`)`)
+		filters = append(filters, `UPPER(severity) IN (`+strings.Join(placeholders, ", ")+`)`)
 	}
 	if p.TraceID != "" {
 		filters = append(filters, `trace_id = ?`)
@@ -178,8 +178,8 @@ func (s *Service) logsGrouped(ctx context.Context, p LogParams) (*LogsResult, er
 SELECT
   %s,
   count(*) AS count,
-  list_slice(list(body ORDER BY random()), 1, 3) AS sample_bodies,
-  list_slice(list(trace_id ORDER BY random()) FILTER (WHERE trace_id IS NOT NULL AND trace_id != ''), 1, 3) AS sample_trace_ids
+  to_json(list_slice(list(body ORDER BY random()), 1, 3))::VARCHAR AS sample_bodies,
+  to_json(list_slice(list(trace_id ORDER BY random()) FILTER (WHERE trace_id IS NOT NULL AND trace_id != ''), 1, 3))::VARCHAR AS sample_trace_ids
 FROM logs
 WHERE time >= now() - INTERVAL %d MINUTE
   %s

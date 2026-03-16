@@ -151,10 +151,7 @@ kv AS (
   SELECT
     unnest(json_keys(CAST(%s AS VARCHAR))) AS key,
     CAST(%s AS VARCHAR) AS doc
-  FROM %s
-  %s
-  AND %s IS NOT NULL AND %s != ''
-  AND json_valid(CAST(%s AS VARCHAR))
+  FROM (SELECT %s FROM %s %s AND %s IS NOT NULL AND %s != '' AND json_valid(CAST(%s AS VARCHAR)) LIMIT 10000) sampled
 )
 SELECT
   key,
@@ -167,7 +164,7 @@ GROUP BY key
 ORDER BY count DESC
 LIMIT %d`,
 		signal, where,
-		jsonCol, jsonCol, signal, where, jsonCol, jsonCol, jsonCol,
+		jsonCol, jsonCol, jsonCol, signal, where, jsonCol, jsonCol, jsonCol,
 		limit)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, append(args, args...)...)
