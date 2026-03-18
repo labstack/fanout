@@ -31,10 +31,11 @@ type AttributesResult struct {
 
 // AttributeInfo describes a discovered attribute key.
 type AttributeInfo struct {
-	Key         string   `json:"key"`
-	Count       int64    `json:"count"`
-	Cardinality int64    `json:"cardinality"`
-	Samples     []string `json:"samples"`
+	Key             string   `json:"key"`
+	Count           int64    `json:"count"`
+	Cardinality     int64    `json:"cardinality"`
+	Samples         []string `json:"samples"`
+	DiscoveryMethod string   `json:"discovery_method,omitempty"`
 }
 
 // spanAttrColumns maps pre-extracted span column names to their OTel attribute keys.
@@ -79,14 +80,7 @@ func (s *Service) Attributes(ctx context.Context, p AttributeParams) (*Attribute
 	case "spans":
 		return s.attributesFromColumns(ctx, p)
 	case "logs", "metrics":
-		// Logs and metrics don't have pre-extracted columns yet.
-		// Return a helpful message instead of failing with OOM.
-		return &AttributesResult{
-			Signal:             p.Signal,
-			Attributes:         []AttributeInfo{},
-			ResourceAttributes: []AttributeInfo{},
-			Warnings:           []string{fmt.Sprintf("Attribute discovery for %s is not yet supported. Use the query tool with json_keys() on a small sample.", p.Signal)},
-		}, nil
+		return s.attributesFromJSON(ctx, p)
 	default:
 		return nil, fmt.Errorf("invalid signal %q: use spans, logs, or metrics", p.Signal)
 	}
@@ -171,6 +165,7 @@ ORDER BY count DESC`,
 		if otelKey, ok := colToKey[info.Key]; ok {
 			info.Key = otelKey
 		}
+		info.DiscoveryMethod = "column"
 		if samplesJSON.Valid {
 			if err := json.Unmarshal([]byte(samplesJSON.String), &info.Samples); err != nil {
 				slog.Warn("samples parse failed", "key", info.Key, "err", err)
@@ -223,6 +218,7 @@ ORDER BY count DESC`,
 			if otelKey, ok := resColToKey[info.Key]; ok {
 				info.Key = otelKey
 			}
+			info.DiscoveryMethod = "column"
 			if samplesJSON.Valid {
 				json.Unmarshal([]byte(samplesJSON.String), &info.Samples) //nolint:errcheck
 			}
@@ -237,4 +233,97 @@ ORDER BY count DESC`,
 	}
 
 	return out, nil
+}
+
+// attributesFromJSON discovers attributes by sampling the JSON blob.
+// Used for logs and metrics which don't have pre-extracted columns.
+func (s *Service) attributesFromJSON(ctx context.Context, p AttributeParams) (*AttributesResult, error) {
+	var table, timeCol string
+	switch p.Signal {
+	case "logs":
+		table, timeCol = "logs", "time"
+	case "metrics":
+		table, timeCol = "metrics", "time"
+	default:
+		return nil, fmt.Errorf("attributesFromJSON: unsupported signal %q", p.Signal)
+	}
+
+	out := &AttributesResult{
+		Signal:             p.Signal,
+		Attributes:         []AttributeInfo{},
+		ResourceAttributes: []AttributeInfo{},
+		Warnings:           []string{"Counts are approximate — based on 1000-row sample"},
+	}
+
+	var clauses []string
+	var args []any
+	clauses = append(clauses, fmt.Sprintf("%s >= now() - INTERVAL %d MINUTE", timeCol, p.Window))
+	if p.Service != "" {
+		clauses = append(clauses, "service = ?")
+		args = append(args, p.Service)
+	}
+	if p.Namespace != "" {
+		clauses = append(clauses, "namespace = ?")
+		args = append(args, p.Namespace)
+	}
+	if p.TenantID != "" {
+		clauses = append(clauses, "tenant = ?")
+		args = append(args, p.TenantID)
+	}
+	where := "WHERE " + strings.Join(clauses, " AND ")
+
+	countQ := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", table, where)
+	var totalRows int64
+	if err := s.duck.DB.QueryRowContext(ctx, countQ, args...).Scan(&totalRows); err != nil {
+		slog.Warn("attributes count query failed", "signal", p.Signal, "err", err)
+	}
+	out.TotalRows = totalRows
+
+	out.Attributes = s.discoverJSONKeys(ctx, table, "attributes_json", where, args, p.Limit)
+	out.ResourceAttributes = s.discoverJSONKeys(ctx, table, "resource_json", where, args, p.Limit)
+
+	return out, nil
+}
+
+// discoverJSONKeys samples a JSON column and returns discovered attribute keys with counts.
+func (s *Service) discoverJSONKeys(ctx context.Context, table, jsonCol, where string, args []any, limit int) []AttributeInfo {
+	q := fmt.Sprintf(`
+WITH sample AS (
+  SELECT %s FROM %s %s AND %s IS NOT NULL AND %s != '' LIMIT 1000
+),
+kv AS (
+  SELECT k AS key, json_extract_string(%s::JSON, '$.' || k) AS val
+  FROM sample, UNNEST(json_keys(%s::JSON)) AS t(k)
+)
+SELECT key, COUNT(*) AS count, COUNT(DISTINCT val) AS cardinality
+FROM kv
+GROUP BY key
+ORDER BY count DESC
+LIMIT %d`, jsonCol, table, where, jsonCol, jsonCol, jsonCol, jsonCol, limit)
+
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		slog.Warn("JSON attribute discovery failed", "table", table, "col", jsonCol, "err", err)
+		return []AttributeInfo{}
+	}
+	defer rows.Close()
+
+	var attrs []AttributeInfo
+	for rows.Next() {
+		var info AttributeInfo
+		if err := rows.Scan(&info.Key, &info.Count, &info.Cardinality); err != nil {
+			slog.Warn("JSON attribute scan failed", "err", err)
+			continue
+		}
+		info.Samples = []string{}
+		info.DiscoveryMethod = "sample"
+		attrs = append(attrs, info)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("JSON attribute iteration error", "err", err)
+	}
+	if attrs == nil {
+		attrs = []AttributeInfo{}
+	}
+	return attrs
 }

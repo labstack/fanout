@@ -21,10 +21,11 @@ type AttributesIn struct {
 
 // AttributeOut describes a discovered attribute.
 type AttributeOut struct {
-	Key         string   `json:"key"`
-	Count       int64    `json:"count"`
-	Cardinality int64    `json:"cardinality"`
-	Samples     []string `json:"samples"`
+	Key             string   `json:"key"`
+	Count           int64    `json:"count"`
+	Cardinality     int64    `json:"cardinality"`
+	Samples         []string `json:"samples"`
+	DiscoveryMethod string   `json:"discovery_method,omitempty"`
 }
 
 // AttributesOut is the response envelope.
@@ -76,25 +77,29 @@ func (s *Server) attributes(ctx context.Context, req *mcp.CallToolRequest, in At
 
 	for _, a := range result.Attributes {
 		out.Attributes = append(out.Attributes, AttributeOut{
-			Key:         a.Key,
-			Count:       a.Count,
-			Cardinality: a.Cardinality,
-			Samples:     a.Samples,
+			Key:             a.Key,
+			Count:           a.Count,
+			Cardinality:     a.Cardinality,
+			Samples:         a.Samples,
+			DiscoveryMethod: a.DiscoveryMethod,
 		})
 	}
 	for _, a := range result.ResourceAttributes {
 		out.ResourceAttributes = append(out.ResourceAttributes, AttributeOut{
-			Key:         a.Key,
-			Count:       a.Count,
-			Cardinality: a.Cardinality,
-			Samples:     a.Samples,
+			Key:             a.Key,
+			Count:           a.Count,
+			Cardinality:     a.Cardinality,
+			Samples:         a.Samples,
+			DiscoveryMethod: a.DiscoveryMethod,
 		})
 	}
 
 	if len(out.Attributes) == 0 && len(out.ResourceAttributes) == 0 {
 		out.Suggestion = "No attributes found. Try widening the time window or removing service/operation filters."
+	} else if result.Signal == "spans" {
+		out.Suggestion = fmt.Sprintf("Found %d attribute(s) and %d resource attribute(s) from pre-extracted columns. Additional attributes may exist in attributes_json — use query tool with json_keys() to discover them. Use attrs={\"key\":\"value\"} on spans/logs/metrics tools to filter.", len(out.Attributes), len(out.ResourceAttributes))
 	} else {
-		out.Suggestion = fmt.Sprintf("Found %d attribute(s) and %d resource attribute(s). Use attrs={\"key\":\"value\"} on spans/logs/metrics tools to filter.", len(out.Attributes), len(out.ResourceAttributes))
+		out.Suggestion = fmt.Sprintf("Found %d attribute(s) and %d resource attribute(s) from 1000-row sample (counts are approximate). Use attrs={\"key\":\"value\"} on spans/logs/metrics tools to filter.", len(out.Attributes), len(out.ResourceAttributes))
 	}
 
 	return nil, out, nil
