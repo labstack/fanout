@@ -38,7 +38,7 @@ export function ComparisonBlock({ data }: { data: ComparisonData }) {
             : isImprovement
               ? "bg-emerald-500/10 border-emerald-500/30"
               : "bg-zinc-500/10 border-zinc-600/30";
-          const arrow = m.changePct > 5 ? "\u2191" : m.changePct < -5 ? "\u2193" : "\u2192";
+          const arrow = m.changePct > 0 ? "\u2191" : m.changePct < 0 ? "\u2193" : "\u2192";
           const rightColor = isRegression ? "text-red-400" : isImprovement ? "text-emerald-400" : "text-foreground";
 
           return (

@@ -483,26 +483,26 @@ Call the respond tool OR write markdown directly. Either way:
 
 ## Block Selection
 
-Pick the MOST SPECIFIC block type for the data. When multiple could work, use the first match:
+Pick the MOST SPECIFIC block type for the data. First match wins:
 
-| Data shape | Block type | NOT this |
-|---|---|---|
-| compare tool output (before/after) | comparison | table |
-| trace tool output (span tree) | trace_waterfall | table |
-| topology tool output (nodes/edges) | topology | table |
-| per-endpoint stats (method, path, p50/p95/p99) | endpoints | table |
-| log entries from logs tool | logs | table |
-| latency/error/throughput over same time range | correlation | timeseries |
-| "where is time spent?" with spans grouped by operation | flame_graph | bar |
-| "how does traffic flow?" with topology edges | sankey | topology |
-| many services, pairwise health (error rates between pairs) | dep_matrix | table |
-| metric timeseries from metrics tool | timeseries | table |
-| ranked values (top N slowest, highest error) | bar | table |
-| histogram bucket distributions over time | heatmap | bar |
-| 2-6 key numbers (health score, total requests, error rate) | metrics | table |
-| everything else | table | — |
+| Data shape | Block type |
+|---|---|
+| compare tool output (before/after) | comparison |
+| trace tool output (span tree) | trace_waterfall |
+| topology tool output (nodes/edges) | topology |
+| per-endpoint stats (method, path, p50/p95/p99) | endpoints |
+| log entries from logs tool | logs |
+| latency/error/throughput over same time range | correlation |
+| "where is time spent?" with spans grouped by operation | flame_graph |
+| "how does traffic flow?" with topology edges | sankey |
+| many services, pairwise health (error rates between pairs) | dep_matrix |
+| metric timeseries from metrics tool | timeseries |
+| ranked values (top N slowest, highest error) | bar |
+| histogram bucket distributions over time | heatmap |
+| 2-6 key numbers (health score, total requests, error rate) | metrics |
+| everything else | table |
 
-Block types available: metrics, table, timeseries, bar, heatmap, trace_waterfall, topology, flame_graph, sankey, dep_matrix, endpoints, correlation, logs, comparison.
+Default to table only when no specialized type above matches.
 
 ## Rules
 

@@ -63,8 +63,7 @@ func validateBlock(b Block) error {
 		var d LogsBlockData
 		return unmarshalOnly(b.Data, &d)
 	case BlockComparison:
-		var d ComparisonData
-		return unmarshalOnly(b.Data, &d)
+		return validateComparison(b.Data)
 	default:
 		return fmt.Errorf("unknown block type %q", b.Type)
 	}
@@ -259,6 +258,31 @@ func validateCorrelation(data json.RawMessage) error {
 		if len(p.Values) != len(d.Times) {
 			return fmt.Errorf("correlation panel %d (%s): values length %d != times length %d",
 				i, p.Label, len(p.Values), len(d.Times))
+		}
+	}
+	return nil
+}
+
+func validateComparison(data json.RawMessage) error {
+	var d ComparisonData
+	if err := json.Unmarshal(data, &d); err != nil {
+		return err
+	}
+	if len(d.Metrics) == 0 {
+		return fmt.Errorf("comparison block has no metrics")
+	}
+	if d.LeftLabel == "" || d.RightLabel == "" {
+		return fmt.Errorf("comparison block missing left/right label")
+	}
+	for i, m := range d.Metrics {
+		if !isFinite(m.LeftValue) {
+			return fmt.Errorf("comparison metric %d (%s): non-finite leftValue", i, m.Label)
+		}
+		if !isFinite(m.RightValue) {
+			return fmt.Errorf("comparison metric %d (%s): non-finite rightValue", i, m.Label)
+		}
+		if !isFinite(m.ChangePct) {
+			return fmt.Errorf("comparison metric %d (%s): non-finite changePct", i, m.Label)
 		}
 	}
 	return nil
