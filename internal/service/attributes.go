@@ -240,13 +240,9 @@ ORDER BY count DESC`,
 // attributesFromJSON discovers attributes by sampling the JSON blob.
 // Used for logs and metrics which don't have pre-extracted columns.
 func (s *Service) attributesFromJSON(ctx context.Context, p AttributeParams) (*AttributesResult, error) {
-	var table, timeCol string
-	switch p.Signal {
-	case "logs":
-		table, timeCol = "logs", "time"
-	case "metrics":
-		table, timeCol = "metrics", "time"
-	default:
+	// Both logs and metrics use "time" as their timestamp column and table name matches signal.
+	table := p.Signal
+	if table != "logs" && table != "metrics" {
 		return nil, fmt.Errorf("attributesFromJSON: unsupported signal %q", p.Signal)
 	}
 
@@ -257,9 +253,8 @@ func (s *Service) attributesFromJSON(ctx context.Context, p AttributeParams) (*A
 		Warnings:           []string{"Counts are approximate — based on 1000-row sample"},
 	}
 
-	var clauses []string
+	clauses := []string{fmt.Sprintf("time >= now() - INTERVAL %d MINUTE", p.Window)}
 	var args []any
-	clauses = append(clauses, fmt.Sprintf("%s >= now() - INTERVAL %d MINUTE", timeCol, p.Window))
 	if p.Service != "" {
 		clauses = append(clauses, "service = ?")
 		args = append(args, p.Service)
@@ -296,19 +291,20 @@ func (s *Service) attributesFromJSON(ctx context.Context, p AttributeParams) (*A
 // discoverJSONKeys samples a JSON column and returns discovered attribute keys with counts.
 // Returns the discovered attributes and any warnings for the caller to surface.
 func (s *Service) discoverJSONKeys(ctx context.Context, table, jsonCol, where string, args []any, limit int) ([]AttributeInfo, []string) {
-	q := fmt.Sprintf(`
+	// Use placeholder replacement to avoid repeating jsonCol 5 times in Sprintf.
+	q := strings.ReplaceAll(fmt.Sprintf(`
 WITH sample AS (
-  SELECT %s FROM %s %s AND %s IS NOT NULL AND %s != '' LIMIT 1000
+  SELECT {col} FROM %s %s AND {col} IS NOT NULL AND {col} != '' LIMIT 1000
 ),
 kv AS (
-  SELECT k AS key, json_extract_string(%s::JSON, '$.' || k) AS val
-  FROM sample, UNNEST(json_keys(%s::JSON)) AS t(k)
+  SELECT k AS key, json_extract_string({col}::JSON, '$.' || k) AS val
+  FROM sample, UNNEST(json_keys({col}::JSON)) AS t(k)
 )
 SELECT key, COUNT(*) AS count, COUNT(DISTINCT val) AS cardinality
 FROM kv
 GROUP BY key
 ORDER BY count DESC
-LIMIT %d`, jsonCol, table, where, jsonCol, jsonCol, jsonCol, jsonCol, limit)
+LIMIT %d`, table, where, limit), "{col}", jsonCol)
 
 	var warnings []string
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
@@ -319,7 +315,7 @@ LIMIT %d`, jsonCol, table, where, jsonCol, jsonCol, jsonCol, jsonCol, limit)
 	}
 	defer rows.Close()
 
-	var attrs []AttributeInfo
+	attrs := []AttributeInfo{}
 	for rows.Next() {
 		var info AttributeInfo
 		if err := rows.Scan(&info.Key, &info.Count, &info.Cardinality); err != nil {
@@ -333,9 +329,6 @@ LIMIT %d`, jsonCol, table, where, jsonCol, jsonCol, jsonCol, jsonCol, limit)
 	if err := rows.Err(); err != nil {
 		slog.Warn("JSON attribute iteration error", "err", err)
 		warnings = append(warnings, fmt.Sprintf("Partial results for %s.%s: %s", table, jsonCol, err))
-	}
-	if attrs == nil {
-		attrs = []AttributeInfo{}
 	}
 	return attrs, warnings
 }

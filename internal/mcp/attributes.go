@@ -70,28 +70,9 @@ func (s *Server) attributes(ctx context.Context, req *mcp.CallToolRequest, in At
 	out := AttributesOut{
 		Signal:             result.Signal,
 		TotalRows:          result.TotalRows,
-		Attributes:         make([]AttributeOut, 0, len(result.Attributes)),
-		ResourceAttributes: make([]AttributeOut, 0, len(result.ResourceAttributes)),
+		Attributes:         convertAttributes(result.Attributes),
+		ResourceAttributes: convertAttributes(result.ResourceAttributes),
 		Warnings:           result.Warnings,
-	}
-
-	for _, a := range result.Attributes {
-		out.Attributes = append(out.Attributes, AttributeOut{
-			Key:             a.Key,
-			Count:           a.Count,
-			Cardinality:     a.Cardinality,
-			Samples:         a.Samples,
-			DiscoveryMethod: a.DiscoveryMethod,
-		})
-	}
-	for _, a := range result.ResourceAttributes {
-		out.ResourceAttributes = append(out.ResourceAttributes, AttributeOut{
-			Key:             a.Key,
-			Count:           a.Count,
-			Cardinality:     a.Cardinality,
-			Samples:         a.Samples,
-			DiscoveryMethod: a.DiscoveryMethod,
-		})
 	}
 
 	if len(out.Attributes) == 0 && len(out.ResourceAttributes) == 0 {
@@ -103,4 +84,19 @@ func (s *Server) attributes(ctx context.Context, req *mcp.CallToolRequest, in At
 	}
 
 	return nil, out, nil
+}
+
+// convertAttributes maps service-layer AttributeInfo values to MCP-layer AttributeOut values.
+func convertAttributes(infos []service.AttributeInfo) []AttributeOut {
+	out := make([]AttributeOut, len(infos))
+	for i, a := range infos {
+		out[i] = AttributeOut{
+			Key:             a.Key,
+			Count:           a.Count,
+			Cardinality:     a.Cardinality,
+			Samples:         a.Samples,
+			DiscoveryMethod: a.DiscoveryMethod,
+		}
+	}
+	return out
 }

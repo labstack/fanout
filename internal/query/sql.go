@@ -250,6 +250,24 @@ func tokenOutsideStrings(query, token string) bool {
 	return false
 }
 
+// Pre-compiled patterns for CheckQueryCost to avoid re-compilation on every call.
+var (
+	highCardPatterns = func() map[string]*regexp.Regexp {
+		cols := []string{"TRACE_ID", "SPAN_ID", "ATTRIBUTES_JSON", "RESOURCE_JSON", "BODY", "EVENTS_JSON"}
+		m := make(map[string]*regexp.Regexp, len(cols))
+		for _, col := range cols {
+			m[col] = regexp.MustCompile(`\b` + col + `\b`)
+		}
+		return m
+	}()
+
+	baseViewPatterns = map[string]*regexp.Regexp{
+		"SPANS":   regexp.MustCompile(`\bSPANS\b`),
+		"LOGS":    regexp.MustCompile(`\bLOGS\b`),
+		"METRICS": regexp.MustCompile(`\bMETRICS\b`),
+	}
+)
+
 // CheckQueryCost performs best-effort pattern analysis on a SQL query and returns
 // advisory warnings about potentially expensive operations.
 func CheckQueryCost(sql string) []string {
@@ -259,54 +277,41 @@ func CheckQueryCost(sql string) []string {
 	// 1. High-cardinality GROUP BY
 	if idx := strings.Index(upper, "GROUP BY"); idx >= 0 {
 		groupByClause := upper[idx:]
-		highCardCols := []string{"TRACE_ID", "SPAN_ID", "ATTRIBUTES_JSON", "RESOURCE_JSON", "BODY", "EVENTS_JSON"}
-		for _, col := range highCardCols {
-			pattern := regexp.MustCompile(`\b` + col + `\b`)
-			if pattern.MatchString(groupByClause) {
+		for col, pat := range highCardPatterns {
+			if pat.MatchString(groupByClause) {
 				warnings = append(warnings, fmt.Sprintf("GROUP BY %s is high-cardinality and may produce millions of groups. Consider aggregating by service, operation, or status instead.", strings.ToLower(col)))
 				break
 			}
 		}
 	}
 
-	// 2. Unbounded time range on base views
-	baseViews := []struct {
-		view      string
-		timePreds []string
-	}{
-		{"SPANS", []string{"START_TIME", "INTERVAL", "NOW()"}},
-		{"LOGS", []string{"TIME", "INTERVAL", "NOW()"}},
-		{"METRICS", []string{"TIME", "INTERVAL", "NOW()"}},
+	// Determine which base views are referenced.
+	referencedViews := make(map[string]bool, 3)
+	for name, pat := range baseViewPatterns {
+		if pat.MatchString(upper) {
+			referencedViews[name] = true
+		}
 	}
-	for _, bv := range baseViews {
-		viewPattern := regexp.MustCompile(`\b` + bv.view + `\b`)
-		if viewPattern.MatchString(upper) {
-			hasTimePred := false
-			for _, pred := range bv.timePreds {
-				if strings.Contains(upper, pred) {
-					hasTimePred = true
-					break
-				}
-			}
-			if strings.Contains(upper, "BUCKET") {
-				hasTimePred = true
-			}
-			if !hasTimePred {
-				warnings = append(warnings, fmt.Sprintf("Query references %s without a time filter. This scans all data. Add a WHERE clause with start_time/time > now() - INTERVAL.", strings.ToLower(bv.view)))
+
+	// 2. Unbounded time range on base views.
+	// Check for common time-filter indicators: INTERVAL, NOW(), timestamp column names, or BUCKET (rollups).
+	if len(referencedViews) > 0 {
+		hasTimePred := strings.Contains(upper, "INTERVAL") ||
+			strings.Contains(upper, "NOW()") ||
+			strings.Contains(upper, "START_TIME") ||
+			strings.Contains(upper, "TIME") ||
+			strings.Contains(upper, "BUCKET")
+		if !hasTimePred {
+			for name := range referencedViews {
+				warnings = append(warnings, fmt.Sprintf("Query references %s without a time filter. This scans all data. Add a WHERE clause with start_time/time > now() - INTERVAL.", strings.ToLower(name)))
 				break
 			}
 		}
 	}
 
 	// 3. SELECT * without LIMIT on base views
-	if strings.Contains(upper, "SELECT *") && !strings.Contains(upper, "LIMIT") {
-		for _, bv := range baseViews {
-			viewPattern := regexp.MustCompile(`\b` + bv.view + `\b`)
-			if viewPattern.MatchString(upper) {
-				warnings = append(warnings, "SELECT * without LIMIT on a base view. Add LIMIT or select specific columns to control result size.")
-				break
-			}
-		}
+	if len(referencedViews) > 0 && strings.Contains(upper, "SELECT *") && !strings.Contains(upper, "LIMIT") {
+		warnings = append(warnings, "SELECT * without LIMIT on a base view. Add LIMIT or select specific columns to control result size.")
 	}
 
 	// 4. CROSS JOIN
