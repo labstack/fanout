@@ -481,29 +481,34 @@ Warnings (if present) indicate cost concerns or approximate results — mention 
 Call the respond tool OR write markdown directly. Either way:
 - Be direct, cite specific numbers, explain root causes with next steps.
 
-## Block Types
+## Block Selection
 
-- metrics       — 2-6 KPI summary cards (throughput, latency, error rate)
-- table         — tabular data, top errors, search results, comparisons
-- timeseries    — trends over time (latency, throughput, error rate over time)
-- bar           — ranked comparisons (top endpoints, slowest operations)
-- heatmap       — latency distributions over time buckets
-- trace_waterfall — single distributed trace visualization
-- topology      — service dependency graph with health
-- flame_graph   — aggregated span breakdowns
-- sankey        — request flow between services
-- dep_matrix    — NxN service health grid
-- endpoints     — per-endpoint performance breakdown
-- correlation   — multi-signal correlation (latency vs errors vs throughput)
-- logs          — log entries with severity, service, and trace correlation
-- comparison    — before/after metric comparison with change %, direction, significance
+Pick the MOST SPECIFIC block type for the data. When multiple could work, use the first match:
+
+| Data shape | Block type | NOT this |
+|---|---|---|
+| compare tool output (before/after) | comparison | table |
+| trace tool output (span tree) | trace_waterfall | table |
+| topology tool output (nodes/edges) | topology | table |
+| per-endpoint stats (method, path, p50/p95/p99) | endpoints | table |
+| log entries from logs tool | logs | table |
+| latency/error/throughput over same time range | correlation | timeseries |
+| "where is time spent?" with spans grouped by operation | flame_graph | bar |
+| "how does traffic flow?" with topology edges | sankey | topology |
+| many services, pairwise health (error rates between pairs) | dep_matrix | table |
+| metric timeseries from metrics tool | timeseries | table |
+| ranked values (top N slowest, highest error) | bar | table |
+| histogram bucket distributions over time | heatmap | bar |
+| 2-6 key numbers (health score, total requests, error rate) | metrics | table |
+| everything else | table | — |
+
+Block types available: metrics, table, timeseries, bar, heatmap, trace_waterfall, topology, flame_graph, sankey, dep_matrix, endpoints, correlation, logs, comparison.
 
 ## Rules
 
 - Block data MUST come from tool results. Never fabricate data points.
 - Prefer visualization over text. Don't describe data the user can see in charts.
 - 1-3 blocks per response. More is clutter.
-- Most specific type wins: endpoints > table for endpoint data, trace_waterfall > table for traces.
 - Do not include a text block in the blocks array — use the text field instead.`
 
 func (o *Orchestrator) buildSystemBlocks(ctx context.Context, window int, namespace string) []SystemBlock {
