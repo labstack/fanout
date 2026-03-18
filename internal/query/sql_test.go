@@ -119,3 +119,51 @@ func TestDefaultTimeout(t *testing.T) {
 		t.Errorf("custom timeout = %d, want 5000", customMs)
 	}
 }
+
+func TestCheckQueryCost(t *testing.T) {
+	tests := []struct {
+		name         string
+		query        string
+		wantWarnings int
+	}{
+		// Clean queries — no warnings
+		{"safe rollup query", "SELECT service, p95_ms FROM service_rollup WHERE bucket > now() - INTERVAL 1 HOUR", 0},
+		{"safe spans with time filter", "SELECT * FROM spans WHERE start_time > now() - INTERVAL 15 MINUTE LIMIT 100", 0},
+		{"safe CTE", "WITH x AS (SELECT 1) SELECT * FROM x", 0},
+
+		// High-cardinality GROUP BY
+		{"group by trace_id", "SELECT trace_id, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY trace_id", 1},
+		{"group by span_id", "SELECT span_id, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY span_id", 1},
+		{"group by attributes_json", "SELECT attributes_json, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY attributes_json", 1},
+		{"group by body", "SELECT body, COUNT(*) FROM logs WHERE time > now() - INTERVAL 1 HOUR GROUP BY body", 1},
+		{"group by events_json", "SELECT events_json, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY events_json", 1},
+		{"group by resource_json", "SELECT resource_json, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY resource_json", 1},
+
+		// Unbounded time range (also triggers SELECT * without LIMIT)
+		{"spans no time filter", "SELECT * FROM spans WHERE service = 'foo'", 2},
+		{"logs no time filter", "SELECT * FROM logs WHERE severity = 'ERROR'", 2},
+		{"metrics no time filter", "SELECT * FROM metrics WHERE name = 'cpu'", 2},
+		{"spans with time filter ok", "SELECT * FROM spans WHERE start_time > now() - INTERVAL 1 HOUR LIMIT 100", 0},
+		{"rollup no time filter ok", "SELECT * FROM service_rollup", 0},
+
+		// SELECT * without LIMIT
+		{"select star no limit", "SELECT * FROM spans WHERE start_time > now() - INTERVAL 1 HOUR", 1},
+		{"select star with limit ok", "SELECT * FROM spans WHERE start_time > now() - INTERVAL 1 HOUR LIMIT 100", 0},
+		{"select columns no limit ok", "SELECT service, count(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY service", 0},
+
+		// CROSS JOIN (also triggers SELECT * without LIMIT)
+		{"cross join", "SELECT * FROM spans CROSS JOIN logs WHERE start_time > now() - INTERVAL 1 HOUR", 2},
+
+		// Multiple warnings
+		{"group by trace_id no time", "SELECT trace_id, COUNT(*) FROM spans GROUP BY trace_id", 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings := CheckQueryCost(tt.query)
+			if len(warnings) != tt.wantWarnings {
+				t.Errorf("CheckQueryCost() returned %d warning(s), want %d: %v", len(warnings), tt.wantWarnings, warnings)
+			}
+		})
+	}
+}

@@ -23,6 +23,7 @@ type QueryOut struct {
 	ExecTimeMs int64           `json:"exec_time_ms,omitempty"`
 	Truncated  bool            `json:"truncated,omitempty"`
 	QueryPlan  string          `json:"query_plan,omitempty"`
+	Warnings   []string        `json:"warnings,omitempty"`
 	Schema     *SchemaResponse `json:"schema,omitempty"`
 }
 
@@ -185,6 +186,8 @@ func (s *Server) query(ctx context.Context, req *mcp.CallToolRequest, in QueryIn
 		in.MaxRows = 10000
 	}
 
+	costWarnings := query.CheckQueryCost(in.SQL)
+
 	resp := s.duck.ExecuteSQL(ctx, query.SQLRequest{
 		Query:     in.SQL,
 		MaxRows:   in.MaxRows,
@@ -194,7 +197,8 @@ func (s *Server) query(ctx context.Context, req *mcp.CallToolRequest, in QueryIn
 
 	if resp.Error != "" {
 		return nil, QueryOut{
-			Schema: buildSchemaResponse(),
+			Warnings: costWarnings,
+			Schema:   buildSchemaResponse(),
 		}, fmt.Errorf("%s", resp.Error)
 	}
 
@@ -202,6 +206,7 @@ func (s *Server) query(ctx context.Context, req *mcp.CallToolRequest, in QueryIn
 		return nil, QueryOut{
 			QueryPlan:  resp.QueryPlan,
 			ExecTimeMs: resp.ExecutionTimeMs,
+			Warnings:   costWarnings,
 		}, nil
 	}
 
@@ -210,5 +215,6 @@ func (s *Server) query(ctx context.Context, req *mcp.CallToolRequest, in QueryIn
 		RowCount:   resp.RowsReturned,
 		ExecTimeMs: resp.ExecutionTimeMs,
 		Truncated:  resp.RowsReturned >= in.MaxRows,
+		Warnings:   costWarnings,
 	}, nil
 }
