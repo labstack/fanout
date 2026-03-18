@@ -99,7 +99,7 @@ Workflow: overview → diagnose (problem service) → spans/logs/trace (specific
 Params: window ("15m","1h","7d" or ISO range), include (["health","services","issues"]), sort_services_by ("severity","error_rate","latency","throughput")
 
 Returns: health (score, total_services, by_status, throughput_per_min, global_error_rate, global_p95_ms), services (service, status, requests, error_rate, p50_ms, p95_ms), top_issues (service, issue, value, threshold)`,
-	}, s.overview)
+	}, wrap("overview", s.overview))
 
 	// 2. topology — service dependency map
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -109,7 +109,7 @@ Returns: health (score, total_services, by_status, throughput_per_min, global_er
 Params: window, edge_type (call|messaging|all), depth (BFS hops from service), service (focus node), include_inactive, namespace, tenant
 
 Returns: nodes (service, status, requests, error_rate, p50_ms, p95_ms, blast_radius, upstream_count, downstream_count), edges (source, target, calls, avg_ms, error_rate, edge_type), critical_paths (top 3 weighted paths)`,
-	}, s.topology)
+	}, wrap("topology", s.topology))
 
 	// 3. spans — span search and aggregation
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -120,7 +120,7 @@ Params: query (substring match), operation (exact), service, status (error|ok|sl
 
 Returns (ungrouped): spans (trace_id, span_id, service, operation, kind, start_time, duration_ms, status, attributes), total_matched
 Returns (grouped): groups (key, count, error_count, error_rate, p50_ms, p95_ms, p99_ms, exemplar_trace_ids), total_groups`,
-	}, s.spans)
+	}, wrap("spans", s.spans))
 
 	// 4. logs — log search and aggregation
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -131,7 +131,7 @@ Params: query (substring on body), severity (TRACE|DEBUG|INFO|WARN|ERROR|FATAL),
 
 Returns (ungrouped): logs (time, service, severity, body, trace_id, span_id, attributes), total_matched
 Returns (grouped): groups (key, count, sample_bodies, sample_trace_ids), total_groups`,
-	}, s.logs)
+	}, wrap("logs", s.logs))
 
 	// 5. metrics — metric discovery and timeseries query
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -142,7 +142,7 @@ Params: action (list|query), name, names (overlay multiple), aggregation (avg|su
 
 Returns (list): metrics (name, type, unit, services, description)
 Returns (query): series (labels, metric, aggregation, unit, datapoints), anomalies (time, type, value, expected, deviation_sigma)`,
-	}, s.metrics)
+	}, wrap("metrics", s.metrics))
 
 	// 6. trace — distributed trace with root cause analysis
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -152,7 +152,7 @@ Returns (query): series (labels, metric, aggregation, unit, datapoints), anomali
 Params: trace_id (required), include_logs (default true), include_metrics (adds service_rollup context around trace time), compare_to (another trace_id for side-by-side diff)
 
 Returns: spans (tree with timing/self_time), logs (correlated), critical_path, root_cause (reason, evidence), comparison (when compare_to set), metric_context (when include_metrics set)`,
-	}, s.trace)
+	}, wrap("trace", s.trace))
 
 	// 7. diagnose — multi-signal root cause analysis
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -162,7 +162,7 @@ Returns: spans (tree with timing/self_time), logs (correlated), critical_path, r
 Params: service (required), symptom (auto|latency|errors|throughput_drop), window, namespace, tenant
 
 Returns: metrics (p50/p95/p99_ms, error_rate, request_count, comparison_to_baseline), top_errors (message, count, example_trace), slow_operations, dependencies, change_points (time, metric, before, after), correlated_log_patterns (pattern, count, severity)`,
-	}, s.diagnose)
+	}, wrap("diagnose", s.diagnose))
 
 	// 8. compare — side-by-side comparison (3 modes)
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -172,7 +172,7 @@ Returns: metrics (p50/p95/p99_ms, error_rate, request_count, comparison_to_basel
 Params: mode (services|time|operations), services (for services mode), service (for time/operations), left/right (mode-specific config), focus (["latency","errors","throughput"]), window
 
 Returns: comparison (per-metric left/right values, change_pct, direction, statistically_significant), verdict`,
-	}, s.compare)
+	}, wrap("compare", s.compare))
 
 	// 9. attributes — attribute discovery
 	mcp.AddTool(s.mcp, &mcp.Tool{
@@ -184,13 +184,13 @@ Params: signal (spans|logs|metrics, default: spans), service, operation (spans o
 Returns: attributes (key, count, cardinality, samples[]), resource_attributes (key, count, cardinality, samples[])
 
 Example: attributes(signal="spans", service="checkout") → discovers http.method (4 values), http.status_code (8 values), db.system (2 values), etc.`,
-	}, s.attributes)
+	}, wrap("attributes", s.attributes))
 
 	// 10. query — raw SQL with DuckDB views
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "query",
 		Description: queryToolDescription(s.cfg.LakeDir),
-	}, s.query)
+	}, wrap("query", s.query))
 }
 
 func queryToolDescription(lakeDir string) string {
