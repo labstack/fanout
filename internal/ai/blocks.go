@@ -25,7 +25,7 @@ const (
 	BlockDepMatrix      BlockType = "dep_matrix"
 	BlockEndpoints      BlockType = "endpoints"
 	BlockCorrelation    BlockType = "correlation"
-	BlockLogs BlockType = "logs"
+	BlockLogs           BlockType = "logs"
 )
 
 // Block is a typed data unit sent to the client for rendering.

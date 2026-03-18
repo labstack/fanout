@@ -359,4 +359,3 @@ LIMIT %d;
 	}
 	return metrics, hasMore, nil
 }
-
