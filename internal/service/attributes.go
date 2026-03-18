@@ -220,7 +220,9 @@ ORDER BY count DESC`,
 			}
 			info.DiscoveryMethod = "column"
 			if samplesJSON.Valid {
-				json.Unmarshal([]byte(samplesJSON.String), &info.Samples) //nolint:errcheck
+				if err := json.Unmarshal([]byte(samplesJSON.String), &info.Samples); err != nil {
+					slog.Warn("resource samples parse failed", "key", info.Key, "err", err)
+				}
 			}
 			if info.Samples == nil {
 				info.Samples = []string{}
@@ -276,17 +278,24 @@ func (s *Service) attributesFromJSON(ctx context.Context, p AttributeParams) (*A
 	var totalRows int64
 	if err := s.duck.DB.QueryRowContext(ctx, countQ, args...).Scan(&totalRows); err != nil {
 		slog.Warn("attributes count query failed", "signal", p.Signal, "err", err)
+		out.Warnings = append(out.Warnings, fmt.Sprintf("Count query failed: %s — results may be incomplete", err))
 	}
 	out.TotalRows = totalRows
 
-	out.Attributes = s.discoverJSONKeys(ctx, table, "attributes_json", where, args, p.Limit)
-	out.ResourceAttributes = s.discoverJSONKeys(ctx, table, "resource_json", where, args, p.Limit)
+	attrs, attrsWarns := s.discoverJSONKeys(ctx, table, "attributes_json", where, args, p.Limit)
+	out.Attributes = attrs
+	out.Warnings = append(out.Warnings, attrsWarns...)
+
+	resAttrs, resWarns := s.discoverJSONKeys(ctx, table, "resource_json", where, args, p.Limit)
+	out.ResourceAttributes = resAttrs
+	out.Warnings = append(out.Warnings, resWarns...)
 
 	return out, nil
 }
 
 // discoverJSONKeys samples a JSON column and returns discovered attribute keys with counts.
-func (s *Service) discoverJSONKeys(ctx context.Context, table, jsonCol, where string, args []any, limit int) []AttributeInfo {
+// Returns the discovered attributes and any warnings for the caller to surface.
+func (s *Service) discoverJSONKeys(ctx context.Context, table, jsonCol, where string, args []any, limit int) ([]AttributeInfo, []string) {
 	q := fmt.Sprintf(`
 WITH sample AS (
   SELECT %s FROM %s %s AND %s IS NOT NULL AND %s != '' LIMIT 1000
@@ -301,10 +310,12 @@ GROUP BY key
 ORDER BY count DESC
 LIMIT %d`, jsonCol, table, where, jsonCol, jsonCol, jsonCol, jsonCol, limit)
 
+	var warnings []string
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("JSON attribute discovery failed", "table", table, "col", jsonCol, "err", err)
-		return []AttributeInfo{}
+		warnings = append(warnings, fmt.Sprintf("Discovery failed for %s.%s: %s", table, jsonCol, err))
+		return []AttributeInfo{}, warnings
 	}
 	defer rows.Close()
 
@@ -321,9 +332,10 @@ LIMIT %d`, jsonCol, table, where, jsonCol, jsonCol, jsonCol, jsonCol, limit)
 	}
 	if err := rows.Err(); err != nil {
 		slog.Warn("JSON attribute iteration error", "err", err)
+		warnings = append(warnings, fmt.Sprintf("Partial results for %s.%s: %s", table, jsonCol, err))
 	}
 	if attrs == nil {
 		attrs = []AttributeInfo{}
 	}
-	return attrs
+	return attrs, warnings
 }
