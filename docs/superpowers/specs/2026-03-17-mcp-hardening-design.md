@@ -25,21 +25,25 @@ type Result struct {
 }
 
 type ResultMeta struct {
-    ExecTimeMs int64  `json:"exec_time_ms"`
-    Truncated  bool   `json:"truncated,omitempty"`
-    Window     string `json:"window,omitempty"`
+    ExecTimeMs int64 `json:"exec_time_ms"`
 }
 ```
 
+Note: `Truncated` and `Window` are already present in per-tool output structs (e.g., `SpansOut.Suggestion`, `OverviewOut.Window`). Duplicating them in `ResultMeta` would create two sources of truth. The meta layer only carries cross-cutting concerns (execution time).
+
 **Generic wrapper** in `internal/mcp/result.go`:
 
+The wrapper returns `any` (not `Result`) to avoid MCP SDK output schema validation issues. The SDK derives a JSON Schema from the return type — with `Result` it would see `Data` as an empty-object schema and potentially reject the actual data. Returning `any` skips schema derivation entirely.
+
 ```go
-func wrap[TIn, TOut any](toolType string, fn func(context.Context, *mcp.CallToolRequest, TIn) (*mcp.CallToolResult, TOut, error)) func(context.Context, *mcp.CallToolRequest, TIn) (*mcp.CallToolResult, Result, error) {
-    return func(ctx context.Context, req *mcp.CallToolRequest, in TIn) (*mcp.CallToolResult, Result, error) {
+func wrap[TIn, TOut any](toolType string, fn func(context.Context, *mcp.CallToolRequest, TIn) (*mcp.CallToolResult, TOut, error)) func(context.Context, *mcp.CallToolRequest, TIn) (*mcp.CallToolResult, any, error) {
+    return func(ctx context.Context, req *mcp.CallToolRequest, in TIn) (*mcp.CallToolResult, any, error) {
         start := time.Now()
         callResult, out, err := fn(ctx, req, in)
         if callResult != nil {
-            return callResult, Result{}, nil
+            // Handler already built a CallToolResult (not used by any current handler,
+            // but preserved for forward compatibility). Propagate error if present.
+            return callResult, nil, err
         }
         return nil, Result{
             Type: toolType,
@@ -62,9 +66,11 @@ mcp.AddTool(s.mcp, overviewTool, wrap("overview", s.overview))
 
 ### Why this approach
 
-- **No handler changes**: Handler methods keep their specific return types. All 13 existing tests continue to call handlers directly with no changes.
+- **No handler changes**: Handler methods keep their specific return types. Existing handler tests continue to call handlers directly with no changes.
 - **No service layer changes**: The `Data any` field is just the existing `*Out` struct, serialized as-is.
 - **Works with Go generics**: `wrap` infers `TIn` and `TOut` from the handler signature. Even handlers returning `any` (metrics, attributes) work.
+- **SDK-safe**: Returns `any` to skip MCP SDK output schema derivation, avoiding issues with the `Data any` field.
+- **Error propagation**: Errors are always passed through — when `callResult != nil`, the error is still returned to the SDK (not swallowed).
 - **Uniform JSON contract**: Every tool response is `{"type": "...", "data": {...}, "meta": {...}}`.
 
 ### What the LLM sees (before/after)
@@ -79,7 +85,7 @@ After:
 {
   "type": "overview",
   "data": {"services": [...], "health": {...}, "window": "15m", "timestamp": "..."},
-  "meta": {"exec_time_ms": 42, "window": "15m"}
+  "meta": {"exec_time_ms": 42}
 }
 ```
 
@@ -95,17 +101,17 @@ The `query` tool validates SQL syntax (SELECT/WITH only, no dangerous functions)
 
 Add **pattern-based warnings** to `internal/query/sql.go`. These are advisory — they return a warning in the response rather than blocking execution — because the LLM needs to be told _why_ a query is risky, not just rejected.
 
-**New function** `checkQueryCost(sql string) []string` returns warning strings:
+**New exported function** `CheckQueryCost(sql string) []string` in `internal/query/sql.go` returns warning strings. Pattern detection is best-effort — false positives/negatives are acceptable since these are advisory warnings. Matches against normalized upper-case SQL; only detects simple cases (direct view/table references without obvious time predicates).
 
-1. **High-cardinality GROUP BY**: Warn if GROUP BY references `trace_id`, `span_id`, `attributes_json`, `resource_json`, `body`, `events_json`, or `links_json`.
+1. **High-cardinality GROUP BY**: Warn if GROUP BY references `trace_id`, `span_id`, `attributes_json`, `resource_json`, `body`, or `events_json`.
 
-2. **Unbounded time range**: Warn if query references `spans`, `logs`, or `metrics` views without a time filter (no `start_time >`, `time >`, or `WHERE ... INTERVAL`).
+2. **Unbounded time range**: Warn if query directly references `spans`, `logs`, or `metrics` views without a WHERE clause containing time-related predicates (`start_time`, `time`, `bucket`, `INTERVAL`, `now()`).
 
-3. **SELECT * without LIMIT**: Warn when `SELECT *` is used on a base view without an explicit LIMIT (ensureLimit handles this, but the warning educates the LLM).
+3. **SELECT * without LIMIT**: Warn when `SELECT *` appears with a base view and no explicit `LIMIT` keyword (ensureLimit adds one, but the warning educates the LLM about the pattern).
 
-4. **CROSS JOIN**: Warn on any `CROSS JOIN` or implicit cross joins (comma-separated FROM tables).
+4. **CROSS JOIN**: Warn on explicit `CROSS JOIN` keywords.
 
-**Integration**: Call `checkQueryCost` in the MCP `query` handler (not in `ExecuteSQL`, since that's also used internally). If warnings exist, include them in the response:
+**Integration**: The MCP `query` handler calls `query.CheckQueryCost(in.SQL)` before execution and includes warnings in the response:
 
 ```go
 type QueryOut struct {
@@ -114,7 +120,9 @@ type QueryOut struct {
 }
 ```
 
-**DuckDB memory guard**: Set `SET memory_limit = '512MB'` on the query connection. This is a per-connection setting that prevents a single query from consuming all available memory.
+The handler sets `out.Warnings = query.CheckQueryCost(in.SQL)` before calling `ExecuteSQL`.
+
+**DuckDB memory guard**: Set `memory_limit` in the DuckDB connection config at initialization time (in `internal/query/duck.go`), not per-query. This avoids connection pool issues — `database/sql` doesn't guarantee the same connection across calls, so a per-query `SET` could be lost. A global config applies to all connections from the pool.
 
 ### Not doing
 
@@ -194,37 +202,51 @@ WITH sample AS (
     AND attributes_json IS NOT NULL AND attributes_json != ''
   LIMIT 1000
 ),
-keys AS (
-  SELECT UNNEST(json_keys(attributes_json::JSON)) AS key
-  FROM sample
+kv AS (
+  SELECT k AS key, json_extract_string(attributes_json::JSON, '$.' || k) AS val
+  FROM sample, UNNEST(json_keys(attributes_json::JSON)) AS t(k)
 )
 SELECT key,
        COUNT(*) AS count,
-       COUNT(DISTINCT key) AS cardinality
-FROM keys
+       COUNT(DISTINCT val) AS cardinality
+FROM kv
 GROUP BY key
 ORDER BY count DESC
 LIMIT ?
 ```
 
+The UNNEST + json_extract_string pattern is O(keys * rows) but bounded to 1000 sample rows, so it stays fast even with many unique keys. This gives us real cardinality numbers, not the constant-1 that a keys-only GROUP BY would produce.
+
 **Key decisions:**
 - **Sample 1000 rows**, not full scan. This bounds memory and execution time regardless of data volume.
-- **No sample values** for JSON-discovered attributes (unlike span UNPIVOT which returns samples). Extracting values for every discovered key across 1000 rows is O(keys * rows) — too expensive for arbitrary JSON.
-- **Add a `discovery_method` field** to `AttributeInfo`: "column" for pre-extracted (spans), "sample" for JSON-sampled (logs/metrics). This tells the LLM that sample-based counts are approximate.
+- **No sample values** for JSON-discovered attributes (unlike span UNPIVOT which returns `list(DISTINCT val)`). Adding samples would require another round of extraction; the LLM can use the `query` tool with `json_extract_string` to sample specific keys if needed.
+- **Add a `DiscoveryMethod` field** to `AttributeInfo`: `"column"` for pre-extracted (spans), `"sample"` for JSON-sampled (logs/metrics). This tells the LLM that sample-based counts are approximate.
+
+**Struct change** in `internal/service/attributes.go`:
+
+```go
+type AttributeInfo struct {
+    Key             string   `json:"key"`
+    Count           int64    `json:"count"`
+    Cardinality     int64    `json:"cardinality"`
+    Samples         []string `json:"samples"`
+    DiscoveryMethod string   `json:"discovery_method,omitempty"` // "column" or "sample"
+}
+```
+
+For JSON-discovered attributes, `Samples` is `[]string{}` (empty).
 
 **Implementation** in `internal/service/attributes.go`:
 
-Add `attributesFromJSON(ctx, signal, tableName, timeCol, p)` method that:
-1. Runs the sample query above
-2. For resource attributes, does the same on `resource_json`
+Add `attributesFromJSON(ctx context.Context, p AttributeParams)` method (matching existing pattern — signal, table name, and time column are derived internally from `p.Signal`) that:
+1. Runs the sample query above for `attributes_json`
+2. Runs the same for `resource_json`
 3. Returns `AttributesResult` with `Warnings: ["Counts are approximate — based on 1000-row sample"]`
 
 Update the `switch` in `Attributes()`:
 ```go
-case "logs":
-    return s.attributesFromJSON(ctx, "logs", "logs", "time", p)
-case "metrics":
-    return s.attributesFromJSON(ctx, "metrics", "metrics", "time", p)
+case "logs", "metrics":
+    return s.attributesFromJSON(ctx, p)
 ```
 
 ### Consistency gap
