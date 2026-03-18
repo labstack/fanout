@@ -92,11 +92,15 @@ func (s *Server) registerTools() {
 	// 1. overview — system health entry point
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "overview",
-		Description: `System health overview. Start here. Returns composite health score (0–1), per-service status, and top issues.
+		Description: `System health overview. Start here for any investigation.
 
-Workflow: overview → diagnose (problem service) → spans/logs/trace (specific errors)
+When to use: First tool to call. Gives you the lay of the land — which services exist, which have issues.
+Workflow: overview → diagnose(problem service) → trace(suggested_traces) → logs(trace_id)
+Gotchas:
+- sort_services_by="severity" (default) surfaces problems first; use "throughput" for traffic-based ranking.
+- Returns at most 100 services. Use limit parameter to increase.
 
-Params: window ("15m","1h","7d" or ISO range), include (["health","services","issues"]), sort_services_by ("severity","error_rate","latency","throughput")
+Params: window ("15m","1h","7d" or ISO range), include (["health","services","issues"]), sort_services_by ("severity","error_rate","latency","throughput"), namespace, tenant, limit (default 100)
 
 Returns: health (score, total_services, by_status, throughput_per_min, global_error_rate, global_p95_ms), services (service, status, requests, error_rate, p50_ms, p95_ms), top_issues (service, issue, value, threshold)`,
 	}, wrap("overview", s.overview))
@@ -106,6 +110,12 @@ Returns: health (score, total_services, by_status, throughput_per_min, global_er
 		Name: "topology",
 		Description: `Service dependency map with health status, blast radius, and critical paths.
 
+When to use: To understand which services call which, identify blast radius, or find critical dependency chains.
+Workflow: topology → diagnose(unhealthy node) or topology(service=X, depth=2) to zoom in on a subgraph.
+Gotchas:
+- edge_type="messaging" shows async producer/consumer links; "call" shows synchronous RPC.
+- blast_radius indicates how many downstream services are affected if this node fails.
+
 Params: window, edge_type (call|messaging|all), depth (BFS hops from service), service (focus node), include_inactive, namespace, tenant
 
 Returns: nodes (service, status, requests, error_rate, p50_ms, p95_ms, blast_radius, upstream_count, downstream_count), edges (source, target, calls, avg_ms, error_rate, edge_type), critical_paths (top 3 weighted paths)`,
@@ -114,7 +124,14 @@ Returns: nodes (service, status, requests, error_rate, p50_ms, p95_ms, blast_rad
 	// 3. spans — span search and aggregation
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "spans",
-		Description: `Search, filter, and aggregate trace spans. Supports raw listing or group_by aggregation with percentile latency.
+		Description: `Search, filter, and aggregate trace spans.
+
+When to use: To find specific spans matching criteria, or to get aggregated latency/error stats by service or operation.
+Workflow: spans(service=X, status=error) → trace(trace_id) for full context. Use group_by for patterns before drilling in.
+Gotchas:
+- Without group_by, returns raw spans (use limit to control volume). With group_by, returns aggregated stats with percentiles.
+- Use attributes tool first to discover filterable attribute keys for attrs parameter.
+- status="slow" filters spans above service P95 baseline.
 
 Params: query (substring match), operation (exact), service, status (error|ok|slow|all), kind (server|client|producer|consumer|internal), min_duration_ms, max_duration_ms, attrs (key-value), group_by (service|operation|status|kind|http.method|http.status_code), order_by (time|duration|error_rate|count), include_exemplars, window, namespace, tenant, limit
 
@@ -125,7 +142,14 @@ Returns (grouped): groups (key, count, error_count, error_rate, p50_ms, p95_ms, 
 	// 4. logs — log search and aggregation
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "logs",
-		Description: `Search, filter, and aggregate log entries. Supports raw listing or group_by aggregation with sample bodies and trace correlation.
+		Description: `Search, filter, and aggregate log entries.
+
+When to use: To find logs by pattern, severity, or trace correlation. Use after trace tool to get logs for a specific request.
+Workflow: logs(trace_id=X) for request logs. logs(severity=["ERROR","FATAL"], service=X) → trace(trace_id) for error investigation.
+Gotchas:
+- severity is an array — pass ["ERROR", "FATAL"] for multiple levels.
+- group_by=["service","severity"] gives a heatmap of log volume by service and level.
+- Use attributes tool first to discover filterable attribute keys.
 
 Params: query (substring on body), severity (TRACE|DEBUG|INFO|WARN|ERROR|FATAL), trace_id (correlate to trace), service, attrs (key-value), group_by (service|severity), order_by (time|count|severity), window, namespace, tenant, limit
 
@@ -136,9 +160,16 @@ Returns (grouped): groups (key, count, sample_bodies, sample_trace_ids), total_g
 	// 5. metrics — metric discovery and timeseries query
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "metrics",
-		Description: `Discover and query OTLP metric timeseries with anomaly detection. Two actions: 'list' discovers metrics; 'query' returns bucketed timeseries.
+		Description: `Discover and query OTLP metric timeseries with anomaly detection.
 
-Params: action (list|query), name, names (overlay multiple), aggregation (avg|sum|min|max|count), group_by, granularity (1m|5m|15m|1h|auto), service, attrs, window, namespace, tenant, limit
+When to use: For metric-based investigation — CPU, memory, request rates, custom business metrics. Start with action="list" to discover what metrics exist.
+Workflow: metrics(action=list) → metrics(action=query, name=X) → anomalies in response highlight spikes/drops.
+Gotchas:
+- Cumulative sum metrics (type="sum") are auto-converted to per-bucket deltas — you see rates, not raw counters.
+- action="histogram" returns bucket distributions; action="exemplars" returns trace links from histogram exemplars.
+- names=["metric1","metric2"] overlays multiple metrics in one query for comparison.
+
+Params: action (list|query|histogram|exemplars), name, names (overlay multiple), aggregation (avg|sum|min|max|count), group_by, granularity (1m|5m|15m|1h|auto), service, attrs, window, namespace, tenant, limit
 
 Returns (list): metrics (name, type, unit, services, description)
 Returns (query): series (labels, metric, aggregation, unit, datapoints), anomalies (time, type, value, expected, deviation_sigma)`,
@@ -147,9 +178,16 @@ Returns (query): series (labels, metric, aggregation, unit, datapoints), anomali
 	// 6. trace — distributed trace with root cause analysis
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "trace",
-		Description: `Distributed trace with auto root-cause analysis. Shows spans, correlated logs, critical path, and identifies the likely error or latency cause.
+		Description: `Distributed trace with auto root-cause analysis.
 
-Params: trace_id (required), include_logs (default true), include_metrics (adds service_rollup context around trace time), compare_to (another trace_id for side-by-side diff)
+When to use: When you have a trace_id from spans, logs, diagnose, or metrics exemplars. Shows the full request journey with timing breakdown.
+Workflow: trace(trace_id) → check root_cause → if latency issue, compare with trace(trace_id, compare_to=healthy_trace_id).
+Gotchas:
+- include_metrics=true adds service_rollup context around the trace's time — useful for seeing if the trace was during a spike.
+- critical_path shows spans that consumed the most wall-clock time relative to the trace duration.
+- compare_to gives a side-by-side diff highlighting which operations changed.
+
+Params: trace_id (required), include_logs (default true), include_metrics (adds service_rollup context around trace time), compare_to (another trace_id for side-by-side diff), window
 
 Returns: spans (tree with timing/self_time), logs (correlated), critical_path, root_cause (reason, evidence), comparison (when compare_to set), metric_context (when include_metrics set)`,
 	}, wrap("trace", s.trace))
@@ -159,31 +197,53 @@ Returns: spans (tree with timing/self_time), logs (correlated), critical_path, r
 		Name: "diagnose",
 		Description: `Deep-dive into a service with baseline comparison, change point detection, and log correlation.
 
+When to use: After overview identifies a problem service. For broad "what's wrong?" exploration — use spans/logs for specific known errors.
+Workflow: overview → diagnose(service) → trace(suggested_traces[0]) → logs(trace_id) for full investigation.
+Gotchas:
+- symptom="auto" (default) detects the dominant issue; specify "latency" or "errors" to force focus.
+- suggested_traces contains trace IDs ready for the trace tool — always use them for follow-up.
+- change_points show when metrics shifted — feed the timestamp to compare(mode=time) for before/after.
+
 Params: service (required), symptom (auto|latency|errors|throughput_drop), window, namespace, tenant
 
-Returns: metrics (p50/p95/p99_ms, error_rate, request_count, comparison_to_baseline), top_errors (message, count, example_trace), slow_operations, dependencies, change_points (time, metric, before, after), correlated_log_patterns (pattern, count, severity)`,
+Returns: metrics (p50/p95/p99_ms, error_rate, request_count, comparison_to_baseline), top_errors (operation, message, exception_type, count, example_trace), slow_operations, dependencies, change_points, correlated_log_patterns, suggested_traces`,
 	}, wrap("diagnose", s.diagnose))
 
 	// 8. compare — side-by-side comparison (3 modes)
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "compare",
-		Description: `Side-by-side comparison with 3 modes. Services mode compares 2-4 services. Time mode compares same service across two windows. Operations mode compares two operations within a service.
+		Description: `Side-by-side comparison with 3 modes.
 
-Params: mode (services|time|operations), services (for services mode), service (for time/operations), left/right (mode-specific config), focus (["latency","errors","throughput"]), window
+When to use: To quantify differences — between services, time windows, or operations — with statistical significance.
+Workflow: diagnose → compare(mode=time, left.window=before_change, right.window=after_change) to confirm a regression.
 
+Modes:
+- services: Compare 2-4 services side-by-side. Pass services=["svc1","svc2"].
+- time: Compare same service across two ISO time windows. Pass service, left.window, right.window.
+- operations: Compare two operations within a service. Pass service, left.operation, right.operation.
+
+Gotchas:
+- Time mode requires ISO range windows (e.g., "2026-03-17T10:00:00Z/2026-03-17T11:00:00Z"), not durations.
+- statistically_significant=true in comparison means the change is likely real, not noise.
+
+Params: mode (services|time|operations), services, service, left/right, focus (["latency","errors","throughput"]), window
 Returns: comparison (per-metric left/right values, change_pct, direction, statistically_significant), verdict`,
 	}, wrap("compare", s.compare))
 
 	// 9. attributes — attribute discovery
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "attributes",
-		Description: `Discover what OTel attributes exist in the data. Returns attribute keys with occurrence count, cardinality, and sample values per signal (spans/logs/metrics). Use this before filtering to learn what keys are available.
+		Description: `Discover what OTel attributes exist in the data.
+
+When to use: Before using attrs={} filters on spans/logs/metrics tools. Tells you what keys are available and their value distributions.
+Workflow: attributes(signal=spans, service=X) → spans(service=X, attrs={"http.status_code":"500"})
+Gotchas:
+- For spans, uses pre-extracted columns (fast, exact counts). For logs/metrics, samples 1000 rows from JSON (approximate counts).
+- Additional span attributes may exist in the JSON blob beyond the pre-extracted columns — use query tool with json_keys(attributes_json) to discover them.
 
 Params: signal (spans|logs|metrics, default: spans), service, operation (spans only), window (default: 1h), namespace, tenant, limit (default: 50)
 
-Returns: attributes (key, count, cardinality, samples[]), resource_attributes (key, count, cardinality, samples[])
-
-Example: attributes(signal="spans", service="checkout") → discovers http.method (4 values), http.status_code (8 values), db.system (2 values), etc.`,
+Returns: attributes (key, count, cardinality, samples[]), resource_attributes (key, count, cardinality, samples[])`,
 	}, wrap("attributes", s.attributes))
 
 	// 10. query — raw SQL with DuckDB views
@@ -194,9 +254,17 @@ Example: attributes(signal="spans", service="checkout") → discovers http.metho
 }
 
 func queryToolDescription(lakeDir string) string {
-	return strings.ReplaceAll(`Execute raw SQL against DuckDB. For advanced analysis not covered by other tools. Omit sql to get structured schema reference.
+	return strings.ReplaceAll(`Raw SQL against DuckDB. Escape hatch for analysis not covered by other tools.
 
-DuckDB Views (clean column names — use these instead of raw Parquet):
+When to use: Only when other tools can't answer the question. Prefer overview/diagnose/spans/logs/metrics for standard queries.
+Workflow: query(sql="") to get schema reference → write query using view/column names from schema → query(sql=...).
+Gotchas:
+- Use the views (spans, logs, metrics) not raw Parquet. Views have clean column names.
+- Always add a time filter (WHERE start_time > now() - INTERVAL ...) to avoid full scans.
+- Avoid GROUP BY trace_id, span_id, or attributes_json — these are high-cardinality and will be slow.
+- Use attr(attributes_json, 'key') macro to extract JSON attributes.
+
+DuckDB Views (clean column names):
 - spans: trace_id, span_id, service, operation, kind, start_time, end_time, duration_ms, status, status_message, attributes_json, resource_json, events_json, namespace, tenant
 - logs: time, severity, body, service, trace_id, span_id, attributes_json, resource_json, namespace, tenant
 - metrics: time, name, type, value, unit, service, description, attributes_json, resource_json, namespace, tenant
