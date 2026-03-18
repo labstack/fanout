@@ -250,6 +250,73 @@ func tokenOutsideStrings(query, token string) bool {
 	return false
 }
 
+// CheckQueryCost performs best-effort pattern analysis on a SQL query and returns
+// advisory warnings about potentially expensive operations.
+func CheckQueryCost(sql string) []string {
+	upper := strings.ToUpper(sql)
+	var warnings []string
+
+	// 1. High-cardinality GROUP BY
+	if idx := strings.Index(upper, "GROUP BY"); idx >= 0 {
+		groupByClause := upper[idx:]
+		highCardCols := []string{"TRACE_ID", "SPAN_ID", "ATTRIBUTES_JSON", "RESOURCE_JSON", "BODY", "EVENTS_JSON"}
+		for _, col := range highCardCols {
+			pattern := regexp.MustCompile(`\b` + col + `\b`)
+			if pattern.MatchString(groupByClause) {
+				warnings = append(warnings, fmt.Sprintf("GROUP BY %s is high-cardinality and may produce millions of groups. Consider aggregating by service, operation, or status instead.", strings.ToLower(col)))
+				break
+			}
+		}
+	}
+
+	// 2. Unbounded time range on base views
+	baseViews := []struct {
+		view      string
+		timePreds []string
+	}{
+		{"SPANS", []string{"START_TIME", "INTERVAL", "NOW()"}},
+		{"LOGS", []string{"TIME", "INTERVAL", "NOW()"}},
+		{"METRICS", []string{"TIME", "INTERVAL", "NOW()"}},
+	}
+	for _, bv := range baseViews {
+		viewPattern := regexp.MustCompile(`\b` + bv.view + `\b`)
+		if viewPattern.MatchString(upper) {
+			hasTimePred := false
+			for _, pred := range bv.timePreds {
+				if strings.Contains(upper, pred) {
+					hasTimePred = true
+					break
+				}
+			}
+			if strings.Contains(upper, "BUCKET") {
+				hasTimePred = true
+			}
+			if !hasTimePred {
+				warnings = append(warnings, fmt.Sprintf("Query references %s without a time filter. This scans all data. Add a WHERE clause with start_time/time > now() - INTERVAL.", strings.ToLower(bv.view)))
+				break
+			}
+		}
+	}
+
+	// 3. SELECT * without LIMIT on base views
+	if strings.Contains(upper, "SELECT *") && !strings.Contains(upper, "LIMIT") {
+		for _, bv := range baseViews {
+			viewPattern := regexp.MustCompile(`\b` + bv.view + `\b`)
+			if viewPattern.MatchString(upper) {
+				warnings = append(warnings, "SELECT * without LIMIT on a base view. Add LIMIT or select specific columns to control result size.")
+				break
+			}
+		}
+	}
+
+	// 4. CROSS JOIN
+	if strings.Contains(upper, "CROSS JOIN") {
+		warnings = append(warnings, "CROSS JOIN produces a cartesian product. This is almost never what you want in observability queries.")
+	}
+
+	return warnings
+}
+
 // ensureLimit adds or replaces LIMIT clause
 func ensureLimit(query string, maxRows int) string {
 	upperQuery := strings.ToUpper(query)
