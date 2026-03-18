@@ -11,7 +11,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/service"
 )
 
 const (
@@ -45,14 +44,13 @@ type clientMessage struct {
 // WSHandler handles WebSocket connections for the chat interface.
 type WSHandler struct {
 	orchestrator *Orchestrator
-	svc          *service.Service
 	appCtx       context.Context // parent context for graceful shutdown
 }
 
 // NewWSHandler creates a WebSocket handler.
 // The appCtx should be the application-level context that is cancelled on shutdown.
-func NewWSHandler(appCtx context.Context, orchestrator *Orchestrator, svc *service.Service) *WSHandler {
-	return &WSHandler{appCtx: appCtx, orchestrator: orchestrator, svc: svc}
+func NewWSHandler(appCtx context.Context, orchestrator *Orchestrator) *WSHandler {
+	return &WSHandler{appCtx: appCtx, orchestrator: orchestrator}
 }
 
 // Handle upgrades to WebSocket and manages the chat session.
@@ -72,7 +70,6 @@ func (h *WSHandler) Handle(c *echo.Context) error {
 	session := &chatSession{
 		ws:           ws,
 		orchestrator: h.orchestrator,
-		svc:          h.svc,
 		appCtx:       h.appCtx,
 		messages:     []Message{},
 	}
@@ -103,7 +100,6 @@ func (h *WSHandler) Handle(c *echo.Context) error {
 type chatSession struct {
 	ws           *websocket.Conn
 	orchestrator *Orchestrator
-	svc          *service.Service
 	appCtx       context.Context
 
 	mu       sync.Mutex // protects messages, cancel, done
@@ -232,7 +228,6 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 		s.mu.Unlock()
 	}()
 }
-
 
 func (s *chatSession) send(event ClientEvent) error {
 	s.writeMu.Lock()
