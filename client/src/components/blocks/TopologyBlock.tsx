@@ -5,13 +5,15 @@ import {
   forceManyBody,
   forceCenter,
   forceCollide,
+  forceX,
+  forceY,
   type SimulationNodeDatum,
   type SimulationLinkDatum,
 } from "d3";
 import type { TopologyData, TopologyNode, TopologyEdge } from "@/lib/types";
 
-const NODE_RADIUS = 28;
-const PADDING = 60;
+const NODE_RADIUS = 24;
+const PADDING = 80;
 
 interface SimNode extends SimulationNodeDatum {
   id: string;
@@ -82,11 +84,13 @@ function computeLayout(
       "link",
       forceLink<SimNode, SimLink>(simLinks)
         .id((d) => d.id)
-        .distance(140),
+        .distance(200),
     )
-    .force("charge", forceManyBody().strength(-400))
+    .force("charge", forceManyBody().strength(-800))
     .force("center", forceCenter(width / 2, height / 2))
-    .force("collide", forceCollide(NODE_RADIUS + 20))
+    .force("collide", forceCollide(NODE_RADIUS + 40))
+    .force("x", forceX(width / 2).strength(0.05))
+    .force("y", forceY(height / 2).strength(0.05))
     .stop();
 
   // Run synchronously
@@ -127,7 +131,7 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
     return () => observer.disconnect();
   }, [updateWidth]);
 
-  const height = Math.max(350, Math.min(500, data.nodes.length * 80));
+  const height = Math.max(450, Math.min(650, data.nodes.length * 80));
 
   const layout = useMemo(
     () => computeLayout(data.nodes, data.edges, width, height),
@@ -143,7 +147,7 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
   }
 
   const edgeStrokeWidth = (rpm: number) =>
-    Math.max(1.5, Math.min(4, rpm / 400));
+    Math.max(1.5, Math.min(5, rpm / 300));
 
   return (
     <div ref={containerRef} className="relative">
@@ -159,14 +163,13 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
             viewBox="0 0 10 7"
             refX="10"
             refY="3.5"
-            markerWidth="8"
-            markerHeight="6"
+            markerWidth="7"
+            markerHeight="5"
             orient="auto-start-reverse"
           >
             <polygon
               points="0 0, 10 3.5, 0 7"
-              className="fill-muted-foreground"
-              opacity={0.5}
+              fill="hsl(var(--border))"
             />
           </marker>
           <marker
@@ -174,11 +177,22 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
             viewBox="0 0 10 7"
             refX="10"
             refY="3.5"
-            markerWidth="8"
-            markerHeight="6"
+            markerWidth="7"
+            markerHeight="5"
             orient="auto-start-reverse"
           >
-            <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b" opacity={0.6} />
+            <polygon points="0 0, 10 3.5, 0 7" fill="#f59e0b" />
+          </marker>
+          <marker
+            id="topo-arrow-danger"
+            viewBox="0 0 10 7"
+            refX="10"
+            refY="3.5"
+            markerWidth="7"
+            markerHeight="5"
+            orient="auto-start-reverse"
+          >
+            <polygon points="0 0, 10 3.5, 0 7" fill="#ef4444" />
           </marker>
         </defs>
 
@@ -197,11 +211,26 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
           const dx = x2 - x1;
           const dy = y2 - y1;
           const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-          const offsetX = (dx / dist) * NODE_RADIUS;
-          const offsetY = (dy / dist) * NODE_RADIUS;
 
+          // Skip edges where nodes overlap — avoids floating arrowheads
+          if (dist < (NODE_RADIUS + 4) * 2 + 10) return null;
+
+          const offsetX = (dx / dist) * (NODE_RADIUS + 4);
+          const offsetY = (dy / dist) * (NODE_RADIUS + 4);
+
+          const isDanger = link.errorRate > 3;
           const isWarn = link.errorRate > 1;
           const sw = edgeStrokeWidth(link.rpm);
+          const marker = isDanger
+            ? "url(#topo-arrow-danger)"
+            : isWarn
+              ? "url(#topo-arrow-warn)"
+              : "url(#topo-arrow)";
+          const stroke = isDanger
+            ? "#ef4444"
+            : isWarn
+              ? "#f59e0b"
+              : "hsl(var(--border))";
 
           return (
             <line
@@ -210,10 +239,10 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
               y1={y1 + offsetY}
               x2={x2 - offsetX}
               y2={y2 - offsetY}
-              stroke={isWarn ? "#f59e0b" : "hsl(var(--muted-foreground))"}
+              stroke={stroke}
               strokeWidth={sw}
-              opacity={isWarn ? 0.7 : 0.4}
-              markerEnd={isWarn ? "url(#topo-arrow-warn)" : "url(#topo-arrow)"}
+              opacity={isDanger ? 0.8 : isWarn ? 0.7 : 0.6}
+              markerEnd={marker}
               className="cursor-pointer"
               onMouseEnter={(e) => {
                 const rect = containerRef.current?.getBoundingClientRect();
@@ -267,40 +296,49 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
             }}
             onMouseLeave={() => setTooltip(null)}
           >
+            {/* Outer glow for unhealthy/degraded */}
+            {(node.status === "unhealthy" || node.status === "degraded") && (
+              <circle
+                r={NODE_RADIUS + 4}
+                fill="none"
+                stroke={statusFill(node.status)}
+                strokeWidth={2}
+                opacity={0.3}
+                strokeDasharray={node.status === "unhealthy" ? "4,3" : "none"}
+              />
+            )}
             {/* Node circle */}
             <circle
               r={NODE_RADIUS}
               fill={statusFill(node.status)}
               stroke={statusStroke(node.status)}
-              strokeWidth={2}
+              strokeWidth={2.5}
               opacity={0.9}
             />
-            {/* Service name */}
+            {/* RPM inside circle */}
             <text
-              y={-4}
+              y={1}
               textAnchor="middle"
-              className="fill-white text-[10px] font-semibold"
+              dominantBaseline="central"
+              className="fill-white text-[9px] font-bold"
               style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}
             >
-              {node.id.length > 10
-                ? node.id.slice(0, 9) + "\u2026"
-                : node.id}
+              {node.rpm >= 1000 ? `${(node.rpm / 1000).toFixed(1)}k` : node.rpm}
             </text>
-            {/* RPM label */}
+            {/* Service name below circle */}
             <text
-              y={10}
+              y={NODE_RADIUS + 14}
               textAnchor="middle"
-              className="fill-white/80 text-[8px]"
-              style={{ textShadow: "0 1px 2px rgba(0,0,0,0.5)" }}
+              className="fill-foreground text-[11px] font-medium"
             >
-              {node.rpm} rpm
+              {node.id}
             </text>
           </g>
         ))}
       </svg>
 
       {/* Legend */}
-      <div className="mt-2 flex flex-wrap gap-3 px-1">
+      <div className="mt-1 flex flex-wrap gap-4 px-1 justify-center">
         {[
           { color: "#22c55e", label: "Healthy" },
           { color: "#f59e0b", label: "Degraded" },

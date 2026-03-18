@@ -14,7 +14,7 @@ export type BlockType =
   | "dep_matrix"
   | "endpoints"
   | "correlation"
-  | "tail";
+  | "logs";
 
 export interface Block {
   type: BlockType;
@@ -194,14 +194,14 @@ export interface CorrelationData {
 }
 
 export interface LogEntry {
-  time: number;
+  time: string;
   severity: string;
   service: string;
   body: string;
   traceId?: string;
 }
 
-export interface TailData {
+export interface LogsBlockData {
   entries: LogEntry[];
 }
 

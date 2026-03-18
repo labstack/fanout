@@ -69,18 +69,7 @@ const (
 	CEToolResult ClientEventType = "tool_result"
 	CEError      ClientEventType = "error"
 	CEDone       ClientEventType = "done"
-	CETail       ClientEventType = "tail"
-	CETailEnd    ClientEventType = "tail_end"
 )
-
-// TailConfig holds parameters for a live log tailing session.
-type TailConfig struct {
-	Service   string    `json:"service"`
-	Pattern   string    `json:"pattern,omitempty"`
-	Severity  string    `json:"severity,omitempty"`
-	Namespace string    `json:"namespace,omitempty"`
-	Since     time.Time `json:"since"`
-}
 
 // ClientEvent is sent from the orchestrator to the WebSocket client.
 type ClientEvent struct {
@@ -98,9 +87,8 @@ type SendFunc func(event ClientEvent) error
 
 // stepResult captures the outcome of a single LLM call.
 type stepResult struct {
-	done    bool // true if response is complete (respond called or text-only)
-	tailCfg *TailConfig
-	err     error
+	done bool // true if response is complete (respond called or text-only)
+	err  error
 }
 
 // step executes one LLM call: stream → handle tool calls → execute tools.
@@ -225,13 +213,10 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 
 		// If the LLM called both respond and real tools, execute the real
 		// tools first so their results are in the conversation history.
-		var tailCfg *TailConfig
 		if len(realToolCalls) > 0 {
-			tc, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
-			if err != nil {
-				return stepResult{tailCfg: tc, err: err}
+			if err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName); err != nil {
+				return stepResult{err: err}
 			}
-			tailCfg = tc
 		}
 
 		// Add a synthetic tool_result so the conversation stays valid
@@ -263,9 +248,9 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 			ID:     fmt.Sprintf("r-%d", time.Now().UnixMilli()),
 			Blocks: blocks,
 		}); err != nil {
-			return stepResult{tailCfg: tailCfg, err: err}
+			return stepResult{err: err}
 		}
-		return stepResult{done: true, tailCfg: tailCfg}
+		return stepResult{done: true}
 	}
 
 	// No respond call — execute real tool calls and return (not done yet)
@@ -273,17 +258,16 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		slog.Warn("LLM returned tool_use stop reason but no tool calls", "step", stepName)
 		return stepResult{}
 	}
-	tc, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
-	if err != nil {
-		return stepResult{tailCfg: tc, err: err}
+	if err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName); err != nil {
+		return stepResult{err: err}
 	}
-	return stepResult{tailCfg: tc}
+	return stepResult{}
 }
 
 // executeTools runs tool calls in parallel, sends results to the client,
 // and appends tool result messages to the conversation.
 func (o *Orchestrator) executeTools(ctx context.Context, toolCalls []ToolCall,
-	conversation *[]Message, send SendFunc, namespace string, stepName string) (*TailConfig, error) {
+	conversation *[]Message, send SendFunc, namespace string, stepName string) error {
 
 	type toolExecResult struct {
 		tc       ToolCall
@@ -339,44 +323,28 @@ func (o *Orchestrator) executeTools(ctx context.Context, toolCalls []ToolCall,
 	slog.Info("tools batch complete", "step", stepName, "count", len(results), "wall_ms", time.Since(toolsStart).Milliseconds())
 
 	if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return ctx.Err()
 	}
 
 	// Send results to WebSocket sequentially (preserves order)
-	var tailCfg *TailConfig
 	for idx := range results {
 		r := &results[idx]
 
-		// Special handling for tail tool: extract TailConfig
-		if r.tc.Name == "tail" && !r.isError {
-			var tailResult struct {
-				Tail *TailConfig `json:"tail"`
-			}
-			if err := json.Unmarshal([]byte(r.result), &tailResult); err != nil {
-				slog.Warn("failed to unmarshal tail config", "err", err)
-			} else if tailResult.Tail != nil {
-				tailCfg = tailResult.Tail
-				if tailCfg.Namespace == "" {
-					tailCfg.Namespace = namespace
-				}
-			}
-		}
-
 		// Always send tool_result to clear the spinner
 		if sendErr := send(ClientEvent{Type: CEToolResult, Name: r.tc.Name}); sendErr != nil {
-			return tailCfg, sendErr
+			return sendErr
 		}
 
 		// Add tool result to conversation
 		*conversation = append(*conversation, ToolMessage(r.tc.ID, truncateResult(r.result, 8192), r.isError))
 	}
 
-	return tailCfg, nil
+	return nil
 }
 
 // Run executes a two-step orchestration for a user message: gather data, then respond.
-// Returns the updated conversation, an optional TailConfig if the tail tool was invoked, and any error.
-func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) (msgs []Message, tailCfg *TailConfig, retErr error) {
+// Returns the updated conversation and any error.
+func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window int, namespace string, send SendFunc) (msgs []Message, retErr error) {
 	runStart := time.Now()
 	systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
 
@@ -388,9 +356,8 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	// Step 1: Gather — all tools available
 	allTools := append(o.tools.Defs(), respondToolDef())
 	r := o.step(ctx, &conversation, systemBlocks, allTools, nil, "gather", send, namespace)
-	tailCfg = r.tailCfg
 	if r.done || r.err != nil {
-		return conversation, tailCfg, r.err
+		return conversation, r.err
 	}
 
 	// Step 2: Respond — respond tool only.
@@ -400,14 +367,11 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 		"Now synthesize the tool results into a complete response. "+
 			"Do NOT suggest further investigation — analyze what you have."))
 	r2 := o.step(ctx, &conversation, systemBlocks, []ToolDef{respondToolDef()}, &ToolChoice{Name: respondToolName}, "respond", send, namespace)
-	if r2.tailCfg != nil {
-		tailCfg = r2.tailCfg
-	}
 	if r2.err != nil {
-		return conversation, tailCfg, r2.err
+		return conversation, r2.err
 	}
 
-	return conversation, tailCfg, nil
+	return conversation, nil
 }
 
 // SuggestedQuestions returns contextual starter questions.
@@ -488,19 +452,29 @@ You help users understand system health, investigate issues, and analyze telemet
 
 ## Tools
 
-You get ONE tool call to gather data — pick the best tool for the question:
-- overview — system health overview (start here for general questions)
-- diagnose — deep-dive into a specific service (latency, errors, dependencies)
-- spans — search and aggregate trace spans by pattern, service, status
-- logs — search and aggregate log entries by severity, service, pattern
-- metrics — discover and query OTLP metric timeseries with anomaly detection
-- trace — full distributed trace (needs trace_id from spans or logs results)
-- topology — service dependency map with health
-- compare — side-by-side service comparison (services, time, or operations mode)
-- query — custom SQL (last resort)
+Pick the best tool(s) for the question. You may call multiple tools in parallel if independent.
 
-You may call multiple tools in parallel if they are independent (e.g. diagnose for two services).
+Investigation workflow:
+  overview → diagnose(problem service) → trace(suggested_traces[0]) → logs(trace_id)
+
+- overview — system health, scores, top issues (start here)
+- diagnose — deep-dive a service: latency, errors, dependencies, change points, suggested traces
+- spans — search/aggregate trace spans by pattern, service, status, attributes
+- logs — search/aggregate logs by severity, service, pattern, trace correlation
+- metrics — discover (action=list) and query OTLP metric timeseries with anomaly detection
+- trace — full distributed trace with root-cause analysis (needs trace_id)
+- topology — service dependency map with blast radius and critical paths
+- compare — side-by-side: services, time windows, or operations mode
+- attributes — discover filterable attribute keys before using attrs={} on spans/logs/metrics
+- query — raw SQL against DuckDB (last resort — prefer specialized tools)
+
 After tools execute, respond with your analysis — do NOT plan further tool calls.
+
+## Tool Response Format
+
+All tools return: {"type": "<tool>", "data": {...}, "meta": {"exec_time_ms": N}}
+Extract data from the "data" field. Use "meta.exec_time_ms" to note slow queries.
+Warnings (if present) indicate cost concerns or approximate results — mention them.
 
 ## Response
 
@@ -521,7 +495,7 @@ Call the respond tool OR write markdown directly. Either way:
 - dep_matrix    — NxN service health grid
 - endpoints     — per-endpoint performance breakdown
 - correlation   — multi-signal correlation (latency vs errors vs throughput)
-- tail          — log entries
+- logs          — log entries with severity, service, and trace correlation
 
 ## Rules
 

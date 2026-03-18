@@ -30,7 +30,7 @@ var BlockTypeRegistry = []BlockTypeEntry{
 	{BlockDepMatrix, DepMatrixData{}},
 	{BlockEndpoints, EndpointsData{}},
 	{BlockCorrelation, CorrelationData{}},
-	{BlockTail, TailData{}},
+	{BlockLogs, LogsBlockData{}},
 }
 
 var (

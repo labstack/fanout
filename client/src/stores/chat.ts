@@ -122,16 +122,6 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
         };
         break;
 
-      case "tail":
-        // TODO: parse event.content as JSON for log tail entries (server already emits these)
-        console.debug("[chat] tail event:", event.content);
-        break;
-
-      case "tail_end":
-        // TODO: mark tail stopped (server already emits these)
-        console.debug("[chat] tail_end event");
-        break;
-
       default:
         console.warn("[chat] unrecognized event type:", event.type);
         break;

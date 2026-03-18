@@ -25,7 +25,7 @@ const (
 	BlockDepMatrix      BlockType = "dep_matrix"
 	BlockEndpoints      BlockType = "endpoints"
 	BlockCorrelation    BlockType = "correlation"
-	BlockTail           BlockType = "tail"
+	BlockLogs BlockType = "logs"
 )
 
 // Block is a typed data unit sent to the client for rendering.
@@ -249,17 +249,17 @@ type CorrelationData struct {
 	Panels []CorrelationPanel `json:"panels"`
 }
 
-// LogEntry is a single log line in a tail block.
+// LogEntry is a single log line in a logs block.
 type LogEntry struct {
-	Time     int64  `json:"time"`
+	Time     string `json:"time"`
 	Severity string `json:"severity"`
 	Service  string `json:"service"`
 	Body     string `json:"body"`
 	TraceID  string `json:"traceId,omitempty"`
 }
 
-// TailData holds live log entries.
-type TailData struct {
+// LogsBlockData holds log entries for display.
+type LogsBlockData struct {
 	Entries []LogEntry `json:"entries"`
 }
 
