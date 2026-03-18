@@ -14,6 +14,7 @@ import type {
   EndpointsData,
   CorrelationData,
   LogsBlockData,
+  ComparisonData,
 } from "@/lib/types";
 import { TextBlock } from "./TextBlock";
 import { MetricsBlock } from "./MetricsBlock";
@@ -29,6 +30,7 @@ import { DepMatrixBlock } from "./DepMatrixBlock";
 import { EndpointsBlock } from "./EndpointsBlock";
 import { CorrelationBlock } from "./CorrelationBlock";
 import { LogsBlock } from "./LogsBlock";
+import { ComparisonBlock } from "./ComparisonBlock";
 import { GenericBlock } from "./GenericBlock";
 
 export function BlockRenderer({ block, onAction }: { block: Block; onAction?: (prompt: string) => void }) {
@@ -61,6 +63,8 @@ export function BlockRenderer({ block, onAction }: { block: Block; onAction?: (p
       return <CorrelationBlock data={block.data as CorrelationData} />;
     case "logs":
       return <LogsBlock data={block.data as LogsBlockData} onAction={onAction} />;
+    case "comparison":
+      return <ComparisonBlock data={block.data as ComparisonData} />;
     default:
       return <GenericBlock type={block.type} data={block.data} />;
   }

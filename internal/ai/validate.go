@@ -62,6 +62,9 @@ func validateBlock(b Block) error {
 	case BlockLogs:
 		var d LogsBlockData
 		return unmarshalOnly(b.Data, &d)
+	case BlockComparison:
+		var d ComparisonData
+		return unmarshalOnly(b.Data, &d)
 	default:
 		return fmt.Errorf("unknown block type %q", b.Type)
 	}

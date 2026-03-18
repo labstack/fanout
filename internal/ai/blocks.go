@@ -26,6 +26,7 @@ const (
 	BlockEndpoints      BlockType = "endpoints"
 	BlockCorrelation    BlockType = "correlation"
 	BlockLogs           BlockType = "logs"
+	BlockComparison     BlockType = "comparison"
 )
 
 // Block is a typed data unit sent to the client for rendering.
@@ -261,6 +262,26 @@ type LogEntry struct {
 // LogsBlockData holds log entries for display.
 type LogsBlockData struct {
 	Entries []LogEntry `json:"entries"`
+}
+
+// CompareMetric is a single metric in a before/after comparison.
+type CompareMetric struct {
+	Label       string  `json:"label"`
+	LeftValue   float64 `json:"leftValue"`
+	RightValue  float64 `json:"rightValue"`
+	ChangePct   float64 `json:"changePct"`
+	Direction   string  `json:"direction"` // "regression", "improvement", "stable"
+	Significant bool    `json:"significant"`
+	Unit        string  `json:"unit,omitempty"`
+}
+
+// ComparisonData holds a before/after comparison across multiple metrics.
+type ComparisonData struct {
+	Mode       string          `json:"mode"` // "services", "time", "operations"
+	LeftLabel  string          `json:"leftLabel"`
+	RightLabel string          `json:"rightLabel"`
+	Metrics    []CompareMetric `json:"metrics"`
+	Verdict    string          `json:"verdict,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

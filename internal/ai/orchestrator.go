@@ -496,6 +496,7 @@ Call the respond tool OR write markdown directly. Either way:
 - endpoints     — per-endpoint performance breakdown
 - correlation   — multi-signal correlation (latency vs errors vs throughput)
 - logs          — log entries with severity, service, and trace correlation
+- comparison    — before/after metric comparison with change %, direction, significance
 
 ## Rules
 

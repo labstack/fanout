@@ -54,7 +54,7 @@ func TestGenerateResponseSchema_BlocksHasAllTypes(t *testing.T) {
 	types := []string{
 		"text", "metrics", "table", "timeseries", "bar", "heatmap",
 		"trace_waterfall", "topology", "flame_graph", "sankey",
-		"dep_matrix", "endpoints", "correlation", "logs",
+		"dep_matrix", "endpoints", "correlation", "logs", "comparison",
 	}
 	for _, bt := range types {
 		if !strings.Contains(raw, `"`+bt+`"`) {

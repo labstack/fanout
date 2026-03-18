@@ -14,7 +14,8 @@ export type BlockType =
   | "dep_matrix"
   | "endpoints"
   | "correlation"
-  | "logs";
+  | "logs"
+  | "comparison";
 
 export interface Block {
   type: BlockType;
@@ -203,6 +204,24 @@ export interface LogEntry {
 
 export interface LogsBlockData {
   entries: LogEntry[];
+}
+
+export interface CompareMetric {
+  label: string;
+  leftValue: number;
+  rightValue: number;
+  changePct: number;
+  direction: string;
+  significant: boolean;
+  unit?: string;
+}
+
+export interface ComparisonData {
+  mode: string;
+  leftLabel: string;
+  rightLabel: string;
+  metrics: CompareMetric[];
+  verdict?: string;
 }
 
 // Chat event types (WebSocket protocol)
