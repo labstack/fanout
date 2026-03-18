@@ -11,7 +11,6 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/service"
 )
 
 const (
@@ -45,14 +44,13 @@ type clientMessage struct {
 // WSHandler handles WebSocket connections for the chat interface.
 type WSHandler struct {
 	orchestrator *Orchestrator
-	svc          *service.Service
 	appCtx       context.Context // parent context for graceful shutdown
 }
 
 // NewWSHandler creates a WebSocket handler.
 // The appCtx should be the application-level context that is cancelled on shutdown.
-func NewWSHandler(appCtx context.Context, orchestrator *Orchestrator, svc *service.Service) *WSHandler {
-	return &WSHandler{appCtx: appCtx, orchestrator: orchestrator, svc: svc}
+func NewWSHandler(appCtx context.Context, orchestrator *Orchestrator) *WSHandler {
+	return &WSHandler{appCtx: appCtx, orchestrator: orchestrator}
 }
 
 // Handle upgrades to WebSocket and manages the chat session.
@@ -72,7 +70,6 @@ func (h *WSHandler) Handle(c *echo.Context) error {
 	session := &chatSession{
 		ws:           ws,
 		orchestrator: h.orchestrator,
-		svc:          h.svc,
 		appCtx:       h.appCtx,
 		messages:     []Message{},
 	}
@@ -103,7 +100,6 @@ func (h *WSHandler) Handle(c *echo.Context) error {
 type chatSession struct {
 	ws           *websocket.Conn
 	orchestrator *Orchestrator
-	svc          *service.Service
 	appCtx       context.Context
 
 	mu       sync.Mutex // protects messages, cancel, done
@@ -213,7 +209,7 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 			return s.send(event)
 		}
 
-		updated, tailCfg, err := s.orchestrator.Run(ctx, msgs, window, msg.Namespace, send)
+		updated, err := s.orchestrator.Run(ctx, msgs, window, msg.Namespace, send)
 
 		if err != nil && ctx.Err() == nil {
 			slog.Error("orchestrator error", "err", err)
@@ -230,131 +226,7 @@ func (s *chatSession) handleMessage(msg clientMessage) {
 		}
 		s.trimConversation()
 		s.mu.Unlock()
-
-		// Start tailing if the orchestrator detected a tail tool call.
-		// runTail blocks until done; new messages wait for it to exit on cancel.
-		if tailCfg != nil {
-			if ctx.Err() != nil {
-				if sendErr := s.send(ClientEvent{Type: CETailEnd, Content: "cancel"}); sendErr != nil {
-					slog.Debug("tail end send error on context cancel", "err", sendErr)
-				}
-			} else {
-				s.runTail(ctx, tailCfg, send)
-			}
-		}
 	}()
-}
-
-// runTail polls for new log entries and streams them to the client.
-// Stops on context cancellation, 2-minute timeout, or 30s of no new results.
-func (s *chatSession) runTail(parent context.Context, cfg *TailConfig, send SendFunc) {
-	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
-	defer cancel()
-
-	slog.Info("tail started", "service", cfg.Service, "namespace", cfg.Namespace, "since", cfg.Since)
-
-	// Set Since to now if zero (initial batch had no logs)
-	if cfg.Since.IsZero() {
-		cfg.Since = time.Now().Add(-5 * time.Minute)
-	}
-
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	idleSince := time.Now()
-	var consecutivePollErrors int
-
-	for {
-		select {
-		case <-ctx.Done():
-			reason := "timeout"
-			if parent.Err() != nil {
-				reason = "cancel"
-			}
-			if err := s.send(ClientEvent{Type: CETailEnd, Content: reason}); err != nil {
-				slog.Debug("tail end send error", "reason", reason, "err", err)
-			}
-			return
-		case <-ticker.C:
-			logs, err := s.svc.TailLogs(ctx, service.TailParams{
-				Service:   cfg.Service,
-				Pattern:   cfg.Pattern,
-				Severity:  cfg.Severity,
-				Namespace: cfg.Namespace,
-				Since:     cfg.Since,
-			})
-			if err != nil {
-				if ctx.Err() != nil {
-					if sendErr := s.send(ClientEvent{Type: CETailEnd, Content: "cancel"}); sendErr != nil {
-						slog.Debug("tail end send error", "reason", "cancel", "err", sendErr)
-					}
-					return
-				}
-				consecutivePollErrors++
-				slog.Warn("tail poll error", "err", err, "consecutive", consecutivePollErrors)
-				if consecutivePollErrors >= 3 {
-					s.sendError("Log polling failed repeatedly — check service name and try again")
-					if sendErr := s.send(ClientEvent{Type: CETailEnd, Content: "error"}); sendErr != nil {
-						slog.Debug("tail end send error", "reason", "error", "err", sendErr)
-					}
-					return
-				}
-				continue
-			}
-			consecutivePollErrors = 0
-
-			if len(logs) == 0 {
-				if time.Since(idleSince) > 30*time.Second {
-					slog.Info("tail stopped", "reason", "idle")
-					if sendErr := s.send(ClientEvent{Type: CETailEnd, Content: "idle"}); sendErr != nil {
-						slog.Debug("tail end send error", "reason", "idle", "err", sendErr)
-					}
-					return
-				}
-				continue
-			}
-
-			idleSince = time.Now()
-
-			// Update Since to the latest log time
-			if last := logs[len(logs)-1]; last.Time != "" {
-				if t, err := time.Parse("2006-01-02T15:04:05Z", last.Time); err == nil {
-					cfg.Since = t
-				} else {
-					slog.Warn("tail: failed to parse log time, advancing cursor to now", "time", last.Time, "err", err)
-					cfg.Since = time.Now()
-				}
-			}
-
-			// Marshal and send entries
-			type tailEntry struct {
-				Time     string `json:"time"`
-				Severity string `json:"severity"`
-				Body     string `json:"body"`
-				Service  string `json:"service"`
-				TraceID  string `json:"trace_id,omitempty"`
-			}
-			entries := make([]tailEntry, len(logs))
-			for i, l := range logs {
-				entries[i] = tailEntry{
-					Time:     l.Time,
-					Severity: l.Severity,
-					Body:     l.Body,
-					Service:  l.Service,
-					TraceID:  l.TraceID,
-				}
-			}
-			data, err := json.Marshal(map[string]any{"entries": entries})
-			if err != nil {
-				slog.Warn("tail marshal error", "err", err)
-				continue
-			}
-			if err := send(ClientEvent{Type: CETail, Content: string(data)}); err != nil {
-				slog.Debug("tail send error, stopping", "err", err)
-				return
-			}
-		}
-	}
 }
 
 func (s *chatSession) send(event ClientEvent) error {

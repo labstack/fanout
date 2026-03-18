@@ -79,7 +79,7 @@ func TestOrchestrator_RespondTool_ProducesBlocks(t *testing.T) {
 	}
 
 	conv := []Message{UserMessage("How's the system?")}
-	_, _, err := orch.Run(context.Background(), conv, 60, "", send)
+	_, err := orch.Run(context.Background(), conv, 60, "", send)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestOrchestrator_NoRespondTool_FallsBackToText(t *testing.T) {
 	}
 
 	conv := []Message{UserMessage("Hello")}
-	_, _, err := orch.Run(context.Background(), conv, 60, "", send)
+	_, err := orch.Run(context.Background(), conv, 60, "", send)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestOrchestrator_RespondTool_InvalidBlocks_Dropped(t *testing.T) {
 	}
 
 	conv := []Message{UserMessage("Show data")}
-	_, _, err := orch.Run(context.Background(), conv, 60, "", send)
+	_, err := orch.Run(context.Background(), conv, 60, "", send)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestOrchestrator_RespondTool_InvalidJSON_Fallback(t *testing.T) {
 	}
 
 	conv := []Message{UserMessage("test")}
-	_, _, err := orch.Run(context.Background(), conv, 60, "", send)
+	_, err := orch.Run(context.Background(), conv, 60, "", send)
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}

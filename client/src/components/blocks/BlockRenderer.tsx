@@ -13,7 +13,7 @@ import type {
   DepMatrixData,
   EndpointsData,
   CorrelationData,
-  TailData,
+  LogsBlockData,
 } from "@/lib/types";
 import { TextBlock } from "./TextBlock";
 import { MetricsBlock } from "./MetricsBlock";
@@ -28,7 +28,7 @@ import { SankeyBlock } from "./SankeyBlock";
 import { DepMatrixBlock } from "./DepMatrixBlock";
 import { EndpointsBlock } from "./EndpointsBlock";
 import { CorrelationBlock } from "./CorrelationBlock";
-import { TailBlock } from "./TailBlock";
+import { LogsBlock } from "./LogsBlock";
 import { GenericBlock } from "./GenericBlock";
 
 export function BlockRenderer({ block, onAction }: { block: Block; onAction?: (prompt: string) => void }) {
@@ -59,8 +59,8 @@ export function BlockRenderer({ block, onAction }: { block: Block; onAction?: (p
       return <EndpointsBlock data={block.data as EndpointsData} />;
     case "correlation":
       return <CorrelationBlock data={block.data as CorrelationData} />;
-    case "tail":
-      return <TailBlock data={block.data as TailData} onAction={onAction} />;
+    case "logs":
+      return <LogsBlock data={block.data as LogsBlockData} onAction={onAction} />;
     default:
       return <GenericBlock type={block.type} data={block.data} />;
   }

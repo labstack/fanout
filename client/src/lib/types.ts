@@ -14,7 +14,7 @@ export type BlockType =
   | "dep_matrix"
   | "endpoints"
   | "correlation"
-  | "tail";
+  | "logs";
 
 export interface Block {
   type: BlockType;
@@ -194,20 +194,20 @@ export interface CorrelationData {
 }
 
 export interface LogEntry {
-  time: number;
+  time: string;
   severity: string;
   service: string;
   body: string;
   traceId?: string;
 }
 
-export interface TailData {
+export interface LogsBlockData {
   entries: LogEntry[];
 }
 
 // Chat event types (WebSocket protocol)
 export interface ChatEvent {
-  type: "token" | "tool_call" | "tool_result" | "error" | "done" | "tail" | "tail_end";
+  type: "token" | "tool_call" | "tool_result" | "error" | "done";
   content?: string;
   name?: string;
   input?: string;

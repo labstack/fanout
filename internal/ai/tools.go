@@ -24,7 +24,7 @@ type ToolRegistry struct {
 
 // NewToolRegistry creates the registry by connecting to the MCP server
 // in-process and importing its tool definitions, then registering AI-only
-// tools (metrics, tail) directly.
+// tools directly.
 func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Service, cfg config.Config) (*ToolRegistry, error) {
 	// Create in-memory transport pair
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
