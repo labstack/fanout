@@ -86,45 +86,44 @@ sequenceDiagram
 ```mermaid
 graph LR
     subgraph Discovery
-        STATUS[status]
+        OV[overview]
         TOPO[topology]
+        ATTR[attributes]
     end
 
     subgraph Investigation
         DIAG[diagnose]
-        FIND[find]
+        SPANS[spans]
+        LOGS[logs]
+        METRICS[metrics]
         TRACE[trace]
-        TIMELINE[timeline]
         COMPARE[compare]
     end
 
     subgraph Advanced
         QUERY[query]
-        SCHEMA[schema]
-        RENDER[render]
     end
 
-    STATUS --> |service issues| DIAG
+    OV --> |service issues| DIAG
     TOPO --> |dependencies| DIAG
     DIAG --> |trace IDs| TRACE
-    FIND --> |trace IDs| TRACE
-    TIMELINE --> |anomalies| FIND
-    SCHEMA --> |table info| QUERY
-    QUERY --> |data| RENDER
+    SPANS --> |trace IDs| TRACE
+    ATTR --> |filter keys| SPANS & LOGS & METRICS
+    METRICS --> |anomalies| SPANS
 ```
 
 | Tool | Description |
 |------|-------------|
-| `status` | System health overview, top issues, key metrics |
-| `diagnose` | Deep-dive: P50/P95/P99 latency, errors, dependencies |
-| `find` | Search spans/logs by pattern, service, status, severity |
+| `overview` | System health, scores, top issues |
+| `topology` | Service dependency map with blast radius |
+| `spans` | Search/aggregate trace spans |
+| `logs` | Search/aggregate log entries |
+| `metrics` | Discover and query OTLP metric timeseries |
 | `trace` | Distributed trace with root-cause analysis |
-| `timeline` | Time-bucketed metrics with anomaly detection |
-| `topology` | Service dependency map with health status |
+| `diagnose` | Deep-dive service analysis with baseline comparison |
+| `compare` | Side-by-side: services, time windows, or operations |
+| `attributes` | Discover filterable attribute keys |
 | `query` | Raw SQL against DuckDB |
-| `schema` | Database schema reference for SQL queries |
-| `render` | Generate HTML reports with charts (Vega-Lite) |
-| `compare` | Side-by-side service comparison |
 
 ## Directory Structure
 
@@ -199,18 +198,22 @@ graph LR
         H3[GET /-/metrics]
     end
 
-    subgraph UI
-        U1[GET /]
-        U2[GET /services]
-        U3[GET /services/:name]
-        U4[GET /traces]
-        U5[GET /traces/:id]
-        U6[GET /logs]
-        U7[GET /metrics]
+    subgraph Chat
+        C1[GET /ws/chat]
+    end
+
+    subgraph Bookmarks
+        B1[GET /api/bookmarks]
+        B2[POST /api/bookmarks]
+        B3[DELETE /api/bookmarks/:id]
+    end
+
+    subgraph Suggestions
+        S1[GET /api/suggestions]
     end
 
     subgraph MCP
-        M1[POST /mcp]
+        M1[ANY /mcp]
     end
 
     subgraph Reports
@@ -218,6 +221,11 @@ graph LR
         R2[GET /view/r/:id]
         R3[GET /api/reports]
         R4[DELETE /api/reports/:id]
+    end
+
+    subgraph SPA
+        D1[GET /demo]
+        SP[GET /* catch-all]
     end
 ```
 

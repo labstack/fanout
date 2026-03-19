@@ -89,7 +89,7 @@ The actual schema uses inline `oneOf` with all variant schemas directly embedded
 }
 ```
 
-Repeats for all 14 types. Generated from Go structs on first use via `sync.Once`.
+Repeats for all 15 types. Generated from Go structs on first use via `sync.Once`.
 
 ### Block Type Reference
 
@@ -108,7 +108,8 @@ Repeats for all 14 types. Generated from Go structs on first use via `sync.Once`
 | `dep_matrix` | `{services[], cells[]}` | NxN health matrix |
 | `endpoints` | `{endpoints[]}` | Per-endpoint breakdown |
 | `correlation` | `{times[], panels[]}` | Multi-signal correlation |
-| `tail` | `{entries[]}` | Log entries |
+| `logs` | `{entries[]}` | Log entries |
+| `comparison` | `{items[]}` | Side-by-side comparison |
 
 ---
 
@@ -258,7 +259,8 @@ Your final response must include:
 - `dep_matrix`      — NxN service health grid
 - `endpoints`       — per-endpoint breakdowns
 - `correlation`     — multi-signal correlation
-- `tail`            — log entries
+- `logs`            — log entries
+- `comparison`      — side-by-side comparison
 
 ## Rules
 
@@ -303,7 +305,7 @@ The React client in `client/` renders block responses:
 - **BlockRenderer** (`client/src/components/blocks/BlockRenderer.tsx`): Dispatches to per-type components based on `block.type`
 - **Block components**: D3 (topology, flame graph, sankey), Recharts (timeseries, bar, heatmap, correlation), TanStack Table (table), custom (metrics cards, trace waterfall, endpoints)
 
-All 14 block types are rendered via a `switch` on `block.type` in `BlockRenderer`.
+All 15 block types are rendered via a `switch` on `block.type` in `BlockRenderer`.
 
 ---
 

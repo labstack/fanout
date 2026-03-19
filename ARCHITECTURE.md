@@ -101,17 +101,16 @@ fanout/
 │   │   └── retention.go     # Data pruning
 │   ├── mcp/                 # MCP tools + server
 │   │   ├── server.go        # MCP protocol handler
-│   │   ├── status.go        # status tool
-│   │   ├── diagnose.go      # diagnose tool
-│   │   ├── find.go          # find tool
-│   │   ├── trace.go         # trace tool
-│   │   ├── timeline.go      # timeline tool
+│   │   ├── overview.go      # overview tool
 │   │   ├── topology.go      # topology tool
+│   │   ├── spans.go         # spans tool
+│   │   ├── logs.go          # logs tool
+│   │   ├── metrics.go       # metrics tool
+│   │   ├── trace.go         # trace tool
+│   │   ├── diagnose.go      # diagnose tool
 │   │   ├── compare.go       # compare tool
-│   │   ├── query.go         # query tool
-│   │   ├── schema.go        # schema tool
-│   │   ├── render.go        # render tool
-│   │   └── discovery.go     # Tool discovery
+│   │   ├── attributes.go    # attributes tool
+│   │   └── query.go         # query tool
 │   ├── metrics/             # Prometheus metrics
 │   ├── query/               # DuckDB engine
 │   │   ├── duck.go          # Connection pool
@@ -133,16 +132,8 @@ fanout/
 │   │   ├── trace.go         # Trace analysis
 │   │   ├── timeline.go      # Time series
 │   │   └── topology.go      # Service map
-│   └── web/                 # Templ templates
-│       ├── layout.templ     # Base layout + shortcuts
-│       ├── nav.templ        # Navigation
-│       ├── overview.templ   # Dashboard
-│       ├── services.templ   # Service list/detail
-│       ├── traces.templ     # Trace explorer
-│       ├── logs.templ       # Log viewer
-│       ├── metrics.templ    # Metrics summary
-│       ├── topology.templ   # Service map
-│       └── partials.templ   # Reusable components
+│   └── web/                 # React SPA (client/)
+│       └── embed.go         # Embedded static assets
 └── lake/                    # Data directory (gitignored)
     ├── spans/
     ├── logs/
@@ -267,12 +258,14 @@ Shared business logic used by both MCP tools and Web UI:
 
 | File | Function | Description |
 |------|----------|-------------|
-| `status.go` | `Status()` | System health overview |
+| `overview.go` | `Overview()` | System health overview |
 | `diagnose.go` | `Diagnose(service)` | Service deep-dive |
-| `find.go` | `Find(query)` | Search spans/logs |
+| `spans.go` | `Spans(query)` | Search/aggregate spans |
+| `logs.go` | `Logs(query)` | Search/aggregate logs |
+| `metrics.go` | `Metrics(query)` | Query OTLP metrics |
 | `trace.go` | `Trace(id)` | Distributed trace |
-| `timeline.go` | `Timeline()` | Time-bucketed metrics |
 | `topology.go` | `Topology()` | Service dependency map |
+| `attributes.go` | `Attributes()` | Discover attribute keys |
 
 ### Render System (`internal/render/`)
 
@@ -326,15 +319,17 @@ graph LR
 ```mermaid
 graph LR
     subgraph Discovery
-        ST[status]
+        OV[overview]
         TP[topology]
+        AT[attributes]
     end
 
     subgraph Investigation
         DG[diagnose]
-        FD[find]
+        SP[spans]
+        LG[logs]
+        MT[metrics]
         TR[trace]
-        TL[timeline]
     end
 
     subgraph Comparison
@@ -343,78 +338,53 @@ graph LR
 
     subgraph Advanced
         QR[query]
-        SC[schema]
-        RD[render]
     end
 
-    ST --> |"issues"| DG
+    OV --> |"issues"| DG
     TP --> |"deps"| DG
     DG --> |"trace_id"| TR
-    FD --> |"trace_id"| TR
-    TL --> |"anomalies"| FD
-    SC --> |"tables"| QR
-    QR --> |"data"| RD
+    SP --> |"trace_id"| TR
+    AT --> |"filter keys"| SP & LG & MT
+    MT --> |"anomalies"| SP
 ```
 
 ### Tool Details
 
-| Tool | Parameters | Returns |
-|------|------------|---------|
-| `status` | `window` | services, top_issues, throughput, p95_ms, error_rate |
-| `diagnose` | `service`, `window` | p50/p95/p99_ms, error_rate, top_errors, slow_ops, dependencies |
-| `find` | `query`, `service`, `status`, `severity`, `type`, `window` | spans, logs with trace_ids |
-| `trace` | `trace_id` | span tree, logs, critical_path, root_cause |
-| `timeline` | `service`, `window`, `granularity` | buckets with anomaly flags |
-| `topology` | `window` | nodes (services), edges (calls) |
-| `compare` | `services[]`, `window` | side-by-side metrics |
-| `query` | `sql`, `max_rows` | raw query results |
-| `schema` | - | table definitions, example queries |
-| `render` | `title`, `sections[]` | report URL |
+| Tool | Description |
+|------|-------------|
+| `overview` | System health, scores, top issues |
+| `topology` | Service dependency map with blast radius |
+| `spans` | Search/aggregate trace spans |
+| `logs` | Search/aggregate log entries |
+| `metrics` | Discover and query OTLP metric timeseries |
+| `trace` | Distributed trace with root-cause analysis |
+| `diagnose` | Deep-dive service analysis with baseline comparison |
+| `compare` | Side-by-side: services, time windows, or operations |
+| `attributes` | Discover filterable attribute keys |
+| `query` | Raw SQL against DuckDB |
 
 ## Web UI
 
+React SPA with a single AI-powered chat interface. The LLM calls MCP tools to gather data, then produces structured blocks (15 visual types) streamed over WebSocket.
+
 ```mermaid
 graph TB
-    subgraph Pages
-        OV[Overview /]
-        SL[Services /services]
-        SD[Service Detail /services/:name]
-        TL[Traces /traces]
-        TD[Trace Detail /traces/:id]
-        LG[Logs /logs]
-        MT[Metrics /metrics]
-        TP[Topology /topology]
-        UF[Unified /unified]
-        RP[Reports /reports]
+    subgraph "React SPA"
+        CHAT[Chat Interface /]
+        DEMO[Component Demo /demo]
+        RPT[Reports /reports]
     end
 
     subgraph Features
-        KB[Keyboard Shortcuts]
-        TM[Time Window Selector]
-        SR[Search DSL]
-        NS[Namespace Filter]
+        WS[WebSocket Streaming]
+        BLK[15 Block Types]
+        BM[Bookmarks]
+        SUG[Suggestions]
     end
 
-    OV --> SL & TL & LG & MT & TP & UF
-    SL --> SD
-    TL --> TD
-    KB --> |g+key| OV & SL & TL & LG & MT & TP
+    CHAT --> WS
+    WS --> BLK
 ```
-
-### Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| `g o` | Go to Overview |
-| `g s` | Go to Services |
-| `g t` | Go to Traces |
-| `g l` | Go to Logs |
-| `g m` | Go to Metrics |
-| `g p` | Go to Topology |
-| `j/k` | Navigate table rows |
-| `/` | Focus search |
-| `?` | Show help |
-| `Esc` | Clear selection |
 
 ## HTTP API
 
@@ -426,31 +396,34 @@ graph TB
         PM["GET /-/metrics"]
     end
 
-    subgraph "Web UI"
-        OV["GET /"]
-        SV["GET /services"]
-        SD["GET /services/:name"]
-        TC["GET /traces"]
-        TD["GET /traces/:id"]
-        LG["GET /logs"]
-        MT["GET /metrics"]
-        TP["GET /topology"]
-        UF["GET /unified"]
-        RP["GET /reports"]
+    subgraph Chat
+        WS["GET /ws/chat"]
+    end
+
+    subgraph Bookmarks
+        BL["GET /api/bookmarks"]
+        BC["POST /api/bookmarks"]
+        BD["DELETE /api/bookmarks/:id"]
+    end
+
+    subgraph Suggestions
+        SG["GET /api/suggestions"]
     end
 
     subgraph MCP
-        MC["POST /mcp"]
+        MC["ANY /mcp"]
     end
 
     subgraph Reports
+        RP["GET /reports"]
         VW["GET /view/r/:id"]
         RL["GET /api/reports"]
         RD["DELETE /api/reports/:id"]
     end
 
-    subgraph API
-        NS["GET /api/namespaces"]
+    subgraph SPA
+        DM["GET /demo"]
+        CA["GET /* catch-all"]
     end
 ```
 

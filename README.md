@@ -34,16 +34,16 @@ Connect Claude Code or any MCP client to `https://fanout.test/mcp`
 
 | Tool | Description |
 |------|-------------|
-| `status` | System health overview. Start here. |
-| `diagnose` | Deep-dive into a service (P50/P95/P99, errors, slow ops) |
-| `find` | Search spans and logs by pattern, service, status |
-| `trace` | Distributed trace with auto root-cause analysis |
-| `timeline` | Time-bucketed metrics with anomaly detection |
-| `topology` | Service dependency map with health status |
-| `compare` | Side-by-side comparison of 2-4 services |
+| `overview` | System health, scores, top issues |
+| `topology` | Service dependency map with blast radius |
+| `spans` | Search/aggregate trace spans |
+| `logs` | Search/aggregate log entries |
+| `metrics` | Discover and query OTLP metric timeseries |
+| `trace` | Distributed trace with root-cause analysis |
+| `diagnose` | Deep-dive service analysis with baseline comparison |
+| `compare` | Side-by-side: services, time windows, or operations |
+| `attributes` | Discover filterable attribute keys |
 | `query` | Raw SQL against DuckDB |
-| `schema` | Database schema reference for writing queries |
-| `render` | Generate HTML reports with charts |
 
 MCP clients receive full JSON Schema via `tools/list`.
 
@@ -73,6 +73,10 @@ OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_SERVICE_NAME=my-service
 ```
 
+## AI Chat
+
+The web UI is a React SPA with a single chat interface powered by an AI observability assistant. The LLM calls MCP tools to gather data, then produces structured blocks (15 visual types) streamed over WebSocket. Visit `/demo` for a component showcase.
+
 ## HTTP API
 
 **Health:**
@@ -80,22 +84,28 @@ OTEL_SERVICE_NAME=my-service
 - `GET /readyz` - Readiness check
 - `GET /-/metrics` - Prometheus metrics
 
-**Web UI:**
-- `GET /` - Overview dashboard
-- `GET /services` - Service list
-- `GET /services/:name` - Service detail
-- `GET /traces` - Trace search
-- `GET /traces/:id` - Trace detail
-- `GET /logs` - Log search
-- `GET /metrics` - Metrics explorer
-- `GET /topology` - Service map
-- `GET /unified` - Unified timeline
-- `GET /reports` - Report list
+**Chat:**
+- `GET /ws/chat` - WebSocket chat interface
+
+**Bookmarks:**
+- `GET /api/bookmarks` - List bookmarks
+- `POST /api/bookmarks` - Create bookmark
+- `DELETE /api/bookmarks/:id` - Delete bookmark
+
+**Suggestions:**
+- `GET /api/suggestions` - Get suggestions
 
 **MCP:**
-- `POST /mcp` - MCP endpoint
+- `ANY /mcp` - MCP endpoint (streamable HTTP)
 
 **Reports:**
+- `GET /reports` - Report list
 - `GET /view/r/:id` - View report
 - `GET /api/reports` - List reports (JSON)
 - `DELETE /api/reports/:id` - Delete report
+
+**Demo:**
+- `GET /demo` - Component demo page
+
+**SPA:**
+- `GET /*` - React catch-all (serves index.html)
