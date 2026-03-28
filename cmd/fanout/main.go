@@ -36,7 +36,7 @@ import (
 var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
 	cfg := config.Load()
 
