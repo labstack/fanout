@@ -16,7 +16,7 @@ type LogsIn struct {
 	TraceID   string            `json:"trace_id,omitempty"  jsonschema:"Find logs correlated to a specific trace"`
 	Service   string            `json:"service,omitempty"   jsonschema:"Filter by service"`
 	Attrs     map[string]string `json:"attrs,omitempty"     jsonschema:"Attribute filters as key-value pairs"`
-	GroupBy   []string          `json:"group_by,omitempty"  jsonschema:"Aggregate by: service|severity"`
+	GroupBy   []string          `json:"group_by,omitempty"  jsonschema:"Aggregate by: service|severity|template"`
 	OrderBy   string            `json:"order_by,omitempty"  jsonschema:"Sort: time|count|severity"`
 	Window    string            `json:"window,omitempty"    jsonschema:"Time window: '15m','1h','7d', or ISO range 'start/end'. Default: 15m"`
 	Namespace string            `json:"namespace,omitempty" jsonschema:"Filter by namespace"`

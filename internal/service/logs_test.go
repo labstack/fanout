@@ -274,7 +274,7 @@ func TestLogGroupOrderByClause(t *testing.T) {
 }
 
 func TestValidLogGroupByFields(t *testing.T) {
-	valid := []string{"service", "severity"}
+	valid := []string{"service", "severity", "template"}
 	for _, f := range valid {
 		if !validLogGroupByFields[f] {
 			t.Errorf("validLogGroupByFields[%q] should be true", f)
@@ -413,5 +413,29 @@ func TestLogs_GroupBy_NullArrays(t *testing.T) {
 	}
 	if g.SampleTraceIDs == nil {
 		t.Error("SampleTraceIDs should not be nil (should default to empty slice)")
+	}
+}
+
+func TestMapGroupByCols(t *testing.T) {
+	tests := []struct {
+		input []string
+		want  []string
+	}{
+		{[]string{"service"}, []string{"service"}},
+		{[]string{"severity"}, []string{"severity"}},
+		{[]string{"template"}, []string{"body_template"}},
+		{[]string{"service", "template"}, []string{"service", "body_template"}},
+	}
+	for _, tc := range tests {
+		got := mapGroupByCols(tc.input)
+		if len(got) != len(tc.want) {
+			t.Errorf("mapGroupByCols(%v) = %v, want %v", tc.input, got, tc.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Errorf("mapGroupByCols(%v)[%d] = %q, want %q", tc.input, i, got[i], tc.want[i])
+			}
+		}
 	}
 }

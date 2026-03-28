@@ -12,6 +12,27 @@ import (
 var validLogGroupByFields = map[string]bool{
 	"service":  true,
 	"severity": true,
+	"template": true,
+}
+
+// logGroupByColumnMap maps MCP-facing group-by names to SQL column names.
+var logGroupByColumnMap = map[string]string{
+	"service":  "service",
+	"severity": "severity",
+	"template": "body_template",
+}
+
+// mapGroupByCols converts MCP group-by field names to SQL column names.
+func mapGroupByCols(fields []string) []string {
+	cols := make([]string, len(fields))
+	for i, f := range fields {
+		if col, ok := logGroupByColumnMap[f]; ok {
+			cols[i] = col
+		} else {
+			cols[i] = f
+		}
+	}
+	return cols
 }
 
 // Logs searches, filters, or aggregates log entries.
@@ -30,7 +51,7 @@ func (s *Service) Logs(ctx context.Context, p LogParams) (*LogsResult, error) {
 	// Validate group_by fields
 	for _, field := range p.GroupBy {
 		if !validLogGroupByFields[field] {
-			return nil, fmt.Errorf("invalid group_by field %q: allowed fields are service, severity", field)
+			return nil, fmt.Errorf("invalid group_by field %q: allowed fields are service, severity, template", field)
 		}
 	}
 
@@ -171,7 +192,8 @@ func (s *Service) logsGrouped(ctx context.Context, p LogParams) (*LogsResult, er
 	whereClause := filterClause(filters)
 	orderExpr := logGroupOrderByClause(p.OrderBy)
 
-	groupCols := strings.Join(p.GroupBy, ", ")
+	sqlCols := mapGroupByCols(p.GroupBy)
+	groupCols := strings.Join(sqlCols, ", ")
 	selectCols := groupCols
 
 	q := fmt.Sprintf(`
