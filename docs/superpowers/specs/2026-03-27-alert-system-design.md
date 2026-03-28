@@ -55,7 +55,7 @@ Rule-based alerting for Fanout. Users define expressions (via expr-lang) that ev
 └────────────────────────────────────────────────────────────┘
 ```
 
-Alert engine receives `*query.Duck` (rollup queries) and `*intelligence.Detector` (anomaly z-scores). SQLite lives at `lake/fanout.db`. MCP tools are the sole management interface. Webhook actions fire asynchronously — never block the eval loop.
+Alert engine receives `*query.Duck` (rollup queries) and `*intelligence.Detector` (anomaly z-scores). SQLite lives at `lake/fanout.sqlite`. MCP tools are the sole management interface. Webhook actions fire asynchronously — never block the eval loop.
 
 ## Data Model — SQLite Schema
 
@@ -394,7 +394,7 @@ internal/mcp/
 1. Lake Writer         (existing)
 2. DuckDB + Rollups    (existing)
 3. Intelligence Detector (existing)
-4. SQLite Store        (NEW — open fanout.db, run migrations)
+4. SQLite Store        (NEW — open fanout.sqlite, run migrations)
 5. Alert Engine        (NEW — needs duck + detector + store)
 6. Service Layer       (existing)
 7. MCP Server          (modified — receives alert engine)

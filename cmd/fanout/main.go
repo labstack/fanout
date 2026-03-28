@@ -96,7 +96,7 @@ func main() {
 	go detector.Run(ctx)
 
 	// Open SQLite for application state
-	sqlite, err := store.NewSQLite(filepath.Join(cfg.LakeDir, "fanout.db"))
+	sqlite, err := store.NewSQLite(filepath.Join(cfg.LakeDir, "fanout.sqlite"))
 	if err != nil {
 		slog.Error("sqlite init failed", "err", err)
 		os.Exit(1)
