@@ -104,7 +104,7 @@ func normalizeJSON(body string) string {
         // Not valid JSON despite starting with '{' — fall back to text
         return normalizeText(body)
     }
-    normalizeJSONValues(m)
+    m = normalizeJSONValues(m).(map[string]interface{})
     out, err := json.Marshal(m)
     if err != nil {
         return normalizeText(body)
@@ -150,9 +150,7 @@ Output:
 {"level":"error","msg":"connection refused","host":"<str>","port":"<num>","trace_id":"<hex>"}
 ```
 
-Keys preserved. Structural identity maintained. Short string values that look like enum constants (e.g., `"error"`, `"connection refused"`) pass through — they're structural, not variable.
-
-Wait — `normalizeText("error")` would not match any regex (no numbers, no IPs, etc.) so `"error"` stays as-is. `normalizeText("db-primary-01")` would replace `01` with `<num>` → `"db-primary-<num>"`. That's correct — the hostname varies.
+Keys preserved. Structural identity maintained. Short string values that look like enum constants (e.g., `"error"`, `"connection refused"`) pass through `normalizeText` unchanged — no regex matches. Dynamic values like hostnames get normalized: `"db-primary-01"` → `"db-primary-<num>"`.
 
 ### UTF-8 Safe Truncation
 
@@ -198,7 +196,7 @@ Old Parquet files lack the `body_template` column. DuckDB's `union_by_name=true`
 
 ### Placeholder SQL Update
 
-`internal/query/views.go` — add to the logs placeholder (for fresh installs with no data):
+`internal/query/views.go` — add to the logs placeholder. This is required for both fresh installs AND schema evolution on running instances. Fanout rewrites `_schema.parquet` sentinels on every startup to propagate new columns via `union_by_name=true`:
 
 ```sql
 NULL::VARCHAR AS "name=body_template",
@@ -214,13 +212,15 @@ Add to the `viewLogs` definition:
 
 ## Intelligence Detector Update
 
-`internal/intelligence/detector.go` — replace crude substring grouping with template grouping:
+`internal/intelligence/detector.go` — replace crude substring grouping with template grouping.
+
+**Note:** The detector queries raw Parquet via `read_parquet()`, not through the `logs` view. Raw Parquet columns use the `"name=..."` prefix. The service layer queries go through the `logs` view and use clean aliases (`body_template`). These are different namespaces — do not confuse them.
 
 ```sql
 -- Before:
 GROUP BY SUBSTRING("name=body", 1, 100), "name=severity", "name=service_name"
 
--- After:
+-- After (raw Parquet column names):
 GROUP BY COALESCE("name=body_template", SUBSTRING("name=body", 1, 100)),
          "name=severity", "name=service_name"
 ```
@@ -241,7 +241,27 @@ var validLogGroupByFields = map[string]bool{
 }
 ```
 
-When `group_by` includes `"template"`, the SQL maps it to `body_template`:
+**Column name mapping required.** The existing `logsGrouped` function passes group-by field names directly as SQL column references (`groupCols := strings.Join(p.GroupBy, ", ")`). Since the MCP-facing name is `"template"` but the view column is `body_template`, a mapping step must be added before building `groupCols`:
+
+```go
+// Map MCP-facing group-by names to actual SQL column names
+var logGroupByColumnMap = map[string]string{
+    "service":  "service",
+    "severity": "severity",
+    "template": "body_template",
+}
+
+// In logsGrouped, before building groupCols:
+for i, field := range p.GroupBy {
+    if col, ok := logGroupByColumnMap[field]; ok {
+        p.GroupBy[i] = col
+    }
+}
+```
+
+The result scanning in `LogGroup.Key` should use the original MCP-facing name (`"template"`) as the map key so consumers see a clean interface. This means the SELECT should alias: `body_template AS template`.
+
+Generated SQL when `group_by` includes `"template"`:
 
 ```sql
 SELECT body_template AS template, count(*) AS count,
