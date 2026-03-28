@@ -112,3 +112,156 @@ func TestNormalizeText(t *testing.T) {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// normalizeJSON
+// ---------------------------------------------------------------------------
+
+func TestNormalizeJSON(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "preserves keys normalizes string values",
+			input: `{"msg":"user 192.168.1.1 logged in","level":"info"}`,
+			// level value "info" has no variable parts → preserved
+			want: `{"level":"info","msg":"user <ip> logged in"}`,
+		},
+		{
+			name:  "normalizes trace ids in string values",
+			input: `{"trace_id":"4bf92f3577b34da6a3ce929d0e0e4736"}`,
+			want:  `{"trace_id":"<hex>"}`,
+		},
+		{
+			name:  "preserves booleans",
+			input: `{"ok":true,"failed":false}`,
+			want:  `{"failed":false,"ok":true}`,
+		},
+		{
+			name:  "preserves nulls",
+			input: `{"user":null}`,
+			want:  `{"user":null}`,
+		},
+		{
+			name:  "nested objects",
+			input: `{"req":{"method":"GET","path":"/api/v1/users","latency":45.2}}`,
+			want:  `{"req":{"latency":"<num>","method":"GET","path":"<path>"}}`,
+		},
+		{
+			name:  "arrays",
+			input: `{"ids":["550e8400-e29b-41d4-a716-446655440000","550e8400-e29b-41d4-a716-446655440001"]}`,
+			want:  `{"ids":["<uuid>","<uuid>"]}`,
+		},
+		{
+			name:  "invalid JSON fallback to text",
+			input: `{not valid json`,
+			want:  normalizeText(`{not valid json`),
+		},
+		{
+			name:  "enum-like strings preserved",
+			input: `{"status":"ok","env":"production"}`,
+			want:  `{"env":"production","status":"ok"}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeJSON(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeJSON(%q)\n got  %q\n want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// truncateUTF8
+// ---------------------------------------------------------------------------
+
+func TestTruncateUTF8(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxBytes int
+		want     string
+	}{
+		{
+			name:     "ascii short",
+			input:    "hello",
+			maxBytes: 10,
+			want:     "hello",
+		},
+		{
+			name:     "ascii exact",
+			input:    "hello",
+			maxBytes: 5,
+			want:     "hello",
+		},
+		{
+			name:     "ascii truncate",
+			input:    "hello world",
+			maxBytes: 5,
+			want:     "hello",
+		},
+		{
+			name:     "multibyte safe - don't split 世界",
+			input:    "ab世界cd",
+			maxBytes: 5, // "ab" (2) + "世" (3) = 5 but "世界" starts at byte 2
+			want:     "ab世",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			maxBytes: 10,
+			want:     "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := truncateUTF8(tt.input, tt.maxBytes)
+			if got != tt.want {
+				t.Errorf("truncateUTF8(%q, %d)\n got  %q\n want %q", tt.input, tt.maxBytes, got, tt.want)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// normalizeTemplate
+// ---------------------------------------------------------------------------
+
+func TestNormalizeTemplate(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "JSON detected by leading brace",
+			input: `{"msg":"connected from 10.0.0.1","code":200}`,
+			want:  `{"code":"<num>","msg":"connected from <ip>"}`,
+		},
+		{
+			name:  "plain text",
+			input: "user 550e8400-e29b-41d4-a716-446655440000 disconnected",
+			want:  "user <uuid> disconnected",
+		},
+		{
+			name:  "empty body",
+			input: "",
+			want:  "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeTemplate(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeTemplate(%q)\n got  %q\n want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
