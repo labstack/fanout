@@ -258,11 +258,12 @@ Returns: attributes (key, count, cardinality, samples[]), resource_attributes (k
 	// 11. alert_rules
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name: "alert_rules",
-		Description: `Manage alert rules. Create, update, delete, enable/disable, test expressions and webhooks.
+		Description: `Manage alert rules. Create, update, delete, enable/disable, test expressions, inspect live values.
 
-Actions: create, list, get, update, delete, enable, disable, test, test_webhook
-Expressions use: error_rate, p50, p95, p99, throughput, log_count, z_score, health_score, error_rate_delta, p95_delta, throughput_delta
-Use alert_env tool to see live values and example expressions.`,
+Actions: create, list, get, update, delete, enable, disable, test, test_webhook, inspect
+- inspect: show available expression fields, live values for a service, and example expressions. Use before creating rules.
+- test: dry-run an expression against live data for a service.
+Expressions use: error_rate, p50, p95, throughput, log_count, z_score, health_score, error_rate_delta, p95_delta, throughput_delta`,
 	}, wrap("alert_rules", s.alertRules))
 
 	// 12. alerts
@@ -273,16 +274,6 @@ Use alert_env tool to see live values and example expressions.`,
 Params: state (firing|pending|resolved|all), service, rule_id
 Returns: alert list with delivery status + summary counts`,
 	}, wrap("alerts", s.alertsList))
-
-	// 13. alert_env
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "alert_env",
-		Description: `Show available expression fields and live values for a service.
-
-Use before creating rules to see available data and current values.
-Params: service (optional)
-Returns: field definitions, live values, example expressions`,
-	}, wrap("alert_env", s.alertEnv))
 }
 
 func queryToolDescription(lakeDir string) string {
