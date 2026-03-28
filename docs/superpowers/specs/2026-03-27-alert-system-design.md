@@ -1,6 +1,6 @@
 # Alert System Design
 
-**Date:** 2026-03-27
+**Date:** 2026-03-27 (revised 2026-03-28)
 **Status:** Approved
 
 ## Overview
@@ -13,12 +13,15 @@ Rule-based alerting for Fanout. Users define expressions (via expr-lang) that ev
 - **Easy to use**: Conversational rule creation via MCP, test-before-save workflow
 - **Robust**: Compound conditions, rate-of-change, anomaly-based, absence detection
 - **No flapping**: `for` duration, cooldown, repeat intervals
+- **Simple**: 2 tables, 3 MCP tools
 
 ## Non-Goals
 
 - Built-in Slack/PagerDuty integrations (webhooks cover these)
 - UI for alert management (MCP-first)
 - Multi-tenant alert isolation (single-tenant product)
+- Separate delivery audit table (slog handles this)
+- Silence management (use enabled/disabled on rules)
 
 ## Architecture
 
@@ -41,12 +44,13 @@ Rule-based alerting for Fanout. Users define expressions (via expr-lang) that ev
 │                              └─────────────┬────────────┘  │
 │                                            │               │
 │                    ┌───────────┐    ┌──────▼──────┐        │
-│                    │ Service   │    │ Actions     │        │
-│                    │ Layer     │    │ (webhooks)  │        │
+│                    │ Service   │    │ Webhooks    │        │
+│                    │ Layer     │    │ (async)     │        │
 │                    └─────┬─────┘    └─────────────┘        │
 │                          │                                 │
 │                    ┌─────▼─────┐                           │
-│                    │ MCP Tools │  ← alert_*, silence_*     │
+│                    │ MCP Tools │  ← alert_rules,           │
+│                    │           │    alerts, alert_env       │
 │                    └───────────┘                           │
 └────────────────────────────────────────────────────────────┘
 ```
@@ -55,7 +59,7 @@ Alert engine receives `*query.Duck` (rollup queries) and `*intelligence.Detector
 
 ## Data Model — SQLite Schema
 
-All primary keys are UUID v7 (time-ordered, sortable).
+All primary keys are UUID v7 (time-ordered, sortable). Two tables.
 
 ```sql
 CREATE TABLE alert_rules (
@@ -69,60 +73,39 @@ CREATE TABLE alert_rules (
     for_seconds       INTEGER DEFAULT 60,
     cooldown_s        INTEGER DEFAULT 600,
     repeat_interval_s INTEGER DEFAULT 3600,
-    eval_interval_s   INTEGER DEFAULT 30,
+    -- Webhook (inline — one per rule; need two destinations? make two rules)
+    webhook_url       TEXT,
+    webhook_headers   TEXT,              -- JSON: {"Content-Type": "application/json"}
+    webhook_template  TEXT,              -- body template: "{{.Alert.Service}}: {{.Rule.Name}}"
+    notify_on_resolve INTEGER DEFAULT 0,
     created_at        TEXT DEFAULT (datetime('now')),
     updated_at        TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE alert_actions (
-    id          TEXT PRIMARY KEY,  -- uuid v7
-    rule_id     TEXT NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
-    action_type TEXT NOT NULL DEFAULT 'webhook',
-    config      TEXT NOT NULL,     -- JSON: {"url":"...", "method":"POST", "headers":{}, "body_template":"..."}
-    on_fire     INTEGER DEFAULT 1,
-    on_resolve  INTEGER DEFAULT 0
-);
-
 CREATE TABLE alerts (
-    id          TEXT PRIMARY KEY,  -- uuid v7
-    rule_id     TEXT NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
-    service     TEXT NOT NULL,
-    state       TEXT NOT NULL,     -- 'pending', 'firing', 'resolved'
-    value       REAL,
-    fired_at    TEXT,
-    resolved_at TEXT,
-    repeated_at TEXT,
-    last_eval   TEXT DEFAULT (datetime('now')),
-    created_at  TEXT DEFAULT (datetime('now')),
+    id                    TEXT PRIMARY KEY,  -- uuid v7
+    rule_id               TEXT NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
+    service               TEXT NOT NULL,
+    state                 TEXT NOT NULL,     -- 'pending', 'firing', 'resolved'
+    value                 REAL,
+    fired_at              TEXT,
+    resolved_at           TEXT,
+    repeated_at           TEXT,
+    last_eval             TEXT,
+    -- Delivery status (inline — slog has the full audit trail)
+    last_delivery_status  TEXT,             -- 'success', 'failed'
+    last_delivery_at      TEXT,
+    created_at            TEXT DEFAULT (datetime('now')),
     UNIQUE(rule_id, service)
-);
-
-CREATE TABLE alert_silences (
-    id         TEXT PRIMARY KEY,  -- uuid v7
-    service    TEXT,              -- NULL = all services
-    rule_id    TEXT,              -- NULL = all rules
-    reason     TEXT,
-    expires_at TEXT NOT NULL,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE alert_deliveries (
-    id           TEXT PRIMARY KEY,  -- uuid v7
-    alert_id     TEXT NOT NULL REFERENCES alerts(id) ON DELETE CASCADE,
-    action_id    TEXT NOT NULL REFERENCES alert_actions(id) ON DELETE CASCADE,
-    status       TEXT NOT NULL,     -- 'success', 'failed'
-    status_code  INTEGER,
-    response     TEXT,
-    attempted_at TEXT DEFAULT (datetime('now'))
 );
 ```
 
-`UNIQUE(rule_id, service)` on alerts — one active alert per rule+service pair. Structural deduplication.
+**Design decisions:**
 
-Silences match on service and/or rule_id. NULL means wildcard:
-- `service='checkout', rule_id=NULL` — silence one service for all rules
-- `service=NULL, rule_id='...'` — silence one rule for all services
-- Both NULL — maintenance window (silence everything)
+- **Webhook inline on rule**: One webhook per rule. Need two destinations for the same condition? Create two rules with the same expression. Eliminates the actions table and the actions MCP tool.
+- **No silences table**: Claude disables rules via `enabled=false` and re-enables after deploy. Silences are a UI concept for humans clicking buttons. MCP doesn't need them.
+- **No deliveries table**: `slog` logs every webhook attempt with status, URL, and response. `last_delivery_status` + `last_delivery_at` on the alert row covers "did it fire?" without a separate table.
+- **UNIQUE(rule_id, service)**: One active alert per rule+service pair. Structural deduplication.
 
 ## Rule Engine — expr-lang
 
@@ -196,7 +179,6 @@ Single goroutine, runs every 30s (configurable via `ALERT_EVAL_INTERVAL`):
 ```go
 func (e *Engine) evaluate(ctx context.Context) {
     rules := e.store.ListEnabled()
-    silences := e.store.ActiveSilences()
 
     // ONE DuckDB query for ALL services — current + previous window
     envs := e.buildEnvs(ctx)  // map[service]AlertEnv
@@ -204,7 +186,7 @@ func (e *Engine) evaluate(ctx context.Context) {
     for _, rule := range rules {
         services := e.resolveServices(rule, envs)
         for _, svc := range services {
-            if isSilenced(silences, rule.ID, svc) { continue }
+            if !rule.Enabled { continue }
             result, err := expr.Run(rule.Program, envs[svc])  // ~50ns
             if err != nil { slog.Error(...); continue }
             e.transition(rule, svc, result.(bool), envs[svc])
@@ -252,12 +234,12 @@ Z-scores and health_score are read from `detector.LatestSnapshot()` — no addit
                                     │
                                     │ held for `for_seconds` (default 60)
                                     ▼
-                               FIRING ──▶ actions (fire)
+                               FIRING ──▶ webhook (fire)
                                     │         │
                 expr false          │         │ every `repeat_interval_s` (default 3600)
                     │               │         ▼
-                    ▼               │    actions (reminder)
-               RESOLVED ──▶ actions (resolve)
+                    ▼               │    webhook (reminder)
+               RESOLVED ──▶ webhook (resolve, if notify_on_resolve)
                     │
                     │ `cooldown_s` elapsed (default 600)
                     ▼
@@ -268,12 +250,12 @@ Z-scores and health_score are read from `detector.LatestSnapshot()` — no addit
 
 | Current State | Condition | Next State | Action |
 |---|---|---|---|
-| (none) | expr true, for=0 | FIRING | fire actions |
+| (none) | expr true, for=0 | FIRING | fire webhook |
 | (none) | expr true, for>0 | PENDING | — |
-| PENDING | still true, for elapsed | FIRING | fire actions |
+| PENDING | still true, for elapsed | FIRING | fire webhook |
 | PENDING | expr false | (deleted) | — |
 | FIRING | still true | FIRING | reminder if repeat_interval elapsed |
-| FIRING | expr false | RESOLVED | resolve actions |
+| FIRING | expr false | RESOLVED | resolve webhook (if notify_on_resolve) |
 | RESOLVED | cooldown elapsed | (pruned) | — |
 
 ### Defaults (Opinionated)
@@ -287,18 +269,7 @@ Z-scores and health_score are read from `detector.LatestSnapshot()` — no addit
 
 ## Actions — Webhook Execution
 
-### Config Schema
-
-Stored as JSON in `alert_actions.config`:
-
-```json
-{
-    "url": "https://hooks.slack.com/services/T.../B.../xxx",
-    "method": "POST",
-    "headers": {"Content-Type": "application/json"},
-    "body_template": "{\"text\": \"{{.Alert.Service}}: {{.Rule.Name}} ({{.Event}})\"}"
-}
-```
+Webhook config lives directly on the rule. Template uses Go `text/template` syntax.
 
 ### Template Variables
 
@@ -323,52 +294,32 @@ type ActionContext struct {
 - HTTP client: 5s connect timeout, 10s total timeout
 - 3 retries with linear backoff (2s, 4s) for 5xx/network errors
 - No retry on 4xx (config error, not transient)
-- Every attempt logged to `alert_deliveries`
+- Every attempt logged via `slog`
+- `last_delivery_status` + `last_delivery_at` updated on the alert row
 
 ## MCP Tools
 
-Six new tools registered in `internal/mcp/tool_alerts.go`.
+Three tools registered in `internal/mcp/tool_alerts.go`.
 
 ### `alert_rules` — Rule CRUD + test
 
 | Action | Params | Returns |
 |---|---|---|
-| `create` | name, expression, service, for_seconds, cooldown_s, repeat_interval_s, description | Rule object with compiled status |
+| `create` | name, expression, service, for_seconds, cooldown_s, repeat_interval_s, webhook_url, webhook_headers, webhook_template, notify_on_resolve, description | Rule object with compiled status |
 | `list` | — | All rules with last_fired info |
-| `get` | rule_id | Rule + actions + active alerts |
-| `update` | rule_id, (any field) | Updated rule |
+| `get` | rule_id | Rule + active alerts |
+| `update` | rule_id, (any field) | Updated rule (recompiles expression if changed) |
 | `delete` | rule_id | Confirmation |
+| `enable` | rule_id | Enables a disabled rule |
+| `disable` | rule_id, duration | Disables rule (optionally for a duration, then auto-re-enables) |
 | `test` | expression, service | {triggered, env values} — dry-run against live data |
-
-### `alert_actions` — Webhook CRUD + test
-
-| Action | Params | Returns |
-|---|---|---|
-| `create` | rule_id, url, method, headers, body_template, on_fire, on_resolve | Action object |
-| `list` | rule_id | Actions for rule |
-| `update` | action_id, (any field) | Updated action |
-| `delete` | action_id | Confirmation |
-| `test` | action_id | Sends test webhook, returns delivery result |
-
-### `alert_silences` — Mute alerts
-
-| Action | Params | Returns |
-|---|---|---|
-| `create` | service, rule_id, duration/expires_at, reason | Silence with expiry |
-| `list` | — | Active silences |
-| `delete` | silence_id | Confirmation |
+| `test_webhook` | rule_id | Sends test webhook, returns delivery result |
 
 ### `alerts` — View alert state
 
 | Params | Returns |
 |---|---|
-| state (firing/pending/resolved/all), service, rule_id, window, limit | Alert list with deliveries + summary counts |
-
-### `alert_history` — Delivery audit trail
-
-| Params | Returns |
-|---|---|
-| alert_id, rule_id, status, window, limit | Delivery log entries |
+| state (firing/pending/resolved/all), service, rule_id, window, limit | Alert list with delivery status + summary counts |
 
 ### `alert_env` — Expression reference + live values
 
@@ -393,9 +344,15 @@ Claude: "I'll set a rule for P95 > 800ms sustained for 2 minutes.
 
 User: "Slack #ops channel"
 
-Claude: calls alert_rules(action="create", ...)
-Claude: calls alert_actions(action="create", rule_id="...", url="https://hooks.slack.com/...")
-Claude: calls alert_actions(action="test", action_id="...")
+Claude: calls alert_rules(action="create",
+         name="checkout latency",
+         expression="p95 > 800",
+         service="checkout",
+         for_seconds=120,
+         webhook_url="https://hooks.slack.com/...",
+         webhook_template="{\"text\": \"{{.Alert.Service}}: {{.Rule.Name}} — P95 {{.Env.P95}}ms\"}")
+
+Claude: calls alert_rules(action="test_webhook", rule_id="...")
   → test webhook delivered successfully
 
 Claude: "Done. Rule is active. Tested the webhook — it delivered."
@@ -408,11 +365,11 @@ internal/alert/
     store.go       — SQLite schema, migrations, CRUD
     engine.go      — eval loop, buildEnvs, transition logic
     expr.go        — AlertEnv struct, compilation, caching
-    actions.go     — webhook execution, templates, retries
-    types.go       — Rule, Alert, Action, Silence, Delivery structs
+    webhook.go     — webhook execution, templates, retries
+    types.go       — Rule, Alert structs
 
 internal/mcp/
-    tool_alerts.go — 6 MCP tool handlers
+    tool_alerts.go — 3 MCP tool handlers
 ```
 
 ## Dependencies
