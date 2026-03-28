@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -22,6 +23,7 @@ import (
 	_ "google.golang.org/grpc/encoding/gzip" // Register gzip decompressor
 
 	"github.com/labstack/fanout/internal/ai"
+	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/ingest"
@@ -30,6 +32,7 @@ import (
 	"github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
+	"github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/web"
 )
 
@@ -91,6 +94,27 @@ func main() {
 	// Start intelligence detector
 	detector := intelligence.NewDetector(q, intelligence.DefaultDetectorConfig())
 	go detector.Run(ctx)
+
+	// Open SQLite for application state
+	sqlite, err := store.NewSQLite(filepath.Join(cfg.LakeDir, "fanout.db"))
+	if err != nil {
+		slog.Error("sqlite init failed", "err", err)
+		os.Exit(1)
+	}
+	defer sqlite.Close()
+
+	// Start alert engine
+	var alertEngine *alert.Engine
+	if cfg.AlertEnabled {
+		alertStore := alert.NewStore(sqlite.DB)
+		alertEngine = alert.NewEngine(
+			alertStore, q, detector,
+			time.Duration(cfg.AlertEvalInterval)*time.Second,
+			cfg.AlertHistoryDays,
+		)
+		go alertEngine.Run(ctx)
+		slog.Info("alert engine enabled", "interval", cfg.AlertEvalInterval)
+	}
 
 	// Start gRPC ingest (OTLP)
 	grpcLis, err := net.Listen("tcp", cfg.OTLPGRPCAddr)
@@ -176,7 +200,7 @@ func main() {
 	svc := service.New(q, cfg)
 
 	// Create MCP server unconditionally (AI orchestrator connects to it in-process)
-	mcpServer := mcp.NewServer(svc, q, cfg)
+	mcpServer := mcp.NewServer(svc, q, cfg, alertEngine)
 	go mcp.RunCleanup(ctx)
 
 	// AI orchestrator (optional — needs API key)

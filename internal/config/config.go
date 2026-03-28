@@ -24,6 +24,10 @@ type Config struct {
 	DefaultNS      string    // default namespace if not set
 	// DuckDB
 	DuckDBMemory string // memory limit (e.g. "512MB", "1GB")
+	// Alerting
+	AlertEnabled      bool
+	AlertEvalInterval int // seconds
+	AlertHistoryDays  int
 	// AI chat
 	AIProvider string // anthropic or openai
 	AIAPIKey   string // LLM API key
@@ -45,11 +49,14 @@ func Load() Config {
 		RetentionHours: getenvInt("RETENTION_HOURS", 1),
 		TenantID:       getenvUUID("TENANT_ID"),
 		DefaultNS:      getenv("DEFAULT_NAMESPACE", "default"),
-		DuckDBMemory:   getenv("DUCKDB_MEMORY", "512MB"),
-		AIProvider:     getenv("AI_PROVIDER", "anthropic"),
-		AIAPIKey:       os.Getenv("AI_API_KEY"),
-		AIModel:        os.Getenv("AI_MODEL"),
-		AIBaseURL:      os.Getenv("AI_BASE_URL"),
+		DuckDBMemory:      getenv("DUCKDB_MEMORY", "512MB"),
+		AlertEnabled:      getenvBool("ALERT_ENABLED", true),
+		AlertEvalInterval: getenvInt("ALERT_EVAL_INTERVAL", 30),
+		AlertHistoryDays:  getenvInt("ALERT_HISTORY_DAYS", 7),
+		AIProvider:        getenv("AI_PROVIDER", "anthropic"),
+		AIAPIKey:          os.Getenv("AI_API_KEY"),
+		AIModel:           os.Getenv("AI_MODEL"),
+		AIBaseURL:         os.Getenv("AI_BASE_URL"),
 	}
 	if err := cfg.Validate(); err != nil {
 		slog.Error("invalid config", "err", err)

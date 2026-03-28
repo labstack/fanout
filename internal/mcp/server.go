@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
@@ -15,16 +16,17 @@ import (
 )
 
 type Server struct {
-	mcp  *mcp.Server
-	svc  *service.Service
-	duck *query.Duck
-	cfg  config.Config
+	mcp    *mcp.Server
+	svc    *service.Service
+	duck   *query.Duck
+	cfg    config.Config
+	alerts *alert.Engine
 }
 
 // MCP returns the inner MCP server for in-process client connections.
 func (s *Server) MCP() *mcp.Server { return s.mcp }
 
-func NewServer(svc *service.Service, duck *query.Duck, cfg config.Config) *Server {
+func NewServer(svc *service.Service, duck *query.Duck, cfg config.Config, alerts *alert.Engine) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "fanout",
 		Version: "1.0.0",
@@ -34,10 +36,11 @@ func NewServer(svc *service.Service, duck *query.Duck, cfg config.Config) *Serve
 	InitReportStore(cfg.LakeDir)
 
 	s := &Server{
-		mcp:  mcpServer,
-		svc:  svc,
-		duck: duck,
-		cfg:  cfg,
+		mcp:    mcpServer,
+		svc:    svc,
+		duck:   duck,
+		cfg:    cfg,
+		alerts: alerts,
 	}
 
 	s.registerTools()
@@ -251,6 +254,35 @@ Returns: attributes (key, count, cardinality, samples[]), resource_attributes (k
 		Name:        "query",
 		Description: queryToolDescription(s.cfg.LakeDir),
 	}, wrap("query", s.query))
+
+	// 11. alert_rules
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "alert_rules",
+		Description: `Manage alert rules. Create, update, delete, enable/disable, test expressions and webhooks.
+
+Actions: create, list, get, update, delete, enable, disable, test, test_webhook
+Expressions use: error_rate, p50, p95, p99, throughput, log_count, z_score, health_score, error_rate_delta, p95_delta, throughput_delta
+Use alert_env tool to see live values and example expressions.`,
+	}, wrap("alert_rules", s.alertRules))
+
+	// 12. alerts
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "alerts",
+		Description: `View current and recent alerts.
+
+Params: state (firing|pending|resolved|all), service, rule_id
+Returns: alert list with delivery status + summary counts`,
+	}, wrap("alerts", s.alertsList))
+
+	// 13. alert_env
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "alert_env",
+		Description: `Show available expression fields and live values for a service.
+
+Use before creating rules to see available data and current values.
+Params: service (optional)
+Returns: field definitions, live values, example expressions`,
+	}, wrap("alert_env", s.alertEnv))
 }
 
 func queryToolDescription(lakeDir string) string {
