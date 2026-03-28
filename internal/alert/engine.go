@@ -98,7 +98,7 @@ func (e *Engine) BuildEnvForService(ctx context.Context, service string) (AlertE
 	return env, ok
 }
 
-// BuildAllEnvs returns all current AlertEnvs (for MCP alert_env tool).
+// BuildAllEnvs returns all current AlertEnvs keyed by service name.
 func (e *Engine) BuildAllEnvs(ctx context.Context) map[string]AlertEnv {
 	envs := e.buildEnvs(ctx)
 	if envs == nil {

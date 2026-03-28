@@ -16,7 +16,7 @@ import (
 
 // AlertRulesIn holds input parameters for the alert_rules tool.
 type AlertRulesIn struct {
-	Action          string `json:"action"                      jsonschema:"Action: create|list|get|update|delete|enable|disable|test|test_webhook"`
+	Action          string `json:"action"                      jsonschema:"Action: create|list|get|update|delete|enable|disable|test|test_webhook|inspect"`
 	RuleID          string `json:"rule_id,omitempty"           jsonschema:"Rule ID (for get/update/delete/enable/disable/test_webhook)"`
 	Name            string `json:"name,omitempty"              jsonschema:"Rule name"`
 	Description     string `json:"description,omitempty"       jsonschema:"Rule description"`
