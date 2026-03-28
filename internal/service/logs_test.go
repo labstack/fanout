@@ -24,6 +24,7 @@ func TestLogs_Empty(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("Logs() returned nil")
+		return
 	}
 	if len(result.Logs) != 0 {
 		t.Errorf("Logs count = %d, want 0", len(result.Logs))

@@ -236,6 +236,7 @@ func TestToolRegistryMCPIntegration(t *testing.T) {
 	}
 	if greetDef == nil {
 		t.Fatal("expected 'greet' tool in registry defs, not found")
+		return
 	}
 	if greetDef.Description != "Say hello" {
 		t.Errorf("greet description = %q, want %q", greetDef.Description, "Say hello")

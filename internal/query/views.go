@@ -56,6 +56,7 @@ SELECT
   "name=span_id" AS span_id,
   decode("name=attributes_json") AS attributes_json,
   decode("name=resource_json") AS resource_json,
+  "name=body_template" AS body_template,
   namespace, tenant
 FROM read_parquet('{lake}/logs/**/*.parquet',
      hive_partitioning=true, union_by_name=true);`
@@ -139,6 +140,7 @@ SELECT
   NULL::VARCHAR AS "name=span_id",
   NULL::BLOB    AS "name=attributes_json",
   NULL::BLOB    AS "name=resource_json",
+  NULL::VARCHAR AS "name=body_template",
   NULL::VARCHAR AS namespace,
   NULL::VARCHAR AS tenant
 WHERE false

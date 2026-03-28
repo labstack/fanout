@@ -244,6 +244,7 @@ func TestNewDetector(t *testing.T) {
 
 	if d == nil {
 		t.Fatal("NewDetector returned nil")
+		return
 	}
 	if d.config.Enabled != true {
 		t.Error("config.Enabled not set correctly")

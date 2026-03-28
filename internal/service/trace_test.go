@@ -382,6 +382,7 @@ func TestCompareTrace_MatchingOperations(t *testing.T) {
 	}
 	if cmp == nil {
 		t.Fatal("CompareTrace() returned nil")
+		return
 	}
 	if cmp.OtherTraceID != "trace-def" {
 		t.Errorf("OtherTraceID = %q, want %q", cmp.OtherTraceID, "trace-def")
@@ -443,6 +444,7 @@ func TestCompareTrace_DeltaIsAbsolute(t *testing.T) {
 	}
 	if cmp == nil {
 		t.Fatal("CompareTrace() returned nil")
+		return
 	}
 	if cmp.DurationDeltaMs < 0 {
 		t.Errorf("DurationDeltaMs = %f, should be non-negative", cmp.DurationDeltaMs)
@@ -565,6 +567,7 @@ func TestCompareTrace_AsymmetricOperations(t *testing.T) {
 	}
 	if cmp == nil {
 		t.Fatal("CompareTrace() returned nil")
+		return
 	}
 
 	// Should have at least 3 diffs: api/GET /users (both), db/SELECT users (primary only), cache/REDIS GET (other only)

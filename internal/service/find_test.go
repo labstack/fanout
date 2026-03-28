@@ -291,6 +291,7 @@ func TestFind_QueryError(t *testing.T) {
 	// Should still return a valid (empty) result struct
 	if result == nil {
 		t.Fatal("Find() should return non-nil result even on error")
+		return
 	}
 	if len(result.Spans) != 0 {
 		t.Errorf("Spans count = %d, want 0", len(result.Spans))
