@@ -16,7 +16,7 @@ import (
 
 // AlertRulesIn holds input parameters for the alert_rules tool.
 type AlertRulesIn struct {
-	Action          string `json:"action"                      jsonschema:"Action: create|list|get|update|delete|enable|disable|test|test_webhook"`
+	Action          string `json:"action"                      jsonschema:"Action: create|list|get|update|delete|enable|disable|test|test_webhook|inspect"`
 	RuleID          string `json:"rule_id,omitempty"           jsonschema:"Rule ID (for get/update/delete/enable/disable/test_webhook)"`
 	Name            string `json:"name,omitempty"              jsonschema:"Rule name"`
 	Description     string `json:"description,omitempty"       jsonschema:"Rule description"`
@@ -46,12 +46,28 @@ type WebhookResult struct {
 	Message string `json:"message,omitempty"`
 }
 
+// InspectResult is the output from the inspect action.
+type InspectResult struct {
+	Fields   []InspectField  `json:"fields"`
+	Env      *alert.AlertEnv `json:"env,omitempty"`
+	Examples []string        `json:"examples"`
+	Message  string          `json:"message,omitempty"`
+}
+
+// InspectField describes one available expression variable.
+type InspectField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description"`
+}
+
 // AlertRulesOut is the response envelope for the alert_rules tool.
 type AlertRulesOut struct {
 	Rule    *alert.Rule    `json:"rule,omitempty"`
 	Rules   []alert.Rule   `json:"rules,omitempty"`
 	Test    *TestResult    `json:"test,omitempty"`
 	Webhook *WebhookResult `json:"webhook,omitempty"`
+	Inspect *InspectResult `json:"inspect,omitempty"`
 	Message string         `json:"message,omitempty"`
 }
 
@@ -294,9 +310,44 @@ func (s *Server) alertRules(ctx context.Context, req *mcp.CallToolRequest, in Al
 			},
 		}, nil
 
+	case "inspect":
+		fields := []InspectField{
+			{Name: "error_rate", Type: "float64", Description: "Fraction of spans with error status (0–1) over the last 5 minutes"},
+			{Name: "p50", Type: "float64", Description: "Median latency in milliseconds"},
+			{Name: "p95", Type: "float64", Description: "P95 latency in milliseconds"},
+			{Name: "throughput", Type: "float64", Description: "Total span count over the last 5 minutes"},
+			{Name: "log_count", Type: "float64", Description: "Log entry count over the last 5 minutes"},
+			{Name: "z_score", Type: "float64", Description: "Max absolute anomaly z-score from the intelligence detector"},
+			{Name: "health_score", Type: "float64", Description: "System-wide health score (0–100) from the intelligence detector"},
+			{Name: "error_rate_delta", Type: "float64", Description: "Percent change in error_rate vs the previous 5-minute window"},
+			{Name: "p95_delta", Type: "float64", Description: "Percent change in p95 vs the previous 5-minute window"},
+			{Name: "throughput_delta", Type: "float64", Description: "Percent change in throughput vs the previous 5-minute window"},
+			{Name: "service", Type: "string", Description: "Service name"},
+		}
+		examples := []string{
+			`error_rate > 0.05`,
+			`error_rate > 0.05 && p95 > 1000`,
+			`p95 > 2000`,
+			`throughput < 10`,
+			`z_score > 3.0`,
+			`error_rate_delta > 50`,
+			`p95_delta > 100 && throughput > 100`,
+			`health_score < 50`,
+		}
+		result := InspectResult{Fields: fields, Examples: examples}
+		if in.Service != "" {
+			env, ok := s.alerts.BuildEnvForService(ctx, in.Service)
+			if ok {
+				result.Env = &env
+			} else {
+				result.Message = fmt.Sprintf("no live data for service %q", in.Service)
+			}
+		}
+		return nil, AlertRulesOut{Inspect: &result}, nil
+
 	default:
 		return nil, AlertRulesOut{
-			Message: fmt.Sprintf("unknown action %q — valid actions: create, list, get, update, delete, enable, disable, test, test_webhook", in.Action),
+			Message: fmt.Sprintf("unknown action %q — valid actions: create, list, get, update, delete, enable, disable, test, test_webhook, inspect", in.Action),
 		}, nil
 	}
 }
@@ -349,75 +400,6 @@ func (s *Server) alertsList(ctx context.Context, req *mcp.CallToolRequest, in Al
 		Alerts:  alerts,
 		Summary: summary,
 	}, nil
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// alert_env — expression reference + live values
-// ──────────────────────────────────────────────────────────────────────────────
-
-// AlertEnvIn holds input parameters for the alert_env tool.
-type AlertEnvIn struct {
-	Service string `json:"service,omitempty" jsonschema:"Service name to fetch live values for (optional)"`
-}
-
-// AlertEnvField describes one available expression variable.
-type AlertEnvField struct {
-	Name        string `json:"name"`
-	Type        string `json:"type"`
-	Description string `json:"description"`
-}
-
-// AlertEnvOut is the response envelope for the alert_env tool.
-type AlertEnvOut struct {
-	Fields   []AlertEnvField `json:"fields"`
-	Env      *alert.AlertEnv `json:"env,omitempty"`
-	Examples []string        `json:"examples"`
-	Message  string          `json:"message,omitempty"`
-}
-
-func (s *Server) alertEnv(ctx context.Context, req *mcp.CallToolRequest, in AlertEnvIn) (*mcp.CallToolResult, AlertEnvOut, error) {
-	fields := []AlertEnvField{
-		{Name: "error_rate", Type: "float64", Description: "Fraction of spans with error status (0–1) over the last 5 minutes"},
-		{Name: "p50", Type: "float64", Description: "Median latency in milliseconds"},
-		{Name: "p95", Type: "float64", Description: "P95 latency in milliseconds"},
-		{Name: "throughput", Type: "float64", Description: "Total span count over the last 5 minutes"},
-		{Name: "log_count", Type: "float64", Description: "Log entry count over the last 5 minutes"},
-		{Name: "z_score", Type: "float64", Description: "Max absolute anomaly z-score from the intelligence detector"},
-		{Name: "health_score", Type: "float64", Description: "System-wide health score (0–100) from the intelligence detector"},
-		{Name: "error_rate_delta", Type: "float64", Description: "Percent change in error_rate vs the previous 5-minute window"},
-		{Name: "p95_delta", Type: "float64", Description: "Percent change in p95 vs the previous 5-minute window"},
-		{Name: "throughput_delta", Type: "float64", Description: "Percent change in throughput vs the previous 5-minute window"},
-		{Name: "service", Type: "string", Description: "Service name (string — use for logging/routing, not thresholds)"},
-	}
-
-	examples := []string{
-		`error_rate > 0.05`,
-		`error_rate > 0.05 && p95 > 1000`,
-		`p95 > 2000`,
-		`throughput < 10`,
-		`z_score > 3.0`,
-		`error_rate_delta > 50`,
-		`p95_delta > 100 && throughput > 100`,
-		`health_score < 50`,
-	}
-
-	out := AlertEnvOut{
-		Fields:   fields,
-		Examples: examples,
-	}
-
-	if in.Service != "" && s.alerts != nil {
-		env, ok := s.alerts.BuildEnvForService(ctx, in.Service)
-		if ok {
-			out.Env = &env
-		} else {
-			out.Message = fmt.Sprintf("no live data found for service %q — service may be inactive or rollup data not yet available", in.Service)
-		}
-	} else if in.Service != "" && s.alerts == nil {
-		out.Message = "alerting is disabled — live values unavailable"
-	}
-
-	return nil, out, nil
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
