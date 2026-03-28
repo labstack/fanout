@@ -9,6 +9,7 @@ func TestBuildSchemaResponse(t *testing.T) {
 
 	if schema == nil {
 		t.Fatal("buildSchemaResponse() returned nil")
+		return
 	}
 
 	// Views
@@ -87,6 +88,7 @@ func TestSchemaResponseSpansColumns(t *testing.T) {
 	}
 	if spansView == nil {
 		t.Fatal("spans view not found")
+		return
 	}
 
 	requiredCols := []string{
@@ -123,6 +125,7 @@ func TestSchemaResponseServiceRollupColumns(t *testing.T) {
 	}
 	if rollup == nil {
 		t.Fatal("service_rollup not found")
+		return
 	}
 
 	requiredCols := []string{"bucket", "service", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}
@@ -149,6 +152,7 @@ func TestSchemaResponseEdgeRollupColumns(t *testing.T) {
 	}
 	if rollup == nil {
 		t.Fatal("edge_rollup not found")
+		return
 	}
 
 	requiredCols := []string{"bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"}

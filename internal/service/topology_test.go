@@ -428,6 +428,7 @@ func TestTopologyWithParams_CriticalPaths(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("TopologyWithParams() returned nil")
+		return
 	}
 	if result.CriticalPaths == nil {
 		t.Error("CriticalPaths should not be nil")

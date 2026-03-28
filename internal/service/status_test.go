@@ -44,6 +44,7 @@ func TestStatus_NoData(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("Status() returned nil")
+		return
 	}
 	if !result.Healthy {
 		// With no data, should be healthy
@@ -285,6 +286,7 @@ func TestOverview_NoData(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("Overview() returned nil")
+		return
 	}
 	if result.Health.TotalServices != 0 {
 		t.Errorf("TotalServices = %d, want 0", result.Health.TotalServices)

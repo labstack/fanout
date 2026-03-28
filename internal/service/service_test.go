@@ -66,6 +66,7 @@ func TestNew(t *testing.T) {
 
 	if svc == nil {
 		t.Fatal("New() returned nil")
+		return
 	}
 	if svc.cfg.DefaultNS != "test-ns" {
 		t.Errorf("cfg.DefaultNS = %q, want %q", svc.cfg.DefaultNS, "test-ns")

@@ -58,6 +58,7 @@ func TestReportStore_SaveAndGet(t *testing.T) {
 	got := store.Get(id)
 	if got == nil {
 		t.Fatal("Get() returned nil for saved report")
+		return
 	}
 	if got.ID != id {
 		t.Errorf("ID = %q, want %q", got.ID, id)

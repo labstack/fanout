@@ -383,10 +383,10 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
 	logsGlob := d.duck.LogsGlob(tenantID, namespace, windowMins)
 
-	// Group logs by message pattern (first 100 chars as template)
+	// Group logs by normalized template (falls back to first 100 chars for old data without body_template)
 	sql := fmt.Sprintf(`
 		SELECT
-			SUBSTRING("name=body", 1, 100) AS template,
+			COALESCE("name=body_template", SUBSTRING("name=body", 1, 100)) AS template,
 			"name=severity" as severity,
 			"name=service_name" as service_name,
 			COUNT(*) AS occurrence_count,
@@ -395,7 +395,7 @@ func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) 
 		FROM read_parquet(%s, union_by_name=true)
 		WHERE "name=time_unix_nano" >= %d AND "name=time_unix_nano" < %d
 		AND "name=severity" IN ('WARN', 'ERROR', 'FATAL')
-		GROUP BY SUBSTRING("name=body", 1, 100), "name=severity", "name=service_name"
+		GROUP BY COALESCE("name=body_template", SUBSTRING("name=body", 1, 100)), "name=severity", "name=service_name"
 		HAVING COUNT(*) >= 3
 		ORDER BY occurrence_count DESC
 		LIMIT 50

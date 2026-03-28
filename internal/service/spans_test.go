@@ -24,6 +24,7 @@ func TestSpans_Empty(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("Spans() returned nil")
+		return
 	}
 	if len(result.Spans) != 0 {
 		t.Errorf("Spans count = %d, want 0", len(result.Spans))
@@ -450,6 +451,7 @@ func TestSpans_ZeroWindow(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("Spans(Window:0) returned nil")
+		return
 	}
 	if len(result.Spans) != 0 {
 		t.Errorf("Spans count = %d, want 0", len(result.Spans))
@@ -468,6 +470,7 @@ func TestSpans_ZeroLimit(t *testing.T) {
 	}
 	if result == nil {
 		t.Fatal("Spans(Limit:0) returned nil")
+		return
 	}
 	if len(result.Spans) != 0 {
 		t.Errorf("Spans count = %d, want 0", len(result.Spans))

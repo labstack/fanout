@@ -285,6 +285,7 @@ func TestPrunerStats(t *testing.T) {
 
 	if spanStats == nil {
 		t.Fatal("spans stats not found")
+		return // unreachable, but satisfies staticcheck nil analysis
 	}
 
 	if spanStats.PartitionCount != 1 {
