@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/labstack/fanout/internal/alert"
@@ -62,6 +63,9 @@ func (s *Server) alertRules(ctx context.Context, req *mcp.CallToolRequest, in Al
 
 	switch in.Action {
 	case "create":
+		if in.Name == "" {
+			return nil, AlertRulesOut{Message: "name is required"}, nil
+		}
 		if in.Expression == "" {
 			return nil, AlertRulesOut{Message: "expression is required"}, nil
 		}
@@ -87,7 +91,9 @@ func (s *Server) alertRules(ctx context.Context, req *mcp.CallToolRequest, in Al
 			return nil, AlertRulesOut{Message: fmt.Sprintf("create failed: %s", err)}, nil
 		}
 		// Compile into the engine immediately so it evaluates on the next tick.
-		_ = s.alerts.RecompileRule(created.ID, created.Expression)
+		if err := s.alerts.RecompileRule(created.ID, created.Expression); err != nil {
+			slog.Warn("alert: recompile after create", "rule", created.ID, "err", err)
+		}
 		return nil, AlertRulesOut{Rule: &created}, nil
 
 	case "list":
@@ -159,7 +165,9 @@ func (s *Server) alertRules(ctx context.Context, req *mcp.CallToolRequest, in Al
 		if err != nil {
 			return nil, AlertRulesOut{Message: fmt.Sprintf("update failed: %s", err)}, nil
 		}
-		_ = s.alerts.RecompileRule(updated.ID, updated.Expression)
+		if err := s.alerts.RecompileRule(updated.ID, updated.Expression); err != nil {
+			slog.Warn("alert: recompile after update", "rule", updated.ID, "err", err)
+		}
 		return nil, AlertRulesOut{Rule: &updated}, nil
 
 	case "delete":
@@ -185,7 +193,9 @@ func (s *Server) alertRules(ctx context.Context, req *mcp.CallToolRequest, in Al
 		if err != nil {
 			return nil, AlertRulesOut{Message: fmt.Sprintf("enable failed: %s", err)}, nil
 		}
-		_ = s.alerts.RecompileRule(updated.ID, updated.Expression)
+		if err := s.alerts.RecompileRule(updated.ID, updated.Expression); err != nil {
+			slog.Warn("alert: recompile after enable", "rule", updated.ID, "err", err)
+		}
 		return nil, AlertRulesOut{Rule: &updated}, nil
 
 	case "disable":
@@ -331,8 +341,8 @@ func (s *Server) alertsList(ctx context.Context, req *mcp.CallToolRequest, in Al
 
 	summary, err := store.AlertSummary()
 	if err != nil {
-		// Non-fatal: return alerts without summary.
-		return nil, AlertsOut{Alerts: alerts}, nil
+		slog.Warn("alert: summary query failed", "err", err)
+		return nil, AlertsOut{Alerts: alerts, Message: "summary unavailable"}, nil
 	}
 
 	return nil, AlertsOut{
@@ -370,7 +380,6 @@ func (s *Server) alertEnv(ctx context.Context, req *mcp.CallToolRequest, in Aler
 		{Name: "error_rate", Type: "float64", Description: "Fraction of spans with error status (0–1) over the last 5 minutes"},
 		{Name: "p50", Type: "float64", Description: "Median latency in milliseconds"},
 		{Name: "p95", Type: "float64", Description: "P95 latency in milliseconds"},
-		{Name: "p99", Type: "float64", Description: "P99 latency in milliseconds"},
 		{Name: "throughput", Type: "float64", Description: "Total span count over the last 5 minutes"},
 		{Name: "log_count", Type: "float64", Description: "Log entry count over the last 5 minutes"},
 		{Name: "z_score", Type: "float64", Description: "Max absolute anomaly z-score from the intelligence detector"},
@@ -379,7 +388,6 @@ func (s *Server) alertEnv(ctx context.Context, req *mcp.CallToolRequest, in Aler
 		{Name: "p95_delta", Type: "float64", Description: "Percent change in p95 vs the previous 5-minute window"},
 		{Name: "throughput_delta", Type: "float64", Description: "Percent change in throughput vs the previous 5-minute window"},
 		{Name: "service", Type: "string", Description: "Service name (string — use for logging/routing, not thresholds)"},
-		{Name: "namespace", Type: "string", Description: "Namespace (string)"},
 	}
 
 	examples := []string{

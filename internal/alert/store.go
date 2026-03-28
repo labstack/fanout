@@ -2,11 +2,15 @@ package alert
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 )
+
+// ErrNotFound is returned when a requested record does not exist.
+var ErrNotFound = errors.New("not found")
 
 // Store provides CRUD operations for alert rules and alert instances.
 type Store struct {
@@ -166,9 +170,13 @@ func (s *Store) UpdateRule(r Rule) (Rule, error) {
 
 // DeleteRule deletes a rule by ID (cascades to alerts).
 func (s *Store) DeleteRule(id string) error {
-	_, err := s.db.Exec(`DELETE FROM alert_rules WHERE id=?`, id)
+	res, err := s.db.Exec(`DELETE FROM alert_rules WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("store: delete rule: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("store: rule %q: %w", id, ErrNotFound)
 	}
 	return nil
 }
@@ -219,7 +227,7 @@ func (s *Store) GetAlert(ruleID, service string) (Alert, error) {
 		&lastDeliveryStatus, &lastDeliveryAt, &a.CreatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return Alert{}, fmt.Errorf("store: alert (%q, %q) not found", ruleID, service)
+		return Alert{}, fmt.Errorf("store: alert (%q, %q): %w", ruleID, service, ErrNotFound)
 	}
 	if err != nil {
 		return Alert{}, fmt.Errorf("store: get alert: %w", err)
@@ -296,6 +304,21 @@ func (s *Store) DeleteAlert(id string) error {
 	_, err := s.db.Exec(`DELETE FROM alerts WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("store: delete alert: %w", err)
+	}
+	return nil
+}
+
+// UpdateDeliveryStatus updates only the delivery status columns for a (rule_id, service) pair.
+// This is used by fireWebhookAsync to avoid overwriting alert state that may have changed
+// between when the goroutine was launched and when the webhook completed.
+func (s *Store) UpdateDeliveryStatus(ruleID, service, status, deliveredAt string) error {
+	_, err := s.db.Exec(`
+		UPDATE alerts SET last_delivery_status=?, last_delivery_at=?
+		WHERE rule_id=? AND service=?`,
+		status, deliveredAt, ruleID, service,
+	)
+	if err != nil {
+		return fmt.Errorf("store: update delivery status: %w", err)
 	}
 	return nil
 }

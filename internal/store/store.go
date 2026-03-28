@@ -15,9 +15,11 @@ type SQLite struct {
 // NewSQLite opens (or creates) an SQLite database at dbPath and runs
 // schema migrations. Use ":memory:" for an in-memory database.
 func NewSQLite(dbPath string) (*SQLite, error) {
-	dsn := dbPath
-	if dbPath != ":memory:" {
-		dsn = dbPath + "?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)"
+	var dsn string
+	if dbPath == ":memory:" {
+		dsn = "file::memory:?_pragma=foreign_keys(1)"
+	} else {
+		dsn = dbPath + "?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
 	}
 
 	db, err := sql.Open("sqlite", dsn)
@@ -40,7 +42,6 @@ func (s *SQLite) Close() error {
 
 func (s *SQLite) migrate() error {
 	stmts := []string{
-		`PRAGMA foreign_keys = ON`,
 		`CREATE TABLE IF NOT EXISTS alert_rules (
 			id                   TEXT PRIMARY KEY,
 			name                 TEXT NOT NULL,

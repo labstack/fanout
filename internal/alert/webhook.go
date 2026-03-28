@@ -61,11 +61,10 @@ func FireWebhook(rule Rule, ctx ActionContext) (string, error) {
 	if rule.WebhookHeaders != "" {
 		var custom map[string]string
 		if err := json.Unmarshal([]byte(rule.WebhookHeaders), &custom); err != nil {
-			slog.Warn("alert: invalid webhook_headers JSON", "rule", rule.ID, "err", err)
-		} else {
-			for k, v := range custom {
-				headers[k] = v
-			}
+			return "failed", fmt.Errorf("webhook: invalid headers JSON: %w", err)
+		}
+		for k, v := range custom {
+			headers[k] = v
 		}
 	}
 

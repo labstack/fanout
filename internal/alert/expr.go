@@ -3,6 +3,7 @@ package alert
 import (
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 
 	"github.com/expr-lang/expr"
 	"github.com/expr-lang/expr/vm"
@@ -39,7 +40,7 @@ func EvalExpression(prog *vm.Program, env AlertEnv) (bool, error) {
 func SafeEval(prog *vm.Program, env AlertEnv) (result bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			slog.Error("alert: expression eval panic", "panic", r)
+			slog.Error("alert: expression eval panic", "panic", r, "stack", string(debug.Stack()))
 			err = fmt.Errorf("expression eval panicked: %v", r)
 		}
 	}()

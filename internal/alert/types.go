@@ -28,7 +28,7 @@ type Alert struct {
 	RuleID             string  `json:"rule_id"`
 	Service            string  `json:"service"`
 	State              string  `json:"state"`
-	Value              float64 `json:"value,omitempty"`
+	Value              float64 `json:"value,omitempty"` // Primary metric snapshot (error_rate) at time of evaluation
 	FiredAt            string  `json:"fired_at,omitempty"`
 	ResolvedAt         string  `json:"resolved_at,omitempty"`
 	RepeatedAt         string  `json:"repeated_at,omitempty"`
@@ -43,7 +43,6 @@ type AlertEnv struct {
 	ErrorRate       float64 `expr:"error_rate"`
 	P50             float64 `expr:"p50"`
 	P95             float64 `expr:"p95"`
-	P99             float64 `expr:"p99"`
 	Throughput      float64 `expr:"throughput"`
 	LogCount        float64 `expr:"log_count"`
 	ZScore          float64 `expr:"z_score"`
@@ -52,7 +51,6 @@ type AlertEnv struct {
 	P95Delta        float64 `expr:"p95_delta"`
 	ThroughputDelta float64 `expr:"throughput_delta"`
 	Service         string  `expr:"service"`
-	Namespace       string  `expr:"namespace"`
 }
 
 // AlertSummary aggregates alert state counts.

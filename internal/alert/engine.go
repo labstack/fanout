@@ -2,10 +2,11 @@ package alert
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"runtime/debug"
 	"sort"
-	"strings"
+	"sync"
 	"time"
 
 	"github.com/expr-lang/expr/vm"
@@ -21,6 +22,7 @@ type Engine struct {
 	store       *Store
 	duck        *query.Duck            // may be nil in tests
 	detector    *intelligence.Detector // may be nil in tests
+	mu          sync.RWMutex
 	programs    map[string]*vm.Program // rule ID → compiled program
 	interval    time.Duration
 	histDays    int
@@ -54,12 +56,16 @@ func (e *Engine) RecompileRule(ruleID, expression string) error {
 	if err != nil {
 		return err
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	e.programs[ruleID] = prog
 	return nil
 }
 
 // RemoveRule removes a compiled program so it is not evaluated on future ticks.
 func (e *Engine) RemoveRule(ruleID string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	delete(e.programs, ruleID)
 }
 
@@ -85,13 +91,20 @@ func (e *Engine) Run(ctx context.Context) {
 // BuildEnvForService returns the AlertEnv for a single service (for MCP test action).
 func (e *Engine) BuildEnvForService(ctx context.Context, service string) (AlertEnv, bool) {
 	envs := e.buildEnvs(ctx)
+	if envs == nil {
+		return AlertEnv{}, false
+	}
 	env, ok := envs[service]
 	return env, ok
 }
 
 // BuildAllEnvs returns all current AlertEnvs (for MCP alert_env tool).
 func (e *Engine) BuildAllEnvs(ctx context.Context) map[string]AlertEnv {
-	return e.buildEnvs(ctx)
+	envs := e.buildEnvs(ctx)
+	if envs == nil {
+		return map[string]AlertEnv{}
+	}
+	return envs
 }
 
 // ---- internal ----
@@ -118,9 +131,14 @@ func (e *Engine) evaluateOnce(ctx context.Context) {
 	e.compileRules(rules)
 
 	envs := e.buildEnvs(ctx)
+	if envs == nil {
+		return // DuckDB error — skip evaluation entirely, don't false-fire
+	}
 
 	for _, rule := range rules {
+		e.mu.RLock()
 		prog, ok := e.programs[rule.ID]
+		e.mu.RUnlock()
 		if !ok {
 			// Compilation already logged the error; skip.
 			continue
@@ -141,6 +159,8 @@ func (e *Engine) evaluateOnce(ctx context.Context) {
 
 // compileRules compiles any rules that have not yet been compiled.
 func (e *Engine) compileRules(rules []Rule) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	for _, r := range rules {
 		if _, ok := e.programs[r.ID]; ok {
 			continue
@@ -179,7 +199,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 	nowStr := now.Format(time.RFC3339)
 
 	existing, err := e.store.GetAlert(rule.ID, svc)
-	noAlert := err != nil && strings.Contains(err.Error(), "not found")
+	noAlert := errors.Is(err, ErrNotFound)
 	if err != nil && !noAlert {
 		slog.Error("alert: get alert", "rule", rule.ID, "service", svc, "err", err)
 		return
@@ -223,8 +243,8 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 		// Check whether the for-duration has elapsed.
 		createdAt, parseErr := time.Parse(time.RFC3339, existing.CreatedAt)
 		if parseErr != nil {
-			// Fallback: treat as elapsed.
-			createdAt = now.Add(-time.Duration(rule.ForSeconds+1) * time.Second)
+			slog.Error("alert: invalid created_at, skipping", "rule", rule.ID, "service", svc, "created_at", existing.CreatedAt, "err", parseErr)
+			return
 		}
 		forDuration := time.Duration(rule.ForSeconds) * time.Second
 		if now.Sub(createdAt) >= forDuration {
@@ -262,6 +282,9 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 				ref = existing.FiredAt
 			}
 			refTime, parseErr := time.Parse(time.RFC3339, ref)
+			if parseErr != nil {
+				slog.Error("alert: invalid ref timestamp for repeat", "rule", rule.ID, "service", svc, "ref", ref, "err", parseErr)
+			}
 			repeatInterval := time.Duration(rule.RepeatIntervalS) * time.Second
 			if parseErr == nil && now.Sub(refTime) >= repeatInterval {
 				existing.RepeatedAt = nowStr
@@ -323,6 +346,11 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 // fireWebhookAsync fires the webhook for an alert in a goroutine and updates delivery status.
 func (e *Engine) fireWebhookAsync(rule Rule, alert Alert, env AlertEnv, event string) {
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("alert: webhook goroutine panic", "rule", rule.ID, "service", alert.Service, "panic", r, "stack", string(debug.Stack()))
+			}
+		}()
 		ctx := ActionContext{
 			Rule:  rule,
 			Alert: alert,
@@ -335,10 +363,8 @@ func (e *Engine) fireWebhookAsync(rule Rule, alert Alert, env AlertEnv, event st
 			slog.Warn("alert: webhook delivery", "rule", rule.ID, "service", alert.Service, "event", event, "err", err)
 		}
 		now := time.Now().Format(time.RFC3339)
-		alert.LastDeliveryStatus = status
-		alert.LastDeliveryAt = now
-		if _, upsertErr := e.store.UpsertAlert(alert); upsertErr != nil {
-			slog.Error("alert: update delivery status", "rule", rule.ID, "service", alert.Service, "err", upsertErr)
+		if updateErr := e.store.UpdateDeliveryStatus(alert.RuleID, alert.Service, status, now); updateErr != nil {
+			slog.Error("alert: update delivery status", "rule", rule.ID, "service", alert.Service, "err", updateErr)
 		}
 	}()
 }
@@ -357,7 +383,7 @@ func (e *Engine) buildEnvs(ctx context.Context) map[string]AlertEnv {
 WITH current AS (
     SELECT service,
            avg(error_rate) as error_rate,
-           avg(p50_ms) as p50, avg(p95_ms) as p95, avg(p95_ms) as p99,
+           avg(p50_ms) as p50, avg(p95_ms) as p95,
            sum(spans) as throughput, sum(log_count) as log_count
     FROM service_rollup
     WHERE bucket >= (SELECT max(bucket) FROM service_rollup) - INTERVAL '5 minutes'
@@ -371,7 +397,7 @@ previous AS (
       AND bucket < (SELECT max(bucket) FROM service_rollup) - INTERVAL '5 minutes'
     GROUP BY service
 )
-SELECT c.service, c.error_rate, c.p50, c.p95, c.p99, c.throughput, c.log_count,
+SELECT c.service, c.error_rate, c.p50, c.p95, c.throughput, c.log_count,
     ((c.error_rate - p.error_rate) / NULLIF(p.error_rate, 0)) * 100 as error_rate_delta,
     ((c.p95 - p.p95) / NULLIF(p.p95, 0)) * 100 as p95_delta,
     ((c.throughput - p.throughput) / NULLIF(p.throughput, 0)) * 100 as throughput_delta
@@ -379,8 +405,8 @@ FROM current c LEFT JOIN previous p ON c.service = p.service`
 
 	resp := e.duck.ExecuteSQL(ctx, query.SQLRequest{Query: envSQL})
 	if resp.Error != "" {
-		slog.Warn("alert: buildEnvs query error", "err", resp.Error)
-		return map[string]AlertEnv{}
+		slog.Error("alert: buildEnvs query failed", "err", resp.Error)
+		return nil
 	}
 
 	// Collect health score and z-scores from the detector snapshot.
@@ -409,7 +435,6 @@ FROM current c LEFT JOIN previous p ON c.service = p.service`
 			ErrorRate:       toFloat(row["error_rate"]),
 			P50:             toFloat(row["p50"]),
 			P95:             toFloat(row["p95"]),
-			P99:             toFloat(row["p99"]),
 			Throughput:      toFloat(row["throughput"]),
 			LogCount:        toFloat(row["log_count"]),
 			ErrorRateDelta:  toFloat(row["error_rate_delta"]),
