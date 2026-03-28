@@ -3,7 +3,10 @@ package ingest
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"regexp"
+	"runtime/debug"
 	"unicode/utf8"
 )
 
@@ -12,7 +15,7 @@ var (
 	reTimestamp = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?`)
 	reIPv4      = regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?\b`)
 	reEmail     = regexp.MustCompile(`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
-	reHexLong   = regexp.MustCompile(`\b0x[0-9a-fA-F]{4,}\b|\b[0-9a-fA-F]{8,}\b`)
+	reHexLong   = regexp.MustCompile(`\b0x[0-9a-fA-F]{4,}\b|\b[0-9a-fA-F]*[a-fA-F][0-9a-fA-F]*\b`)
 	rePath      = regexp.MustCompile(`(/[a-zA-Z0-9._-]+){2,}(\?[^\s"]*)?`)
 	reQuoted    = regexp.MustCompile(`"[^"]{1,200}"`)
 	reNumber    = regexp.MustCompile(`\b\d+(\.\d+)?\b`)
@@ -46,6 +49,18 @@ func truncateUTF8(s string, maxBytes int) string {
 	return s[:b]
 }
 
+// safeNormalizeTemplate wraps normalizeTemplate with panic recovery so a
+// single bad log line cannot crash the entire ingest pipeline.
+func safeNormalizeTemplate(body string) (tmpl string) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("normalizeTemplate panic", "panic", fmt.Sprint(r), "stack", string(debug.Stack()))
+			tmpl = ""
+		}
+	}()
+	return normalizeTemplate(body)
+}
+
 // normalizeTemplate is the entry point. It truncates to 500 bytes (UTF-8
 // safe), detects JSON by leading '{', and dispatches accordingly.
 func normalizeTemplate(body string) string {
@@ -68,6 +83,7 @@ func normalizeJSON(body string) string {
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	if err := enc.Encode(normalized); err != nil {
+		slog.Warn("normalizeJSON: re-marshal failed after successful unmarshal", "err", err)
 		return normalizeText(body)
 	}
 	// json.Encoder.Encode appends a trailing newline; trim it.

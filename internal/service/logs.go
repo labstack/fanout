@@ -8,29 +8,28 @@ import (
 	"strings"
 )
 
-// validLogGroupByFields is the allowlist for log group_by values.
-var validLogGroupByFields = map[string]bool{
-	"service":  true,
-	"severity": true,
-	"template": true,
-}
-
-// logGroupByColumnMap maps MCP-facing group-by names to SQL column names.
-var logGroupByColumnMap = map[string]string{
+// logGroupByColumns maps MCP-facing group-by names to SQL column names.
+// Single source of truth — validLogGroupByFields is derived from it.
+var logGroupByColumns = map[string]string{
 	"service":  "service",
 	"severity": "severity",
 	"template": "body_template",
 }
 
+// validLogGroupByFields is the allowlist for log group_by values.
+var validLogGroupByFields = func() map[string]bool {
+	m := make(map[string]bool, len(logGroupByColumns))
+	for k := range logGroupByColumns {
+		m[k] = true
+	}
+	return m
+}()
+
 // mapGroupByCols converts MCP group-by field names to SQL column names.
 func mapGroupByCols(fields []string) []string {
 	cols := make([]string, len(fields))
 	for i, f := range fields {
-		if col, ok := logGroupByColumnMap[f]; ok {
-			cols[i] = col
-		} else {
-			cols[i] = f
-		}
+		cols[i] = logGroupByColumns[f]
 	}
 	return cols
 }

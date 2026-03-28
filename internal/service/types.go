@@ -405,7 +405,7 @@ type LogParams struct {
 	TraceID   string
 	Service   string
 	Attrs     map[string]string
-	GroupBy   []string // "service", "severity"
+	GroupBy   []string // "service", "severity", "template"
 	OrderBy   string
 	Window    int // minutes
 	Namespace string

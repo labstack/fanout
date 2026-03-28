@@ -135,6 +135,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 			scopeName, scopeVer := scopeInfo(sl.Scope)
 			for _, lr := range sl.LogRecords {
 				body := bodyString(lr.Body)
+				tmpl := safeNormalizeTemplate(body)
 				row := lake.LogRow{
 					TenantID:          cfg.TenantID.String(),
 					Namespace:         namespace,
@@ -143,7 +144,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 					Severity:          normalizeSeverity(lr.SeverityText, int32(lr.SeverityNumber)),
 					SeverityNumber:    int32(lr.SeverityNumber),
 					Body:              body,
-					BodyTemplate:      normalizeTemplate(body),
+					BodyTemplate:      tmpl,
 					ServiceName:       svc,
 					TraceID:           hexOrEmpty(lr.TraceId),
 					SpanID:            hexOrEmpty(lr.SpanId),

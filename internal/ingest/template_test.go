@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -95,6 +96,12 @@ func TestNormalizeText(t *testing.T) {
 			want:  "server started successfully",
 		},
 		{
+			// Version strings like 1.2.3.4 match the IPv4 pattern — known trade-off.
+			name:  "version number matches as IP",
+			input: "version 1.2.3.4 released",
+			want:  "version <ip> released",
+		},
+		{
 			// UUID must be matched before hex (UUID contains hex chars), and
 			// hex before number (hex contains digit runs).
 			name:  "UUID-before-hex-before-number ordering",
@@ -164,6 +171,16 @@ func TestNormalizeJSON(t *testing.T) {
 			input: `{"status":"ok","env":"production"}`,
 			want:  `{"env":"production","status":"ok"}`,
 		},
+		{
+			name:  "empty object",
+			input: `{}`,
+			want:  `{}`,
+		},
+		{
+			name:  "integer value normalized",
+			input: `{"count":42}`,
+			want:  `{"count":"<num>"}`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -217,6 +234,18 @@ func TestTruncateUTF8(t *testing.T) {
 			maxBytes: 10,
 			want:     "",
 		},
+		{
+			name:     "maxBytes zero",
+			input:    "hello",
+			maxBytes: 0,
+			want:     "",
+		},
+		{
+			name:     "all multibyte no rune fits",
+			input:    "世界",
+			maxBytes: 2, // 世 is 3 bytes, can't fit
+			want:     "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -253,6 +282,16 @@ func TestNormalizeTemplate(t *testing.T) {
 			name:  "empty body",
 			input: "",
 			want:  "",
+		},
+		{
+			name:  "truncation fires before normalization",
+			input: strings.Repeat("x", 510) + " 12345",
+			want:  strings.Repeat("x", 500), // truncated to 500, number never seen
+		},
+		{
+			name:  "JSON array treated as text",
+			input: `[{"ip":"10.0.0.1"}]`,
+			want:  `[{<str>:<str>}]`,
 		},
 	}
 
