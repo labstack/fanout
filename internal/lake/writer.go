@@ -73,6 +73,7 @@ type LogRow struct {
 	ScopeName         string `parquet:"name=scope_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	ScopeVersion      string `parquet:"name=scope_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 	IngestedAt        int64  `parquet:"name=ingested_unix_nano, type=INT64"`
+	BodyTemplate      string `parquet:"name=body_template, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
 }
 
 type MetricRow struct {
