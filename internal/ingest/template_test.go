@@ -22,12 +22,12 @@ func TestNormalizeText(t *testing.T) {
 		{
 			name:  "timestamp with offset",
 			input: "at 2024-01-15T13:45:00.123+05:30 the event fired",
-			want:  "at <ts> the event fired",
+			want:  "at <time> the event fired",
 		},
 		{
 			name:  "timestamp with Z",
 			input: "logged at 2023-06-01T00:00:00Z",
-			want:  "logged at <ts>",
+			want:  "logged at <time>",
 		},
 		{
 			name:  "IPv4",
@@ -82,7 +82,7 @@ func TestNormalizeText(t *testing.T) {
 		{
 			name:  "combined patterns",
 			input: "user 550e8400-e29b-41d4-a716-446655440000 from 10.0.0.1 at 2024-03-01T12:00:00Z",
-			want:  "user <uuid> from <ip> at <ts>",
+			want:  "user <uuid> from <ip> at <time>",
 		},
 		{
 			name:  "empty body",

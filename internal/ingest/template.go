@@ -22,7 +22,7 @@ var (
 // replacing variable content with typed placeholders.
 func normalizeText(body string) string {
 	body = reUUID.ReplaceAllString(body, "<uuid>")
-	body = reTimestamp.ReplaceAllString(body, "<ts>")
+	body = reTimestamp.ReplaceAllString(body, "<time>")
 	body = reIPv4.ReplaceAllString(body, "<ip>")
 	body = reEmail.ReplaceAllString(body, "<email>")
 	body = reHexLong.ReplaceAllString(body, "<hex>")
