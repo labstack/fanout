@@ -1,15 +1,6 @@
 import { useMemo } from "react";
-import echarts, { ReactECharts, cssVar } from "@/lib/echarts";
+import echarts, { ReactECharts, tooltipStyle, statusColor, cssVar, esc } from "@/lib/echarts";
 import type { TopologyData } from "@/lib/types";
-
-function statusColor(status: string): string {
-  switch (status.toLowerCase()) {
-    case "healthy": return "#22c55e";
-    case "degraded": return "#f59e0b";
-    case "unhealthy": return "#ef4444";
-    default: return "#6b7280";
-  }
-}
 
 export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction?: (prompt: string) => void }) {
   const onEvents = useMemo(() => ({
@@ -26,17 +17,15 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
     return {
       animation: false,
       tooltip: {
-        backgroundColor: cssVar("--popover"),
-        borderColor: cssVar("--border"),
-        textStyle: { color: cssVar("--popover-foreground"), fontSize: 12 },
+        ...tooltipStyle(),
         formatter: (params: any) => {
           if (params.dataType === "node") {
             const d = params.data;
-            return `<b>${d.name}</b><br/>Status: ${d.status}<br/>Throughput: ${d.rpm} rpm<br/>P95: ${d.p95}ms<br/>Errors: ${d.errors}%`;
+            return `<b>${esc(d.name)}</b><br/>Status: ${esc(d.status)}<br/>Throughput: ${esc(d.rpm)} rpm<br/>P95: ${esc(d.p95)}ms<br/>Errors: ${esc(d.errors)}%`;
           }
           if (params.dataType === "edge") {
             const d = params.data;
-            return `<b>${d.source} → ${d.target}</b><br/>Volume: ${d.rpm} rpm<br/>Error Rate: ${d.errorRate}%`;
+            return `<b>${esc(d.source)} → ${esc(d.target)}</b><br/>Volume: ${esc(d.rpm)} rpm<br/>Error Rate: ${esc(d.errorRate)}%`;
           }
           return "";
         },
@@ -59,30 +48,33 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
         },
         edgeSymbol: ["none", "arrow"],
         edgeSymbolSize: 8,
-        data: data.nodes.map((n) => ({
-          name: n.id,
-          status: n.status,
-          rpm: n.rpm,
-          p95: n.p95,
-          errors: n.errors,
-          itemStyle: {
-            color: statusColor(n.status),
-            borderColor: statusColor(n.status),
-            borderWidth: 2.5,
-            shadowBlur: n.status !== "healthy" ? 10 : 0,
-            shadowColor: statusColor(n.status),
-          },
-          label: {
-            show: true,
-            position: "bottom",
-            distance: 8,
-            formatter: `{name|${n.id}}\n{rpm|${n.rpm >= 1000 ? (n.rpm / 1000).toFixed(1) + "k" : n.rpm} rpm}`,
-            rich: {
-              name: { fontSize: 11, color: cssVar("--foreground"), fontWeight: 500, align: "center" },
-              rpm: { fontSize: 9, color: cssVar("--muted-foreground"), align: "center" },
+        data: data.nodes.map((n) => {
+          const color = statusColor(n.status);
+          return {
+            name: n.id,
+            status: n.status,
+            rpm: n.rpm,
+            p95: n.p95,
+            errors: n.errors,
+            itemStyle: {
+              color,
+              borderColor: color,
+              borderWidth: 2.5,
+              shadowBlur: n.status !== "healthy" ? 10 : 0,
+              shadowColor: color,
             },
-          },
-        })),
+            label: {
+              show: true,
+              position: "bottom",
+              distance: 8,
+              formatter: `{name|${n.id}}\n{rpm|${n.rpm >= 1000 ? (n.rpm / 1000).toFixed(1) + "k" : n.rpm} rpm}`,
+              rich: {
+                name: { fontSize: 11, color: cssVar("--foreground"), fontWeight: 500, align: "center" },
+                rpm: { fontSize: 9, color: cssVar("--muted-foreground"), align: "center" },
+              },
+            },
+          };
+        }),
         edges: data.edges.map((e) => ({
           source: e.source,
           target: e.target,

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import echarts, { ReactECharts, cssVar } from "@/lib/echarts";
+import echarts, { ReactECharts, tooltipStyle, axisLine, axisLabel, splitLine, cssVar } from "@/lib/echarts";
 import type { TimeseriesBlockData } from "@/lib/types";
 
 const DEFAULT_COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff7f50", "#00bcd4"];
@@ -8,12 +8,7 @@ export function TimeseriesBlock({ data }: { data: TimeseriesBlockData }) {
   const option = useMemo(() => ({
     animation: false,
     grid: { left: 56, right: 16, top: 32, bottom: 32, containLabel: false },
-    tooltip: {
-      trigger: "axis",
-      backgroundColor: cssVar("--popover"),
-      borderColor: cssVar("--border"),
-      textStyle: { color: cssVar("--popover-foreground"), fontSize: 12 },
-    },
+    tooltip: { trigger: "axis", ...tooltipStyle() },
     legend: {
       data: data.series.map((s) => s.label),
       textStyle: { color: cssVar("--foreground"), fontSize: 12 },
@@ -22,16 +17,16 @@ export function TimeseriesBlock({ data }: { data: TimeseriesBlockData }) {
     xAxis: {
       type: "category" as const,
       data: data.labels,
-      axisLine: { lineStyle: { color: cssVar("--border") } },
-      axisLabel: { color: cssVar("--foreground"), fontSize: 12 },
+      axisLine: axisLine(),
+      axisLabel: axisLabel(),
     },
     yAxis: {
       type: "value" as const,
       name: data.yLabel,
       nameTextStyle: { color: cssVar("--muted-foreground"), fontSize: 12 },
-      axisLine: { lineStyle: { color: cssVar("--border") } },
-      axisLabel: { color: cssVar("--foreground"), fontSize: 12 },
-      splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" as const } },
+      axisLine: axisLine(),
+      axisLabel: axisLabel(),
+      splitLine: splitLine(),
     },
     series: data.series.map((s, i) => ({
       name: s.label,

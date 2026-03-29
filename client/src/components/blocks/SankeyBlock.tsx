@@ -1,14 +1,6 @@
 import { useMemo } from "react";
-import echarts, { ReactECharts, cssVar } from "@/lib/echarts";
+import echarts, { ReactECharts, tooltipStyle, statusColor, cssVar } from "@/lib/echarts";
 import type { SankeyData } from "@/lib/types";
-
-function statusColor(status?: string): string {
-  switch (status?.toLowerCase()) {
-    case "degraded": return "#f59e0b";
-    case "unhealthy": return "#ef4444";
-    default: return "#22c55e";
-  }
-}
 
 export function SankeyBlock({ data }: { data: SankeyData }) {
   const option = useMemo(() => {
@@ -16,12 +8,7 @@ export function SankeyBlock({ data }: { data: SankeyData }) {
 
     return {
       animation: false,
-      tooltip: {
-        trigger: "item",
-        backgroundColor: cssVar("--popover"),
-        borderColor: cssVar("--border"),
-        textStyle: { color: cssVar("--popover-foreground"), fontSize: 12 },
-      },
+      tooltip: { trigger: "item", ...tooltipStyle() },
       series: [{
         type: "sankey",
         layout: "none",
@@ -31,7 +18,7 @@ export function SankeyBlock({ data }: { data: SankeyData }) {
         nodeGap: 14,
         data: data.nodes.map((n) => ({
           name: n.id,
-          itemStyle: { color: statusColor(n.status) },
+          itemStyle: { color: statusColor(n.status ?? "healthy") },
           label: {
             formatter: `{name|${n.label}}\n{rpm|${n.rpm} rpm}`,
             rich: {

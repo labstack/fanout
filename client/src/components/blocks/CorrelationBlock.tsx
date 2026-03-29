@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import echarts, { ReactECharts, cssVar } from "@/lib/echarts";
+import echarts, { ReactECharts, tooltipStyle, axisLine, splitLine, cssVar } from "@/lib/echarts";
 import type { CorrelationData } from "@/lib/types";
 
 const PANEL_H = 80;
@@ -23,7 +23,7 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
         data: data.times,
         gridIndex: i,
         show: i === data.panels.length - 1,
-        axisLine: { lineStyle: { color: cssVar("--border") } },
+        axisLine: axisLine(),
         axisLabel: { color: cssVar("--muted-foreground"), fontSize: 9, interval: Math.max(0, Math.ceil(data.times.length / 10) - 1) },
       });
 
@@ -35,12 +35,11 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
         nameTextStyle: { color: cssVar("--foreground"), fontSize: 9 },
         nameGap: 40,
         max: maxVal,
-        axisLine: { lineStyle: { color: cssVar("--border") } },
+        axisLine: axisLine(),
         axisLabel: { color: cssVar("--muted-foreground"), fontSize: 8 },
-        splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" } },
+        splitLine: splitLine(),
       });
 
-      // Area + line series
       series.push({
         type: "line",
         data: panel.values,
@@ -49,13 +48,21 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
         symbol: "none",
         lineStyle: { width: 1.5, color: panel.color },
         areaStyle: { color: panel.color, opacity: 0.1 },
-        markLine: panel.baseline !== undefined ? {
-          silent: true,
-          symbol: "none",
-          lineStyle: { color: panel.color, type: "dashed", width: 0.5, opacity: 0.4 },
-          data: [{ yAxis: panel.baseline }],
-          label: { show: false },
-        } : undefined,
+        markLine: (() => {
+          const lines: any[] = [];
+          // Baseline
+          if (panel.baseline !== undefined) {
+            lines.push({ yAxis: panel.baseline, lineStyle: { color: panel.color, type: "dashed", width: 0.5, opacity: 0.4 }, label: { show: false } });
+          }
+          // Vertical marker lines at event positions
+          if (panel.markers?.length) {
+            for (const m of panel.markers) {
+              const color = m.severity === "critical" ? "#ef4444" : "#f59e0b";
+              lines.push({ xAxis: m.t, lineStyle: { color, type: "dashed", width: 0.75, opacity: 0.5 }, label: { show: true, formatter: m.label.length > 12 ? m.label.slice(0, 11) + "\u2026" : m.label, fontSize: 7, color, position: "start" } });
+            }
+          }
+          return lines.length > 0 ? { silent: true, symbol: "none", data: lines } : undefined;
+        })(),
         markPoint: panel.markers?.length ? {
           symbol: "circle",
           symbolSize: 7,
@@ -74,12 +81,7 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
       xAxis: xAxes,
       yAxis: yAxes,
       series,
-      tooltip: {
-        trigger: "axis",
-        backgroundColor: cssVar("--popover"),
-        borderColor: cssVar("--border"),
-        textStyle: { color: cssVar("--popover-foreground"), fontSize: 12 },
-      },
+      tooltip: { trigger: "axis", ...tooltipStyle() },
     };
   }, [data]);
 

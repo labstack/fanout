@@ -1,12 +1,12 @@
 import { useMemo } from "react";
-import echarts, { ReactECharts, cssVar } from "@/lib/echarts";
+import echarts, { ReactECharts, tooltipStyle, axisLine, axisLabel, esc } from "@/lib/echarts";
 import type { HeatmapBlockData } from "@/lib/types";
 
 export function HeatmapBlock({ data }: { data: HeatmapBlockData }) {
   const option = useMemo(() => {
-    // Flatten 2D values to [timeIdx, bucketIdx, value] triples
     const flatData: [number, number, number][] = [];
-    let vMin = Infinity, vMax = -Infinity;
+    let vMin = Infinity;
+    let vMax = -Infinity;
     for (let ti = 0; ti < data.values.length; ti++) {
       for (let bi = 0; bi < data.values[ti].length; bi++) {
         const v = data.values[ti][bi];
@@ -22,25 +22,23 @@ export function HeatmapBlock({ data }: { data: HeatmapBlockData }) {
       animation: false,
       grid: { left: 60, right: 16, top: 8, bottom: 40 },
       tooltip: {
-        backgroundColor: cssVar("--popover"),
-        borderColor: cssVar("--border"),
-        textStyle: { color: cssVar("--popover-foreground"), fontSize: 12 },
+        ...tooltipStyle(),
         formatter: (params: any) => {
           const [ti, bi, v] = params.data;
-          return `${data.times[ti]}<br/>${data.buckets[bi]}: <b>${v}</b>`;
+          return `${esc(data.times[ti])}<br/>${esc(data.buckets[bi])}: <b>${esc(v)}</b>`;
         },
       },
       xAxis: {
         type: "category" as const,
         data: data.times,
-        axisLine: { lineStyle: { color: cssVar("--border") } },
-        axisLabel: { color: cssVar("--foreground"), fontSize: 10, interval: Math.max(0, Math.ceil(data.times.length / 10) - 1) },
+        axisLine: axisLine(),
+        axisLabel: { ...axisLabel(10), interval: Math.max(0, Math.ceil(data.times.length / 10) - 1) },
       },
       yAxis: {
         type: "category" as const,
         data: data.buckets.map(String),
-        axisLine: { lineStyle: { color: cssVar("--border") } },
-        axisLabel: { color: cssVar("--foreground"), fontSize: 10 },
+        axisLine: axisLine(),
+        axisLabel: axisLabel(10),
       },
       visualMap: {
         min: vMin,
