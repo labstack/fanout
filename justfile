@@ -25,10 +25,6 @@ up:
 down:
     process-compose down
 
-# Run binary directly
-run:
-    ./{{bin}}
-
 # ── Build ────────────────────────────────────────────────────────────────────
 
 # Build production binary (client + server)
