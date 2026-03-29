@@ -1,4 +1,5 @@
 import * as echarts from "echarts/core";
+import LinearGradient from "zrender/lib/graphic/LinearGradient.js";
 import {
   LineChart,
   BarChart,
@@ -33,6 +34,7 @@ echarts.use([
 ]);
 
 export default echarts;
+export { LinearGradient };
 export const ReactECharts =
   (ReactEChartsCore as any).default || ReactEChartsCore;
 

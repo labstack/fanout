@@ -61,7 +61,8 @@ export function FlameGraphBlock({ data }: { data: FlameGraphData }) {
   }
 
   return (
-    <div ref={containerRef} className="relative">
+    <div ref={containerRef} className="relative block-card">
+      <h3 className="block-title">Flame Graph</h3>
       <svg
         width={width}
         height={svgHeight}

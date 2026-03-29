@@ -45,7 +45,7 @@ export function DepMatrixBlock({ data }: { data: DepMatrixData }) {
         <span>Callee (columns)</span>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto block-card-flush">
         <table className="w-auto text-xs border-collapse">
           <thead>
             <tr className="bg-muted/50">

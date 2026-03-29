@@ -96,7 +96,8 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
   }
 
   return (
-    <div>
+    <div className="block-card">
+      <h3 className="block-title">Correlation</h3>
       <ReactECharts echarts={echarts} option={option} style={{ height: totalH }} opts={{ renderer: "svg" }} />
     </div>
   );

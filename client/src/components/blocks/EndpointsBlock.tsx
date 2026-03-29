@@ -52,7 +52,7 @@ export function EndpointsBlock({ data }: { data: EndpointsData }) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
+    <div className="overflow-x-auto block-card-flush">
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-border bg-muted/50">

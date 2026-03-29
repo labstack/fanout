@@ -55,8 +55,8 @@ export function HeatmapBlock({ data }: { data: HeatmapBlockData }) {
   }, [data]);
 
   return (
-    <div>
-      <h3 className="mb-2 text-sm font-semibold text-foreground">{data.title}</h3>
+    <div className="block-card">
+      <h3 className="block-title">{data.title}</h3>
       <ReactECharts echarts={echarts} option={option} style={{ height: Math.max(200, data.buckets.length * 24 + 48) }} opts={{ renderer: "svg" }} />
     </div>
   );

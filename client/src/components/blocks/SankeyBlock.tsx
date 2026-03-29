@@ -47,7 +47,8 @@ export function SankeyBlock({ data }: { data: SankeyData }) {
   const height = Math.max(300, data.nodes.length * 40);
 
   return (
-    <div>
+    <div className="block-card">
+      <h3 className="block-title">Flow</h3>
       <ReactECharts echarts={echarts} option={option} style={{ height }} opts={{ renderer: "svg" }} />
     </div>
   );

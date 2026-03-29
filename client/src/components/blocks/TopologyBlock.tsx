@@ -101,7 +101,8 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
   const height = Math.max(450, Math.min(650, data.nodes.length * 80));
 
   return (
-    <div>
+    <div className="block-card">
+      <h3 className="block-title">Topology</h3>
       <ReactECharts
         echarts={echarts}
         option={option}

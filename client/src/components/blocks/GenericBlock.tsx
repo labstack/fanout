@@ -3,10 +3,8 @@ export function GenericBlock({ type, data }: { type: string; data: unknown }) {
     data !== null && typeof data === "object" && !Array.isArray(data);
 
   return (
-    <div className="rounded-lg border border-border bg-muted/50 p-4">
-      <span className="mb-2 inline-block rounded bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
-        {type}
-      </span>
+    <div className="block-card">
+      <span className="block-title inline-block">{type}</span>
       {isObject ? (
         <dl className="mt-2 space-y-1 text-sm">
           {Object.entries(data as Record<string, unknown>).map(
