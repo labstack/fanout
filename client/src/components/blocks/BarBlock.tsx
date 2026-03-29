@@ -1,91 +1,55 @@
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-  Cell,
-} from "recharts";
+import { useMemo } from "react";
+import echarts, { ReactECharts, cssVar } from "@/lib/echarts";
 import type { BarBlockData } from "@/lib/types";
 
 const DEFAULT_COLOR = "#8884d8";
 
 export function BarBlock({ data }: { data: BarBlockData }) {
-  const chartData = data.bars.map((b) => ({
-    label: b.label,
-    value: b.value,
-  }));
+  const option = useMemo(() => {
+    const categories = data.bars.map((b) => b.label);
+    const values = data.bars.map((b) => ({
+      value: b.value,
+      itemStyle: b.color ? { color: b.color } : undefined,
+    }));
 
-  const hasIndividualColors = data.bars.some((b) => b.color);
+    const categoryAxis = {
+      type: "category" as const,
+      data: categories,
+      axisLine: { lineStyle: { color: cssVar("--border") } },
+      axisLabel: { color: cssVar("--foreground"), fontSize: 12 },
+    };
+    const valueAxis = {
+      type: "value" as const,
+      name: data.yLabel,
+      nameTextStyle: { color: cssVar("--muted-foreground"), fontSize: 12 },
+      axisLine: { lineStyle: { color: cssVar("--border") } },
+      axisLabel: { color: cssVar("--foreground"), fontSize: 12 },
+      splitLine: { lineStyle: { color: cssVar("--border"), type: "dashed" as const } },
+    };
+
+    return {
+      animation: false,
+      grid: { left: data.horizontal ? 110 : 56, right: 16, top: 16, bottom: 32, containLabel: false },
+      tooltip: {
+        trigger: "axis" as const,
+        backgroundColor: cssVar("--popover"),
+        borderColor: cssVar("--border"),
+        textStyle: { color: cssVar("--popover-foreground"), fontSize: 12 },
+      },
+      xAxis: data.horizontal ? valueAxis : categoryAxis,
+      yAxis: data.horizontal ? categoryAxis : valueAxis,
+      series: [{
+        type: "bar" as const,
+        data: values,
+        itemStyle: { color: DEFAULT_COLOR, borderRadius: data.horizontal ? [0, 4, 4, 0] : [4, 4, 0, 0] },
+      }],
+    };
+  }, [data]);
 
   return (
     <div>
-      <h3 className="mb-2 text-sm font-semibold text-foreground">
-        {data.title}
-      </h3>
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart
-          data={chartData}
-          layout={data.horizontal ? "vertical" : "horizontal"}
-        >
-          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-          {data.horizontal ? (
-            <>
-              <XAxis
-                type="number"
-                tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }}
-                stroke="hsl(var(--border))"
-              />
-              <YAxis
-                type="category"
-                dataKey="label"
-                tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }}
-                stroke="hsl(var(--border))"
-                width={100}
-              />
-            </>
-          ) : (
-            <>
-              <XAxis
-                dataKey="label"
-                tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }}
-                stroke="hsl(var(--border))"
-              />
-              <YAxis
-                tick={{ fill: "hsl(var(--foreground))", fontSize: 12 }}
-                stroke="hsl(var(--border))"
-                label={
-                  data.yLabel
-                    ? {
-                        value: data.yLabel,
-                        angle: -90,
-                        position: "insideLeft",
-                        fill: "hsl(var(--muted-foreground))",
-                        fontSize: 12,
-                      }
-                    : undefined
-                }
-              />
-            </>
-          )}
-          <Tooltip
-            contentStyle={{
-              backgroundColor: "hsl(var(--popover))",
-              border: "1px solid hsl(var(--border))",
-              borderRadius: "6px",
-              color: "hsl(var(--popover-foreground))",
-            }}
-          />
-          <Bar dataKey="value" fill={DEFAULT_COLOR} radius={[4, 4, 0, 0]}>
-            {hasIndividualColors &&
-              data.bars.map((b, i) => (
-                <Cell key={i} fill={b.color ?? DEFAULT_COLOR} />
-              ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
+      <h3 className="mb-2 text-sm font-semibold text-foreground">{data.title}</h3>
+      <ReactECharts echarts={echarts} option={option} style={{ height: 300 }} opts={{ renderer: "svg" }} />
     </div>
   );
 }
