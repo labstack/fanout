@@ -104,7 +104,7 @@ func isTimeLikeValues(results []map[string]any, col string) bool {
 		return false
 	}
 	// ISO timestamps: "2026-03-27T10:00:00" or "2026-03-27 10:00:00"
-	return len(s) >= 10 && (strings.Contains(s, "T") || (s[4] == '-' && s[7] == '-'))
+	return len(s) >= 10 && ((len(s) >= 11 && s[10] == 'T') || (s[4] == '-' && s[7] == '-'))
 }
 
 func isStringCol(results []map[string]any, col string) bool {

@@ -87,7 +87,7 @@ type SendFunc func(event ClientEvent) error
 
 // stepResult captures the outcome of a single LLM call.
 type stepResult struct {
-	done            bool    // true if response is complete (respond called or text-only)
+	done            bool // true if response is complete (respond called or text-only)
 	err             error
 	suggestedBlocks []Block // blocks suggested by tool handlers (for merging into respond)
 }
@@ -245,8 +245,8 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 			if resp.Text != "" {
 				blocks = append([]Block{MakeTextBlock(resp.Text)}, blocks...)
 			}
-			// Append tool-suggested blocks (already valid, built by Go code)
-			blocks = append(blocks, toolSuggestedBlocks...)
+			// Validate and append tool-suggested blocks
+			blocks = append(blocks, validateBlocks(toolSuggestedBlocks)...)
 		}
 
 		if err := send(ClientEvent{
@@ -388,7 +388,7 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	if len(gatherBlocks) > 0 {
 		respondSend = func(event ClientEvent) error {
 			if event.Type == CEDone {
-				event.Blocks = append(event.Blocks, gatherBlocks...)
+				event.Blocks = append(event.Blocks, validateBlocks(gatherBlocks)...)
 			}
 			return send(event)
 		}
