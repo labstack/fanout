@@ -132,7 +132,15 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawM
 		slog.Warn("MCP tool returned error", "tool", name, "text", text)
 		return "", nil, fmt.Errorf("tool %s: %s", name, text)
 	}
-	return extractMCPText(result), nil, nil
+	text := extractMCPText(result)
+
+	// Post-process: suggest visualization blocks from structured results
+	var blocks []Block
+	if name == "query" {
+		blocks = suggestBlocksFromQueryText(text)
+	}
+
+	return text, blocks, nil
 }
 
 // extractMCPText pulls text content from an MCP CallToolResult.
