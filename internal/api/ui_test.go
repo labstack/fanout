@@ -38,22 +38,59 @@ func TestFavicon(t *testing.T) {
 	}
 }
 
-func TestWebSocket_NilHandler(t *testing.T) {
+func TestStreamChat_NilHandler(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/ws/chat", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat", strings.NewReader(`{"content":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
 	h := &UIHandler{}
-	err := h.WebSocket(c)
+	err := h.StreamChat(c)
 	if err == nil {
-		t.Fatal("expected error for nil wsHandler")
+		t.Fatal("expected error for nil sseHandler")
 	}
 
 	httpErr, ok := err.(*echo.HTTPError)
 	if !ok {
 		t.Fatalf("error type = %T, want *echo.HTTPError", err)
 	}
+	if httpErr.Code != 503 {
+		t.Errorf("error code = %d, want 503", httpErr.Code)
+	}
+}
+
+func TestCancelChat_NilHandler(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/cancel", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	h := &UIHandler{}
+	err := h.CancelChat(c)
+	if err == nil {
+		t.Fatal("expected error for nil sseHandler")
+	}
+
+	httpErr, _ := err.(*echo.HTTPError)
+	if httpErr.Code != 503 {
+		t.Errorf("error code = %d, want 503", httpErr.Code)
+	}
+}
+
+func TestClearChat_NilHandler(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/clear", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	h := &UIHandler{}
+	err := h.ClearChat(c)
+	if err == nil {
+		t.Fatal("expected error for nil sseHandler")
+	}
+
+	httpErr, _ := err.(*echo.HTTPError)
 	if httpErr.Code != 503 {
 		t.Errorf("error code = %d, want 503", httpErr.Code)
 	}

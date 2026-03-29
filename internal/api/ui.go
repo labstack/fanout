@@ -49,29 +49,31 @@ var faviconSVG []byte
 
 // UIHandler handles the chat UI and API routes.
 type UIHandler struct {
-	cfg       config.Config
-	orch      *ai.Orchestrator
-	wsHandler *ai.WSHandler
-	bookmarks *ai.BookmarkStore
-	sanitizer *bluemonday.Policy
+	cfg        config.Config
+	orch       *ai.Orchestrator
+	sseHandler *ai.SSEHandler
+	bookmarks  *ai.BookmarkStore
+	sanitizer  *bluemonday.Policy
 }
 
 // RegisterUIRoutes registers all routes and returns the handler.
-func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, wsHandler *ai.WSHandler, bookmarks *ai.BookmarkStore) *UIHandler {
+func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, sseHandler *ai.SSEHandler, bookmarks *ai.BookmarkStore) *UIHandler {
 	h := &UIHandler{
-		cfg:       cfg,
-		orch:      orch,
-		wsHandler: wsHandler,
-		bookmarks: bookmarks,
-		sanitizer: newSanitizer(),
+		cfg:        cfg,
+		orch:       orch,
+		sseHandler: sseHandler,
+		bookmarks:  bookmarks,
+		sanitizer:  newSanitizer(),
 	}
 
 	// Favicon
 	e.GET("/favicon.ico", Favicon)
 	e.GET("/favicon.svg", Favicon)
 
-	// WebSocket
-	e.GET("/ws/chat", h.WebSocket)
+	// Chat SSE
+	e.POST("/api/chat", h.StreamChat)
+	e.POST("/api/chat/cancel", h.CancelChat)
+	e.POST("/api/chat/clear", h.ClearChat)
 
 	// Bookmarks API
 	e.GET("/api/bookmarks", h.ListBookmarks)
@@ -91,12 +93,28 @@ func Favicon(c *echo.Context) error {
 	return c.Blob(200, "image/svg+xml", faviconSVG)
 }
 
-// WebSocket upgrades to WS and handles the chat session.
-func (h *UIHandler) WebSocket(c *echo.Context) error {
-	if h.wsHandler == nil {
+// StreamChat streams the AI response as SSE.
+func (h *UIHandler) StreamChat(c *echo.Context) error {
+	if h.sseHandler == nil {
 		return echo.NewHTTPError(503, "AI chat not configured")
 	}
-	return h.wsHandler.Handle(c)
+	return h.sseHandler.StreamChat(c)
+}
+
+// CancelChat cancels the in-flight AI request.
+func (h *UIHandler) CancelChat(c *echo.Context) error {
+	if h.sseHandler == nil {
+		return echo.NewHTTPError(503, "AI chat not configured")
+	}
+	return h.sseHandler.CancelChat(c)
+}
+
+// ClearChat resets conversation history.
+func (h *UIHandler) ClearChat(c *echo.Context) error {
+	if h.sseHandler == nil {
+		return echo.NewHTTPError(503, "AI chat not configured")
+	}
+	return h.sseHandler.ClearChat(c)
 }
 
 // ListBookmarks returns all bookmarks.

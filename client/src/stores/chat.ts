@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { StoreApi } from "zustand";
-import { ChatSocket, wsURL } from "@/lib/ws";
+import { ChatClient } from "@/lib/sse";
 import type { Block, ChatEvent } from "@/lib/types";
 
 // ---------------------------------------------------------------------------
@@ -27,10 +27,9 @@ export interface Message {
 
 interface ChatStore {
   messages: Message[];
-  connected: boolean;
+  streaming: boolean;
 
-  connect: (token?: string) => void;
-  disconnect: () => void;
+  init: (token?: string) => void;
   sendMessage: (text: string, window?: number, namespace?: string) => void;
   cancel: () => void;
   clear: () => void;
@@ -44,10 +43,10 @@ type SetState = StoreApi<ChatStore>["setState"];
 type GetState = StoreApi<ChatStore>["getState"];
 
 // ---------------------------------------------------------------------------
-// WebSocket instance (kept outside store state — not serializable)
+// ChatClient instance (kept outside store state — not serializable)
 // ---------------------------------------------------------------------------
 
-let socket: ChatSocket | null = null;
+let client: ChatClient | null = null;
 
 // ---------------------------------------------------------------------------
 // Event handler — updates the last assistant message immutably
@@ -137,26 +136,24 @@ function handleEvent(set: SetState, _get: GetState, event: ChatEvent) {
 
 export const useChatStore = create<ChatStore>((set, get) => ({
   messages: [],
-  connected: false,
+  streaming: false,
 
-  connect: (token?: string) => {
-    if (socket) return;
+  init: (token?: string) => {
+    if (client) return;
 
-    socket = new ChatSocket(
-      wsURL("/ws/chat", token),
+    client = new ChatClient(
+      "",
       (event) => handleEvent(set, get, event),
-      (connected) => set({ connected }),
+      (status) => set({ streaming: status === "streaming" }),
     );
-    socket.connect();
-  },
-
-  disconnect: () => {
-    socket?.close();
-    socket = null;
-    set({ connected: false });
+    if (token) {
+      client.setToken(token);
+    }
   },
 
   sendMessage: (text, window = 60, namespace = "") => {
+    if (!client) return;
+
     const userMsg: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -177,7 +174,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       messages: [...state.messages, userMsg, assistantMsg],
     }));
 
-    if (!socket?.send({ type: "message", content: text, window, namespace })) {
+    // send() is async — fire and forget (errors are handled via events)
+    client.send({ content: text, window, namespace }).catch((err) => {
+      console.error("[chat] send failed:", err);
       set((state) => {
         const messages = [...state.messages];
         const last = messages[messages.length - 1];
@@ -185,18 +184,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           messages[messages.length - 1] = {
             ...last,
             loading: false,
-            error: "Not connected. Please wait for reconnection and try again.",
+            error: "Failed to send message. Please try again.",
           };
         }
         return { messages };
       });
-    }
+    });
   },
 
   cancel: () => {
-    if (!socket?.send({ type: "cancel" })) {
-      console.warn("[chat] cancel message dropped (not connected)");
-    }
+    client?.cancel();
 
     set((state) => {
       const messages = [...state.messages];
@@ -209,9 +206,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   clear: () => {
-    if (!socket?.send({ type: "clear" })) {
-      console.warn("[chat] clear message dropped (not connected)");
-    }
+    client?.clear();
     set({ messages: [] });
   },
 }));

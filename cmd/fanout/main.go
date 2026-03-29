@@ -168,15 +168,6 @@ func main() {
 					return next(c)
 				}
 
-				// WebSocket: accept token via query param since browsers can't set headers
-				if path == "/ws/chat" {
-					token := c.QueryParam("token")
-					if subtle.ConstantTimeCompare([]byte(token), tokenBytes) != 1 {
-						return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-					}
-					return next(c)
-				}
-
 				auth := c.Request().Header.Get("Authorization")
 				if !strings.HasPrefix(auth, "Bearer ") {
 					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
@@ -205,7 +196,7 @@ func main() {
 
 	// AI orchestrator (optional — needs API key)
 	var orch *ai.Orchestrator
-	var wsHandler *ai.WSHandler
+	var sseHandler *ai.SSEHandler
 	var aiTools *ai.ToolRegistry
 
 	if cfg.AIAPIKey != "" {
@@ -229,7 +220,7 @@ func main() {
 			os.Exit(1)
 		}
 		orch = ai.NewOrchestrator(provider, aiTools, svc, cfg)
-		wsHandler = ai.NewWSHandler(ctx, orch)
+		sseHandler = ai.NewSSEHandler(ctx, orch)
 		if cfg.APIToken == "" {
 			slog.Warn("AI chat enabled without API_TOKEN — chat endpoint is unauthenticated")
 		}
@@ -243,8 +234,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// UI routes (WebSocket + bookmarks + suggestions)
-	api.RegisterUIRoutes(e, cfg, orch, wsHandler, bookmarks)
+	// UI routes (chat SSE + bookmarks + suggestions)
+	api.RegisterUIRoutes(e, cfg, orch, sseHandler, bookmarks)
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled
 	if cfg.MCPEnabled {

@@ -224,7 +224,7 @@ export interface ComparisonData {
   verdict?: string;
 }
 
-// Chat event types (WebSocket protocol)
+// Chat event types (SSE protocol)
 export interface ChatEvent {
   type: "token" | "tool_call" | "tool_result" | "error" | "done";
   content?: string;
@@ -233,14 +233,6 @@ export interface ChatEvent {
   error?: string;
   id?: string;
   blocks?: Block[];
-}
-
-// Client message (sent to server)
-export interface ClientMessage {
-  type: "message" | "cancel" | "clear";
-  content?: string;
-  window?: number;
-  namespace?: string;
 }
 
 // Bookmark

@@ -3,17 +3,16 @@ import { useChatStore } from "@/stores/chat";
 import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { EmptyState } from "@/components/chat/EmptyState";
-import { Radio, RotateCcw, Circle } from "lucide-react";
+import { Radio, RotateCcw, Loader2 } from "lucide-react";
 
 export function ChatPage() {
-  const { connect, disconnect, connected, messages, clear } = useChatStore();
+  const { init, streaming, messages, clear } = useChatStore();
 
   useEffect(() => {
     const token =
       new URLSearchParams(location.search).get("token") ?? undefined;
-    connect(token);
-    return () => disconnect();
-  }, [connect, disconnect]);
+    init(token);
+  }, [init]);
 
   const hasMessages = messages.length > 0;
 
@@ -28,12 +27,12 @@ export function ChatPage() {
           </span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Circle
-              className={`h-1.5 w-1.5 fill-current ${connected ? "text-emerald-400" : "text-red-400"}`}
-            />
-            {connected ? "Connected" : "Disconnected"}
-          </div>
+          {streaming && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Streaming
+            </div>
+          )}
           {hasMessages && (
             <button
               onClick={clear}

@@ -3,15 +3,13 @@ package ai
 import "testing"
 
 func TestTrimConversation_UnderLimit(t *testing.T) {
-	s := &chatSession{
-		messages: []Message{
-			UserMessage("q1"),
-			AssistantMessage("a1", nil),
-		},
+	msgs := []Message{
+		UserMessage("q1"),
+		AssistantMessage("a1", nil),
 	}
-	s.trimConversation()
-	if len(s.messages) != 2 {
-		t.Errorf("messages = %d, want 2 (unchanged)", len(s.messages))
+	trimConversation(&msgs)
+	if len(msgs) != 2 {
+		t.Errorf("messages = %d, want 2 (unchanged)", len(msgs))
 	}
 }
 
@@ -24,15 +22,14 @@ func TestTrimConversation_TrimsAtUserBoundary(t *testing.T) {
 	}
 	// 50 messages total
 
-	s := &chatSession{messages: msgs}
-	s.trimConversation()
+	trimConversation(&msgs)
 
-	if len(s.messages) > 40 {
-		t.Errorf("messages = %d, want <= 40", len(s.messages))
+	if len(msgs) > 40 {
+		t.Errorf("messages = %d, want <= 40", len(msgs))
 	}
 	// First message should be a user message (safe boundary)
-	if s.messages[0].Role != RoleUser {
-		t.Errorf("first message role = %q, want %q", s.messages[0].Role, RoleUser)
+	if msgs[0].Role != RoleUser {
+		t.Errorf("first message role = %q, want %q", msgs[0].Role, RoleUser)
 	}
 }
 
@@ -48,15 +45,14 @@ func TestTrimConversation_SkipsToolMessages(t *testing.T) {
 	}
 	// 45 messages total
 
-	s := &chatSession{messages: msgs}
-	s.trimConversation()
+	trimConversation(&msgs)
 
-	if len(s.messages) > 40 {
-		t.Errorf("messages = %d, want <= 40", len(s.messages))
+	if len(msgs) > 40 {
+		t.Errorf("messages = %d, want <= 40", len(msgs))
 	}
 	// Must start at a user boundary, not mid-tool-call
-	if s.messages[0].Role != RoleUser {
-		t.Errorf("first message role = %q, want %q (user boundary)", s.messages[0].Role, RoleUser)
+	if msgs[0].Role != RoleUser {
+		t.Errorf("first message role = %q, want %q (user boundary)", msgs[0].Role, RoleUser)
 	}
 }
 
@@ -68,10 +64,9 @@ func TestTrimConversation_ExactlyAtLimit(t *testing.T) {
 	}
 	// 40 messages = maxMessages
 
-	s := &chatSession{messages: msgs}
-	s.trimConversation()
+	trimConversation(&msgs)
 
-	if len(s.messages) != 40 {
-		t.Errorf("messages = %d, want 40 (unchanged at limit)", len(s.messages))
+	if len(msgs) != 40 {
+		t.Errorf("messages = %d, want 40 (unchanged at limit)", len(msgs))
 	}
 }
