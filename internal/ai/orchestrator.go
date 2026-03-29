@@ -498,7 +498,7 @@ Pick the MOST SPECIFIC block type for the data. First match wins:
 | many services, pairwise health (error rates between pairs) | dep_matrix |
 | metric timeseries from metrics tool | timeseries |
 | ranked values (top N slowest, highest error) | bar |
-| histogram bucket distributions over time | heatmap |
+| latency distribution over time (histogram metrics OR span duration buckets via query tool) | heatmap |
 | 2-6 key numbers (health score, total requests, error rate) | metrics |
 | everything else | table |
 
