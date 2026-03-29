@@ -11,7 +11,6 @@ export function SankeyBlock({ data }: { data: SankeyData }) {
       tooltip: { trigger: "item", ...tooltipStyle() },
       series: [{
         type: "sankey",
-        layout: "none",
         emphasis: { focus: "adjacency" },
         nodeAlign: "left",
         nodeWidth: 12,
