@@ -22,13 +22,13 @@ export function ChatPage() {
       <header className="flex items-center justify-between px-5 h-12 border-b border-border/50 shrink-0">
         <div className="flex items-center gap-2.5">
           <Radio className="h-4.5 w-4.5 text-primary" />
-          <span className="font-mono text-sm font-bold tracking-wide text-foreground">
+          <span className="font-sans text-sm font-bold tracking-wide text-foreground">
             fanout
           </span>
         </div>
         <div className="flex items-center gap-3">
           {streaming && (
-            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-mono">
               <Loader2 className="h-3 w-3 animate-spin" />
               Streaming
             </div>

@@ -101,7 +101,11 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
   const height = Math.max(450, Math.min(650, data.nodes.length * 80));
 
   return (
-    <div>
+    <div
+      className="rounded-[14px] p-4"
+      style={{ background: "#111113", border: "1px solid rgba(129,140,248,0.15)" }}
+    >
+      <h3 className="mb-2 font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[#818cf8]">Topology</h3>
       <ReactECharts
         echarts={echarts}
         option={option}

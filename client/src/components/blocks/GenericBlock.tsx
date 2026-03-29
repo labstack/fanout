@@ -3,8 +3,11 @@ export function GenericBlock({ type, data }: { type: string; data: unknown }) {
     data !== null && typeof data === "object" && !Array.isArray(data);
 
   return (
-    <div className="rounded-lg border border-border bg-muted/50 p-4">
-      <span className="mb-2 inline-block rounded bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
+    <div
+      className="rounded-[14px] p-4"
+      style={{ background: "#111113", border: "1px solid rgba(129,140,248,0.15)" }}
+    >
+      <span className="mb-2 inline-block font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[#818cf8]">
         {type}
       </span>
       {isObject ? (

@@ -67,7 +67,10 @@ export function TableBlock({ data, onAction }: { data: TableBlockData; onAction?
   });
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-border">
+    <div
+      className="overflow-x-auto rounded-[14px]"
+      style={{ background: "#111113", border: "1px solid rgba(129,140,248,0.15)" }}
+    >
       <table className="w-full text-sm">
         <thead>
           {table.getHeaderGroups().map((hg) => (

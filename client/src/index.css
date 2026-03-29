@@ -8,7 +8,7 @@
 /* ─── Theme tokens ─────────────────────────────────────────────────────── */
 @theme inline {
     --font-sans: "DM Sans", system-ui, -apple-system, sans-serif;
-    --font-mono: "Fragment Mono", "SF Mono", ui-monospace, monospace;
+    --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);
     --radius-lg: var(--radius);

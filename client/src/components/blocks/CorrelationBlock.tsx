@@ -96,7 +96,11 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
   }
 
   return (
-    <div>
+    <div
+      className="rounded-[14px] p-4"
+      style={{ background: "#111113", border: "1px solid rgba(129,140,248,0.15)" }}
+    >
+      <h3 className="mb-2 font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[#818cf8]">Correlation</h3>
       <ReactECharts echarts={echarts} option={option} style={{ height: totalH }} opts={{ renderer: "svg" }} />
     </div>
   );

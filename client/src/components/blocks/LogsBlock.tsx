@@ -74,10 +74,13 @@ export function LogsBlock({ data, onAction }: { data: LogsBlockData; onAction?: 
   }
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-950 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800/80 bg-zinc-900/50">
-        <span className="text-[11px] text-zinc-500 font-medium uppercase tracking-wider">Log Entries</span>
-        <span className="text-[11px] text-zinc-600">{data.entries.length} entries</span>
+    <div
+      className="rounded-[14px] overflow-hidden"
+      style={{ background: "#111113", border: "1px solid rgba(129,140,248,0.15)" }}
+    >
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[#818cf8]/10">
+        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[#818cf8]">Log Entries</span>
+        <span className="font-mono text-[10px] text-muted-foreground">{data.entries.length} entries</span>
       </div>
 
       <div className="overflow-auto font-mono" style={{ maxHeight: 400 }}>
