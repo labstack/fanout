@@ -1,0 +1,11 @@
+version: "0.5"
+
+processes:
+  server:
+    command: air
+    working_dir: .
+    env_file: .env
+
+  client:
+    command: bun run dev
+    working_dir: ./client

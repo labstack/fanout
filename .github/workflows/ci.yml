@@ -15,6 +15,7 @@ jobs:
       pull-requests: read
     outputs:
       go: ${{ steps.filter.outputs.go }}
+      client: ${{ steps.filter.outputs.client }}
       docker: ${{ steps.filter.outputs.docker }}
     steps:
       - uses: actions/checkout@v6
@@ -28,10 +29,11 @@ jobs:
               - 'go.sum'
               - '.github/workflows/ci.yml'
               - '.golangci.yml'
+            client:
+              - 'client/**'
             docker:
               - 'Dockerfile'
               - '.dockerignore'
-              - 'client/**'
 
   server:
     name: Server (fmt + vet + lint + test + build)
@@ -79,13 +81,31 @@ jobs:
           files: coverage.txt
         continue-on-error: true
 
+  client:
+    name: Client (type check + build)
+    needs: changes
+    if: needs.changes.outputs.client == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install deps
+        run: cd client && bun install --frozen-lockfile
+
+      - name: Type check + build
+        run: cd client && bun run build
+
   docker:
     if: |
       always() &&
       !failure() && !cancelled() &&
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      (needs.changes.outputs.go == 'true' || needs.changes.outputs.docker == 'true')
-    needs: [changes, server]
+      (needs.changes.outputs.go == 'true' || needs.changes.outputs.client == 'true' || needs.changes.outputs.docker == 'true')
+    needs: [changes, server, client]
     runs-on: ubuntu-24.04
     permissions:
       contents: read

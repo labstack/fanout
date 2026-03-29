@@ -1,0 +1,35 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  entrypoint = "./cmd/fanout"
+  cmd = "CGO_ENABLED=1 go build -o ./tmp/fanout ./cmd/fanout"
+  delay = 500
+  exclude_dir = ["lake", "tmp", "vendor", ".git", "node_modules", "client"]
+  exclude_file = []
+  exclude_regex = ["_test.go"]
+  exclude_unchanged = false
+  follow_symlink = false
+  full_bin = "./tmp/fanout"
+  include_dir = ["cmd", "internal"]
+  include_ext = ["go"]
+  kill_delay = "1s"
+  log = "build-errors.log"
+  send_interrupt = true
+  stop_on_error = true
+
+[color]
+  app = ""
+  build = "yellow"
+  main = "magenta"
+  runner = "green"
+  watcher = "cyan"
+
+[log]
+  time = false
+
+[misc]
+  clean_on_exit = true
+
+[screen]
+  clear_on_rebuild = false

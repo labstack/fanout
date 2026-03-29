@@ -9,6 +9,14 @@ bin := "fanout"
 default:
     @just --list
 
+# Start dev environment (Go + Vite with auto-reload)
+up:
+    process-compose up
+
+# Stop dev environment
+down:
+    process-compose down
+
 # Build binary (client + server)
 build:
     cd client && bun run build
@@ -16,32 +24,32 @@ build:
     cp -r client/dist/* internal/web/dist/
     go build -o {{bin}} ./cmd/fanout
 
-# Dev mode with auto-reload
-dev:
-    @command -v air >/dev/null || go install github.com/air-verse/air@latest
-    air
-
 # Generate TypeScript types from Go block structs
 gen:
     go generate ./internal/ai/...
 
-# Run tests
+# Run Go tests
 test *ARGS='./...':
     go test {{ARGS}}
 
-# Check formatting
+# Check Go formatting
 fmt-check:
     @if [ -n "$(gofmt -l .)" ]; then gofmt -d .; exit 1; fi
 
-# Lint
+# Lint Go
 lint:
     golangci-lint run
 
-# Format + vet + lint + build (pre-commit)
+# Check client (TypeScript + build)
+client-check:
+    cd client && bun run build
+
+# Full pre-commit check (Go + client)
 check:
     go fmt ./...
     go vet ./...
     just lint
+    just client-check
     just build
     @echo "All checks passed"
 
@@ -63,3 +71,7 @@ deploy *ARGS='':
 # Deploy demo (otel-demo + fanout)
 deploy-demo *ARGS='':
     ./demo/yeet.sh {{ARGS}}
+
+# Run fanout binary directly
+run:
+    ./{{bin}}

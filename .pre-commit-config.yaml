@@ -1,0 +1,42 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+
+  - repo: local
+    hooks:
+      - id: go-fmt-check
+        name: Go format check
+        entry: just fmt-check
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      - id: go-vet
+        name: Go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      - id: go-lint
+        name: Go lint
+        entry: golangci-lint run
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      - id: client-check
+        name: Client type check + build
+        entry: bash -c 'cd client && bun run build'
+        language: system
+        files: '^client/'
+        pass_filenames: false
