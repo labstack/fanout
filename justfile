@@ -9,6 +9,12 @@ bin := "fanout"
 default:
     @just --list
 
+# Install dev tools + client deps
+install:
+    go install github.com/air-verse/air@latest
+    brew install process-compose 2>/dev/null || true
+    cd client && bun install
+
 # ── Dev ──────────────────────────────────────────────────────────────────────
 
 # Start dev environment (Go auto-reload + Vite HMR)
