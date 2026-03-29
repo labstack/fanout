@@ -504,12 +504,6 @@ Pick the MOST SPECIFIC block type for the data. First match wins:
 
 Default to table only when no specialized type above matches.
 
-## Heatmap example
-
-When you have latency distribution data (from query tool with time_bucket + CASE buckets), produce:
-{"type":"heatmap","data":{"title":"Latency Distribution","times":["10:00","10:05","10:10"],"buckets":[10,50,100,500,1000,5000],"values":[[120,45,20,8,3,1],[130,40,18,10,5,2],[125,50,22,7,4,1]]}}
-Note: values[i] corresponds to times[i], each inner array has one count per bucket. len(values)==len(times), len(values[i])==len(buckets).
-
 ## Rules
 
 - Block data MUST come from tool results. Never fabricate data points.
