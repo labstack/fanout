@@ -25,6 +25,12 @@ jobs:
         with:
           bun-version: latest
 
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.9
+          args: --help
+
       - name: Install client deps
         run: cd client && bun install --frozen-lockfile
 
