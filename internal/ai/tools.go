@@ -12,8 +12,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// ToolHandler executes a tool and returns JSON result text.
-type ToolHandler func(ctx context.Context, input json.RawMessage) (string, error)
+// ToolHandler executes a tool and returns JSON result text and optional suggested blocks.
+type ToolHandler func(ctx context.Context, input json.RawMessage) (string, []Block, error)
 
 // ToolRegistry maps tool names to definitions and handlers.
 type ToolRegistry struct {
@@ -95,27 +95,27 @@ func (r *ToolRegistry) Defs() []ToolDef {
 	return out
 }
 
-// Execute runs a tool by name and returns the result text.
+// Execute runs a tool by name and returns the result text plus optional suggested blocks.
 // AI-only tools are checked first; all others are dispatched to the MCP server.
-func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawMessage) (string, error) {
+func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawMessage) (string, []Block, error) {
 	// Check AI-only handlers first
 	if h, ok := r.handlers[name]; ok {
-		result, err := h(ctx, input)
+		result, blocks, err := h(ctx, input)
 		if err != nil {
 			slog.Warn("tool execution failed", "tool", name, "err", err)
-			return "", err
+			return "", nil, err
 		}
-		return result, nil
+		return result, blocks, nil
 	}
 
 	// Fall through to MCP server via in-memory session
 	if r.session == nil {
-		return "", fmt.Errorf("tool %s: registry is closed", name)
+		return "", nil, fmt.Errorf("tool %s: registry is closed", name)
 	}
 	var args any
 	if len(input) > 0 {
 		if err := json.Unmarshal(input, &args); err != nil {
-			return "", fmt.Errorf("invalid tool arguments: %w", err)
+			return "", nil, fmt.Errorf("invalid tool arguments: %w", err)
 		}
 	}
 
@@ -125,14 +125,22 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawM
 	})
 	if err != nil {
 		slog.Warn("MCP tool execution failed", "tool", name, "err", err)
-		return "", err
+		return "", nil, err
 	}
 	if result.IsError {
 		text := extractMCPText(result)
 		slog.Warn("MCP tool returned error", "tool", name, "text", text)
-		return "", fmt.Errorf("tool %s: %s", name, text)
+		return "", nil, fmt.Errorf("tool %s: %s", name, text)
 	}
-	return extractMCPText(result), nil
+	text := extractMCPText(result)
+
+	// Post-process: suggest visualization blocks from structured results
+	var blocks []Block
+	if name == "query" {
+		blocks = suggestBlocksFromQueryText(text)
+	}
+
+	return text, blocks, nil
 }
 
 // extractMCPText pulls text content from an MCP CallToolResult.

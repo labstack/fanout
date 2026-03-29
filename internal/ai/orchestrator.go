@@ -87,8 +87,9 @@ type SendFunc func(event ClientEvent) error
 
 // stepResult captures the outcome of a single LLM call.
 type stepResult struct {
-	done bool // true if response is complete (respond called or text-only)
-	err  error
+	done            bool // true if response is complete (respond called or text-only)
+	err             error
+	suggestedBlocks []Block // blocks suggested by tool handlers (for merging into respond)
 }
 
 // step executes one LLM call: stream → handle tool calls → execute tools.
@@ -213,10 +214,13 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 
 		// If the LLM called both respond and real tools, execute the real
 		// tools first so their results are in the conversation history.
+		var toolSuggestedBlocks []Block
 		if len(realToolCalls) > 0 {
-			if err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName); err != nil {
+			suggested, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
+			if err != nil {
 				return stepResult{err: err}
 			}
+			toolSuggestedBlocks = suggested
 		}
 
 		// Add a synthetic tool_result so the conversation stays valid
@@ -241,6 +245,8 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 			if resp.Text != "" {
 				blocks = append([]Block{MakeTextBlock(resp.Text)}, blocks...)
 			}
+			// Validate and append tool-suggested blocks
+			blocks = append(blocks, validateBlocks(toolSuggestedBlocks)...)
 		}
 
 		if err := send(ClientEvent{
@@ -258,20 +264,23 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		slog.Warn("LLM returned tool_use stop reason but no tool calls", "step", stepName)
 		return stepResult{}
 	}
-	if err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName); err != nil {
+	suggested, err := o.executeTools(ctx, realToolCalls, conversation, send, namespace, stepName)
+	if err != nil {
 		return stepResult{err: err}
 	}
-	return stepResult{}
+	return stepResult{suggestedBlocks: suggested}
 }
 
 // executeTools runs tool calls in parallel, sends results to the client,
 // and appends tool result messages to the conversation.
+// Returns any suggested blocks from tool handlers.
 func (o *Orchestrator) executeTools(ctx context.Context, toolCalls []ToolCall,
-	conversation *[]Message, send SendFunc, namespace string, stepName string) error {
+	conversation *[]Message, send SendFunc, namespace string, stepName string) ([]Block, error) {
 
 	type toolExecResult struct {
 		tc       ToolCall
 		result   string
+		blocks   []Block // suggested blocks from tool
 		isError  bool
 		duration time.Duration
 	}
@@ -292,13 +301,14 @@ func (o *Orchestrator) executeTools(ctx context.Context, toolCalls []ToolCall,
 				}
 			}()
 			t0 := time.Now()
-			result, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
+			result, blocks, err := o.tools.Execute(ctx, tc.Name, json.RawMessage(tc.Input))
 			results[idx].duration = time.Since(t0)
 			if err != nil {
 				results[idx].result = fmt.Sprintf(`{"error": %q}`, err.Error())
 				results[idx].isError = true
 			} else {
 				results[idx].result = result
+				results[idx].blocks = blocks
 			}
 		}(i, tc)
 	}
@@ -323,23 +333,26 @@ func (o *Orchestrator) executeTools(ctx context.Context, toolCalls []ToolCall,
 	slog.Info("tools batch complete", "step", stepName, "count", len(results), "wall_ms", time.Since(toolsStart).Milliseconds())
 
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return nil, ctx.Err()
 	}
 
+	// Collect suggested blocks from all tools
+	var suggestedBlocks []Block
 	// Send results to WebSocket sequentially (preserves order)
 	for idx := range results {
 		r := &results[idx]
 
 		// Always send tool_result to clear the spinner
 		if sendErr := send(ClientEvent{Type: CEToolResult, Name: r.tc.Name}); sendErr != nil {
-			return sendErr
+			return nil, sendErr
 		}
 
 		// Add tool result to conversation
 		*conversation = append(*conversation, ToolMessage(r.tc.ID, truncateResult(r.result, 8192), r.isError))
+		suggestedBlocks = append(suggestedBlocks, r.blocks...)
 	}
 
-	return nil
+	return suggestedBlocks, nil
 }
 
 // Run executes a two-step orchestration for a user message: gather data, then respond.
@@ -366,7 +379,21 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	conversation = append(conversation, UserMessage(
 		"Now synthesize the tool results into a complete response. "+
 			"Do NOT suggest further investigation — analyze what you have."))
-	r2 := o.step(ctx, &conversation, systemBlocks, []ToolDef{respondToolDef()}, &ToolChoice{Name: respondToolName}, "respond", send, namespace)
+
+	// Wrap send to merge tool-suggested blocks from the gather step into the
+	// final CEDone event. This lets tool handlers influence the response
+	// without the LLM needing to build complex data structures.
+	gatherBlocks := r.suggestedBlocks
+	respondSend := send
+	if len(gatherBlocks) > 0 {
+		respondSend = func(event ClientEvent) error {
+			if event.Type == CEDone {
+				event.Blocks = append(event.Blocks, validateBlocks(gatherBlocks)...)
+			}
+			return send(event)
+		}
+	}
+	r2 := o.step(ctx, &conversation, systemBlocks, []ToolDef{respondToolDef()}, &ToolChoice{Name: respondToolName}, "respond", respondSend, namespace)
 	if r2.err != nil {
 		return conversation, r2.err
 	}
