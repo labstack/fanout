@@ -74,12 +74,9 @@ export function LogsBlock({ data, onAction }: { data: LogsBlockData; onAction?: 
   }
 
   return (
-    <div
-      className="rounded-[14px] overflow-hidden"
-      style={{ background: "#111113", border: "1px solid rgba(129,140,248,0.15)" }}
-    >
+    <div className="overflow-hidden block-card-flush">
       <div className="flex items-center justify-between px-4 py-3 border-b border-[#818cf8]/10">
-        <span className="font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[#818cf8]">Log Entries</span>
+        <span className="block-title mb-0">Log Entries</span>
         <span className="font-mono text-[10px] text-muted-foreground">{data.entries.length} entries</span>
       </div>
 

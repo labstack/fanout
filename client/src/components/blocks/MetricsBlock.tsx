@@ -16,14 +16,11 @@ export function MetricsBlock({ data }: { data: MetricsBlockData }) {
         return (
           <div
             key={i}
-            className="rounded-[14px] p-4"
-            style={{
-              background: "#111113",
-              border: `1px solid ${accent}26`,
-            }}
+            className="block-card"
+            style={{ borderColor: `${accent}26` }}
           >
             <div
-              className="flex items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.1em] mb-2"
+              className="flex items-center gap-1.5 block-title mb-2"
               style={{ color: accent }}
             >
               <span

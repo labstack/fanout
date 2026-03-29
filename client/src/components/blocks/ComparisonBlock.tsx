@@ -10,10 +10,7 @@ function formatNum(v: number): string {
 
 export function ComparisonBlock({ data }: { data: ComparisonData }) {
   return (
-    <div
-      className="space-y-3 rounded-[14px] p-4"
-      style={{ background: "#111113", border: "1px solid rgba(129,140,248,0.15)" }}
-    >
+    <div className="space-y-3 block-card">
       {/* Header bar */}
       <div className="flex items-center rounded-lg bg-white/[0.03] px-4 py-2.5">
         <div className="w-[130px] shrink-0" />

@@ -69,11 +69,8 @@ export function TimeseriesBlock({ data }: { data: TimeseriesBlockData }) {
   }), [data]);
 
   return (
-    <div
-      className="rounded-[14px] p-4"
-      style={{ background: "#111113", border: "1px solid rgba(129,140,248,0.15)" }}
-    >
-      <h3 className="mb-2 font-mono text-[10px] font-medium uppercase tracking-[0.1em] text-[#818cf8]">{data.title}</h3>
+    <div className="block-card">
+      <h3 className="block-title">{data.title}</h3>
       <ReactECharts echarts={echarts} option={option} style={{ height: 300 }} opts={{ renderer: "svg" }} />
     </div>
   );
