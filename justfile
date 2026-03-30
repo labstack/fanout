@@ -5,6 +5,7 @@ set dotenv-load
 export CGO_ENABLED := "1"
 
 bin := "fanout"
+sock := "{{sock}}"
 
 default:
     @just --list
@@ -19,11 +20,11 @@ install:
 
 # Start dev environment (Go auto-reload + Vite HMR)
 up:
-    process-compose up
+    process-compose up --unix-socket {{sock}}
 
 # Stop dev environment
 down:
-    process-compose down
+    process-compose down --unix-socket {{sock}}
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,18 @@ fmt-check:
 # Run Go tests
 test *ARGS='./...':
     go test {{ARGS}}
+
+# ── Release ───────────────────────────────────────────────────────────────────
+
+# Tag a release (v{YEAR.MONTH}.{NUM})
+release:
+    #!/bin/bash
+    MONTH=$(date +%Y.%m)
+    LAST=$(git tag --list "v${MONTH}.*" --sort=-v:refname | head -1)
+    if [ -z "$LAST" ]; then NUM=1; else NUM=$(( ${LAST##*.} + 1 )); fi
+    TAG="v${MONTH}.${NUM}"
+    echo "Tagging ${TAG}"
+    git tag "$TAG" && git push origin "$TAG"
 
 # ── Ops ──────────────────────────────────────────────────────────────────────
 
