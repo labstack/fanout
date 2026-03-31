@@ -50,6 +50,9 @@ done
 # Use environment variable overrides
 [[ -n "$LETSENCRYPT_EMAIL" ]] && EMAIL="$LETSENCRYPT_EMAIL"
 
+# Strip v prefix from version (Docker tags don't include it)
+VERSION="${VERSION#v}"
+
 # Default server
 [[ -z "$SERVER" ]] && SERVER="$DEFAULT_SERVER"
 
