@@ -19,10 +19,11 @@ func (s *Service) Diagnose(ctx context.Context, svc string, window int, namespac
 	}
 
 	out := &DiagnoseResult{
-		Service:      svc,
-		TopErrors:    []ErrorInfo{},
-		SlowOps:      []SlowOp{},
-		Dependencies: []Dependency{},
+		Service:       svc,
+		WindowMinutes: window,
+		TopErrors:     []ErrorInfo{},
+		SlowOps:       []SlowOp{},
+		Dependencies:  []Dependency{},
 	}
 
 	// Always scope to single partition
@@ -94,7 +95,10 @@ LIMIT 10;
 	q = fmt.Sprintf(`
 SELECT
   "name=name" as op,
+  COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p50,
   PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms") as p95,
+  COALESCE(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p99,
+  COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate,
   COUNT(*) as cnt
 FROM read_parquet(%s, union_by_name=true)
 WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
@@ -112,7 +116,7 @@ LIMIT 5;
 		defer rows.Close()
 		for rows.Next() {
 			var op SlowOp
-			if err := rows.Scan(&op.Name, &op.P95Ms, &op.Count); err != nil {
+			if err := rows.Scan(&op.Name, &op.P50Ms, &op.P95Ms, &op.P99Ms, &op.ErrorRate, &op.Count); err != nil {
 				slog.Warn("scan failed", "method", "Diagnose.slowOps", "err", err)
 				continue
 			}

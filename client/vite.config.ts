@@ -8,6 +8,8 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     port: 7521,
+    host: true,
+    allowedHosts: ["fanout.test"],
     proxy: {
       "/api": "http://localhost:7520",
       "/mcp": "http://localhost:7520",

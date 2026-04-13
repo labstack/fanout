@@ -111,16 +111,17 @@ type TopologyParams struct {
 
 // DiagnoseResult contains detailed service diagnostics.
 type DiagnoseResult struct {
-	Service      string
-	Status       string
-	P50Ms        float64
-	P95Ms        float64
-	P99Ms        float64
-	ErrorRate    float64
-	SpanCount    int64
-	TopErrors    []ErrorInfo
-	SlowOps      []SlowOp
-	Dependencies []Dependency
+	Service       string
+	Status        string
+	WindowMinutes int
+	P50Ms         float64
+	P95Ms         float64
+	P99Ms         float64
+	ErrorRate     float64
+	SpanCount     int64
+	TopErrors     []ErrorInfo
+	SlowOps       []SlowOp
+	Dependencies  []Dependency
 
 	// Enhanced fields (populated by DiagnoseEnhanced)
 	SymptomDetected       string              `json:"symptom_detected,omitempty"`
@@ -163,9 +164,12 @@ type ErrorInfo struct {
 
 // SlowOp describes a slow operation.
 type SlowOp struct {
-	Name  string
-	P95Ms float64
-	Count int64
+	Name      string
+	P50Ms     float64
+	P95Ms     float64
+	P99Ms     float64
+	ErrorRate float64
+	Count     int64
 }
 
 // Dependency describes a downstream service call.

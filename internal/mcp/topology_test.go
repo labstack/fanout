@@ -92,6 +92,7 @@ func TestTopologyIn(t *testing.T) {
 
 func TestTopologyOut(t *testing.T) {
 	out := TopologyOut{
+		WindowMinutes: 60,
 		Nodes: []ServiceNode{
 			{
 				Service:     "frontend",
@@ -120,6 +121,9 @@ func TestTopologyOut(t *testing.T) {
 
 	if len(out.Nodes) != 1 {
 		t.Errorf("Nodes count = %d, want 1", len(out.Nodes))
+	}
+	if out.WindowMinutes != 60 {
+		t.Errorf("WindowMinutes = %d, want 60", out.WindowMinutes)
 	}
 	if len(out.Edges) != 1 {
 		t.Errorf("Edges count = %d, want 1", len(out.Edges))

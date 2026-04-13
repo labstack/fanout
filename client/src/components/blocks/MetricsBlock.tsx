@@ -1,4 +1,5 @@
 import type { MetricsBlockData } from "@/lib/types";
+import { fmt } from "@/lib/utils";
 
 const STATUS_COLORS: Record<string, string> = {
   ok: "#22c55e",
@@ -30,7 +31,7 @@ export function MetricsBlock({ data }: { data: MetricsBlockData }) {
               {item.label}
             </div>
             <div className="text-2xl font-bold text-foreground">
-              {item.value}
+              {fmt(item.value)}
               <span className="text-sm font-normal text-muted-foreground ml-1">
                 {item.unit}
               </span>

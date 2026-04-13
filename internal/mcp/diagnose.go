@@ -58,9 +58,12 @@ type ErrorDetail struct {
 }
 
 type SlowOperation struct {
-	Name  string  `json:"name"`
-	P95Ms float64 `json:"p95_ms"`
-	Count int64   `json:"count"`
+	Name      string  `json:"name"`
+	P50Ms     float64 `json:"p50_ms"`
+	P95Ms     float64 `json:"p95_ms"`
+	P99Ms     float64 `json:"p99_ms"`
+	ErrorRate float64 `json:"error_rate"`
+	Count     int64   `json:"count"`
 }
 
 type Dependency struct {
@@ -74,6 +77,7 @@ type Dependency struct {
 type DiagnoseOut struct {
 	Service               string          `json:"service"`
 	Status                string          `json:"status"`
+	WindowMinutes         int             `json:"window_minutes"`
 	SymptomDetected       string          `json:"symptom_detected,omitempty"`
 	Metrics               ServiceMetrics  `json:"metrics"`
 	TopErrors             []ErrorDetail   `json:"top_errors"`
@@ -121,6 +125,7 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 	out := DiagnoseOut{
 		Service:         result.Service,
 		Status:          result.Status,
+		WindowMinutes:   result.WindowMinutes,
 		SymptomDetected: result.SymptomDetected,
 		Metrics:         metrics,
 		TopErrors:       make([]ErrorDetail, 0, len(result.TopErrors)),
@@ -140,9 +145,12 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 
 	for _, op := range result.SlowOps {
 		out.SlowOperations = append(out.SlowOperations, SlowOperation{
-			Name:  op.Name,
-			P95Ms: op.P95Ms,
-			Count: op.Count,
+			Name:      op.Name,
+			P50Ms:     op.P50Ms,
+			P95Ms:     op.P95Ms,
+			P99Ms:     op.P99Ms,
+			ErrorRate: op.ErrorRate,
+			Count:     op.Count,
 		})
 	}
 

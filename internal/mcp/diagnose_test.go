@@ -80,9 +80,12 @@ func TestErrorDetail(t *testing.T) {
 
 func TestSlowOperation(t *testing.T) {
 	op := SlowOperation{
-		Name:  "POST /api/import",
-		P95Ms: 2500.0,
-		Count: 50,
+		Name:      "POST /api/import",
+		P50Ms:     500.0,
+		P95Ms:     2500.0,
+		P99Ms:     4800.0,
+		ErrorRate: 0.02,
+		Count:     50,
 	}
 
 	if op.Name != "POST /api/import" {
@@ -90,6 +93,12 @@ func TestSlowOperation(t *testing.T) {
 	}
 	if op.P95Ms != 2500.0 {
 		t.Errorf("P95Ms = %f", op.P95Ms)
+	}
+	if op.P50Ms != 500.0 {
+		t.Errorf("P50Ms = %f", op.P50Ms)
+	}
+	if op.ErrorRate != 0.02 {
+		t.Errorf("ErrorRate = %f", op.ErrorRate)
 	}
 }
 
@@ -175,6 +184,7 @@ func TestDiagnoseOut_NewFields(t *testing.T) {
 	out := DiagnoseOut{
 		Service:         "checkout",
 		Status:          "degraded",
+		WindowMinutes:   15,
 		SymptomDetected: "latency",
 		Metrics: ServiceMetrics{
 			P95Ms: 9200.0,
@@ -194,6 +204,9 @@ func TestDiagnoseOut_NewFields(t *testing.T) {
 
 	if out.SymptomDetected != "latency" {
 		t.Errorf("SymptomDetected = %q, want %q", out.SymptomDetected, "latency")
+	}
+	if out.WindowMinutes != 15 {
+		t.Errorf("WindowMinutes = %d, want 15", out.WindowMinutes)
 	}
 	if out.Metrics.ComparisonToBaseline == nil {
 		t.Fatal("ComparisonToBaseline should not be nil")

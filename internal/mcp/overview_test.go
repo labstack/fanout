@@ -1,6 +1,8 @@
 package mcp
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -9,7 +11,7 @@ func TestOverviewOut_Structure(t *testing.T) {
 	out := OverviewOut{
 		Timestamp: "2026-03-14T17:05:00Z",
 		Window:    "15m",
-		Health: OverviewHealth{
+		Health: &OverviewHealth{
 			Score:            0.92,
 			TotalServices:    20,
 			ByStatus:         map[string]int{"healthy": 16, "degraded": 3, "unhealthy": 1},
@@ -38,6 +40,9 @@ func TestOverviewOut_Structure(t *testing.T) {
 		},
 	}
 
+	if out.Health == nil {
+		t.Fatal("Health should not be nil")
+	}
 	if out.Health.Score != 0.92 {
 		t.Errorf("Health.Score = %v, want 0.92", out.Health.Score)
 	}
@@ -58,6 +63,38 @@ func TestOverviewOut_Structure(t *testing.T) {
 	}
 	if out.TopIssues[0].Issue != "p95_latency" {
 		t.Errorf("TopIssues[0].Issue = %q, want %q", out.TopIssues[0].Issue, "p95_latency")
+	}
+}
+
+func TestOverviewOut_MarshalOmitsHealthWhenAbsent(t *testing.T) {
+	out := OverviewOut{
+		Timestamp: "2026-04-13T12:00:00Z",
+		Window:    "15m",
+		Services:  []OverviewService{{Service: "api"}},
+	}
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"health"`) {
+		t.Fatalf("marshaled json unexpectedly included health: %s", data)
+	}
+}
+
+func TestOverviewOut_MarshalKeepsHealthWhenRequestedEvenIfZero(t *testing.T) {
+	out := OverviewOut{
+		Timestamp: "2026-04-13T12:00:00Z",
+		Window:    "15m",
+		Health:    &OverviewHealth{},
+	}
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"health"`) {
+		t.Fatalf("marshaled json should include health when pointer is present: %s", data)
 	}
 }
 

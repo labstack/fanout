@@ -18,10 +18,16 @@ function statusPill(
   status: string,
   errorRate: number,
 ): { label: string; className: string } {
-  if (status === "degraded" || errorRate > 1) {
+  if (status === "unhealthy") {
+    return {
+      label: "UNHEALTHY",
+      className: "bg-red-500/12 text-red-500",
+    };
+  }
+  if (status === "degraded") {
     return {
       label: "DEGRADED",
-      className: "bg-red-500/12 text-red-500",
+      className: "bg-amber-500/12 text-amber-500",
     };
   }
   if (errorRate > 0.3) {

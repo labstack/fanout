@@ -34,7 +34,7 @@ func TestDiagnose_DefaultWindow(t *testing.T) {
 
 	// Slow ops query
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}))
 
 	// Dependencies query
 	mock.ExpectQuery("SELECT").WillReturnRows(
@@ -47,6 +47,9 @@ func TestDiagnose_DefaultWindow(t *testing.T) {
 
 	if result.Service != "my-service" {
 		t.Errorf("Service = %q, want %q", result.Service, "my-service")
+	}
+	if result.WindowMinutes != 15 {
+		t.Errorf("WindowMinutes = %d, want 15", result.WindowMinutes)
 	}
 }
 
@@ -65,7 +68,7 @@ func TestDiagnose_HealthyService(t *testing.T) {
 
 	// Slow ops - none
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}))
 
 	// Dependencies - none
 	mock.ExpectQuery("SELECT").WillReturnRows(
@@ -102,7 +105,7 @@ func TestDiagnose_DegradedService(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"operation", "message", "exception_type", "cnt", "trace_id"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
@@ -128,7 +131,7 @@ func TestDiagnose_UnhealthyService(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"operation", "message", "exception_type", "cnt", "trace_id"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
@@ -157,7 +160,7 @@ func TestDiagnose_WithTopErrors(t *testing.T) {
 			AddRow("POST /checkout", "null pointer", nil, int64(25), "trace-456"))
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
@@ -196,9 +199,9 @@ func TestDiagnose_WithSlowOps(t *testing.T) {
 
 	// Slow ops with data
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}).
-			AddRow("GET /api/heavy", 500.0, int64(100)).
-			AddRow("POST /api/import", 800.0, int64(50)))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}).
+			AddRow("GET /api/heavy", 200.0, 500.0, 900.0, 0.01, int64(100)).
+			AddRow("POST /api/import", 300.0, 800.0, 1200.0, 0.02, int64(50)))
 
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
@@ -214,6 +217,12 @@ func TestDiagnose_WithSlowOps(t *testing.T) {
 	if result.SlowOps[0].Name != "GET /api/heavy" {
 		t.Errorf("SlowOps[0].Name = %q", result.SlowOps[0].Name)
 	}
+	if result.SlowOps[0].P50Ms != 200.0 {
+		t.Errorf("SlowOps[0].P50Ms = %f, want 200.0", result.SlowOps[0].P50Ms)
+	}
+	if result.SlowOps[0].ErrorRate != 0.01 {
+		t.Errorf("SlowOps[0].ErrorRate = %f, want 0.01", result.SlowOps[0].ErrorRate)
+	}
 }
 
 func TestDiagnose_WithDependencies(t *testing.T) {
@@ -227,7 +236,7 @@ func TestDiagnose_WithDependencies(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"operation", "message", "exception_type", "cnt", "trace_id"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}))
 
 	// Dependencies with data
 	mock.ExpectQuery("SELECT").WillReturnRows(
@@ -274,7 +283,7 @@ func TestDiagnose_SQLEscaping(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"operation", "message", "exception_type", "cnt", "trace_id"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
@@ -299,7 +308,7 @@ func expectDiagnoseQueries(mock sqlmock.Sqlmock, spanCount int64, p50, p95, p99,
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"operation", "message", "exception_type", "cnt", "trace_id"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 }
