@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import echarts, { ReactECharts, tooltipStyle, statusColor, cssVar, esc } from "@/lib/echarts";
 import type { TopologyData } from "@/lib/types";
+import { fmt } from "@/lib/utils";
 
 export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction?: (prompt: string) => void }) {
   const onEvents = useMemo(() => ({
@@ -21,11 +22,11 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
         formatter: (params: any) => {
           if (params.dataType === "node") {
             const d = params.data;
-            return `<b>${esc(d.name)}</b><br/>Status: ${esc(d.status)}<br/>Throughput: ${esc(d.rpm)} rpm<br/>P95: ${esc(d.p95)}ms<br/>Errors: ${esc(d.errors)}%`;
+            return `<b>${esc(d.name)}</b><br/>Status: ${esc(d.status)}<br/>Throughput: ${fmt(d.rpm)} rpm<br/>P95: ${fmt(d.p95)}ms<br/>Errors: ${fmt(d.errors)}%`;
           }
           if (params.dataType === "edge") {
             const d = params.data;
-            return `<b>${esc(d.source)} → ${esc(d.target)}</b><br/>Volume: ${esc(d.rpm)} rpm<br/>Error Rate: ${esc(d.errorRate)}%`;
+            return `<b>${esc(d.source)} → ${esc(d.target)}</b><br/>Volume: ${fmt(d.rpm)} rpm<br/>Error Rate: ${fmt(d.errorRate)}%`;
           }
           return "";
         },
@@ -67,7 +68,7 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
               show: true,
               position: "bottom",
               distance: 8,
-              formatter: `{name|${n.id}}\n{rpm|${n.rpm >= 1000 ? (n.rpm / 1000).toFixed(1) + "k" : n.rpm} rpm}`,
+              formatter: `{name|${n.id}}\n{rpm|${fmt(n.rpm)} rpm}`,
               rich: {
                 name: { fontSize: 11, color: cssVar("--foreground"), fontWeight: 500, align: "center" },
                 rpm: { fontSize: 9, color: cssVar("--muted-foreground"), align: "center" },
