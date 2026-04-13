@@ -257,21 +257,21 @@ WITH producers AS (
   SELECT
     date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
     "name=service_name" AS service,
-    json_extract_string(from_utf8("name=attributes_json"), '$.messaging.destination.name') AS destination,
-    json_extract_string(from_utf8("name=attributes_json"), '$.messaging.system') AS msg_system
+    json_extract_string(decode("name=attributes_json"), '$.messaging.destination.name') AS destination,
+    json_extract_string(decode("name=attributes_json"), '$.messaging.system') AS msg_system
   FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
   WHERE "name=kind" = 'SPAN_KIND_PRODUCER'
-    AND json_extract_string(from_utf8("name=attributes_json"), '$.messaging.destination.name') IS NOT NULL
+    AND json_extract_string(decode("name=attributes_json"), '$.messaging.destination.name') IS NOT NULL
 ),
 consumers AS (
   SELECT
     date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
     "name=service_name" AS service,
-    json_extract_string(from_utf8("name=attributes_json"), '$.messaging.destination.name') AS destination,
-    json_extract_string(from_utf8("name=attributes_json"), '$.messaging.system') AS msg_system
+    json_extract_string(decode("name=attributes_json"), '$.messaging.destination.name') AS destination,
+    json_extract_string(decode("name=attributes_json"), '$.messaging.system') AS msg_system
   FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
   WHERE "name=kind" = 'SPAN_KIND_CONSUMER'
-    AND json_extract_string(from_utf8("name=attributes_json"), '$.messaging.destination.name') IS NOT NULL
+    AND json_extract_string(decode("name=attributes_json"), '$.messaging.destination.name') IS NOT NULL
 )
 SELECT
   p.bucket,

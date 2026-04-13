@@ -51,7 +51,8 @@ func (s *Server) RegisterRoutes(e *echo.Echo) {
 	handler := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
 		return s.mcp
 	}, &mcp.StreamableHTTPOptions{
-		Stateless: true, // Survives server restarts - no session persistence needed
+		Stateless:                  true, // Survives server restarts - no session persistence needed
+		DisableLocalhostProtection: true, // Server is behind a reverse proxy (Caddy/nginx)
 	})
 	e.Any("/mcp", echo.WrapHandler(handler))
 

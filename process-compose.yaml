@@ -4,8 +4,10 @@ processes:
   server:
     command: air
     working_dir: .
-    env_file: .env
+    environment:
+      - OTEL_SERVICE_NAME=fanout
+    env_file: ./.env
 
-  client:
+  web:
     command: bun run dev
     working_dir: ./client

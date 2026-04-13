@@ -62,9 +62,9 @@ type AlertSummary struct {
 
 // ActionContext is passed to webhook templates and delivery logic.
 type ActionContext struct {
-	Rule  Rule        `json:"rule"`
-	Alert Alert       `json:"alert"`
-	Env   AlertEnv    `json:"env"`
-	Event string      `json:"event"`
-	Time  time.Time   `json:"time"`
+	Rule  Rule      `json:"rule"`
+	Alert Alert     `json:"alert"`
+	Env   AlertEnv  `json:"env"`
+	Event string    `json:"event"`
+	Time  time.Time `json:"time"`
 }
