@@ -24,7 +24,7 @@ const respondToolName = "respond"
 func respondToolDef() ToolDef {
 	return ToolDef{
 		Name:        respondToolName,
-		Description: "Produce your final response with markdown text and visualization blocks. Call this as your last action.",
+		Description: "Produce your final text analysis of the tool results. Visualization blocks are generated automatically. Call this as your last action.",
 		InputSchema: generateResponseSchema(), // from schema_gen.go
 	}
 }
@@ -231,7 +231,8 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		// Parse text-only response; blocks are built deterministically from tools.
 		var blocks []Block
 		var resp struct {
-			Text string `json:"text"`
+			Text   string          `json:"text"`
+			Blocks json.RawMessage `json:"blocks"`
 		}
 		if err := json.Unmarshal([]byte(respondCall.Input), &resp); err != nil {
 			slog.Error("failed to parse respond tool input", "err", err, "input_preview", truncateJSON(respondCall.Input, 500))
@@ -241,6 +242,9 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 			}
 			blocks = []Block{MakeTextBlock(text)}
 		} else {
+			if len(resp.Blocks) > 0 {
+				slog.Warn("respond tool input included unexpected blocks field; ignoring stale LLM block output")
+			}
 			if resp.Text != "" {
 				blocks = []Block{MakeTextBlock(resp.Text)}
 			} else {

@@ -139,6 +139,37 @@ func TestBuildBlocksFromTraceResult_Waterfall(t *testing.T) {
 	}
 }
 
+func TestBuildBlocksFromTraceResult_SkipsBadSpanTimestamp(t *testing.T) {
+	text := `{
+		"trace_id":"trace-1",
+		"total_duration_ms":42,
+		"span_count":2,
+		"services":["api","db"],
+		"has_error":false,
+		"spans":[
+			{"span_id":"root","service":"api","operation":"GET /users","start_time":"2026-04-13T12:00:00Z","duration_ms":40,"status":"STATUS_CODE_OK"},
+			{"span_id":"child","parent_span_id":"root","service":"db","operation":"SELECT users","start_time":"not-a-time","duration_ms":15,"status":"STATUS_CODE_OK"}
+		],
+		"logs":[]
+	}`
+
+	blocks := buildBlocksFromTraceResult(text)
+	if len(blocks) != 1 {
+		t.Fatalf("got %d blocks, want 1", len(blocks))
+	}
+
+	var data TraceWaterfallData
+	if err := json.Unmarshal(blocks[0].Data, &data); err != nil {
+		t.Fatalf("unmarshal trace waterfall: %v", err)
+	}
+	if len(data.Spans) != 1 {
+		t.Fatalf("span count = %d, want 1 valid span", len(data.Spans))
+	}
+	if data.Spans[0].ID != "root" {
+		t.Errorf("span id = %q, want root", data.Spans[0].ID)
+	}
+}
+
 func TestBuildBlocksFromCompare_TimeComparison(t *testing.T) {
 	text := `{
 		"mode":"time",
@@ -309,6 +340,55 @@ func TestBuildBlocksFromMetrics_SparseFallsBackToTable(t *testing.T) {
 	}
 	if blocks[0].Type != BlockTable {
 		t.Fatalf("block type = %q, want table fallback", blocks[0].Type)
+	}
+}
+
+func TestBuildBlocksFromMetrics_AlignedSeriesBuildsTimeseries(t *testing.T) {
+	text := `{
+		"series":[
+			{"metric":"http.server.duration","aggregation":"avg","unit":"ms","labels":{"service":"api"},"datapoints":[
+				{"time":"2026-04-13T12:00:00Z","value":10},
+				{"time":"2026-04-13T12:01:00Z","value":11}
+			]}
+		],
+		"anomalies":[]
+	}`
+
+	blocks := buildBlocksFromMetricsResult(text)
+	if len(blocks) != 1 {
+		t.Fatalf("got %d blocks, want 1", len(blocks))
+	}
+	if blocks[0].Type != BlockTimeseries {
+		t.Fatalf("block type = %q, want timeseries", blocks[0].Type)
+	}
+
+	var data TimeseriesBlockData
+	if err := json.Unmarshal(blocks[0].Data, &data); err != nil {
+		t.Fatalf("unmarshal timeseries: %v", err)
+	}
+	if len(data.Series) != 1 {
+		t.Fatalf("series count = %d, want 1", len(data.Series))
+	}
+	if data.Series[0].Label != "api" {
+		t.Errorf("series label = %q, want api", data.Series[0].Label)
+	}
+	if len(data.Labels) != 2 {
+		t.Fatalf("labels count = %d, want 2", len(data.Labels))
+	}
+	if data.YLabel != "ms" {
+		t.Errorf("yLabel = %q, want ms", data.YLabel)
+	}
+}
+
+func TestSplitMethodPath_Allowlist(t *testing.T) {
+	method, path := splitMethodPath("GET /users")
+	if method != "GET" || path != "/users" {
+		t.Fatalf("got %q %q, want GET /users", method, path)
+	}
+
+	method, path = splitMethodPath("SELECT users")
+	if method != "" || path != "SELECT users" {
+		t.Fatalf("got %q %q, want empty method and original path", method, path)
 	}
 }
 

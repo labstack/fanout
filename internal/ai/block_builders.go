@@ -33,26 +33,34 @@ func buildBlocksFromToolResult(name, text string) []Block {
 	case "query":
 		return suggestBlocksFromQueryText(text)
 	default:
+		slog.Debug("no block builder for tool", "tool", name)
 		return nil
 	}
 }
 
 func buildBlocksFromTraceResult(text string) []Block {
 	var out mcpout.TraceOut
-	if err := json.Unmarshal([]byte(text), &out); err != nil || len(out.Spans) == 0 {
-		return nil
-	}
-
-	base, ok := parseTimestamp(out.Spans[0].StartTime)
-	if !ok {
+	if !unmarshalToolResult("trace", text, &out) || len(out.Spans) == 0 {
 		return nil
 	}
 
 	spans := make([]TraceSpan, 0, len(out.Spans))
+	var (
+		base    time.Time
+		baseSet bool
+	)
 	for _, sp := range out.Spans {
 		start, ok := parseTimestamp(sp.StartTime)
 		if !ok {
-			return nil
+			slog.Warn("skipping trace span with invalid start time",
+				"trace_id", out.TraceID,
+				"span_id", sp.SpanID,
+				"start_time", sp.StartTime)
+			continue
+		}
+		if !baseSet {
+			base = start
+			baseSet = true
 		}
 		var parent *string
 		if sp.ParentSpanID != "" {
@@ -68,13 +76,16 @@ func buildBlocksFromTraceResult(text string) []Block {
 			Status:    normalizeStatus(sp.Status),
 		})
 	}
+	if !baseSet || len(spans) == 0 {
+		return nil
+	}
 
 	return []Block{NewBlock(BlockTraceWaterfall, TraceWaterfallData{Spans: spans})}
 }
 
 func buildBlocksFromLogsResult(text string) []Block {
 	var out mcpout.LogsOut
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
+	if !unmarshalToolResult("logs", text, &out) {
 		return nil
 	}
 
@@ -113,7 +124,7 @@ func buildBlocksFromLogsResult(text string) []Block {
 
 func buildBlocksFromCompareResult(text string) []Block {
 	var out mcpout.CompareOut
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
+	if !unmarshalToolResult("compare", text, &out) {
 		return nil
 	}
 
@@ -169,7 +180,7 @@ func buildBlocksFromCompareResult(text string) []Block {
 
 func buildBlocksFromOverviewResult(text string) []Block {
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+	if !unmarshalToolResult("overview", text, &raw) {
 		return nil
 	}
 	if _, ok := raw["health"]; !ok {
@@ -177,7 +188,7 @@ func buildBlocksFromOverviewResult(text string) []Block {
 	}
 
 	var out mcpout.OverviewOut
-	if err := json.Unmarshal([]byte(text), &out); err != nil || out.Health == nil {
+	if !unmarshalToolResult("overview", text, &out) || out.Health == nil {
 		return nil
 	}
 
@@ -203,7 +214,7 @@ func buildBlocksFromOverviewResult(text string) []Block {
 
 func buildBlocksFromDiagnoseResult(text string) []Block {
 	var out mcpout.DiagnoseOut
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
+	if !unmarshalToolResult("diagnose", text, &out) {
 		return nil
 	}
 
@@ -241,7 +252,7 @@ func buildBlocksFromDiagnoseResult(text string) []Block {
 
 func buildBlocksFromSpansResult(text string) []Block {
 	var out mcpout.SpansOut
-	if err := json.Unmarshal([]byte(text), &out); err != nil {
+	if !unmarshalToolResult("spans", text, &out) {
 		return nil
 	}
 
@@ -290,13 +301,13 @@ func buildBlocksFromSpansResult(text string) []Block {
 
 func buildBlocksFromMetricsResult(text string) []Block {
 	var raw map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(text), &raw); err != nil {
+	if !unmarshalToolResult("metrics", text, &raw) {
 		return nil
 	}
 
 	if seriesRaw, ok := raw["series"]; ok {
 		var out mcpout.MetricsQueryOut
-		if err := json.Unmarshal([]byte(text), &out); err != nil {
+		if !unmarshalToolResult("metrics", text, &out) {
 			return nil
 		}
 		if block := buildMetricsTimeseriesBlock(out.Series); block != nil {
@@ -317,7 +328,7 @@ func buildBlocksFromMetricsResult(text string) []Block {
 
 	if _, ok := raw["metrics"]; ok {
 		var out mcpout.MetricsListOut
-		if err := json.Unmarshal([]byte(text), &out); err != nil || len(out.Metrics) == 0 {
+		if !unmarshalToolResult("metrics", text, &out) || len(out.Metrics) == 0 {
 			return nil
 		}
 		rows := make([]map[string]any, 0, len(out.Metrics))
@@ -351,7 +362,7 @@ func buildBlocksFromMetricsResult(text string) []Block {
 
 func buildBlocksFromTopologyResult(text string) []Block {
 	var out mcpout.TopologyOut
-	if err := json.Unmarshal([]byte(text), &out); err != nil || len(out.Nodes) == 0 || out.WindowMinutes <= 0 {
+	if !unmarshalToolResult("topology", text, &out) || len(out.Nodes) == 0 || out.WindowMinutes <= 0 {
 		return nil
 	}
 
@@ -391,7 +402,7 @@ func suggestBlocksFromQueryText(text string) []Block {
 			Results []map[string]any `json:"results"`
 		} `json:"data"`
 	}
-	if err := json.Unmarshal([]byte(text), &envelope); err != nil {
+	if !unmarshalToolResult("query", text, &envelope) {
 		return nil
 	}
 	return suggestBlocksFromRows(envelope.Data.Results)
@@ -959,10 +970,13 @@ func throughputStatus(count int64) string {
 
 func splitMethodPath(name string) (string, string) {
 	parts := strings.SplitN(strings.TrimSpace(name), " ", 2)
-	if len(parts) == 2 && len(parts[0]) > 0 {
-		return strings.ToUpper(parts[0]), parts[1]
+	if len(parts) == 2 {
+		method := strings.ToUpper(parts[0])
+		if validHTTPMethod(method) {
+			return method, parts[1]
+		}
 	}
-	return "N/A", strings.TrimSpace(name)
+	return "", strings.TrimSpace(name)
 }
 
 func deriveEndpointStatus(p95Ms, errorRatePct float64) string {
@@ -1088,7 +1102,7 @@ func buildGenericArrayTableBlock(raw map[string]json.RawMessage, field, _ string
 		return nil
 	}
 	var rows []map[string]any
-	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+	if !unmarshalToolResultBytes(field, data, &rows) || len(rows) == 0 {
 		return nil
 	}
 	block := buildQueryTableBlock(rows)
@@ -1121,4 +1135,25 @@ func humanizeColumn(col string) string {
 		parts[i] = strings.ToUpper(lower[:1]) + lower[1:]
 	}
 	return strings.Join(parts, " ")
+}
+
+func unmarshalToolResult(tool, text string, dst any) bool {
+	return unmarshalToolResultBytes(tool, []byte(text), dst)
+}
+
+func unmarshalToolResultBytes(tool string, data []byte, dst any) bool {
+	if err := json.Unmarshal(data, dst); err != nil {
+		slog.Warn("failed to parse tool result for block builder", "tool", tool, "err", err)
+		return false
+	}
+	return true
+}
+
+func validHTTPMethod(method string) bool {
+	switch method {
+	case "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS":
+		return true
+	default:
+		return false
+	}
 }
