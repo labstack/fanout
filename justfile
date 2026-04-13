@@ -1,11 +1,12 @@
 # Fanout justfile
 
+set shell := ["bash", "-euo", "pipefail", "-c"]
 set dotenv-load
 
 export CGO_ENABLED := "1"
 
 bin := "fanout"
-sock := "{{sock}}"
+sock := env("SOCK", "/tmp/pc-fanout.sock")
 
 default:
     @just --list

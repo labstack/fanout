@@ -106,7 +106,7 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 	}
 	// Attribute filters
 	for key, val := range p.Attrs {
-		filters = append(filters, `json_extract_string(from_utf8("name=attributes_json"), ?) = ?`)
+		filters = append(filters, `json_extract_string(CAST("name=attributes_json" AS VARCHAR), ?) = ?`)
 		args = append(args, "$."+key, val)
 	}
 
