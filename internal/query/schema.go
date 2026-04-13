@@ -136,7 +136,7 @@ Common queries:
 - By metric name: WHERE "name=name" = 'http.server.duration'
 - By type: WHERE "name=mtype" = 'histogram'
 - By unit: WHERE "name=unit" = 'ms'
-- Get exemplar traces: SELECT json_extract_string(CAST("name=exemplars_json" AS VARCHAR), '$[0].trace_id') as trace_id
+- Get exemplar traces: SELECT json_extract_string(decode("name=exemplars_json"), '$[0].trace_id') as trace_id
 
 ### 4. Rollup Table (service_rollup)
 Pre-aggregated data for fast queries:
@@ -174,7 +174,7 @@ Time range:
 2. Use union_by_name=true to handle schema evolution (old files may not have new columns)
 3. Filter by time to improve performance
 4. Use service_rollup table for fast dashboard queries
-5. JSON columns are BLOB; cast with CAST(col AS VARCHAR) before json_extract_*
+5. JSON columns are BLOB; use decode(col) to convert to VARCHAR before json_extract_*
 6. Always include LIMIT clause (default max 1000 rows)
 7. Data columns have "name=" prefix and must be double-quoted
 8. Partition columns (tenant, namespace, year, month, day, hour) have NO prefix
@@ -183,7 +183,7 @@ Time range:
 
 ## DuckDB-Specific Functions
 - read_parquet('path/**/*.parquet', hive_partitioning=true, union_by_name=true): Read Parquet with partition columns and schema evolution
-- CAST(blob_column AS VARCHAR): Convert BLOB → VARCHAR (for JSON columns)
+- decode(blob_column): Convert BLOB → VARCHAR (for JSON columns)
 - json_extract_string(json_text, '$.key'): Extract JSON values
 - to_timestamp(seconds): Convert epoch seconds to timestamp
 - EXTRACT(EPOCH FROM timestamp): Get epoch seconds from timestamp
