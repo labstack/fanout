@@ -14,8 +14,9 @@ default:
 # Install dev tools + client deps
 install:
     go install github.com/air-verse/air@latest
-    brew install process-compose 2>/dev/null || true
+    brew install process-compose pre-commit 2>/dev/null || true
     cd client && bun install
+    pre-commit install
 
 # ── Dev ──────────────────────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ check:
     go fmt ./...
     go vet ./...
     just lint
+    cd client && npx tsc --noEmit
     just build
     @echo "All checks passed"
 
@@ -71,12 +73,31 @@ test *ARGS='./...':
 # Tag a release (v{YEAR.MONTH}.{NUM})
 release:
     #!/bin/bash
+    git fetch origin --tags main
+    BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$BRANCH" != "main" ]; then
+      echo "release must run from main." >&2
+      exit 1
+    fi
+    if ! git diff --quiet || ! git diff --cached --quiet; then
+      echo "release requires a clean tracked worktree." >&2
+      exit 1
+    fi
+    if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
+      echo "release must run from an up-to-date main (HEAD must equal origin/main)." >&2
+      exit 1
+    fi
     MONTH=$(date +%Y.%m)
     LAST=$(git tag --list "v${MONTH}.*" --sort=-v:refname | head -1)
     if [ -z "$LAST" ]; then NUM=1; else NUM=$(( ${LAST##*.} + 1 )); fi
     TAG="v${MONTH}.${NUM}"
     echo "Tagging ${TAG}"
-    git tag "$TAG" && git push origin "$TAG"
+    if git rev-parse "$TAG" >/dev/null 2>&1; then
+      echo "Tag $TAG already exists; pushing existing tag."
+    else
+      git tag "$TAG"
+    fi
+    git push origin "$TAG"
 
 # ── Ops ──────────────────────────────────────────────────────────────────────
 

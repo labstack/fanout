@@ -1,21 +1,65 @@
+# Pre-commit hooks configuration
+# Uses justfile commands — single source of truth with CI
+# Install: brew install pre-commit && pre-commit install
+
+default_install_hook_types: [pre-commit]
+default_stages: [pre-commit]
+
 repos:
+  # General hygiene
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        exclude: (node_modules|\.lock|dist)
       - id: end-of-file-fixer
+        exclude: (node_modules|\.lock|dist)
       - id: check-yaml
+        args: [--unsafe]
+        exclude: node_modules
       - id: check-merge-conflict
+        exclude: node_modules
       - id: mixed-line-ending
         args: [--fix=lf]
+        exclude: (node_modules|\.lock|dist)
       - id: check-added-large-files
         args: [--maxkb=1000]
+        exclude: (node_modules|dist)
 
+  # Go + client quality (path-filtered)
   - repo: local
     hooks:
-      - id: check
-        name: Full check (Go + client)
-        entry: just check
+      - id: go-fmt
+        name: Format (Go)
+        entry: bash -c 'test -z "$(gofmt -l .)" || (gofmt -d .; exit 1)'
         language: system
+        files: \.go$
         pass_filenames: false
-        always_run: true
+
+      - id: go-vet
+        name: Vet (Go)
+        entry: bash -c 'CGO_ENABLED=1 go vet ./...'
+        language: system
+        files: \.go$
+        pass_filenames: false
+
+      - id: go-lint
+        name: Lint (Go)
+        entry: golangci-lint run
+        language: system
+        files: \.go$
+        pass_filenames: false
+
+      - id: tsc
+        name: Type check (client)
+        entry: bash -c 'cd client && npx tsc --noEmit'
+        language: system
+        files: ^client/.*\.(ts|tsx)$
+        pass_filenames: false
+
+      - id: build
+        name: Build (Go + client)
+        entry: just build
+        language: system
+        files: \.(go|ts|tsx|css)$
+        pass_filenames: false

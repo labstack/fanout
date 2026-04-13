@@ -4,6 +4,19 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v2026.04.1)"
+        required: true
+      dry_run:
+        description: "Dry run (build but don't push)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
