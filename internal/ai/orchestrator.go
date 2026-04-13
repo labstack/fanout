@@ -228,11 +228,10 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 		// for subsequent turns (Anthropic requires tool_result after tool_use).
 		*conversation = append(*conversation, ToolMessage(respondCall.ID, `{"ok":true}`, false))
 
-		// Parse structured response; fall back to streamed text on failure
+		// Parse text-only response; blocks are built deterministically from tools.
 		var blocks []Block
 		var resp struct {
-			Text   string  `json:"text"`
-			Blocks []Block `json:"blocks"`
+			Text string `json:"text"`
 		}
 		if err := json.Unmarshal([]byte(respondCall.Input), &resp); err != nil {
 			slog.Error("failed to parse respond tool input", "err", err, "input_preview", truncateJSON(respondCall.Input, 500))
@@ -242,11 +241,11 @@ func (o *Orchestrator) step(ctx context.Context, conversation *[]Message,
 			}
 			blocks = []Block{MakeTextBlock(text)}
 		} else {
-			blocks = validateBlocks(resp.Blocks)
 			if resp.Text != "" {
-				blocks = append([]Block{MakeTextBlock(resp.Text)}, blocks...)
+				blocks = []Block{MakeTextBlock(resp.Text)}
+			} else {
+				blocks = []Block{MakeTextBlock(textBuf.String())}
 			}
-			// Validate and append tool-suggested blocks
 			blocks = append(blocks, validateBlocks(toolSuggestedBlocks)...)
 		}
 

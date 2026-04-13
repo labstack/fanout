@@ -40,40 +40,18 @@ var (
 )
 
 // generateResponseSchema returns a cached JSON Schema describing the "respond" tool's
-// input: {text: string, blocks: Block[]} where Block is a discriminated union (oneOf)
-// keyed by "type" with per-type "data" shapes derived from Go struct reflection.
+// input: {text: string}. Visualization blocks are built deterministically from
+// tool results, not emitted by the LLM.
 func generateResponseSchema() json.RawMessage {
 	responseSchemaOnce.Do(func() {
-		// Build the oneOf variants from the registry.
-		variants := make([]map[string]any, 0, len(BlockTypeRegistry))
-		for _, entry := range BlockTypeRegistry {
-			variant := map[string]any{
-				"type":                 "object",
-				"required":             []string{"type", "data"},
-				"additionalProperties": false,
-				"properties": map[string]any{
-					"type": map[string]any{
-						"type":  "string",
-						"const": string(entry.Type),
-					},
-					"data": reflectSchema(entry.Data),
-				},
-			}
-			variants = append(variants, variant)
-		}
-
 		schema := map[string]any{
 			"type":                 "object",
-			"required":             []string{"text", "blocks"},
+			"required":             []string{"text"},
 			"additionalProperties": false,
 			"properties": map[string]any{
 				"text": map[string]any{
 					"type":        "string",
-					"description": "Markdown text response to the user.",
-				},
-				"blocks": map[string]any{
-					"type":  "array",
-					"items": map[string]any{"oneOf": variants},
+					"description": "Markdown text response analyzing the tool results for the user.",
 				},
 			},
 		}

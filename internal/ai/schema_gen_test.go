@@ -3,7 +3,6 @@ package ai
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -30,8 +29,8 @@ func TestGenerateResponseSchema_HasRequiredFields(t *testing.T) {
 	if _, ok := props["text"]; !ok {
 		t.Error("schema missing 'text' property")
 	}
-	if _, ok := props["blocks"]; !ok {
-		t.Error("schema missing 'blocks' property")
+	if _, ok := props["blocks"]; ok {
+		t.Error("schema should not have 'blocks' property")
 	}
 
 	required, ok := m["required"].([]any)
@@ -42,24 +41,8 @@ func TestGenerateResponseSchema_HasRequiredFields(t *testing.T) {
 	for _, r := range required {
 		found[r.(string)] = true
 	}
-	if !found["text"] || !found["blocks"] {
-		t.Errorf("required = %v, want text and blocks", required)
-	}
-}
-
-func TestGenerateResponseSchema_BlocksHasAllTypes(t *testing.T) {
-	schema := generateResponseSchema()
-	raw := string(schema)
-
-	types := []string{
-		"text", "metrics", "table", "timeseries", "bar", "heatmap",
-		"trace_waterfall", "topology", "flame_graph", "sankey",
-		"dep_matrix", "endpoints", "correlation", "logs", "comparison",
-	}
-	for _, bt := range types {
-		if !strings.Contains(raw, `"`+bt+`"`) {
-			t.Errorf("schema missing block type %q", bt)
-		}
+	if !found["text"] {
+		t.Errorf("required = %v, want text", required)
 	}
 }
 
@@ -116,72 +99,18 @@ func TestReflectSchema_OptionalField(t *testing.T) {
 	}
 }
 
-// TestSchemaCoversAllBlockTypes verifies the generated JSON schema has a variant
-// for every BlockType in the registry and that each variant's data schema matches
-// the Go struct fields — catching drift between structs and schema at test time.
-func TestSchemaCoversAllBlockTypes(t *testing.T) {
-	schema := generateResponseSchema()
-	var m map[string]any
-	if err := json.Unmarshal(schema, &m); err != nil {
-		t.Fatalf("schema is not valid JSON: %v", err)
-	}
-
-	// Extract oneOf variants from blocks.items
-	props := m["properties"].(map[string]any)
-	blocks := props["blocks"].(map[string]any)
-	items := blocks["items"].(map[string]any)
-	oneOf := items["oneOf"].([]any)
-
-	// Build map of type→variant from schema
-	schemaVariants := map[string]map[string]any{}
-	for _, v := range oneOf {
-		variant := v.(map[string]any)
-		vProps := variant["properties"].(map[string]any)
-		typeObj := vProps["type"].(map[string]any)
-		constVal := typeObj["const"].(string)
-		schemaVariants[constVal] = vProps["data"].(map[string]any)
-	}
-
-	// Check every registry entry has a matching variant with correct fields
+func TestBlockTypeRegistry_ReflectSchemasRemainValid(t *testing.T) {
 	for _, entry := range BlockTypeRegistry {
-		typeName := string(entry.Type)
-		dataSchema, ok := schemaVariants[typeName]
-		if !ok {
-			t.Errorf("schema missing variant for block type %q", typeName)
-			continue
+		schema := reflectSchema(entry.Data)
+		if schema["type"] != "object" {
+			t.Errorf("%s schema type = %v, want object", entry.Type, schema["type"])
 		}
-
-		// Compare fields: reflectSchema vs schema variant
-		expected := reflectSchema(entry.Data)
-		expectedProps, _ := expected["properties"].(map[string]any)
-		schemaProps, _ := dataSchema["properties"].(map[string]any)
-
-		if expectedProps == nil && schemaProps == nil {
-			continue
+		props, _ := schema["properties"].(map[string]any)
+		if props == nil {
+			t.Errorf("%s schema missing properties", entry.Type)
 		}
-
-		// Check no missing fields
-		for fieldName := range expectedProps {
-			if _, ok := schemaProps[fieldName]; !ok {
-				t.Errorf("block type %q: schema missing field %q", typeName, fieldName)
-			}
-		}
-		// Check no extra fields
-		for fieldName := range schemaProps {
-			if _, ok := expectedProps[fieldName]; !ok {
-				t.Errorf("block type %q: schema has extra field %q", typeName, fieldName)
-			}
-		}
-	}
-
-	// Check no extra variants in schema
-	registryTypes := map[string]bool{}
-	for _, entry := range BlockTypeRegistry {
-		registryTypes[string(entry.Type)] = true
-	}
-	for typeName := range schemaVariants {
-		if !registryTypes[typeName] {
-			t.Errorf("schema has variant %q not in BlockTypeRegistry", typeName)
+		if len(props) == 0 {
+			t.Errorf("%s schema has no properties", entry.Type)
 		}
 	}
 }

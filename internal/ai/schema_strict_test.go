@@ -210,28 +210,13 @@ func TestStrictifySchema_ResponseSchema(t *testing.T) {
 		t.Error("top-level missing additionalProperties: false")
 	}
 
-	// Walk into blocks.items.oneOf and check each variant
 	props := m["properties"].(map[string]any)
-	blocks := props["blocks"].(map[string]any)
-	items := blocks["items"].(map[string]any)
-	oneOf := items["oneOf"].([]any)
-
-	if len(oneOf) != len(BlockTypeRegistry) {
-		t.Errorf("oneOf has %d variants, want %d", len(oneOf), len(BlockTypeRegistry))
+	if _, ok := props["blocks"]; ok {
+		t.Fatal("response schema should not include blocks")
 	}
-
-	for i, v := range oneOf {
-		variant := v.(map[string]any)
-		if variant["additionalProperties"] != false {
-			t.Errorf("variant[%d] missing additionalProperties: false", i)
-		}
-		// Check that the data object also has additionalProperties: false (if it has properties)
-		vProps := variant["properties"].(map[string]any)
-		data := vProps["data"].(map[string]any)
-		_, hasProps := data["properties"].(map[string]any)
-		if data["type"] == "object" && hasProps && data["additionalProperties"] != false {
-			t.Errorf("variant[%d] data object missing additionalProperties: false", i)
-		}
+	text := props["text"].(map[string]any)
+	if text["type"] != "string" {
+		t.Errorf("text property type = %v, want string", text["type"])
 	}
 }
 

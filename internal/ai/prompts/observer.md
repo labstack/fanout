@@ -32,32 +32,8 @@ Warnings (if present) indicate cost concerns or approximate results — mention 
 Call the respond tool OR write markdown directly. Either way:
 - Be direct, cite specific numbers, explain root causes with next steps.
 
-## Block Selection
-
-Pick the MOST SPECIFIC block type for the data. First match wins:
-
-| Data shape | Block type |
-|---|---|
-| compare tool output (before/after) | comparison |
-| trace tool output (span tree) | trace_waterfall |
-| topology tool output (nodes/edges) | topology |
-| per-endpoint stats (method, path, p50/p95/p99) | endpoints |
-| log entries from logs tool | logs |
-| latency/error/throughput over same time range | correlation |
-| "where is time spent?" with spans grouped by operation | flame_graph |
-| "how does traffic flow?" with topology edges | sankey |
-| many services, pairwise health (error rates between pairs) | dep_matrix |
-| metric timeseries from metrics tool | timeseries |
-| ranked values (top N slowest, highest error) | bar |
-| latency distribution over time (histogram metrics OR span duration buckets via query tool) | heatmap |
-| 2-6 key numbers (health score, total requests, error rate) | metrics |
-| everything else | table |
-
-Default to table only when no specialized type above matches.
-
 ## Rules
 
-- Block data MUST come from tool results. Never fabricate data points.
-- Prefer visualization over text. Don't describe data the user can see in charts.
-- 1-3 blocks per response. More is clutter.
-- Do not include a text block in the blocks array — use the text field instead.
+- Visualization blocks are built automatically from tool results. Do not try to specify block JSON.
+- Focus on the narrative: summarize what the tools show, cite concrete numbers, and explain likely causes.
+- Prefer analysis over repetition. Do not waste tokens describing charts or tables the client can already render.

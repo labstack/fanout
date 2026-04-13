@@ -134,13 +134,7 @@ func (r *ToolRegistry) Execute(ctx context.Context, name string, input json.RawM
 	}
 	text := extractMCPText(result)
 
-	// Post-process: suggest visualization blocks from structured results
-	var blocks []Block
-	if name == "query" {
-		blocks = suggestBlocksFromQueryText(text)
-	}
-
-	return text, blocks, nil
+	return text, buildBlocksFromToolResult(name, text), nil
 }
 
 // extractMCPText pulls text content from an MCP CallToolResult.

@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -63,6 +65,9 @@ func TestOverviewHandler(t *testing.T) {
 		t.Fatalf("overview() error = %v", err)
 	}
 
+	if out.Health == nil {
+		t.Fatal("Health should not be nil when health is requested")
+	}
 	if out.Health.TotalServices != 2 {
 		t.Errorf("Health.TotalServices = %d, want 2", out.Health.TotalServices)
 	}
@@ -120,6 +125,33 @@ func TestOverviewHandler_WithWindow(t *testing.T) {
 
 	if out.Window != "1h" {
 		t.Errorf("Window = %q, want %q", out.Window, "1h")
+	}
+}
+
+func TestOverviewHandler_IncludeServices_OmitsHealthJSON(t *testing.T) {
+	s, mock := newTestServer(t)
+	ctx := context.Background()
+
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
+			AddRow("frontend", int64(5000), sql.NullFloat64{Float64: 3.0, Valid: true},
+				sql.NullFloat64{Float64: 20.0, Valid: true},
+				sql.NullFloat64{Float64: 0.01, Valid: true}))
+
+	_, out, err := s.overview(ctx, nil, OverviewIn{Include: []string{"services"}})
+	if err != nil {
+		t.Fatalf("overview() error = %v", err)
+	}
+	if out.Health != nil {
+		t.Fatalf("Health should be nil when include excludes health")
+	}
+
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"health"`) {
+		t.Fatalf("marshaled overview unexpectedly included health: %s", data)
 	}
 }
 
@@ -453,8 +485,8 @@ func TestDiagnoseHandler(t *testing.T) {
 
 	// Slow ops query
 	mock.ExpectQuery("SELECT").WillReturnRows(
-		sqlmock.NewRows([]string{"op", "p95", "cnt"}).
-			AddRow("GET /api/heavy", 500.0, int64(100)))
+		sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}).
+			AddRow("GET /api/heavy", 200.0, 500.0, 900.0, 0.02, int64(100)))
 
 	// Dependencies query
 	mock.ExpectQuery("SELECT").WillReturnRows(
@@ -488,6 +520,9 @@ func TestDiagnoseHandler(t *testing.T) {
 	}
 	if out.Status != "healthy" {
 		t.Errorf("Status = %q, want %q", out.Status, "healthy")
+	}
+	if out.WindowMinutes != 15 {
+		t.Errorf("WindowMinutes = %d, want 15", out.WindowMinutes)
 	}
 	if out.Metrics.P50Ms != 5.0 {
 		t.Errorf("Metrics.P50Ms = %f, want 5.0", out.Metrics.P50Ms)
@@ -525,6 +560,8 @@ func TestDiagnoseHandler(t *testing.T) {
 		t.Errorf("SlowOperations count = %d, want 1", len(out.SlowOperations))
 	} else if out.SlowOperations[0].Name != "GET /api/heavy" {
 		t.Errorf("SlowOperations[0].Name = %q", out.SlowOperations[0].Name)
+	} else if out.SlowOperations[0].ErrorRate != 0.02 {
+		t.Errorf("SlowOperations[0].ErrorRate = %f, want 0.02", out.SlowOperations[0].ErrorRate)
 	}
 
 	// Verify dependencies mapped correctly
@@ -567,7 +604,7 @@ func TestDiagnoseHandler_DegradedService(t *testing.T) {
 			AddRow(int64(500), 100.0, 1500.0, 3000.0, 0.02))
 
 	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"operation", "message", "exception_type", "cnt", "trace_id"}))
-	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"op", "p95", "cnt"}))
+	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"op", "p50", "p95", "p99", "error_rate", "cnt"}))
 	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
 	// Baseline

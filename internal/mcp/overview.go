@@ -51,7 +51,7 @@ type OverviewIssue struct {
 type OverviewOut struct {
 	Timestamp string            `json:"timestamp"`
 	Window    string            `json:"window"`
-	Health    OverviewHealth    `json:"health,omitempty"`
+	Health    *OverviewHealth   `json:"health,omitempty"`
 	Services  []OverviewService `json:"services,omitempty"`
 	TopIssues []OverviewIssue   `json:"top_issues,omitempty"`
 }
@@ -81,16 +81,20 @@ func (s *Server) overview(ctx context.Context, req *mcp.CallToolRequest, in Over
 	out := OverviewOut{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Window:    tw.String(),
-		Health: OverviewHealth{
+		Services:  make([]OverviewService, 0, len(result.Services)),
+		TopIssues: make([]OverviewIssue, 0, len(result.Issues)),
+	}
+
+	includeAll := len(in.Include) == 0
+	if includeAll || containsOverviewSection(in.Include, "health") {
+		out.Health = &OverviewHealth{
 			Score:            result.Health.Score,
 			TotalServices:    result.Health.TotalServices,
 			ByStatus:         result.Health.ByStatus,
 			ThroughputPerMin: result.Health.ThroughputPerMin,
 			GlobalErrorRate:  result.Health.GlobalErrorRate,
 			GlobalP95Ms:      result.Health.GlobalP95Ms,
-		},
-		Services:  make([]OverviewService, 0, len(result.Services)),
-		TopIssues: make([]OverviewIssue, 0, len(result.Issues)),
+		}
 	}
 
 	for _, svc := range result.Services {
@@ -130,4 +134,13 @@ func (tw TimeWindow) String() string {
 		return fmt.Sprintf("%dh", minutes/60)
 	}
 	return fmt.Sprintf("%dm", minutes)
+}
+
+func containsOverviewSection(include []string, target string) bool {
+	for _, section := range include {
+		if section == target {
+			return true
+		}
+	}
+	return false
 }

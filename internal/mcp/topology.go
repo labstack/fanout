@@ -42,6 +42,7 @@ type ServiceEdge struct {
 }
 
 type TopologyOut struct {
+	WindowMinutes int           `json:"window_minutes"`
 	Nodes         []ServiceNode `json:"nodes"`
 	Edges         []ServiceEdge `json:"edges"`
 	CriticalPaths [][]string    `json:"critical_paths"`
@@ -73,6 +74,7 @@ func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in Topo
 	}
 
 	out := TopologyOut{
+		WindowMinutes: window,
 		Nodes:         make([]ServiceNode, 0, len(result.Nodes)),
 		Edges:         make([]ServiceEdge, 0, len(result.Edges)),
 		CriticalPaths: result.CriticalPaths,

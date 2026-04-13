@@ -46,16 +46,6 @@ func (p *scriptedProvider) Stream(_ context.Context, _ StreamParams, cb StreamCa
 func TestOrchestrator_RespondTool_ProducesBlocks(t *testing.T) {
 	respondInput, _ := json.Marshal(map[string]any{
 		"text": "System is healthy.",
-		"blocks": []map[string]any{
-			{
-				"type": "metrics",
-				"data": map[string]any{
-					"items": []map[string]any{
-						{"label": "P95", "value": 42.5, "unit": "ms", "status": "ok"},
-					},
-				},
-			},
-		},
 	})
 
 	provider := &scriptedProvider{
@@ -86,14 +76,11 @@ func TestOrchestrator_RespondTool_ProducesBlocks(t *testing.T) {
 	if doneEvent == nil {
 		t.Fatal("no CEDone event received")
 	}
-	if len(doneEvent.Blocks) < 2 {
-		t.Fatalf("got %d blocks, want >= 2 (text + metrics)", len(doneEvent.Blocks))
+	if len(doneEvent.Blocks) != 1 {
+		t.Fatalf("got %d blocks, want 1 (text only)", len(doneEvent.Blocks))
 	}
 	if doneEvent.Blocks[0].Type != BlockText {
-		t.Errorf("first block type = %q, want text", doneEvent.Blocks[0].Type)
-	}
-	if doneEvent.Blocks[1].Type != BlockMetrics {
-		t.Errorf("second block type = %q, want metrics", doneEvent.Blocks[1].Type)
+		t.Errorf("block type = %q, want text", doneEvent.Blocks[0].Type)
 	}
 }
 
@@ -139,26 +126,17 @@ func TestOrchestrator_NoRespondTool_FallsBackToText(t *testing.T) {
 	}
 }
 
-func TestOrchestrator_RespondTool_InvalidBlocks_Dropped(t *testing.T) {
+func TestOrchestrator_RespondTool_MergesSuggestedBlocks(t *testing.T) {
 	respondInput, _ := json.Marshal(map[string]any{
 		"text": "Here's the data.",
-		"blocks": []map[string]any{
-			{
-				"type": "metrics",
-				"data": map[string]any{"items": []any{}}, // empty — invalid
-			},
-			{
-				"type": "table",
-				"data": map[string]any{
-					"columns": []map[string]any{{"key": "k", "label": "K"}},
-					"rows":    []map[string]any{{"k": "v"}},
-				},
-			},
-		},
 	})
 
 	provider := &scriptedProvider{
 		steps: []scriptedStep{
+			{
+				toolCalls:  []ToolCall{{ID: "t1", Name: "status", Input: `{}`}},
+				stopReason: "tool_use",
+			},
 			{
 				toolCalls:  []ToolCall{{ID: "r1", Name: respondToolName, Input: string(respondInput)}},
 				stopReason: "tool_use",
@@ -166,7 +144,16 @@ func TestOrchestrator_RespondTool_InvalidBlocks_Dropped(t *testing.T) {
 		},
 	}
 
-	tools := &ToolRegistry{handlers: map[string]ToolHandler{}}
+	tools := &ToolRegistry{
+		defs: []ToolDef{{Name: "status"}},
+		handlers: map[string]ToolHandler{
+			"status": func(_ context.Context, _ json.RawMessage) (string, []Block, error) {
+				return `{"ok":true}`, []Block{
+					MakeMetricsBlock([]MetricItem{{Label: "P95", Value: 42.5, Unit: "ms", Status: "ok"}}),
+				}, nil
+			},
+		},
+	}
 	orch := NewOrchestrator(provider, tools, nil, config.Config{})
 
 	var doneEvent *ClientEvent
@@ -182,9 +169,14 @@ func TestOrchestrator_RespondTool_InvalidBlocks_Dropped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Run() error: %v", err)
 	}
-	// Should have text + table (metrics dropped because empty items)
 	if len(doneEvent.Blocks) != 2 {
-		t.Fatalf("got %d blocks, want 2 (text + table, empty metrics dropped)", len(doneEvent.Blocks))
+		t.Fatalf("got %d blocks, want 2 (text + suggested metrics)", len(doneEvent.Blocks))
+	}
+	if doneEvent.Blocks[0].Type != BlockText {
+		t.Errorf("first block type = %q, want text", doneEvent.Blocks[0].Type)
+	}
+	if doneEvent.Blocks[1].Type != BlockMetrics {
+		t.Errorf("second block type = %q, want metrics", doneEvent.Blocks[1].Type)
 	}
 }
 
@@ -242,5 +234,16 @@ func TestRespondToolDef_HasSchema(t *testing.T) {
 	}
 	if len(b) < 100 {
 		t.Errorf("InputSchema too short (%d bytes), expected substantial schema", len(b))
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(b, &schema); err != nil {
+		t.Fatalf("schema unmarshal: %v", err)
+	}
+	props := schema["properties"].(map[string]any)
+	if _, ok := props["text"]; !ok {
+		t.Error("schema missing text property")
+	}
+	if _, ok := props["blocks"]; ok {
+		t.Error("schema should not contain blocks property")
 	}
 }
