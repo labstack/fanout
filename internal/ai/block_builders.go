@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -402,7 +403,8 @@ func suggestBlocksFromQueryText(text string) []Block {
 			Results []map[string]any `json:"results"`
 		} `json:"data"`
 	}
-	if !unmarshalToolResult("query", text, &envelope) {
+	if err := json.Unmarshal([]byte(text), &envelope); err != nil {
+		slog.Warn("failed to parse query tool result for block builder", "tool", "query", "err", err)
 		return nil
 	}
 	return suggestBlocksFromRows(envelope.Data.Results)
@@ -1142,11 +1144,27 @@ func unmarshalToolResult(tool, text string, dst any) bool {
 }
 
 func unmarshalToolResultBytes(tool string, data []byte, dst any) bool {
-	if err := json.Unmarshal(data, dst); err != nil {
+	payload := unwrapToolResultData(data)
+	if err := json.Unmarshal(payload, dst); err != nil {
 		slog.Warn("failed to parse tool result for block builder", "tool", tool, "err", err)
 		return false
 	}
 	return true
+}
+
+func unwrapToolResultData(data []byte) []byte {
+	var envelope struct {
+		Type string          `json:"type"`
+		Data json.RawMessage `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return data
+	}
+	payload := bytes.TrimSpace(envelope.Data)
+	if envelope.Type == "" || len(payload) == 0 || bytes.Equal(payload, []byte("null")) {
+		return data
+	}
+	return payload
 }
 
 func validHTTPMethod(method string) bool {

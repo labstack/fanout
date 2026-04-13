@@ -18,7 +18,7 @@ function statusPill(
   status: string,
   errorRate: number,
 ): { label: string; className: string } {
-  if (status === "unhealthy" || errorRate > 1) {
+  if (status === "unhealthy") {
     return {
       label: "UNHEALTHY",
       className: "bg-red-500/12 text-red-500",

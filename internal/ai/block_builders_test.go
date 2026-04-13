@@ -2,8 +2,13 @@ package ai
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
+
+func wrapToolResult(tool, payload string) string {
+	return fmt.Sprintf(`{"type":"%s","data":%s,"meta":{"source":"test"}}`, tool, payload)
+}
 
 func TestSuggestBlocksFromRows_Heatmap(t *testing.T) {
 	rows := []map[string]any{
@@ -117,7 +122,7 @@ func TestSuggestBlocksFromQueryText_NoResults(t *testing.T) {
 }
 
 func TestBuildBlocksFromTraceResult_Waterfall(t *testing.T) {
-	text := `{
+	text := wrapToolResult("trace", `{
 		"trace_id":"trace-1",
 		"total_duration_ms":42,
 		"span_count":2,
@@ -128,7 +133,7 @@ func TestBuildBlocksFromTraceResult_Waterfall(t *testing.T) {
 			{"span_id":"child","parent_span_id":"root","service":"db","operation":"SELECT users","start_time":"2026-04-13T12:00:00Z","duration_ms":15,"status":"STATUS_CODE_OK"}
 		],
 		"logs":[]
-	}`
+	}`)
 
 	blocks := buildBlocksFromTraceResult(text)
 	if len(blocks) != 1 {
@@ -140,7 +145,7 @@ func TestBuildBlocksFromTraceResult_Waterfall(t *testing.T) {
 }
 
 func TestBuildBlocksFromTraceResult_SkipsBadSpanTimestamp(t *testing.T) {
-	text := `{
+	text := wrapToolResult("trace", `{
 		"trace_id":"trace-1",
 		"total_duration_ms":42,
 		"span_count":2,
@@ -151,7 +156,7 @@ func TestBuildBlocksFromTraceResult_SkipsBadSpanTimestamp(t *testing.T) {
 			{"span_id":"child","parent_span_id":"root","service":"db","operation":"SELECT users","start_time":"not-a-time","duration_ms":15,"status":"STATUS_CODE_OK"}
 		],
 		"logs":[]
-	}`
+	}`)
 
 	blocks := buildBlocksFromTraceResult(text)
 	if len(blocks) != 1 {
@@ -203,11 +208,11 @@ func TestBuildBlocksFromCompare_TimeComparison(t *testing.T) {
 }
 
 func TestBuildBlocksFromOverview_NoHealth(t *testing.T) {
-	text := `{
+	text := wrapToolResult("overview", `{
 		"timestamp":"2026-04-13T12:00:00Z",
 		"window":"15m",
 		"services":[{"service":"api","status":"healthy","requests":100,"error_rate":0.01,"p50_ms":5,"p95_ms":20}]
-	}`
+	}`)
 
 	blocks := buildBlocksFromOverviewResult(text)
 	if blocks != nil {
@@ -216,12 +221,12 @@ func TestBuildBlocksFromOverview_NoHealth(t *testing.T) {
 }
 
 func TestBuildBlocksFromOverview_WithHealth(t *testing.T) {
-	text := `{
+	text := wrapToolResult("overview", `{
 		"timestamp":"2026-04-13T12:00:00Z",
 		"window":"15m",
 		"health":{"score":0.92,"total_services":12,"by_status":{"healthy":11,"degraded":1,"unhealthy":0},"throughput_per_min":1200,"global_error_rate":0.02,"global_p95_ms":250},
 		"services":[]
-	}`
+	}`)
 
 	blocks := buildBlocksFromOverviewResult(text)
 	if len(blocks) != 1 {
@@ -244,7 +249,7 @@ func TestBuildBlocksFromOverview_WithHealth(t *testing.T) {
 }
 
 func TestBuildBlocksFromDiagnose_EndpointsUsesOperationStats(t *testing.T) {
-	text := `{
+	text := wrapToolResult("diagnose", `{
 		"service":"checkout",
 		"status":"degraded",
 		"window_minutes":15,
@@ -254,7 +259,7 @@ func TestBuildBlocksFromDiagnose_EndpointsUsesOperationStats(t *testing.T) {
 			{"name":"GET /orders","p50_ms":80,"p95_ms":1400,"p99_ms":2400,"error_rate":0.02,"count":150}
 		],
 		"dependencies":[]
-	}`
+	}`)
 
 	blocks := buildBlocksFromDiagnoseResult(text)
 	if len(blocks) != 2 {
@@ -290,12 +295,12 @@ func TestBuildBlocksFromDiagnose_EndpointsUsesOperationStats(t *testing.T) {
 }
 
 func TestBuildBlocksFromTopology_NormalizesUnits(t *testing.T) {
-	text := `{
+	text := wrapToolResult("topology", `{
 		"window_minutes":60,
 		"nodes":[{"service":"api","status":"degraded","requests":120,"p50_ms":10,"p95_ms":200,"error_rate":0.02,"upstream_count":1,"downstream_count":1,"blast_radius":1}],
 		"edges":[{"source":"api","target":"db","edge_type":"call","calls":60,"avg_ms":12,"error_rate":0.01}],
 		"critical_paths":[["api","db"]]
-	}`
+	}`)
 
 	blocks := buildBlocksFromTopologyResult(text)
 	if len(blocks) != 1 {
@@ -321,7 +326,7 @@ func TestBuildBlocksFromTopology_NormalizesUnits(t *testing.T) {
 }
 
 func TestBuildBlocksFromMetrics_SparseFallsBackToTable(t *testing.T) {
-	text := `{
+	text := wrapToolResult("metrics", `{
 		"series":[
 			{"metric":"http.server.duration","aggregation":"avg","unit":"ms","labels":{"service":"api"},"datapoints":[
 				{"time":"2026-04-13T12:00:00Z","value":10},
@@ -332,7 +337,7 @@ func TestBuildBlocksFromMetrics_SparseFallsBackToTable(t *testing.T) {
 			]}
 		],
 		"anomalies":[]
-	}`
+	}`)
 
 	blocks := buildBlocksFromMetricsResult(text)
 	if len(blocks) != 1 {
@@ -344,7 +349,7 @@ func TestBuildBlocksFromMetrics_SparseFallsBackToTable(t *testing.T) {
 }
 
 func TestBuildBlocksFromMetrics_AlignedSeriesBuildsTimeseries(t *testing.T) {
-	text := `{
+	text := wrapToolResult("metrics", `{
 		"series":[
 			{"metric":"http.server.duration","aggregation":"avg","unit":"ms","labels":{"service":"api"},"datapoints":[
 				{"time":"2026-04-13T12:00:00Z","value":10},
@@ -352,7 +357,7 @@ func TestBuildBlocksFromMetrics_AlignedSeriesBuildsTimeseries(t *testing.T) {
 			]}
 		],
 		"anomalies":[]
-	}`
+	}`)
 
 	blocks := buildBlocksFromMetricsResult(text)
 	if len(blocks) != 1 {
@@ -393,11 +398,11 @@ func TestSplitMethodPath_Allowlist(t *testing.T) {
 }
 
 func TestBuildBlocksFromLogs_Ungrouped(t *testing.T) {
-	text := `{
+	text := wrapToolResult("logs", `{
 		"logs":[
 			{"time":"2026-04-13T12:00:00Z","service":"api","severity":"ERROR","body":"boom","trace_id":"trace-1"}
 		]
-	}`
+	}`)
 
 	blocks := buildBlocksFromLogsResult(text)
 	if len(blocks) != 1 {
