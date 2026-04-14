@@ -152,7 +152,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   sendMessage: (text, window = 60, namespace = "") => {
-    if (!client) return;
+    if (!client) {
+      console.error("[chat] sendMessage called before init()");
+      return;
+    }
 
     const userMsg: Message = {
       id: crypto.randomUUID(),

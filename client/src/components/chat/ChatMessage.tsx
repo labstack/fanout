@@ -10,7 +10,7 @@ export function ChatMessage({ message }: { message: Message }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="bg-primary text-primary-foreground rounded-[14px] rounded-br-[4px] px-4 py-2.5 max-w-[80%] text-[14px] leading-relaxed font-medium">
+        <div className="bg-primary text-primary-foreground rounded-[14px] rounded-br-[4px] px-4 py-2.5 max-w-[80%] text-[14px] leading-relaxed">
           {message.content}
         </div>
       </div>

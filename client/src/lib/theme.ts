@@ -1,3 +1,6 @@
+// These values must match the CSS custom properties in index.css :root.
+// If you change a color here, update index.css too (and vice versa).
+
 export const COLORS = {
   surface: "#09090b",
   surface1: "#121215",
@@ -13,10 +16,4 @@ export const COLORS = {
   label: "#71717a",
   text: "#e4e4e7",
   textDim: "#71717a",
-} as const;
-
-export const FONTS = {
-  mono: "'JetBrains Mono', monospace",
-  sans: "'Fragment Mono', monospace",
-  heading: "'DM Sans', system-ui, sans-serif",
 } as const;
