@@ -3,6 +3,8 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+@custom-variant dark (&:is(.dark *));
+
 /* ─── Theme tokens ─────────────────────────────────────────────────────── */
 @theme inline {
     --font-sans: "Fragment Mono", monospace;
