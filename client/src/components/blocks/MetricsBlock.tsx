@@ -1,13 +1,14 @@
 import type { MetricsBlockData } from "@/lib/types";
 import { fmt } from "@/lib/utils";
+import { COLORS } from "@/lib/theme";
 
 const STATUS_COLORS: Record<string, string> = {
-  ok: "#22c55e",
-  warning: "#f59e0b",
-  danger: "#ef4444",
+  ok: COLORS.healthy,
+  warning: COLORS.degraded,
+  danger: COLORS.unhealthy,
 };
 
-const DEFAULT_ACCENT = "#818cf8";
+const DEFAULT_ACCENT = COLORS.accent;
 
 export function MetricsBlock({ data }: { data: MetricsBlockData }) {
   return (

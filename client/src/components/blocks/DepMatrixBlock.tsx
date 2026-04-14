@@ -1,18 +1,19 @@
 import { useMemo } from "react";
 import type { DepMatrixData } from "@/lib/types";
+import { COLORS } from "@/lib/theme";
 
 function cellBg(errorRate: number | undefined): string {
   if (errorRate === undefined || errorRate === null) return "";
-  if (errorRate === 0) return "rgba(34, 197, 94, 0.15)";
-  if (errorRate < 0.5) return "rgba(34, 197, 94, 0.3)";
-  if (errorRate < 1.0) return "rgba(234, 179, 8, 0.3)";
-  if (errorRate < 2.0) return "rgba(234, 179, 8, 0.6)";
-  return "rgba(239, 68, 68, 0.6)";
+  if (errorRate === 0) return `${COLORS.healthy}26`;
+  if (errorRate < 0.5) return `${COLORS.healthy}4d`;
+  if (errorRate < 1.0) return `${COLORS.degraded}4d`;
+  if (errorRate < 2.0) return `${COLORS.degraded}99`;
+  return `${COLORS.unhealthy}99`;
 }
 
 function errorColor(errorRate: number): string {
-  if (errorRate > 1) return "#ef4444";
-  if (errorRate > 0.5) return "#f59e0b";
+  if (errorRate > 1) return COLORS.unhealthy;
+  if (errorRate > 0.5) return COLORS.degraded;
   return "inherit";
 }
 
@@ -134,10 +135,10 @@ export function DepMatrixBlock({ data }: { data: DepMatrixData }) {
       {/* Legend */}
       <div className="mt-2 flex flex-wrap gap-3 px-1">
         {[
-          { color: "rgba(34,197,94,0.3)", label: "< 0.5%" },
-          { color: "rgba(234,179,8,0.3)", label: "0.5-1%" },
-          { color: "rgba(234,179,8,0.6)", label: "1-2%" },
-          { color: "rgba(239,68,68,0.6)", label: "> 2%" },
+          { color: `${COLORS.healthy}4d`, label: "< 0.5%" },
+          { color: `${COLORS.degraded}4d`, label: "0.5-1%" },
+          { color: `${COLORS.degraded}99`, label: "1-2%" },
+          { color: `${COLORS.unhealthy}99`, label: "> 2%" },
         ].map((item) => (
           <div key={item.label} className="flex items-center gap-1.5 text-xs">
             <span

@@ -82,8 +82,8 @@ export class ChatClient {
             try {
               const data = JSON.parse(line.slice(6));
               this.onEvent({ type: currentEvent, ...data } as ChatEvent);
-            } catch {
-              // ignore malformed data lines
+            } catch (err) {
+              console.warn("[ChatClient] malformed SSE data, skipping:", line.slice(6, 100), err);
             }
             currentEvent = "";
           }
@@ -118,7 +118,7 @@ export class ChatClient {
     fetch(`${this.baseUrl}/api/chat/cancel`, {
       method: "POST",
       headers,
-    }).catch(() => {});
+    }).catch((err) => console.warn("[ChatClient] cancel request failed:", err));
   }
 
   /** Clear conversation history on the server. */
@@ -132,7 +132,7 @@ export class ChatClient {
     fetch(`${this.baseUrl}/api/chat/clear`, {
       method: "POST",
       headers,
-    }).catch(() => {});
+    }).catch((err) => console.warn("[ChatClient] clear request failed:", err));
   }
 
   /** Set the auth token for subsequent requests. */

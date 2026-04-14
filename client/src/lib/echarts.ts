@@ -17,6 +17,7 @@ import {
 } from "echarts/components";
 import { SVGRenderer } from "echarts/renderers";
 import ReactEChartsCore from "echarts-for-react/lib/core";
+import { COLORS } from "./theme";
 
 echarts.use([
   LineChart,
@@ -76,9 +77,9 @@ export function esc(s: unknown): string {
 /** Status color used by topology and sankey blocks. */
 export function statusColor(status?: string): string {
   switch (status?.toLowerCase()) {
-    case "healthy": return "#22c55e";
-    case "degraded": return "#f59e0b";
-    case "unhealthy": return "#ef4444";
-    default: return "#6b7280";
+    case "healthy": return COLORS.healthy;
+    case "degraded": return COLORS.degraded;
+    case "unhealthy": return COLORS.unhealthy;
+    default: return COLORS.label;
   }
 }

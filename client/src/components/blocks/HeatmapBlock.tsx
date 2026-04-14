@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import echarts, { ReactECharts, tooltipStyle, axisLine, axisLabel, esc } from "@/lib/echarts";
 import type { HeatmapBlockData } from "@/lib/types";
+import { COLORS } from "@/lib/theme";
 
 export function HeatmapBlock({ data }: { data: HeatmapBlockData }) {
   const option = useMemo(() => {
@@ -44,7 +45,7 @@ export function HeatmapBlock({ data }: { data: HeatmapBlockData }) {
         min: vMin,
         max: vMax,
         show: false,
-        inRange: { color: ["#ffffb2", "#fd8d3c", "#bd0026"] },
+        inRange: { color: [COLORS.surface2, COLORS.accent, COLORS.unhealthy] },
       },
       series: [{
         type: "heatmap" as const,

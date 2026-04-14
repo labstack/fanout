@@ -35,20 +35,20 @@ export function ChatInput() {
   return (
     <div className="px-4 pb-4 pt-2 shrink-0">
       <div className="input-glow max-w-4xl mx-auto">
-        <div className="flex items-end gap-2 rounded-2xl border border-border bg-card/80 backdrop-blur-sm px-4 py-3">
+        <div className="flex items-end gap-2 rounded-xl border border-border/80 bg-surface-1 px-4 py-3">
           <textarea
             ref={textareaRef}
             value={text}
             onChange={handleChange}
             onKeyDown={handleKeyDown}
             placeholder="Ask about your services..."
-            className="flex-1 resize-none bg-transparent text-base text-foreground placeholder:text-muted-foreground/70 focus:outline-none min-h-[24px] max-h-[120px] leading-6"
+            className="flex-1 resize-none bg-transparent text-[14px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none min-h-[24px] max-h-[120px] leading-6"
             rows={1}
           />
           {isLoading ? (
             <button
               onClick={cancel}
-              className="flex items-center justify-center h-8 w-8 rounded-lg bg-muted hover:bg-muted/80 transition-colors shrink-0"
+              className="flex items-center justify-center h-9 w-9 rounded-lg bg-surface-3 hover:bg-surface-3/80 transition-colors shrink-0"
               aria-label="Cancel"
             >
               <Square className="h-3.5 w-3.5 text-foreground fill-current" />
@@ -57,7 +57,7 @@ export function ChatInput() {
             <button
               onClick={handleSend}
               disabled={!text.trim()}
-              className="flex items-center justify-center h-8 w-8 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30 disabled:hover:bg-primary transition-colors shrink-0"
+              className="flex items-center justify-center h-9 w-9 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-20 disabled:hover:bg-primary transition-colors shrink-0"
               aria-label="Send"
             >
               <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
@@ -65,9 +65,6 @@ export function ChatInput() {
           )}
         </div>
       </div>
-      <p className="text-center text-xs text-muted-foreground mt-2 max-w-4xl mx-auto">
-        Fanout can make mistakes. Verify important data.
-      </p>
     </div>
   );
 }
