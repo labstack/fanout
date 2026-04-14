@@ -1,24 +1,22 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigation } from "react-router";
+import { useChatStore } from "@/stores/chat";
 
 export function NavLoader() {
-  const navigation = useNavigation();
-  const isLoading = navigation.state === "loading";
+  const streaming = useChatStore((s) => s.streaming);
   const [visible, setVisible] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>(null);
 
-  if (isLoading && !visible) {
-    setVisible(true);
-  }
-
   useEffect(() => {
-    if (!isLoading && visible) {
+    if (streaming) {
+      setVisible(true);
+      if (timerRef.current) clearTimeout(timerRef.current);
+    } else if (visible) {
       timerRef.current = setTimeout(() => setVisible(false), 200);
       return () => {
         if (timerRef.current) clearTimeout(timerRef.current);
       };
     }
-  }, [isLoading, visible]);
+  }, [streaming, visible]);
 
   return (
     <div className={`nav-loader ${visible ? "active" : ""}`}>

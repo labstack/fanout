@@ -150,8 +150,8 @@
 .block-card,
 .block-card-flush {
   background: var(--surface-1);
-  border: 1px solid rgba(96, 165, 250, 0.15);
-  border-radius: 14px;
+  border: 1px solid color-mix(in srgb, var(--primary) 12%, transparent);
+  border-radius: 12px;
 }
 
 .block-card {
@@ -161,11 +161,12 @@
 .block-title {
   margin-bottom: 0.5rem;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 0.6875rem;
   font-weight: 500;
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: #60a5fa;
+  letter-spacing: 0.08em;
+  color: var(--primary);
+  opacity: 0.7;
 }
 
 /* ─── Prose theme (shared between chat markdown and text blocks) ──────── */

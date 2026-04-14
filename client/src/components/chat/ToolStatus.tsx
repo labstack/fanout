@@ -4,10 +4,10 @@ import type { ToolCall } from "@/stores/chat";
 export function ToolStatus({ toolCall }: { toolCall: ToolCall }) {
   return (
     <div
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border ${
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] border mono ${
         toolCall.done
           ? "bg-healthy/10 border-healthy/20 text-healthy"
-          : "bg-muted/50 border-border/50 text-muted-foreground"
+          : "bg-surface-2 border-border/50 text-muted-foreground"
       }`}
     >
       {toolCall.done ? (
@@ -15,7 +15,7 @@ export function ToolStatus({ toolCall }: { toolCall: ToolCall }) {
       ) : (
         <Loader2 className="h-3 w-3 animate-spin" />
       )}
-      <span className="font-mono text-[11px]">{toolCall.name}</span>
+      <span>{toolCall.name}</span>
     </div>
   );
 }

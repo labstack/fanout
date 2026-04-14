@@ -327,40 +327,35 @@ const blocks: { title: string; description: string; block: Block }[] = [
 
 export function DemoPage() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="max-w-5xl mx-auto flex items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold">Block Components</h1>
-            <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-              {blocks.length} blocks
-            </span>
-          </div>
-          <a href="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-            Back to Chat
-          </a>
+    <div className="max-w-5xl mx-auto px-6">
+      <div className="flex items-center justify-between py-6 mb-2">
+        <div className="flex items-baseline gap-3">
+          <h1 className="font-heading text-lg font-semibold text-foreground">Block Components</h1>
+          <span className="text-[11px] mono text-muted-foreground">{blocks.length} blocks</span>
         </div>
-      </header>
+        <a href="/" className="text-[12px] mono text-muted-foreground hover:text-foreground transition-colors">
+          Back to Chat
+        </a>
+      </div>
 
-      <main className="max-w-5xl mx-auto px-6 py-8 space-y-12">
+      <div className="space-y-10 pb-12">
         {blocks.map(({ title, description, block }, i) => (
           <section key={i} id={title.toLowerCase().replace(/\s+/g, "-")}>
-            <div className="mb-4">
-              <div className="flex items-center gap-3 mb-1">
-                <h2 className="text-xl font-semibold">{title}</h2>
-                <code className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded font-mono">
+            <div className="mb-3">
+              <div className="flex items-center gap-2.5 mb-0.5">
+                <h2 className="font-heading text-base font-semibold text-foreground">{title}</h2>
+                <code className="text-[11px] text-muted-foreground bg-surface-2 px-2 py-0.5 rounded mono">
                   {block.type}
                 </code>
               </div>
-              <p className="text-sm text-muted-foreground">{description}</p>
+              <p className="text-[13px] text-muted-foreground">{description}</p>
             </div>
-            <div className="rounded-xl border border-border bg-card p-4">
+            <div className="rounded-xl border border-border/60 bg-surface-1 p-4">
               <BlockRenderer block={block} onAction={demoAction} />
             </div>
           </section>
         ))}
-
-      </main>
+      </div>
     </div>
   );
 }
