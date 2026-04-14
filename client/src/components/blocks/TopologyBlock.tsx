@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import echarts, { ReactECharts, tooltipStyle, statusColor, cssVar, esc } from "@/lib/echarts";
 import type { TopologyData } from "@/lib/types";
 import { fmt } from "@/lib/utils";
+import { COLORS } from "@/lib/theme";
 
 export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction?: (prompt: string) => void }) {
   const onEvents = useMemo(() => ({
@@ -83,7 +84,7 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
           errorRate: e.errorRate,
           lineStyle: {
             width: Math.max(1.5, Math.min(5, e.rpm / 300)),
-            color: e.errorRate > 3 ? "#ef4444" : e.errorRate > 1 ? "#f59e0b" : cssVar("--border"),
+            color: e.errorRate > 3 ? COLORS.unhealthy : e.errorRate > 1 ? COLORS.degraded : cssVar("--border"),
             opacity: e.errorRate > 3 ? 0.8 : e.errorRate > 1 ? 0.7 : 0.6,
           },
         })),
@@ -113,9 +114,9 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
       />
       <div className="mt-1 flex flex-wrap gap-4 px-1 justify-center">
         {[
-          { color: "#22c55e", label: "Healthy" },
-          { color: "#f59e0b", label: "Degraded" },
-          { color: "#ef4444", label: "Unhealthy" },
+          { color: COLORS.healthy, label: "Healthy" },
+          { color: COLORS.degraded, label: "Degraded" },
+          { color: COLORS.unhealthy, label: "Unhealthy" },
         ].map((item) => (
           <div key={item.label} className="flex items-center gap-1.5 text-xs">
             <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />

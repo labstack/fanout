@@ -6,7 +6,7 @@ export function ToolStatus({ toolCall }: { toolCall: ToolCall }) {
     <div
       className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs border ${
         toolCall.done
-          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+          ? "bg-healthy/10 border-healthy/20 text-healthy"
           : "bg-muted/50 border-border/50 text-muted-foreground"
       }`}
     >

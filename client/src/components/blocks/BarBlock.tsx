@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import echarts, { ReactECharts, tooltipStyle, axisLine, axisLabel, splitLine, cssVar } from "@/lib/echarts";
 import type { BarBlockData } from "@/lib/types";
+import { COLORS } from "@/lib/theme";
 
-const DEFAULT_COLOR = "#8884d8";
+const DEFAULT_COLOR = COLORS.accent;
 
 export function BarBlock({ data }: { data: BarBlockData }) {
   const option = useMemo(() => {

@@ -245,7 +245,7 @@ const blocks: { title: string; description: string; block: Block }[] = [
         panels: [
           {
             label: "P95 Latency (ms)",
-            color: "#8884d8",
+            color: "#60a5fa",
             values: [42, 45, 43, 48, 120, 280, 310, 295, 180, 65, 48, 44],
             baseline: 50,
             markers: [
@@ -255,13 +255,13 @@ const blocks: { title: string; description: string; block: Block }[] = [
           },
           {
             label: "Error Rate (%)",
-            color: "#ef4444",
+            color: "#f87171",
             values: [0.3, 0.2, 0.4, 0.5, 2.1, 5.8, 7.2, 6.5, 3.1, 0.8, 0.3, 0.2],
             baseline: 1.0,
           },
           {
             label: "Throughput (rpm)",
-            color: "#82ca9d",
+            color: "#34d399",
             values: [3400, 3380, 3420, 3350, 2800, 1900, 1200, 1500, 2600, 3200, 3380, 3400],
             baseline: 3400,
           },

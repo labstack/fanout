@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import { scaleLinear, scaleOrdinal, schemeTableau10 } from "d3";
 import type { TraceWaterfallData, TraceSpan } from "@/lib/types";
+import { COLORS } from "@/lib/theme";
 
 const ROW_HEIGHT = 30;
 const LABEL_WIDTH = 220;
@@ -52,7 +53,7 @@ function flattenSpans(spans: TraceSpan[]): FlatSpan[] {
 function statusColor(status: string): string {
   switch (status.toLowerCase()) {
     case "error":
-      return "#ef4444";
+      return COLORS.unhealthy;
     case "unset":
     case "ok":
     default:
@@ -229,7 +230,7 @@ export function TraceWaterfallBlock({ data, onAction }: { data: TraceWaterfallDa
                 fill={color}
                 opacity={0.85}
                 rx={2}
-                stroke={isError ? "#ef4444" : "none"}
+                stroke={isError ? COLORS.unhealthy : "none"}
                 strokeWidth={isError ? 1.5 : 0}
               />
 
@@ -262,7 +263,7 @@ export function TraceWaterfallBlock({ data, onAction }: { data: TraceWaterfallDa
         <div className="flex items-center gap-1.5 text-xs">
           <span
             className="inline-block h-2.5 w-2.5 rounded-sm"
-            style={{ backgroundColor: "#ef4444" }}
+            style={{ backgroundColor: COLORS.unhealthy }}
           />
           <span className="text-muted-foreground">Error</span>
         </div>

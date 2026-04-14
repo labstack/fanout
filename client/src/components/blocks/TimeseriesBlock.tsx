@@ -1,8 +1,9 @@
 import { useMemo } from "react";
 import echarts, { ReactECharts, LinearGradient, tooltipStyle, axisLine, axisLabel, splitLine, cssVar } from "@/lib/echarts";
 import type { TimeseriesBlockData } from "@/lib/types";
+import { COLORS } from "@/lib/theme";
 
-const DEFAULT_COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff7f50", "#00bcd4"];
+const DEFAULT_COLORS = [COLORS.accent, COLORS.healthy, COLORS.degraded, "#fb923c", "#a78bfa"];
 
 /** Parse hex color to [r,g,b] or return null */
 function hexToRgb(hex: string): [number, number, number] | null {

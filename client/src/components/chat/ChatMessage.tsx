@@ -11,7 +11,7 @@ export function ChatMessage({ message }: { message: Message }) {
   if (message.role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="bg-[#818cf8] text-white rounded-[16px] rounded-br-[4px] px-4 py-2.5 max-w-[80%] text-base leading-relaxed">
+        <div className="bg-primary text-white rounded-[16px] rounded-br-[4px] px-4 py-2.5 max-w-[80%] text-base leading-relaxed">
           {message.content}
         </div>
       </div>
@@ -24,8 +24,8 @@ export function ChatMessage({ message }: { message: Message }) {
   return (
     <div className="flex gap-3">
       {/* AI avatar */}
-      <div className="shrink-0 mt-0.5 flex items-center justify-center h-7 w-7 rounded-lg bg-[#818cf8]/15">
-        <Radio className="h-3.5 w-3.5 text-[#818cf8]" />
+      <div className="shrink-0 mt-0.5 flex items-center justify-center h-7 w-7 rounded-lg bg-primary/15">
+        <Radio className="h-3.5 w-3.5 text-primary" />
       </div>
 
       <div className="flex-1 space-y-3 min-w-0">

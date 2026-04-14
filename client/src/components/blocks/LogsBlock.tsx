@@ -75,7 +75,7 @@ export function LogsBlock({ data, onAction }: { data: LogsBlockData; onAction?: 
 
   return (
     <div className="overflow-hidden block-card-flush">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#818cf8]/10">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-primary/10">
         <span className="block-title mb-0">Log Entries</span>
         <span className="font-mono text-[10px] text-muted-foreground">{data.entries.length} entries</span>
       </div>

@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import echarts, { ReactECharts, tooltipStyle, axisLine, splitLine, cssVar } from "@/lib/echarts";
 import type { CorrelationData } from "@/lib/types";
+import { COLORS } from "@/lib/theme";
 
 const PANEL_H = 80;
 const GAP = 40;
@@ -57,7 +58,7 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
           // Vertical marker lines at event positions
           if (panel.markers?.length) {
             for (const m of panel.markers) {
-              const color = m.severity === "critical" ? "#ef4444" : "#f59e0b";
+              const color = m.severity === "critical" ? COLORS.unhealthy : COLORS.degraded;
               lines.push({ xAxis: m.t, lineStyle: { color, type: "dashed", width: 0.75, opacity: 0.5 }, label: { show: true, formatter: m.label.length > 12 ? m.label.slice(0, 11) + "\u2026" : m.label, fontSize: 7, color, position: "start" } });
             }
           }
@@ -68,7 +69,7 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
           symbolSize: 7,
           data: panel.markers.map((m) => ({
             coord: [m.t, panel.values[data.times.indexOf(m.t)] ?? 0],
-            itemStyle: { color: m.severity === "critical" ? "#ef4444" : "#f59e0b" },
+            itemStyle: { color: m.severity === "critical" ? COLORS.unhealthy : COLORS.degraded },
             name: m.label,
           })),
         } : undefined,
