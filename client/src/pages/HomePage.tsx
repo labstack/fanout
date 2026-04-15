@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router";
-import { api, setApiToken } from "@/api/client";
+import { api, ApiError, setApiToken } from "@/api/client";
 import type { HomeResponse } from "@/lib/types";
 import { buildChatPath } from "@/lib/chat-route";
 import { EmptyState } from "@/components/home/EmptyState";
@@ -20,8 +20,9 @@ export function HomePage() {
 
   const [data, setData] = useState<HomeResponse | null>(null);
   const [loading, setLoading] = useState(true);
-  const [window, setWindow] = useState(60);
+  const [timeWindow, setTimeWindow] = useState(60);
   const [staleSeconds, setStaleSeconds] = useState(0);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const lastFetch = useRef(0);
 
   useEffect(() => {
@@ -33,15 +34,23 @@ export function HomePage() {
 
     async function load() {
       try {
-        const result = await api<HomeResponse>(`/api/home?window=${window}`);
+        const result = await api<HomeResponse>(`/api/home?window=${timeWindow}`);
         if (!cancelled) {
           setData(result);
           setLoading(false);
+          setFetchError(null);
           lastFetch.current = Date.now();
           setStaleSeconds(0);
         }
-      } catch {
-        if (!cancelled) setLoading(false);
+      } catch (err) {
+        if (!cancelled) {
+          setLoading(false);
+          const message = err instanceof ApiError
+            ? `Failed to load: ${err.message}`
+            : "Failed to load home data";
+          setFetchError(message);
+          console.error("Home fetch failed:", err);
+        }
       }
     }
 
@@ -60,7 +69,7 @@ export function HomePage() {
       clearInterval(interval);
       clearInterval(staleTick);
     };
-  }, [window]);
+  }, [timeWindow]);
 
   const investigate = (prompt: string) => {
     navigate(buildChatPath(prompt, token));
@@ -109,9 +118,9 @@ export function HomePage() {
               <button
                 key={opt.value}
                 type="button"
-                onClick={() => setWindow(opt.value)}
+                onClick={() => setTimeWindow(opt.value)}
                 className={`rounded-full px-3 py-1 text-[11px] mono transition-colors ${
-                  window === opt.value
+                  timeWindow === opt.value
                     ? "bg-primary/12 text-foreground"
                     : "text-muted-foreground hover:text-foreground"
                 }`}
@@ -126,6 +135,13 @@ export function HomePage() {
             </span>
           )}
         </div>
+
+        {/* Error banner */}
+        {fetchError && (
+          <div className="rounded-lg border border-unhealthy/20 bg-unhealthy/5 px-4 py-3 text-sm text-unhealthy/90 mono">
+            {fetchError}
+          </div>
+        )}
 
         {/* Summary header */}
         <SummaryHeader summary={data.summary} />

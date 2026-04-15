@@ -202,6 +202,9 @@ func (h *UIHandler) Home(c *echo.Context) error {
 		}
 		window = v
 	}
+	if window > 1440 {
+		window = 1440
+	}
 
 	if h.svc == nil {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "service layer not configured")
@@ -216,7 +219,9 @@ func (h *UIHandler) Home(c *echo.Context) error {
 	// Append firing alerts from alert store.
 	if h.alertStore != nil {
 		alerts, err := h.alertStore.ListAlerts("firing", "", "")
-		if err == nil {
+		if err != nil {
+			slog.Error("failed to list firing alerts for home", "err", err)
+		} else {
 			for _, a := range alerts {
 				result.Alerts = append(result.Alerts, service.HomeAlert{
 					Rule:    a.RuleID,

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 )
@@ -38,12 +39,7 @@ LIMIT 100;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
 	if err != nil {
-		slog.Warn("query failed", "method", "Home", "err", err)
-		return &HomeResult{
-			Incidents: []HomeIncident{},
-			Services:  []HomeService{},
-			Alerts:    []HomeAlert{},
-		}, nil
+		return nil, fmt.Errorf("home rollup query: %w", err)
 	}
 	defer rows.Close()
 
@@ -115,7 +111,7 @@ LIMIT 100;
 	}
 	sparklines, err := s.homeSparklines(ctx, window, namespace, tenantID, allSvcNames)
 	if err != nil {
-		slog.Warn("sparklines query failed", "method", "Home", "err", err)
+		slog.Error("sparklines query failed", "method", "Home", "err", err)
 		sparklines = make(map[string][]float64)
 	}
 
@@ -131,7 +127,7 @@ LIMIT 100;
 	if len(incidentSvcNames) > 0 {
 		topErrors, err = s.homeTopErrors(ctx, window, namespace, tenantID, incidentSvcNames)
 		if err != nil {
-			slog.Warn("top errors query failed", "method", "Home", "err", err)
+			slog.Error("top errors query failed", "method", "Home", "err", err)
 		}
 	}
 
@@ -228,11 +224,18 @@ LIMIT 100;
 	}, nil
 }
 
-// homeSparklines queries per-minute rollup buckets for all services.
+// homeSparklines queries per-minute rollup buckets for the specified services.
 // Returns a map with keys like "svc-a_traffic" and "svc-a_err".
 func (s *Service) homeSparklines(ctx context.Context, window int, namespace, tenantID string, services []string) (map[string][]float64, error) {
 	if len(services) == 0 {
 		return make(map[string][]float64), nil
+	}
+
+	placeholders := make([]string, len(services))
+	args := []interface{}{tenantID, namespace, namespace}
+	for i, svc := range services {
+		placeholders[i] = "?"
+		args = append(args, svc)
 	}
 
 	q := fmt.Sprintf(`
@@ -241,10 +244,11 @@ FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
   AND tenant = ?
   AND (? = '' OR namespace = ?)
+  AND service IN (%s)
 ORDER BY service, bucket;
-`, window)
+`, window, strings.Join(placeholders, ", "))
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("sparklines query failed: %w", err)
 	}
@@ -354,16 +358,9 @@ LIMIT 20;
 	return out, nil
 }
 
-// sortIncidents sorts incidents by HealthScore ascending (worst first) using
-// a simple insertion sort.
+// sortIncidents sorts incidents by HealthScore ascending (worst first).
 func sortIncidents(incidents []HomeIncident) {
-	for i := 1; i < len(incidents); i++ {
-		key := incidents[i]
-		j := i - 1
-		for j >= 0 && incidents[j].HealthScore > key.HealthScore {
-			incidents[j+1] = incidents[j]
-			j--
-		}
-		incidents[j+1] = key
-	}
+	sort.Slice(incidents, func(i, j int) bool {
+		return incidents[i].HealthScore < incidents[j].HealthScore
+	})
 }

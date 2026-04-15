@@ -16,13 +16,14 @@ type Incident struct {
 }
 
 type incidentState struct {
-	lifecycle    string // "", "pending", "open", "cooling"
-	startedAt    time.Time
-	peakErrRate  float64
-	peakP95      float64
-	pendingTicks int
-	coolingTicks int
-	lastHealth   string
+	lifecycle      string // "", "open", "cooling"
+	startedAt      time.Time
+	firstPendingAt time.Time
+	peakErrRate    float64
+	peakP95        float64
+	pendingTicks   int
+	coolingTicks   int
+	lastHealth     string
 }
 
 const (
@@ -53,12 +54,15 @@ func (t *IncidentTracker) Tick(service, health string, errorRate, p95Ms float64,
 	bad := health == "degraded" || health == "unhealthy"
 
 	switch s.lifecycle {
-	case "", "clear":
+	case "":
 		if bad {
+			if s.pendingTicks == 0 {
+				s.firstPendingAt = now
+			}
 			s.pendingTicks++
 			if s.pendingTicks >= openThreshold {
 				s.lifecycle = "open"
-				s.startedAt = now.Add(-time.Duration(s.pendingTicks-1) * time.Minute)
+				s.startedAt = s.firstPendingAt
 				s.peakErrRate = errorRate
 				s.peakP95 = p95Ms
 				s.pendingTicks = 0
