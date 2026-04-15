@@ -122,10 +122,15 @@ LIMIT 100;
 		}
 	}
 
-	// Query top errors for degraded/unhealthy services only.
+	// Query top errors for degraded/unhealthy services — use a short window
+	// (max 5 min) to avoid expensive full-table scans on raw spans.
 	topErrors := make(map[string][]HomeTopError)
 	if len(incidentSvcNames) > 0 {
-		topErrors, err = s.homeTopErrors(ctx, window, namespace, tenantID, incidentSvcNames)
+		errWindow := window
+		if errWindow > 5 {
+			errWindow = 5
+		}
+		topErrors, err = s.homeTopErrors(ctx, errWindow, namespace, tenantID, incidentSvcNames)
 		if err != nil {
 			slog.Error("top errors query failed", "method", "Home", "err", err)
 		}
