@@ -1,6 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { RootLayout } from "./components/layout/root-layout";
-import { DashboardPage } from "./pages/DashboardPage";
+import { HomePage } from "./pages/HomePage";
 import { ChatPage } from "./pages/ChatPage";
 import { DemoPage } from "./pages/DemoPage";
 
@@ -9,7 +9,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route element={<RootLayout />}>
-          <Route index element={<DashboardPage />} />
+          <Route index element={<HomePage />} />
           <Route path="/chat" element={<ChatPage />} />
           <Route path="/demo" element={<DemoPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
