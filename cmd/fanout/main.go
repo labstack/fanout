@@ -152,7 +152,7 @@ func main() {
 				path := c.Request().URL.Path
 
 				// Skip auth for health, metrics, and UI page routes
-				if path == "/healthz" || path == "/readyz" || path == "/-/metrics" ||
+				if path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
 					path == "/" || path == "/favicon.ico" || path == "/favicon.svg" {
 					return next(c)
 				}

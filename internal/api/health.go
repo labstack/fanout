@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -28,6 +30,8 @@ type CheckResult struct {
 	Status    string `json:"status"`
 	LatencyMs int64  `json:"latency_ms,omitempty"`
 	Error     string `json:"error,omitempty"`
+	Detail    string `json:"detail,omitempty"`
+	UpdatedAt string `json:"updated_at,omitempty"`
 }
 
 // HealthResponse represents the full health check response
@@ -50,9 +54,11 @@ func (h *HealthHandler) Readiness(c *echo.Context) error {
 
 	// Check DuckDB
 	resp.Checks["duckdb"] = h.checkDuckDB()
+	resp.Checks["ducklake"] = h.checkDuckLake()
 
 	// Check lake directory
 	resp.Checks["lake"] = h.checkLakeDir()
+	resp.Checks["rollups"] = h.checkRollups()
 
 	// Determine overall status
 	hasUnhealthy := false
@@ -89,23 +95,18 @@ func (h *HealthHandler) checkDuckDB() CheckResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	rows, err := h.duck.DB.QueryContext(ctx, "SELECT 1")
-	latency := time.Since(start).Milliseconds()
-	if rows != nil {
-		defer rows.Close()
-	}
-
-	if err != nil {
+	var one int
+	if err := h.duck.DB.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
 		return CheckResult{
 			Status:    "unhealthy",
-			LatencyMs: latency,
+			LatencyMs: time.Since(start).Milliseconds(),
 			Error:     err.Error(),
 		}
 	}
 
 	return CheckResult{
 		Status:    "ok",
-		LatencyMs: latency,
+		LatencyMs: time.Since(start).Milliseconds(),
 	}
 }
 
@@ -129,9 +130,97 @@ func (h *HealthHandler) checkLakeDir() CheckResult {
 	}
 }
 
+func (h *HealthHandler) checkDuckLake() CheckResult {
+	if h.duck == nil {
+		return CheckResult{
+			Status: "unhealthy",
+			Error:  "duckdb not initialized",
+		}
+	}
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var one int
+	err := h.duck.DB.QueryRowContext(ctx, "SELECT 1 FROM lake.spans LIMIT 1").Scan(&one)
+	if err != nil && err != sql.ErrNoRows {
+		return CheckResult{
+			Status:    "unhealthy",
+			LatencyMs: time.Since(start).Milliseconds(),
+			Error:     err.Error(),
+		}
+	}
+
+	res := CheckResult{
+		Status:    "ok",
+		LatencyMs: time.Since(start).Milliseconds(),
+	}
+	if err == sql.ErrNoRows {
+		res.Detail = "lake attached, no spans yet"
+	}
+	return res
+}
+
+func (h *HealthHandler) checkRollups() CheckResult {
+	if h.duck == nil {
+		return CheckResult{
+			Status: "unhealthy",
+			Error:  "duckdb not initialized",
+		}
+	}
+
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var updatedAt sql.NullTime
+	var cacheCount int
+	var ageSeconds int64
+	err := h.duck.DB.QueryRowContext(ctx, `
+SELECT
+  MAX(updated_at),
+  COUNT(*),
+  COALESCE(date_diff('second', MAX(updated_at), now()), 0)
+FROM rollup_state`).Scan(&updatedAt, &cacheCount, &ageSeconds)
+	if err != nil {
+		return CheckResult{
+			Status:    "unhealthy",
+			LatencyMs: time.Since(start).Milliseconds(),
+			Error:     err.Error(),
+		}
+	}
+
+	res := CheckResult{
+		Status:    "ok",
+		LatencyMs: time.Since(start).Milliseconds(),
+	}
+	if cacheCount == 0 || !updatedAt.Valid {
+		res.Detail = "no rollup state yet"
+		return res
+	}
+
+	res.UpdatedAt = updatedAt.Time.UTC().Format(time.RFC3339)
+	age := time.Duration(ageSeconds) * time.Second
+	threshold := time.Duration(h.cfg.RollupEvery*3) * time.Second
+	if threshold < 2*time.Minute {
+		threshold = 2 * time.Minute
+	}
+
+	if age > threshold {
+		res.Status = "degraded"
+		res.Detail = fmt.Sprintf("rollups stale by %s", age.Round(time.Second))
+		return res
+	}
+
+	res.Detail = fmt.Sprintf("last refreshed %s ago", age.Round(time.Second))
+	return res
+}
+
 // RegisterHealthRoutes registers health check endpoints
 func RegisterHealthRoutes(e *echo.Echo, duck *query.Duck, cfg config.Config) {
 	h := NewHealthHandler(duck, cfg)
 	e.GET("/healthz", h.Liveness)
 	e.GET("/readyz", h.Readiness)
+	e.GET("/api/health", h.Readiness)
 }
