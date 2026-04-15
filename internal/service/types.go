@@ -63,6 +63,66 @@ type OverviewIssue struct {
 	Since     string // ISO8601 timestamp (optional)
 }
 
+// HomeResult is the response for the deterministic Home triage page.
+type HomeResult struct {
+	Summary   HomeSummary    `json:"summary"`
+	Incidents []HomeIncident `json:"incidents"`
+	Services  []HomeService  `json:"services"`
+	Alerts    []HomeAlert    `json:"alerts"`
+}
+
+// HomeSummary contains aggregate system metrics.
+type HomeSummary struct {
+	TotalServices int     `json:"total_services"`
+	Healthy       int     `json:"healthy"`
+	Degraded      int     `json:"degraded"`
+	Unhealthy     int     `json:"unhealthy"`
+	TrafficPerMin float64 `json:"traffic_per_min"`
+	ErrorRate     float64 `json:"error_rate"`
+	P95Ms         float64 `json:"p95_ms"`
+}
+
+// HomeIncident represents a service with degraded or unhealthy health.
+type HomeIncident struct {
+	Service          string         `json:"service"`
+	Health           string         `json:"health"`
+	HealthScore      float64        `json:"health_score"`
+	ErrorRate        float64        `json:"error_rate"`
+	P95Ms            float64        `json:"p95_ms"`
+	TrafficPerMin    float64        `json:"traffic_per_min"`
+	StartedAt        string         `json:"started_at,omitempty"`
+	Lifecycle        string         `json:"lifecycle"`
+	SparklineErrRate []float64      `json:"sparkline_error_rate"`
+	TopErrors        []HomeTopError `json:"top_errors,omitempty"`
+	Related          []string       `json:"related,omitempty"`
+}
+
+// HomeTopError is a grouped error message with count.
+type HomeTopError struct {
+	Message string `json:"message"`
+	Count   int64  `json:"count"`
+}
+
+// HomeService represents a healthy service in the compact list.
+type HomeService struct {
+	Name             string    `json:"name"`
+	Health           string    `json:"health"`
+	HealthScore      float64   `json:"health_score"`
+	TrafficPerMin    float64   `json:"traffic_per_min"`
+	ErrorRate        float64   `json:"error_rate"`
+	P95Ms            float64   `json:"p95_ms"`
+	SparklineTraffic []float64 `json:"sparkline_traffic"`
+}
+
+// HomeAlert represents a firing alert for the Home page footer.
+type HomeAlert struct {
+	Rule    string  `json:"rule"`
+	Service string  `json:"service"`
+	State   string  `json:"state"`
+	Value   float64 `json:"value"`
+	FiredAt string  `json:"fired_at"`
+}
+
 // TopologyResult contains service dependency map data.
 type TopologyResult struct {
 	Nodes         []ServiceNode
