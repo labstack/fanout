@@ -152,9 +152,12 @@ func main() {
 			return func(c *echo.Context) error {
 				path := c.Request().URL.Path
 
-				// Skip auth for health, metrics, and UI page routes
+				// Skip auth for health, metrics, and SPA page routes.
+				// Auth only applies to /api/* and /mcp — everything else is
+				// either a health check or a client-side route served by the SPA.
 				if path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
-					path == "/" || path == "/favicon.ico" || path == "/favicon.svg" {
+					path == "/favicon.ico" || path == "/favicon.svg" ||
+					(!strings.HasPrefix(path, "/api/") && path != "/mcp") {
 					return next(c)
 				}
 

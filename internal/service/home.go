@@ -21,6 +21,8 @@ func (s *Service) Home(ctx context.Context, window int, namespace, tenantID stri
 	namespace, tenantID = s.defaults(namespace, tenantID)
 
 	// Query per-service aggregates from service_rollup.
+	// Order by health severity first so unhealthy/degraded services are never
+	// dropped by the LIMIT. Within each health tier, sort by traffic descending.
 	q := fmt.Sprintf(`
 SELECT
   service,
@@ -33,8 +35,16 @@ WHERE bucket >= now() - INTERVAL %d MINUTE
   AND tenant = ?
   AND (? = '' OR namespace = ?)
 GROUP BY service
-ORDER BY SUM(spans) DESC
-LIMIT 100;
+ORDER BY
+  CASE
+    WHEN AVG(CASE WHEN spans > 0 THEN error_rate END) > 0.1
+      OR AVG(CASE WHEN spans > 0 THEN p95_ms END) > 5000 THEN 0
+    WHEN AVG(CASE WHEN spans > 0 THEN error_rate END) > 0.01
+      OR AVG(CASE WHEN spans > 0 THEN p95_ms END) > 1000 THEN 1
+    ELSE 2
+  END,
+  SUM(spans) DESC
+LIMIT 200;
 `, window)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
