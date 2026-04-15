@@ -37,12 +37,14 @@ SELECT
   SUM(COALESCE(metric_count, 0))::BIGINT AS metric_cnt
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
 GROUP BY service
 ORDER BY (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0))) DESC
 LIMIT 100;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
 	if err != nil {
 		slog.Warn("query failed", "method", "Status", "err", err)
 		return &StatusResult{
@@ -264,12 +266,14 @@ SELECT
   AVG(CASE WHEN spans > 0 THEN error_rate END) AS error_rate
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
 GROUP BY service
 ORDER BY SUM(spans) DESC
 LIMIT %d;
 `, window, limit)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q)
+	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("overview query failed: %w", err)
 	}

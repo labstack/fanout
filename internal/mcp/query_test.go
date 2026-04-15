@@ -128,7 +128,7 @@ func TestSchemaResponseServiceRollupColumns(t *testing.T) {
 		return
 	}
 
-	requiredCols := []string{"bucket", "service", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}
+	requiredCols := []string{"tenant", "namespace", "bucket", "service", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}
 	colMap := map[string]bool{}
 	for _, c := range rollup.Columns {
 		colMap[c.Name] = true
@@ -155,7 +155,7 @@ func TestSchemaResponseEdgeRollupColumns(t *testing.T) {
 		return
 	}
 
-	requiredCols := []string{"bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"}
+	requiredCols := []string{"tenant", "namespace", "bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"}
 	colMap := map[string]bool{}
 	for _, c := range rollup.Columns {
 		colMap[c.Name] = true

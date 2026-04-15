@@ -120,6 +120,8 @@ func buildSchemaResponse() *SchemaResponse {
 			{
 				Name: "service_rollup",
 				Columns: []ColumnInfo{
+					{Name: "tenant", Type: "VARCHAR", Description: "Tenant identifier"},
+					{Name: "namespace", Type: "VARCHAR", Description: "Namespace identifier (empty query arg means all namespaces)"},
 					{Name: "bucket", Type: "TIMESTAMP", Description: "1-minute time bucket"},
 					{Name: "service", Type: "VARCHAR", Description: "Service name"},
 					{Name: "spans", Type: "BIGINT", Description: "Request count"},
@@ -133,6 +135,8 @@ func buildSchemaResponse() *SchemaResponse {
 			{
 				Name: "edge_rollup",
 				Columns: []ColumnInfo{
+					{Name: "tenant", Type: "VARCHAR", Description: "Tenant identifier"},
+					{Name: "namespace", Type: "VARCHAR", Description: "Namespace identifier (empty query arg means all namespaces)"},
 					{Name: "bucket", Type: "TIMESTAMP", Description: "1-minute time bucket"},
 					{Name: "caller", Type: "VARCHAR", Description: "Calling service"},
 					{Name: "callee", Type: "VARCHAR", Description: "Called service"},

@@ -262,12 +262,13 @@ func (s *Service) CompareOperations(ctx context.Context, params CompareOperation
 func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start, end time.Time) ([]RollupBucket, error) {
 	q := `
 		SELECT
-			COALESCE(p95_ms, 0),
-			COALESCE(p50_ms, 0),
-			COALESCE(error_rate, 0),
-			COALESCE(spans, 0)
+			COALESCE(AVG(CASE WHEN spans > 0 THEN p95_ms END), 0),
+			COALESCE(AVG(CASE WHEN spans > 0 THEN p50_ms END), 0),
+			COALESCE(AVG(CASE WHEN spans > 0 THEN error_rate END), 0),
+			COALESCE(SUM(spans), 0)
 		FROM service_rollup
 		WHERE service = ? AND bucket >= ? AND bucket < ?
+		GROUP BY bucket
 		ORDER BY bucket ASC
 	`
 	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end)

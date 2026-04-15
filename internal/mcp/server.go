@@ -283,7 +283,7 @@ func queryToolDescription(lakeDir string) string {
 When to use: Only when other tools can't answer the question. Prefer overview/diagnose/spans/logs/metrics for standard queries.
 Workflow: query(sql="") to get schema reference → write query using view/column names from schema → query(sql=...).
 Gotchas:
-- Use the views (spans, logs, metrics) not raw Parquet. Views have clean column names.
+- Use the views (spans, logs, metrics) rather than querying lake.* directly. Views have clean column names.
 - Always add a time filter (WHERE start_time > now() - INTERVAL ...) to avoid full scans.
 - Avoid GROUP BY trace_id, span_id, or attributes_json — these are high-cardinality and will be slow.
 - Use attr(attributes_json, 'key') macro to extract JSON attributes.
@@ -294,8 +294,8 @@ DuckDB Views (clean column names):
 - metrics: time, name, type, value, unit, service, description, attributes_json, resource_json, namespace, tenant
 
 Rollup tables:
-- service_rollup: bucket, service, spans, error_rate, p50_ms, p95_ms, log_count, metric_count
-- edge_rollup: bucket, caller, callee, calls, avg_ms, error_rate, edge_type
+- service_rollup: tenant, namespace, bucket, service, spans, error_rate, p50_ms, p95_ms, log_count, metric_count
+- edge_rollup: tenant, namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
 
 Macro: attr(json_col, 'key') — extracts JSON key from attributes_json
 

@@ -48,9 +48,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Clean up orphaned temp files from previous crashes
-	lake.CleanupTempFiles(cfg.LakeDir)
-
 	// Channels for ingest → lake writer
 	chSpans := make(chan lake.SpanRow, 10000)
 	chLogs := make(chan lake.LogRow, 10000)
@@ -65,14 +62,6 @@ func main() {
 	// Error channel for goroutine failures
 	errCh := make(chan error, 3)
 
-	// Start Lake Writer
-	writer := lake.NewWriter(cfg, chSpans, chLogs, chMetrics)
-	go func() {
-		if err := writer.Run(ctx); err != nil {
-			errCh <- fmt.Errorf("lake writer: %w", err)
-		}
-	}()
-
 	// Start DuckDB + rollups
 	q, err := query.NewDuck(ctx, cfg)
 	if err != nil {
@@ -81,15 +70,15 @@ func main() {
 	}
 	defer q.Close()
 
+	// Start Lake Writer
+	writer := lake.NewWriter(cfg, q.DB, chSpans, chLogs, chMetrics)
+	go func() {
+		if err := writer.Run(ctx); err != nil {
+			errCh <- fmt.Errorf("lake writer: %w", err)
+		}
+	}()
+
 	go q.RunRollups(ctx)
-
-	// Start retention pruner
-	pruner := lake.NewPruner(cfg)
-	go pruner.Run(ctx)
-
-	// Start compactor (merges small hourly files into daily files)
-	compactor := lake.NewCompactor(cfg, q.DB)
-	go compactor.Run(ctx)
 
 	// Start intelligence detector
 	detector := intelligence.NewDetector(q, intelligence.DefaultDetectorConfig())

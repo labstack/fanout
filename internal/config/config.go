@@ -14,12 +14,11 @@ type Config struct {
 	OTLPGRPCAddr   string    // :4317
 	LakeDir        string    // ./lake
 	FlushSeconds   int       // 15
-	MaxRows        int       // 50000 per file
+	FlushBatchSize int       // 50000 rows per writer flush
 	APIToken       string    // bearer for API (optional)
 	RollupEvery    int       // seconds
 	MCPEnabled     bool      // enable MCP server
 	RetentionDays  int       // days to keep data (0 = forever)
-	RetentionHours int       // how often to check retention (hours)
 	TenantID       uuid.UUID // tenant identifier (UUIDv7)
 	DefaultNS      string    // default namespace if not set
 	// DuckDB
@@ -41,12 +40,11 @@ func Load() Config {
 		OTLPGRPCAddr:      getenv("OTLP_GRPC_ADDR", ":4317"),
 		LakeDir:           getenv("LAKE_DIR", "./lake"),
 		FlushSeconds:      getenvInt("FLUSH_SECONDS", 15),
-		MaxRows:           getenvInt("MAX_ROWS", 50000),
+		FlushBatchSize:    getenvInt("FLUSH_BATCH_SIZE", 50000),
 		APIToken:          os.Getenv("API_TOKEN"),
 		RollupEvery:       getenvInt("ROLLUP_EVERY", 60),
 		MCPEnabled:        getenvBool("MCP_ENABLED", true),
 		RetentionDays:     getenvInt("RETENTION_DAYS", 30),
-		RetentionHours:    getenvInt("RETENTION_HOURS", 1),
 		TenantID:          getenvUUID("TENANT_ID"),
 		DefaultNS:         getenv("DEFAULT_NAMESPACE", "default"),
 		DuckDBMemory:      getenv("DUCKDB_MEMORY", "512MB"),
@@ -70,17 +68,14 @@ func (c Config) Validate() error {
 	if c.FlushSeconds <= 0 {
 		return fmt.Errorf("FlushSeconds (FLUSH_SECONDS) must be > 0, got %d", c.FlushSeconds)
 	}
-	if c.MaxRows <= 0 {
-		return fmt.Errorf("MaxRows (MAX_ROWS) must be > 0, got %d", c.MaxRows)
+	if c.FlushBatchSize <= 0 {
+		return fmt.Errorf("FlushBatchSize (FLUSH_BATCH_SIZE) must be > 0, got %d", c.FlushBatchSize)
 	}
 	if c.RollupEvery <= 0 {
 		return fmt.Errorf("RollupEvery (ROLLUP_EVERY) must be > 0, got %d", c.RollupEvery)
 	}
 	if c.RetentionDays < 0 {
 		return fmt.Errorf("RetentionDays (RETENTION_DAYS) must be >= 0, got %d", c.RetentionDays)
-	}
-	if c.RetentionHours <= 0 {
-		return fmt.Errorf("RetentionHours (RETENTION_HOURS) must be > 0, got %d", c.RetentionHours)
 	}
 	return nil
 }

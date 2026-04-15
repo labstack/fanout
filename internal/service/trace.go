@@ -31,34 +31,35 @@ func (s *Service) Trace(ctx context.Context, traceID string, includeLogs bool, w
 	// Use config defaults for partition
 	namespace, tenantID := s.defaults("", "")
 
-	// Get spans (using optimized glob for time window)
-	// Use union_by_name=true to handle schema evolution (old files may not have new columns)
 	q := fmt.Sprintf(`
-SELECT "name=span_id" as span_id,
-       "name=parent_span_id" as parent_span_id,
-       "name=service_name" as service,
-       "name=name" as operation,
-       "name=kind" as kind,
-       strftime(epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS start_time,
-       "name=duration_ms" as duration_ms,
-       "name=status_code" as status,
-       "name=status_msg" as status_msg,
-       "name=start_unix_nano" as start_nano,
-       "name=events_json" as events_json,
-       "name=links_json" as links_json,
-       "name=trace_state" as trace_state,
-       "name=flags" as flags,
-       "name=scope_name" as scope_name,
-       "name=scope_version" as scope_version,
-       "name=attributes_json" as attributes_json,
-       "name=resource_json" as resource_json
-FROM read_parquet(%s, union_by_name=true)
-WHERE "name=trace_id" = ?
-ORDER BY "name=start_unix_nano" ASC
+SELECT span_id,
+       parent_span_id,
+       service,
+       operation,
+       kind,
+       strftime(start_time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS start_time,
+       duration_ms,
+       status,
+       status_message,
+       start_unix_nano,
+       events_json,
+       links_json,
+       trace_state,
+       flags,
+       scope_name,
+       scope_version,
+       attributes_json,
+       resource_json
+FROM spans
+WHERE trace_id = ?
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND start_time >= now() - INTERVAL %d MINUTE
+ORDER BY start_unix_nano ASC
 LIMIT 200;
-`, s.duck.SpansGlob(tenantID, namespace, window))
+`, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, traceID)
+	rows, err := s.duck.DB.QueryContext(ctx, q, traceID, tenantID, namespace, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
@@ -103,47 +104,39 @@ LIMIT 200;
 			r.ScopeVersion = fmt.Sprintf("%v", scopeVersion)
 		}
 		// Parse events JSON
-		if eventsJSON != nil {
-			if b, ok := eventsJSON.([]byte); ok && len(b) > 0 {
-				var events []SpanEvent
-				if err := json.Unmarshal(b, &events); err != nil {
-					slog.Debug("events JSON parse failed", "span_id", r.SpanID, "err", err)
-				} else {
-					r.Events = events
-				}
+		if b := jsonValueBytes(eventsJSON); len(b) > 0 {
+			var events []SpanEvent
+			if err := json.Unmarshal(b, &events); err != nil {
+				slog.Debug("events JSON parse failed", "span_id", r.SpanID, "err", err)
+			} else {
+				r.Events = events
 			}
 		}
 		// Parse links JSON
-		if linksJSON != nil {
-			if b, ok := linksJSON.([]byte); ok && len(b) > 0 {
-				var links []SpanLink
-				if err := json.Unmarshal(b, &links); err != nil {
-					slog.Debug("links JSON parse failed", "span_id", r.SpanID, "err", err)
-				} else {
-					r.Links = links
-				}
+		if b := jsonValueBytes(linksJSON); len(b) > 0 {
+			var links []SpanLink
+			if err := json.Unmarshal(b, &links); err != nil {
+				slog.Debug("links JSON parse failed", "span_id", r.SpanID, "err", err)
+			} else {
+				r.Links = links
 			}
 		}
 		// Parse attributes JSON
-		if attrsJSON != nil {
-			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
-				var attrs map[string]any
-				if err := json.Unmarshal(b, &attrs); err != nil {
-					slog.Debug("attributes JSON parse failed", "span_id", r.SpanID, "err", err)
-				} else {
-					r.Attributes = attrs
-				}
+		if b := jsonValueBytes(attrsJSON); len(b) > 0 {
+			var attrs map[string]any
+			if err := json.Unmarshal(b, &attrs); err != nil {
+				slog.Debug("attributes JSON parse failed", "span_id", r.SpanID, "err", err)
+			} else {
+				r.Attributes = attrs
 			}
 		}
 		// Parse resource JSON
-		if resourceJSON != nil {
-			if b, ok := resourceJSON.([]byte); ok && len(b) > 0 {
-				var res map[string]any
-				if err := json.Unmarshal(b, &res); err != nil {
-					slog.Debug("resource JSON parse failed", "span_id", r.SpanID, "err", err)
-				} else {
-					r.Resource = res
-				}
+		if b := jsonValueBytes(resourceJSON); len(b) > 0 {
+			var res map[string]any
+			if err := json.Unmarshal(b, &res); err != nil {
+				slog.Debug("resource JSON parse failed", "span_id", r.SpanID, "err", err)
+			} else {
+				r.Resource = res
 			}
 		}
 		services[r.Service] = true
@@ -359,6 +352,7 @@ func (s *Service) FetchMetricContext(ctx context.Context, result *TraceResult) [
 	if len(result.Spans) == 0 {
 		return nil
 	}
+	namespace, tenantID := s.defaults("", "")
 
 	// Derive the earliest start time from span start times (stored as RFC3339 strings).
 	// We use the first span since spans are already ordered by start_unix_nano ASC.
@@ -377,7 +371,7 @@ func (s *Service) FetchMetricContext(ctx context.Context, result *TraceResult) [
 
 	placeholders := makePlaceholders(len(result.Services))
 	args := make([]any, 0, len(result.Services)+2)
-	args = append(args, startTime, startTime)
+	args = append(args, startTime, startTime, tenantID, namespace, namespace)
 	for _, svc := range result.Services {
 		args = append(args, svc)
 	}
@@ -390,6 +384,8 @@ SELECT service,
        SUM(spans) as total_spans
 FROM service_rollup
 WHERE bucket BETWEEN (TIMESTAMPTZ ? - INTERVAL '2.5 minutes') AND (TIMESTAMPTZ ? + INTERVAL '2.5 minutes')
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
   AND service IN (%s)
 GROUP BY service
 ORDER BY service ASC;
@@ -424,26 +420,29 @@ func (s *Service) fetchTraceLogs(ctx context.Context, traceID string, window int
 	namespace, tenantID := s.defaults("", "")
 
 	q := fmt.Sprintf(`
-SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
-       CASE WHEN "name=observed_time_unix_nano" > 0
-            THEN strftime(epoch_ms(CAST("name=observed_time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ')
+SELECT strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+       CASE WHEN observed_time_unix_nano > 0
+            THEN strftime(observed_time, '%%Y-%%m-%%dT%%H:%%M:%%SZ')
             ELSE NULL END AS observed_ts,
-       "name=service_name" as service,
-       "name=severity" as severity,
-       "name=severity_number" as severity_number,
-       "name=body" as body,
-       "name=span_id" as span_id,
-       "name=flags" as flags,
-       "name=scope_name" as scope_name,
-       "name=scope_version" as scope_version,
-       "name=attributes_json" as attributes_json
-FROM read_parquet(%s, union_by_name=true)
-WHERE "name=trace_id" = ?
-ORDER BY "name=time_unix_nano" ASC
+       service,
+       severity,
+       severity_number,
+       body,
+       span_id,
+       flags,
+       scope_name,
+       scope_version,
+       attributes_json
+FROM logs
+WHERE trace_id = ?
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND time >= now() - INTERVAL %d MINUTE
+ORDER BY time_unix_nano ASC
 LIMIT 100;
-`, s.duck.LogsGlob(tenantID, namespace, window))
+`, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, traceID)
+	rows, err := s.duck.DB.QueryContext(ctx, q, traceID, tenantID, namespace, namespace)
 	if err != nil {
 		slog.Warn("fetch trace logs query failed", "method", "fetchTraceLogs", "trace_id", traceID, "err", err)
 		return logs
@@ -485,14 +484,12 @@ LIMIT 100;
 		if scopeVersion != nil {
 			r.ScopeVersion = fmt.Sprintf("%v", scopeVersion)
 		}
-		if attrsJSON != nil {
-			if b, ok := attrsJSON.([]byte); ok && len(b) > 0 {
-				var attrs map[string]any
-				if err := json.Unmarshal(b, &attrs); err != nil {
-					slog.Debug("log attributes JSON parse failed", "trace_id", traceID, "err", err)
-				} else {
-					r.Attributes = attrs
-				}
+		if b := jsonValueBytes(attrsJSON); len(b) > 0 {
+			var attrs map[string]any
+			if err := json.Unmarshal(b, &attrs); err != nil {
+				slog.Debug("log attributes JSON parse failed", "trace_id", traceID, "err", err)
+			} else {
+				r.Attributes = attrs
 			}
 		}
 		logs = append(logs, r)
@@ -501,4 +498,27 @@ LIMIT 100;
 		slog.Warn("fetch trace logs iteration error", "method", "fetchTraceLogs", "trace_id", traceID, "err", err)
 	}
 	return logs
+}
+
+func jsonValueBytes(v any) []byte {
+	switch x := v.(type) {
+	case nil:
+		return nil
+	case []byte:
+		if len(x) == 0 {
+			return nil
+		}
+		return x
+	case string:
+		if x == "" {
+			return nil
+		}
+		return []byte(x)
+	default:
+		s := fmt.Sprintf("%v", x)
+		if s == "" || s == "<nil>" {
+			return nil
+		}
+		return []byte(s)
+	}
 }

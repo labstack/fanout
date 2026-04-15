@@ -12,8 +12,7 @@ func TestValidateSQL(t *testing.T) {
 	}{
 		// Valid queries
 		{"valid select from rollup", "SELECT * FROM service_rollup", false},
-		{"valid read_parquet lake path", "SELECT * FROM read_parquet('lake/spans/**/*.parquet')", false},
-		{"valid read_parquet with lake in path", "SELECT * FROM read_parquet('/data/lake/spans/*.parquet')", false},
+		{"valid select from spans", "SELECT * FROM spans", false},
 		{"valid with CTE", "WITH cte AS (SELECT 1) SELECT * FROM cte", false},
 
 		// Blocked DDL
@@ -25,18 +24,14 @@ func TestValidateSQL(t *testing.T) {
 		{"blocked read_csv", "SELECT * FROM read_csv('/etc/passwd')", true},
 		{"blocked read_json", "SELECT * FROM read_json('/etc/shadow')", true},
 		{"blocked read_text", "SELECT * FROM read_text('/etc/hosts')", true},
-
-		// Blocked read_parquet outside lake
+		{"blocked read_parquet", "SELECT * FROM read_parquet('/etc/passwd')", true},
 		{"blocked read_parquet /etc", "SELECT * FROM read_parquet('/etc/passwd')", true},
 		{"blocked read_parquet relative", "SELECT * FROM read_parquet('../secrets.parquet')", true},
-		{"blocked path traversal", "SELECT * FROM read_parquet('lake/../../../etc/passwd')", true},
 
 		// SQL comment injection
 		{"blocked -- comment", "SELECT * FROM foo -- DROP TABLE bar", true},
 		{"blocked -- at end", "SELECT * FROM foo--", true},
 		{"blocked /* block comment */", "SELECT * FROM foo /* malicious */", true},
-		// Glob patterns with /* inside quoted strings should be allowed
-		{"allowed glob in string", "SELECT * FROM read_parquet('lake/spans/**/*.parquet')", false},
 		{"allowed -- in string", "SELECT * FROM foo WHERE x = 'a--b'", false},
 		{"allowed /* in string", "SELECT * FROM foo WHERE x = 'a/*b'", false},
 		// Escaped quotes inside strings should not break detection
@@ -49,7 +44,7 @@ func TestValidateSQL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validateSQL(tt.query, "lake")
+			err := validateSQL(tt.query)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateSQL() error = %v, wantErr %v", err, tt.wantErr)
 			}

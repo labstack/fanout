@@ -4,9 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"sort"
 	"strings"
 )
 
@@ -45,21 +42,25 @@ func (s *Service) Metrics(ctx context.Context, p MetricsParams) (*MetricsResult,
 	}
 
 	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
-	metricsGlob := s.duck.MetricsGlob(p.TenantID, p.Namespace, p.Window)
 
 	var filters []string
 	var args []any
 
-	filters = append(filters, fmt.Sprintf(
-		`epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE`, p.Window))
+	filters = append(filters, fmt.Sprintf(`time >= now() - INTERVAL %d MINUTE`, p.Window))
+	filters = append(filters, `tenant = ?`)
+	args = append(args, p.TenantID)
+	if p.Namespace != "" {
+		filters = append(filters, `namespace = ?`)
+		args = append(args, p.Namespace)
+	}
 
 	// Name filter
 	for _, n := range p.Names {
 		if containsWildcard(n) {
-			filters = append(filters, `"name=name" ILIKE ?`)
+			filters = append(filters, `name ILIKE ?`)
 			args = append(args, wildcardToLike(n))
 		} else {
-			filters = append(filters, `"name=name" = ?`)
+			filters = append(filters, `name = ?`)
 			args = append(args, n)
 		}
 	}
@@ -67,7 +68,7 @@ func (s *Service) Metrics(ctx context.Context, p MetricsParams) (*MetricsResult,
 	// Service filter
 	if len(p.Services) > 0 {
 		placeholders := makePlaceholders(len(p.Services))
-		filters = append(filters, fmt.Sprintf(`"name=service_name" IN (%s)`, placeholders))
+		filters = append(filters, fmt.Sprintf(`service IN (%s)`, placeholders))
 		for _, svc := range p.Services {
 			args = append(args, svc)
 		}
@@ -76,7 +77,7 @@ func (s *Service) Metrics(ctx context.Context, p MetricsParams) (*MetricsResult,
 	// Type filter
 	if len(p.Types) > 0 {
 		placeholders := makePlaceholders(len(p.Types))
-		filters = append(filters, fmt.Sprintf(`"name=mtype" IN (%s)`, placeholders))
+		filters = append(filters, fmt.Sprintf(`type IN (%s)`, placeholders))
 		for _, t := range p.Types {
 			args = append(args, t)
 		}
@@ -84,7 +85,7 @@ func (s *Service) Metrics(ctx context.Context, p MetricsParams) (*MetricsResult,
 
 	// Text search
 	for _, term := range p.Terms {
-		filters = append(filters, `"name=name" ILIKE ?`)
+		filters = append(filters, `name ILIKE ?`)
 		args = append(args, "%"+term+"%")
 	}
 
@@ -92,19 +93,19 @@ func (s *Service) Metrics(ctx context.Context, p MetricsParams) (*MetricsResult,
 
 	q := fmt.Sprintf(`
 SELECT
-  "name=name" as metric_name,
-  COALESCE("name=mtype", 'unknown') as mtype,
+  name as metric_name,
+  COALESCE(type, 'unknown') as mtype,
   COUNT(*) as cnt,
-  AVG(COALESCE("name=value", 0)) as avg_val,
-  MIN(COALESCE("name=value", 0)) as min_val,
-  MAX(COALESCE("name=value", 0)) as max_val,
-  LIST(DISTINCT "name=service_name") as services
-FROM read_parquet(%s, union_by_name=true)
+  AVG(COALESCE(value, 0)) as avg_val,
+  MIN(COALESCE(value, 0)) as min_val,
+  MAX(COALESCE(value, 0)) as max_val,
+  LIST(DISTINCT service) as services
+FROM metrics
 %s
-GROUP BY "name=name", "name=mtype"
+GROUP BY name, type
 ORDER BY metric_name
 LIMIT 100;
-`, metricsGlob, whereClause)
+`, whereClause)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -165,26 +166,27 @@ func (s *Service) MetricDetail(ctx context.Context, name string, window int, nam
 		window = 60
 	}
 	namespace, tenantID = s.defaults(namespace, tenantID)
-	metricsGlob := s.duck.MetricsGlob(tenantID, namespace, window)
 
 	// Summary
 	q := fmt.Sprintf(`
 SELECT
-  COALESCE("name=mtype", 'unknown') as mtype,
+  COALESCE(type, 'unknown') as mtype,
   COUNT(*) as cnt,
-  AVG(COALESCE("name=value", 0)) as avg_val,
-  MIN(COALESCE("name=value", 0)) as min_val,
-  MAX(COALESCE("name=value", 0)) as max_val,
-  LIST(DISTINCT "name=service_name") as services
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=name" = ?
-GROUP BY "name=mtype";
-`, metricsGlob, window)
+  AVG(COALESCE(value, 0)) as avg_val,
+  MIN(COALESCE(value, 0)) as min_val,
+  MAX(COALESCE(value, 0)) as max_val,
+  LIST(DISTINCT service) as services
+FROM metrics
+WHERE time >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND name = ?
+GROUP BY type;
+`, window)
 
 	out := &MetricDetailResult{Name: name}
 	var services any
-	row := s.duck.DB.QueryRowContext(ctx, q, name)
+	row := s.duck.DB.QueryRowContext(ctx, q, tenantID, namespace, namespace, name)
 	if err := row.Scan(&out.Type, &out.Count, &out.Avg, &out.Min, &out.Max, &services); err != nil {
 		slog.Warn("query failed", "method", "MetricDetail.summary", "metric", name, "err", err)
 		return out, nil
@@ -198,18 +200,20 @@ GROUP BY "name=mtype";
 	}
 	tsQ := fmt.Sprintf(`
 SELECT
-  strftime(time_bucket(INTERVAL '%d minutes', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT))), '%%Y-%%m-%%dT%%H:%%M:00Z') as bucket,
-  AVG(COALESCE("name=value", 0)) as avg_val,
-  MIN(COALESCE("name=value", 0)) as min_val,
-  MAX(COALESCE("name=value", 0)) as max_val
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=name" = ?
+  strftime(time_bucket(INTERVAL '%d minutes', time), '%%Y-%%m-%%dT%%H:%%M:00Z') as bucket,
+  AVG(COALESCE(value, 0)) as avg_val,
+  MIN(COALESCE(value, 0)) as min_val,
+  MAX(COALESCE(value, 0)) as max_val
+FROM metrics
+WHERE time >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND name = ?
 GROUP BY bucket
 ORDER BY bucket ASC;
-`, bucketMins, metricsGlob, window)
+`, bucketMins, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, tsQ, name)
+	rows, err := s.duck.DB.QueryContext(ctx, tsQ, tenantID, namespace, namespace, name)
 	if err != nil {
 		slog.Warn("query failed", "method", "MetricDetail.timeseries", "metric", name, "err", err)
 		return out, nil
@@ -234,7 +238,6 @@ ORDER BY bucket ASC;
 func (s *Service) metricSparklines(ctx context.Context, names []string, window int, namespace, tenantID string) map[string][]float64 {
 	out := make(map[string][]float64)
 
-	metricsGlob := s.duck.MetricsGlob(tenantID, namespace, window)
 	bucketMins := window / 12
 	if bucketMins < 1 {
 		bucketMins = 1
@@ -248,17 +251,21 @@ func (s *Service) metricSparklines(ctx context.Context, names []string, window i
 
 	q := fmt.Sprintf(`
 SELECT
-  "name=name" as metric_name,
-  time_bucket(INTERVAL '%d minutes', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT))) as bucket,
-  AVG(COALESCE("name=value", 0)) as avg_val
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=name" IN (%s)
-GROUP BY "name=name", bucket
+  name as metric_name,
+  time_bucket(INTERVAL '%d minutes', time) as bucket,
+  AVG(COALESCE(value, 0)) as avg_val
+FROM metrics
+WHERE time >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND name IN (%s)
+GROUP BY name, bucket
 ORDER BY metric_name, bucket ASC;
-`, bucketMins, metricsGlob, window, placeholders)
+`, bucketMins, window, placeholders)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	queryArgs := []any{tenantID, namespace, namespace}
+	queryArgs = append(queryArgs, args...)
+	rows, err := s.duck.DB.QueryContext(ctx, q, queryArgs...)
 	if err != nil {
 		slog.Warn("query failed", "method", "metricSparklines", "err", err)
 		return out
@@ -312,23 +319,24 @@ func (s *Service) Compare(ctx context.Context, services []string, window int, na
 		args = append(args, svc)
 	}
 
-	// Use raw spans for accurate comparison scoped by namespace/tenant
-	spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
 	q := fmt.Sprintf(`
 SELECT
-  "name=service_name" as service,
+  service,
   COUNT(*)::BIGINT as requests,
-  COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate,
-  COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p50_ms,
-  COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95_ms
-FROM read_parquet(%s, union_by_name=true, hive_partitioning=true)
-WHERE "name=service_name" IN (%s)
-  AND epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-GROUP BY "name=service_name"
+  COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate,
+  COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_ms), 0) as p50_ms,
+  COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms), 0) as p95_ms
+FROM spans
+WHERE service IN (%s)
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND start_time >= now() - INTERVAL %d MINUTE
+GROUP BY service
 ORDER BY requests DESC;
-`, spansGlob, placeholders, window)
+`, placeholders, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	queryArgs := append(args, tenantID, namespace, namespace)
+	rows, err := s.duck.DB.QueryContext(ctx, q, queryArgs...)
 	if err != nil {
 		slog.Warn("query failed", "method", "Compare", "err", err)
 		return &CompareResult{}, nil
@@ -386,32 +394,34 @@ ORDER BY requests DESC;
 	}, nil
 }
 
-// Namespaces discovers namespaces from filesystem.
+// Namespaces discovers namespaces from recent telemetry data.
 func (s *Service) Namespaces(lakeDir, tenantID string) []string {
+	_ = lakeDir
 	if tenantID == "" {
 		tenantID = s.cfg.TenantID.String()
 	}
 
 	var namespaces []string
-	seen := make(map[string]bool)
-
-	basePath := filepath.Join(lakeDir, "spans", fmt.Sprintf("tenant=%s", tenantID))
-	entries, err := os.ReadDir(basePath)
+	rows, err := s.duck.DB.Query(`
+SELECT DISTINCT namespace
+FROM spans
+WHERE tenant = ?
+  AND namespace IS NOT NULL
+  AND namespace != ''
+ORDER BY namespace ASC;
+`, tenantID)
 	if err != nil {
 		return namespaces
 	}
+	defer rows.Close()
 
-	for _, entry := range entries {
-		if entry.IsDir() && strings.HasPrefix(entry.Name(), "namespace=") {
-			ns := strings.TrimPrefix(entry.Name(), "namespace=")
-			if ns != "" && !seen[ns] {
-				seen[ns] = true
-				namespaces = append(namespaces, ns)
-			}
+	for rows.Next() {
+		var ns string
+		if err := rows.Scan(&ns); err != nil {
+			continue
 		}
+		namespaces = append(namespaces, ns)
 	}
-
-	sort.Strings(namespaces)
 	return namespaces
 }
 

@@ -10,7 +10,6 @@ require (
 	github.com/labstack/echo/v5 v5.1.0
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/modelcontextprotocol/go-sdk v1.5.0
-	github.com/parquet-go/parquet-go v0.29.0
 	github.com/prometheus/client_golang v1.23.2
 	go.opentelemetry.io/proto/otlp v1.10.0
 	google.golang.org/grpc v1.80.0

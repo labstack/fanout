@@ -13,9 +13,9 @@ import (
 	"github.com/labstack/fanout/internal/query"
 )
 
-// isNoDataError returns true if the error indicates no parquet files exist yet
+// isNoDataError returns true if the error indicates telemetry tables are empty/unavailable.
 func isNoDataError(errMsg string) bool {
-	return strings.Contains(errMsg, "No files found that match the pattern")
+	return strings.Contains(errMsg, "Table with name")
 }
 
 // Detector runs intelligence detection on observability data
@@ -144,32 +144,33 @@ func (d *Detector) detectAnomalies(ctx context.Context, start, end time.Time) []
 func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
-	windowMins := int(d.config.LookbackWindow.Minutes())
 	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
-	spansGlob := d.duck.SpansGlob(tenantID, namespace, windowMins*2) // 2x for baseline
+	scope := detectorScopeClause(tenantID, namespace)
 
 	// Compare current error rate to baseline (previous period)
 	sql := fmt.Sprintf(`
 		WITH current_period AS (
 			SELECT
-				"name=service_name" as service_name,
-				COUNT(*) FILTER (WHERE "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')) AS error_count,
+				service as service_name,
+				COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR')) AS error_count,
 				COUNT(*) AS total_count,
-				(COUNT(*) FILTER (WHERE "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR'))::FLOAT / COUNT(*)::FLOAT) AS error_rate
-			FROM read_parquet(%s, union_by_name=true)
-			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
-			GROUP BY "name=service_name"
+				(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::FLOAT / COUNT(*)::FLOAT) AS error_rate
+			FROM spans
+			WHERE start_unix_nano >= %d AND start_unix_nano < %d
+			%s
+			GROUP BY service
 		),
 		baseline_period AS (
 			SELECT
-				"name=service_name" as service_name,
-				COUNT(*) FILTER (WHERE "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')) AS error_count,
+				service as service_name,
+				COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR')) AS error_count,
 				COUNT(*) AS total_count,
-				(COUNT(*) FILTER (WHERE "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR'))::FLOAT / COUNT(*)::FLOAT) AS error_rate,
-				STDDEV(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_stddev
-			FROM read_parquet(%s, union_by_name=true)
-			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
-			GROUP BY "name=service_name"
+				(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::FLOAT / COUNT(*)::FLOAT) AS error_rate,
+				STDDEV(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_stddev
+			FROM spans
+			WHERE start_unix_nano >= %d AND start_unix_nano < %d
+			%s
+			GROUP BY service
 		)
 		SELECT
 			c.service_name,
@@ -182,7 +183,7 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 		FROM current_period c
 		LEFT JOIN baseline_period b ON c.service_name = b.service_name
 		WHERE c.error_rate > 0
-	`, spansGlob, startNano, endNano, spansGlob, startNano-endNano+startNano, startNano)
+	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope)
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
@@ -221,29 +222,30 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
-	windowMins := int(d.config.LookbackWindow.Minutes())
 	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
-	spansGlob := d.duck.SpansGlob(tenantID, namespace, windowMins*2)
+	scope := detectorScopeClause(tenantID, namespace)
 
 	sql := fmt.Sprintf(`
 		WITH current_period AS (
 			SELECT
-				"name=service_name" as service_name,
-				PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS p95_latency
-			FROM read_parquet(%s, union_by_name=true)
-			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
-			AND "name=kind" = 'SPAN_KIND_SERVER'
-			GROUP BY "name=service_name"
+				service as service_name,
+				PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_latency
+			FROM spans
+			WHERE start_unix_nano >= %d AND start_unix_nano < %d
+			  AND kind = 'SPAN_KIND_SERVER'
+			  %s
+			GROUP BY service
 		),
 		baseline_buckets AS (
 			SELECT
-				"name=service_name" as service_name,
-				time_bucket(INTERVAL '5 minutes', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
-				PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ("name=end_unix_nano" - "name=start_unix_nano") / 1000000.0) AS p95_latency
-			FROM read_parquet(%s, union_by_name=true)
-			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
-			AND "name=kind" = 'SPAN_KIND_SERVER'
-			GROUP BY "name=service_name", bucket
+				service as service_name,
+				time_bucket(INTERVAL '5 minutes', start_time) AS bucket,
+				PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_latency
+			FROM spans
+			WHERE start_unix_nano >= %d AND start_unix_nano < %d
+			  AND kind = 'SPAN_KIND_SERVER'
+			  %s
+			GROUP BY service, bucket
 		),
 		baseline_period AS (
 			SELECT
@@ -263,7 +265,7 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 			END AS z_score
 		FROM current_period c
 		LEFT JOIN baseline_period b ON c.service_name = b.service_name
-	`, spansGlob, startNano, endNano, spansGlob, startNano-endNano+startNano, startNano)
+	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope)
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
@@ -302,18 +304,18 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
-	windowMins := int(d.config.LookbackWindow.Minutes())
 	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
-	spansGlob := d.duck.SpansGlob(tenantID, namespace, windowMins*2)
+	scope := detectorScopeClause(tenantID, namespace)
 
 	sql := fmt.Sprintf(`
 		WITH current_period AS (
 			SELECT
-				"name=service_name" as service_name,
+				service as service_name,
 				COUNT(*) AS span_count
-			FROM read_parquet(%s, union_by_name=true)
-			WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
-			GROUP BY "name=service_name"
+			FROM spans
+			WHERE start_unix_nano >= %d AND start_unix_nano < %d
+			%s
+			GROUP BY service
 		),
 		baseline_period AS (
 			SELECT
@@ -322,11 +324,12 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 				STDDEV(cnt) AS count_stddev
 			FROM (
 				SELECT
-					"name=service_name" as service_name,
+					service as service_name,
 					COUNT(*) AS cnt
-				FROM read_parquet(%s, union_by_name=true)
-				WHERE "name=start_unix_nano" >= %d AND "name=start_unix_nano" < %d
-				GROUP BY "name=service_name", time_bucket(INTERVAL '5 minutes', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)))
+				FROM spans
+				WHERE start_unix_nano >= %d AND start_unix_nano < %d
+				%s
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time)
 			) subq
 			GROUP BY service_name
 		)
@@ -340,7 +343,7 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 			END AS z_score
 		FROM current_period c
 		LEFT JOIN baseline_period b ON c.service_name = b.service_name
-	`, spansGlob, startNano, endNano, spansGlob, startNano-endNano+startNano, startNano)
+	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope)
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
@@ -379,27 +382,27 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) []Pattern {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
-	windowMins := int(d.config.LookbackWindow.Minutes())
 	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
-	logsGlob := d.duck.LogsGlob(tenantID, namespace, windowMins)
+	scope := detectorScopeClause(tenantID, namespace)
 
 	// Group logs by normalized template (falls back to first 100 chars for old data without body_template)
 	sql := fmt.Sprintf(`
 		SELECT
-			COALESCE("name=body_template", SUBSTRING("name=body", 1, 100)) AS template,
-			"name=severity" as severity,
-			"name=service_name" as service_name,
+			COALESCE(body_template, SUBSTRING(body, 1, 100)) AS template,
+			severity,
+			service as service_name,
 			COUNT(*) AS occurrence_count,
-			MIN("name=time_unix_nano") AS first_seen_nano,
-			MAX("name=time_unix_nano") AS last_seen_nano
-		FROM read_parquet(%s, union_by_name=true)
-		WHERE "name=time_unix_nano" >= %d AND "name=time_unix_nano" < %d
-		AND "name=severity" IN ('WARN', 'ERROR', 'FATAL')
-		GROUP BY COALESCE("name=body_template", SUBSTRING("name=body", 1, 100)), "name=severity", "name=service_name"
+			MIN(time_unix_nano) AS first_seen_nano,
+			MAX(time_unix_nano) AS last_seen_nano
+		FROM logs
+		WHERE time_unix_nano >= %d AND time_unix_nano < %d
+		AND severity IN ('WARN', 'ERROR', 'FATAL')
+		%s
+		GROUP BY COALESCE(body_template, SUBSTRING(body, 1, 100)), severity, service
 		HAVING COUNT(*) >= 3
 		ORDER BY occurrence_count DESC
 		LIMIT 50
-	`, logsGlob, startNano, endNano)
+	`, startNano, endNano, scope)
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
@@ -518,6 +521,18 @@ func (d *Detector) generateSummary(healthScore float64, anomalies []Anomaly, pat
 	} else {
 		return fmt.Sprintf("Critical system issues (%.0f/100). Immediate attention required.", healthScore)
 	}
+}
+
+func detectorScopeClause(tenantID, namespace string) string {
+	clause := fmt.Sprintf("AND tenant = %s", detectorSQLLiteral(tenantID))
+	if namespace != "" {
+		clause += fmt.Sprintf(" AND namespace = %s", detectorSQLLiteral(namespace))
+	}
+	return clause
+}
+
+func detectorSQLLiteral(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
 // toInt64 converts interface{} to int64, handling both int64 and float64

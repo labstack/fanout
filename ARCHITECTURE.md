@@ -491,12 +491,13 @@ erDiagram
     SPANS ||--o{ SPANS : "parent_span_id"
 ```
 
-### Parquet Column Naming
+### Telemetry Query Surface
 
-DuckDB reads Parquet with `name=` prefix for columns:
+Telemetry is queried through DuckLake-backed views with clean column names:
 ```sql
-SELECT "name=service_name", "name=duration_ms"
-FROM read_parquet('lake/spans/**/*.parquet')
+SELECT service, duration_ms
+FROM spans
+WHERE start_time > now() - INTERVAL 15 MINUTE
 ```
 
 ## Report System
