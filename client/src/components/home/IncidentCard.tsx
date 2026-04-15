@@ -26,32 +26,79 @@ function fmtTraffic(v: number): string {
   return v.toFixed(0);
 }
 
+/** Truncate long error messages (gRPC stack traces, etc.) */
+function truncateError(msg: string, max = 80): string {
+  if (msg.length <= max) return msg;
+  return msg.slice(0, max) + "\u2026";
+}
+
+/** Identify the primary reason a service is unhealthy/degraded */
+function primaryIssue(incident: HomeIncident): string {
+  const highErr = incident.error_rate > 0.01;
+  const highLat = incident.p95_ms > 1000;
+  if (highErr && highLat) return "high errors + latency";
+  if (highErr) return "high error rate";
+  if (highLat) return "high latency";
+  return "degraded";
+}
+
 interface Props {
   incident: HomeIncident;
   onInvestigate: (prompt: string) => void;
+  compact?: boolean;
 }
 
-export function IncidentCard({ incident, onInvestigate }: Props) {
+export function IncidentCard({ incident, onInvestigate, compact = false }: Props) {
   const isUnhealthy = incident.health === "unhealthy";
-  const borderCls = isUnhealthy
-    ? "border-unhealthy/20"
-    : "border-degraded/20";
+  const borderCls = isUnhealthy ? "border-unhealthy/20" : "border-degraded/20";
   const bgCls = isUnhealthy ? "bg-unhealthy/5" : "bg-degraded/5";
   const statusCls = isUnhealthy ? "text-unhealthy" : "text-degraded";
 
-  const prompt = isUnhealthy
-    ? `Investigate ${incident.service} — error rate is ${fmtPercent(incident.error_rate)}${incident.started_at ? `, started ${timeAgo(incident.started_at)}` : ""}. What's the root cause?`
-    : `Investigate ${incident.service} — p95 latency is ${fmtMs(incident.p95_ms)}. What's causing the degradation?`;
+  const prompt = `Investigate ${incident.service} — ${primaryIssue(incident)}: error rate ${fmtPercent(incident.error_rate)}, p95 ${fmtMs(incident.p95_ms)}${incident.started_at ? `, started ${timeAgo(incident.started_at)}` : ""}. What's the root cause?`;
 
+  // Compact mode for degraded services — single row
+  if (compact) {
+    return (
+      <button
+        type="button"
+        onClick={() => onInvestigate(prompt)}
+        className={`w-full flex items-center gap-4 px-4 py-2.5 rounded-lg text-left transition-colors hover:bg-surface-2 group border ${borderCls} ${bgCls}`}
+      >
+        <span className={`text-sm ${statusCls}`}>{"\u25B2"}</span>
+        <span className="font-heading text-sm text-foreground/90 group-hover:text-foreground w-48 truncate">
+          {incident.service}
+        </span>
+        <span className={`mono text-xs ${statusCls} w-20`}>
+          {fmtPercent(incident.error_rate)}
+        </span>
+        <span className="mono text-xs text-foreground/70 w-16">
+          {fmtMs(incident.p95_ms)}
+        </span>
+        <Sparkline
+          values={incident.sparkline_error_rate}
+          width={64}
+          height={20}
+          color="var(--degraded)"
+          className="opacity-50 group-hover:opacity-80 transition-opacity"
+        />
+        <span className={`ml-auto text-[10px] uppercase tracking-wider mono ${statusCls}`}>
+          {primaryIssue(incident)}
+        </span>
+      </button>
+    );
+  }
+
+  // Full card for unhealthy services
   return (
     <div className={`rounded-xl border ${borderCls} ${bgCls} p-4 fade-up`}>
       <div className="flex items-start justify-between gap-3 mb-3">
         <div className="flex items-center gap-2.5">
-          <span className={`text-sm ${statusCls}`}>
-            {isUnhealthy ? "\u2716" : "\u25B2"}
-          </span>
+          <span className={`text-sm ${statusCls}`}>{"\u2716"}</span>
           <span className="font-heading text-sm font-semibold text-foreground">
             {incident.service}
+          </span>
+          <span className={`text-[10px] mono ${statusCls} opacity-70`}>
+            {primaryIssue(incident)}
           </span>
         </div>
         <span
@@ -65,18 +112,20 @@ export function IncidentCard({ incident, onInvestigate }: Props) {
         <div className="flex items-center gap-4 text-sm">
           <div>
             <span className="text-muted-foreground">Error rate: </span>
-            <span className={`mono font-medium ${statusCls}`}>
+            <span className={`mono font-medium ${incident.error_rate > 0.01 ? statusCls : "text-foreground"}`}>
               {fmtPercent(incident.error_rate)}
             </span>
           </div>
           <div>
             <span className="text-muted-foreground">P95: </span>
-            <span className="mono text-foreground">{fmtMs(incident.p95_ms)}</span>
+            <span className={`mono ${incident.p95_ms > 1000 ? statusCls : "text-foreground"}`}>
+              {fmtMs(incident.p95_ms)}
+            </span>
           </div>
           <div>
             <span className="text-muted-foreground">Traffic: </span>
             <span className="mono text-foreground">
-              {fmtTraffic(incident.traffic_per_min)} spans/min
+              {fmtTraffic(incident.traffic_per_min)} <span className="text-[10px] text-muted-foreground">spans/min</span>
             </span>
           </div>
         </div>
@@ -85,13 +134,13 @@ export function IncidentCard({ incident, onInvestigate }: Props) {
           <div className="flex items-center gap-2">
             <Sparkline
               values={incident.sparkline_error_rate}
-              width={120}
-              height={28}
+              width={140}
+              height={32}
               color={isUnhealthy ? "var(--unhealthy)" : "var(--degraded)"}
             />
             {incident.started_at && (
               <span className="text-[11px] text-muted-foreground mono">
-                started {timeAgo(incident.started_at)}
+                {timeAgo(incident.started_at)}
               </span>
             )}
           </div>
@@ -99,7 +148,7 @@ export function IncidentCard({ incident, onInvestigate }: Props) {
 
         {incident.related && incident.related.length > 0 && (
           <div className="text-[12px] text-muted-foreground">
-            Related: {incident.related.join(", ")} also affected
+            Related: {incident.related.join(", ")}
           </div>
         )}
       </div>
@@ -110,10 +159,10 @@ export function IncidentCard({ incident, onInvestigate }: Props) {
           {incident.top_errors.slice(0, 3).map((err) => (
             <div
               key={err.message}
-              className="flex items-center justify-between text-[12px]"
+              className="flex items-center justify-between text-[12px] gap-3"
             >
-              <span className="text-foreground/70 truncate mr-3 mono">
-                {err.message}
+              <span className="text-foreground/70 truncate mono" title={err.message}>
+                {truncateError(err.message)}
               </span>
               <span className="text-muted-foreground mono shrink-0">
                 {err.count.toLocaleString()}

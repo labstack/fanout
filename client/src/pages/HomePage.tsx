@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router";
-import { RefreshCw } from "lucide-react";
 import { api, setApiToken } from "@/api/client";
 import type { HomeResponse } from "@/lib/types";
 import { buildChatPath } from "@/lib/chat-route";
@@ -22,6 +21,8 @@ export function HomePage() {
   const [data, setData] = useState<HomeResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [window, setWindow] = useState(60);
+  const [staleSeconds, setStaleSeconds] = useState(0);
+  const lastFetch = useRef(0);
 
   useEffect(() => {
     if (token) setApiToken(token);
@@ -36,6 +37,8 @@ export function HomePage() {
         if (!cancelled) {
           setData(result);
           setLoading(false);
+          lastFetch.current = Date.now();
+          setStaleSeconds(0);
         }
       } catch {
         if (!cancelled) setLoading(false);
@@ -44,9 +47,18 @@ export function HomePage() {
 
     load();
     const interval = setInterval(load, REFRESH_INTERVAL);
+
+    // Tick staleness counter every 10s
+    const staleTick = setInterval(() => {
+      if (lastFetch.current > 0) {
+        setStaleSeconds(Math.floor((Date.now() - lastFetch.current) / 1000));
+      }
+    }, 10_000);
+
     return () => {
       cancelled = true;
       clearInterval(interval);
+      clearInterval(staleTick);
     };
   }, [window]);
 
@@ -82,8 +94,10 @@ export function HomePage() {
 
   if (!data) return null;
 
+  const unhealthy = data.incidents.filter((i) => i.health === "unhealthy");
+  const degraded = data.incidents.filter((i) => i.health === "degraded");
   const healthyCount = data.services.length;
-  const incidentCount = data.incidents.length;
+  const hasIncidents = data.incidents.length > 0;
 
   return (
     <div className="px-4 py-6 sm:px-6">
@@ -106,19 +120,20 @@ export function HomePage() {
               </button>
             ))}
           </div>
-          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mono">
-            <RefreshCw className="h-3 w-3" />
-            Auto-refresh
-          </div>
+          {staleSeconds >= 60 && (
+            <span className="text-[11px] text-muted-foreground/60 mono">
+              updated {staleSeconds >= 120 ? `${Math.floor(staleSeconds / 60)}m` : `${staleSeconds}s`} ago
+            </span>
+          )}
         </div>
 
         {/* Summary header */}
         <SummaryHeader summary={data.summary} />
 
-        {/* Incident cards */}
-        {incidentCount > 0 && (
+        {/* Unhealthy services — full expanded cards */}
+        {unhealthy.length > 0 && (
           <div className="space-y-3">
-            {data.incidents.map((inc) => (
+            {unhealthy.map((inc) => (
               <IncidentCard
                 key={inc.service}
                 incident={inc}
@@ -128,14 +143,39 @@ export function HomePage() {
           </div>
         )}
 
+        {/* Degraded services — compact rows */}
+        {degraded.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="px-1 text-[11px] text-muted-foreground mono">
+              {degraded.length} degraded
+            </div>
+            {degraded.map((inc) => (
+              <IncidentCard
+                key={inc.service}
+                incident={inc}
+                onInvestigate={investigate}
+                compact
+              />
+            ))}
+          </div>
+        )}
+
         {/* Healthy services */}
         {healthyCount > 0 && (
           <div className="rounded-xl border border-border/60 bg-surface-1/80 py-1">
-            {incidentCount > 0 && (
-              <div className="px-4 py-2 text-[11px] text-muted-foreground mono">
-                {healthyCount} service{healthyCount !== 1 ? "s" : ""} healthy
-              </div>
-            )}
+            <div className="flex items-center gap-4 px-4 py-2">
+              <span className="text-[11px] text-muted-foreground mono">
+                {hasIncidents
+                  ? `${healthyCount} service${healthyCount !== 1 ? "s" : ""} healthy`
+                  : `${healthyCount} services`}
+              </span>
+              {/* Column headers */}
+              <span className="ml-auto flex items-center gap-4 text-[10px] text-muted-foreground/60 mono uppercase tracking-wider">
+                <span className="w-24 text-right">traffic</span>
+                <span className="w-14 text-right">errors</span>
+                <span className="w-16 text-right">p95</span>
+              </span>
+            </div>
             {data.services.map((svc) => (
               <ServiceRow
                 key={svc.name}

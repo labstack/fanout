@@ -25,26 +25,26 @@ export function ServiceRow({ service, onClick }: Props) {
     <button
       type="button"
       onClick={() => onClick(service.name)}
-      className="w-full flex items-center gap-4 px-4 py-2.5 rounded-lg text-left transition-colors hover:bg-surface-2 group"
+      className="w-full flex items-center gap-4 px-4 py-2 rounded-lg text-left transition-colors hover:bg-surface-2 group"
     >
-      <span className="text-sm text-healthy">{"\u25CF"}</span>
-      <span className="font-heading text-sm text-foreground/90 group-hover:text-foreground w-48 truncate">
+      <span className="text-xs text-healthy">{"\u25CF"}</span>
+      <span className="font-heading text-[13px] text-foreground/90 group-hover:text-foreground min-w-0 flex-1 truncate">
         {service.name}
       </span>
       <Sparkline
         values={service.sparkline_traffic}
-        width={64}
-        height={20}
+        width={56}
+        height={18}
         color="var(--primary)"
-        className="opacity-40 group-hover:opacity-70 transition-opacity"
+        className="opacity-30 group-hover:opacity-60 transition-opacity shrink-0"
       />
-      <span className="mono text-xs text-muted-foreground w-24 text-right">
-        {fmtTraffic(service.traffic_per_min)} <span className="text-[10px]">spans/min</span>
+      <span className="mono text-xs text-muted-foreground w-24 text-right shrink-0">
+        {fmtTraffic(service.traffic_per_min)} <span className="text-[10px]">s/m</span>
       </span>
-      <span className="mono text-xs text-foreground/70 w-14 text-right">
+      <span className="mono text-xs text-foreground/70 w-14 text-right shrink-0">
         {fmtPercent(service.error_rate)}
       </span>
-      <span className="mono text-xs text-foreground/70 w-16 text-right">
+      <span className="mono text-xs text-foreground/70 w-16 text-right shrink-0">
         {fmtMs(service.p95_ms)}
       </span>
     </button>
