@@ -44,9 +44,10 @@ interface Props {
   incident: HomeIncident;
   onInvestigate: (prompt: string) => void;
   compact?: boolean;
+  primary?: boolean;
 }
 
-export function IncidentCard({ incident, onInvestigate, compact = false }: Props) {
+export function IncidentCard({ incident, onInvestigate, compact = false, primary = false }: Props) {
   const isUnhealthy = incident.health === "unhealthy";
   const borderCls = isUnhealthy ? "border-unhealthy/20" : "border-degraded/20";
   const bgCls = isUnhealthy ? "bg-unhealthy/5" : "bg-degraded/5";
@@ -184,11 +185,10 @@ export function IncidentCard({ incident, onInvestigate, compact = false }: Props
         </div>
       )}
 
-      {/* Investigate — primary action */}
       <button
         type="button"
         onClick={() => onInvestigate(prompt)}
-        className="btn-primary w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs"
+        className={`${primary ? "btn-primary" : "btn-ghost"} w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs`}
       >
         <Search className="h-3 w-3" />
         Investigate

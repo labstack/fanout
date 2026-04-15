@@ -182,11 +182,12 @@ export function HomePage() {
         {/* Unhealthy services — top 2 expanded, rest compact */}
         {expandedUnhealthy.length > 0 && (
           <div className="space-y-3">
-            {expandedUnhealthy.map((inc) => (
+            {expandedUnhealthy.map((inc, i) => (
               <IncidentCard
                 key={inc.service}
                 incident={inc}
                 onInvestigate={investigate}
+                primary={i === 0}
               />
             ))}
           </div>
