@@ -1,5 +1,5 @@
 import { ArrowLeft, Search } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 interface Props {
   name: string;
@@ -9,6 +9,7 @@ interface Props {
 }
 
 export function ServiceHeader({ name, status, symptom, onInvestigate }: Props) {
+  const { search } = useLocation();
   const isUnhealthy = status === "unhealthy";
   const isDegraded = status === "degraded";
   const statusCls = isUnhealthy
@@ -26,7 +27,7 @@ export function ServiceHeader({ name, status, symptom, onInvestigate }: Props) {
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div className="flex items-center gap-3 min-w-0 flex-wrap">
         <Link
-          to="/"
+          to={`/${search}`}
           className="text-xs text-muted-foreground hover:text-foreground transition-colors mono flex items-center gap-1"
         >
           <ArrowLeft className="h-3 w-3" />

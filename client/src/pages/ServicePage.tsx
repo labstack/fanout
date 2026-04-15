@@ -40,8 +40,12 @@ export function ServicePage() {
 
     async function load() {
       try {
+        const params = new URLSearchParams();
+        params.set("window", String(timeWindow));
+        const ns = new URLSearchParams(search).get("namespace");
+        if (ns) params.set("namespace", ns);
         const result = await api<ServiceDetailResponse>(
-          `/api/service/${encodeURIComponent(name!)}?window=${timeWindow}`,
+          `/api/service/${encodeURIComponent(name!)}?${params}`,
         );
         if (!cancelled) {
           setData(result);
