@@ -382,3 +382,39 @@ func TestHome_NilService(t *testing.T) {
 		t.Errorf("error code = %d, want 503", httpErr.Code)
 	}
 }
+
+func TestServiceDetail_NilService(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/service/test-svc", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{{Name: "name", Value: "test-svc"}})
+
+	h := &UIHandler{}
+	err := h.ServiceDetail(c)
+	if err == nil {
+		t.Fatal("expected error for nil service")
+	}
+	httpErr, _ := err.(*echo.HTTPError)
+	if httpErr.Code != 503 {
+		t.Errorf("code = %d, want 503", httpErr.Code)
+	}
+}
+
+func TestServiceDetail_EmptyName(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/service/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPathValues(echo.PathValues{{Name: "name", Value: ""}})
+
+	h := &UIHandler{}
+	err := h.ServiceDetail(c)
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+	httpErr, _ := err.(*echo.HTTPError)
+	if httpErr.Code != 400 {
+		t.Errorf("code = %d, want 400", httpErr.Code)
+	}
+}
