@@ -88,7 +88,27 @@ export function HomePage() {
     { label: "24h", value: 1440 },
   ];
 
-  // Empty state: no data or no services
+  // Error state on initial load — show error, not onboarding
+  if (!loading && !data && fetchError) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-center max-w-md space-y-4 fade-up">
+          <div className="rounded-lg border border-unhealthy/20 bg-unhealthy/5 px-5 py-4 text-sm text-unhealthy/90 mono">
+            {fetchError}
+          </div>
+          <button
+            type="button"
+            onClick={() => globalThis.location.reload()}
+            className="btn-ghost text-xs"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Empty state: no data and no errors — genuinely no services
   if (!loading && (!data || data.summary.total_services === 0)) {
     return <EmptyState />;
   }
