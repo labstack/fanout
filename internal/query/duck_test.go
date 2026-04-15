@@ -1,10 +1,16 @@
 package query
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/labstack/fanout/internal/config"
 )
 
 func TestLatencyRowStruct(t *testing.T) {
@@ -145,5 +151,44 @@ func TestParquetGlob_DayLevel(t *testing.T) {
 	glob := ParquetGlob(lakeDir, "spans", "test-tenant", "default", 2880) // 48 hours
 	if glob == "" {
 		t.Error("ParquetGlob returned empty string")
+	}
+}
+
+func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	d := &Duck{
+		DB:  db,
+		cfg: config.Config{RetentionDays: 7},
+	}
+
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.spans WHERE start_time < now() - INTERVAL 7 DAY")).
+		WillReturnResult(sqlmock.NewResult(0, 11))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.logs WHERE log_time < now() - INTERVAL 7 DAY")).
+		WillReturnError(errors.New("log delete failed"))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.metrics WHERE metric_time < now() - INTERVAL 7 DAY")).
+		WillReturnResult(sqlmock.NewResult(0, 7))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM service_rollup WHERE bucket < now() - INTERVAL 7 DAY")).
+		WillReturnResult(sqlmock.NewResult(0, 5))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL 7 DAY")).
+		WillReturnResult(sqlmock.NewResult(0, 3))
+	mock.ExpectExec(regexp.QuoteMeta("CHECKPOINT lake")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("CHECKPOINT")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	err = d.runMaintenance(context.Background())
+	if err == nil {
+		t.Fatal("runMaintenance() error = nil, want joined error")
+	}
+	if d.lastMaintenance.IsZero() {
+		t.Fatal("runMaintenance() did not update lastMaintenance")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }

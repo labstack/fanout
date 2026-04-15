@@ -109,6 +109,7 @@ LIMIT 100;
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
+		slog.Warn("query failed", "method", "Metrics", "err", err)
 		return &MetricsResult{Metrics: []MetricSummary{}}, nil
 	}
 	defer rows.Close()
@@ -120,11 +121,15 @@ LIMIT 100;
 		var m MetricSummary
 		var services any
 		if err := rows.Scan(&m.Name, &m.Type, &m.Count, &m.Avg, &m.Min, &m.Max, &services); err != nil {
+			slog.Warn("scan failed", "method", "Metrics", "err", err)
 			continue
 		}
 		m.Services = parseServiceList(services)
 		metricNames = append(metricNames, m.Name)
 		metrics = append(metrics, m)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rows iteration failed", "method", "Metrics", "err", err)
 	}
 
 	// Get sparklines
@@ -395,22 +400,23 @@ ORDER BY requests DESC;
 }
 
 // Namespaces discovers namespaces from recent telemetry data.
-func (s *Service) Namespaces(lakeDir, tenantID string) []string {
-	_ = lakeDir
+func (s *Service) Namespaces(ctx context.Context, tenantID string) []string {
 	if tenantID == "" {
 		tenantID = s.cfg.TenantID.String()
 	}
 
 	var namespaces []string
-	rows, err := s.duck.DB.Query(`
+	rows, err := s.duck.DB.QueryContext(ctx, `
 SELECT DISTINCT namespace
 FROM spans
 WHERE tenant = ?
+  AND start_time >= now() - INTERVAL 7 DAY
   AND namespace IS NOT NULL
   AND namespace != ''
 ORDER BY namespace ASC;
 `, tenantID)
 	if err != nil {
+		slog.Warn("query failed", "method", "Namespaces", "err", err)
 		return namespaces
 	}
 	defer rows.Close()
@@ -418,9 +424,13 @@ ORDER BY namespace ASC;
 	for rows.Next() {
 		var ns string
 		if err := rows.Scan(&ns); err != nil {
+			slog.Warn("scan failed", "method", "Namespaces", "err", err)
 			continue
 		}
 		namespaces = append(namespaces, ns)
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("rows iteration failed", "method", "Namespaces", "err", err)
 	}
 	return namespaces
 }

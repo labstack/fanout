@@ -601,3 +601,25 @@ func TestCompareTrace_AsymmetricOperations(t *testing.T) {
 		t.Errorf("cache/REDIS GET ThisMs = %f, want 0 (only in other)", cacheDiff.ThisMs)
 	}
 }
+
+func TestTrace_RowIterationError(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	rows := sqlmock.NewRows([]string{
+		"span_id", "parent_span_id", "service", "operation", "kind", "start_time",
+		"duration_ms", "status", "status_msg", "start_nano", "events_json", "links_json",
+		"trace_state", "flags", "scope_name", "scope_version", "attributes_json", "resource_json",
+	}).
+		AddRow("span-1", nil, "api", "GET /users", "SERVER", "2024-01-01T10:00:00Z",
+			100.0, "OK", nil, int64(1704106800000000000), nil, nil, nil, nil, nil, nil, nil, nil).
+		AddRow("span-2", "span-1", "db", "SELECT", "CLIENT", "2024-01-01T10:00:01Z",
+			50.0, "OK", nil, int64(1704106801000000000), nil, nil, nil, nil, nil, nil, nil, nil).
+		RowError(1, errors.New("stream failed"))
+	mock.ExpectQuery("SELECT").WillReturnRows(rows)
+
+	_, err := svc.Trace(context.Background(), "trace-broken", false, 60)
+	if err == nil {
+		t.Fatal("Trace() error = nil, want row iteration failure")
+	}
+}

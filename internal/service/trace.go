@@ -145,6 +145,9 @@ LIMIT 200;
 		}
 		spans = append(spans, r)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("trace row iteration failed: %w", err)
+	}
 
 	// Calculate self time and find root
 	var rootSpan *spanWithNano

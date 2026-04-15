@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -55,14 +56,13 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 
 	db, err := openDuckDB(ctx, dsn, tempDir, metadataPath, dataPath)
 	if err != nil {
-		slog.Warn("duckdb open failed, attempting recovery", "err", err)
-		_ = os.Remove(dbPath)
-		_ = os.Remove(dbPath + ".wal")
-		db, err = openDuckDB(ctx, dsn, tempDir, metadataPath, dataPath)
-		if err != nil {
-			return nil, fmt.Errorf("duckdb open after recovery: %w", err)
-		}
-		slog.Info("duckdb recovered with fresh database")
+		return nil, fmt.Errorf(
+			"open duckdb catalog: %w (if the local cache catalog is corrupted, remove %s and %s; DuckLake data remains in %s)",
+			err,
+			dbPath,
+			dbPath+".wal",
+			dataPath,
+		)
 	}
 
 	d := &Duck{DB: db, cfg: cfg}
@@ -553,29 +553,44 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 		return nil
 	}
 
+	var errs []error
 	if d.cfg.RetentionDays > 0 {
-		stmts := []string{
-			fmt.Sprintf("DELETE FROM lake.spans WHERE start_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
-			fmt.Sprintf("DELETE FROM lake.logs WHERE log_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
-			fmt.Sprintf("DELETE FROM lake.metrics WHERE metric_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
-			fmt.Sprintf("DELETE FROM service_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
-			fmt.Sprintf("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
+		stmts := []struct {
+			name string
+			sql  string
+		}{
+			{name: "lake.spans", sql: fmt.Sprintf("DELETE FROM lake.spans WHERE start_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "lake.logs", sql: fmt.Sprintf("DELETE FROM lake.logs WHERE log_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "lake.metrics", sql: fmt.Sprintf("DELETE FROM lake.metrics WHERE metric_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "service_rollup", sql: fmt.Sprintf("DELETE FROM service_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "edge_rollup", sql: fmt.Sprintf("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
 		}
 		for _, stmt := range stmts {
-			if _, err := d.DB.ExecContext(ctx, stmt); err != nil {
-				return err
+			res, err := d.DB.ExecContext(ctx, stmt.sql)
+			if err != nil {
+				slog.Error("maintenance delete failed", "table", stmt.name, "err", err)
+				errs = append(errs, fmt.Errorf("%s retention delete: %w", stmt.name, err))
+				continue
 			}
+			rows, rowsErr := res.RowsAffected()
+			if rowsErr != nil {
+				slog.Info("maintenance delete complete", "table", stmt.name)
+				continue
+			}
+			slog.Info("maintenance delete complete", "table", stmt.name, "rows", rows)
 		}
 	}
 
 	if _, err := d.DB.ExecContext(ctx, "CHECKPOINT lake"); err != nil {
-		return err
+		slog.Error("maintenance checkpoint failed", "target", "lake", "err", err)
+		errs = append(errs, fmt.Errorf("checkpoint lake: %w", err))
 	}
 	if _, err := d.DB.ExecContext(ctx, "CHECKPOINT"); err != nil {
-		return err
+		slog.Error("maintenance checkpoint failed", "target", "main", "err", err)
+		errs = append(errs, fmt.Errorf("checkpoint main: %w", err))
 	}
 	d.lastMaintenance = time.Now()
-	return nil
+	return errors.Join(errs...)
 }
 
 // ---- Queries for API ----
