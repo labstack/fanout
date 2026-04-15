@@ -4,9 +4,11 @@
 
 **Goal:** Replace Fanout's custom Parquet write/glob/compaction/retention infrastructure with DuckLake, eliminating ~1000 lines of infrastructure code and gaining metadata-driven query pruning.
 
-**Architecture:** DuckLake extension with SQLite catalog stores all telemetry (spans, logs, metrics) as managed tables. The lake writer INSERTs into DuckLake via DuckDB SQL instead of writing Parquet directly via parquet-go. Rollups query DuckLake tables directly instead of glob-scanning the filesystem. DuckLake handles compaction, schema evolution, and data file management automatically.
+**Architecture:** DuckLake extension with SQLite catalog stores all telemetry (spans, logs, metrics) as managed tables. The lake writer INSERTs into DuckLake via DuckDB SQL instead of writing Parquet directly via parquet-go. Rollups query DuckLake tables directly instead of glob-scanning the filesystem. Fanout enforces telemetry retention with explicit `DELETE` statements on DuckLake tables, then runs DuckLake maintenance to rewrite storage and clean orphaned files. DuckLake handles compaction, schema evolution, and data file management automatically.
 
 **Tech Stack:** DuckDB v1.5.2+ (duckdb-go/v2), DuckLake extension, SQLite catalog
+
+**Operational prerequisite:** Preinstall the `ducklake` and `sqlite` DuckDB extensions in developer environments and production images. Fanout startup should only `LOAD` them, not `INSTALL` them, so runtime does not depend on network access or a writable extension cache.
 
 ---
 
@@ -15,7 +17,7 @@
 ### Files to DELETE entirely
 - `internal/lake/compact.go` — replaced by DuckLake's automatic file management
 - `internal/lake/compact_test.go`
-- `internal/lake/retention.go` — replaced by DuckLake snapshot expiration
+- `internal/lake/retention.go` — replaced by table-level retention deletes in DuckLake maintenance
 - `internal/lake/retention_test.go`
 - `internal/query/perf.go` — glob-based file discovery no longer needed
 - `internal/query/perf_test.go` (if exists)
@@ -129,7 +131,7 @@ Also delete their test files if they exist:
 - [ ] **Step 3: Rewrite `internal/query/duck.go`**
 
 Replace the entire file. Key changes:
-- Install DuckLake + SQLite extensions in connector init
+- Load preinstalled DuckLake + SQLite extensions in connector init
 - Attach DuckLake with SQLite catalog at `{LakeDir}/catalog.sqlite`, data path `{LakeDir}/data/`
 - Create tables (`lake.spans`, `lake.logs`, `lake.metrics`) with proper columns if they don't exist
 - Create **alias views** (`CREATE VIEW spans AS SELECT * FROM lake.spans`, same for logs/metrics) so existing `FROM spans` queries work unchanged
@@ -192,8 +194,8 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 		boot := []string{
 			fmt.Sprintf("SET memory_limit='%s'", mem),
 			"SET threads=4",
-			"INSTALL ducklake",
-			"INSTALL sqlite",
+			"LOAD ducklake",
+			"LOAD sqlite",
 			fmt.Sprintf("ATTACH 'ducklake:sqlite:%s' AS lake (DATA_PATH '%s/')", catalogPath, dataPath),
 		}
 		for _, stmt := range boot {
@@ -341,12 +343,6 @@ func (d *Duck) configureDuckLake() error {
 		"CALL lake.set_option('data_inlining_row_limit', 5000, table_name => 'spans')",
 		"CALL lake.set_option('data_inlining_row_limit', 5000, table_name => 'logs')",
 		"CALL lake.set_option('data_inlining_row_limit', 5000, table_name => 'metrics')",
-	}
-	if d.cfg.RetentionDays > 0 {
-		opts = append(opts,
-			fmt.Sprintf("CALL lake.set_option('expire_older_than', '%d days')", d.cfg.RetentionDays),
-			"CALL lake.set_option('delete_older_than', '1 day')",
-		)
 	}
 	for _, stmt := range opts {
 		if _, err := d.DB.Exec(stmt); err != nil {
@@ -605,8 +601,9 @@ GROUP BY p.bucket, p.service, c.service`)
 - [ ] **Step 4: Add a `RunMaintenance()` method for periodic DuckLake housekeeping**
 
 ```go
-// RunMaintenance runs periodic DuckLake maintenance (flush inlined data,
-// expire snapshots, merge files, cleanup).
+// RunMaintenance runs periodic DuckLake maintenance. Retention is enforced
+// with row deletes on the live tables, then DuckLake housekeeping reclaims
+// storage and cleans orphaned files.
 func (d *Duck) RunMaintenance(ctx context.Context) {
 	// Run every hour
 	ticker := time.NewTicker(1 * time.Hour)
@@ -628,8 +625,24 @@ func (d *Duck) RunMaintenance(ctx context.Context) {
 
 func (d *Duck) maintenance() {
 	start := time.Now()
-	// CHECKPOINT runs all maintenance in order: flush inlined data,
-	// expire snapshots, merge files, rewrite deleted, cleanup, delete orphans.
+	if d.cfg.RetentionDays > 0 {
+		stmts := []string{
+			fmt.Sprintf("DELETE FROM lake.spans WHERE start_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
+			fmt.Sprintf("DELETE FROM lake.logs WHERE time < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
+			fmt.Sprintf("DELETE FROM lake.metrics WHERE time < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
+			fmt.Sprintf("DELETE FROM service_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
+			fmt.Sprintf("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays),
+		}
+		for _, stmt := range stmts {
+			if _, err := d.DB.Exec(stmt); err != nil {
+				slog.Error("ducklake retention delete failed", "stmt", stmt, "err", err)
+				return
+			}
+		}
+	}
+
+	// CHECKPOINT flushes inlined data and lets DuckLake rewrite storage after
+	// deletes so old files can be reclaimed.
 	if _, err := d.DB.Exec("CHECKPOINT lake"); err != nil {
 		slog.Error("ducklake maintenance failed", "err", err)
 		return
@@ -1284,9 +1297,9 @@ In `validateSQL()`:
 - [ ] **Step 4: Update `internal/config/config.go`**
 
 Rename `MaxRows` to `FlushBatchSize` (it now controls the writer's batch flush threshold, not Parquet file size).
-Remove `RetentionHours` (DuckLake maintenance handles this via CHECKPOINT).
+Remove `RetentionHours` (maintenance runs hourly and handles retention deletes plus DuckLake housekeeping).
 Keep `FlushSeconds` (still controls the writer's timer-based flush interval).
-Keep `RetentionDays` (passed to DuckLake's `expire_older_than` option).
+Keep `RetentionDays` (used by maintenance to delete old rows from DuckLake tables).
 
 ```go
 type Config struct {
@@ -1298,7 +1311,7 @@ type Config struct {
 	APIToken       string
 	RollupEvery    int       // seconds
 	MCPEnabled     bool
-	RetentionDays  int       // passed to DuckLake expire_older_than
+	RetentionDays  int       // enforced by maintenance DELETEs on DuckLake tables
 	TenantID       uuid.UUID
 	DefaultNS      string
 	DuckDBMemory   string
@@ -1451,8 +1464,8 @@ func setupTestDB(t *testing.T) *sql.DB {
 	tmpDir := t.TempDir()
 	connector, err := duckdb.NewConnector("", func(execer driver.ExecerContext) error {
 		stmts := []string{
-			"INSTALL ducklake",
-			"INSTALL sqlite",
+			"LOAD ducklake",
+			"LOAD sqlite",
 			fmt.Sprintf("ATTACH 'ducklake:sqlite:%s/catalog.sqlite' AS lake (DATA_PATH '%s/data/')", tmpDir, tmpDir),
 		}
 		for _, s := range stmts {
@@ -1525,6 +1538,8 @@ git commit -m "test: update all tests for DuckLake migration"
 
 For existing deployments that have Parquet data in the old layout, provide a one-shot migration tool.
 
+Use the same extension-loading model as the server: the host or image preinstalls `ducklake` and `sqlite`, and the tool only `LOAD`s them.
+
 - [ ] **Step 1: Write migration tool**
 
 ```go
@@ -1533,6 +1548,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"log/slog"
 	"os"
@@ -1566,8 +1582,8 @@ func main() {
 	// Connect to DuckDB with DuckLake
 	connector, err := duckdb.NewConnector("", func(execer driver.ExecerContext) error {
 		stmts := []string{
-			"INSTALL ducklake",
-			"INSTALL sqlite",
+			"LOAD ducklake",
+			"LOAD sqlite",
 			fmt.Sprintf("ATTACH 'ducklake:sqlite:%s' AS lake (DATA_PATH '%s/')", catalogPath, dataPath),
 		}
 		for _, s := range stmts {

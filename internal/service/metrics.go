@@ -401,9 +401,9 @@ func (s *Service) MetricsHistogram(ctx context.Context, p MetricQueryParams) (*H
 SELECT
   strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS time,
   service,
-  CAST(decode(attributes_json) AS VARCHAR) AS attrs,
-  CAST(decode(hist_bounds_json) AS VARCHAR) AS bounds,
-  CAST(decode(hist_counts_json) AS VARCHAR) AS counts,
+  attributes_json AS attrs,
+  hist_bounds_json AS bounds,
+  hist_counts_json AS counts,
   hist_count,
   hist_sum
 FROM metrics
@@ -496,7 +496,7 @@ func (s *Service) MetricsExemplars(ctx context.Context, p MetricQueryParams) (*E
 SELECT
   strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS time,
   service,
-  CAST(decode(exemplars_json) AS VARCHAR) AS exemplars
+  exemplars_json AS exemplars
 FROM metrics
 %s
 ORDER BY time DESC

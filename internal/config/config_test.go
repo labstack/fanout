@@ -86,8 +86,8 @@ func TestGetenvBool(t *testing.T) {
 func TestLoad(t *testing.T) {
 	// Clear all env vars that might affect config
 	vars := []string{"HTTP_ADDR", "OTLP_GRPC_ADDR", "LAKE_DIR", "FLUSH_SECONDS",
-		"MAX_ROWS", "API_TOKEN", "ROLLUP_EVERY",
-		"RETENTION_DAYS", "RETENTION_HOURS", "TENANT_ID", "DEFAULT_NAMESPACE",
+		"FLUSH_BATCH_SIZE", "API_TOKEN", "ROLLUP_EVERY",
+		"RETENTION_DAYS", "TENANT_ID", "DEFAULT_NAMESPACE",
 		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL"}
 	for _, v := range vars {
 		os.Unsetenv(v)
@@ -108,8 +108,8 @@ func TestLoad(t *testing.T) {
 	if cfg.FlushSeconds != 15 {
 		t.Errorf("FlushSeconds = %d, want %d", cfg.FlushSeconds, 15)
 	}
-	if cfg.MaxRows != 50000 {
-		t.Errorf("MaxRows = %d, want %d", cfg.MaxRows, 50000)
+	if cfg.FlushBatchSize != 50000 {
+		t.Errorf("FlushBatchSize = %d, want %d", cfg.FlushBatchSize, 50000)
 	}
 	if cfg.RollupEvery != 60 {
 		t.Errorf("RollupEvery = %d, want %d", cfg.RollupEvery, 60)
@@ -125,10 +125,9 @@ func TestLoad(t *testing.T) {
 func TestValidate(t *testing.T) {
 	valid := Config{
 		FlushSeconds:   15,
-		MaxRows:        50000,
+		FlushBatchSize: 50000,
 		RollupEvery:    60,
 		RetentionDays:  30,
-		RetentionHours: 1,
 	}
 	if err := valid.Validate(); err != nil {
 		t.Errorf("valid config should pass: %v", err)
@@ -140,13 +139,11 @@ func TestValidate(t *testing.T) {
 	}{
 		{"FlushSeconds=0", func(c *Config) { c.FlushSeconds = 0 }},
 		{"FlushSeconds=-1", func(c *Config) { c.FlushSeconds = -1 }},
-		{"MaxRows=0", func(c *Config) { c.MaxRows = 0 }},
-		{"MaxRows=-1", func(c *Config) { c.MaxRows = -1 }},
+		{"FlushBatchSize=0", func(c *Config) { c.FlushBatchSize = 0 }},
+		{"FlushBatchSize=-1", func(c *Config) { c.FlushBatchSize = -1 }},
 		{"RollupEvery=0", func(c *Config) { c.RollupEvery = 0 }},
 		{"RollupEvery=-1", func(c *Config) { c.RollupEvery = -1 }},
 		{"RetentionDays=-1", func(c *Config) { c.RetentionDays = -1 }},
-		{"RetentionHours=0", func(c *Config) { c.RetentionHours = 0 }},
-		{"RetentionHours=-1", func(c *Config) { c.RetentionHours = -1 }},
 	}
 
 	for _, tc := range tests {

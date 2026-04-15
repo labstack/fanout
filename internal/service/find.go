@@ -87,27 +87,33 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 	var args []any
 
 	if p.Query != "" {
-		filters = append(filters, `"name=name" ILIKE ?`)
+		filters = append(filters, `operation ILIKE ?`)
 		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Query)
 		args = append(args, "%"+escaped+"%")
 	}
 	if p.Service != "" {
-		filters = append(filters, `"name=service_name" = ?`)
+		filters = append(filters, `service = ?`)
 		args = append(args, p.Service)
 	}
 	if p.Operation != "" {
-		filters = append(filters, `"name=name" = ?`)
+		filters = append(filters, `operation = ?`)
 		args = append(args, p.Operation)
 	}
 	if p.Status == "error" {
-		filters = append(filters, `"name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')`)
+		filters = append(filters, `status IN ('STATUS_CODE_ERROR', 'ERROR')`)
 	} else if p.Status == "slow" {
-		filters = append(filters, `"name=duration_ms" > 1000`)
+		filters = append(filters, `duration_ms > 1000`)
 	}
 	// Attribute filters
 	for key, val := range p.Attrs {
-		filters = append(filters, `json_extract_string(decode("name=attributes_json"), ?) = ?`)
+		filters = append(filters, `json_extract_string(attributes_json, ?) = ?`)
 		args = append(args, "$."+key, val)
+	}
+	filters = append(filters, `tenant = ?`)
+	args = append(args, p.TenantID)
+	if p.Namespace != "" {
+		filters = append(filters, `namespace = ?`)
+		args = append(args, p.Namespace)
 	}
 
 	filterStr := ""
@@ -115,23 +121,22 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 		filterStr = "AND " + strings.Join(filters, " AND ")
 	}
 
-	// Glob scoped to single partition, union_by_name for schema evolution
 	q := fmt.Sprintf(`
-SELECT "name=trace_id" as trace_id,
-       "name=span_id" as span_id,
-       "name=service_name" as service,
-       "name=name" as operation,
-       "name=duration_ms" as duration_ms,
-       "name=status_code" as status,
-       strftime(epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS start_time,
-       "name=scope_name" as scope_name,
-       "name=scope_version" as scope_version
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+SELECT trace_id,
+       span_id,
+       service,
+       operation,
+       duration_ms,
+       status,
+       strftime(start_time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS start_time,
+       scope_name,
+       scope_version
+FROM spans
+WHERE start_time >= now() - INTERVAL %d MINUTE
   %s
-ORDER BY "name=start_unix_nano" DESC
+ORDER BY start_unix_nano DESC
 LIMIT %d;
-`, s.duck.SpansGlob(p.TenantID, p.Namespace, p.Window), p.Window, filterStr, p.Limit+1)
+`, p.Window, filterStr, p.Limit+1)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -177,12 +182,12 @@ func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool
 	var args []any
 
 	if p.Query != "" {
-		filters = append(filters, `"name=body" ILIKE ?`)
+		filters = append(filters, `body ILIKE ?`)
 		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Query)
 		args = append(args, "%"+escaped+"%")
 	}
 	if p.Service != "" {
-		filters = append(filters, `"name=service_name" = ?`)
+		filters = append(filters, `service = ?`)
 		args = append(args, p.Service)
 	}
 	if len(p.Severity) > 0 {
@@ -191,7 +196,13 @@ func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool
 			placeholders[i] = "?"
 			args = append(args, sev)
 		}
-		filters = append(filters, fmt.Sprintf(`"name=severity" IN (%s)`, strings.Join(placeholders, ",")))
+		filters = append(filters, fmt.Sprintf(`severity IN (%s)`, strings.Join(placeholders, ",")))
+	}
+	filters = append(filters, `tenant = ?`)
+	args = append(args, p.TenantID)
+	if p.Namespace != "" {
+		filters = append(filters, `namespace = ?`)
+		args = append(args, p.Namespace)
 	}
 
 	filterStr := ""
@@ -199,26 +210,25 @@ func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool
 		filterStr = "AND " + strings.Join(filters, " AND ")
 	}
 
-	// Glob scoped to single partition, union_by_name for schema evolution
 	q := fmt.Sprintf(`
-SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
-       CASE WHEN "name=observed_time_unix_nano" > 0
-            THEN strftime(epoch_ms(CAST("name=observed_time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ')
+SELECT strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+       CASE WHEN observed_time_unix_nano > 0
+            THEN strftime(observed_time, '%%Y-%%m-%%dT%%H:%%M:%%SZ')
             ELSE NULL END AS observed_ts,
-       "name=service_name" as service,
-       "name=severity" as severity,
-       "name=severity_number" as severity_number,
-       "name=body" as body,
-       "name=trace_id" as trace_id,
-       "name=span_id" as span_id,
-       "name=scope_name" as scope_name,
-       "name=scope_version" as scope_version
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+       service,
+       severity,
+       severity_number,
+       body,
+       trace_id,
+       span_id,
+       scope_name,
+       scope_version
+FROM logs
+WHERE time >= now() - INTERVAL %d MINUTE
   %s
-ORDER BY "name=time_unix_nano" DESC
+ORDER BY time_unix_nano DESC
 LIMIT %d;
-`, s.duck.LogsGlob(p.TenantID, p.Namespace, p.Window), p.Window, filterStr, p.Limit+1)
+`, p.Window, filterStr, p.Limit+1)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -281,13 +291,19 @@ func (s *Service) findMetrics(ctx context.Context, p FindParams) ([]MetricInfo, 
 	var args []any
 
 	if p.Query != "" {
-		filters = append(filters, `"name=name" ILIKE ?`)
+		filters = append(filters, `name ILIKE ?`)
 		escaped := strings.NewReplacer("%", "\\%", "_", "\\_").Replace(p.Query)
 		args = append(args, "%"+escaped+"%")
 	}
 	if p.Service != "" {
-		filters = append(filters, `"name=service_name" = ?`)
+		filters = append(filters, `service = ?`)
 		args = append(args, p.Service)
+	}
+	filters = append(filters, `tenant = ?`)
+	args = append(args, p.TenantID)
+	if p.Namespace != "" {
+		filters = append(filters, `namespace = ?`)
+		args = append(args, p.Namespace)
 	}
 
 	filterStr := ""
@@ -296,21 +312,21 @@ func (s *Service) findMetrics(ctx context.Context, p FindParams) ([]MetricInfo, 
 	}
 
 	q := fmt.Sprintf(`
-SELECT "name=name" as metric_name,
-       "name=mtype" as mtype,
-       "name=service_name" as service,
-       "name=value" as value,
-       strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
-       "name=unit" as unit,
-       "name=description" as description,
-       "name=scope_name" as scope_name,
-       "name=scope_version" as scope_version
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+SELECT name as metric_name,
+       type as mtype,
+       service,
+       value,
+       strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+       unit,
+       description,
+       scope_name,
+       scope_version
+FROM metrics
+WHERE time >= now() - INTERVAL %d MINUTE
   %s
-ORDER BY "name=time_unix_nano" DESC
+ORDER BY time_unix_nano DESC
 LIMIT %d;
-`, s.duck.MetricsGlob(p.TenantID, p.Namespace, p.Window), p.Window, filterStr, p.Limit+1)
+`, p.Window, filterStr, p.Limit+1)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {

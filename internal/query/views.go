@@ -3,288 +3,329 @@ package query
 import (
 	"database/sql"
 	"fmt"
-	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
 )
 
-// viewSpans is the CREATE OR REPLACE VIEW for spans with clean column names.
-// {lake} is replaced with the actual lake directory path at runtime.
+const createSpansTable = `
+CREATE TABLE IF NOT EXISTS lake.spans (
+  tenant VARCHAR,
+  namespace VARCHAR,
+  trace_id VARCHAR,
+  span_id VARCHAR,
+  parent_span_id VARCHAR,
+  service VARCHAR,
+  operation VARCHAR,
+  kind VARCHAR,
+  start_time TIMESTAMP,
+  end_time TIMESTAMP,
+  start_unix_nano BIGINT,
+  end_unix_nano BIGINT,
+  duration_ms DOUBLE,
+  status VARCHAR,
+  status_message VARCHAR,
+  resource_json VARCHAR,
+  attributes_json VARCHAR,
+  events_json VARCHAR,
+  links_json VARCHAR,
+  trace_state VARCHAR,
+  flags BIGINT,
+  scope_name VARCHAR,
+  scope_version VARCHAR,
+  ingested_at TIMESTAMP,
+  ingested_unix_nano BIGINT,
+  http_method VARCHAR,
+  http_status_code VARCHAR,
+  http_route VARCHAR,
+  db_system VARCHAR,
+  rpc_method VARCHAR,
+  rpc_service VARCHAR,
+  peer_service VARCHAR,
+  service_version VARCHAR,
+  deployment_env VARCHAR,
+  exception_type VARCHAR,
+  exception_message VARCHAR
+);`
+
+const createLogsTable = `
+CREATE TABLE IF NOT EXISTS lake.logs (
+  tenant VARCHAR,
+  namespace VARCHAR,
+  log_time TIMESTAMP,
+  observed_time TIMESTAMP,
+  time_unix_nano BIGINT,
+  observed_time_unix_nano BIGINT,
+  severity VARCHAR,
+  severity_number BIGINT,
+  body VARCHAR,
+  service VARCHAR,
+  trace_id VARCHAR,
+  span_id VARCHAR,
+  flags BIGINT,
+  resource_json VARCHAR,
+  attributes_json VARCHAR,
+  scope_name VARCHAR,
+  scope_version VARCHAR,
+  ingested_at TIMESTAMP,
+  ingested_unix_nano BIGINT,
+  body_template VARCHAR
+);`
+
+const createMetricsTable = `
+CREATE TABLE IF NOT EXISTS lake.metrics (
+  tenant VARCHAR,
+  namespace VARCHAR,
+  metric_time TIMESTAMP,
+  time_unix_nano BIGINT,
+  name VARCHAR,
+  description VARCHAR,
+  unit VARCHAR,
+  metric_type VARCHAR,
+  service VARCHAR,
+  value DOUBLE,
+  hist_bounds_json VARCHAR,
+  hist_counts_json VARCHAR,
+  hist_count BIGINT,
+  hist_sum DOUBLE,
+  exemplars_json VARCHAR,
+  attributes_json VARCHAR,
+  resource_json VARCHAR,
+  scope_name VARCHAR,
+  scope_version VARCHAR,
+  ingested_at TIMESTAMP,
+  ingested_unix_nano BIGINT
+);`
+
+const createServiceRollupTable = `
+CREATE TABLE service_rollup (
+  tenant TEXT,
+  namespace TEXT,
+  bucket TIMESTAMP,
+  service TEXT,
+  spans BIGINT,
+  p50_ms DOUBLE,
+  p95_ms DOUBLE,
+  error_rate DOUBLE,
+  log_count BIGINT DEFAULT 0,
+  metric_count BIGINT DEFAULT 0,
+  PRIMARY KEY (tenant, namespace, bucket, service)
+);`
+
+const createEdgeRollupTable = `
+CREATE TABLE edge_rollup (
+  tenant TEXT,
+  namespace TEXT,
+  bucket TIMESTAMP,
+  caller TEXT,
+  callee TEXT,
+  calls BIGINT,
+  avg_ms DOUBLE,
+  error_rate DOUBLE,
+  edge_type TEXT DEFAULT 'call',
+  PRIMARY KEY (tenant, namespace, bucket, caller, callee, edge_type)
+);`
+
+const createRollupStateTable = `
+CREATE TABLE rollup_state (
+  cache_key TEXT PRIMARY KEY,
+  last_ingested_unix_nano BIGINT,
+  updated_at TIMESTAMP
+);`
+
 const viewSpans = `
 CREATE OR REPLACE VIEW spans AS
 SELECT
-  "name=trace_id" AS trace_id,
-  "name=span_id" AS span_id,
-  "name=parent_span_id" AS parent_span_id,
-  "name=service_name" AS service,
-  "name=name" AS operation,
-  "name=kind" AS kind,
-  to_timestamp("name=start_unix_nano" / 1e9) AS start_time,
-  to_timestamp("name=end_unix_nano" / 1e9) AS end_time,
-  "name=duration_ms" AS duration_ms,
-  "name=status_code" AS status,
-  "name=status_msg" AS status_message,
-  decode("name=attributes_json") AS attributes_json,
-  decode("name=resource_json") AS resource_json,
-  decode("name=events_json") AS events_json,
-  -- Pre-extracted OTel semantic convention attributes (NULL for old data).
-  "name=attr_http_method" AS http_method,
-  "name=attr_http_status_code" AS http_status_code,
-  "name=attr_http_route" AS http_route,
-  "name=attr_db_system" AS db_system,
-  "name=attr_rpc_method" AS rpc_method,
-  "name=attr_rpc_service" AS rpc_service,
-  "name=attr_peer_service" AS peer_service,
-  "name=res_service_version" AS service_version,
-  "name=res_deployment_env" AS deployment_env,
-  "name=exc_type" AS exception_type,
-  "name=exc_message" AS exception_message,
-  namespace, tenant
-FROM read_parquet('{lake}/spans/**/*.parquet',
-     hive_partitioning=true, union_by_name=true);`
+  tenant,
+  namespace,
+  trace_id,
+  span_id,
+  parent_span_id,
+  service,
+  operation,
+  kind,
+  start_time,
+  end_time,
+  start_unix_nano,
+  end_unix_nano,
+  duration_ms,
+  status,
+  status_message,
+  resource_json,
+  attributes_json,
+  events_json,
+  links_json,
+  trace_state,
+  flags,
+  scope_name,
+  scope_version,
+  ingested_at,
+  ingested_unix_nano,
+  http_method,
+  http_status_code,
+  http_route,
+  db_system,
+  rpc_method,
+  rpc_service,
+  peer_service,
+  service_version,
+  deployment_env,
+  exception_type,
+  exception_message
+FROM lake.spans;`
 
-// viewLogs is the CREATE OR REPLACE VIEW for logs with clean column names.
 const viewLogs = `
 CREATE OR REPLACE VIEW logs AS
 SELECT
-  to_timestamp("name=time_unix_nano" / 1e9) AS time,
-  "name=severity" AS severity,
-  "name=body" AS body,
-  "name=service_name" AS service,
-  "name=trace_id" AS trace_id,
-  "name=span_id" AS span_id,
-  decode("name=attributes_json") AS attributes_json,
-  decode("name=resource_json") AS resource_json,
-  "name=body_template" AS body_template,
-  namespace, tenant
-FROM read_parquet('{lake}/logs/**/*.parquet',
-     hive_partitioning=true, union_by_name=true);`
+  tenant,
+  namespace,
+  log_time AS time,
+  observed_time,
+  time_unix_nano,
+  observed_time_unix_nano,
+  severity,
+  severity_number,
+  body,
+  service,
+  trace_id,
+  span_id,
+  flags,
+  resource_json,
+  attributes_json,
+  scope_name,
+  scope_version,
+  ingested_at,
+  ingested_unix_nano,
+  body_template
+FROM lake.logs;`
 
-// viewMetrics is the CREATE OR REPLACE VIEW for metrics with clean column names.
 const viewMetrics = `
 CREATE OR REPLACE VIEW metrics AS
 SELECT
-  to_timestamp("name=time_unix_nano" / 1e9) AS time,
-  "name=name" AS name,
-  "name=mtype" AS type,
-  "name=value" AS value,
-  "name=unit" AS unit,
-  "name=service_name" AS service,
-  "name=description" AS description,
-  decode("name=attributes_json") AS attributes_json,
-  decode("name=resource_json") AS resource_json,
-  decode("name=hist_bounds_json") AS hist_bounds_json,
-  decode("name=hist_counts_json") AS hist_counts_json,
-  "name=hist_count" AS hist_count,
-  "name=hist_sum" AS hist_sum,
-  decode("name=exemplars_json") AS exemplars_json,
-  namespace, tenant
-FROM read_parquet('{lake}/metrics/**/*.parquet',
-     hive_partitioning=true, union_by_name=true);`
+  tenant,
+  namespace,
+  metric_time AS time,
+  time_unix_nano,
+  name,
+  description,
+  unit,
+  metric_type AS type,
+  service,
+  value,
+  hist_bounds_json,
+  hist_counts_json,
+  hist_count,
+  hist_sum,
+  exemplars_json,
+  attributes_json,
+  resource_json,
+  scope_name,
+  scope_version,
+  ingested_at,
+  ingested_unix_nano
+FROM lake.metrics;`
 
-// macroAttr creates the attr() convenience macro for extracting JSON keys.
 const macroAttr = `
 CREATE OR REPLACE MACRO attr(json_col, key) AS
   json_extract_string(json_col, '$.' || key);`
 
-// placeholders maps each signal to the SQL that writes a zero-row sentinel
-// Parquet file. The sentinel establishes the column schema so that DuckDB can
-// validate the view definition even before real data arrives. We use
-// union_by_name=true in the views, so additional columns from real data files
-// are accepted transparently.
-//
-// Each sentinel is written to:
-//
-//	{lakeDir}/{signal}/_placeholder.parquet
-var placeholders = map[string]string{
-	"spans": `COPY (
-SELECT
-  NULL::VARCHAR AS "name=trace_id",
-  NULL::VARCHAR AS "name=span_id",
-  NULL::VARCHAR AS "name=parent_span_id",
-  NULL::VARCHAR AS "name=service_name",
-  NULL::VARCHAR AS "name=name",
-  NULL::VARCHAR AS "name=kind",
-  NULL::BIGINT  AS "name=start_unix_nano",
-  NULL::BIGINT  AS "name=end_unix_nano",
-  NULL::DOUBLE  AS "name=duration_ms",
-  NULL::VARCHAR AS "name=status_code",
-  NULL::VARCHAR AS "name=status_msg",
-  NULL::BLOB    AS "name=attributes_json",
-  NULL::BLOB    AS "name=resource_json",
-  NULL::BLOB    AS "name=events_json",
-  NULL::VARCHAR AS "name=attr_http_method",
-  NULL::VARCHAR AS "name=attr_http_status_code",
-  NULL::VARCHAR AS "name=attr_http_route",
-  NULL::VARCHAR AS "name=attr_db_system",
-  NULL::VARCHAR AS "name=attr_rpc_method",
-  NULL::VARCHAR AS "name=attr_rpc_service",
-  NULL::VARCHAR AS "name=attr_peer_service",
-  NULL::VARCHAR AS "name=res_service_version",
-  NULL::VARCHAR AS "name=res_deployment_env",
-  NULL::VARCHAR AS "name=exc_type",
-  NULL::VARCHAR AS "name=exc_message",
-  NULL::VARCHAR AS namespace,
-  NULL::VARCHAR AS tenant
-WHERE false
-) TO '{path}' (FORMAT parquet);`,
-
-	"logs": `COPY (
-SELECT
-  NULL::BIGINT  AS "name=time_unix_nano",
-  NULL::VARCHAR AS "name=severity",
-  NULL::VARCHAR AS "name=body",
-  NULL::VARCHAR AS "name=service_name",
-  NULL::VARCHAR AS "name=trace_id",
-  NULL::VARCHAR AS "name=span_id",
-  NULL::BLOB    AS "name=attributes_json",
-  NULL::BLOB    AS "name=resource_json",
-  NULL::VARCHAR AS "name=body_template",
-  NULL::VARCHAR AS namespace,
-  NULL::VARCHAR AS tenant
-WHERE false
-) TO '{path}' (FORMAT parquet);`,
-
-	"metrics": `COPY (
-SELECT
-  NULL::BIGINT  AS "name=time_unix_nano",
-  NULL::VARCHAR AS "name=name",
-  NULL::VARCHAR AS "name=mtype",
-  NULL::DOUBLE  AS "name=value",
-  NULL::VARCHAR AS "name=unit",
-  NULL::VARCHAR AS "name=service_name",
-  NULL::VARCHAR AS "name=description",
-  NULL::BLOB    AS "name=attributes_json",
-  NULL::BLOB    AS "name=resource_json",
-  NULL::BLOB    AS "name=hist_bounds_json",
-  NULL::BLOB    AS "name=hist_counts_json",
-  NULL::BIGINT  AS "name=hist_count",
-  NULL::DOUBLE  AS "name=hist_sum",
-  NULL::BLOB    AS "name=exemplars_json",
-  NULL::VARCHAR AS namespace,
-  NULL::VARCHAR AS tenant
-WHERE false
-) TO '{path}' (FORMAT parquet);`,
+func CreateTables(db *sql.DB) error {
+	for _, stmt := range []string{createSpansTable, createLogsTable, createMetricsTable} {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("create table: %w", err)
+		}
+	}
+	if err := configureDuckLake(db); err != nil {
+		return err
+	}
+	if err := ensureCacheTable(db, "service_rollup", createServiceRollupTable,
+		"tenant", "namespace", "bucket", "service", "spans", "p50_ms", "p95_ms", "error_rate", "log_count", "metric_count"); err != nil {
+		return err
+	}
+	if err := ensureCacheTable(db, "edge_rollup", createEdgeRollupTable,
+		"tenant", "namespace", "bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"); err != nil {
+		return err
+	}
+	if err := ensureCacheTable(db, "rollup_state", createRollupStateTable,
+		"cache_key", "last_ingested_unix_nano", "updated_at"); err != nil {
+		return err
+	}
+	return nil
 }
 
-// MigrateOldPartitions moves parquet files that sit directly under day=
-// directories into hour=00/ subdirectories. Older compaction code wrote
-// compacted.parquet at the day level, but DuckDB requires consistent Hive
-// partition depth across all files.
-func MigrateOldPartitions(lakeDir string) {
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		pattern := filepath.Join(lakeDir, signal, "tenant=*", "namespace=*",
-			"year=*", "month=*", "day=*", "*.parquet")
-		matches, err := filepath.Glob(pattern)
-		if err != nil {
-			slog.Warn("migrate glob failed", "pattern", pattern, "err", err)
-			continue
-		}
-		for _, f := range matches {
-			dayDir := filepath.Dir(f)
-			hourDir := filepath.Join(dayDir, "hour=00")
-			if err := os.MkdirAll(hourDir, 0o755); err != nil {
-				slog.Warn("migrate mkdir failed", "path", hourDir, "err", err)
-				continue
-			}
-			dest := filepath.Join(hourDir, filepath.Base(f))
-			if err := os.Rename(f, dest); err != nil {
-				slog.Warn("migrate rename failed", "from", f, "to", dest, "err", err)
-			} else {
-				slog.Info("migrated old partition file", "from", f, "to", dest)
-			}
-		}
-	}
-}
-
-// CreateViews creates (or replaces) the clean-name DuckDB views over Parquet
-// files and the attr() macro. lakeDir is substituted for the {lake} placeholder
-// in all view definitions.
-//
-// Views are created with CREATE OR REPLACE so this is safe to call multiple
-// times (e.g., after a recovery restart). DuckDB's read_parquet raises an IO
-// error at view-creation time when the glob pattern matches no files, so we
-// write a zero-row sentinel Parquet file into each signal directory. This
-// ensures the views are always registered in the catalog and return empty result
-// sets until real data arrives.
-func CreateViews(db *sql.DB, lakeDir string) error {
-	// Validate lakeDir before substituting into SQL strings.
-	if strings.ContainsAny(lakeDir, "'\"\\;") {
-		return fmt.Errorf("lake dir contains unsafe characters: %q", lakeDir)
-	}
-
-	// Write sentinel Parquet files so read_parquet globs are non-empty and
-	// DuckDB can resolve all column names (including new ones from schema
-	// evolution). Two cases:
-	//
-	// 1. No real data: write root-level _placeholder.parquet
-	// 2. Real data exists: write a hive-partitioned _schema.parquet so it
-	//    coexists with real data and provides column definitions for new
-	//    columns that old parquet files lack (union_by_name=true fills NULL).
-	for signal, copySQLTemplate := range placeholders {
-		dir := filepath.Join(lakeDir, signal)
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			return fmt.Errorf("mkdir %s: %w", dir, err)
-		}
-
-		if hasRealData(dir) {
-			// Clean up root placeholder (conflicts with hive partitioning).
-			os.Remove(filepath.Join(dir, "_placeholder.parquet"))
-			// Write schema sentinel into a hive-partitioned path so DuckDB
-			// sees new columns. Re-written every startup to track schema changes.
-			schemaDir := filepath.Join(dir, "tenant=_schema", "namespace=_schema",
-				"year=1970", "month=01", "day=01", "hour=00")
-			if err := os.MkdirAll(schemaDir, 0o755); err != nil {
-				return fmt.Errorf("mkdir schema dir %s: %w", schemaDir, err)
-			}
-			dest := filepath.Join(schemaDir, "_schema.parquet")
-			copySQL := strings.ReplaceAll(copySQLTemplate, "{path}", dest)
-			if _, err := db.Exec(copySQL); err != nil {
-				return fmt.Errorf("write schema sentinel for %s: %w", signal, err)
-			}
-		} else {
-			// Always re-write placeholder to track schema evolution
-			// (old placeholder may lack new columns).
-			dest := filepath.Join(dir, "_placeholder.parquet")
-			copySQL := strings.ReplaceAll(copySQLTemplate, "{path}", dest)
-			if _, err := db.Exec(copySQL); err != nil {
-				return fmt.Errorf("write placeholder for %s: %w", signal, err)
-			}
-		}
-	}
-
-	stmts := []struct {
-		name string
-		sql  string
-	}{
-		{"spans view", viewSpans},
-		{"logs view", viewLogs},
-		{"metrics view", viewMetrics},
-		{"attr() macro", macroAttr},
-	}
-
-	for _, s := range stmts {
-		q := strings.ReplaceAll(s.sql, "{lake}", lakeDir)
-		if _, err := db.Exec(q); err != nil {
-			return fmt.Errorf("create %s: %w", s.name, err)
+// CreateViews creates the clean-name views over DuckLake tables plus the attr() macro.
+func CreateViews(db *sql.DB) error {
+	for _, stmt := range []string{macroAttr, viewSpans, viewLogs, viewMetrics} {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("create view/macro: %w", err)
 		}
 	}
 	return nil
 }
 
-// hasRealData checks if a signal directory contains any parquet files beyond
-// the root-level placeholder (i.e., in hive-partitioned subdirectories).
-func hasRealData(dir string) bool {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
+func configureDuckLake(db *sql.DB) error {
+	var loaded int
+	if err := db.QueryRow(`
+SELECT count(*)
+FROM duckdb_extensions()
+WHERE extension_name = 'ducklake' AND loaded`).Scan(&loaded); err != nil {
+		return fmt.Errorf("check ducklake extension: %w", err)
 	}
-	for _, e := range entries {
-		if e.IsDir() {
-			// Any subdirectory means hive-partitioned data exists
-			return true
+	if loaded == 0 {
+		return nil
+	}
+
+	stmts := []string{
+		`CALL lake.set_option('parquet_compression', 'zstd')`,
+		`CALL lake.set_option('target_file_size', '256MB')`,
+		`ALTER TABLE lake.spans SET PARTITIONED BY (tenant, namespace, day(start_time))`,
+		`ALTER TABLE lake.logs SET PARTITIONED BY (tenant, namespace, day(log_time))`,
+		`ALTER TABLE lake.metrics SET PARTITIONED BY (tenant, namespace, day(metric_time))`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("configure ducklake: %w", err)
 		}
 	}
-	return false
+	return nil
+}
+
+func ensureCacheTable(db *sql.DB, table, createStmt string, requiredColumns ...string) error {
+	columns, err := cacheTableColumns(db, table)
+	if err != nil {
+		return fmt.Errorf("inspect %s schema: %w", table, err)
+	}
+	if len(columns) == 0 {
+		if _, err := db.Exec(createStmt); err != nil {
+			return fmt.Errorf("create %s: %w", table, err)
+		}
+		return nil
+	}
+	for _, column := range requiredColumns {
+		if _, ok := columns[column]; !ok {
+			if _, err := db.Exec("DROP TABLE " + table); err != nil {
+				return fmt.Errorf("drop stale %s: %w", table, err)
+			}
+			if _, err := db.Exec(createStmt); err != nil {
+				return fmt.Errorf("recreate %s: %w", table, err)
+			}
+			return nil
+		}
+	}
+	return nil
+}
+
+func cacheTableColumns(db *sql.DB, table string) (map[string]struct{}, error) {
+	rows, err := db.Query(`SELECT column_name FROM duckdb_columns() WHERE table_name = ?`, table)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	columns := make(map[string]struct{})
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		columns[name] = struct{}{}
+	}
+	return columns, rows.Err()
 }

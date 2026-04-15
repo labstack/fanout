@@ -13,7 +13,7 @@ func TestGetSchema(t *testing.T) {
 	}
 
 	// Verify lake dir substitution
-	if !strings.Contains(schema, "/var/lib/fanout/spans") {
+	if !strings.Contains(schema, "/var/lib/fanout") {
 		t.Error("GetSchema() did not substitute lake dir")
 	}
 	if strings.Contains(schema, "{LAKE}") {
@@ -23,14 +23,14 @@ func TestGetSchema(t *testing.T) {
 	// Check for key sections
 	required := []string{
 		"Fanout Data Schema",
-		"Spans (Traces)",
+		"Spans",
 		"Logs",
 		"Metrics",
 		"service_rollup",
 		"trace_id",
-		"service_name",
-		"read_parquet",
-		"hive_partitioning",
+		"service",
+		"lake.spans",
+		"json_extract_string",
 	}
 
 	for _, section := range required {

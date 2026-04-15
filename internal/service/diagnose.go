@@ -26,22 +26,23 @@ func (s *Service) Diagnose(ctx context.Context, svc string, window int, namespac
 		Dependencies:  []Dependency{},
 	}
 
-	// Always scope to single partition
+	// Always scope to single tenant; namespace may be empty to search all namespaces.
 	namespace, tenantID = s.defaults(namespace, tenantID)
-	spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
 	q := fmt.Sprintf(`
 SELECT
   COUNT(*) as cnt,
-  COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p50,
-  COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p95,
-  COALESCE(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p99,
-  COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=service_name" = ?;
-`, spansGlob, window)
+  COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_ms), 0) as p50,
+  COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms), 0) as p95,
+  COALESCE(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms), 0) as p99,
+  COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
+FROM spans
+WHERE start_time >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND service = ?;
+`, window)
 
-	row := s.duck.DB.QueryRowContext(ctx, q, svc)
+	row := s.duck.DB.QueryRowContext(ctx, q, tenantID, namespace, namespace, svc)
 	if err := row.Scan(&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate); err != nil {
 		return nil, fmt.Errorf("diagnose query failed: %w", err)
 	}
@@ -54,21 +55,23 @@ WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERV
 	// Uses pre-extracted exc_type/exc_message columns (no JSON parsing, no OOM).
 	q = fmt.Sprintf(`
 SELECT
-  "name=name" AS operation,
-  COALESCE(NULLIF("name=status_msg", ''), NULLIF("name=exc_message", ''), 'error') AS message,
-  COALESCE("name=exc_type", '') AS exception_type,
+  operation,
+  COALESCE(NULLIF(status_message, ''), NULLIF(exception_message, ''), 'error') AS message,
+  COALESCE(exception_type, '') AS exception_type,
   COUNT(*) AS cnt,
-  FIRST("name=trace_id") AS trace_id
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=service_name" = ?
-  AND "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')
+  FIRST(trace_id) AS trace_id
+FROM spans
+WHERE start_time >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND service = ?
+  AND status IN ('STATUS_CODE_ERROR', 'ERROR')
 GROUP BY operation, message, exception_type
 ORDER BY cnt DESC
 LIMIT 10;
-`, spansGlob, window)
+`, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, svc)
+	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace, svc)
 	if err != nil {
 		slog.Warn("top errors query failed", "method", "Diagnose.errors", "service", svc, "err", err)
 	} else {
@@ -94,22 +97,24 @@ LIMIT 10;
 	// Get slow operations
 	q = fmt.Sprintf(`
 SELECT
-  "name=name" as op,
-  COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p50,
-  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY "name=duration_ms") as p95,
-  COALESCE(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY "name=duration_ms"), 0) as p99,
-  COALESCE(AVG(CASE WHEN "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate,
+  operation as op,
+  COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_ms), 0) as p50,
+  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) as p95,
+  COALESCE(PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms), 0) as p99,
+  COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate,
   COUNT(*) as cnt
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=service_name" = ?
-GROUP BY "name=name"
+FROM spans
+WHERE start_time >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND service = ?
+GROUP BY operation
 HAVING p95 > 100
 ORDER BY p95 DESC
 LIMIT 5;
-`, spansGlob, window)
+`, window)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q, svc)
+	rows, err = s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace, svc)
 	if err != nil {
 		slog.Warn("slow ops query failed", "method", "Diagnose.slowOps", "service", svc, "err", err)
 	} else {
@@ -137,12 +142,14 @@ SELECT
 FROM edge_rollup
 WHERE caller = ?
   AND bucket >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
 GROUP BY callee
 ORDER BY calls DESC
 LIMIT 10;
 `, window)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q, svc)
+	rows, err = s.duck.DB.QueryContext(ctx, q, svc, tenantID, namespace, namespace)
 	if err != nil {
 		slog.Warn("dependencies query failed", "method", "Diagnose.deps", "service", svc, "err", err)
 	} else {
@@ -186,7 +193,7 @@ func (s *Service) DiagnoseEnhanced(ctx context.Context, svc string, window int, 
 	out.SymptomDetected = detected
 
 	// Baseline comparison: same time-of-day over past 7 days.
-	baseline, err := s.queryBaseline(ctx, svc, window)
+	baseline, err := s.queryBaseline(ctx, svc, window, namespace, tenantID)
 	if err != nil {
 		slog.Warn("baseline query failed", "method", "DiagnoseEnhanced", "err", err)
 	} else {
@@ -194,7 +201,7 @@ func (s *Service) DiagnoseEnhanced(ctx context.Context, svc string, window int, 
 	}
 
 	// Change point detection over rollup buckets in the window.
-	changePoints, cpTime := s.detectChangePoints(ctx, svc, window, detected)
+	changePoints, cpTime := s.detectChangePoints(ctx, svc, window, detected, namespace, tenantID)
 	out.ChangePoints = changePoints
 
 	// Correlated log patterns around the change point (or window start).
@@ -228,7 +235,9 @@ func detectSymptom(errorRate, p95Ms float64, spanCount int64) string {
 
 // queryBaseline computes the historical same-time-of-day P95 average over the past 7 days.
 // Returns nil when there is insufficient data (< 3 distinct days).
-func (s *Service) queryBaseline(ctx context.Context, svc string, window int) (*BaselineComparison, error) {
+func (s *Service) queryBaseline(ctx context.Context, svc string, window int, namespace, tenantID string) (*BaselineComparison, error) {
+	namespace, tenantID = s.defaults(namespace, tenantID)
+
 	// Determine the current hour range covered by the window.
 	now := time.Now()
 	startHour := now.Add(-time.Duration(window) * time.Minute).Hour()
@@ -244,10 +253,12 @@ SELECT
   COUNT(DISTINCT DATE_TRUNC('day', bucket)) as day_count
 FROM service_rollup
 WHERE service = ?
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
   AND bucket >= NOW() - INTERVAL 7 DAY
   AND (EXTRACT(HOUR FROM bucket) >= ? OR EXTRACT(HOUR FROM bucket) <= ?)
   AND spans > 0;`
-		row = s.duck.DB.QueryRowContext(ctx, q, svc, startHour, endHour)
+		row = s.duck.DB.QueryRowContext(ctx, q, svc, tenantID, namespace, namespace, startHour, endHour)
 	} else {
 		q = `
 SELECT
@@ -255,10 +266,12 @@ SELECT
   COUNT(DISTINCT DATE_TRUNC('day', bucket)) as day_count
 FROM service_rollup
 WHERE service = ?
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
   AND bucket >= NOW() - INTERVAL 7 DAY
   AND EXTRACT(HOUR FROM bucket) BETWEEN ? AND ?
   AND spans > 0;`
-		row = s.duck.DB.QueryRowContext(ctx, q, svc, startHour, endHour)
+		row = s.duck.DB.QueryRowContext(ctx, q, svc, tenantID, namespace, namespace, startHour, endHour)
 	}
 
 	var baselineP95 *float64
@@ -287,15 +300,19 @@ type rollupBucket struct {
 
 // detectChangePoints scans service_rollup buckets for >2σ jumps in the symptom metric.
 // Returns change points and the time of the first detected change (or window start if none).
-func (s *Service) detectChangePoints(ctx context.Context, svc string, window int, symptom string) ([]ChangePoint, time.Time) {
+func (s *Service) detectChangePoints(ctx context.Context, svc string, window int, symptom, namespace, tenantID string) ([]ChangePoint, time.Time) {
+	namespace, tenantID = s.defaults(namespace, tenantID)
+
 	q := fmt.Sprintf(`
 SELECT bucket, COALESCE(p95_ms, 0), COALESCE(error_rate, 0), COALESCE(spans, 0)
 FROM service_rollup
 WHERE service = ?
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
   AND bucket >= NOW() - INTERVAL %d MINUTE
 ORDER BY bucket ASC;`, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, svc)
+	rows, err := s.duck.DB.QueryContext(ctx, q, svc, tenantID, namespace, namespace)
 	windowStart := time.Now().Add(-time.Duration(window) * time.Minute)
 	if err != nil {
 		slog.Warn("change point query failed", "err", err)
@@ -389,7 +406,6 @@ func (s *Service) correlatedLogs(ctx context.Context, svc string, around time.Ti
 		to = time.Now()
 	}
 
-	// Use the logs view for a clean query. Fall back to parquet glob if view fails.
 	// Tokenize log bodies: replace UUIDs, timestamps, and numbers with placeholders
 	// so similar log lines cluster together instead of returning raw truncated text.
 	const tokenize = `regexp_replace(
@@ -402,35 +418,16 @@ func (s *Service) correlatedLogs(ctx context.Context, svc string, around time.Ti
 SELECT %s as pattern, severity, COUNT(*) as cnt
 FROM logs
 WHERE service = ?
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
   AND time BETWEEN ? AND ?
 GROUP BY pattern, severity
 ORDER BY cnt DESC
 LIMIT 5;`, tokenize)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, svc, from, to)
+	rows, err := s.duck.DB.QueryContext(ctx, q, svc, tenantID, namespace, namespace, from, to)
 	if err != nil {
-		// Fall back to raw parquet glob.
-		logsGlob := s.duck.LogsGlob(tenantID, namespace, window)
-		fromNano := from.UnixNano()
-		toNano := to.UnixNano()
-		tokenizePQ := `regexp_replace(
-    regexp_replace(
-      regexp_replace(LEFT("name=body", 200),
-        '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<ID>', 'gi'),
-      '\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}[^\s]*', '<TS>', 'g'),
-    '\b\d+\b', '<N>', 'g')`
-		q2 := fmt.Sprintf(`
-SELECT %s as pattern, "name=severity" as severity, COUNT(*) as cnt
-FROM read_parquet(%s, union_by_name=true)
-WHERE "name=service_name" = ?
-  AND "name=time_unix_nano" BETWEEN ? AND ?
-GROUP BY pattern, "name=severity"
-ORDER BY cnt DESC
-LIMIT 5;`, tokenizePQ, logsGlob)
-		rows, err = s.duck.DB.QueryContext(ctx, q2, svc, fromNano, toNano)
-		if err != nil {
-			return nil, fmt.Errorf("correlated logs query: %w", err)
-		}
+		return nil, fmt.Errorf("correlated logs query: %w", err)
 	}
 	defer rows.Close()
 
@@ -453,7 +450,6 @@ LIMIT 5;`, tokenizePQ, logsGlob)
 // so the user has concrete traces to investigate with the trace tool.
 func (s *Service) suggestedTraces(ctx context.Context, svc string, around time.Time, window int, namespace, tenantID string) []string {
 	namespace, tenantID = s.defaults(namespace, tenantID)
-	spansGlob := s.duck.SpansGlob(tenantID, namespace, window)
 
 	// Search ±2 minutes around the change point.
 	windowStart := time.Now().Add(-time.Duration(window) * time.Minute)
@@ -469,25 +465,34 @@ func (s *Service) suggestedTraces(ctx context.Context, svc string, around time.T
 	toNano := to.UnixNano()
 
 	// Get a mix: error traces first, then slow traces.
-	q := fmt.Sprintf(`
-(SELECT DISTINCT "name=trace_id" AS tid
- FROM read_parquet(%s, union_by_name=true)
- WHERE "name=service_name" = ?
-   AND "name=start_unix_nano" BETWEEN ? AND ?
-   AND "name=status_code" IN ('STATUS_CODE_ERROR', 'ERROR')
+	q := `
+(SELECT DISTINCT trace_id AS tid
+ FROM spans
+ WHERE service = ?
+   AND tenant = ?
+   AND (? = '' OR namespace = ?)
+   AND start_unix_nano BETWEEN ? AND ?
+   AND status IN ('STATUS_CODE_ERROR', 'ERROR')
  ORDER BY random()
  LIMIT 2)
 UNION ALL
-(SELECT "name=trace_id" AS tid
- FROM read_parquet(%s, union_by_name=true)
- WHERE "name=service_name" = ?
-   AND "name=start_unix_nano" BETWEEN ? AND ?
-   AND "name=duration_ms" > 1000
- ORDER BY "name=duration_ms" DESC
+(SELECT trace_id AS tid
+ FROM spans
+ WHERE service = ?
+   AND tenant = ?
+   AND (? = '' OR namespace = ?)
+   AND start_unix_nano BETWEEN ? AND ?
+   AND duration_ms > 1000
+ ORDER BY duration_ms DESC
  LIMIT 1)
-`, spansGlob, spansGlob)
+`
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, svc, fromNano, toNano, svc, fromNano, toNano)
+	rows, err := s.duck.DB.QueryContext(
+		ctx,
+		q,
+		svc, tenantID, namespace, namespace, fromNano, toNano,
+		svc, tenantID, namespace, namespace, fromNano, toNano,
+	)
 	if err != nil {
 		slog.Warn("suggested traces query failed", "method", "suggestedTraces", "service", svc, "err", err)
 		return nil

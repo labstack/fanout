@@ -44,7 +44,7 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 	}
 
 	// Validate SQL (skip validation for EXPLAIN-prefixed queries that we construct)
-	if err := validateSQL(req.Query, d.cfg.LakeDir); err != nil {
+	if err := validateSQL(req.Query); err != nil {
 		return SQLResponse{
 			Error: fmt.Sprintf("SQL validation failed: %v", err),
 		}
@@ -155,7 +155,7 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 }
 
 // validateSQL checks if the SQL query is safe to execute
-func validateSQL(query string, lakeDir string) error {
+func validateSQL(query string) error {
 	upperQuery := strings.ToUpper(strings.TrimSpace(query))
 
 	// Must start with SELECT or WITH (for CTEs)
@@ -191,32 +191,14 @@ func validateSQL(query string, lakeDir string) error {
 	}
 
 	// Block file-reading table functions (prevent arbitrary file access)
-	// Only read_parquet with lake/ path is allowed
 	fileReaders := []string{
-		"READ_CSV", "READ_JSON", "READ_TEXT", "READ_BLOB",
+		"READ_CSV", "READ_JSON", "READ_TEXT", "READ_BLOB", "READ_PARQUET",
 		"READ_CSV_AUTO", "READ_JSON_AUTO",
 	}
 	for _, fn := range fileReaders {
 		pattern := regexp.MustCompile(`\b` + fn + `\s*\(`)
 		if pattern.MatchString(upperQuery) {
-			return fmt.Errorf("function '%s' is not allowed; use read_parquet with lake/ paths", fn)
-		}
-	}
-
-	// Validate read_parquet paths - must reference configured lake directory
-	parquetPattern := regexp.MustCompile(`(?i)READ_PARQUET\s*\(\s*'([^']*)'`)
-	matches := parquetPattern.FindAllStringSubmatch(query, -1)
-	for _, m := range matches {
-		if len(m) > 1 {
-			path := m[1]
-			// Allow paths that start with configured lake dir or contain it
-			if !strings.HasPrefix(path, lakeDir) && !strings.Contains(path, lakeDir+"/") {
-				return fmt.Errorf("read_parquet path must be within %s directory", lakeDir)
-			}
-			// Block path traversal
-			if strings.Contains(path, "..") {
-				return fmt.Errorf("path traversal not allowed")
-			}
+			return fmt.Errorf("function '%s' is not allowed", fn)
 		}
 	}
 

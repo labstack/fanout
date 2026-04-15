@@ -2,104 +2,99 @@ package lake
 
 import (
 	"context"
+	"database/sql"
+	"database/sql/driver"
 	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
-	"github.com/parquet-go/parquet-go"
-	"github.com/parquet-go/parquet-go/compress/zstd"
-
+	"github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
 )
 
 type SpanRow struct {
-	TenantID       string  `parquet:"-"` // Partitioning only
-	Namespace      string  `parquet:"-"` // Partitioning only
-	TraceID        string  `parquet:"name=trace_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	SpanID         string  `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8"`
-	ParentSpanID   string  `parquet:"name=parent_span_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ServiceName    string  `parquet:"name=service_name, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Name           string  `parquet:"name=name, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Kind           string  `parquet:"name=kind, type=BYTE_ARRAY, convertedtype=UTF8"`
-	StartUnixNanos int64   `parquet:"name=start_unix_nano, type=INT64"`
-	EndUnixNanos   int64   `parquet:"name=end_unix_nano, type=INT64"`
-	DurationMs     float64 `parquet:"name=duration_ms, type=DOUBLE"`
-	StatusCode     string  `parquet:"name=status_code, type=BYTE_ARRAY, convertedtype=UTF8"`
-	StatusMsg      string  `parquet:"name=status_msg, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ResourceJSON   []byte  `parquet:"name=resource_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	AttributesJSON []byte  `parquet:"name=attributes_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	EventsJSON     []byte  `parquet:"name=events_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	LinksJSON      []byte  `parquet:"name=links_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	TraceState     string  `parquet:"name=trace_state, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	Flags          uint32  `parquet:"name=flags, type=INT32, repetitiontype=OPTIONAL"`
-	ScopeName      string  `parquet:"name=scope_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ScopeVersion   string  `parquet:"name=scope_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	IngestedAt     int64   `parquet:"name=ingested_unix_nano, type=INT64"`
-	// Pre-extracted OTel semantic convention attributes (avoids JSON parsing at query time).
-	HTTPMethod     string `parquet:"name=attr_http_method, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	HTTPStatusCode string `parquet:"name=attr_http_status_code, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	HTTPRoute      string `parquet:"name=attr_http_route, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	DBSystem       string `parquet:"name=attr_db_system, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	RPCMethod      string `parquet:"name=attr_rpc_method, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	RPCService     string `parquet:"name=attr_rpc_service, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	PeerService    string `parquet:"name=attr_peer_service, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	// Pre-extracted resource attributes.
-	ServiceVersion string `parquet:"name=res_service_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	DeploymentEnv  string `parquet:"name=res_deployment_env, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	// Pre-extracted exception info from span events.
-	ExceptionType    string `parquet:"name=exc_type, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ExceptionMessage string `parquet:"name=exc_message, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	TenantID         string
+	Namespace        string
+	TraceID          string
+	SpanID           string
+	ParentSpanID     string
+	ServiceName      string
+	Name             string
+	Kind             string
+	StartUnixNanos   int64
+	EndUnixNanos     int64
+	DurationMs       float64
+	StatusCode       string
+	StatusMsg        string
+	ResourceJSON     []byte
+	AttributesJSON   []byte
+	EventsJSON       []byte
+	LinksJSON        []byte
+	TraceState       string
+	Flags            uint32
+	ScopeName        string
+	ScopeVersion     string
+	IngestedAt       int64
+	HTTPMethod       string
+	HTTPStatusCode   string
+	HTTPRoute        string
+	DBSystem         string
+	RPCMethod        string
+	RPCService       string
+	PeerService      string
+	ServiceVersion   string
+	DeploymentEnv    string
+	ExceptionType    string
+	ExceptionMessage string
 }
 
 type LogRow struct {
-	TenantID          string `parquet:"-"` // Partitioning only
-	Namespace         string `parquet:"-"` // Partitioning only
-	TimeUnixNanos     int64  `parquet:"name=time_unix_nano, type=INT64"`
-	ObservedTimeNanos int64  `parquet:"name=observed_time_unix_nano, type=INT64, repetitiontype=OPTIONAL"`
-	Severity          string `parquet:"name=severity, type=BYTE_ARRAY, convertedtype=UTF8"`
-	SeverityNumber    int32  `parquet:"name=severity_number, type=INT32, repetitiontype=OPTIONAL"`
-	Body              string `parquet:"name=body, type=BYTE_ARRAY, convertedtype=UTF8"`
-	ServiceName       string `parquet:"name=service_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	TraceID           string `parquet:"name=trace_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	SpanID            string `parquet:"name=span_id, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	Flags             uint32 `parquet:"name=flags, type=INT32, repetitiontype=OPTIONAL"`
-	ResourceJSON      []byte `parquet:"name=resource_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	AttributesJSON    []byte `parquet:"name=attributes_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ScopeName         string `parquet:"name=scope_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ScopeVersion      string `parquet:"name=scope_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	IngestedAt        int64  `parquet:"name=ingested_unix_nano, type=INT64"`
-	BodyTemplate      string `parquet:"name=body_template, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
+	TenantID          string
+	Namespace         string
+	TimeUnixNanos     int64
+	ObservedTimeNanos int64
+	Severity          string
+	SeverityNumber    int32
+	Body              string
+	ServiceName       string
+	TraceID           string
+	SpanID            string
+	Flags             uint32
+	ResourceJSON      []byte
+	AttributesJSON    []byte
+	ScopeName         string
+	ScopeVersion      string
+	IngestedAt        int64
+	BodyTemplate      string
 }
 
 type MetricRow struct {
-	TenantID       string  `parquet:"-"` // Partitioning only
-	Namespace      string  `parquet:"-"` // Partitioning only
-	TimeUnixNanos  int64   `parquet:"name=time_unix_nano, type=INT64"`
-	Name           string  `parquet:"name=name, type=BYTE_ARRAY, convertedtype=UTF8"`
-	Description    string  `parquet:"name=description, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	Unit           string  `parquet:"name=unit, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	MType          string  `parquet:"name=mtype, type=BYTE_ARRAY, convertedtype=UTF8"`
-	ServiceName    string  `parquet:"name=service_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	Value          float64 `parquet:"name=value, type=DOUBLE, repetitiontype=OPTIONAL"`
-	HistBoundsJSON []byte  `parquet:"name=hist_bounds_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	HistCountsJSON []byte  `parquet:"name=hist_counts_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	HistCount      int64   `parquet:"name=hist_count, type=INT64, repetitiontype=OPTIONAL"`
-	HistSum        float64 `parquet:"name=hist_sum, type=DOUBLE, repetitiontype=OPTIONAL"`
-	ExemplarsJSON  []byte  `parquet:"name=exemplars_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	AttributesJSON []byte  `parquet:"name=attributes_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ResourceJSON   []byte  `parquet:"name=resource_json, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ScopeName      string  `parquet:"name=scope_name, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	ScopeVersion   string  `parquet:"name=scope_version, type=BYTE_ARRAY, convertedtype=UTF8, repetitiontype=OPTIONAL"`
-	IngestedAt     int64   `parquet:"name=ingested_unix_nano, type=INT64"`
+	TenantID       string
+	Namespace      string
+	TimeUnixNanos  int64
+	Name           string
+	Description    string
+	Unit           string
+	MType          string
+	ServiceName    string
+	Value          float64
+	HistBoundsJSON []byte
+	HistCountsJSON []byte
+	HistCount      int64
+	HistSum        float64
+	ExemplarsJSON  []byte
+	AttributesJSON []byte
+	ResourceJSON   []byte
+	ScopeName      string
+	ScopeVersion   string
+	IngestedAt     int64
 }
 
 type Writer struct {
 	cfg        config.Config
+	db         *sql.DB
 	chSpans    <-chan SpanRow
 	chLogs     <-chan LogRow
 	chMetrics  <-chan MetricRow
@@ -111,8 +106,16 @@ type Writer struct {
 	done       chan struct{}
 }
 
-func NewWriter(cfg config.Config, spans <-chan SpanRow, logs <-chan LogRow, metrics <-chan MetricRow) *Writer {
-	return &Writer{cfg: cfg, chSpans: spans, chLogs: logs, chMetrics: metrics, lastFlush: time.Now(), done: make(chan struct{})}
+func NewWriter(cfg config.Config, db *sql.DB, spans <-chan SpanRow, logs <-chan LogRow, metricsCh <-chan MetricRow) *Writer {
+	return &Writer{
+		cfg:       cfg,
+		db:        db,
+		chSpans:   spans,
+		chLogs:    logs,
+		chMetrics: metricsCh,
+		lastFlush: time.Now(),
+		done:      make(chan struct{}),
+	}
 }
 
 // Wait blocks until Run() has returned (final flush complete).
@@ -126,27 +129,43 @@ func (w *Writer) Run(ctx context.Context) error {
 	ticker := time.NewTicker(time.Duration(w.cfg.FlushSeconds) * time.Second)
 	defer ticker.Stop()
 
+	spansCh := w.chSpans
+	logsCh := w.chLogs
+	metricsCh := w.chMetrics
+
 	for {
 		select {
-		case r := <-w.chSpans:
+		case r, ok := <-spansCh:
+			if !ok {
+				spansCh = nil
+				continue
+			}
 			w.mu.Lock()
 			w.bufSpans = append(w.bufSpans, r)
 			metrics.RecordIngest("spans", 1)
-			metrics.UpdateQueueDepth("spans", len(w.chSpans))
+			metrics.UpdateQueueDepth("spans", len(spansCh))
 			w.maybeFlush()
 			w.mu.Unlock()
-		case r := <-w.chLogs:
+		case r, ok := <-logsCh:
+			if !ok {
+				logsCh = nil
+				continue
+			}
 			w.mu.Lock()
 			w.bufLogs = append(w.bufLogs, r)
 			metrics.RecordIngest("logs", 1)
-			metrics.UpdateQueueDepth("logs", len(w.chLogs))
+			metrics.UpdateQueueDepth("logs", len(logsCh))
 			w.maybeFlush()
 			w.mu.Unlock()
-		case r := <-w.chMetrics:
+		case r, ok := <-metricsCh:
+			if !ok {
+				metricsCh = nil
+				continue
+			}
 			w.mu.Lock()
 			w.bufMetrics = append(w.bufMetrics, r)
 			metrics.RecordIngest("metrics", 1)
-			metrics.UpdateQueueDepth("metrics", len(w.chMetrics))
+			metrics.UpdateQueueDepth("metrics", len(metricsCh))
 			w.maybeFlush()
 			w.mu.Unlock()
 		case <-ticker.C:
@@ -154,9 +173,15 @@ func (w *Writer) Run(ctx context.Context) error {
 			w.flushLocked()
 			w.mu.Unlock()
 		case <-ctx.Done():
-			// Drain any remaining items from buffered channels
 			w.mu.Lock()
-			w.drainChannels()
+			w.drainChannels(spansCh, logsCh, metricsCh)
+			w.flushLocked()
+			w.mu.Unlock()
+			return nil
+		}
+
+		if spansCh == nil && logsCh == nil && metricsCh == nil {
+			w.mu.Lock()
 			w.flushLocked()
 			w.mu.Unlock()
 			return nil
@@ -164,29 +189,43 @@ func (w *Writer) Run(ctx context.Context) error {
 	}
 }
 
-// drainChannels reads any remaining items from the buffered input channels.
-// Must be called with w.mu held.
-func (w *Writer) drainChannels() {
+func (w *Writer) drainChannels(spansCh <-chan SpanRow, logsCh <-chan LogRow, metricsCh <-chan MetricRow) {
 	for {
+		drained := false
+
 		select {
-		case r := <-w.chSpans:
+		case r := <-spansCh:
 			w.bufSpans = append(w.bufSpans, r)
-		case r := <-w.chLogs:
-			w.bufLogs = append(w.bufLogs, r)
-		case r := <-w.chMetrics:
-			w.bufMetrics = append(w.bufMetrics, r)
+			drained = true
 		default:
+		}
+		select {
+		case r := <-logsCh:
+			w.bufLogs = append(w.bufLogs, r)
+			drained = true
+		default:
+		}
+		select {
+		case r := <-metricsCh:
+			w.bufMetrics = append(w.bufMetrics, r)
+			drained = true
+		default:
+		}
+
+		if !drained {
 			return
 		}
 	}
 }
 
 func (w *Writer) maybeFlush() {
-	if len(w.bufSpans) >= w.cfg.MaxRows ||
-		len(w.bufLogs) >= w.cfg.MaxRows ||
-		len(w.bufMetrics) >= w.cfg.MaxRows ||
-		len(w.bufSpans)+len(w.bufLogs)+len(w.bufMetrics) >= w.cfg.MaxRows {
+	total := len(w.bufSpans) + len(w.bufLogs) + len(w.bufMetrics)
+	if len(w.bufSpans) >= w.cfg.FlushBatchSize ||
+		len(w.bufLogs) >= w.cfg.FlushBatchSize ||
+		len(w.bufMetrics) >= w.cfg.FlushBatchSize ||
+		total >= w.cfg.FlushBatchSize {
 		w.flushLocked()
+		return
 	}
 	if time.Since(w.lastFlush) >= time.Duration(w.cfg.FlushSeconds)*time.Second {
 		w.flushLocked()
@@ -194,195 +233,255 @@ func (w *Writer) maybeFlush() {
 }
 
 func (w *Writer) flushLocked() {
-	now := time.Now()
-	maxRetry := w.cfg.MaxRows * 3 // Cap retry buffer to prevent unbounded growth
-	if maxRetry < 0 {
-		maxRetry = 0
-	}
-
-	// Group spans by tenant/namespace
-	if len(w.bufSpans) > 0 {
-		byPartition := make(map[string][]SpanRow)
-		for _, r := range w.bufSpans {
-			if r.TenantID == "" {
-				r.TenantID = "default"
-			}
-			if r.Namespace == "" {
-				r.Namespace = "default"
-			}
-			key := r.TenantID + "/" + r.Namespace
-			byPartition[key] = append(byPartition[key], r)
-		}
-		var totalBytes int64
-		var failed []SpanRow
-		start := time.Now()
-		for _, rows := range byPartition {
-			r := rows[0]
-			base := filepath.Join(w.cfg.LakeDir, "spans", fmt.Sprintf("tenant=%s", r.TenantID), fmt.Sprintf("namespace=%s", r.Namespace))
-			_, bytes, err := writeParquet(base, now, rows)
-			if err != nil {
-				slog.Error("write spans parquet failed", "tenant", r.TenantID, "namespace", r.Namespace, "err", err)
-				metrics.FlushErrors.WithLabelValues("spans").Inc()
-				failed = append(failed, rows...)
-			} else {
-				totalBytes += bytes
-			}
-		}
-		metrics.RecordFlush("spans", totalBytes, time.Since(start).Seconds())
-		if len(failed) > maxRetry {
-			dropped := len(failed) - maxRetry
-			slog.Error("spans data loss: retry buffer full, dropping rows", "buffered", len(failed), "dropped", dropped)
-			metrics.RowsDropped.WithLabelValues("spans").Add(float64(dropped))
-			failed = failed[:maxRetry]
-		}
-		w.bufSpans = append(w.bufSpans[:0], failed...)
-	}
-
-	// Group logs by tenant/namespace
-	if len(w.bufLogs) > 0 {
-		byPartition := make(map[string][]LogRow)
-		for _, r := range w.bufLogs {
-			if r.TenantID == "" {
-				r.TenantID = "default"
-			}
-			if r.Namespace == "" {
-				r.Namespace = "default"
-			}
-			key := r.TenantID + "/" + r.Namespace
-			byPartition[key] = append(byPartition[key], r)
-		}
-		var totalBytes int64
-		var failed []LogRow
-		start := time.Now()
-		for _, rows := range byPartition {
-			r := rows[0]
-			base := filepath.Join(w.cfg.LakeDir, "logs", fmt.Sprintf("tenant=%s", r.TenantID), fmt.Sprintf("namespace=%s", r.Namespace))
-			_, bytes, err := writeParquet(base, now, rows)
-			if err != nil {
-				slog.Error("write logs parquet failed", "tenant", r.TenantID, "namespace", r.Namespace, "err", err)
-				metrics.FlushErrors.WithLabelValues("logs").Inc()
-				failed = append(failed, rows...)
-			} else {
-				totalBytes += bytes
-			}
-		}
-		metrics.RecordFlush("logs", totalBytes, time.Since(start).Seconds())
-		if len(failed) > maxRetry {
-			dropped := len(failed) - maxRetry
-			slog.Error("logs data loss: retry buffer full, dropping rows", "buffered", len(failed), "dropped", dropped)
-			metrics.RowsDropped.WithLabelValues("logs").Add(float64(dropped))
-			failed = failed[:maxRetry]
-		}
-		w.bufLogs = append(w.bufLogs[:0], failed...)
-	}
-
-	// Group metrics by tenant/namespace
-	if len(w.bufMetrics) > 0 {
-		byPartition := make(map[string][]MetricRow)
-		for _, r := range w.bufMetrics {
-			if r.TenantID == "" {
-				r.TenantID = "default"
-			}
-			if r.Namespace == "" {
-				r.Namespace = "default"
-			}
-			key := r.TenantID + "/" + r.Namespace
-			byPartition[key] = append(byPartition[key], r)
-		}
-		var totalBytes int64
-		var failed []MetricRow
-		start := time.Now()
-		for _, rows := range byPartition {
-			r := rows[0]
-			base := filepath.Join(w.cfg.LakeDir, "metrics", fmt.Sprintf("tenant=%s", r.TenantID), fmt.Sprintf("namespace=%s", r.Namespace))
-			_, bytes, err := writeParquet(base, now, rows)
-			if err != nil {
-				slog.Error("write metrics parquet failed", "tenant", r.TenantID, "namespace", r.Namespace, "err", err)
-				metrics.FlushErrors.WithLabelValues("metrics").Inc()
-				failed = append(failed, rows...)
-			} else {
-				totalBytes += bytes
-			}
-		}
-		metrics.RecordFlush("metrics", totalBytes, time.Since(start).Seconds())
-		if len(failed) > maxRetry {
-			dropped := len(failed) - maxRetry
-			slog.Error("metrics data loss: retry buffer full, dropping rows", "buffered", len(failed), "dropped", dropped)
-			metrics.RowsDropped.WithLabelValues("metrics").Add(float64(dropped))
-			failed = failed[:maxRetry]
-		}
-		w.bufMetrics = append(w.bufMetrics[:0], failed...)
-	}
-
-	w.lastFlush = now
+	w.flushSpansLocked()
+	w.flushLogsLocked()
+	w.flushMetricsLocked()
+	w.lastFlush = time.Now()
 }
 
-// CleanupTempFiles removes orphaned .tmp-*.parquet files left by
-// a previous crash. Call before starting the writer.
-func CleanupTempFiles(lakeDir string) {
-	err := filepath.Walk(lakeDir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil // skip unreadable dirs
-		}
-		if !info.IsDir() && strings.HasPrefix(info.Name(), ".tmp-") && strings.HasSuffix(info.Name(), ".parquet") {
-			if rmErr := os.Remove(path); rmErr != nil {
-				slog.Warn("failed to remove temp file", "path", path, "err", rmErr)
-			} else {
-				slog.Info("removed orphaned temp file", "path", path)
+func (w *Writer) flushSpansLocked() {
+	if len(w.bufSpans) == 0 {
+		return
+	}
+	start := time.Now()
+	if err := w.insertSpans(w.bufSpans); err != nil {
+		slog.Error("write spans failed", "err", err)
+		metrics.FlushErrors.WithLabelValues("spans").Inc()
+		w.bufSpans = retainRows(w.bufSpans, w.retryCap(), "spans")
+		return
+	}
+	metrics.RecordFlush("spans", 0, time.Since(start).Seconds())
+	w.bufSpans = w.bufSpans[:0]
+}
+
+func (w *Writer) flushLogsLocked() {
+	if len(w.bufLogs) == 0 {
+		return
+	}
+	start := time.Now()
+	if err := w.insertLogs(w.bufLogs); err != nil {
+		slog.Error("write logs failed", "err", err)
+		metrics.FlushErrors.WithLabelValues("logs").Inc()
+		w.bufLogs = retainRows(w.bufLogs, w.retryCap(), "logs")
+		return
+	}
+	metrics.RecordFlush("logs", 0, time.Since(start).Seconds())
+	w.bufLogs = w.bufLogs[:0]
+}
+
+func (w *Writer) flushMetricsLocked() {
+	if len(w.bufMetrics) == 0 {
+		return
+	}
+	start := time.Now()
+	if err := w.insertMetrics(w.bufMetrics); err != nil {
+		slog.Error("write metrics failed", "err", err)
+		metrics.FlushErrors.WithLabelValues("metrics").Inc()
+		w.bufMetrics = retainRows(w.bufMetrics, w.retryCap(), "metrics")
+		return
+	}
+	metrics.RecordFlush("metrics", 0, time.Since(start).Seconds())
+	w.bufMetrics = w.bufMetrics[:0]
+}
+
+func (w *Writer) retryCap() int {
+	maxRetry := w.cfg.FlushBatchSize * 3
+	if maxRetry < 0 {
+		return 0
+	}
+	return maxRetry
+}
+
+func (w *Writer) insertSpans(rows []SpanRow) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return withAppender(ctx, w.db, "spans", func(a *duckdb.Appender) error {
+		for _, row := range rows {
+			tenantID, namespace := normalizePartition(row.TenantID, row.Namespace)
+			if err := a.AppendRow(
+				tenantID,
+				namespace,
+				row.TraceID,
+				row.SpanID,
+				optionalString(row.ParentSpanID),
+				row.ServiceName,
+				row.Name,
+				row.Kind,
+				optionalTime(row.StartUnixNanos),
+				optionalTime(row.EndUnixNanos),
+				row.StartUnixNanos,
+				row.EndUnixNanos,
+				row.DurationMs,
+				row.StatusCode,
+				optionalString(row.StatusMsg),
+				optionalJSON(row.ResourceJSON),
+				optionalJSON(row.AttributesJSON),
+				optionalJSON(row.EventsJSON),
+				optionalJSON(row.LinksJSON),
+				optionalString(row.TraceState),
+				int64(row.Flags),
+				optionalString(row.ScopeName),
+				optionalString(row.ScopeVersion),
+				optionalTime(row.IngestedAt),
+				row.IngestedAt,
+				optionalString(row.HTTPMethod),
+				optionalString(row.HTTPStatusCode),
+				optionalString(row.HTTPRoute),
+				optionalString(row.DBSystem),
+				optionalString(row.RPCMethod),
+				optionalString(row.RPCService),
+				optionalString(row.PeerService),
+				optionalString(row.ServiceVersion),
+				optionalString(row.DeploymentEnv),
+				optionalString(row.ExceptionType),
+				optionalString(row.ExceptionMessage),
+			); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
-	if err != nil {
-		slog.Warn("temp file cleanup walk failed", "err", err)
-	}
 }
 
-func writeParquet[T any](base string, ts time.Time, rows []T) (string, int64, error) {
-	utc := ts.UTC()
-	year, month, day := utc.Date()
-	hour := utc.Hour()
-	dir := filepath.Join(base,
-		fmt.Sprintf("year=%04d", year),
-		fmt.Sprintf("month=%02d", int(month)),
-		fmt.Sprintf("day=%02d", day),
-		fmt.Sprintf("hour=%02d", hour),
-	)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", 0, err
-	}
-	finalPath := filepath.Join(dir, fmt.Sprintf("part-%d.parquet", ts.UnixNano()))
+func (w *Writer) insertLogs(rows []LogRow) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return withAppender(ctx, w.db, "logs", func(a *duckdb.Appender) error {
+		for _, row := range rows {
+			tenantID, namespace := normalizePartition(row.TenantID, row.Namespace)
+			if err := a.AppendRow(
+				tenantID,
+				namespace,
+				optionalTime(row.TimeUnixNanos),
+				optionalTime(row.ObservedTimeNanos),
+				row.TimeUnixNanos,
+				optionalInt64(row.ObservedTimeNanos),
+				row.Severity,
+				int64(row.SeverityNumber),
+				row.Body,
+				optionalString(row.ServiceName),
+				optionalString(row.TraceID),
+				optionalString(row.SpanID),
+				int64(row.Flags),
+				optionalJSON(row.ResourceJSON),
+				optionalJSON(row.AttributesJSON),
+				optionalString(row.ScopeName),
+				optionalString(row.ScopeVersion),
+				optionalTime(row.IngestedAt),
+				row.IngestedAt,
+				optionalString(row.BodyTemplate),
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
 
-	tmp, err := os.CreateTemp(dir, ".tmp-*.parquet")
+func (w *Writer) insertMetrics(rows []MetricRow) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	return withAppender(ctx, w.db, "metrics", func(a *duckdb.Appender) error {
+		for _, row := range rows {
+			tenantID, namespace := normalizePartition(row.TenantID, row.Namespace)
+			if err := a.AppendRow(
+				tenantID,
+				namespace,
+				optionalTime(row.TimeUnixNanos),
+				row.TimeUnixNanos,
+				row.Name,
+				optionalString(row.Description),
+				optionalString(row.Unit),
+				row.MType,
+				optionalString(row.ServiceName),
+				row.Value,
+				optionalJSON(row.HistBoundsJSON),
+				optionalJSON(row.HistCountsJSON),
+				optionalInt64(row.HistCount),
+				row.HistSum,
+				optionalJSON(row.ExemplarsJSON),
+				optionalJSON(row.AttributesJSON),
+				optionalJSON(row.ResourceJSON),
+				optionalString(row.ScopeName),
+				optionalString(row.ScopeVersion),
+				optionalTime(row.IngestedAt),
+				row.IngestedAt,
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func normalizePartition(tenantID, namespace string) (string, string) {
+	if tenantID == "" {
+		tenantID = "default"
+	}
+	if namespace == "" {
+		namespace = "default"
+	}
+	return tenantID, namespace
+}
+
+func optionalString(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+func optionalJSON(v []byte) any {
+	if len(v) == 0 {
+		return nil
+	}
+	return string(v)
+}
+
+func optionalTime(unixNano int64) any {
+	if unixNano <= 0 {
+		return nil
+	}
+	return time.Unix(0, unixNano).UTC()
+}
+
+func optionalInt64(v int64) any {
+	if v == 0 {
+		return nil
+	}
+	return v
+}
+
+func withAppender(ctx context.Context, db *sql.DB, table string, fn func(a *duckdb.Appender) error) error {
+	conn, err := db.Conn(ctx)
 	if err != nil {
-		return "", 0, err
+		return err
 	}
-	tmpPath := tmp.Name()
-	defer func() {
-		_ = tmp.Close()
-	}()
+	defer conn.Close()
 
-	if err := parquet.Write(tmp, rows, parquet.Compression(&zstd.Codec{})); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", 0, err
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", 0, err
-	}
-	if err := tmp.Close(); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", 0, err
-	}
-	_ = os.Chmod(tmpPath, 0o644)
-	if err := os.Rename(tmpPath, finalPath); err != nil {
-		_ = os.Remove(tmpPath)
-		return "", 0, err
-	}
+	return conn.Raw(func(raw any) error {
+		driverConn, ok := raw.(driver.Conn)
+		if !ok {
+			return fmt.Errorf("unexpected driver connection type %T", raw)
+		}
+		appender, err := duckdb.NewAppender(driverConn, "lake", "", table)
+		if err != nil {
+			return err
+		}
+		if err := fn(appender); err != nil {
+			_ = appender.Close()
+			return err
+		}
+		return appender.Close()
+	})
+}
 
-	info, err := os.Stat(finalPath)
-	if err != nil {
-		return finalPath, 0, nil
+func retainRows[T any](rows []T, maxRetry int, signal string) []T {
+	if len(rows) <= maxRetry {
+		return rows
 	}
-	return finalPath, info.Size(), nil
+	dropped := len(rows) - maxRetry
+	slog.Error("data loss: retry buffer full, dropping rows", "signal", signal, "buffered", len(rows), "dropped", dropped)
+	metrics.RowsDropped.WithLabelValues(signal).Add(float64(dropped))
+	return rows[:maxRetry]
 }

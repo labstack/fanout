@@ -1,6 +1,6 @@
 # Fanout
 
-Single-binary observability platform. Ingest OTLP, store as Parquet, query with DuckDB.
+Single-binary observability platform. Ingest OTLP, store in DuckLake, query with DuckDB.
 
 <p align="center">
   <img src="docs/architecture.svg" alt="Fanout Architecture" width="800"/>
@@ -53,14 +53,13 @@ MCP clients receive full JSON Schema via `tools/list`.
 |----------|---------|-------------|
 | `HTTP_ADDR` | `:7520` | HTTP server address |
 | `OTLP_GRPC_ADDR` | `:4317` | OTLP gRPC address |
-| `LAKE_DIR` | `./lake` | Parquet storage directory |
+| `LAKE_DIR` | `./lake` | DuckLake storage directory |
 | `FLUSH_SECONDS` | `15` | Batch flush interval |
-| `MAX_ROWS` | `50000` | Max rows per Parquet file |
+| `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
 | `ROLLUP_EVERY` | `60` | Rollup refresh (seconds) |
 | `API_TOKEN` | - | Bearer auth token (optional) |
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
-| `RETENTION_HOURS` | `1` | Retention check interval |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace |
 | `TENANT_ID` | - | Tenant UUID (optional) |
 

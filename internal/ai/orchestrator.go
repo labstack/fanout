@@ -448,7 +448,7 @@ func (o *Orchestrator) cachedServices(ctx context.Context) []string {
 		return o.servicesList
 	}
 
-	namespaces := o.svc.Namespaces(o.cfg.LakeDir, "")
+	namespaces := o.svc.Namespaces(ctx, "")
 	ns := ""
 	if len(namespaces) > 0 {
 		ns = namespaces[0]

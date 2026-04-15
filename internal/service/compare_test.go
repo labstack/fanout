@@ -1,9 +1,13 @@
 package service
 
 import (
+	"context"
 	"math"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/DATA-DOG/go-sqlmock"
 )
 
 func TestAggregateBuckets(t *testing.T) {
@@ -107,6 +111,71 @@ func TestBuildComparison_WithBuckets(t *testing.T) {
 	latency := comparison["latency"]
 	if !latency.StatisticallySignificant {
 		t.Error("latency should be statistically significant with clearly different bucket data")
+	}
+}
+
+func TestCompareServices_QueriesRawSpans(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	rows := sqlmock.NewRows([]string{"service", "requests", "error_rate", "p50_ms", "p95_ms", "error_count"}).
+		AddRow("checkout", int64(120), 0.025, 40.0, 120.0, int64(3))
+
+	mock.ExpectQuery(`FROM spans`).
+		WillReturnRows(rows)
+
+	result, err := svc.CompareServices(context.Background(), CompareServicesParams{
+		Services: []string{"checkout", "payments"},
+		Window:   60,
+	})
+	if err != nil {
+		t.Fatalf("CompareServices() error = %v", err)
+	}
+
+	if len(result.Services) != 2 {
+		t.Fatalf("CompareServices() services = %d, want 2", len(result.Services))
+	}
+	if result.Services[0].Service != "checkout" {
+		t.Fatalf("first service = %q, want checkout", result.Services[0].Service)
+	}
+	if result.Services[0].P95Ms != 120 {
+		t.Errorf("checkout P95Ms = %f, want 120", result.Services[0].P95Ms)
+	}
+	if result.Services[0].ErrorCount != 3 {
+		t.Errorf("checkout ErrorCount = %d, want 3", result.Services[0].ErrorCount)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestQueryRollupBuckets_QueriesRawSpans(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	start := time.Unix(0, 0).UTC()
+	end := start.Add(15 * time.Minute)
+
+	rows := sqlmock.NewRows([]string{"p95_ms", "p50_ms", "error_rate", "total_spans"}).
+		AddRow(100.0, 50.0, 0.01, int64(100)).
+		AddRow(120.0, 60.0, 0.02, int64(80))
+
+	mock.ExpectQuery(`FROM spans`).
+		WithArgs("checkout", start, end).
+		WillReturnRows(rows)
+
+	buckets, err := svc.QueryRollupBuckets(context.Background(), "checkout", start, end)
+	if err != nil {
+		t.Fatalf("QueryRollupBuckets() error = %v", err)
+	}
+	if len(buckets) != 2 {
+		t.Fatalf("QueryRollupBuckets() len = %d, want 2", len(buckets))
+	}
+	if buckets[0].P95Ms != 100 || buckets[1].P95Ms != 120 {
+		t.Fatalf("unexpected bucket p95s: %+v", buckets)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
 	}
 }
 

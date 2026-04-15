@@ -491,12 +491,13 @@ erDiagram
     SPANS ||--o{ SPANS : "parent_span_id"
 ```
 
-### Parquet Column Naming
+### Telemetry Query Surface
 
-DuckDB reads Parquet with `name=` prefix for columns:
+Telemetry is queried through DuckLake-backed views with clean column names:
 ```sql
-SELECT "name=service_name", "name=duration_ms"
-FROM read_parquet('lake/spans/**/*.parquet')
+SELECT service, duration_ms
+FROM spans
+WHERE start_time > now() - INTERVAL 15 MINUTE
 ```
 
 ## Report System
@@ -546,14 +547,13 @@ Environment variables:
 |----------|---------|-------------|
 | `HTTP_ADDR` | `:7520` | HTTP server address |
 | `OTLP_GRPC_ADDR` | `:4317` | OTLP gRPC address |
-| `LAKE_DIR` | `./lake` | Parquet storage directory |
+| `LAKE_DIR` | `./lake` | DuckLake storage directory |
 | `FLUSH_SECONDS` | `15` | Batch flush interval |
-| `MAX_ROWS` | `50000` | Max rows per Parquet file |
+| `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
 | `ROLLUP_EVERY` | `60` | Rollup refresh interval (seconds) |
 | `API_TOKEN` | - | Bearer auth token (optional) |
 | `MCP_ENABLED` | `true` | Enable MCP server at /mcp |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
-| `RETENTION_HOURS` | `1` | Retention check interval |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace for services |
 | `TENANT_ID` | - | Tenant UUID (optional) |
 

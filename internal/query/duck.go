@@ -3,6 +3,8 @@ package query
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -10,19 +12,39 @@ import (
 	"strings"
 	"time"
 
-	_ "github.com/duckdb/duckdb-go/v2"
+	"github.com/duckdb/duckdb-go/v2"
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
 )
 
 type Duck struct {
-	DB  *sql.DB
-	cfg config.Config
+	DB              *sql.DB
+	cfg             config.Config
+	lastMaintenance time.Time
 }
 
+const (
+	serviceRollupStateKey = "service_rollup_v2"
+	edgeRollupStateKey    = "edge_rollup_v2"
+)
+
 func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
+	if err := os.MkdirAll(cfg.LakeDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create lake dir: %w", err)
+	}
+
 	dbPath := filepath.Join(cfg.LakeDir, "fanout.duckdb")
+	tempDir := filepath.Join(cfg.LakeDir, "tmp")
+	metadataPath := filepath.Join(cfg.LakeDir, "fanout.ducklake.sqlite")
+	dataPath := filepath.Join(cfg.LakeDir, "ducklake")
+	if err := os.MkdirAll(tempDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create temp dir: %w", err)
+	}
+	if err := os.MkdirAll(dataPath, 0o755); err != nil {
+		return nil, fmt.Errorf("create ducklake data dir: %w", err)
+	}
+
 	mem := cfg.DuckDBMemory
 	if mem == "" {
 		mem = "512MB"
@@ -32,91 +54,65 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 	}
 	dsn := dbPath + "?threads=4&memory_limit=" + mem
 
-	db, err := sql.Open("duckdb", dsn)
+	db, err := openDuckDB(ctx, dsn, tempDir, metadataPath, dataPath)
 	if err != nil {
-		// Corruption recovery: remove DB + WAL, retry once
-		slog.Warn("duckdb open failed, attempting recovery", "err", err)
-		os.Remove(dbPath)
-		os.Remove(dbPath + ".wal")
-		db, err = sql.Open("duckdb", dsn)
-		if err != nil {
-			return nil, fmt.Errorf("duckdb open after recovery: %w", err)
-		}
-		slog.Info("duckdb recovered with fresh database")
+		return nil, fmt.Errorf(
+			"open duckdb catalog: %w (if the local cache catalog is corrupted, remove %s and %s; DuckLake data remains in %s)",
+			err,
+			dbPath,
+			dbPath+".wal",
+			dataPath,
+		)
 	}
 
-	// Enable spill-to-disk so large queries don't OOM.
-	tmpDir := filepath.Join(cfg.LakeDir, "tmp")
-	if strings.ContainsAny(tmpDir, "'\"\\;") {
-		slog.Warn("temp_directory contains unsafe characters, skipping", "path", tmpDir)
-	} else {
-		if mkErr := os.MkdirAll(tmpDir, 0o755); mkErr != nil {
-			slog.Warn("failed to create temp directory", "path", tmpDir, "err", mkErr)
-		}
-		if _, err := db.Exec(fmt.Sprintf("SET temp_directory='%s'", tmpDir)); err != nil {
-			slog.Warn("failed to set temp_directory for spill-to-disk", "err", err)
-		}
-	}
 	d := &Duck{DB: db, cfg: cfg}
-	// Create rollup tables
-	if _, err := db.Exec(`
-CREATE TABLE IF NOT EXISTS service_rollup (
-  bucket TIMESTAMP,
-  service TEXT,
-  spans BIGINT,
-  p50_ms DOUBLE,
-  p95_ms DOUBLE,
-  error_rate DOUBLE,
-  log_count BIGINT DEFAULT 0,
-  metric_count BIGINT DEFAULT 0
-);`); err != nil {
+	if err := CreateTables(db); err != nil {
+		_ = db.Close()
 		return nil, err
 	}
-	if _, err := db.Exec(`
-CREATE TABLE IF NOT EXISTS edge_rollup (
-  bucket TIMESTAMP,
-  caller TEXT,
-  callee TEXT,
-  calls BIGINT,
-  avg_ms DOUBLE,
-  error_rate DOUBLE,
-  edge_type TEXT DEFAULT 'call'
-);`); err != nil {
-		return nil, err
-	}
-
-	// Migrate old partition layout (day-level parquet → hour=00/) before
-	// creating views so DuckDB sees consistent Hive partition depth.
-	MigrateOldPartitions(cfg.LakeDir)
-
-	// Create clean-name views over Parquet files plus the attr() macro.
-	// CreateViews handles directory creation internally, so failures here
-	// indicate a real problem (permissions, disk full, DuckDB error).
-	if err := CreateViews(db, cfg.LakeDir); err != nil {
+	if err := CreateViews(db); err != nil {
+		_ = db.Close()
 		return nil, fmt.Errorf("create views: %w", err)
 	}
-
 	return d, nil
+}
+
+func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string) (*sql.DB, error) {
+	connector, err := duckdb.NewConnector(dsn, func(execer driver.ExecerContext) error {
+		boot := []string{
+			"LOAD ducklake",
+			"LOAD sqlite",
+			fmt.Sprintf("SET temp_directory=%s", sqlLiteral(tempDir)),
+			fmt.Sprintf("ATTACH %s AS lake (DATA_PATH %s)",
+				sqlLiteral("ducklake:sqlite:"+metadataPath),
+				sqlLiteral(dataPath)),
+		}
+		for _, stmt := range boot {
+			if _, err := execer.ExecContext(ctx, stmt, nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	db := sql.OpenDB(connector)
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+func sqlLiteral(v string) string {
+	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
 func (d *Duck) Close() error { return d.DB.Close() }
 
-// SpansGlob returns optimized glob pattern for spans within a single partition
-func (d *Duck) SpansGlob(tenant, namespace string, windowMinutes int) string {
-	return ParquetGlob(d.cfg.LakeDir, "spans", tenant, namespace, windowMinutes)
-}
-
-// LogsGlob returns optimized glob pattern for logs within a single partition
-func (d *Duck) LogsGlob(tenant, namespace string, windowMinutes int) string {
-	return ParquetGlob(d.cfg.LakeDir, "logs", tenant, namespace, windowMinutes)
-}
-
-// MetricsGlob returns optimized glob pattern for metrics within a single partition
-func (d *Duck) MetricsGlob(tenant, namespace string, windowMinutes int) string {
-	return ParquetGlob(d.cfg.LakeDir, "metrics", tenant, namespace, windowMinutes)
-}
-
-// DefaultTenantID returns the configured tenant ID
+// DefaultTenantID returns the configured tenant ID.
 func (d *Duck) DefaultTenantID() string {
 	return d.cfg.TenantID.String()
 }
@@ -127,7 +123,6 @@ func (d *Duck) DefaultNamespace() string {
 }
 
 func (d *Duck) RunRollups(ctx context.Context) {
-	// Run once immediately at startup so dashboards have data right away
 	start := time.Now()
 	rows, err := d.rollupOnce(ctx)
 	if err != nil {
@@ -156,153 +151,446 @@ func (d *Duck) RunRollups(ctx context.Context) {
 }
 
 func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
-	// Service rollup
-	res, err := d.DB.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO service_rollup (bucket, service, spans, p50_ms, p95_ms, error_rate)
-SELECT
-  date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
-  "name=service_name" as service,
-  COUNT(*) AS spans,
-  quantile_cont("name=duration_ms", 0.50) AS p50_ms,
-  quantile_cont("name=duration_ms", 0.95) AS p95_ms,
-  avg(CASE WHEN "name=status_code" = 'STATUS_CODE_ERROR' OR "name=status_code" = 'ERROR' THEN 1 ELSE 0 END) AS error_rate
-FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
-WHERE bucket > COALESCE((SELECT max(bucket) FROM service_rollup), TIMESTAMP '1970-01-01')
-GROUP BY ALL;
-`, d.cfg.LakeDir))
+	affected := int64(0)
+
+	n, err := d.refreshServiceRollup(ctx)
 	if err != nil {
 		return 0, err
 	}
-	affected, _ := res.RowsAffected()
+	affected += n
 
-	// Log rollup — services that emit logs
-	logRes, logErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO service_rollup (bucket, service, spans, p50_ms, p95_ms, error_rate, log_count, metric_count)
-SELECT
-  date_trunc('minute', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT))) AS bucket,
-  "name=service_name" AS service,
-  0 AS spans, 0 AS p50_ms, 0 AS p95_ms, 0 AS error_rate,
-  COUNT(*) AS log_count,
-  0 AS metric_count
-FROM read_parquet(['%s/logs/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
-WHERE "name=service_name" IS NOT NULL AND "name=service_name" != ''
-  AND date_trunc('minute', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)))
-      > COALESCE((SELECT max(bucket) FROM service_rollup WHERE log_count > 0), TIMESTAMP '1970-01-01')
-GROUP BY ALL;
-`, d.cfg.LakeDir))
-	if logErr != nil {
-		slog.Error("log rollup failed", "err", logErr)
-	} else {
-		n, _ := logRes.RowsAffected()
-		affected += n
+	n, err = d.refreshEdgeRollup(ctx)
+	if err != nil {
+		return 0, err
 	}
+	affected += n
 
-	// Metric rollup — services that emit metrics
-	metricRes, metricErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO service_rollup (bucket, service, spans, p50_ms, p95_ms, error_rate, log_count, metric_count)
-SELECT
-  date_trunc('minute', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT))) AS bucket,
-  "name=service_name" AS service,
-  0 AS spans, 0 AS p50_ms, 0 AS p95_ms, 0 AS error_rate,
-  0 AS log_count,
-  COUNT(DISTINCT "name=name") AS metric_count
-FROM read_parquet(['%s/metrics/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
-WHERE "name=service_name" IS NOT NULL AND "name=service_name" != ''
-  AND date_trunc('minute', epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)))
-      > COALESCE((SELECT max(bucket) FROM service_rollup WHERE metric_count > 0), TIMESTAMP '1970-01-01')
-GROUP BY ALL;
-`, d.cfg.LakeDir))
-	if metricErr != nil {
-		slog.Error("metric rollup failed", "err", metricErr)
-	} else {
-		n, _ := metricRes.RowsAffected()
-		affected += n
-	}
-
-	// Edge rollup (caller -> callee relationships)
-	_, edgeErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO edge_rollup (bucket, caller, callee, calls, avg_ms, error_rate)
-WITH calls AS (
-  SELECT
-    date_trunc('minute', epoch_ms(CAST(child."name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
-    parent."name=service_name" as caller,
-    child."name=service_name" as callee,
-    child."name=duration_ms" as duration_ms,
-    child."name=status_code" as status
-  FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true) child
-  JOIN read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true) parent
-    ON child."name=parent_span_id" = parent."name=span_id"
-    AND child."name=trace_id" = parent."name=trace_id"
-  WHERE bucket > COALESCE((SELECT max(bucket) FROM edge_rollup), TIMESTAMP '1970-01-01')
-    AND parent."name=service_name" != child."name=service_name"
-)
-SELECT
-  bucket,
-  caller,
-  callee,
-  COUNT(*) as calls,
-  AVG(duration_ms) as avg_ms,
-  AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) as error_rate
-FROM calls
-GROUP BY bucket, caller, callee;
-`, d.cfg.LakeDir, d.cfg.LakeDir))
-	if edgeErr != nil {
-		slog.Error("edge rollup failed", "err", edgeErr)
-	}
-
-	// Messaging edge rollup (producer -> broker -> consumer via messaging spans)
-	_, msgErr := d.DB.ExecContext(ctx, fmt.Sprintf(`
-INSERT INTO edge_rollup (bucket, caller, callee, calls, avg_ms, error_rate, edge_type)
-WITH producers AS (
-  SELECT
-    date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
-    "name=service_name" AS service,
-    json_extract_string(decode("name=attributes_json"), '$.messaging.destination.name') AS destination,
-    json_extract_string(decode("name=attributes_json"), '$.messaging.system') AS msg_system
-  FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
-  WHERE "name=kind" = 'SPAN_KIND_PRODUCER'
-    AND json_extract_string(decode("name=attributes_json"), '$.messaging.destination.name') IS NOT NULL
-),
-consumers AS (
-  SELECT
-    date_trunc('minute', epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT))) AS bucket,
-    "name=service_name" AS service,
-    json_extract_string(decode("name=attributes_json"), '$.messaging.destination.name') AS destination,
-    json_extract_string(decode("name=attributes_json"), '$.messaging.system') AS msg_system
-  FROM read_parquet(['%s/spans/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/*.parquet'], union_by_name=true, hive_partitioning=true)
-  WHERE "name=kind" = 'SPAN_KIND_CONSUMER'
-    AND json_extract_string(decode("name=attributes_json"), '$.messaging.destination.name') IS NOT NULL
-)
-SELECT
-  p.bucket,
-  p.service AS caller,
-  c.service AS callee,
-  COUNT(*) AS calls,
-  0 AS avg_ms,
-  0 AS error_rate,
-  'messaging' AS edge_type
-FROM producers p
-JOIN consumers c ON p.destination = c.destination AND p.msg_system = c.msg_system AND p.bucket = c.bucket
-WHERE p.service != c.service
-  AND p.bucket > COALESCE((SELECT max(bucket) FROM edge_rollup WHERE edge_type = 'messaging'), TIMESTAMP '1970-01-01')
-GROUP BY p.bucket, p.service, c.service;
-`, d.cfg.LakeDir, d.cfg.LakeDir))
-	if msgErr != nil {
-		slog.Error("messaging edge rollup failed", "err", msgErr)
-	}
-
-	// Prune old rollup data
-	if d.cfg.RetentionDays > 0 {
-		for _, tbl := range []string{"service_rollup", "edge_rollup"} {
-			_, err := d.DB.ExecContext(ctx, fmt.Sprintf(
-				`DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY`, tbl, d.cfg.RetentionDays))
-			if err != nil {
-				slog.Warn("rollup retention failed", "table", tbl, "err", err)
-			}
-		}
+	if err := d.runMaintenance(ctx); err != nil {
+		slog.Warn("ducklake maintenance failed", "err", err)
 	}
 
 	return int(affected), nil
+}
+
+func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	lastWatermark, err := rollupWatermark(ctx, tx, serviceRollupStateKey)
+	if err != nil {
+		return 0, err
+	}
+
+	currentWatermark, err := maxServiceRollupWatermark(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if currentWatermark <= lastWatermark {
+		return 0, tx.Commit()
+	}
+
+	args := []any{lastWatermark, lastWatermark, lastWatermark}
+	if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, args...); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, serviceRollupInsertSQL, args...)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := storeRollupWatermark(ctx, tx, serviceRollupStateKey, currentWatermark); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	if rows, err := res.RowsAffected(); err == nil {
+		return rows, nil
+	}
+	return 0, nil
+}
+
+func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	lastWatermark, err := rollupWatermark(ctx, tx, edgeRollupStateKey)
+	if err != nil {
+		return 0, err
+	}
+
+	currentWatermark, err := maxEdgeRollupWatermark(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if currentWatermark <= lastWatermark {
+		return 0, tx.Commit()
+	}
+
+	if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, lastWatermark); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, lastWatermark)
+	if err != nil {
+		return 0, err
+	}
+
+	if err := storeRollupWatermark(ctx, tx, edgeRollupStateKey, currentWatermark); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	if rows, err := res.RowsAffected(); err == nil {
+		return rows, nil
+	}
+	return 0, nil
+}
+
+func rollupWatermark(ctx context.Context, tx *sql.Tx, key string) (int64, error) {
+	var watermark int64
+	err := tx.QueryRowContext(ctx, `
+SELECT COALESCE(last_ingested_unix_nano, 0)
+FROM rollup_state
+WHERE cache_key = ?`, key).Scan(&watermark)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return watermark, err
+}
+
+func storeRollupWatermark(ctx context.Context, tx *sql.Tx, key string, watermark int64) error {
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO rollup_state (cache_key, last_ingested_unix_nano, updated_at)
+VALUES (?, ?, now())
+ON CONFLICT (cache_key) DO UPDATE
+SET last_ingested_unix_nano = excluded.last_ingested_unix_nano,
+    updated_at = excluded.updated_at`, key, watermark)
+	return err
+}
+
+func maxServiceRollupWatermark(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var watermark int64
+	err := tx.QueryRowContext(ctx, `
+SELECT COALESCE(MAX(v), 0)::BIGINT
+FROM (
+  SELECT COALESCE(MAX(ingested_unix_nano), 0) AS v FROM spans
+  UNION ALL
+  SELECT COALESCE(MAX(ingested_unix_nano), 0) AS v FROM logs
+  UNION ALL
+  SELECT COALESCE(MAX(ingested_unix_nano), 0) AS v FROM metrics
+) maxes`).Scan(&watermark)
+	return watermark, err
+}
+
+func maxEdgeRollupWatermark(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var watermark int64
+	err := tx.QueryRowContext(ctx, `
+SELECT COALESCE(MAX(ingested_unix_nano), 0)::BIGINT
+FROM spans`).Scan(&watermark)
+	return watermark, err
+}
+
+const serviceRollupDeleteSQL = `
+WITH affected AS (
+  SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket, service
+  FROM spans
+  WHERE ingested_unix_nano > ?
+    AND service IS NOT NULL
+    AND service != ''
+  UNION
+  SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
+  FROM logs
+  WHERE ingested_unix_nano > ?
+    AND service IS NOT NULL
+    AND service != ''
+  UNION
+  SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
+  FROM metrics
+  WHERE ingested_unix_nano > ?
+    AND service IS NOT NULL
+    AND service != ''
+)
+DELETE FROM service_rollup
+WHERE EXISTS (
+  SELECT 1
+  FROM affected
+  WHERE affected.tenant = service_rollup.tenant
+    AND affected.namespace = service_rollup.namespace
+    AND affected.bucket = service_rollup.bucket
+    AND affected.service = service_rollup.service
+);`
+
+const serviceRollupInsertSQL = `
+WITH affected AS (
+  SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket, service
+  FROM spans
+  WHERE ingested_unix_nano > ?
+    AND service IS NOT NULL
+    AND service != ''
+  UNION
+  SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
+  FROM logs
+  WHERE ingested_unix_nano > ?
+    AND service IS NOT NULL
+    AND service != ''
+  UNION
+  SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
+  FROM metrics
+  WHERE ingested_unix_nano > ?
+    AND service IS NOT NULL
+    AND service != ''
+),
+span_agg AS (
+  SELECT
+    s.tenant,
+    s.namespace,
+    date_trunc('minute', s.start_time) AS bucket,
+    s.service,
+    COUNT(*) AS spans,
+    quantile_cont(s.duration_ms, 0.50) AS p50_ms,
+    quantile_cont(s.duration_ms, 0.95) AS p95_ms,
+    avg(CASE WHEN s.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
+  FROM spans s
+  JOIN affected a
+    ON a.tenant = s.tenant
+   AND a.namespace = s.namespace
+   AND a.bucket = date_trunc('minute', s.start_time)
+   AND a.service = s.service
+  GROUP BY s.tenant, s.namespace, date_trunc('minute', s.start_time), s.service
+),
+log_agg AS (
+  SELECT
+    l.tenant,
+    l.namespace,
+    date_trunc('minute', l.time) AS bucket,
+    l.service,
+    COUNT(*) AS log_count
+  FROM logs l
+  JOIN affected a
+    ON a.tenant = l.tenant
+   AND a.namespace = l.namespace
+   AND a.bucket = date_trunc('minute', l.time)
+   AND a.service = l.service
+  GROUP BY l.tenant, l.namespace, date_trunc('minute', l.time), l.service
+),
+metric_agg AS (
+  SELECT
+    m.tenant,
+    m.namespace,
+    date_trunc('minute', m.time) AS bucket,
+    m.service,
+    COUNT(DISTINCT m.name) AS metric_count
+  FROM metrics m
+  JOIN affected a
+    ON a.tenant = m.tenant
+   AND a.namespace = m.namespace
+   AND a.bucket = date_trunc('minute', m.time)
+   AND a.service = m.service
+  GROUP BY m.tenant, m.namespace, date_trunc('minute', m.time), m.service
+)
+INSERT INTO service_rollup (
+  tenant,
+  namespace,
+  bucket,
+  service,
+  spans,
+  p50_ms,
+  p95_ms,
+  error_rate,
+  log_count,
+  metric_count
+)
+SELECT
+  a.tenant,
+  a.namespace,
+  a.bucket,
+  a.service,
+  COALESCE(s.spans, 0),
+  COALESCE(s.p50_ms, 0),
+  COALESCE(s.p95_ms, 0),
+  COALESCE(s.error_rate, 0),
+  COALESCE(l.log_count, 0),
+  COALESCE(m.metric_count, 0)
+FROM affected a
+LEFT JOIN span_agg s USING (tenant, namespace, bucket, service)
+LEFT JOIN log_agg l USING (tenant, namespace, bucket, service)
+LEFT JOIN metric_agg m USING (tenant, namespace, bucket, service);`
+
+const edgeRollupDeleteSQL = `
+WITH affected AS (
+  SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket
+  FROM spans
+  WHERE ingested_unix_nano > ?
+)
+DELETE FROM edge_rollup
+WHERE EXISTS (
+  SELECT 1
+  FROM affected
+  WHERE affected.tenant = edge_rollup.tenant
+    AND affected.namespace = edge_rollup.namespace
+    AND affected.bucket = edge_rollup.bucket
+);`
+
+const edgeRollupInsertSQL = `
+WITH affected AS (
+  SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket
+  FROM spans
+  WHERE ingested_unix_nano > ?
+),
+call_edges AS (
+  SELECT
+    child.tenant,
+    child.namespace,
+    date_trunc('minute', child.start_time) AS bucket,
+    parent.service AS caller,
+    child.service AS callee,
+    COUNT(*) AS calls,
+    AVG(child.duration_ms) AS avg_ms,
+    AVG(CASE WHEN child.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate,
+    'call' AS edge_type
+  FROM spans child
+  JOIN spans parent
+    ON child.parent_span_id = parent.span_id
+   AND child.trace_id = parent.trace_id
+   AND child.tenant = parent.tenant
+   AND child.namespace = parent.namespace
+  JOIN affected a
+    ON a.tenant = child.tenant
+   AND a.namespace = child.namespace
+   AND a.bucket = date_trunc('minute', child.start_time)
+  WHERE parent.service IS NOT NULL
+    AND parent.service != ''
+    AND child.service IS NOT NULL
+    AND child.service != ''
+    AND parent.service != child.service
+  GROUP BY child.tenant, child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
+),
+producers AS (
+  SELECT
+    s.tenant,
+    s.namespace,
+    date_trunc('minute', s.start_time) AS bucket,
+    s.service,
+    json_extract_string(s.attributes_json, '$.messaging.destination.name') AS destination,
+    json_extract_string(s.attributes_json, '$.messaging.system') AS msg_system
+  FROM spans s
+  JOIN affected a
+    ON a.tenant = s.tenant
+   AND a.namespace = s.namespace
+   AND a.bucket = date_trunc('minute', s.start_time)
+  WHERE s.kind = 'SPAN_KIND_PRODUCER'
+    AND s.service IS NOT NULL
+    AND s.service != ''
+    AND json_extract_string(s.attributes_json, '$.messaging.destination.name') IS NOT NULL
+),
+consumers AS (
+  SELECT
+    s.tenant,
+    s.namespace,
+    date_trunc('minute', s.start_time) AS bucket,
+    s.service,
+    json_extract_string(s.attributes_json, '$.messaging.destination.name') AS destination,
+    json_extract_string(s.attributes_json, '$.messaging.system') AS msg_system
+  FROM spans s
+  JOIN affected a
+    ON a.tenant = s.tenant
+   AND a.namespace = s.namespace
+   AND a.bucket = date_trunc('minute', s.start_time)
+  WHERE s.kind = 'SPAN_KIND_CONSUMER'
+    AND s.service IS NOT NULL
+    AND s.service != ''
+    AND json_extract_string(s.attributes_json, '$.messaging.destination.name') IS NOT NULL
+),
+messaging_edges AS (
+  SELECT
+    p.tenant,
+    p.namespace,
+    p.bucket,
+    p.service AS caller,
+    c.service AS callee,
+    COUNT(*) AS calls,
+    0.0 AS avg_ms,
+    0.0 AS error_rate,
+    'messaging' AS edge_type
+  FROM producers p
+  JOIN consumers c
+    ON c.tenant = p.tenant
+   AND c.namespace = p.namespace
+   AND c.bucket = p.bucket
+   AND c.destination = p.destination
+   AND c.msg_system = p.msg_system
+  WHERE p.service != c.service
+  GROUP BY p.tenant, p.namespace, p.bucket, p.service, c.service
+)
+INSERT INTO edge_rollup (
+  tenant,
+  namespace,
+  bucket,
+  caller,
+  callee,
+  calls,
+  avg_ms,
+  error_rate,
+  edge_type
+)
+SELECT tenant, namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
+FROM call_edges
+UNION ALL
+SELECT tenant, namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
+FROM messaging_edges;`
+
+func (d *Duck) runMaintenance(ctx context.Context) error {
+	if !d.lastMaintenance.IsZero() && time.Since(d.lastMaintenance) < time.Hour {
+		return nil
+	}
+
+	var errs []error
+	if d.cfg.RetentionDays > 0 {
+		stmts := []struct {
+			name string
+			sql  string
+		}{
+			{name: "lake.spans", sql: fmt.Sprintf("DELETE FROM lake.spans WHERE start_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "lake.logs", sql: fmt.Sprintf("DELETE FROM lake.logs WHERE log_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "lake.metrics", sql: fmt.Sprintf("DELETE FROM lake.metrics WHERE metric_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "service_rollup", sql: fmt.Sprintf("DELETE FROM service_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "edge_rollup", sql: fmt.Sprintf("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+		}
+		for _, stmt := range stmts {
+			res, err := d.DB.ExecContext(ctx, stmt.sql)
+			if err != nil {
+				slog.Error("maintenance delete failed", "table", stmt.name, "err", err)
+				errs = append(errs, fmt.Errorf("%s retention delete: %w", stmt.name, err))
+				continue
+			}
+			rows, rowsErr := res.RowsAffected()
+			if rowsErr != nil {
+				slog.Info("maintenance delete complete", "table", stmt.name)
+				continue
+			}
+			slog.Info("maintenance delete complete", "table", stmt.name, "rows", rows)
+		}
+	}
+
+	if _, err := d.DB.ExecContext(ctx, "CHECKPOINT lake"); err != nil {
+		slog.Error("maintenance checkpoint failed", "target", "lake", "err", err)
+		errs = append(errs, fmt.Errorf("checkpoint lake: %w", err))
+	}
+	if _, err := d.DB.ExecContext(ctx, "CHECKPOINT"); err != nil {
+		slog.Error("maintenance checkpoint failed", "target", "main", "err", err)
+		errs = append(errs, fmt.Errorf("checkpoint main: %w", err))
+	}
+	d.lastMaintenance = time.Now()
+	return errors.Join(errs...)
 }
 
 // ---- Queries for API ----
@@ -315,6 +603,7 @@ type LatencyRow struct {
 }
 
 func (d *Duck) LatencyOverview(ctx context.Context, windowMinutes int) ([]LatencyRow, error) {
+	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT
   service as service_name,
@@ -323,12 +612,14 @@ SELECT
   SUM(spans)::BIGINT as spans
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
 GROUP BY service
 HAVING SUM(spans) > 0
 ORDER BY p95_ms DESC
 LIMIT 100;
 `, windowMinutes)
-	rows, err := d.DB.QueryContext(ctx, q)
+	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -354,17 +645,20 @@ type LogsSample struct {
 func (d *Duck) LogsSamples(ctx context.Context, windowMinutes, limit int, pattern string) ([]LogsSample, error) {
 	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
-SELECT strftime(epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)), '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
-       "name=body" as body,
-       "name=service_name" as service_name,
-       "name=severity" as severity
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=body" ~ ?
-ORDER BY ts DESC
+SELECT
+  strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+  body,
+  service AS service_name,
+  severity
+FROM logs
+WHERE time >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND body ~ ?
+ORDER BY time DESC
 LIMIT %d;
-`, d.LogsGlob(tenantID, namespace, windowMinutes), windowMinutes, limit)
-	rows, err := d.DB.QueryContext(ctx, q, pattern)
+`, windowMinutes, limit)
+	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -386,15 +680,18 @@ type ThroughputRow struct {
 }
 
 func (d *Duck) Throughput(ctx context.Context, windowMinutes int) ([]ThroughputRow, error) {
+	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT strftime(bucket, '%%Y-%%m-%%dT%%H:%%M:00Z') AS bucket,
   (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0))) AS spans
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
 GROUP BY bucket
 ORDER BY bucket ASC;
 `, windowMinutes)
-	rows, err := d.DB.QueryContext(ctx, q)
+	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -416,15 +713,18 @@ type ServiceThroughputRow struct {
 }
 
 func (d *Duck) ServiceThroughput(ctx context.Context, windowMinutes int) ([]ServiceThroughputRow, error) {
+	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT service, (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0)))::BIGINT / %d AS spans_per_minute
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
 GROUP BY service
 ORDER BY spans_per_minute DESC
 LIMIT 20;
 `, windowMinutes, windowMinutes)
-	rows, err := d.DB.QueryContext(ctx, q)
+	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -448,15 +748,17 @@ type ErrorRoute struct {
 func (d *Duck) ErrorRoutes(ctx context.Context, windowMinutes, limit int) ([]ErrorRoute, error) {
 	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
-SELECT "name=body" AS route, COUNT(*) AS count
-FROM read_parquet(%s, union_by_name=true)
-WHERE epoch_ms(CAST("name=time_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
-  AND "name=severity" IN ('ERROR','ERR','WARN')
-GROUP BY "name=body"
+SELECT body AS route, COUNT(*) AS count
+FROM logs
+WHERE time >= now() - INTERVAL %d MINUTE
+  AND tenant = ?
+  AND (? = '' OR namespace = ?)
+  AND severity IN ('ERROR', 'ERR', 'WARN')
+GROUP BY body
 ORDER BY count DESC
 LIMIT %d;
-`, d.LogsGlob(tenantID, namespace, windowMinutes), windowMinutes, limit)
-	rows, err := d.DB.QueryContext(ctx, q)
+`, windowMinutes, limit)
+	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -483,23 +785,23 @@ func (d *Duck) ErrorRouteDetails(ctx context.Context, windowMinutes, limit int) 
 	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
 	q := fmt.Sprintf(`
 WITH spans_with_errors AS (
-  SELECT "name=service_name" as service_name,
-         "name=name" as name,
-         "name=status_code" as status_code
-  FROM read_parquet(%s, union_by_name=true)
-  WHERE epoch_ms(CAST("name=start_unix_nano"/1000000 AS BIGINT)) >= now() - INTERVAL %d MINUTE
+  SELECT service AS service_name, operation AS name, status AS status_code
+  FROM spans
+  WHERE start_time >= now() - INTERVAL %d MINUTE
+    AND tenant = ?
+    AND (? = '' OR namespace = ?)
 )
 SELECT service_name,
        name,
-       SUM(CASE WHEN status_code = 'STATUS_CODE_ERROR' OR status_code = 'ERROR' THEN 1 ELSE 0 END) AS errors,
-       AVG(CASE WHEN status_code = 'STATUS_CODE_ERROR' OR status_code = 'ERROR' THEN 1.0 ELSE 0.0 END) AS error_rate
+       SUM(CASE WHEN status_code IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1 ELSE 0 END) AS errors,
+       AVG(CASE WHEN status_code IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
 FROM spans_with_errors
 GROUP BY service_name, name
 HAVING errors > 0
 ORDER BY errors DESC
 LIMIT %d;
-`, d.SpansGlob(tenantID, namespace, windowMinutes), windowMinutes, limit)
-	rows, err := d.DB.QueryContext(ctx, q)
+`, windowMinutes, limit)
+	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
