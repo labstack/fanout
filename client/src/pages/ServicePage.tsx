@@ -200,7 +200,7 @@ export function ServicePage() {
             errors={d.top_errors}
             onClickTrace={(id) => openChat(`Show me trace ${id} for ${d.service}.`)}
           />
-          <DependencyList dependencies={d.dependencies} />
+          <DependencyList dependencies={d.dependencies} windowMinutes={d.window_minutes} />
         </div>
 
         {d.change_points && d.change_points.length > 0 && (

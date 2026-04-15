@@ -1,4 +1,4 @@
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import type { ServiceDependency } from "@/lib/types";
 
 function fmtMs(v: number): string {
@@ -15,9 +15,12 @@ function fmtRate(v: number): string {
 
 interface Props {
   dependencies: ServiceDependency[];
+  windowMinutes: number;
 }
 
-export function DependencyList({ dependencies }: Props) {
+export function DependencyList({ dependencies, windowMinutes }: Props) {
+  const { search } = useLocation();
+
   if (!dependencies || dependencies.length === 0) return null;
 
   return (
@@ -27,7 +30,7 @@ export function DependencyList({ dependencies }: Props) {
         {dependencies.map((dep) => (
           <Link
             key={dep.service}
-            to={`/service/${encodeURIComponent(dep.service)}`}
+            to={`/service/${encodeURIComponent(dep.service)}${search}`}
             className="flex items-center justify-between py-2 px-1 rounded-md hover:bg-surface-2 transition-colors group"
           >
             <div className="flex items-center gap-2">
@@ -37,7 +40,9 @@ export function DependencyList({ dependencies }: Props) {
               </span>
             </div>
             <div className="flex items-center gap-4 text-xs mono">
-              <span className="text-muted-foreground">{fmtRate(dep.call_count)}/min</span>
+              <span className="text-muted-foreground">
+                {fmtRate(dep.call_count / windowMinutes)}/min
+              </span>
               <span className="text-muted-foreground">{fmtMs(dep.avg_ms)}</span>
               <span className={dep.error_rate > 0.01 ? "text-unhealthy" : "text-foreground/70"}>
                 {fmtPercent(dep.error_rate)}

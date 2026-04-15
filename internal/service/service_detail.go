@@ -51,7 +51,7 @@ func (s *Service) ServiceDetail(ctx context.Context, svcName string, window int,
 	// 3. Rollup buckets for charts
 	now := time.Now().UTC()
 	start := now.Add(-time.Duration(window) * time.Minute)
-	rollupBuckets, err := s.QueryRollupBuckets(ctx, svcName, start, now)
+	rollupBuckets, err := s.QueryRollupBuckets(ctx, svcName, start, now, namespace, tenantID)
 	if err != nil {
 		slog.Error("service detail rollup query failed", "service", svcName, "err", err)
 		rollupBuckets = nil

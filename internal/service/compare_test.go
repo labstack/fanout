@@ -161,10 +161,10 @@ func TestQueryRollupBuckets_QueriesRawSpans(t *testing.T) {
 		AddRow(start.Add(time.Minute), 120.0, 60.0, 0.02, int64(80))
 
 	mock.ExpectQuery(`FROM spans`).
-		WithArgs("checkout", start, end).
+		WithArgs("checkout", start, end, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(rows)
 
-	buckets, err := svc.QueryRollupBuckets(context.Background(), "checkout", start, end)
+	buckets, err := svc.QueryRollupBuckets(context.Background(), "checkout", start, end, "", "")
 	if err != nil {
 		t.Fatalf("QueryRollupBuckets() error = %v", err)
 	}
