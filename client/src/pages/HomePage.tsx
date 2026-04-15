@@ -9,6 +9,13 @@ import { IncidentCard } from "@/components/home/IncidentCard";
 import { ServiceRow } from "@/components/home/ServiceRow";
 
 const REFRESH_INTERVAL = 30_000;
+const MAX_EXPANDED_CARDS = 2;
+
+function freshnessLabel(seconds: number): string {
+  if (seconds < 10) return "Live";
+  if (seconds < 60) return `${seconds}s ago`;
+  return `${Math.floor(seconds / 60)}m ago`;
+}
 
 export function HomePage() {
   const navigate = useNavigate();
@@ -57,12 +64,11 @@ export function HomePage() {
     load();
     const interval = setInterval(load, REFRESH_INTERVAL);
 
-    // Tick staleness counter every 10s
     const staleTick = setInterval(() => {
       if (lastFetch.current > 0) {
         setStaleSeconds(Math.floor((Date.now() - lastFetch.current) / 1000));
       }
-    }, 10_000);
+    }, 5_000);
 
     return () => {
       cancelled = true;
@@ -108,10 +114,16 @@ export function HomePage() {
   const healthyCount = data.services.length;
   const hasIncidents = data.incidents.length > 0;
 
+  // Split unhealthy into expanded (top N) and collapsed (rest)
+  const expandedUnhealthy = unhealthy.slice(0, MAX_EXPANDED_CARDS);
+  const collapsedUnhealthy = unhealthy.slice(MAX_EXPANDED_CARDS);
+
+  const isStale = staleSeconds >= 60;
+
   return (
     <div className="px-4 py-6 sm:px-6">
       <div className="mx-auto max-w-5xl space-y-4 fade-up">
-        {/* Time range selector */}
+        {/* Time range + freshness */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1 rounded-full border border-border/60 bg-surface-1/70 p-1">
             {windowOptions.map((opt) => (
@@ -129,11 +141,12 @@ export function HomePage() {
               </button>
             ))}
           </div>
-          {staleSeconds >= 60 && (
-            <span className="text-[11px] text-muted-foreground/60 mono">
-              updated {staleSeconds >= 120 ? `${Math.floor(staleSeconds / 60)}m` : `${staleSeconds}s`} ago
-            </span>
-          )}
+          <div className={`flex items-center gap-1.5 text-[11px] mono ${isStale ? "text-degraded/70" : "text-muted-foreground/50"}`}>
+            {!isStale && (
+              <span className="inline-block w-1.5 h-1.5 rounded-full bg-healthy/60" />
+            )}
+            {freshnessLabel(staleSeconds)}
+          </div>
         </div>
 
         {/* Error banner */}
@@ -146,10 +159,10 @@ export function HomePage() {
         {/* Summary header */}
         <SummaryHeader summary={data.summary} />
 
-        {/* Unhealthy services — full expanded cards */}
-        {unhealthy.length > 0 && (
+        {/* Unhealthy services — top 2 expanded, rest compact */}
+        {expandedUnhealthy.length > 0 && (
           <div className="space-y-3">
-            {unhealthy.map((inc) => (
+            {expandedUnhealthy.map((inc) => (
               <IncidentCard
                 key={inc.service}
                 incident={inc}
@@ -159,20 +172,39 @@ export function HomePage() {
           </div>
         )}
 
-        {/* Degraded services — compact rows */}
-        {degraded.length > 0 && (
+        {/* Collapsed unhealthy + degraded — compact rows */}
+        {(collapsedUnhealthy.length > 0 || degraded.length > 0) && (
           <div className="space-y-1.5">
-            <div className="px-1 text-[11px] text-muted-foreground mono">
-              {degraded.length} degraded
-            </div>
-            {degraded.map((inc) => (
-              <IncidentCard
-                key={inc.service}
-                incident={inc}
-                onInvestigate={investigate}
-                compact
-              />
-            ))}
+            {collapsedUnhealthy.length > 0 && (
+              <>
+                <div className="px-1 text-[11px] text-muted-foreground mono">
+                  {collapsedUnhealthy.length} more unhealthy
+                </div>
+                {collapsedUnhealthy.map((inc) => (
+                  <IncidentCard
+                    key={inc.service}
+                    incident={inc}
+                    onInvestigate={investigate}
+                    compact
+                  />
+                ))}
+              </>
+            )}
+            {degraded.length > 0 && (
+              <>
+                <div className="px-1 text-[11px] text-muted-foreground mono">
+                  {degraded.length} degraded
+                </div>
+                {degraded.map((inc) => (
+                  <IncidentCard
+                    key={inc.service}
+                    incident={inc}
+                    onInvestigate={investigate}
+                    compact
+                  />
+                ))}
+              </>
+            )}
           </div>
         )}
 
@@ -185,7 +217,6 @@ export function HomePage() {
                   ? `${healthyCount} service${healthyCount !== 1 ? "s" : ""} healthy`
                   : `${healthyCount} services`}
               </span>
-              {/* Column headers */}
               <span className="ml-auto flex items-center gap-4 text-[10px] text-muted-foreground/60 mono uppercase tracking-wider">
                 <span className="w-24 text-right">traffic</span>
                 <span className="w-14 text-right">errors</span>

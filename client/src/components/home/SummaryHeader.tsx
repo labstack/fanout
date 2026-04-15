@@ -1,13 +1,5 @@
 import type { HomeSummary } from "@/lib/types";
 
-function healthIndicator(summary: HomeSummary) {
-  if (summary.unhealthy > 0)
-    return { icon: "\u2716", label: `${summary.unhealthy} unhealthy`, cls: "text-unhealthy" };
-  if (summary.degraded > 0)
-    return { icon: "\u25D0", label: `${summary.degraded} degraded`, cls: "text-degraded" };
-  return { icon: "\u25CF", label: "All healthy", cls: "text-healthy" };
-}
-
 function fmtTraffic(v: number): string {
   if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
   return v.toFixed(0);
@@ -27,13 +19,28 @@ interface Props {
 }
 
 export function SummaryHeader({ summary }: Props) {
-  const h = healthIndicator(summary);
+  // Build status parts: show both unhealthy and degraded counts when present
+  const parts: { label: string; cls: string; icon: string }[] = [];
+  if (summary.unhealthy > 0)
+    parts.push({ label: `${summary.unhealthy} unhealthy`, cls: "text-unhealthy", icon: "\u2716" });
+  if (summary.degraded > 0)
+    parts.push({ label: `${summary.degraded} degraded`, cls: "text-degraded", icon: "\u25D0" });
+  if (parts.length === 0)
+    parts.push({ label: "All healthy", cls: "text-healthy", icon: "\u25CF" });
+
+  const worstCls = parts[0].cls;
 
   return (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-border/60 bg-surface-1/80 px-5 py-3">
-      <div className="flex items-center gap-3">
-        <span className={`text-base ${h.cls}`}>{h.icon}</span>
-        <span className={`font-heading text-sm font-semibold ${h.cls}`}>{h.label}</span>
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-lg border border-border/60 bg-surface-1/80 px-5 py-3">
+      <div className="flex items-center gap-3 flex-wrap">
+        <span className={`text-base ${worstCls}`}>{parts[0].icon}</span>
+        <div className="flex items-center gap-2 flex-wrap">
+          {parts.map((p) => (
+            <span key={p.label} className={`font-heading text-sm font-semibold ${p.cls}`}>
+              {p.label}
+            </span>
+          ))}
+        </div>
         <span className="text-xs text-muted-foreground mono">
           {summary.total_services} services
         </span>

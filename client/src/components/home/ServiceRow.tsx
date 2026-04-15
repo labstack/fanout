@@ -39,7 +39,7 @@ export function ServiceRow({ service, onClick }: Props) {
         className="opacity-30 group-hover:opacity-60 transition-opacity shrink-0"
       />
       <span className="mono text-xs text-muted-foreground w-24 text-right shrink-0">
-        {fmtTraffic(service.traffic_per_min)} <span className="text-[10px]">s/m</span>
+        {fmtTraffic(service.traffic_per_min)} <span className="text-[10px]">spans/min</span>
       </span>
       <span className="mono text-xs text-foreground/70 w-14 text-right shrink-0">
         {fmtPercent(service.error_rate)}
