@@ -3,13 +3,17 @@ package api
 import (
 	_ "embed"
 	"log/slog"
+	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v5"
 	"github.com/microcosm-cc/bluemonday"
 
 	"github.com/labstack/fanout/internal/ai"
+	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/service"
 )
 
 // newSanitizer creates the bluemonday HTML sanitizer policy for bookmark content.
@@ -54,16 +58,22 @@ type UIHandler struct {
 	sseHandler *ai.SSEHandler
 	bookmarks  *ai.BookmarkStore
 	sanitizer  *bluemonday.Policy
+	svc        *service.Service
+	alertStore *alert.Store
+	incidents  *service.IncidentTracker
 }
 
 // RegisterUIRoutes registers all routes and returns the handler.
-func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, sseHandler *ai.SSEHandler, bookmarks *ai.BookmarkStore) *UIHandler {
+func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, sseHandler *ai.SSEHandler, bookmarks *ai.BookmarkStore, svc *service.Service, alertStore *alert.Store) *UIHandler {
 	h := &UIHandler{
 		cfg:        cfg,
 		orch:       orch,
 		sseHandler: sseHandler,
 		bookmarks:  bookmarks,
 		sanitizer:  newSanitizer(),
+		svc:        svc,
+		alertStore: alertStore,
+		incidents:  service.NewIncidentTracker(),
 	}
 
 	// Favicon
@@ -82,6 +92,8 @@ func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, ss
 
 	// Suggestions API
 	e.GET("/api/suggestions", h.Suggestions)
+	e.GET("/api/dashboard", h.Dashboard)
+	e.GET("/api/home", h.Home)
 
 	return h
 }
@@ -178,4 +190,67 @@ func (h *UIHandler) Suggestions(c *echo.Context) error {
 		return c.JSON(200, []string{})
 	}
 	return c.JSON(200, h.orch.SuggestedQuestions(c.Request().Context()))
+}
+
+// Home returns the deterministic triage home page data.
+func (h *UIHandler) Home(c *echo.Context) error {
+	window := 60
+	if raw := strings.TrimSpace(c.QueryParam("window")); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v <= 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid window")
+		}
+		window = v
+	}
+
+	if h.svc == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "service layer not configured")
+	}
+
+	result, err := h.svc.Home(c.Request().Context(), window, c.QueryParam("namespace"), "", h.incidents)
+	if err != nil {
+		slog.Error("home query failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to build home data")
+	}
+
+	// Append firing alerts from alert store.
+	if h.alertStore != nil {
+		alerts, err := h.alertStore.ListAlerts("firing", "", "")
+		if err == nil {
+			for _, a := range alerts {
+				result.Alerts = append(result.Alerts, service.HomeAlert{
+					Rule:    a.RuleID,
+					Service: a.Service,
+					State:   a.State,
+					Value:   a.Value,
+					FiredAt: a.FiredAt,
+				})
+			}
+		}
+	}
+
+	return c.JSON(http.StatusOK, result)
+}
+
+// Dashboard returns an AI-generated smart dashboard snapshot.
+func (h *UIHandler) Dashboard(c *echo.Context) error {
+	if h.orch == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "AI dashboard not configured")
+	}
+
+	window := 60
+	if raw := strings.TrimSpace(c.QueryParam("window")); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v <= 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid window")
+		}
+		window = v
+	}
+
+	result, err := h.orch.Dashboard(c.Request().Context(), window, c.QueryParam("namespace"))
+	if err != nil {
+		slog.Error("dashboard generation failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to build dashboard")
+	}
+	return c.JSON(http.StatusOK, result)
 }

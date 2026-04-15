@@ -93,9 +93,10 @@ func main() {
 	defer sqlite.Close()
 
 	// Start alert engine
+	var alertStore *alert.Store
 	var alertEngine *alert.Engine
 	if cfg.AlertEnabled {
-		alertStore := alert.NewStore(sqlite.DB)
+		alertStore = alert.NewStore(sqlite.DB)
 		alertEngine = alert.NewEngine(
 			alertStore, q, detector,
 			time.Duration(cfg.AlertEvalInterval)*time.Second,
@@ -224,7 +225,7 @@ func main() {
 	}
 
 	// UI routes (chat SSE + bookmarks + suggestions)
-	api.RegisterUIRoutes(e, cfg, orch, sseHandler, bookmarks)
+	api.RegisterUIRoutes(e, cfg, orch, sseHandler, bookmarks, svc, alertStore)
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled
 	if cfg.MCPEnabled {

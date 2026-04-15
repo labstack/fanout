@@ -144,6 +144,27 @@ func TestListBookmarks_WithStore(t *testing.T) {
 	}
 }
 
+func TestDashboard_NilOrchestrator(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	h := &UIHandler{}
+	err := h.Dashboard(c)
+	if err == nil {
+		t.Fatal("expected error for nil orchestrator")
+	}
+
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok {
+		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != 503 {
+		t.Errorf("error code = %d, want 503", httpErr.Code)
+	}
+}
+
 func TestCreateBookmark_Success(t *testing.T) {
 	store, _ := ai.NewBookmarkStore(t.TempDir())
 
@@ -319,8 +340,45 @@ func TestSuggestions_NilOrch(t *testing.T) {
 
 func TestRegisterUIRoutes(t *testing.T) {
 	e := echo.New()
-	h := RegisterUIRoutes(e, config.Config{}, nil, nil, nil)
+	h := RegisterUIRoutes(e, config.Config{}, nil, nil, nil, nil, nil)
 	if h == nil {
 		t.Fatal("RegisterUIRoutes returned nil")
+	}
+}
+
+func TestHome_InvalidWindow(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/home?window=abc", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	h := &UIHandler{}
+	err := h.Home(c)
+	if err == nil {
+		t.Fatal("expected error for invalid window")
+	}
+	httpErr, _ := err.(*echo.HTTPError)
+	if httpErr.Code != 400 {
+		t.Errorf("error code = %d, want 400", httpErr.Code)
+	}
+}
+
+func TestHome_NilService(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/home", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	h := &UIHandler{}
+	err := h.Home(c)
+	if err == nil {
+		t.Fatal("expected error for nil service")
+	}
+	httpErr, ok := err.(*echo.HTTPError)
+	if !ok {
+		t.Fatalf("error type = %T, want *echo.HTTPError", err)
+	}
+	if httpErr.Code != 503 {
+		t.Errorf("error code = %d, want 503", httpErr.Code)
 	}
 }
