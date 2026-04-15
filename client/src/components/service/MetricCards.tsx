@@ -2,7 +2,12 @@ import type { BaselineComparison } from "@/lib/types";
 
 function fmtVal(v: number, unit: string): string {
   if (unit === "pct") return `${(v * 100).toFixed(1)}%`;
-  if (unit === "ms") return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${v.toFixed(0)}ms`;
+  if (unit === "ms") {
+    if (v >= 60000) return `${(v / 60000).toFixed(1)}m`;
+    if (v >= 1000) return `${(v / 1000).toFixed(1)}s`;
+    if (v < 1 && v > 0) return `${(v * 1000).toFixed(0)}\u00B5s`;
+    return `${v.toFixed(0)}ms`;
+  }
   if (unit === "count") return v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0);
   return v.toFixed(1);
 }

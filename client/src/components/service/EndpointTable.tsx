@@ -1,7 +1,10 @@
 import type { ServiceEndpoint } from "@/lib/types";
 
 function fmtMs(v: number): string {
-  return v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${v.toFixed(0)}ms`;
+  if (v >= 60000) return `${(v / 60000).toFixed(1)}m`;
+  if (v >= 1000) return `${(v / 1000).toFixed(1)}s`;
+  if (v < 1 && v > 0) return `<1ms`;
+  return `${v.toFixed(0)}ms`;
 }
 
 function fmtPercent(v: number): string {
