@@ -120,16 +120,16 @@ func (s *Service) CompareServices(ctx context.Context, params CompareServicesPar
 	q := fmt.Sprintf(`
 		SELECT
 			service,
-			COALESCE(SUM(spans), 0) AS requests,
-			COALESCE(AVG(CASE WHEN spans > 0 THEN error_rate END), 0) AS error_rate,
-			COALESCE(AVG(CASE WHEN spans > 0 THEN p50_ms END), 0) AS p50_ms,
-			COALESCE(AVG(CASE WHEN spans > 0 THEN p95_ms END), 0) AS p95_ms,
-			COALESCE(SUM(log_count), 0) AS log_count,
-			COALESCE(SUM(metric_count), 0) AS metric_count
-		FROM service_rollup
-		WHERE service IN (%s) AND bucket >= NOW() - INTERVAL '%d minutes'
+			COUNT(*) AS requests,
+			COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
+			COALESCE(quantile_cont(duration_ms, 0.50), 0) AS p50_ms,
+			COALESCE(quantile_cont(duration_ms, 0.95), 0) AS p95_ms,
+			COALESCE(SUM(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1 ELSE 0 END), 0)::BIGINT AS error_count
+		FROM spans
+		WHERE service IN (%s)
+		  AND start_time >= NOW() - INTERVAL '%d minutes'
 		GROUP BY service
-		ORDER BY (COALESCE(SUM(spans), 0) + COALESCE(SUM(log_count), 0) + COALESCE(SUM(metric_count), 0)) DESC
+		ORDER BY COUNT(*) DESC
 	`, strings.Join(placeholders, ","), window)
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
@@ -141,15 +141,10 @@ func (s *Service) CompareServices(ctx context.Context, params CompareServicesPar
 	var metrics []ServiceMetrics
 	for rows.Next() {
 		var m ServiceMetrics
-		var logCount, metricCount int64
-		if err := rows.Scan(&m.Service, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms, &logCount, &metricCount); err != nil {
+		if err := rows.Scan(&m.Service, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms, &m.ErrorCount); err != nil {
 			slog.Warn("scan failed", "method", "CompareServices", "err", err)
 			continue
 		}
-		if m.Requests == 0 && (logCount > 0 || metricCount > 0) {
-			m.Requests = logCount + metricCount
-		}
-		m.ErrorCount = int64(float64(m.Requests) * m.ErrorRate)
 		if m.Requests > 0 {
 			m.AvgMs = (m.P50Ms + m.P95Ms) / 2
 		}
@@ -204,17 +199,23 @@ func (s *Service) CompareTime(ctx context.Context, params CompareTimeParams) (*C
 
 	focus := ResolveFocus(params.Focus)
 
-	leftBuckets, leftErr := s.QueryRollupBuckets(ctx, params.Service, params.Left.Start, params.Left.End)
+	leftAgg, leftErr := s.queryServiceStats(ctx, params.Service, params.Left.Start, params.Left.End)
 	if leftErr != nil {
 		return nil, fmt.Errorf("left window query failed: %w", leftErr)
 	}
-	rightBuckets, rightErr := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End)
+	rightAgg, rightErr := s.queryServiceStats(ctx, params.Service, params.Right.Start, params.Right.End)
 	if rightErr != nil {
 		return nil, fmt.Errorf("right window query failed: %w", rightErr)
 	}
 
-	leftAgg := AggregateBuckets(leftBuckets)
-	rightAgg := AggregateBuckets(rightBuckets)
+	leftBuckets, leftErr := s.QueryRollupBuckets(ctx, params.Service, params.Left.Start, params.Left.End)
+	if leftErr != nil {
+		return nil, fmt.Errorf("left bucket query failed: %w", leftErr)
+	}
+	rightBuckets, rightErr := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End)
+	if rightErr != nil {
+		return nil, fmt.Errorf("right bucket query failed: %w", rightErr)
+	}
 
 	comparison := BuildComparison(leftAgg, rightAgg, leftBuckets, rightBuckets, focus)
 
@@ -258,18 +259,18 @@ func (s *Service) CompareOperations(ctx context.Context, params CompareOperation
 
 // --- Query helpers ---
 
-// QueryRollupBuckets fetches per-bucket rows from service_rollup for a service in a time range.
+// QueryRollupBuckets fetches per-minute bucket stats directly from raw spans for a service in a time range.
 func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start, end time.Time) ([]RollupBucket, error) {
 	q := `
 		SELECT
-			COALESCE(AVG(CASE WHEN spans > 0 THEN p95_ms END), 0),
-			COALESCE(AVG(CASE WHEN spans > 0 THEN p50_ms END), 0),
-			COALESCE(AVG(CASE WHEN spans > 0 THEN error_rate END), 0),
-			COALESCE(SUM(spans), 0)
-		FROM service_rollup
-		WHERE service = ? AND bucket >= ? AND bucket < ?
-		GROUP BY bucket
-		ORDER BY bucket ASC
+			COALESCE(quantile_cont(duration_ms, 0.95), 0) AS p95_ms,
+			COALESCE(quantile_cont(duration_ms, 0.50), 0) AS p50_ms,
+			COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
+			COUNT(*) AS total_spans
+		FROM spans
+		WHERE service = ? AND start_time >= ? AND start_time < ?
+		GROUP BY date_trunc('minute', start_time)
+		ORDER BY date_trunc('minute', start_time) ASC
 	`
 	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end)
 	if err != nil {
@@ -287,6 +288,41 @@ func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start,
 		buckets = append(buckets, b)
 	}
 	return buckets, rows.Err()
+}
+
+// queryServiceStats computes exact aggregate stats from raw spans over a time window.
+func (s *Service) queryServiceStats(ctx context.Context, service string, start, end time.Time) (AggStats, error) {
+	q := `
+		SELECT
+			COALESCE(quantile_cont(duration_ms, 0.95), 0) AS p95_ms,
+			COALESCE(quantile_cont(duration_ms, 0.50), 0) AS p50_ms,
+			COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
+			COUNT(*) AS total_spans
+		FROM spans
+		WHERE service = ?
+		  AND start_time >= ?
+		  AND start_time < ?
+	`
+	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end)
+	if err != nil {
+		return AggStats{}, err
+	}
+	defer rows.Close()
+
+	if rows.Next() {
+		var a AggStats
+		var totalSpans int64
+		if err := rows.Scan(&a.P95Ms, &a.P50Ms, &a.ErrorRate, &totalSpans); err != nil {
+			return AggStats{}, err
+		}
+		minutes := end.Sub(start).Minutes()
+		if minutes == 0 {
+			minutes = 1
+		}
+		a.Throughput = float64(totalSpans) / minutes
+		return a, rows.Err()
+	}
+	return AggStats{}, rows.Err()
 }
 
 // queryOperationStats queries the spans view for operation-level aggregate stats.

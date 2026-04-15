@@ -172,9 +172,9 @@ just run
 |----------|---------|-------------|
 | `HTTP_ADDR` | `:7520` | HTTP server address |
 | `OTLP_GRPC_ADDR` | `:4317` | OTLP gRPC address |
-| `LAKE_DIR` | `./lake` | Parquet storage directory |
+| `LAKE_DIR` | `./lake` | DuckLake storage directory |
 | `FLUSH_SECONDS` | `15` | Batch flush interval |
-| `MAX_ROWS` | `50000` | Max rows per Parquet file |
+| `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
 | `ROLLUP_EVERY` | `60` | Rollup interval (seconds) |
 | `API_TOKEN` | - | Bearer auth token (optional) |
 | `MCP_ENABLED` | `true` | Enable MCP server |
