@@ -8,7 +8,7 @@ You click a service from Home, see its metrics, endpoints, errors, and dependenc
 
 ## Principles
 
-1. **One backend call** — `DiagnoseEnhanced()` already returns everything. No new queries.
+1. **One HTTP request, three internal queries** — the handler calls `DiagnoseEnhanced()`, `Spans(groupBy=["operation"])`, and a rollup-buckets query, then merges the results into one JSON response.
 2. **Vertical stack** — full-width sections top to bottom. Charts get room to breathe. Scrolls naturally on mobile.
 3. **Bookmarkable** — `/service/:name` URL. Paste it in Slack during an incident.
 4. **Deterministic** — same data, same page, every time. AI only behind Investigate.
@@ -29,9 +29,15 @@ One endpoint:
 GET /api/service/:name?window=60&namespace=
 ```
 
-Calls `service.DiagnoseEnhanced()` and returns the result directly. The existing `DiagnoseResult` and `DiagnoseEnhancedResult` types already have everything needed — no new response types required.
+The handler calls three internal queries and merges results into a `ServiceDetailResult`:
 
-The handler is thin: parse params, call `DiagnoseEnhanced()`, return JSON. Cap window at 1440 like Home.
+1. `DiagnoseEnhanced()` — metrics, health, top errors, slow ops, dependencies, change points, baseline P95
+2. `Spans(groupBy=["operation"])` — full endpoint list with per-operation P50/P95/error rate
+3. `QueryRollupBuckets()` — per-minute error rate + P95 timeseries for charts
+
+Returns a new `ServiceDetailResult` type that wraps all three. Cap window at 1440 like Home.
+
+**Note:** `DiagnoseResult` fields currently lack `json:` struct tags (PascalCase by default). Either add snake_case tags to match Home's convention, or define `ServiceDetailResult` with explicit fields and tags instead of embedding.
 
 ## Page Layout (Vertical Stack)
 
@@ -47,7 +53,9 @@ Back link to Home (← Home).
 
 Four cards in a row: Error Rate, P95, P50, Traffic.
 
-Each card shows the current value. When `DiagnoseEnhanced()` returns baseline data, show it as a secondary line: "baseline 0.3%". Color the value by health thresholds (same as Home).
+Each card shows the current value. Color the value by health thresholds (same as Home).
+
+For P95: when `BaselineComparison.BaselineP95Ms` is available, show it as a secondary line: "baseline 120ms". Note: the baseline only covers P95 latency today — `queryBaseline()` does not compute a baseline for error rate. If error rate baseline is needed later, `queryBaseline()` must be extended to also query `AVG(error_rate)` from rollups.
 
 On mobile, 2x2 grid.
 
@@ -55,21 +63,21 @@ On mobile, 2x2 grid.
 
 Two timeseries charts side by side (stack on mobile).
 
-Data source: `DiagnoseEnhanced().Buckets` — per-minute rollup data returned by the diagnose call.
+Data source: `QueryRollupBuckets(service, start, end)` — per-minute P50, P95, error rate, and span count. This is a separate query from `DiagnoseEnhanced()` because the diagnose call uses rollup buckets internally for change-point detection but discards them — only the change points are returned. The handler must call `QueryRollupBuckets()` directly and include the buckets in `ServiceDetailResult`.
 
-When change points are detected, render them as vertical dashed blue lines on the chart with a label.
+When change points are detected (from `DiagnoseEnhanced().ChangePoints`), render them as vertical dashed blue lines on the chart with a label.
 
-When baseline is available, render it as a faint horizontal dashed line.
+When baseline P95 is available, render it as a faint horizontal dashed line on the latency chart.
 
 ### 4. Top Endpoints
 
 Full-width table. Columns: Operation, Rate (spans/min), Errors (%), P50, P95, P99.
 
-Data source: `DiagnoseEnhanced().SlowOps` for operations with latency data, supplemented by a span group-by query for the full endpoint list.
+Data source: `Spans(service, groupBy=["operation"])` — returns all operations with span count, error rate, P50, P95, P99, and exemplar trace IDs.
+
+`DiagnoseEnhanced().SlowOps` is redundant here since the span group-by gives the full endpoint list. The handler uses `Spans()` for this section, not `SlowOps`.
 
 Sorted by error rate descending (worst first). Color error rate and P95 by thresholds.
-
-Since `DiagnoseEnhanced()` only returns slow ops (P95 > 100ms), we need to also call `Spans()` with `GroupBy=["operation"]` for the full endpoint list. This is one additional query beyond DiagnoseEnhanced.
 
 ### 5. Top Errors
 
@@ -110,9 +118,10 @@ Browser                    Server
   │  Render page             │
 ```
 
-Two backend queries total:
-1. `DiagnoseEnhanced()` — metrics, errors, slow ops, deps, change points, baseline
-2. `Spans(groupBy=["operation"])` — full endpoint list (DiagnoseEnhanced only returns slow ops)
+Three internal queries, one HTTP response:
+1. `DiagnoseEnhanced()` — metrics, health, top errors, slow ops, deps, change points, baseline P95
+2. `Spans(service, groupBy=["operation"])` — full endpoint list with per-operation metrics
+3. `QueryRollupBuckets(service, start, end)` — per-minute timeseries for charts
 
 ## Frontend Components
 
@@ -133,11 +142,11 @@ Reuse from Home: `Sparkline.tsx` (for inline sparklines if needed).
 
 Minimal:
 
-1. **New handler** — `GET /api/service/:name` in `internal/api/ui.go`. Calls `DiagnoseEnhanced()` + `Spans(groupBy)`. Returns combined JSON.
-2. **New response type** — `ServiceDetailResult` wrapping diagnose + endpoints data in one response.
-3. **Route registration** — add to `RegisterUIRoutes`.
-
-No new service layer methods. No new DuckDB queries.
+1. **New response type** — `ServiceDetailResult` in `internal/service/types.go` with explicit `json:` snake_case tags. Wraps diagnose data, endpoints, and rollup buckets.
+2. **New service method** — `ServiceDetail()` in `internal/service/service_detail.go`. Calls `DiagnoseEnhanced()` + `Spans(groupBy)` + `QueryRollupBuckets()` and assembles the result.
+3. **New handler** — `GET /api/service/:name` in `internal/api/ui.go`. Thin wrapper around `ServiceDetail()`.
+4. **Add JSON tags** — to `DiagnoseResult` fields in `types.go` for consistent snake_case serialization.
+5. **Route registration** — add to `RegisterUIRoutes`.
 
 ## Navigation
 
