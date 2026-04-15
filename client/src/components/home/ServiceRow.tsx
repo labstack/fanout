@@ -36,10 +36,10 @@ export function ServiceRow({ service }: Props) {
       </span>
       <Sparkline
         values={service.sparkline_traffic}
-        width={56}
-        height={18}
+        width={72}
+        height={24}
         color="var(--primary)"
-        className="opacity-30 group-hover:opacity-60 transition-opacity shrink-0"
+        className="opacity-60 group-hover:opacity-90 transition-opacity shrink-0"
       />
       <span className="mono text-xs text-muted-foreground w-24 text-right shrink-0">
         {fmtTraffic(service.traffic_per_min)} <span className="text-[10px]">spans/min</span>

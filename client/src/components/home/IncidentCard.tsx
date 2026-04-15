@@ -86,7 +86,7 @@ export function IncidentCard({ incident, onInvestigate, compact = false, primary
           width={56}
           height={18}
           color={isUnhealthy ? "var(--unhealthy)" : "var(--degraded)"}
-          className="opacity-50 group-hover:opacity-80 transition-opacity shrink-0 hidden sm:block"
+          className="opacity-70 group-hover:opacity-100 transition-opacity shrink-0 hidden sm:block"
         />
       </button>
     );
