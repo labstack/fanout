@@ -4,8 +4,9 @@ import { Toaster } from "sonner";
 import { NavLoader } from "./nav-loader";
 import { Nav } from "./nav";
 import { Footer } from "./footer";
+import { setApiToken } from "@/api/client";
 
-const HIDE_FOOTER = new Set(["/"]);
+const HIDE_FOOTER = new Set(["/chat"]);
 
 class ErrorBoundary extends Component<
   { children: ReactNode },
@@ -47,13 +48,20 @@ class ErrorBoundary extends Component<
 }
 
 export function RootLayout() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
   const showFooter = !HIDE_FOOTER.has(pathname);
 
   useEffect(() => {
     mainRef.current?.scrollTo(0, 0);
   }, [pathname]);
+
+  useEffect(() => {
+    const token = new URLSearchParams(search).get("token");
+    if (token) {
+      setApiToken(token);
+    }
+  }, [search]);
 
   return (
     <div className="h-screen flex flex-col noise">

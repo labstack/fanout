@@ -93,9 +93,10 @@ func main() {
 	defer sqlite.Close()
 
 	// Start alert engine
+	var alertStore *alert.Store
 	var alertEngine *alert.Engine
 	if cfg.AlertEnabled {
-		alertStore := alert.NewStore(sqlite.DB)
+		alertStore = alert.NewStore(sqlite.DB)
 		alertEngine = alert.NewEngine(
 			alertStore, q, detector,
 			time.Duration(cfg.AlertEvalInterval)*time.Second,
@@ -151,9 +152,12 @@ func main() {
 			return func(c *echo.Context) error {
 				path := c.Request().URL.Path
 
-				// Skip auth for health, metrics, and UI page routes
+				// Skip auth for health, metrics, and SPA page routes.
+				// Auth only applies to /api/* and /mcp — everything else is
+				// either a health check or a client-side route served by the SPA.
 				if path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
-					path == "/" || path == "/favicon.ico" || path == "/favicon.svg" {
+					path == "/favicon.ico" || path == "/favicon.svg" ||
+					(!strings.HasPrefix(path, "/api/") && path != "/mcp") {
 					return next(c)
 				}
 
@@ -224,7 +228,7 @@ func main() {
 	}
 
 	// UI routes (chat SSE + bookmarks + suggestions)
-	api.RegisterUIRoutes(e, cfg, orch, sseHandler, bookmarks)
+	api.RegisterUIRoutes(e, cfg, orch, sseHandler, bookmarks, svc, alertStore)
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled
 	if cfg.MCPEnabled {

@@ -247,3 +247,81 @@ func TestRespondToolDef_HasSchema(t *testing.T) {
 		t.Error("schema should not contain blocks property")
 	}
 }
+
+func TestDashboardRespondToolDef_HasSchema(t *testing.T) {
+	def := dashboardRespondToolDef()
+	if def.Name != dashboardRespondToolName {
+		t.Errorf("name = %q, want %q", def.Name, dashboardRespondToolName)
+	}
+	if def.InputSchema == nil {
+		t.Fatal("InputSchema is nil")
+	}
+
+	var schema map[string]any
+	if err := json.Unmarshal(def.InputSchema.(json.RawMessage), &schema); err != nil {
+		t.Fatalf("schema unmarshal: %v", err)
+	}
+	props := schema["properties"].(map[string]any)
+	if _, ok := props["headline"]; !ok {
+		t.Error("schema missing headline property")
+	}
+	if _, ok := props["brief"]; !ok {
+		t.Error("schema missing brief property")
+	}
+	if _, ok := props["actions"]; !ok {
+		t.Error("schema missing actions property")
+	}
+}
+
+func TestOrchestrator_Dashboard_ReturnsStructuredResult(t *testing.T) {
+	dashboardInput, _ := json.Marshal(map[string]any{
+		"headline": "Checkout is the main risk",
+		"brief":    "Checkout latency and errors dominate the current incident picture.",
+		"actions": []map[string]any{
+			{"label": "Diagnose checkout", "prompt": "Diagnose checkout", "kind": "drill"},
+			{"label": "Explain regression", "prompt": "Explain the checkout regression", "kind": "explain"},
+		},
+	})
+
+	provider := &scriptedProvider{
+		steps: []scriptedStep{
+			{
+				toolCalls:  []ToolCall{{ID: "t1", Name: "status", Input: `{}`}},
+				stopReason: "tool_use",
+			},
+			{
+				toolCalls:  []ToolCall{{ID: "d1", Name: dashboardRespondToolName, Input: string(dashboardInput)}},
+				stopReason: "tool_use",
+			},
+		},
+	}
+
+	tools := &ToolRegistry{
+		defs: []ToolDef{{Name: "status"}},
+		handlers: map[string]ToolHandler{
+			"status": func(_ context.Context, _ json.RawMessage) (string, []Block, error) {
+				return `{"ok":true}`, []Block{
+					MakeMetricsBlock([]MetricItem{{Label: "P95", Value: 42.5, Unit: "ms", Status: "ok"}}),
+				}, nil
+			},
+		},
+	}
+	orch := NewOrchestrator(provider, tools, nil, config.Config{})
+
+	result, err := orch.Dashboard(context.Background(), 60, "")
+	if err != nil {
+		t.Fatalf("Dashboard() error: %v", err)
+	}
+	if result.Headline != "Checkout is the main risk" {
+		t.Errorf("Headline = %q", result.Headline)
+	}
+	if !strings.Contains(result.Brief, "Checkout latency") {
+		t.Errorf("Brief = %q", result.Brief)
+	}
+	if len(result.Actions) != 2 {
+		t.Fatalf("Actions = %d, want 2", len(result.Actions))
+	}
+	if len(result.Blocks) != 1 || result.Blocks[0].Type != BlockMetrics {
+		t.Fatalf("Blocks = %#v, want one metrics block", result.Blocks)
+	}
+}

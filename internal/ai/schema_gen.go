@@ -35,8 +35,10 @@ var BlockTypeRegistry = []BlockTypeEntry{
 }
 
 var (
-	responseSchemaOnce sync.Once
-	responseSchemaJSON json.RawMessage
+	responseSchemaOnce  sync.Once
+	responseSchemaJSON  json.RawMessage
+	dashboardSchemaOnce sync.Once
+	dashboardSchemaJSON json.RawMessage
 )
 
 // generateResponseSchema returns a cached JSON Schema describing the "respond" tool's
@@ -63,6 +65,59 @@ func generateResponseSchema() json.RawMessage {
 		}
 	})
 	return responseSchemaJSON
+}
+
+// generateDashboardSchema returns a cached JSON Schema describing the
+// dashboard-specific structured AI response. Blocks remain deterministic and
+// are appended from tool results rather than emitted by the model.
+func generateDashboardSchema() json.RawMessage {
+	dashboardSchemaOnce.Do(func() {
+		schema := map[string]any{
+			"type":                 "object",
+			"required":             []string{"headline", "brief", "actions"},
+			"additionalProperties": false,
+			"properties": map[string]any{
+				"headline": map[string]any{
+					"type":        "string",
+					"description": "Short dashboard headline summarizing the current situation.",
+				},
+				"brief": map[string]any{
+					"type":        "string",
+					"description": "Concise markdown briefing describing what changed, what matters, and what to watch.",
+				},
+				"actions": map[string]any{
+					"type":        "array",
+					"description": "Concrete next dashboard actions the user can take.",
+					"items": map[string]any{
+						"type":                 "object",
+						"required":             []string{"label", "prompt", "kind"},
+						"additionalProperties": false,
+						"properties": map[string]any{
+							"label": map[string]any{
+								"type":        "string",
+								"description": "Short user-facing action label.",
+							},
+							"prompt": map[string]any{
+								"type":        "string",
+								"description": "Prompt to send into the investigation chat when this action is clicked.",
+							},
+							"kind": map[string]any{
+								"type":        "string",
+								"description": "Action category such as explain, drill, compare, or alert.",
+							},
+						},
+					},
+				},
+			},
+		}
+
+		var err error
+		dashboardSchemaJSON, err = json.Marshal(schema)
+		if err != nil {
+			panic(fmt.Sprintf("ai: failed to marshal dashboard schema: %v", err))
+		}
+	})
+	return dashboardSchemaJSON
 }
 
 // reflectSchema produces a JSON Schema object definition from a Go struct value.

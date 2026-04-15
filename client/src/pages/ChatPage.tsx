@@ -1,17 +1,35 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useSearchParams } from "react-router";
 import { useChatStore } from "@/stores/chat";
 import { MessageList } from "@/components/chat/MessageList";
 import { ChatInput } from "@/components/chat/ChatInput";
 import { EmptyState } from "@/components/chat/EmptyState";
+import { getApiToken } from "@/api/client";
 
 export function ChatPage() {
-  const { init, messages } = useChatStore();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sentPromptRef = useRef<string | null>(null);
+  const { init, messages, sendMessage } = useChatStore();
 
   useEffect(() => {
-    const token =
-      new URLSearchParams(location.search).get("token") ?? undefined;
+    const token = searchParams.get("token") ?? getApiToken() ?? undefined;
     init(token);
-  }, [init]);
+  }, [init, searchParams]);
+
+  useEffect(() => {
+    const prompt = searchParams.get("q");
+    if (!prompt) return;
+
+    const promptKey = `${searchParams.get("token") ?? ""}:${prompt}`;
+    if (sentPromptRef.current === promptKey) return;
+
+    sentPromptRef.current = promptKey;
+    sendMessage(prompt);
+
+    const next = new URLSearchParams(searchParams);
+    next.delete("q");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, sendMessage, setSearchParams]);
 
   const hasMessages = messages.length > 0;
 

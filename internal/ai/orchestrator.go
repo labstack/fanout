@@ -17,6 +17,7 @@ import (
 )
 
 const respondToolName = "respond"
+const dashboardRespondToolName = "dashboard_respond"
 
 // respondToolDef builds the synthetic respond tool definition.
 // This tool is NOT registered in the ToolRegistry — it is appended to the
@@ -27,6 +28,32 @@ func respondToolDef() ToolDef {
 		Description: "Produce your final text analysis of the tool results. Visualization blocks are generated automatically. Call this as your last action.",
 		InputSchema: generateResponseSchema(), // from schema_gen.go
 	}
+}
+
+// dashboardRespondToolDef builds the synthetic tool definition used for the
+// smart dashboard summary and action payload.
+func dashboardRespondToolDef() ToolDef {
+	return ToolDef{
+		Name:        dashboardRespondToolName,
+		Description: "Produce the dashboard briefing and next actions. Call this after reviewing the gathered telemetry.",
+		InputSchema: generateDashboardSchema(),
+	}
+}
+
+// DashboardAction is a structured AI-recommended next action for the home page.
+type DashboardAction struct {
+	Label  string `json:"label"`
+	Prompt string `json:"prompt"`
+	Kind   string `json:"kind"`
+}
+
+// DashboardResult is the smart dashboard payload returned by the backend.
+type DashboardResult struct {
+	Headline    string            `json:"headline"`
+	Brief       string            `json:"brief"`
+	Actions     []DashboardAction `json:"actions"`
+	Blocks      []Block           `json:"blocks"`
+	GeneratedAt string            `json:"generated_at"`
 }
 
 // Orchestrator manages the agentic loop: user question → LLM → tools → stream.
@@ -403,6 +430,104 @@ func (o *Orchestrator) Run(ctx context.Context, conversation []Message, window i
 	}
 
 	return conversation, nil
+}
+
+// Dashboard builds a smart home-page snapshot from live telemetry and the
+// existing AI/tool stack. The result is stateless and independent of chat
+// sessions.
+func (o *Orchestrator) Dashboard(ctx context.Context, window int, namespace string) (DashboardResult, error) {
+	systemBlocks := o.buildSystemBlocks(ctx, window, namespace)
+	prompt := strings.Join([]string{
+		"Create the Fanout dashboard snapshot for right now.",
+		"Use observability tools to inspect current health, risky services, and notable regressions.",
+		"Focus on what changed, what matters most, and what should happen next.",
+		"Prefer a small set of high-signal tools and keep the result compact.",
+	}, " ")
+	conversation := []Message{UserMessage(prompt)}
+
+	r := o.step(ctx, &conversation, systemBlocks, o.tools.Defs(), nil, "dashboard_gather", func(ClientEvent) error { return nil }, namespace)
+	if r.err != nil {
+		return DashboardResult{}, r.err
+	}
+
+	conversation = append(conversation, UserMessage(
+		"Now create the dashboard briefing. Return a short headline, a concise brief, and 3 concrete next actions. "+
+			"Base them only on gathered evidence. Do not mention missing context or ask follow-up questions."))
+
+	var textBuf strings.Builder
+	var dashboardCall *ToolCall
+	err := o.provider.Stream(ctx, StreamParams{
+		SystemBlocks: systemBlocks,
+		Messages:     conversation,
+		Tools:        []ToolDef{dashboardRespondToolDef()},
+		ToolChoice:   &ToolChoice{Name: dashboardRespondToolName},
+		MaxTokens:    2048,
+	}, func(event StreamEvent) error {
+		switch event.Type {
+		case EventText:
+			textBuf.WriteString(event.Delta)
+		case EventToolUse:
+			if event.ToolCall != nil && event.ToolCall.Name == dashboardRespondToolName {
+				tc := *event.ToolCall
+				dashboardCall = &tc
+			}
+		case EventError:
+			return fmt.Errorf("dashboard provider error: %s", event.Error)
+		}
+		return nil
+	})
+	if err != nil {
+		return DashboardResult{}, err
+	}
+
+	result := DashboardResult{
+		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		Blocks:      validateBlocks(r.suggestedBlocks),
+	}
+
+	if dashboardCall == nil {
+		fallback := strings.TrimSpace(textBuf.String())
+		if fallback == "" {
+			fallback = "No dashboard summary was produced."
+		}
+		result.Headline = "Live system snapshot"
+		result.Brief = fallback
+		result.Actions = []DashboardAction{
+			{Label: "Explain health", Prompt: "Give me a concise brief on current system health and the top risk.", Kind: "explain"},
+			{Label: "Investigate anomalies", Prompt: "What should I investigate first right now, and why?", Kind: "drill"},
+			{Label: "Review alerts", Prompt: "Recommend the next alert I should create from the current system state.", Kind: "alert"},
+		}
+		return result, nil
+	}
+
+	var payload struct {
+		Headline string            `json:"headline"`
+		Brief    string            `json:"brief"`
+		Actions  []DashboardAction `json:"actions"`
+	}
+	if err := json.Unmarshal([]byte(dashboardCall.Input), &payload); err != nil {
+		return DashboardResult{}, fmt.Errorf("parse dashboard response: %w", err)
+	}
+
+	result.Headline = strings.TrimSpace(payload.Headline)
+	result.Brief = strings.TrimSpace(payload.Brief)
+	result.Actions = payload.Actions
+
+	if result.Headline == "" {
+		result.Headline = "Live system snapshot"
+	}
+	if result.Brief == "" {
+		result.Brief = strings.TrimSpace(textBuf.String())
+	}
+	if len(result.Actions) == 0 {
+		result.Actions = []DashboardAction{
+			{Label: "Explain health", Prompt: "Give me a concise brief on current system health and the top risk.", Kind: "explain"},
+			{Label: "Investigate anomalies", Prompt: "What should I investigate first right now, and why?", Kind: "drill"},
+			{Label: "Review alerts", Prompt: "Recommend the next alert I should create from the current system state.", Kind: "alert"},
+		}
+	}
+
+	return result, nil
 }
 
 // SuggestedQuestions returns contextual starter questions.

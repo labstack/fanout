@@ -242,3 +242,59 @@ export interface Bookmark {
   answer_html: string;
   created_at: string;
 }
+
+// ── Home page types ─────────────────────────────────────────
+
+export interface HomeResponse {
+  summary: HomeSummary;
+  incidents: HomeIncident[];
+  services: HomeService[];
+  alerts: HomeAlert[];
+}
+
+export interface HomeSummary {
+  total_services: number;
+  healthy: number;
+  degraded: number;
+  unhealthy: number;
+  traffic_per_min: number;
+  error_rate: number;
+  p95_ms: number;
+}
+
+export interface HomeIncident {
+  service: string;
+  health: string;
+  health_score: number;
+  error_rate: number;
+  p95_ms: number;
+  traffic_per_min: number;
+  started_at?: string;
+  lifecycle: string;
+  sparkline_error_rate: number[];
+  top_errors?: HomeTopError[];
+  related?: string[];
+}
+
+export interface HomeTopError {
+  message: string;
+  count: number;
+}
+
+export interface HomeService {
+  name: string;
+  health: string;
+  health_score: number;
+  traffic_per_min: number;
+  error_rate: number;
+  p95_ms: number;
+  sparkline_traffic: number[];
+}
+
+export interface HomeAlert {
+  rule: string;
+  service: string;
+  state: string;
+  value: number;
+  fired_at: string;
+}
