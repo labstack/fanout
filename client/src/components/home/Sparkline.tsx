@@ -7,12 +7,28 @@ function resolveColor(color: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || color;
 }
 
+/** Downsample values to ~maxPoints by averaging buckets */
+function downsample(values: number[], maxPoints: number): number[] {
+  if (values.length <= maxPoints) return values;
+  const bucketSize = values.length / maxPoints;
+  const out: number[] = [];
+  for (let i = 0; i < maxPoints; i++) {
+    const start = Math.floor(i * bucketSize);
+    const end = Math.floor((i + 1) * bucketSize);
+    let sum = 0;
+    for (let j = start; j < end; j++) sum += values[j];
+    out.push(sum / (end - start));
+  }
+  return out;
+}
+
 interface SparklineProps {
   values: number[];
   width?: number;
   height?: number;
   color?: string;
   className?: string;
+  maxPoints?: number;
 }
 
 export function Sparkline({
@@ -21,6 +37,7 @@ export function Sparkline({
   height = 24,
   color = "var(--primary)",
   className = "",
+  maxPoints = 16,
 }: SparklineProps) {
   const gradientId = useId();
   const resolvedColor = useMemo(() => resolveColor(color), [color]);
@@ -29,13 +46,14 @@ export function Sparkline({
     return <svg width={width} height={height} className={className} />;
   }
 
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  const sampled = downsample(values, maxPoints);
+  const min = Math.min(...sampled);
+  const max = Math.max(...sampled);
   const range = max - min || 1;
   const padding = 1;
 
-  const coords = values.map((v, i) => {
-    const x = (i / (values.length - 1)) * (width - padding * 2) + padding;
+  const coords = sampled.map((v, i) => {
+    const x = (i / (sampled.length - 1)) * (width - padding * 2) + padding;
     const y = height - padding - ((v - min) / range) * (height - padding * 2);
     return { x, y };
   });
