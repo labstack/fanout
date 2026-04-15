@@ -94,6 +94,7 @@ func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, ss
 	e.GET("/api/suggestions", h.Suggestions)
 	e.GET("/api/dashboard", h.Dashboard)
 	e.GET("/api/home", h.Home)
+	e.GET("/api/service/:name", h.ServiceDetail)
 
 	return h
 }
@@ -232,6 +233,38 @@ func (h *UIHandler) Home(c *echo.Context) error {
 				})
 			}
 		}
+	}
+
+	return c.JSON(http.StatusOK, result)
+}
+
+// ServiceDetail returns deterministic data for the Service Detail page.
+func (h *UIHandler) ServiceDetail(c *echo.Context) error {
+	name := c.Param("name")
+	if strings.TrimSpace(name) == "" || len(name) > 256 {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid service name")
+	}
+
+	if h.svc == nil {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "service layer not configured")
+	}
+
+	window := 60
+	if raw := strings.TrimSpace(c.QueryParam("window")); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v <= 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid window")
+		}
+		window = v
+	}
+	if window > 1440 {
+		window = 1440
+	}
+
+	result, err := h.svc.ServiceDetail(c.Request().Context(), name, window, c.QueryParam("namespace"), "")
+	if err != nil {
+		slog.Error("service detail failed", "service", name, "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load service detail")
 	}
 
 	return c.JSON(http.StatusOK, result)

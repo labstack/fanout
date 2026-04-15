@@ -1,3 +1,4 @@
+import { useNavigate, useLocation } from "react-router";
 import type { HomeService } from "@/lib/types";
 import { Sparkline } from "./Sparkline";
 
@@ -17,14 +18,16 @@ function fmtMs(v: number): string {
 
 interface Props {
   service: HomeService;
-  onClick: (service: string) => void;
 }
 
-export function ServiceRow({ service, onClick }: Props) {
+export function ServiceRow({ service }: Props) {
+  const navigate = useNavigate();
+  const { search } = useLocation();
+
   return (
     <button
       type="button"
-      onClick={() => onClick(service.name)}
+      onClick={() => navigate(`/service/${encodeURIComponent(service.name)}${search}`)}
       className="w-full flex items-center gap-4 px-4 py-2 rounded-lg text-left transition-colors hover:bg-surface-2 group"
     >
       <span className="text-xs text-healthy">{"\u25CF"}</span>

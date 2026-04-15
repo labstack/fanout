@@ -171,17 +171,17 @@ type TopologyParams struct {
 
 // DiagnoseResult contains detailed service diagnostics.
 type DiagnoseResult struct {
-	Service       string
-	Status        string
-	WindowMinutes int
-	P50Ms         float64
-	P95Ms         float64
-	P99Ms         float64
-	ErrorRate     float64
-	SpanCount     int64
-	TopErrors     []ErrorInfo
-	SlowOps       []SlowOp
-	Dependencies  []Dependency
+	Service       string       `json:"service"`
+	Status        string       `json:"status"`
+	WindowMinutes int          `json:"window_minutes"`
+	P50Ms         float64      `json:"p50_ms"`
+	P95Ms         float64      `json:"p95_ms"`
+	P99Ms         float64      `json:"p99_ms"`
+	ErrorRate     float64      `json:"error_rate"`
+	SpanCount     int64        `json:"span_count"`
+	TopErrors     []ErrorInfo  `json:"top_errors"`
+	SlowOps       []SlowOp     `json:"slow_ops"`
+	Dependencies  []Dependency `json:"dependencies"`
 
 	// Enhanced fields (populated by DiagnoseEnhanced)
 	SymptomDetected       string              `json:"symptom_detected,omitempty"`
@@ -224,20 +224,20 @@ type ErrorInfo struct {
 
 // SlowOp describes a slow operation.
 type SlowOp struct {
-	Name      string
-	P50Ms     float64
-	P95Ms     float64
-	P99Ms     float64
-	ErrorRate float64
-	Count     int64
+	Name      string  `json:"name"`
+	P50Ms     float64 `json:"p50_ms"`
+	P95Ms     float64 `json:"p95_ms"`
+	P99Ms     float64 `json:"p99_ms"`
+	ErrorRate float64 `json:"error_rate"`
+	Count     int64   `json:"count"`
 }
 
 // Dependency describes a downstream service call.
 type Dependency struct {
-	Service   string
-	CallCount int64
-	ErrorRate float64
-	AvgMs     float64
+	Service   string  `json:"service"`
+	CallCount int64   `json:"call_count"`
+	ErrorRate float64 `json:"error_rate"`
+	AvgMs     float64 `json:"avg_ms"`
 }
 
 // TraceResult contains a complete distributed trace.
@@ -607,4 +607,31 @@ type MetricAnomaly struct {
 	Value          float64
 	Expected       float64
 	DeviationSigma float64
+}
+
+// ServiceDetailResult is the response for the Service Detail page.
+type ServiceDetailResult struct {
+	Diagnose  DiagnoseResult    `json:"diagnose"`
+	Endpoints []ServiceEndpoint `json:"endpoints"`
+	Buckets   []ServiceBucket   `json:"buckets"`
+}
+
+// ServiceEndpoint is a per-operation summary from span group-by.
+type ServiceEndpoint struct {
+	Operation  string  `json:"operation"`
+	Count      int64   `json:"count"`
+	ErrorRate  float64 `json:"error_rate"`
+	P50Ms      float64 `json:"p50_ms"`
+	P95Ms      float64 `json:"p95_ms"`
+	P99Ms      float64 `json:"p99_ms"`
+	ExemplarID string  `json:"exemplar_id,omitempty"`
+}
+
+// ServiceBucket is a per-minute rollup point for charts.
+type ServiceBucket struct {
+	Time      string  `json:"time"`
+	ErrorRate float64 `json:"error_rate"`
+	P95Ms     float64 `json:"p95_ms"`
+	P50Ms     float64 `json:"p50_ms"`
+	Spans     int64   `json:"spans"`
 }

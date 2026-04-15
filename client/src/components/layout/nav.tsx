@@ -25,7 +25,9 @@ export function Nav() {
             end
             className={({ isActive }) =>
               `text-xs mono transition-colors ${
-                isActive ? "text-foreground" : "text-zinc-400 hover:text-zinc-200"
+                isActive || pathname.startsWith("/service/")
+                  ? "text-foreground"
+                  : "text-zinc-400 hover:text-zinc-200"
               }`
             }
           >

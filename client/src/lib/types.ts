@@ -298,3 +298,91 @@ export interface HomeAlert {
   value: number;
   fired_at: string;
 }
+
+// ── Service Detail types ────────────────────────────────────
+
+export interface ServiceDetailResponse {
+  diagnose: DiagnoseResult;
+  endpoints: ServiceEndpoint[];
+  buckets: ServiceBucket[];
+}
+
+export interface DiagnoseResult {
+  service: string;
+  status: string;
+  window_minutes: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  error_rate: number;
+  span_count: number;
+  top_errors: ErrorInfo[];
+  slow_ops: SlowOp[];
+  dependencies: ServiceDependency[];
+  symptom_detected?: string;
+  comparison_to_baseline?: BaselineComparison;
+  change_points?: ChangePoint[];
+  correlated_log_patterns?: LogPattern[];
+  suggested_traces?: string[];
+}
+
+export interface ErrorInfo {
+  operation: string;
+  message: string;
+  exception_type?: string;
+  count: number;
+  trace_id: string;
+}
+
+export interface SlowOp {
+  name: string;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  error_rate: number;
+  count: number;
+}
+
+export interface ServiceDependency {
+  service: string;
+  call_count: number;
+  error_rate: number;
+  avg_ms: number;
+}
+
+export interface BaselineComparison {
+  p95_ratio: number;
+  baseline_p95_ms: number;
+  baseline_window: string;
+}
+
+export interface ChangePoint {
+  time: string;
+  metric: string;
+  before: number;
+  after: number;
+}
+
+export interface LogPattern {
+  pattern: string;
+  count: number;
+  severity: string;
+}
+
+export interface ServiceEndpoint {
+  operation: string;
+  count: number;
+  error_rate: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  exemplar_id?: string;
+}
+
+export interface ServiceBucket {
+  time: string;
+  error_rate: number;
+  p95_ms: number;
+  p50_ms: number;
+  spans: number;
+}

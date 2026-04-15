@@ -87,6 +87,7 @@ type AggStats struct {
 
 // RollupBucket holds per-bucket stats from service_rollup.
 type RollupBucket struct {
+	Bucket    time.Time
 	P95Ms     float64
 	P50Ms     float64
 	ErrorRate float64
@@ -208,11 +209,11 @@ func (s *Service) CompareTime(ctx context.Context, params CompareTimeParams) (*C
 		return nil, fmt.Errorf("right window query failed: %w", rightErr)
 	}
 
-	leftBuckets, leftErr := s.QueryRollupBuckets(ctx, params.Service, params.Left.Start, params.Left.End)
+	leftBuckets, leftErr := s.QueryRollupBuckets(ctx, params.Service, params.Left.Start, params.Left.End, "", "")
 	if leftErr != nil {
 		return nil, fmt.Errorf("left bucket query failed: %w", leftErr)
 	}
-	rightBuckets, rightErr := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End)
+	rightBuckets, rightErr := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End, "", "")
 	if rightErr != nil {
 		return nil, fmt.Errorf("right bucket query failed: %w", rightErr)
 	}
@@ -260,19 +261,24 @@ func (s *Service) CompareOperations(ctx context.Context, params CompareOperation
 // --- Query helpers ---
 
 // QueryRollupBuckets fetches per-minute bucket stats directly from raw spans for a service in a time range.
-func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start, end time.Time) ([]RollupBucket, error) {
+// Pass empty namespace/tenantID to query across all.
+func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start, end time.Time, namespace, tenantID string) ([]RollupBucket, error) {
+	ns, tid := s.defaults(namespace, tenantID)
 	q := `
 		SELECT
+			date_trunc('minute', start_time) AS bucket,
 			COALESCE(quantile_cont(duration_ms, 0.95), 0) AS p95_ms,
 			COALESCE(quantile_cont(duration_ms, 0.50), 0) AS p50_ms,
 			COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
 			COUNT(*) AS total_spans
 		FROM spans
 		WHERE service = ? AND start_time >= ? AND start_time < ?
+			AND tenant = ?
+			AND (? = '' OR namespace = ?)
 		GROUP BY date_trunc('minute', start_time)
-		ORDER BY date_trunc('minute', start_time) ASC
+		ORDER BY bucket ASC
 	`
-	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end)
+	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end, tid, ns, ns)
 	if err != nil {
 		return nil, err
 	}
@@ -281,7 +287,7 @@ func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start,
 	var buckets []RollupBucket
 	for rows.Next() {
 		var b RollupBucket
-		if err := rows.Scan(&b.P95Ms, &b.P50Ms, &b.ErrorRate, &b.Spans); err != nil {
+		if err := rows.Scan(&b.Bucket, &b.P95Ms, &b.P50Ms, &b.ErrorRate, &b.Spans); err != nil {
 			slog.Warn("scan failed", "method", "QueryRollupBuckets", "err", err)
 			continue
 		}

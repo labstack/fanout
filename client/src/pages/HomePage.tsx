@@ -244,13 +244,7 @@ export function HomePage() {
               </span>
             </div>
             {data.services.map((svc) => (
-              <ServiceRow
-                key={svc.name}
-                service={svc}
-                onClick={(name) =>
-                  investigate(`Give me an overview of ${name} — key metrics, endpoints, and any concerns.`)
-                }
-              />
+              <ServiceRow key={svc.name} service={svc} />
             ))}
           </div>
         )}
