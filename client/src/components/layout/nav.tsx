@@ -23,9 +23,9 @@ export function Nav() {
           <NavLink
             to={buildDashboardPath(token)}
             end
-            className={() =>
+            className={({ isActive }) =>
               `text-xs mono transition-colors ${
-                pathname === "/" || pathname.startsWith("/service/")
+                isActive || pathname.startsWith("/service/")
                   ? "text-foreground"
                   : "text-zinc-400 hover:text-zinc-200"
               }`

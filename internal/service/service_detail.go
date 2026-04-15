@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -52,15 +53,14 @@ func (s *Service) ServiceDetail(ctx context.Context, svcName string, window int,
 	start := now.Add(-time.Duration(window) * time.Minute)
 	rollupBuckets, err := s.QueryRollupBuckets(ctx, svcName, start, now)
 	if err != nil {
-		// Non-fatal: page works without charts
+		slog.Error("service detail rollup query failed", "service", svcName, "err", err)
 		rollupBuckets = nil
 	}
 
 	buckets := make([]ServiceBucket, 0, len(rollupBuckets))
-	for i, rb := range rollupBuckets {
-		t := start.Add(time.Duration(i) * time.Minute)
+	for _, rb := range rollupBuckets {
 		buckets = append(buckets, ServiceBucket{
-			Time:      t.Format(time.RFC3339),
+			Time:      rb.Bucket.UTC().Format(time.RFC3339),
 			ErrorRate: rb.ErrorRate,
 			P95Ms:     rb.P95Ms,
 			P50Ms:     rb.P50Ms,

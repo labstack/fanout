@@ -87,6 +87,7 @@ type AggStats struct {
 
 // RollupBucket holds per-bucket stats from service_rollup.
 type RollupBucket struct {
+	Bucket    time.Time
 	P95Ms     float64
 	P50Ms     float64
 	ErrorRate float64
@@ -263,6 +264,7 @@ func (s *Service) CompareOperations(ctx context.Context, params CompareOperation
 func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start, end time.Time) ([]RollupBucket, error) {
 	q := `
 		SELECT
+			date_trunc('minute', start_time) AS bucket,
 			COALESCE(quantile_cont(duration_ms, 0.95), 0) AS p95_ms,
 			COALESCE(quantile_cont(duration_ms, 0.50), 0) AS p50_ms,
 			COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
@@ -270,7 +272,7 @@ func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start,
 		FROM spans
 		WHERE service = ? AND start_time >= ? AND start_time < ?
 		GROUP BY date_trunc('minute', start_time)
-		ORDER BY date_trunc('minute', start_time) ASC
+		ORDER BY bucket ASC
 	`
 	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end)
 	if err != nil {
@@ -281,7 +283,7 @@ func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start,
 	var buckets []RollupBucket
 	for rows.Next() {
 		var b RollupBucket
-		if err := rows.Scan(&b.P95Ms, &b.P50Ms, &b.ErrorRate, &b.Spans); err != nil {
+		if err := rows.Scan(&b.Bucket, &b.P95Ms, &b.P50Ms, &b.ErrorRate, &b.Spans); err != nil {
 			slog.Warn("scan failed", "method", "QueryRollupBuckets", "err", err)
 			continue
 		}

@@ -241,8 +241,8 @@ func (h *UIHandler) Home(c *echo.Context) error {
 // ServiceDetail returns deterministic data for the Service Detail page.
 func (h *UIHandler) ServiceDetail(c *echo.Context) error {
 	name := c.Param("name")
-	if strings.TrimSpace(name) == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "service name required")
+	if strings.TrimSpace(name) == "" || len(name) > 256 {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid service name")
 	}
 
 	if h.svc == nil {
