@@ -176,8 +176,6 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 5))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL 7 DAY")).
 		WillReturnResult(sqlmock.NewResult(0, 3))
-	mock.ExpectExec(regexp.QuoteMeta("CHECKPOINT lake")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CHECKPOINT")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 

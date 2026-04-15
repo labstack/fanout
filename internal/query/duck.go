@@ -99,6 +99,12 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 	}
 
 	db := sql.OpenDB(connector)
+	// DuckLake attaches catalog state in the connector init hook. Re-opening pooled
+	// sql connections races that attach path and triggers duplicate internal metadata
+	// attachment errors, so keep one shared DuckDB connection and let DuckDB parallelize
+	// execution internally.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -304,18 +310,21 @@ WITH affected AS (
   SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
+    AND start_time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
   UNION
   SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
+    AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
   UNION
   SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
+    AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
 )
@@ -334,18 +343,21 @@ WITH affected AS (
   SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
+    AND start_time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
   UNION
   SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
+    AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
   UNION
   SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
+    AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
 ),
@@ -430,6 +442,7 @@ WITH affected AS (
   SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
+    AND start_time IS NOT NULL
 )
 DELETE FROM edge_rollup
 WHERE EXISTS (
@@ -445,6 +458,7 @@ WITH affected AS (
   SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
+    AND start_time IS NOT NULL
 ),
 call_edges AS (
   SELECT
@@ -581,10 +595,10 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 		}
 	}
 
-	if _, err := d.DB.ExecContext(ctx, "CHECKPOINT lake"); err != nil {
-		slog.Error("maintenance checkpoint failed", "target", "lake", "err", err)
-		errs = append(errs, fmt.Errorf("checkpoint lake: %w", err))
-	}
+	// DuckLake's catalog checkpoint currently trips an internal error on live datasets
+	// with nullable string fields, which invalidates the whole database connection.
+	// Keep runtime maintenance to TTL deletes and the main-cache checkpoint until the
+	// upstream checkpoint path is stable.
 	if _, err := d.DB.ExecContext(ctx, "CHECKPOINT"); err != nil {
 		slog.Error("maintenance checkpoint failed", "target", "main", "err", err)
 		errs = append(errs, fmt.Errorf("checkpoint main: %w", err))

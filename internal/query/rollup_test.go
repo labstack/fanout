@@ -174,6 +174,81 @@ WHERE tenant = 'tenant-a'
 	}
 }
 
+func TestRollupOnceIgnoresRowsWithoutBucketTimestamp(t *testing.T) {
+	db := openTestDuck(t)
+	if err := CreateTables(db); err != nil {
+		t.Fatalf("CreateTables failed: %v", err)
+	}
+	if err := CreateViews(db); err != nil {
+		t.Fatalf("CreateViews failed: %v", err)
+	}
+
+	d := &Duck{
+		DB:              db,
+		cfg:             config.Config{RetentionDays: 30},
+		lastMaintenance: time.Now(),
+	}
+	ctx := context.Background()
+
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-4 * time.Minute)
+	insertRollupTestSpan(t, db, rollupTestSpan{
+		tenant:    "tenant-a",
+		namespace: "ns-a",
+		traceID:   "trace-1",
+		spanID:    "span-1",
+		service:   "checkout",
+		operation: "POST /checkout",
+		start:     bucket.Add(10 * time.Second),
+		duration:  50 * time.Millisecond,
+		ingested:  100,
+	})
+
+	if _, err := db.Exec(`
+INSERT INTO lake.logs (
+  tenant,
+  namespace,
+  log_time,
+  time_unix_nano,
+  severity,
+  severity_number,
+  body,
+  service,
+  ingested_at,
+  ingested_unix_nano
+)
+VALUES ('tenant-a', 'ns-a', NULL, 0, 'INFO', 9, 'missing time', 'checkout', now(), 200)`); err != nil {
+		t.Fatalf("insert lake.logs failed: %v", err)
+	}
+
+	if _, err := db.Exec(`
+INSERT INTO lake.metrics (
+  tenant,
+  namespace,
+  metric_time,
+  time_unix_nano,
+  name,
+  metric_type,
+  service,
+  value,
+  ingested_at,
+  ingested_unix_nano
+)
+VALUES ('tenant-a', 'ns-a', NULL, 0, 'cpu.usage', 'gauge', 'checkout', 1.0, now(), 300)`); err != nil {
+		t.Fatalf("insert lake.metrics failed: %v", err)
+	}
+
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("rollupOnce failed: %v", err)
+	}
+
+	requireServiceRollupSpans(t, db, "tenant-a", "ns-a", bucket, "checkout", 1)
+	requireRowCount(t, db, `
+SELECT count(*)
+FROM service_rollup
+WHERE tenant = 'tenant-a'
+  AND namespace = 'ns-a'`, nil, 1)
+}
+
 type rollupTestSpan struct {
 	tenant       string
 	namespace    string
@@ -260,7 +335,13 @@ func requireRowCount(t *testing.T, db *sql.DB, q string, arg any, want int) {
 	t.Helper()
 
 	var got int
-	if err := db.QueryRow(q, arg).Scan(&got); err != nil {
+	var err error
+	if arg == nil {
+		err = db.QueryRow(q).Scan(&got)
+	} else {
+		err = db.QueryRow(q, arg).Scan(&got)
+	}
+	if err != nil {
 		t.Fatalf("count query failed: %v", err)
 	}
 	if got != want {
