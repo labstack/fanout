@@ -42,6 +42,9 @@ func (h *alertHandler) ListAlerts(c *echo.Context) error {
 		slog.Error("list alerts failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list alerts")
 	}
+	if alerts == nil {
+		alerts = []alert.Alert{}
+	}
 	return c.JSON(200, alerts)
 }
 
@@ -67,6 +70,9 @@ func (h *alertHandler) ListRules(c *echo.Context) error {
 	if err != nil {
 		slog.Error("list rules failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list rules")
+	}
+	if rules == nil {
+		rules = []alert.Rule{}
 	}
 	return c.JSON(200, rules)
 }

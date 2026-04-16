@@ -34,9 +34,9 @@ export function AlertsPage() {
         api<AlertRule[]>("/api/alert-rules"),
         api<AlertSummary>("/api/alerts/summary"),
       ]);
-      setAlerts(alertsRes);
-      setRules(rulesRes);
-      setSummary(summaryRes);
+      setAlerts(alertsRes ?? []);
+      setRules(rulesRes ?? []);
+      setSummary(summaryRes ?? { firing: 0, pending: 0, resolved: 0 });
       setLoading(false);
       setFetchError(null);
       lastFetch.current = Date.now();
