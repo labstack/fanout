@@ -103,7 +103,7 @@ export function CreateRuleInput({ onCreated }: Props) {
                         for_seconds: toolInput.for_seconds || 0,
                       });
                     }
-                  } catch { /* input may not be complete JSON yet */ }
+                  } catch { /* partial JSON from streaming — expected */ }
                 }
               }
               if (currentEvent === "tool_result" && data.name === "alert_rules") {
@@ -113,8 +113,8 @@ export function CreateRuleInput({ onCreated }: Props) {
               if (currentEvent === "error" && data.error) {
                 setAiError(data.error);
               }
-            } catch {
-              // skip malformed SSE
+            } catch (e) {
+              console.warn("[AlertCreate] malformed SSE data:", e);
             }
             currentEvent = "";
           }
@@ -166,6 +166,7 @@ export function CreateRuleInput({ onCreated }: Props) {
       onCreated();
     } catch (err) {
       console.error("Create rule failed:", err);
+      setAiError(err instanceof Error ? err.message : "Failed to save rule");
     } finally {
       setSaving(false);
     }

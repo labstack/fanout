@@ -89,7 +89,7 @@ export function AlertRulesTable({ rules, alerts, onRefresh }: Props) {
                     {rule.service || "*"}
                   </td>
                   <td className="p-3 text-xs text-muted-foreground mono truncate max-w-[140px]">
-                    {rule.webhook_url ? new URL(rule.webhook_url).hostname : "none"}
+                    {rule.webhook_url ? (() => { try { return new URL(rule.webhook_url).hostname; } catch { return rule.webhook_url; } })() : "none"}
                   </td>
                   <td className="p-3 text-right">
                     {!rule.enabled ? (

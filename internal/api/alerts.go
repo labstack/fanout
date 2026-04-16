@@ -104,7 +104,9 @@ func (h *alertHandler) CreateRule(c *echo.Context) error {
 
 	// Compile in the engine so it starts evaluating immediately
 	if h.engine != nil {
-		_ = h.engine.RecompileRule(created.ID, created.Expression)
+		if err := h.engine.RecompileRule(created.ID, created.Expression); err != nil {
+			slog.Error("alert rule created but failed to compile in engine", "rule", created.ID, "err", err)
+		}
 	}
 
 	return c.JSON(201, created)
@@ -140,7 +142,9 @@ func (h *alertHandler) UpdateRule(c *echo.Context) error {
 
 	if h.engine != nil {
 		if updated.Enabled {
-			_ = h.engine.RecompileRule(updated.ID, updated.Expression)
+			if err := h.engine.RecompileRule(updated.ID, updated.Expression); err != nil {
+				slog.Error("alert rule updated but failed to compile in engine", "rule", updated.ID, "err", err)
+			}
 		} else {
 			h.engine.RemoveRule(updated.ID)
 		}
@@ -180,7 +184,11 @@ func (h *alertHandler) TestRule(c *echo.Context) error {
 	id := c.Param("id")
 	rule, err := h.store.GetRule(id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "rule not found")
+		if strings.Contains(err.Error(), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "rule not found")
+		}
+		slog.Error("get rule failed", "id", id, "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to get rule")
 	}
 
 	prog, compileErr := alert.CompileExpression(rule.Expression)
@@ -193,6 +201,7 @@ func (h *alertHandler) TestRule(c *echo.Context) error {
 	type testResult struct {
 		Service   string         `json:"service"`
 		Triggered bool           `json:"triggered"`
+		Error     string         `json:"error,omitempty"`
 		Env       alert.AlertEnv `json:"env"`
 	}
 
@@ -200,12 +209,16 @@ func (h *alertHandler) TestRule(c *echo.Context) error {
 	services := resolveTestServices(rule, envs)
 	for _, svc := range services {
 		env := envs[svc]
-		triggered, _ := alert.SafeEval(prog, env)
-		results = append(results, testResult{
+		triggered, evalErr := alert.SafeEval(prog, env)
+		tr := testResult{
 			Service:   svc,
 			Triggered: triggered,
 			Env:       env,
-		})
+		}
+		if evalErr != nil {
+			tr.Error = evalErr.Error()
+		}
+		results = append(results, tr)
 	}
 
 	return c.JSON(200, map[string]any{
