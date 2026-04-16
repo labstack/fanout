@@ -13,10 +13,9 @@ function timeAgo(iso?: string): string {
 }
 
 function fmtValue(v?: number): string {
-  if (v === undefined) return "";
-  if (v < 1) return `${(v * 100).toFixed(1)}%`;
-  if (v >= 1000) return `${(v / 1000).toFixed(1)}s`;
-  return `${v.toFixed(0)}ms`;
+  if (v === undefined || v === 0) return "";
+  if (Number.isInteger(v)) return v.toLocaleString();
+  return v.toPrecision(3);
 }
 
 interface Props {
@@ -44,7 +43,7 @@ export function FiringAlerts({ alerts, rules }: Props) {
     <div className="space-y-2">
       {firing.map((a) => {
         const rule = ruleMap.get(a.rule_id);
-        const prompt = `Investigate ${a.service} — alert "${rule?.name || a.rule_id}" is firing. Expression: ${rule?.expression}. Current value: ${fmtValue(a.value)}. What's the root cause?`;
+        const prompt = `Investigate ${a.service} — alert "${rule?.name || a.rule_id}" is firing. Expression: ${rule?.expression}. What's the root cause?`;
 
         const status = a.last_delivery_status;
         const deliveryCls = status === "success"

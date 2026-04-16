@@ -147,6 +147,14 @@ func (h *alertHandler) UpdateRule(c *echo.Context) error {
 			}
 		} else {
 			h.engine.RemoveRule(updated.ID)
+			// Clear active alerts so they don't linger indefinitely
+			if activeAlerts, err := h.store.ListAlerts("", "", updated.ID); err == nil {
+				for _, a := range activeAlerts {
+					if a.State == "firing" || a.State == "pending" {
+						_ = h.store.DeleteAlert(a.ID)
+					}
+				}
+			}
 		}
 	}
 

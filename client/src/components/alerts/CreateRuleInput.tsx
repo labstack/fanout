@@ -27,6 +27,7 @@ export function CreateRuleInput({ onCreated }: Props) {
   const [showManual, setShowManual] = useState(false);
   const [saving, setSaving] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const sessionIdRef = useRef(crypto.randomUUID());
 
   // Manual form state
   const [name, setName] = useState("");
@@ -50,6 +51,7 @@ export function CreateRuleInput({ onCreated }: Props) {
     try {
       const headers: Record<string, string> = {
         "Content-Type": "application/json",
+        "X-Session-ID": sessionIdRef.current,
       };
       const authToken = token || getApiToken();
       if (authToken) headers["Authorization"] = `Bearer ${authToken}`;

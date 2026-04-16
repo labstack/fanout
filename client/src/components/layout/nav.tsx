@@ -51,7 +51,7 @@ export function Nav() {
             Home
           </NavLink>
           <NavLink
-            to="/alerts"
+            to={`/alerts${search}`}
             className={({ isActive }) =>
               `text-xs mono transition-colors flex items-center gap-1.5 ${
                 isActive ? "text-foreground" : "text-zinc-400 hover:text-zinc-200"
