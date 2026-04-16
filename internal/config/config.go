@@ -32,6 +32,14 @@ type Config struct {
 	AIAPIKey   string // LLM API key
 	AIModel    string // model ID override
 	AIBaseURL  string // base URL override (OpenAI-compatible)
+	// Auth
+	SMTPHost   string // SMTP server host
+	SMTPPort   int    // SMTP server port (default 587)
+	SMTPUser   string // SMTP username
+	SMTPPass   string // SMTP password
+	SMTPFrom   string // Sender email address
+	AdminEmail string // First admin user (created on boot)
+	JWTSecret  string // HS256 signing key (auto-generated if empty)
 }
 
 func Load() Config {
@@ -55,6 +63,13 @@ func Load() Config {
 		AIAPIKey:          os.Getenv("AI_API_KEY"),
 		AIModel:           os.Getenv("AI_MODEL"),
 		AIBaseURL:         os.Getenv("AI_BASE_URL"),
+		SMTPHost:          os.Getenv("SMTP_HOST"),
+		SMTPPort:          getenvInt("SMTP_PORT", 587),
+		SMTPUser:          os.Getenv("SMTP_USER"),
+		SMTPPass:          os.Getenv("SMTP_PASS"),
+		SMTPFrom:          getenv("SMTP_FROM", "Fanout <noreply@fanout.dev>"),
+		AdminEmail:        os.Getenv("ADMIN_EMAIL"),
+		JWTSecret:         os.Getenv("JWT_SECRET"),
 	}
 	if err := cfg.Validate(); err != nil {
 		slog.Error("invalid config", "err", err)
@@ -77,7 +92,20 @@ func (c Config) Validate() error {
 	if c.RetentionDays < 0 {
 		return fmt.Errorf("RetentionDays (RETENTION_DAYS) must be >= 0, got %d", c.RetentionDays)
 	}
+	if c.AuthEnabled() {
+		if c.SMTPFrom == "" {
+			return fmt.Errorf("SMTP_FROM is required when auth is enabled")
+		}
+		if c.SMTPPort <= 0 {
+			return fmt.Errorf("SMTP_PORT must be > 0 when auth is enabled")
+		}
+	}
 	return nil
+}
+
+// AuthEnabled returns true if SMTP is configured for passwordless login.
+func (c Config) AuthEnabled() bool {
+	return c.SMTPHost != "" && c.SMTPUser != "" && c.SMTPPass != ""
 }
 
 func getenvUUID(k string) uuid.UUID {

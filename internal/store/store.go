@@ -75,6 +75,26 @@ func (s *SQLite) migrate() error {
 			created_at           TEXT DEFAULT (datetime('now')),
 			UNIQUE(rule_id, service)
 		)`,
+		`CREATE TABLE IF NOT EXISTS users (
+			id           TEXT PRIMARY KEY,
+			email        TEXT NOT NULL UNIQUE,
+			name         TEXT,
+			role         TEXT NOT NULL DEFAULT 'operator',
+			active       INTEGER NOT NULL DEFAULT 1,
+			logged_in_at TEXT,
+			created_at   TEXT DEFAULT (datetime('now')),
+			updated_at   TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE TABLE IF NOT EXISTS verification_codes (
+			id         TEXT PRIMARY KEY,
+			email      TEXT NOT NULL,
+			code_hash  TEXT NOT NULL,
+			attempts   INTEGER NOT NULL DEFAULT 0,
+			used       INTEGER NOT NULL DEFAULT 0,
+			expires_at TEXT NOT NULL,
+			created_at TEXT DEFAULT (datetime('now'))
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_verification_codes_email ON verification_codes(email)`,
 	}
 
 	for _, stmt := range stmts {

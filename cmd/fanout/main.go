@@ -25,6 +25,7 @@ import (
 	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
+	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
@@ -144,32 +145,50 @@ func main() {
 		},
 	}))
 
-	// Auth (optional) — skip health checks and metrics for orchestrators/LBs
+	// Resolve JWT secret (generate ephemeral if not set)
+	jwtSecret := cfg.JWTSecret
+	if jwtSecret == "" && cfg.AuthEnabled() {
+		jwtSecret = auth.GenerateSecret()
+		slog.Warn("JWT_SECRET not set — generated ephemeral secret (sessions won't survive restart)")
+	}
+
+	// Auth middleware — supports JWT + API_TOKEN dual auth
 	apiToken := strings.TrimSpace(cfg.APIToken)
-	if apiToken != "" {
+	if apiToken != "" || cfg.AuthEnabled() {
 		tokenBytes := []byte(apiToken)
 		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(c *echo.Context) error {
 				path := c.Request().URL.Path
 
-				// Skip auth for health, metrics, and SPA page routes.
-				// Auth only applies to /api/* and /mcp — everything else is
-				// either a health check or a client-side route served by the SPA.
+				// Skip auth for health, metrics, SPA page routes, and auth endpoints
 				if path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
 					path == "/favicon.ico" || path == "/favicon.svg" ||
+					strings.HasPrefix(path, "/api/auth/") ||
 					(!strings.HasPrefix(path, "/api/") && path != "/mcp") {
 					return next(c)
 				}
 
-				auth := c.Request().Header.Get("Authorization")
-				if !strings.HasPrefix(auth, "Bearer ") {
+				authHeader := c.Request().Header.Get("Authorization")
+				if !strings.HasPrefix(authHeader, "Bearer ") {
 					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 				}
-				provided := []byte(strings.TrimPrefix(auth, "Bearer "))
-				if subtle.ConstantTimeCompare(provided, tokenBytes) != 1 {
-					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+				bearer := strings.TrimPrefix(authHeader, "Bearer ")
+
+				// Try API_TOKEN first (constant-time compare)
+				if apiToken != "" && subtle.ConstantTimeCompare([]byte(bearer), tokenBytes) == 1 {
+					return next(c)
 				}
-				return next(c)
+
+				// Try JWT
+				if jwtSecret != "" {
+					claims, err := auth.VerifyAccess(jwtSecret, bearer)
+					if err == nil {
+						c.Set("auth_claims", claims)
+						return next(c)
+					}
+				}
+
+				return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 			}
 		})
 	}
@@ -232,6 +251,30 @@ func main() {
 
 	// Alert management REST endpoints
 	api.RegisterAlertRoutes(e, alertStore, alertEngine)
+
+	// Auth routes (only if SMTP configured)
+	if cfg.AuthEnabled() {
+		userStore := auth.NewUserStore(sqlite.DB)
+		codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
+
+		if cfg.AdminEmail != "" {
+			if err := userStore.EnsureAdmin(cfg.AdminEmail); err != nil {
+				slog.Error("create admin user failed", "err", err)
+			} else {
+				slog.Info("admin user ensured", "email", cfg.AdminEmail)
+			}
+		}
+
+		api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, auth.SMTPConfig{
+			Host: cfg.SMTPHost,
+			Port: cfg.SMTPPort,
+			User: cfg.SMTPUser,
+			Pass: cfg.SMTPPass,
+			From: cfg.SMTPFrom,
+		})
+		api.RegisterUserRoutes(e, userStore)
+		slog.Info("auth enabled", "admin", cfg.AdminEmail)
+	}
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled
 	if cfg.MCPEnabled {
