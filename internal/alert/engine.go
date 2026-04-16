@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,7 @@ type Engine struct {
 	programs    map[string]*vm.Program // rule ID → compiled program
 	interval    time.Duration
 	histDays    int
+	lastPrune   time.Time
 	envOverride map[string]AlertEnv // for testing — bypasses DuckDB query
 }
 
@@ -212,7 +214,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 			RuleID:   rule.ID,
 			Service:  svc,
 			State:    "firing",
-			Value:    env.ErrorRate,
+			Value:    primaryValue(rule, env),
 			FiredAt:  nowStr,
 			LastEval: nowStr,
 		}
@@ -229,7 +231,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 			RuleID:   rule.ID,
 			Service:  svc,
 			State:    "pending",
-			Value:    env.ErrorRate,
+			Value:    primaryValue(rule, env),
 			LastEval: nowStr,
 		}
 		if _, upsertErr := e.store.UpsertAlert(a); upsertErr != nil {
@@ -275,7 +277,7 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 	case !noAlert && existing.State == "firing" && triggered:
 		// Already firing; send repeat notification if repeat_interval has elapsed.
 		existing.LastEval = nowStr
-		existing.Value = env.ErrorRate
+		existing.Value = primaryValue(rule, env)
 		if rule.RepeatIntervalS > 0 {
 			ref := existing.RepeatedAt
 			if ref == "" {
@@ -316,13 +318,25 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 		}
 
 	case !noAlert && existing.State == "resolved" && triggered:
-		// Re-fire from resolved state.
+		// Re-fire from resolved state — respect cooldown_s if set.
+		if rule.CooldownS > 0 && existing.ResolvedAt != "" {
+			resolvedAt, parseErr := time.Parse(time.RFC3339, existing.ResolvedAt)
+			if parseErr == nil && now.Sub(resolvedAt) < time.Duration(rule.CooldownS)*time.Second {
+				// Still in cooldown — update last_eval but don't re-fire.
+				existing.LastEval = nowStr
+				if _, upsertErr := e.store.UpsertAlert(existing); upsertErr != nil {
+					slog.Error("alert: update cooldown last_eval", "rule", rule.ID, "service", svc, "err", upsertErr)
+				}
+				return
+			}
+		}
+
 		if rule.ForSeconds == 0 {
 			existing.State = "firing"
 			existing.FiredAt = nowStr
 			existing.ResolvedAt = ""
 			existing.LastEval = nowStr
-			existing.Value = env.ErrorRate
+			existing.Value = primaryValue(rule, env)
 			saved, upsertErr := e.store.UpsertAlert(existing)
 			if upsertErr != nil {
 				slog.Error("alert: re-fire from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
@@ -335,12 +349,32 @@ func (e *Engine) transition(rule Rule, svc string, triggered bool, env AlertEnv)
 			existing.FiredAt = ""
 			existing.ResolvedAt = ""
 			existing.LastEval = nowStr
-			existing.Value = env.ErrorRate
+			existing.Value = primaryValue(rule, env)
 			if _, upsertErr := e.store.UpsertAlert(existing); upsertErr != nil {
 				slog.Error("alert: re-pend from resolved", "rule", rule.ID, "service", svc, "err", upsertErr)
 			}
 		}
 	}
+}
+
+// primaryValue picks the most relevant metric value based on the rule expression.
+// If the expression mentions p95, use P95. If it mentions throughput, use that.
+// Default to error_rate as the most common alert metric.
+func primaryValue(rule Rule, env AlertEnv) float64 {
+	expr := rule.Expression
+	if strings.Contains(expr, "p95") {
+		return env.P95
+	}
+	if strings.Contains(expr, "p50") {
+		return env.P50
+	}
+	if strings.Contains(expr, "throughput") {
+		return env.Throughput
+	}
+	if strings.Contains(expr, "z_score") {
+		return env.ZScore
+	}
+	return env.ErrorRate
 }
 
 // fireWebhookAsync fires the webhook for an alert in a goroutine and updates delivery status.
@@ -449,7 +483,11 @@ FROM current c LEFT JOIN previous p ON c.service = p.service`
 }
 
 // pruneOldAlerts deletes resolved alerts older than histDays.
+// Runs at most once per hour to avoid unnecessary SQLite churn.
 func (e *Engine) pruneOldAlerts() {
+	if time.Since(e.lastPrune) < time.Hour {
+		return
+	}
 	days := e.histDays
 	if days <= 0 {
 		days = pruneHistDays
@@ -459,6 +497,7 @@ func (e *Engine) pruneOldAlerts() {
 		slog.Warn("alert: prune resolved", "err", err)
 		return
 	}
+	e.lastPrune = time.Now()
 	if n > 0 {
 		slog.Info("alert: pruned resolved alerts", "count", n)
 	}
