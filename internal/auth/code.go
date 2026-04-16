@@ -19,9 +19,12 @@ const (
 )
 
 // GenerateCode returns a random 6-digit code.
-func GenerateCode() string {
-	n, _ := rand.Int(rand.Reader, big.NewInt(1_000_000))
-	return fmt.Sprintf("%06d", n.Int64())
+func GenerateCode() (string, error) {
+	n, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+	if err != nil {
+		return "", fmt.Errorf("auth: generate code: %w", err)
+	}
+	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
 // HashCode produces an HMAC-SHA256 hex digest of the code.
@@ -50,12 +53,18 @@ func NewCodeStore(db *sql.DB, secret string) *CodeStore {
 
 // Create stores a verification code for the given email. Returns the plaintext code.
 func (s *CodeStore) Create(email string) (string, error) {
-	code := GenerateCode()
+	code, err := GenerateCode()
+	if err != nil {
+		return "", err
+	}
 	hash := HashCode(code, s.secret)
-	id, _ := uuid.NewV7()
+	id, err := uuid.NewV7()
+	if err != nil {
+		return "", fmt.Errorf("auth: generate code id: %w", err)
+	}
 	expiresAt := time.Now().Add(codeTTL).UTC().Format(time.RFC3339)
 
-	_, err := s.db.Exec(
+	_, err = s.db.Exec(
 		`INSERT INTO verification_codes (id, email, code_hash, expires_at) VALUES (?, ?, ?, ?)`,
 		id.String(), email, hash, expiresAt,
 	)
@@ -92,7 +101,10 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 	rows.Close()
 
 	// Check expiry
-	exp, _ := time.Parse(time.RFC3339, expiresAt)
+	exp, parseErr := time.Parse(time.RFC3339, expiresAt)
+	if parseErr != nil {
+		return false, fmt.Errorf("auth: corrupt expiry timestamp: %w", parseErr)
+	}
 	if time.Now().After(exp) {
 		return false, nil
 	}
@@ -104,17 +116,22 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 
 	// Verify
 	if !VerifyHash(code, hash, s.secret) {
-		_, _ = s.db.Exec(`UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?`, id)
+		if _, err := s.db.Exec(`UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?`, id); err != nil {
+			return false, fmt.Errorf("auth: increment attempts: %w", err)
+		}
 		return false, nil
 	}
 
-	// Mark used
-	_, _ = s.db.Exec(`UPDATE verification_codes SET used = 1 WHERE id = ?`, id)
+	// Mark used — must succeed to prevent replay
+	if _, err := s.db.Exec(`UPDATE verification_codes SET used = 1 WHERE id = ?`, id); err != nil {
+		return false, fmt.Errorf("auth: mark code used: %w", err)
+	}
 	return true, nil
 }
 
 // Cleanup deletes expired codes older than 1 hour.
-func (s *CodeStore) Cleanup() {
+func (s *CodeStore) Cleanup() error {
 	cutoff := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	_, _ = s.db.Exec(`DELETE FROM verification_codes WHERE expires_at < ?`, cutoff)
+	_, err := s.db.Exec(`DELETE FROM verification_codes WHERE expires_at < ?`, cutoff)
+	return err
 }

@@ -67,7 +67,7 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 
 	go func() {
 		if err := auth.SendCode(h.smtp, email, code); err != nil {
-			slog.Error("auth: send verification email failed — logging code for dev use", "email", email, "code", code, "err", err)
+			slog.Error("auth: send verification email failed", "email", email, "err", err)
 		}
 	}()
 
@@ -179,6 +179,8 @@ func (h *AuthHandler) Logout(c *echo.Context) error {
 		Value:    "",
 		Path:     "/api/auth/",
 		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 	})
 	return c.JSON(200, map[string]bool{"ok": true})

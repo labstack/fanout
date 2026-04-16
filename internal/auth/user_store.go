@@ -36,9 +36,12 @@ func NewUserStore(db *sql.DB) *UserStore {
 
 // Create adds a new user.
 func (s *UserStore) Create(email, name, role string) (User, error) {
-	id, _ := uuid.NewV7()
+	id, err := uuid.NewV7()
+	if err != nil {
+		return User{}, fmt.Errorf("auth: generate user id: %w", err)
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
+	_, err = s.db.Exec(
 		`INSERT INTO users (id, email, name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		id.String(), email, name, role, now, now,
 	)

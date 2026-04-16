@@ -17,7 +17,10 @@ func newTestCodeStore(t *testing.T) *CodeStore {
 }
 
 func TestGenerateCode_SixDigits(t *testing.T) {
-	code := GenerateCode()
+	code, err := GenerateCode()
+	if err != nil {
+		t.Fatalf("GenerateCode: %v", err)
+	}
 	if len(code) != 6 {
 		t.Errorf("code = %q, want 6 digits", code)
 	}

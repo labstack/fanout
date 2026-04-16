@@ -19,8 +19,9 @@ const (
 // Claims is the JWT payload for access tokens.
 type Claims struct {
 	jwt.RegisteredClaims
-	Email string `json:"email"`
-	Role  string `json:"role"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	TokenType string `json:"typ"`
 }
 
 // SignAccess creates a short-lived access token.
@@ -32,8 +33,9 @@ func SignAccess(secret, userID, email, role string) (string, error) {
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(AccessTTL)),
 		},
-		Email: email,
-		Role:  role,
+		Email:     email,
+		Role:      role,
+		TokenType: "access",
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
@@ -66,6 +68,9 @@ func VerifyAccess(secret, tokenStr string) (*Claims, error) {
 	claims, ok := token.Claims.(*Claims)
 	if !ok || !token.Valid {
 		return nil, fmt.Errorf("invalid token")
+	}
+	if claims.TokenType != "access" {
+		return nil, fmt.Errorf("wrong token type: expected access, got %s", claims.TokenType)
 	}
 	return claims, nil
 }

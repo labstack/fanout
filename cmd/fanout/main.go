@@ -161,9 +161,12 @@ func main() {
 				path := c.Request().URL.Path
 
 				// Skip auth for health, metrics, SPA page routes, and auth endpoints
+				// Skip auth for public endpoints. /api/auth/* is exempt EXCEPT /api/auth/me
+				// which needs JWT claims populated by the middleware.
+				isPublicAuth := strings.HasPrefix(path, "/api/auth/") && path != "/api/auth/me"
 				if path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
 					path == "/favicon.ico" || path == "/favicon.svg" ||
-					strings.HasPrefix(path, "/api/auth/") ||
+					isPublicAuth ||
 					(!strings.HasPrefix(path, "/api/") && path != "/mcp") {
 					return next(c)
 				}
@@ -260,9 +263,9 @@ func main() {
 		if cfg.AdminEmail != "" {
 			if err := userStore.EnsureAdmin(cfg.AdminEmail); err != nil {
 				slog.Error("create admin user failed", "err", err)
-			} else {
-				slog.Info("admin user ensured", "email", cfg.AdminEmail)
+				os.Exit(1)
 			}
+			slog.Info("admin user ensured", "email", cfg.AdminEmail)
 		}
 
 		api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, auth.SMTPConfig{

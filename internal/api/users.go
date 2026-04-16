@@ -18,11 +18,12 @@ type UserHandler struct {
 // RegisterUserRoutes registers user management endpoints.
 func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore) {
 	h := &UserHandler{users: users}
+	adminOnly := RequireRole("admin")
 
-	e.GET("/api/users", h.ListUsers)
-	e.POST("/api/users", h.CreateUser)
-	e.PUT("/api/users/:id", h.UpdateUser)
-	e.DELETE("/api/users/:id", h.DeleteUser)
+	e.GET("/api/users", h.ListUsers, adminOnly)
+	e.POST("/api/users", h.CreateUser, adminOnly)
+	e.PUT("/api/users/:id", h.UpdateUser, adminOnly)
+	e.DELETE("/api/users/:id", h.DeleteUser, adminOnly)
 }
 
 // ListUsers returns all users.
