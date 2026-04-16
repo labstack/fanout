@@ -28,6 +28,8 @@
 | `internal/auth/jwt_test.go` | Create | Tests for JWT |
 | `internal/api/auth.go` | Create | Auth HTTP handlers (start, verify, refresh, me, logout) |
 | `internal/api/auth_test.go` | Create | Tests for auth handlers |
+| `internal/api/users.go` | Create | Admin user management endpoints (list, create, update, delete) |
+| `go.mod` / `go.sum` | Modify | Add `github.com/golang-jwt/jwt/v5` dependency |
 | `cmd/fanout/main.go` | Modify | Wire auth store, register routes, update middleware |
 
 ---
@@ -69,7 +71,20 @@ Add a helper method:
 ```go
 // AuthEnabled returns true if SMTP is configured for passwordless login.
 func (c Config) AuthEnabled() bool {
-	return c.SMTPHost != "" && c.SMTPPass != ""
+	return c.SMTPHost != "" && c.SMTPUser != "" && c.SMTPPass != ""
+}
+```
+
+Add to `Validate()`:
+
+```go
+if c.AuthEnabled() {
+	if c.SMTPFrom == "" {
+		return fmt.Errorf("SMTP_FROM is required when auth is enabled")
+	}
+	if c.SMTPPort <= 0 {
+		return fmt.Errorf("SMTP_PORT must be > 0 when auth is enabled")
+	}
 }
 ```
 
@@ -535,6 +550,9 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 		return false, nil
 	}
 
+	// Close rows before running UPDATEs to avoid SQLite connection contention
+	rows.Close()
+
 	// Verify
 	if !VerifyHash(code, hash, s.secret) {
 		s.db.Exec(`UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?`, id)
@@ -962,24 +980,18 @@ import (
 )
 
 type AuthHandler struct {
-	users  *auth.UserStore
-	codes  *auth.CodeStore
-	cfg    config.Config
-	smtp   auth.SMTPConfig
+	users     *auth.UserStore
+	codes     *auth.CodeStore
+	jwtSecret string
+	smtp      auth.SMTPConfig
 }
 
-func RegisterAuthRoutes(e *echo.Echo, cfg config.Config, users *auth.UserStore, codes *auth.CodeStore) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, jwtSecret string, smtp auth.SMTPConfig) {
 	h := &AuthHandler{
-		users: users,
-		codes: codes,
-		cfg:   cfg,
-		smtp: auth.SMTPConfig{
-			Host: cfg.SMTPHost,
-			Port: cfg.SMTPPort,
-			User: cfg.SMTPUser,
-			Pass: cfg.SMTPPass,
-			From: cfg.SMTPFrom,
-		},
+		users:     users,
+		codes:     codes,
+		jwtSecret: jwtSecret,
+		smtp:      smtp,
 	}
 
 	e.POST("/api/auth/start", h.Start)
@@ -1020,7 +1032,7 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 
 	go func() {
 		if err := auth.SendCode(h.smtp, email, code); err != nil {
-			slog.Error("auth: send verification email", "email", email, "err", err)
+			slog.Error("auth: send verification email failed — logging code for dev use", "email", email, "code", code, "err", err)
 		}
 	}()
 
@@ -1058,7 +1070,7 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 
 	h.users.TouchLogin(user.ID)
 
-	secret := h.jwtSecret()
+	secret := h.jwtSecret
 	accessToken, err := auth.SignAccess(secret, user.ID, user.Email, user.Role)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
@@ -1092,7 +1104,7 @@ func (h *AuthHandler) Refresh(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "no refresh token")
 	}
 
-	secret := h.jwtSecret()
+	secret := h.jwtSecret
 	userID, err := auth.VerifyRefresh(secret, cookie.Value)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid refresh token")
@@ -1138,13 +1150,6 @@ func (h *AuthHandler) Logout(c *echo.Context) error {
 		MaxAge:   -1,
 	})
 	return c.JSON(200, map[string]bool{"ok": true})
-}
-
-func (h *AuthHandler) jwtSecret() string {
-	if h.cfg.JWTSecret != "" {
-		return h.cfg.JWTSecret
-	}
-	return "fanout-dev-secret-change-me"
 }
 
 // getAuthClaims retrieves JWT claims from the echo context (set by middleware).
@@ -1343,7 +1348,138 @@ git commit -m "feat(auth): wire auth into main, dual JWT + API_TOKEN middleware"
 
 ---
 
-## Task 9: Full Build Verification
+## Task 9: Admin User Management Endpoints
+
+**Files:**
+- Create: `internal/api/users.go`
+
+- [ ] **Step 1: Create users.go**
+
+```go
+package api
+
+import (
+	"log/slog"
+	"net/http"
+	"strings"
+
+	"github.com/labstack/echo/v5"
+
+	"github.com/labstack/fanout/internal/auth"
+)
+
+type UserHandler struct {
+	users *auth.UserStore
+}
+
+func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore) {
+	h := &UserHandler{users: users}
+
+	// All user management requires admin role — enforced by middleware in main.go
+	e.GET("/api/users", h.ListUsers)
+	e.POST("/api/users", h.CreateUser)
+	e.PUT("/api/users/:id", h.UpdateUser)
+	e.DELETE("/api/users/:id", h.DeleteUser)
+}
+
+func (h *UserHandler) ListUsers(c *echo.Context) error {
+	users, err := h.users.List()
+	if err != nil {
+		slog.Error("list users failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list users")
+	}
+	return c.JSON(200, users)
+}
+
+func (h *UserHandler) CreateUser(c *echo.Context) error {
+	var req struct {
+		Email string `json:"email"`
+		Name  string `json:"name"`
+		Role  string `json:"role"`
+	}
+	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Email) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
+	}
+	role := req.Role
+	if role == "" {
+		role = "operator"
+	}
+	if role != "viewer" && role != "operator" && role != "admin" {
+		return echo.NewHTTPError(http.StatusBadRequest, "role must be viewer, operator, or admin")
+	}
+
+	user, err := h.users.Create(req.Email, req.Name, role)
+	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE") {
+			return echo.NewHTTPError(http.StatusConflict, "user already exists")
+		}
+		slog.Error("create user failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create user")
+	}
+	return c.JSON(201, user)
+}
+
+func (h *UserHandler) UpdateUser(c *echo.Context) error {
+	id := c.Param("id")
+	var req struct {
+		Email  *string `json:"email"`
+		Name   *string `json:"name"`
+		Role   *string `json:"role"`
+		Active *bool   `json:"active"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
+	}
+	if req.Role != nil && *req.Role != "viewer" && *req.Role != "operator" && *req.Role != "admin" {
+		return echo.NewHTTPError(http.StatusBadRequest, "role must be viewer, operator, or admin")
+	}
+
+	user, err := h.users.Update(id, req.Email, req.Name, req.Role, req.Active)
+	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "user not found")
+		}
+		slog.Error("update user failed", "id", id, "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update user")
+	}
+	return c.JSON(200, user)
+}
+
+func (h *UserHandler) DeleteUser(c *echo.Context) error {
+	id := c.Param("id")
+	if err := h.users.Delete(id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			return echo.NewHTTPError(http.StatusNotFound, "user not found")
+		}
+		slog.Error("delete user failed", "id", id, "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete user")
+	}
+	return c.NoContent(204)
+}
+```
+
+- [ ] **Step 2: Wire into main.go with admin role enforcement**
+
+In main.go, after `RegisterAuthRoutes`:
+
+```go
+api.RegisterUserRoutes(e, userStore)
+```
+
+The `/api/users` endpoints should be gated by admin role in the middleware skip list — they are NOT skipped from auth, and require the JWT claims to have `role: "admin"`.
+
+- [ ] **Step 3: Verify and commit**
+
+Run: `go build ./...`
+
+```bash
+git add internal/api/users.go cmd/fanout/main.go
+git commit -m "feat(auth): add admin user management endpoints"
+```
+
+---
+
+## Task 10: Full Build Verification
 
 - [ ] **Step 1: Run all Go tests**
 
