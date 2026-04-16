@@ -64,14 +64,24 @@ Click a rule → expands inline to show full details + edit form.
 
 Toggle enabled/disabled with a switch — calls `UpdateRule` with `enabled: true/false`.
 
-### 4. Create/Edit Rule Form
+### 4. Create Rule — AI-Assisted
 
-Either inline (expanded row in the table) or a modal. Fields:
+The primary way to create a rule is natural language. A text input at the top of the rules section:
+
+```
+"Alert me if checkout error rate goes above 5% for 2 minutes, notify Slack"
+```
+
+This sends the prompt to the AI chat endpoint, which uses the existing `alert_rules create` MCP tool to generate a complete rule: expression, service filter, for_seconds, webhook URL. The AI returns the proposed rule as a preview card. The user reviews and clicks "Save" or "Edit" to tweak.
+
+**Why AI-first:** Nobody should have to learn expr-lang syntax to set up an alert. The AI already knows the available fields, the expression syntax, and the webhook format. It can infer "2 minutes" → `for_seconds: 120` and "Slack" → webhook URL if configured.
+
+**Manual form fallback:** An "Advanced" toggle reveals the full form for power users who want to write expressions directly:
 
 | Field | Type | Notes |
 |-------|------|-------|
 | Name | text | Required |
-| Expression | text (mono) | Required. Syntax help link/tooltip |
+| Expression | text (mono) | Required |
 | Service | text | `*` for all, or specific service name |
 | For (seconds) | number | 0 = fire immediately |
 | Cooldown (seconds) | number | Prevent re-fire after resolve |
@@ -81,29 +91,11 @@ Either inline (expanded row in the table) or a modal. Fields:
 | Webhook template | textarea (mono) | Go template, optional |
 | Notify on resolve | toggle | Send webhook when alert clears |
 
-**Test button**: Dry-runs the expression against live data for the specified service (or all services if `*`). Shows which services would trigger and current metric values. Uses `Engine.BuildEnvForService()` + `SafeEval()`.
+**Test button**: Dry-runs the expression against live data. Shows which services would trigger and current metric values.
 
-**Expression syntax help**: Show available fields inline:
-```
-error_rate    — current error rate (0-1)
-p50           — P50 latency (ms)
-p95           — P95 latency (ms)
-throughput    — spans per evaluation window
-log_count     — log entries per window
-z_score       — anomaly z-score
-health_score  — composite health (0-1)
-error_rate_delta  — % change vs previous window
-p95_delta         — % change vs previous window
-throughput_delta  — % change vs previous window
-```
+### Editing Rules
 
-Example expressions:
-```
-error_rate > 0.05
-p95 > 1000 && throughput > 100
-error_rate_delta > 50
-z_score > 3
-```
+Click "Edit" on any rule → opens the manual form pre-filled with current values. Or describe the change in natural language: "change the threshold to 10%" and the AI updates the expression.
 
 ### 5. Recent Alert History
 
