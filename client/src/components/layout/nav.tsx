@@ -1,7 +1,10 @@
+import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router";
 import { Loader2, Radio, RotateCcw } from "lucide-react";
 import { useChatStore } from "@/stores/chat";
 import { buildChatPath, buildDashboardPath } from "@/lib/chat-route";
+import { api } from "@/api/client";
+import type { AlertSummary } from "@/lib/types";
 
 export function Nav() {
   const { pathname, search } = useLocation();
@@ -9,6 +12,20 @@ export function Nav() {
   const { streaming, messages, clear } = useChatStore();
   const hasMessages = messages.length > 0;
   const isChatRoute = pathname === "/chat";
+  const [firingCount, setFiringCount] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const s = await api<AlertSummary>("/api/alerts/summary");
+        if (!cancelled) setFiringCount(s.firing);
+      } catch { /* ignore */ }
+    }
+    load();
+    const interval = setInterval(load, 30_000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, []);
 
   return (
     <nav className="border-b border-border/50 px-6 h-12 flex items-center justify-between backdrop-blur-sm sticky top-0 z-50 bg-surface/80">
@@ -32,6 +49,21 @@ export function Nav() {
             }
           >
             Home
+          </NavLink>
+          <NavLink
+            to={`/alerts${search}`}
+            className={({ isActive }) =>
+              `text-xs mono transition-colors flex items-center gap-1.5 ${
+                isActive ? "text-foreground" : "text-zinc-400 hover:text-zinc-200"
+              }`
+            }
+          >
+            Alerts
+            {firingCount > 0 && (
+              <span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-unhealthy text-white text-[9px] font-bold px-1">
+                {firingCount}
+              </span>
+            )}
           </NavLink>
           <NavLink
             to={buildChatPath(undefined, token)}

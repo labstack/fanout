@@ -230,6 +230,9 @@ func main() {
 	// UI routes (chat SSE + bookmarks + suggestions)
 	api.RegisterUIRoutes(e, cfg, orch, sseHandler, bookmarks, svc, alertStore)
 
+	// Alert management REST endpoints
+	api.RegisterAlertRoutes(e, alertStore, alertEngine)
+
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled
 	if cfg.MCPEnabled {
 		mcpServer.RegisterRoutes(e)

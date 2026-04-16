@@ -386,3 +386,45 @@ export interface ServiceBucket {
   p50_ms: number;
   spans: number;
 }
+
+// ── Alert types ─────────────────────────────────────────────
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  description?: string;
+  enabled: boolean;
+  service?: string;
+  namespace?: string;
+  expression: string;
+  for_seconds: number;
+  cooldown_s: number;
+  repeat_interval_s: number;
+  webhook_url?: string;
+  webhook_headers?: string;
+  webhook_template?: string;
+  notify_on_resolve: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AlertInstance {
+  id: string;
+  rule_id: string;
+  service: string;
+  state: string;
+  value?: number;
+  fired_at?: string;
+  resolved_at?: string;
+  repeated_at?: string;
+  last_eval?: string;
+  last_delivery_status?: string;
+  last_delivery_at?: string;
+  created_at: string;
+}
+
+export interface AlertSummary {
+  firing: number;
+  pending: number;
+  resolved: number;
+}
