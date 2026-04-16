@@ -73,7 +73,7 @@ export function Nav() {
               }`
             }
           >
-            Investigate
+            Chat
           </NavLink>
         </div>
       </div>

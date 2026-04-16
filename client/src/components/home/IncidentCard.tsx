@@ -191,7 +191,7 @@ export function IncidentCard({ incident, onInvestigate, compact = false, primary
         className={`${primary ? "btn-primary" : "btn-ghost"} w-full sm:w-auto inline-flex items-center justify-center gap-1.5 text-xs`}
       >
         <Search className="h-3 w-3" />
-        Investigate
+        Ask AI
       </button>
     </div>
   );

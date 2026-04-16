@@ -90,7 +90,7 @@ export function FiringAlerts({ alerts, rules }: Props) {
                   onClick={() => navigate(buildChatPath(prompt, token))}
                   className="btn-ghost text-xs"
                 >
-                  Investigate
+                  Ask AI
                 </button>
               </div>
             </div>
