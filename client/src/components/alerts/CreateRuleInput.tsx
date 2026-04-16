@@ -1,22 +1,25 @@
-import { useState } from "react";
-import { useNavigate, useLocation } from "react-router";
-import { Sparkles, Settings } from "lucide-react";
+import { useRef, useState } from "react";
+import { useLocation } from "react-router";
+import { Sparkles, Settings, Loader2 } from "lucide-react";
 import { api } from "@/api/client";
-import { buildChatPath } from "@/lib/chat-route";
-import type { AlertRule } from "@/lib/types";
+import { getApiToken } from "@/api/client";
+import type { AlertRule, ChatEvent } from "@/lib/types";
 
 interface Props {
   onCreated: () => void;
 }
 
 export function CreateRuleInput({ onCreated }: Props) {
-  const navigate = useNavigate();
   const { search } = useLocation();
   const token = new URLSearchParams(search).get("token") ?? undefined;
 
   const [input, setInput] = useState("");
   const [showManual, setShowManual] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [aiStatus, setAiStatus] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   // Manual form state
   const [name, setName] = useState("");
@@ -28,10 +31,99 @@ export function CreateRuleInput({ onCreated }: Props) {
   const [webhookUrl, setWebhookUrl] = useState("");
   const [notifyResolve, setNotifyResolve] = useState(false);
 
-  function handleAICreate() {
-    if (!input.trim()) return;
-    const prompt = `Create an alert rule: ${input.trim()}`;
-    navigate(buildChatPath(prompt, token));
+  async function handleAICreate() {
+    if (!input.trim() || streaming) return;
+
+    setStreaming(true);
+    setAiStatus("Creating alert rule...");
+    setAiError(null);
+    abortRef.current = new AbortController();
+
+    try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+      const authToken = token || getApiToken();
+      if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+
+      const resp = await fetch("/api/chat", {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          content: `Create an alert rule: ${input.trim()}`,
+        }),
+        signal: abortRef.current.signal,
+      });
+
+      if (!resp.ok) {
+        setAiError(`Failed: HTTP ${resp.status}`);
+        setStreaming(false);
+        setAiStatus(null);
+        return;
+      }
+
+      const reader = resp.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let resultText = "";
+      let ruleCreated = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7);
+          } else if (line.startsWith("data: ") && currentEvent) {
+            try {
+              const data = JSON.parse(line.slice(6)) as ChatEvent;
+              if (currentEvent === "tool_call" && data.name === "alert_rules") {
+                setAiStatus("Creating rule...");
+              }
+              if (currentEvent === "tool_result" && data.name === "alert_rules") {
+                ruleCreated = true;
+                setAiStatus("Rule created!");
+              }
+              if (currentEvent === "token" && data.content) {
+                resultText += data.content;
+              }
+              if (currentEvent === "error" && data.error) {
+                setAiError(data.error);
+              }
+            } catch {
+              // skip malformed SSE
+            }
+            currentEvent = "";
+          }
+        }
+      }
+
+      if (ruleCreated) {
+        setInput("");
+        onCreated();
+        // Clear status after a moment
+        setTimeout(() => setAiStatus(null), 2000);
+      } else if (!aiError) {
+        setAiStatus(resultText ? "Done — check rules below" : null);
+        onCreated(); // refresh anyway in case rule was created
+      }
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setAiStatus(null);
+      } else {
+        setAiError("Failed to create rule");
+        console.error("AI alert creation failed:", err);
+      }
+    } finally {
+      setStreaming(false);
+      abortRef.current = null;
+    }
   }
 
   async function saveManualRule() {
@@ -57,7 +149,6 @@ export function CreateRuleInput({ onCreated }: Props) {
       setService("*");
       setForSeconds(0);
       setWebhookUrl("");
-      setInput("");
       setShowManual(false);
       onCreated();
     } catch (err) {
@@ -80,15 +171,23 @@ export function CreateRuleInput({ onCreated }: Props) {
             onKeyDown={(e) => e.key === "Enter" && handleAICreate()}
             placeholder="Alert me when checkout error rate exceeds 5% for 2 minutes..."
             className="input-field pl-9"
+            disabled={streaming}
           />
         </div>
         <button
           type="button"
           onClick={handleAICreate}
-          disabled={!input.trim()}
+          disabled={!input.trim() || streaming}
           className="btn-primary text-xs disabled:opacity-50 shrink-0"
         >
-          Create
+          {streaming ? (
+            <span className="flex items-center gap-1.5">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Creating
+            </span>
+          ) : (
+            "Create"
+          )}
         </button>
         <button
           type="button"
@@ -99,6 +198,18 @@ export function CreateRuleInput({ onCreated }: Props) {
           <Settings className="h-3.5 w-3.5" />
         </button>
       </div>
+
+      {/* AI status/error */}
+      {aiStatus && (
+        <div className="text-[11px] mono text-primary/70 px-1">
+          {aiStatus}
+        </div>
+      )}
+      {aiError && (
+        <div className="text-[11px] mono text-unhealthy/80 px-1">
+          {aiError}
+        </div>
+      )}
 
       {/* Manual form — advanced fallback */}
       {showManual && (
