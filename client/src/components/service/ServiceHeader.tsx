@@ -53,7 +53,7 @@ export function ServiceHeader({ name, status, symptom, onInvestigate }: Props) {
         className="btn-primary inline-flex items-center gap-1.5 text-xs shrink-0"
       >
         <Search className="h-3 w-3" />
-        Ask AI
+        Investigate
       </button>
     </div>
   );
