@@ -12,14 +12,6 @@ function timeAgo(iso?: string): string {
   return `${hrs}h`;
 }
 
-function deliveryBadge(status?: string) {
-  if (!status || status === "skipped")
-    return { label: "no webhook", cls: "border-border bg-surface-2 text-muted-foreground" };
-  if (status === "success")
-    return { label: "webhook \u2713", cls: "border-healthy/20 bg-healthy/10 text-healthy" };
-  return { label: "webhook \u2717", cls: "border-unhealthy/20 bg-unhealthy/10 text-unhealthy" };
-}
-
 function fmtValue(v?: number): string {
   if (v === undefined) return "";
   if (v < 1) return `${(v * 100).toFixed(1)}%`;
@@ -52,8 +44,19 @@ export function FiringAlerts({ alerts, rules }: Props) {
     <div className="space-y-2">
       {firing.map((a) => {
         const rule = ruleMap.get(a.rule_id);
-        const badge = deliveryBadge(a.last_delivery_status);
         const prompt = `Investigate ${a.service} — alert "${rule?.name || a.rule_id}" is firing. Expression: ${rule?.expression}. Current value: ${fmtValue(a.value)}. What's the root cause?`;
+
+        const status = a.last_delivery_status;
+        const deliveryCls = status === "success"
+          ? "border-healthy/20 bg-healthy/10 text-healthy"
+          : status === "failed"
+            ? "border-unhealthy/20 bg-unhealthy/10 text-unhealthy"
+            : "border-border bg-surface-2 text-muted-foreground";
+        const deliveryLabel = !status || status === "skipped"
+          ? "no webhook"
+          : status === "success"
+            ? "webhook \u2713"
+            : "webhook \u2717";
 
         return (
           <div
@@ -80,13 +83,13 @@ export function FiringAlerts({ alerts, rules }: Props) {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <span className={`inline-flex rounded border px-2 py-0.5 text-[9px] font-bold ${badge.cls}`}>
-                  {badge.label}
+                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[9px] font-bold ${deliveryCls}`}>
+                  {deliveryLabel}
                 </span>
                 <button
                   type="button"
                   onClick={() => navigate(buildChatPath(prompt, token))}
-                  className="btn-ghost text-xs px-3 py-1.5"
+                  className="btn-ghost text-xs"
                 >
                   Investigate
                 </button>
