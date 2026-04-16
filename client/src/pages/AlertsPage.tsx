@@ -110,20 +110,14 @@ export function AlertsPage() {
         )}
 
         {/* Firing alerts */}
-        <div>
-          <div className="detail-label mb-2">Firing Now</div>
-          <FiringAlerts alerts={alerts} rules={rules} />
-        </div>
+        <FiringAlerts alerts={alerts} rules={rules} />
 
-        {/* Create rule */}
-        <div>
-          <div className="detail-label mb-2">Create Alert Rule</div>
+        {/* Rules */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="detail-label">Rules ({rules.length})</div>
+          </div>
           <CreateRuleInput onCreated={load} />
-        </div>
-
-        {/* Rules table */}
-        <div>
-          <div className="detail-label mb-2">Rules ({rules.length})</div>
           <AlertRulesTable rules={rules} alerts={alerts} onRefresh={load} />
         </div>
 
