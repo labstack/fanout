@@ -69,12 +69,14 @@ export function AlertRulesTable({ rules, alerts, onRefresh }: Props) {
                     <button
                       type="button"
                       onClick={() => toggleEnabled(rule)}
-                      className="cursor-pointer"
+                      className={`relative w-8 h-[18px] rounded-full transition-colors cursor-pointer ${
+                        rule.enabled ? "bg-healthy/30" : "bg-surface-3"
+                      }`}
                       title={rule.enabled ? "Disable" : "Enable"}
                     >
-                      <div
-                        className={`w-[14px] h-[8px] rounded-full transition-colors ${
-                          rule.enabled ? "bg-healthy" : "bg-surface-3"
+                      <span
+                        className={`absolute top-[3px] h-3 w-3 rounded-full transition-all ${
+                          rule.enabled ? "left-[17px] bg-healthy" : "left-[3px] bg-muted-foreground/50"
                         }`}
                       />
                     </button>
