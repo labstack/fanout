@@ -64,11 +64,29 @@ CREATE TABLE memberships (
 
 ### Roles
 
-| Role | View data | Create alerts | Manage users | Manage org/billing |
-|------|-----------|---------------|--------------|-------------------|
-| Viewer | Yes | No | No | No |
-| Admin | Yes | Yes | Yes | No |
-| Owner | Yes | Yes | Yes | Yes |
+| Role | View data | Chat | Create alerts | Manage users |
+|------|-----------|------|---------------|-------------|
+| Viewer | Yes | Yes | No | No |
+| Operator | Yes | Yes | Yes | No |
+| Admin | Yes | Yes | Yes | Yes |
+
+Viewer sees everything and can use the AI chat but can't change anything. Operator is the oncall engineer who creates/manages alerts and rules. Admin handles user management. Most users are operators.
+
+### Email (SMTP)
+
+Generic SMTP — no vendor lock-in:
+
+```
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=587
+SMTP_USER=resend
+SMTP_PASS=re_xxxxx
+SMTP_FROM=noreply@company.com
+```
+
+Works with Resend, SendGrid, SES, Gmail, Mailgun — anything that speaks SMTP. Go's `net/smtp` handles it. Zero third-party email SDKs.
+
+If SMTP is not configured, auth is disabled entirely (current API_TOKEN behavior). No breaking changes.
 
 ### Auth: Verification Codes (passwordless login)
 
