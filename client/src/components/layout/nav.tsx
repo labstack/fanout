@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, useLocation } from "react-router";
-import { Loader2, Radio, RotateCcw } from "lucide-react";
+import { Link, NavLink, useLocation, useNavigate } from "react-router";
+import { Loader2, LogOut, Radio, RotateCcw } from "lucide-react";
 import { useChatStore } from "@/stores/chat";
 import { buildChatPath, buildDashboardPath } from "@/lib/chat-route";
+import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/api/client";
 import type { AlertSummary } from "@/lib/types";
 
 export function Nav() {
   const { pathname, search } = useLocation();
+  const navigate = useNavigate();
   const token = new URLSearchParams(search).get("token") ?? undefined;
+  const { user, logout } = useAuth();
   const { streaming, messages, clear } = useChatStore();
   const hasMessages = messages.length > 0;
   const isChatRoute = pathname === "/chat";
@@ -92,6 +95,22 @@ export function Nav() {
             <RotateCcw className="h-3 w-3" />
             <span className="hidden sm:inline">New chat</span>
           </button>
+        )}
+        {user ? (
+          <button
+            onClick={async () => {
+              await logout();
+              navigate("/login");
+            }}
+            className="flex items-center gap-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors mono"
+          >
+            <span className="hidden sm:inline">{user.email}</span>
+            <LogOut className="h-3 w-3" />
+          </button>
+        ) : (
+          <Link to="/login" className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors mono">
+            Sign in
+          </Link>
         )}
       </div>
     </nav>
