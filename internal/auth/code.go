@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -83,7 +84,7 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 	ctx := context.Background()
 
 	row, err := s.q.GetLatestUnusedCode(ctx, email)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
 	if err != nil {
@@ -122,5 +123,8 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 // Cleanup deletes expired codes older than 1 hour.
 func (s *CodeStore) Cleanup() error {
 	cutoff := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	return s.q.CleanupExpiredCodes(context.Background(), cutoff)
+	if err := s.q.CleanupExpiredCodes(context.Background(), cutoff); err != nil {
+		return fmt.Errorf("auth: cleanup codes: %w", err)
+	}
+	return nil
 }

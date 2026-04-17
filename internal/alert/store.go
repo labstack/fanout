@@ -122,7 +122,7 @@ func alertToUpsertParams(a Alert) generated.UpsertAlertParams {
 		State:   a.State,
 		Value: sql.NullFloat64{
 			Float64: a.Value,
-			Valid:   a.Value != 0,
+			Valid:   true,
 		},
 		FiredAt:            nullString(a.FiredAt),
 		ResolvedAt:         nullString(a.ResolvedAt),

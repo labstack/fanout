@@ -87,12 +87,24 @@ func (s *SQLite) migrate() error {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 
-		if _, err := s.DB.Exec(string(content)); err != nil {
+		// Wrap in transaction so partial failures don't leave the DB in a broken state
+		tx, err := s.DB.Begin()
+		if err != nil {
+			return fmt.Errorf("begin migration %s: %w", name, err)
+		}
+
+		if _, err := tx.Exec(string(content)); err != nil {
+			_ = tx.Rollback()
 			return fmt.Errorf("apply migration %s: %w", name, err)
 		}
 
-		if _, err := s.DB.Exec(`INSERT INTO _migrations (version) VALUES (?)`, name); err != nil {
+		if _, err := tx.Exec(`INSERT INTO _migrations (version) VALUES (?)`, name); err != nil {
+			_ = tx.Rollback()
 			return fmt.Errorf("record migration %s: %w", name, err)
+		}
+
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit migration %s: %w", name, err)
 		}
 
 		slog.Info("migration applied", "version", name)
