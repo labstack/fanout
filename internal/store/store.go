@@ -2,10 +2,18 @@ package store
 
 import (
 	"database/sql"
+	"embed"
 	"fmt"
+	"io/fs"
+	"log/slog"
+	"sort"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
+
+//go:embed migrations/*.sql
+var migrationsFS embed.FS
 
 // SQLite wraps a database/sql.DB backed by modernc SQLite.
 type SQLite struct {
@@ -41,67 +49,54 @@ func (s *SQLite) Close() error {
 }
 
 func (s *SQLite) migrate() error {
-	stmts := []string{
-		`CREATE TABLE IF NOT EXISTS alert_rules (
-			id                   TEXT PRIMARY KEY,
-			name                 TEXT NOT NULL,
-			description          TEXT,
-			enabled              INTEGER DEFAULT 1,
-			service              TEXT,
-			namespace            TEXT DEFAULT '',
-			expression           TEXT NOT NULL,
-			for_seconds          INTEGER DEFAULT 60,
-			cooldown_s           INTEGER DEFAULT 600,
-			repeat_interval_s    INTEGER DEFAULT 3600,
-			webhook_url          TEXT,
-			webhook_headers      TEXT,
-			webhook_template     TEXT,
-			notify_on_resolve    INTEGER DEFAULT 0,
-			created_at           TEXT DEFAULT (datetime('now')),
-			updated_at           TEXT DEFAULT (datetime('now'))
-		)`,
-		`CREATE TABLE IF NOT EXISTS alerts (
-			id                   TEXT PRIMARY KEY,
-			rule_id              TEXT NOT NULL REFERENCES alert_rules(id) ON DELETE CASCADE,
-			service              TEXT NOT NULL,
-			state                TEXT NOT NULL,
-			value                REAL,
-			fired_at             TEXT,
-			resolved_at          TEXT,
-			repeated_at          TEXT,
-			last_eval            TEXT,
-			last_delivery_status TEXT,
-			last_delivery_at     TEXT,
-			created_at           TEXT DEFAULT (datetime('now')),
-			UNIQUE(rule_id, service)
-		)`,
-		`CREATE TABLE IF NOT EXISTS users (
-			id           TEXT PRIMARY KEY,
-			email        TEXT NOT NULL UNIQUE,
-			name         TEXT,
-			role         TEXT NOT NULL DEFAULT 'operator',
-			active       INTEGER NOT NULL DEFAULT 1,
-			key_hash     TEXT UNIQUE,
-			logged_in_at TEXT,
-			created_at   TEXT DEFAULT (datetime('now')),
-			updated_at   TEXT DEFAULT (datetime('now'))
-		)`,
-		`CREATE TABLE IF NOT EXISTS verification_codes (
-			id         TEXT PRIMARY KEY,
-			email      TEXT NOT NULL,
-			code_hash  TEXT NOT NULL,
-			attempts   INTEGER NOT NULL DEFAULT 0,
-			used       INTEGER NOT NULL DEFAULT 0,
-			expires_at TEXT NOT NULL,
-			created_at TEXT DEFAULT (datetime('now'))
-		)`,
-		`CREATE INDEX IF NOT EXISTS idx_verification_codes_email ON verification_codes(email)`,
+	// Create migration tracking table
+	if _, err := s.DB.Exec(`CREATE TABLE IF NOT EXISTS _migrations (
+		version TEXT PRIMARY KEY,
+		applied_at TEXT DEFAULT (datetime('now'))
+	)`); err != nil {
+		return fmt.Errorf("create migrations table: %w", err)
 	}
 
-	for _, stmt := range stmts {
-		if _, err := s.DB.Exec(stmt); err != nil {
-			return fmt.Errorf("exec stmt: %w", err)
+	// Read embedded migration files
+	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		return fmt.Errorf("read migrations dir: %w", err)
+	}
+
+	// Sort and filter to .sql files only
+	var files []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			files = append(files, e.Name())
 		}
 	}
+	sort.Strings(files)
+
+	// Apply unapplied migrations in order
+	for _, name := range files {
+		var count int
+		if err := s.DB.QueryRow(`SELECT COUNT(*) FROM _migrations WHERE version = ?`, name).Scan(&count); err != nil {
+			return fmt.Errorf("check migration %s: %w", name, err)
+		}
+		if count > 0 {
+			continue // already applied
+		}
+
+		content, err := migrationsFS.ReadFile("migrations/" + name)
+		if err != nil {
+			return fmt.Errorf("read migration %s: %w", name, err)
+		}
+
+		if _, err := s.DB.Exec(string(content)); err != nil {
+			return fmt.Errorf("apply migration %s: %w", name, err)
+		}
+
+		if _, err := s.DB.Exec(`INSERT INTO _migrations (version) VALUES (?)`, name); err != nil {
+			return fmt.Errorf("record migration %s: %w", name, err)
+		}
+
+		slog.Info("migration applied", "version", name)
+	}
+
 	return nil
 }
