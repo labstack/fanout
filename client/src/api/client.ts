@@ -37,6 +37,37 @@ async function fetchWithAuth(
   return fetch(path, { ...rest, headers });
 }
 
+// Deduplicate concurrent refresh calls
+let refreshPromise: Promise<boolean> | null = null;
+
+/** Try to refresh the access token using the httpOnly refresh cookie. */
+export async function tryRefresh(): Promise<boolean> {
+  if (refreshPromise) return refreshPromise;
+
+  refreshPromise = (async () => {
+    try {
+      const res = await fetch("/api/auth/refresh", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        apiToken = data.access_token;
+        return true;
+      }
+      if (res.status >= 500) return false; // server error — keep token, may still work
+      apiToken = null; // 401/403 — token is invalid
+      return false;
+    } catch {
+      return false;
+    } finally {
+      refreshPromise = null;
+    }
+  })();
+
+  return refreshPromise;
+}
+
 export async function api<T>(
   path: string,
   opts: RequestInit = {},
@@ -46,6 +77,18 @@ export async function api<T>(
     res = await fetchWithAuth(path, opts);
   } catch {
     throw new ApiError(0, `Network error: unable to reach ${path}`);
+  }
+
+  // Auto-refresh on 401
+  if (res.status === 401 && apiToken) {
+    const refreshed = await tryRefresh();
+    if (refreshed) {
+      try {
+        res = await fetchWithAuth(path, opts);
+      } catch {
+        throw new ApiError(0, `Network error: unable to reach ${path}`);
+      }
+    }
   }
 
   if (!res.ok) {

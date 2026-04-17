@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from "react-router";
-import type { AlertInstance, AlertRule } from "@/lib/types";
+import type { Alert, Rule } from "@/lib/types";
 import { buildChatPath } from "@/lib/chat-route";
 
 function timeAgo(iso?: string): string {
@@ -19,8 +19,8 @@ function fmtValue(v?: number): string {
 }
 
 interface Props {
-  alerts: AlertInstance[];
-  rules: AlertRule[];
+  alerts: Alert[];
+  rules: Rule[];
 }
 
 export function FiringAlerts({ alerts, rules }: Props) {

@@ -22,9 +22,11 @@ import (
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip" // Register gzip decompressor
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
+	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
@@ -144,32 +146,78 @@ func main() {
 		},
 	}))
 
-	// Auth (optional) — skip health checks and metrics for orchestrators/LBs
+	// Resolve JWT secret (generate ephemeral if not set)
+	jwtSecret := cfg.JWTSecret
+	if jwtSecret == "" && cfg.AuthEnabled() {
+		var err error
+		jwtSecret, err = auth.GenerateSecret()
+		if err != nil {
+			slog.Error("failed to generate JWT secret", "err", err)
+			os.Exit(1)
+		}
+		slog.Warn("JWT_SECRET not set — generated ephemeral secret (sessions won't survive restart)")
+	}
+
+	// Create user store early so the middleware can look up API keys
+	var userStore *auth.UserStore
+	if cfg.AuthEnabled() {
+		userStore = auth.NewUserStore(sqlite.DB)
+	}
+
+	// Auth middleware — supports JWT, per-user API keys, and legacy API_TOKEN
 	apiToken := strings.TrimSpace(cfg.APIToken)
-	if apiToken != "" {
+	if apiToken != "" || cfg.AuthEnabled() {
 		tokenBytes := []byte(apiToken)
 		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(c *echo.Context) error {
 				path := c.Request().URL.Path
 
-				// Skip auth for health, metrics, and SPA page routes.
-				// Auth only applies to /api/* and /mcp — everything else is
-				// either a health check or a client-side route served by the SPA.
+				// Skip auth for public endpoints. /api/auth/* is exempt EXCEPT /api/auth/me.
+				isPublicAuth := strings.HasPrefix(path, "/api/auth/") &&
+					path != "/api/auth/me" &&
+					!strings.HasPrefix(path, "/api/auth/api-key")
 				if path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
 					path == "/favicon.ico" || path == "/favicon.svg" ||
+					isPublicAuth ||
 					(!strings.HasPrefix(path, "/api/") && path != "/mcp") {
 					return next(c)
 				}
 
-				auth := c.Request().Header.Get("Authorization")
-				if !strings.HasPrefix(auth, "Bearer ") {
+				authHeader := c.Request().Header.Get("Authorization")
+				if !strings.HasPrefix(authHeader, "Bearer ") {
 					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 				}
-				provided := []byte(strings.TrimPrefix(auth, "Bearer "))
-				if subtle.ConstantTimeCompare(provided, tokenBytes) != 1 {
-					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+				bearer := strings.TrimPrefix(authHeader, "Bearer ")
+
+				// Try legacy API_TOKEN (constant-time compare)
+				if apiToken != "" && subtle.ConstantTimeCompare([]byte(bearer), tokenBytes) == 1 {
+					return next(c)
 				}
-				return next(c)
+
+				// Try JWT access token
+				if jwtSecret != "" {
+					claims, err := auth.VerifyAccess(jwtSecret, bearer)
+					if err == nil {
+						c.Set("auth_claims", claims)
+						return next(c)
+					}
+				}
+
+				// Try per-user API key (fo_...)
+				if userStore != nil && strings.HasPrefix(bearer, "fo_") {
+					user, err := userStore.GetByAPIKey(bearer)
+					if err == nil && user.Active {
+						c.Set("auth_claims", &auth.Claims{
+							RegisteredClaims: jwt.RegisteredClaims{Subject: user.ID},
+							Email:            user.Email,
+							Role:             user.Role,
+							TokenType:        "access",
+						})
+						return next(c)
+					}
+				}
+
+				return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 			}
 		})
 	}
@@ -232,6 +280,21 @@ func main() {
 
 	// Alert management REST endpoints
 	api.RegisterAlertRoutes(e, alertStore, alertEngine)
+
+	// Auth routes (only if SMTP configured)
+	if cfg.AuthEnabled() {
+		smtpCfg := auth.SMTPConfig{
+			Host: cfg.SMTPHost,
+			Port: cfg.SMTPPort,
+			User: cfg.SMTPUser,
+			Pass: cfg.SMTPPass,
+			From: cfg.SMTPFrom,
+		}
+		codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
+		api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, smtpCfg)
+		api.RegisterUserRoutes(e, userStore, smtpCfg)
+		slog.Info("auth enabled")
+	}
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled
 	if cfg.MCPEnabled {

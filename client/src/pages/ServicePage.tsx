@@ -45,7 +45,7 @@ export function ServicePage() {
         const ns = new URLSearchParams(search).get("namespace");
         if (ns) params.set("namespace", ns);
         const result = await api<ServiceDetailResponse>(
-          `/api/service/${encodeURIComponent(name!)}?${params}`,
+          `/api/services/${encodeURIComponent(name!)}?${params}`,
         );
         if (!cancelled) {
           setData(result);

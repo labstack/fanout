@@ -1,13 +1,13 @@
-import type { AlertRule, AlertInstance } from "@/lib/types";
+import type { Rule, Alert } from "@/lib/types";
 import { api } from "@/api/client";
 
 interface Props {
-  rules: AlertRule[];
-  alerts: AlertInstance[];
+  rules: Rule[];
+  alerts: Alert[];
   onRefresh: () => void;
 }
 
-export function AlertRulesTable({ rules, alerts, onRefresh }: Props) {
+export function RulesTable({ rules, alerts, onRefresh }: Props) {
   if (rules.length === 0) {
     return (
       <div className="rounded-lg border border-border/60 bg-surface-1/80 px-4 py-6 text-center text-sm text-muted-foreground">
@@ -24,9 +24,9 @@ export function AlertRulesTable({ rules, alerts, onRefresh }: Props) {
     }
   }
 
-  async function toggleEnabled(rule: AlertRule) {
+  async function toggleEnabled(rule: Rule) {
     try {
-      await api(`/api/alert-rules/${rule.id}`, {
+      await api(`/api/rules/${rule.id}`, {
         method: "PUT",
         body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
       });
@@ -38,7 +38,7 @@ export function AlertRulesTable({ rules, alerts, onRefresh }: Props) {
 
   async function deleteRule(id: string) {
     try {
-      await api(`/api/alert-rules/${id}`, { method: "DELETE" });
+      await api(`/api/rules/${id}`, { method: "DELETE" });
       onRefresh();
     } catch (err) {
       console.error("Delete rule failed:", err);

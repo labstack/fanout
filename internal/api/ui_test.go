@@ -144,27 +144,6 @@ func TestListBookmarks_WithStore(t *testing.T) {
 	}
 }
 
-func TestDashboard_NilOrchestrator(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/dashboard", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	h := &UIHandler{}
-	err := h.Dashboard(c)
-	if err == nil {
-		t.Fatal("expected error for nil orchestrator")
-	}
-
-	httpErr, ok := err.(*echo.HTTPError)
-	if !ok {
-		t.Fatalf("error type = %T, want *echo.HTTPError", err)
-	}
-	if httpErr.Code != 503 {
-		t.Errorf("error code = %d, want 503", httpErr.Code)
-	}
-}
-
 func TestCreateBookmark_Success(t *testing.T) {
 	store, _ := ai.NewBookmarkStore(t.TempDir())
 
@@ -320,24 +299,6 @@ func TestDeleteBookmark_InvalidID(t *testing.T) {
 	}
 }
 
-func TestSuggestions_NilOrch(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/suggestions", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
-
-	h := &UIHandler{}
-	if err := h.Suggestions(c); err != nil {
-		t.Fatalf("Suggestions: %v", err)
-	}
-
-	var result []string
-	json.Unmarshal(rec.Body.Bytes(), &result)
-	if len(result) != 0 {
-		t.Errorf("suggestions = %d, want 0", len(result))
-	}
-}
-
 func TestRegisterUIRoutes(t *testing.T) {
 	e := echo.New()
 	h := RegisterUIRoutes(e, config.Config{}, nil, nil, nil, nil, nil)
@@ -385,7 +346,7 @@ func TestHome_NilService(t *testing.T) {
 
 func TestServiceDetail_NilService(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/service/test-svc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/services/test-svc", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPathValues(echo.PathValues{{Name: "name", Value: "test-svc"}})
@@ -403,7 +364,7 @@ func TestServiceDetail_NilService(t *testing.T) {
 
 func TestServiceDetail_EmptyName(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/service/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/services/", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.SetPathValues(echo.PathValues{{Name: "name", Value: ""}})

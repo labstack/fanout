@@ -16,11 +16,11 @@ func RegisterAlertRoutes(e *echo.Echo, store *alert.Store, engine *alert.Engine)
 
 	e.GET("/api/alerts", h.ListAlerts)
 	e.GET("/api/alerts/summary", h.AlertSummary)
-	e.GET("/api/alert-rules", h.ListRules)
-	e.POST("/api/alert-rules", h.CreateRule)
-	e.PUT("/api/alert-rules/:id", h.UpdateRule)
-	e.DELETE("/api/alert-rules/:id", h.DeleteRule)
-	e.POST("/api/alert-rules/:id/test", h.TestRule)
+	e.GET("/api/rules", h.ListRules)
+	e.POST("/api/rules", h.CreateRule)
+	e.PUT("/api/rules/:id", h.UpdateRule)
+	e.DELETE("/api/rules/:id", h.DeleteRule)
+	e.POST("/api/rules/:id/test", h.TestRule)
 }
 
 type alertHandler struct {
