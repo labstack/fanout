@@ -31,7 +31,7 @@ export function AlertsPage() {
     try {
       const [alertsRes, rulesRes, summaryRes] = await Promise.all([
         api<AlertInstance[]>("/api/alerts"),
-        api<AlertRule[]>("/api/alert-rules"),
+        api<AlertRule[]>("/api/rules"),
         api<AlertSummary>("/api/alerts/summary"),
       ]);
       setAlerts(alertsRes ?? []);

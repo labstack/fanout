@@ -145,7 +145,7 @@ export function CreateRuleInput({ onCreated }: Props) {
     if (!name.trim() || !expression.trim()) return;
     setSaving(true);
     try {
-      await api<AlertRule>("/api/alert-rules", {
+      await api<AlertRule>("/api/rules", {
         method: "POST",
         body: JSON.stringify({
           name,

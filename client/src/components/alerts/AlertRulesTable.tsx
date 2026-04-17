@@ -26,7 +26,7 @@ export function AlertRulesTable({ rules, alerts, onRefresh }: Props) {
 
   async function toggleEnabled(rule: AlertRule) {
     try {
-      await api(`/api/alert-rules/${rule.id}`, {
+      await api(`/api/rules/${rule.id}`, {
         method: "PUT",
         body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
       });
@@ -38,7 +38,7 @@ export function AlertRulesTable({ rules, alerts, onRefresh }: Props) {
 
   async function deleteRule(id: string) {
     try {
-      await api(`/api/alert-rules/${id}`, { method: "DELETE" });
+      await api(`/api/rules/${id}`, { method: "DELETE" });
       onRefresh();
     } catch (err) {
       console.error("Delete rule failed:", err);
