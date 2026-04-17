@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/labstack/fanout/internal/db/generated"
 )
 
 const (
@@ -42,13 +44,13 @@ func VerifyHash(code, hash, secret string) bool {
 
 // CodeStore manages verification codes in SQLite.
 type CodeStore struct {
-	db     *sql.DB
+	q      *generated.Queries
 	secret string
 }
 
 // NewCodeStore creates a CodeStore with the given HMAC secret.
 func NewCodeStore(db *sql.DB, secret string) *CodeStore {
-	return &CodeStore{db: db, secret: secret}
+	return &CodeStore{q: generated.New(db), secret: secret}
 }
 
 // Create stores a verification code for the given email. Returns the plaintext code.
@@ -64,10 +66,12 @@ func (s *CodeStore) Create(email string) (string, error) {
 	}
 	expiresAt := time.Now().Add(codeTTL).UTC().Format(time.RFC3339)
 
-	_, err = s.db.Exec(
-		`INSERT INTO verification_codes (id, email, code_hash, expires_at) VALUES (?, ?, ?, ?)`,
-		id.String(), email, hash, expiresAt,
-	)
+	err = s.q.CreateVerificationCode(context.Background(), generated.CreateVerificationCodeParams{
+		ID:        id.String(),
+		Email:     email,
+		CodeHash:  hash,
+		ExpiresAt: expiresAt,
+	})
 	if err != nil {
 		return "", fmt.Errorf("auth: create code: %w", err)
 	}
@@ -76,32 +80,18 @@ func (s *CodeStore) Create(email string) (string, error) {
 
 // Verify checks the code for the given email. Returns true if valid.
 func (s *CodeStore) Verify(email, code string) (bool, error) {
-	rows, err := s.db.Query(
-		`SELECT id, code_hash, attempts, used, expires_at FROM verification_codes
-		 WHERE email = ? AND used = 0
-		 ORDER BY created_at DESC LIMIT 1`,
-		email,
-	)
+	ctx := context.Background()
+
+	row, err := s.q.GetLatestUnusedCode(ctx, email)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
 	if err != nil {
 		return false, fmt.Errorf("auth: query code: %w", err)
 	}
 
-	if !rows.Next() {
-		rows.Close()
-		return false, nil
-	}
-
-	var id, hash, expiresAt string
-	var attempts, used int
-	if err := rows.Scan(&id, &hash, &attempts, &used, &expiresAt); err != nil {
-		rows.Close()
-		return false, fmt.Errorf("auth: scan code: %w", err)
-	}
-	// Close rows before running UPDATEs to avoid SQLite connection contention
-	rows.Close()
-
 	// Check expiry
-	exp, parseErr := time.Parse(time.RFC3339, expiresAt)
+	exp, parseErr := time.Parse(time.RFC3339, row.ExpiresAt)
 	if parseErr != nil {
 		return false, fmt.Errorf("auth: corrupt expiry timestamp: %w", parseErr)
 	}
@@ -110,20 +100,20 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 	}
 
 	// Check max attempts
-	if attempts >= maxAttempts {
+	if row.Attempts >= maxAttempts {
 		return false, nil
 	}
 
 	// Verify
-	if !VerifyHash(code, hash, s.secret) {
-		if _, err := s.db.Exec(`UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?`, id); err != nil {
+	if !VerifyHash(code, row.CodeHash, s.secret) {
+		if err := s.q.IncrementCodeAttempts(ctx, row.ID); err != nil {
 			return false, fmt.Errorf("auth: increment attempts: %w", err)
 		}
 		return false, nil
 	}
 
 	// Mark used — must succeed to prevent replay
-	if _, err := s.db.Exec(`UPDATE verification_codes SET used = 1 WHERE id = ?`, id); err != nil {
+	if err := s.q.MarkCodeUsed(ctx, row.ID); err != nil {
 		return false, fmt.Errorf("auth: mark code used: %w", err)
 	}
 	return true, nil
@@ -132,6 +122,5 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 // Cleanup deletes expired codes older than 1 hour.
 func (s *CodeStore) Cleanup() error {
 	cutoff := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`DELETE FROM verification_codes WHERE expires_at < ?`, cutoff)
-	return err
+	return s.q.CleanupExpiredCodes(context.Background(), cutoff)
 }
