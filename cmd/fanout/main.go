@@ -260,14 +260,6 @@ func main() {
 		userStore := auth.NewUserStore(sqlite.DB)
 		codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
 
-		if cfg.AdminEmail != "" {
-			if err := userStore.EnsureAdmin(cfg.AdminEmail); err != nil {
-				slog.Error("create admin user failed", "err", err)
-				os.Exit(1)
-			}
-			slog.Info("admin user ensured", "email", cfg.AdminEmail)
-		}
-
 		api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, auth.SMTPConfig{
 			Host: cfg.SMTPHost,
 			Port: cfg.SMTPPort,
@@ -276,7 +268,7 @@ func main() {
 			From: cfg.SMTPFrom,
 		})
 		api.RegisterUserRoutes(e, userStore)
-		slog.Info("auth enabled", "admin", cfg.AdminEmail)
+		slog.Info("auth enabled")
 	}
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled

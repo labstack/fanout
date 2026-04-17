@@ -33,13 +33,12 @@ type Config struct {
 	AIModel    string // model ID override
 	AIBaseURL  string // base URL override (OpenAI-compatible)
 	// Auth
-	SMTPHost   string // SMTP server host
-	SMTPPort   int    // SMTP server port (default 587)
-	SMTPUser   string // SMTP username
-	SMTPPass   string // SMTP password
-	SMTPFrom   string // Sender email address
-	AdminEmail string // First admin user (created on boot)
-	JWTSecret  string // HS256 signing key (auto-generated if empty)
+	SMTPHost  string // SMTP server host
+	SMTPPort  int    // SMTP server port (default 587)
+	SMTPUser  string // SMTP username
+	SMTPPass  string // SMTP password
+	SMTPFrom  string // Sender email address
+	JWTSecret string // HS256 signing key (auto-generated if empty)
 }
 
 func Load() Config {
@@ -68,7 +67,6 @@ func Load() Config {
 		SMTPUser:          os.Getenv("SMTP_USER"),
 		SMTPPass:          os.Getenv("SMTP_PASS"),
 		SMTPFrom:          getenv("SMTP_FROM", "Fanout <noreply@fanout.dev>"),
-		AdminEmail:        os.Getenv("ADMIN_EMAIL"),
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 	}
 	if err := cfg.Validate(); err != nil {

@@ -51,9 +51,27 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 	}
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 
-	// Check if user exists and is active — never reveal account existence
+	// Check if user exists. If no users exist yet, create the first one as admin.
 	user, err := h.users.GetByEmail(email)
-	if err != nil || !user.Active {
+	if err != nil {
+		users, listErr := h.users.List()
+		if listErr == nil && len(users) == 0 {
+			// First user ever — auto-create as admin
+			created, createErr := h.users.Create(email, "", "admin")
+			if createErr != nil {
+				slog.Error("auth: auto-create first admin failed", "err", createErr)
+				jitter()
+				return c.JSON(200, map[string]bool{"code_sent": true})
+			}
+			user = created
+			slog.Info("auth: first user created as admin", "email", email)
+		} else {
+			// Users exist but this email is not one of them — don't reveal
+			jitter()
+			return c.JSON(200, map[string]bool{"code_sent": true})
+		}
+	}
+	if !user.Active {
 		jitter()
 		return c.JSON(200, map[string]bool{"code_sent": true})
 	}
