@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/labstack/fanout/internal/db/generated"
 )
 
 // ErrUserNotFound is returned when a requested user does not exist.
@@ -30,12 +32,27 @@ type User struct {
 
 // UserStore provides CRUD operations for users.
 type UserStore struct {
-	db *sql.DB
+	q *generated.Queries
 }
 
 // NewUserStore creates a UserStore backed by the given database connection.
 func NewUserStore(db *sql.DB) *UserStore {
-	return &UserStore{db: db}
+	return &UserStore{q: generated.New(db)}
+}
+
+// toUser converts a generated.User to the domain User type.
+func toUser(u generated.User) User {
+	return User{
+		ID:         u.ID,
+		Email:      u.Email,
+		Name:       u.Name.String,
+		Role:       u.Role,
+		Active:     u.Active == 1,
+		HasAPIKey:  u.KeyHash.Valid && u.KeyHash.String != "",
+		LoggedInAt: u.LoggedInAt.String,
+		CreatedAt:  u.CreatedAt,
+		UpdatedAt:  u.UpdatedAt,
+	}
 }
 
 // Create adds a new user.
@@ -45,98 +62,97 @@ func (s *UserStore) Create(email, name, role string) (User, error) {
 		return User{}, fmt.Errorf("auth: generate user id: %w", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = s.db.Exec(
-		`INSERT INTO users (id, email, name, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		id.String(), email, name, role, now, now,
-	)
+	u, err := s.q.CreateUser(context.Background(), generated.CreateUserParams{
+		ID:        id.String(),
+		Email:     email,
+		Name:      sql.NullString{String: name, Valid: name != ""},
+		Role:      role,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
 	if err != nil {
 		return User{}, fmt.Errorf("auth: create user: %w", err)
 	}
-	return s.GetByID(id.String())
+	return toUser(u), nil
 }
 
 // GetByID returns a user by ID.
 func (s *UserStore) GetByID(id string) (User, error) {
-	row := s.db.QueryRow(
-		`SELECT id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at FROM users WHERE id = ?`, id,
-	)
-	return scanUserRow(row)
+	u, err := s.q.GetUserByID(context.Background(), id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("auth: get user by id: %w", err)
+	}
+	return toUser(u), nil
 }
 
 // GetByEmail returns a user by email address.
 func (s *UserStore) GetByEmail(email string) (User, error) {
-	row := s.db.QueryRow(
-		`SELECT id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at FROM users WHERE email = ?`, email,
-	)
-	return scanUserRow(row)
+	u, err := s.q.GetUserByEmail(context.Background(), email)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("auth: get user by email: %w", err)
+	}
+	return toUser(u), nil
 }
 
 // List returns all users ordered by creation time.
 func (s *UserStore) List() ([]User, error) {
-	rows, err := s.db.Query(
-		`SELECT id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at FROM users ORDER BY created_at DESC`,
-	)
+	rows, err := s.q.ListUsers(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("auth: list users: %w", err)
 	}
-	defer rows.Close()
-
-	var users []User
-	for rows.Next() {
-		var u User
-		var name, keyHash, loggedIn sql.NullString
-		var active int
-		if err := rows.Scan(&u.ID, &u.Email, &name, &u.Role, &active, &keyHash, &loggedIn, &u.CreatedAt, &u.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("auth: scan user: %w", err)
-		}
-		u.Name = name.String
-		u.HasAPIKey = keyHash.Valid && keyHash.String != ""
-		u.LoggedInAt = loggedIn.String
-		u.Active = active == 1
-		users = append(users, u)
+	users := make([]User, len(rows))
+	for i, row := range rows {
+		users[i] = toUser(row)
 	}
-	if users == nil {
-		users = []User{}
-	}
-	return users, rows.Err()
+	return users, nil
 }
 
 // Update modifies a user's fields. Nil pointers are skipped.
 func (s *UserStore) Update(id string, email, name, role *string, active *bool) (User, error) {
-	u, err := s.GetByID(id)
+	existing, err := s.GetByID(id)
 	if err != nil {
 		return User{}, err
 	}
 	if email != nil {
-		u.Email = *email
+		existing.Email = *email
 	}
 	if name != nil {
-		u.Name = *name
+		existing.Name = *name
 	}
 	if role != nil {
-		u.Role = *role
+		existing.Role = *role
 	}
 	if active != nil {
-		u.Active = *active
+		existing.Active = *active
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	activeInt := 0
-	if u.Active {
+	activeInt := int64(0)
+	if existing.Active {
 		activeInt = 1
 	}
-	_, err = s.db.Exec(
-		`UPDATE users SET email=?, name=?, role=?, active=?, updated_at=? WHERE id=?`,
-		u.Email, u.Name, u.Role, activeInt, now, id,
-	)
+	now := time.Now().UTC().Format(time.RFC3339)
+	u, err := s.q.UpdateUser(context.Background(), generated.UpdateUserParams{
+		Email:     existing.Email,
+		Name:      sql.NullString{String: existing.Name, Valid: existing.Name != ""},
+		Role:      existing.Role,
+		Active:    activeInt,
+		UpdatedAt: now,
+		ID:        id,
+	})
 	if err != nil {
 		return User{}, fmt.Errorf("auth: update user: %w", err)
 	}
-	return s.GetByID(id)
+	return toUser(u), nil
 }
 
 // Delete removes a user by ID.
 func (s *UserStore) Delete(id string) error {
-	res, err := s.db.Exec(`DELETE FROM users WHERE id = ?`, id)
+	res, err := s.q.DeleteUser(context.Background(), id)
 	if err != nil {
 		return fmt.Errorf("auth: delete user: %w", err)
 	}
@@ -150,8 +166,11 @@ func (s *UserStore) Delete(id string) error {
 // TouchLogin updates the logged_in_at timestamp.
 func (s *UserStore) TouchLogin(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE users SET logged_in_at=?, updated_at=? WHERE id=?`, now, now, id)
-	return err
+	return s.q.TouchLogin(context.Background(), generated.TouchLoginParams{
+		LoggedInAt: sql.NullString{String: now, Valid: true},
+		UpdatedAt:  now,
+		ID:         id,
+	})
 }
 
 // EnsureAdmin creates the admin user if it doesn't exist.
@@ -167,24 +186,6 @@ func (s *UserStore) EnsureAdmin(email string) error {
 	return err
 }
 
-func scanUserRow(row *sql.Row) (User, error) {
-	var u User
-	var name, keyHash, loggedIn sql.NullString
-	var active int
-	err := row.Scan(&u.ID, &u.Email, &name, &u.Role, &active, &keyHash, &loggedIn, &u.CreatedAt, &u.UpdatedAt)
-	if errors.Is(err, sql.ErrNoRows) {
-		return User{}, ErrUserNotFound
-	}
-	if err != nil {
-		return User{}, fmt.Errorf("auth: scan user: %w", err)
-	}
-	u.Name = name.String
-	u.HasAPIKey = keyHash.Valid && keyHash.String != ""
-	u.LoggedInAt = loggedIn.String
-	u.Active = active == 1
-	return u, nil
-}
-
 // GenerateAPIKey creates a new API key for the user. Returns the plaintext key.
 // The key is stored as a SHA-256 hash in the database.
 func (s *UserStore) GenerateAPIKey(userID string) (string, error) {
@@ -196,7 +197,11 @@ func (s *UserStore) GenerateAPIKey(userID string) (string, error) {
 	hash := hashAPIKey(key)
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE users SET key_hash=?, updated_at=? WHERE id=?`, hash, now, userID)
+	err := s.q.SetAPIKeyHash(context.Background(), generated.SetAPIKeyHashParams{
+		KeyHash:   sql.NullString{String: hash, Valid: true},
+		UpdatedAt: now,
+		ID:        userID,
+	})
 	if err != nil {
 		return "", fmt.Errorf("auth: store api key: %w", err)
 	}
@@ -206,17 +211,23 @@ func (s *UserStore) GenerateAPIKey(userID string) (string, error) {
 // RevokeAPIKey removes the API key for a user.
 func (s *UserStore) RevokeAPIKey(userID string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(`UPDATE users SET key_hash=NULL, updated_at=? WHERE id=?`, now, userID)
-	return err
+	return s.q.RevokeAPIKey(context.Background(), generated.RevokeAPIKeyParams{
+		UpdatedAt: now,
+		ID:        userID,
+	})
 }
 
 // GetByAPIKey looks up a user by their API key (plaintext → hash → lookup).
 func (s *UserStore) GetByAPIKey(key string) (User, error) {
 	hash := hashAPIKey(key)
-	row := s.db.QueryRow(
-		`SELECT id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at FROM users WHERE key_hash = ?`, hash,
-	)
-	return scanUserRow(row)
+	u, err := s.q.GetUserByKeyHash(context.Background(), sql.NullString{String: hash, Valid: true})
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("auth: get user by api key: %w", err)
+	}
+	return toUser(u), nil
 }
 
 func hashAPIKey(key string) string {

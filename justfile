@@ -37,9 +37,19 @@ build:
     cp -r client/dist/* internal/web/dist/
     go build -o {{bin}} ./cmd/fanout
 
-# Generate TypeScript types from Go block structs
+# Generate TypeScript types from Go block structs + sqlc queries
 gen:
     go generate ./internal/ai/...
+    cd internal/db && sqlc generate
+
+# Create a new Atlas migration from schema changes
+migrate-diff NAME:
+    cd internal/db && atlas migrate diff {{NAME}} --env local
+    cp internal/db/migrations/*.sql internal/store/migrations/
+
+# Apply migrations (for development — production uses auto-apply on boot)
+migrate-apply:
+    cd internal/db && atlas migrate apply --env local
 
 # Build docker image
 docker TAG="local":

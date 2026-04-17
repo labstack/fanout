@@ -1,12 +1,13 @@
 package alert
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
+	"github.com/labstack/fanout/internal/db/generated"
 )
 
 // ErrNotFound is returned when a requested record does not exist.
@@ -14,12 +15,12 @@ var ErrNotFound = errors.New("not found")
 
 // Store provides CRUD operations for alert rules and alert instances.
 type Store struct {
-	db *sql.DB
+	q *generated.Queries
 }
 
 // NewStore creates a Store backed by the given database connection.
 func NewStore(db *sql.DB) *Store {
-	return &Store{db: db}
+	return &Store{q: generated.New(db)}
 }
 
 // newID returns a new UUIDv7 string.
@@ -32,151 +33,178 @@ func newID() string {
 	return id.String()
 }
 
+// ruleToRow converts a domain Rule to generated CreateRuleParams.
+func ruleToCreateParams(r Rule) generated.CreateRuleParams {
+	return generated.CreateRuleParams{
+		ID:              r.ID,
+		Name:            r.Name,
+		Description:     nullString(r.Description),
+		Enabled:         boolToInt64(r.Enabled),
+		Service:         nullString(r.Service),
+		Namespace:       nullString(r.Namespace),
+		Expression:      r.Expression,
+		ForSeconds:      int64(r.ForSeconds),
+		CooldownS:       int64(r.CooldownS),
+		RepeatIntervalS: int64(r.RepeatIntervalS),
+		WebhookUrl:      nullString(r.WebhookURL),
+		WebhookHeaders:  nullString(r.WebhookHeaders),
+		WebhookTemplate: nullString(r.WebhookTemplate),
+		NotifyOnResolve: boolToInt64(r.NotifyOnResolve),
+	}
+}
+
+// ruleToUpdateParams converts a domain Rule to generated UpdateRuleParams.
+func ruleToUpdateParams(r Rule) generated.UpdateRuleParams {
+	return generated.UpdateRuleParams{
+		ID:              r.ID,
+		Name:            r.Name,
+		Description:     nullString(r.Description),
+		Enabled:         boolToInt64(r.Enabled),
+		Service:         nullString(r.Service),
+		Namespace:       nullString(r.Namespace),
+		Expression:      r.Expression,
+		ForSeconds:      int64(r.ForSeconds),
+		CooldownS:       int64(r.CooldownS),
+		RepeatIntervalS: int64(r.RepeatIntervalS),
+		WebhookUrl:      nullString(r.WebhookURL),
+		WebhookHeaders:  nullString(r.WebhookHeaders),
+		WebhookTemplate: nullString(r.WebhookTemplate),
+		NotifyOnResolve: boolToInt64(r.NotifyOnResolve),
+	}
+}
+
+// alertRuleToRule converts a generated.AlertRule to a domain Rule.
+func alertRuleToRule(ar generated.AlertRule) Rule {
+	return Rule{
+		ID:              ar.ID,
+		Name:            ar.Name,
+		Description:     ar.Description.String,
+		Enabled:         ar.Enabled != 0,
+		Service:         ar.Service.String,
+		Namespace:       ar.Namespace.String,
+		Expression:      ar.Expression,
+		ForSeconds:      int(ar.ForSeconds),
+		CooldownS:       int(ar.CooldownS),
+		RepeatIntervalS: int(ar.RepeatIntervalS),
+		WebhookURL:      ar.WebhookUrl.String,
+		WebhookHeaders:  ar.WebhookHeaders.String,
+		WebhookTemplate: ar.WebhookTemplate.String,
+		NotifyOnResolve: ar.NotifyOnResolve != 0,
+		CreatedAt:       ar.CreatedAt,
+		UpdatedAt:       ar.UpdatedAt,
+	}
+}
+
+// genAlertToAlert converts a generated.Alert to a domain Alert.
+func genAlertToAlert(ga generated.Alert) Alert {
+	return Alert{
+		ID:                 ga.ID,
+		RuleID:             ga.RuleID,
+		Service:            ga.Service,
+		State:              ga.State,
+		Value:              ga.Value.Float64,
+		FiredAt:            ga.FiredAt.String,
+		ResolvedAt:         ga.ResolvedAt.String,
+		RepeatedAt:         ga.RepeatedAt.String,
+		LastEval:           ga.LastEval.String,
+		LastDeliveryStatus: ga.LastDeliveryStatus.String,
+		LastDeliveryAt:     ga.LastDeliveryAt.String,
+		CreatedAt:          ga.CreatedAt,
+	}
+}
+
+// alertToUpsertParams converts a domain Alert to generated UpsertAlertParams.
+func alertToUpsertParams(a Alert) generated.UpsertAlertParams {
+	return generated.UpsertAlertParams{
+		ID:      a.ID,
+		RuleID:  a.RuleID,
+		Service: a.Service,
+		State:   a.State,
+		Value: sql.NullFloat64{
+			Float64: a.Value,
+			Valid:   true,
+		},
+		FiredAt:            nullString(a.FiredAt),
+		ResolvedAt:         nullString(a.ResolvedAt),
+		RepeatedAt:         nullString(a.RepeatedAt),
+		LastEval:           nullString(a.LastEval),
+		LastDeliveryStatus: nullString(a.LastDeliveryStatus),
+		LastDeliveryAt:     nullString(a.LastDeliveryAt),
+	}
+}
+
 // CreateRule inserts a new alert rule and returns the persisted record.
 func (s *Store) CreateRule(r Rule) (Rule, error) {
 	r.ID = newID()
-	_, err := s.db.Exec(`
-		INSERT INTO alert_rules
-			(id, name, description, enabled, service, namespace, expression,
-			 for_seconds, cooldown_s, repeat_interval_s, webhook_url,
-			 webhook_headers, webhook_template, notify_on_resolve)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.ID, r.Name, r.Description, boolToInt(r.Enabled),
-		r.Service, r.Namespace, r.Expression,
-		r.ForSeconds, r.CooldownS, r.RepeatIntervalS,
-		r.WebhookURL, r.WebhookHeaders, r.WebhookTemplate,
-		boolToInt(r.NotifyOnResolve),
-	)
+	ar, err := s.q.CreateRule(context.Background(), ruleToCreateParams(r))
 	if err != nil {
 		return Rule{}, fmt.Errorf("store: create rule: %w", err)
 	}
-	return s.GetRule(r.ID)
+	return alertRuleToRule(ar), nil
 }
 
 // GetRule retrieves a rule by ID.
 func (s *Store) GetRule(id string) (Rule, error) {
-	var r Rule
-	var description, service, namespace sql.NullString
-	var webhookURL, webhookHeaders, webhookTemplate sql.NullString
-	var enabled, notifyOnResolve int
-
-	err := s.db.QueryRow(`
-		SELECT id, name, description, enabled, service, namespace, expression,
-		       for_seconds, cooldown_s, repeat_interval_s, webhook_url,
-		       webhook_headers, webhook_template, notify_on_resolve,
-		       created_at, updated_at
-		FROM alert_rules WHERE id = ?`, id,
-	).Scan(
-		&r.ID, &r.Name, &description, &enabled,
-		&service, &namespace, &r.Expression,
-		&r.ForSeconds, &r.CooldownS, &r.RepeatIntervalS,
-		&webhookURL, &webhookHeaders, &webhookTemplate,
-		&notifyOnResolve, &r.CreatedAt, &r.UpdatedAt,
-	)
-	if err == sql.ErrNoRows {
+	ar, err := s.q.GetRule(context.Background(), id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return Rule{}, fmt.Errorf("store: rule %q not found", id)
 	}
 	if err != nil {
 		return Rule{}, fmt.Errorf("store: get rule: %w", err)
 	}
-
-	r.Description = description.String
-	r.Service = service.String
-	r.Namespace = namespace.String
-	r.WebhookURL = webhookURL.String
-	r.WebhookHeaders = webhookHeaders.String
-	r.WebhookTemplate = webhookTemplate.String
-	r.Enabled = enabled != 0
-	r.NotifyOnResolve = notifyOnResolve != 0
-	return r, nil
+	return alertRuleToRule(ar), nil
 }
 
 // ListRules returns all rules ordered by creation time descending.
 func (s *Store) ListRules() ([]Rule, error) {
-	return s.queryRules(`SELECT id, name, description, enabled, service, namespace,
-		expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url,
-		webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at
-		FROM alert_rules ORDER BY created_at DESC`, nil)
+	rows, err := s.q.ListRules(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("store: list rules: %w", err)
+	}
+	rules := make([]Rule, len(rows))
+	for i, ar := range rows {
+		rules[i] = alertRuleToRule(ar)
+	}
+	return rules, nil
 }
 
 // ListEnabledRules returns only enabled rules.
 func (s *Store) ListEnabledRules() ([]Rule, error) {
-	return s.queryRules(`SELECT id, name, description, enabled, service, namespace,
-		expression, for_seconds, cooldown_s, repeat_interval_s, webhook_url,
-		webhook_headers, webhook_template, notify_on_resolve, created_at, updated_at
-		FROM alert_rules WHERE enabled = 1 ORDER BY created_at DESC`, nil)
-}
-
-func (s *Store) queryRules(query string, args []any) ([]Rule, error) {
-	rows, err := s.db.Query(query, args...)
+	rows, err := s.q.ListEnabledRules(context.Background())
 	if err != nil {
-		return nil, fmt.Errorf("store: query rules: %w", err)
+		return nil, fmt.Errorf("store: list enabled rules: %w", err)
 	}
-	defer rows.Close()
-
-	var rules []Rule
-	for rows.Next() {
-		var r Rule
-		var description, service, namespace sql.NullString
-		var webhookURL, webhookHeaders, webhookTemplate sql.NullString
-		var enabled, notifyOnResolve int
-
-		if err := rows.Scan(
-			&r.ID, &r.Name, &description, &enabled,
-			&service, &namespace, &r.Expression,
-			&r.ForSeconds, &r.CooldownS, &r.RepeatIntervalS,
-			&webhookURL, &webhookHeaders, &webhookTemplate,
-			&notifyOnResolve, &r.CreatedAt, &r.UpdatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("store: scan rule: %w", err)
-		}
-
-		r.Description = description.String
-		r.Service = service.String
-		r.Namespace = namespace.String
-		r.WebhookURL = webhookURL.String
-		r.WebhookHeaders = webhookHeaders.String
-		r.WebhookTemplate = webhookTemplate.String
-		r.Enabled = enabled != 0
-		r.NotifyOnResolve = notifyOnResolve != 0
-		rules = append(rules, r)
+	rules := make([]Rule, len(rows))
+	for i, ar := range rows {
+		rules[i] = alertRuleToRule(ar)
 	}
-	return rules, rows.Err()
+	return rules, nil
 }
 
 // UpdateRule updates a rule by ID and returns the updated record.
 func (s *Store) UpdateRule(r Rule) (Rule, error) {
-	res, err := s.db.Exec(`
-		UPDATE alert_rules SET
-			name=?, description=?, enabled=?, service=?, namespace=?,
-			expression=?, for_seconds=?, cooldown_s=?, repeat_interval_s=?,
-			webhook_url=?, webhook_headers=?, webhook_template=?,
-			notify_on_resolve=?, updated_at=datetime('now')
-		WHERE id=?`,
-		r.Name, r.Description, boolToInt(r.Enabled), r.Service, r.Namespace,
-		r.Expression, r.ForSeconds, r.CooldownS, r.RepeatIntervalS,
-		r.WebhookURL, r.WebhookHeaders, r.WebhookTemplate,
-		boolToInt(r.NotifyOnResolve), r.ID,
-	)
+	ar, err := s.q.UpdateRule(context.Background(), ruleToUpdateParams(r))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Rule{}, fmt.Errorf("store: rule %q not found", r.ID)
+	}
 	if err != nil {
 		return Rule{}, fmt.Errorf("store: update rule: %w", err)
 	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return Rule{}, fmt.Errorf("store: rule %q not found", r.ID)
-	}
-	return s.GetRule(r.ID)
+	return alertRuleToRule(ar), nil
 }
 
 // DeleteRule deletes a rule by ID (cascades to alerts).
 func (s *Store) DeleteRule(id string) error {
-	res, err := s.db.Exec(`DELETE FROM alert_rules WHERE id=?`, id)
-	if err != nil {
-		return fmt.Errorf("store: delete rule: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
+	// GetRule first to detect not-found (generated DeleteRule is :exec with no rows info).
+	_, err := s.q.GetRule(context.Background(), id)
+	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("store: rule %q: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return fmt.Errorf("store: delete rule (pre-check): %w", err)
+	}
+	if err := s.q.DeleteRule(context.Background(), id); err != nil {
+		return fmt.Errorf("store: delete rule: %w", err)
 	}
 	return nil
 }
@@ -186,123 +214,96 @@ func (s *Store) UpsertAlert(a Alert) (Alert, error) {
 	if a.ID == "" {
 		a.ID = newID()
 	}
-	_, err := s.db.Exec(`
-		INSERT INTO alerts
-			(id, rule_id, service, state, value, fired_at, resolved_at,
-			 repeated_at, last_eval, last_delivery_status, last_delivery_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(rule_id, service) DO UPDATE SET
-			state=excluded.state,
-			value=excluded.value,
-			fired_at=excluded.fired_at,
-			resolved_at=excluded.resolved_at,
-			repeated_at=excluded.repeated_at,
-			last_eval=excluded.last_eval,
-			last_delivery_status=excluded.last_delivery_status,
-			last_delivery_at=excluded.last_delivery_at`,
-		a.ID, a.RuleID, a.Service, a.State, a.Value,
-		nullString(a.FiredAt), nullString(a.ResolvedAt), nullString(a.RepeatedAt),
-		nullString(a.LastEval), nullString(a.LastDeliveryStatus), nullString(a.LastDeliveryAt),
-	)
+	ga, err := s.q.UpsertAlert(context.Background(), alertToUpsertParams(a))
 	if err != nil {
 		return Alert{}, fmt.Errorf("store: upsert alert: %w", err)
 	}
-	return s.GetAlert(a.RuleID, a.Service)
+	return genAlertToAlert(ga), nil
 }
 
 // GetAlert retrieves an alert by (rule_id, service).
 func (s *Store) GetAlert(ruleID, service string) (Alert, error) {
-	var a Alert
-	var firedAt, resolvedAt, repeatedAt, lastEval sql.NullString
-	var lastDeliveryStatus, lastDeliveryAt sql.NullString
-
-	err := s.db.QueryRow(`
-		SELECT id, rule_id, service, state, value, fired_at, resolved_at,
-		       repeated_at, last_eval, last_delivery_status, last_delivery_at,
-		       created_at
-		FROM alerts WHERE rule_id=? AND service=?`, ruleID, service,
-	).Scan(
-		&a.ID, &a.RuleID, &a.Service, &a.State, &a.Value,
-		&firedAt, &resolvedAt, &repeatedAt, &lastEval,
-		&lastDeliveryStatus, &lastDeliveryAt, &a.CreatedAt,
-	)
-	if err == sql.ErrNoRows {
+	ga, err := s.q.GetAlert(context.Background(), generated.GetAlertParams{
+		RuleID:  ruleID,
+		Service: service,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
 		return Alert{}, fmt.Errorf("store: alert (%q, %q): %w", ruleID, service, ErrNotFound)
 	}
 	if err != nil {
 		return Alert{}, fmt.Errorf("store: get alert: %w", err)
 	}
-
-	a.FiredAt = firedAt.String
-	a.ResolvedAt = resolvedAt.String
-	a.RepeatedAt = repeatedAt.String
-	a.LastEval = lastEval.String
-	a.LastDeliveryStatus = lastDeliveryStatus.String
-	a.LastDeliveryAt = lastDeliveryAt.String
-	return a, nil
+	return genAlertToAlert(ga), nil
 }
 
 // ListAlerts returns alerts with optional filters for state, service, and ruleID.
+// For a single filter, a dedicated generated query is used. For combined filters
+// or no filter, all alerts are fetched and filtered in Go (dataset is small).
 func (s *Store) ListAlerts(state, service, ruleID string) ([]Alert, error) {
-	where := []string{}
-	args := []any{}
+	ctx := context.Background()
 
-	if state != "" {
-		where = append(where, "state=?")
-		args = append(args, state)
-	}
-	if service != "" {
-		where = append(where, "service=?")
-		args = append(args, service)
-	}
-	if ruleID != "" {
-		where = append(where, "rule_id=?")
-		args = append(args, ruleID)
-	}
-
-	q := `SELECT id, rule_id, service, state, value, fired_at, resolved_at,
-		repeated_at, last_eval, last_delivery_status, last_delivery_at, created_at
-		FROM alerts`
-	if len(where) > 0 {
-		q += " WHERE " + strings.Join(where, " AND ")
-	}
-	q += " ORDER BY created_at DESC"
-
-	rows, err := s.db.Query(q, args...)
-	if err != nil {
-		return nil, fmt.Errorf("store: list alerts: %w", err)
-	}
-	defer rows.Close()
-
-	var alerts []Alert
-	for rows.Next() {
-		var a Alert
-		var firedAt, resolvedAt, repeatedAt, lastEval sql.NullString
-		var lastDeliveryStatus, lastDeliveryAt sql.NullString
-
-		if err := rows.Scan(
-			&a.ID, &a.RuleID, &a.Service, &a.State, &a.Value,
-			&firedAt, &resolvedAt, &repeatedAt, &lastEval,
-			&lastDeliveryStatus, &lastDeliveryAt, &a.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("store: scan alert: %w", err)
+	// Fast paths: single-filter generated queries.
+	switch {
+	case state != "" && service == "" && ruleID == "":
+		rows, err := s.q.ListAlertsByState(ctx, state)
+		if err != nil {
+			return nil, fmt.Errorf("store: list alerts by state: %w", err)
 		}
+		return genAlertsToAlerts(rows), nil
 
-		a.FiredAt = firedAt.String
-		a.ResolvedAt = resolvedAt.String
-		a.RepeatedAt = repeatedAt.String
-		a.LastEval = lastEval.String
-		a.LastDeliveryStatus = lastDeliveryStatus.String
-		a.LastDeliveryAt = lastDeliveryAt.String
-		alerts = append(alerts, a)
+	case service != "" && state == "" && ruleID == "":
+		rows, err := s.q.ListAlertsByService(ctx, service)
+		if err != nil {
+			return nil, fmt.Errorf("store: list alerts by service: %w", err)
+		}
+		return genAlertsToAlerts(rows), nil
+
+	case ruleID != "" && state == "" && service == "":
+		rows, err := s.q.ListAlertsByRuleID(ctx, ruleID)
+		if err != nil {
+			return nil, fmt.Errorf("store: list alerts by rule id: %w", err)
+		}
+		return genAlertsToAlerts(rows), nil
+
+	default:
+		// No filter or combined filters: fetch all and filter in Go.
+		rows, err := s.q.ListAlerts(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("store: list alerts: %w", err)
+		}
+		all := genAlertsToAlerts(rows)
+		if state == "" && service == "" && ruleID == "" {
+			return all, nil
+		}
+		var filtered []Alert
+		for _, a := range all {
+			if state != "" && a.State != state {
+				continue
+			}
+			if service != "" && a.Service != service {
+				continue
+			}
+			if ruleID != "" && a.RuleID != ruleID {
+				continue
+			}
+			filtered = append(filtered, a)
+		}
+		return filtered, nil
 	}
-	return alerts, rows.Err()
+}
+
+// genAlertsToAlerts converts a slice of generated.Alert to domain []Alert.
+func genAlertsToAlerts(rows []generated.Alert) []Alert {
+	alerts := make([]Alert, len(rows))
+	for i, ga := range rows {
+		alerts[i] = genAlertToAlert(ga)
+	}
+	return alerts
 }
 
 // DeleteAlert deletes an alert by ID.
 func (s *Store) DeleteAlert(id string) error {
-	_, err := s.db.Exec(`DELETE FROM alerts WHERE id=?`, id)
-	if err != nil {
+	if err := s.q.DeleteAlert(context.Background(), id); err != nil {
 		return fmt.Errorf("store: delete alert: %w", err)
 	}
 	return nil
@@ -312,11 +313,12 @@ func (s *Store) DeleteAlert(id string) error {
 // This is used by fireWebhookAsync to avoid overwriting alert state that may have changed
 // between when the goroutine was launched and when the webhook completed.
 func (s *Store) UpdateDeliveryStatus(ruleID, service, status, deliveredAt string) error {
-	_, err := s.db.Exec(`
-		UPDATE alerts SET last_delivery_status=?, last_delivery_at=?
-		WHERE rule_id=? AND service=?`,
-		status, deliveredAt, ruleID, service,
-	)
+	err := s.q.UpdateDeliveryStatus(context.Background(), generated.UpdateDeliveryStatusParams{
+		LastDeliveryStatus: nullString(status),
+		LastDeliveryAt:     nullString(deliveredAt),
+		RuleID:             ruleID,
+		Service:            service,
+	})
 	if err != nil {
 		return fmt.Errorf("store: update delivery status: %w", err)
 	}
@@ -325,46 +327,36 @@ func (s *Store) UpdateDeliveryStatus(ruleID, service, status, deliveredAt string
 
 // AlertSummary returns counts of alerts grouped by state.
 func (s *Store) AlertSummary() (AlertSummary, error) {
-	rows, err := s.db.Query(`SELECT state, COUNT(*) FROM alerts GROUP BY state`)
+	rows, err := s.q.AlertSummary(context.Background())
 	if err != nil {
 		return AlertSummary{}, fmt.Errorf("store: alert summary: %w", err)
 	}
-	defer rows.Close()
-
 	var sum AlertSummary
-	for rows.Next() {
-		var state string
-		var count int
-		if err := rows.Scan(&state, &count); err != nil {
-			return AlertSummary{}, fmt.Errorf("store: scan summary: %w", err)
-		}
-		switch state {
+	for _, row := range rows {
+		switch row.State {
 		case "firing":
-			sum.Firing = count
+			sum.Firing = int(row.Count)
 		case "pending":
-			sum.Pending = count
+			sum.Pending = int(row.Count)
 		case "resolved":
-			sum.Resolved = count
+			sum.Resolved = int(row.Count)
 		}
 	}
-	return sum, rows.Err()
+	return sum, nil
 }
 
 // PruneResolved deletes resolved alerts older than days days.
 // Returns the number of rows deleted.
 func (s *Store) PruneResolved(days int) (int64, error) {
-	res, err := s.db.Exec(
-		`DELETE FROM alerts WHERE state='resolved' AND resolved_at < datetime('now', ? || ' days')`,
-		fmt.Sprintf("-%d", days),
-	)
+	res, err := s.q.PruneResolved(context.Background(), nullString(fmt.Sprintf("-%d", days)))
 	if err != nil {
 		return 0, fmt.Errorf("store: prune resolved: %w", err)
 	}
 	return res.RowsAffected()
 }
 
-// boolToInt converts a bool to an integer for SQLite storage.
-func boolToInt(b bool) int {
+// boolToInt64 converts a bool to int64 for SQLite storage.
+func boolToInt64(b bool) int64 {
 	if b {
 		return 1
 	}
