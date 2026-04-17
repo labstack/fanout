@@ -43,12 +43,16 @@ func SignAccess(secret, userID, email, role string) (string, error) {
 
 // SignRefresh creates a long-lived refresh token.
 func SignRefresh(secret, userID string) (string, error) {
+	jti, err := generateJTI()
+	if err != nil {
+		return "", err
+	}
 	now := time.Now()
 	claims := jwt.RegisteredClaims{
 		Subject:   userID,
 		IssuedAt:  jwt.NewNumericDate(now),
 		ExpiresAt: jwt.NewNumericDate(now.Add(RefreshTTL)),
-		ID:        generateJTI(),
+		ID:        jti,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
@@ -94,14 +98,18 @@ func VerifyRefresh(secret, tokenStr string) (string, error) {
 }
 
 // GenerateSecret creates a random 32-byte hex secret for JWT signing.
-func GenerateSecret() string {
+func GenerateSecret() (string, error) {
 	b := make([]byte, 32)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("auth: generate secret: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }
 
-func generateJTI() string {
+func generateJTI() (string, error) {
 	b := make([]byte, 16)
-	rand.Read(b)
-	return hex.EncodeToString(b)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("auth: generate jti: %w", err)
+	}
+	return hex.EncodeToString(b), nil
 }

@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip" // Register gzip decompressor
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
@@ -148,7 +149,12 @@ func main() {
 	// Resolve JWT secret (generate ephemeral if not set)
 	jwtSecret := cfg.JWTSecret
 	if jwtSecret == "" && cfg.AuthEnabled() {
-		jwtSecret = auth.GenerateSecret()
+		var err error
+		jwtSecret, err = auth.GenerateSecret()
+		if err != nil {
+			slog.Error("failed to generate JWT secret", "err", err)
+			os.Exit(1)
+		}
 		slog.Warn("JWT_SECRET not set — generated ephemeral secret (sessions won't survive restart)")
 	}
 
@@ -167,7 +173,9 @@ func main() {
 				path := c.Request().URL.Path
 
 				// Skip auth for public endpoints. /api/auth/* is exempt EXCEPT /api/auth/me.
-				isPublicAuth := strings.HasPrefix(path, "/api/auth/") && path != "/api/auth/me"
+				isPublicAuth := strings.HasPrefix(path, "/api/auth/") &&
+					path != "/api/auth/me" &&
+					!strings.HasPrefix(path, "/api/auth/api-key")
 				if path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
 					path == "/favicon.ico" || path == "/favicon.svg" ||
 					isPublicAuth ||
@@ -200,8 +208,10 @@ func main() {
 					user, err := userStore.GetByAPIKey(bearer)
 					if err == nil && user.Active {
 						c.Set("auth_claims", &auth.Claims{
-							Email: user.Email,
-							Role:  user.Role,
+							RegisteredClaims: jwt.RegisteredClaims{Subject: user.ID},
+							Email:            user.Email,
+							Role:             user.Role,
+							TokenType:        "access",
 						})
 						return next(c)
 					}

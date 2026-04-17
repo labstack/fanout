@@ -51,7 +51,10 @@ func TestSignAndVerifyRefresh(t *testing.T) {
 }
 
 func TestGenerateSecret_Length(t *testing.T) {
-	s := GenerateSecret()
+	s, err := GenerateSecret()
+	if err != nil {
+		t.Fatalf("GenerateSecret: %v", err)
+	}
 	if len(s) != 64 {
 		t.Errorf("secret length = %d, want 64", len(s))
 	}

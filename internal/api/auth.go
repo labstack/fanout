@@ -81,7 +81,9 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create admin")
 	}
 
-	_ = h.users.TouchLogin(user.ID)
+	if err := h.users.TouchLogin(user.ID); err != nil {
+		slog.Error("auth: touch login failed", "user_id", user.ID, "err", err)
+	}
 	slog.Info("auth: first admin created via setup", "email", email)
 
 	accessToken, err := auth.SignAccess(h.jwtSecret, user.ID, user.Email, user.Role)
@@ -171,7 +173,9 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user not found")
 	}
 
-	_ = h.users.TouchLogin(user.ID)
+	if err := h.users.TouchLogin(user.ID); err != nil {
+		slog.Error("auth: touch login failed", "user_id", user.ID, "err", err)
+	}
 
 	accessToken, err := auth.SignAccess(h.jwtSecret, user.ID, user.Email, user.Role)
 	if err != nil {

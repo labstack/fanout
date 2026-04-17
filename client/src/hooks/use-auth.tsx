@@ -44,7 +44,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const me = await api<User>("/api/auth/me");
           setUser(me);
-        } catch {
+        } catch (err) {
+          console.error("auth: failed to fetch user", err);
           setUser(null);
         }
       }
@@ -58,7 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await api<User>("/api/auth/me");
       setUser(me);
-    } catch {
+    } catch (err) {
+      console.error("auth: login fetch user failed", err);
       setUser(null);
     }
   }
