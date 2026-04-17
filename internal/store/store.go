@@ -1,18 +1,20 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"fmt"
-	"io/fs"
 	"log/slog"
-	"sort"
-	"strings"
+	"time"
+
+	"ariga.io/atlas/sql/migrate"
+	"ariga.io/atlas/sql/sqlite"
 
 	_ "modernc.org/sqlite"
 )
 
-//go:embed migrations/*.sql
+//go:embed migrations
 var migrationsFS embed.FS
 
 // SQLite wraps a database/sql.DB backed by modernc SQLite.
@@ -21,7 +23,7 @@ type SQLite struct {
 }
 
 // NewSQLite opens (or creates) an SQLite database at dbPath and runs
-// schema migrations. Use ":memory:" for an in-memory database.
+// schema migrations via Atlas. Use ":memory:" for an in-memory database.
 func NewSQLite(dbPath string) (*SQLite, error) {
 	var dsn string
 	if dbPath == ":memory:" {
@@ -49,79 +51,151 @@ func (s *SQLite) Close() error {
 }
 
 func (s *SQLite) migrate() error {
-	// Create migration tracking table
-	if _, err := s.DB.Exec(`CREATE TABLE IF NOT EXISTS _migrations (
-		version TEXT PRIMARY KEY,
-		applied_at TEXT DEFAULT (datetime('now'))
-	)`); err != nil {
-		return fmt.Errorf("create migrations table: %w", err)
-	}
+	ctx := context.Background()
 
-	// Handle existing databases created before the migration system.
-	// If _migrations is empty but tables already exist, seed the initial migration.
-	var migCount int
-	s.DB.QueryRow(`SELECT COUNT(*) FROM _migrations`).Scan(&migCount)
-	if migCount == 0 {
-		var tableCount int
-		s.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='alert_rules'`).Scan(&tableCount)
-		if tableCount > 0 {
-			_, _ = s.DB.Exec(`INSERT INTO _migrations (version) VALUES ('20260417192833_initial.sql')`)
-			slog.Info("existing database detected, seeded initial migration")
-		}
-	}
-
-	// Read embedded migration files
-	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	// Open Atlas SQLite driver
+	drv, err := sqlite.Open(s.DB)
 	if err != nil {
-		return fmt.Errorf("read migrations dir: %w", err)
+		return fmt.Errorf("open atlas driver: %w", err)
 	}
 
-	// Sort and filter to .sql files only
-	var files []string
+	// Load embedded migration files into an in-memory directory
+	dir := migrate.OpenMemDir("fanout")
+	entries, err := migrationsFS.ReadDir("migrations")
+	if err != nil {
+		return fmt.Errorf("read embedded migrations: %w", err)
+	}
 	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
-			files = append(files, e.Name())
+		if e.IsDir() {
+			continue
 		}
-	}
-	sort.Strings(files)
-
-	// Apply unapplied migrations in order
-	for _, name := range files {
-		var count int
-		if err := s.DB.QueryRow(`SELECT COUNT(*) FROM _migrations WHERE version = ?`, name).Scan(&count); err != nil {
-			return fmt.Errorf("check migration %s: %w", name, err)
-		}
-		if count > 0 {
-			continue // already applied
-		}
-
-		content, err := migrationsFS.ReadFile("migrations/" + name)
+		content, err := migrationsFS.ReadFile("migrations/" + e.Name())
 		if err != nil {
-			return fmt.Errorf("read migration %s: %w", name, err)
+			return fmt.Errorf("read migration %s: %w", e.Name(), err)
 		}
-
-		// Wrap in transaction so partial failures don't leave the DB in a broken state
-		tx, err := s.DB.Begin()
-		if err != nil {
-			return fmt.Errorf("begin migration %s: %w", name, err)
-		}
-
-		if _, err := tx.Exec(string(content)); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("apply migration %s: %w", name, err)
-		}
-
-		if _, err := tx.Exec(`INSERT INTO _migrations (version) VALUES (?)`, name); err != nil {
-			_ = tx.Rollback()
-			return fmt.Errorf("record migration %s: %w", name, err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit migration %s: %w", name, err)
-		}
-
-		slog.Info("migration applied", "version", name)
+		_ = dir.WriteFile(e.Name(), content)
 	}
 
+	// Create revision tracking backed by SQLite
+	rrw := newSQLiteRevisions(s.DB)
+	if err := rrw.init(); err != nil {
+		return fmt.Errorf("init revision table: %w", err)
+	}
+
+	// Handle existing databases created before the migration system
+	rrw.seedIfNeeded()
+
+	// Create executor and apply pending migrations
+	ex, err := migrate.NewExecutor(drv, dir, rrw)
+	if err != nil {
+		return fmt.Errorf("create migration executor: %w", err)
+	}
+
+	if err := ex.ExecuteN(ctx, -1); err != nil {
+		if err == migrate.ErrNoPendingFiles {
+			return nil
+		}
+		return fmt.Errorf("apply migrations: %w", err)
+	}
+
+	slog.Info("migrations applied")
 	return nil
+}
+
+// sqliteRevisions implements migrate.RevisionReadWriter for SQLite.
+type sqliteRevisions struct {
+	db *sql.DB
+}
+
+func newSQLiteRevisions(db *sql.DB) *sqliteRevisions {
+	return &sqliteRevisions{db: db}
+}
+
+func (r *sqliteRevisions) init() error {
+	_, err := r.db.Exec(`CREATE TABLE IF NOT EXISTS atlas_schema_revisions (
+		version        TEXT PRIMARY KEY,
+		description    TEXT DEFAULT '',
+		applied        INTEGER DEFAULT 0,
+		total          INTEGER DEFAULT 0,
+		executed_at    TEXT DEFAULT (datetime('now')),
+		execution_time INTEGER DEFAULT 0,
+		hash           TEXT DEFAULT '',
+		operator_version TEXT DEFAULT ''
+	)`)
+	return err
+}
+
+// seedIfNeeded handles databases created before the migration system.
+func (r *sqliteRevisions) seedIfNeeded() {
+	var migCount int
+	r.db.QueryRow(`SELECT COUNT(*) FROM atlas_schema_revisions`).Scan(&migCount)
+	if migCount > 0 {
+		return
+	}
+	var tableCount int
+	r.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='alert_rules'`).Scan(&tableCount)
+	if tableCount > 0 {
+		_ = r.WriteRevision(context.Background(), &migrate.Revision{
+			Version:     "20260417192833",
+			Description: "initial",
+			Applied:     1,
+			Total:       1,
+			ExecutedAt:  time.Now(),
+		})
+		slog.Info("existing database detected, seeded initial migration revision")
+	}
+}
+
+func (r *sqliteRevisions) Ident() *migrate.TableIdent {
+	return &migrate.TableIdent{Name: "atlas_schema_revisions"}
+}
+
+func (r *sqliteRevisions) ReadRevisions(_ context.Context) ([]*migrate.Revision, error) {
+	rows, err := r.db.Query(`SELECT version, description, applied, total, executed_at, execution_time, hash FROM atlas_schema_revisions ORDER BY version`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var revs []*migrate.Revision
+	for rows.Next() {
+		var rev migrate.Revision
+		var executedAt string
+		if err := rows.Scan(&rev.Version, &rev.Description, &rev.Applied, &rev.Total, &executedAt, &rev.ExecutionTime, &rev.Hash); err != nil {
+			return nil, err
+		}
+		rev.ExecutedAt, _ = time.Parse(time.RFC3339, executedAt)
+		revs = append(revs, &rev)
+	}
+	return revs, rows.Err()
+}
+
+func (r *sqliteRevisions) ReadRevision(_ context.Context, version string) (*migrate.Revision, error) {
+	var rev migrate.Revision
+	var executedAt string
+	err := r.db.QueryRow(
+		`SELECT version, description, applied, total, executed_at, execution_time, hash FROM atlas_schema_revisions WHERE version = ?`,
+		version,
+	).Scan(&rev.Version, &rev.Description, &rev.Applied, &rev.Total, &executedAt, &rev.ExecutionTime, &rev.Hash)
+	if err == sql.ErrNoRows {
+		return nil, migrate.ErrRevisionNotExist
+	}
+	if err != nil {
+		return nil, err
+	}
+	rev.ExecutedAt, _ = time.Parse(time.RFC3339, executedAt)
+	return &rev, nil
+}
+
+func (r *sqliteRevisions) WriteRevision(_ context.Context, rev *migrate.Revision) error {
+	_, err := r.db.Exec(
+		`INSERT OR REPLACE INTO atlas_schema_revisions (version, description, applied, total, executed_at, execution_time, hash) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		rev.Version, rev.Description, rev.Applied, rev.Total, rev.ExecutedAt.Format(time.RFC3339), rev.ExecutionTime, rev.Hash,
+	)
+	return err
+}
+
+func (r *sqliteRevisions) DeleteRevision(_ context.Context, version string) error {
+	_, err := r.db.Exec(`DELETE FROM atlas_schema_revisions WHERE version = ?`, version)
+	return err
 }
