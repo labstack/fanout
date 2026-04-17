@@ -41,7 +41,11 @@ export function HomePage() {
 
     async function load() {
       try {
-        const result = await api<HomeResponse>(`/api/home?window=${timeWindow}`);
+        const params = new URLSearchParams();
+        params.set("window", String(timeWindow));
+        const ns = new URLSearchParams(search).get("namespace");
+        if (ns) params.set("namespace", ns);
+        const result = await api<HomeResponse>(`/api/home?${params}`);
         if (!cancelled) {
           setData(result);
           setLoading(false);
@@ -75,7 +79,7 @@ export function HomePage() {
       clearInterval(interval);
       clearInterval(staleTick);
     };
-  }, [timeWindow]);
+  }, [timeWindow, search]);
 
   const investigate = (prompt: string) => {
     navigate(buildChatPath(prompt, token));
