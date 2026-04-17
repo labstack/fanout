@@ -389,7 +389,7 @@ export interface ServiceBucket {
 
 // ── Alert types ─────────────────────────────────────────────
 
-export interface AlertRule {
+export interface Rule {
   id: string;
   name: string;
   description?: string;
@@ -408,7 +408,7 @@ export interface AlertRule {
   updated_at: string;
 }
 
-export interface AlertInstance {
+export interface Alert {
   id: string;
   rule_id: string;
   service: string;

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { api, ApiError, setApiToken } from "@/api/client";
-import type { AlertRule, AlertInstance, AlertSummary } from "@/lib/types";
+import type { Rule, Alert, AlertSummary } from "@/lib/types";
 import { FiringAlerts } from "@/components/alerts/FiringAlerts";
-import { AlertRulesTable } from "@/components/alerts/AlertRulesTable";
+import { RulesTable } from "@/components/alerts/RulesTable";
 import { CreateRuleInput } from "@/components/alerts/CreateRuleInput";
 
 const REFRESH_INTERVAL = 15_000;
@@ -15,8 +15,8 @@ export function AlertsPage() {
     [search],
   );
 
-  const [alerts, setAlerts] = useState<AlertInstance[]>([]);
-  const [rules, setRules] = useState<AlertRule[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [rules, setRules] = useState<Rule[]>([]);
   const [summary, setSummary] = useState<AlertSummary>({ firing: 0, pending: 0, resolved: 0 });
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -30,8 +30,8 @@ export function AlertsPage() {
   const load = useCallback(async () => {
     try {
       const [alertsRes, rulesRes, summaryRes] = await Promise.all([
-        api<AlertInstance[]>("/api/alerts"),
-        api<AlertRule[]>("/api/rules"),
+        api<Alert[]>("/api/alerts"),
+        api<Rule[]>("/api/rules"),
         api<AlertSummary>("/api/alerts/summary"),
       ]);
       setAlerts(alertsRes ?? []);
@@ -118,7 +118,7 @@ export function AlertsPage() {
             <div className="detail-label">Rules ({rules.length})</div>
           </div>
           <CreateRuleInput onCreated={load} />
-          <AlertRulesTable rules={rules} alerts={alerts} onRefresh={load} />
+          <RulesTable rules={rules} alerts={alerts} onRefresh={load} />
         </div>
 
         {/* Recent history */}

@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useLocation } from "react-router";
 import { Sparkles, Loader2, Check, Trash2, Settings } from "lucide-react";
 import { api, getApiToken } from "@/api/client";
-import type { AlertRule, ChatEvent } from "@/lib/types";
+import type { Rule, ChatEvent } from "@/lib/types";
 
 interface Props {
   onCreated: () => void;
@@ -145,7 +145,7 @@ export function CreateRuleInput({ onCreated }: Props) {
     if (!name.trim() || !expression.trim()) return;
     setSaving(true);
     try {
-      await api<AlertRule>("/api/rules", {
+      await api<Rule>("/api/rules", {
         method: "POST",
         body: JSON.stringify({
           name,
