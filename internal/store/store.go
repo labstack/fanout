@@ -57,6 +57,19 @@ func (s *SQLite) migrate() error {
 		return fmt.Errorf("create migrations table: %w", err)
 	}
 
+	// Handle existing databases created before the migration system.
+	// If _migrations is empty but tables already exist, seed the initial migration.
+	var migCount int
+	s.DB.QueryRow(`SELECT COUNT(*) FROM _migrations`).Scan(&migCount)
+	if migCount == 0 {
+		var tableCount int
+		s.DB.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='alert_rules'`).Scan(&tableCount)
+		if tableCount > 0 {
+			_, _ = s.DB.Exec(`INSERT INTO _migrations (version) VALUES ('20260417192833_initial.sql')`)
+			slog.Info("existing database detected, seeded initial migration")
+		}
+	}
+
 	// Read embedded migration files
 	entries, err := fs.ReadDir(migrationsFS, "migrations")
 	if err != nil {
