@@ -93,6 +93,7 @@ func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, ss
 	// Suggestions API
 	e.GET("/api/home", h.Home)
 	e.GET("/api/services/:name", h.ServiceDetail)
+	e.GET("/api/namespaces", h.Namespaces)
 
 	return h
 }
@@ -181,6 +182,18 @@ func (h *UIHandler) DeleteBookmark(c *echo.Context) error {
 		return echo.NewHTTPError(500, "failed to delete bookmark")
 	}
 	return c.NoContent(204)
+}
+
+// Namespaces returns discovered namespaces from telemetry data.
+func (h *UIHandler) Namespaces(c *echo.Context) error {
+	if h.svc == nil {
+		return c.JSON(200, []string{})
+	}
+	ns := h.svc.Namespaces(c.Request().Context(), "")
+	if ns == nil {
+		ns = []string{}
+	}
+	return c.JSON(200, ns)
 }
 
 // Home returns the deterministic triage home page data.

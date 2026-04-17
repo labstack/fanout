@@ -4,6 +4,7 @@ import { Loader2, LogOut, Radio, RotateCcw } from "lucide-react";
 import { useChatStore } from "@/stores/chat";
 import { buildChatPath, buildDashboardPath } from "@/lib/chat-route";
 import { useAuth } from "@/hooks/use-auth";
+import { NamespacePicker } from "./namespace-picker";
 import { api } from "@/api/client";
 import type { AlertSummary } from "@/lib/types";
 
@@ -81,6 +82,7 @@ export function Nav() {
         </div>
       </div>
       <div className="flex items-center gap-3">
+        <NamespacePicker />
         {streaming && (
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground mono">
             <Loader2 className="h-3 w-3 animate-spin" />
