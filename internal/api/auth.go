@@ -29,6 +29,8 @@ func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeSto
 		smtp:      smtp,
 	}
 
+	e.GET("/api/auth/status", h.Status)
+	e.POST("/api/auth/setup", h.Setup)
 	e.POST("/api/auth/start", h.Start)
 	e.POST("/api/auth/verify", h.Verify)
 	e.POST("/api/auth/refresh", h.Refresh)
@@ -41,6 +43,72 @@ func jitter() {
 	time.Sleep(time.Duration(50+rand.IntN(100)) * time.Millisecond)
 }
 
+// Status returns whether auth is set up (has users) or needs first-time setup.
+func (h *AuthHandler) Status(c *echo.Context) error {
+	users, err := h.users.List()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check auth status")
+	}
+	return c.JSON(200, map[string]any{
+		"setup_required": len(users) == 0,
+		"auth_enabled":   true,
+	})
+}
+
+// Setup creates the first admin user without email verification.
+// Only works when zero users exist — one-time first-boot setup.
+func (h *AuthHandler) Setup(c *echo.Context) error {
+	users, err := h.users.List()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check users")
+	}
+	if len(users) > 0 {
+		return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
+	}
+
+	var req struct {
+		Email string `json:"email"`
+		Name  string `json:"name"`
+	}
+	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Email) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
+	}
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+
+	user, err := h.users.Create(email, req.Name, "admin")
+	if err != nil {
+		slog.Error("auth: setup create admin failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create admin")
+	}
+
+	_ = h.users.TouchLogin(user.ID)
+	slog.Info("auth: first admin created via setup", "email", email)
+
+	accessToken, err := auth.SignAccess(h.jwtSecret, user.ID, user.Email, user.Role)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
+	}
+
+	refreshToken, err := auth.SignRefresh(h.jwtSecret, user.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
+	}
+
+	c.SetCookie(&http.Cookie{
+		Name:     "refresh_token",
+		Value:    refreshToken,
+		Path:     "/api/auth/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   7 * 24 * 60 * 60,
+	})
+
+	return c.JSON(200, map[string]string{
+		"access_token": accessToken,
+	})
+}
+
 // Start sends a verification code to the given email.
 func (h *AuthHandler) Start(c *echo.Context) error {
 	var req struct {
@@ -51,27 +119,9 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 	}
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 
-	// Check if user exists. If no users exist yet, create the first one as admin.
+	// Only send codes to existing active users — never reveal account existence
 	user, err := h.users.GetByEmail(email)
-	if err != nil {
-		users, listErr := h.users.List()
-		if listErr == nil && len(users) == 0 {
-			// First user ever — auto-create as admin
-			created, createErr := h.users.Create(email, "", "admin")
-			if createErr != nil {
-				slog.Error("auth: auto-create first admin failed", "err", createErr)
-				jitter()
-				return c.JSON(200, map[string]bool{"code_sent": true})
-			}
-			user = created
-			slog.Info("auth: first user created as admin", "email", email)
-		} else {
-			// Users exist but this email is not one of them — don't reveal
-			jitter()
-			return c.JSON(200, map[string]bool{"code_sent": true})
-		}
-	}
-	if !user.Active {
+	if err != nil || !user.Active {
 		jitter()
 		return c.JSON(200, map[string]bool{"code_sent": true})
 	}

@@ -1,25 +1,71 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router";
 import { Loader2, Radio } from "lucide-react";
 import { api, setApiToken } from "@/api/client";
 import { useAuth } from "@/hooks/use-auth";
 
-type Step = "email" | "code";
+type Step = "loading" | "setup" | "email" | "code";
 
 export function LoginPage() {
   const { user, isLoading, login } = useAuth();
   const [searchParams] = useSearchParams();
   const next = searchParams.get("next") || "/";
 
-  const [step, setStep] = useState<Step>("email");
+  const [step, setStep] = useState<Step>("loading");
   const [email, setEmail] = useState("");
+  const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
+  // Check if setup is needed
+  useEffect(() => {
+    (async () => {
+      try {
+        const status = await fetch("/api/auth/status").then((r) => r.json());
+        setStep(status.setup_required ? "setup" : "email");
+      } catch {
+        setStep("email"); // fallback to login if status check fails
+      }
+    })();
+  }, []);
+
   // Redirect if already logged in
   if (!isLoading && user) {
     return <Navigate to={next} replace />;
+  }
+
+  async function handleSetup(e: React.FormEvent) {
+    e.preventDefault();
+    if (!email.trim()) return;
+    setSending(true);
+    setError(null);
+
+    try {
+      const result = await fetch("/api/auth/setup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          name: name.trim(),
+        }),
+      });
+
+      if (!result.ok) {
+        const body = await result.json().catch(() => ({ detail: "Setup failed" }));
+        setError(body.detail || "Setup failed");
+        setSending(false);
+        return;
+      }
+
+      const data = await result.json();
+      setApiToken(data.access_token);
+      await login(data.access_token);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Setup failed");
+      setSending(false);
+    }
   }
 
   async function handleEmailSubmit(e: React.FormEvent) {
@@ -71,6 +117,14 @@ export function LoginPage() {
     }
   }
 
+  if (step === "loading") {
+    return (
+      <div className="flex items-center justify-center min-h-screen bg-surface">
+        <Loader2 className="h-6 w-6 text-primary animate-spin" />
+      </div>
+    );
+  }
+
   return (
     <div className="flex items-center justify-center min-h-screen bg-surface">
       <div className="w-full max-w-sm space-y-8 px-6">
@@ -83,7 +137,9 @@ export function LoginPage() {
             Fanout
           </h1>
           <p className="text-sm text-muted-foreground">
-            {step === "email" ? "Sign in to your account" : `Enter the code sent to ${email}`}
+            {step === "setup" && "Create your admin account"}
+            {step === "email" && "Sign in to your account"}
+            {step === "code" && `Enter the code sent to ${email}`}
           </p>
         </div>
 
@@ -92,6 +148,49 @@ export function LoginPage() {
           <div className="rounded-lg border border-unhealthy/20 bg-unhealthy/5 px-4 py-3 text-sm text-unhealthy/90 mono">
             {error}
           </div>
+        )}
+
+        {/* Setup — first boot, no email code needed */}
+        {step === "setup" && (
+          <form onSubmit={handleSetup} className="space-y-4">
+            <div>
+              <label className="detail-label mb-2 block">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="admin@company.com"
+                className="input-field"
+                autoFocus
+                autoComplete="email"
+                required
+              />
+            </div>
+            <div>
+              <label className="detail-label mb-2 block">Name (optional)</label>
+              <input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your name"
+                className="input-field"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={sending || !email.trim()}
+              className="btn-primary w-full disabled:opacity-50"
+            >
+              {sending ? (
+                <span className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Setting up...
+                </span>
+              ) : (
+                "Create Admin Account"
+              )}
+            </button>
+          </form>
         )}
 
         {/* Email step */}
