@@ -59,6 +59,9 @@ export function NamespacePicker() {
       <button
         type="button"
         onClick={() => setOpen(!open)}
+        onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
+        aria-expanded={open}
+        aria-haspopup="listbox"
         className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] mono transition-colors cursor-pointer ${
           current
             ? "border-primary/30 bg-primary/8 text-primary"
@@ -73,7 +76,7 @@ export function NamespacePicker() {
       </button>
 
       {open && (
-        <div className="dropdown-content absolute top-8 right-0 min-w-[160px]">
+        <div role="listbox" className="dropdown-content absolute top-8 right-0 min-w-[160px]">
           <div className="px-2.5 py-1.5 text-[9px] text-muted-foreground uppercase tracking-wider mono font-semibold">
             Namespace
           </div>
