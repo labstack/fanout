@@ -81,6 +81,7 @@ func (s *SQLite) migrate() error {
 			name         TEXT,
 			role         TEXT NOT NULL DEFAULT 'operator',
 			active       INTEGER NOT NULL DEFAULT 1,
+			key_hash     TEXT UNIQUE,
 			logged_in_at TEXT,
 			created_at   TEXT DEFAULT (datetime('now')),
 			updated_at   TEXT DEFAULT (datetime('now'))

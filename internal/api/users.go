@@ -24,6 +24,8 @@ func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore) {
 	e.POST("/api/users", h.CreateUser, adminOnly)
 	e.PUT("/api/users/:id", h.UpdateUser, adminOnly)
 	e.DELETE("/api/users/:id", h.DeleteUser, adminOnly)
+	e.POST("/api/auth/api-key", h.GenerateAPIKey)
+	e.DELETE("/api/auth/api-key", h.RevokeAPIKey)
 }
 
 // ListUsers returns all users.
@@ -90,6 +92,33 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update user")
 	}
 	return c.JSON(200, user)
+}
+
+// GenerateAPIKey creates a new API key for the authenticated user.
+func (h *UserHandler) GenerateAPIKey(c *echo.Context) error {
+	claims := GetAuthClaims(c)
+	if claims == nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+	}
+	key, err := h.users.GenerateAPIKey(claims.Subject)
+	if err != nil {
+		slog.Error("generate api key failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate api key")
+	}
+	return c.JSON(200, map[string]string{"api_key": key})
+}
+
+// RevokeAPIKey removes the API key for the authenticated user.
+func (h *UserHandler) RevokeAPIKey(c *echo.Context) error {
+	claims := GetAuthClaims(c)
+	if claims == nil {
+		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+	}
+	if err := h.users.RevokeAPIKey(claims.Subject); err != nil {
+		slog.Error("revoke api key failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to revoke api key")
+	}
+	return c.JSON(200, map[string]bool{"ok": true})
 }
 
 // DeleteUser removes a user (admin only).

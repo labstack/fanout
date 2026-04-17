@@ -152,7 +152,13 @@ func main() {
 		slog.Warn("JWT_SECRET not set — generated ephemeral secret (sessions won't survive restart)")
 	}
 
-	// Auth middleware — supports JWT + API_TOKEN dual auth
+	// Create user store early so the middleware can look up API keys
+	var userStore *auth.UserStore
+	if cfg.AuthEnabled() {
+		userStore = auth.NewUserStore(sqlite.DB)
+	}
+
+	// Auth middleware — supports JWT, per-user API keys, and legacy API_TOKEN
 	apiToken := strings.TrimSpace(cfg.APIToken)
 	if apiToken != "" || cfg.AuthEnabled() {
 		tokenBytes := []byte(apiToken)
@@ -160,9 +166,7 @@ func main() {
 			return func(c *echo.Context) error {
 				path := c.Request().URL.Path
 
-				// Skip auth for health, metrics, SPA page routes, and auth endpoints
-				// Skip auth for public endpoints. /api/auth/* is exempt EXCEPT /api/auth/me
-				// which needs JWT claims populated by the middleware.
+				// Skip auth for public endpoints. /api/auth/* is exempt EXCEPT /api/auth/me.
 				isPublicAuth := strings.HasPrefix(path, "/api/auth/") && path != "/api/auth/me"
 				if path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
 					path == "/favicon.ico" || path == "/favicon.svg" ||
@@ -177,16 +181,28 @@ func main() {
 				}
 				bearer := strings.TrimPrefix(authHeader, "Bearer ")
 
-				// Try API_TOKEN first (constant-time compare)
+				// Try legacy API_TOKEN (constant-time compare)
 				if apiToken != "" && subtle.ConstantTimeCompare([]byte(bearer), tokenBytes) == 1 {
 					return next(c)
 				}
 
-				// Try JWT
+				// Try JWT access token
 				if jwtSecret != "" {
 					claims, err := auth.VerifyAccess(jwtSecret, bearer)
 					if err == nil {
 						c.Set("auth_claims", claims)
+						return next(c)
+					}
+				}
+
+				// Try per-user API key (fo_...)
+				if userStore != nil && strings.HasPrefix(bearer, "fo_") {
+					user, err := userStore.GetByAPIKey(bearer)
+					if err == nil && user.Active {
+						c.Set("auth_claims", &auth.Claims{
+							Email: user.Email,
+							Role:  user.Role,
+						})
 						return next(c)
 					}
 				}
@@ -257,7 +273,6 @@ func main() {
 
 	// Auth routes (only if SMTP configured)
 	if cfg.AuthEnabled() {
-		userStore := auth.NewUserStore(sqlite.DB)
 		codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
 
 		api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, auth.SMTPConfig{
