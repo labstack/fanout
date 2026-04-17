@@ -119,18 +119,19 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 	}
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 
-	// Only send codes to existing active users — never reveal account existence
+	// Check if user exists — be honest, this is an internal tool
 	user, err := h.users.GetByEmail(email)
-	if err != nil || !user.Active {
-		jitter()
-		return c.JSON(200, map[string]bool{"code_sent": true})
+	if err != nil {
+		return c.JSON(200, map[string]any{"code_sent": false, "reason": "no_account"})
+	}
+	if !user.Active {
+		return c.JSON(200, map[string]any{"code_sent": false, "reason": "inactive"})
 	}
 
 	code, err := h.codes.Create(email)
 	if err != nil {
 		slog.Error("auth: create verification code", "err", err)
-		jitter()
-		return c.JSON(200, map[string]bool{"code_sent": true})
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create verification code")
 	}
 
 	go func() {
@@ -139,8 +140,7 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 		}
 	}()
 
-	jitter()
-	return c.JSON(200, map[string]bool{"code_sent": true})
+	return c.JSON(200, map[string]any{"code_sent": true})
 }
 
 // Verify checks the code and returns JWT tokens.

@@ -273,16 +273,16 @@ func main() {
 
 	// Auth routes (only if SMTP configured)
 	if cfg.AuthEnabled() {
-		codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
-
-		api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, auth.SMTPConfig{
+		smtpCfg := auth.SMTPConfig{
 			Host: cfg.SMTPHost,
 			Port: cfg.SMTPPort,
 			User: cfg.SMTPUser,
 			Pass: cfg.SMTPPass,
 			From: cfg.SMTPFrom,
-		})
-		api.RegisterUserRoutes(e, userStore)
+		}
+		codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
+		api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, smtpCfg)
+		api.RegisterUserRoutes(e, userStore, smtpCfg)
 		slog.Info("auth enabled")
 	}
 

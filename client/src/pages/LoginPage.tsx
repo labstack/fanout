@@ -75,11 +75,19 @@ export function LoginPage() {
     setError(null);
 
     try {
-      await api<{ code_sent: boolean }>("/api/auth/start", {
+      const result = await api<{ code_sent: boolean; reason?: string }>("/api/auth/start", {
         method: "POST",
         body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
-      setStep("code");
+      if (result.code_sent) {
+        setStep("code");
+      } else if (result.reason === "no_account") {
+        setError("No account found. Ask your admin for an invitation.");
+      } else if (result.reason === "inactive") {
+        setError("Your account has been deactivated. Contact your admin.");
+      } else {
+        setError("Unable to send verification code.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send code");
     } finally {

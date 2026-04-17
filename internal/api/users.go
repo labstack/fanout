@@ -13,11 +13,12 @@ import (
 // UserHandler handles admin user management endpoints.
 type UserHandler struct {
 	users *auth.UserStore
+	smtp  auth.SMTPConfig
 }
 
 // RegisterUserRoutes registers user management endpoints.
-func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore) {
-	h := &UserHandler{users: users}
+func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfig) {
+	h := &UserHandler{users: users, smtp: smtp}
 	adminOnly := RequireRole("admin")
 
 	e.GET("/api/users", h.ListUsers, adminOnly)
@@ -56,7 +57,8 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "role must be viewer, operator, or admin")
 	}
 
-	user, err := h.users.Create(strings.ToLower(strings.TrimSpace(req.Email)), req.Name, role)
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+	user, err := h.users.Create(email, req.Name, role)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
 			return echo.NewHTTPError(http.StatusConflict, "user already exists")
@@ -64,6 +66,14 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 		slog.Error("create user failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create user")
 	}
+
+	// Send invitation email
+	go func() {
+		if err := auth.SendInvite(h.smtp, email); err != nil {
+			slog.Error("auth: send invitation email failed", "email", email, "err", err)
+		}
+	}()
+
 	return c.JSON(201, user)
 }
 
