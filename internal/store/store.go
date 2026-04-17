@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -61,6 +62,7 @@ func (s *SQLite) migrate() error {
 
 	// Load embedded migration files into an in-memory directory
 	dir := migrate.OpenMemDir("fanout")
+	defer dir.Close()
 	entries, err := migrationsFS.ReadDir("migrations")
 	if err != nil {
 		return fmt.Errorf("read embedded migrations: %w", err)
@@ -73,7 +75,9 @@ func (s *SQLite) migrate() error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", e.Name(), err)
 		}
-		_ = dir.WriteFile(e.Name(), content)
+		if err := dir.WriteFile(e.Name(), content); err != nil {
+			return fmt.Errorf("write migration %s to memdir: %w", e.Name(), err)
+		}
 	}
 
 	// Create revision tracking backed by SQLite
@@ -83,7 +87,9 @@ func (s *SQLite) migrate() error {
 	}
 
 	// Handle existing databases created before the migration system
-	rrw.seedIfNeeded()
+	if err := rrw.seedIfNeeded(); err != nil {
+		return fmt.Errorf("seed existing db: %w", err)
+	}
 
 	// Create executor and apply pending migrations
 	ex, err := migrate.NewExecutor(drv, dir, rrw)
@@ -92,7 +98,7 @@ func (s *SQLite) migrate() error {
 	}
 
 	if err := ex.ExecuteN(ctx, -1); err != nil {
-		if err == migrate.ErrNoPendingFiles {
+		if errors.Is(err, migrate.ErrNoPendingFiles) {
 			return nil
 		}
 		return fmt.Errorf("apply migrations: %w", err)
@@ -126,24 +132,31 @@ func (r *sqliteRevisions) init() error {
 }
 
 // seedIfNeeded handles databases created before the migration system.
-func (r *sqliteRevisions) seedIfNeeded() {
+func (r *sqliteRevisions) seedIfNeeded() error {
 	var migCount int
-	r.db.QueryRow(`SELECT COUNT(*) FROM atlas_schema_revisions`).Scan(&migCount)
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM atlas_schema_revisions`).Scan(&migCount); err != nil {
+		return fmt.Errorf("check revision count: %w", err)
+	}
 	if migCount > 0 {
-		return
+		return nil
 	}
 	var tableCount int
-	r.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='alert_rules'`).Scan(&tableCount)
+	if err := r.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='alert_rules'`).Scan(&tableCount); err != nil {
+		return fmt.Errorf("check existing tables: %w", err)
+	}
 	if tableCount > 0 {
-		_ = r.WriteRevision(context.Background(), &migrate.Revision{
+		if err := r.WriteRevision(context.Background(), &migrate.Revision{
 			Version:     "20260417192833",
 			Description: "initial",
 			Applied:     1,
 			Total:       1,
 			ExecutedAt:  time.Now(),
-		})
+		}); err != nil {
+			return fmt.Errorf("seed initial revision: %w", err)
+		}
 		slog.Info("existing database detected, seeded initial migration revision")
 	}
+	return nil
 }
 
 func (r *sqliteRevisions) Ident() *migrate.TableIdent {
@@ -165,6 +178,9 @@ func (r *sqliteRevisions) ReadRevisions(_ context.Context) ([]*migrate.Revision,
 			return nil, err
 		}
 		rev.ExecutedAt, _ = time.Parse(time.RFC3339, executedAt)
+		if rev.ExecutedAt.IsZero() {
+			rev.ExecutedAt, _ = time.Parse("2006-01-02 15:04:05", executedAt)
+		}
 		revs = append(revs, &rev)
 	}
 	return revs, rows.Err()

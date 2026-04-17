@@ -19,7 +19,7 @@ export function NamespacePicker() {
       try {
         const ns = await api<string[]>("/api/namespaces");
         if (!cancelled) setNamespaces(ns ?? []);
-      } catch { /* ignore */ }
+      } catch (err) { console.warn("namespace fetch failed:", err); }
     }
     load();
     const interval = setInterval(load, 60_000);
