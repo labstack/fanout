@@ -149,7 +149,7 @@ func TestCompareServices_QueriesRawSpans(t *testing.T) {
 	}
 }
 
-func TestQueryRollupBuckets_QueriesRawSpans(t *testing.T) {
+func TestQueryRollupBuckets_QueriesServiceRollup(t *testing.T) {
 	svc, mock := newMockService(t)
 	defer svc.duck.DB.Close()
 
@@ -160,7 +160,7 @@ func TestQueryRollupBuckets_QueriesRawSpans(t *testing.T) {
 		AddRow(start, 100.0, 50.0, 0.01, int64(100)).
 		AddRow(start.Add(time.Minute), 120.0, 60.0, 0.02, int64(80))
 
-	mock.ExpectQuery(`FROM spans`).
+	mock.ExpectQuery(`FROM service_rollup`).
 		WithArgs("checkout", start, end, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
 		WillReturnRows(rows)
 

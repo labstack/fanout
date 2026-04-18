@@ -110,60 +110,9 @@ func (s *Service) CompareServices(ctx context.Context, params CompareServicesPar
 		window = 60
 	}
 
-	// Build parameterized IN clause for services
-	placeholders := make([]string, len(params.Services))
-	args := make([]any, len(params.Services))
-	for i, svc := range params.Services {
-		placeholders[i] = "?"
-		args[i] = svc
-	}
-
-	q := fmt.Sprintf(`
-		SELECT
-			service,
-			COUNT(*) AS requests,
-			COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
-			COALESCE(quantile_cont(duration_ms, 0.50), 0) AS p50_ms,
-			COALESCE(quantile_cont(duration_ms, 0.95), 0) AS p95_ms,
-			COALESCE(SUM(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1 ELSE 0 END), 0)::BIGINT AS error_count
-		FROM spans
-		WHERE service IN (%s)
-		  AND start_time >= NOW() - INTERVAL '%d minutes'
-		GROUP BY service
-		ORDER BY COUNT(*) DESC
-	`, strings.Join(placeholders, ","), window)
-
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	metrics, err := s.compareServicesRollup(ctx, params.Services, window, "", "")
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
-	}
-	defer rows.Close()
-
-	var metrics []ServiceMetrics
-	for rows.Next() {
-		var m ServiceMetrics
-		if err := rows.Scan(&m.Service, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms, &m.ErrorCount); err != nil {
-			slog.Warn("scan failed", "method", "CompareServices", "err", err)
-			continue
-		}
-		if m.Requests > 0 {
-			m.AvgMs = (m.P50Ms + m.P95Ms) / 2
-		}
-		metrics = append(metrics, m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("compare iteration: %w", err)
-	}
-
-	// Add empty entries for services with no data
-	found := make(map[string]bool)
-	for _, m := range metrics {
-		found[m.Service] = true
-	}
-	for _, svc := range params.Services {
-		if !found[svc] {
-			metrics = append(metrics, ServiceMetrics{Service: svc})
-		}
 	}
 
 	// Determine winner (lowest P95 with acceptable error rate)
@@ -200,6 +149,7 @@ func (s *Service) CompareTime(ctx context.Context, params CompareTimeParams) (*C
 
 	focus := ResolveFocus(params.Focus)
 
+	// Use raw spans for exact percentiles and precise window boundaries
 	leftAgg, leftErr := s.queryServiceStats(ctx, params.Service, params.Left.Start, params.Left.End)
 	if leftErr != nil {
 		return nil, fmt.Errorf("left window query failed: %w", leftErr)
@@ -209,14 +159,9 @@ func (s *Service) CompareTime(ctx context.Context, params CompareTimeParams) (*C
 		return nil, fmt.Errorf("right window query failed: %w", rightErr)
 	}
 
-	leftBuckets, leftErr := s.QueryRollupBuckets(ctx, params.Service, params.Left.Start, params.Left.End, "", "")
-	if leftErr != nil {
-		return nil, fmt.Errorf("left bucket query failed: %w", leftErr)
-	}
-	rightBuckets, rightErr := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End, "", "")
-	if rightErr != nil {
-		return nil, fmt.Errorf("right bucket query failed: %w", rightErr)
-	}
+	// Rollup buckets for timeseries chart data only
+	leftBuckets, _ := s.QueryRollupBuckets(ctx, params.Service, params.Left.Start, params.Left.End, "", "")
+	rightBuckets, _ := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End, "", "")
 
 	comparison := BuildComparison(leftAgg, rightAgg, leftBuckets, rightBuckets, focus)
 
@@ -260,22 +205,21 @@ func (s *Service) CompareOperations(ctx context.Context, params CompareOperation
 
 // --- Query helpers ---
 
-// QueryRollupBuckets fetches per-minute bucket stats directly from raw spans for a service in a time range.
+// QueryRollupBuckets fetches per-minute bucket stats from service_rollup for a service in a time range.
 // Pass empty namespace/tenantID to query across all.
 func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start, end time.Time, namespace, tenantID string) ([]RollupBucket, error) {
 	ns, tid := s.defaults(namespace, tenantID)
 	q := `
 		SELECT
-			date_trunc('minute', start_time) AS bucket,
-			COALESCE(quantile_cont(duration_ms, 0.95), 0) AS p95_ms,
-			COALESCE(quantile_cont(duration_ms, 0.50), 0) AS p50_ms,
-			COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
-			COUNT(*) AS total_spans
-		FROM spans
-		WHERE service = ? AND start_time >= ? AND start_time < ?
+			bucket,
+			COALESCE(p95_ms, 0) AS p95_ms,
+			COALESCE(p50_ms, 0) AS p50_ms,
+			COALESCE(error_rate, 0) AS error_rate,
+			COALESCE(spans, 0) AS total_spans
+		FROM service_rollup
+		WHERE service = ? AND bucket >= ? AND bucket < ?
 			AND tenant = ?
 			AND (? = '' OR namespace = ?)
-		GROUP BY date_trunc('minute', start_time)
 		ORDER BY bucket ASC
 	`
 	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end, tid, ns, ns)
@@ -389,9 +333,16 @@ func AggregateBuckets(buckets []RollupBucket) AggStats {
 	if count == 0 {
 		return AggStats{Throughput: 0}
 	}
-	minutes := float64(len(buckets))
-	if minutes == 0 {
-		minutes = 1
+	// Use time span between first and last bucket for throughput,
+	// not the number of buckets (which understates for sparse windows).
+	minutes := 1.0
+	if len(buckets) >= 2 {
+		first := buckets[0].Bucket
+		last := buckets[len(buckets)-1].Bucket
+		span := last.Sub(first).Minutes() + 1 // +1 because last bucket covers 1 minute
+		if span > 0 {
+			minutes = span
+		}
 	}
 	return AggStats{
 		P95Ms:      sumP95 / float64(count),
@@ -503,6 +454,69 @@ func ResolveFocus(focus []string) []string {
 		return []string{"latency", "errors", "throughput"}
 	}
 	return focus
+}
+
+func (s *Service) compareServicesRollup(ctx context.Context, services []string, window int, namespace, tenantID string) ([]ServiceMetrics, error) {
+	namespace, tenantID = s.defaults(namespace, tenantID)
+
+	placeholders := make([]string, len(services))
+	args := []any{tenantID, namespace, namespace}
+	for i, svc := range services {
+		placeholders[i] = "?"
+		args = append(args, svc)
+	}
+
+	// Use raw spans for exact percentiles instead of rollup averages.
+	q := fmt.Sprintf(`
+		SELECT
+			service,
+			COUNT(*)::BIGINT AS requests,
+			COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate,
+			COALESCE(quantile_cont(duration_ms, 0.50), 0) AS p50_ms,
+			COALESCE(quantile_cont(duration_ms, 0.95), 0) AS p95_ms,
+			COALESCE(SUM(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1 ELSE 0 END), 0)::BIGINT AS error_count
+		FROM spans
+		WHERE start_time >= NOW() - INTERVAL '%d minutes'
+		  AND tenant = ?
+		  AND (? = '' OR namespace = ?)
+		  AND service IN (%s)
+		GROUP BY service
+		ORDER BY requests DESC
+	`, window, strings.Join(placeholders, ","))
+
+	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var metrics []ServiceMetrics
+	for rows.Next() {
+		var m ServiceMetrics
+		if err := rows.Scan(&m.Service, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms, &m.ErrorCount); err != nil {
+			slog.Warn("scan failed", "method", "compareServicesRollup", "err", err)
+			continue
+		}
+		if m.Requests > 0 {
+			m.AvgMs = (m.P50Ms + m.P95Ms) / 2
+		}
+		metrics = append(metrics, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	found := make(map[string]bool, len(metrics))
+	for _, m := range metrics {
+		found[m.Service] = true
+	}
+	for _, svc := range services {
+		if !found[svc] {
+			metrics = append(metrics, ServiceMetrics{Service: svc})
+		}
+	}
+
+	return metrics, nil
 }
 
 // IsSignificant returns true if the difference between the two sample means is
