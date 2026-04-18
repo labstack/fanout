@@ -4,7 +4,7 @@ import { Loader2, Radio } from "lucide-react";
 import { api, setApiToken } from "@/api/client";
 import { useAuth } from "@/hooks/use-auth";
 
-type Step = "loading" | "setup" | "email" | "code";
+type Step = "loading" | "setup" | "email" | "code" | "no-smtp";
 
 export function LoginPage() {
   const { user, isLoading, login } = useAuth();
@@ -23,9 +23,15 @@ export function LoginPage() {
     (async () => {
       try {
         const status = await fetch("/api/auth/status").then((r) => r.json());
-        setStep(status.setup_required ? "setup" : "email");
+        if (status.setup_required) {
+          setStep("setup");
+        } else if (status.smtp_configured) {
+          setStep("email");
+        } else {
+          setStep("no-smtp");
+        }
       } catch {
-        setStep("email"); // fallback to login if status check fails
+        setStep("email");
       }
     })();
   }, []);
@@ -148,6 +154,7 @@ export function LoginPage() {
             {step === "setup" && "Create your admin account"}
             {step === "email" && "Sign in to your account"}
             {step === "code" && `Enter the code sent to ${email}`}
+            {step === "no-smtp" && "Sign in to continue"}
           </p>
         </div>
 
@@ -281,6 +288,18 @@ export function LoginPage() {
               Use a different email
             </button>
           </form>
+        )}
+
+        {/* No SMTP — admin can only restore session via refresh token */}
+        {step === "no-smtp" && (
+          <div className="space-y-4 text-center">
+            <div className="rounded-lg border border-border/60 bg-surface-1/80 px-4 py-4 text-sm text-muted-foreground">
+              <p>Email login requires SMTP configuration.</p>
+              <p className="mt-2 text-[11px] mono text-muted-foreground/60">
+                Set SMTP_HOST, SMTP_USER, SMTP_PASS to enable email codes.
+              </p>
+            </div>
+          </div>
         )}
       </div>
     </div>

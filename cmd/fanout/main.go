@@ -182,8 +182,8 @@ func main() {
 					return next(c)
 				}
 
-				// If no API_TOKEN and no users exist, skip auth (fresh install).
-				// Fail closed on error — deny access rather than bypass auth.
+				// If no users exist (fresh install), only allow setup + status endpoints.
+				// All other API calls blocked until admin creates an account.
 				if apiToken == "" {
 					count, err := userStore.CountUsers()
 					if err != nil {
@@ -191,7 +191,7 @@ func main() {
 						return echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
 					}
 					if count == 0 {
-						return next(c)
+						return echo.NewHTTPError(http.StatusUnauthorized, "setup required")
 					}
 				}
 

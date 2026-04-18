@@ -1,6 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { RootLayout } from "./components/layout/root-layout";
-import { AuthProvider } from "./hooks/use-auth";
+import { AuthProvider, RequireAuth } from "./hooks/use-auth";
 import { HomePage } from "./pages/HomePage";
 import { ChatPage } from "./pages/ChatPage";
 import { ServicePage } from "./pages/ServicePage";
@@ -14,7 +14,13 @@ function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route element={<RootLayout />}>
+          <Route
+            element={
+              <RequireAuth>
+                <RootLayout />
+              </RequireAuth>
+            }
+          >
             <Route index element={<HomePage />} />
             <Route path="/service/:name" element={<ServicePage />} />
             <Route path="/alerts" element={<AlertsPage />} />

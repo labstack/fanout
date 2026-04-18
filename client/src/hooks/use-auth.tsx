@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { Navigate, useLocation } from "react-router";
 import { api, setApiToken, tryRefresh } from "@/api/client";
 
 interface User {
@@ -9,11 +10,18 @@ interface User {
   active: boolean;
 }
 
+interface AuthStatus {
+  setup_required: boolean;
+  auth_enabled: boolean;
+  smtp_configured: boolean;
+}
+
 interface AuthCtx {
   user: User | null;
   isLoading: boolean;
   isAdmin: boolean;
   isOperator: boolean;
+  setupRequired: boolean;
   login: (accessToken: string) => void;
   logout: () => Promise<void>;
 }
@@ -23,6 +31,7 @@ const AuthContext = createContext<AuthCtx>({
   isLoading: true,
   isAdmin: false,
   isOperator: false,
+  setupRequired: false,
   login: () => {},
   logout: async () => {},
 });
@@ -34,21 +43,33 @@ export function useAuth() {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [setupRequired, setSetupRequired] = useState(false);
   const [ready, setReady] = useState(false);
 
-  // On mount, try to restore session from refresh token cookie
   useEffect(() => {
     (async () => {
-      const refreshed = await tryRefresh();
-      if (refreshed) {
-        try {
-          const me = await api<User>("/api/auth/me");
-          setUser(me);
-        } catch (err) {
-          console.error("auth: failed to fetch user", err);
-          setUser(null);
+      // Check auth status first
+      try {
+        const status = await fetch("/api/auth/status").then((r) => r.json()) as AuthStatus;
+        setSetupRequired(status.setup_required);
+
+        if (!status.setup_required) {
+          // Try to restore session
+          const refreshed = await tryRefresh();
+          if (refreshed) {
+            try {
+              const me = await api<User>("/api/auth/me");
+              setUser(me);
+            } catch (err) {
+              console.error("auth: failed to fetch user", err);
+              setUser(null);
+            }
+          }
         }
+      } catch {
+        // Auth endpoints don't exist (very old build) — skip
       }
+
       setIsLoading(false);
       setReady(true);
     })();
@@ -59,6 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const me = await api<User>("/api/auth/me");
       setUser(me);
+      setSetupRequired(false);
     } catch (err) {
       console.error("auth: login fetch user failed", err);
       setUser(null);
@@ -79,14 +101,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isAdmin = user?.role === "admin";
   const isOperator = isAdmin || user?.role === "operator";
 
-  // Don't render children until initial refresh attempt completes
   if (!ready) {
     return null;
   }
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, isAdmin, isOperator, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, isAdmin, isOperator, setupRequired, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
+}
+
+/** Wraps protected routes — redirects to /login if not authenticated or setup needed. */
+export function RequireAuth({ children }: { children: ReactNode }) {
+  const { user, isLoading, setupRequired } = useAuth();
+  const location = useLocation();
+
+  if (isLoading) return null;
+
+  if (setupRequired || !user) {
+    return <Navigate to={`/login?next=${encodeURIComponent(location.pathname)}`} replace />;
+  }
+
+  return <>{children}</>;
 }
