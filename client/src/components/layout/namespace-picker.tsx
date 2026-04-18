@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { api } from "@/api/client";
 
 export function NamespacePicker() {
@@ -9,10 +10,7 @@ export function NamespacePicker() {
   const current = params.get("namespace") || "";
 
   const [namespaces, setNamespaces] = useState<string[]>([]);
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
 
-  // Fetch discovered namespaces
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -26,18 +24,6 @@ export function NamespacePicker() {
     return () => { cancelled = true; clearInterval(interval); };
   }, []);
 
-  // Close on outside click
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    if (open) document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [open]);
-
-  // Hide if only one or zero namespaces
   if (namespaces.length <= 1) return null;
 
   function select(ns: string) {
@@ -49,65 +35,60 @@ export function NamespacePicker() {
     }
     const query = newParams.toString();
     navigate(`${pathname}${query ? `?${query}` : ""}`, { replace: true });
-    setOpen(false);
   }
 
   const label = current || "All";
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(!open)}
-        onKeyDown={(e) => e.key === "Escape" && setOpen(false)}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] mono transition-colors cursor-pointer ${
-          current
-            ? "border-primary/30 bg-primary/8 text-primary"
-            : "border-border/60 bg-surface-1/70 text-muted-foreground hover:text-foreground"
-        }`}
-      >
-        {current && (
-          <span className="w-1.5 h-1.5 rounded-full bg-primary" />
-        )}
-        {label}
-        <span className="text-[9px] opacity-50">{open ? "\u25B4" : "\u25BE"}</span>
-      </button>
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button
+          type="button"
+          className={`flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] mono transition-colors cursor-pointer ${
+            current
+              ? "border-primary/30 bg-primary/8 text-primary"
+              : "border-border/60 bg-surface-1/70 text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          {current && (
+            <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+          )}
+          {label}
+          <span className="text-[9px] opacity-50">{"\u25BE"}</span>
+        </button>
+      </DropdownMenu.Trigger>
 
-      {open && (
-        <div role="listbox" className="dropdown-content absolute top-8 right-0 min-w-[160px]">
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content align="end" sideOffset={4} className="dropdown-content">
           <div className="px-2.5 py-1.5 text-[9px] text-muted-foreground uppercase tracking-wider mono font-semibold">
             Namespace
           </div>
           {namespaces.map((ns) => (
-            <button
+            <DropdownMenu.Item
               key={ns}
-              type="button"
-              onClick={() => select(ns)}
-              className={`dropdown-item w-full ${current === ns ? "bg-surface-2 text-foreground" : ""}`}
+              className="dropdown-item"
+              onSelect={() => select(ns)}
             >
-              <span className={`w-1.5 h-1.5 rounded-full ${current === ns ? "bg-primary" : "bg-surface-3"}`} />
-              <span className="flex-1 text-left">{ns}</span>
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${current === ns ? "bg-primary" : "bg-surface-3"}`} />
+              {ns}
               {current === ns && (
-                <span className="text-primary text-[10px]">{"\u2713"}</span>
+                <span className="ml-auto text-primary text-[10px]">{"\u2713"}</span>
               )}
-            </button>
+            </DropdownMenu.Item>
           ))}
-          <div className="border-t border-border/30 my-1" />
-          <button
-            type="button"
-            onClick={() => select("")}
-            className={`dropdown-item w-full ${!current ? "bg-surface-2 text-foreground" : ""}`}
+          <DropdownMenu.Separator className="my-1 h-px bg-border/30" />
+          <DropdownMenu.Item
+            className="dropdown-item"
+            onSelect={() => select("")}
           >
-            <span className={`w-1.5 h-1.5 rounded-full border ${!current ? "border-primary bg-primary" : "border-surface-3"}`} />
-            <span className="flex-1 text-left">All namespaces</span>
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${!current ? "bg-primary" : "border border-surface-3"}`} />
+            All namespaces
             {!current && (
-              <span className="text-primary text-[10px]">{"\u2713"}</span>
+              <span className="ml-auto text-primary text-[10px]">{"\u2713"}</span>
             )}
-          </button>
-        </div>
-      )}
-    </div>
+          </DropdownMenu.Item>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
