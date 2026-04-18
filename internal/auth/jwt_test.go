@@ -1,11 +1,14 @@
 package auth
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestSignAndVerifyAccess(t *testing.T) {
 	secret := "test-secret-key"
 
-	token, err := SignAccess(secret, "user-123", "test@example.com", "admin")
+	token, err := SignAccess(secret, "user-123")
 	if err != nil {
 		t.Fatalf("SignAccess: %v", err)
 	}
@@ -17,16 +20,13 @@ func TestSignAndVerifyAccess(t *testing.T) {
 	if claims.Subject != "user-123" {
 		t.Errorf("subject = %q, want user-123", claims.Subject)
 	}
-	if claims.Email != "test@example.com" {
-		t.Errorf("email = %q, want test@example.com", claims.Email)
-	}
-	if claims.Role != "admin" {
-		t.Errorf("role = %q, want admin", claims.Role)
+	if claims.TokenType != accessTokenType {
+		t.Errorf("token type = %q, want %q", claims.TokenType, accessTokenType)
 	}
 }
 
 func TestVerifyAccess_WrongSecret(t *testing.T) {
-	token, _ := SignAccess("secret-1", "user-123", "test@example.com", "admin")
+	token, _ := SignAccess("secret-1", "user-123")
 	_, err := VerifyAccess("secret-2", token)
 	if err == nil {
 		t.Error("should fail with wrong secret")
@@ -35,27 +35,46 @@ func TestVerifyAccess_WrongSecret(t *testing.T) {
 
 func TestSignAndVerifyRefresh(t *testing.T) {
 	secret := "test-refresh-secret"
+	issuedAt := time.Now().UTC().Truncate(time.Second)
 
-	token, err := SignRefresh(secret, "user-456")
+	token, err := SignRefresh(secret, "user-456", issuedAt)
 	if err != nil {
 		t.Fatalf("SignRefresh: %v", err)
 	}
 
-	userID, err := VerifyRefresh(secret, token)
+	claims, err := VerifyRefresh(secret, token)
 	if err != nil {
 		t.Fatalf("VerifyRefresh: %v", err)
 	}
-	if userID != "user-456" {
-		t.Errorf("userID = %q, want user-456", userID)
+	if claims.Subject != "user-456" {
+		t.Errorf("subject = %q, want user-456", claims.Subject)
+	}
+	if claims.IssuedAt == nil || !claims.IssuedAt.Time.Equal(issuedAt) {
+		t.Fatalf("issued_at = %v, want %v", claims.IssuedAt, issuedAt)
+	}
+	if claims.TokenType != refreshTokenType {
+		t.Errorf("token type = %q, want %q", claims.TokenType, refreshTokenType)
 	}
 }
 
-func TestGenerateSecret_Length(t *testing.T) {
-	s, err := GenerateSecret()
+func TestVerifyRefresh_RejectsAccessToken(t *testing.T) {
+	secret := "test-refresh-secret"
+	token, err := SignAccess(secret, "user-456")
 	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
+		t.Fatalf("SignAccess: %v", err)
 	}
-	if len(s) != 64 {
-		t.Errorf("secret length = %d, want 64", len(s))
+	if _, err := VerifyRefresh(secret, token); err == nil {
+		t.Fatal("VerifyRefresh should reject access token")
+	}
+}
+
+func TestVerifyAccess_RejectsRefreshToken(t *testing.T) {
+	secret := "test-refresh-secret"
+	token, err := SignRefresh(secret, "user-456", time.Now())
+	if err != nil {
+		t.Fatalf("SignRefresh: %v", err)
+	}
+	if _, err := VerifyAccess(secret, token); err == nil {
+		t.Fatal("VerifyAccess should reject refresh token")
 	}
 }

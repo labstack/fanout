@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,11 +11,10 @@ import (
 	"ariga.io/atlas/sql/migrate"
 	"ariga.io/atlas/sql/sqlite"
 
+	appdb "github.com/labstack/fanout/internal/db"
+
 	_ "modernc.org/sqlite"
 )
-
-//go:embed migrations
-var migrationsFS embed.FS
 
 // SQLite wraps a database/sql.DB backed by modernc SQLite.
 type SQLite struct {
@@ -60,35 +58,17 @@ func (s *SQLite) migrate() error {
 		return fmt.Errorf("open atlas driver: %w", err)
 	}
 
-	// Load embedded migration files into an in-memory directory
-	dir := migrate.OpenMemDir("fanout")
-	defer dir.Close()
-	entries, err := migrationsFS.ReadDir("migrations")
+	// Load the single embedded Atlas migration source of truth.
+	dir, err := appdb.OpenMigrationDir()
 	if err != nil {
-		return fmt.Errorf("read embedded migrations: %w", err)
+		return fmt.Errorf("open migrations: %w", err)
 	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		content, err := migrationsFS.ReadFile("migrations/" + e.Name())
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", e.Name(), err)
-		}
-		if err := dir.WriteFile(e.Name(), content); err != nil {
-			return fmt.Errorf("write migration %s to memdir: %w", e.Name(), err)
-		}
-	}
+	defer dir.Close()
 
 	// Create revision tracking backed by SQLite
 	rrw := newSQLiteRevisions(s.DB)
 	if err := rrw.init(); err != nil {
 		return fmt.Errorf("init revision table: %w", err)
-	}
-
-	// Handle existing databases created before the migration system
-	if err := rrw.seedIfNeeded(); err != nil {
-		return fmt.Errorf("seed existing db: %w", err)
 	}
 
 	// Create executor and apply pending migrations
@@ -129,34 +109,6 @@ func (r *sqliteRevisions) init() error {
 		operator_version TEXT DEFAULT ''
 	)`)
 	return err
-}
-
-// seedIfNeeded handles databases created before the migration system.
-func (r *sqliteRevisions) seedIfNeeded() error {
-	var migCount int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM atlas_schema_revisions`).Scan(&migCount); err != nil {
-		return fmt.Errorf("check revision count: %w", err)
-	}
-	if migCount > 0 {
-		return nil
-	}
-	var tableCount int
-	if err := r.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='alert_rules'`).Scan(&tableCount); err != nil {
-		return fmt.Errorf("check existing tables: %w", err)
-	}
-	if tableCount > 0 {
-		if err := r.WriteRevision(context.Background(), &migrate.Revision{
-			Version:     "20260417192833",
-			Description: "initial",
-			Applied:     1,
-			Total:       1,
-			ExecutedAt:  time.Now(),
-		}); err != nil {
-			return fmt.Errorf("seed initial revision: %w", err)
-		}
-		slog.Info("existing database detected, seeded initial migration revision")
-	}
-	return nil
 }
 
 func (r *sqliteRevisions) Ident() *migrate.TableIdent {

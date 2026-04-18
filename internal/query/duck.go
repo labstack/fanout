@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,22 +26,26 @@ type Duck struct {
 const (
 	serviceRollupStateKey = "service_rollup_v2"
 	edgeRollupStateKey    = "edge_rollup_v2"
+	duckDBPoolSize        = 1
 )
 
 func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
-	if err := os.MkdirAll(cfg.LakeDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create lake dir: %w", err)
+	if err := os.MkdirAll(cfg.QueryDir(), 0o755); err != nil {
+		return nil, fmt.Errorf("create query dir: %w", err)
+	}
+	if err := os.MkdirAll(cfg.TelemetryDir(), 0o755); err != nil {
+		return nil, fmt.Errorf("create telemetry dir: %w", err)
 	}
 
-	dbPath := filepath.Join(cfg.LakeDir, "fanout.duckdb")
-	tempDir := filepath.Join(cfg.LakeDir, "tmp")
-	metadataPath := filepath.Join(cfg.LakeDir, "fanout.ducklake.sqlite")
-	dataPath := filepath.Join(cfg.LakeDir, "ducklake")
+	dbPath := cfg.QueryDuckDBPath()
+	tempDir := cfg.QueryTempDir()
+	metadataPath := cfg.TelemetryDuckLakePath()
+	dataPath := cfg.TelemetryParquetDir()
 	if err := os.MkdirAll(tempDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
 	if err := os.MkdirAll(dataPath, 0o755); err != nil {
-		return nil, fmt.Errorf("create ducklake data dir: %w", err)
+		return nil, fmt.Errorf("create telemetry parquet dir: %w", err)
 	}
 
 	mem := cfg.DuckDBMemory
@@ -83,7 +86,7 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 			"LOAD ducklake",
 			"LOAD sqlite",
 			fmt.Sprintf("SET temp_directory=%s", sqlLiteral(tempDir)),
-			fmt.Sprintf("ATTACH %s AS lake (DATA_PATH %s)",
+			fmt.Sprintf("ATTACH IF NOT EXISTS %s AS lake (DATA_PATH %s)",
 				sqlLiteral("ducklake:sqlite:"+metadataPath),
 				sqlLiteral(dataPath)),
 		}
@@ -99,16 +102,11 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 	}
 
 	db := sql.OpenDB(connector)
-	// DuckLake attaches catalog state in the connector init hook. Re-opening pooled
-	// sql connections races that attach path and triggers duplicate internal metadata
-	// attachment errors, so keep one shared DuckDB connection and let DuckDB parallelize
-	// execution internally.
-	db.SetMaxOpenConns(1)
-	db.SetMaxIdleConns(1)
-	if err := db.PingContext(ctx); err != nil {
-		_ = db.Close()
-		return nil, err
-	}
+	// DuckLake metadata lives in a SQLite catalog and will lock under concurrent
+	// commits from multiple database/sql connections. Keep one shared connection
+	// so readers, rollups, and appenders serialize through the same handle.
+	db.SetMaxOpenConns(duckDBPoolSize)
+	db.SetMaxIdleConns(duckDBPoolSize)
 	return db, nil
 }
 

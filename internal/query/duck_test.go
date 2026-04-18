@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/config"
 )
 
@@ -188,5 +190,33 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cfg := config.Config{
+		DataDir:      t.TempDir(),
+		RollupEvery:  60,
+		DuckDBMemory: "128MB",
+		TenantID:     uuid.Nil,
+	}
+
+	d, err := NewDuck(ctx, cfg)
+	if err != nil {
+		if strings.Contains(err.Error(), "LOAD ducklake") ||
+			strings.Contains(err.Error(), "LOAD sqlite") ||
+			strings.Contains(err.Error(), "ATTACH") {
+			t.Skipf("DuckLake extensions unavailable: %v", err)
+		}
+		t.Fatalf("NewDuck() error = %v", err)
+	}
+	defer d.Close()
+
+	stats := d.DB.Stats()
+	if stats.MaxOpenConnections != duckDBPoolSize {
+		t.Fatalf("MaxOpenConnections = %d, want %d for DuckLake serialization", stats.MaxOpenConnections, duckDBPoolSize)
 	}
 }

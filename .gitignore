@@ -4,7 +4,7 @@
 *.exe
 
 # Data
-/lake/
+/data/
 
 # IDE
 .idea/

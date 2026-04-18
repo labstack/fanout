@@ -4,8 +4,8 @@ SELECT * FROM users WHERE id = ?;
 -- name: GetUserByEmail :one
 SELECT * FROM users WHERE email = ?;
 
--- name: GetUserByKeyHash :one
-SELECT * FROM users WHERE key_hash = ?;
+-- name: GetUserByKey :one
+SELECT * FROM users WHERE key = ?;
 
 -- name: ListUsers :many
 SELECT * FROM users ORDER BY created_at DESC;
@@ -30,7 +30,7 @@ DELETE FROM users WHERE id = ?;
 UPDATE users SET logged_in_at = ?, updated_at = ? WHERE id = ?;
 
 -- name: SetAPIKeyHash :exec
-UPDATE users SET key_hash = ?, updated_at = ? WHERE id = ?;
+UPDATE users SET key = ?, updated_at = ? WHERE id = ?;
 
 -- name: RevokeAPIKey :exec
-UPDATE users SET key_hash = NULL, updated_at = ? WHERE id = ?;
+UPDATE users SET key = NULL, updated_at = ? WHERE id = ?;

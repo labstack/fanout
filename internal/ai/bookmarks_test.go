@@ -8,7 +8,8 @@ import (
 )
 
 func TestNewBookmarkStore(t *testing.T) {
-	dir := t.TempDir()
+	root := t.TempDir()
+	dir := filepath.Join(root, "bookmarks")
 	store, err := NewBookmarkStore(dir)
 	if err != nil {
 		t.Fatalf("NewBookmarkStore: %v", err)
@@ -17,7 +18,7 @@ func TestNewBookmarkStore(t *testing.T) {
 		t.Fatal("store is nil")
 	}
 	// Directory should exist
-	info, err := os.Stat(filepath.Join(dir, "bookmarks"))
+	info, err := os.Stat(dir)
 	if err != nil {
 		t.Fatalf("bookmarks dir not created: %v", err)
 	}

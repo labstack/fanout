@@ -465,15 +465,18 @@ func (s *Service) suggestedTraces(ctx context.Context, svc string, around time.T
 	toNano := to.UnixNano()
 
 	// Get a mix: error traces first, then slow traces.
+	// Prefer recent error traces instead of random sampling to avoid a full random sort
+	// over the matching window on large services.
 	q := `
-(SELECT DISTINCT trace_id AS tid
+(SELECT trace_id AS tid
  FROM spans
  WHERE service = ?
    AND tenant = ?
    AND (? = '' OR namespace = ?)
    AND start_unix_nano BETWEEN ? AND ?
    AND status IN ('STATUS_CODE_ERROR', 'ERROR')
- ORDER BY random()
+ GROUP BY trace_id
+ ORDER BY MAX(start_unix_nano) DESC
  LIMIT 2)
 UNION ALL
 (SELECT trace_id AS tid

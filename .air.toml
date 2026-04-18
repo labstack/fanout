@@ -2,7 +2,7 @@ root = "."
 tmp_dir = "tmp"
 
 [build]
-  entrypoint = "./cmd/fanout"
+  entrypoint = "./tmp/fanout"
   cmd = "CGO_ENABLED=1 go build -o ./tmp/fanout ./cmd/fanout"
   delay = 500
   exclude_dir = ["lake", "tmp", "vendor", ".git", "node_modules", "client"]
@@ -10,10 +10,9 @@ tmp_dir = "tmp"
   exclude_regex = ["_test.go"]
   exclude_unchanged = false
   follow_symlink = false
-  full_bin = "./tmp/fanout"
   include_dir = ["cmd", "internal"]
   include_ext = ["go"]
-  kill_delay = "1s"
+  kill_delay = "35s"
   log = "build-errors.log"
   send_interrupt = true
   stop_on_error = true

@@ -11,7 +11,7 @@ func TestNewSQLite_InMemory(t *testing.T) {
 	}
 	defer s.Close()
 
-	tables := []string{"alert_rules", "alerts"}
+	tables := []string{"alert_rules", "alerts", "users", "verifications"}
 	for _, tbl := range tables {
 		var name string
 		err := s.DB.QueryRow(

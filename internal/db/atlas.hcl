@@ -1,6 +1,6 @@
 env "local" {
   src = "file://schema.sql"
-  url = "sqlite://fanout.sqlite"
+  url = "sqlite://../../data/control/fanout.sqlite"
   dev = "sqlite://dev?mode=memory"
 
   migration {

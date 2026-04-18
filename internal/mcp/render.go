@@ -37,9 +37,9 @@ type ReportStore struct {
 
 var reports = &ReportStore{}
 
-// InitReportStore sets the reports directory (call from NewServer)
-func InitReportStore(lakeDir string) {
-	reports.dir = filepath.Join(lakeDir, "reports")
+// InitReportStore sets the reports directory (call from NewServer).
+func InitReportStore(dir string) {
+	reports.dir = dir
 }
 
 func (rs *ReportStore) Save(r *Report) {

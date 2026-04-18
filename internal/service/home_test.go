@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestHome_ReturnsServicesAndSummary(t *testing.T) {
@@ -284,6 +285,35 @@ func TestHome_NilTracker(t *testing.T) {
 	}
 	if result.Summary.TotalServices != 1 {
 		t.Errorf("TotalServices = %d, want 1", result.Summary.TotalServices)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unfulfilled mock expectations: %v", err)
+	}
+}
+
+func TestHome_UsesCachedSnapshot(t *testing.T) {
+	cacheCtx, cancel := context.WithCancel(context.Background())
+	query.InitQueryCache(cacheCtx)
+	t.Cleanup(func() {
+		cancel()
+		query.QueryCache = nil
+	})
+
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	rollupRows := sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
+		AddRow("svc-a", int64(200), 10.0, 80.0, 0.001)
+	mock.ExpectQuery("SELECT").WillReturnRows(rollupRows)
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "bucket", "spans", "error_rate"}))
+
+	if _, err := svc.Home(context.Background(), 60, "", "", nil); err != nil {
+		t.Fatalf("first Home() error = %v", err)
+	}
+	if _, err := svc.Home(context.Background(), 60, "", "", nil); err != nil {
+		t.Fatalf("second Home() error = %v", err)
 	}
 
 	if err := mock.ExpectationsWereMet(); err != nil {

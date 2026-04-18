@@ -48,13 +48,13 @@ type User struct {
 	Name       sql.NullString `json:"name"`
 	Role       string         `json:"role"`
 	Active     int64          `json:"active"`
-	KeyHash    sql.NullString `json:"key_hash"`
+	Key        sql.NullString `json:"key"`
 	LoggedInAt sql.NullString `json:"logged_in_at"`
 	CreatedAt  string         `json:"created_at"`
 	UpdatedAt  string         `json:"updated_at"`
 }
 
-type VerificationCode struct {
+type Verification struct {
 	ID        string `json:"id"`
 	Email     string `json:"email"`
 	CodeHash  string `json:"code_hash"`

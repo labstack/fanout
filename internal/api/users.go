@@ -46,7 +46,7 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 		Name  string `json:"name"`
 		Role  string `json:"role"`
 	}
-	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Email) == "" {
+	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
 	}
 	role := req.Role
@@ -57,7 +57,10 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "role must be viewer, operator, or admin")
 	}
 
-	email := strings.ToLower(strings.TrimSpace(req.Email))
+	email, err := auth.NormalizeEmail(req.Email)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	user, err := h.users.Create(email, req.Name, role)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -92,6 +95,13 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 	if req.Role != nil && *req.Role != "viewer" && *req.Role != "operator" && *req.Role != "admin" {
 		return echo.NewHTTPError(http.StatusBadRequest, "role must be viewer, operator, or admin")
 	}
+	if req.Email != nil {
+		email, err := auth.NormalizeEmail(*req.Email)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		req.Email = &email
+	}
 
 	user, err := h.users.Update(id, req.Email, req.Name, req.Role, req.Active)
 	if err != nil {
@@ -106,11 +116,11 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 
 // GenerateAPIKey creates a new API key for the authenticated user.
 func (h *UserHandler) GenerateAPIKey(c *echo.Context) error {
-	claims := GetAuthClaims(c)
-	if claims == nil {
+	user := GetCurrentUser(c)
+	if user == nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
-	key, err := h.users.GenerateAPIKey(claims.Subject)
+	key, err := h.users.GenerateAPIKey(user.ID)
 	if err != nil {
 		slog.Error("generate api key failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate api key")
@@ -120,11 +130,11 @@ func (h *UserHandler) GenerateAPIKey(c *echo.Context) error {
 
 // RevokeAPIKey removes the API key for the authenticated user.
 func (h *UserHandler) RevokeAPIKey(c *echo.Context) error {
-	claims := GetAuthClaims(c)
-	if claims == nil {
+	user := GetCurrentUser(c)
+	if user == nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
-	if err := h.users.RevokeAPIKey(claims.Subject); err != nil {
+	if err := h.users.RevokeAPIKey(user.ID); err != nil {
 		slog.Error("revoke api key failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to revoke api key")
 	}

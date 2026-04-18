@@ -56,8 +56,8 @@ func (h *HealthHandler) Readiness(c *echo.Context) error {
 	resp.Checks["duckdb"] = h.checkDuckDB()
 	resp.Checks["ducklake"] = h.checkDuckLake()
 
-	// Check lake directory
-	resp.Checks["lake"] = h.checkLakeDir()
+	// Check data directory
+	resp.Checks["data"] = h.checkDataDir()
 	resp.Checks["rollups"] = h.checkRollups()
 
 	// Determine overall status
@@ -110,16 +110,16 @@ func (h *HealthHandler) checkDuckDB() CheckResult {
 	}
 }
 
-func (h *HealthHandler) checkLakeDir() CheckResult {
-	// Check if lake directory exists and is writable
-	testFile := filepath.Join(h.cfg.LakeDir, ".health-check")
+func (h *HealthHandler) checkDataDir() CheckResult {
+	// Check if the data directory exists and is writable.
+	testFile := filepath.Join(h.cfg.DataDir, ".health-check")
 
 	// Try to create a temp file
 	f, err := os.Create(testFile)
 	if err != nil {
 		return CheckResult{
 			Status: "unhealthy",
-			Error:  "lake dir not writable: " + err.Error(),
+			Error:  "data dir not writable: " + err.Error(),
 		}
 	}
 	f.Close()
@@ -157,7 +157,7 @@ func (h *HealthHandler) checkDuckLake() CheckResult {
 		LatencyMs: time.Since(start).Milliseconds(),
 	}
 	if err == sql.ErrNoRows {
-		res.Detail = "lake attached, no spans yet"
+		res.Detail = "telemetry attached, no spans yet"
 	}
 	return res
 }

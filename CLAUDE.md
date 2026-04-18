@@ -144,11 +144,10 @@ internal/
   service/        # Business logic layer
   web/            # Templ templates
 
-lake/             # Data storage (gitignored)
-  spans/          # Trace spans
-  logs/           # Log entries
-  metrics/        # Metric points
-  reports/        # Saved HTML reports
+data/             # Data storage (gitignored)
+  telemetry/      # DuckLake metadata + parquet files
+  query/          # DuckDB catalog + temp files
+  control/        # Fanout SQLite, bookmarks, reports
 ```
 
 ## Build & Run
@@ -172,11 +171,12 @@ just run
 |----------|---------|-------------|
 | `HTTP_ADDR` | `:7520` | HTTP server address |
 | `OTLP_GRPC_ADDR` | `:4317` | OTLP gRPC address |
-| `LAKE_DIR` | `./lake` | DuckLake storage directory |
+| `DATA_DIR` | `./data` | Storage root for telemetry, query cache, and control data |
 | `FLUSH_SECONDS` | `15` | Batch flush interval |
 | `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
 | `ROLLUP_EVERY` | `60` | Rollup interval (seconds) |
-| `API_TOKEN` | - | Bearer auth token (optional) |
+| `JWT_SECRET` | - | HS256 access-token signing key |
+| `JWT_REFRESH_SECRET` | - | HS256 refresh-token signing key |
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 
@@ -317,7 +317,7 @@ graph TB
     end
 
     subgraph Storage
-        RENDER --> JSON[(lake/reports/*.json)]
+        RENDER --> JSON[(data/control/reports/*.json)]
         JSON --> |expires 24h| CLEANUP[Cleanup Goroutine]
     end
 

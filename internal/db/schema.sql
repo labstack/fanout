@@ -43,13 +43,13 @@ CREATE TABLE users (
     name         TEXT DEFAULT '',
     role         TEXT NOT NULL DEFAULT 'operator',
     active       INTEGER NOT NULL DEFAULT 1,
-    key_hash     TEXT UNIQUE,
+    key          TEXT UNIQUE,
     logged_in_at TEXT DEFAULT '',
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE verification_codes (
+CREATE TABLE verifications (
     id         TEXT PRIMARY KEY,
     email      TEXT NOT NULL,
     code_hash  TEXT NOT NULL,
@@ -59,4 +59,4 @@ CREATE TABLE verification_codes (
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX idx_verification_codes_email ON verification_codes(email);
+CREATE INDEX idx_verifications_email ON verifications(email);

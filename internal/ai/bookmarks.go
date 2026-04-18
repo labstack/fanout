@@ -26,15 +26,14 @@ type Bookmark struct {
 	CreatedAt  string `json:"created_at"`
 }
 
-// BookmarkStore manages bookmark CRUD in lake/bookmarks/.
+// BookmarkStore manages bookmark CRUD in the configured bookmarks directory.
 type BookmarkStore struct {
 	mu  sync.RWMutex
 	dir string
 }
 
 // NewBookmarkStore creates a store backed by the given directory.
-func NewBookmarkStore(lakeDir string) (*BookmarkStore, error) {
-	dir := filepath.Join(lakeDir, "bookmarks")
+func NewBookmarkStore(dir string) (*BookmarkStore, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("create bookmarks dir: %w", err)
 	}

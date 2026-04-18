@@ -82,6 +82,7 @@ if ! command -v docker &> /dev/null; then
 fi
 
 sudo mkdir -p /data/{fanout,ssl,nginx,html,acme}
+sudo mkdir -p /data/fanout/certs
 sudo chown -R $USER:$USER /data
 sudo mkdir -p /opt/fanout
 sudo chown -R $USER:$USER /opt/fanout
@@ -90,7 +91,6 @@ SETUP_EOF
 echo "📥 Copying config..."
 REPO_DIR="$(dirname "$0")/.."
 scp "$REPO_DIR/docker-compose.yaml" "$SERVER:/opt/fanout/docker-compose.yaml"
-scp "$(dirname "$0")/grpc.conf" "$SERVER:/data/nginx/grpc.conf"
 
 # Build single .env: secrets (.env) + production config (.env.production) + compose vars
 TMPENV=$(mktemp)

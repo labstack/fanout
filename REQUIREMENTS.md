@@ -9,7 +9,7 @@
 - Multi-tenant via `x-tenant-id` header
 
 ### Storage
-- **Partitioned Parquet**: `/lake/{signal}/year=YYYY/month=MM/day=DD/hour=HH/part-<ts>.parquet`
+- **Partitioned Parquet**: `/data/telemetry/parquet/main/{signal}/tenant=<id>/namespace=<ns>/year=YYYY/month=MM/day=DD/hour=HH/*.parquet`
 - **DuckDB** embedded query engine + **minute rollups** (`service_rollup`)
 - **Retention**: Automatic pruning (configurable, default 30 days)
 
@@ -48,11 +48,12 @@
 |----------|---------|-------------|
 | `HTTP_ADDR` | `:7520` | HTTP server address |
 | `OTLP_GRPC_ADDR` | `:4317` | OTLP gRPC address |
-| `LAKE_DIR` | `./lake` | DuckLake storage directory |
+| `DATA_DIR` | `./data` | Storage root for telemetry, query cache, and control data |
 | `FLUSH_SECONDS` | `15` | Batch flush interval |
 | `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
 | `ROLLUP_EVERY` | `60` | Rollup interval (seconds) |
-| `API_TOKEN` | - | Bearer auth token (optional) |
+| `JWT_SECRET` | - | HS256 signing key for access tokens |
+| `JWT_REFRESH_SECRET` | - | HS256 signing key for refresh tokens |
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace for services |

@@ -134,11 +134,18 @@ fanout/
 │   │   └── topology.go      # Service map
 │   └── web/                 # React SPA (client/)
 │       └── embed.go         # Embedded static assets
-└── lake/                    # Data directory (gitignored)
-    ├── spans/
-    ├── logs/
-    ├── metrics/
-    └── reports/
+└── data/                    # Data directory (gitignored)
+    ├── telemetry/
+    │   ├── ducklake.sqlite
+    │   └── parquet/
+    │       └── main/{spans,logs,metrics}/...
+    ├── query/
+    │   ├── catalog.duckdb
+    │   └── tmp/
+    └── control/
+        ├── fanout.sqlite
+        ├── bookmarks/
+        └── reports/
 ```
 
 ## Components
@@ -180,7 +187,7 @@ flowchart LR
 ```
 
 - **Flush triggers**: Timer (15s) OR row count (50k)
-- **Partition path**: `lake/{spans|logs|metrics}/year=YYYY/month=MM/day=DD/hour=HH/part-<unix>.parquet`
+- **Partition path**: `data/telemetry/parquet/main/{spans|logs|metrics}/tenant=<id>/namespace=<ns>/year=YYYY/month=MM/day=DD/hour=HH/*.parquet`
 - **Retention**: Background pruner removes data older than `RETENTION_DAYS`
 
 ### Query Engine (`internal/query/`)
@@ -516,7 +523,7 @@ flowchart LR
     end
 
     subgraph Storage
-        FS[("lake/reports/")]
+        FS[("data/control/reports/")]
     end
 
     subgraph Output
@@ -535,7 +542,7 @@ flowchart LR
 Report lifecycle:
 1. MCP `render` tool receives sections config
 2. Components render to HTML via registry
-3. Report saved as JSON in `lake/reports/`
+3. Report saved as JSON in `data/control/reports/`
 4. Accessible via `/view/r/:id`
 5. Auto-cleanup after 24h
 
@@ -547,11 +554,12 @@ Environment variables:
 |----------|---------|-------------|
 | `HTTP_ADDR` | `:7520` | HTTP server address |
 | `OTLP_GRPC_ADDR` | `:4317` | OTLP gRPC address |
-| `LAKE_DIR` | `./lake` | DuckLake storage directory |
+| `DATA_DIR` | `./data` | Storage root for telemetry, query cache, and control data |
 | `FLUSH_SECONDS` | `15` | Batch flush interval |
 | `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
 | `ROLLUP_EVERY` | `60` | Rollup refresh interval (seconds) |
-| `API_TOKEN` | - | Bearer auth token (optional) |
+| `JWT_SECRET` | - | HS256 signing key for access tokens |
+| `JWT_REFRESH_SECRET` | - | HS256 signing key for refresh tokens |
 | `MCP_ENABLED` | `true` | Enable MCP server at /mcp |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace for services |
@@ -561,7 +569,7 @@ Environment variables:
 
 - **Tenant isolation**: `x-tenant-id` gRPC header stored in Parquet
 - **Query filtering**: Tenant ID applied at query time
-- **API auth**: Optional bearer token via `API_TOKEN`
+- **API auth**: User access tokens and per-user API keys
 - **Rate limiting**: Configurable via `RATE_LIMIT_RPS`
 
 ## Performance Characteristics

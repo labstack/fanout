@@ -318,65 +318,28 @@ func (s *Service) Compare(ctx context.Context, services []string, window int, na
 	}
 	namespace, tenantID = s.defaults(namespace, tenantID)
 
-	placeholders := makePlaceholders(len(services))
-	var args []any
-	for _, svc := range services {
-		args = append(args, svc)
-	}
-
-	q := fmt.Sprintf(`
-SELECT
-  service,
-  COUNT(*)::BIGINT as requests,
-  COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate,
-  COALESCE(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY duration_ms), 0) as p50_ms,
-  COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms), 0) as p95_ms
-FROM spans
-WHERE service IN (%s)
-  AND tenant = ?
-  AND (? = '' OR namespace = ?)
-  AND start_time >= now() - INTERVAL %d MINUTE
-GROUP BY service
-ORDER BY requests DESC;
-`, placeholders, window)
-
-	queryArgs := append(args, tenantID, namespace, namespace)
-	rows, err := s.duck.DB.QueryContext(ctx, q, queryArgs...)
+	metrics, err := s.compareServicesRollup(ctx, services, window, namespace, tenantID)
 	if err != nil {
 		slog.Warn("query failed", "method", "Compare", "err", err)
 		return &CompareResult{}, nil
 	}
-	defer rows.Close()
 
-	var metrics []CompareService
-	for rows.Next() {
-		var m CompareService
-		if err := rows.Scan(&m.Name, &m.Requests, &m.ErrorRate, &m.P50Ms, &m.P95Ms); err != nil {
-			slog.Warn("scan failed", "method", "Compare", "err", err)
-			continue
-		}
-		m.ErrorCount = int64(float64(m.Requests) * m.ErrorRate)
-		metrics = append(metrics, m)
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("iteration error", "method", "Compare", "err", err)
-	}
-
-	// Add empty entries for services with no data
-	found := make(map[string]bool)
+	compareMetrics := make([]CompareService, 0, len(metrics))
 	for _, m := range metrics {
-		found[m.Name] = true
-	}
-	for _, svc := range services {
-		if !found[svc] {
-			metrics = append(metrics, CompareService{Name: svc})
-		}
+		compareMetrics = append(compareMetrics, CompareService{
+			Name:       m.Service,
+			Requests:   m.Requests,
+			ErrorRate:  m.ErrorRate,
+			P50Ms:      m.P50Ms,
+			P95Ms:      m.P95Ms,
+			ErrorCount: m.ErrorCount,
+		})
 	}
 
 	// Determine winner
 	winner := ""
 	bestScore := float64(-1)
-	for _, m := range metrics {
+	for _, m := range compareMetrics {
 		if m.Requests == 0 {
 			continue
 		}
@@ -387,13 +350,13 @@ ORDER BY requests DESC;
 		}
 	}
 
-	summary := fmt.Sprintf("Compared %d services over %d minutes.", len(metrics), window)
+	summary := fmt.Sprintf("Compared %d services over %d minutes.", len(compareMetrics), window)
 	if winner != "" {
 		summary += fmt.Sprintf(" %s has best performance.", winner)
 	}
 
 	return &CompareResult{
-		Services: metrics,
+		Services: compareMetrics,
 		Winner:   winner,
 		Summary:  summary,
 	}, nil

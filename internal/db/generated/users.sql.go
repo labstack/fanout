@@ -24,7 +24,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, email, name, role, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
-RETURNING id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at
+RETURNING id, email, name, role, active, "key", logged_in_at, created_at, updated_at
 `
 
 type CreateUserParams struct {
@@ -52,7 +52,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Name,
 		&i.Role,
 		&i.Active,
-		&i.KeyHash,
+		&i.Key,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -69,7 +69,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id string) (sql.Result, error)
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at FROM users WHERE email = ?
+SELECT id, email, name, role, active, "key", logged_in_at, created_at, updated_at FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -81,7 +81,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Name,
 		&i.Role,
 		&i.Active,
-		&i.KeyHash,
+		&i.Key,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -90,7 +90,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at FROM users WHERE id = ?
+SELECT id, email, name, role, active, "key", logged_in_at, created_at, updated_at FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -102,7 +102,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.Name,
 		&i.Role,
 		&i.Active,
-		&i.KeyHash,
+		&i.Key,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -110,12 +110,12 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 	return i, err
 }
 
-const getUserByKeyHash = `-- name: GetUserByKeyHash :one
-SELECT id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at FROM users WHERE key_hash = ?
+const getUserByKey = `-- name: GetUserByKey :one
+SELECT id, email, name, role, active, "key", logged_in_at, created_at, updated_at FROM users WHERE key = ?
 `
 
-func (q *Queries) GetUserByKeyHash(ctx context.Context, keyHash sql.NullString) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByKeyHash, keyHash)
+func (q *Queries) GetUserByKey(ctx context.Context, key sql.NullString) (User, error) {
+	row := q.db.QueryRowContext(ctx, getUserByKey, key)
 	var i User
 	err := row.Scan(
 		&i.ID,
@@ -123,7 +123,7 @@ func (q *Queries) GetUserByKeyHash(ctx context.Context, keyHash sql.NullString) 
 		&i.Name,
 		&i.Role,
 		&i.Active,
-		&i.KeyHash,
+		&i.Key,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -132,7 +132,7 @@ func (q *Queries) GetUserByKeyHash(ctx context.Context, keyHash sql.NullString) 
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at FROM users ORDER BY created_at DESC
+SELECT id, email, name, role, active, "key", logged_in_at, created_at, updated_at FROM users ORDER BY created_at DESC
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -150,7 +150,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.Name,
 			&i.Role,
 			&i.Active,
-			&i.KeyHash,
+			&i.Key,
 			&i.LoggedInAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -169,7 +169,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 }
 
 const revokeAPIKey = `-- name: RevokeAPIKey :exec
-UPDATE users SET key_hash = NULL, updated_at = ? WHERE id = ?
+UPDATE users SET key = NULL, updated_at = ? WHERE id = ?
 `
 
 type RevokeAPIKeyParams struct {
@@ -183,17 +183,17 @@ func (q *Queries) RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) erro
 }
 
 const setAPIKeyHash = `-- name: SetAPIKeyHash :exec
-UPDATE users SET key_hash = ?, updated_at = ? WHERE id = ?
+UPDATE users SET key = ?, updated_at = ? WHERE id = ?
 `
 
 type SetAPIKeyHashParams struct {
-	KeyHash   sql.NullString `json:"key_hash"`
+	Key       sql.NullString `json:"key"`
 	UpdatedAt string         `json:"updated_at"`
 	ID        string         `json:"id"`
 }
 
 func (q *Queries) SetAPIKeyHash(ctx context.Context, arg SetAPIKeyHashParams) error {
-	_, err := q.db.ExecContext(ctx, setAPIKeyHash, arg.KeyHash, arg.UpdatedAt, arg.ID)
+	_, err := q.db.ExecContext(ctx, setAPIKeyHash, arg.Key, arg.UpdatedAt, arg.ID)
 	return err
 }
 
@@ -215,7 +215,7 @@ func (q *Queries) TouchLogin(ctx context.Context, arg TouchLoginParams) error {
 const updateUser = `-- name: UpdateUser :one
 UPDATE users SET email = ?, name = ?, role = ?, active = ?, updated_at = ?
 WHERE id = ?
-RETURNING id, email, name, role, active, key_hash, logged_in_at, created_at, updated_at
+RETURNING id, email, name, role, active, "key", logged_in_at, created_at, updated_at
 `
 
 type UpdateUserParams struct {
@@ -243,7 +243,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Name,
 		&i.Role,
 		&i.Active,
-		&i.KeyHash,
+		&i.Key,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,

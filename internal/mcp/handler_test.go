@@ -27,7 +27,7 @@ func newTestServer(t *testing.T) (*Server, sqlmock.Sqlmock) {
 	t.Cleanup(func() { db.Close() })
 
 	cfg := config.Config{
-		LakeDir:   "lake",
+		DataDir:   "data",
 		DefaultNS: "default",
 		TenantID:  uuid.MustParse("00000000-0000-0000-0000-000000000000"),
 	}

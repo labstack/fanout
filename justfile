@@ -26,7 +26,11 @@ up:
 
 # Stop dev environment
 down:
-    process-compose down --unix-socket {{sock}}
+    @if [ -S "{{sock}}" ]; then \
+        process-compose down --unix-socket {{sock}}; \
+    else \
+        echo "process-compose already down (socket {{sock}} missing)"; \
+    fi
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
@@ -44,11 +48,12 @@ gen:
 
 # Create a new Atlas migration from schema changes
 migrate-diff NAME:
+    mkdir -p data/control
     cd internal/db && atlas migrate diff {{NAME}} --env local
-    cp internal/db/migrations/*.sql internal/store/migrations/
 
 # Apply migrations (for development — production uses auto-apply on boot)
 migrate-apply:
+    mkdir -p data/control
     cd internal/db && atlas migrate apply --env local
 
 # Build docker image
@@ -119,9 +124,9 @@ deploy *ARGS='':
 deploy-demo *ARGS='':
     ./demo/yeet.sh {{ARGS}}
 
-# Clean build artifacts (--all also removes lake/)
+# Clean build artifacts (--all also removes data/)
 clean *ARGS='':
     rm -f {{bin}} coverage.out coverage.html
     rm -rf tmp/
     find internal/web/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
-    {{ if ARGS == "--all" { "rm -rf lake/" } else { "" } }}
+    {{ if ARGS == "--all" { "rm -rf data/" } else { "" } }}

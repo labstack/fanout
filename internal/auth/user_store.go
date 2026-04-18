@@ -32,12 +32,13 @@ type User struct {
 
 // UserStore provides CRUD operations for users.
 type UserStore struct {
-	q *generated.Queries
+	db *sql.DB
+	q  *generated.Queries
 }
 
 // NewUserStore creates a UserStore backed by the given database connection.
 func NewUserStore(db *sql.DB) *UserStore {
-	return &UserStore{q: generated.New(db)}
+	return &UserStore{db: db, q: generated.New(db)}
 }
 
 // toUser converts a generated.User to the domain User type.
@@ -48,7 +49,7 @@ func toUser(u generated.User) User {
 		Name:       u.Name.String,
 		Role:       u.Role,
 		Active:     u.Active == 1,
-		HasAPIKey:  u.KeyHash.Valid && u.KeyHash.String != "",
+		HasAPIKey:  u.Key.Valid && u.Key.String != "",
 		LoggedInAt: u.LoggedInAt.String,
 		CreatedAt:  u.CreatedAt,
 		UpdatedAt:  u.UpdatedAt,
@@ -57,19 +58,11 @@ func toUser(u generated.User) User {
 
 // Create adds a new user.
 func (s *UserStore) Create(email, name, role string) (User, error) {
-	id, err := uuid.NewV7()
+	params, err := newCreateUserParams(email, name, role)
 	if err != nil {
-		return User{}, fmt.Errorf("auth: generate user id: %w", err)
+		return User{}, err
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
-	u, err := s.q.CreateUser(context.Background(), generated.CreateUserParams{
-		ID:        id.String(),
-		Email:     email,
-		Name:      sql.NullString{String: name, Valid: name != ""},
-		Role:      role,
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
+	u, err := s.q.CreateUser(context.Background(), params)
 	if err != nil {
 		return User{}, fmt.Errorf("auth: create user: %w", err)
 	}
@@ -165,7 +158,11 @@ func (s *UserStore) Delete(id string) error {
 
 // TouchLogin updates the logged_in_at timestamp.
 func (s *UserStore) TouchLogin(id string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
+	return s.TouchLoginAt(id, time.Now().UTC())
+}
+
+func (s *UserStore) TouchLoginAt(id string, at time.Time) error {
+	now := at.UTC().Truncate(TokenTimePrecision).Format(time.RFC3339Nano)
 	return s.q.TouchLogin(context.Background(), generated.TouchLoginParams{
 		LoggedInAt: sql.NullString{String: now, Valid: true},
 		UpdatedAt:  now,
@@ -181,31 +178,49 @@ func (s *UserStore) CountUsers() (int64, error) {
 // CreateFirstAdmin atomically creates the first admin user.
 // Returns ErrSetupComplete if users already exist (race-safe).
 func (s *UserStore) CreateFirstAdmin(email, name string) (User, error) {
-	count, err := s.CountUsers()
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return User{}, fmt.Errorf("auth: open user conn: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return User{}, fmt.Errorf("auth: begin first admin setup: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	q := generated.New(conn)
+	count, err := q.CountUsers(ctx)
 	if err != nil {
 		return User{}, fmt.Errorf("auth: check user count: %w", err)
 	}
 	if count > 0 {
 		return User{}, ErrSetupComplete
 	}
-	return s.Create(email, name, "admin")
+
+	params, err := newCreateUserParams(email, name, "admin")
+	if err != nil {
+		return User{}, err
+	}
+	u, err := q.CreateUser(ctx, params)
+	if err != nil {
+		return User{}, fmt.Errorf("auth: create first admin: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return User{}, fmt.Errorf("auth: commit first admin setup: %w", err)
+	}
+	committed = true
+	return toUser(u), nil
 }
 
 // ErrSetupComplete is returned when setup is attempted but users already exist.
 var ErrSetupComplete = errors.New("setup already complete")
-
-// EnsureAdmin creates the admin user if it doesn't exist.
-func (s *UserStore) EnsureAdmin(email string) error {
-	_, err := s.GetByEmail(email)
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, ErrUserNotFound) {
-		return err
-	}
-	_, err = s.Create(email, "", "admin")
-	return err
-}
 
 // GenerateAPIKey creates a new API key for the user. Returns the plaintext key.
 // The key is stored as a SHA-256 hash in the database.
@@ -214,12 +229,12 @@ func (s *UserStore) GenerateAPIKey(userID string) (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("auth: generate api key: %w", err)
 	}
-	key := "fo_" + hex.EncodeToString(b)
+	key := "mk_" + hex.EncodeToString(b)
 	hash := hashAPIKey(key)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	err := s.q.SetAPIKeyHash(context.Background(), generated.SetAPIKeyHashParams{
-		KeyHash:   sql.NullString{String: hash, Valid: true},
+		Key:       sql.NullString{String: hash, Valid: true},
 		UpdatedAt: now,
 		ID:        userID,
 	})
@@ -241,7 +256,7 @@ func (s *UserStore) RevokeAPIKey(userID string) error {
 // GetByAPIKey looks up a user by their API key (plaintext → hash → lookup).
 func (s *UserStore) GetByAPIKey(key string) (User, error) {
 	hash := hashAPIKey(key)
-	u, err := s.q.GetUserByKeyHash(context.Background(), sql.NullString{String: hash, Valid: true})
+	u, err := s.q.GetUserByKey(context.Background(), sql.NullString{String: hash, Valid: true})
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
@@ -254,4 +269,20 @@ func (s *UserStore) GetByAPIKey(key string) (User, error) {
 func hashAPIKey(key string) string {
 	h := sha256.Sum256([]byte(key))
 	return hex.EncodeToString(h[:])
+}
+
+func newCreateUserParams(email, name, role string) (generated.CreateUserParams, error) {
+	id, err := uuid.NewV7()
+	if err != nil {
+		return generated.CreateUserParams{}, fmt.Errorf("auth: generate user id: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	return generated.CreateUserParams{
+		ID:        id.String(),
+		Email:     email,
+		Name:      sql.NullString{String: name, Valid: name != ""},
+		Role:      role,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}, nil
 }

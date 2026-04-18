@@ -32,8 +32,8 @@ func NewServer(svc *service.Service, duck *query.Duck, cfg config.Config, alerts
 		Version: "1.0.0",
 	}, nil)
 
-	// Initialize report store with configured lake dir
-	InitReportStore(cfg.LakeDir)
+	// Initialize report store with configured control-dir path.
+	InitReportStore(cfg.ReportsDir())
 
 	s := &Server{
 		mcp:    mcpServer,
@@ -253,7 +253,7 @@ Returns: attributes (key, count, cardinality, samples[]), resource_attributes (k
 	// 10. query — raw SQL with DuckDB views
 	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "query",
-		Description: queryToolDescription(s.cfg.LakeDir),
+		Description: queryToolDescription(s.cfg.DataDir),
 	}, wrap("query", s.query))
 
 	// 11. alert_rules

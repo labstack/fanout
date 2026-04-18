@@ -2,14 +2,12 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
@@ -22,7 +20,6 @@ import (
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip" // Register gzip decompressor
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
@@ -45,8 +42,12 @@ func main() {
 
 	cfg := config.Load()
 
-	if err := os.MkdirAll(cfg.LakeDir, 0o755); err != nil {
-		slog.Error("create lake dir failed", "err", err)
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		slog.Error("create data dir failed", "err", err)
+		os.Exit(1)
+	}
+	if err := os.MkdirAll(cfg.ControlDir(), 0o755); err != nil {
+		slog.Error("create control dir failed", "err", err)
 		os.Exit(1)
 	}
 
@@ -87,7 +88,7 @@ func main() {
 	go detector.Run(ctx)
 
 	// Open SQLite for application state
-	sqlite, err := store.NewSQLite(filepath.Join(cfg.LakeDir, "fanout.sqlite"))
+	sqlite, err := store.NewSQLite(cfg.ControlSQLitePath())
 	if err != nil {
 		slog.Error("sqlite init failed", "err", err)
 		os.Exit(1)
@@ -114,12 +115,17 @@ func main() {
 		slog.Error("listen gRPC failed", "err", err)
 		os.Exit(1)
 	}
-	grpcSrv := grpc.NewServer()
+	grpcOpts, err := ingest.GRPCServerOptions(cfg)
+	if err != nil {
+		slog.Error("OTLP gRPC TLS init failed", "err", err)
+		os.Exit(1)
+	}
+	grpcSrv := grpc.NewServer(grpcOpts...)
 	ing := ingest.NewServer(cfg, chSpans, chLogs, chMetrics)
 	ingest.RegisterOTLP(grpcSrv, ing)
 
 	go func() {
-		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr)
+		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr, "mtls", cfg.OTLPMTLSEnabled())
 		if err := grpcSrv.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
 			errCh <- fmt.Errorf("gRPC server: %w", err)
 		}
@@ -146,93 +152,10 @@ func main() {
 		},
 	}))
 
-	// Resolve JWT secret (always needed for auth)
 	jwtSecret := cfg.JWTSecret
-	if jwtSecret == "" {
-		var err error
-		jwtSecret, err = auth.GenerateSecret()
-		if err != nil {
-			slog.Error("failed to generate JWT secret", "err", err)
-			os.Exit(1)
-		}
-		slog.Warn("JWT_SECRET not set — generated ephemeral secret (sessions won't survive restart)")
-	}
-
-	// User store always available (auth always works, SMTP optional)
+	refreshSecret := cfg.JWTRefreshSecret
 	userStore := auth.NewUserStore(sqlite.DB)
-
-	// Auth middleware — supports JWT, per-user API keys, and legacy API_TOKEN.
-	// Auth is enforced when API_TOKEN is set or users exist in the database.
-	// On a fresh install with no users, all endpoints are open until setup.
-	apiToken := strings.TrimSpace(cfg.APIToken)
-	{
-		tokenBytes := []byte(apiToken)
-		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
-			return func(c *echo.Context) error {
-				path := c.Request().URL.Path
-
-				// Skip auth for public endpoints. /api/auth/* is exempt EXCEPT /api/auth/me.
-				isPublicAuth := strings.HasPrefix(path, "/api/auth/") &&
-					path != "/api/auth/me" &&
-					!strings.HasPrefix(path, "/api/auth/api-key")
-				if path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
-					path == "/favicon.ico" || path == "/favicon.svg" ||
-					isPublicAuth ||
-					(!strings.HasPrefix(path, "/api/") && path != "/mcp") {
-					return next(c)
-				}
-
-				// If no users exist (fresh install), only allow setup + status endpoints.
-				// All other API calls blocked until admin creates an account.
-				if apiToken == "" {
-					count, err := userStore.CountUsers()
-					if err != nil {
-						slog.Error("auth: count users failed", "err", err)
-						return echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
-					}
-					if count == 0 {
-						return echo.NewHTTPError(http.StatusUnauthorized, "setup required")
-					}
-				}
-
-				authHeader := c.Request().Header.Get("Authorization")
-				if !strings.HasPrefix(authHeader, "Bearer ") {
-					return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-				}
-				bearer := strings.TrimPrefix(authHeader, "Bearer ")
-
-				// Try legacy API_TOKEN (constant-time compare)
-				if apiToken != "" && subtle.ConstantTimeCompare([]byte(bearer), tokenBytes) == 1 {
-					return next(c)
-				}
-
-				// Try JWT access token
-				if jwtSecret != "" {
-					claims, err := auth.VerifyAccess(jwtSecret, bearer)
-					if err == nil {
-						c.Set("auth_claims", claims)
-						return next(c)
-					}
-				}
-
-				// Try per-user API key (fo_...)
-				if userStore != nil && strings.HasPrefix(bearer, "fo_") {
-					user, err := userStore.GetByAPIKey(bearer)
-					if err == nil && user.Active {
-						c.Set("auth_claims", &auth.Claims{
-							RegisteredClaims: jwt.RegisteredClaims{Subject: user.ID},
-							Email:            user.Email,
-							Role:             user.Role,
-							TokenType:        "access",
-						})
-						return next(c)
-					}
-				}
-
-				return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-			}
-		})
-	}
+	api.RegisterAuthMiddleware(e, userStore, jwtSecret)
 
 	// Health checks (liveness + readiness)
 	api.RegisterHealthRoutes(e, q, cfg)
@@ -247,41 +170,28 @@ func main() {
 	mcpServer := mcp.NewServer(svc, q, cfg, alertEngine)
 	go mcp.RunCleanup(ctx)
 
-	// AI orchestrator (optional — needs API key)
-	var orch *ai.Orchestrator
-	var sseHandler *ai.SSEHandler
-	var aiTools *ai.ToolRegistry
-
-	if cfg.AIAPIKey != "" {
-		var provider ai.Provider
-		switch cfg.AIProvider {
-		case "openai":
-			provider = ai.NewOpenAIProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
-			slog.Info("AI provider: OpenAI", "model", cfg.AIModel)
-		case "anthropic", "":
-			provider = ai.NewAnthropicProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
-			slog.Info("AI provider: Anthropic", "model", cfg.AIModel)
-		default:
-			slog.Error("unsupported AI_PROVIDER", "value", cfg.AIProvider, "supported", "anthropic, openai")
-			os.Exit(1)
-		}
-
-		var err error
-		aiTools, err = ai.NewToolRegistry(ctx, mcpServer.MCP(), svc, cfg)
-		if err != nil {
-			slog.Error("AI tool registry init failed", "err", err)
-			os.Exit(1)
-		}
-		orch = ai.NewOrchestrator(provider, aiTools, svc, cfg)
-		sseHandler = ai.NewSSEHandler(ctx, orch)
-		if cfg.APIToken == "" {
-			slog.Warn("AI chat enabled without API_TOKEN — chat endpoint is unauthenticated")
-		}
-	} else {
-		slog.Warn("AI_API_KEY not set — chat disabled, ingest + health active")
+	var provider ai.Provider
+	switch cfg.AIProvider {
+	case "openai":
+		provider = ai.NewOpenAIProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
+		slog.Info("AI provider: OpenAI", "model", cfg.AIModel)
+	case "anthropic", "":
+		provider = ai.NewAnthropicProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
+		slog.Info("AI provider: Anthropic", "model", cfg.AIModel)
+	default:
+		slog.Error("unsupported AI_PROVIDER", "value", cfg.AIProvider, "supported", "anthropic, openai")
+		os.Exit(1)
 	}
 
-	bookmarks, err := ai.NewBookmarkStore(cfg.LakeDir)
+	aiTools, err := ai.NewToolRegistry(ctx, mcpServer.MCP(), svc, cfg)
+	if err != nil {
+		slog.Error("AI tool registry init failed", "err", err)
+		os.Exit(1)
+	}
+	orch := ai.NewOrchestrator(provider, aiTools, svc, cfg)
+	sseHandler := ai.NewSSEHandler(ctx, orch)
+
+	bookmarks, err := ai.NewBookmarkStore(cfg.BookmarksDir())
 	if err != nil {
 		slog.Error("bookmarks init failed", "err", err)
 		os.Exit(1)
@@ -293,7 +203,7 @@ func main() {
 	// Alert management REST endpoints
 	api.RegisterAlertRoutes(e, alertStore, alertEngine)
 
-	// Auth routes (always registered — SMTP optional for email code flow)
+	// Auth routes (web-only setup + email-code login)
 	smtpCfg := auth.SMTPConfig{
 		Host: cfg.SMTPHost,
 		Port: cfg.SMTPPort,
@@ -302,9 +212,9 @@ func main() {
 		From: cfg.SMTPFrom,
 	}
 	codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
-	api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, smtpCfg, cfg.SMTPConfigured())
+	api.RegisterAuthRoutes(e, userStore, codeStore, cfg.SetupToken, jwtSecret, refreshSecret, smtpCfg)
 	api.RegisterUserRoutes(e, userStore, smtpCfg)
-	slog.Info("auth enabled", "smtp", cfg.SMTPConfigured())
+	slog.Info("auth enabled")
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled
 	if cfg.MCPEnabled {

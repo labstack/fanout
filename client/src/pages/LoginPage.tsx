@@ -4,7 +4,7 @@ import { Loader2, Radio } from "lucide-react";
 import { api, setApiToken } from "@/api/client";
 import { useAuth } from "@/hooks/use-auth";
 
-type Step = "loading" | "setup" | "email" | "code" | "no-smtp";
+type Step = "loading" | "setup" | "email" | "code";
 
 export function LoginPage() {
   const { user, isLoading, login } = useAuth();
@@ -14,6 +14,7 @@ export function LoginPage() {
   const [step, setStep] = useState<Step>("loading");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
+  const [setupToken, setSetupToken] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -25,10 +26,8 @@ export function LoginPage() {
         const status = await fetch("/api/auth/status").then((r) => r.json());
         if (status.setup_required) {
           setStep("setup");
-        } else if (status.smtp_configured) {
-          setStep("email");
         } else {
-          setStep("no-smtp");
+          setStep("email");
         }
       } catch {
         setStep("email");
@@ -55,12 +54,13 @@ export function LoginPage() {
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           name: name.trim(),
+          setup_token: setupToken.trim(),
         }),
       });
 
       if (!result.ok) {
         const body = await result.json().catch(() => ({ detail: "Setup failed" }));
-        setError(body.detail || "Setup failed");
+        setError(body.detail || body.message || "Setup failed");
         setSending(false);
         return;
       }
@@ -81,16 +81,12 @@ export function LoginPage() {
     setError(null);
 
     try {
-      const result = await api<{ code_sent: boolean; reason?: string }>("/api/auth/start", {
+      const result = await api<{ code_sent: boolean }>("/api/auth/start", {
         method: "POST",
         body: JSON.stringify({ email: email.trim().toLowerCase() }),
       });
       if (result.code_sent) {
         setStep("code");
-      } else if (result.reason === "no_account") {
-        setError("No account found. Ask your admin for an invitation.");
-      } else if (result.reason === "inactive") {
-        setError("Your account has been deactivated. Contact your admin.");
       } else {
         setError("Unable to send verification code.");
       }
@@ -117,7 +113,7 @@ export function LoginPage() {
 
       if (!result.ok) {
         const body = await result.json().catch(() => ({ detail: "Invalid code" }));
-        setError(body.detail || "Invalid or expired code");
+        setError(body.detail || body.message || "Invalid or expired code");
         setSending(false);
         return;
       }
@@ -151,10 +147,9 @@ export function LoginPage() {
             Fanout
           </h1>
           <p className="text-sm text-muted-foreground">
-            {step === "setup" && "Create your admin account"}
+            {step === "setup" && "Create your admin account with the setup token"}
             {step === "email" && "Sign in to your account"}
             {step === "code" && `Enter the code sent to ${email}`}
-            {step === "no-smtp" && "Sign in to continue"}
           </p>
         </div>
 
@@ -191,9 +186,21 @@ export function LoginPage() {
                 className="input-field"
               />
             </div>
+            <div>
+              <label className="detail-label mb-2 block">Setup token</label>
+              <input
+                type="password"
+                value={setupToken}
+                onChange={(e) => setSetupToken(e.target.value)}
+                placeholder="Paste your setup token"
+                className="input-field"
+                autoComplete="one-time-code"
+                required
+              />
+            </div>
             <button
               type="submit"
-              disabled={sending || !email.trim()}
+              disabled={sending || !email.trim() || !setupToken.trim()}
               className="btn-primary w-full disabled:opacity-50"
             >
               {sending ? (
@@ -288,18 +295,6 @@ export function LoginPage() {
               Use a different email
             </button>
           </form>
-        )}
-
-        {/* No SMTP — admin can only restore session via refresh token */}
-        {step === "no-smtp" && (
-          <div className="space-y-4 text-center">
-            <div className="rounded-lg border border-border/60 bg-surface-1/80 px-4 py-4 text-sm text-muted-foreground">
-              <p>Email login requires SMTP configuration.</p>
-              <p className="mt-2 text-[11px] mono text-muted-foreground/60">
-                Set SMTP_HOST, SMTP_USER, SMTP_PASS to enable email codes.
-              </p>
-            </div>
-          </div>
         )}
       </div>
     </div>

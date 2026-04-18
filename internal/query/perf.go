@@ -11,8 +11,10 @@ import (
 )
 
 // ParquetGlob returns a DuckDB-ready file list or glob for parquet files.
-// Empty namespace searches all namespaces via wildcard.
-func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) string {
+// parquetRoot should point at the DuckLake DATA_PATH directory
+// (for example data/telemetry/parquet). Empty namespace searches all
+// namespaces via wildcard.
+func ParquetGlob(parquetRoot, signal, tenant, namespace string, windowMinutes int) string {
 	if namespace == "" {
 		namespace = "*"
 	}
@@ -23,8 +25,8 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 
 	if windowMinutes > 1440 {
 		for t := start.Truncate(24 * time.Hour); !t.After(now.Truncate(24 * time.Hour)); t = t.Add(24 * time.Hour) {
-			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
-				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
+			dayBase := fmt.Sprintf("%s/main/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
+				parquetRoot, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
 			matches, _ := filepath.Glob(filepath.Join(dayBase, "hour=*/*.parquet"))
 			for _, m := range matches {
 				filesSet[m] = struct{}{}
@@ -33,8 +35,8 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 	} else {
 		seenDays := make(map[string]struct{})
 		for t := start.Truncate(time.Hour); !t.After(now.Truncate(time.Hour)); t = t.Add(time.Hour) {
-			dayBase := fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
-				lakeDir, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
+			dayBase := fmt.Sprintf("%s/main/%s/tenant=%s/namespace=%s/year=%d/month=%02d/day=%02d",
+				parquetRoot, signal, tenant, namespace, t.Year(), t.Month(), t.Day())
 			matches, _ := filepath.Glob(filepath.Join(dayBase, fmt.Sprintf("hour=%02d/*.parquet", t.Hour())))
 			for _, m := range matches {
 				filesSet[m] = struct{}{}
@@ -51,8 +53,8 @@ func ParquetGlob(lakeDir, signal, tenant, namespace string, windowMinutes int) s
 	}
 
 	if len(filesSet) == 0 {
-		return sqlQuote(fmt.Sprintf("%s/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/*.parquet",
-			lakeDir, signal, tenant, namespace))
+		return sqlQuote(fmt.Sprintf("%s/main/%s/tenant=%s/namespace=%s/year=*/month=*/day=*/hour=*/*.parquet",
+			parquetRoot, signal, tenant, namespace))
 	}
 
 	files := make([]string, 0, len(filesSet))

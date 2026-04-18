@@ -8,7 +8,26 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/labstack/fanout/internal/query"
 )
+
+type homeSnapshot struct {
+	Summary    HomeSummary
+	Rows       []homeSnapshotRow
+	Sparklines map[string][]float64
+	TopErrors  map[string][]HomeTopError
+}
+
+type homeSnapshotRow struct {
+	Name      string
+	Spans     int64
+	ErrorRate float64
+	P95Ms     float64
+	TrafficPM float64
+	Health    string
+	Score     float64
+}
 
 // Home assembles all data for the deterministic Home triage page.
 // It queries rollup data, builds sparklines, fetches top errors for unhealthy
@@ -19,6 +38,22 @@ func (s *Service) Home(ctx context.Context, window int, namespace, tenantID stri
 	}
 
 	namespace, tenantID = s.defaults(namespace, tenantID)
+
+	snapshot, err := s.homeSnapshot(ctx, window, namespace, tenantID)
+	if err != nil {
+		return nil, err
+	}
+
+	return buildHomeResult(snapshot, tracker, time.Now()), nil
+}
+
+func (s *Service) homeSnapshot(ctx context.Context, window int, namespace, tenantID string) (*homeSnapshot, error) {
+	cacheKey := fmt.Sprintf("home:%d:%s:%s", window, namespace, tenantID)
+	if v, ok := query.GetCached(cacheKey); ok {
+		if snapshot, ok := v.(*homeSnapshot); ok {
+			return snapshot, nil
+		}
+	}
 
 	// Query per-service aggregates from service_rollup.
 	// Order by health severity first so unhealthy/degraded services are never
@@ -90,29 +125,17 @@ LIMIT 200;
 
 	// Return empty result if no services found.
 	if len(svcs) == 0 {
-		return &HomeResult{
-			Incidents: []HomeIncident{},
-			Services:  []HomeService{},
-			Alerts:    []HomeAlert{},
-		}, nil
-	}
-
-	// Feed each service into the incident tracker.
-	now := time.Now()
-	if tracker != nil {
-		for _, r := range svcs {
-			tracker.Tick(r.name, r.health, r.errorRate, r.p95, now)
+		snapshot := &homeSnapshot{
+			Summary:    HomeSummary{},
+			Rows:       []homeSnapshotRow{},
+			Sparklines: map[string][]float64{},
+			TopErrors:  map[string][]HomeTopError{},
 		}
+		query.SetCached(cacheKey, snapshot)
+		return snapshot, nil
 	}
 
-	// Collect incident states from tracker.
 	var incidentSvcNames []string
-	incidentMap := make(map[string]Incident)
-	if tracker != nil {
-		for _, inc := range tracker.Incidents() {
-			incidentMap[inc.Service] = inc
-		}
-	}
 
 	// Query sparklines for all services.
 	allSvcNames := make([]string, 0, len(svcs))
@@ -172,71 +195,26 @@ LIMIT 200;
 		summary.P95Ms = weightedP95 / float64(totalSpans)
 	}
 
-	// Build incidents and healthy services lists.
-	var incidents []HomeIncident
-	var healthyServices []HomeService
-
+	snapshot := &homeSnapshot{
+		Summary:    summary,
+		Rows:       make([]homeSnapshotRow, 0, len(svcs)),
+		Sparklines: sparklines,
+		TopErrors:  topErrors,
+	}
 	for _, r := range svcs {
-		errKey := r.name + "_err"
-		trafficKey := r.name + "_traffic"
-		trafficPerMin := float64(r.spans) / float64(window)
-
-		if r.health == "degraded" || r.health == "unhealthy" {
-			inc := HomeIncident{
-				Service:          r.name,
-				Health:           r.health,
-				HealthScore:      r.score,
-				ErrorRate:        r.errorRate,
-				P95Ms:            r.p95,
-				TrafficPerMin:    trafficPerMin,
-				Lifecycle:        "open",
-				SparklineErrRate: sparklines[errKey],
-				TopErrors:        topErrors[r.name],
-				Related:          []string{},
-			}
-
-			// Enrich with tracker incident state if available.
-			if tracked, ok := incidentMap[r.name]; ok {
-				inc.Lifecycle = tracked.Lifecycle
-				if !tracked.StartedAt.IsZero() {
-					inc.StartedAt = tracked.StartedAt.UTC().Format(time.RFC3339)
-				}
-			}
-
-			if inc.SparklineErrRate == nil {
-				inc.SparklineErrRate = []float64{}
-			}
-			if inc.TopErrors == nil {
-				inc.TopErrors = []HomeTopError{}
-			}
-
-			incidents = append(incidents, inc)
-		} else {
-			hsvc := HomeService{
-				Name:             r.name,
-				Health:           r.health,
-				HealthScore:      r.score,
-				TrafficPerMin:    trafficPerMin,
-				ErrorRate:        r.errorRate,
-				P95Ms:            r.p95,
-				SparklineTraffic: sparklines[trafficKey],
-			}
-			if hsvc.SparklineTraffic == nil {
-				hsvc.SparklineTraffic = []float64{}
-			}
-			healthyServices = append(healthyServices, hsvc)
-		}
+		snapshot.Rows = append(snapshot.Rows, homeSnapshotRow{
+			Name:      r.name,
+			Spans:     r.spans,
+			ErrorRate: r.errorRate,
+			P95Ms:     r.p95,
+			TrafficPM: float64(r.spans) / float64(window),
+			Health:    r.health,
+			Score:     r.score,
+		})
 	}
 
-	// Sort incidents by health score ascending (worst first).
-	sortIncidents(incidents)
-
-	return &HomeResult{
-		Summary:   summary,
-		Incidents: incidents,
-		Services:  healthyServices,
-		Alerts:    []HomeAlert{},
-	}, nil
+	query.SetCached(cacheKey, snapshot)
+	return snapshot, nil
 }
 
 // homeSparklines queries per-minute rollup buckets for the specified services.
@@ -378,4 +356,101 @@ func sortIncidents(incidents []HomeIncident) {
 	sort.Slice(incidents, func(i, j int) bool {
 		return incidents[i].HealthScore < incidents[j].HealthScore
 	})
+}
+
+func buildHomeResult(snapshot *homeSnapshot, tracker *IncidentTracker, now time.Time) *HomeResult {
+	if snapshot == nil {
+		return &HomeResult{
+			Incidents: []HomeIncident{},
+			Services:  []HomeService{},
+			Alerts:    []HomeAlert{},
+		}
+	}
+
+	if tracker != nil {
+		for _, r := range snapshot.Rows {
+			tracker.Tick(r.Name, r.Health, r.ErrorRate, r.P95Ms, now)
+		}
+	}
+
+	incidentMap := make(map[string]Incident)
+	if tracker != nil {
+		for _, inc := range tracker.Incidents() {
+			incidentMap[inc.Service] = inc
+		}
+	}
+
+	incidents := make([]HomeIncident, 0, len(snapshot.Rows))
+	healthyServices := make([]HomeService, 0, len(snapshot.Rows))
+	for _, r := range snapshot.Rows {
+		if r.Health == "degraded" || r.Health == "unhealthy" {
+			inc := HomeIncident{
+				Service:          r.Name,
+				Health:           r.Health,
+				HealthScore:      r.Score,
+				ErrorRate:        r.ErrorRate,
+				P95Ms:            r.P95Ms,
+				TrafficPerMin:    r.TrafficPM,
+				Lifecycle:        "open",
+				SparklineErrRate: cloneFloat64s(snapshot.Sparklines[r.Name+"_err"]),
+				TopErrors:        cloneHomeTopErrors(snapshot.TopErrors[r.Name]),
+				Related:          []string{},
+			}
+			if tracked, ok := incidentMap[r.Name]; ok {
+				inc.Lifecycle = tracked.Lifecycle
+				if !tracked.StartedAt.IsZero() {
+					inc.StartedAt = tracked.StartedAt.UTC().Format(time.RFC3339)
+				}
+			}
+			if inc.SparklineErrRate == nil {
+				inc.SparklineErrRate = []float64{}
+			}
+			if inc.TopErrors == nil {
+				inc.TopErrors = []HomeTopError{}
+			}
+			incidents = append(incidents, inc)
+			continue
+		}
+
+		hsvc := HomeService{
+			Name:             r.Name,
+			Health:           r.Health,
+			HealthScore:      r.Score,
+			TrafficPerMin:    r.TrafficPM,
+			ErrorRate:        r.ErrorRate,
+			P95Ms:            r.P95Ms,
+			SparklineTraffic: cloneFloat64s(snapshot.Sparklines[r.Name+"_traffic"]),
+		}
+		if hsvc.SparklineTraffic == nil {
+			hsvc.SparklineTraffic = []float64{}
+		}
+		healthyServices = append(healthyServices, hsvc)
+	}
+
+	sortIncidents(incidents)
+
+	return &HomeResult{
+		Summary:   snapshot.Summary,
+		Incidents: incidents,
+		Services:  healthyServices,
+		Alerts:    []HomeAlert{},
+	}
+}
+
+func cloneFloat64s(in []float64) []float64 {
+	if in == nil {
+		return nil
+	}
+	out := make([]float64, len(in))
+	copy(out, in)
+	return out
+}
+
+func cloneHomeTopErrors(in []HomeTopError) []HomeTopError {
+	if in == nil {
+		return nil
+	}
+	out := make([]HomeTopError, len(in))
+	copy(out, in)
+	return out
 }

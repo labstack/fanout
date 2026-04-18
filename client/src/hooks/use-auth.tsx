@@ -13,7 +13,6 @@ interface User {
 interface AuthStatus {
   setup_required: boolean;
   auth_enabled: boolean;
-  smtp_configured: boolean;
 }
 
 interface AuthCtx {
@@ -22,7 +21,7 @@ interface AuthCtx {
   isAdmin: boolean;
   isOperator: boolean;
   setupRequired: boolean;
-  login: (accessToken: string) => void;
+  login: (accessToken: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -32,7 +31,7 @@ const AuthContext = createContext<AuthCtx>({
   isAdmin: false,
   isOperator: false,
   setupRequired: false,
-  login: () => {},
+  login: async () => {},
   logout: async () => {},
 });
 

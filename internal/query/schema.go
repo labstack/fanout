@@ -3,15 +3,15 @@ package query
 import "strings"
 
 // GetSchema returns a description of the data schema for MCP/LLM context.
-func GetSchema(lakeDir string) string {
-	return strings.ReplaceAll(schemaTemplate, "{LAKE}", lakeDir)
+func GetSchema(dataDir string) string {
+	return strings.ReplaceAll(schemaTemplate, "{DATA_DIR}", dataDir)
 }
 
 const schemaTemplate = `
 ## Fanout Data Schema
 
 Fanout stores telemetry in DuckLake tables attached under the lake catalog.
-The local metadata catalog and data files live under {LAKE}.
+The local metadata catalog, query cache, and product state live under {DATA_DIR}.
 
 Primary query surfaces:
 - spans view: clean span columns for most queries

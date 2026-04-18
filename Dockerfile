@@ -39,7 +39,7 @@ WORKDIR /var/lib/fanout
 
 EXPOSE 7520 4317
 
-ENV LAKE_DIR=/var/lib/fanout
+ENV DATA_DIR=/var/lib/fanout/data
 ENV HTTP_ADDR=:7520
 ENV OTLP_GRPC_ADDR=:4317
 

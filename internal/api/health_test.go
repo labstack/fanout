@@ -20,7 +20,7 @@ func TestLiveness(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	h := &HealthHandler{cfg: config.Config{LakeDir: os.TempDir()}}
+	h := &HealthHandler{cfg: config.Config{DataDir: os.TempDir()}}
 	err := h.Liveness(c)
 	if err != nil {
 		t.Fatalf("Liveness error: %v", err)
@@ -42,7 +42,7 @@ func TestReadiness_NilDuck(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	h := NewHealthHandler(nil, config.Config{LakeDir: os.TempDir()})
+	h := NewHealthHandler(nil, config.Config{DataDir: os.TempDir()})
 	err := h.Readiness(c)
 	if err != nil {
 		t.Fatalf("Readiness error: %v", err)
@@ -93,7 +93,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"max", "count", "age_seconds"}).AddRow(time.Now().UTC(), 2, int64(30)))
 
 	h := NewHealthHandler(&query.Duck{DB: db}, config.Config{
-		LakeDir:     os.TempDir(),
+		DataDir:     os.TempDir(),
 		RollupEvery: 60,
 	})
 	if err := h.Readiness(c); err != nil {
@@ -112,7 +112,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	if resp.Status != "ready" {
 		t.Fatalf("status = %q, want ready", resp.Status)
 	}
-	for _, key := range []string{"duckdb", "ducklake", "lake", "rollups"} {
+	for _, key := range []string{"duckdb", "ducklake", "data", "rollups"} {
 		if _, ok := resp.Checks[key]; !ok {
 			t.Fatalf("missing %s check", key)
 		}
@@ -130,7 +130,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 
 func TestRegisterHealthRoutes_RegistersAPIHealth(t *testing.T) {
 	e := echo.New()
-	RegisterHealthRoutes(e, nil, config.Config{LakeDir: os.TempDir()})
+	RegisterHealthRoutes(e, nil, config.Config{DataDir: os.TempDir()})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	rec := httptest.NewRecorder()

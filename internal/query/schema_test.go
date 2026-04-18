@@ -12,12 +12,12 @@ func TestGetSchema(t *testing.T) {
 		t.Error("GetSchema() returned empty string")
 	}
 
-	// Verify lake dir substitution
+	// Verify data dir substitution
 	if !strings.Contains(schema, "/var/lib/fanout") {
-		t.Error("GetSchema() did not substitute lake dir")
+		t.Error("GetSchema() did not substitute data dir")
 	}
-	if strings.Contains(schema, "{LAKE}") {
-		t.Error("GetSchema() has unsubstituted {LAKE} placeholder")
+	if strings.Contains(schema, "{DATA_DIR}") {
+		t.Error("GetSchema() has unsubstituted {DATA_DIR} placeholder")
 	}
 
 	// Check for key sections

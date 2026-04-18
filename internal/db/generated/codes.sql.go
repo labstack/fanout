@@ -10,7 +10,7 @@ import (
 )
 
 const cleanupExpiredCodes = `-- name: CleanupExpiredCodes :exec
-DELETE FROM verification_codes WHERE expires_at < ?
+DELETE FROM verifications WHERE expires_at < ?
 `
 
 func (q *Queries) CleanupExpiredCodes(ctx context.Context, expiresAt string) error {
@@ -19,7 +19,7 @@ func (q *Queries) CleanupExpiredCodes(ctx context.Context, expiresAt string) err
 }
 
 const createVerificationCode = `-- name: CreateVerificationCode :exec
-INSERT INTO verification_codes (id, email, code_hash, expires_at)
+INSERT INTO verifications (id, email, code_hash, expires_at)
 VALUES (?, ?, ?, ?)
 `
 
@@ -42,7 +42,7 @@ func (q *Queries) CreateVerificationCode(ctx context.Context, arg CreateVerifica
 
 const getLatestUnusedCode = `-- name: GetLatestUnusedCode :one
 SELECT id, code_hash, attempts, used, expires_at
-FROM verification_codes
+FROM verifications
 WHERE email = ? AND used = 0
 ORDER BY created_at DESC
 LIMIT 1
@@ -70,7 +70,7 @@ func (q *Queries) GetLatestUnusedCode(ctx context.Context, email string) (GetLat
 }
 
 const incrementCodeAttempts = `-- name: IncrementCodeAttempts :exec
-UPDATE verification_codes SET attempts = attempts + 1 WHERE id = ?
+UPDATE verifications SET attempts = attempts + 1 WHERE id = ?
 `
 
 func (q *Queries) IncrementCodeAttempts(ctx context.Context, id string) error {
@@ -79,7 +79,7 @@ func (q *Queries) IncrementCodeAttempts(ctx context.Context, id string) error {
 }
 
 const markCodeUsed = `-- name: MarkCodeUsed :exec
-UPDATE verification_codes SET used = 1 WHERE id = ?
+UPDATE verifications SET used = 1 WHERE id = ?
 `
 
 func (q *Queries) MarkCodeUsed(ctx context.Context, id string) error {

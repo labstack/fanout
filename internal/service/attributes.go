@@ -117,36 +117,53 @@ func (s *Service) attributesFromColumns(ctx context.Context, p AttributeParams) 
 	}
 	where := "WHERE " + strings.Join(clauses, " AND ")
 
-	// Get total row count
-	countQ := fmt.Sprintf("SELECT COUNT(*) FROM spans %s", where)
-	var totalRows int64
-	if err := s.duck.DB.QueryRowContext(ctx, countQ, args...).Scan(&totalRows); err != nil {
-		slog.Warn("attributes count query failed", "err", err)
-	}
-	out.TotalRows = totalRows
-
-	// Discover span attributes via UNPIVOT on pre-extracted columns.
-	// Build column list for UNPIVOT.
 	var cols []string
-	colToKey := map[string]string{}
+	colMeta := map[string]struct {
+		key        string
+		isResource bool
+	}{}
 	for _, c := range spanAttrColumns {
 		cols = append(cols, c.Column)
-		colToKey[c.Column] = c.Key
+		colMeta[c.Column] = struct {
+			key        string
+			isResource bool
+		}{key: c.Key}
+	}
+	for _, c := range spanResourceColumns {
+		cols = append(cols, c.Column)
+		colMeta[c.Column] = struct {
+			key        string
+			isResource bool
+		}{key: c.Key, isResource: true}
 	}
 
 	q := fmt.Sprintf(`
 WITH data AS (
-  SELECT %s FROM spans %s
+  SELECT COUNT(*) OVER () AS total_rows, %s FROM spans %s
+),
+stats AS (
+  SELECT key,
+         COUNT(*) AS count,
+         COUNT(DISTINCT val) AS cardinality,
+         to_json(list_slice(list(DISTINCT val), 1, 5))::VARCHAR AS samples,
+         MAX(total_rows)::BIGINT AS total_rows
+  FROM (UNPIVOT data ON %s INTO NAME key VALUE val)
+  WHERE val IS NOT NULL AND val != ''
+  GROUP BY key
+),
+total AS (
+  SELECT COALESCE(MAX(total_rows), 0)::BIGINT AS total_rows FROM data
+),
+combined AS (
+  SELECT key, count, cardinality, samples, total_rows FROM stats
+  UNION ALL
+  SELECT '__total_rows__' AS key, 0::BIGINT AS count, 0::BIGINT AS cardinality, '[]'::VARCHAR AS samples, total_rows
+  FROM total
 )
-SELECT key, COUNT(*) AS count,
-       COUNT(DISTINCT val) AS cardinality,
-       to_json(list_slice(list(DISTINCT val), 1, 5))::VARCHAR AS samples
-FROM (UNPIVOT data ON %s INTO NAME key VALUE val)
-WHERE val IS NOT NULL AND val != ''
-GROUP BY key
+SELECT key, count, cardinality, samples, total_rows
+FROM combined
 ORDER BY count DESC`,
-		strings.Join(cols, ", "), where,
-		strings.Join(cols, ", "))
+		strings.Join(cols, ", "), where, strings.Join(cols, ", "))
 
 	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -155,16 +172,25 @@ ORDER BY count DESC`,
 	defer rows.Close()
 
 	for rows.Next() {
+		var rawKey string
 		var info AttributeInfo
 		var samplesJSON sql.NullString
-		if err := rows.Scan(&info.Key, &info.Count, &info.Cardinality, &samplesJSON); err != nil {
+		var totalRows int64
+		if err := rows.Scan(&rawKey, &info.Count, &info.Cardinality, &samplesJSON, &totalRows); err != nil {
 			slog.Warn("attributes scan failed", "err", err)
 			continue
 		}
-		// Map column name back to OTel key
-		if otelKey, ok := colToKey[info.Key]; ok {
-			info.Key = otelKey
+		if totalRows > out.TotalRows {
+			out.TotalRows = totalRows
 		}
+		if rawKey == "__total_rows__" {
+			continue
+		}
+		meta, ok := colMeta[rawKey]
+		if !ok {
+			continue
+		}
+		info.Key = meta.key
 		info.DiscoveryMethod = "column"
 		if samplesJSON.Valid {
 			if err := json.Unmarshal([]byte(samplesJSON.String), &info.Samples); err != nil {
@@ -174,64 +200,14 @@ ORDER BY count DESC`,
 		if info.Samples == nil {
 			info.Samples = []string{}
 		}
-		out.Attributes = append(out.Attributes, info)
+		if meta.isResource {
+			out.ResourceAttributes = append(out.ResourceAttributes, info)
+		} else {
+			out.Attributes = append(out.Attributes, info)
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return out, fmt.Errorf("attributes iteration: %w", err)
-	}
-
-	// Discover resource attributes from pre-extracted columns
-	var resCols []string
-	resColToKey := map[string]string{}
-	for _, c := range spanResourceColumns {
-		resCols = append(resCols, c.Column)
-		resColToKey[c.Column] = c.Key
-	}
-
-	resQ := fmt.Sprintf(`
-WITH data AS (
-  SELECT %s FROM spans %s
-)
-SELECT key, COUNT(*) AS count,
-       COUNT(DISTINCT val) AS cardinality,
-       to_json(list_slice(list(DISTINCT val), 1, 5))::VARCHAR AS samples
-FROM (UNPIVOT data ON %s INTO NAME key VALUE val)
-WHERE val IS NOT NULL AND val != ''
-GROUP BY key
-ORDER BY count DESC`,
-		strings.Join(resCols, ", "), where,
-		strings.Join(resCols, ", "))
-
-	resRows, err := s.duck.DB.QueryContext(ctx, resQ, args...)
-	if err != nil {
-		slog.Warn("resource attributes query failed", "err", err)
-		out.Warnings = append(out.Warnings, fmt.Sprintf("resource attribute discovery failed: %s", err))
-	} else {
-		defer resRows.Close()
-		for resRows.Next() {
-			var info AttributeInfo
-			var samplesJSON sql.NullString
-			if err := resRows.Scan(&info.Key, &info.Count, &info.Cardinality, &samplesJSON); err != nil {
-				slog.Warn("resource attributes scan failed", "err", err)
-				continue
-			}
-			if otelKey, ok := resColToKey[info.Key]; ok {
-				info.Key = otelKey
-			}
-			info.DiscoveryMethod = "column"
-			if samplesJSON.Valid {
-				if err := json.Unmarshal([]byte(samplesJSON.String), &info.Samples); err != nil {
-					slog.Warn("resource samples parse failed", "key", info.Key, "err", err)
-				}
-			}
-			if info.Samples == nil {
-				info.Samples = []string{}
-			}
-			out.ResourceAttributes = append(out.ResourceAttributes, info)
-		}
-		if err := resRows.Err(); err != nil {
-			slog.Warn("resource attributes iteration error", "err", err)
-		}
 	}
 
 	return out, nil

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"errors"
 	"log/slog"
 	"math/rand/v2"
@@ -13,23 +14,23 @@ import (
 	"github.com/labstack/fanout/internal/auth"
 )
 
-// AuthHandler handles passwordless email login endpoints.
 type AuthHandler struct {
-	users          *auth.UserStore
-	codes          *auth.CodeStore
-	jwtSecret      string
-	smtp           auth.SMTPConfig
-	smtpConfigured bool
+	users         *auth.UserStore
+	codes         *auth.CodeStore
+	setupToken    string
+	jwtSecret     string
+	refreshSecret string
+	smtp          auth.SMTPConfig
 }
 
-// RegisterAuthRoutes registers auth endpoints.
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, jwtSecret string, smtp auth.SMTPConfig, smtpConfigured bool) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setupToken, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
 	h := &AuthHandler{
-		users:          users,
-		codes:          codes,
-		jwtSecret:      jwtSecret,
-		smtp:           smtp,
-		smtpConfigured: smtpConfigured,
+		users:         users,
+		codes:         codes,
+		setupToken:    setupToken,
+		jwtSecret:     jwtSecret,
+		refreshSecret: refreshSecret,
+		smtp:          smtp,
 	}
 
 	e.GET("/api/auth/status", h.Status)
@@ -41,37 +42,39 @@ func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeSto
 	e.POST("/api/auth/logout", h.Logout)
 }
 
-// jitter adds random delay to prevent timing attacks on user enumeration.
 func jitter() {
 	time.Sleep(time.Duration(50+rand.IntN(100)) * time.Millisecond)
 }
 
-// Status returns whether auth is set up (has users) or needs first-time setup.
 func (h *AuthHandler) Status(c *echo.Context) error {
-	users, err := h.users.List()
+	count, err := h.users.CountUsers()
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check auth status")
 	}
 	return c.JSON(200, map[string]any{
-		"setup_required":  len(users) == 0,
-		"auth_enabled":    true,
-		"smtp_configured": h.smtpConfigured,
+		"setup_required": count == 0,
+		"auth_enabled":   true,
 	})
 }
 
-// Setup creates the first admin user without email verification.
-// Only works when zero users exist — one-time first-boot setup.
-// Uses atomic check-and-create to prevent race conditions.
 func (h *AuthHandler) Setup(c *echo.Context) error {
 	var req struct {
-		Email string `json:"email"`
-		Name  string `json:"name"`
+		Email      string `json:"email"`
+		Name       string `json:"name"`
+		SetupToken string `json:"setup_token"`
 	}
-	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Email) == "" {
+	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
 	}
-	email := strings.ToLower(strings.TrimSpace(req.Email))
+	if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(req.SetupToken)), []byte(strings.TrimSpace(h.setupToken))) != 1 {
+		jitter()
+		return echo.NewHTTPError(http.StatusForbidden, "invalid setup token")
+	}
 
+	email, err := auth.NormalizeEmail(req.Email)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	user, err := h.users.CreateFirstAdmin(email, req.Name)
 	if errors.Is(err, auth.ErrSetupComplete) {
 		return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
@@ -81,57 +84,31 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create admin")
 	}
 
-	if err := h.users.TouchLogin(user.ID); err != nil {
-		slog.Error("auth: touch login failed", "user_id", user.ID, "err", err)
-	}
 	slog.Info("auth: first admin created via setup", "email", email)
 
-	accessToken, err := auth.SignAccess(h.jwtSecret, user.ID, user.Email, user.Role)
+	accessToken, err := h.issueTokens(c, user)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
 	}
-
-	refreshToken, err := auth.SignRefresh(h.jwtSecret, user.ID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
-	}
-
-	c.SetCookie(&http.Cookie{
-		Name:     "refresh_token",
-		Value:    refreshToken,
-		Path:     "/api/auth/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   7 * 24 * 60 * 60,
-	})
-
-	return c.JSON(200, map[string]string{
-		"access_token": accessToken,
-	})
+	return c.JSON(200, map[string]string{"access_token": accessToken})
 }
 
-// Start sends a verification code to the given email.
 func (h *AuthHandler) Start(c *echo.Context) error {
-	if !h.smtpConfigured {
-		return echo.NewHTTPError(http.StatusServiceUnavailable, "email login requires SMTP configuration")
-	}
-
 	var req struct {
 		Email string `json:"email"`
 	}
-	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Email) == "" {
+	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
 	}
-	email := strings.ToLower(strings.TrimSpace(req.Email))
 
-	// Check if user exists — be honest, this is an internal tool
-	user, err := h.users.GetByEmail(email)
+	email, err := auth.NormalizeEmail(req.Email)
 	if err != nil {
-		return c.JSON(200, map[string]any{"code_sent": false, "reason": "no_account"})
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if !user.Active {
-		return c.JSON(200, map[string]any{"code_sent": false, "reason": "inactive"})
+	user, err := h.users.GetByEmail(email)
+	if err != nil || !user.Active {
+		jitter()
+		return c.JSON(200, map[string]bool{"code_sent": true})
 	}
 
 	code, err := h.codes.Create(email)
@@ -139,27 +116,27 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 		slog.Error("auth: create verification code", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create verification code")
 	}
+	if err := auth.SendCode(h.smtp, email, code); err != nil {
+		slog.Error("auth: send verification email failed", "email", email, "err", err)
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "email delivery unavailable")
+	}
 
-	go func() {
-		if err := auth.SendCode(h.smtp, email, code); err != nil {
-			slog.Error("auth: send verification email failed", "email", email, "err", err)
-		}
-	}()
-
-	return c.JSON(200, map[string]any{"code_sent": true})
+	return c.JSON(200, map[string]bool{"code_sent": true})
 }
 
-// Verify checks the code and returns JWT tokens.
 func (h *AuthHandler) Verify(c *echo.Context) error {
 	var req struct {
 		Email string `json:"email"`
 		Code  string `json:"code"`
 	}
-	if err := c.Bind(&req); err != nil || req.Email == "" || req.Code == "" {
+	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Code) == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "email and code are required")
 	}
-	email := strings.ToLower(strings.TrimSpace(req.Email))
 
+	email, err := auth.NormalizeEmail(req.Email)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
 	ok, err := h.codes.Verify(email, req.Code)
 	if err != nil {
 		slog.Error("auth: verify code", "err", err)
@@ -172,123 +149,120 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 	}
 
 	user, err := h.users.GetByEmail(email)
-	if err != nil {
+	if err != nil || !user.Active {
 		jitter()
-		return echo.NewHTTPError(http.StatusUnauthorized, "user not found")
+		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or inactive")
 	}
 
-	if err := h.users.TouchLogin(user.ID); err != nil {
-		slog.Error("auth: touch login failed", "user_id", user.ID, "err", err)
-	}
-
-	accessToken, err := auth.SignAccess(h.jwtSecret, user.ID, user.Email, user.Role)
+	accessToken, err := h.issueTokens(c, user)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
 	}
-
-	refreshToken, err := auth.SignRefresh(h.jwtSecret, user.ID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
-	}
-
-	c.SetCookie(&http.Cookie{
-		Name:     "refresh_token",
-		Value:    refreshToken,
-		Path:     "/api/auth/",
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   7 * 24 * 60 * 60,
-	})
-
-	return c.JSON(200, map[string]string{
-		"access_token": accessToken,
-	})
+	return c.JSON(200, map[string]string{"access_token": accessToken})
 }
 
-// Refresh exchanges a refresh token for a new access token.
 func (h *AuthHandler) Refresh(c *echo.Context) error {
 	cookie, err := c.Cookie("refresh_token")
 	if err != nil || cookie.Value == "" {
 		return echo.NewHTTPError(http.StatusUnauthorized, "no refresh token")
 	}
 
-	userID, err := auth.VerifyRefresh(h.jwtSecret, cookie.Value)
+	claims, err := auth.VerifyRefresh(h.refreshSecret, cookie.Value)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid refresh token")
 	}
 
-	user, err := h.users.GetByID(userID)
+	user, err := h.users.GetByID(claims.Subject)
 	if err != nil || !user.Active {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or inactive")
 	}
 
-	accessToken, err := auth.SignAccess(h.jwtSecret, user.ID, user.Email, user.Role)
+	if sessionRevoked(user, claims) {
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid refresh token")
+	}
+
+	accessToken, err := h.issueTokens(c, user)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
 	}
-
-	return c.JSON(200, map[string]string{
-		"access_token": accessToken,
-	})
+	return c.JSON(200, map[string]string{"access_token": accessToken})
 }
 
-// Me returns the current authenticated user.
 func (h *AuthHandler) Me(c *echo.Context) error {
-	claims := GetAuthClaims(c)
-	if claims == nil {
+	user := GetCurrentUser(c)
+	if user == nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
-
-	user, err := h.users.GetByID(claims.Subject)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusNotFound, "user not found")
-	}
-
 	return c.JSON(200, user)
 }
 
-// Logout clears the refresh token cookie.
 func (h *AuthHandler) Logout(c *echo.Context) error {
+	if cookie, err := c.Cookie("refresh_token"); err == nil && cookie.Value != "" {
+		if claims, err := auth.VerifyRefresh(h.refreshSecret, cookie.Value); err == nil {
+			_ = h.users.TouchLoginAt(claims.Subject, time.Now().UTC().Add(auth.TokenTimePrecision))
+		}
+	}
+	h.clearRefreshCookie(c)
+	return c.JSON(200, map[string]bool{"ok": true})
+}
+
+func (h *AuthHandler) issueTokens(c *echo.Context, user auth.User) (string, error) {
+	issuedAt := time.Now().UTC()
+	refreshToken, err := auth.SignRefresh(h.refreshSecret, user.ID, issuedAt)
+	if err != nil {
+		return "", err
+	}
+	accessToken, err := auth.SignAccess(h.jwtSecret, user.ID)
+	if err != nil {
+		return "", err
+	}
+	if err := h.users.TouchLoginAt(user.ID, issuedAt); err != nil {
+		return "", err
+	}
+	h.setRefreshCookie(c, refreshToken, issuedAt.Add(auth.RefreshTTL))
+	return accessToken, nil
+}
+
+func (h *AuthHandler) setRefreshCookie(c *echo.Context, value string, expiresAt time.Time) {
+	c.SetCookie(&http.Cookie{
+		Name:     "refresh_token",
+		Value:    value,
+		Path:     "/api/auth/",
+		HttpOnly: true,
+		Secure:   isSecureRequest(c),
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   int(time.Until(expiresAt).Seconds()),
+		Expires:  expiresAt,
+	})
+}
+
+func (h *AuthHandler) clearRefreshCookie(c *echo.Context) {
 	c.SetCookie(&http.Cookie{
 		Name:     "refresh_token",
 		Value:    "",
 		Path:     "/api/auth/",
 		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   isSecureRequest(c),
+		SameSite: http.SameSiteStrictMode,
 		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
 	})
-	return c.JSON(200, map[string]bool{"ok": true})
 }
 
-// GetAuthClaims retrieves JWT claims from the echo context (set by middleware).
-func GetAuthClaims(c *echo.Context) *auth.Claims {
-	v := c.Get("auth_claims")
-	if v == nil {
-		return nil
+func isSecureRequest(c *echo.Context) bool {
+	if c.Request().TLS != nil {
+		return true
 	}
-	claims, _ := v.(*auth.Claims)
-	return claims
+	return strings.EqualFold(c.Request().Header.Get("X-Forwarded-Proto"), "https")
 }
 
-// RequireRole returns a middleware that checks the user's role.
-// Roles are hierarchical: admin > operator > viewer.
-func RequireRole(minRole string) echo.MiddlewareFunc {
-	levels := map[string]int{"viewer": 0, "operator": 1, "admin": 2}
-	minLevel := levels[minRole]
-
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c *echo.Context) error {
-			claims := GetAuthClaims(c)
-			if claims == nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
-			}
-			userLevel, ok := levels[claims.Role]
-			if !ok || userLevel < minLevel {
-				return echo.NewHTTPError(http.StatusForbidden, "insufficient permissions")
-			}
-			return next(c)
-		}
+func sessionRevoked(user auth.User, claims *auth.Claims) bool {
+	if claims.IssuedAt == nil || user.LoggedInAt == "" {
+		return false
 	}
+	lastLogin, err := time.Parse(time.RFC3339Nano, user.LoggedInAt)
+	if err != nil {
+		return true
+	}
+	return claims.IssuedAt.Time.Before(lastLogin)
 }

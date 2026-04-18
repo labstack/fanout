@@ -1,19 +1,25 @@
 package auth
 
 import (
+	"errors"
 	"testing"
 
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func newTestUserStore(t *testing.T) *UserStore {
+func newTestSQLite(t *testing.T) *appstore.SQLite {
 	t.Helper()
 	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
 	}
 	t.Cleanup(func() { sqlite.Close() })
-	return NewUserStore(sqlite.DB)
+	return sqlite
+}
+
+func newTestUserStore(t *testing.T) *UserStore {
+	t.Helper()
+	return NewUserStore(newTestSQLite(t).DB)
 }
 
 func TestUserStore_CreateAndGet(t *testing.T) {
@@ -36,27 +42,6 @@ func TestUserStore_CreateAndGet(t *testing.T) {
 	}
 	if got.ID != u.ID {
 		t.Errorf("id mismatch")
-	}
-}
-
-func TestUserStore_EnsureAdmin(t *testing.T) {
-	s := newTestUserStore(t)
-
-	if err := s.EnsureAdmin("admin@example.com"); err != nil {
-		t.Fatalf("EnsureAdmin: %v", err)
-	}
-
-	u, err := s.GetByEmail("admin@example.com")
-	if err != nil {
-		t.Fatalf("GetByEmail: %v", err)
-	}
-	if u.Role != "admin" {
-		t.Errorf("role = %q, want admin", u.Role)
-	}
-
-	// Idempotent
-	if err := s.EnsureAdmin("admin@example.com"); err != nil {
-		t.Fatalf("EnsureAdmin (second): %v", err)
 	}
 }
 
@@ -98,5 +83,22 @@ func TestUserStore_Delete(t *testing.T) {
 	_, err := s.GetByID(u.ID)
 	if err == nil {
 		t.Fatal("expected ErrUserNotFound after delete")
+	}
+}
+
+func TestUserStore_CreateFirstAdmin(t *testing.T) {
+	s := newTestUserStore(t)
+
+	user, err := s.CreateFirstAdmin("admin@example.com", "Admin")
+	if err != nil {
+		t.Fatalf("CreateFirstAdmin: %v", err)
+	}
+	if user.Role != "admin" {
+		t.Fatalf("role = %q, want admin", user.Role)
+	}
+
+	_, err = s.CreateFirstAdmin("other@example.com", "Other")
+	if !errors.Is(err, ErrSetupComplete) {
+		t.Fatalf("second CreateFirstAdmin error = %v, want ErrSetupComplete", err)
 	}
 }

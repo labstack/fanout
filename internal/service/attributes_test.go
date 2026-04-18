@@ -90,13 +90,11 @@ func TestAttributes_SpansDiscoveryMethod(t *testing.T) {
 	svc, mock := newMockService(t)
 	defer svc.duck.DB.Close()
 
-	mock.ExpectQuery("SELECT COUNT").WillReturnRows(
-		sqlmock.NewRows([]string{"count"}).AddRow(int64(100)))
-	mock.ExpectQuery("SELECT key").WillReturnRows(
-		sqlmock.NewRows([]string{"key", "count", "cardinality", "samples"}).
-			AddRow("http_method", int64(90), int64(3), `["GET","POST","PUT"]`))
-	mock.ExpectQuery("SELECT key").WillReturnRows(
-		sqlmock.NewRows([]string{"key", "count", "cardinality", "samples"}))
+	mock.ExpectQuery("WITH data").WillReturnRows(
+		sqlmock.NewRows([]string{"key", "count", "cardinality", "samples", "total_rows"}).
+			AddRow("http_method", int64(90), int64(3), `["GET","POST","PUT"]`, int64(100)).
+			AddRow("service_version", int64(80), int64(2), `["1.0","1.1"]`, int64(100)).
+			AddRow("__total_rows__", int64(0), int64(0), `[]`, int64(100)))
 
 	result, err := svc.Attributes(context.Background(), AttributeParams{
 		Signal: "spans",
@@ -112,5 +110,14 @@ func TestAttributes_SpansDiscoveryMethod(t *testing.T) {
 	}
 	if result.Attributes[0].DiscoveryMethod != "column" {
 		t.Errorf("DiscoveryMethod = %q, want %q", result.Attributes[0].DiscoveryMethod, "column")
+	}
+	if result.TotalRows != 100 {
+		t.Errorf("TotalRows = %d, want 100", result.TotalRows)
+	}
+	if len(result.ResourceAttributes) != 1 {
+		t.Fatalf("ResourceAttributes count = %d, want 1", len(result.ResourceAttributes))
+	}
+	if result.ResourceAttributes[0].Key != "service.version" {
+		t.Errorf("ResourceAttributes[0].Key = %q, want service.version", result.ResourceAttributes[0].Key)
 	}
 }
