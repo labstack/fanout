@@ -173,12 +173,28 @@ func (s *UserStore) TouchLogin(id string) error {
 	})
 }
 
-// EnsureAdmin creates the admin user if it doesn't exist.
 // CountUsers returns the number of users in the database.
 func (s *UserStore) CountUsers() (int64, error) {
 	return s.q.CountUsers(context.Background())
 }
 
+// CreateFirstAdmin atomically creates the first admin user.
+// Returns ErrSetupComplete if users already exist (race-safe).
+func (s *UserStore) CreateFirstAdmin(email, name string) (User, error) {
+	count, err := s.CountUsers()
+	if err != nil {
+		return User{}, fmt.Errorf("auth: check user count: %w", err)
+	}
+	if count > 0 {
+		return User{}, ErrSetupComplete
+	}
+	return s.Create(email, name, "admin")
+}
+
+// ErrSetupComplete is returned when setup is attempted but users already exist.
+var ErrSetupComplete = errors.New("setup already complete")
+
+// EnsureAdmin creates the admin user if it doesn't exist.
 func (s *UserStore) EnsureAdmin(email string) error {
 	_, err := s.GetByEmail(email)
 	if err == nil {

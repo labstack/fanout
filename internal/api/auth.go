@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -60,15 +61,8 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 
 // Setup creates the first admin user without email verification.
 // Only works when zero users exist — one-time first-boot setup.
+// Uses atomic check-and-create to prevent race conditions.
 func (h *AuthHandler) Setup(c *echo.Context) error {
-	users, err := h.users.List()
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check users")
-	}
-	if len(users) > 0 {
-		return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
-	}
-
 	var req struct {
 		Email string `json:"email"`
 		Name  string `json:"name"`
@@ -78,7 +72,10 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	}
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 
-	user, err := h.users.Create(email, req.Name, "admin")
+	user, err := h.users.CreateFirstAdmin(email, req.Name)
+	if errors.Is(err, auth.ErrSetupComplete) {
+		return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
+	}
 	if err != nil {
 		slog.Error("auth: setup create admin failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create admin")

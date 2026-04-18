@@ -182,9 +182,14 @@ func main() {
 					return next(c)
 				}
 
-				// If no API_TOKEN and no users exist, skip auth (fresh install)
+				// If no API_TOKEN and no users exist, skip auth (fresh install).
+				// Fail closed on error — deny access rather than bypass auth.
 				if apiToken == "" {
-					count, _ := userStore.CountUsers()
+					count, err := userStore.CountUsers()
+					if err != nil {
+						slog.Error("auth: count users failed", "err", err)
+						return echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
+					}
 					if count == 0 {
 						return next(c)
 					}
