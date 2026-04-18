@@ -8,7 +8,7 @@ import (
 
 	_ "github.com/duckdb/duckdb-go/v2"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/query"
 )
 
@@ -35,7 +35,7 @@ func TestWriterFlushBatchSize(t *testing.T) {
 	chLogs := make(chan LogRow, 10)
 	chMetrics := make(chan MetricRow, 10)
 
-	w := NewWriter(config.Config{
+	w := NewWriter(env.Config{
 		FlushSeconds:   60,
 		FlushBatchSize: 2,
 		DefaultNS:      "default",

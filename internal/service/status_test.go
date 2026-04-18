@@ -7,7 +7,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/query"
 )
 
@@ -17,7 +17,7 @@ func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock) {
 		t.Fatalf("failed to create sqlmock: %v", err)
 	}
 
-	cfg := config.Config{
+	cfg := env.Config{
 		DataDir:   "data",
 		DefaultNS: "default",
 		TenantID:  uuid.MustParse("00000000-0000-0000-0000-000000000000"),

@@ -11,7 +11,7 @@ import (
 	resourcepb "go.opentelemetry.io/proto/otlp/resource/v1"
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/lake"
 )
 
@@ -511,7 +511,7 @@ func TestTraceExportContextCancellation(t *testing.T) {
 	logs := make(chan lake.LogRow, 1)
 	metrics := make(chan lake.MetricRow, 1)
 
-	srv := NewServer(config.Config{}, spans, logs, metrics)
+	srv := NewServer(env.Config{}, spans, logs, metrics)
 	ts := &traceService{srv: srv}
 
 	// Cancel the context before calling Export

@@ -25,12 +25,12 @@ go build ./cmd/fanout
 
 # Or build and run the Docker image directly
 docker build -t fanout .
-docker run --rm --env-file .env -p 7520:7520 -p 4317:4317 fanout
+docker run --rm --env-file .env -p 7520:7520 fanout
 ```
 
-Then open `http://localhost:7520/login` and use the `SETUP_TOKEN` from `.env` to create the first admin account.
+Then open `http://localhost:7520/login`, use the `SETUP_TOKEN` from `.env` to create the first admin account, and choose whether OTLP stays private or is exposed publicly over TLS with a generated ingest token.
 
-For the production compose stack, fill the OTLP mTLS envs in `.env` before running `docker compose up -d`.
+If you want a collector outside the container to reach OTLP, explicitly set `OTLP_GRPC_ADDR=0.0.0.0:4317` and publish `-p 4317:4317`.
 
 **Ports:**
 - `7520` - HTTP API + MCP (`/mcp`)
@@ -60,7 +60,7 @@ MCP clients receive full JSON Schema via `tools/list`.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `HTTP_ADDR` | `:7520` | HTTP server address |
-| `OTLP_GRPC_ADDR` | `:4317` | OTLP gRPC address |
+| `OTLP_GRPC_ADDR` | `127.0.0.1:4317` | OTLP gRPC address (private by default) |
 | `DATA_DIR` | `./data` | Storage root for telemetry, query cache, and control data |
 | `FLUSH_SECONDS` | `15` | Batch flush interval |
 | `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
@@ -79,7 +79,6 @@ MCP clients receive full JSON Schema via `tools/list`.
 | `JWT_REFRESH_SECRET` | - | HS256 signing key for refresh tokens |
 | `OTLP_TLS_CERT_FILE` | - | OTLP gRPC server certificate file |
 | `OTLP_TLS_KEY_FILE` | - | OTLP gRPC server private key file |
-| `OTLP_TLS_CLIENT_CA_FILE` | - | CA bundle used to verify OTLP client certificates |
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace |
@@ -92,19 +91,22 @@ Storage layout under `DATA_DIR`:
 
 ## OTLP Ingest
 
-Point OpenTelemetry SDK at:
+Private OTLP is the default. Point a local collector or same-host SDK at:
 ```bash
-OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+OTEL_EXPORTER_OTLP_ENDPOINT=127.0.0.1:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_SERVICE_NAME=my-service
 ```
+
+For Docker, `127.0.0.1:4317` is inside the container. To ingest from the host or another machine, set `OTLP_GRPC_ADDR=0.0.0.0:4317`, publish port `4317`, and then either keep it private behind your network or enable public OTLP over TLS from setup.
 
 For public OTLP, Fanout terminates gRPC TLS itself. Set:
 ```bash
 OTLP_TLS_CERT_FILE=/etc/fanout/certs/server.pem
 OTLP_TLS_KEY_FILE=/etc/fanout/certs/server-key.pem
-OTLP_TLS_CLIENT_CA_FILE=/etc/fanout/certs/client-ca.pem
 ```
+
+After first login, enable public OTLP from the setup flow or admin config screen. Fanout will generate an ingest token and show the exact exporter config.
 
 Collector example:
 ```yaml
@@ -112,9 +114,9 @@ exporters:
   otlp:
     endpoint: fanout.example.com:4317
     tls:
-      ca_file: /etc/otel/server-ca.pem
-      cert_file: /etc/otel/client.pem
-      key_file: /etc/otel/client-key.pem
+      insecure: false
+    headers:
+      x-fanout-ingest-token: <INGEST_TOKEN>
 ```
 
 Auth is web-only:

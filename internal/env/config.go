@@ -1,4 +1,4 @@
-package config
+package env
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ import (
 
 type Config struct {
 	HTTPAddr       string    // :7520
-	OTLPGRPCAddr   string    // :4317
+	OTLPGRPCAddr   string    // 127.0.0.1:4317
 	DataDir        string    // ./data
 	FlushSeconds   int       // 15
 	FlushBatchSize int       // 50000 rows per writer flush
@@ -41,43 +41,41 @@ type Config struct {
 	SetupToken       string // First-boot admin setup token
 	JWTSecret        string // HS256 access-token signing key
 	JWTRefreshSecret string // HS256 refresh-token signing key
-	// OTLP mTLS
-	OTLPTLSCertFile     string // TLS server cert for OTLP gRPC
-	OTLPTLSKeyFile      string // TLS server key for OTLP gRPC
-	OTLPTLSClientCAFile string // Client CA bundle for OTLP mTLS
+	// OTLP TLS
+	OTLPTLSCertFile string // TLS server cert for OTLP gRPC
+	OTLPTLSKeyFile  string // TLS server key for OTLP gRPC
 }
 
 func Load() Config {
 	cfg := Config{
-		HTTPAddr:            getenv("HTTP_ADDR", ":7520"),
-		OTLPGRPCAddr:        getenv("OTLP_GRPC_ADDR", ":4317"),
-		DataDir:             getenv("DATA_DIR", "./data"),
-		FlushSeconds:        getenvInt("FLUSH_SECONDS", 15),
-		FlushBatchSize:      getenvInt("FLUSH_BATCH_SIZE", 50000),
-		RollupEvery:         getenvInt("ROLLUP_EVERY", 60),
-		MCPEnabled:          getenvBool("MCP_ENABLED", true),
-		RetentionDays:       getenvInt("RETENTION_DAYS", 30),
-		TenantID:            getenvUUID("TENANT_ID"),
-		DefaultNS:           getenv("DEFAULT_NAMESPACE", "default"),
-		DuckDBMemory:        getenv("DUCKDB_MEMORY", "512MB"),
-		AlertEnabled:        getenvBool("ALERT_ENABLED", true),
-		AlertEvalInterval:   getenvInt("ALERT_EVAL_INTERVAL", 30),
-		AlertHistoryDays:    getenvInt("ALERT_HISTORY_DAYS", 7),
-		AIProvider:          getenv("AI_PROVIDER", "anthropic"),
-		AIAPIKey:            os.Getenv("AI_API_KEY"),
-		AIModel:             os.Getenv("AI_MODEL"),
-		AIBaseURL:           os.Getenv("AI_BASE_URL"),
-		SMTPHost:            os.Getenv("SMTP_HOST"),
-		SMTPPort:            getenvInt("SMTP_PORT", 587),
-		SMTPUser:            os.Getenv("SMTP_USER"),
-		SMTPPass:            os.Getenv("SMTP_PASS"),
-		SMTPFrom:            os.Getenv("SMTP_FROM"),
-		SetupToken:          os.Getenv("SETUP_TOKEN"),
-		JWTSecret:           os.Getenv("JWT_SECRET"),
-		JWTRefreshSecret:    os.Getenv("JWT_REFRESH_SECRET"),
-		OTLPTLSCertFile:     os.Getenv("OTLP_TLS_CERT_FILE"),
-		OTLPTLSKeyFile:      os.Getenv("OTLP_TLS_KEY_FILE"),
-		OTLPTLSClientCAFile: os.Getenv("OTLP_TLS_CLIENT_CA_FILE"),
+		HTTPAddr:          getenv("HTTP_ADDR", ":7520"),
+		OTLPGRPCAddr:      getenv("OTLP_GRPC_ADDR", "127.0.0.1:4317"),
+		DataDir:           getenv("DATA_DIR", "./data"),
+		FlushSeconds:      getenvInt("FLUSH_SECONDS", 15),
+		FlushBatchSize:    getenvInt("FLUSH_BATCH_SIZE", 50000),
+		RollupEvery:       getenvInt("ROLLUP_EVERY", 60),
+		MCPEnabled:        getenvBool("MCP_ENABLED", true),
+		RetentionDays:     getenvInt("RETENTION_DAYS", 30),
+		TenantID:          getenvUUID("TENANT_ID"),
+		DefaultNS:         getenv("DEFAULT_NAMESPACE", "default"),
+		DuckDBMemory:      getenv("DUCKDB_MEMORY", "512MB"),
+		AlertEnabled:      getenvBool("ALERT_ENABLED", true),
+		AlertEvalInterval: getenvInt("ALERT_EVAL_INTERVAL", 30),
+		AlertHistoryDays:  getenvInt("ALERT_HISTORY_DAYS", 7),
+		AIProvider:        getenv("AI_PROVIDER", "anthropic"),
+		AIAPIKey:          os.Getenv("AI_API_KEY"),
+		AIModel:           os.Getenv("AI_MODEL"),
+		AIBaseURL:         os.Getenv("AI_BASE_URL"),
+		SMTPHost:          os.Getenv("SMTP_HOST"),
+		SMTPPort:          getenvInt("SMTP_PORT", 587),
+		SMTPUser:          os.Getenv("SMTP_USER"),
+		SMTPPass:          os.Getenv("SMTP_PASS"),
+		SMTPFrom:          os.Getenv("SMTP_FROM"),
+		SetupToken:        os.Getenv("SETUP_TOKEN"),
+		JWTSecret:         os.Getenv("JWT_SECRET"),
+		JWTRefreshSecret:  os.Getenv("JWT_REFRESH_SECRET"),
+		OTLPTLSCertFile:   os.Getenv("OTLP_TLS_CERT_FILE"),
+		OTLPTLSKeyFile:    os.Getenv("OTLP_TLS_KEY_FILE"),
 	}
 	if err := cfg.Validate(); err != nil {
 		slog.Error("invalid config", "err", err)
@@ -126,10 +124,9 @@ func (c Config) ReportsDir() string {
 	return filepath.Join(c.ControlDir(), "reports")
 }
 
-func (c Config) OTLPMTLSEnabled() bool {
+func (c Config) OTLPTLSEnabled() bool {
 	return strings.TrimSpace(c.OTLPTLSCertFile) != "" &&
-		strings.TrimSpace(c.OTLPTLSKeyFile) != "" &&
-		strings.TrimSpace(c.OTLPTLSClientCAFile) != ""
+		strings.TrimSpace(c.OTLPTLSKeyFile) != ""
 }
 
 // Validate checks that config values are sane.
@@ -181,8 +178,8 @@ func (c Config) Validate() error {
 	if c.JWTSecret == c.JWTRefreshSecret {
 		return fmt.Errorf("JWT_SECRET and JWT_REFRESH_SECRET must be different")
 	}
-	if anySet(c.OTLPTLSCertFile, c.OTLPTLSKeyFile, c.OTLPTLSClientCAFile) && !c.OTLPMTLSEnabled() {
-		return fmt.Errorf("OTLP mTLS requires OTLP_TLS_CERT_FILE, OTLP_TLS_KEY_FILE, and OTLP_TLS_CLIENT_CA_FILE")
+	if anySet(c.OTLPTLSCertFile, c.OTLPTLSKeyFile) && !c.OTLPTLSEnabled() {
+		return fmt.Errorf("OTLP TLS requires OTLP_TLS_CERT_FILE and OTLP_TLS_KEY_FILE")
 	}
 	return nil
 }

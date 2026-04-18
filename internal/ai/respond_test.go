@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 )
 
 // scriptedProvider replays a sequence of scripted responses for testing.
@@ -58,7 +58,7 @@ func TestOrchestrator_RespondTool_ProducesBlocks(t *testing.T) {
 	}
 
 	tools := &ToolRegistry{handlers: map[string]ToolHandler{}}
-	orch := NewOrchestrator(provider, tools, nil, config.Config{})
+	orch := NewOrchestrator(provider, tools, nil, env.Config{})
 
 	var doneEvent *ClientEvent
 	send := func(event ClientEvent) error {
@@ -95,7 +95,7 @@ func TestOrchestrator_NoRespondTool_FallsBackToText(t *testing.T) {
 	}
 
 	tools := &ToolRegistry{handlers: map[string]ToolHandler{}}
-	orch := NewOrchestrator(provider, tools, nil, config.Config{})
+	orch := NewOrchestrator(provider, tools, nil, env.Config{})
 
 	var doneEvent *ClientEvent
 	send := func(event ClientEvent) error {
@@ -154,7 +154,7 @@ func TestOrchestrator_RespondTool_MergesSuggestedBlocks(t *testing.T) {
 			},
 		},
 	}
-	orch := NewOrchestrator(provider, tools, nil, config.Config{})
+	orch := NewOrchestrator(provider, tools, nil, env.Config{})
 
 	var doneEvent *ClientEvent
 	send := func(event ClientEvent) error {
@@ -192,7 +192,7 @@ func TestOrchestrator_RespondTool_InvalidJSON_Fallback(t *testing.T) {
 	}
 
 	tools := &ToolRegistry{handlers: map[string]ToolHandler{}}
-	orch := NewOrchestrator(provider, tools, nil, config.Config{})
+	orch := NewOrchestrator(provider, tools, nil, env.Config{})
 
 	var doneEvent *ClientEvent
 	send := func(event ClientEvent) error {
@@ -306,7 +306,7 @@ func TestOrchestrator_Dashboard_ReturnsStructuredResult(t *testing.T) {
 			},
 		},
 	}
-	orch := NewOrchestrator(provider, tools, nil, config.Config{})
+	orch := NewOrchestrator(provider, tools, nil, env.Config{})
 
 	result, err := orch.Dashboard(context.Background(), 60, "")
 	if err != nil {

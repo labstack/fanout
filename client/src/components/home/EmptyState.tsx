@@ -12,7 +12,7 @@ export function EmptyState() {
             Welcome to Fanout
           </h1>
           <p className="text-sm text-muted-foreground leading-6">
-            Point your OTLP exporter here to get started.
+            Start with a local collector. Public OTLP can be enabled later from setup.
           </p>
         </div>
         <div className="stat-card text-left space-y-2">
@@ -20,7 +20,7 @@ export function EmptyState() {
           <div className="space-y-1 text-sm mono text-foreground/80">
             <div>
               <span className="text-muted-foreground">OTEL_EXPORTER_OTLP_ENDPOINT</span>
-              <span className="text-primary">=localhost:4317</span>
+              <span className="text-primary">=127.0.0.1:4317</span>
             </div>
             <div>
               <span className="text-muted-foreground">OTEL_EXPORTER_OTLP_PROTOCOL</span>

@@ -10,18 +10,18 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/query"
 )
 
 // HealthHandler handles health check endpoints
 type HealthHandler struct {
 	duck *query.Duck
-	cfg  config.Config
+	cfg  env.Config
 }
 
 // NewHealthHandler creates a new health handler
-func NewHealthHandler(duck *query.Duck, cfg config.Config) *HealthHandler {
+func NewHealthHandler(duck *query.Duck, cfg env.Config) *HealthHandler {
 	return &HealthHandler{duck: duck, cfg: cfg}
 }
 
@@ -218,7 +218,7 @@ FROM rollup_state`).Scan(&updatedAt, &cacheCount, &ageSeconds)
 }
 
 // RegisterHealthRoutes registers health check endpoints
-func RegisterHealthRoutes(e *echo.Echo, duck *query.Duck, cfg config.Config) {
+func RegisterHealthRoutes(e *echo.Echo, duck *query.Duck, cfg env.Config) {
 	h := NewHealthHandler(duck, cfg)
 	e.GET("/healthz", h.Liveness)
 	e.GET("/readyz", h.Readiness)

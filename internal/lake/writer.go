@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/metrics"
 )
 
@@ -93,7 +93,7 @@ type MetricRow struct {
 }
 
 type Writer struct {
-	cfg        config.Config
+	cfg        env.Config
 	db         *sql.DB
 	chSpans    <-chan SpanRow
 	chLogs     <-chan LogRow
@@ -106,7 +106,7 @@ type Writer struct {
 	done       chan struct{}
 }
 
-func NewWriter(cfg config.Config, db *sql.DB, spans <-chan SpanRow, logs <-chan LogRow, metricsCh <-chan MetricRow) *Writer {
+func NewWriter(cfg env.Config, db *sql.DB, spans <-chan SpanRow, logs <-chan LogRow, metricsCh <-chan MetricRow) *Writer {
 	return &Writer{
 		cfg:       cfg,
 		db:        db,

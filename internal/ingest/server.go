@@ -18,12 +18,12 @@ import (
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/grpc"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/lake"
 )
 
 type Server struct {
-	cfg        config.Config
+	cfg        env.Config
 	outSpans   chan<- lake.SpanRow
 	outLogs    chan<- lake.LogRow
 	outMetrics chan<- lake.MetricRow
@@ -44,7 +44,7 @@ type metricsService struct {
 	srv *Server
 }
 
-func NewServer(cfg config.Config, spans chan<- lake.SpanRow, logs chan<- lake.LogRow, metrics chan<- lake.MetricRow) *Server {
+func NewServer(cfg env.Config, spans chan<- lake.SpanRow, logs chan<- lake.LogRow, metrics chan<- lake.MetricRow) *Server {
 	return &Server{cfg: cfg, outSpans: spans, outLogs: logs, outMetrics: metrics}
 }
 

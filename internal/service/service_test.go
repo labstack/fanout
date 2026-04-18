@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 )
 
 func TestDeriveHealth(t *testing.T) {
@@ -58,7 +58,7 @@ func TestDeriveHealth_Active(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	cfg := config.Config{
+	cfg := env.Config{
 		DefaultNS: "test-ns",
 		TenantID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 	}
@@ -75,7 +75,7 @@ func TestNew(t *testing.T) {
 
 func TestDefaults(t *testing.T) {
 	tenantID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
-	cfg := config.Config{
+	cfg := env.Config{
 		DefaultNS: "default-ns",
 		TenantID:  tenantID,
 	}

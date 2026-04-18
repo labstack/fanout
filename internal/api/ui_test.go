@@ -9,7 +9,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/ai"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 )
 
 func TestFavicon(t *testing.T) {
@@ -259,12 +259,13 @@ func TestDeleteBookmark_Success(t *testing.T) {
 
 func TestDeleteBookmark_NotFound(t *testing.T) {
 	store, _ := ai.NewBookmarkStore(t.TempDir())
+	missingID := "018f6f88-7d6a-7f5c-a9ef-6404b4e66a81"
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodDelete, "/api/bookmarks/deadbeef", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/bookmarks/"+missingID, nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
-	c.SetPathValues(echo.PathValues{{Name: "id", Value: "deadbeef"}})
+	c.SetPathValues(echo.PathValues{{Name: "id", Value: missingID}})
 
 	h := &UIHandler{bookmarks: store}
 	err := h.DeleteBookmark(c)
@@ -301,7 +302,7 @@ func TestDeleteBookmark_InvalidID(t *testing.T) {
 
 func TestRegisterUIRoutes(t *testing.T) {
 	e := echo.New()
-	h := RegisterUIRoutes(e, config.Config{}, nil, nil, nil, nil, nil)
+	h := RegisterUIRoutes(e, env.Config{}, nil, nil, nil, nil, nil)
 	if h == nil {
 		t.Fatal("RegisterUIRoutes returned nil")
 	}

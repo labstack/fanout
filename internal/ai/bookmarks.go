@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -14,9 +13,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-// validBookmarkID matches 8 hex characters (UUID prefix).
-var validBookmarkID = regexp.MustCompile(`^[0-9a-f]{8}$`)
 
 // Bookmark stores a saved chat answer.
 type Bookmark struct {
@@ -49,8 +45,13 @@ func (s *BookmarkStore) Create(question, answerHTML string) (*Bookmark, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	id, err := uuid.NewV7()
+	if err != nil {
+		return nil, fmt.Errorf("generate bookmark id: %w", err)
+	}
+
 	b := &Bookmark{
-		ID:         uuid.New().String()[:8],
+		ID:         id.String(),
 		Question:   question,
 		AnswerHTML: answerHTML,
 		CreatedAt:  time.Now().UTC().Format(time.RFC3339),
@@ -120,15 +121,24 @@ func (s *BookmarkStore) Delete(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if !validBookmarkID.MatchString(id) {
-		return fmt.Errorf("invalid bookmark ID: %s", id)
+	bookmarkID, err := normalizeBookmarkID(id)
+	if err != nil {
+		return err
 	}
-	path := filepath.Join(s.dir, id+".json")
+	path := filepath.Join(s.dir, bookmarkID+".json")
 	if err := os.Remove(path); err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("bookmark not found: %s", id)
+			return fmt.Errorf("bookmark not found: %s", bookmarkID)
 		}
 		return fmt.Errorf("delete bookmark: %w", err)
 	}
 	return nil
+}
+
+func normalizeBookmarkID(id string) (string, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(id))
+	if err != nil || parsed.Version() != 7 {
+		return "", fmt.Errorf("invalid bookmark ID: %s", id)
+	}
+	return parsed.String(), nil
 }

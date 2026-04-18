@@ -1,4 +1,4 @@
-package config
+package env
 
 import (
 	"os"
@@ -90,7 +90,7 @@ func TestLoad(t *testing.T) {
 		"RETENTION_DAYS", "TENANT_ID", "DEFAULT_NAMESPACE",
 		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL", "SETUP_TOKEN", "JWT_SECRET", "JWT_REFRESH_SECRET",
 		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
-		"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE", "OTLP_TLS_CLIENT_CA_FILE"}
+		"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE"}
 	for _, v := range vars {
 		os.Unsetenv(v)
 	}
@@ -117,8 +117,8 @@ func TestLoad(t *testing.T) {
 	if cfg.HTTPAddr != ":7520" {
 		t.Errorf("HTTPAddr = %q, want %q", cfg.HTTPAddr, ":7520")
 	}
-	if cfg.OTLPGRPCAddr != ":4317" {
-		t.Errorf("OTLPGRPCAddr = %q, want %q", cfg.OTLPGRPCAddr, ":4317")
+	if cfg.OTLPGRPCAddr != "127.0.0.1:4317" {
+		t.Errorf("OTLPGRPCAddr = %q, want %q", cfg.OTLPGRPCAddr, "127.0.0.1:4317")
 	}
 	if cfg.DataDir != "./data" {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, "./data")
@@ -186,9 +186,8 @@ func TestValidate(t *testing.T) {
 		{"JWTRefreshSecret empty", func(c *Config) { c.JWTRefreshSecret = "" }},
 		{"JWTRefreshSecret short", func(c *Config) { c.JWTRefreshSecret = "short" }},
 		{"JWT secrets equal", func(c *Config) { c.JWTRefreshSecret = c.JWTSecret }},
-		{"OTLP mTLS partial cert", func(c *Config) { c.OTLPTLSCertFile = "server.pem" }},
-		{"OTLP mTLS partial key", func(c *Config) { c.OTLPTLSKeyFile = "server-key.pem" }},
-		{"OTLP mTLS partial client ca", func(c *Config) { c.OTLPTLSClientCAFile = "ca.pem" }},
+		{"OTLP TLS partial cert", func(c *Config) { c.OTLPTLSCertFile = "server.pem" }},
+		{"OTLP TLS partial key", func(c *Config) { c.OTLPTLSKeyFile = "server-key.pem" }},
 	}
 
 	for _, tc := range tests {
@@ -210,16 +209,15 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("OTLPMTLS_valid", func(t *testing.T) {
+	t.Run("OTLPTLS_valid", func(t *testing.T) {
 		c := valid
 		c.OTLPTLSCertFile = "server.pem"
 		c.OTLPTLSKeyFile = "server-key.pem"
-		c.OTLPTLSClientCAFile = "ca.pem"
 		if err := c.Validate(); err != nil {
-			t.Errorf("OTLP mTLS config should be valid: %v", err)
+			t.Errorf("OTLP TLS config should be valid: %v", err)
 		}
-		if !c.OTLPMTLSEnabled() {
-			t.Error("OTLPMTLSEnabled = false, want true")
+		if !c.OTLPTLSEnabled() {
+			t.Error("OTLPTLSEnabled = false, want true")
 		}
 	})
 }

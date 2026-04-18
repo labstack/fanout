@@ -9,7 +9,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/alert"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -19,14 +19,14 @@ type Server struct {
 	mcp    *mcp.Server
 	svc    *service.Service
 	duck   *query.Duck
-	cfg    config.Config
+	cfg    env.Config
 	alerts *alert.Engine
 }
 
 // MCP returns the inner MCP server for in-process client connections.
 func (s *Server) MCP() *mcp.Server { return s.mcp }
 
-func NewServer(svc *service.Service, duck *query.Duck, cfg config.Config, alerts *alert.Engine) *Server {
+func NewServer(svc *service.Service, duck *query.Duck, cfg env.Config, alerts *alert.Engine) *Server {
 	mcpServer := mcp.NewServer(&mcp.Implementation{
 		Name:    "fanout",
 		Version: "1.0.0",

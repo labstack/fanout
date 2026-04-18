@@ -35,6 +35,10 @@ func NewSQLite(dbPath string) (*SQLite, error) {
 	if err != nil {
 		return nil, fmt.Errorf("store: open sqlite: %w", err)
 	}
+	if dbPath == ":memory:" {
+		db.SetMaxOpenConns(1)
+		db.SetMaxIdleConns(1)
+	}
 
 	s := &SQLite{DB: db}
 	if err := s.migrate(); err != nil {

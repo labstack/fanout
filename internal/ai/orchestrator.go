@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/service"
 )
 
@@ -61,7 +61,7 @@ type Orchestrator struct {
 	provider Provider
 	tools    *ToolRegistry
 	svc      *service.Service
-	cfg      config.Config
+	cfg      env.Config
 
 	// Cached services list (refreshed every 60s)
 	servicesMu    sync.RWMutex
@@ -71,7 +71,7 @@ type Orchestrator struct {
 
 // NewOrchestrator creates an orchestrator with the given provider and tools.
 // Panics if provider or tools are nil.
-func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Service, cfg config.Config) *Orchestrator {
+func NewOrchestrator(provider Provider, tools *ToolRegistry, svc *service.Service, cfg env.Config) *Orchestrator {
 	if provider == nil {
 		panic("ai: NewOrchestrator called with nil provider")
 	}

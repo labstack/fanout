@@ -13,6 +13,9 @@ SELECT * FROM users ORDER BY created_at DESC;
 -- name: CountUsers :one
 SELECT COUNT(*) FROM users;
 
+-- name: CountActiveAdmins :one
+SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1;
+
 -- name: CreateUser :one
 INSERT INTO users (id, email, name, role, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)

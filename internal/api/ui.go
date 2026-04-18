@@ -12,7 +12,7 @@ import (
 
 	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/alert"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/service"
 )
 
@@ -53,7 +53,7 @@ var faviconSVG []byte
 
 // UIHandler handles the chat UI and API routes.
 type UIHandler struct {
-	cfg        config.Config
+	cfg        env.Config
 	orch       *ai.Orchestrator
 	sseHandler *ai.SSEHandler
 	bookmarks  *ai.BookmarkStore
@@ -64,7 +64,7 @@ type UIHandler struct {
 }
 
 // RegisterUIRoutes registers all routes and returns the handler.
-func RegisterUIRoutes(e *echo.Echo, cfg config.Config, orch *ai.Orchestrator, sseHandler *ai.SSEHandler, bookmarks *ai.BookmarkStore, svc *service.Service, alertStore *alert.Store) *UIHandler {
+func RegisterUIRoutes(e *echo.Echo, cfg env.Config, orch *ai.Orchestrator, sseHandler *ai.SSEHandler, bookmarks *ai.BookmarkStore, svc *service.Service, alertStore *alert.Store) *UIHandler {
 	h := &UIHandler{
 		cfg:        cfg,
 		orch:       orch,

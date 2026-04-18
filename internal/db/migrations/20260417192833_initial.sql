@@ -1,6 +1,6 @@
 -- Create "alert_rules" table
 CREATE TABLE `alert_rules` (
-  `id` text NULL,
+  `id` text NOT NULL,
   `name` text NOT NULL,
   `description` text NULL DEFAULT '',
   `enabled` integer NOT NULL DEFAULT 1,
@@ -20,7 +20,7 @@ CREATE TABLE `alert_rules` (
 );
 -- Create "alerts" table
 CREATE TABLE `alerts` (
-  `id` text NULL,
+  `id` text NOT NULL,
   `rule_id` text NOT NULL,
   `service` text NOT NULL,
   `state` text NOT NULL,
@@ -39,12 +39,12 @@ CREATE TABLE `alerts` (
 CREATE UNIQUE INDEX `alerts_rule_id_service` ON `alerts` (`rule_id`, `service`);
 -- Create "users" table
 CREATE TABLE `users` (
-  `id` text NULL,
+  `id` text NOT NULL,
   `email` text NOT NULL,
   `name` text NULL DEFAULT '',
   `role` text NOT NULL DEFAULT 'operator',
   `active` integer NOT NULL DEFAULT 1,
-  `key_hash` text NULL,
+  `key` text NULL,
   `logged_in_at` text NULL DEFAULT '',
   `created_at` text NOT NULL DEFAULT (datetime('now')),
   `updated_at` text NOT NULL DEFAULT (datetime('now')),
@@ -52,11 +52,11 @@ CREATE TABLE `users` (
 );
 -- Create index "users_email" to table: "users"
 CREATE UNIQUE INDEX `users_email` ON `users` (`email`);
--- Create index "users_key_hash" to table: "users"
-CREATE UNIQUE INDEX `users_key_hash` ON `users` (`key_hash`);
--- Create "verification_codes" table
-CREATE TABLE `verification_codes` (
-  `id` text NULL,
+-- Create index "users_key" to table: "users"
+CREATE UNIQUE INDEX `users_key` ON `users` (`key`);
+-- Create "verifications" table
+CREATE TABLE `verifications` (
+  `id` text NOT NULL,
   `email` text NOT NULL,
   `code_hash` text NOT NULL,
   `attempts` integer NOT NULL DEFAULT 0,
@@ -65,5 +65,14 @@ CREATE TABLE `verification_codes` (
   `created_at` text NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (`id`)
 );
--- Create index "idx_verification_codes_email" to table: "verification_codes"
-CREATE INDEX `idx_verification_codes_email` ON `verification_codes` (`email`);
+-- Create index "idx_verifications_email" to table: "verifications"
+CREATE INDEX `idx_verifications_email` ON `verifications` (`email`);
+-- Create "config" table
+CREATE TABLE `config` (
+  `group_key` text NOT NULL,
+  `overrides` text NOT NULL DEFAULT '{}',
+  `updated_at` text NOT NULL DEFAULT (datetime('now')),
+  `updated_by` text NULL DEFAULT '',
+  `last_reason` text NULL DEFAULT '',
+  PRIMARY KEY (`group_key`)
+);

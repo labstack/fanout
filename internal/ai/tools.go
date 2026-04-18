@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -25,7 +25,7 @@ type ToolRegistry struct {
 // NewToolRegistry creates the registry by connecting to the MCP server
 // in-process and importing its tool definitions, then registering AI-only
 // tools directly.
-func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Service, cfg config.Config) (*ToolRegistry, error) {
+func NewToolRegistry(ctx context.Context, mcpServer *mcp.Server, svc *service.Service, cfg env.Config) (*ToolRegistry, error) {
 	// Create in-memory transport pair
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 

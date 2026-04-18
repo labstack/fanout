@@ -1,0 +1,227 @@
+package ingest
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
+	"net"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc/status"
+
+	appconfig "github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
+	appstore "github.com/labstack/fanout/internal/store"
+)
+
+func TestGRPCServerOptions_Disabled(t *testing.T) {
+	store := newRuntimeStore(t)
+	opts, err := GRPCServerOptions(env.Config{}, store)
+	if err != nil {
+		t.Fatalf("GRPCServerOptions: %v", err)
+	}
+	if len(opts) != 1 {
+		t.Fatalf("len(opts) = %d, want 1", len(opts))
+	}
+}
+
+func TestOTLPTLSConfig(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile := writeServerTLSFiles(t, dir)
+
+	tlsConfig, err := otlpTLSConfig(env.Config{
+		OTLPTLSCertFile: certFile,
+		OTLPTLSKeyFile:  keyFile,
+	})
+	if err != nil {
+		t.Fatalf("otlpTLSConfig: %v", err)
+	}
+	if tlsConfig.MinVersion != tls.VersionTLS13 {
+		t.Fatalf("MinVersion = %v, want TLS 1.3", tlsConfig.MinVersion)
+	}
+	if len(tlsConfig.Certificates) != 1 {
+		t.Fatalf("len(Certificates) = %d, want 1", len(tlsConfig.Certificates))
+	}
+}
+
+func TestAuthorize_PrivateModeAllowsPrivatePeer(t *testing.T) {
+	store := newRuntimeStore(t)
+	authorizer := newIngestAuthorizer(env.Config{}, store)
+
+	ctx := peer.NewContext(context.Background(), &peer.Peer{
+		Addr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 4317},
+	})
+
+	if err := authorizer.authorize(ctx); err != nil {
+		t.Fatalf("authorize(private loopback): %v", err)
+	}
+}
+
+func TestAuthorize_PrivateModeRejectsPublicPeer(t *testing.T) {
+	store := newRuntimeStore(t)
+	authorizer := newIngestAuthorizer(env.Config{}, store)
+
+	ctx := peer.NewContext(context.Background(), &peer.Peer{
+		Addr: &net.TCPAddr{IP: net.ParseIP("203.0.113.10"), Port: 4317},
+	})
+
+	err := authorizer.authorize(ctx)
+	if status.Code(err) != codes.PermissionDenied {
+		t.Fatalf("code = %v, want %v", status.Code(err), codes.PermissionDenied)
+	}
+}
+
+func TestAuthorize_PublicModeRequiresTLSAndToken(t *testing.T) {
+	store := newRuntimeStore(t)
+	token, hash, err := appconfig.GenerateIngestToken()
+	if err != nil {
+		t.Fatalf("GenerateIngestToken: %v", err)
+	}
+	if err := store.SetIngest(context.Background(), appconfig.IngestConfig{
+		Mode:           appconfig.IngestModePublic,
+		PublicEndpoint: "fanout.example.com:4317",
+		TokenHash:      hash,
+	}, "test", "enable public"); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+
+	authorizer := newIngestAuthorizer(env.Config{
+		OTLPTLSCertFile: "server.pem",
+		OTLPTLSKeyFile:  "server-key.pem",
+	}, store)
+
+	ctx := peer.NewContext(context.Background(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("203.0.113.10"), Port: 4317},
+		AuthInfo: credentials.TLSInfo{},
+	})
+	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("x-fanout-ingest-token", token))
+
+	if err := authorizer.authorize(ctx); err != nil {
+		t.Fatalf("authorize(public tls+token): %v", err)
+	}
+}
+
+func TestAuthorize_PublicModeRejectsMissingToken(t *testing.T) {
+	store := newRuntimeStore(t)
+	if err := store.SetIngest(context.Background(), appconfig.IngestConfig{
+		Mode:           appconfig.IngestModePublic,
+		PublicEndpoint: "fanout.example.com:4317",
+		TokenHash:      appconfig.HashIngestToken("fi_test"),
+	}, "test", "enable public"); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+
+	authorizer := newIngestAuthorizer(env.Config{
+		OTLPTLSCertFile: "server.pem",
+		OTLPTLSKeyFile:  "server-key.pem",
+	}, store)
+
+	ctx := peer.NewContext(context.Background(), &peer.Peer{
+		Addr:     &net.TCPAddr{IP: net.ParseIP("203.0.113.10"), Port: 4317},
+		AuthInfo: credentials.TLSInfo{},
+	})
+
+	err := authorizer.authorize(ctx)
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("code = %v, want %v", status.Code(err), codes.Unauthenticated)
+	}
+}
+
+func TestAuthorize_PublicModeRejectsWithoutTLSConfig(t *testing.T) {
+	store := newRuntimeStore(t)
+	if err := store.SetIngest(context.Background(), appconfig.IngestConfig{
+		Mode:           appconfig.IngestModePublic,
+		PublicEndpoint: "fanout.example.com:4317",
+		TokenHash:      appconfig.HashIngestToken("fi_test"),
+	}, "test", "enable public"); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+
+	authorizer := newIngestAuthorizer(env.Config{}, store)
+	ctx := peer.NewContext(context.Background(), &peer.Peer{
+		Addr: &net.TCPAddr{IP: net.ParseIP("203.0.113.10"), Port: 4317},
+	})
+
+	err := authorizer.authorize(ctx)
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("code = %v, want %v", status.Code(err), codes.FailedPrecondition)
+	}
+}
+
+func newRuntimeStore(t *testing.T) *appconfig.Store {
+	t.Helper()
+
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close() })
+	return appconfig.NewStore(sqlite.DB)
+}
+
+func writeServerTLSFiles(t *testing.T, dir string) (string, string) {
+	t.Helper()
+
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey(ca): %v", err)
+	}
+	caTemplate := certificateTemplate("fanout-test-ca", true)
+	caTemplate.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageCRLSign
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("CreateCertificate(ca): %v", err)
+	}
+
+	serverKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("GenerateKey(server): %v", err)
+	}
+	serverTemplate := certificateTemplate("fanout.test", false)
+	serverTemplate.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+	serverTemplate.DNSNames = []string{"fanout.test", "localhost"}
+	serverDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, caTemplate, &serverKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("CreateCertificate(server): %v", err)
+	}
+
+	certFile := filepath.Join(dir, "server.pem")
+	keyFile := filepath.Join(dir, "server-key.pem")
+
+	writePEMFile(t, certFile, "CERTIFICATE", serverDER)
+	writePEMFile(t, keyFile, "RSA PRIVATE KEY", x509.MarshalPKCS1PrivateKey(serverKey))
+	_ = caDER
+	return certFile, keyFile
+}
+
+func certificateTemplate(commonName string, isCA bool) *x509.Certificate {
+	now := time.Now().UTC()
+	return &x509.Certificate{
+		SerialNumber:          big.NewInt(now.UnixNano()),
+		Subject:               pkix.Name{CommonName: commonName},
+		NotBefore:             now.Add(-time.Minute),
+		NotAfter:              now.Add(24 * time.Hour),
+		BasicConstraintsValid: true,
+		IsCA:                  isCA,
+	}
+}
+
+func writePEMFile(t *testing.T, path, blockType string, der []byte) {
+	t.Helper()
+	block := &pem.Block{Type: blockType, Bytes: der}
+	if err := os.WriteFile(path, pem.EncodeToMemory(block), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
+}

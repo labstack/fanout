@@ -10,7 +10,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
 )
@@ -26,7 +26,7 @@ func newTestServer(t *testing.T) (*Server, sqlmock.Sqlmock) {
 	}
 	t.Cleanup(func() { db.Close() })
 
-	cfg := config.Config{
+	cfg := env.Config{
 		DataDir:   "data",
 		DefaultNS: "default",
 		TenantID:  uuid.MustParse("00000000-0000-0000-0000-000000000000"),

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -173,7 +173,7 @@ func TestNewOrchestrator_PanicsOnNilProvider(t *testing.T) {
 			t.Error("expected panic for nil provider")
 		}
 	}()
-	NewOrchestrator(nil, &ToolRegistry{}, nil, config.Config{})
+	NewOrchestrator(nil, &ToolRegistry{}, nil, env.Config{})
 }
 
 func TestNewOrchestrator_PanicsOnNilTools(t *testing.T) {
@@ -182,7 +182,7 @@ func TestNewOrchestrator_PanicsOnNilTools(t *testing.T) {
 			t.Error("expected panic for nil tools")
 		}
 	}()
-	NewOrchestrator(&mockProvider{}, nil, nil, config.Config{})
+	NewOrchestrator(&mockProvider{}, nil, nil, env.Config{})
 }
 
 type mockProvider struct{}
@@ -218,7 +218,7 @@ func TestToolRegistryMCPIntegration(t *testing.T) {
 
 	// 2. Create the AI tool registry connected to this test server.
 	//    Pass nil for svc — AI-only tools won't be called in this test.
-	registry, err := NewToolRegistry(ctx, mcpServer, nil, config.Config{})
+	registry, err := NewToolRegistry(ctx, mcpServer, nil, env.Config{})
 	if err != nil {
 		t.Fatalf("NewToolRegistry failed: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestToolRegistryMCPIntegration_IsError(t *testing.T) {
 		}, struct{}{}, nil
 	})
 
-	registry, err := NewToolRegistry(ctx, mcpServer, nil, config.Config{})
+	registry, err := NewToolRegistry(ctx, mcpServer, nil, env.Config{})
 	if err != nil {
 		t.Fatalf("NewToolRegistry failed: %v", err)
 	}

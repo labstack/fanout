@@ -13,13 +13,13 @@ import (
 
 	"github.com/duckdb/duckdb-go/v2"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/metrics"
 )
 
 type Duck struct {
 	DB              *sql.DB
-	cfg             config.Config
+	cfg             env.Config
 	lastMaintenance time.Time
 }
 
@@ -29,7 +29,7 @@ const (
 	duckDBPoolSize        = 1
 )
 
-func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
+func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 	if err := os.MkdirAll(cfg.QueryDir(), 0o755); err != nil {
 		return nil, fmt.Errorf("create query dir: %w", err)
 	}

@@ -17,6 +17,9 @@ import (
 // ErrUserNotFound is returned when a requested user does not exist.
 var ErrUserNotFound = errors.New("user not found")
 
+// ErrLastActiveAdmin is returned when an operation would remove the final active admin.
+var ErrLastActiveAdmin = errors.New("cannot remove the last active admin")
+
 // User represents an authenticated user.
 type User struct {
 	ID         string `json:"id"`
@@ -108,10 +111,33 @@ func (s *UserStore) List() ([]User, error) {
 
 // Update modifies a user's fields. Nil pointers are skipped.
 func (s *UserStore) Update(id string, email, name, role *string, active *bool) (User, error) {
-	existing, err := s.GetByID(id)
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return User{}, err
+		return User{}, fmt.Errorf("auth: open user conn: %w", err)
 	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return User{}, fmt.Errorf("auth: begin user update: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	q := generated.New(conn)
+	row, err := q.GetUserByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("auth: get user by id: %w", err)
+	}
+
+	existing := toUser(row)
 	if email != nil {
 		existing.Email = *email
 	}
@@ -124,12 +150,22 @@ func (s *UserStore) Update(id string, email, name, role *string, active *bool) (
 	if active != nil {
 		existing.Active = *active
 	}
+	if row.Role == "admin" && row.Active == 1 && (!existing.Active || existing.Role != "admin") {
+		admins, err := q.CountActiveAdmins(ctx)
+		if err != nil {
+			return User{}, fmt.Errorf("auth: count active admins: %w", err)
+		}
+		if admins <= 1 {
+			return User{}, ErrLastActiveAdmin
+		}
+	}
+
 	activeInt := int64(0)
 	if existing.Active {
 		activeInt = 1
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	u, err := s.q.UpdateUser(context.Background(), generated.UpdateUserParams{
+	u, err := q.UpdateUser(ctx, generated.UpdateUserParams{
 		Email:     existing.Email,
 		Name:      sql.NullString{String: existing.Name, Valid: existing.Name != ""},
 		Role:      existing.Role,
@@ -140,12 +176,51 @@ func (s *UserStore) Update(id string, email, name, role *string, active *bool) (
 	if err != nil {
 		return User{}, fmt.Errorf("auth: update user: %w", err)
 	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return User{}, fmt.Errorf("auth: commit user update: %w", err)
+	}
+	committed = true
 	return toUser(u), nil
 }
 
 // Delete removes a user by ID.
 func (s *UserStore) Delete(id string) error {
-	res, err := s.q.DeleteUser(context.Background(), id)
+	ctx := context.Background()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("auth: open user conn: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("auth: begin user delete: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+
+	q := generated.New(conn)
+	row, err := q.GetUserByID(ctx, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrUserNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("auth: get user by id: %w", err)
+	}
+	if row.Role == "admin" && row.Active == 1 {
+		admins, err := q.CountActiveAdmins(ctx)
+		if err != nil {
+			return fmt.Errorf("auth: count active admins: %w", err)
+		}
+		if admins <= 1 {
+			return ErrLastActiveAdmin
+		}
+	}
+
+	res, err := q.DeleteUser(ctx, id)
 	if err != nil {
 		return fmt.Errorf("auth: delete user: %w", err)
 	}
@@ -153,6 +228,10 @@ func (s *UserStore) Delete(id string) error {
 	if n == 0 {
 		return ErrUserNotFound
 	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("auth: commit user delete: %w", err)
+	}
+	committed = true
 	return nil
 }
 
@@ -173,6 +252,11 @@ func (s *UserStore) TouchLoginAt(id string, at time.Time) error {
 // CountUsers returns the number of users in the database.
 func (s *UserStore) CountUsers() (int64, error) {
 	return s.q.CountUsers(context.Background())
+}
+
+// CountActiveAdmins returns the number of active admin users.
+func (s *UserStore) CountActiveAdmins() (int64, error) {
+	return s.q.CountActiveAdmins(context.Background())
 }
 
 // CreateFirstAdmin atomically creates the first admin user.

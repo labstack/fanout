@@ -41,6 +41,9 @@ func TestRequireRoleUsesCurrentUserState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
+	if _, err := users.Create("second-admin@example.com", "", "admin"); err != nil {
+		t.Fatalf("Create second admin: %v", err)
+	}
 
 	e.GET("/api/admin", func(c *echo.Context) error {
 		return c.NoContent(http.StatusNoContent)

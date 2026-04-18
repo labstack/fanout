@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestNewBookmarkStore(t *testing.T) {
@@ -41,8 +43,12 @@ func TestBookmarkStore_CreateAndList(t *testing.T) {
 	if b.ID == "" {
 		t.Error("bookmark ID is empty")
 	}
-	if len(b.ID) != 8 {
-		t.Errorf("bookmark ID length = %d, want 8", len(b.ID))
+	parsed, err := uuid.Parse(b.ID)
+	if err != nil {
+		t.Fatalf("bookmark ID is not a UUID: %v", err)
+	}
+	if parsed.Version() != 7 {
+		t.Fatalf("bookmark ID version = %d, want 7", parsed.Version())
 	}
 	if b.Question != "What is P95 latency?" {
 		t.Errorf("Question = %q, want %q", b.Question, "What is P95 latency?")
@@ -128,7 +134,7 @@ func TestBookmarkStore_DeleteNotFound(t *testing.T) {
 		t.Fatalf("NewBookmarkStore: %v", err)
 	}
 
-	err = store.Delete("deadbeef")
+	err = store.Delete("018f6f88-7d6a-7f5c-a9ef-6404b4e66a81")
 	if err == nil {
 		t.Fatal("expected error for non-existent bookmark")
 	}
@@ -143,7 +149,13 @@ func TestBookmarkStore_DeleteInvalidID(t *testing.T) {
 		t.Fatalf("NewBookmarkStore: %v", err)
 	}
 
-	for _, id := range []string{"", "ZZZZZZZZ", "../etc/passwd", "too-long-id-string"} {
+	for _, id := range []string{
+		"",
+		"ZZZZZZZZ",
+		"../etc/passwd",
+		"too-long-id-string",
+		"018f6f88-7d6a-4f5c-a9ef-6404b4e66a81",
+	} {
 		err := store.Delete(id)
 		if err == nil {
 			t.Errorf("Delete(%q): expected error for invalid ID", id)

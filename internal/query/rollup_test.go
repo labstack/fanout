@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 )
 
 func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
@@ -20,7 +20,7 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 
 	d := &Duck{
 		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
+		cfg:             env.Config{RetentionDays: 30},
 		lastMaintenance: time.Now(),
 	}
 	ctx := context.Background()
@@ -90,7 +90,7 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 
 	d := &Duck{
 		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
+		cfg:             env.Config{RetentionDays: 30},
 		lastMaintenance: time.Now(),
 	}
 	ctx := context.Background()
@@ -185,7 +185,7 @@ func TestRollupOnceIgnoresRowsWithoutBucketTimestamp(t *testing.T) {
 
 	d := &Duck{
 		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
+		cfg:             env.Config{RetentionDays: 30},
 		lastMaintenance: time.Now(),
 	}
 	ctx := context.Background()

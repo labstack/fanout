@@ -4,7 +4,16 @@ import { Loader2, Radio } from "lucide-react";
 import { api, setApiToken } from "@/api/client";
 import { useAuth } from "@/hooks/use-auth";
 
-type Step = "loading" | "setup" | "email" | "code";
+type Step = "loading" | "setup" | "ingest" | "email" | "code";
+
+interface IngestConfigResponse {
+  mode: string;
+  public_endpoint: string;
+  suggested_endpoint: string;
+  tls_configured: boolean;
+  header_name: string;
+  ingest_token?: string;
+}
 
 export function LoginPage() {
   const { user, isLoading, login } = useAuth();
@@ -16,6 +25,11 @@ export function LoginPage() {
   const [name, setName] = useState("");
   const [setupToken, setSetupToken] = useState("");
   const [code, setCode] = useState("");
+  const [setupAccessToken, setSetupAccessToken] = useState<string | null>(null);
+  const [publicEndpoint, setPublicEndpoint] = useState("");
+  const [tlsConfigured, setTLSConfigured] = useState(false);
+  const [headerName, setHeaderName] = useState("x-fanout-ingest-token");
+  const [ingestToken, setIngestToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
@@ -67,9 +81,60 @@ export function LoginPage() {
 
       const data = await result.json();
       setApiToken(data.access_token);
-      await login(data.access_token);
+      setSetupAccessToken(data.access_token);
+
+      const ingest = await api<IngestConfigResponse>("/api/config/ingest");
+      setPublicEndpoint(ingest.public_endpoint || ingest.suggested_endpoint);
+      setTLSConfigured(ingest.tls_configured);
+      setHeaderName(ingest.header_name);
+      setStep("ingest");
+      setSending(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Setup failed");
+      setSending(false);
+    }
+  }
+
+  async function completeSetup() {
+    if (!setupAccessToken) return;
+    await login(setupAccessToken);
+  }
+
+  async function handlePrivateIngest() {
+    setSending(true);
+    setError(null);
+
+    try {
+      await api<IngestConfigResponse>("/api/config/ingest", {
+        method: "POST",
+        body: JSON.stringify({ mode: "private" }),
+      });
+      await completeSetup();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to keep ingest private");
+      setSending(false);
+    }
+  }
+
+  async function handlePublicIngest(e: React.FormEvent) {
+    e.preventDefault();
+    setSending(true);
+    setError(null);
+
+    try {
+      const result = await api<IngestConfigResponse>("/api/config/ingest", {
+        method: "POST",
+        body: JSON.stringify({
+          mode: "public",
+          public_endpoint: publicEndpoint.trim(),
+        }),
+      });
+      setIngestToken(result.ingest_token || null);
+      setPublicEndpoint(result.public_endpoint || publicEndpoint.trim());
+      setHeaderName(result.header_name);
+      setSending(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to enable public ingest");
       setSending(false);
     }
   }
@@ -148,6 +213,7 @@ export function LoginPage() {
           </h1>
           <p className="text-sm text-muted-foreground">
             {step === "setup" && "Create your admin account with the setup token"}
+            {step === "ingest" && "Choose how collectors reach this Fanout instance"}
             {step === "email" && "Sign in to your account"}
             {step === "code" && `Enter the code sent to ${email}`}
           </p>
@@ -213,6 +279,89 @@ export function LoginPage() {
               )}
             </button>
           </form>
+        )}
+
+        {step === "ingest" && (
+          <div className="space-y-4">
+            {ingestToken ? (
+              <>
+                <div className="rounded-lg border border-border bg-surface-2 px-4 py-3 space-y-3">
+                  <div className="detail-label">Public OTLP enabled</div>
+                  <div className="space-y-2 text-sm mono text-foreground/80 break-all">
+                    <div>
+                      <span className="text-muted-foreground">Endpoint</span>
+                      <span className="text-primary">={publicEndpoint}</span>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">{headerName}</span>
+                      <span className="text-primary">={ingestToken}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border bg-surface-2 px-4 py-3 space-y-2">
+                  <div className="detail-label">Collector config</div>
+                  <pre className="text-xs mono whitespace-pre-wrap text-foreground/80">{`exporters:
+  otlp:
+    endpoint: ${publicEndpoint}
+    tls:
+      insecure: false
+    headers:
+      ${headerName}: ${ingestToken}`}</pre>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void completeSetup()}
+                  className="btn-primary w-full"
+                >
+                  Continue to Fanout
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => void handlePrivateIngest()}
+                  disabled={sending}
+                  className="btn-primary w-full disabled:opacity-50"
+                >
+                  {sending ? "Saving..." : "Keep OTLP Private"}
+                </button>
+
+                <form onSubmit={handlePublicIngest} className="space-y-4 rounded-lg border border-border bg-surface-2 px-4 py-4">
+                  <div className="space-y-2">
+                    <div className="detail-label">Expose public OTLP</div>
+                    <p className="text-xs text-muted-foreground">
+                      Public ingest requires server TLS and a dedicated ingest token.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="detail-label mb-2 block">Public endpoint</label>
+                    <input
+                      type="text"
+                      value={publicEndpoint}
+                      onChange={(e) => setPublicEndpoint(e.target.value)}
+                      placeholder="fanout.example.com:4317"
+                      className="input-field mono"
+                      disabled={!tlsConfigured}
+                      required
+                    />
+                  </div>
+                  {!tlsConfigured && (
+                    <div className="rounded-lg border border-unhealthy/20 bg-unhealthy/5 px-4 py-3 text-xs text-unhealthy/90 mono">
+                      Configure `OTLP_TLS_CERT_FILE` and `OTLP_TLS_KEY_FILE` before enabling public ingest.
+                    </div>
+                  )}
+                  <button
+                    type="submit"
+                    disabled={sending || !tlsConfigured || !publicEndpoint.trim()}
+                    className="btn-primary w-full disabled:opacity-50"
+                  >
+                    {sending ? "Enabling..." : "Enable Public OTLP"}
+                  </button>
+                </form>
+              </>
+            )}
+          </div>
         )}
 
         {/* Email step */}

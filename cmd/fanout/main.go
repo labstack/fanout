@@ -24,7 +24,8 @@ import (
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/config"
+	appconfig "github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/lake"
@@ -40,7 +41,7 @@ var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
-	cfg := config.Load()
+	cfg := env.Load()
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		slog.Error("create data dir failed", "err", err)
@@ -109,13 +110,15 @@ func main() {
 		slog.Info("alert engine enabled", "interval", cfg.AlertEvalInterval)
 	}
 
+	configStore := appconfig.NewStore(sqlite.DB)
+
 	// Start gRPC ingest (OTLP)
 	grpcLis, err := net.Listen("tcp", cfg.OTLPGRPCAddr)
 	if err != nil {
 		slog.Error("listen gRPC failed", "err", err)
 		os.Exit(1)
 	}
-	grpcOpts, err := ingest.GRPCServerOptions(cfg)
+	grpcOpts, err := ingest.GRPCServerOptions(cfg, configStore)
 	if err != nil {
 		slog.Error("OTLP gRPC TLS init failed", "err", err)
 		os.Exit(1)
@@ -125,7 +128,7 @@ func main() {
 	ingest.RegisterOTLP(grpcSrv, ing)
 
 	go func() {
-		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr, "mtls", cfg.OTLPMTLSEnabled())
+		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr, "tls", cfg.OTLPTLSEnabled())
 		if err := grpcSrv.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
 			errCh <- fmt.Errorf("gRPC server: %w", err)
 		}
@@ -214,6 +217,7 @@ func main() {
 	codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
 	api.RegisterAuthRoutes(e, userStore, codeStore, cfg.SetupToken, jwtSecret, refreshSecret, smtpCfg)
 	api.RegisterUserRoutes(e, userStore, smtpCfg)
+	api.RegisterConfigRoutes(e, cfg, configStore)
 	slog.Info("auth enabled")
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled

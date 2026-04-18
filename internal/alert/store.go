@@ -24,13 +24,12 @@ func NewStore(db *sql.DB) *Store {
 }
 
 // newID returns a new UUIDv7 string.
-func newID() string {
+func newID() (string, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
-		// Fallback to v4 if v7 fails (should not happen in practice).
-		return uuid.New().String()
+		return "", fmt.Errorf("store: generate uuidv7: %w", err)
 	}
-	return id.String()
+	return id.String(), nil
 }
 
 // ruleToRow converts a domain Rule to generated CreateRuleParams.
@@ -135,7 +134,11 @@ func alertToUpsertParams(a Alert) generated.UpsertAlertParams {
 
 // CreateRule inserts a new alert rule and returns the persisted record.
 func (s *Store) CreateRule(r Rule) (Rule, error) {
-	r.ID = newID()
+	id, err := newID()
+	if err != nil {
+		return Rule{}, err
+	}
+	r.ID = id
 	ar, err := s.q.CreateRule(context.Background(), ruleToCreateParams(r))
 	if err != nil {
 		return Rule{}, fmt.Errorf("store: create rule: %w", err)
@@ -212,7 +215,11 @@ func (s *Store) DeleteRule(id string) error {
 // UpsertAlert inserts or updates an alert instance keyed on (rule_id, service).
 func (s *Store) UpsertAlert(a Alert) (Alert, error) {
 	if a.ID == "" {
-		a.ID = newID()
+		id, err := newID()
+		if err != nil {
+			return Alert{}, err
+		}
+		a.ID = id
 	}
 	ga, err := s.q.UpsertAlert(context.Background(), alertToUpsertParams(a))
 	if err != nil {

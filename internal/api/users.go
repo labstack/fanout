@@ -105,6 +105,9 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 
 	user, err := h.users.Update(id, req.Email, req.Name, req.Role, req.Active)
 	if err != nil {
+		if err == auth.ErrLastActiveAdmin {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		if strings.Contains(err.Error(), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
@@ -145,6 +148,9 @@ func (h *UserHandler) RevokeAPIKey(c *echo.Context) error {
 func (h *UserHandler) DeleteUser(c *echo.Context) error {
 	id := c.Param("id")
 	if err := h.users.Delete(id); err != nil {
+		if err == auth.ErrLastActiveAdmin {
+			return echo.NewHTTPError(http.StatusConflict, err.Error())
+		}
 		if strings.Contains(err.Error(), "not found") {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}

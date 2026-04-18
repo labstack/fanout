@@ -12,7 +12,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/google/uuid"
-	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/env"
 )
 
 func TestLatencyRowStruct(t *testing.T) {
@@ -165,7 +165,7 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 
 	d := &Duck{
 		DB:  db,
-		cfg: config.Config{RetentionDays: 7},
+		cfg: env.Config{RetentionDays: 7},
 	}
 
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.spans WHERE start_time < now() - INTERVAL 7 DAY")).
@@ -197,7 +197,7 @@ func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cfg := config.Config{
+	cfg := env.Config{
 		DataDir:      t.TempDir(),
 		RollupEvery:  60,
 		DuckDBMemory: "128MB",
