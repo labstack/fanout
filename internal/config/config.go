@@ -90,19 +90,25 @@ func (c Config) Validate() error {
 	if c.RetentionDays < 0 {
 		return fmt.Errorf("RetentionDays (RETENTION_DAYS) must be >= 0, got %d", c.RetentionDays)
 	}
-	if c.AuthEnabled() {
+	if c.SMTPConfigured() {
 		if c.SMTPFrom == "" {
-			return fmt.Errorf("SMTP_FROM is required when auth is enabled")
+			return fmt.Errorf("SMTP_FROM is required when SMTP is configured")
 		}
 		if c.SMTPPort <= 0 {
-			return fmt.Errorf("SMTP_PORT must be > 0 when auth is enabled")
+			return fmt.Errorf("SMTP_PORT must be > 0 when SMTP is configured")
 		}
 	}
 	return nil
 }
 
-// AuthEnabled returns true if SMTP is configured for passwordless login.
+// AuthEnabled is always true — auth is always available.
+// Admin setup works without SMTP. Only the email code flow needs SMTP.
 func (c Config) AuthEnabled() bool {
+	return true
+}
+
+// SMTPConfigured returns true if SMTP is set up for sending email codes.
+func (c Config) SMTPConfigured() bool {
 	return c.SMTPHost != "" && c.SMTPUser != "" && c.SMTPPass != ""
 }
 

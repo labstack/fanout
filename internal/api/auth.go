@@ -14,19 +14,21 @@ import (
 
 // AuthHandler handles passwordless email login endpoints.
 type AuthHandler struct {
-	users     *auth.UserStore
-	codes     *auth.CodeStore
-	jwtSecret string
-	smtp      auth.SMTPConfig
+	users          *auth.UserStore
+	codes          *auth.CodeStore
+	jwtSecret      string
+	smtp           auth.SMTPConfig
+	smtpConfigured bool
 }
 
 // RegisterAuthRoutes registers auth endpoints.
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, jwtSecret string, smtp auth.SMTPConfig) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, jwtSecret string, smtp auth.SMTPConfig, smtpConfigured bool) {
 	h := &AuthHandler{
-		users:     users,
-		codes:     codes,
-		jwtSecret: jwtSecret,
-		smtp:      smtp,
+		users:          users,
+		codes:          codes,
+		jwtSecret:      jwtSecret,
+		smtp:           smtp,
+		smtpConfigured: smtpConfigured,
 	}
 
 	e.GET("/api/auth/status", h.Status)
@@ -50,8 +52,9 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check auth status")
 	}
 	return c.JSON(200, map[string]any{
-		"setup_required": len(users) == 0,
-		"auth_enabled":   true,
+		"setup_required":  len(users) == 0,
+		"auth_enabled":    true,
+		"smtp_configured": h.smtpConfigured,
 	})
 }
 
@@ -113,6 +116,10 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 
 // Start sends a verification code to the given email.
 func (h *AuthHandler) Start(c *echo.Context) error {
+	if !h.smtpConfigured {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "email login requires SMTP configuration")
+	}
+
 	var req struct {
 		Email string `json:"email"`
 	}

@@ -146,9 +146,9 @@ func main() {
 		},
 	}))
 
-	// Resolve JWT secret (generate ephemeral if not set)
+	// Resolve JWT secret (always needed for auth)
 	jwtSecret := cfg.JWTSecret
-	if jwtSecret == "" && cfg.AuthEnabled() {
+	if jwtSecret == "" {
 		var err error
 		jwtSecret, err = auth.GenerateSecret()
 		if err != nil {
@@ -158,15 +158,14 @@ func main() {
 		slog.Warn("JWT_SECRET not set — generated ephemeral secret (sessions won't survive restart)")
 	}
 
-	// Create user store early so the middleware can look up API keys
-	var userStore *auth.UserStore
-	if cfg.AuthEnabled() {
-		userStore = auth.NewUserStore(sqlite.DB)
-	}
+	// User store always available (auth always works, SMTP optional)
+	userStore := auth.NewUserStore(sqlite.DB)
 
-	// Auth middleware — supports JWT, per-user API keys, and legacy API_TOKEN
+	// Auth middleware — supports JWT, per-user API keys, and legacy API_TOKEN.
+	// Auth is enforced when API_TOKEN is set or users exist in the database.
+	// On a fresh install with no users, all endpoints are open until setup.
 	apiToken := strings.TrimSpace(cfg.APIToken)
-	if apiToken != "" || cfg.AuthEnabled() {
+	{
 		tokenBytes := []byte(apiToken)
 		e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 			return func(c *echo.Context) error {
@@ -181,6 +180,14 @@ func main() {
 					isPublicAuth ||
 					(!strings.HasPrefix(path, "/api/") && path != "/mcp") {
 					return next(c)
+				}
+
+				// If no API_TOKEN and no users exist, skip auth (fresh install)
+				if apiToken == "" {
+					count, _ := userStore.CountUsers()
+					if count == 0 {
+						return next(c)
+					}
 				}
 
 				authHeader := c.Request().Header.Get("Authorization")
@@ -281,20 +288,18 @@ func main() {
 	// Alert management REST endpoints
 	api.RegisterAlertRoutes(e, alertStore, alertEngine)
 
-	// Auth routes (only if SMTP configured)
-	if cfg.AuthEnabled() {
-		smtpCfg := auth.SMTPConfig{
-			Host: cfg.SMTPHost,
-			Port: cfg.SMTPPort,
-			User: cfg.SMTPUser,
-			Pass: cfg.SMTPPass,
-			From: cfg.SMTPFrom,
-		}
-		codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
-		api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, smtpCfg)
-		api.RegisterUserRoutes(e, userStore, smtpCfg)
-		slog.Info("auth enabled")
+	// Auth routes (always registered — SMTP optional for email code flow)
+	smtpCfg := auth.SMTPConfig{
+		Host: cfg.SMTPHost,
+		Port: cfg.SMTPPort,
+		User: cfg.SMTPUser,
+		Pass: cfg.SMTPPass,
+		From: cfg.SMTPFrom,
 	}
+	codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
+	api.RegisterAuthRoutes(e, userStore, codeStore, jwtSecret, smtpCfg, cfg.SMTPConfigured())
+	api.RegisterUserRoutes(e, userStore, smtpCfg)
+	slog.Info("auth enabled", "smtp", cfg.SMTPConfigured())
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled
 	if cfg.MCPEnabled {

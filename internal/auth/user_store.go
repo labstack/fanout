@@ -174,6 +174,11 @@ func (s *UserStore) TouchLogin(id string) error {
 }
 
 // EnsureAdmin creates the admin user if it doesn't exist.
+// CountUsers returns the number of users in the database.
+func (s *UserStore) CountUsers() (int64, error) {
+	return s.q.CountUsers(context.Background())
+}
+
 func (s *UserStore) EnsureAdmin(email string) error {
 	_, err := s.GetByEmail(email)
 	if err == nil {
