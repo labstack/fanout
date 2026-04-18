@@ -10,7 +10,7 @@ import (
 )
 
 func TestUpdateUser_RejectsDemotingLastActiveAdmin(t *testing.T) {
-	e, users, secret, _ := newTestAuthServer(t)
+	e, users, _, secret, _ := newTestAuthServer(t)
 	admin, err := users.Create("admin@example.com", "", "admin")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -34,7 +34,7 @@ func TestUpdateUser_RejectsDemotingLastActiveAdmin(t *testing.T) {
 }
 
 func TestUpdateUser_RejectsDeactivatingLastActiveAdmin(t *testing.T) {
-	e, users, secret, _ := newTestAuthServer(t)
+	e, users, _, secret, _ := newTestAuthServer(t)
 	admin, err := users.Create("admin@example.com", "", "admin")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -58,7 +58,7 @@ func TestUpdateUser_RejectsDeactivatingLastActiveAdmin(t *testing.T) {
 }
 
 func TestDeleteUser_RejectsDeletingLastActiveAdmin(t *testing.T) {
-	e, users, secret, _ := newTestAuthServer(t)
+	e, users, _, secret, _ := newTestAuthServer(t)
 	admin, err := users.Create("admin@example.com", "", "admin")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -81,7 +81,7 @@ func TestDeleteUser_RejectsDeletingLastActiveAdmin(t *testing.T) {
 }
 
 func TestDeleteUser_AllowsDeletingAdminWhenAnotherActiveAdminExists(t *testing.T) {
-	e, users, secret, _ := newTestAuthServer(t)
+	e, users, _, secret, _ := newTestAuthServer(t)
 	admin, err := users.Create("admin@example.com", "", "admin")
 	if err != nil {
 		t.Fatalf("Create admin: %v", err)

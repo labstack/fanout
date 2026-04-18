@@ -11,10 +11,11 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
+	appconfig "github.com/labstack/fanout/internal/config"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, string, string) {
+func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, *appconfig.Store, string, string) {
 	t.Helper()
 
 	sqlite, err := appstore.NewSQLite(":memory:")
@@ -25,18 +26,25 @@ func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, string, strin
 
 	secret := "0123456789abcdef0123456789abcdef"
 	refreshSecret := "abcdef0123456789abcdef0123456789"
-	setupToken := "setup-token-012345"
 	users := auth.NewUserStore(sqlite.DB)
 	codes := auth.NewCodeStore(sqlite.DB, secret)
+	configStore := appconfig.NewStore(sqlite.DB)
+	if err := configStore.Upsert(t.Context(), "bootstrap", appconfig.BootstrapConfig{
+		Token:     "setup-token-012345",
+		TokenHash: appconfig.HashBootstrapToken("setup-token-012345"),
+		ExpiresAt: time.Now().UTC().Add(time.Hour).Format(time.RFC3339),
+	}, "test", "seed bootstrap"); err != nil {
+		t.Fatalf("Upsert bootstrap: %v", err)
+	}
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, setupToken, secret, refreshSecret, auth.SMTPConfig{})
-	return e, users, secret, refreshSecret
+	RegisterAuthRoutes(e, users, codes, configStore, secret, refreshSecret, auth.SMTPConfig{})
+	return e, users, configStore, secret, refreshSecret
 }
 
 func TestRequireRoleUsesCurrentUserState(t *testing.T) {
-	e, users, secret, _ := newTestAuthServer(t)
+	e, users, _, secret, _ := newTestAuthServer(t)
 	user, err := users.Create("admin@example.com", "", "admin")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -70,7 +78,7 @@ func TestRequireRoleUsesCurrentUserState(t *testing.T) {
 }
 
 func TestMeRejectsInactiveUser(t *testing.T) {
-	e, users, secret, _ := newTestAuthServer(t)
+	e, users, _, secret, _ := newTestAuthServer(t)
 	user, err := users.Create("user@example.com", "", "operator")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -97,7 +105,7 @@ func TestMeRejectsInactiveUser(t *testing.T) {
 }
 
 func TestRefreshRotatesAndLogoutRevokesSession(t *testing.T) {
-	e, users, _, refreshSecret := newTestAuthServer(t)
+	e, users, _, _, refreshSecret := newTestAuthServer(t)
 	user, err := users.Create("user@example.com", "", "operator")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -166,6 +174,7 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 	refreshSecret := "abcdef0123456789abcdef0123456789"
 	users := auth.NewUserStore(sqlite.DB)
 	codes := auth.NewCodeStore(sqlite.DB, secret)
+	configStore := appconfig.NewStore(sqlite.DB)
 
 	inactive, err := users.Create("inactive@example.com", "", "operator")
 	if err != nil {
@@ -178,7 +187,7 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, "setup-token-012345", secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, configStore, secret, refreshSecret, auth.SMTPConfig{})
 
 	for _, email := range []string{"missing@example.com", "inactive@example.com"} {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"`+email+`"}`))
@@ -211,13 +220,14 @@ func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 	refreshSecret := "abcdef0123456789abcdef0123456789"
 	users := auth.NewUserStore(sqlite.DB)
 	codes := auth.NewCodeStore(sqlite.DB, secret)
+	configStore := appconfig.NewStore(sqlite.DB)
 	if _, err := users.Create("active@example.com", "", "operator"); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, "setup-token-012345", secret, refreshSecret, auth.SMTPConfig{
+	RegisterAuthRoutes(e, users, codes, configStore, secret, refreshSecret, auth.SMTPConfig{
 		Host: "127.0.0.1",
 		Port: 1,
 		User: "user",
@@ -235,10 +245,10 @@ func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 	}
 }
 
-func TestSetupRequiresValidSetupToken(t *testing.T) {
-	e, users, _, _ := newTestAuthServer(t)
+func TestSetupRequiresValidBootstrapToken(t *testing.T) {
+	e, users, _, _, _ := newTestAuthServer(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"wrong-token"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","bootstrap_token":"wrong-token"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -256,10 +266,10 @@ func TestSetupRequiresValidSetupToken(t *testing.T) {
 	}
 }
 
-func TestSetupCreatesAdminWithValidSetupToken(t *testing.T) {
-	e, users, _, _ := newTestAuthServer(t)
+func TestSetupCreatesAdminWithValidBootstrapToken(t *testing.T) {
+	e, users, configStore, _, _ := newTestAuthServer(t)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"setup-token-012345"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","bootstrap_token":"setup-token-012345"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -274,5 +284,37 @@ func TestSetupCreatesAdminWithValidSetupToken(t *testing.T) {
 	}
 	if user.Role != "admin" {
 		t.Fatalf("role = %q, want %q", user.Role, "admin")
+	}
+
+	bootstrap, err := configStore.GetBootstrap(t.Context())
+	if err != nil {
+		t.Fatalf("GetBootstrap: %v", err)
+	}
+	if bootstrap.TokenHash != "" {
+		t.Fatalf("bootstrap token hash = %q, want empty", bootstrap.TokenHash)
+	}
+}
+
+func TestSetupRetriesSuccessfullyAfterAdminAlreadyExists(t *testing.T) {
+	e, users, configStore, _, _ := newTestAuthServer(t)
+	if _, err := users.CreateFirstAdmin("admin@example.com", "Local Admin"); err != nil {
+		t.Fatalf("CreateFirstAdmin: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","bootstrap_token":"setup-token-012345"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	bootstrap, err := configStore.GetBootstrap(t.Context())
+	if err != nil {
+		t.Fatalf("GetBootstrap: %v", err)
+	}
+	if bootstrap.Token != "" || bootstrap.TokenHash != "" {
+		t.Fatalf("bootstrap = %#v, want cleared config", bootstrap)
 	}
 }

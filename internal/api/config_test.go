@@ -123,7 +123,7 @@ func newConfigServer(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore,
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, "setup-token-012345", secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, store, secret, refreshSecret, auth.SMTPConfig{})
 	RegisterConfigRoutes(e, cfg, store)
 	return e, users, secret, store
 }

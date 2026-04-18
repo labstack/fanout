@@ -10,3 +10,6 @@ ON CONFLICT(group_key) DO UPDATE SET
   updated_by = excluded.updated_by,
   last_reason = excluded.last_reason
 RETURNING *;
+
+-- name: DeleteConfig :exec
+DELETE FROM config WHERE group_key = ?;

@@ -28,7 +28,7 @@ docker build -t fanout .
 docker run --rm --env-file .env -p 7520:7520 fanout
 ```
 
-Then open `http://localhost:7520/login`, use the `SETUP_TOKEN` from `.env` to create the first admin account, and choose whether OTLP stays private or is exposed publicly over TLS with a generated ingest token.
+On an uninitialized instance, Fanout prints a bootstrap token in the server output. Open `http://localhost:7520/login`, use that token to create the first admin account, and then choose whether OTLP stays private or is exposed publicly over TLS with a generated ingest token.
 
 If you want a collector outside the container to reach OTLP, explicitly set `OTLP_GRPC_ADDR=0.0.0.0:4317` and publish `-p 4317:4317`.
 
@@ -74,7 +74,6 @@ MCP clients receive full JSON Schema via `tools/list`.
 | `SMTP_USER` | - | SMTP username for web auth |
 | `SMTP_PASS` | - | SMTP password for web auth |
 | `SMTP_FROM` | - | Sender address for login/setup emails |
-| `SETUP_TOKEN` | - | Required first-boot setup token for creating the first admin |
 | `JWT_SECRET` | - | HS256 signing key for access tokens |
 | `JWT_REFRESH_SECRET` | - | HS256 signing key for refresh tokens |
 | `OTLP_TLS_CERT_FILE` | - | OTLP gRPC server certificate file |
@@ -120,7 +119,7 @@ exporters:
 ```
 
 Auth is web-only:
-- first boot uses the setup page plus `SETUP_TOKEN` to create the first admin
+- first boot uses the setup page plus the bootstrap token printed at startup to create the first admin
 - subsequent logins use emailed verification codes
 - AI, SMTP, and JWT config are required at startup
 

@@ -1,7 +1,6 @@
 package api
 
 import (
-	"crypto/subtle"
 	"errors"
 	"log/slog"
 	"math/rand/v2"
@@ -12,22 +11,23 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
+	appconfig "github.com/labstack/fanout/internal/config"
 )
 
 type AuthHandler struct {
 	users         *auth.UserStore
 	codes         *auth.CodeStore
-	setupToken    string
+	config        *appconfig.Store
 	jwtSecret     string
 	refreshSecret string
 	smtp          auth.SMTPConfig
 }
 
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setupToken, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, configStore *appconfig.Store, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
 	h := &AuthHandler{
 		users:         users,
 		codes:         codes,
-		setupToken:    setupToken,
+		config:        configStore,
 		jwtSecret:     jwtSecret,
 		refreshSecret: refreshSecret,
 		smtp:          smtp,
@@ -59,16 +59,24 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 
 func (h *AuthHandler) Setup(c *echo.Context) error {
 	var req struct {
-		Email      string `json:"email"`
-		Name       string `json:"name"`
-		SetupToken string `json:"setup_token"`
+		Email          string `json:"email"`
+		Name           string `json:"name"`
+		BootstrapToken string `json:"bootstrap_token"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
 	}
-	if subtle.ConstantTimeCompare([]byte(strings.TrimSpace(req.SetupToken)), []byte(strings.TrimSpace(h.setupToken))) != 1 {
+	bootstrap, err := h.config.GetBootstrap(c.Request().Context())
+	if err != nil {
+		slog.Error("auth: read bootstrap token failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to verify bootstrap token")
+	}
+	if err := appconfig.CheckBootstrapToken(req.BootstrapToken, bootstrap, time.Now().UTC()); err != nil {
 		jitter()
-		return echo.NewHTTPError(http.StatusForbidden, "invalid setup token")
+		if errors.Is(err, appconfig.ErrBootstrapTokenExpired) {
+			return echo.NewHTTPError(http.StatusGone, "bootstrap token expired; restart Fanout to generate a new one")
+		}
+		return echo.NewHTTPError(http.StatusForbidden, "invalid bootstrap token")
 	}
 
 	email, err := auth.NormalizeEmail(req.Email)
@@ -77,18 +85,23 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	}
 	user, err := h.users.CreateFirstAdmin(email, req.Name)
 	if errors.Is(err, auth.ErrSetupComplete) {
-		return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
+		user, err = h.users.GetByEmail(email)
+		if err != nil || !user.Active || user.Role != "admin" {
+			return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
+		}
 	}
 	if err != nil {
 		slog.Error("auth: setup create admin failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create admin")
 	}
 
-	slog.Info("auth: first admin created via setup", "email", email)
-
 	accessToken, err := h.issueTokens(c, user)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
+	}
+	slog.Info("auth: first admin setup completed", "email", email)
+	if err := h.config.ClearBootstrap(c.Request().Context()); err != nil {
+		slog.Warn("auth: clear bootstrap token failed", "err", err)
 	}
 	return c.JSON(200, map[string]string{"access_token": accessToken})
 }

@@ -111,6 +111,23 @@ func main() {
 	}
 
 	configStore := appconfig.NewStore(sqlite.DB)
+	userStore := auth.NewUserStore(sqlite.DB)
+
+	userCount, err := userStore.CountUsers()
+	if err != nil {
+		slog.Error("auth status init failed", "err", err)
+		os.Exit(1)
+	}
+	if userCount == 0 {
+		token, bootstrapCfg, err := configStore.EnsureBootstrap(ctx, "system", "first boot setup")
+		if err != nil {
+			slog.Error("bootstrap token init failed", "err", err)
+			os.Exit(1)
+		}
+		printBootstrapBanner(cfg.HTTPAddr, token, bootstrapCfg.ExpiresAt)
+	} else if err := configStore.ClearBootstrap(ctx); err != nil {
+		slog.Warn("bootstrap token cleanup failed", "err", err)
+	}
 
 	// Start gRPC ingest (OTLP)
 	grpcLis, err := net.Listen("tcp", cfg.OTLPGRPCAddr)
@@ -157,7 +174,6 @@ func main() {
 
 	jwtSecret := cfg.JWTSecret
 	refreshSecret := cfg.JWTRefreshSecret
-	userStore := auth.NewUserStore(sqlite.DB)
 	api.RegisterAuthMiddleware(e, userStore, jwtSecret)
 
 	// Health checks (liveness + readiness)
@@ -215,7 +231,7 @@ func main() {
 		From: cfg.SMTPFrom,
 	}
 	codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
-	api.RegisterAuthRoutes(e, userStore, codeStore, cfg.SetupToken, jwtSecret, refreshSecret, smtpCfg)
+	api.RegisterAuthRoutes(e, userStore, codeStore, configStore, jwtSecret, refreshSecret, smtpCfg)
 	api.RegisterUserRoutes(e, userStore, smtpCfg)
 	api.RegisterConfigRoutes(e, cfg, configStore)
 	slog.Info("auth enabled")
@@ -271,4 +287,36 @@ func main() {
 	writer.Wait()
 	grpcSrv.GracefulStop()
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
+}
+
+func printBootstrapBanner(httpAddr, token, expiresAt string) {
+	lines := []string{
+		"============================================================",
+		" FANOUT FIRST-TIME SETUP",
+		"",
+		" Open:  " + bootstrapLoginURL(httpAddr),
+		" Token: " + token,
+		" Valid: one-time use until " + expiresAt,
+		" Note:  this token disappears after the first admin is created",
+		"============================================================",
+	}
+	fmt.Fprintln(os.Stderr, strings.Join(lines, "\n"))
+}
+
+func bootstrapLoginURL(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		return "http://127.0.0.1" + addr + "/login"
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		switch host {
+		case "", "0.0.0.0", "::":
+			host = "127.0.0.1"
+		}
+		if strings.Contains(host, ":") {
+			host = "[" + strings.Trim(host, "[]") + "]"
+		}
+		return "http://" + host + ":" + port + "/login"
+	}
+	return "http://" + addr + "/login"
 }

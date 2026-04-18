@@ -38,7 +38,6 @@ type Config struct {
 	SMTPUser         string // SMTP username
 	SMTPPass         string // SMTP password
 	SMTPFrom         string // Sender email address
-	SetupToken       string // First-boot admin setup token
 	JWTSecret        string // HS256 access-token signing key
 	JWTRefreshSecret string // HS256 refresh-token signing key
 	// OTLP TLS
@@ -71,7 +70,6 @@ func Load() Config {
 		SMTPUser:          os.Getenv("SMTP_USER"),
 		SMTPPass:          os.Getenv("SMTP_PASS"),
 		SMTPFrom:          os.Getenv("SMTP_FROM"),
-		SetupToken:        os.Getenv("SETUP_TOKEN"),
 		JWTSecret:         os.Getenv("JWT_SECRET"),
 		JWTRefreshSecret:  os.Getenv("JWT_REFRESH_SECRET"),
 		OTLPTLSCertFile:   os.Getenv("OTLP_TLS_CERT_FILE"),
@@ -148,12 +146,6 @@ func (c Config) Validate() error {
 	}
 	if c.SMTPPort <= 0 {
 		return fmt.Errorf("SMTP_PORT must be > 0")
-	}
-	if strings.TrimSpace(c.SetupToken) == "" {
-		return fmt.Errorf("SETUP_TOKEN is required")
-	}
-	if len(c.SetupToken) < 16 {
-		return fmt.Errorf("SETUP_TOKEN must be at least 16 characters")
 	}
 	if strings.TrimSpace(c.AIAPIKey) == "" {
 		return fmt.Errorf("AI_API_KEY is required")

@@ -58,6 +58,14 @@ func (s *Store) Upsert(ctx context.Context, groupKey string, value any, updatedB
 	return nil
 }
 
+// Delete removes a config group entirely.
+func (s *Store) Delete(ctx context.Context, groupKey string) error {
+	if err := s.q.DeleteConfig(ctx, groupKey); err != nil {
+		return fmt.Errorf("config: delete %s: %w", groupKey, err)
+	}
+	return nil
+}
+
 func nullString(v string) sql.NullString {
 	return sql.NullString{String: v, Valid: v != ""}
 }

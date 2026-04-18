@@ -88,7 +88,7 @@ func TestLoad(t *testing.T) {
 	vars := []string{"HTTP_ADDR", "OTLP_GRPC_ADDR", "DATA_DIR", "FLUSH_SECONDS",
 		"FLUSH_BATCH_SIZE", "ROLLUP_EVERY",
 		"RETENTION_DAYS", "TENANT_ID", "DEFAULT_NAMESPACE",
-		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL", "SETUP_TOKEN", "JWT_SECRET", "JWT_REFRESH_SECRET",
+		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL", "JWT_SECRET", "JWT_REFRESH_SECRET",
 		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
 		"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE"}
 	for _, v := range vars {
@@ -101,7 +101,6 @@ func TestLoad(t *testing.T) {
 	os.Setenv("SMTP_USER", "user")
 	os.Setenv("SMTP_PASS", "pass")
 	os.Setenv("SMTP_FROM", "Fanout <noreply@example.com>")
-	os.Setenv("SETUP_TOKEN", "setup-token-012345")
 	defer os.Unsetenv("JWT_SECRET")
 	defer os.Unsetenv("JWT_REFRESH_SECRET")
 	defer os.Unsetenv("AI_API_KEY")
@@ -109,7 +108,6 @@ func TestLoad(t *testing.T) {
 	defer os.Unsetenv("SMTP_USER")
 	defer os.Unsetenv("SMTP_PASS")
 	defer os.Unsetenv("SMTP_FROM")
-	defer os.Unsetenv("SETUP_TOKEN")
 
 	cfg := Load()
 
@@ -153,7 +151,6 @@ func TestValidate(t *testing.T) {
 		SMTPUser:         "user",
 		SMTPPass:         "pass",
 		SMTPFrom:         "Fanout <noreply@example.com>",
-		SetupToken:       "setup-token-012345",
 		JWTSecret:        "0123456789abcdef0123456789abcdef",
 		JWTRefreshSecret: "abcdef0123456789abcdef0123456789",
 	}
@@ -179,8 +176,6 @@ func TestValidate(t *testing.T) {
 		{"SMTP missing pass", func(c *Config) { c.SMTPPass = "" }},
 		{"SMTP missing from", func(c *Config) { c.SMTPFrom = "" }},
 		{"SMTP invalid port", func(c *Config) { c.SMTPPort = 0 }},
-		{"SETUP_TOKEN empty", func(c *Config) { c.SetupToken = "" }},
-		{"SETUP_TOKEN short", func(c *Config) { c.SetupToken = "short-token" }},
 		{"JWTSecret empty", func(c *Config) { c.JWTSecret = "" }},
 		{"JWTSecret short", func(c *Config) { c.JWTSecret = "short" }},
 		{"JWTRefreshSecret empty", func(c *Config) { c.JWTRefreshSecret = "" }},

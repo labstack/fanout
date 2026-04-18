@@ -23,7 +23,7 @@ export function LoginPage() {
   const [step, setStep] = useState<Step>("loading");
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [setupToken, setSetupToken] = useState("");
+  const [bootstrapToken, setBootstrapToken] = useState("");
   const [code, setCode] = useState("");
   const [setupAccessToken, setSetupAccessToken] = useState<string | null>(null);
   const [publicEndpoint, setPublicEndpoint] = useState("");
@@ -68,7 +68,7 @@ export function LoginPage() {
         body: JSON.stringify({
           email: email.trim().toLowerCase(),
           name: name.trim(),
-          setup_token: setupToken.trim(),
+          bootstrap_token: bootstrapToken.trim(),
         }),
       });
 
@@ -212,7 +212,7 @@ export function LoginPage() {
             Fanout
           </h1>
           <p className="text-sm text-muted-foreground">
-            {step === "setup" && "Create your admin account with the setup token"}
+            {step === "setup" && "Create your admin account with the bootstrap token shown in the server output"}
             {step === "ingest" && "Choose how collectors reach this Fanout instance"}
             {step === "email" && "Sign in to your account"}
             {step === "code" && `Enter the code sent to ${email}`}
@@ -253,20 +253,23 @@ export function LoginPage() {
               />
             </div>
             <div>
-              <label className="detail-label mb-2 block">Setup token</label>
+              <label className="detail-label mb-2 block">Bootstrap token</label>
               <input
                 type="password"
-                value={setupToken}
-                onChange={(e) => setSetupToken(e.target.value)}
-                placeholder="Paste your setup token"
+                value={bootstrapToken}
+                onChange={(e) => setBootstrapToken(e.target.value)}
+                placeholder="Paste the bootstrap token from the server output"
                 className="input-field"
                 autoComplete="one-time-code"
                 required
               />
             </div>
+            <p className="text-xs text-muted-foreground">
+              Fanout prints this token in the server output while no admin exists. It stays valid until it expires or the first admin is created.
+            </p>
             <button
               type="submit"
-              disabled={sending || !email.trim() || !setupToken.trim()}
+              disabled={sending || !email.trim() || !bootstrapToken.trim()}
               className="btn-primary w-full disabled:opacity-50"
             >
               {sending ? (

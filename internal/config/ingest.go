@@ -2,10 +2,6 @@ package config
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"errors"
 	"fmt"
 )
@@ -76,22 +72,20 @@ func (s *Store) ResetIngest(ctx context.Context, updatedBy, reason string) error
 
 // GenerateIngestToken returns a plaintext token plus its hash for storage.
 func GenerateIngestToken() (string, string, error) {
-	buf := make([]byte, 24)
-	if _, err := rand.Read(buf); err != nil {
+	raw, err := randomHexToken(24)
+	if err != nil {
 		return "", "", fmt.Errorf("generate ingest token: %w", err)
 	}
-	token := "fi_" + hex.EncodeToString(buf)
+	token := "fi_" + raw
 	return token, HashIngestToken(token), nil
 }
 
 // HashIngestToken hashes a plaintext ingest token for storage.
 func HashIngestToken(token string) string {
-	sum := sha256.Sum256([]byte(token))
-	return hex.EncodeToString(sum[:])
+	return hashToken(token)
 }
 
 // CheckIngestToken verifies a plaintext token against a stored hash.
 func CheckIngestToken(token, hash string) bool {
-	expected := HashIngestToken(token)
-	return subtle.ConstantTimeCompare([]byte(expected), []byte(hash)) == 1
+	return checkToken(token, hash)
 }

@@ -10,6 +10,15 @@ import (
 	"database/sql"
 )
 
+const deleteConfig = `-- name: DeleteConfig :exec
+DELETE FROM config WHERE group_key = ?
+`
+
+func (q *Queries) DeleteConfig(ctx context.Context, groupKey string) error {
+	_, err := q.db.ExecContext(ctx, deleteConfig, groupKey)
+	return err
+}
+
 const getConfig = `-- name: GetConfig :one
 SELECT group_key, overrides, updated_at, updated_by, last_reason FROM config WHERE group_key = ?
 `
