@@ -70,10 +70,7 @@ export function NamespacePicker() {
               onSelect={() => select(ns)}
             >
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${current === ns ? "bg-primary" : "bg-surface-3"}`} />
-              {ns}
-              {current === ns && (
-                <span className="ml-auto text-primary text-[10px]">{"\u2713"}</span>
-              )}
+              <span className={current === ns ? "text-foreground" : ""}>{ns}</span>
             </DropdownMenu.Item>
           ))}
           <DropdownMenu.Separator className="my-1 h-px bg-border/30" />
@@ -81,11 +78,8 @@ export function NamespacePicker() {
             className="dropdown-item"
             onSelect={() => select("")}
           >
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${!current ? "bg-primary" : "border border-surface-3"}`} />
-            All namespaces
-            {!current && (
-              <span className="ml-auto text-primary text-[10px]">{"\u2713"}</span>
-            )}
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${!current ? "bg-primary" : "bg-surface-3"}`} />
+            <span className={!current ? "text-foreground" : ""}>All namespaces</span>
           </DropdownMenu.Item>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
