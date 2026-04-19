@@ -35,7 +35,7 @@ func (h *ConfigHandler) GetIngestConfig(c *echo.Context) error {
 		Mode:              string(current.Mode),
 		PublicEndpoint:    current.PublicEndpoint,
 		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr),
-		TLSConfigured:     h.cfg.OTLPTLSEnabled(),
+		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "x-fanout-ingest-token",
 	})
 }
@@ -58,11 +58,11 @@ func (h *ConfigHandler) UpsertIngestConfig(c *echo.Context) error {
 		return c.JSON(http.StatusOK, ingestConfigResponse{
 			Mode:              string(settings.IngestModePrivate),
 			SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr),
-			TLSConfigured:     h.cfg.OTLPTLSEnabled(),
+			TLSConfigured:     h.cfg.TLSEnabled(),
 			HeaderName:        "x-fanout-ingest-token",
 		})
 	case settings.IngestModePublic:
-		if !h.cfg.OTLPTLSEnabled() {
+		if !h.cfg.TLSEnabled() {
 			return echo.NewHTTPError(http.StatusConflict, "OTLP TLS must be configured before enabling public ingest")
 		}
 		token, hash, err := settings.GenerateIngestToken()

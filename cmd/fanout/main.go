@@ -144,7 +144,7 @@ func main() {
 	ingest.RegisterOTLP(grpcSrv, ing)
 
 	go func() {
-		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr, "tls", cfg.OTLPTLSEnabled())
+		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr, "tls", cfg.TLSEnabled())
 		if err := grpcSrv.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
 			errCh <- fmt.Errorf("gRPC server: %w", err)
 		}
@@ -259,8 +259,14 @@ func main() {
 			HideBanner:      true,
 			GracefulTimeout: 5 * time.Second,
 		}
-		slog.Info("HTTP listening", "addr", cfg.HTTPAddr)
-		if err := sc.Start(httpCtx, e); err != nil && err != http.ErrServerClosed {
+		slog.Info("HTTP listening", "addr", cfg.HTTPAddr, "tls", cfg.TLSEnabled())
+		var err error
+		if cfg.TLSEnabled() {
+			err = sc.StartTLS(httpCtx, e, cfg.TLSCertFile, cfg.TLSKeyFile)
+		} else {
+			err = sc.Start(httpCtx, e)
+		}
+		if err != nil && err != http.ErrServerClosed {
 			errCh <- fmt.Errorf("HTTP server: %w", err)
 		}
 	}()

@@ -38,8 +38,8 @@ type Config struct {
 	SMTPFrom          string `env:"SMTP_FROM"`
 	JWTSecret         string `env:"JWT_SECRET"`
 	JWTRefreshSecret  string `env:"JWT_REFRESH_SECRET"`
-	OTLPTLSCertFile   string `env:"OTLP_TLS_CERT_FILE"`
-	OTLPTLSKeyFile    string `env:"OTLP_TLS_KEY_FILE"`
+	TLSCertFile       string `env:"TLS_CERT_FILE"`
+	TLSKeyFile        string `env:"TLS_KEY_FILE"`
 }
 
 // Load reads .env non-destructively (does not overwrite pre-set OS env), then
@@ -137,9 +137,9 @@ func (c Config) ReportsDir() string {
 	return filepath.Join(c.ControlDir(), "reports")
 }
 
-func (c Config) OTLPTLSEnabled() bool {
-	return strings.TrimSpace(c.OTLPTLSCertFile) != "" &&
-		strings.TrimSpace(c.OTLPTLSKeyFile) != ""
+func (c Config) TLSEnabled() bool {
+	return strings.TrimSpace(c.TLSCertFile) != "" &&
+		strings.TrimSpace(c.TLSKeyFile) != ""
 }
 
 // Validate checks that config values are sane.
@@ -185,8 +185,8 @@ func (c Config) Validate() error {
 	if c.JWTSecret == c.JWTRefreshSecret {
 		return fmt.Errorf("JWT_SECRET and JWT_REFRESH_SECRET must be different")
 	}
-	if anySet(c.OTLPTLSCertFile, c.OTLPTLSKeyFile) && !c.OTLPTLSEnabled() {
-		return fmt.Errorf("OTLP TLS requires OTLP_TLS_CERT_FILE and OTLP_TLS_KEY_FILE")
+	if anySet(c.TLSCertFile, c.TLSKeyFile) && !c.TLSEnabled() {
+		return fmt.Errorf("TLS requires TLS_CERT_FILE and TLS_KEY_FILE")
 	}
 	return nil
 }
