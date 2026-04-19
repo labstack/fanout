@@ -25,7 +25,7 @@ Base table: lake.spans
 Preferred query surface: spans
 
 Important columns:
-- tenant, namespace (VARCHAR): partitioning/filtering dimensions
+- namespace (VARCHAR): partitioning/filtering dimension
 - trace_id, span_id, parent_span_id (VARCHAR)
 - service, operation, kind (VARCHAR)
 - start_time, end_time, ingested_at (TIMESTAMP)
@@ -50,7 +50,7 @@ Base table: lake.logs
 Preferred query surface: logs
 
 Important columns:
-- tenant, namespace (VARCHAR)
+- namespace (VARCHAR)
 - time, observed_time, ingested_at (TIMESTAMP)
 - time_unix_nano, observed_time_unix_nano, ingested_unix_nano (BIGINT)
 - severity, severity_number (VARCHAR/BIGINT)
@@ -69,7 +69,7 @@ Base table: lake.metrics
 Preferred query surface: metrics
 
 Important columns:
-- tenant, namespace (VARCHAR)
+- namespace (VARCHAR)
 - time, ingested_at (TIMESTAMP)
 - time_unix_nano, ingested_unix_nano (BIGINT)
 - name, type, unit, description (VARCHAR)
@@ -86,14 +86,14 @@ Common queries:
 
 ### 4. Rollups
 service_rollup columns:
-- tenant, namespace (VARCHAR)
+- namespace (VARCHAR)
 - bucket (TIMESTAMP)
 - service (VARCHAR)
 - spans, log_count, metric_count (BIGINT)
 - p50_ms, p95_ms, error_rate (DOUBLE)
 
 edge_rollup columns:
-- tenant, namespace (VARCHAR)
+- namespace (VARCHAR)
 - bucket (TIMESTAMP)
 - caller, callee, edge_type (VARCHAR)
 - calls (BIGINT)
@@ -102,7 +102,7 @@ edge_rollup columns:
 ## Query Guidelines
 1. Prefer spans, logs, and metrics over raw lake.* tables.
 2. Always add a recent time filter for large queries.
-3. Filter by tenant and, when relevant, namespace.
+3. Filter by namespace when relevant.
 4. JSON columns are already text; use json_extract_string(attributes_json, '$.key') directly.
 5. Use service_rollup and edge_rollup as rebuildable cache tables for dashboards before scanning raw telemetry.
 6. Always include a LIMIT unless aggregation makes it unnecessary.

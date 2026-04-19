@@ -28,8 +28,7 @@ func (s *Service) Trace(ctx context.Context, traceID string, includeLogs bool, w
 		CriticalPath: []string{},
 	}
 
-	// Use config defaults for partition
-	namespace, tenantID := s.defaults("", "")
+	namespace := s.duck.DefaultNamespace()
 
 	q := fmt.Sprintf(`
 SELECT span_id,
@@ -52,14 +51,13 @@ SELECT span_id,
        resource_json
 FROM spans
 WHERE trace_id = ?
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND start_time >= now() - INTERVAL %d MINUTE
 ORDER BY start_unix_nano ASC
 LIMIT 200;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, traceID, tenantID, namespace, namespace)
+	rows, err := s.duck.DB.QueryContext(ctx, q, traceID, namespace, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
@@ -355,7 +353,7 @@ func (s *Service) FetchMetricContext(ctx context.Context, result *TraceResult) [
 	if len(result.Spans) == 0 {
 		return nil
 	}
-	namespace, tenantID := s.defaults("", "")
+	namespace := s.duck.DefaultNamespace()
 
 	// Derive the earliest start time from span start times (stored as RFC3339 strings).
 	// We use the first span since spans are already ordered by start_unix_nano ASC.
@@ -374,7 +372,7 @@ func (s *Service) FetchMetricContext(ctx context.Context, result *TraceResult) [
 
 	placeholders := makePlaceholders(len(result.Services))
 	args := make([]any, 0, len(result.Services)+2)
-	args = append(args, startTime, startTime, tenantID, namespace, namespace)
+	args = append(args, startTime, startTime, namespace, namespace)
 	for _, svc := range result.Services {
 		args = append(args, svc)
 	}
@@ -387,7 +385,6 @@ SELECT service,
        SUM(spans) as total_spans
 FROM service_rollup
 WHERE bucket BETWEEN (TIMESTAMPTZ ? - INTERVAL '2.5 minutes') AND (TIMESTAMPTZ ? + INTERVAL '2.5 minutes')
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND service IN (%s)
 GROUP BY service
@@ -420,7 +417,7 @@ ORDER BY service ASC;
 
 func (s *Service) fetchTraceLogs(ctx context.Context, traceID string, window int) []LogInfo {
 	logs := []LogInfo{}
-	namespace, tenantID := s.defaults("", "")
+	namespace := s.duck.DefaultNamespace()
 
 	q := fmt.Sprintf(`
 SELECT strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
@@ -438,14 +435,13 @@ SELECT strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
        attributes_json
 FROM logs
 WHERE trace_id = ?
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND time >= now() - INTERVAL %d MINUTE
 ORDER BY time_unix_nano ASC
 LIMIT 100;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, traceID, tenantID, namespace, namespace)
+	rows, err := s.duck.DB.QueryContext(ctx, q, traceID, namespace, namespace)
 	if err != nil {
 		slog.Warn("fetch trace logs query failed", "method", "fetchTraceLogs", "trace_id", traceID, "err", err)
 		return logs

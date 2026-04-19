@@ -72,7 +72,6 @@ func (s *Service) MetricsList(ctx context.Context, p MetricListParams) (*Metrics
 	if p.Limit == 0 {
 		p.Limit = 100
 	}
-	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
 	out := &MetricsListResult{Metrics: []MetricListEntry{}}
 
 	var clauses []string
@@ -87,10 +86,6 @@ func (s *Service) MetricsList(ctx context.Context, p MetricListParams) (*Metrics
 	if p.Namespace != "" {
 		clauses = append(clauses, "namespace = ?")
 		args = append(args, p.Namespace)
-	}
-	if p.TenantID != "" {
-		clauses = append(clauses, "tenant = ?")
-		args = append(args, p.TenantID)
 	}
 	for k, v := range p.Attrs {
 		clauses = append(clauses, "json_extract_string(attributes_json, ?) = ?")
@@ -163,7 +158,6 @@ func (s *Service) MetricsQuery(ctx context.Context, p MetricQueryParams) (*Metri
 	if p.Granularity == "" {
 		p.Granularity = "auto"
 	}
-	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
 	out := &MetricsQueryResult{
 		Series:    []MetricSeries{},
 		Anomalies: []MetricAnomaly{},
@@ -239,10 +233,6 @@ func (s *Service) MetricsQuery(ctx context.Context, p MetricQueryParams) (*Metri
 		if p.Namespace != "" {
 			clauses = append(clauses, "namespace = ?")
 			args = append(args, p.Namespace)
-		}
-		if p.TenantID != "" {
-			clauses = append(clauses, "tenant = ?")
-			args = append(args, p.TenantID)
 		}
 		for k, v := range p.Attrs {
 			clauses = append(clauses, "json_extract_string(attributes_json, ?) = ?")
@@ -361,8 +351,6 @@ func (s *Service) MetricsHistogram(ctx context.Context, p MetricQueryParams) (*H
 	if p.Window == 0 {
 		p.Window = 15
 	}
-	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
-
 	names := p.Names
 	if p.Name != "" {
 		names = append([]string{p.Name}, names...)
@@ -388,10 +376,6 @@ func (s *Service) MetricsHistogram(ctx context.Context, p MetricQueryParams) (*H
 		if p.Namespace != "" {
 			clauses = append(clauses, "namespace = ?")
 			args = append(args, p.Namespace)
-		}
-		if p.TenantID != "" {
-			clauses = append(clauses, "tenant = ?")
-			args = append(args, p.TenantID)
 		}
 
 		where := "WHERE " + strings.Join(clauses, " AND ")
@@ -457,8 +441,6 @@ func (s *Service) MetricsExemplars(ctx context.Context, p MetricQueryParams) (*E
 	if p.Window == 0 {
 		p.Window = 15
 	}
-	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
-
 	names := p.Names
 	if p.Name != "" {
 		names = append([]string{p.Name}, names...)
@@ -484,10 +466,6 @@ func (s *Service) MetricsExemplars(ctx context.Context, p MetricQueryParams) (*E
 		if p.Namespace != "" {
 			clauses = append(clauses, "namespace = ?")
 			args = append(args, p.Namespace)
-		}
-		if p.TenantID != "" {
-			clauses = append(clauses, "tenant = ?")
-			args = append(args, p.TenantID)
 		}
 
 		where := "WHERE " + strings.Join(clauses, " AND ")

@@ -32,7 +32,6 @@ type MetricsParams struct {
 	Terms     []string
 	Window    int
 	Namespace string
-	TenantID  string
 }
 
 // Metrics returns aggregated metrics with sparklines.
@@ -41,14 +40,10 @@ func (s *Service) Metrics(ctx context.Context, p MetricsParams) (*MetricsResult,
 		p.Window = 60
 	}
 
-	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
-
 	var filters []string
 	var args []any
 
 	filters = append(filters, fmt.Sprintf(`time >= now() - INTERVAL %d MINUTE`, p.Window))
-	filters = append(filters, `tenant = ?`)
-	args = append(args, p.TenantID)
 	if p.Namespace != "" {
 		filters = append(filters, `namespace = ?`)
 		args = append(args, p.Namespace)
@@ -134,7 +129,7 @@ LIMIT 100;
 
 	// Get sparklines
 	if len(metricNames) > 0 {
-		sparklines := s.metricSparklines(ctx, metricNames, p.Window, p.Namespace, p.TenantID)
+		sparklines := s.metricSparklines(ctx, metricNames, p.Window, p.Namespace)
 		for i := range metrics {
 			if trend, ok := sparklines[metrics[i].Name]; ok {
 				metrics[i].Trend = trend
@@ -166,11 +161,10 @@ type MetricPoint struct {
 }
 
 // MetricDetail returns time-series detail for a single metric.
-func (s *Service) MetricDetail(ctx context.Context, name string, window int, namespace, tenantID string) (*MetricDetailResult, error) {
+func (s *Service) MetricDetail(ctx context.Context, name string, window int, namespace string) (*MetricDetailResult, error) {
 	if window == 0 {
 		window = 60
 	}
-	namespace, tenantID = s.defaults(namespace, tenantID)
 
 	// Summary
 	q := fmt.Sprintf(`
@@ -183,7 +177,6 @@ SELECT
   LIST(DISTINCT service) as services
 FROM metrics
 WHERE time >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND name = ?
 GROUP BY type;
@@ -191,7 +184,7 @@ GROUP BY type;
 
 	out := &MetricDetailResult{Name: name}
 	var services any
-	row := s.duck.DB.QueryRowContext(ctx, q, tenantID, namespace, namespace, name)
+	row := s.duck.DB.QueryRowContext(ctx, q, namespace, namespace, name)
 	if err := row.Scan(&out.Type, &out.Count, &out.Avg, &out.Min, &out.Max, &services); err != nil {
 		slog.Warn("query failed", "method", "MetricDetail.summary", "metric", name, "err", err)
 		return out, nil
@@ -211,14 +204,13 @@ SELECT
   MAX(COALESCE(value, 0)) as max_val
 FROM metrics
 WHERE time >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND name = ?
 GROUP BY bucket
 ORDER BY bucket ASC;
 `, bucketMins, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, tsQ, tenantID, namespace, namespace, name)
+	rows, err := s.duck.DB.QueryContext(ctx, tsQ, namespace, namespace, name)
 	if err != nil {
 		slog.Warn("query failed", "method", "MetricDetail.timeseries", "metric", name, "err", err)
 		return out, nil
@@ -240,7 +232,7 @@ ORDER BY bucket ASC;
 	return out, nil
 }
 
-func (s *Service) metricSparklines(ctx context.Context, names []string, window int, namespace, tenantID string) map[string][]float64 {
+func (s *Service) metricSparklines(ctx context.Context, names []string, window int, namespace string) map[string][]float64 {
 	out := make(map[string][]float64)
 
 	bucketMins := window / 12
@@ -261,14 +253,13 @@ SELECT
   AVG(COALESCE(value, 0)) as avg_val
 FROM metrics
 WHERE time >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND name IN (%s)
 GROUP BY name, bucket
 ORDER BY metric_name, bucket ASC;
 `, bucketMins, window, placeholders)
 
-	queryArgs := []any{tenantID, namespace, namespace}
+	queryArgs := []any{namespace, namespace}
 	queryArgs = append(queryArgs, args...)
 	rows, err := s.duck.DB.QueryContext(ctx, q, queryArgs...)
 	if err != nil {
@@ -312,13 +303,12 @@ type CompareService struct {
 }
 
 // Compare returns side-by-side metrics for 2-4 services.
-func (s *Service) Compare(ctx context.Context, services []string, window int, namespace, tenantID string) (*CompareResult, error) {
+func (s *Service) Compare(ctx context.Context, services []string, window int, namespace string) (*CompareResult, error) {
 	if window == 0 {
 		window = 60
 	}
-	namespace, tenantID = s.defaults(namespace, tenantID)
 
-	metrics, err := s.compareServicesRollup(ctx, services, window, namespace, tenantID)
+	metrics, err := s.compareServicesRollup(ctx, services, window, namespace)
 	if err != nil {
 		slog.Warn("query failed", "method", "Compare", "err", err)
 		return &CompareResult{}, nil
@@ -363,21 +353,16 @@ func (s *Service) Compare(ctx context.Context, services []string, window int, na
 }
 
 // Namespaces discovers namespaces from recent telemetry data.
-func (s *Service) Namespaces(ctx context.Context, tenantID string) []string {
-	if tenantID == "" {
-		tenantID = s.cfg.TenantID.String()
-	}
-
+func (s *Service) Namespaces(ctx context.Context) []string {
 	var namespaces []string
 	rows, err := s.duck.DB.QueryContext(ctx, `
 SELECT DISTINCT namespace
 FROM spans
-WHERE tenant = ?
-  AND start_time >= now() - INTERVAL 7 DAY
+WHERE start_time >= now() - INTERVAL 7 DAY
   AND namespace IS NOT NULL
   AND namespace != ''
 ORDER BY namespace ASC;
-`, tenantID)
+`)
 	if err != nil {
 		slog.Warn("query failed", "method", "Namespaces", "err", err)
 		return namespaces

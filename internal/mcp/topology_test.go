@@ -67,7 +67,6 @@ func TestTopologyIn(t *testing.T) {
 		Service:         "frontend",
 		IncludeInactive: true,
 		Namespace:       "production",
-		TenantID:        "tenant-1",
 	}
 
 	if in.Window != "1h" {

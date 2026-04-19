@@ -15,7 +15,6 @@ import (
 )
 
 type SpanRow struct {
-	TenantID         string
 	Namespace        string
 	TraceID          string
 	SpanID           string
@@ -51,7 +50,6 @@ type SpanRow struct {
 }
 
 type LogRow struct {
-	TenantID          string
 	Namespace         string
 	TimeUnixNanos     int64
 	ObservedTimeNanos int64
@@ -71,7 +69,6 @@ type LogRow struct {
 }
 
 type MetricRow struct {
-	TenantID       string
 	Namespace      string
 	TimeUnixNanos  int64
 	Name           string
@@ -297,9 +294,8 @@ func (w *Writer) insertSpans(rows []SpanRow) error {
 	defer cancel()
 	return withAppender(ctx, w.db, "spans", func(a *duckdb.Appender) error {
 		for _, row := range rows {
-			tenantID, namespace := normalizePartition(row.TenantID, row.Namespace)
+			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
-				tenantID,
 				namespace,
 				row.TraceID,
 				row.SpanID,
@@ -348,9 +344,8 @@ func (w *Writer) insertLogs(rows []LogRow) error {
 	defer cancel()
 	return withAppender(ctx, w.db, "logs", func(a *duckdb.Appender) error {
 		for _, row := range rows {
-			tenantID, namespace := normalizePartition(row.TenantID, row.Namespace)
+			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
-				tenantID,
 				namespace,
 				optionalTime(row.TimeUnixNanos),
 				optionalTime(row.ObservedTimeNanos),
@@ -383,9 +378,8 @@ func (w *Writer) insertMetrics(rows []MetricRow) error {
 	defer cancel()
 	return withAppender(ctx, w.db, "metrics", func(a *duckdb.Appender) error {
 		for _, row := range rows {
-			tenantID, namespace := normalizePartition(row.TenantID, row.Namespace)
+			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
-				tenantID,
 				namespace,
 				optionalTime(row.TimeUnixNanos),
 				row.TimeUnixNanos,
@@ -414,14 +408,11 @@ func (w *Writer) insertMetrics(rows []MetricRow) error {
 	})
 }
 
-func normalizePartition(tenantID, namespace string) (string, string) {
-	if tenantID == "" {
-		tenantID = "default"
-	}
+func normalizeNamespace(namespace string) string {
 	if namespace == "" {
 		namespace = "default"
 	}
-	return tenantID, namespace
+	return namespace
 }
 
 func optionalString(v string) any {

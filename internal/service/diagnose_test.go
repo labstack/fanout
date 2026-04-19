@@ -13,7 +13,7 @@ func TestDiagnose_EmptyService(t *testing.T) {
 	svc, _ := newMockService(t)
 	defer svc.duck.DB.Close()
 
-	_, err := svc.Diagnose(context.Background(), "", 15, "", "")
+	_, err := svc.Diagnose(context.Background(), "", 15, "")
 	if err == nil {
 		t.Error("Diagnose() should return error for empty service")
 	}
@@ -40,7 +40,7 @@ func TestDiagnose_DefaultWindow(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
-	result, err := svc.Diagnose(context.Background(), "my-service", 0, "", "")
+	result, err := svc.Diagnose(context.Background(), "my-service", 0, "")
 	if err != nil {
 		t.Fatalf("Diagnose() error = %v", err)
 	}
@@ -74,7 +74,7 @@ func TestDiagnose_HealthyService(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
-	result, err := svc.Diagnose(context.Background(), "healthy-service", 15, "", "")
+	result, err := svc.Diagnose(context.Background(), "healthy-service", 15, "")
 	if err != nil {
 		t.Fatalf("Diagnose() error = %v", err)
 	}
@@ -109,7 +109,7 @@ func TestDiagnose_DegradedService(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
-	result, err := svc.Diagnose(context.Background(), "slow-service", 15, "", "")
+	result, err := svc.Diagnose(context.Background(), "slow-service", 15, "")
 	if err != nil {
 		t.Fatalf("Diagnose() error = %v", err)
 	}
@@ -135,7 +135,7 @@ func TestDiagnose_UnhealthyService(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
-	result, err := svc.Diagnose(context.Background(), "bad-service", 15, "", "")
+	result, err := svc.Diagnose(context.Background(), "bad-service", 15, "")
 	if err != nil {
 		t.Fatalf("Diagnose() error = %v", err)
 	}
@@ -164,7 +164,7 @@ func TestDiagnose_WithTopErrors(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
-	result, err := svc.Diagnose(context.Background(), "error-service", 15, "", "")
+	result, err := svc.Diagnose(context.Background(), "error-service", 15, "")
 	if err != nil {
 		t.Fatalf("Diagnose() error = %v", err)
 	}
@@ -206,7 +206,7 @@ func TestDiagnose_WithSlowOps(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
-	result, err := svc.Diagnose(context.Background(), "my-service", 15, "", "")
+	result, err := svc.Diagnose(context.Background(), "my-service", 15, "")
 	if err != nil {
 		t.Fatalf("Diagnose() error = %v", err)
 	}
@@ -245,7 +245,7 @@ func TestDiagnose_WithDependencies(t *testing.T) {
 			AddRow("cache", int64(1000), 2.0, 0.0).
 			AddRow("auth-service", int64(200), 25.0, 0.01))
 
-	result, err := svc.Diagnose(context.Background(), "api-gateway", 15, "", "")
+	result, err := svc.Diagnose(context.Background(), "api-gateway", 15, "")
 	if err != nil {
 		t.Fatalf("Diagnose() error = %v", err)
 	}
@@ -265,7 +265,7 @@ func TestDiagnose_QueryError(t *testing.T) {
 	// Main query fails
 	mock.ExpectQuery("SELECT").WillReturnError(errors.New("db error"))
 
-	_, err := svc.Diagnose(context.Background(), "failing-service", 15, "", "")
+	_, err := svc.Diagnose(context.Background(), "failing-service", 15, "")
 	if err == nil {
 		t.Fatal("Diagnose() should return error on query failure")
 	}
@@ -288,7 +288,7 @@ func TestDiagnose_SQLEscaping(t *testing.T) {
 		sqlmock.NewRows([]string{"dep_service", "calls", "avg_ms", "error_rate"}))
 
 	// This should be escaped properly
-	result, err := svc.Diagnose(context.Background(), "service'; DROP TABLE--", 15, "", "")
+	result, err := svc.Diagnose(context.Background(), "service'; DROP TABLE--", 15, "")
 	if err != nil {
 		t.Fatalf("Diagnose() error = %v", err)
 	}
@@ -336,7 +336,7 @@ func TestDiagnoseEnhanced_SymptomAuto_Latency(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"tid"}))
 
-	result, err := svc.DiagnoseEnhanced(context.Background(), "slow-svc", 15, "auto", "", "")
+	result, err := svc.DiagnoseEnhanced(context.Background(), "slow-svc", 15, "auto", "")
 	if err != nil {
 		t.Fatalf("DiagnoseEnhanced() error = %v", err)
 	}
@@ -373,7 +373,7 @@ func TestDiagnoseEnhanced_SymptomAuto_Errors(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"tid"}))
 
-	result, err := svc.DiagnoseEnhanced(context.Background(), "error-svc", 15, "auto", "", "")
+	result, err := svc.DiagnoseEnhanced(context.Background(), "error-svc", 15, "auto", "")
 	if err != nil {
 		t.Fatalf("DiagnoseEnhanced() error = %v", err)
 	}
@@ -402,7 +402,7 @@ func TestDiagnoseEnhanced_ExplicitSymptom(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"tid"}))
 
-	result, err := svc.DiagnoseEnhanced(context.Background(), "my-svc", 15, "throughput_drop", "", "")
+	result, err := svc.DiagnoseEnhanced(context.Background(), "my-svc", 15, "throughput_drop", "")
 	if err != nil {
 		t.Fatalf("DiagnoseEnhanced() error = %v", err)
 	}
@@ -436,7 +436,7 @@ func TestDiagnoseEnhanced_WithBaseline(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"tid"}))
 
-	result, err := svc.DiagnoseEnhanced(context.Background(), "checkout", 15, "latency", "", "")
+	result, err := svc.DiagnoseEnhanced(context.Background(), "checkout", 15, "latency", "")
 	if err != nil {
 		t.Fatalf("DiagnoseEnhanced() error = %v", err)
 	}
@@ -476,7 +476,7 @@ func TestDiagnoseEnhanced_WithLogPatterns(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"tid"}))
 
-	result, err := svc.DiagnoseEnhanced(context.Background(), "worker", 15, "auto", "", "")
+	result, err := svc.DiagnoseEnhanced(context.Background(), "worker", 15, "auto", "")
 	if err != nil {
 		t.Fatalf("DiagnoseEnhanced() error = %v", err)
 	}
@@ -499,7 +499,7 @@ func TestDiagnoseEnhanced_EmptyService(t *testing.T) {
 	svc, _ := newMockService(t)
 	defer svc.duck.DB.Close()
 
-	_, err := svc.DiagnoseEnhanced(context.Background(), "", 15, "auto", "", "")
+	_, err := svc.DiagnoseEnhanced(context.Background(), "", 15, "auto", "")
 	if err == nil {
 		t.Error("DiagnoseEnhanced() should return error for empty service")
 	}
@@ -602,7 +602,7 @@ func TestDiagnoseEnhanced_WithChangePoints(t *testing.T) {
 			AddRow("trace-error-1").
 			AddRow("trace-slow-1"))
 
-	result, err := svc.DiagnoseEnhanced(context.Background(), "spike-svc", 15, "auto", "", "")
+	result, err := svc.DiagnoseEnhanced(context.Background(), "spike-svc", 15, "auto", "")
 	if err != nil {
 		t.Fatalf("DiagnoseEnhanced() error = %v", err)
 	}

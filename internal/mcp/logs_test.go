@@ -15,7 +15,6 @@ func TestLogsIn_Fields(t *testing.T) {
 		OrderBy:   "count",
 		Window:    "1h",
 		Namespace: "prod",
-		Tenant:    "t1",
 		Limit:     50,
 	}
 

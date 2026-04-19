@@ -24,7 +24,6 @@ type SpansIn struct {
 	IncludeExemplars bool              `json:"include_exemplars,omitempty" jsonschema:"Include example trace IDs per group"`
 	Window           string            `json:"window,omitempty"            jsonschema:"Time window: '15m','1h','7d', or ISO range 'start/end'. Default: 15m"`
 	Namespace        string            `json:"namespace,omitempty"         jsonschema:"Filter by namespace"`
-	Tenant           string            `json:"tenant,omitempty"            jsonschema:"Filter by tenant"`
 	Limit            int               `json:"limit,omitempty"             jsonschema:"Max results (ungrouped) or groups. Default: 100"`
 }
 
@@ -89,7 +88,6 @@ func (s *Server) spans(ctx context.Context, req *mcp.CallToolRequest, in SpansIn
 		IncludeExemplars: in.IncludeExemplars,
 		Window:           tw.Minutes,
 		Namespace:        in.Namespace,
-		TenantID:         in.Tenant,
 		Limit:            limit,
 	})
 	if err != nil {

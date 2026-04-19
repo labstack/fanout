@@ -11,16 +11,13 @@ import (
 )
 
 // Status returns system health overview.
-func (s *Service) Status(ctx context.Context, window int, namespace, tenantID string) (*StatusResult, error) {
+func (s *Service) Status(ctx context.Context, window int, namespace string) (*StatusResult, error) {
 	if window == 0 {
 		window = 15
 	}
 
-	// Always scope to single partition
-	namespace, tenantID = s.defaults(namespace, tenantID)
-
 	// Check cache
-	cacheKey := fmt.Sprintf("status:%d:%s:%s", window, namespace, tenantID)
+	cacheKey := fmt.Sprintf("status:%d:%s", window, namespace)
 	if v, ok := query.GetCached(cacheKey); ok {
 		if result, ok := v.(*StatusResult); ok {
 			return result, nil
@@ -37,14 +34,13 @@ SELECT
   SUM(COALESCE(metric_count, 0))::BIGINT AS metric_cnt
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
 GROUP BY service
 ORDER BY (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0))) DESC
 LIMIT 100;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
+	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		slog.Warn("query failed", "method", "Status", "err", err)
 		return &StatusResult{
@@ -240,7 +236,7 @@ type overviewRow struct {
 }
 
 // Overview returns a structured health overview using the new OverviewResult type.
-func (s *Service) Overview(ctx context.Context, window int, include []string, sortBy, namespace, tenantID string, limit int) (*OverviewResult, error) {
+func (s *Service) Overview(ctx context.Context, window int, include []string, sortBy, namespace string, limit int) (*OverviewResult, error) {
 	if window == 0 {
 		window = 15
 	}
@@ -248,9 +244,7 @@ func (s *Service) Overview(ctx context.Context, window int, include []string, so
 		limit = 100
 	}
 
-	namespace, tenantID = s.defaults(namespace, tenantID)
-
-	cacheKey := fmt.Sprintf("overview:%d:%s:%s:%s", window, sortBy, namespace, tenantID)
+	cacheKey := fmt.Sprintf("overview:%d:%s:%s", window, sortBy, namespace)
 	if v, ok := query.GetCached(cacheKey); ok {
 		if result, ok := v.(*OverviewResult); ok {
 			return result, nil
@@ -266,14 +260,13 @@ SELECT
   AVG(CASE WHEN spans > 0 THEN error_rate END) AS error_rate
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
 GROUP BY service
 ORDER BY SUM(spans) DESC
 LIMIT %d;
 `, window, limit)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
+	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("overview query failed: %w", err)
 	}

@@ -122,12 +122,11 @@ func TestParquetGlob_OnlyReturnsExistingFiles(t *testing.T) {
 	parquetRoot := t.TempDir()
 
 	now := time.Now().UTC() // Writer and glob both use UTC
-	// Path structure: data/telemetry/parquet/main/{signal}/tenant=*/namespace=*/year=*/month=*/day=*/hour=*/
+	// Path structure: data/telemetry/parquet/main/{signal}/namespace=*/year=*/month=*/day=*/hour=*/
 	dir := filepath.Join(
 		parquetRoot,
 		"main",
 		"spans",
-		"tenant=00000000-0000-0000-0000-000000000000",
 		"namespace=default",
 		now.Format("year=2006"),
 		now.Format("month=01"),
@@ -143,7 +142,7 @@ func TestParquetGlob_OnlyReturnsExistingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	glob := ParquetGlob(parquetRoot, "spans", "00000000-0000-0000-0000-000000000000", "default", 120)
+	glob := ParquetGlob(parquetRoot, "spans", "default", 120)
 	if !strings.Contains(glob, "part-1.parquet") {
 		t.Fatalf("expected glob to include parquet file path, got: %s", glob)
 	}
@@ -155,8 +154,8 @@ func TestParquetGlob_OnlyReturnsExistingFiles(t *testing.T) {
 func TestParquetGlob_NoFilesFallsBackToBroadGlob(t *testing.T) {
 	parquetRoot := t.TempDir()
 
-	glob := ParquetGlob(parquetRoot, "spans", "test-tenant", "test-namespace", 15)
-	if !strings.Contains(glob, "main/spans/tenant=test-tenant/namespace=test-namespace/year=*/month=*/day=*/hour=*/*.parquet") {
+	glob := ParquetGlob(parquetRoot, "spans", "test-namespace", 15)
+	if !strings.Contains(glob, "main/spans/namespace=test-namespace/year=*/month=*/day=*/hour=*/*.parquet") {
 		t.Fatalf("expected broad glob fallback, got: %s", glob)
 	}
 }
@@ -164,7 +163,7 @@ func TestParquetGlob_NoFilesFallsBackToBroadGlob(t *testing.T) {
 func TestParquetGlob_EmptyNamespaceUsesWildcard(t *testing.T) {
 	parquetRoot := t.TempDir()
 
-	glob := ParquetGlob(parquetRoot, "spans", "test-tenant", "", 15)
+	glob := ParquetGlob(parquetRoot, "spans", "", 15)
 	if !strings.Contains(glob, "namespace=*") {
 		t.Fatalf("expected namespace=* wildcard, got: %s", glob)
 	}
@@ -173,11 +172,10 @@ func TestParquetGlob_EmptyNamespaceUsesWildcard(t *testing.T) {
 func TestParquetGlob_WildcardNamespaceFindsMultipleNamespaces(t *testing.T) {
 	parquetRoot := t.TempDir()
 	now := time.Now().UTC()
-	tenant := "test-tenant"
 
 	// Create files in two namespaces
 	for _, ns := range []string{"prod", "staging"} {
-		dir := filepath.Join(parquetRoot, "main", "spans", "tenant="+tenant, "namespace="+ns,
+		dir := filepath.Join(parquetRoot, "main", "spans", "namespace="+ns,
 			now.Format("year=2006"), now.Format("month=01"), now.Format("day=02"), now.Format("hour=15"))
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			t.Fatal(err)
@@ -187,7 +185,7 @@ func TestParquetGlob_WildcardNamespaceFindsMultipleNamespaces(t *testing.T) {
 		}
 	}
 
-	glob := ParquetGlob(parquetRoot, "spans", tenant, "", 120)
+	glob := ParquetGlob(parquetRoot, "spans", "", 120)
 	if !strings.Contains(glob, "namespace=prod") {
 		t.Fatalf("expected prod namespace in result, got: %s", glob)
 	}
@@ -199,10 +197,9 @@ func TestParquetGlob_WildcardNamespaceFindsMultipleNamespaces(t *testing.T) {
 func TestParquetGlob_WildcardNamespaceFindsCompactedFiles(t *testing.T) {
 	parquetRoot := t.TempDir()
 	now := time.Now().UTC()
-	tenant := "test-tenant"
 
 	// Create compacted file at hour=00 (matches compactor output path)
-	dayBase := filepath.Join(parquetRoot, "main", "spans", "tenant="+tenant, "namespace=myns",
+	dayBase := filepath.Join(parquetRoot, "main", "spans", "namespace=myns",
 		now.Format("year=2006"), now.Format("month=01"), now.Format("day=02"))
 	compactedDir := filepath.Join(dayBase, "hour=00")
 	if err := os.MkdirAll(compactedDir, 0o755); err != nil {
@@ -213,7 +210,7 @@ func TestParquetGlob_WildcardNamespaceFindsCompactedFiles(t *testing.T) {
 	}
 
 	// Use wildcard namespace
-	glob := ParquetGlob(parquetRoot, "spans", tenant, "", 120)
+	glob := ParquetGlob(parquetRoot, "spans", "", 120)
 	if !strings.Contains(glob, "compacted.parquet") {
 		t.Fatalf("expected compacted file in result, got: %s", glob)
 	}

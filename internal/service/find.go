@@ -19,7 +19,6 @@ type FindParams struct {
 	Attrs     map[string]string // attr:key=value filters
 	Limit     int
 	Namespace string
-	TenantID  string
 }
 
 // Find searches spans and logs with smart defaults.
@@ -33,9 +32,6 @@ func (s *Service) Find(ctx context.Context, p FindParams) (*FindResult, error) {
 	if p.Type == "" {
 		p.Type = "both"
 	}
-
-	// Always scope to single partition
-	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
 
 	out := &FindResult{
 		Spans:   []SpanResult{},
@@ -109,8 +105,6 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 		filters = append(filters, `json_extract_string(attributes_json, ?) = ?`)
 		args = append(args, "$."+key, val)
 	}
-	filters = append(filters, `tenant = ?`)
-	args = append(args, p.TenantID)
 	if p.Namespace != "" {
 		filters = append(filters, `namespace = ?`)
 		args = append(args, p.Namespace)
@@ -198,8 +192,6 @@ func (s *Service) findLogs(ctx context.Context, p FindParams) ([]LogResult, bool
 		}
 		filters = append(filters, fmt.Sprintf(`severity IN (%s)`, strings.Join(placeholders, ",")))
 	}
-	filters = append(filters, `tenant = ?`)
-	args = append(args, p.TenantID)
 	if p.Namespace != "" {
 		filters = append(filters, `namespace = ?`)
 		args = append(args, p.Namespace)
@@ -299,8 +291,6 @@ func (s *Service) findMetrics(ctx context.Context, p FindParams) ([]MetricInfo, 
 		filters = append(filters, `service = ?`)
 		args = append(args, p.Service)
 	}
-	filters = append(filters, `tenant = ?`)
-	args = append(args, p.TenantID)
 	if p.Namespace != "" {
 		filters = append(filters, `namespace = ?`)
 		args = append(args, p.Namespace)

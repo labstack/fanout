@@ -189,7 +189,7 @@ func (h *UIHandler) Namespaces(c *echo.Context) error {
 	if h.svc == nil {
 		return c.JSON(200, []string{})
 	}
-	ns := h.svc.Namespaces(c.Request().Context(), "")
+	ns := h.svc.Namespaces(c.Request().Context())
 	if ns == nil {
 		ns = []string{}
 	}
@@ -214,7 +214,7 @@ func (h *UIHandler) Home(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "service layer not configured")
 	}
 
-	result, err := h.svc.Home(c.Request().Context(), window, c.QueryParam("namespace"), "", h.incidents)
+	result, err := h.svc.Home(c.Request().Context(), window, c.QueryParam("namespace"), h.incidents)
 	if err != nil {
 		slog.Error("home query failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to build home data")
@@ -264,7 +264,7 @@ func (h *UIHandler) ServiceDetail(c *echo.Context) error {
 		window = 1440
 	}
 
-	result, err := h.svc.ServiceDetail(c.Request().Context(), name, window, c.QueryParam("namespace"), "")
+	result, err := h.svc.ServiceDetail(c.Request().Context(), name, window, c.QueryParam("namespace"))
 	if err != nil {
 		slog.Error("service detail failed", "service", name, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load service detail")

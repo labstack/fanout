@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
@@ -29,7 +28,6 @@ func newTestServer(t *testing.T) (*Server, sqlmock.Sqlmock) {
 	cfg := env.Config{
 		DataDir:   "data",
 		DefaultNS: "default",
-		TenantID:  uuid.MustParse("00000000-0000-0000-0000-000000000000"),
 	}
 
 	duck := &query.Duck{DB: db}

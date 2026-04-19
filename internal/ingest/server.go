@@ -70,7 +70,6 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 			scopeName, scopeVer := scopeInfo(ss.Scope)
 			for _, sp := range ss.Spans {
 				row := lake.SpanRow{
-					TenantID:       cfg.TenantID.String(),
 					Namespace:      namespace,
 					TraceID:        fmt.Sprintf("%x", sp.TraceId),
 					SpanID:         fmt.Sprintf("%x", sp.SpanId),
@@ -137,7 +136,6 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 				body := bodyString(lr.Body)
 				tmpl := safeNormalizeTemplate(body)
 				row := lake.LogRow{
-					TenantID:          cfg.TenantID.String(),
 					Namespace:         namespace,
 					TimeUnixNanos:     int64(lr.TimeUnixNano),
 					ObservedTimeNanos: int64(lr.ObservedTimeUnixNano),
@@ -185,7 +183,6 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 				case *metricspb.Metric_Gauge:
 					for _, dp := range d.Gauge.DataPoints {
 						row := lake.MetricRow{
-							TenantID:       cfg.TenantID.String(),
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
@@ -214,7 +211,6 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 					}
 					for _, dp := range d.Sum.DataPoints {
 						row := lake.MetricRow{
-							TenantID:       cfg.TenantID.String(),
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
@@ -243,7 +239,6 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							histSum = *dp.Sum
 						}
 						row := lake.MetricRow{
-							TenantID:       cfg.TenantID.String(),
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
@@ -275,7 +270,6 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							histSum = *dp.Sum
 						}
 						row := lake.MetricRow{
-							TenantID:       cfg.TenantID.String(),
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
@@ -303,7 +297,6 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 				case *metricspb.Metric_Summary:
 					for _, dp := range d.Summary.DataPoints {
 						row := lake.MetricRow{
-							TenantID:       cfg.TenantID.String(),
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,

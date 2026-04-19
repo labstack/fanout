@@ -12,15 +12,13 @@ Fanout is a single-binary observability platform that ingests OpenTelemetry (OTL
 graph TB
     subgraph Ingest
         OTLP[OTLP gRPC :4317]
-        TI[Tenant Interceptor]
-        OTLP --> TI
     end
 
     subgraph Channels
         CS[Spans Channel]
         CL[Logs Channel]
         CM[Metrics Channel]
-        TI --> CS & CL & CM
+        OTLP --> CS & CL & CM
     end
 
     subgraph Storage
@@ -180,14 +178,6 @@ just run
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 
-## Tenancy Model
-
-Fanout is designed for **single-tenant deployment**. While `tenant_id` is captured during ingest (from `x-tenant-id` gRPC metadata or `DEFAULT_TENANT_ID` env var), it is **not enforced** in queries—all users see all data.
-
-For multi-tenant deployments:
-- Deploy separate Fanout instances per tenant, OR
-- Add tenant filtering to query paths in `internal/service/` and `internal/mcp/`
-
 ## API Endpoints
 
 ```mermaid
@@ -250,7 +240,6 @@ erDiagram
         string status_msg
         blob resource_json
         blob attributes_json
-        string tenant_id
     }
 
     LOGS {
@@ -263,7 +252,6 @@ erDiagram
         string span_id FK
         blob resource_json
         blob attributes_json
-        string tenant_id
     }
 
     METRICS {
@@ -277,7 +265,6 @@ erDiagram
         blob hist_counts_json
         blob attributes_json
         blob resource_json
-        string tenant_id
     }
 
     SPANS ||--o{ LOGS : "trace_id"

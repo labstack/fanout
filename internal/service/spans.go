@@ -42,8 +42,6 @@ func (s *Service) Spans(ctx context.Context, p SpanParams) (*SpansResult, error)
 		p.Status = "all"
 	}
 
-	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
-
 	// Validate group_by fields
 	for _, field := range p.GroupBy {
 		if !validGroupByFields[field] {
@@ -101,10 +99,6 @@ func buildSpanFilters(p SpanParams) (filters []string, args []any) {
 	if p.Namespace != "" {
 		filters = append(filters, `namespace = ?`)
 		args = append(args, p.Namespace)
-	}
-	if p.TenantID != "" {
-		filters = append(filters, `tenant = ?`)
-		args = append(args, p.TenantID)
 	}
 	for key, val := range p.Attrs {
 		filters = append(filters, `json_extract_string(attributes_json, ?) = ?`)

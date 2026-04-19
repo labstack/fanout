@@ -3,7 +3,6 @@ package service
 import (
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/env"
 )
 
@@ -60,7 +59,6 @@ func TestDeriveHealth_Active(t *testing.T) {
 func TestNew(t *testing.T) {
 	cfg := env.Config{
 		DefaultNS: "test-ns",
-		TenantID:  uuid.MustParse("11111111-1111-1111-1111-111111111111"),
 	}
 	svc := New(nil, cfg)
 
@@ -70,64 +68,6 @@ func TestNew(t *testing.T) {
 	}
 	if svc.cfg.DefaultNS != "test-ns" {
 		t.Errorf("cfg.DefaultNS = %q, want %q", svc.cfg.DefaultNS, "test-ns")
-	}
-}
-
-func TestDefaults(t *testing.T) {
-	tenantID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
-	cfg := env.Config{
-		DefaultNS: "default-ns",
-		TenantID:  tenantID,
-	}
-	svc := New(nil, cfg)
-
-	tests := []struct {
-		name       string
-		namespace  string
-		tenantID   string
-		wantNS     string
-		wantTenant string
-	}{
-		{
-			name:       "both empty uses defaults",
-			namespace:  "",
-			tenantID:   "",
-			wantNS:     "",
-			wantTenant: tenantID.String(),
-		},
-		{
-			name:       "custom namespace",
-			namespace:  "custom-ns",
-			tenantID:   "",
-			wantNS:     "custom-ns",
-			wantTenant: tenantID.String(),
-		},
-		{
-			name:       "custom tenant",
-			namespace:  "",
-			tenantID:   "custom-tenant",
-			wantNS:     "",
-			wantTenant: "custom-tenant",
-		},
-		{
-			name:       "both custom",
-			namespace:  "my-ns",
-			tenantID:   "my-tenant",
-			wantNS:     "my-ns",
-			wantTenant: "my-tenant",
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			ns, tenant := svc.defaults(tc.namespace, tc.tenantID)
-			if ns != tc.wantNS {
-				t.Errorf("defaults() namespace = %q, want %q", ns, tc.wantNS)
-			}
-			if tenant != tc.wantTenant {
-				t.Errorf("defaults() tenantID = %q, want %q", tenant, tc.wantTenant)
-			}
-		})
 	}
 }
 

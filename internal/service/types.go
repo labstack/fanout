@@ -166,7 +166,6 @@ type TopologyParams struct {
 	Service         string // focus service for depth filter
 	IncludeInactive bool
 	Namespace       string
-	TenantID        string
 }
 
 // DiagnoseResult contains detailed service diagnostics.
@@ -422,7 +421,6 @@ type SpanParams struct {
 	IncludeExemplars bool
 	Window           int // minutes
 	Namespace        string
-	TenantID         string
 	Limit            int
 }
 
@@ -473,7 +471,6 @@ type LogParams struct {
 	OrderBy   string
 	Window    int // minutes
 	Namespace string
-	TenantID  string
 	Limit     int
 }
 
@@ -512,7 +509,6 @@ type MetricListParams struct {
 	Service   string
 	Window    int // minutes
 	Namespace string
-	TenantID  string
 	Attrs     map[string]string
 	Limit     int
 	GroupBy   []string
@@ -528,7 +524,6 @@ type MetricQueryParams struct {
 	Service     string
 	Window      int // minutes
 	Namespace   string
-	TenantID    string
 	Attrs       map[string]string
 	Limit       int
 }

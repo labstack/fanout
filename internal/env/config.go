@@ -10,38 +10,36 @@ import (
 	"strings"
 
 	envparse "github.com/caarlos0/env/v11"
-	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	HTTPAddr          string    `env:"HTTP_ADDR" envDefault:":7520"`
-	OTLPGRPCAddr      string    `env:"OTLP_GRPC_ADDR" envDefault:"127.0.0.1:4317"`
-	DataDir           string    `env:"DATA_DIR" envDefault:"./data"`
-	FlushSeconds      int       `env:"FLUSH_SECONDS" envDefault:"15"`
-	FlushBatchSize    int       `env:"FLUSH_BATCH_SIZE" envDefault:"50000"`
-	RollupEvery       int       `env:"ROLLUP_EVERY" envDefault:"60"`
-	MCPEnabled        bool      `env:"MCP_ENABLED" envDefault:"true"`
-	RetentionDays     int       `env:"RETENTION_DAYS" envDefault:"30"`
-	TenantID          uuid.UUID `env:"TENANT_ID"`
-	DefaultNS         string    `env:"DEFAULT_NAMESPACE" envDefault:"default"`
-	DuckDBMemory      string    `env:"DUCKDB_MEMORY" envDefault:"512MB"`
-	AlertEnabled      bool      `env:"ALERT_ENABLED" envDefault:"true"`
-	AlertEvalInterval int       `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
-	AlertHistoryDays  int       `env:"ALERT_HISTORY_DAYS" envDefault:"7"`
-	AIProvider        string    `env:"AI_PROVIDER" envDefault:"anthropic"`
-	AIAPIKey          string    `env:"AI_API_KEY"`
-	AIModel           string    `env:"AI_MODEL"`
-	AIBaseURL         string    `env:"AI_BASE_URL"`
-	SMTPHost          string    `env:"SMTP_HOST"`
-	SMTPPort          int       `env:"SMTP_PORT" envDefault:"587"`
-	SMTPUser          string    `env:"SMTP_USER"`
-	SMTPPass          string    `env:"SMTP_PASS"`
-	SMTPFrom          string    `env:"SMTP_FROM"`
-	JWTSecret         string    `env:"JWT_SECRET"`
-	JWTRefreshSecret  string    `env:"JWT_REFRESH_SECRET"`
-	OTLPTLSCertFile   string    `env:"OTLP_TLS_CERT_FILE"`
-	OTLPTLSKeyFile    string    `env:"OTLP_TLS_KEY_FILE"`
+	HTTPAddr          string `env:"HTTP_ADDR" envDefault:":7520"`
+	OTLPGRPCAddr      string `env:"OTLP_GRPC_ADDR" envDefault:"127.0.0.1:4317"`
+	DataDir           string `env:"DATA_DIR" envDefault:"./data"`
+	FlushSeconds      int    `env:"FLUSH_SECONDS" envDefault:"15"`
+	FlushBatchSize    int    `env:"FLUSH_BATCH_SIZE" envDefault:"50000"`
+	RollupEvery       int    `env:"ROLLUP_EVERY" envDefault:"60"`
+	MCPEnabled        bool   `env:"MCP_ENABLED" envDefault:"true"`
+	RetentionDays     int    `env:"RETENTION_DAYS" envDefault:"30"`
+	DefaultNS         string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	DuckDBMemory      string `env:"DUCKDB_MEMORY" envDefault:"512MB"`
+	AlertEnabled      bool   `env:"ALERT_ENABLED" envDefault:"true"`
+	AlertEvalInterval int    `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
+	AlertHistoryDays  int    `env:"ALERT_HISTORY_DAYS" envDefault:"7"`
+	AIProvider        string `env:"AI_PROVIDER" envDefault:"anthropic"`
+	AIAPIKey          string `env:"AI_API_KEY"`
+	AIModel           string `env:"AI_MODEL"`
+	AIBaseURL         string `env:"AI_BASE_URL"`
+	SMTPHost          string `env:"SMTP_HOST"`
+	SMTPPort          int    `env:"SMTP_PORT" envDefault:"587"`
+	SMTPUser          string `env:"SMTP_USER"`
+	SMTPPass          string `env:"SMTP_PASS"`
+	SMTPFrom          string `env:"SMTP_FROM"`
+	JWTSecret         string `env:"JWT_SECRET"`
+	JWTRefreshSecret  string `env:"JWT_REFRESH_SECRET"`
+	OTLPTLSCertFile   string `env:"OTLP_TLS_CERT_FILE"`
+	OTLPTLSKeyFile    string `env:"OTLP_TLS_KEY_FILE"`
 }
 
 // Load reads .env non-destructively (does not overwrite pre-set OS env), then
