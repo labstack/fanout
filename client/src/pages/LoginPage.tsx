@@ -351,7 +351,7 @@ export function LoginPage() {
                   </div>
                   {!tlsConfigured && (
                     <div className="rounded-lg border border-unhealthy/20 bg-unhealthy/5 px-4 py-3 text-xs text-unhealthy/90 mono">
-                      Configure `OTLP_TLS_CERT_FILE` and `OTLP_TLS_KEY_FILE` before enabling public ingest.
+                      Configure `TLS_CERT_FILE` and `TLS_KEY_FILE` before enabling public ingest.
                     </div>
                   )}
                   <button

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"net"
@@ -262,6 +263,8 @@ func main() {
 		slog.Info("HTTP listening", "addr", cfg.HTTPAddr, "tls", cfg.TLSEnabled())
 		var err error
 		if cfg.TLSEnabled() {
+			// Match the OTLP gRPC listener's TLS 1.3 floor; Echo otherwise defaults to 1.2.
+			sc.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13}
 			err = sc.StartTLS(httpCtx, e, cfg.TLSCertFile, cfg.TLSKeyFile)
 		} else {
 			err = sc.Start(httpCtx, e)

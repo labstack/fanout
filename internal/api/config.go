@@ -63,7 +63,7 @@ func (h *ConfigHandler) UpsertIngestConfig(c *echo.Context) error {
 		})
 	case settings.IngestModePublic:
 		if !h.cfg.TLSEnabled() {
-			return echo.NewHTTPError(http.StatusConflict, "OTLP TLS must be configured before enabling public ingest")
+			return echo.NewHTTPError(http.StatusConflict, "TLS must be configured before enabling public ingest")
 		}
 		token, hash, err := settings.GenerateIngestToken()
 		if err != nil {

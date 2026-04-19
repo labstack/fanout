@@ -137,6 +137,8 @@ func (c Config) ReportsDir() string {
 	return filepath.Join(c.ControlDir(), "reports")
 }
 
+// TLSEnabled reports whether a cert/key pair is configured. When true, HTTP
+// serves HTTPS on HTTP_ADDR and OTLP gRPC accepts TLS (required for public ingest).
 func (c Config) TLSEnabled() bool {
 	return strings.TrimSpace(c.TLSCertFile) != "" &&
 		strings.TrimSpace(c.TLSKeyFile) != ""

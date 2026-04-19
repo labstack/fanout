@@ -76,8 +76,8 @@ MCP clients receive full JSON Schema via `tools/list`.
 | `SMTP_FROM` | - | Sender address for login/setup emails |
 | `JWT_SECRET` | - | HS256 signing key for access tokens |
 | `JWT_REFRESH_SECRET` | - | HS256 signing key for refresh tokens |
-| `TLS_CERT_FILE` | - | Server certificate (shared by HTTP + OTLP gRPC) |
-| `TLS_KEY_FILE` | - | Server private key (shared by HTTP + OTLP gRPC) |
+| `TLS_CERT_FILE` | - | Server cert. When set, HTTP serves HTTPS and OTLP gRPC accepts TLS. Plaintext if unset. |
+| `TLS_KEY_FILE` | - | Server private key, paired with `TLS_CERT_FILE` |
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace |
@@ -98,7 +98,7 @@ OTEL_SERVICE_NAME=my-service
 
 For Docker, `127.0.0.1:4317` is inside the container. To ingest from the host or another machine, set `OTLP_GRPC_ADDR=0.0.0.0:4317`, publish port `4317`, and then either keep it private behind your network or enable public OTLP over TLS from setup.
 
-For public OTLP, Fanout terminates TLS itself (same cert serves HTTP too). Set:
+For public OTLP, Fanout terminates TLS itself. The same cert/key also switches `HTTP_ADDR` to HTTPS. Set:
 ```bash
 TLS_CERT_FILE=/etc/fanout/certs/server.pem
 TLS_KEY_FILE=/etc/fanout/certs/server-key.pem
