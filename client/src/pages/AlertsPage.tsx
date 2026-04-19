@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router";
 import { api, ApiError, setApiToken } from "@/api/client";
 import type { Rule, Alert, AlertSummary } from "@/lib/types";
@@ -18,10 +18,10 @@ export function AlertsPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [rules, setRules] = useState<Rule[]>([]);
   const [summary, setSummary] = useState<AlertSummary>({ firing: 0, pending: 0, resolved: 0 });
-  const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [staleSeconds, setStaleSeconds] = useState(0);
-  const lastFetch = useRef(0);
+  const [lastFetch, setLastFetch] = useState(0);
+  const loading = lastFetch === 0 && fetchError === null;
 
   useEffect(() => {
     if (token) setApiToken(token);
@@ -37,12 +37,10 @@ export function AlertsPage() {
       setAlerts(alertsRes ?? []);
       setRules(rulesRes ?? []);
       setSummary(summaryRes ?? { firing: 0, pending: 0, resolved: 0 });
-      setLoading(false);
       setFetchError(null);
-      lastFetch.current = Date.now();
+      setLastFetch(Date.now());
       setStaleSeconds(0);
     } catch (err) {
-      setLoading(false);
       setFetchError(
         err instanceof ApiError ? `Failed to load: ${err.message}` : "Failed to load alerts",
       );
@@ -51,18 +49,22 @@ export function AlertsPage() {
   }, []);
 
   useEffect(() => {
+    // load() is async — every setState happens after an `await`. The
+    // react-hooks/set-state-in-effect rule can't trace async functions, so
+    // it flags this; a proper fix is migrating to TanStack Query's useQuery.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     const interval = setInterval(load, REFRESH_INTERVAL);
     const staleTick = setInterval(() => {
-      if (lastFetch.current > 0) {
-        setStaleSeconds(Math.floor((Date.now() - lastFetch.current) / 1000));
+      if (lastFetch > 0) {
+        setStaleSeconds(Math.floor((Date.now() - lastFetch) / 1000));
       }
     }, 5_000);
     return () => {
       clearInterval(interval);
       clearInterval(staleTick);
     };
-  }, [load]);
+  }, [load, lastFetch]);
 
   if (loading && rules.length === 0) {
     return (

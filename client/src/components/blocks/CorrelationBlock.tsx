@@ -10,10 +10,11 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
   const option = useMemo(() => {
     if (data.panels.length === 0 || data.times.length < 2) return {};
 
-    const grids: any[] = [];
-    const xAxes: any[] = [];
-    const yAxes: any[] = [];
-    const series: any[] = [];
+    type EChartsOpt = Record<string, unknown>;
+    const grids: EChartsOpt[] = [];
+    const xAxes: EChartsOpt[] = [];
+    const yAxes: EChartsOpt[] = [];
+    const series: EChartsOpt[] = [];
 
     data.panels.forEach((panel, i) => {
       const top = i * (PANEL_H + GAP) + 24;
@@ -50,7 +51,7 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
         lineStyle: { width: 1.5, color: panel.color },
         areaStyle: { color: panel.color, opacity: 0.1 },
         markLine: (() => {
-          const lines: any[] = [];
+          const lines: EChartsOpt[] = [];
           // Baseline
           if (panel.baseline !== undefined) {
             lines.push({ yAxis: panel.baseline, lineStyle: { color: panel.color, type: "dashed", width: 0.5, opacity: 0.4 }, label: { show: false } });

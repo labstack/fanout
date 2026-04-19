@@ -3,7 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router";
 import { Loader2, LogOut, Radio, RotateCcw } from "lucide-react";
 import { useChatStore } from "@/stores/chat";
 import { buildChatPath, buildDashboardPath } from "@/lib/chat-route";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth } from "@/hooks/auth-context";
 import { NamespacePicker } from "./namespace-picker";
 import { api } from "@/api/client";
 import type { AlertSummary } from "@/lib/types";

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation, useParams } from "react-router";
 import { api, ApiError, setApiToken } from "@/api/client";
 import type { ServiceDetailResponse } from "@/lib/types";
@@ -23,11 +23,11 @@ export function ServicePage() {
   );
 
   const [data, setData] = useState<ServiceDetailResponse | null>(null);
-  const [loading, setLoading] = useState(true);
   const [timeWindow, setTimeWindow] = useState(60);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [staleSeconds, setStaleSeconds] = useState(0);
-  const lastFetch = useRef(0);
+  const [lastFetch, setLastFetch] = useState(0);
+  const loading = lastFetch === 0 && fetchError === null;
 
   useEffect(() => {
     if (token) setApiToken(token);
@@ -36,7 +36,6 @@ export function ServicePage() {
   useEffect(() => {
     if (!name) return;
     let cancelled = false;
-    setLoading(true);
 
     async function load() {
       try {
@@ -49,14 +48,12 @@ export function ServicePage() {
         );
         if (!cancelled) {
           setData(result);
-          setLoading(false);
           setFetchError(null);
-          lastFetch.current = Date.now();
+          setLastFetch(Date.now());
           setStaleSeconds(0);
         }
       } catch (err) {
         if (!cancelled) {
-          setLoading(false);
           setFetchError(
             err instanceof ApiError ? `Failed to load: ${err.message}` : "Failed to load service data",
           );
@@ -68,8 +65,8 @@ export function ServicePage() {
     load();
     const interval = setInterval(load, REFRESH_INTERVAL);
     const staleTick = setInterval(() => {
-      if (lastFetch.current > 0) {
-        setStaleSeconds(Math.floor((Date.now() - lastFetch.current) / 1000));
+      if (lastFetch > 0) {
+        setStaleSeconds(Math.floor((Date.now() - lastFetch) / 1000));
       }
     }, 5_000);
 
@@ -78,7 +75,7 @@ export function ServicePage() {
       clearInterval(interval);
       clearInterval(staleTick);
     };
-  }, [name, timeWindow]);
+  }, [name, timeWindow, search, lastFetch]);
 
   const openChat = (prompt: string) => navigate(buildChatPath(prompt, token));
 

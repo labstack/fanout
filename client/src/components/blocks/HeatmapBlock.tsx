@@ -24,7 +24,7 @@ export function HeatmapBlock({ data }: { data: HeatmapBlockData }) {
       grid: { left: 60, right: 16, top: 8, bottom: 40 },
       tooltip: {
         ...tooltipStyle(),
-        formatter: (params: any) => {
+        formatter: (params: { data: [number, number, number] }) => {
           const [ti, bi, v] = params.data;
           return `${esc(data.times[ti])}<br/>${esc(data.buckets[bi])}: <b>${esc(v)}</b>`;
         },
