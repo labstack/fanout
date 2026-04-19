@@ -14,14 +14,13 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	appconfig "github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/settings"
 )
 
-// GRPCServerOptions returns OTLP gRPC server options for TLS and ingest auth.
-func GRPCServerOptions(cfg env.Config, configStore *appconfig.Store) ([]grpc.ServerOption, error) {
+func GRPCServerOptions(cfg env.Config, settingsStore *settings.Store) ([]grpc.ServerOption, error) {
 	opts := []grpc.ServerOption{
-		grpc.UnaryInterceptor(newIngestAuthorizer(cfg, configStore).Unary()),
+		grpc.UnaryInterceptor(newIngestAuthorizer(cfg, settingsStore).Unary()),
 	}
 	if !cfg.OTLPTLSEnabled() {
 		return opts, nil
@@ -48,12 +47,12 @@ func otlpTLSConfig(cfg env.Config) (*tls.Config, error) {
 }
 
 type ingestAuthorizer struct {
-	cfg         env.Config
-	configStore *appconfig.Store
+	cfg           env.Config
+	settingsStore *settings.Store
 }
 
-func newIngestAuthorizer(cfg env.Config, configStore *appconfig.Store) *ingestAuthorizer {
-	return &ingestAuthorizer{cfg: cfg, configStore: configStore}
+func newIngestAuthorizer(cfg env.Config, settingsStore *settings.Store) *ingestAuthorizer {
+	return &ingestAuthorizer{cfg: cfg, settingsStore: settingsStore}
 }
 
 func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
@@ -66,22 +65,22 @@ func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
 }
 
 func (a *ingestAuthorizer) authorize(ctx context.Context) error {
-	if a.configStore == nil {
+	if a.settingsStore == nil {
 		return nil
 	}
 
-	ingestCfg, err := a.configStore.GetIngest(ctx)
+	ingestCfg, err := a.settingsStore.GetIngest(ctx)
 	if err != nil {
 		return status.Errorf(codes.Internal, "failed to load ingest config: %v", err)
 	}
 
 	switch ingestCfg.Mode {
-	case appconfig.IngestModePrivate:
+	case settings.IngestModePrivate:
 		if isPrivatePeer(ctx) {
 			return nil
 		}
 		return status.Error(codes.PermissionDenied, "OTLP ingest is private")
-	case appconfig.IngestModePublic:
+	case settings.IngestModePublic:
 		if !a.cfg.OTLPTLSEnabled() {
 			return status.Error(codes.FailedPrecondition, "public OTLP requires TLS")
 		}
@@ -89,7 +88,7 @@ func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 			return status.Error(codes.Unauthenticated, "TLS required")
 		}
 		token := ingestTokenFromContext(ctx)
-		if token == "" || !appconfig.CheckIngestToken(token, ingestCfg.TokenHash) {
+		if token == "" || !settings.CheckIngestToken(token, ingestCfg.TokenHash) {
 			return status.Error(codes.Unauthenticated, "invalid ingest token")
 		}
 		return nil

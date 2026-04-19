@@ -1,22 +1,23 @@
 package api
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 
 	"github.com/labstack/echo/v5"
 
-	appconfig "github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/settings"
 )
 
 type ConfigHandler struct {
 	cfg   env.Config
-	store *appconfig.Store
+	store *settings.Store
 }
 
-func RegisterConfigRoutes(e *echo.Echo, cfg env.Config, store *appconfig.Store) {
+func RegisterConfigRoutes(e *echo.Echo, cfg env.Config, store *settings.Store) {
 	h := &ConfigHandler{cfg: cfg, store: store}
 	adminOnly := RequireRole("admin")
 
@@ -27,6 +28,7 @@ func RegisterConfigRoutes(e *echo.Echo, cfg env.Config, store *appconfig.Store) 
 func (h *ConfigHandler) GetIngestConfig(c *echo.Context) error {
 	current, err := h.store.GetIngest(c.Request().Context())
 	if err != nil {
+		slog.Error("config: load ingest failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load ingest config")
 	}
 	return c.JSON(http.StatusOK, ingestConfigResponse{
@@ -47,27 +49,23 @@ func (h *ConfigHandler) UpsertIngestConfig(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
 	}
 
-	actor := ""
-	if user := GetCurrentUser(c); user != nil {
-		actor = user.Email
-	}
-
-	switch appconfig.IngestMode(strings.TrimSpace(req.Mode)) {
-	case appconfig.IngestModePrivate:
-		if err := h.store.ResetIngest(c.Request().Context(), actor, "set ingest private"); err != nil {
+	switch settings.IngestMode(strings.TrimSpace(req.Mode)) {
+	case settings.IngestModePrivate:
+		if err := h.store.ResetIngest(c.Request().Context()); err != nil {
+			slog.Error("config: reset ingest failed", "err", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update ingest config")
 		}
 		return c.JSON(http.StatusOK, ingestConfigResponse{
-			Mode:              string(appconfig.IngestModePrivate),
+			Mode:              string(settings.IngestModePrivate),
 			SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr),
 			TLSConfigured:     h.cfg.OTLPTLSEnabled(),
 			HeaderName:        "x-fanout-ingest-token",
 		})
-	case appconfig.IngestModePublic:
+	case settings.IngestModePublic:
 		if !h.cfg.OTLPTLSEnabled() {
 			return echo.NewHTTPError(http.StatusConflict, "OTLP TLS must be configured before enabling public ingest")
 		}
-		token, hash, err := appconfig.GenerateIngestToken()
+		token, hash, err := settings.GenerateIngestToken()
 		if err != nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
 		}
@@ -75,13 +73,14 @@ func (h *ConfigHandler) UpsertIngestConfig(c *echo.Context) error {
 		if publicEndpoint == "" {
 			publicEndpoint = suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr)
 		}
-		next := appconfig.IngestConfig{
-			Mode:           appconfig.IngestModePublic,
+		next := settings.IngestConfig{
+			Mode:           settings.IngestModePublic,
 			PublicEndpoint: publicEndpoint,
 			TokenHash:      hash,
 		}
-		if err := h.store.SetIngest(c.Request().Context(), next, actor, "enable public ingest"); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		if err := h.store.SetIngest(c.Request().Context(), next); err != nil {
+			slog.Error("config: persist ingest failed", "err", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update ingest config")
 		}
 		return c.JSON(http.StatusOK, ingestConfigResponse{
 			Mode:              string(next.Mode),

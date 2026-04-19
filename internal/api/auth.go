@@ -11,23 +11,22 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
-	appconfig "github.com/labstack/fanout/internal/config"
 )
 
 type AuthHandler struct {
 	users         *auth.UserStore
 	codes         *auth.CodeStore
-	config        *appconfig.Store
+	bootstrap     *auth.Bootstrap
 	jwtSecret     string
 	refreshSecret string
 	smtp          auth.SMTPConfig
 }
 
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, configStore *appconfig.Store, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, bootstrap *auth.Bootstrap, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
 	h := &AuthHandler{
 		users:         users,
 		codes:         codes,
-		config:        configStore,
+		bootstrap:     bootstrap,
 		jwtSecret:     jwtSecret,
 		refreshSecret: refreshSecret,
 		smtp:          smtp,
@@ -66,16 +65,19 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
 	}
-	bootstrap, err := h.config.GetBootstrap(c.Request().Context())
-	if err != nil {
-		slog.Error("auth: read bootstrap token failed", "err", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to verify bootstrap token")
-	}
-	if err := appconfig.CheckBootstrapToken(req.BootstrapToken, bootstrap, time.Now().UTC()); err != nil {
+	switch h.bootstrap.Verify(req.BootstrapToken) {
+	case auth.BootstrapStatusOK:
+	case auth.BootstrapStatusExpired:
+		slog.Warn("auth: setup rejected", "reason", "expired")
 		jitter()
-		if errors.Is(err, appconfig.ErrBootstrapTokenExpired) {
-			return echo.NewHTTPError(http.StatusGone, "bootstrap token expired; restart Fanout to generate a new one")
-		}
+		return echo.NewHTTPError(http.StatusGone, "bootstrap token expired; restart Fanout to generate a new one")
+	case auth.BootstrapStatusUnset:
+		slog.Warn("auth: setup rejected", "reason", "unset")
+		jitter()
+		return echo.NewHTTPError(http.StatusGone, "setup window is closed; restart Fanout to reopen it")
+	default:
+		slog.Warn("auth: setup rejected", "reason", "wrong")
+		jitter()
 		return echo.NewHTTPError(http.StatusForbidden, "invalid bootstrap token")
 	}
 
@@ -86,7 +88,12 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	user, err := h.users.CreateFirstAdmin(email, req.Name)
 	if errors.Is(err, auth.ErrSetupComplete) {
 		user, err = h.users.GetByEmail(email)
-		if err != nil || !user.Active || user.Role != "admin" {
+		if err != nil {
+			slog.Error("auth: setup retry lookup failed", "email", email, "err", err)
+			return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
+		}
+		if !user.Active || user.Role != "admin" {
+			slog.Warn("auth: setup retry user not eligible", "email", email, "active", user.Active, "role", user.Role)
 			return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
 		}
 	}
@@ -100,9 +107,7 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
 	}
 	slog.Info("auth: first admin setup completed", "email", email)
-	if err := h.config.ClearBootstrap(c.Request().Context()); err != nil {
-		slog.Warn("auth: clear bootstrap token failed", "err", err)
-	}
+	h.bootstrap.Clear()
 	return c.JSON(200, map[string]string{"access_token": accessToken})
 }
 
@@ -212,7 +217,9 @@ func (h *AuthHandler) Me(c *echo.Context) error {
 func (h *AuthHandler) Logout(c *echo.Context) error {
 	if cookie, err := c.Cookie("refresh_token"); err == nil && cookie.Value != "" {
 		if claims, err := auth.VerifyRefresh(h.refreshSecret, cookie.Value); err == nil {
-			_ = h.users.TouchLoginAt(claims.Subject, time.Now().UTC().Add(auth.TokenTimePrecision))
+			if err := h.users.TouchLoginAt(claims.Subject, time.Now().UTC().Add(auth.TokenTimePrecision)); err != nil {
+				slog.Warn("auth: logout TouchLoginAt failed — session not revoked", "user_id", claims.Subject, "err", err)
+			}
 		}
 	}
 	h.clearRefreshCookie(c)

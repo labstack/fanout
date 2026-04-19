@@ -61,10 +61,8 @@ CREATE TABLE verifications (
 
 CREATE INDEX idx_verifications_email ON verifications(email);
 
-CREATE TABLE config (
-    group_key   TEXT PRIMARY KEY,
-    overrides   TEXT NOT NULL DEFAULT '{}',
-    updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_by  TEXT DEFAULT '',
-    last_reason TEXT DEFAULT ''
+CREATE TABLE settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
