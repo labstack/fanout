@@ -88,7 +88,8 @@ func (b *Bootstrap) Clear() {
 	b.mu.Unlock()
 }
 
-// SetExpiresForTest overrides the expiry time; used only by tests that need to drive the Expired path.
+// SetExpiresForTest overrides the expiry to drive the Expired path in tests.
+// Do not call from production code — no compiler gate enforces this because the helper lives in a non-test file.
 func (b *Bootstrap) SetExpiresForTest(expires time.Time) {
 	b.mu.Lock()
 	b.expires = expires

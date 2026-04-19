@@ -88,7 +88,12 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	user, err := h.users.CreateFirstAdmin(email, req.Name)
 	if errors.Is(err, auth.ErrSetupComplete) {
 		user, err = h.users.GetByEmail(email)
-		if err != nil || !user.Active || user.Role != "admin" {
+		if err != nil {
+			slog.Error("auth: setup retry lookup failed", "email", email, "err", err)
+			return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
+		}
+		if !user.Active || user.Role != "admin" {
+			slog.Warn("auth: setup retry user not eligible", "email", email, "active", user.Active, "role", user.Role)
 			return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
 		}
 	}

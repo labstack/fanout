@@ -28,6 +28,7 @@ func RegisterConfigRoutes(e *echo.Echo, cfg env.Config, store *settings.Store) {
 func (h *ConfigHandler) GetIngestConfig(c *echo.Context) error {
 	current, err := h.store.GetIngest(c.Request().Context())
 	if err != nil {
+		slog.Error("config: load ingest failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load ingest config")
 	}
 	return c.JSON(http.StatusOK, ingestConfigResponse{
@@ -51,6 +52,7 @@ func (h *ConfigHandler) UpsertIngestConfig(c *echo.Context) error {
 	switch settings.IngestMode(strings.TrimSpace(req.Mode)) {
 	case settings.IngestModePrivate:
 		if err := h.store.ResetIngest(c.Request().Context()); err != nil {
+			slog.Error("config: reset ingest failed", "err", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update ingest config")
 		}
 		return c.JSON(http.StatusOK, ingestConfigResponse{
