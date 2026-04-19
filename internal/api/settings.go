@@ -12,29 +12,29 @@ import (
 	"github.com/labstack/fanout/internal/settings"
 )
 
-type ConfigHandler struct {
+type SettingsHandler struct {
 	cfg   env.Config
 	store *settings.Store
 }
 
-func RegisterConfigRoutes(e *echo.Echo, cfg env.Config, store *settings.Store) {
-	h := &ConfigHandler{cfg: cfg, store: store}
+func RegisterSettingsRoutes(e *echo.Echo, cfg env.Config, store *settings.Store) {
+	h := &SettingsHandler{cfg: cfg, store: store}
 	adminOnly := RequireRole("admin")
 
-	e.GET("/api/config/ingest", h.GetIngestConfig, adminOnly)
-	e.POST("/api/config/ingest/rotate-token", h.RotateIngestToken, adminOnly)
-	e.DELETE("/api/config/ingest/token", h.ClearIngestToken, adminOnly)
+	e.GET("/api/settings/ingest", h.GetIngest, adminOnly)
+	e.POST("/api/settings/ingest/rotate-token", h.RotateIngestToken, adminOnly)
+	e.DELETE("/api/settings/ingest/token", h.ClearIngestToken, adminOnly)
 }
 
-// GetIngestConfig returns the current ingest config: whether a token is set
+// GetIngest returns the current ingest config: whether a token is set
 // (but not the token itself) and the endpoint collectors should use.
-func (h *ConfigHandler) GetIngestConfig(c *echo.Context) error {
+func (h *SettingsHandler) GetIngest(c *echo.Context) error {
 	current, err := h.store.GetIngest(c.Request().Context())
 	if err != nil {
 		slog.Error("config: load ingest failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load ingest config")
 	}
-	return c.JSON(http.StatusOK, ingestConfigResponse{
+	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     current.TokenHash != "",
 		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr),
 		TLSConfigured:     h.cfg.TLSEnabled(),
@@ -44,7 +44,7 @@ func (h *ConfigHandler) GetIngestConfig(c *echo.Context) error {
 
 // RotateIngestToken issues a new token, persists only its hash, and returns
 // the plaintext exactly once in the response.
-func (h *ConfigHandler) RotateIngestToken(c *echo.Context) error {
+func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 	token, hash, err := settings.GenerateIngestToken()
 	if err != nil {
 		slog.Error("config: generate ingest token failed", "err", err)
@@ -54,7 +54,7 @@ func (h *ConfigHandler) RotateIngestToken(c *echo.Context) error {
 		slog.Error("config: persist ingest token failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update ingest config")
 	}
-	return c.JSON(http.StatusOK, ingestConfigResponse{
+	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     true,
 		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr),
 		TLSConfigured:     h.cfg.TLSEnabled(),
@@ -64,12 +64,12 @@ func (h *ConfigHandler) RotateIngestToken(c *echo.Context) error {
 }
 
 // ClearIngestToken removes the stored token hash; ingest returns to unauthenticated.
-func (h *ConfigHandler) ClearIngestToken(c *echo.Context) error {
+func (h *SettingsHandler) ClearIngestToken(c *echo.Context) error {
 	if err := h.store.ClearIngest(c.Request().Context()); err != nil {
 		slog.Error("config: clear ingest failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to clear ingest config")
 	}
-	return c.JSON(http.StatusOK, ingestConfigResponse{
+	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     false,
 		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr),
 		TLSConfigured:     h.cfg.TLSEnabled(),
@@ -77,7 +77,7 @@ func (h *ConfigHandler) ClearIngestToken(c *echo.Context) error {
 	})
 }
 
-type ingestConfigResponse struct {
+type ingestResponse struct {
 	TokenRequired     bool   `json:"token_required"`
 	SuggestedEndpoint string `json:"suggested_endpoint"`
 	TLSConfigured     bool   `json:"tls_configured"`

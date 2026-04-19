@@ -14,11 +14,11 @@ import (
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func TestGetIngestConfig_OpenByDefault(t *testing.T) {
+func TestGetIngest_OpenByDefault(t *testing.T) {
 	e, users, secret, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
 	_, token := createAdminForRuntimeConfigTest(t, users, secret)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/config/ingest", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/ingest", nil)
 	req.Host = "fanout.example.com:7520"
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -28,7 +28,7 @@ func TestGetIngestConfig_OpenByDefault(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	var resp ingestConfigResponse
+	var resp ingestResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 	e, users, secret, store := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
 	_, token := createAdminForRuntimeConfigTest(t, users, secret)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/ingest/rotate-token", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil)
 	req.Host = "fanout.example.com:7520"
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
@@ -54,7 +54,7 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	var resp ingestConfigResponse
+	var resp ingestResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestClearIngestToken_RemovesAuth(t *testing.T) {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/config/ingest/token", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/settings/ingest/token", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -120,7 +120,7 @@ func newConfigServer(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore,
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
 	RegisterAuthRoutes(e, users, codes, setup, secret, refreshSecret, auth.SMTPConfig{})
-	RegisterConfigRoutes(e, cfg, store)
+	RegisterSettingsRoutes(e, cfg, store)
 	return e, users, secret, store
 }
 
