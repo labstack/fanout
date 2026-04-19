@@ -115,7 +115,7 @@ Once set, the token is required on every OTLP request regardless of source IP. C
 
 ### TLS
 
-Fanout is designed to run behind a reverse proxy (Caddy, nginx, Traefik) that terminates TLS. See `examples/caddyfile` for a reference config.
+Fanout is designed to run behind a reverse proxy (Caddy, nginx, Traefik) that terminates TLS.
 
 For direct-exposure scenarios (private network with an internal CA, air-gapped environments), set `TLS_CERT_FILE` / `TLS_KEY_FILE` to have Fanout terminate TLS itself — both HTTP and OTLP gRPC use the cert pair.
 
