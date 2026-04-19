@@ -13,7 +13,7 @@ var requiredEnvVars = []string{
 	"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL",
 	"JWT_SECRET", "JWT_REFRESH_SECRET",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
-	"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE",
+	"TLS_CERT_FILE", "TLS_KEY_FILE",
 }
 
 func clearEnv(t *testing.T) {
@@ -184,8 +184,8 @@ func TestValidate(t *testing.T) {
 		{"JWTRefreshSecret empty", func(c *Config) { c.JWTRefreshSecret = "" }},
 		{"JWTRefreshSecret short", func(c *Config) { c.JWTRefreshSecret = "short" }},
 		{"JWT secrets equal", func(c *Config) { c.JWTRefreshSecret = c.JWTSecret }},
-		{"OTLP TLS partial cert", func(c *Config) { c.OTLPTLSCertFile = "server.pem" }},
-		{"OTLP TLS partial key", func(c *Config) { c.OTLPTLSKeyFile = "server-key.pem" }},
+		{"TLS partial cert", func(c *Config) { c.TLSCertFile = "server.pem" }},
+		{"TLS partial key", func(c *Config) { c.TLSKeyFile = "server-key.pem" }},
 	}
 
 	for _, tc := range tests {
@@ -206,15 +206,15 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("OTLPTLS_valid", func(t *testing.T) {
+	t.Run("TLS_valid", func(t *testing.T) {
 		c := valid
-		c.OTLPTLSCertFile = "server.pem"
-		c.OTLPTLSKeyFile = "server-key.pem"
+		c.TLSCertFile = "server.pem"
+		c.TLSKeyFile = "server-key.pem"
 		if err := c.Validate(); err != nil {
-			t.Errorf("OTLP TLS config should be valid: %v", err)
+			t.Errorf("TLS config should be valid: %v", err)
 		}
-		if !c.OTLPTLSEnabled() {
-			t.Error("OTLPTLSEnabled = false, want true")
+		if !c.TLSEnabled() {
+			t.Error("TLSEnabled = false, want true")
 		}
 	})
 }

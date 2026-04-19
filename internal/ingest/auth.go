@@ -22,21 +22,21 @@ func GRPCServerOptions(cfg env.Config, settingsStore *settings.Store) ([]grpc.Se
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(newIngestAuthorizer(cfg, settingsStore).Unary()),
 	}
-	if !cfg.OTLPTLSEnabled() {
+	if !cfg.TLSEnabled() {
 		return opts, nil
 	}
 
-	tlsConfig, err := otlpTLSConfig(cfg)
+	tlsConfig, err := tlsServerConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return append(opts, grpc.Creds(credentials.NewTLS(tlsConfig))), nil
 }
 
-func otlpTLSConfig(cfg env.Config) (*tls.Config, error) {
-	cert, err := tls.LoadX509KeyPair(cfg.OTLPTLSCertFile, cfg.OTLPTLSKeyFile)
+func tlsServerConfig(cfg env.Config) (*tls.Config, error) {
+	cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
 	if err != nil {
-		return nil, fmt.Errorf("load OTLP server cert: %w", err)
+		return nil, fmt.Errorf("load TLS server cert: %w", err)
 	}
 
 	return &tls.Config{
@@ -81,7 +81,7 @@ func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 		}
 		return status.Error(codes.PermissionDenied, "OTLP ingest is private")
 	case settings.IngestModePublic:
-		if !a.cfg.OTLPTLSEnabled() {
+		if !a.cfg.TLSEnabled() {
 			return status.Error(codes.FailedPrecondition, "public OTLP requires TLS")
 		}
 		if !hasTLSPeer(ctx) {

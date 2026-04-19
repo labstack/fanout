@@ -66,9 +66,9 @@ func TestUpsertIngestConfig_PublicRequiresTLS(t *testing.T) {
 
 func TestUpsertIngestConfig_PublicGeneratesToken(t *testing.T) {
 	e, users, secret, store := newConfigServer(t, env.Config{
-		OTLPGRPCAddr:    ":4317",
-		OTLPTLSCertFile: "server.pem",
-		OTLPTLSKeyFile:  "server-key.pem",
+		OTLPGRPCAddr: ":4317",
+		TLSCertFile:  "server.pem",
+		TLSKeyFile:   "server-key.pem",
 	})
 	_, token := createAdminForRuntimeConfigTest(t, users, secret)
 

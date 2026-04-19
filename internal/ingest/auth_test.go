@@ -37,16 +37,16 @@ func TestGRPCServerOptions_Disabled(t *testing.T) {
 	}
 }
 
-func TestOTLPTLSConfig(t *testing.T) {
+func TestTLSConfig(t *testing.T) {
 	dir := t.TempDir()
 	certFile, keyFile := writeServerTLSFiles(t, dir)
 
-	tlsConfig, err := otlpTLSConfig(env.Config{
-		OTLPTLSCertFile: certFile,
-		OTLPTLSKeyFile:  keyFile,
+	tlsConfig, err := tlsServerConfig(env.Config{
+		TLSCertFile: certFile,
+		TLSKeyFile:  keyFile,
 	})
 	if err != nil {
-		t.Fatalf("otlpTLSConfig: %v", err)
+		t.Fatalf("tlsServerConfig: %v", err)
 	}
 	if tlsConfig.MinVersion != tls.VersionTLS13 {
 		t.Fatalf("MinVersion = %v, want TLS 1.3", tlsConfig.MinVersion)
@@ -98,8 +98,8 @@ func TestAuthorize_PublicModeRequiresTLSAndToken(t *testing.T) {
 	}
 
 	authorizer := newIngestAuthorizer(env.Config{
-		OTLPTLSCertFile: "server.pem",
-		OTLPTLSKeyFile:  "server-key.pem",
+		TLSCertFile: "server.pem",
+		TLSKeyFile:  "server-key.pem",
 	}, store)
 
 	ctx := peer.NewContext(context.Background(), &peer.Peer{
@@ -124,8 +124,8 @@ func TestAuthorize_PublicModeRejectsMissingToken(t *testing.T) {
 	}
 
 	authorizer := newIngestAuthorizer(env.Config{
-		OTLPTLSCertFile: "server.pem",
-		OTLPTLSKeyFile:  "server-key.pem",
+		TLSCertFile: "server.pem",
+		TLSKeyFile:  "server-key.pem",
 	}, store)
 
 	ctx := peer.NewContext(context.Background(), &peer.Peer{
