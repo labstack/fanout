@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/settings"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -35,7 +36,7 @@ func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Setup, 
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, setup, secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{})
 	return e, users, setup, setupToken, secret, refreshSecret
 }
 
@@ -183,7 +184,7 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, setup, secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{})
 
 	for _, email := range []string{"missing@example.com", "inactive@example.com"} {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"`+email+`"}`))
@@ -223,7 +224,7 @@ func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, setup, secret, refreshSecret, auth.SMTPConfig{
+	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{
 		Host: "127.0.0.1",
 		Port: 1,
 		User: "user",

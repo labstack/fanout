@@ -11,22 +11,25 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/settings"
 )
 
 type AuthHandler struct {
 	users         *auth.UserStore
 	codes         *auth.CodeStore
 	setup         *auth.Setup
+	settings      *settings.Store
 	jwtSecret     string
 	refreshSecret string
 	smtp          auth.SMTPConfig
 }
 
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
 	h := &AuthHandler{
 		users:         users,
 		codes:         codes,
 		setup:         setup,
+		settings:      settingsStore,
 		jwtSecret:     jwtSecret,
 		refreshSecret: refreshSecret,
 		smtp:          smtp,
@@ -106,9 +109,26 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
 	}
+
+	// Auto-generate the ingest token so collectors have a credential from day one.
+	// The plaintext is returned here exactly once — only the hash persists.
+	ingestToken, ingestHash, err := settings.GenerateIngestToken()
+	if err != nil {
+		slog.Error("auth: setup generate ingest token failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
+	}
+	if err := h.settings.SetIngest(c.Request().Context(), settings.Ingest{TokenHash: ingestHash}); err != nil {
+		slog.Error("auth: setup persist ingest token failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist ingest token")
+	}
+
 	slog.Info("auth: first admin setup completed", "email", email)
 	h.setup.Clear()
-	return c.JSON(200, map[string]string{"access_token": accessToken})
+	return c.JSON(200, map[string]string{
+		"access_token":       accessToken,
+		"ingest_token":       ingestToken,
+		"ingest_header_name": "x-fanout-ingest-token",
+	})
 }
 
 func (h *AuthHandler) Start(c *echo.Context) error {

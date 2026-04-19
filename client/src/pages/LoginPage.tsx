@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router";
-import { Loader2, Radio } from "lucide-react";
+import { Check, Copy, Loader2, Radio } from "lucide-react";
 import { setApiToken } from "@/api/client";
 import { useAuth } from "@/hooks/auth-context";
 
-type Step = "loading" | "setup" | "email" | "code";
+type Step = "loading" | "setup" | "token_shown" | "email" | "code";
 
 export function LoginPage() {
   const { user, isLoading, login } = useAuth();
@@ -18,6 +18,11 @@ export function LoginPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [ingestToken, setIngestToken] = useState<string | null>(null);
+  const [ingestHeaderName, setIngestHeaderName] = useState("x-fanout-ingest-token");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -61,10 +66,33 @@ export function LoginPage() {
 
       const data = await result.json();
       setApiToken(data.access_token);
-      await login(data.access_token);
+      setAccessToken(data.access_token);
+      setIngestToken(data.ingest_token || null);
+      if (data.ingest_header_name) setIngestHeaderName(data.ingest_header_name);
+      setStep("token_shown");
+      setSending(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Setup failed");
       setSending(false);
+    }
+  }
+
+  async function continueAfterTokenShown() {
+    if (!accessToken) return;
+    await login(accessToken);
+  }
+
+  async function copyIngestConfig() {
+    if (!ingestToken) return;
+    const cfg = `OTEL_EXPORTER_OTLP_ENDPOINT=<host>:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=${ingestToken}`;
+    try {
+      await navigator.clipboard.writeText(cfg);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard API can be blocked in some contexts; silent fallback.
     }
   }
 
@@ -133,7 +161,7 @@ export function LoginPage() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-surface">
-      <div className="w-full max-w-sm space-y-8 px-6">
+      <div className="w-full max-w-md space-y-8 px-6">
         <div className="text-center space-y-3">
           <div className="inline-flex items-center justify-center">
             <Radio className="h-8 w-8 text-primary" />
@@ -141,6 +169,7 @@ export function LoginPage() {
           <h1 className="font-heading text-2xl font-bold text-foreground">Fanout</h1>
           <p className="text-sm text-muted-foreground">
             {step === "setup" && "Create your admin account with the setup token shown in the server output"}
+            {step === "token_shown" && "Save your ingest token — it won't be shown again"}
             {step === "email" && "Sign in to your account"}
             {step === "code" && `Enter the code sent to ${email}`}
           </p>
@@ -207,6 +236,39 @@ export function LoginPage() {
               )}
             </button>
           </form>
+        )}
+
+        {step === "token_shown" && ingestToken && (
+          <div className="space-y-4">
+            <div className="rounded-lg border border-border bg-surface-2 px-4 py-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="detail-label">Collector configuration</div>
+                <button
+                  type="button"
+                  onClick={copyIngestConfig}
+                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors mono"
+                >
+                  {copied ? <Check className="h-3.5 w-3.5 text-healthy" /> : <Copy className="h-3.5 w-3.5" />}
+                  {copied ? "Copied" : "Copy"}
+                </button>
+              </div>
+              <pre className="text-xs mono whitespace-pre-wrap text-foreground/80 break-all leading-6">
+{`OTEL_EXPORTER_OTLP_ENDPOINT=<host>:4317
+OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=`}<span className="text-primary">{ingestToken}</span>
+              </pre>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              This token won't be shown again. If you lose it, rotate a new one from the settings page.
+            </p>
+            <button
+              type="button"
+              onClick={() => void continueAfterTokenShown()}
+              className="btn-primary w-full"
+            >
+              Continue to Fanout
+            </button>
+          </div>
         )}
 
         {step === "email" && (
