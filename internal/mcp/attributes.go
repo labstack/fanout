@@ -15,7 +15,6 @@ type AttributesIn struct {
 	Operation string `json:"operation,omitempty" jsonschema:"Filter by operation (spans only)"`
 	Window    string `json:"window,omitempty"    jsonschema:"Time window: '15m','1h','7d'. Default: 1h"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
-	Tenant    string `json:"tenant,omitempty"    jsonschema:"Filter by tenant"`
 	Limit     int    `json:"limit,omitempty"     jsonschema:"Max attribute keys to return. Default: 50"`
 }
 
@@ -58,7 +57,6 @@ func (s *Server) attributes(ctx context.Context, req *mcp.CallToolRequest, in At
 		Operation: in.Operation,
 		Window:    window,
 		Namespace: in.Namespace,
-		TenantID:  in.Tenant,
 		Limit:     limit,
 	}
 

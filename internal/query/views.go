@@ -7,7 +7,6 @@ import (
 
 const createSpansTable = `
 CREATE TABLE IF NOT EXISTS lake.spans (
-  tenant VARCHAR,
   namespace VARCHAR,
   trace_id VARCHAR,
   span_id VARCHAR,
@@ -47,7 +46,6 @@ CREATE TABLE IF NOT EXISTS lake.spans (
 
 const createLogsTable = `
 CREATE TABLE IF NOT EXISTS lake.logs (
-  tenant VARCHAR,
   namespace VARCHAR,
   log_time TIMESTAMP,
   observed_time TIMESTAMP,
@@ -71,7 +69,6 @@ CREATE TABLE IF NOT EXISTS lake.logs (
 
 const createMetricsTable = `
 CREATE TABLE IF NOT EXISTS lake.metrics (
-  tenant VARCHAR,
   namespace VARCHAR,
   metric_time TIMESTAMP,
   time_unix_nano BIGINT,
@@ -96,7 +93,6 @@ CREATE TABLE IF NOT EXISTS lake.metrics (
 
 const createServiceRollupTable = `
 CREATE TABLE service_rollup (
-  tenant TEXT,
   namespace TEXT,
   bucket TIMESTAMP,
   service TEXT,
@@ -106,12 +102,11 @@ CREATE TABLE service_rollup (
   error_rate DOUBLE,
   log_count BIGINT DEFAULT 0,
   metric_count BIGINT DEFAULT 0,
-  PRIMARY KEY (tenant, namespace, bucket, service)
+  PRIMARY KEY (namespace, bucket, service)
 );`
 
 const createEdgeRollupTable = `
 CREATE TABLE edge_rollup (
-  tenant TEXT,
   namespace TEXT,
   bucket TIMESTAMP,
   caller TEXT,
@@ -120,7 +115,7 @@ CREATE TABLE edge_rollup (
   avg_ms DOUBLE,
   error_rate DOUBLE,
   edge_type TEXT DEFAULT 'call',
-  PRIMARY KEY (tenant, namespace, bucket, caller, callee, edge_type)
+  PRIMARY KEY (namespace, bucket, caller, callee, edge_type)
 );`
 
 const createRollupStateTable = `
@@ -133,7 +128,6 @@ CREATE TABLE rollup_state (
 const viewSpans = `
 CREATE OR REPLACE VIEW spans AS
 SELECT
-  tenant,
   namespace,
   trace_id,
   span_id,
@@ -174,7 +168,6 @@ FROM lake.spans;`
 const viewLogs = `
 CREATE OR REPLACE VIEW logs AS
 SELECT
-  tenant,
   namespace,
   log_time AS time,
   observed_time,
@@ -199,7 +192,6 @@ FROM lake.logs;`
 const viewMetrics = `
 CREATE OR REPLACE VIEW metrics AS
 SELECT
-  tenant,
   namespace,
   metric_time AS time,
   time_unix_nano,
@@ -236,11 +228,11 @@ func CreateTables(db *sql.DB) error {
 		return err
 	}
 	if err := ensureCacheTable(db, "service_rollup", createServiceRollupTable,
-		"tenant", "namespace", "bucket", "service", "spans", "p50_ms", "p95_ms", "error_rate", "log_count", "metric_count"); err != nil {
+		"namespace", "bucket", "service", "spans", "p50_ms", "p95_ms", "error_rate", "log_count", "metric_count"); err != nil {
 		return err
 	}
 	if err := ensureCacheTable(db, "edge_rollup", createEdgeRollupTable,
-		"tenant", "namespace", "bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"); err != nil {
+		"namespace", "bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"); err != nil {
 		return err
 	}
 	if err := ensureCacheTable(db, "rollup_state", createRollupStateTable,
@@ -275,9 +267,9 @@ WHERE extension_name = 'ducklake' AND loaded`).Scan(&loaded); err != nil {
 	stmts := []string{
 		`CALL lake.set_option('parquet_compression', 'zstd')`,
 		`CALL lake.set_option('target_file_size', '256MB')`,
-		`ALTER TABLE lake.spans SET PARTITIONED BY (tenant, namespace, day(start_time))`,
-		`ALTER TABLE lake.logs SET PARTITIONED BY (tenant, namespace, day(log_time))`,
-		`ALTER TABLE lake.metrics SET PARTITIONED BY (tenant, namespace, day(metric_time))`,
+		`ALTER TABLE lake.spans SET PARTITIONED BY (namespace, day(start_time))`,
+		`ALTER TABLE lake.logs SET PARTITIONED BY (namespace, day(log_time))`,
+		`ALTER TABLE lake.metrics SET PARTITIONED BY (namespace, day(metric_time))`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {

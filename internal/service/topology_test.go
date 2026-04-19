@@ -19,7 +19,7 @@ func TestTopology_Empty(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}))
 
-	result, err := svc.Topology(context.Background(), 60, "", "")
+	result, err := svc.Topology(context.Background(), 60, "")
 	if err != nil {
 		t.Fatalf("Topology() error = %v", err)
 	}
@@ -47,7 +47,7 @@ func TestTopology_WithNodes(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}))
 
-	result, err := svc.Topology(context.Background(), 60, "", "")
+	result, err := svc.Topology(context.Background(), 60, "")
 	if err != nil {
 		t.Fatalf("Topology() error = %v", err)
 	}
@@ -87,7 +87,7 @@ func TestTopology_WithEdges(t *testing.T) {
 			AddRow("frontend", "backend", int64(800), 25.0, 0.01, "call").
 			AddRow("backend", "database", int64(1500), 5.0, 0.001, "call"))
 
-	result, err := svc.Topology(context.Background(), 60, "", "")
+	result, err := svc.Topology(context.Background(), 60, "")
 	if err != nil {
 		t.Fatalf("Topology() error = %v", err)
 	}
@@ -118,7 +118,7 @@ func TestTopology_DefaultWindow(t *testing.T) {
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}))
 
 	// Pass 0 window, should default to 60
-	result, err := svc.Topology(context.Background(), 0, "", "")
+	result, err := svc.Topology(context.Background(), 0, "")
 	if err != nil {
 		t.Fatalf("Topology() error = %v", err)
 	}
@@ -141,7 +141,7 @@ func TestTopology_NodeHealthStatus(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"caller", "callee", "call_count", "avg_ms", "error_rate", "edge_type"}))
 
-	result, err := svc.Topology(context.Background(), 60, "", "")
+	result, err := svc.Topology(context.Background(), 60, "")
 	if err != nil {
 		t.Fatalf("Topology() error = %v", err)
 	}
@@ -176,7 +176,7 @@ func TestTopology_EdgeHealthStatus(t *testing.T) {
 			AddRow("b", "c", int64(100), 2000.0, 0.03, "call"). // degraded
 			AddRow("c", "d", int64(100), 50.0, 0.15, "call"))   // unhealthy
 
-	result, err := svc.Topology(context.Background(), 60, "", "")
+	result, err := svc.Topology(context.Background(), 60, "")
 	if err != nil {
 		t.Fatalf("Topology() error = %v", err)
 	}

@@ -78,8 +78,8 @@ ORDER BY table_name, column_name`)
 	}
 
 	required := map[string][]string{
-		"service_rollup": {"tenant", "namespace", "bucket", "service"},
-		"edge_rollup":    {"tenant", "namespace", "bucket", "caller", "callee", "edge_type"},
+		"service_rollup": {"namespace", "bucket", "service"},
+		"edge_rollup":    {"namespace", "bucket", "caller", "callee", "edge_type"},
 		"rollup_state":   {"cache_key", "last_ingested_unix_nano", "updated_at"},
 	}
 	for table, columns := range required {

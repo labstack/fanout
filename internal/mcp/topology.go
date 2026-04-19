@@ -17,7 +17,6 @@ type TopologyIn struct {
 	Service         string `json:"service,omitempty" jsonschema:"Focus service for depth-limited graph"`
 	IncludeInactive bool   `json:"include_inactive,omitempty" jsonschema:"Include services with no recent traffic"`
 	Namespace       string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
-	TenantID        string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
 }
 
 type ServiceNode struct {
@@ -67,7 +66,6 @@ func (s *Server) topology(ctx context.Context, req *mcp.CallToolRequest, in Topo
 		Service:         in.Service,
 		IncludeInactive: in.IncludeInactive,
 		Namespace:       in.Namespace,
-		TenantID:        in.TenantID,
 	})
 	if err != nil {
 		return nil, TopologyOut{}, fmt.Errorf("topology query failed: %w", err)

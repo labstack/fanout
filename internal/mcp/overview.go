@@ -14,7 +14,6 @@ type OverviewIn struct {
 	Include        []string `json:"include,omitempty"         jsonschema:"Sections to include: 'health', 'services', 'issues'. Default: all"`
 	SortServicesBy string   `json:"sort_services_by,omitempty" jsonschema:"Sort order: 'severity', 'error_rate', 'latency', 'throughput'. Default: severity"`
 	Namespace      string   `json:"namespace,omitempty"       jsonschema:"Filter by namespace"`
-	Tenant         string   `json:"tenant,omitempty"          jsonschema:"Filter by tenant"`
 	Limit          int      `json:"limit,omitempty"           jsonschema:"Max services to return. Default: 100"`
 }
 
@@ -72,7 +71,7 @@ func (s *Server) overview(ctx context.Context, req *mcp.CallToolRequest, in Over
 		limit = 100
 	}
 
-	result, err := s.svc.Overview(ctx, window, in.Include, in.SortServicesBy, in.Namespace, in.Tenant, limit)
+	result, err := s.svc.Overview(ctx, window, in.Include, in.SortServicesBy, in.Namespace, limit)
 	if err != nil {
 		return nil, OverviewOut{}, fmt.Errorf("overview query failed: %w", err)
 	}

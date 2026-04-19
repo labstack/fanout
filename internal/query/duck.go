@@ -116,11 +116,6 @@ func sqlLiteral(v string) string {
 
 func (d *Duck) Close() error { return d.DB.Close() }
 
-// DefaultTenantID returns the configured tenant ID.
-func (d *Duck) DefaultTenantID() string {
-	return d.cfg.TenantID.String()
-}
-
 // DefaultNamespace returns empty string so queries search all namespaces.
 func (d *Duck) DefaultNamespace() string {
 	return ""
@@ -305,21 +300,21 @@ FROM spans`).Scan(&watermark)
 
 const serviceRollupDeleteSQL = `
 WITH affected AS (
-  SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
     AND start_time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
     AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
     AND time IS NOT NULL
@@ -330,29 +325,28 @@ DELETE FROM service_rollup
 WHERE EXISTS (
   SELECT 1
   FROM affected
-  WHERE affected.tenant = service_rollup.tenant
-    AND affected.namespace = service_rollup.namespace
+  WHERE affected.namespace = service_rollup.namespace
     AND affected.bucket = service_rollup.bucket
     AND affected.service = service_rollup.service
 );`
 
 const serviceRollupInsertSQL = `
 WITH affected AS (
-  SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
     AND start_time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
     AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT tenant, namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
     AND time IS NOT NULL
@@ -361,7 +355,6 @@ WITH affected AS (
 ),
 span_agg AS (
   SELECT
-    s.tenant,
     s.namespace,
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
@@ -371,44 +364,38 @@ span_agg AS (
     avg(CASE WHEN s.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
   JOIN affected a
-    ON a.tenant = s.tenant
-   AND a.namespace = s.namespace
+    ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
    AND a.service = s.service
-  GROUP BY s.tenant, s.namespace, date_trunc('minute', s.start_time), s.service
+  GROUP BY s.namespace, date_trunc('minute', s.start_time), s.service
 ),
 log_agg AS (
   SELECT
-    l.tenant,
     l.namespace,
     date_trunc('minute', l.time) AS bucket,
     l.service,
     COUNT(*) AS log_count
   FROM logs l
   JOIN affected a
-    ON a.tenant = l.tenant
-   AND a.namespace = l.namespace
+    ON a.namespace = l.namespace
    AND a.bucket = date_trunc('minute', l.time)
    AND a.service = l.service
-  GROUP BY l.tenant, l.namespace, date_trunc('minute', l.time), l.service
+  GROUP BY l.namespace, date_trunc('minute', l.time), l.service
 ),
 metric_agg AS (
   SELECT
-    m.tenant,
     m.namespace,
     date_trunc('minute', m.time) AS bucket,
     m.service,
     COUNT(DISTINCT m.name) AS metric_count
   FROM metrics m
   JOIN affected a
-    ON a.tenant = m.tenant
-   AND a.namespace = m.namespace
+    ON a.namespace = m.namespace
    AND a.bucket = date_trunc('minute', m.time)
    AND a.service = m.service
-  GROUP BY m.tenant, m.namespace, date_trunc('minute', m.time), m.service
+  GROUP BY m.namespace, date_trunc('minute', m.time), m.service
 )
 INSERT INTO service_rollup (
-  tenant,
   namespace,
   bucket,
   service,
@@ -420,7 +407,6 @@ INSERT INTO service_rollup (
   metric_count
 )
 SELECT
-  a.tenant,
   a.namespace,
   a.bucket,
   a.service,
@@ -431,13 +417,13 @@ SELECT
   COALESCE(l.log_count, 0),
   COALESCE(m.metric_count, 0)
 FROM affected a
-LEFT JOIN span_agg s USING (tenant, namespace, bucket, service)
-LEFT JOIN log_agg l USING (tenant, namespace, bucket, service)
-LEFT JOIN metric_agg m USING (tenant, namespace, bucket, service);`
+LEFT JOIN span_agg s USING (namespace, bucket, service)
+LEFT JOIN log_agg l USING (namespace, bucket, service)
+LEFT JOIN metric_agg m USING (namespace, bucket, service);`
 
 const edgeRollupDeleteSQL = `
 WITH affected AS (
-  SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket
+  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
     AND start_time IS NOT NULL
@@ -446,21 +432,19 @@ DELETE FROM edge_rollup
 WHERE EXISTS (
   SELECT 1
   FROM affected
-  WHERE affected.tenant = edge_rollup.tenant
-    AND affected.namespace = edge_rollup.namespace
+  WHERE affected.namespace = edge_rollup.namespace
     AND affected.bucket = edge_rollup.bucket
 );`
 
 const edgeRollupInsertSQL = `
 WITH affected AS (
-  SELECT DISTINCT tenant, namespace, date_trunc('minute', start_time) AS bucket
+  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
     AND start_time IS NOT NULL
 ),
 call_edges AS (
   SELECT
-    child.tenant,
     child.namespace,
     date_trunc('minute', child.start_time) AS bucket,
     parent.service AS caller,
@@ -473,22 +457,19 @@ call_edges AS (
   JOIN spans parent
     ON child.parent_span_id = parent.span_id
    AND child.trace_id = parent.trace_id
-   AND child.tenant = parent.tenant
    AND child.namespace = parent.namespace
   JOIN affected a
-    ON a.tenant = child.tenant
-   AND a.namespace = child.namespace
+    ON a.namespace = child.namespace
    AND a.bucket = date_trunc('minute', child.start_time)
   WHERE parent.service IS NOT NULL
     AND parent.service != ''
     AND child.service IS NOT NULL
     AND child.service != ''
     AND parent.service != child.service
-  GROUP BY child.tenant, child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
+  GROUP BY child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
 ),
 producers AS (
   SELECT
-    s.tenant,
     s.namespace,
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
@@ -496,8 +477,7 @@ producers AS (
     json_extract_string(s.attributes_json, '$.messaging.system') AS msg_system
   FROM spans s
   JOIN affected a
-    ON a.tenant = s.tenant
-   AND a.namespace = s.namespace
+    ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_PRODUCER'
     AND s.service IS NOT NULL
@@ -506,7 +486,6 @@ producers AS (
 ),
 consumers AS (
   SELECT
-    s.tenant,
     s.namespace,
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
@@ -514,8 +493,7 @@ consumers AS (
     json_extract_string(s.attributes_json, '$.messaging.system') AS msg_system
   FROM spans s
   JOIN affected a
-    ON a.tenant = s.tenant
-   AND a.namespace = s.namespace
+    ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_CONSUMER'
     AND s.service IS NOT NULL
@@ -524,7 +502,6 @@ consumers AS (
 ),
 messaging_edges AS (
   SELECT
-    p.tenant,
     p.namespace,
     p.bucket,
     p.service AS caller,
@@ -535,16 +512,14 @@ messaging_edges AS (
     'messaging' AS edge_type
   FROM producers p
   JOIN consumers c
-    ON c.tenant = p.tenant
-   AND c.namespace = p.namespace
+    ON c.namespace = p.namespace
    AND c.bucket = p.bucket
    AND c.destination = p.destination
    AND c.msg_system = p.msg_system
   WHERE p.service != c.service
-  GROUP BY p.tenant, p.namespace, p.bucket, p.service, c.service
+  GROUP BY p.namespace, p.bucket, p.service, c.service
 )
 INSERT INTO edge_rollup (
-  tenant,
   namespace,
   bucket,
   caller,
@@ -554,10 +529,10 @@ INSERT INTO edge_rollup (
   error_rate,
   edge_type
 )
-SELECT tenant, namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
+SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
 FROM call_edges
 UNION ALL
-SELECT tenant, namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
+SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
 FROM messaging_edges;`
 
 func (d *Duck) runMaintenance(ctx context.Context) error {
@@ -615,7 +590,7 @@ type LatencyRow struct {
 }
 
 func (d *Duck) LatencyOverview(ctx context.Context, windowMinutes int) ([]LatencyRow, error) {
-	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
+	namespace := d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT
   service as service_name,
@@ -624,14 +599,13 @@ SELECT
   SUM(spans)::BIGINT as spans
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
 GROUP BY service
 HAVING SUM(spans) > 0
 ORDER BY p95_ms DESC
 LIMIT 100;
 `, windowMinutes)
-	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
+	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -655,7 +629,7 @@ type LogsSample struct {
 }
 
 func (d *Duck) LogsSamples(ctx context.Context, windowMinutes, limit int, pattern string) ([]LogsSample, error) {
-	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
+	namespace := d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT
   strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
@@ -664,13 +638,12 @@ SELECT
   severity
 FROM logs
 WHERE time >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND body ~ ?
 ORDER BY time DESC
 LIMIT %d;
 `, windowMinutes, limit)
-	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace, pattern)
+	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -692,18 +665,17 @@ type ThroughputRow struct {
 }
 
 func (d *Duck) Throughput(ctx context.Context, windowMinutes int) ([]ThroughputRow, error) {
-	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
+	namespace := d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT strftime(bucket, '%%Y-%%m-%%dT%%H:%%M:00Z') AS bucket,
   (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0))) AS spans
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
 GROUP BY bucket
 ORDER BY bucket ASC;
 `, windowMinutes)
-	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
+	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -725,18 +697,17 @@ type ServiceThroughputRow struct {
 }
 
 func (d *Duck) ServiceThroughput(ctx context.Context, windowMinutes int) ([]ServiceThroughputRow, error) {
-	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
+	namespace := d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT service, (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0)))::BIGINT / %d AS spans_per_minute
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
 GROUP BY service
 ORDER BY spans_per_minute DESC
 LIMIT 20;
 `, windowMinutes, windowMinutes)
-	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
+	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -758,19 +729,18 @@ type ErrorRoute struct {
 }
 
 func (d *Duck) ErrorRoutes(ctx context.Context, windowMinutes, limit int) ([]ErrorRoute, error) {
-	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
+	namespace := d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT body AS route, COUNT(*) AS count
 FROM logs
 WHERE time >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND severity IN ('ERROR', 'ERR', 'WARN')
 GROUP BY body
 ORDER BY count DESC
 LIMIT %d;
 `, windowMinutes, limit)
-	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
+	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -794,13 +764,12 @@ type ErrorRouteRow struct {
 }
 
 func (d *Duck) ErrorRouteDetails(ctx context.Context, windowMinutes, limit int) ([]ErrorRouteRow, error) {
-	tenantID, namespace := d.DefaultTenantID(), d.DefaultNamespace()
+	namespace := d.DefaultNamespace()
 	q := fmt.Sprintf(`
 WITH spans_with_errors AS (
   SELECT service AS service_name, operation AS name, status AS status_code
   FROM spans
   WHERE start_time >= now() - INTERVAL %d MINUTE
-    AND tenant = ?
     AND (? = '' OR namespace = ?)
 )
 SELECT service_name,
@@ -813,7 +782,7 @@ HAVING errors > 0
 ORDER BY errors DESC
 LIMIT %d;
 `, windowMinutes, limit)
-	rows, err := d.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
+	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}

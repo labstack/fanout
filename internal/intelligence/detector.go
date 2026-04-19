@@ -144,8 +144,8 @@ func (d *Detector) detectAnomalies(ctx context.Context, start, end time.Time) []
 func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
-	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
-	scope := detectorScopeClause(tenantID, namespace)
+	namespace := d.duck.DefaultNamespace()
+	scope := detectorScopeClause(namespace)
 
 	// Compare current error rate to baseline (previous period)
 	sql := fmt.Sprintf(`
@@ -222,8 +222,8 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
-	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
-	scope := detectorScopeClause(tenantID, namespace)
+	namespace := d.duck.DefaultNamespace()
+	scope := detectorScopeClause(namespace)
 
 	sql := fmt.Sprintf(`
 		WITH current_period AS (
@@ -304,8 +304,8 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
-	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
-	scope := detectorScopeClause(tenantID, namespace)
+	namespace := d.duck.DefaultNamespace()
+	scope := detectorScopeClause(namespace)
 
 	sql := fmt.Sprintf(`
 		WITH current_period AS (
@@ -382,8 +382,8 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 func (d *Detector) detectLogPatterns(ctx context.Context, start, end time.Time) []Pattern {
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
-	tenantID, namespace := d.duck.DefaultTenantID(), d.duck.DefaultNamespace()
-	scope := detectorScopeClause(tenantID, namespace)
+	namespace := d.duck.DefaultNamespace()
+	scope := detectorScopeClause(namespace)
 
 	// Group logs by normalized template (falls back to first 100 chars for old data without body_template)
 	sql := fmt.Sprintf(`
@@ -523,12 +523,11 @@ func (d *Detector) generateSummary(healthScore float64, anomalies []Anomaly, pat
 	}
 }
 
-func detectorScopeClause(tenantID, namespace string) string {
-	clause := fmt.Sprintf("AND tenant = %s", detectorSQLLiteral(tenantID))
-	if namespace != "" {
-		clause += fmt.Sprintf(" AND namespace = %s", detectorSQLLiteral(namespace))
+func detectorScopeClause(namespace string) string {
+	if namespace == "" {
+		return ""
 	}
-	return clause
+	return fmt.Sprintf("AND namespace = %s", detectorSQLLiteral(namespace))
 }
 
 func detectorSQLLiteral(v string) string {

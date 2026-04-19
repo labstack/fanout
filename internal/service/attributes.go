@@ -16,7 +16,6 @@ type AttributeParams struct {
 	Operation string // spans only
 	Window    int    // minutes
 	Namespace string
-	TenantID  string
 	Limit     int
 }
 
@@ -74,7 +73,6 @@ func (s *Service) Attributes(ctx context.Context, p AttributeParams) (*Attribute
 	if p.Limit == 0 {
 		p.Limit = 50
 	}
-	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
 
 	switch p.Signal {
 	case "spans":
@@ -110,10 +108,6 @@ func (s *Service) attributesFromColumns(ctx context.Context, p AttributeParams) 
 	if p.Namespace != "" {
 		clauses = append(clauses, "namespace = ?")
 		args = append(args, p.Namespace)
-	}
-	if p.TenantID != "" {
-		clauses = append(clauses, "tenant = ?")
-		args = append(args, p.TenantID)
 	}
 	where := "WHERE " + strings.Join(clauses, " AND ")
 
@@ -238,10 +232,6 @@ func (s *Service) attributesFromJSON(ctx context.Context, p AttributeParams) (*A
 	if p.Namespace != "" {
 		clauses = append(clauses, "namespace = ?")
 		args = append(args, p.Namespace)
-	}
-	if p.TenantID != "" {
-		clauses = append(clauses, "tenant = ?")
-		args = append(args, p.TenantID)
 	}
 	where := "WHERE " + strings.Join(clauses, " AND ")
 

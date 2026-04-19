@@ -32,14 +32,12 @@ type homeSnapshotRow struct {
 // Home assembles all data for the deterministic Home triage page.
 // It queries rollup data, builds sparklines, fetches top errors for unhealthy
 // services, and integrates with the incident tracker.
-func (s *Service) Home(ctx context.Context, window int, namespace, tenantID string, tracker *IncidentTracker) (*HomeResult, error) {
+func (s *Service) Home(ctx context.Context, window int, namespace string, tracker *IncidentTracker) (*HomeResult, error) {
 	if window <= 0 {
 		window = 60
 	}
 
-	namespace, tenantID = s.defaults(namespace, tenantID)
-
-	snapshot, err := s.homeSnapshot(ctx, window, namespace, tenantID)
+	snapshot, err := s.homeSnapshot(ctx, window, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +45,8 @@ func (s *Service) Home(ctx context.Context, window int, namespace, tenantID stri
 	return buildHomeResult(snapshot, tracker, time.Now()), nil
 }
 
-func (s *Service) homeSnapshot(ctx context.Context, window int, namespace, tenantID string) (*homeSnapshot, error) {
-	cacheKey := fmt.Sprintf("home:%d:%s:%s", window, namespace, tenantID)
+func (s *Service) homeSnapshot(ctx context.Context, window int, namespace string) (*homeSnapshot, error) {
+	cacheKey := fmt.Sprintf("home:%d:%s", window, namespace)
 	if v, ok := query.GetCached(cacheKey); ok {
 		if snapshot, ok := v.(*homeSnapshot); ok {
 			return snapshot, nil
@@ -67,7 +65,6 @@ SELECT
   AVG(CASE WHEN spans > 0 THEN error_rate END) AS error_rate
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
 GROUP BY service
 ORDER BY
@@ -82,7 +79,7 @@ ORDER BY
 LIMIT 200;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace)
+	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("home rollup query: %w", err)
 	}
@@ -142,7 +139,7 @@ LIMIT 200;
 	for _, r := range svcs {
 		allSvcNames = append(allSvcNames, r.name)
 	}
-	sparklines, err := s.homeSparklines(ctx, window, namespace, tenantID, allSvcNames)
+	sparklines, err := s.homeSparklines(ctx, window, namespace, allSvcNames)
 	if err != nil {
 		slog.Error("sparklines query failed", "method", "Home", "err", err)
 		sparklines = make(map[string][]float64)
@@ -163,7 +160,7 @@ LIMIT 200;
 		if errWindow > 5 {
 			errWindow = 5
 		}
-		topErrors, err = s.homeTopErrors(ctx, errWindow, namespace, tenantID, incidentSvcNames)
+		topErrors, err = s.homeTopErrors(ctx, errWindow, namespace, incidentSvcNames)
 		if err != nil {
 			slog.Error("top errors query failed", "method", "Home", "err", err)
 		}
@@ -219,13 +216,13 @@ LIMIT 200;
 
 // homeSparklines queries per-minute rollup buckets for the specified services.
 // Returns a map with keys like "svc-a_traffic" and "svc-a_err".
-func (s *Service) homeSparklines(ctx context.Context, window int, namespace, tenantID string, services []string) (map[string][]float64, error) {
+func (s *Service) homeSparklines(ctx context.Context, window int, namespace string, services []string) (map[string][]float64, error) {
 	if len(services) == 0 {
 		return make(map[string][]float64), nil
 	}
 
 	placeholders := make([]string, len(services))
-	args := []interface{}{tenantID, namespace, namespace}
+	args := []interface{}{namespace, namespace}
 	for i, svc := range services {
 		placeholders[i] = "?"
 		args = append(args, svc)
@@ -235,7 +232,6 @@ func (s *Service) homeSparklines(ctx context.Context, window int, namespace, ten
 SELECT service, bucket, spans, error_rate
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND service IN (%s)
 ORDER BY service, bucket;
@@ -285,15 +281,15 @@ ORDER BY service, bucket;
 // homeTopErrors queries top error messages for a set of services.
 // Queries raw spans table for error spans, groups by service+message, limits
 // to top 5 per service (20 total). Returns a map keyed by service name.
-func (s *Service) homeTopErrors(ctx context.Context, window int, namespace, tenantID string, services []string) (map[string][]HomeTopError, error) {
+func (s *Service) homeTopErrors(ctx context.Context, window int, namespace string, services []string) (map[string][]HomeTopError, error) {
 	if len(services) == 0 {
 		return make(map[string][]HomeTopError), nil
 	}
 
 	// Build IN clause placeholders.
 	placeholders := make([]string, len(services))
-	args := make([]interface{}, 0, 3+len(services))
-	args = append(args, tenantID, namespace, namespace)
+	args := make([]interface{}, 0, 2+len(services))
+	args = append(args, namespace, namespace)
 	for i, svc := range services {
 		placeholders[i] = "?"
 		args = append(args, svc)
@@ -307,7 +303,6 @@ SELECT
   COUNT(*) AS cnt
 FROM spans
 WHERE start_time >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND service IN (%s)
   AND status IN ('STATUS_CODE_ERROR', 'ERROR')

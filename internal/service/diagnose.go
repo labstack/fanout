@@ -10,7 +10,7 @@ import (
 )
 
 // Diagnose returns detailed service diagnostics with root cause analysis.
-func (s *Service) Diagnose(ctx context.Context, svc string, window int, namespace, tenantID string) (*DiagnoseResult, error) {
+func (s *Service) Diagnose(ctx context.Context, svc string, window int, namespace string) (*DiagnoseResult, error) {
 	if svc == "" {
 		return nil, fmt.Errorf("service is required")
 	}
@@ -26,8 +26,6 @@ func (s *Service) Diagnose(ctx context.Context, svc string, window int, namespac
 		Dependencies:  []Dependency{},
 	}
 
-	// Always scope to single tenant; namespace may be empty to search all namespaces.
-	namespace, tenantID = s.defaults(namespace, tenantID)
 	q := fmt.Sprintf(`
 SELECT
   COUNT(*) as cnt,
@@ -37,12 +35,11 @@ SELECT
   COALESCE(AVG(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END), 0) as error_rate
 FROM spans
 WHERE start_time >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND service = ?;
 `, window)
 
-	row := s.duck.DB.QueryRowContext(ctx, q, tenantID, namespace, namespace, svc)
+	row := s.duck.DB.QueryRowContext(ctx, q, namespace, namespace, svc)
 	if err := row.Scan(&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate); err != nil {
 		return nil, fmt.Errorf("diagnose query failed: %w", err)
 	}
@@ -62,7 +59,6 @@ SELECT
   FIRST(trace_id) AS trace_id
 FROM spans
 WHERE start_time >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND service = ?
   AND status IN ('STATUS_CODE_ERROR', 'ERROR')
@@ -71,7 +67,7 @@ ORDER BY cnt DESC
 LIMIT 10;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace, svc)
+	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace, svc)
 	if err != nil {
 		slog.Warn("top errors query failed", "method", "Diagnose.errors", "service", svc, "err", err)
 	} else {
@@ -105,7 +101,6 @@ SELECT
   COUNT(*) as cnt
 FROM spans
 WHERE start_time >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND service = ?
 GROUP BY operation
@@ -114,7 +109,7 @@ ORDER BY p95 DESC
 LIMIT 5;
 `, window)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q, tenantID, namespace, namespace, svc)
+	rows, err = s.duck.DB.QueryContext(ctx, q, namespace, namespace, svc)
 	if err != nil {
 		slog.Warn("slow ops query failed", "method", "Diagnose.slowOps", "service", svc, "err", err)
 	} else {
@@ -142,14 +137,13 @@ SELECT
 FROM edge_rollup
 WHERE caller = ?
   AND bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
 GROUP BY callee
 ORDER BY calls DESC
 LIMIT 10;
 `, window)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q, svc, tenantID, namespace, namespace)
+	rows, err = s.duck.DB.QueryContext(ctx, q, svc, namespace, namespace)
 	if err != nil {
 		slog.Warn("dependencies query failed", "method", "Diagnose.deps", "service", svc, "err", err)
 	} else {
@@ -175,8 +169,8 @@ LIMIT 10;
 // DiagnoseEnhanced runs the standard Diagnose and enriches the result with
 // baseline comparison, change-point detection, and correlated log patterns.
 // symptom is one of: "latency", "errors", "throughput_drop", "auto".
-func (s *Service) DiagnoseEnhanced(ctx context.Context, svc string, window int, symptom, namespace, tenantID string) (*DiagnoseResult, error) {
-	out, err := s.Diagnose(ctx, svc, window, namespace, tenantID)
+func (s *Service) DiagnoseEnhanced(ctx context.Context, svc string, window int, symptom, namespace string) (*DiagnoseResult, error) {
+	out, err := s.Diagnose(ctx, svc, window, namespace)
 	if err != nil {
 		return out, err
 	}
@@ -193,7 +187,7 @@ func (s *Service) DiagnoseEnhanced(ctx context.Context, svc string, window int, 
 	out.SymptomDetected = detected
 
 	// Baseline comparison: same time-of-day over past 7 days.
-	baseline, err := s.queryBaseline(ctx, svc, window, namespace, tenantID)
+	baseline, err := s.queryBaseline(ctx, svc, window, namespace)
 	if err != nil {
 		slog.Warn("baseline query failed", "method", "DiagnoseEnhanced", "err", err)
 	} else {
@@ -201,18 +195,18 @@ func (s *Service) DiagnoseEnhanced(ctx context.Context, svc string, window int, 
 	}
 
 	// Change point detection over rollup buckets in the window.
-	changePoints, cpTime := s.detectChangePoints(ctx, svc, window, detected, namespace, tenantID)
+	changePoints, cpTime := s.detectChangePoints(ctx, svc, window, detected, namespace)
 	out.ChangePoints = changePoints
 
 	// Correlated log patterns around the change point (or window start).
-	if logPatterns, lerr := s.correlatedLogs(ctx, svc, cpTime, window, namespace, tenantID); lerr != nil {
+	if logPatterns, lerr := s.correlatedLogs(ctx, svc, cpTime, window, namespace); lerr != nil {
 		slog.Warn("log correlation failed", "method", "DiagnoseEnhanced", "err", lerr)
 	} else {
 		out.CorrelatedLogPatterns = logPatterns
 	}
 
 	// Find representative traces around the change point for direct investigation.
-	if traces := s.suggestedTraces(ctx, svc, cpTime, window, namespace, tenantID); len(traces) > 0 {
+	if traces := s.suggestedTraces(ctx, svc, cpTime, window, namespace); len(traces) > 0 {
 		out.SuggestedTraces = traces
 	}
 
@@ -235,9 +229,7 @@ func detectSymptom(errorRate, p95Ms float64, spanCount int64) string {
 
 // queryBaseline computes the historical same-time-of-day P95 average over the past 7 days.
 // Returns nil when there is insufficient data (< 3 distinct days).
-func (s *Service) queryBaseline(ctx context.Context, svc string, window int, namespace, tenantID string) (*BaselineComparison, error) {
-	namespace, tenantID = s.defaults(namespace, tenantID)
-
+func (s *Service) queryBaseline(ctx context.Context, svc string, window int, namespace string) (*BaselineComparison, error) {
 	// Determine the current hour range covered by the window.
 	now := time.Now()
 	startHour := now.Add(-time.Duration(window) * time.Minute).Hour()
@@ -253,12 +245,11 @@ SELECT
   COUNT(DISTINCT DATE_TRUNC('day', bucket)) as day_count
 FROM service_rollup
 WHERE service = ?
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND bucket >= NOW() - INTERVAL 7 DAY
   AND (EXTRACT(HOUR FROM bucket) >= ? OR EXTRACT(HOUR FROM bucket) <= ?)
   AND spans > 0;`
-		row = s.duck.DB.QueryRowContext(ctx, q, svc, tenantID, namespace, namespace, startHour, endHour)
+		row = s.duck.DB.QueryRowContext(ctx, q, svc, namespace, namespace, startHour, endHour)
 	} else {
 		q = `
 SELECT
@@ -266,12 +257,11 @@ SELECT
   COUNT(DISTINCT DATE_TRUNC('day', bucket)) as day_count
 FROM service_rollup
 WHERE service = ?
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND bucket >= NOW() - INTERVAL 7 DAY
   AND EXTRACT(HOUR FROM bucket) BETWEEN ? AND ?
   AND spans > 0;`
-		row = s.duck.DB.QueryRowContext(ctx, q, svc, tenantID, namespace, namespace, startHour, endHour)
+		row = s.duck.DB.QueryRowContext(ctx, q, svc, namespace, namespace, startHour, endHour)
 	}
 
 	var baselineP95 *float64
@@ -300,19 +290,16 @@ type rollupBucket struct {
 
 // detectChangePoints scans service_rollup buckets for >2σ jumps in the symptom metric.
 // Returns change points and the time of the first detected change (or window start if none).
-func (s *Service) detectChangePoints(ctx context.Context, svc string, window int, symptom, namespace, tenantID string) ([]ChangePoint, time.Time) {
-	namespace, tenantID = s.defaults(namespace, tenantID)
-
+func (s *Service) detectChangePoints(ctx context.Context, svc string, window int, symptom, namespace string) ([]ChangePoint, time.Time) {
 	q := fmt.Sprintf(`
 SELECT bucket, COALESCE(p95_ms, 0), COALESCE(error_rate, 0), COALESCE(spans, 0)
 FROM service_rollup
 WHERE service = ?
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND bucket >= NOW() - INTERVAL %d MINUTE
 ORDER BY bucket ASC;`, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, svc, tenantID, namespace, namespace)
+	rows, err := s.duck.DB.QueryContext(ctx, q, svc, namespace, namespace)
 	windowStart := time.Now().Add(-time.Duration(window) * time.Minute)
 	if err != nil {
 		slog.Warn("change point query failed", "err", err)
@@ -392,9 +379,7 @@ ORDER BY bucket ASC;`, window)
 }
 
 // correlatedLogs queries log patterns near the given change-point time.
-func (s *Service) correlatedLogs(ctx context.Context, svc string, around time.Time, window int, namespace, tenantID string) ([]LogPattern, error) {
-	namespace, tenantID = s.defaults(namespace, tenantID)
-
+func (s *Service) correlatedLogs(ctx context.Context, svc string, around time.Time, window int, namespace string) ([]LogPattern, error) {
 	// Search ±5 minutes around the change point, but stay within the window.
 	windowStart := time.Now().Add(-time.Duration(window) * time.Minute)
 	from := around.Add(-5 * time.Minute)
@@ -418,14 +403,13 @@ func (s *Service) correlatedLogs(ctx context.Context, svc string, around time.Ti
 SELECT %s as pattern, severity, COUNT(*) as cnt
 FROM logs
 WHERE service = ?
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
   AND time BETWEEN ? AND ?
 GROUP BY pattern, severity
 ORDER BY cnt DESC
 LIMIT 5;`, tokenize)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, svc, tenantID, namespace, namespace, from, to)
+	rows, err := s.duck.DB.QueryContext(ctx, q, svc, namespace, namespace, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("correlated logs query: %w", err)
 	}
@@ -448,9 +432,7 @@ LIMIT 5;`, tokenize)
 
 // suggestedTraces finds representative error trace IDs around the change point
 // so the user has concrete traces to investigate with the trace tool.
-func (s *Service) suggestedTraces(ctx context.Context, svc string, around time.Time, window int, namespace, tenantID string) []string {
-	namespace, tenantID = s.defaults(namespace, tenantID)
-
+func (s *Service) suggestedTraces(ctx context.Context, svc string, around time.Time, window int, namespace string) []string {
 	// Search ±2 minutes around the change point.
 	windowStart := time.Now().Add(-time.Duration(window) * time.Minute)
 	from := around.Add(-2 * time.Minute)
@@ -471,7 +453,6 @@ func (s *Service) suggestedTraces(ctx context.Context, svc string, around time.T
 (SELECT trace_id AS tid
  FROM spans
  WHERE service = ?
-   AND tenant = ?
    AND (? = '' OR namespace = ?)
    AND start_unix_nano BETWEEN ? AND ?
    AND status IN ('STATUS_CODE_ERROR', 'ERROR')
@@ -482,7 +463,6 @@ UNION ALL
 (SELECT trace_id AS tid
  FROM spans
  WHERE service = ?
-   AND tenant = ?
    AND (? = '' OR namespace = ?)
    AND start_unix_nano BETWEEN ? AND ?
    AND duration_ms > 1000
@@ -493,8 +473,8 @@ UNION ALL
 	rows, err := s.duck.DB.QueryContext(
 		ctx,
 		q,
-		svc, tenantID, namespace, namespace, fromNano, toNano,
-		svc, tenantID, namespace, namespace, fromNano, toNano,
+		svc, namespace, namespace, fromNano, toNano,
+		svc, namespace, namespace, fromNano, toNano,
 	)
 	if err != nil {
 		slog.Warn("suggested traces query failed", "method", "suggestedTraces", "service", svc, "err", err)

@@ -27,7 +27,6 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
 	insertRollupTestSpan(t, db, rollupTestSpan{
-		tenant:    "tenant-a",
 		namespace: "ns-a",
 		traceID:   "trace-1",
 		spanID:    "span-1",
@@ -43,7 +42,6 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 	}
 
 	insertRollupTestSpan(t, db, rollupTestSpan{
-		tenant:    "tenant-a",
 		namespace: "ns-a",
 		traceID:   "trace-2",
 		spanID:    "span-2",
@@ -54,7 +52,6 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 		ingested:  200,
 	})
 	insertRollupTestSpan(t, db, rollupTestSpan{
-		tenant:    "tenant-a",
 		namespace: "ns-b",
 		traceID:   "trace-3",
 		spanID:    "span-3",
@@ -69,13 +66,12 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 		t.Fatalf("second rollupOnce failed: %v", err)
 	}
 
-	requireServiceRollupSpans(t, db, "tenant-a", "ns-a", bucket, "checkout", 2)
-	requireServiceRollupSpans(t, db, "tenant-a", "ns-b", bucket, "checkout", 1)
+	requireServiceRollupSpans(t, db, "ns-a", bucket, "checkout", 2)
+	requireServiceRollupSpans(t, db, "ns-b", bucket, "checkout", 1)
 	requireRowCount(t, db, `
 SELECT count(*)
 FROM service_rollup
-WHERE tenant = 'tenant-a'
-  AND bucket = ?
+WHERE bucket = ?
   AND service = 'checkout'`, bucket, 2)
 }
 
@@ -97,7 +93,6 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-3 * time.Minute)
 	insertRollupTestSpan(t, db, rollupTestSpan{
-		tenant:    "tenant-a",
 		namespace: "ns-a",
 		traceID:   "trace-1",
 		spanID:    "parent-1",
@@ -109,7 +104,6 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 		ingested:  100,
 	})
 	insertRollupTestSpan(t, db, rollupTestSpan{
-		tenant:       "tenant-a",
 		namespace:    "ns-a",
 		traceID:      "trace-1",
 		spanID:       "child-1",
@@ -127,7 +121,6 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 	}
 
 	insertRollupTestSpan(t, db, rollupTestSpan{
-		tenant:    "tenant-a",
 		namespace: "ns-a",
 		traceID:   "trace-2",
 		spanID:    "parent-2",
@@ -139,7 +132,6 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 		ingested:  200,
 	})
 	insertRollupTestSpan(t, db, rollupTestSpan{
-		tenant:       "tenant-a",
 		namespace:    "ns-a",
 		traceID:      "trace-2",
 		spanID:       "child-2",
@@ -160,8 +152,7 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 	err := db.QueryRow(`
 SELECT calls
 FROM edge_rollup
-WHERE tenant = 'tenant-a'
-  AND namespace = 'ns-a'
+WHERE namespace = 'ns-a'
   AND bucket = ?
   AND caller = 'frontend'
   AND callee = 'payments'
@@ -192,7 +183,6 @@ func TestRollupOnceIgnoresRowsWithoutBucketTimestamp(t *testing.T) {
 
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-4 * time.Minute)
 	insertRollupTestSpan(t, db, rollupTestSpan{
-		tenant:    "tenant-a",
 		namespace: "ns-a",
 		traceID:   "trace-1",
 		spanID:    "span-1",
@@ -205,7 +195,6 @@ func TestRollupOnceIgnoresRowsWithoutBucketTimestamp(t *testing.T) {
 
 	if _, err := db.Exec(`
 INSERT INTO lake.logs (
-  tenant,
   namespace,
   log_time,
   time_unix_nano,
@@ -216,13 +205,12 @@ INSERT INTO lake.logs (
   ingested_at,
   ingested_unix_nano
 )
-VALUES ('tenant-a', 'ns-a', NULL, 0, 'INFO', 9, 'missing time', 'checkout', now(), 200)`); err != nil {
+VALUES ('ns-a', NULL, 0, 'INFO', 9, 'missing time', 'checkout', now(), 200)`); err != nil {
 		t.Fatalf("insert lake.logs failed: %v", err)
 	}
 
 	if _, err := db.Exec(`
 INSERT INTO lake.metrics (
-  tenant,
   namespace,
   metric_time,
   time_unix_nano,
@@ -233,7 +221,7 @@ INSERT INTO lake.metrics (
   ingested_at,
   ingested_unix_nano
 )
-VALUES ('tenant-a', 'ns-a', NULL, 0, 'cpu.usage', 'gauge', 'checkout', 1.0, now(), 300)`); err != nil {
+VALUES ('ns-a', NULL, 0, 'cpu.usage', 'gauge', 'checkout', 1.0, now(), 300)`); err != nil {
 		t.Fatalf("insert lake.metrics failed: %v", err)
 	}
 
@@ -241,16 +229,14 @@ VALUES ('tenant-a', 'ns-a', NULL, 0, 'cpu.usage', 'gauge', 'checkout', 1.0, now(
 		t.Fatalf("rollupOnce failed: %v", err)
 	}
 
-	requireServiceRollupSpans(t, db, "tenant-a", "ns-a", bucket, "checkout", 1)
+	requireServiceRollupSpans(t, db, "ns-a", bucket, "checkout", 1)
 	requireRowCount(t, db, `
 SELECT count(*)
 FROM service_rollup
-WHERE tenant = 'tenant-a'
-  AND namespace = 'ns-a'`, nil, 1)
+WHERE namespace = 'ns-a'`, nil, 1)
 }
 
 type rollupTestSpan struct {
-	tenant       string
 	namespace    string
 	traceID      string
 	spanID       string
@@ -274,7 +260,6 @@ func insertRollupTestSpan(t *testing.T, db *sql.DB, span rollupTestSpan) {
 
 	if _, err := db.Exec(`
 INSERT INTO lake.spans (
-  tenant,
   namespace,
   trace_id,
   span_id,
@@ -291,8 +276,7 @@ INSERT INTO lake.spans (
   ingested_at,
   ingested_unix_nano
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'STATUS_CODE_OK', ?, ?)`,
-		span.tenant,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'STATUS_CODE_OK', ?, ?)`,
 		span.namespace,
 		span.traceID,
 		span.spanID,
@@ -312,17 +296,16 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'STATUS_CODE_OK', ?, ?)`,
 	}
 }
 
-func requireServiceRollupSpans(t *testing.T, db *sql.DB, tenant, namespace string, bucket time.Time, service string, want int64) {
+func requireServiceRollupSpans(t *testing.T, db *sql.DB, namespace string, bucket time.Time, service string, want int64) {
 	t.Helper()
 
 	var got int64
 	err := db.QueryRow(`
 SELECT spans
 FROM service_rollup
-WHERE tenant = ?
-  AND namespace = ?
+WHERE namespace = ?
   AND bucket = ?
-  AND service = ?`, tenant, namespace, bucket, service).Scan(&got)
+  AND service = ?`, namespace, bucket, service).Scan(&got)
 	if err != nil {
 		t.Fatalf("query service_rollup failed: %v", err)
 	}

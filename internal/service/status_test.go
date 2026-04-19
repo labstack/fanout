@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/query"
 )
@@ -20,7 +19,6 @@ func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock) {
 	cfg := env.Config{
 		DataDir:   "data",
 		DefaultNS: "default",
-		TenantID:  uuid.MustParse("00000000-0000-0000-0000-000000000000"),
 	}
 
 	duck := &query.Duck{DB: db}
@@ -37,7 +35,7 @@ func TestStatus_NoData(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnError(nil)
 	mock.ExpectQuery("SELECT").WillReturnRows(sqlmock.NewRows([]string{"service", "span_cnt", "p95_ms", "error_rate", "log_cnt", "metric_cnt"}))
 
-	result, err := svc.Status(context.Background(), 15, "", "")
+	result, err := svc.Status(context.Background(), 15, "")
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -63,7 +61,7 @@ func TestStatus_WithServices(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Status(context.Background(), 15, "", "")
+	result, err := svc.Status(context.Background(), 15, "")
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -88,7 +86,7 @@ func TestStatus_WithHighErrors(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Status(context.Background(), 15, "", "")
+	result, err := svc.Status(context.Background(), 15, "")
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -111,7 +109,7 @@ func TestStatus_TopIssues(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Status(context.Background(), 15, "", "")
+	result, err := svc.Status(context.Background(), 15, "")
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -129,7 +127,7 @@ func TestStatus_DefaultWindow(t *testing.T) {
 		sqlmock.NewRows([]string{"service", "span_cnt", "p95_ms", "error_rate", "log_cnt", "metric_cnt"}))
 
 	// Pass 0 window, should default to 15
-	result, err := svc.Status(context.Background(), 0, "", "")
+	result, err := svc.Status(context.Background(), 0, "")
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -145,7 +143,7 @@ func TestStatus_CustomNamespace(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "span_cnt", "p95_ms", "error_rate", "log_cnt", "metric_cnt"}))
 
-	result, err := svc.Status(context.Background(), 15, "production", "tenant-123")
+	result, err := svc.Status(context.Background(), 15, "production")
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -164,7 +162,7 @@ func TestStatus_SummaryHealthy(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Status(context.Background(), 15, "", "")
+	result, err := svc.Status(context.Background(), 15, "")
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -187,7 +185,7 @@ func TestStatus_SummaryUnhealthy(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Status(context.Background(), 15, "", "")
+	result, err := svc.Status(context.Background(), 15, "")
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
@@ -280,7 +278,7 @@ func TestOverview_NoData(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}))
 
-	result, err := svc.Overview(context.Background(), 15, nil, "", "", "", 0)
+	result, err := svc.Overview(context.Background(), 15, nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
 	}
@@ -308,7 +306,7 @@ func TestOverview_HealthScore(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Overview(context.Background(), 15, nil, "", "", "", 0)
+	result, err := svc.Overview(context.Background(), 15, nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
 	}
@@ -341,7 +339,7 @@ func TestOverview_ByStatus(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Overview(context.Background(), 15, nil, "", "", "", 0)
+	result, err := svc.Overview(context.Background(), 15, nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
 	}
@@ -367,7 +365,7 @@ func TestOverview_IncludeFilter(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Overview(context.Background(), 15, []string{"health"}, "", "", "", 0)
+	result, err := svc.Overview(context.Background(), 15, []string{"health"}, "", "", 0)
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
 	}
@@ -394,7 +392,7 @@ func TestOverview_SortBySeverity(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Overview(context.Background(), 15, nil, "severity", "", "", 0)
+	result, err := svc.Overview(context.Background(), 15, nil, "severity", "", 0)
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
 	}
@@ -417,7 +415,7 @@ func TestOverview_SortByErrorRate(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Overview(context.Background(), 15, nil, "error_rate", "", "", 0)
+	result, err := svc.Overview(context.Background(), 15, nil, "error_rate", "", 0)
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
 	}
@@ -440,7 +438,7 @@ func TestOverview_TopIssues(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
 
-	result, err := svc.Overview(context.Background(), 15, nil, "", "", "", 0)
+	result, err := svc.Overview(context.Background(), 15, nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
 	}
@@ -486,7 +484,7 @@ func TestOverview_DefaultWindow(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}))
 
-	result, err := svc.Overview(context.Background(), 0, nil, "", "", "", 0)
+	result, err := svc.Overview(context.Background(), 0, nil, "", "", 0)
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
 	}
@@ -501,7 +499,7 @@ func TestOverview_QueryError(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnError(errTest)
 
-	_, err := svc.Overview(context.Background(), 15, nil, "", "", "", 0)
+	_, err := svc.Overview(context.Background(), 15, nil, "", "", 0)
 	if err == nil {
 		t.Fatal("Overview() should return error on query failure")
 	}

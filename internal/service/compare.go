@@ -110,7 +110,7 @@ func (s *Service) CompareServices(ctx context.Context, params CompareServicesPar
 		window = 60
 	}
 
-	metrics, err := s.compareServicesRollup(ctx, params.Services, window, "", "")
+	metrics, err := s.compareServicesRollup(ctx, params.Services, window, "")
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
@@ -160,8 +160,8 @@ func (s *Service) CompareTime(ctx context.Context, params CompareTimeParams) (*C
 	}
 
 	// Rollup buckets for timeseries chart data only
-	leftBuckets, _ := s.QueryRollupBuckets(ctx, params.Service, params.Left.Start, params.Left.End, "", "")
-	rightBuckets, _ := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End, "", "")
+	leftBuckets, _ := s.QueryRollupBuckets(ctx, params.Service, params.Left.Start, params.Left.End, "")
+	rightBuckets, _ := s.QueryRollupBuckets(ctx, params.Service, params.Right.Start, params.Right.End, "")
 
 	comparison := BuildComparison(leftAgg, rightAgg, leftBuckets, rightBuckets, focus)
 
@@ -206,9 +206,8 @@ func (s *Service) CompareOperations(ctx context.Context, params CompareOperation
 // --- Query helpers ---
 
 // QueryRollupBuckets fetches per-minute bucket stats from service_rollup for a service in a time range.
-// Pass empty namespace/tenantID to query across all.
-func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start, end time.Time, namespace, tenantID string) ([]RollupBucket, error) {
-	ns, tid := s.defaults(namespace, tenantID)
+// Pass empty namespace to query across all namespaces.
+func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start, end time.Time, namespace string) ([]RollupBucket, error) {
 	q := `
 		SELECT
 			bucket,
@@ -218,11 +217,10 @@ func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start,
 			COALESCE(spans, 0) AS total_spans
 		FROM service_rollup
 		WHERE service = ? AND bucket >= ? AND bucket < ?
-			AND tenant = ?
 			AND (? = '' OR namespace = ?)
 		ORDER BY bucket ASC
 	`
-	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end, tid, ns, ns)
+	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -456,11 +454,9 @@ func ResolveFocus(focus []string) []string {
 	return focus
 }
 
-func (s *Service) compareServicesRollup(ctx context.Context, services []string, window int, namespace, tenantID string) ([]ServiceMetrics, error) {
-	namespace, tenantID = s.defaults(namespace, tenantID)
-
+func (s *Service) compareServicesRollup(ctx context.Context, services []string, window int, namespace string) ([]ServiceMetrics, error) {
 	placeholders := make([]string, len(services))
-	args := []any{tenantID, namespace, namespace}
+	args := []any{namespace, namespace}
 	for i, svc := range services {
 		placeholders[i] = "?"
 		args = append(args, svc)
@@ -477,7 +473,6 @@ func (s *Service) compareServicesRollup(ctx context.Context, services []string, 
 			COALESCE(SUM(CASE WHEN status IN ('STATUS_CODE_ERROR','ERROR') THEN 1 ELSE 0 END), 0)::BIGINT AS error_count
 		FROM spans
 		WHERE start_time >= NOW() - INTERVAL '%d minutes'
-		  AND tenant = ?
 		  AND (? = '' OR namespace = ?)
 		  AND service IN (%s)
 		GROUP BY service

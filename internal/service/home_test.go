@@ -42,7 +42,7 @@ func TestHome_ReturnsServicesAndSummary(t *testing.T) {
 
 	mock.ExpectQuery("SELECT").WillReturnRows(errRows)
 
-	result, err := svc.Home(context.Background(), 60, "", "", tracker)
+	result, err := svc.Home(context.Background(), 60, "", tracker)
 	if err != nil {
 		t.Fatalf("Home() error = %v", err)
 	}
@@ -117,7 +117,7 @@ func TestHome_EmptyState(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}))
 
-	result, err := svc.Home(context.Background(), 60, "", "", tracker)
+	result, err := svc.Home(context.Background(), 60, "", tracker)
 	if err != nil {
 		t.Fatalf("Home() error = %v", err)
 	}
@@ -166,7 +166,7 @@ func TestHome_DefaultWindow(t *testing.T) {
 		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}))
 
 	// Pass window <= 0, should default to 60.
-	result, err := svc.Home(context.Background(), 0, "", "", nil)
+	result, err := svc.Home(context.Background(), 0, "", nil)
 	if err != nil {
 		t.Fatalf("Home() error = %v", err)
 	}
@@ -197,7 +197,7 @@ func TestHome_UnhealthyService(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "message", "cnt"}))
 
-	result, err := svc.Home(context.Background(), 60, "", "", nil)
+	result, err := svc.Home(context.Background(), 60, "", nil)
 	if err != nil {
 		t.Fatalf("Home() error = %v", err)
 	}
@@ -241,7 +241,7 @@ func TestHome_SortIncidentsWorstFirst(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "message", "cnt"}))
 
-	result, err := svc.Home(context.Background(), 60, "", "", nil)
+	result, err := svc.Home(context.Background(), 60, "", nil)
 	if err != nil {
 		t.Fatalf("Home() error = %v", err)
 	}
@@ -276,7 +276,7 @@ func TestHome_NilTracker(t *testing.T) {
 
 	// No top errors query — no degraded/unhealthy services.
 
-	result, err := svc.Home(context.Background(), 60, "", "", nil)
+	result, err := svc.Home(context.Background(), 60, "", nil)
 	if err != nil {
 		t.Fatalf("Home() error = %v", err)
 	}
@@ -309,10 +309,10 @@ func TestHome_UsesCachedSnapshot(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "bucket", "spans", "error_rate"}))
 
-	if _, err := svc.Home(context.Background(), 60, "", "", nil); err != nil {
+	if _, err := svc.Home(context.Background(), 60, "", nil); err != nil {
 		t.Fatalf("first Home() error = %v", err)
 	}
-	if _, err := svc.Home(context.Background(), 60, "", "", nil); err != nil {
+	if _, err := svc.Home(context.Background(), 60, "", nil); err != nil {
 		t.Fatalf("second Home() error = %v", err)
 	}
 

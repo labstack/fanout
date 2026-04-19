@@ -7,13 +7,13 @@ import (
 	"time"
 )
 
-func (s *Service) ServiceDetail(ctx context.Context, svcName string, window int, namespace, tenantID string) (*ServiceDetailResult, error) {
+func (s *Service) ServiceDetail(ctx context.Context, svcName string, window int, namespace string) (*ServiceDetailResult, error) {
 	if window <= 0 {
 		window = 60
 	}
 
 	// 1. DiagnoseEnhanced
-	diag, err := s.DiagnoseEnhanced(ctx, svcName, window, "", namespace, tenantID)
+	diag, err := s.DiagnoseEnhanced(ctx, svcName, window, "", namespace)
 	if err != nil {
 		return nil, fmt.Errorf("service detail diagnose: %w", err)
 	}
@@ -25,7 +25,6 @@ func (s *Service) ServiceDetail(ctx context.Context, svcName string, window int,
 		IncludeExemplars: true,
 		Window:           window,
 		Namespace:        namespace,
-		TenantID:         tenantID,
 		Limit:            50,
 	})
 	if err != nil {
@@ -51,7 +50,7 @@ func (s *Service) ServiceDetail(ctx context.Context, svcName string, window int,
 	// 3. Rollup buckets for charts
 	now := time.Now().UTC()
 	start := now.Add(-time.Duration(window) * time.Minute)
-	rollupBuckets, err := s.QueryRollupBuckets(ctx, svcName, start, now, namespace, tenantID)
+	rollupBuckets, err := s.QueryRollupBuckets(ctx, svcName, start, now, namespace)
 	if err != nil {
 		slog.Error("service detail rollup query failed", "service", svcName, "err", err)
 		rollupBuckets = nil

@@ -22,7 +22,6 @@ type MetricsIn struct {
 	Attrs       map[string]string `json:"attrs,omitempty"       jsonschema:"Attribute filters as key-value pairs"`
 	Window      string            `json:"window,omitempty"      jsonschema:"Time window: '15m','1h','7d', or ISO range 'start/end'. Default: 15m"`
 	Namespace   string            `json:"namespace,omitempty"   jsonschema:"Filter by namespace"`
-	Tenant      string            `json:"tenant,omitempty"      jsonschema:"Filter by tenant"`
 	Limit       int               `json:"limit,omitempty"       jsonschema:"Max results. Default: 100"`
 }
 
@@ -91,7 +90,6 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 			Service:   in.Service,
 			Window:    tw.Minutes,
 			Namespace: in.Namespace,
-			TenantID:  in.Tenant,
 			Attrs:     in.Attrs,
 			Limit:     limit,
 			GroupBy:   in.GroupBy,
@@ -135,7 +133,6 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 			Service:     in.Service,
 			Window:      tw.Minutes,
 			Namespace:   in.Namespace,
-			TenantID:    in.Tenant,
 			Attrs:       in.Attrs,
 			Limit:       limit,
 		}
@@ -187,7 +184,6 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 			Service:   in.Service,
 			Window:    tw.Minutes,
 			Namespace: in.Namespace,
-			TenantID:  in.Tenant,
 			Attrs:     in.Attrs,
 			Limit:     limit,
 		}
@@ -209,7 +205,6 @@ func (s *Server) metrics(ctx context.Context, req *mcp.CallToolRequest, in Metri
 			Service:   in.Service,
 			Window:    tw.Minutes,
 			Namespace: in.Namespace,
-			TenantID:  in.Tenant,
 			Attrs:     in.Attrs,
 			Limit:     limit,
 		}

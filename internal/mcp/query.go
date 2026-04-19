@@ -82,7 +82,6 @@ func buildSchemaResponse() *SchemaResponse {
 					{Name: "attributes_json", Type: "VARCHAR", Description: "Span attributes (JSON)"},
 					{Name: "resource_json", Type: "VARCHAR", Description: "Resource attributes (JSON)"},
 					{Name: "events_json", Type: "VARCHAR", Description: "Span events (JSON)"},
-					{Name: "tenant", Type: "VARCHAR", Description: "Tenant identifier"},
 				},
 			},
 			{
@@ -97,7 +96,6 @@ func buildSchemaResponse() *SchemaResponse {
 					{Name: "span_id", Type: "VARCHAR", Description: "Associated span identifier"},
 					{Name: "attributes_json", Type: "VARCHAR", Description: "Log attributes (JSON)"},
 					{Name: "resource_json", Type: "VARCHAR", Description: "Resource attributes (JSON)"},
-					{Name: "tenant", Type: "VARCHAR", Description: "Tenant identifier"},
 				},
 			},
 			{
@@ -112,7 +110,6 @@ func buildSchemaResponse() *SchemaResponse {
 					{Name: "value", Type: "DOUBLE", Description: "Metric value"},
 					{Name: "attributes_json", Type: "VARCHAR", Description: "Metric attributes (JSON)"},
 					{Name: "resource_json", Type: "VARCHAR", Description: "Resource attributes (JSON)"},
-					{Name: "tenant", Type: "VARCHAR", Description: "Tenant identifier"},
 				},
 			},
 		},
@@ -120,7 +117,6 @@ func buildSchemaResponse() *SchemaResponse {
 			{
 				Name: "service_rollup",
 				Columns: []ColumnInfo{
-					{Name: "tenant", Type: "VARCHAR", Description: "Tenant identifier"},
 					{Name: "namespace", Type: "VARCHAR", Description: "Namespace identifier (empty query arg means all namespaces)"},
 					{Name: "bucket", Type: "TIMESTAMP", Description: "1-minute time bucket"},
 					{Name: "service", Type: "VARCHAR", Description: "Service name"},
@@ -135,7 +131,6 @@ func buildSchemaResponse() *SchemaResponse {
 			{
 				Name: "edge_rollup",
 				Columns: []ColumnInfo{
-					{Name: "tenant", Type: "VARCHAR", Description: "Tenant identifier"},
 					{Name: "namespace", Type: "VARCHAR", Description: "Namespace identifier (empty query arg means all namespaces)"},
 					{Name: "bucket", Type: "TIMESTAMP", Description: "1-minute time bucket"},
 					{Name: "caller", Type: "VARCHAR", Description: "Calling service"},

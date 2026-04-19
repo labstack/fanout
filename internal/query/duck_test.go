@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/env"
 )
 
@@ -138,7 +137,6 @@ func TestParquetGlob_DayLevel(t *testing.T) {
 		dir := filepath.Join(
 			lakeDir,
 			"spans",
-			"tenant=test-tenant",
 			"namespace=default",
 			d.Format("year=2006"),
 			d.Format("month=01"),
@@ -150,7 +148,7 @@ func TestParquetGlob_DayLevel(t *testing.T) {
 	}
 
 	// Use window > 1440 to trigger day-level glob
-	glob := ParquetGlob(lakeDir, "spans", "test-tenant", "default", 2880) // 48 hours
+	glob := ParquetGlob(lakeDir, "spans", "default", 2880) // 48 hours
 	if glob == "" {
 		t.Error("ParquetGlob returned empty string")
 	}
@@ -201,7 +199,6 @@ func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 		DataDir:      t.TempDir(),
 		RollupEvery:  60,
 		DuckDBMemory: "128MB",
-		TenantID:     uuid.Nil,
 	}
 
 	d, err := NewDuck(ctx, cfg)

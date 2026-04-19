@@ -12,11 +12,10 @@ import (
 
 // Topology returns the service dependency map with health indicators.
 // This is the legacy signature kept for backward compatibility with the AI orchestrator.
-func (s *Service) Topology(ctx context.Context, window int, namespace, tenantID string) (*TopologyResult, error) {
+func (s *Service) Topology(ctx context.Context, window int, namespace string) (*TopologyResult, error) {
 	return s.TopologyWithParams(ctx, TopologyParams{
 		Window:    window,
 		Namespace: namespace,
-		TenantID:  tenantID,
 		EdgeType:  "all",
 	})
 }
@@ -30,11 +29,8 @@ func (s *Service) TopologyWithParams(ctx context.Context, p TopologyParams) (*To
 		p.EdgeType = "all"
 	}
 
-	// Always scope to single partition
-	p.Namespace, p.TenantID = s.defaults(p.Namespace, p.TenantID)
-
 	// Check cache
-	cacheKey := fmt.Sprintf("topology:%d:%s:%s:%s:%d:%s:%v", p.Window, p.Namespace, p.TenantID, p.EdgeType, p.Depth, p.Service, p.IncludeInactive)
+	cacheKey := fmt.Sprintf("topology:%d:%s:%s:%d:%s:%v", p.Window, p.Namespace, p.EdgeType, p.Depth, p.Service, p.IncludeInactive)
 	if v, ok := query.GetCached(cacheKey); ok {
 		if result, ok := v.(*TopologyResult); ok {
 			return result, nil
@@ -58,14 +54,13 @@ SELECT
   SUM(COALESCE(metric_count, 0))::BIGINT AS metric_cnt
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
 GROUP BY service
 ORDER BY (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0))) DESC
 LIMIT 50;
 `, p.Window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, p.TenantID, p.Namespace, p.Namespace)
+	rows, err := s.duck.DB.QueryContext(ctx, q, p.Namespace, p.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("topology nodes query failed: %w", err)
 	}
@@ -113,7 +108,6 @@ SELECT
   COALESCE(edge_type, 'call') AS edge_type
 FROM edge_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
-  AND tenant = ?
   AND (? = '' OR namespace = ?)
 %s
 GROUP BY caller, callee, edge_type
@@ -121,7 +115,7 @@ ORDER BY call_count DESC
 LIMIT 100;
 `, p.Window, edgeTypeFilter)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q, p.TenantID, p.Namespace, p.Namespace)
+	rows, err = s.duck.DB.QueryContext(ctx, q, p.Namespace, p.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("topology edges query failed: %w", err)
 	}

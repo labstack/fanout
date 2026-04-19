@@ -20,7 +20,6 @@ type LogsIn struct {
 	OrderBy   string            `json:"order_by,omitempty"  jsonschema:"Sort: time|count|severity"`
 	Window    string            `json:"window,omitempty"    jsonschema:"Time window: '15m','1h','7d', or ISO range 'start/end'. Default: 15m"`
 	Namespace string            `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
-	Tenant    string            `json:"tenant,omitempty"    jsonschema:"Filter by tenant"`
 	Limit     int               `json:"limit,omitempty"     jsonschema:"Max results (ungrouped) or groups. Default: 100"`
 }
 
@@ -75,7 +74,6 @@ func (s *Server) logs(ctx context.Context, req *mcp.CallToolRequest, in LogsIn) 
 		OrderBy:   in.OrderBy,
 		Window:    tw.Minutes,
 		Namespace: in.Namespace,
-		TenantID:  in.Tenant,
 		Limit:     limit,
 	})
 	if err != nil {

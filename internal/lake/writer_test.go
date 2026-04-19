@@ -47,7 +47,6 @@ func TestWriterFlushBatchSize(t *testing.T) {
 
 	now := time.Now().UnixNano()
 	chSpans <- SpanRow{
-		TenantID:       "tenant-a",
 		Namespace:      "ns-a",
 		TraceID:        "trace-1",
 		SpanID:         "span-1",
@@ -59,7 +58,6 @@ func TestWriterFlushBatchSize(t *testing.T) {
 		IngestedAt:     now,
 	}
 	chSpans <- SpanRow{
-		TenantID:       "tenant-a",
 		Namespace:      "ns-a",
 		TraceID:        "trace-1",
 		SpanID:         "span-2",

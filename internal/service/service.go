@@ -16,15 +16,6 @@ func New(duck *query.Duck, cfg env.Config) *Service {
 	return &Service{duck: duck, cfg: cfg}
 }
 
-// defaults returns namespace and tenantID with defaults applied.
-// Empty namespace means search all namespaces (wildcard).
-func (s *Service) defaults(namespace, tenantID string) (string, string) {
-	if tenantID == "" {
-		tenantID = s.cfg.TenantID.String()
-	}
-	return namespace, tenantID
-}
-
 // ResolveNamespace returns the effective namespace (empty means all).
 func (s *Service) ResolveNamespace(namespace string) string {
 	return namespace

@@ -573,13 +573,13 @@ func (o *Orchestrator) cachedServices(ctx context.Context) []string {
 		return o.servicesList
 	}
 
-	namespaces := o.svc.Namespaces(ctx, "")
+	namespaces := o.svc.Namespaces(ctx)
 	ns := ""
 	if len(namespaces) > 0 {
 		ns = namespaces[0]
 	}
 
-	topo, err := o.svc.Topology(ctx, 60, ns, "")
+	topo, err := o.svc.Topology(ctx, 60, ns)
 	if err != nil {
 		if o.servicesList == nil {
 			slog.Error("initial services cache load failed — system prompt will lack service context", "err", err)

@@ -13,12 +13,11 @@ func TestNamespaces_UsesRecentWindow(t *testing.T) {
 	defer svc.duck.DB.Close()
 
 	mock.ExpectQuery("(?s)SELECT DISTINCT namespace.*start_time >= now\\(\\) - INTERVAL 7 DAY").
-		WithArgs(svc.cfg.TenantID.String()).
 		WillReturnRows(sqlmock.NewRows([]string{"namespace"}).
 			AddRow("default").
 			AddRow("payments"))
 
-	namespaces := svc.Namespaces(context.Background(), "")
+	namespaces := svc.Namespaces(context.Background())
 	if len(namespaces) != 2 {
 		t.Fatalf("Namespaces() len = %d, want 2", len(namespaces))
 	}

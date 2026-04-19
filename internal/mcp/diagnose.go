@@ -14,7 +14,6 @@ type DiagnoseIn struct {
 	Service   string `json:"service" jsonschema:"Service name to diagnose"`
 	Window    string `json:"window,omitempty" jsonschema:"Time window: duration (15m, 1h, 7d) or ISO range,default=15m"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace"`
-	TenantID  string `json:"tenant_id,omitempty" jsonschema:"Filter by tenant"`
 	Symptom   string `json:"symptom,omitempty" jsonschema:"Focus diagnosis on: latency, errors, throughput_drop, or auto (default)"`
 }
 
@@ -98,7 +97,7 @@ func (s *Server) diagnose(ctx context.Context, req *mcp.CallToolRequest, in Diag
 		return nil, DiagnoseOut{}, fmt.Errorf("invalid window: %w", err)
 	}
 	window := clampInt(tw.Minutes, minWindow, maxWindow, defWindow)
-	result, err := s.svc.DiagnoseEnhanced(ctx, in.Service, window, in.Symptom, in.Namespace, in.TenantID)
+	result, err := s.svc.DiagnoseEnhanced(ctx, in.Service, window, in.Symptom, in.Namespace)
 	if err != nil {
 		return nil, DiagnoseOut{}, fmt.Errorf("diagnose failed for %s: %w", in.Service, err)
 	}

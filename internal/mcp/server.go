@@ -104,7 +104,7 @@ Gotchas:
 - sort_services_by="severity" (default) surfaces problems first; use "throughput" for traffic-based ranking.
 - Returns at most 100 services. Use limit parameter to increase.
 
-Params: window ("15m","1h","7d" or ISO range), include (["health","services","issues"]), sort_services_by ("severity","error_rate","latency","throughput"), namespace, tenant, limit (default 100)
+Params: window ("15m","1h","7d" or ISO range), include (["health","services","issues"]), sort_services_by ("severity","error_rate","latency","throughput"), namespace, limit (default 100)
 
 Returns: health (score, total_services, by_status, throughput_per_min, global_error_rate, global_p95_ms), services (service, status, requests, error_rate, p50_ms, p95_ms), top_issues (service, issue, value, threshold)`,
 	}, wrap("overview", s.overview))
@@ -120,7 +120,7 @@ Gotchas:
 - edge_type="messaging" shows async producer/consumer links; "call" shows synchronous RPC.
 - blast_radius indicates how many downstream services are affected if this node fails.
 
-Params: window, edge_type (call|messaging|all), depth (BFS hops from service), service (focus node), include_inactive, namespace, tenant
+Params: window, edge_type (call|messaging|all), depth (BFS hops from service), service (focus node), include_inactive, namespace
 
 Returns: nodes (service, status, requests, error_rate, p50_ms, p95_ms, blast_radius, upstream_count, downstream_count), edges (source, target, calls, avg_ms, error_rate, edge_type), critical_paths (top 3 weighted paths)`,
 	}, wrap("topology", s.topology))
@@ -137,7 +137,7 @@ Gotchas:
 - Use attributes tool first to discover filterable attribute keys for attrs parameter.
 - status="slow" filters spans above service P95 baseline.
 
-Params: query (substring match), operation (exact), service, status (error|ok|slow|all), kind (server|client|producer|consumer|internal), min_duration_ms, max_duration_ms, attrs (key-value), group_by (service|operation|status|kind|http.method|http.status_code), order_by (time|duration|error_rate|count), include_exemplars, window, namespace, tenant, limit
+Params: query (substring match), operation (exact), service, status (error|ok|slow|all), kind (server|client|producer|consumer|internal), min_duration_ms, max_duration_ms, attrs (key-value), group_by (service|operation|status|kind|http.method|http.status_code), order_by (time|duration|error_rate|count), include_exemplars, window, namespace, limit
 
 Returns (ungrouped): spans (trace_id, span_id, service, operation, kind, start_time, duration_ms, status, attributes), total_matched
 Returns (grouped): groups (key, count, error_count, error_rate, p50_ms, p95_ms, p99_ms, exemplar_trace_ids), total_groups`,
@@ -155,7 +155,7 @@ Gotchas:
 - group_by=["service","severity"] gives a heatmap of log volume by service and level.
 - Use attributes tool first to discover filterable attribute keys.
 
-Params: query (substring on body), severity (TRACE|DEBUG|INFO|WARN|ERROR|FATAL), trace_id (correlate to trace), service, attrs (key-value), group_by (service|severity), order_by (time|count|severity), window, namespace, tenant, limit
+Params: query (substring on body), severity (TRACE|DEBUG|INFO|WARN|ERROR|FATAL), trace_id (correlate to trace), service, attrs (key-value), group_by (service|severity), order_by (time|count|severity), window, namespace, limit
 
 Returns (ungrouped): logs (time, service, severity, body, trace_id, span_id, attributes), total_matched
 Returns (grouped): groups (key, count, sample_bodies, sample_trace_ids), total_groups`,
@@ -173,7 +173,7 @@ Gotchas:
 - action="histogram" returns bucket distributions; action="exemplars" returns trace links from histogram exemplars.
 - names=["metric1","metric2"] overlays multiple metrics in one query for comparison.
 
-Params: action (list|query|histogram|exemplars), name, names (overlay multiple), aggregation (avg|sum|min|max|count), group_by, granularity (1m|5m|15m|1h|auto), service, attrs, window, namespace, tenant, limit
+Params: action (list|query|histogram|exemplars), name, names (overlay multiple), aggregation (avg|sum|min|max|count), group_by, granularity (1m|5m|15m|1h|auto), service, attrs, window, namespace, limit
 
 Returns (list): metrics (name, type, unit, services, description)
 Returns (query): series (labels, metric, aggregation, unit, datapoints), anomalies (time, type, value, expected, deviation_sigma)`,
@@ -208,7 +208,7 @@ Gotchas:
 - suggested_traces contains trace IDs ready for the trace tool — always use them for follow-up.
 - change_points show when metrics shifted — feed the timestamp to compare(mode=time) for before/after.
 
-Params: service (required), symptom (auto|latency|errors|throughput_drop), window, namespace, tenant
+Params: service (required), symptom (auto|latency|errors|throughput_drop), window, namespace
 
 Returns: metrics (p50/p95/p99_ms, error_rate, request_count, comparison_to_baseline), top_errors (operation, message, exception_type, count, example_trace), slow_operations, dependencies, change_points, correlated_log_patterns, suggested_traces`,
 	}, wrap("diagnose", s.diagnose))
@@ -245,7 +245,7 @@ Gotchas:
 - For spans, uses pre-extracted columns (fast, exact counts). For logs/metrics, samples 1000 rows from JSON (approximate counts).
 - Additional span attributes may exist in the JSON blob beyond the pre-extracted columns — use query tool with json_keys(attributes_json) to discover them.
 
-Params: signal (spans|logs|metrics, default: spans), service, operation (spans only), window (default: 1h), namespace, tenant, limit (default: 50)
+Params: signal (spans|logs|metrics, default: spans), service, operation (spans only), window (default: 1h), namespace, limit (default: 50)
 
 Returns: attributes (key, count, cardinality, samples[]), resource_attributes (key, count, cardinality, samples[])`,
 	}, wrap("attributes", s.attributes))
@@ -289,13 +289,13 @@ Gotchas:
 - Use attr(attributes_json, 'key') macro to extract JSON attributes.
 
 DuckDB Views (clean column names):
-- spans: trace_id, span_id, service, operation, kind, start_time, end_time, duration_ms, status, status_message, attributes_json, resource_json, events_json, namespace, tenant
-- logs: time, severity, body, service, trace_id, span_id, attributes_json, resource_json, namespace, tenant
-- metrics: time, name, type, value, unit, service, description, attributes_json, resource_json, namespace, tenant
+- spans: trace_id, span_id, service, operation, kind, start_time, end_time, duration_ms, status, status_message, attributes_json, resource_json, events_json, namespace
+- logs: time, severity, body, service, trace_id, span_id, attributes_json, resource_json, namespace
+- metrics: time, name, type, value, unit, service, description, attributes_json, resource_json, namespace
 
 Rollup tables:
-- service_rollup: tenant, namespace, bucket, service, spans, error_rate, p50_ms, p95_ms, log_count, metric_count
-- edge_rollup: tenant, namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
+- service_rollup: namespace, bucket, service, spans, error_rate, p50_ms, p95_ms, log_count, metric_count
+- edge_rollup: namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
 
 Macro: attr(json_col, 'key') — extracts JSON key from attributes_json
 

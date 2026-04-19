@@ -21,7 +21,6 @@ func TestSpansIn_Fields(t *testing.T) {
 		IncludeExemplars: true,
 		Window:           "15m",
 		Namespace:        "prod",
-		Tenant:           "t1",
 		Limit:            100,
 	}
 
