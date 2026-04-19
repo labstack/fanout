@@ -5,113 +5,30 @@ import (
 	"testing"
 )
 
-func TestGetenv(t *testing.T) {
-	// Test default value
-	result := getenv("NONEXISTENT_VAR_12345", "default_value")
-	if result != "default_value" {
-		t.Errorf("getenv with missing var = %q, want %q", result, "default_value")
-	}
-
-	// Test actual value
-	os.Setenv("TEST_GETENV_VAR", "actual_value")
-	defer os.Unsetenv("TEST_GETENV_VAR")
-
-	result = getenv("TEST_GETENV_VAR", "default_value")
-	if result != "actual_value" {
-		t.Errorf("getenv with set var = %q, want %q", result, "actual_value")
-	}
-}
-
-func TestGetenvInt(t *testing.T) {
-	// Test default value
-	result := getenvInt("NONEXISTENT_INT_VAR", 42)
-	if result != 42 {
-		t.Errorf("getenvInt with missing var = %d, want %d", result, 42)
-	}
-
-	// Test actual value
-	os.Setenv("TEST_INT_VAR", "123")
-	defer os.Unsetenv("TEST_INT_VAR")
-
-	result = getenvInt("TEST_INT_VAR", 42)
-	if result != 123 {
-		t.Errorf("getenvInt with set var = %d, want %d", result, 123)
-	}
-
-	// Test invalid value (should return default)
-	os.Setenv("TEST_INT_VAR", "not_a_number")
-	result = getenvInt("TEST_INT_VAR", 42)
-	if result != 42 {
-		t.Errorf("getenvInt with invalid var = %d, want %d", result, 42)
-	}
-}
-
-func TestGetenvBool(t *testing.T) {
-	tests := []struct {
-		value    string
-		def      bool
-		expected bool
-	}{
-		{"", true, true},   // empty returns default
-		{"", false, false}, // empty returns default
-		{"1", false, true},
-		{"true", false, true},
-		{"yes", false, true},
-		{"True", false, true},
-		{"TRUE", false, true},
-		{"YES", false, true},
-		{"0", true, false},
-		{"false", true, false},
-		{"no", true, false},
-		{"anything", true, false}, // unrecognized = false
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.value, func(t *testing.T) {
-			if tc.value != "" {
-				os.Setenv("TEST_BOOL_VAR", tc.value)
-				defer os.Unsetenv("TEST_BOOL_VAR")
-			} else {
-				os.Unsetenv("TEST_BOOL_VAR")
-			}
-
-			result := getenvBool("TEST_BOOL_VAR", tc.def)
-			if result != tc.expected {
-				t.Errorf("getenvBool(%q, %v) = %v, want %v", tc.value, tc.def, result, tc.expected)
-			}
-		})
-	}
-}
-
 func TestLoad(t *testing.T) {
-	// Clear all env vars that might affect config
-	vars := []string{"HTTP_ADDR", "OTLP_GRPC_ADDR", "DATA_DIR", "FLUSH_SECONDS",
+	vars := []string{
+		"HTTP_ADDR", "OTLP_GRPC_ADDR", "DATA_DIR", "FLUSH_SECONDS",
 		"FLUSH_BATCH_SIZE", "ROLLUP_EVERY",
 		"RETENTION_DAYS", "TENANT_ID", "DEFAULT_NAMESPACE",
-		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL", "JWT_SECRET", "JWT_REFRESH_SECRET",
+		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL",
+		"JWT_SECRET", "JWT_REFRESH_SECRET",
 		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
-		"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE"}
+		"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE",
+	}
 	for _, v := range vars {
+		t.Setenv(v, "")
 		os.Unsetenv(v)
 	}
-	os.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
-	os.Setenv("JWT_REFRESH_SECRET", "abcdef0123456789abcdef0123456789")
-	os.Setenv("AI_API_KEY", "sk-test")
-	os.Setenv("SMTP_HOST", "smtp.example.com")
-	os.Setenv("SMTP_USER", "user")
-	os.Setenv("SMTP_PASS", "pass")
-	os.Setenv("SMTP_FROM", "Fanout <noreply@example.com>")
-	defer os.Unsetenv("JWT_SECRET")
-	defer os.Unsetenv("JWT_REFRESH_SECRET")
-	defer os.Unsetenv("AI_API_KEY")
-	defer os.Unsetenv("SMTP_HOST")
-	defer os.Unsetenv("SMTP_USER")
-	defer os.Unsetenv("SMTP_PASS")
-	defer os.Unsetenv("SMTP_FROM")
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("JWT_REFRESH_SECRET", "abcdef0123456789abcdef0123456789")
+	t.Setenv("AI_API_KEY", "sk-test")
+	t.Setenv("SMTP_HOST", "smtp.example.com")
+	t.Setenv("SMTP_USER", "user")
+	t.Setenv("SMTP_PASS", "pass")
+	t.Setenv("SMTP_FROM", "Fanout <noreply@example.com>")
 
 	cfg := Load()
 
-	// Check defaults
 	if cfg.HTTPAddr != ":7520" {
 		t.Errorf("HTTPAddr = %q, want %q", cfg.HTTPAddr, ":7520")
 	}
@@ -187,7 +104,7 @@ func TestValidate(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := valid // copy
+			c := valid
 			tc.modify(&c)
 			if err := c.Validate(); err == nil {
 				t.Error("expected validation error")
@@ -195,7 +112,6 @@ func TestValidate(t *testing.T) {
 		})
 	}
 
-	// RetentionDays=0 is valid (means "keep forever")
 	t.Run("RetentionDays=0_valid", func(t *testing.T) {
 		c := valid
 		c.RetentionDays = 0
