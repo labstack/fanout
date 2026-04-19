@@ -63,9 +63,9 @@ func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
 	}
 }
 
-// authorize accepts the request if no ingest token is configured, otherwise
-// requires a valid token via `x-fanout-ingest-token` or `Authorization: Bearer`.
-// Peer IP is not considered — operators decide who reaches the port.
+// authorize requires a valid ingest token on every request (set up during
+// admin creation, rotatable from the settings page). Peer IP is not
+// considered — operators decide who reaches the port.
 func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 	if a.settingsStore == nil {
 		// Defensive: production always wires a store (cmd/fanout/main.go). Reaching
@@ -80,7 +80,9 @@ func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 		return status.Error(codes.Internal, "ingest auth unavailable")
 	}
 	if ingestCfg.TokenHash == "" {
-		return nil
+		// Pre-setup (no admin yet) — no token exists to check against. Reject
+		// all requests until setup completes; collectors must wait.
+		return status.Error(codes.Unauthenticated, "fanout not initialized")
 	}
 	token := ingestTokenFromContext(ctx)
 	if token == "" || !settings.CheckIngestToken(token, ingestCfg.TokenHash) {

@@ -30,10 +30,6 @@ func (s *Store) SetIngest(ctx context.Context, ingest Ingest) error {
 	return s.Upsert(ctx, ingestKey, ingest)
 }
 
-func (s *Store) ClearIngest(ctx context.Context) error {
-	return s.Delete(ctx, ingestKey)
-}
-
 func GenerateIngestToken() (string, string, error) {
 	raw, err := randomHexToken(24)
 	if err != nil {

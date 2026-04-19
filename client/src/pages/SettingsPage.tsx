@@ -1,40 +1,19 @@
-import { useEffect, useState } from "react";
-import { Check, Copy, Loader2, ShieldCheck, ShieldOff } from "lucide-react";
+import { useState } from "react";
+import { Check, Copy, ShieldCheck } from "lucide-react";
 import { api } from "@/api/client";
 import { useAuth } from "@/hooks/auth-context";
 import { Navigate } from "react-router";
 
-interface IngestResponse {
-  token_required: boolean;
-  suggested_endpoint: string;
-  header_name: string;
-  ingest_token?: string;
+interface RotateResponse {
+  ingest_token: string;
 }
 
 export function SettingsPage() {
   const { isAdmin, isLoading: authLoading } = useAuth();
-  const [ingest, setIngest] = useState<IngestResponse | null>(null);
-  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    if (!isAdmin) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const r = await api<IngestResponse>("/api/settings/ingest");
-        if (!cancelled) setIngest(r);
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load settings");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [isAdmin]);
 
   if (authLoading) return null;
   if (!isAdmin) return <Navigate to="/" replace />;
@@ -44,26 +23,10 @@ export function SettingsPage() {
     setBusy(true);
     setError(null);
     try {
-      const r = await api<IngestResponse>("/api/settings/ingest/rotate-token", { method: "POST" });
-      setIngest(r);
+      const r = await api<RotateResponse>("/api/settings/ingest/rotate-token", { method: "POST" });
       setRevealedToken(r.ingest_token || null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to rotate token");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function clear() {
-    if (!confirm("Remove the ingest token? OTLP ingest will become unauthenticated.")) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await api<IngestResponse>("/api/settings/ingest/token", { method: "DELETE" });
-      setIngest(r);
-      setRevealedToken(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to clear token");
     } finally {
       setBusy(false);
     }
@@ -102,19 +65,10 @@ export function SettingsPage() {
                 Controls whether OTLP collectors must present a token on every request.
               </p>
             </div>
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            ) : ingest?.token_required ? (
-              <span className="flex items-center gap-1.5 text-[11px] text-healthy mono">
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Required
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 text-[11px] text-degraded mono">
-                <ShieldOff className="h-3.5 w-3.5" />
-                Open
-              </span>
-            )}
+            <span className="flex items-center gap-1.5 text-[11px] text-healthy mono">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Required
+            </span>
           </div>
 
           {revealedToken && (
@@ -137,26 +91,14 @@ export function SettingsPage() {
             </div>
           )}
 
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => void rotate()}
-              disabled={busy || loading}
-              className="btn-primary text-xs disabled:opacity-50"
-            >
-              {busy ? "Working…" : ingest?.token_required ? "Rotate token" : "Generate token"}
-            </button>
-            {ingest?.token_required && (
-              <button
-                type="button"
-                onClick={() => void clear()}
-                disabled={busy}
-                className="btn-ghost text-xs disabled:opacity-50"
-              >
-                Remove token (open ingest)
-              </button>
-            )}
-          </div>
+          <button
+            type="button"
+            onClick={() => void rotate()}
+            disabled={busy}
+            className="btn-primary text-xs disabled:opacity-50"
+          >
+            {busy ? "Working…" : "Rotate token"}
+          </button>
         </div>
       </div>
     </div>

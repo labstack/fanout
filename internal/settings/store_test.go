@@ -36,23 +36,6 @@ func TestSetIngest_RoundTripsTokenHash(t *testing.T) {
 	}
 }
 
-func TestClearIngest_RemovesToken(t *testing.T) {
-	store := newTestStore(t)
-	if err := store.SetIngest(context.Background(), Ingest{TokenHash: HashIngestToken("fo_preseed")}); err != nil {
-		t.Fatalf("SetIngest: %v", err)
-	}
-	if err := store.ClearIngest(context.Background()); err != nil {
-		t.Fatalf("ClearIngest: %v", err)
-	}
-	got, err := store.GetIngest(context.Background())
-	if err != nil {
-		t.Fatalf("GetIngest: %v", err)
-	}
-	if got.TokenHash != "" {
-		t.Fatalf("token hash = %q, want empty after Clear", got.TokenHash)
-	}
-}
-
 func TestGenerateAndCheckIngestToken(t *testing.T) {
 	token, hash, err := GenerateIngestToken()
 	if err != nil {

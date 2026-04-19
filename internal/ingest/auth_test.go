@@ -53,12 +53,15 @@ func TestTLSConfig(t *testing.T) {
 	}
 }
 
-func TestAuthorize_OpenWhenNoToken(t *testing.T) {
+func TestAuthorize_RejectsWhenPreSetup(t *testing.T) {
+	// With no token persisted (pre-admin-setup), every request is rejected —
+	// collectors must wait for the operator to complete setup.
 	store := newRuntimeStore(t)
 	authorizer := newIngestAuthorizer(env.Config{}, store)
 
-	if err := authorizer.authorize(context.Background()); err != nil {
-		t.Fatalf("authorize with no token configured should pass: %v", err)
+	err := authorizer.authorize(context.Background())
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("code = %v, want %v", status.Code(err), codes.Unauthenticated)
 	}
 }
 
