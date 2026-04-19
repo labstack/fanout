@@ -18,7 +18,6 @@ import (
 	"github.com/labstack/fanout/internal/settings"
 )
 
-// GRPCServerOptions returns OTLP gRPC server options for TLS and ingest auth.
 func GRPCServerOptions(cfg env.Config, settingsStore *settings.Store) ([]grpc.ServerOption, error) {
 	opts := []grpc.ServerOption{
 		grpc.UnaryInterceptor(newIngestAuthorizer(cfg, settingsStore).Unary()),

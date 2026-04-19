@@ -65,11 +65,18 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
 	}
-	if h.bootstrap.Expired() {
+	switch h.bootstrap.Verify(req.BootstrapToken) {
+	case auth.BootstrapStatusOK:
+	case auth.BootstrapStatusExpired:
+		slog.Warn("auth: setup rejected", "reason", "expired")
 		jitter()
 		return echo.NewHTTPError(http.StatusGone, "bootstrap token expired; restart Fanout to generate a new one")
-	}
-	if !h.bootstrap.Check(req.BootstrapToken) {
+	case auth.BootstrapStatusUnset:
+		slog.Warn("auth: setup rejected", "reason", "unset")
+		jitter()
+		return echo.NewHTTPError(http.StatusGone, "setup window is closed; restart Fanout to reopen it")
+	default:
+		slog.Warn("auth: setup rejected", "reason", "wrong")
 		jitter()
 		return echo.NewHTTPError(http.StatusForbidden, "invalid bootstrap token")
 	}

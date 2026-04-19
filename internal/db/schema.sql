@@ -63,6 +63,6 @@ CREATE INDEX idx_verifications_email ON verifications(email);
 
 CREATE TABLE settings (
     key        TEXT PRIMARY KEY,
-    value      TEXT NOT NULL DEFAULT '{}',
+    value      TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );

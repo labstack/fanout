@@ -262,6 +262,34 @@ func TestSetupRequiresValidBootstrapToken(t *testing.T) {
 	}
 }
 
+func TestSetupReturnsGoneWhenBootstrapExpired(t *testing.T) {
+	e, _, bootstrap, bootstrapToken, _, _ := newTestAuthServer(t)
+	bootstrap.SetExpiresForTest(time.Now().UTC().Add(-time.Minute))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","bootstrap_token":"`+bootstrapToken+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusGone {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusGone)
+	}
+}
+
+func TestSetupReturnsGoneWhenBootstrapUnset(t *testing.T) {
+	e, _, bootstrap, bootstrapToken, _, _ := newTestAuthServer(t)
+	bootstrap.Clear()
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","bootstrap_token":"`+bootstrapToken+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusGone {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusGone)
+	}
+}
+
 func TestSetupCreatesAdminWithValidBootstrapToken(t *testing.T) {
 	e, users, bootstrap, bootstrapToken, _, _ := newTestAuthServer(t)
 
@@ -282,8 +310,8 @@ func TestSetupCreatesAdminWithValidBootstrapToken(t *testing.T) {
 		t.Fatalf("role = %q, want %q", user.Role, "admin")
 	}
 
-	if bootstrap.Check(bootstrapToken) {
-		t.Fatal("bootstrap token still valid after setup, want cleared")
+	if got := bootstrap.Verify(bootstrapToken); got != auth.BootstrapStatusUnset {
+		t.Fatalf("bootstrap after setup = %v, want Unset", got)
 	}
 }
 
@@ -302,7 +330,7 @@ func TestSetupRetriesSuccessfullyAfterAdminAlreadyExists(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 
-	if bootstrap.Check(bootstrapToken) {
-		t.Fatal("bootstrap token still valid after setup, want cleared")
+	if got := bootstrap.Verify(bootstrapToken); got != auth.BootstrapStatusUnset {
+		t.Fatalf("bootstrap after setup = %v, want Unset", got)
 	}
 }

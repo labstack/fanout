@@ -10,25 +10,43 @@ import (
 	"time"
 )
 
-// BootstrapTTL is the lifetime of a generated bootstrap token.
 const BootstrapTTL = time.Hour
 
-// Bootstrap holds the one-time first-boot token in memory.
-// The token is generated once per process when no users exist, printed to
-// stderr, and consumed by the initial admin setup request.
+// BootstrapStatus is the result of verifying a presented bootstrap token.
+type BootstrapStatus int
+
+const (
+	BootstrapStatusOK BootstrapStatus = iota
+	BootstrapStatusUnset
+	BootstrapStatusExpired
+	BootstrapStatusWrong
+)
+
+func (s BootstrapStatus) String() string {
+	switch s {
+	case BootstrapStatusOK:
+		return "ok"
+	case BootstrapStatusUnset:
+		return "unset"
+	case BootstrapStatusExpired:
+		return "expired"
+	case BootstrapStatusWrong:
+		return "wrong"
+	}
+	return "unknown"
+}
+
+// Bootstrap holds the in-memory first-boot admin token.
 type Bootstrap struct {
 	mu      sync.Mutex
 	token   string
 	expires time.Time
 }
 
-// NewBootstrap returns an empty bootstrap holder.
 func NewBootstrap() *Bootstrap {
 	return &Bootstrap{}
 }
 
-// Rotate generates a new bootstrap token with a fresh TTL and returns it
-// alongside its expiry time.
 func (b *Bootstrap) Rotate() (string, time.Time, error) {
 	token, err := generateBootstrapToken()
 	if err != nil {
@@ -44,32 +62,36 @@ func (b *Bootstrap) Rotate() (string, time.Time, error) {
 	return token, expires, nil
 }
 
-// Check returns true when token matches the active bootstrap value and the
-// TTL has not elapsed. Comparison is constant-time.
-func (b *Bootstrap) Check(token string) bool {
+// Verify returns why a bootstrap token is or isn't acceptable. Comparison is constant-time.
+func (b *Bootstrap) Verify(token string) BootstrapStatus {
 	b.mu.Lock()
 	current := b.token
 	expires := b.expires
 	b.mu.Unlock()
 
-	if current == "" || time.Now().UTC().After(expires) {
-		return false
+	if current == "" {
+		return BootstrapStatusUnset
 	}
-	return subtle.ConstantTimeCompare([]byte(token), []byte(current)) == 1
+	if time.Now().UTC().After(expires) {
+		return BootstrapStatusExpired
+	}
+	if subtle.ConstantTimeCompare([]byte(token), []byte(current)) != 1 {
+		return BootstrapStatusWrong
+	}
+	return BootstrapStatusOK
 }
 
-// Expired reports whether a token exists but has passed its TTL.
-func (b *Bootstrap) Expired() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.token != "" && time.Now().UTC().After(b.expires)
-}
-
-// Clear zeroes the bootstrap state after successful first-admin setup.
 func (b *Bootstrap) Clear() {
 	b.mu.Lock()
 	b.token = ""
 	b.expires = time.Time{}
+	b.mu.Unlock()
+}
+
+// SetExpiresForTest overrides the expiry time; used only by tests that need to drive the Expired path.
+func (b *Bootstrap) SetExpiresForTest(expires time.Time) {
+	b.mu.Lock()
+	b.expires = expires
 	b.mu.Unlock()
 }
 

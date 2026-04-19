@@ -11,17 +11,16 @@ import (
 	"github.com/labstack/fanout/internal/db/generated"
 )
 
-// Store persists app-managed settings in SQLite.
 type Store struct {
 	q *generated.Queries
 }
 
-// NewStore creates a settings store backed by the given database.
 func NewStore(db *sql.DB) *Store {
 	return &Store{q: generated.New(db)}
 }
 
-// Get decodes the stored setting value into out, or leaves defaults intact if the row is missing.
+// Get leaves out unchanged when the row is missing so callers keep their defaults.
+// A corrupt value surfaces as a decode error rather than silently falling through to defaults.
 func (s *Store) Get(ctx context.Context, key string, out any) error {
 	row, err := s.q.GetSetting(ctx, key)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -30,16 +29,12 @@ func (s *Store) Get(ctx context.Context, key string, out any) error {
 	if err != nil {
 		return fmt.Errorf("settings: get %s: %w", key, err)
 	}
-	if row.Value == "" {
-		return nil
-	}
 	if err := json.Unmarshal([]byte(row.Value), out); err != nil {
 		return fmt.Errorf("settings: decode %s: %w", key, err)
 	}
 	return nil
 }
 
-// Upsert writes a complete value payload for one setting key.
 func (s *Store) Upsert(ctx context.Context, key string, value any) error {
 	payload, err := json.Marshal(value)
 	if err != nil {
@@ -56,7 +51,6 @@ func (s *Store) Upsert(ctx context.Context, key string, value any) error {
 	return nil
 }
 
-// Delete removes a setting entirely.
 func (s *Store) Delete(ctx context.Context, key string) error {
 	if err := s.q.DeleteSetting(ctx, key); err != nil {
 		return fmt.Errorf("settings: delete %s: %w", key, err)
