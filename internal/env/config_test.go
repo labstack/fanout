@@ -2,23 +2,29 @@ package env
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
-func TestLoad(t *testing.T) {
-	vars := []string{
-		"HTTP_ADDR", "OTLP_GRPC_ADDR", "DATA_DIR", "FLUSH_SECONDS",
-		"FLUSH_BATCH_SIZE", "ROLLUP_EVERY",
-		"RETENTION_DAYS", "TENANT_ID", "DEFAULT_NAMESPACE",
-		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL",
-		"JWT_SECRET", "JWT_REFRESH_SECRET",
-		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
-		"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE",
-	}
-	for _, v := range vars {
-		t.Setenv(v, "")
+var requiredEnvVars = []string{
+	"HTTP_ADDR", "OTLP_GRPC_ADDR", "DATA_DIR", "FLUSH_SECONDS",
+	"FLUSH_BATCH_SIZE", "ROLLUP_EVERY",
+	"RETENTION_DAYS", "TENANT_ID", "DEFAULT_NAMESPACE", "ENV",
+	"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL",
+	"JWT_SECRET", "JWT_REFRESH_SECRET",
+	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
+	"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE",
+}
+
+func clearEnv(t *testing.T) {
+	t.Helper()
+	for _, v := range requiredEnvVars {
 		os.Unsetenv(v)
 	}
+}
+
+func seedValidEnv(t *testing.T) {
+	t.Helper()
 	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("JWT_REFRESH_SECRET", "abcdef0123456789abcdef0123456789")
 	t.Setenv("AI_API_KEY", "sk-test")
@@ -26,6 +32,11 @@ func TestLoad(t *testing.T) {
 	t.Setenv("SMTP_USER", "user")
 	t.Setenv("SMTP_PASS", "pass")
 	t.Setenv("SMTP_FROM", "Fanout <noreply@example.com>")
+}
+
+func TestLoadReturnsDefaults(t *testing.T) {
+	clearEnv(t)
+	seedValidEnv(t)
 
 	cfg := Load()
 
@@ -52,6 +63,81 @@ func TestLoad(t *testing.T) {
 	}
 	if cfg.DefaultNS != "default" {
 		t.Errorf("DefaultNS = %q, want %q", cfg.DefaultNS, "default")
+	}
+}
+
+// TestLoadLayering exercises the precedence contract: .env.{ENV} > OS env > .env > defaults.
+// Uses t.Chdir so loadIfPresent/overloadIfPresent look at the temp dir.
+func TestLoadLayering(t *testing.T) {
+	cases := []struct {
+		name     string
+		envFile  string
+		profFile string
+		profile  string
+		osEnv    map[string]string
+		wantAddr string
+	}{
+		{
+			name:     "default wins when no files and no OS env",
+			profile:  "development",
+			wantAddr: ":7520",
+		},
+		{
+			name:     ".env sets value when OS env is unset",
+			envFile:  "HTTP_ADDR=:1111\n",
+			profile:  "development",
+			wantAddr: ":1111",
+		},
+		{
+			name:     "OS env beats .env",
+			envFile:  "HTTP_ADDR=:1111\n",
+			osEnv:    map[string]string{"HTTP_ADDR": ":2222"},
+			profile:  "development",
+			wantAddr: ":2222",
+		},
+		{
+			name:     ".env.{ENV} overrides everything",
+			envFile:  "HTTP_ADDR=:1111\n",
+			profFile: "HTTP_ADDR=:3333\n",
+			osEnv:    map[string]string{"HTTP_ADDR": ":2222"},
+			profile:  "production",
+			wantAddr: ":3333",
+		},
+		{
+			name:     "profile file selection respects ENV",
+			profFile: "HTTP_ADDR=:4444\n",
+			profile:  "staging",
+			wantAddr: ":4444",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearEnv(t)
+			seedValidEnv(t)
+
+			dir := t.TempDir()
+			if tc.envFile != "" {
+				if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(tc.envFile), 0o644); err != nil {
+					t.Fatalf("write .env: %v", err)
+				}
+			}
+			if tc.profFile != "" {
+				if err := os.WriteFile(filepath.Join(dir, ".env."+tc.profile), []byte(tc.profFile), 0o644); err != nil {
+					t.Fatalf("write .env.%s: %v", tc.profile, err)
+				}
+			}
+			t.Chdir(dir)
+			t.Setenv("ENV", tc.profile)
+			for k, v := range tc.osEnv {
+				t.Setenv(k, v)
+			}
+
+			cfg := Load()
+			if cfg.HTTPAddr != tc.wantAddr {
+				t.Errorf("HTTPAddr = %q, want %q", cfg.HTTPAddr, tc.wantAddr)
+			}
+		})
 	}
 }
 
