@@ -120,11 +120,11 @@ func newConfigServer(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore,
 	users := auth.NewUserStore(sqlite.DB)
 	codes := auth.NewCodeStore(sqlite.DB, secret)
 	store := settings.NewStore(sqlite.DB)
-	bootstrap := auth.NewBootstrap()
+	setup := auth.NewSetup()
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, bootstrap, secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, setup, secret, refreshSecret, auth.SMTPConfig{})
 	RegisterConfigRoutes(e, cfg, store)
 	return e, users, secret, store
 }
