@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/labstack/echo/v5"
@@ -15,8 +14,8 @@ import (
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func TestGetIngestConfig_DefaultPrivate(t *testing.T) {
-	e, users, secret, store := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
+func TestGetIngestConfig_OpenByDefault(t *testing.T) {
+	e, users, secret, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
 	_, token := createAdminForRuntimeConfigTest(t, users, secret)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/config/ingest", nil)
@@ -33,49 +32,21 @@ func TestGetIngestConfig_DefaultPrivate(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if resp.Mode != "private" {
-		t.Fatalf("mode = %q, want private", resp.Mode)
+	if resp.TokenRequired {
+		t.Fatalf("token_required = true, want false for fresh store")
 	}
 	if resp.SuggestedEndpoint != "fanout.example.com:4317" {
 		t.Fatalf("suggested endpoint = %q", resp.SuggestedEndpoint)
 	}
-
-	current, err := store.GetIngest(req.Context())
-	if err != nil {
-		t.Fatalf("GetIngest: %v", err)
-	}
-	if current.Mode != settings.IngestModePrivate {
-		t.Fatalf("stored mode = %q, want private", current.Mode)
-	}
 }
 
-func TestUpsertIngestConfig_PublicRequiresTLS(t *testing.T) {
-	e, users, secret, _ := newConfigServer(t, env.Config{})
+func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
+	e, users, secret, store := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
 	_, token := createAdminForRuntimeConfigTest(t, users, secret)
 
-	req := httptest.NewRequest(http.MethodPost, "/api/config/ingest", strings.NewReader(`{"mode":"public","public_endpoint":"fanout.example.com:4317"}`))
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
-	}
-}
-
-func TestUpsertIngestConfig_PublicGeneratesToken(t *testing.T) {
-	e, users, secret, store := newConfigServer(t, env.Config{
-		OTLPGRPCAddr: ":4317",
-		TLSCertFile:  "server.pem",
-		TLSKeyFile:   "server-key.pem",
-	})
-	_, token := createAdminForRuntimeConfigTest(t, users, secret)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/config/ingest", strings.NewReader(`{"mode":"public","public_endpoint":"fanout.example.com:4317"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/config/ingest/rotate-token", nil)
 	req.Host = "fanout.example.com:7520"
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
@@ -90,19 +61,43 @@ func TestUpsertIngestConfig_PublicGeneratesToken(t *testing.T) {
 	if resp.IngestToken == "" {
 		t.Fatal("ingest token is empty")
 	}
-	if resp.Mode != "public" {
-		t.Fatalf("mode = %q, want public", resp.Mode)
+	if !resp.TokenRequired {
+		t.Fatal("token_required = false after rotate")
 	}
 
 	current, err := store.GetIngest(req.Context())
 	if err != nil {
 		t.Fatalf("GetIngest: %v", err)
 	}
-	if current.Mode != settings.IngestModePublic {
-		t.Fatalf("stored mode = %q, want public", current.Mode)
-	}
 	if !settings.CheckIngestToken(resp.IngestToken, current.TokenHash) {
-		t.Fatal("stored token hash does not match returned ingest token")
+		t.Fatal("stored token hash does not match returned plaintext")
+	}
+}
+
+func TestClearIngestToken_RemovesAuth(t *testing.T) {
+	e, users, secret, store := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
+	_, token := createAdminForRuntimeConfigTest(t, users, secret)
+
+	// Seed a token first.
+	if err := store.SetIngest(t.Context(), settings.Ingest{TokenHash: settings.HashIngestToken("fi_preseed")}); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/config/ingest/token", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	current, err := store.GetIngest(req.Context())
+	if err != nil {
+		t.Fatalf("GetIngest: %v", err)
+	}
+	if current.TokenHash != "" {
+		t.Fatalf("token hash = %q, want empty after clear", current.TokenHash)
 	}
 }
 

@@ -7,25 +7,21 @@ import (
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func TestGetIngest_DefaultsToPrivate(t *testing.T) {
+func TestGetIngest_OpenByDefault(t *testing.T) {
 	store := newTestStore(t)
 
 	cfg, err := store.GetIngest(context.Background())
 	if err != nil {
 		t.Fatalf("GetIngest: %v", err)
 	}
-	if cfg.Mode != IngestModePrivate {
-		t.Fatalf("mode = %q, want %q", cfg.Mode, IngestModePrivate)
+	if cfg.TokenHash != "" {
+		t.Fatalf("token hash = %q, want empty for fresh store", cfg.TokenHash)
 	}
 }
 
-func TestSetIngest_PersistsConfig(t *testing.T) {
+func TestSetIngest_RoundTripsTokenHash(t *testing.T) {
 	store := newTestStore(t)
-	want := Ingest{
-		Mode:           IngestModePublic,
-		PublicEndpoint: "fanout.example.com:4317",
-		TokenHash:      HashIngestToken("fi_test"),
-	}
+	want := Ingest{TokenHash: HashIngestToken("fi_test")}
 
 	if err := store.SetIngest(context.Background(), want); err != nil {
 		t.Fatalf("SetIngest: %v", err)
@@ -37,6 +33,23 @@ func TestSetIngest_PersistsConfig(t *testing.T) {
 	}
 	if got != want {
 		t.Fatalf("config = %#v, want %#v", got, want)
+	}
+}
+
+func TestClearIngest_RemovesToken(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.SetIngest(context.Background(), Ingest{TokenHash: HashIngestToken("fi_preseed")}); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+	if err := store.ClearIngest(context.Background()); err != nil {
+		t.Fatalf("ClearIngest: %v", err)
+	}
+	got, err := store.GetIngest(context.Background())
+	if err != nil {
+		t.Fatalf("GetIngest: %v", err)
+	}
+	if got.TokenHash != "" {
+		t.Fatalf("token hash = %q, want empty after Clear", got.TokenHash)
 	}
 }
 

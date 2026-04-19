@@ -1,0 +1,21 @@
+# Reference Caddy config for Fanout behind a reverse proxy.
+# Caddy handles Let's Encrypt automatically for both the web UI and OTLP gRPC.
+#
+# Assumptions:
+#   - fanout.example.com        → web UI + HTTP API
+#   - otel.example.com          → OTLP gRPC (h2c)
+#   - Fanout running on localhost with default ports (7520 HTTP, 4317 gRPC)
+#   - DNS A/AAAA records for both subdomains point at this host
+
+fanout.example.com {
+    reverse_proxy 127.0.0.1:7520
+}
+
+otel.example.com {
+    reverse_proxy h2c://127.0.0.1:4317 {
+        # OTLP uses gRPC over HTTP/2 cleartext between Caddy and Fanout.
+        transport http {
+            versions h2c 2
+        }
+    }
+}
