@@ -112,7 +112,7 @@ func main() {
 
 	settingsStore := settings.NewStore(sqlite.DB)
 	userStore := auth.NewUserStore(sqlite.DB)
-	bootstrap := auth.NewBootstrap()
+	setup := auth.NewSetup()
 
 	userCount, err := userStore.CountUsers()
 	if err != nil {
@@ -120,12 +120,12 @@ func main() {
 		os.Exit(1)
 	}
 	if userCount == 0 {
-		token, expires, err := bootstrap.Rotate()
+		token, _, err := setup.Rotate()
 		if err != nil {
-			slog.Error("bootstrap token init failed", "err", err)
+			slog.Error("setup token init failed", "err", err)
 			os.Exit(1)
 		}
-		printBootstrapBanner(cfg.HTTPAddr, token, expires.Format(time.RFC3339))
+		printSetupBanner(cfg.HTTPAddr, token)
 	}
 
 	// Start gRPC ingest (OTLP)
@@ -230,7 +230,7 @@ func main() {
 		From: cfg.SMTPFrom,
 	}
 	codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
-	api.RegisterAuthRoutes(e, userStore, codeStore, bootstrap, jwtSecret, refreshSecret, smtpCfg)
+	api.RegisterAuthRoutes(e, userStore, codeStore, setup, jwtSecret, refreshSecret, smtpCfg)
 	api.RegisterUserRoutes(e, userStore, smtpCfg)
 	api.RegisterConfigRoutes(e, cfg, settingsStore)
 	slog.Info("auth enabled")
@@ -288,21 +288,21 @@ func main() {
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 
-func printBootstrapBanner(httpAddr, token, expiresAt string) {
+func printSetupBanner(httpAddr, token string) {
 	lines := []string{
 		"============================================================",
-		" FANOUT FIRST-TIME SETUP",
+		" FANOUT SETUP",
 		"",
-		" Open:  " + bootstrapLoginURL(httpAddr),
+		" Open:  " + setupLoginURL(httpAddr),
 		" Token: " + token,
-		" Valid: one-time use until " + expiresAt,
+		" Valid: one-time use, expires in 1 hour",
 		" Note:  this token disappears after the first admin is created",
 		"============================================================",
 	}
 	fmt.Fprintln(os.Stderr, strings.Join(lines, "\n"))
 }
 
-func bootstrapLoginURL(addr string) string {
+func setupLoginURL(addr string) string {
 	if strings.HasPrefix(addr, ":") {
 		return "http://127.0.0.1" + addr + "/login"
 	}

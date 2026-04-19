@@ -16,17 +16,17 @@ import (
 type AuthHandler struct {
 	users         *auth.UserStore
 	codes         *auth.CodeStore
-	bootstrap     *auth.Bootstrap
+	setup         *auth.Setup
 	jwtSecret     string
 	refreshSecret string
 	smtp          auth.SMTPConfig
 }
 
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, bootstrap *auth.Bootstrap, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
 	h := &AuthHandler{
 		users:         users,
 		codes:         codes,
-		bootstrap:     bootstrap,
+		setup:         setup,
 		jwtSecret:     jwtSecret,
 		refreshSecret: refreshSecret,
 		smtp:          smtp,
@@ -58,27 +58,27 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 
 func (h *AuthHandler) Setup(c *echo.Context) error {
 	var req struct {
-		Email          string `json:"email"`
-		Name           string `json:"name"`
-		BootstrapToken string `json:"bootstrap_token"`
+		Email      string `json:"email"`
+		Name       string `json:"name"`
+		SetupToken string `json:"setup_token"`
 	}
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
 	}
-	switch h.bootstrap.Verify(req.BootstrapToken) {
-	case auth.BootstrapStatusOK:
-	case auth.BootstrapStatusExpired:
+	switch h.setup.Verify(req.SetupToken) {
+	case auth.SetupStatusOK:
+	case auth.SetupStatusExpired:
 		slog.Warn("auth: setup rejected", "reason", "expired")
 		jitter()
-		return echo.NewHTTPError(http.StatusGone, "bootstrap token expired; restart Fanout to generate a new one")
-	case auth.BootstrapStatusUnset:
+		return echo.NewHTTPError(http.StatusGone, "setup token expired; restart Fanout to generate a new one")
+	case auth.SetupStatusUnset:
 		slog.Warn("auth: setup rejected", "reason", "unset")
 		jitter()
 		return echo.NewHTTPError(http.StatusGone, "setup window is closed; restart Fanout to reopen it")
 	default:
 		slog.Warn("auth: setup rejected", "reason", "wrong")
 		jitter()
-		return echo.NewHTTPError(http.StatusForbidden, "invalid bootstrap token")
+		return echo.NewHTTPError(http.StatusForbidden, "invalid setup token")
 	}
 
 	email, err := auth.NormalizeEmail(req.Email)
@@ -107,7 +107,7 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
 	}
 	slog.Info("auth: first admin setup completed", "email", email)
-	h.bootstrap.Clear()
+	h.setup.Clear()
 	return c.JSON(200, map[string]string{"access_token": accessToken})
 }
 
