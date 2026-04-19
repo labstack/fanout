@@ -109,7 +109,7 @@ func TestClearIngestToken_RemovesAuth(t *testing.T) {
 	_, token := createAdminForRuntimeConfigTest(t, users, secret)
 
 	// Seed a token first.
-	if err := store.SetIngest(t.Context(), settings.Ingest{TokenHash: settings.HashIngestToken("fi_preseed")}); err != nil {
+	if err := store.SetIngest(t.Context(), settings.Ingest{TokenHash: settings.HashIngestToken("fo_preseed")}); err != nil {
 		t.Fatalf("SetIngest: %v", err)
 	}
 

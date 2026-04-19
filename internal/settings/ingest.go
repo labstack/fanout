@@ -39,7 +39,7 @@ func GenerateIngestToken() (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("generate ingest token: %w", err)
 	}
-	token := "fi_" + raw
+	token := "fo_" + raw
 	return token, HashIngestToken(token), nil
 }
 

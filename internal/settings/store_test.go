@@ -21,7 +21,7 @@ func TestGetIngest_OpenByDefault(t *testing.T) {
 
 func TestSetIngest_RoundTripsTokenHash(t *testing.T) {
 	store := newTestStore(t)
-	want := Ingest{TokenHash: HashIngestToken("fi_test")}
+	want := Ingest{TokenHash: HashIngestToken("fo_test")}
 
 	if err := store.SetIngest(context.Background(), want); err != nil {
 		t.Fatalf("SetIngest: %v", err)
@@ -38,7 +38,7 @@ func TestSetIngest_RoundTripsTokenHash(t *testing.T) {
 
 func TestClearIngest_RemovesToken(t *testing.T) {
 	store := newTestStore(t)
-	if err := store.SetIngest(context.Background(), Ingest{TokenHash: HashIngestToken("fi_preseed")}); err != nil {
+	if err := store.SetIngest(context.Background(), Ingest{TokenHash: HashIngestToken("fo_preseed")}); err != nil {
 		t.Fatalf("SetIngest: %v", err)
 	}
 	if err := store.ClearIngest(context.Background()); err != nil {
@@ -64,7 +64,7 @@ func TestGenerateAndCheckIngestToken(t *testing.T) {
 	if !CheckIngestToken(token, hash) {
 		t.Fatal("CheckIngestToken returned false for the generated token")
 	}
-	if CheckIngestToken("fi_other", hash) {
+	if CheckIngestToken("fo_other", hash) {
 		t.Fatal("CheckIngestToken returned true for the wrong token")
 	}
 }

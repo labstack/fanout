@@ -91,7 +91,7 @@ func TestAuthorize_RejectsWrongToken(t *testing.T) {
 	}
 
 	authorizer := newIngestAuthorizer(env.Config{}, store)
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", "fi_wrong"))
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", "fo_wrong"))
 
 	err = authorizer.authorize(ctx)
 	if status.Code(err) != codes.Unauthenticated {
