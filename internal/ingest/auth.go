@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -67,11 +68,16 @@ func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
 // Peer IP is not considered — operators decide who reaches the port.
 func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 	if a.settingsStore == nil {
-		return nil
+		// Defensive: production always wires a store (cmd/fanout/main.go). Reaching
+		// this path means a mis-wired init; fail closed and log so it surfaces.
+		slog.Error("ingest: settings store not wired; rejecting request")
+		return status.Error(codes.Internal, "ingest auth unavailable")
 	}
 	ingestCfg, err := a.settingsStore.GetIngest(ctx)
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to load ingest config: %v", err)
+		// Don't leak the wrapped error to the client — log it server-side.
+		slog.Error("ingest: load config failed", "err", err)
+		return status.Error(codes.Internal, "ingest auth unavailable")
 	}
 	if ingestCfg.TokenHash == "" {
 		return nil

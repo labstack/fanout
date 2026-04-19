@@ -31,7 +31,7 @@ func RegisterSettingsRoutes(e *echo.Echo, cfg env.Config, store *settings.Store)
 func (h *SettingsHandler) GetIngest(c *echo.Context) error {
 	current, err := h.store.GetIngest(c.Request().Context())
 	if err != nil {
-		slog.Error("config: load ingest failed", "err", err)
+		slog.Error("settings: load ingest failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load ingest config")
 	}
 	return c.JSON(http.StatusOK, ingestResponse{
@@ -47,11 +47,11 @@ func (h *SettingsHandler) GetIngest(c *echo.Context) error {
 func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 	token, hash, err := settings.GenerateIngestToken()
 	if err != nil {
-		slog.Error("config: generate ingest token failed", "err", err)
+		slog.Error("settings: generate ingest token failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
 	}
 	if err := h.store.SetIngest(c.Request().Context(), settings.Ingest{TokenHash: hash}); err != nil {
-		slog.Error("config: persist ingest token failed", "err", err)
+		slog.Error("settings: persist ingest token failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update ingest config")
 	}
 	return c.JSON(http.StatusOK, ingestResponse{
@@ -66,7 +66,7 @@ func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 // ClearIngestToken removes the stored token hash; ingest returns to unauthenticated.
 func (h *SettingsHandler) ClearIngestToken(c *echo.Context) error {
 	if err := h.store.ClearIngest(c.Request().Context()); err != nil {
-		slog.Error("config: clear ingest failed", "err", err)
+		slog.Error("settings: clear ingest failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to clear ingest config")
 	}
 	return c.JSON(http.StatusOK, ingestResponse{

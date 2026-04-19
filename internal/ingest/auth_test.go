@@ -99,6 +99,24 @@ func TestAuthorize_RejectsWrongToken(t *testing.T) {
 	}
 }
 
+func TestAuthorize_AcceptsBearerAuthorization(t *testing.T) {
+	store := newRuntimeStore(t)
+	token, hash, err := settings.GenerateIngestToken()
+	if err != nil {
+		t.Fatalf("GenerateIngestToken: %v", err)
+	}
+	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+
+	authorizer := newIngestAuthorizer(env.Config{}, store)
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
+
+	if err := authorizer.authorize(ctx); err != nil {
+		t.Fatalf("authorize with Bearer header: %v", err)
+	}
+}
+
 func TestAuthorize_RejectsMissingToken(t *testing.T) {
 	store := newRuntimeStore(t)
 	_, hash, err := settings.GenerateIngestToken()

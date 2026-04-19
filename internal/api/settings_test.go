@@ -74,6 +74,36 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 	}
 }
 
+func TestIngestEndpoints_RequireAdmin(t *testing.T) {
+	e, users, secret, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
+
+	viewer, err := users.Create("viewer@example.com", "", "viewer")
+	if err != nil {
+		t.Fatalf("Create viewer: %v", err)
+	}
+	nonAdminToken, err := auth.SignAccess(secret, viewer.ID)
+	if err != nil {
+		t.Fatalf("SignAccess: %v", err)
+	}
+
+	cases := []struct{ method, path string }{
+		{http.MethodGet, "/api/settings/ingest"},
+		{http.MethodPost, "/api/settings/ingest/rotate-token"},
+		{http.MethodDelete, "/api/settings/ingest/token"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			req.Header.Set("Authorization", "Bearer "+nonAdminToken)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+			}
+		})
+	}
+}
+
 func TestClearIngestToken_RemovesAuth(t *testing.T) {
 	e, users, secret, store := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
 	_, token := createAdminForRuntimeConfigTest(t, users, secret)
