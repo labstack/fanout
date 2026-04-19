@@ -21,7 +21,9 @@ func RegisterSettingsRoutes(e *echo.Echo, cfg env.Config, store *settings.Store)
 	h := &SettingsHandler{cfg: cfg, store: store}
 	adminOnly := RequireRole("admin")
 
-	e.GET("/api/settings/ingest", h.GetIngest, adminOnly)
+	// GET returns non-secret metadata (token_required, endpoint, header name)
+	// used by the home empty state — readable by any authenticated user.
+	e.GET("/api/settings/ingest", h.GetIngest)
 	e.POST("/api/settings/ingest/rotate-token", h.RotateIngestToken, adminOnly)
 }
 

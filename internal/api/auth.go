@@ -110,25 +110,33 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
 	}
 
-	// Auto-generate the ingest token so collectors have a credential from day one.
-	// The plaintext is returned here exactly once — only the hash persists.
-	ingestToken, ingestHash, err := settings.GenerateIngestToken()
+	// Generate the ingest token only if one doesn't exist yet. A Setup retry
+	// (ErrSetupComplete branch above) must not rotate and invalidate a token
+	// live collectors may already be using — to rotate deliberately, the admin
+	// uses the Settings page.
+	resp := map[string]string{"access_token": accessToken}
+	current, err := h.settings.GetIngest(c.Request().Context())
 	if err != nil {
-		slog.Error("auth: setup generate ingest token failed", "err", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
+		slog.Error("auth: setup load ingest config failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load ingest config")
 	}
-	if err := h.settings.SetIngest(c.Request().Context(), settings.Ingest{TokenHash: ingestHash}); err != nil {
-		slog.Error("auth: setup persist ingest token failed", "err", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist ingest token")
+	if current.TokenHash == "" {
+		ingestToken, ingestHash, err := settings.GenerateIngestToken()
+		if err != nil {
+			slog.Error("auth: setup generate ingest token failed", "err", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
+		}
+		if err := h.settings.SetIngest(c.Request().Context(), settings.Ingest{TokenHash: ingestHash}); err != nil {
+			slog.Error("auth: setup persist ingest token failed", "err", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist ingest token")
+		}
+		resp["ingest_token"] = ingestToken
+		resp["ingest_header_name"] = "x-fanout-ingest-token"
 	}
 
 	slog.Info("auth: first admin setup completed", "email", email)
 	h.setup.Clear()
-	return c.JSON(200, map[string]string{
-		"access_token":       accessToken,
-		"ingest_token":       ingestToken,
-		"ingest_header_name": "x-fanout-ingest-token",
-	})
+	return c.JSON(200, resp)
 }
 
 func (h *AuthHandler) Start(c *echo.Context) error {

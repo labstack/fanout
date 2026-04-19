@@ -82,6 +82,7 @@ func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 	if ingestCfg.TokenHash == "" {
 		// Pre-setup (no admin yet) — no token exists to check against. Reject
 		// all requests until setup completes; collectors must wait.
+		slog.Warn("ingest: rejecting request — no ingest token configured (setup not complete)")
 		return status.Error(codes.Unauthenticated, "fanout not initialized")
 	}
 	token := ingestTokenFromContext(ctx)

@@ -7,9 +7,10 @@ import (
 
 const ingestKey = "ingest"
 
-// Ingest holds the (optional) ingest-auth configuration.
-// When TokenHash is empty, OTLP ingest is unauthenticated. When set, every
-// request must present the token via `x-fanout-ingest-token` or Bearer auth.
+// Ingest holds the ingest-auth configuration. TokenHash is set during
+// first-admin setup and rotatable from the Settings page; when unset
+// (pre-setup), the authorizer rejects all OTLP requests. Collectors
+// present the token via `x-fanout-ingest-token` or `Authorization: Bearer`.
 type Ingest struct {
 	TokenHash string `json:"token_hash"`
 }

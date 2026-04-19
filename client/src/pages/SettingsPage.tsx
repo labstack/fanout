@@ -24,7 +24,10 @@ export function SettingsPage() {
     setError(null);
     try {
       const r = await api<RotateResponse>("/api/settings/ingest/rotate-token", { method: "POST" });
-      setRevealedToken(r.ingest_token || null);
+      if (!r.ingest_token) {
+        throw new Error("server returned an empty token");
+      }
+      setRevealedToken(r.ingest_token);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to rotate token");
     } finally {
@@ -62,7 +65,7 @@ export function SettingsPage() {
             <div>
               <h2 className="text-sm font-semibold text-foreground">Ingest token</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Controls whether OTLP collectors must present a token on every request.
+                Rotate the token collectors present on every OTLP request. The previous token stops working immediately.
               </p>
             </div>
             <span className="flex items-center gap-1.5 text-[11px] text-healthy mono">

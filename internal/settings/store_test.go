@@ -7,7 +7,7 @@ import (
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func TestGetIngest_OpenByDefault(t *testing.T) {
+func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 	store := newTestStore(t)
 
 	cfg, err := store.GetIngest(context.Background())
