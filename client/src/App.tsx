@@ -6,6 +6,7 @@ import { ChatPage } from "./pages/ChatPage";
 import { ServicePage } from "./pages/ServicePage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { LoginPage } from "./pages/LoginPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { DemoPage } from "./pages/DemoPage";
 
 function App() {
@@ -25,6 +26,7 @@ function App() {
             <Route path="/service/:name" element={<ServicePage />} />
             <Route path="/alerts" element={<AlertsPage />} />
             <Route path="/chat" element={<ChatPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/demo" element={<DemoPage />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>

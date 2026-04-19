@@ -7,9 +7,10 @@ import (
 
 const ingestKey = "ingest"
 
-// Ingest holds the (optional) ingest-auth configuration.
-// When TokenHash is empty, OTLP ingest is unauthenticated. When set, every
-// request must present the token via `x-fanout-ingest-token` or Bearer auth.
+// Ingest holds the ingest-auth configuration. TokenHash is set during
+// first-admin setup and rotatable from the Settings page; when unset
+// (pre-setup), the authorizer rejects all OTLP requests. Collectors
+// present the token via `x-fanout-ingest-token` or `Authorization: Bearer`.
 type Ingest struct {
 	TokenHash string `json:"token_hash"`
 }
@@ -30,16 +31,12 @@ func (s *Store) SetIngest(ctx context.Context, ingest Ingest) error {
 	return s.Upsert(ctx, ingestKey, ingest)
 }
 
-func (s *Store) ClearIngest(ctx context.Context) error {
-	return s.Delete(ctx, ingestKey)
-}
-
 func GenerateIngestToken() (string, string, error) {
 	raw, err := randomHexToken(24)
 	if err != nil {
 		return "", "", fmt.Errorf("generate ingest token: %w", err)
 	}
-	token := "fi_" + raw
+	token := "fo_" + raw
 	return token, HashIngestToken(token), nil
 }
 

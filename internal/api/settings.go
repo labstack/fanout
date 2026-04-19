@@ -21,9 +21,10 @@ func RegisterSettingsRoutes(e *echo.Echo, cfg env.Config, store *settings.Store)
 	h := &SettingsHandler{cfg: cfg, store: store}
 	adminOnly := RequireRole("admin")
 
-	e.GET("/api/settings/ingest", h.GetIngest, adminOnly)
+	// GET returns non-secret metadata (token_required, endpoint, header name)
+	// used by the home empty state — readable by any authenticated user.
+	e.GET("/api/settings/ingest", h.GetIngest)
 	e.POST("/api/settings/ingest/rotate-token", h.RotateIngestToken, adminOnly)
-	e.DELETE("/api/settings/ingest/token", h.ClearIngestToken, adminOnly)
 }
 
 // GetIngest returns the current ingest config: whether a token is set
@@ -60,20 +61,6 @@ func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "x-fanout-ingest-token",
 		IngestToken:       token,
-	})
-}
-
-// ClearIngestToken removes the stored token hash; ingest returns to unauthenticated.
-func (h *SettingsHandler) ClearIngestToken(c *echo.Context) error {
-	if err := h.store.ClearIngest(c.Request().Context()); err != nil {
-		slog.Error("settings: clear ingest failed", "err", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to clear ingest config")
-	}
-	return c.JSON(http.StatusOK, ingestResponse{
-		TokenRequired:     false,
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr),
-		TLSConfigured:     h.cfg.TLSEnabled(),
-		HeaderName:        "x-fanout-ingest-token",
 	})
 }
 

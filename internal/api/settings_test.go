@@ -14,7 +14,7 @@ import (
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func TestGetIngest_OpenByDefault(t *testing.T) {
+func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 	e, users, secret, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
 	_, token := createAdminForRuntimeConfigTest(t, users, secret)
 
@@ -74,7 +74,7 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 	}
 }
 
-func TestIngestEndpoints_RequireAdmin(t *testing.T) {
+func TestRotateIngestToken_RequiresAdmin(t *testing.T) {
 	e, users, secret, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
 
 	viewer, err := users.Create("viewer@example.com", "", "viewer")
@@ -86,48 +86,33 @@ func TestIngestEndpoints_RequireAdmin(t *testing.T) {
 		t.Fatalf("SignAccess: %v", err)
 	}
 
-	cases := []struct{ method, path string }{
-		{http.MethodGet, "/api/settings/ingest"},
-		{http.MethodPost, "/api/settings/ingest/rotate-token"},
-		{http.MethodDelete, "/api/settings/ingest/token"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			req := httptest.NewRequest(tc.method, tc.path, nil)
-			req.Header.Set("Authorization", "Bearer "+nonAdminToken)
-			rec := httptest.NewRecorder()
-			e.ServeHTTP(rec, req)
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
-			}
-		})
+	req := httptest.NewRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil)
+	req.Header.Set("Authorization", "Bearer "+nonAdminToken)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
 	}
 }
 
-func TestClearIngestToken_RemovesAuth(t *testing.T) {
-	e, users, secret, store := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
-	_, token := createAdminForRuntimeConfigTest(t, users, secret)
+func TestGetIngest_AllowsNonAdmin(t *testing.T) {
+	e, users, secret, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
 
-	// Seed a token first.
-	if err := store.SetIngest(t.Context(), settings.Ingest{TokenHash: settings.HashIngestToken("fi_preseed")}); err != nil {
-		t.Fatalf("SetIngest: %v", err)
+	viewer, err := users.Create("viewer@example.com", "", "viewer")
+	if err != nil {
+		t.Fatalf("Create viewer: %v", err)
+	}
+	nonAdminToken, err := auth.SignAccess(secret, viewer.ID)
+	if err != nil {
+		t.Fatalf("SignAccess: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodDelete, "/api/settings/ingest/token", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	req := httptest.NewRequest(http.MethodGet, "/api/settings/ingest", nil)
+	req.Header.Set("Authorization", "Bearer "+nonAdminToken)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
-
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-
-	current, err := store.GetIngest(req.Context())
-	if err != nil {
-		t.Fatalf("GetIngest: %v", err)
-	}
-	if current.TokenHash != "" {
-		t.Fatalf("token hash = %q, want empty after clear", current.TokenHash)
+		t.Fatalf("status = %d, want %d (GetIngest returns non-secret metadata)", rec.Code, http.StatusOK)
 	}
 }
 
@@ -149,7 +134,7 @@ func newConfigServer(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore,
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, setup, secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{})
 	RegisterSettingsRoutes(e, cfg, store)
 	return e, users, secret, store
 }
