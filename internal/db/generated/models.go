@@ -42,12 +42,10 @@ type AlertRule struct {
 	UpdatedAt       string         `json:"updated_at"`
 }
 
-type Config struct {
-	GroupKey   string         `json:"group_key"`
-	Overrides  string         `json:"overrides"`
-	UpdatedAt  string         `json:"updated_at"`
-	UpdatedBy  sql.NullString `json:"updated_by"`
-	LastReason sql.NullString `json:"last_reason"`
+type Setting struct {
+	Key       string `json:"key"`
+	Value     string `json:"value"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 type User struct {

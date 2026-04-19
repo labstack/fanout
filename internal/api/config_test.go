@@ -10,8 +10,8 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
-	appconfig "github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/settings"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -44,7 +44,7 @@ func TestGetIngestConfig_DefaultPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIngest: %v", err)
 	}
-	if current.Mode != appconfig.IngestModePrivate {
+	if current.Mode != settings.IngestModePrivate {
 		t.Fatalf("stored mode = %q, want private", current.Mode)
 	}
 }
@@ -98,15 +98,15 @@ func TestUpsertIngestConfig_PublicGeneratesToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIngest: %v", err)
 	}
-	if current.Mode != appconfig.IngestModePublic {
+	if current.Mode != settings.IngestModePublic {
 		t.Fatalf("stored mode = %q, want public", current.Mode)
 	}
-	if !appconfig.CheckIngestToken(resp.IngestToken, current.TokenHash) {
+	if !settings.CheckIngestToken(resp.IngestToken, current.TokenHash) {
 		t.Fatal("stored token hash does not match returned ingest token")
 	}
 }
 
-func newConfigServer(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore, string, *appconfig.Store) {
+func newConfigServer(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore, string, *settings.Store) {
 	t.Helper()
 
 	sqlite, err := appstore.NewSQLite(":memory:")
@@ -119,11 +119,12 @@ func newConfigServer(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore,
 	refreshSecret := "abcdef0123456789abcdef0123456789"
 	users := auth.NewUserStore(sqlite.DB)
 	codes := auth.NewCodeStore(sqlite.DB, secret)
-	store := appconfig.NewStore(sqlite.DB)
+	store := settings.NewStore(sqlite.DB)
+	bootstrap := auth.NewBootstrap()
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, store, secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, bootstrap, secret, refreshSecret, auth.SMTPConfig{})
 	RegisterConfigRoutes(e, cfg, store)
 	return e, users, secret, store
 }

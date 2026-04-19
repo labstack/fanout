@@ -1,4 +1,4 @@
-package config
+package settings
 
 import (
 	"crypto/rand"
@@ -6,7 +6,6 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
-	"strings"
 )
 
 func randomHexToken(byteLen int) (string, error) {
@@ -25,20 +24,4 @@ func hashToken(token string) string {
 func checkToken(token, hash string) bool {
 	expected := hashToken(token)
 	return subtle.ConstantTimeCompare([]byte(expected), []byte(hash)) == 1
-}
-
-func formatGroupedToken(prefix, raw string, groupSize int) string {
-	if groupSize <= 0 {
-		return prefix + raw
-	}
-	parts := make([]string, 0, (len(raw)+groupSize-1)/groupSize)
-	for len(raw) > 0 {
-		end := groupSize
-		if end > len(raw) {
-			end = len(raw)
-		}
-		parts = append(parts, raw[:end])
-		raw = raw[end:]
-	}
-	return prefix + strings.Join(parts, "-")
 }

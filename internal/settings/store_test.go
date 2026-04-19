@@ -1,4 +1,4 @@
-package config
+package settings
 
 import (
 	"context"
@@ -27,7 +27,7 @@ func TestSetIngest_PersistsConfig(t *testing.T) {
 		TokenHash:      HashIngestToken("fi_test"),
 	}
 
-	if err := store.SetIngest(context.Background(), want, "test", "enable public"); err != nil {
+	if err := store.SetIngest(context.Background(), want); err != nil {
 		t.Fatalf("SetIngest: %v", err)
 	}
 

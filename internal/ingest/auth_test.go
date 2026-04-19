@@ -21,8 +21,8 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	appconfig "github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/settings"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -85,15 +85,15 @@ func TestAuthorize_PrivateModeRejectsPublicPeer(t *testing.T) {
 
 func TestAuthorize_PublicModeRequiresTLSAndToken(t *testing.T) {
 	store := newRuntimeStore(t)
-	token, hash, err := appconfig.GenerateIngestToken()
+	token, hash, err := settings.GenerateIngestToken()
 	if err != nil {
 		t.Fatalf("GenerateIngestToken: %v", err)
 	}
-	if err := store.SetIngest(context.Background(), appconfig.IngestConfig{
-		Mode:           appconfig.IngestModePublic,
+	if err := store.SetIngest(context.Background(), settings.IngestConfig{
+		Mode:           settings.IngestModePublic,
 		PublicEndpoint: "fanout.example.com:4317",
 		TokenHash:      hash,
-	}, "test", "enable public"); err != nil {
+	}); err != nil {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
@@ -115,11 +115,11 @@ func TestAuthorize_PublicModeRequiresTLSAndToken(t *testing.T) {
 
 func TestAuthorize_PublicModeRejectsMissingToken(t *testing.T) {
 	store := newRuntimeStore(t)
-	if err := store.SetIngest(context.Background(), appconfig.IngestConfig{
-		Mode:           appconfig.IngestModePublic,
+	if err := store.SetIngest(context.Background(), settings.IngestConfig{
+		Mode:           settings.IngestModePublic,
 		PublicEndpoint: "fanout.example.com:4317",
-		TokenHash:      appconfig.HashIngestToken("fi_test"),
-	}, "test", "enable public"); err != nil {
+		TokenHash:      settings.HashIngestToken("fi_test"),
+	}); err != nil {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
@@ -141,11 +141,11 @@ func TestAuthorize_PublicModeRejectsMissingToken(t *testing.T) {
 
 func TestAuthorize_PublicModeRejectsWithoutTLSConfig(t *testing.T) {
 	store := newRuntimeStore(t)
-	if err := store.SetIngest(context.Background(), appconfig.IngestConfig{
-		Mode:           appconfig.IngestModePublic,
+	if err := store.SetIngest(context.Background(), settings.IngestConfig{
+		Mode:           settings.IngestModePublic,
 		PublicEndpoint: "fanout.example.com:4317",
-		TokenHash:      appconfig.HashIngestToken("fi_test"),
-	}, "test", "enable public"); err != nil {
+		TokenHash:      settings.HashIngestToken("fi_test"),
+	}); err != nil {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
@@ -160,7 +160,7 @@ func TestAuthorize_PublicModeRejectsWithoutTLSConfig(t *testing.T) {
 	}
 }
 
-func newRuntimeStore(t *testing.T) *appconfig.Store {
+func newRuntimeStore(t *testing.T) *settings.Store {
 	t.Helper()
 
 	sqlite, err := appstore.NewSQLite(":memory:")
@@ -168,7 +168,7 @@ func newRuntimeStore(t *testing.T) *appconfig.Store {
 		t.Fatalf("NewSQLite: %v", err)
 	}
 	t.Cleanup(func() { sqlite.Close() })
-	return appconfig.NewStore(sqlite.DB)
+	return settings.NewStore(sqlite.DB)
 }
 
 func writeServerTLSFiles(t *testing.T, dir string) (string, string) {

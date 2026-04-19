@@ -1,4 +1,4 @@
-package config
+package settings
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const ingestGroupKey = "ingest"
+const ingestKey = "ingest"
 
 type IngestMode string
 
@@ -48,26 +48,26 @@ func (c IngestConfig) Validate() error {
 // GetIngest returns the current ingest config, defaulting to private mode.
 func (s *Store) GetIngest(ctx context.Context) (IngestConfig, error) {
 	cfg := DefaultIngestConfig()
-	if err := s.Get(ctx, ingestGroupKey, &cfg); err != nil {
+	if err := s.Get(ctx, ingestKey, &cfg); err != nil {
 		return IngestConfig{}, err
 	}
 	if err := cfg.Validate(); err != nil {
-		return IngestConfig{}, fmt.Errorf("config: invalid ingest config: %w", err)
+		return IngestConfig{}, fmt.Errorf("settings: invalid ingest config: %w", err)
 	}
 	return cfg, nil
 }
 
 // SetIngest persists the current ingest config.
-func (s *Store) SetIngest(ctx context.Context, cfg IngestConfig, updatedBy, reason string) error {
+func (s *Store) SetIngest(ctx context.Context, cfg IngestConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
-	return s.Upsert(ctx, ingestGroupKey, cfg, updatedBy, reason)
+	return s.Upsert(ctx, ingestKey, cfg)
 }
 
 // ResetIngest returns OTLP to its default private mode.
-func (s *Store) ResetIngest(ctx context.Context, updatedBy, reason string) error {
-	return s.Upsert(ctx, ingestGroupKey, DefaultIngestConfig(), updatedBy, reason)
+func (s *Store) ResetIngest(ctx context.Context) error {
+	return s.Upsert(ctx, ingestKey, DefaultIngestConfig())
 }
 
 // GenerateIngestToken returns a plaintext token plus its hash for storage.

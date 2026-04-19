@@ -24,7 +24,6 @@ import (
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/auth"
-	appconfig "github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
@@ -32,6 +31,7 @@ import (
 	"github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/service"
+	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/web"
 )
@@ -110,8 +110,9 @@ func main() {
 		slog.Info("alert engine enabled", "interval", cfg.AlertEvalInterval)
 	}
 
-	configStore := appconfig.NewStore(sqlite.DB)
+	settingsStore := settings.NewStore(sqlite.DB)
 	userStore := auth.NewUserStore(sqlite.DB)
+	bootstrap := auth.NewBootstrap()
 
 	userCount, err := userStore.CountUsers()
 	if err != nil {
@@ -119,14 +120,12 @@ func main() {
 		os.Exit(1)
 	}
 	if userCount == 0 {
-		token, bootstrapCfg, err := configStore.EnsureBootstrap(ctx, "system", "first boot setup")
+		token, expires, err := bootstrap.Rotate()
 		if err != nil {
 			slog.Error("bootstrap token init failed", "err", err)
 			os.Exit(1)
 		}
-		printBootstrapBanner(cfg.HTTPAddr, token, bootstrapCfg.ExpiresAt)
-	} else if err := configStore.ClearBootstrap(ctx); err != nil {
-		slog.Warn("bootstrap token cleanup failed", "err", err)
+		printBootstrapBanner(cfg.HTTPAddr, token, expires.Format(time.RFC3339))
 	}
 
 	// Start gRPC ingest (OTLP)
@@ -135,7 +134,7 @@ func main() {
 		slog.Error("listen gRPC failed", "err", err)
 		os.Exit(1)
 	}
-	grpcOpts, err := ingest.GRPCServerOptions(cfg, configStore)
+	grpcOpts, err := ingest.GRPCServerOptions(cfg, settingsStore)
 	if err != nil {
 		slog.Error("OTLP gRPC TLS init failed", "err", err)
 		os.Exit(1)
@@ -231,9 +230,9 @@ func main() {
 		From: cfg.SMTPFrom,
 	}
 	codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
-	api.RegisterAuthRoutes(e, userStore, codeStore, configStore, jwtSecret, refreshSecret, smtpCfg)
+	api.RegisterAuthRoutes(e, userStore, codeStore, bootstrap, jwtSecret, refreshSecret, smtpCfg)
 	api.RegisterUserRoutes(e, userStore, smtpCfg)
-	api.RegisterConfigRoutes(e, cfg, configStore)
+	api.RegisterConfigRoutes(e, cfg, settingsStore)
 	slog.Info("auth enabled")
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled
