@@ -212,7 +212,9 @@ func (h *AuthHandler) Me(c *echo.Context) error {
 func (h *AuthHandler) Logout(c *echo.Context) error {
 	if cookie, err := c.Cookie("refresh_token"); err == nil && cookie.Value != "" {
 		if claims, err := auth.VerifyRefresh(h.refreshSecret, cookie.Value); err == nil {
-			_ = h.users.TouchLoginAt(claims.Subject, time.Now().UTC().Add(auth.TokenTimePrecision))
+			if err := h.users.TouchLoginAt(claims.Subject, time.Now().UTC().Add(auth.TokenTimePrecision)); err != nil {
+				slog.Warn("auth: logout TouchLoginAt failed — session not revoked", "user_id", claims.Subject, "err", err)
+			}
 		}
 	}
 	h.clearRefreshCookie(c)

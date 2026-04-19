@@ -1,6 +1,7 @@
 package api
 
 import (
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -76,7 +77,8 @@ func (h *ConfigHandler) UpsertIngestConfig(c *echo.Context) error {
 			TokenHash:      hash,
 		}
 		if err := h.store.SetIngest(c.Request().Context(), next); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			slog.Error("config: persist ingest failed", "err", err)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to update ingest config")
 		}
 		return c.JSON(http.StatusOK, ingestConfigResponse{
 			Mode:              string(next.Mode),
