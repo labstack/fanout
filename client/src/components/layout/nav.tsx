@@ -42,19 +42,6 @@ export function Nav() {
         </Link>
         <div className="flex items-center gap-4">
           <NavLink
-            to={buildDashboardPath(token)}
-            end
-            className={({ isActive }) =>
-              `text-xs mono transition-colors ${
-                isActive || pathname.startsWith("/service/")
-                  ? "text-foreground"
-                  : "text-zinc-400 hover:text-zinc-200"
-              }`
-            }
-          >
-            Home
-          </NavLink>
-          <NavLink
             to={`/alerts${search}`}
             className={({ isActive }) =>
               `text-xs mono transition-colors flex items-center gap-1.5 ${
