@@ -73,7 +73,7 @@ func (h *ConfigHandler) UpsertIngestConfig(c *echo.Context) error {
 		if publicEndpoint == "" {
 			publicEndpoint = suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr)
 		}
-		next := settings.IngestConfig{
+		next := settings.Ingest{
 			Mode:           settings.IngestModePublic,
 			PublicEndpoint: publicEndpoint,
 			TokenHash:      hash,

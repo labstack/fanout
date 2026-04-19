@@ -21,7 +21,7 @@ func TestGetIngest_DefaultsToPrivate(t *testing.T) {
 
 func TestSetIngest_PersistsConfig(t *testing.T) {
 	store := newTestStore(t)
-	want := IngestConfig{
+	want := Ingest{
 		Mode:           IngestModePublic,
 		PublicEndpoint: "fanout.example.com:4317",
 		TokenHash:      HashIngestToken("fi_test"),
