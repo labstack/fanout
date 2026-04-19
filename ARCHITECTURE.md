@@ -8,7 +8,6 @@ Single-binary observability platform: **ingest → lake → query → API + MCP*
 graph TB
     subgraph Ingest
         OTLP[OTLP gRPC :4317]
-        TI[Tenant Interceptor]
     end
 
     subgraph Channels
@@ -158,9 +157,8 @@ gRPC OTLP services implementing:
 - `collector.metrics.v1.MetricsService`
 
 Each Export call:
-1. Extracts tenant ID from `x-tenant-id` header
-2. Transforms OTLP data into normalized rows
-3. Pushes to in-memory channels (non-blocking)
+1. Transforms OTLP data into normalized rows
+2. Pushes to in-memory channels (non-blocking)
 
 ### Lake Writer (`internal/lake/`)
 
@@ -187,7 +185,7 @@ flowchart LR
 ```
 
 - **Flush triggers**: Timer (15s) OR row count (50k)
-- **Partition path**: `data/telemetry/parquet/main/{spans|logs|metrics}/tenant=<id>/namespace=<ns>/year=YYYY/month=MM/day=DD/hour=HH/*.parquet`
+- **Partition path**: `data/telemetry/parquet/main/{spans|logs|metrics}/namespace=<ns>/year=YYYY/month=MM/day=DD/hour=HH/*.parquet`
 - **Retention**: Background pruner removes data older than `RETENTION_DAYS`
 
 ### Query Engine (`internal/query/`)
@@ -452,7 +450,6 @@ erDiagram
         string status_msg
         blob resource_json
         blob attributes_json
-        string tenant_id
         bigint ingested_unix_nano
     }
 
@@ -465,7 +462,6 @@ erDiagram
         string span_id FK
         blob resource_json
         blob attributes_json
-        string tenant_id
         bigint ingested_unix_nano
     }
 
@@ -479,7 +475,6 @@ erDiagram
         blob hist_counts_json
         blob attributes_json
         blob resource_json
-        string tenant_id
         bigint ingested_unix_nano
         bigint hist_count
         float hist_sum
@@ -563,12 +558,9 @@ Environment variables:
 | `MCP_ENABLED` | `true` | Enable MCP server at /mcp |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace for services |
-| `TENANT_ID` | - | Tenant UUID (optional) |
 
-## Security & Tenancy
+## Security
 
-- **Tenant isolation**: `x-tenant-id` gRPC header stored in Parquet
-- **Query filtering**: Tenant ID applied at query time
 - **API auth**: User access tokens and per-user API keys
 - **Rate limiting**: Configurable via `RATE_LIMIT_RPS`
 

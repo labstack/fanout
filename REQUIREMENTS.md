@@ -6,10 +6,10 @@
 
 ### Ingest
 - OTLP **gRPC** on :4317 (traces, logs, metrics)
-- Multi-tenant via `x-tenant-id` header
+- Single-tenant deployment
 
 ### Storage
-- **Partitioned Parquet**: `/data/telemetry/parquet/main/{signal}/tenant=<id>/namespace=<ns>/year=YYYY/month=MM/day=DD/hour=HH/*.parquet`
+- **Partitioned Parquet**: `/data/telemetry/parquet/main/{signal}/namespace=<ns>/year=YYYY/month=MM/day=DD/hour=HH/*.parquet`
 - **DuckDB** embedded query engine + **minute rollups** (`service_rollup`)
 - **Retention**: Automatic pruning (configurable, default 30 days)
 
@@ -57,7 +57,6 @@
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace for services |
-| `TENANT_ID` | - | Tenant UUID (optional) |
 
 ## 7. Build & Run
 

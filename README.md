@@ -81,7 +81,6 @@ MCP clients receive full JSON Schema via `tools/list`.
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace |
-| `TENANT_ID` | - | Tenant UUID (optional) |
 
 Storage layout under `DATA_DIR`:
 - `telemetry/` - DuckLake metadata and parquet data files
