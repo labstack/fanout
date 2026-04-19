@@ -36,8 +36,11 @@ echarts.use([
 
 export default echarts;
 export { LinearGradient };
+// echarts-for-react ships both an ESM default export and a bare CJS module object;
+// this picks the right one at runtime.
 export const ReactECharts =
-  (ReactEChartsCore as any).default || ReactEChartsCore;
+  (ReactEChartsCore as unknown as { default?: typeof ReactEChartsCore }).default ||
+  ReactEChartsCore;
 
 export function cssVar(name: string): string {
   return getComputedStyle(document.documentElement)

@@ -1,43 +1,7 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
 import { api, setApiToken, tryRefresh } from "@/api/client";
-
-interface User {
-  id: string;
-  email: string;
-  name?: string;
-  role: string;
-  active: boolean;
-}
-
-interface AuthStatus {
-  setup_required: boolean;
-  auth_enabled: boolean;
-}
-
-interface AuthCtx {
-  user: User | null;
-  isLoading: boolean;
-  isAdmin: boolean;
-  isOperator: boolean;
-  setupRequired: boolean;
-  login: (accessToken: string) => Promise<void>;
-  logout: () => Promise<void>;
-}
-
-const AuthContext = createContext<AuthCtx>({
-  user: null,
-  isLoading: true,
-  isAdmin: false,
-  isOperator: false,
-  setupRequired: false,
-  login: async () => {},
-  logout: async () => {},
-});
-
-export function useAuth() {
-  return useContext(AuthContext);
-}
+import { AuthContext, useAuth, type AuthStatus, type User } from "./auth-context";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -47,13 +11,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     (async () => {
-      // Check auth status first
       try {
         const status = await fetch("/api/auth/status").then((r) => r.json()) as AuthStatus;
         setSetupRequired(status.setup_required);
 
         if (!status.setup_required) {
-          // Try to restore session
           const refreshed = await tryRefresh();
           if (refreshed) {
             try {

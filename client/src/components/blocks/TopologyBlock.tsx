@@ -4,10 +4,14 @@ import type { TopologyData } from "@/lib/types";
 import { fmt } from "@/lib/utils";
 import { COLORS } from "@/lib/theme";
 
+type NodeTooltip = { name: string; status: string; rpm: number; p95: number; errors: number };
+type EdgeTooltip = { source: string; target: string; rpm: number; errorRate: number };
+type TopologyTooltipParams = { dataType?: string; data: NodeTooltip | EdgeTooltip };
+
 export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction?: (prompt: string) => void }) {
   const onEvents = useMemo(() => ({
-    click: (params: any) => {
-      if (params.dataType === "node" && onAction) {
+    click: (params: { dataType?: string; data?: { name: string } }) => {
+      if (params.dataType === "node" && params.data && onAction) {
         onAction(`Diagnose ${params.data.name}`);
       }
     },
@@ -20,13 +24,13 @@ export function TopologyBlock({ data, onAction }: { data: TopologyData; onAction
       animation: false,
       tooltip: {
         ...tooltipStyle(),
-        formatter: (params: any) => {
+        formatter: (params: TopologyTooltipParams) => {
           if (params.dataType === "node") {
-            const d = params.data;
+            const d = params.data as NodeTooltip;
             return `<b>${esc(d.name)}</b><br/>Status: ${esc(d.status)}<br/>Throughput: ${fmt(d.rpm)} rpm<br/>P95: ${fmt(d.p95)}ms<br/>Errors: ${fmt(d.errors)}%`;
           }
           if (params.dataType === "edge") {
-            const d = params.data;
+            const d = params.data as EdgeTooltip;
             return `<b>${esc(d.source)} → ${esc(d.target)}</b><br/>Volume: ${fmt(d.rpm)} rpm<br/>Error Rate: ${fmt(d.errorRate)}%`;
           }
           return "";

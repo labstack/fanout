@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Navigate, useSearchParams } from "react-router";
 import { Loader2, Radio } from "lucide-react";
 import { api, setApiToken } from "@/api/client";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth } from "@/hooks/auth-context";
 
 type Step = "loading" | "setup" | "ingest" | "email" | "code";
 
