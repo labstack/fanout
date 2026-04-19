@@ -89,7 +89,7 @@ func TestAuthorize_PublicModeRequiresTLSAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateIngestToken: %v", err)
 	}
-	if err := store.SetIngest(context.Background(), settings.IngestConfig{
+	if err := store.SetIngest(context.Background(), settings.Ingest{
 		Mode:           settings.IngestModePublic,
 		PublicEndpoint: "fanout.example.com:4317",
 		TokenHash:      hash,
@@ -115,7 +115,7 @@ func TestAuthorize_PublicModeRequiresTLSAndToken(t *testing.T) {
 
 func TestAuthorize_PublicModeRejectsMissingToken(t *testing.T) {
 	store := newRuntimeStore(t)
-	if err := store.SetIngest(context.Background(), settings.IngestConfig{
+	if err := store.SetIngest(context.Background(), settings.Ingest{
 		Mode:           settings.IngestModePublic,
 		PublicEndpoint: "fanout.example.com:4317",
 		TokenHash:      settings.HashIngestToken("fi_test"),
@@ -141,7 +141,7 @@ func TestAuthorize_PublicModeRejectsMissingToken(t *testing.T) {
 
 func TestAuthorize_PublicModeRejectsWithoutTLSConfig(t *testing.T) {
 	store := newRuntimeStore(t)
-	if err := store.SetIngest(context.Background(), settings.IngestConfig{
+	if err := store.SetIngest(context.Background(), settings.Ingest{
 		Mode:           settings.IngestModePublic,
 		PublicEndpoint: "fanout.example.com:4317",
 		TokenHash:      settings.HashIngestToken("fi_test"),

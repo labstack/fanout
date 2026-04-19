@@ -15,17 +15,17 @@ const (
 	IngestModePublic  IngestMode = "public"
 )
 
-type IngestConfig struct {
+type Ingest struct {
 	Mode           IngestMode `json:"mode"`
 	PublicEndpoint string     `json:"public_endpoint"`
 	TokenHash      string     `json:"token_hash"`
 }
 
-func DefaultIngestConfig() IngestConfig {
-	return IngestConfig{Mode: IngestModePrivate}
+func DefaultIngest() Ingest {
+	return Ingest{Mode: IngestModePrivate}
 }
 
-func (c IngestConfig) Validate() error {
+func (c Ingest) Validate() error {
 	switch c.Mode {
 	case IngestModePrivate:
 		return nil
@@ -42,26 +42,26 @@ func (c IngestConfig) Validate() error {
 	}
 }
 
-func (s *Store) GetIngest(ctx context.Context) (IngestConfig, error) {
-	cfg := DefaultIngestConfig()
-	if err := s.Get(ctx, ingestKey, &cfg); err != nil {
-		return IngestConfig{}, err
+func (s *Store) GetIngest(ctx context.Context) (Ingest, error) {
+	ingest := DefaultIngest()
+	if err := s.Get(ctx, ingestKey, &ingest); err != nil {
+		return Ingest{}, err
 	}
-	if err := cfg.Validate(); err != nil {
-		return IngestConfig{}, fmt.Errorf("settings: invalid ingest config: %w", err)
+	if err := ingest.Validate(); err != nil {
+		return Ingest{}, fmt.Errorf("settings: invalid ingest: %w", err)
 	}
-	return cfg, nil
+	return ingest, nil
 }
 
-func (s *Store) SetIngest(ctx context.Context, cfg IngestConfig) error {
-	if err := cfg.Validate(); err != nil {
+func (s *Store) SetIngest(ctx context.Context, ingest Ingest) error {
+	if err := ingest.Validate(); err != nil {
 		return err
 	}
-	return s.Upsert(ctx, ingestKey, cfg)
+	return s.Upsert(ctx, ingestKey, ingest)
 }
 
 func (s *Store) ResetIngest(ctx context.Context) error {
-	return s.Upsert(ctx, ingestKey, DefaultIngestConfig())
+	return s.Upsert(ctx, ingestKey, DefaultIngest())
 }
 
 func GenerateIngestToken() (string, string, error) {
