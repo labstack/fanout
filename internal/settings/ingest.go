@@ -2,44 +2,20 @@ package settings
 
 import (
 	"context"
-	"errors"
 	"fmt"
 )
 
 const ingestKey = "ingest"
 
-type IngestMode string
-
-const (
-	IngestModePrivate IngestMode = "private"
-	IngestModePublic  IngestMode = "public"
-)
-
+// Ingest holds the (optional) ingest-auth configuration.
+// When TokenHash is empty, OTLP ingest is unauthenticated. When set, every
+// request must present the token via `x-fanout-ingest-token` or Bearer auth.
 type Ingest struct {
-	Mode           IngestMode `json:"mode"`
-	PublicEndpoint string     `json:"public_endpoint"`
-	TokenHash      string     `json:"token_hash"`
+	TokenHash string `json:"token_hash"`
 }
 
 func DefaultIngest() Ingest {
-	return Ingest{Mode: IngestModePrivate}
-}
-
-func (c Ingest) Validate() error {
-	switch c.Mode {
-	case IngestModePrivate:
-		return nil
-	case IngestModePublic:
-		if c.PublicEndpoint == "" {
-			return errors.New("public endpoint is required")
-		}
-		if c.TokenHash == "" {
-			return errors.New("ingest token is required")
-		}
-		return nil
-	default:
-		return fmt.Errorf("invalid ingest mode: %s", c.Mode)
-	}
+	return Ingest{}
 }
 
 func (s *Store) GetIngest(ctx context.Context) (Ingest, error) {
@@ -47,21 +23,15 @@ func (s *Store) GetIngest(ctx context.Context) (Ingest, error) {
 	if err := s.Get(ctx, ingestKey, &ingest); err != nil {
 		return Ingest{}, err
 	}
-	if err := ingest.Validate(); err != nil {
-		return Ingest{}, fmt.Errorf("settings: invalid ingest: %w", err)
-	}
 	return ingest, nil
 }
 
 func (s *Store) SetIngest(ctx context.Context, ingest Ingest) error {
-	if err := ingest.Validate(); err != nil {
-		return err
-	}
 	return s.Upsert(ctx, ingestKey, ingest)
 }
 
-func (s *Store) ResetIngest(ctx context.Context) error {
-	return s.Upsert(ctx, ingestKey, DefaultIngest())
+func (s *Store) ClearIngest(ctx context.Context) error {
+	return s.Delete(ctx, ingestKey)
 }
 
 func GenerateIngestToken() (string, string, error) {

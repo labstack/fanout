@@ -233,7 +233,7 @@ func main() {
 	codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
 	api.RegisterAuthRoutes(e, userStore, codeStore, setup, jwtSecret, refreshSecret, smtpCfg)
 	api.RegisterUserRoutes(e, userStore, smtpCfg)
-	api.RegisterConfigRoutes(e, cfg, settingsStore)
+	api.RegisterSettingsRoutes(e, cfg, settingsStore)
 	slog.Info("auth enabled")
 
 	// MCP HTTP routes (Model Context Protocol) — expose if enabled

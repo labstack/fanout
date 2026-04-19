@@ -4,14 +4,13 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"net"
+	"log/slog"
 	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/labstack/fanout/internal/env"
@@ -64,73 +63,30 @@ func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
 	}
 }
 
+// authorize accepts the request if no ingest token is configured, otherwise
+// requires a valid token via `x-fanout-ingest-token` or `Authorization: Bearer`.
+// Peer IP is not considered — operators decide who reaches the port.
 func (a *ingestAuthorizer) authorize(ctx context.Context) error {
 	if a.settingsStore == nil {
-		return nil
+		// Defensive: production always wires a store (cmd/fanout/main.go). Reaching
+		// this path means a mis-wired init; fail closed and log so it surfaces.
+		slog.Error("ingest: settings store not wired; rejecting request")
+		return status.Error(codes.Internal, "ingest auth unavailable")
 	}
-
 	ingestCfg, err := a.settingsStore.GetIngest(ctx)
 	if err != nil {
-		return status.Errorf(codes.Internal, "failed to load ingest config: %v", err)
+		// Don't leak the wrapped error to the client — log it server-side.
+		slog.Error("ingest: load config failed", "err", err)
+		return status.Error(codes.Internal, "ingest auth unavailable")
 	}
-
-	switch ingestCfg.Mode {
-	case settings.IngestModePrivate:
-		if isPrivatePeer(ctx) {
-			return nil
-		}
-		return status.Error(codes.PermissionDenied, "OTLP ingest is private")
-	case settings.IngestModePublic:
-		if !a.cfg.TLSEnabled() {
-			return status.Error(codes.FailedPrecondition, "public OTLP requires TLS")
-		}
-		if !hasTLSPeer(ctx) {
-			return status.Error(codes.Unauthenticated, "TLS required")
-		}
-		token := ingestTokenFromContext(ctx)
-		if token == "" || !settings.CheckIngestToken(token, ingestCfg.TokenHash) {
-			return status.Error(codes.Unauthenticated, "invalid ingest token")
-		}
+	if ingestCfg.TokenHash == "" {
 		return nil
-	default:
-		return status.Error(codes.FailedPrecondition, "invalid ingest mode")
 	}
-}
-
-func hasTLSPeer(ctx context.Context) bool {
-	p, ok := peer.FromContext(ctx)
-	if !ok || p.AuthInfo == nil {
-		return false
+	token := ingestTokenFromContext(ctx)
+	if token == "" || !settings.CheckIngestToken(token, ingestCfg.TokenHash) {
+		return status.Error(codes.Unauthenticated, "invalid ingest token")
 	}
-	_, ok = p.AuthInfo.(credentials.TLSInfo)
-	return ok
-}
-
-func isPrivatePeer(ctx context.Context) bool {
-	p, ok := peer.FromContext(ctx)
-	if !ok || p.Addr == nil {
-		return false
-	}
-	if p.Addr.Network() == "unix" {
-		return true
-	}
-
-	host := p.Addr.String()
-	if tcpAddr, ok := p.Addr.(*net.TCPAddr); ok && tcpAddr.IP != nil {
-		return isPrivateIP(tcpAddr.IP)
-	}
-	if splitHost, _, err := net.SplitHostPort(host); err == nil {
-		host = splitHost
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	return isPrivateIP(ip)
-}
-
-func isPrivateIP(ip net.IP) bool {
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+	return nil
 }
 
 func ingestTokenFromContext(ctx context.Context) string {

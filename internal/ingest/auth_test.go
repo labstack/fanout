@@ -9,16 +9,13 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"math/big"
-	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/labstack/fanout/internal/env"
@@ -26,7 +23,7 @@ import (
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func TestGRPCServerOptions_Disabled(t *testing.T) {
+func TestGRPCServerOptions_NoTLS(t *testing.T) {
 	store := newRuntimeStore(t)
 	opts, err := GRPCServerOptions(env.Config{}, store)
 	if err != nil {
@@ -56,107 +53,85 @@ func TestTLSConfig(t *testing.T) {
 	}
 }
 
-func TestAuthorize_PrivateModeAllowsPrivatePeer(t *testing.T) {
+func TestAuthorize_OpenWhenNoToken(t *testing.T) {
 	store := newRuntimeStore(t)
 	authorizer := newIngestAuthorizer(env.Config{}, store)
 
-	ctx := peer.NewContext(context.Background(), &peer.Peer{
-		Addr: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 4317},
-	})
-
-	if err := authorizer.authorize(ctx); err != nil {
-		t.Fatalf("authorize(private loopback): %v", err)
+	if err := authorizer.authorize(context.Background()); err != nil {
+		t.Fatalf("authorize with no token configured should pass: %v", err)
 	}
 }
 
-func TestAuthorize_PrivateModeRejectsPublicPeer(t *testing.T) {
-	store := newRuntimeStore(t)
-	authorizer := newIngestAuthorizer(env.Config{}, store)
-
-	ctx := peer.NewContext(context.Background(), &peer.Peer{
-		Addr: &net.TCPAddr{IP: net.ParseIP("203.0.113.10"), Port: 4317},
-	})
-
-	err := authorizer.authorize(ctx)
-	if status.Code(err) != codes.PermissionDenied {
-		t.Fatalf("code = %v, want %v", status.Code(err), codes.PermissionDenied)
-	}
-}
-
-func TestAuthorize_PublicModeRequiresTLSAndToken(t *testing.T) {
+func TestAuthorize_AcceptsValidToken(t *testing.T) {
 	store := newRuntimeStore(t)
 	token, hash, err := settings.GenerateIngestToken()
 	if err != nil {
 		t.Fatalf("GenerateIngestToken: %v", err)
 	}
-	if err := store.SetIngest(context.Background(), settings.Ingest{
-		Mode:           settings.IngestModePublic,
-		PublicEndpoint: "fanout.example.com:4317",
-		TokenHash:      hash,
-	}); err != nil {
+	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
-	authorizer := newIngestAuthorizer(env.Config{
-		TLSCertFile: "server.pem",
-		TLSKeyFile:  "server-key.pem",
-	}, store)
-
-	ctx := peer.NewContext(context.Background(), &peer.Peer{
-		Addr:     &net.TCPAddr{IP: net.ParseIP("203.0.113.10"), Port: 4317},
-		AuthInfo: credentials.TLSInfo{},
-	})
-	ctx = metadata.NewIncomingContext(ctx, metadata.Pairs("x-fanout-ingest-token", token))
+	authorizer := newIngestAuthorizer(env.Config{}, store)
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", token))
 
 	if err := authorizer.authorize(ctx); err != nil {
-		t.Fatalf("authorize(public tls+token): %v", err)
+		t.Fatalf("authorize with valid token: %v", err)
 	}
 }
 
-func TestAuthorize_PublicModeRejectsMissingToken(t *testing.T) {
+func TestAuthorize_RejectsWrongToken(t *testing.T) {
 	store := newRuntimeStore(t)
-	if err := store.SetIngest(context.Background(), settings.Ingest{
-		Mode:           settings.IngestModePublic,
-		PublicEndpoint: "fanout.example.com:4317",
-		TokenHash:      settings.HashIngestToken("fi_test"),
-	}); err != nil {
+	_, hash, err := settings.GenerateIngestToken()
+	if err != nil {
+		t.Fatalf("GenerateIngestToken: %v", err)
+	}
+	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
-	authorizer := newIngestAuthorizer(env.Config{
-		TLSCertFile: "server.pem",
-		TLSKeyFile:  "server-key.pem",
-	}, store)
+	authorizer := newIngestAuthorizer(env.Config{}, store)
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", "fi_wrong"))
 
-	ctx := peer.NewContext(context.Background(), &peer.Peer{
-		Addr:     &net.TCPAddr{IP: net.ParseIP("203.0.113.10"), Port: 4317},
-		AuthInfo: credentials.TLSInfo{},
-	})
-
-	err := authorizer.authorize(ctx)
+	err = authorizer.authorize(ctx)
 	if status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("code = %v, want %v", status.Code(err), codes.Unauthenticated)
 	}
 }
 
-func TestAuthorize_PublicModeRejectsWithoutTLSConfig(t *testing.T) {
+func TestAuthorize_AcceptsBearerAuthorization(t *testing.T) {
 	store := newRuntimeStore(t)
-	if err := store.SetIngest(context.Background(), settings.Ingest{
-		Mode:           settings.IngestModePublic,
-		PublicEndpoint: "fanout.example.com:4317",
-		TokenHash:      settings.HashIngestToken("fi_test"),
-	}); err != nil {
+	token, hash, err := settings.GenerateIngestToken()
+	if err != nil {
+		t.Fatalf("GenerateIngestToken: %v", err)
+	}
+	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
 	authorizer := newIngestAuthorizer(env.Config{}, store)
-	ctx := peer.NewContext(context.Background(), &peer.Peer{
-		Addr: &net.TCPAddr{IP: net.ParseIP("203.0.113.10"), Port: 4317},
-	})
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
 
-	err := authorizer.authorize(ctx)
-	if status.Code(err) != codes.FailedPrecondition {
-		t.Fatalf("code = %v, want %v", status.Code(err), codes.FailedPrecondition)
+	if err := authorizer.authorize(ctx); err != nil {
+		t.Fatalf("authorize with Bearer header: %v", err)
+	}
+}
+
+func TestAuthorize_RejectsMissingToken(t *testing.T) {
+	store := newRuntimeStore(t)
+	_, hash, err := settings.GenerateIngestToken()
+	if err != nil {
+		t.Fatalf("GenerateIngestToken: %v", err)
+	}
+	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+
+	authorizer := newIngestAuthorizer(env.Config{}, store)
+
+	err = authorizer.authorize(context.Background())
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("code = %v, want %v", status.Code(err), codes.Unauthenticated)
 	}
 }
 

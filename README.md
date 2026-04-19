@@ -89,33 +89,35 @@ Storage layout under `DATA_DIR`:
 
 ## OTLP Ingest
 
-Private OTLP is the default. Point a local collector or same-host SDK at:
+Point a collector or SDK at `OTLP_GRPC_ADDR` (default `127.0.0.1:4317`):
+
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=127.0.0.1:4317
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_SERVICE_NAME=my-service
 ```
 
-For Docker, `127.0.0.1:4317` is inside the container. To ingest from the host or another machine, set `OTLP_GRPC_ADDR=0.0.0.0:4317`, publish port `4317`, and then either keep it private behind your network or enable public OTLP over TLS from setup.
+Ingest is **unauthenticated by default** — whoever can reach the port can write. Protect it however your network normally protects a service: firewall, private VPC, reverse proxy, or an **ingest token** you generate from the admin UI.
 
-For public OTLP, Fanout terminates TLS itself. The same cert/key also switches `HTTP_ADDR` to HTTPS. Set:
-```bash
-TLS_CERT_FILE=/etc/fanout/certs/server.pem
-TLS_KEY_FILE=/etc/fanout/certs/server-key.pem
-```
+### Ingest token
 
-After first login, enable public OTLP from the setup flow or admin config screen. Fanout will generate an ingest token and show the exact exporter config.
+From the admin UI, rotate a token. Collectors then send it in every request:
 
-Collector example:
 ```yaml
 exporters:
   otlp:
     endpoint: fanout.example.com:4317
-    tls:
-      insecure: false
     headers:
-      x-fanout-ingest-token: <INGEST_TOKEN>
+      x-fanout-ingest-token: <TOKEN>
 ```
+
+Once set, the token is required on every OTLP request regardless of source IP. Clear it from the UI to go back to unauthenticated.
+
+### TLS
+
+Fanout is designed to run behind a reverse proxy (Caddy, nginx, Traefik) that terminates TLS.
+
+For direct-exposure scenarios (private network with an internal CA, air-gapped environments), set `TLS_CERT_FILE` / `TLS_KEY_FILE` to have Fanout terminate TLS itself — both HTTP and OTLP gRPC use the cert pair.
 
 Auth is web-only:
 - first boot uses the setup page plus the setup token printed at startup to create the first admin
