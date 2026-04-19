@@ -1,10 +1,13 @@
 package auth
 
 import (
+	"regexp"
 	"sync"
 	"testing"
 	"time"
 )
+
+var tokenShape = regexp.MustCompile(`^[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}$`)
 
 func TestSetupVerifyAcceptsFreshToken(t *testing.T) {
 	s := NewSetup()
@@ -12,8 +15,8 @@ func TestSetupVerifyAcceptsFreshToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)
 	}
-	if token == "" {
-		t.Fatal("token is empty")
+	if !tokenShape.MatchString(token) {
+		t.Fatalf("token = %q, want 3 hex-4 groups separated by dashes", token)
 	}
 	if time.Until(expires) <= 0 || time.Until(expires) > SetupTTL {
 		t.Fatalf("expires %v outside TTL", expires)

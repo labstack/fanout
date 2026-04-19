@@ -311,7 +311,7 @@ func TestSetupCreatesAdminWithValidToken(t *testing.T) {
 	}
 
 	if got := setup.Verify(setupToken); got != auth.SetupStatusUnset {
-		t.Fatalf("setup after setup = %v, want Unset", got)
+		t.Fatalf("setup state after admin creation = %v, want Unset", got)
 	}
 }
 
@@ -331,6 +331,6 @@ func TestSetupRetriesSuccessfullyAfterAdminAlreadyExists(t *testing.T) {
 	}
 
 	if got := setup.Verify(setupToken); got != auth.SetupStatusUnset {
-		t.Fatalf("setup after setup = %v, want Unset", got)
+		t.Fatalf("setup state after admin creation = %v, want Unset", got)
 	}
 }
