@@ -2,116 +2,44 @@ package env
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
-func TestGetenv(t *testing.T) {
-	// Test default value
-	result := getenv("NONEXISTENT_VAR_12345", "default_value")
-	if result != "default_value" {
-		t.Errorf("getenv with missing var = %q, want %q", result, "default_value")
-	}
-
-	// Test actual value
-	os.Setenv("TEST_GETENV_VAR", "actual_value")
-	defer os.Unsetenv("TEST_GETENV_VAR")
-
-	result = getenv("TEST_GETENV_VAR", "default_value")
-	if result != "actual_value" {
-		t.Errorf("getenv with set var = %q, want %q", result, "actual_value")
-	}
+var requiredEnvVars = []string{
+	"HTTP_ADDR", "OTLP_GRPC_ADDR", "DATA_DIR", "FLUSH_SECONDS",
+	"FLUSH_BATCH_SIZE", "ROLLUP_EVERY",
+	"RETENTION_DAYS", "TENANT_ID", "DEFAULT_NAMESPACE", "ENV",
+	"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL",
+	"JWT_SECRET", "JWT_REFRESH_SECRET",
+	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
+	"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE",
 }
 
-func TestGetenvInt(t *testing.T) {
-	// Test default value
-	result := getenvInt("NONEXISTENT_INT_VAR", 42)
-	if result != 42 {
-		t.Errorf("getenvInt with missing var = %d, want %d", result, 42)
-	}
-
-	// Test actual value
-	os.Setenv("TEST_INT_VAR", "123")
-	defer os.Unsetenv("TEST_INT_VAR")
-
-	result = getenvInt("TEST_INT_VAR", 42)
-	if result != 123 {
-		t.Errorf("getenvInt with set var = %d, want %d", result, 123)
-	}
-
-	// Test invalid value (should return default)
-	os.Setenv("TEST_INT_VAR", "not_a_number")
-	result = getenvInt("TEST_INT_VAR", 42)
-	if result != 42 {
-		t.Errorf("getenvInt with invalid var = %d, want %d", result, 42)
-	}
-}
-
-func TestGetenvBool(t *testing.T) {
-	tests := []struct {
-		value    string
-		def      bool
-		expected bool
-	}{
-		{"", true, true},   // empty returns default
-		{"", false, false}, // empty returns default
-		{"1", false, true},
-		{"true", false, true},
-		{"yes", false, true},
-		{"True", false, true},
-		{"TRUE", false, true},
-		{"YES", false, true},
-		{"0", true, false},
-		{"false", true, false},
-		{"no", true, false},
-		{"anything", true, false}, // unrecognized = false
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.value, func(t *testing.T) {
-			if tc.value != "" {
-				os.Setenv("TEST_BOOL_VAR", tc.value)
-				defer os.Unsetenv("TEST_BOOL_VAR")
-			} else {
-				os.Unsetenv("TEST_BOOL_VAR")
-			}
-
-			result := getenvBool("TEST_BOOL_VAR", tc.def)
-			if result != tc.expected {
-				t.Errorf("getenvBool(%q, %v) = %v, want %v", tc.value, tc.def, result, tc.expected)
-			}
-		})
-	}
-}
-
-func TestLoad(t *testing.T) {
-	// Clear all env vars that might affect config
-	vars := []string{"HTTP_ADDR", "OTLP_GRPC_ADDR", "DATA_DIR", "FLUSH_SECONDS",
-		"FLUSH_BATCH_SIZE", "ROLLUP_EVERY",
-		"RETENTION_DAYS", "TENANT_ID", "DEFAULT_NAMESPACE",
-		"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL", "JWT_SECRET", "JWT_REFRESH_SECRET",
-		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
-		"OTLP_TLS_CERT_FILE", "OTLP_TLS_KEY_FILE"}
-	for _, v := range vars {
+func clearEnv(t *testing.T) {
+	t.Helper()
+	for _, v := range requiredEnvVars {
 		os.Unsetenv(v)
 	}
-	os.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
-	os.Setenv("JWT_REFRESH_SECRET", "abcdef0123456789abcdef0123456789")
-	os.Setenv("AI_API_KEY", "sk-test")
-	os.Setenv("SMTP_HOST", "smtp.example.com")
-	os.Setenv("SMTP_USER", "user")
-	os.Setenv("SMTP_PASS", "pass")
-	os.Setenv("SMTP_FROM", "Fanout <noreply@example.com>")
-	defer os.Unsetenv("JWT_SECRET")
-	defer os.Unsetenv("JWT_REFRESH_SECRET")
-	defer os.Unsetenv("AI_API_KEY")
-	defer os.Unsetenv("SMTP_HOST")
-	defer os.Unsetenv("SMTP_USER")
-	defer os.Unsetenv("SMTP_PASS")
-	defer os.Unsetenv("SMTP_FROM")
+}
+
+func seedValidEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("JWT_REFRESH_SECRET", "abcdef0123456789abcdef0123456789")
+	t.Setenv("AI_API_KEY", "sk-test")
+	t.Setenv("SMTP_HOST", "smtp.example.com")
+	t.Setenv("SMTP_USER", "user")
+	t.Setenv("SMTP_PASS", "pass")
+	t.Setenv("SMTP_FROM", "Fanout <noreply@example.com>")
+}
+
+func TestLoadReturnsDefaults(t *testing.T) {
+	clearEnv(t)
+	seedValidEnv(t)
 
 	cfg := Load()
 
-	// Check defaults
 	if cfg.HTTPAddr != ":7520" {
 		t.Errorf("HTTPAddr = %q, want %q", cfg.HTTPAddr, ":7520")
 	}
@@ -135,6 +63,81 @@ func TestLoad(t *testing.T) {
 	}
 	if cfg.DefaultNS != "default" {
 		t.Errorf("DefaultNS = %q, want %q", cfg.DefaultNS, "default")
+	}
+}
+
+// TestLoadLayering exercises the precedence contract: .env.{ENV} > OS env > .env > defaults.
+// Uses t.Chdir so loadIfPresent/overloadIfPresent look at the temp dir.
+func TestLoadLayering(t *testing.T) {
+	cases := []struct {
+		name     string
+		envFile  string
+		profFile string
+		profile  string
+		osEnv    map[string]string
+		wantAddr string
+	}{
+		{
+			name:     "default wins when no files and no OS env",
+			profile:  "development",
+			wantAddr: ":7520",
+		},
+		{
+			name:     ".env sets value when OS env is unset",
+			envFile:  "HTTP_ADDR=:1111\n",
+			profile:  "development",
+			wantAddr: ":1111",
+		},
+		{
+			name:     "OS env beats .env",
+			envFile:  "HTTP_ADDR=:1111\n",
+			osEnv:    map[string]string{"HTTP_ADDR": ":2222"},
+			profile:  "development",
+			wantAddr: ":2222",
+		},
+		{
+			name:     ".env.{ENV} overrides everything",
+			envFile:  "HTTP_ADDR=:1111\n",
+			profFile: "HTTP_ADDR=:3333\n",
+			osEnv:    map[string]string{"HTTP_ADDR": ":2222"},
+			profile:  "production",
+			wantAddr: ":3333",
+		},
+		{
+			name:     "profile file selection respects ENV",
+			profFile: "HTTP_ADDR=:4444\n",
+			profile:  "staging",
+			wantAddr: ":4444",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clearEnv(t)
+			seedValidEnv(t)
+
+			dir := t.TempDir()
+			if tc.envFile != "" {
+				if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(tc.envFile), 0o644); err != nil {
+					t.Fatalf("write .env: %v", err)
+				}
+			}
+			if tc.profFile != "" {
+				if err := os.WriteFile(filepath.Join(dir, ".env."+tc.profile), []byte(tc.profFile), 0o644); err != nil {
+					t.Fatalf("write .env.%s: %v", tc.profile, err)
+				}
+			}
+			t.Chdir(dir)
+			t.Setenv("ENV", tc.profile)
+			for k, v := range tc.osEnv {
+				t.Setenv(k, v)
+			}
+
+			cfg := Load()
+			if cfg.HTTPAddr != tc.wantAddr {
+				t.Errorf("HTTPAddr = %q, want %q", cfg.HTTPAddr, tc.wantAddr)
+			}
+		})
 	}
 }
 
@@ -187,7 +190,7 @@ func TestValidate(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			c := valid // copy
+			c := valid
 			tc.modify(&c)
 			if err := c.Validate(); err == nil {
 				t.Error("expected validation error")
@@ -195,7 +198,6 @@ func TestValidate(t *testing.T) {
 		})
 	}
 
-	// RetentionDays=0 is valid (means "keep forever")
 	t.Run("RetentionDays=0_valid", func(t *testing.T) {
 		c := valid
 		c.RetentionDays = 0

@@ -1,85 +1,102 @@
 package env
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	envparse "github.com/caarlos0/env/v11"
 	"github.com/google/uuid"
+	"github.com/joho/godotenv"
 )
 
 type Config struct {
-	HTTPAddr       string    // :7520
-	OTLPGRPCAddr   string    // 127.0.0.1:4317
-	DataDir        string    // ./data
-	FlushSeconds   int       // 15
-	FlushBatchSize int       // 50000 rows per writer flush
-	RollupEvery    int       // seconds
-	MCPEnabled     bool      // enable MCP server
-	RetentionDays  int       // days to keep data (0 = forever)
-	TenantID       uuid.UUID // tenant identifier (UUIDv7)
-	DefaultNS      string    // default namespace if not set
-	// DuckDB
-	DuckDBMemory string // memory limit (e.g. "512MB", "1GB")
-	// Alerting
-	AlertEnabled      bool
-	AlertEvalInterval int // seconds
-	AlertHistoryDays  int
-	// AI chat
-	AIProvider string // anthropic or openai
-	AIAPIKey   string // LLM API key
-	AIModel    string // model ID override
-	AIBaseURL  string // base URL override (OpenAI-compatible)
-	// Auth
-	SMTPHost         string // SMTP server host
-	SMTPPort         int    // SMTP server port (default 587)
-	SMTPUser         string // SMTP username
-	SMTPPass         string // SMTP password
-	SMTPFrom         string // Sender email address
-	JWTSecret        string // HS256 access-token signing key
-	JWTRefreshSecret string // HS256 refresh-token signing key
-	// OTLP TLS
-	OTLPTLSCertFile string // TLS server cert for OTLP gRPC
-	OTLPTLSKeyFile  string // TLS server key for OTLP gRPC
+	HTTPAddr          string    `env:"HTTP_ADDR" envDefault:":7520"`
+	OTLPGRPCAddr      string    `env:"OTLP_GRPC_ADDR" envDefault:"127.0.0.1:4317"`
+	DataDir           string    `env:"DATA_DIR" envDefault:"./data"`
+	FlushSeconds      int       `env:"FLUSH_SECONDS" envDefault:"15"`
+	FlushBatchSize    int       `env:"FLUSH_BATCH_SIZE" envDefault:"50000"`
+	RollupEvery       int       `env:"ROLLUP_EVERY" envDefault:"60"`
+	MCPEnabled        bool      `env:"MCP_ENABLED" envDefault:"true"`
+	RetentionDays     int       `env:"RETENTION_DAYS" envDefault:"30"`
+	TenantID          uuid.UUID `env:"TENANT_ID"`
+	DefaultNS         string    `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	DuckDBMemory      string    `env:"DUCKDB_MEMORY" envDefault:"512MB"`
+	AlertEnabled      bool      `env:"ALERT_ENABLED" envDefault:"true"`
+	AlertEvalInterval int       `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
+	AlertHistoryDays  int       `env:"ALERT_HISTORY_DAYS" envDefault:"7"`
+	AIProvider        string    `env:"AI_PROVIDER" envDefault:"anthropic"`
+	AIAPIKey          string    `env:"AI_API_KEY"`
+	AIModel           string    `env:"AI_MODEL"`
+	AIBaseURL         string    `env:"AI_BASE_URL"`
+	SMTPHost          string    `env:"SMTP_HOST"`
+	SMTPPort          int       `env:"SMTP_PORT" envDefault:"587"`
+	SMTPUser          string    `env:"SMTP_USER"`
+	SMTPPass          string    `env:"SMTP_PASS"`
+	SMTPFrom          string    `env:"SMTP_FROM"`
+	JWTSecret         string    `env:"JWT_SECRET"`
+	JWTRefreshSecret  string    `env:"JWT_REFRESH_SECRET"`
+	OTLPTLSCertFile   string    `env:"OTLP_TLS_CERT_FILE"`
+	OTLPTLSKeyFile    string    `env:"OTLP_TLS_KEY_FILE"`
 }
 
+// Load reads .env non-destructively (does not overwrite pre-set OS env), then
+// .env.{ENV} destructively (overwrites everything — it is the per-env override).
+// ENV defaults to "development". Missing files are not an error.
+//
+// Effective precedence (highest first):
+//  1. .env.{ENV}
+//  2. real OS env (e.g. exported in shell or injected by a container runtime)
+//  3. .env
+//  4. envDefault tags on the Config struct
 func Load() Config {
-	cfg := Config{
-		HTTPAddr:          getenv("HTTP_ADDR", ":7520"),
-		OTLPGRPCAddr:      getenv("OTLP_GRPC_ADDR", "127.0.0.1:4317"),
-		DataDir:           getenv("DATA_DIR", "./data"),
-		FlushSeconds:      getenvInt("FLUSH_SECONDS", 15),
-		FlushBatchSize:    getenvInt("FLUSH_BATCH_SIZE", 50000),
-		RollupEvery:       getenvInt("ROLLUP_EVERY", 60),
-		MCPEnabled:        getenvBool("MCP_ENABLED", true),
-		RetentionDays:     getenvInt("RETENTION_DAYS", 30),
-		TenantID:          getenvUUID("TENANT_ID"),
-		DefaultNS:         getenv("DEFAULT_NAMESPACE", "default"),
-		DuckDBMemory:      getenv("DUCKDB_MEMORY", "512MB"),
-		AlertEnabled:      getenvBool("ALERT_ENABLED", true),
-		AlertEvalInterval: getenvInt("ALERT_EVAL_INTERVAL", 30),
-		AlertHistoryDays:  getenvInt("ALERT_HISTORY_DAYS", 7),
-		AIProvider:        getenv("AI_PROVIDER", "anthropic"),
-		AIAPIKey:          os.Getenv("AI_API_KEY"),
-		AIModel:           os.Getenv("AI_MODEL"),
-		AIBaseURL:         os.Getenv("AI_BASE_URL"),
-		SMTPHost:          os.Getenv("SMTP_HOST"),
-		SMTPPort:          getenvInt("SMTP_PORT", 587),
-		SMTPUser:          os.Getenv("SMTP_USER"),
-		SMTPPass:          os.Getenv("SMTP_PASS"),
-		SMTPFrom:          os.Getenv("SMTP_FROM"),
-		JWTSecret:         os.Getenv("JWT_SECRET"),
-		JWTRefreshSecret:  os.Getenv("JWT_REFRESH_SECRET"),
-		OTLPTLSCertFile:   os.Getenv("OTLP_TLS_CERT_FILE"),
-		OTLPTLSKeyFile:    os.Getenv("OTLP_TLS_KEY_FILE"),
+	envName := os.Getenv("ENV")
+	if envName == "" {
+		envName = "development"
+	}
+
+	cwd, err := os.Getwd()
+	if err != nil {
+		slog.Warn("getwd failed, using '.'", "err", err)
+		cwd = "."
+	}
+	if err := loadIfPresent(filepath.Join(cwd, ".env")); err != nil {
+		slog.Error("load .env failed", "err", err)
+		os.Exit(1)
+	}
+	if err := overloadIfPresent(filepath.Join(cwd, ".env."+envName)); err != nil {
+		slog.Error("load .env."+envName+" failed", "err", err)
+		os.Exit(1)
+	}
+
+	var cfg Config
+	if err := envparse.Parse(&cfg); err != nil {
+		slog.Error("parse env failed", "err", err)
+		os.Exit(1)
 	}
 	if err := cfg.Validate(); err != nil {
 		slog.Error("invalid config", "err", err)
 		os.Exit(1)
 	}
 	return cfg
+}
+
+func loadIfPresent(path string) error {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return godotenv.Load(path)
+}
+
+func overloadIfPresent(path string) error {
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	return godotenv.Overload(path)
 }
 
 func (c Config) TelemetryDir() string {
@@ -182,45 +199,6 @@ func (c Config) SMTPConfigured() bool {
 		strings.TrimSpace(c.SMTPUser) != "" &&
 		strings.TrimSpace(c.SMTPPass) != "" &&
 		strings.TrimSpace(c.SMTPFrom) != ""
-}
-
-func getenvUUID(k string) uuid.UUID {
-	if v := os.Getenv(k); v != "" {
-		id, err := uuid.Parse(v)
-		if err != nil {
-			slog.Error("invalid UUID", "key", k, "err", err)
-			os.Exit(1)
-		}
-		return id
-	}
-	return uuid.Nil // stable default
-}
-
-func getenvBool(k string, def bool) bool {
-	v := os.Getenv(k)
-	if v == "" {
-		return def
-	}
-	v = strings.ToLower(v)
-	return v == "1" || v == "true" || v == "yes"
-}
-
-func getenv(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
-}
-
-func getenvInt(k string, def int) int {
-	if v := os.Getenv(k); v != "" {
-		var i int
-		if _, err := fmt.Sscanf(v, "%d", &i); err == nil {
-			return i
-		}
-		slog.Warn("invalid integer config value, using default", "key", k, "value", v, "default", def)
-	}
-	return def
 }
 
 func anySet(values ...string) bool {
