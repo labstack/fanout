@@ -90,7 +90,7 @@ func RegisterUIRoutes(e *echo.Echo, cfg env.Config, orch *ai.Orchestrator, sseHa
 	e.POST("/api/bookmarks", h.CreateBookmark)
 	e.DELETE("/api/bookmarks/:id", h.DeleteBookmark)
 
-	// Suggestions API
+	// Overview + service detail API
 	e.GET("/api/overview", h.Overview)
 	e.GET("/api/services/:name", h.ServiceDetail)
 	e.GET("/api/namespaces", h.Namespaces)

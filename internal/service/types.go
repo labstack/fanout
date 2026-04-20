@@ -48,14 +48,14 @@ type OverviewHealth struct {
 	GlobalP95Ms      float64        `json:"global_p95_ms"`
 }
 
-// OverviewService contains per-service metrics. HealthScore, TrafficPerMin,
-// and SparklineTraffic are optional — populated only when requested via Include.
+// OverviewService contains per-service metrics. SparklineTraffic is only
+// populated when the "sparklines" section is requested via Include.
 type OverviewService struct {
 	Service          string    `json:"service"`
 	Status           string    `json:"status"`
-	HealthScore      float64   `json:"health_score,omitempty"`
+	HealthScore      float64   `json:"health_score"`
 	Requests         int64     `json:"requests"`
-	TrafficPerMin    float64   `json:"traffic_per_min,omitempty"`
+	TrafficPerMin    float64   `json:"traffic_per_min"`
 	ErrorRate        float64   `json:"error_rate"`
 	P50Ms            float64   `json:"p50_ms"`
 	P95Ms            float64   `json:"p95_ms"`

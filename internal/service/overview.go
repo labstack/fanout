@@ -17,7 +17,7 @@ import (
 type OverviewParams struct {
 	Window    int      // minutes; 0 → 15
 	Namespace string   // empty = all namespaces
-	Include   []string // sections to populate: "health", "services", "issues", "incidents", "sparklines". Empty = all except "incidents" and "sparklines" (those are always opt-in).
+	Include   []string // sections to populate: "health", "services", "issues", "incidents", "sparklines". Empty = all except "incidents" and "sparklines". Specifying "incidents" implies "sparklines".
 	SortBy    string   // services sort: "severity" (default), "error_rate", "latency", "throughput"
 	Limit     int      // max services; 0 → 100
 	Tracker   *IncidentTracker
@@ -28,7 +28,7 @@ type OverviewParams struct {
 // state is applied on top per call and is not cached.
 type overviewSnapshot struct {
 	Rows       []overviewRow
-	Sparklines map[string][]float64 // key: "svc_traffic" or "svc_err"
+	Sparklines map[string][]float64 // key: "<service>_traffic" or "<service>_err"
 	TopErrors  map[string][]TopError
 }
 
@@ -44,7 +44,7 @@ type overviewRow struct {
 
 // Overview returns a unified health overview, powering both the MCP overview
 // tool (compact) and the UI Home page (rich). Sections are populated based on
-// p.Include; the expensive "incidents" section requires a non-nil Tracker.
+// p.Include; lifecycle fields on incidents require a non-nil Tracker.
 func (s *Service) Overview(ctx context.Context, p OverviewParams) (*OverviewResult, error) {
 	window := p.Window
 	if window <= 0 {
@@ -248,8 +248,10 @@ ORDER BY service, bucket;
 	return out, nil
 }
 
-// overviewTopErrors queries top error messages for a set of services — groups
-// error-status spans by message, capped at 5 per service (20 total).
+// overviewTopErrors queries top error messages for a set of services. The SQL
+// LIMIT 20 is a shared fetch cap; the Go loop then keeps at most 5 per service
+// (an earlier-returned service dominating the fetch can leave later services
+// empty — acceptable since those services will still appear in Incidents).
 func (s *Service) overviewTopErrors(ctx context.Context, window int, namespace string, services []string) (map[string][]TopError, error) {
 	if len(services) == 0 {
 		return map[string][]TopError{}, nil
