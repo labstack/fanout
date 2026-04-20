@@ -1,0 +1,113 @@
+---
+interface Heading {
+  depth: number;
+  slug: string;
+  text: string;
+}
+
+interface Props {
+  headings: Heading[];
+}
+
+// Only show h2/h3 in the TOC — h1 is the page title, h4+ is too noisy.
+const { headings } = Astro.props;
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+---
+
+{
+  toc.length > 0 && (
+    <aside class="docs-toc" aria-label="On this page">
+      <span class="docs-toc__label">On this page</span>
+      <ul>
+        {toc.map((h) => (
+          <li class={`docs-toc__item docs-toc__item--h${h.depth}`}>
+            <a href={`#${h.slug}`}>{h.text}</a>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  )
+}
+
+<style>
+  .docs-toc {
+    position: sticky;
+    top: 80px;
+    align-self: start;
+    font-size: 12.5px;
+    line-height: 1.5;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+  }
+
+  @media (max-width: 960px) {
+    .docs-toc {
+      display: none;
+    }
+  }
+
+  .docs-toc__label {
+    display: block;
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+
+  .docs-toc ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .docs-toc__item {
+    padding: 4px 0;
+  }
+
+  .docs-toc__item--h3 {
+    padding-left: 14px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .docs-toc a {
+    color: var(--muted);
+    text-decoration: none;
+    transition: color 0.15s;
+    display: block;
+  }
+  .docs-toc a:hover {
+    color: var(--fg);
+  }
+  .docs-toc a.active {
+    color: var(--primary);
+  }
+</style>
+
+<script>
+  // Highlight the current section as the user scrolls.
+  const observer = new IntersectionObserver(
+    (entries) => {
+      const visible = entries.filter((e) => e.isIntersecting);
+      if (visible.length === 0) return;
+      // Pick the heading closest to the top of the viewport.
+      visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      const id = visible[0].target.id;
+      document.querySelectorAll(".docs-toc a").forEach((a) => {
+        a.classList.toggle("active", (a as HTMLAnchorElement).hash === `#${id}`);
+      });
+    },
+    { rootMargin: "-80px 0px -70% 0px" },
+  );
+
+  function wireHeadings() {
+    document.querySelectorAll(".docs-body h2, .docs-body h3").forEach((h) => {
+      if (h.id) observer.observe(h);
+    });
+  }
+
+  wireHeadings();
+  document.addEventListener("astro:page-load", wireHeadings);
+</script>

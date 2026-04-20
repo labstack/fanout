@@ -1,6 +1,7 @@
 import { defineConfig } from "astro/config";
-import starlight from "@astrojs/starlight";
 import mdx from "@astrojs/mdx";
+import rehypeSlug from "rehype-slug";
+import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
 export default defineConfig({
   site: "https://fanout.run",
@@ -9,31 +10,20 @@ export default defineConfig({
     // reserved for the Vite-powered app shell.
     allowedHosts: ["fanout.test"],
   },
-  integrations: [
-    starlight({
-      title: "Fanout",
-      description:
-        "Observability that runs anywhere you can run a binary. OpenTelemetry ingest, fast UI, chat investigator — self-hosted.",
-      customCss: ["./src/styles/theme.css"],
-      // Dark-only site — pin one dark Shiki theme for every code block (not
-      // just terminal frames) so non-bash samples (yaml, json, http, text)
-      // stay readable.
-      expressiveCode: {
-        themes: ["github-dark-default"],
-      },
-      head: [
-        { tag: "link", attrs: { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" } },
-        { tag: "meta", attrs: { property: "og:type", content: "website" } },
-        { tag: "meta", attrs: { property: "og:image", content: "https://fanout.run/og.png" } },
-        { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
-        { tag: "meta", attrs: { name: "twitter:image", content: "https://fanout.run/og.png" } },
-      ],
-      components: {
-        Head: "./src/components/StarlightHead.astro",
-      },
-      // Single-page docs — the "On this page" TOC handles navigation.
-      sidebar: [{ label: "Fanout docs", slug: "docs" }],
-    }),
-    mdx(),
-  ],
+  markdown: {
+    // Single dark Shiki theme keeps non-bash code (yaml, json, http) readable;
+    // the paired light theme that Astro would otherwise use renders near-black
+    // tokens on the docs' dark surface.
+    shikiConfig: {
+      theme: "github-dark-default",
+      wrap: false,
+    },
+    // Heading IDs + the TOC need anchors; autolink is a nice-to-have for
+    // deep-linking from the marketing site.
+    rehypePlugins: [
+      rehypeSlug,
+      [rehypeAutolinkHeadings, { behavior: "wrap" }],
+    ],
+  },
+  integrations: [mdx()],
 });
