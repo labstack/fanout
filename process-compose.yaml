@@ -10,4 +10,8 @@ processes:
 
   web:
     command: bun run dev
-    working_dir: ./client
+    working_dir: ./web
+
+  site:
+    command: bun run dev --host --port 7522
+    working_dir: ./site

@@ -1,5 +1,5 @@
 // Command genblocks generates TypeScript type definitions from Go block structs.
-// Usage: go run ./cmd/genblocks > client/src/lib/types.ts
+// Usage: go run ./cmd/genblocks > web/src/lib/types.ts
 package main
 
 import (

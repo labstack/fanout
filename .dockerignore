@@ -9,8 +9,10 @@ testdata/
 
 # Build
 fanout
-client/node_modules/
-client/dist/
+web/node_modules/
+web/dist/
+site/node_modules/
+site/dist/
 
 # Dev files
 .env

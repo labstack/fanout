@@ -5,7 +5,7 @@ tmp_dir = "tmp"
   entrypoint = "./tmp/fanout"
   cmd = "CGO_ENABLED=1 go build -o ./tmp/fanout ./cmd/fanout"
   delay = 500
-  exclude_dir = ["lake", "tmp", "vendor", ".git", "node_modules", "client"]
+  exclude_dir = ["lake", "tmp", "vendor", ".git", "node_modules", "web", "site"]
   exclude_file = []
   exclude_regex = ["_test.go"]
   exclude_unchanged = false

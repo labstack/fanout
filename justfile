@@ -11,11 +11,12 @@ sock := env("SOCK", "/tmp/pc-fanout.sock")
 default:
     @just --list
 
-# Install dev tools + client deps
+# Install dev tools + web/site deps
 install:
     go install github.com/air-verse/air@latest
     brew install process-compose pre-commit 2>/dev/null || true
-    cd client && bun install
+    cd web && bun install
+    cd site && bun install
     pre-commit install
 
 # ── Dev ──────────────────────────────────────────────────────────────────────
@@ -34,11 +35,11 @@ down:
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
-# Build production binary (client + server)
+# Build production binary (web + server)
 build:
-    cd client && bun run build
-    rm -rf internal/web/dist/*
-    cp -r client/dist/* internal/web/dist/
+    cd web && bun run build
+    rm -rf internal/ui/dist/*
+    cp -r web/dist/* internal/ui/dist/
     go build -o {{bin}} ./cmd/fanout
 
 # Generate TypeScript types from Go block structs + sqlc queries
@@ -67,7 +68,7 @@ check:
     go fmt ./...
     go vet ./...
     just lint
-    cd client && npx tsc --noEmit
+    cd web && npx tsc --noEmit
     just build
     @echo "All checks passed"
 
@@ -128,5 +129,5 @@ deploy-demo *ARGS='':
 clean *ARGS='':
     rm -f {{bin}} coverage.out coverage.html
     rm -rf tmp/
-    find internal/web/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+    find internal/ui/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
     {{ if ARGS == "--all" { "rm -rf data/" } else { "" } }}

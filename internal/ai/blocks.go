@@ -1,6 +1,6 @@
 package ai
 
-//go:generate sh -c "go run ../../cmd/genblocks > ../../client/src/lib/types.ts"
+//go:generate sh -c "go run ../../cmd/genblocks > ../../web/src/lib/types.ts"
 
 import (
 	"encoding/json"
@@ -48,7 +48,7 @@ func NewBlock(t BlockType, data any) Block {
 
 // ---------------------------------------------------------------------------
 // Data structs for each block type. JSON tags match the TypeScript interfaces
-// in client/src/lib/types.ts exactly.
+// in web/src/lib/types.ts exactly.
 // ---------------------------------------------------------------------------
 
 // TextBlockData is markdown content.

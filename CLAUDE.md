@@ -272,7 +272,7 @@ erDiagram
 
 ### Namespace Support
 
-The `namespace` field captures OTLP's `service.namespace` resource attribute, allowing multi-product deployments to logically separate services. Use `ns:` filter in UI search or MCP tools.
+The `namespace` field captures OTLP's `service.namespace` resource attribute, allowing multi-product deployments to logically separate services. Switch namespace via the header picker in the UI; MCP tools accept an explicit `namespace` argument.
 
 ```bash
 # Configure via OTEL resource attributes
