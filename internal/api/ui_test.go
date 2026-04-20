@@ -308,14 +308,14 @@ func TestRegisterUIRoutes(t *testing.T) {
 	}
 }
 
-func TestHome_InvalidWindow(t *testing.T) {
+func TestOverview_InvalidWindow(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/home?window=abc", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/overview?window=abc", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
 	h := &UIHandler{}
-	err := h.Home(c)
+	err := h.Overview(c)
 	if err == nil {
 		t.Fatal("expected error for invalid window")
 	}
@@ -325,14 +325,14 @@ func TestHome_InvalidWindow(t *testing.T) {
 	}
 }
 
-func TestHome_NilService(t *testing.T) {
+func TestOverview_NilService(t *testing.T) {
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/home", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
 	h := &UIHandler{}
-	err := h.Home(c)
+	err := h.Overview(c)
 	if err == nil {
 		t.Fatal("expected error for nil service")
 	}

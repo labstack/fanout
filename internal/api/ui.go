@@ -90,8 +90,8 @@ func RegisterUIRoutes(e *echo.Echo, cfg env.Config, orch *ai.Orchestrator, sseHa
 	e.POST("/api/bookmarks", h.CreateBookmark)
 	e.DELETE("/api/bookmarks/:id", h.DeleteBookmark)
 
-	// Suggestions API
-	e.GET("/api/home", h.Home)
+	// Overview + service detail API
+	e.GET("/api/overview", h.Overview)
 	e.GET("/api/services/:name", h.ServiceDetail)
 	e.GET("/api/namespaces", h.Namespaces)
 
@@ -196,8 +196,8 @@ func (h *UIHandler) Namespaces(c *echo.Context) error {
 	return c.JSON(200, ns)
 }
 
-// Home returns the deterministic triage home page data.
-func (h *UIHandler) Home(c *echo.Context) error {
+// Overview returns the deterministic triage overview data for the UI Home page.
+func (h *UIHandler) Overview(c *echo.Context) error {
 	window := 60
 	if raw := strings.TrimSpace(c.QueryParam("window")); raw != "" {
 		v, err := strconv.Atoi(raw)
@@ -214,20 +214,26 @@ func (h *UIHandler) Home(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "service layer not configured")
 	}
 
-	result, err := h.svc.Home(c.Request().Context(), window, c.QueryParam("namespace"), h.incidents)
+	result, err := h.svc.Overview(c.Request().Context(), service.OverviewParams{
+		Window:    window,
+		Namespace: c.QueryParam("namespace"),
+		Include:   []string{"health", "services", "sparklines", "incidents"},
+		Limit:     200,
+		Tracker:   h.incidents,
+	})
 	if err != nil {
-		slog.Error("home query failed", "err", err)
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to build home data")
+		slog.Error("overview query failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to build overview data")
 	}
 
 	// Append firing alerts from alert store.
 	if h.alertStore != nil {
 		alerts, err := h.alertStore.ListAlerts("firing", "", "")
 		if err != nil {
-			slog.Error("failed to list firing alerts for home", "err", err)
+			slog.Error("failed to list firing alerts for overview", "err", err)
 		} else {
 			for _, a := range alerts {
-				result.Alerts = append(result.Alerts, service.HomeAlert{
+				result.Alerts = append(result.Alerts, service.OverviewAlert{
 					Rule:    a.RuleID,
 					Service: a.Service,
 					State:   a.State,

@@ -27,95 +27,74 @@ type TopIssue struct {
 	Detail  string
 }
 
-// OverviewResult contains the structured health overview.
+// OverviewResult is the unified response for health overview, powering both
+// the MCP overview tool (compact) and the UI Home page (rich with incidents,
+// sparklines, and alerts). Sections are populated based on OverviewParams.Include.
 type OverviewResult struct {
-	Health   OverviewHealth
-	Services []OverviewService
-	Issues   []OverviewIssue
+	Health    *OverviewHealth    `json:"health,omitempty"`
+	Services  []OverviewService  `json:"services,omitempty"`
+	Issues    []OverviewIssue    `json:"issues,omitempty"`
+	Incidents []OverviewIncident `json:"incidents,omitempty"`
+	Alerts    []OverviewAlert    `json:"alerts,omitempty"`
 }
 
 // OverviewHealth contains global health metrics.
 type OverviewHealth struct {
-	Score            float64
-	TotalServices    int
-	ByStatus         map[string]int
-	ThroughputPerMin float64
-	GlobalErrorRate  float64
-	GlobalP95Ms      float64
+	Score            float64        `json:"score"`
+	TotalServices    int            `json:"total_services"`
+	ByStatus         map[string]int `json:"by_status"`
+	ThroughputPerMin float64        `json:"throughput_per_min"`
+	GlobalErrorRate  float64        `json:"global_error_rate"`
+	GlobalP95Ms      float64        `json:"global_p95_ms"`
 }
 
-// OverviewService contains per-service metrics.
+// OverviewService contains per-service metrics. SparklineTraffic is only
+// populated when the "sparklines" section is requested via Include.
 type OverviewService struct {
-	Service   string
-	Status    string
-	Requests  int64
-	ErrorRate float64
-	P50Ms     float64
-	P95Ms     float64
+	Service          string    `json:"service"`
+	Status           string    `json:"status"`
+	HealthScore      float64   `json:"health_score"`
+	Requests         int64     `json:"requests"`
+	TrafficPerMin    float64   `json:"traffic_per_min"`
+	ErrorRate        float64   `json:"error_rate"`
+	P50Ms            float64   `json:"p50_ms"`
+	P95Ms            float64   `json:"p95_ms"`
+	SparklineTraffic []float64 `json:"sparkline_traffic,omitempty"`
 }
 
-// OverviewIssue represents a service issue to surface.
+// OverviewIssue is a compact MCP-style issue descriptor.
 type OverviewIssue struct {
-	Service   string
-	Issue     string
-	Value     float64
-	Threshold float64
-	Since     string // ISO8601 timestamp (optional)
+	Service   string  `json:"service"`
+	Issue     string  `json:"issue"`
+	Value     float64 `json:"value"`
+	Threshold float64 `json:"threshold"`
+	Since     string  `json:"since,omitempty"` // ISO8601 timestamp (optional)
 }
 
-// HomeResult is the response for the deterministic Home triage page.
-type HomeResult struct {
-	Summary   HomeSummary    `json:"summary"`
-	Incidents []HomeIncident `json:"incidents"`
-	Services  []HomeService  `json:"services"`
-	Alerts    []HomeAlert    `json:"alerts"`
+// OverviewIncident is a rich UI-style degraded/unhealthy service entry,
+// including sparkline, top errors, and incident lifecycle.
+type OverviewIncident struct {
+	Service          string     `json:"service"`
+	Status           string     `json:"status"`
+	HealthScore      float64    `json:"health_score"`
+	ErrorRate        float64    `json:"error_rate"`
+	P95Ms            float64    `json:"p95_ms"`
+	TrafficPerMin    float64    `json:"traffic_per_min"`
+	StartedAt        string     `json:"started_at,omitempty"`
+	Lifecycle        string     `json:"lifecycle"`
+	SparklineErrRate []float64  `json:"sparkline_error_rate"`
+	TopErrors        []TopError `json:"top_errors,omitempty"`
+	Related          []string   `json:"related,omitempty"`
 }
 
-// HomeSummary contains aggregate system metrics.
-type HomeSummary struct {
-	TotalServices int     `json:"total_services"`
-	Healthy       int     `json:"healthy"`
-	Degraded      int     `json:"degraded"`
-	Unhealthy     int     `json:"unhealthy"`
-	TrafficPerMin float64 `json:"traffic_per_min"`
-	ErrorRate     float64 `json:"error_rate"`
-	P95Ms         float64 `json:"p95_ms"`
-}
-
-// HomeIncident represents a service with degraded or unhealthy health.
-type HomeIncident struct {
-	Service          string         `json:"service"`
-	Health           string         `json:"health"`
-	HealthScore      float64        `json:"health_score"`
-	ErrorRate        float64        `json:"error_rate"`
-	P95Ms            float64        `json:"p95_ms"`
-	TrafficPerMin    float64        `json:"traffic_per_min"`
-	StartedAt        string         `json:"started_at,omitempty"`
-	Lifecycle        string         `json:"lifecycle"`
-	SparklineErrRate []float64      `json:"sparkline_error_rate"`
-	TopErrors        []HomeTopError `json:"top_errors,omitempty"`
-	Related          []string       `json:"related,omitempty"`
-}
-
-// HomeTopError is a grouped error message with count.
-type HomeTopError struct {
+// TopError is a grouped error message with count.
+type TopError struct {
 	Message string `json:"message"`
 	Count   int64  `json:"count"`
 }
 
-// HomeService represents a healthy service in the compact list.
-type HomeService struct {
-	Name             string    `json:"name"`
-	Health           string    `json:"health"`
-	HealthScore      float64   `json:"health_score"`
-	TrafficPerMin    float64   `json:"traffic_per_min"`
-	ErrorRate        float64   `json:"error_rate"`
-	P95Ms            float64   `json:"p95_ms"`
-	SparklineTraffic []float64 `json:"sparkline_traffic"`
-}
-
-// HomeAlert represents a firing alert for the Home page footer.
-type HomeAlert struct {
+// OverviewAlert represents a firing alert.
+type OverviewAlert struct {
 	Rule    string  `json:"rule"`
 	Service string  `json:"service"`
 	State   string  `json:"state"`
