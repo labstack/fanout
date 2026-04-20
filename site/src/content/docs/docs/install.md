@@ -1,6 +1,6 @@
 ---
 title: Install
-description: Run Fanout via Docker, a pre-built binary, or from source.
+description: Run Fanout via Docker or a pre-built binary.
 ---
 
 Fanout ships as a single executable. Pick whichever path matches how you already deploy.
@@ -9,7 +9,6 @@ Fanout ships as a single executable. Pick whichever path matches how you already
 | --- | --- |
 | **Docker** | Servers you already manage with containers. The fastest way to try it. |
 | **Pre-built binary** | Bare-metal hosts, custom service managers, air-gapped environments. |
-| **From source** | Active development, custom patches, or platforms without a release. |
 
 ## Docker
 
@@ -39,18 +38,6 @@ Download the artifact for your platform from the [releases page](https://github.
 Defaults: HTTP on `:7520`, OTLP gRPC on `127.0.0.1:4317`, data under `./data`.
 
 The binary is around 30 MB and self-contained — no runtime dependencies beyond a recent libc.
-
-## From source
-
-```sh
-git clone https://github.com/labstack/fanout
-cd fanout
-just install
-just build
-./fanout
-```
-
-**Build requirements:** Go 1.26+, [Bun](https://bun.sh) for the web bundle, and a C toolchain (`CGO_ENABLED=1` is required by the embedded query engine).
 
 ## System requirements
 

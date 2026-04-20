@@ -33,5 +33,5 @@ If you need a multi-tenant, multi-region SaaS with an account team, this isn't t
 
 ## Next steps
 
-- [Install](/docs/install/) — Docker, binary, or build from source.
+- [Install](/docs/install/) — Docker or pre-built binary.
 - [Getting started](/docs/getting-started/) — first boot to first trace in under five minutes.
