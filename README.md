@@ -39,6 +39,8 @@ just check     # Format, vet, lint, type-check, build
 just test      # go test ./...
 ```
 
+With the shared local Caddy setup in `../docker`, use `https://fanout.test` for the website/docs and `https://demo.fanout.test` for the app.
+
 ## License
 
 See [LICENSE](LICENSE).

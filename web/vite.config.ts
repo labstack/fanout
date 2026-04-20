@@ -9,11 +9,7 @@ export default defineConfig({
   server: {
     port: 7521,
     host: true,
-    allowedHosts: ["fanout.test"],
-    proxy: {
-      "/api": "http://localhost:7520",
-      "/mcp": "http://localhost:7520",
-    },
+    allowedHosts: ["demo.fanout.test"],
   },
   resolve: {
     alias: {

@@ -4,6 +4,9 @@ import mdx from "@astrojs/mdx";
 
 export default defineConfig({
   site: "https://fanout.run",
+  server: {
+    allowedHosts: ["fanout.test"],
+  },
   integrations: [
     starlight({
       title: "Fanout",
