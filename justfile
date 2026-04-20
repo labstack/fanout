@@ -96,7 +96,6 @@ release COMPONENT:
       fanout|site) ;;
       *) echo "unknown component: {{COMPONENT}} (expected fanout|site)" >&2; exit 1 ;;
     esac
-    git fetch origin --tags main
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
     if [ "$BRANCH" != "main" ]; then
       echo "release must run from main." >&2
@@ -106,6 +105,7 @@ release COMPONENT:
       echo "release requires a clean tracked worktree." >&2
       exit 1
     fi
+    git fetch origin --tags main
     if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
       echo "release must run from an up-to-date main (HEAD must equal origin/main)." >&2
       exit 1

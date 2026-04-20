@@ -24,7 +24,6 @@ defaults:
 
 env:
   REGISTRY: ghcr.io
-  TAG_PATTERN: '^site/v[0-9]{4}\.[0-9]{2}\.[0-9]+(-[A-Za-z0-9.]+)?$'
 
 jobs:
   docker:
@@ -34,14 +33,16 @@ jobs:
 
       - name: Resolve and validate tag
         id: version
+        # Untrusted inputs flow through env vars (never `${{ }}` interpolation)
+        # so a malicious workflow_dispatch payload can't run as shell.
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          if [[ -n "${{ inputs.tag }}" ]]; then
-            raw="${{ inputs.tag }}"
-          else
-            raw="${GITHUB_REF_NAME}"
-          fi
-          if [[ ! "$raw" =~ ${{ env.TAG_PATTERN }} ]]; then
+          raw="${INPUT_TAG:-$GITHUB_REF_NAME}"
+          raw="$(printf '%s' "$raw" | tr -d '[:space:]')"
+          pattern='^site/v[0-9]{4}\.[0-9]{2}\.[0-9]+(-[A-Za-z0-9.]+)?$'
+          if [[ ! "$raw" =~ $pattern ]]; then
             echo "::error::tag must match site/vYYYY.MM.N (optionally -suffix), got: $raw"
             exit 1
           fi
