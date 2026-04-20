@@ -57,6 +57,16 @@ VERSION="${VERSION#v}"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REMOTE_DIR="/opt/fanout"
 
+# Preflight — demo/.env.secrets (gitignored) holds the demo instance's
+# JWT/SMTP/AI credentials. scp would silently skip a missing file and
+# the failure would only surface on the server as a cryptic "env file
+# not found" during docker compose up. Fail fast here with a pointer.
+if [[ ! -f "$REPO_DIR/demo/.env.secrets" ]]; then
+  echo "ERROR: demo/.env.secrets not found locally." >&2
+  echo "  Copy demo/.env.secrets.sample to demo/.env.secrets and fill in real values." >&2
+  exit 1
+fi
+
 echo "Deploying to $SERVER"
 echo "  version: ${VERSION:-latest}"
 echo "  email:   $EMAIL"

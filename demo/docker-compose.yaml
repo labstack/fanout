@@ -12,6 +12,7 @@ services:
     container_name: fanout-demo
     restart: unless-stopped
     env_file:
+      # Compose applies these in order — later files override earlier ones.
       - .env          # otel-demo pin + ports (tracked)
       - .env.secrets  # demo instance secrets — JWT/SMTP/AI (gitignored)
     environment:
