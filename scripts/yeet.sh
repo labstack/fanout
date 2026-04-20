@@ -91,18 +91,19 @@ SETUP_EOF
 echo "Copying compose + Caddyfile + demo/..."
 scp "$REPO_DIR/docker-compose.yaml" "$SERVER:$REMOTE_DIR/docker-compose.yaml"
 scp "$REPO_DIR/Caddyfile"           "$SERVER:$REMOTE_DIR/Caddyfile"
-ssh "$SERVER" "mkdir -p $REMOTE_DIR/demo/flagd $REMOTE_DIR/demo/products $REMOTE_DIR/demo/src/postgresql"
-scp "$REPO_DIR/demo/docker-compose.yaml" "$SERVER:$REMOTE_DIR/demo/docker-compose.yaml"
-scp "$REPO_DIR/demo/otelcol-config.yaml" "$SERVER:$REMOTE_DIR/demo/otelcol-config.yaml"
-scp "$REPO_DIR/demo/.env"                "$SERVER:$REMOTE_DIR/demo/.env"
-scp "$REPO_DIR/demo/flagd/"*             "$SERVER:$REMOTE_DIR/demo/flagd/"
-scp "$REPO_DIR/demo/products/"*          "$SERVER:$REMOTE_DIR/demo/products/"
-scp "$REPO_DIR/demo/src/postgresql/"*    "$SERVER:$REMOTE_DIR/demo/src/postgresql/"
+# Recursive copy of the whole demo/ tree — scp without -r on a glob
+# would silently skip any subdirectories that get added later.
+scp -r "$REPO_DIR/demo" "$SERVER:$REMOTE_DIR/"
 
 # Root .env — Caddy's TLS email and the fanout-site image tag.
-# Demo-specific env (otel-demo image names, ports, etc.) lives in
-# demo/.env and is loaded by the include: directive in the root
-# compose file (env_file: demo/.env).
+# Demo-specific env has two consumers, both pointed at demo/.env:
+#   1. Variable interpolation for the included compose file: the
+#      root compose declares `include.env_file: demo/.env`, which
+#      expands `${COLLECTOR_CONTRIB_IMAGE}` and friends at parse time.
+#   2. Container runtime env: the demo `fanout` service has its own
+#      `env_file: .env` (relative to demo/), which injects variables
+#      into the container at runtime. Both hats live in the same file
+#      — don't delete one thinking the other covers it.
 printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\n' "$EMAIL" "${VERSION:-latest}" \
   | ssh "$SERVER" "cat > $REMOTE_DIR/.env && chmod 600 $REMOTE_DIR/.env"
 
@@ -112,11 +113,33 @@ set -euo pipefail
 cd $REMOTE_DIR
 
 docker compose pull
-docker compose up -d --remove-orphans
+# --wait blocks until all services with healthchecks are healthy (or
+# the timeout elapses), so a success exit actually reflects a working
+# deploy. Services without healthchecks only need to start.
+docker compose up -d --wait --wait-timeout 180 --remove-orphans
 
 echo ''
 docker compose ps
 "
+
+echo ""
+echo "Smoke test..."
+# Caddy's first-boot cert issuance can take 30-60s after it comes up.
+# Retry a handful of times; bail only if it still fails.
+smoke() {
+  local url="$1"
+  for _ in 1 2 3 4 5 6; do
+    if curl -fsS --max-time 10 -o /dev/null "$url"; then
+      echo "  OK  $url"
+      return 0
+    fi
+    sleep 10
+  done
+  echo "  FAIL $url" >&2
+  return 1
+}
+smoke https://fanout.run
+smoke https://demo.fanout.run
 
 echo ""
 echo "Deployed:"
