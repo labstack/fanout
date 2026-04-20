@@ -13,15 +13,18 @@ export default defineConfig({
     starlight({
       title: "Fanout",
       description:
-        "Single-binary OpenTelemetry ingest, storage, and query — self-hosted.",
+        "Observability that runs anywhere you can run a binary. OpenTelemetry ingest, fast UI, chat investigator — self-hosted.",
       customCss: ["./src/styles/theme.css"],
-      social: [
-        {
-          icon: "github",
-          label: "GitHub",
-          href: "https://github.com/labstack/fanout",
-        },
+      head: [
+        { tag: "link", attrs: { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" } },
+        { tag: "meta", attrs: { property: "og:type", content: "website" } },
+        { tag: "meta", attrs: { property: "og:image", content: "https://fanout.run/og.png" } },
+        { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
+        { tag: "meta", attrs: { name: "twitter:image", content: "https://fanout.run/og.png" } },
       ],
+      components: {
+        Head: "./src/components/StarlightHead.astro",
+      },
       sidebar: [
         {
           label: "Start here",

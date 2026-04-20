@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 32" fill="none">
+  <g transform="translate(2 2)" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6.9 21.1C3 17.2 3 10.8 6.9 6.9"/>
+    <path d="M9.8 18.2c-2.3-2.3-2.3-6.1 0-8.5"/>
+    <circle cx="14" cy="14" r="2"/>
+    <path d="M18.2 9.8c2.3 2.3 2.3 6.1 0 8.5"/>
+    <path d="M21.1 6.9C25 10.8 25 17.2 21.1 21.1"/>
+  </g>
+  <text x="38" y="22" font-family="DM Sans, ui-sans-serif, system-ui, sans-serif" font-size="18" font-weight="700" letter-spacing="2" fill="#e4e4e7">FANOUT</text>
+</svg>

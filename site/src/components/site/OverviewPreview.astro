@@ -1,0 +1,99 @@
+---
+const rows = [
+  { name: "checkout", health: "red", p95: "412 ms", delta: "↑38%", errors: "2.4%", rps: "1.2k rps" },
+  { name: "cart", health: "amber", p95: "187 ms", delta: null, errors: "0.6%", rps: "2.1k rps" },
+  { name: "catalog", health: "green", p95: "42 ms", delta: null, errors: "0.0%", rps: "3.8k rps" },
+  { name: "payment", health: "green", p95: "94 ms", delta: null, errors: "0.1%", rps: "980 rps" },
+  { name: "auth", health: "green", p95: "28 ms", delta: null, errors: "0.0%", rps: "5.4k rps" },
+];
+const labels = { green: "healthy", amber: "degraded", red: "unhealthy" };
+---
+
+<div class="preview-wrap">
+  <div class="preview">
+    <div class="toolbar">
+      <div class="dots"><i></i><i></i><i></i></div>
+      <span class="url">demo.fanout.run · <span class="seg">Overview</span></span>
+    </div>
+    <div class="preview-grid">
+      <div class="block">
+        <div class="block-title">Services · last 1h</div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Service</th>
+              <th>Health</th>
+              <th>p95</th>
+              <th>Errors</th>
+              <th>Throughput</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr>
+                <td>{r.name}</td>
+                <td>
+                  <span class={`status ${r.health}`}>
+                    <span class="d"></span>{labels[r.health]}
+                  </span>
+                </td>
+                <td class="num">
+                  {r.p95}
+                  {r.delta && <span class="delta-up">{r.delta}</span>}
+                </td>
+                <td class="num">{r.errors}</td>
+                <td class="num">{r.rps}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div class="block">
+        <div class="block-title">Health · now</div>
+        <div class="kpis">
+          <div class="kpi">
+            <span class="label">Score</span>
+            <span class="value">86</span>
+            <span class="delta delta-down">+2 vs 1h</span>
+          </div>
+          <div class="kpi">
+            <span class="label">Spans/min</span>
+            <span class="value">2.1M</span>
+            <span class="delta">stable</span>
+          </div>
+          <div class="kpi">
+            <span class="label">Errors</span>
+            <span class="value" style="color: var(--unhealthy)">0.4%</span>
+            <span class="delta delta-up">↑0.2</span>
+          </div>
+          <div class="kpi">
+            <span class="label">Services</span>
+            <span class="value">47</span>
+            <span class="delta">2 alerting</span>
+          </div>
+        </div>
+        <div style="margin-top: 16px;">
+          <div class="block-title" style="margin-bottom: 8px;">Throughput · 1h</div>
+          <svg class="spark" viewBox="0 0 200 38" preserveAspectRatio="none">
+            <defs>
+              <linearGradient id="g1" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0" stop-color="#60a5fa" stop-opacity="0.5" />
+                <stop offset="1" stop-color="#60a5fa" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <path
+              d="M0,28 L10,24 L20,26 L30,18 L40,22 L50,14 L60,18 L70,12 L80,16 L90,10 L100,14 L110,8 L120,12 L130,6 L140,10 L150,14 L160,8 L170,12 L180,6 L190,10 L200,4 L200,38 L0,38 Z"
+              fill="url(#g1)"
+            />
+            <path
+              d="M0,28 L10,24 L20,26 L30,18 L40,22 L50,14 L60,18 L70,12 L80,16 L90,10 L100,14 L110,8 L120,12 L130,6 L140,10 L150,14 L160,8 L170,12 L180,6 L190,10 L200,4"
+              fill="none"
+              stroke="#60a5fa"
+              stroke-width="1.5"
+            />
+          </svg>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
