@@ -1,9 +1,11 @@
 ---
 title: Getting started
-description: First boot — admin setup, ingest token, and sending your first spans.
+description: From a fresh install to your first trace, in five steps.
 ---
 
-This walks a fresh Fanout install from zero to the first trace.
+This walks a fresh Fanout install through admin setup, generating an ingest token, and sending the first trace.
+
+You'll need: a host that can run the binary or container, an SMTP relay (for the email-based login codes), and an Anthropic or OpenAI API key (for the chat investigator).
 
 ## 1. Start Fanout
 
@@ -11,68 +13,82 @@ This walks a fresh Fanout install from zero to the first trace.
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 \
   -v $PWD/data:/var/lib/fanout/data \
-  -e JWT_SECRET=... -e JWT_REFRESH_SECRET=... \
-  -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=... \
-  -e AI_API_KEY=... \
+  -e JWT_SECRET=$(openssl rand -hex 32) \
+  -e JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+  -e SMTP_HOST=smtp.example.com \
+  -e SMTP_USER=fanout@example.com \
+  -e SMTP_PASS=<smtp-password> \
+  -e SMTP_FROM='"Fanout" <fanout@example.com>' \
+  -e AI_API_KEY=<anthropic-or-openai-key> \
   ghcr.io/labstack/fanout:latest
 ```
 
-Required on first boot: `JWT_SECRET`, `JWT_REFRESH_SECRET`, the `SMTP_*` block, and `AI_API_KEY`. See the [environment reference](/docs/config/) for the full list.
+`JWT_SECRET`, `JWT_REFRESH_SECRET`, the four `SMTP_*` variables, and `AI_API_KEY` are required — Fanout refuses to start without them. See the [environment reference](/docs/config/) for everything else.
 
-Open [http://localhost:7520](http://localhost:7520).
+Open [http://localhost:7520](http://localhost:7520). You should land on the login page.
 
 ## 2. Find the setup token
 
-On first boot Fanout prints a one-time **setup token** to the server logs — it's what authorizes the admin-creation flow:
+On first boot Fanout logs a one-time **setup token**. It authorises the admin-creation flow and is valid until the first admin is created.
 
-```
+```sh
 docker logs fanout 2>&1 | grep "setup token"
 ```
 
-## 3. Create the admin
+If you don't see it, you've already booted before — the token is regenerated only on a fresh data directory.
 
-The UI redirects any unauthenticated request to `/login`, which on first boot shows the setup form. Enter:
+## 3. Create the admin user
 
-- Your email and name.
+The login page detects the unconfigured state and shows a setup form. Provide:
+
+- Your name and email.
 - The setup token from step 2.
 
-Fanout creates the admin user, issues access/refresh tokens, and generates a **random ingest token** that's shown **once** in the response. Copy it — you'll need it for every OTLP client.
+Fanout creates the admin, signs you in, and **prints the ingest token once** in the response. Copy it now — it isn't shown again. You can rotate it later from **Settings → Ingest** in the UI.
 
-You can rotate the ingest token later from **Settings → Ingest**. The setup window closes after the first admin is created; a restart is required to reopen it.
-
-Login on subsequent visits uses **email + one-time code** delivered via SMTP. No password is ever stored.
+After this, the setup form is closed for the lifetime of the data directory. New users join via email invites; logins use one-time codes delivered via SMTP. No passwords are ever stored.
 
 ## 4. Send telemetry
 
-Point an OpenTelemetry SDK or collector at Fanout. `OTLP_GRPC_ADDR` defaults to `127.0.0.1:4317` (loopback only) — set it to `:4317` (or a specific interface) if your collector is off-host.
+Point your OpenTelemetry SDK or collector at Fanout. The Docker container listens on all interfaces, so this works from any host that can reach it.
 
 ```sh
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://<fanout-host>:4317
 export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-export OTEL_EXPORTER_OTLP_HEADERS=x-fanout-ingest-token=fo_<YOUR_TOKEN>
+export OTEL_EXPORTER_OTLP_HEADERS=x-fanout-ingest-token=fo_<your-token>
 export OTEL_SERVICE_NAME=my-service
 ```
 
-Collector config:
+Or in a Collector config:
 
 ```yaml
 exporters:
   otlp/fanout:
-    endpoint: fanout.yourdomain.com:4317
+    endpoint: <fanout-host>:4317
     headers:
-      x-fanout-ingest-token: fo_<YOUR_TOKEN>
+      x-fanout-ingest-token: fo_<your-token>
+
+service:
+  pipelines:
+    traces:  { exporters: [otlp/fanout] }
+    logs:    { exporters: [otlp/fanout] }
+    metrics: { exporters: [otlp/fanout] }
 ```
 
-Alternatively pass the token as a bearer header: `Authorization: Bearer fo_<YOUR_TOKEN>`.
+Both `x-fanout-ingest-token` and `Authorization: Bearer fo_<token>` are accepted.
 
-## 5. Explore
+## 5. Verify
 
-- **Home**: service health grid, top errors, latency trends.
-- **Service detail**: operations, dependencies, top spans.
-- **Chat**: ask "what's slow?" — the MCP tools run the investigation for you.
+Send a request through your instrumented service, then open the UI:
+
+- **Home** — your service appears in the health grid within ~15 seconds (the default flush interval).
+- **Service detail** — click the service for operations, dependencies, and top spans.
+- **Chat** — ask *"what's the slowest service in the last 15 minutes?"* The investigator runs MCP tools to answer.
+
+If nothing shows up, check the [troubleshooting tips](/docs/ingest/) — most often it's an unset token header or a network rule blocking port `4317`.
 
 ## Next
 
-- [Environment reference](/docs/config/)
-- [OTLP ingest details](/docs/ingest/)
-- [MCP for Claude Code](/docs/mcp/)
+- [Environment reference](/docs/config/) — all the knobs.
+- [OTLP ingest details](/docs/ingest/) — SDK and collector specifics, TLS, namespaces.
+- [MCP for Claude Code](/docs/mcp/) — bring the investigator into your editor.

@@ -1,0 +1,10 @@
+---
+import Default from "@astrojs/starlight/components/Head.astro";
+import "@fontsource-variable/dm-sans";
+import "@fontsource/fragment-mono";
+import "@fontsource-variable/jetbrains-mono";
+import { ClientRouter } from "astro:transitions";
+---
+
+<Default><slot /></Default>
+<ClientRouter />
