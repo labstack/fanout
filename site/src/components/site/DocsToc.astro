@@ -38,6 +38,13 @@ const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
     line-height: 1.5;
     max-height: calc(100vh - 100px);
     overflow-y: auto;
+    /* Hide the inner scrollbar — on long TOCs it reads as a second scrollbar
+       alongside the page scroll. Content still scrolls via wheel / keyboard. */
+    scrollbar-width: none;
+  }
+  .docs-toc::-webkit-scrollbar {
+    width: 0;
+    height: 0;
   }
 
   @media (max-width: 960px) {
