@@ -13,13 +13,14 @@
   },
   "dependencies": {
     "@astrojs/mdx": "^5.0.3",
-    "@astrojs/starlight": "^0.38.3",
     "@fontsource-variable/dm-sans": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource/fragment-mono": "^5.2.8",
     "astro": "^6.1.8"
   },
   "devDependencies": {
+    "rehype-autolink-headings": "^7.1.0",
+    "rehype-slug": "^6.0.0",
     "sharp": "^0.34.5"
   }
 }

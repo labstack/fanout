@@ -1,6 +1,7 @@
 import { defineConfig } from "astro/config";
-import starlight from "@astrojs/starlight";
 import mdx from "@astrojs/mdx";
+import rehypeSlug from "rehype-slug";
+import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
 export default defineConfig({
   site: "https://fanout.run",
@@ -9,48 +10,21 @@ export default defineConfig({
     // reserved for the Vite-powered app shell.
     allowedHosts: ["fanout.test"],
   },
-  integrations: [
-    starlight({
-      title: "Fanout",
-      description:
-        "Observability that runs anywhere you can run a binary. OpenTelemetry ingest, fast UI, chat investigator — self-hosted.",
-      customCss: ["./src/styles/theme.css"],
-      head: [
-        { tag: "link", attrs: { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" } },
-        { tag: "meta", attrs: { property: "og:type", content: "website" } },
-        { tag: "meta", attrs: { property: "og:image", content: "https://fanout.run/og.png" } },
-        { tag: "meta", attrs: { name: "twitter:card", content: "summary_large_image" } },
-        { tag: "meta", attrs: { name: "twitter:image", content: "https://fanout.run/og.png" } },
-      ],
-      components: {
-        Head: "./src/components/StarlightHead.astro",
-      },
-      sidebar: [
-        {
-          label: "Start here",
-          items: [
-            { label: "Introduction", slug: "docs/introduction" },
-            { label: "Install", slug: "docs/install" },
-            { label: "Getting started", slug: "docs/getting-started" },
-          ],
-        },
-        {
-          label: "Configuration",
-          items: [
-            { label: "Environment", slug: "docs/config" },
-            { label: "OTLP ingest", slug: "docs/ingest" },
-          ],
-        },
-        {
-          label: "Features",
-          items: [
-            { label: "Architecture", slug: "docs/architecture" },
-            { label: "MCP server", slug: "docs/mcp" },
-            { label: "Alerts", slug: "docs/alerts" },
-          ],
-        },
-      ],
-    }),
-    mdx(),
-  ],
+  markdown: {
+    // Pin github-dark-default over Astro's default github-dark: higher
+    // contrast on yaml/json/http tokens against the docs' dark surface.
+    shikiConfig: {
+      theme: "github-dark-default",
+      wrap: false,
+    },
+    // rehype-slug gives each heading an id; rehype-autolink-headings wraps
+    // the heading in an <a href="#id"> so the TOC can deep-link. The wrap
+    // behavior is paired with a `.docs-body h2 > a` style reset in
+    // DocsLayout.astro — if you change the behavior here, update that too.
+    rehypePlugins: [
+      rehypeSlug,
+      [rehypeAutolinkHeadings, { behavior: "wrap" }],
+    ],
+  },
+  integrations: [mdx()],
 });
