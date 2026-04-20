@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/labstack/fanout/internal/service"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -71,7 +72,13 @@ func (s *Server) overview(ctx context.Context, req *mcp.CallToolRequest, in Over
 		limit = 100
 	}
 
-	result, err := s.svc.Overview(ctx, window, in.Include, in.SortServicesBy, in.Namespace, limit)
+	result, err := s.svc.Overview(ctx, service.OverviewParams{
+		Window:    window,
+		Namespace: in.Namespace,
+		Include:   in.Include,
+		SortBy:    in.SortServicesBy,
+		Limit:     limit,
+	})
 	if err != nil {
 		return nil, OverviewOut{}, fmt.Errorf("overview query failed: %w", err)
 	}
@@ -84,8 +91,7 @@ func (s *Server) overview(ctx context.Context, req *mcp.CallToolRequest, in Over
 		TopIssues: make([]OverviewIssue, 0, len(result.Issues)),
 	}
 
-	includeAll := len(in.Include) == 0
-	if includeAll || containsOverviewSection(in.Include, "health") {
+	if result.Health != nil {
 		out.Health = &OverviewHealth{
 			Score:            result.Health.Score,
 			TotalServices:    result.Health.TotalServices,
@@ -133,13 +139,4 @@ func (tw TimeWindow) String() string {
 		return fmt.Sprintf("%dh", minutes/60)
 	}
 	return fmt.Sprintf("%dm", minutes)
-}
-
-func containsOverviewSection(include []string, target string) bool {
-	for _, section := range include {
-		if section == target {
-			return true
-		}
-	}
-	return false
 }

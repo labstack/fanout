@@ -243,28 +243,27 @@ export interface Bookmark {
   created_at: string;
 }
 
-// ── Home page types ─────────────────────────────────────────
+// ── Overview (Home page) types ─────────────────────────────
 
-export interface HomeResponse {
-  summary: HomeSummary;
-  incidents: HomeIncident[];
-  services: HomeService[];
-  alerts: HomeAlert[];
+export interface OverviewResponse {
+  health: OverviewHealth;
+  services: OverviewService[];
+  incidents: OverviewIncident[];
+  alerts: OverviewAlert[];
 }
 
-export interface HomeSummary {
+export interface OverviewHealth {
+  score: number;
   total_services: number;
-  healthy: number;
-  degraded: number;
-  unhealthy: number;
-  traffic_per_min: number;
-  error_rate: number;
-  p95_ms: number;
+  by_status: Record<string, number>;
+  throughput_per_min: number;
+  global_error_rate: number;
+  global_p95_ms: number;
 }
 
-export interface HomeIncident {
+export interface OverviewIncident {
   service: string;
-  health: string;
+  status: string;
   health_score: number;
   error_rate: number;
   p95_ms: number;
@@ -272,26 +271,28 @@ export interface HomeIncident {
   started_at?: string;
   lifecycle: string;
   sparkline_error_rate: number[];
-  top_errors?: HomeTopError[];
+  top_errors?: TopError[];
   related?: string[];
 }
 
-export interface HomeTopError {
+export interface TopError {
   message: string;
   count: number;
 }
 
-export interface HomeService {
-  name: string;
-  health: string;
+export interface OverviewService {
+  service: string;
+  status: string;
   health_score: number;
+  requests: number;
   traffic_per_min: number;
   error_rate: number;
+  p50_ms: number;
   p95_ms: number;
   sparkline_traffic: number[];
 }
 
-export interface HomeAlert {
+export interface OverviewAlert {
   rule: string;
   service: string;
   state: string;

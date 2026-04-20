@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from "react-router";
-import type { HomeService } from "@/lib/types";
+import type { OverviewService } from "@/lib/types";
 import { Sparkline } from "./Sparkline";
 
 function fmtTraffic(v: number): string {
@@ -17,7 +17,7 @@ function fmtMs(v: number): string {
 }
 
 interface Props {
-  service: HomeService;
+  service: OverviewService;
 }
 
 export function ServiceRow({ service }: Props) {
@@ -27,12 +27,12 @@ export function ServiceRow({ service }: Props) {
   return (
     <button
       type="button"
-      onClick={() => navigate(`/service/${encodeURIComponent(service.name)}${search}`)}
+      onClick={() => navigate(`/service/${encodeURIComponent(service.service)}${search}`)}
       className="w-full flex items-center gap-4 px-4 py-2 rounded-lg text-left transition-colors hover:bg-surface-2 group"
     >
       <span className="text-xs text-healthy">{"\u25CF"}</span>
       <span className="font-heading text-[13px] text-foreground/90 group-hover:text-foreground min-w-0 flex-1 truncate">
-        {service.name}
+        {service.service}
       </span>
       <Sparkline
         values={service.sparkline_traffic}

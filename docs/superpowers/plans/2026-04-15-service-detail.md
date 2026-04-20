@@ -333,7 +333,7 @@ git commit -m "feat(service-detail): add ServiceDetail() method"
 
 - [ ] **Step 1: Add ServiceDetail handler to ui.go**
 
-Add route registration in `RegisterUIRoutes` after the `e.GET("/api/home", h.Home)` line:
+Add route registration in `RegisterUIRoutes` after the `e.GET("/api/overview", h.Overview)` line:
 
 ```go
 e.GET("/api/service/:name", h.ServiceDetail)
@@ -1354,13 +1354,13 @@ In `ServiceRow.tsx`, change the `onClick` handler. The `onClick` prop currently 
 
 ```tsx
 import { useNavigate } from "react-router";
-import type { HomeService } from "@/lib/types";
+import type { OverviewService } from "@/lib/types";
 import { Sparkline } from "./Sparkline";
 
 // ... fmtTraffic, fmtPercent, fmtMs unchanged ...
 
 interface Props {
-  service: HomeService;
+  service: OverviewService;
 }
 
 export function ServiceRow({ service }: Props) {

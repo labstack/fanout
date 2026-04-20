@@ -1506,5 +1506,5 @@ curl -X POST http://localhost:7520/api/auth/verify -H 'Content-Type: application
 curl http://localhost:7520/api/auth/me -H 'Authorization: Bearer <token>'
 
 # API_TOKEN still works
-curl http://localhost:7520/api/home -H 'Authorization: Bearer <api_token>'
+curl http://localhost:7520/api/overview -H 'Authorization: Bearer <api_token>'
 ```

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router";
 import { api, ApiError, setApiToken } from "@/api/client";
-import type { HomeResponse } from "@/lib/types";
+import type { OverviewResponse } from "@/lib/types";
 import { buildChatPath } from "@/lib/chat-route";
 import { EmptyState } from "@/components/home/EmptyState";
 import { SummaryHeader } from "@/components/home/SummaryHeader";
@@ -25,7 +25,7 @@ export function HomePage() {
     [search],
   );
 
-  const [data, setData] = useState<HomeResponse | null>(null);
+  const [data, setData] = useState<OverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [timeWindow, setTimeWindow] = useState(60);
   const [staleSeconds, setStaleSeconds] = useState(0);
@@ -45,7 +45,7 @@ export function HomePage() {
         params.set("window", String(timeWindow));
         const ns = new URLSearchParams(search).get("namespace");
         if (ns) params.set("namespace", ns);
-        const result = await api<HomeResponse>(`/api/home?${params}`);
+        const result = await api<OverviewResponse>(`/api/overview?${params}`);
         if (!cancelled) {
           setData(result);
           setLoading(false);
@@ -58,9 +58,9 @@ export function HomePage() {
           setLoading(false);
           const message = err instanceof ApiError
             ? `Failed to load: ${err.message}`
-            : "Failed to load home data";
+            : "Failed to load overview data";
           setFetchError(message);
-          console.error("Home fetch failed:", err);
+          console.error("Overview fetch failed:", err);
         }
       }
     }
@@ -113,7 +113,7 @@ export function HomePage() {
   }
 
   // Empty state: no data and no errors — genuinely no services
-  if (!loading && (!data || data.summary.total_services === 0)) {
+  if (!loading && (!data || data.health.total_services === 0)) {
     return <EmptyState />;
   }
 
@@ -133,9 +133,11 @@ export function HomePage() {
 
   if (!data) return null;
 
-  const unhealthy = data.incidents.filter((i) => i.health === "unhealthy");
-  const degraded = data.incidents.filter((i) => i.health === "degraded");
-  const healthyCount = data.services.length;
+  const unhealthy = data.incidents.filter((i) => i.status === "unhealthy");
+  const degraded = data.incidents.filter((i) => i.status === "degraded");
+  const incidentNames = new Set(data.incidents.map((i) => i.service));
+  const healthyServices = data.services.filter((s) => !incidentNames.has(s.service));
+  const healthyCount = healthyServices.length;
   const hasIncidents = data.incidents.length > 0;
 
   // Split unhealthy into expanded (top N) and collapsed (rest)
@@ -181,7 +183,7 @@ export function HomePage() {
         )}
 
         {/* Summary header */}
-        <SummaryHeader summary={data.summary} />
+        <SummaryHeader health={data.health} />
 
         {/* Unhealthy services — top 2 expanded, rest compact */}
         {expandedUnhealthy.length > 0 && (
@@ -248,8 +250,8 @@ export function HomePage() {
                 <span className="w-16 text-right">p95</span>
               </span>
             </div>
-            {data.services.map((svc) => (
-              <ServiceRow key={svc.name} service={svc} />
+            {healthyServices.map((svc) => (
+              <ServiceRow key={svc.service} service={svc} />
             ))}
           </div>
         )}

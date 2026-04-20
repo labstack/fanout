@@ -1,5 +1,5 @@
 import { Search } from "lucide-react";
-import type { HomeIncident } from "@/lib/types";
+import type { OverviewIncident } from "@/lib/types";
 import { Sparkline } from "./Sparkline";
 
 function timeAgo(iso?: string): string {
@@ -31,7 +31,7 @@ function truncateError(msg: string, max = 72): string {
   return msg.slice(0, max) + "\u2026";
 }
 
-function primaryIssue(incident: HomeIncident): string {
+function primaryIssue(incident: OverviewIncident): string {
   const highErr = incident.error_rate > 0.01;
   const highLat = incident.p95_ms > 1000;
   if (highErr && highLat) return "high errors + latency";
@@ -41,14 +41,14 @@ function primaryIssue(incident: HomeIncident): string {
 }
 
 interface Props {
-  incident: HomeIncident;
+  incident: OverviewIncident;
   onInvestigate: (prompt: string) => void;
   compact?: boolean;
   primary?: boolean;
 }
 
 export function IncidentCard({ incident, onInvestigate, compact = false, primary = false }: Props) {
-  const isUnhealthy = incident.health === "unhealthy";
+  const isUnhealthy = incident.status === "unhealthy";
   const borderCls = isUnhealthy ? "border-unhealthy/20" : "border-degraded/20";
   const bgCls = isUnhealthy ? "bg-unhealthy/5" : "bg-degraded/5";
   const statusCls = isUnhealthy ? "text-unhealthy" : "text-degraded";
@@ -113,7 +113,7 @@ export function IncidentCard({ incident, onInvestigate, compact = false, primary
             {primaryIssue(incident)}
           </span>
           <span className={`inline-flex rounded-full border ${borderCls} ${bgCls} px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusCls}`}>
-            {incident.health}
+            {incident.status}
           </span>
         </div>
       </div>
