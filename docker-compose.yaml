@@ -47,4 +47,3 @@ services:
       - "80"
     networks:
       - webproxy
-      - default

@@ -6,7 +6,9 @@ set -e
 # Deploys the root docker-compose.yaml stack (nginx-proxy + acme-companion +
 # fanout-site) to the target host. The demo stack at demo.fanout.run is
 # deployed separately via ./demo/yeet.sh and joins the same `webproxy`
-# network stood up here.
+# network stood up here — run this first on a fresh host; the demo
+# deploy depends on nginx-proxy + acme-companion + the webproxy network
+# created here.
 
 DEFAULT_SERVER="ubuntu@fanout.run"
 EMAIL="v@labstack.com"
@@ -69,12 +71,17 @@ fi
 
 echo "Setting up server..."
 ssh "$SERVER" 'bash -s' << 'SETUP_EOF'
-set -e
+set -euo pipefail
 sudo apt update && sudo apt install -y curl wget
 
 if ! command -v docker &> /dev/null; then
     echo "Installing Docker..."
-    curl -fsSL https://get.docker.com | sudo sh
+    # Download the installer to a file first; `curl -fsSL | sh` hides a
+    # mid-body curl failure behind sh's exit code even with pipefail.
+    tmp=$(mktemp)
+    curl -fsSL https://get.docker.com -o "$tmp"
+    sudo sh "$tmp"
+    rm -f "$tmp"
     sudo systemctl enable docker
     sudo systemctl start docker
     sudo usermod -aG docker $USER
@@ -92,11 +99,8 @@ scp "$REPO_DIR/docker-compose.yaml" "$SERVER:/opt/fanout/docker-compose.yaml"
 
 # Minimal .env — nginx-proxy + acme-companion need LETSENCRYPT_EMAIL;
 # fanout-site is self-contained. Written server-side (no repo secrets).
-ssh "$SERVER" "cat > /opt/fanout/.env <<ENV
-LETSENCRYPT_EMAIL=$EMAIL
-VERSION=${VERSION:-latest}
-ENV
-chmod 600 /opt/fanout/.env"
+printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\n' "$EMAIL" "${VERSION:-latest}" \
+  | ssh "$SERVER" 'cat > /opt/fanout/.env && chmod 600 /opt/fanout/.env'
 
 echo "Deploying..."
 ssh "$SERVER" "
@@ -106,7 +110,10 @@ cd /opt/fanout
 docker network create webproxy 2>/dev/null || true
 
 docker compose pull
-docker compose up -d
+# --remove-orphans cleans up the old fanout admin container from the
+# previous compose shape; without this, nginx-proxy sees two containers
+# claiming fanout.run and routing is non-deterministic.
+docker compose up -d --remove-orphans
 
 echo ''
 docker compose ps
