@@ -31,31 +31,8 @@ export default defineConfig({
       components: {
         Head: "./src/components/StarlightHead.astro",
       },
-      sidebar: [
-        {
-          label: "Start here",
-          items: [
-            { label: "Introduction", slug: "docs/introduction" },
-            { label: "Install", slug: "docs/install" },
-            { label: "Getting started", slug: "docs/getting-started" },
-          ],
-        },
-        {
-          label: "Configuration",
-          items: [
-            { label: "Environment", slug: "docs/config" },
-            { label: "OTLP ingest", slug: "docs/ingest" },
-          ],
-        },
-        {
-          label: "Features",
-          items: [
-            { label: "Architecture", slug: "docs/architecture" },
-            { label: "MCP server", slug: "docs/mcp" },
-            { label: "Alerts", slug: "docs/alerts" },
-          ],
-        },
-      ],
+      // Single-page docs — the "On this page" TOC handles navigation.
+      sidebar: [{ label: "Fanout docs", slug: "docs" }],
     }),
     mdx(),
   ],
