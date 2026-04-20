@@ -10,7 +10,15 @@ COPY web/ .
 RUN bun run build
 
 # --- Server build stage ---
-FROM golang:1.26-bookworm AS builder
+# TARGETOS / TARGETARCH come from `docker buildx --platform` and let the same
+# Dockerfile produce binaries for whatever the buildx target is. CGO is on,
+# so the build host must have a matching C toolchain — in CI we use native
+# runners (ubuntu-24.04 + ubuntu-24.04-arm) rather than QEMU.
+FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION=dev
 
 WORKDIR /app
 
@@ -22,7 +30,8 @@ COPY . .
 COPY --from=web /app/web/dist/ internal/ui/dist/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=1 go build -ldflags="-s -w" -o fanout ./cmd/fanout
+    CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -ldflags="-s -w -X main.version=${VERSION}" -o fanout ./cmd/fanout
 
 # --- Runtime stage ---
 FROM debian:bookworm-slim

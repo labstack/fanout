@@ -3,66 +3,175 @@ name: Release
 on:
   push:
     tags:
-      - "v*"
+      - "fanout/v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v2026.04.1)"
+        description: "Release tag (e.g. fanout/v2026.04.1)"
         required: true
 
 concurrency:
-  group: release
+  group: release-fanout
   cancel-in-progress: false
 
 permissions:
   contents: write
   packages: write
 
+env:
+  REGISTRY: ghcr.io
+  GO_VERSION: "1.26.1"
+
 jobs:
-  docker:
-    runs-on: ubuntu-24.04
+  # ── Native binaries (Linux amd64, Linux arm64, macOS arm64) ──────────
+  # Each runner builds for its own native arch via `goreleaser release
+  # --split --single-target`. CGO + DuckDB under QEMU is impractical, so we
+  # avoid cross-compilation entirely and let each runner do native work.
+  binaries:
     strategy:
+      fail-fast: true
       matrix:
         include:
-          - name: fanout
-            context: .
-            image: ghcr.io/labstack/fanout
-            platforms: linux/amd64
-          - name: site
-            context: ./site
-            image: ghcr.io/labstack/fanout-site
-            platforms: linux/amd64,linux/arm64
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - runner: macos-14
+            goos: darwin
+            goarch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # goreleaser needs full git history for changelog
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: goreleaser release --split --single-target
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean --split --single-target
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload partial dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # ── Multi-arch Docker (linux/amd64, linux/arm64) ─────────────────────
+  # Each native runner builds + pushes a SHA-suffixed single-arch image;
+  # the manifest job stitches them together under the real tags.
+  docker:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            platform: linux/amd64
+            suffix: amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+            suffix: arm64
+    runs-on: ${{ matrix.runner }}
+    outputs:
+      version: ${{ steps.version.outputs.value }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ matrix.image }}
-          tags: |
-            type=match,pattern=v(.*),group=1
-            type=raw,value=latest
+      - name: Resolve version
+        id: version
+        run: |
+          # Tag shape is "fanout/vYYYY.MM.N" (or via workflow_dispatch input).
+          # Strip the "fanout/" prefix so the Docker tag is just "vYYYY.MM.N".
+          if [[ -n "${{ inputs.tag }}" ]]; then
+            raw="${{ inputs.tag }}"
+          else
+            raw="${GITHUB_REF_NAME}"
+          fi
+          echo "value=${raw#fanout/}" >>"$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/setup-qemu-action@v4
-        if: matrix.name == 'site'
-
-      - name: Login to GHCR
-        uses: docker/login-action@v4
+      - uses: docker/login-action@v4
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
+      - name: Build and push (${{ matrix.platform }})
         uses: docker/build-push-action@v7
         with:
-          context: ${{ matrix.context }}
-          platforms: ${{ matrix.platforms }}
+          context: .
+          platforms: ${{ matrix.platform }}
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha,scope=${{ matrix.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+          provenance: false
+          build-args: |
+            VERSION=${{ steps.version.outputs.value }}
+          tags: ghcr.io/labstack/fanout:${{ github.sha }}-${{ matrix.suffix }}
+          cache-from: type=gha,scope=fanout-${{ matrix.suffix }}
+          cache-to: type=gha,mode=max,scope=fanout-${{ matrix.suffix }}
+
+  docker-manifest:
+    runs-on: ubuntu-24.04
+    needs: docker
+    steps:
+      - uses: docker/setup-buildx-action@v4
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stitch multi-arch manifests
+        env:
+          IMAGE: ghcr.io/labstack/fanout
+          VERSION: ${{ needs.docker.outputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Strip leading 'v' so the version tag matches the historical scheme.
+          tag="${VERSION#v}"
+          docker buildx imagetools create \
+            -t "$IMAGE:$tag" \
+            -t "$IMAGE:latest" \
+            "$IMAGE:$SHA-amd64" \
+            "$IMAGE:$SHA-arm64"
+
+  # ── Finalise: merge partial dists + publish GH Release ───────────────
+  release:
+    runs-on: ubuntu-24.04
+    needs: [binaries, docker-manifest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download partial dists
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: false
+
+      - name: goreleaser continue --merge
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: continue --merge
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
