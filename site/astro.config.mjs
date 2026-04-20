@@ -11,15 +11,16 @@ export default defineConfig({
     allowedHosts: ["fanout.test"],
   },
   markdown: {
-    // Single dark Shiki theme keeps non-bash code (yaml, json, http) readable;
-    // the paired light theme that Astro would otherwise use renders near-black
-    // tokens on the docs' dark surface.
+    // Pin github-dark-default over Astro's default github-dark: higher
+    // contrast on yaml/json/http tokens against the docs' dark surface.
     shikiConfig: {
       theme: "github-dark-default",
       wrap: false,
     },
-    // Heading IDs + the TOC need anchors; autolink is a nice-to-have for
-    // deep-linking from the marketing site.
+    // rehype-slug gives each heading an id; rehype-autolink-headings wraps
+    // the heading in an <a href="#id"> so the TOC can deep-link. The wrap
+    // behavior is paired with a `.docs-body h2 > a` style reset in
+    // DocsLayout.astro — if you change the behavior here, update that too.
     rehypePlugins: [
       rehypeSlug,
       [rehypeAutolinkHeadings, { behavior: "wrap" }],
