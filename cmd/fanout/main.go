@@ -39,7 +39,18 @@ import (
 
 var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 
+// version is set at build time via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "-v", "-version", "--version", "version":
+			fmt.Println(version)
+			return
+		}
+	}
+
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
 	cfg := env.Load()

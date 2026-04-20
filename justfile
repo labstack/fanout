@@ -35,12 +35,13 @@ down:
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
-# Build production binary (web + server)
-build:
+# Build production binary (web + server). VERSION embeds via -ldflags;
+# defaults to git describe so local builds are self-identifying.
+build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`:
     cd web && bun run build
     rm -rf internal/ui/dist/*
     cp -r web/dist/* internal/ui/dist/
-    go build -o {{bin}} ./cmd/fanout
+    go build -ldflags "-s -w -X main.version={{VERSION}}" -o {{bin}} ./cmd/fanout
 
 # Generate TypeScript types from Go block structs + sqlc queries
 gen:
@@ -86,10 +87,15 @@ test *ARGS='./...':
 
 # ── Release ───────────────────────────────────────────────────────────────────
 
-# Tag a release (v{YEAR.MONTH}.{NUM})
-release:
+# Tag a per-component release. COMPONENT must be one of: fanout, site.
+# Tags follow {COMPONENT}/v{YEAR.MONTH}.{NUM}, e.g. fanout/v2026.04.1.
+# Each component has its own GitHub Actions workflow that fires on its prefix.
+release COMPONENT:
     #!/bin/bash
-    git fetch origin --tags main
+    case "{{COMPONENT}}" in
+      fanout|site) ;;
+      *) echo "unknown component: {{COMPONENT}} (expected fanout|site)" >&2; exit 1 ;;
+    esac
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
     if [ "$BRANCH" != "main" ]; then
       echo "release must run from main." >&2
@@ -99,14 +105,25 @@ release:
       echo "release requires a clean tracked worktree." >&2
       exit 1
     fi
+    git fetch origin --tags main
     if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
       echo "release must run from an up-to-date main (HEAD must equal origin/main)." >&2
       exit 1
     fi
     MONTH=$(date +%Y.%m)
-    LAST=$(git tag --list "v${MONTH}.*" --sort=-v:refname | head -1)
-    if [ -z "$LAST" ]; then NUM=1; else NUM=$(( ${LAST##*.} + 1 )); fi
-    TAG="v${MONTH}.${NUM}"
+    PREFIX="{{COMPONENT}}/v${MONTH}"
+    LAST=$(git tag --list "${PREFIX}.*" --sort=-v:refname | head -1)
+    if [ -z "$LAST" ]; then
+      NUM=1
+    else
+      SUFFIX="${LAST##*.}"
+      if [[ ! "$SUFFIX" =~ ^[0-9]+$ ]]; then
+        echo "non-numeric suffix in tag '$LAST' — expected digits, got '$SUFFIX'" >&2
+        exit 1
+      fi
+      NUM=$(( SUFFIX + 1 ))
+    fi
+    TAG="${PREFIX}.${NUM}"
     echo "Tagging ${TAG}"
     if git rev-parse "$TAG" >/dev/null 2>&1; then
       echo "Tag $TAG already exists; pushing existing tag."
