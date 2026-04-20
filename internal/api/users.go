@@ -70,12 +70,14 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create user")
 	}
 
-	// Send invitation email
-	go func() {
-		if err := auth.SendInvite(h.smtp, email); err != nil {
-			slog.Error("auth: send invitation email failed", "email", email, "err", err)
-		}
-	}()
+	// Send invitation synchronously so the admin sees an accurate
+	// result: a 201 must mean the invite was actually delivered to the
+	// MTA. On failure, the user row stays (we don't roll back) so the
+	// admin can retry by clicking resend or re-creating.
+	if err := auth.SendInvite(h.smtp, email); err != nil {
+		slog.Error("auth: send invitation email failed", "email", email, "err", err)
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "user created but invite email delivery failed")
+	}
 
 	return c.JSON(201, user)
 }

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"fmt"
+	"net"
 	"net/smtp"
 	"strconv"
 	"time"
@@ -36,7 +37,7 @@ func SendCode(cfg SMTPConfig, to, code string) error {
 }
 
 func send(cfg SMTPConfig, to, subject, body string) error {
-	e := email.New(cfg.Host + ":" + strconv.Itoa(cfg.Port))
+	e := email.New(net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
 	e.Auth = smtp.PlainAuth("", cfg.User, cfg.Pass, cfg.Host)
 	e.DialTimeout = 10 * time.Second
 	return e.Send(&email.Message{
