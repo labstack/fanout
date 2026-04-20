@@ -11,7 +11,9 @@ services:
     image: ghcr.io/labstack/fanout:main
     container_name: fanout-demo
     restart: unless-stopped
-    env_file: .env
+    env_file:
+      - .env          # otel-demo pin + ports (tracked)
+      - .env.secrets  # demo instance secrets — JWT/SMTP/AI (gitignored)
     environment:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520
