@@ -18,15 +18,21 @@ permissions:
   contents: write
   packages: write
 
+defaults:
+  run:
+    shell: bash
+
 env:
   REGISTRY: ghcr.io
   GO_VERSION: "1.26.1"
+  BUN_VERSION: "1.3.9"
+  TAG_PATTERN: '^fanout/v[0-9]{4}\.[0-9]{2}\.[0-9]+(-[A-Za-z0-9.]+)?$'
 
 jobs:
   # ── Native binaries (Linux amd64, Linux arm64, macOS arm64) ──────────
   # Each runner builds for its own native arch via `goreleaser release
-  # --split --single-target`. CGO + DuckDB under QEMU is impractical, so we
-  # avoid cross-compilation entirely and let each runner do native work.
+  # --split --single-target`. CGO + DuckDB under QEMU is impractical, so
+  # we avoid cross-compilation entirely.
   binaries:
     strategy:
       fail-fast: true
@@ -52,6 +58,8 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
 
       - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: goreleaser release --split --single-target
         uses: goreleaser/goreleaser-action@v6
@@ -86,20 +94,32 @@ jobs:
     runs-on: ${{ matrix.runner }}
     outputs:
       version: ${{ steps.version.outputs.value }}
+      stable: ${{ steps.version.outputs.stable }}
     steps:
       - uses: actions/checkout@v6
 
-      - name: Resolve version
+      - name: Resolve and validate version
         id: version
         run: |
-          # Tag shape is "fanout/vYYYY.MM.N" (or via workflow_dispatch input).
-          # Strip the "fanout/" prefix so the Docker tag is just "vYYYY.MM.N".
+          set -euo pipefail
           if [[ -n "${{ inputs.tag }}" ]]; then
             raw="${{ inputs.tag }}"
           else
             raw="${GITHUB_REF_NAME}"
           fi
-          echo "value=${raw#fanout/}" >>"$GITHUB_OUTPUT"
+          if [[ ! "$raw" =~ ${{ env.TAG_PATTERN }} ]]; then
+            echo "::error::tag must match fanout/vYYYY.MM.N (optionally -suffix), got: $raw"
+            exit 1
+          fi
+          version="${raw#fanout/}"
+          # Stable = no prerelease suffix (no '-' in the version part).
+          if [[ "$version" == *-* ]]; then
+            stable=false
+          else
+            stable=true
+          fi
+          echo "value=$version" >>"$GITHUB_OUTPUT"
+          echo "stable=$stable" >>"$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -138,13 +158,24 @@ jobs:
         env:
           IMAGE: ghcr.io/labstack/fanout
           VERSION: ${{ needs.docker.outputs.version }}
+          STABLE: ${{ needs.docker.outputs.stable }}
           SHA: ${{ github.sha }}
         run: |
+          set -euo pipefail
+          if [[ -z "$VERSION" ]]; then
+            echo "::error::empty VERSION from docker job"
+            exit 1
+          fi
           # Strip leading 'v' so the version tag matches the historical scheme.
           tag="${VERSION#v}"
+          tag_args=(-t "$IMAGE:$tag")
+          # Only move :latest on stable releases — prereleases shouldn't
+          # clobber what users pin to.
+          if [[ "$STABLE" == "true" ]]; then
+            tag_args+=(-t "$IMAGE:latest")
+          fi
           docker buildx imagetools create \
-            -t "$IMAGE:$tag" \
-            -t "$IMAGE:latest" \
+            "${tag_args[@]}" \
             "$IMAGE:$SHA-amd64" \
             "$IMAGE:$SHA-arm64"
 
@@ -167,6 +198,20 @@ jobs:
           path: dist
           pattern: dist-*
           merge-multiple: false
+
+      - name: Verify all partial dists present
+        run: |
+          set -euo pipefail
+          missing=()
+          for d in dist-linux-amd64 dist-linux-arm64 dist-darwin-arm64; do
+            if [[ ! -f "dist/$d/artifacts.json" ]]; then
+              missing+=("$d")
+            fi
+          done
+          if (( ${#missing[@]} > 0 )); then
+            echo "::error::missing partial dist(s): ${missing[*]}"
+            exit 1
+          fi
 
       - name: goreleaser continue --merge
         uses: goreleaser/goreleaser-action@v6

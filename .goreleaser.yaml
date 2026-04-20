@@ -36,7 +36,7 @@ builds:
       - amd64
       - arm64
     ignore:
-      # We don't ship Intel Mac binaries — see issue #95 if we ever need to.
+      # Apple Silicon only — Intel Macs are EOL for our target users.
       - goos: darwin
         goarch: amd64
 

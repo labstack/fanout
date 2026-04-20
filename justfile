@@ -113,7 +113,16 @@ release COMPONENT:
     MONTH=$(date +%Y.%m)
     PREFIX="{{COMPONENT}}/v${MONTH}"
     LAST=$(git tag --list "${PREFIX}.*" --sort=-v:refname | head -1)
-    if [ -z "$LAST" ]; then NUM=1; else NUM=$(( ${LAST##*.} + 1 )); fi
+    if [ -z "$LAST" ]; then
+      NUM=1
+    else
+      SUFFIX="${LAST##*.}"
+      if [[ ! "$SUFFIX" =~ ^[0-9]+$ ]]; then
+        echo "non-numeric suffix in tag '$LAST' — expected digits, got '$SUFFIX'" >&2
+        exit 1
+      fi
+      NUM=$(( SUFFIX + 1 ))
+    fi
     TAG="${PREFIX}.${NUM}"
     echo "Tagging ${TAG}"
     if git rev-parse "$TAG" >/dev/null 2>&1; then

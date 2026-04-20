@@ -10,10 +10,8 @@ COPY web/ .
 RUN bun run build
 
 # --- Server build stage ---
-# TARGETOS / TARGETARCH come from `docker buildx --platform` and let the same
-# Dockerfile produce binaries for whatever the buildx target is. CGO is on,
-# so the build host must have a matching C toolchain — in CI we use native
-# runners (ubuntu-24.04 + ubuntu-24.04-arm) rather than QEMU.
+# CGO is on (DuckDB), so cross-compilation isn't practical — CI uses
+# native runners per arch. See .github/workflows/release.yml.
 FROM --platform=$BUILDPLATFORM golang:1.26-bookworm AS builder
 
 ARG TARGETOS

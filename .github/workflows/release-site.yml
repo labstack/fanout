@@ -18,8 +18,13 @@ permissions:
   contents: write
   packages: write
 
+defaults:
+  run:
+    shell: bash
+
 env:
   REGISTRY: ghcr.io
+  TAG_PATTERN: '^site/v[0-9]{4}\.[0-9]{2}\.[0-9]+(-[A-Za-z0-9.]+)?$'
 
 jobs:
   docker:
@@ -27,26 +32,37 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Resolve tag (strip "site/" prefix)
+      - name: Resolve and validate tag
         id: version
         run: |
+          set -euo pipefail
           if [[ -n "${{ inputs.tag }}" ]]; then
             raw="${{ inputs.tag }}"
           else
             raw="${GITHUB_REF_NAME}"
           fi
-          echo "value=${raw#site/}" >>"$GITHUB_OUTPUT"
+          if [[ ! "$raw" =~ ${{ env.TAG_PATTERN }} ]]; then
+            echo "::error::tag must match site/vYYYY.MM.N (optionally -suffix), got: $raw"
+            exit 1
+          fi
+          version="${raw#site/}"
+          if [[ "$version" == *-* ]]; then
+            stable=false
+          else
+            stable=true
+          fi
+          echo "value=$version" >>"$GITHUB_OUTPUT"
+          echo "stable=$stable" >>"$GITHUB_OUTPUT"
 
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/labstack/fanout-site
+          # Two tags: the version (e.g. 2026.04.1) and 'latest' on stable only.
           tags: |
-            type=raw,value=${{ steps.version.outputs.value }}
-            type=raw,value=${{ steps.version.outputs.value }},enable=${{ !startsWith(steps.version.outputs.value, 'v') }}
             type=match,pattern=v(.*),group=1,value=${{ steps.version.outputs.value }}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ steps.version.outputs.stable == 'true' }}
 
       - uses: docker/setup-buildx-action@v4
       - uses: docker/setup-qemu-action@v4
