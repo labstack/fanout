@@ -576,7 +576,7 @@ input:-webkit-autofill:focus {
 
 Run: `cd /Users/v/Projects/labstack/fanout/client && npm run dev`
 
-Open `https://fanout.test:7521` — background should be `#09090b`, text should be light zinc, body font should be Fragment Mono. The chat page may have some styling issues that we fix in later tasks.
+Open `https://demo.fanout.test` — background should be `#09090b`, text should be light zinc, body font should be Fragment Mono. The chat page may have some styling issues that we fix in later tasks.
 
 - [ ] **Step 3: Commit**
 

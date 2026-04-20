@@ -1422,7 +1422,7 @@ Run: `cd /Users/v/Projects/labstack/fanout && just check`
 
 - [ ] **Step 4: Browser test**
 
-Start dev server and test at `https://fanout.test`:
+Start dev server and test at `https://demo.fanout.test`:
 1. Home page loads, click any service → navigates to `/service/:name`
 2. Service Detail shows header, metric cards, charts, endpoints, errors, deps
 3. Time range selector works
