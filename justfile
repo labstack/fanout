@@ -87,50 +87,75 @@ test *ARGS='./...':
 
 # ── Release ───────────────────────────────────────────────────────────────────
 
-# Tag a per-component release. COMPONENT must be one of: fanout, site.
-# Tags follow {COMPONENT}/v{YEAR.MONTH}.{NUM}, e.g. fanout/v2026.04.1.
-# Each component has its own GitHub Actions workflow that fires on its prefix.
-release COMPONENT:
+# Tags follow {component}/v{YEAR.MONTH}.{NUM}, e.g. fanout/v2026.04.1, and
+# each component has its own GitHub Actions workflow that fires on its prefix.
+# Tag per-component releases, auto-detecting which components changed since their last tag.
+release:
     #!/bin/bash
-    case "{{COMPONENT}}" in
-      fanout|site) ;;
-      *) echo "unknown component: {{COMPONENT}} (expected fanout|site)" >&2; exit 1 ;;
-    esac
+    # `set -eo pipefail` catches failures in the main shell and in pipelines.
+    # Caveats on bash 3.2 (macOS system bash) with no `inherit_errexit`:
+    #   * `local VAR=$(cmd)` masks the subshell exit — we always write
+    #     `local VAR; VAR=$(cmd)` so `set -e` sees the assignment directly.
+    #   * `set -e` does NOT propagate into $(…) subshells — functions called
+    #     that way (`next_tag`) use explicit `|| exit 1` on critical commands.
+    set -eo pipefail
     BRANCH=$(git rev-parse --abbrev-ref HEAD)
     if [ "$BRANCH" != "main" ]; then
-      echo "release must run from main." >&2
-      exit 1
+      echo "release must run from main." >&2; exit 1
     fi
     if ! git diff --quiet || ! git diff --cached --quiet; then
-      echo "release requires a clean tracked worktree." >&2
-      exit 1
+      echo "release requires a clean tracked worktree." >&2; exit 1
     fi
     git fetch origin --tags main
     if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
-      echo "release must run from an up-to-date main (HEAD must equal origin/main)." >&2
-      exit 1
+      echo "release must run from an up-to-date main (HEAD must equal origin/main)." >&2; exit 1
     fi
     MONTH=$(date +%Y.%m)
-    PREFIX="{{COMPONENT}}/v${MONTH}"
-    LAST=$(git tag --list "${PREFIX}.*" --sort=-v:refname | head -1)
-    if [ -z "$LAST" ]; then
-      NUM=1
-    else
-      SUFFIX="${LAST##*.}"
-      if [[ ! "$SUFFIX" =~ ^[0-9]+$ ]]; then
-        echo "non-numeric suffix in tag '$LAST' — expected digits, got '$SUFFIX'" >&2
-        exit 1
+    RELEASED=0
+    next_tag() {
+      local PREFIX="$1"
+      # `next_tag` is invoked via $(next_tag …), so `set -e` inside this body
+      # doesn't propagate back out on bash 3.2 (no `inherit_errexit`). The
+      # explicit `|| exit 1` forces the subshell to abort on a real git failure.
+      # The `|| true` on grep only swallows grep's "no match" exit — the
+      # numeric-suffix filter keeps a stray `…-rc1` tag out of the arithmetic.
+      local ALL
+      ALL=$(git tag --list "${PREFIX}${MONTH}.*" --sort=-v:refname) || exit 1
+      local LAST
+      LAST=$(printf '%s\n' "$ALL" | { grep -E "^${PREFIX}${MONTH}\.[0-9]+$" || true; } | head -1)
+      local NUM
+      if [ -z "$LAST" ]; then NUM=1; else NUM=$(( ${LAST##*.} + 1 )); fi
+      echo "${PREFIX}${MONTH}.${NUM}"
+    }
+    last_tag() {
+      git tag --list "${1}*" --sort=-v:refname | head -1
+    }
+    maybe_release() {
+      local NAME="$1" PREFIX="$2"; shift 2; local PATHS=("$@")
+      local SINCE; SINCE=$(last_tag "$PREFIX")
+      if [ -n "$SINCE" ]; then
+        local CHANGES; CHANGES=$(git diff --name-only "$SINCE"..HEAD -- "${PATHS[@]}")
+        if [ -z "$CHANGES" ]; then
+          echo "  $NAME: no changes"
+          return
+        fi
       fi
-      NUM=$(( SUFFIX + 1 ))
-    fi
-    TAG="${PREFIX}.${NUM}"
-    echo "Tagging ${TAG}"
-    if git rev-parse "$TAG" >/dev/null 2>&1; then
-      echo "Tag $TAG already exists; pushing existing tag."
-    else
+      local TAG; TAG=$(next_tag "$PREFIX")
+      echo "  $NAME: ${SINCE:-<first release>} → $TAG"
       git tag "$TAG"
+      # Drop the local tag if push fails so next run doesn't skip a number.
+      git push origin "$TAG" || { git tag -d "$TAG" >/dev/null; exit 1; }
+      RELEASED=$((RELEASED + 1))
+    }
+    echo "Checking for changes since last release..."
+    # Keep the fanout path list in sync with sources the binary embeds or
+    # compiles from — anything the Dockerfile or .goreleaser.yaml pulls in
+    # must be listed here, or changes there will silently skip the release.
+    maybe_release "fanout" "fanout/v" cmd/ internal/ web/ go.mod go.sum Dockerfile .goreleaser.yaml
+    maybe_release "site" "site/v" site/
+    if [ "$RELEASED" -eq 0 ]; then
+      echo "Nothing to release."
     fi
-    git push origin "$TAG"
 
 # ── Ops ──────────────────────────────────────────────────────────────────────
 
