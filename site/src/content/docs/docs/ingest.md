@@ -50,8 +50,10 @@ service:
 
 ## Namespaces (multi-product)
 
-If you run multiple products through one Fanout, set `service.namespace` in your resource attributes. The UI groups services by namespace and the `ns:` filter works across search and MCP tools.
+If you run multiple products through one Fanout, set `service.namespace` in your resource attributes. The UI groups services by namespace via the namespace picker in the header; MCP tools take an explicit `namespace` argument.
 
 ```sh
 OTEL_RESOURCE_ATTRIBUTES=service.namespace=product-a,service.name=checkout
 ```
+
+Payloads without a `service.namespace` land in the `DEFAULT_NAMESPACE` (`default` unless overridden via env).

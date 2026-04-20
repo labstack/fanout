@@ -16,7 +16,7 @@ install:
     go install github.com/air-verse/air@latest
     brew install process-compose pre-commit 2>/dev/null || true
     cd web && bun install
-    if [ -d site ]; then cd site && bun install; fi
+    cd site && bun install
     pre-commit install
 
 # ── Dev ──────────────────────────────────────────────────────────────────────

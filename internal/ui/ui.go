@@ -3,6 +3,7 @@ package ui
 
 import (
 	"embed"
+	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
@@ -14,8 +15,19 @@ import (
 var distFS embed.FS
 
 // Dist returns the embedded UI filesystem, rooted at the dist directory.
+// Returns an error if the embedded dist has no index.html — which happens
+// when the Go binary is built without running the frontend build first
+// (the embed only has the .gitkeep placeholder). Callers should log and
+// skip SPA registration rather than serve 404s on every route.
 func Dist() (fs.FS, error) {
-	return fs.Sub(distFS, "dist")
+	sub, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := fs.Stat(sub, "index.html"); err != nil {
+		return nil, fmt.Errorf("UI not built: index.html not in embedded dist (run `bun run build` in web/ then rebuild Go): %w", err)
+	}
+	return sub, nil
 }
 
 // RegisterSPARoutes adds a catch-all route that serves the React SPA.

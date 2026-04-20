@@ -11,7 +11,7 @@ Fanout is a **single-binary observability platform** for self-hosters. It accept
 - **Storage** as hourly-partitioned Parquet under `data/telemetry/`.
 - **Query** via embedded DuckDB — rollups at 60 s, raw scans P95 under 5 s.
 - **Web UI** for service overviews, trace waterfalls, logs, and alert rules.
-- **MCP server** with ten tools for Claude Code and any MCP client.
+- **MCP server** with twelve tools for Claude Code and any MCP client.
 - **Alerts** expressed as expr-lang rules, evaluated every 30 s.
 
 ## What it is not

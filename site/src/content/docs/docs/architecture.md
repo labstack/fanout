@@ -40,7 +40,7 @@ Fanout is one Go binary. Every subsystem lives in-process; data flows through ch
 | query | `internal/query` | DuckDB queries, rollups |
 | service | `internal/service` | domain logic layer |
 | api | `internal/api` | Echo HTTP handlers |
-| mcp | `internal/mcp` | MCP server + ten tools |
+| mcp | `internal/mcp` | MCP server + twelve tools |
 | web | `web/` | React admin SPA, embedded in the binary |
 | site | `site/` | Marketing + docs (this website) |
 

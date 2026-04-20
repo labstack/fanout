@@ -13,5 +13,5 @@ processes:
     working_dir: ./web
 
   site:
-    command: bash -c 'if [ -f package.json ]; then bun run dev --host --port 7522; else echo "site not scaffolded yet"; sleep infinity; fi'
+    command: bun run dev --host --port 7522
     working_dir: ./site

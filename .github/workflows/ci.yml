@@ -43,13 +43,13 @@ jobs:
         run: cd web && bun install --frozen-lockfile
 
       - name: Install site deps
-        run: if [ -d site ]; then cd site && bun install --frozen-lockfile; fi
+        run: cd site && bun install --frozen-lockfile
 
       - name: Check
         run: just check
 
       - name: Build site
-        run: if [ -d site ]; then cd site && bun run build; fi
+        run: cd site && bun run build
 
       - name: Test
         run: just test -race -coverprofile=coverage.txt ./...

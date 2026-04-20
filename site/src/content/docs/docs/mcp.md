@@ -3,7 +3,7 @@ title: MCP server
 description: Use Claude Code (or any MCP client) to investigate your telemetry.
 ---
 
-Fanout ships an MCP (Model Context Protocol) server at `/mcp`. Point Claude Code — or any MCP-capable assistant — at it, and ten tools become available for investigation.
+Fanout ships an MCP (Model Context Protocol) server at `/mcp`. Point Claude Code — or any MCP-capable assistant — at it, and twelve tools become available for investigation.
 
 ## Connect Claude Code
 
@@ -31,6 +31,8 @@ claude mcp add fanout --transport http http://localhost:7520/mcp
 | `compare` | Side-by-side: services, time windows, or operations. |
 | `attributes` | Discover filterable attribute keys. |
 | `query` | Raw SQL against DuckDB. |
+| `alert_rules` | List, create, update, and delete alert rules. |
+| `alerts` | List firing / pending / resolved alerts, filterable by service or rule. |
 
 ## Investigation pattern
 
