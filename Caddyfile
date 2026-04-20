@@ -1,0 +1,13 @@
+{
+	email {$LETSENCRYPT_EMAIL}
+}
+
+fanout.run, www.fanout.run {
+	reverse_proxy fanout-site:80
+	encode gzip zstd
+}
+
+demo.fanout.run {
+	reverse_proxy fanout-demo:7520
+	encode gzip zstd
+}

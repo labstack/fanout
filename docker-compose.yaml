@@ -1,49 +1,25 @@
-networks:
-  webproxy:
-    external: true
+include:
+  - path: demo/docker-compose.yaml
+    env_file: demo/.env
 
 services:
-  nginx-proxy:
-    image: nginxproxy/nginx-proxy
-    container_name: nginx-proxy
+  caddy:
+    image: caddy:alpine
+    container_name: caddy
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-    volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-      - /data/ssl:/etc/nginx/certs
-      - /data/nginx:/etc/nginx/vhost.d
-      - /data/html:/usr/share/nginx/html
-    networks:
-      - webproxy
-      - default
-
-  letsencrypt:
-    image: nginxproxy/acme-companion
-    container_name: letsencrypt
-    restart: unless-stopped
-    volumes_from:
-      - nginx-proxy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /data/acme:/etc/acme.sh
     environment:
-      DEFAULT_EMAIL: ${LETSENCRYPT_EMAIL:-admin@fanout.run}
-    networks:
-      - webproxy
-      - default
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-v@labstack.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /data/caddy:/data
+      - /data/caddy-config:/config
 
   fanout-site:
     image: ghcr.io/labstack/fanout-site:${VERSION:-latest}
     container_name: fanout-site
     restart: unless-stopped
-    environment:
-      VIRTUAL_HOST: fanout.run,www.fanout.run
-      VIRTUAL_PORT: "80"
-      LETSENCRYPT_HOST: fanout.run,www.fanout.run
-      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-v@labstack.com}
     expose:
       - "80"
-    networks:
-      - webproxy
