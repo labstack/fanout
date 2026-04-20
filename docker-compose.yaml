@@ -1,75 +1,25 @@
-networks:
-  webproxy:
-    external: true
+include:
+  - path: demo/docker-compose.yaml
+    env_file: demo/.env
 
 services:
-  nginx-proxy:
-    image: nginxproxy/nginx-proxy
-    container_name: nginx-proxy
+  caddy:
+    image: caddy:alpine
+    container_name: caddy
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-    volumes:
-      - /var/run/docker.sock:/tmp/docker.sock:ro
-      - /data/ssl:/etc/nginx/certs
-      - /data/nginx:/etc/nginx/vhost.d
-      - /data/html:/usr/share/nginx/html
-    networks:
-      - webproxy
-      - default
-
-  letsencrypt:
-    image: nginxproxy/acme-companion
-    container_name: letsencrypt
-    restart: unless-stopped
-    volumes_from:
-      - nginx-proxy
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /data/acme:/etc/acme.sh
     environment:
-      DEFAULT_EMAIL: ${LETSENCRYPT_EMAIL:-admin@fanout.run}
-    networks:
-      - webproxy
-      - default
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-v@labstack.com}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /data/caddy:/data
+      - /data/caddy-config:/config
 
-  fanout:
-    image: ghcr.io/labstack/fanout:${VERSION:-main}
-    container_name: fanout
+  fanout-site:
+    image: ghcr.io/labstack/fanout-site:${VERSION:-latest}
+    container_name: fanout-site
     restart: unless-stopped
-    env_file: .env
-    environment:
-      VIRTUAL_HOST: fanout.run
-      VIRTUAL_PORT: 7520
-      LETSENCRYPT_HOST: fanout.run
-      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-admin@fanout.run}
-      DATA_DIR: /var/lib/fanout/data
-      HTTP_ADDR: :7520
-      OTLP_GRPC_ADDR: :4317
-      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
-      AI_API_KEY: ${AI_API_KEY:?set AI_API_KEY}
-      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:?set SMTP_USER}
-      SMTP_PASS: ${SMTP_PASS:?set SMTP_PASS}
-      SMTP_FROM: ${SMTP_FROM:?set SMTP_FROM}
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
-      TLS_CERT_FILE: ${TLS_CERT_FILE:?set TLS_CERT_FILE}
-      TLS_KEY_FILE: ${TLS_KEY_FILE:?set TLS_KEY_FILE}
-    ports:
-      - "4317:4317"
     expose:
-      - "7520"
-    volumes:
-      - /data/fanout:/var/lib/fanout
-      - /data/fanout/certs:/etc/fanout/certs:ro
-    healthcheck:
-      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:7520/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    networks:
-      - webproxy
-      - default
+      - "80"

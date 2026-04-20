@@ -1,0 +1,18 @@
+# Caddy at the edge of the Compose project. The host names must have
+# A records pointing at this server; `fanout-site` and `fanout-demo`
+# are resolved via Compose's default bridge DNS. LETSENCRYPT_EMAIL
+# comes from the `caddy` service's environment in docker-compose.yaml.
+
+{
+	email {$LETSENCRYPT_EMAIL}
+}
+
+fanout.run, www.fanout.run {
+	reverse_proxy fanout-site:80
+	encode gzip zstd
+}
+
+demo.fanout.run {
+	reverse_proxy fanout-demo:7520
+	encode gzip zstd
+}

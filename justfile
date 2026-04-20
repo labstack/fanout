@@ -117,13 +117,9 @@ release:
 
 # ── Ops ──────────────────────────────────────────────────────────────────────
 
-# Deploy to production
+# Deploy site + demo to production (Caddy at the edge + fanout-site + otel-demo)
 deploy *ARGS='':
     ./scripts/yeet.sh {{ARGS}}
-
-# Deploy demo (otel-demo + fanout)
-deploy-demo *ARGS='':
-    ./demo/yeet.sh {{ARGS}}
 
 # Clean build artifacts (--all also removes data/)
 clean *ARGS='':
