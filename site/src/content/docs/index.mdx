@@ -1,0 +1,43 @@
+---
+title: Fanout
+description: Single-binary OpenTelemetry ingest, storage, and query. Self-hosted.
+template: splash
+hero:
+  title: OpenTelemetry without the stack
+  tagline: One binary. Ingest OTLP traces, logs, and metrics. Store as Parquet. Query with DuckDB. Explore in the browser or via MCP.
+  actions:
+    - text: Get started
+      link: /docs/getting-started/
+      icon: right-arrow
+      variant: primary
+    - text: Try the demo
+      link: https://demo.fanout.run
+      icon: external
+    - text: GitHub
+      link: https://github.com/labstack/fanout
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+<CardGrid>
+  <Card title="OTLP-native ingest" icon="puzzle">
+    Accept traces, logs, and metrics over gRPC on port 4317. Point any OpenTelemetry SDK or collector at Fanout.
+  </Card>
+  <Card title="Parquet + DuckDB" icon="document">
+    Events land as partitioned Parquet files. Queries run through embedded DuckDB — fast scans, zero external services.
+  </Card>
+  <Card title="Built-in UI" icon="laptop">
+    Service overviews, trace waterfalls, log search, alert rules, and a chat-driven investigation loop. All in the binary.
+  </Card>
+  <Card title="MCP server" icon="rocket">
+    Ten tools — `overview`, `topology`, `diagnose`, `trace`, and more — exposed to Claude Code and any MCP client.
+  </Card>
+  <Card title="Single binary" icon="download">
+    No Kubernetes, no Kafka, no Cassandra. Drop the binary on a VM, point a proxy at it, and you're done.
+  </Card>
+  <Card title="Self-hosted" icon="seti:shell">
+    Your data stays yours. Run behind your existing TLS terminator or let Fanout handle certs directly.
+  </Card>
+</CardGrid>

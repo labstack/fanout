@@ -15,8 +15,15 @@
 .DS_Store
 
 # Build artifacts (keep .gitkeep so go:embed always has a directory)
-internal/web/dist/*
-!internal/web/dist/.gitkeep
+internal/ui/dist/*
+!internal/ui/dist/.gitkeep
+
+# Site build output
+site/dist/
+site/.astro/
+site/node_modules/
+web/node_modules/
+web/dist/
 
 # Test/temp
 testdata/

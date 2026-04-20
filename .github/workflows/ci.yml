@@ -23,7 +23,7 @@ jobs:
           cache: false
           cache-dependency-path: go.sum
 
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@v4
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -35,11 +35,17 @@ jobs:
           version: v2.9
           args: --help
 
-      - name: Install client deps
-        run: cd client && bun install --frozen-lockfile
+      - name: Install web deps
+        run: cd web && bun install --frozen-lockfile
+
+      - name: Install site deps
+        run: if [ -d site ]; then cd site && bun install --frozen-lockfile; fi
 
       - name: Check
         run: just check
+
+      - name: Build site
+        run: if [ -d site ]; then cd site && bun run build; fi
 
       - name: Test
         run: just test -race -coverprofile=coverage.txt ./...

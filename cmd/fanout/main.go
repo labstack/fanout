@@ -34,7 +34,7 @@ import (
 	"github.com/labstack/fanout/internal/service"
 	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
-	"github.com/labstack/fanout/internal/web"
+	"github.com/labstack/fanout/internal/ui"
 )
 
 var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
@@ -244,11 +244,11 @@ func main() {
 
 	// SPA catch-all — serves the embedded React app for any unmatched route.
 	// API routes registered above take priority; everything else falls through here.
-	spaFS, spaErr := web.ClientDist()
+	spaFS, spaErr := ui.Dist()
 	if spaErr != nil {
 		slog.Warn("React SPA not available (not built?)", "err", spaErr)
 	} else {
-		web.RegisterSPARoutes(e, spaFS)
+		ui.RegisterSPARoutes(e, spaFS)
 		slog.Info("React SPA enabled", "path", "/*")
 	}
 

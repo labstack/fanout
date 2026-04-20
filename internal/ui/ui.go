@@ -1,4 +1,5 @@
-package web
+// Package ui embeds the built React admin UI and serves it as a SPA.
+package ui
 
 import (
 	"embed"
@@ -10,17 +11,17 @@ import (
 )
 
 //go:embed all:dist
-var clientDist embed.FS
+var distFS embed.FS
 
-// ClientDist returns the embedded React app filesystem, rooted at the dist directory.
-func ClientDist() (fs.FS, error) {
-	return fs.Sub(clientDist, "dist")
+// Dist returns the embedded UI filesystem, rooted at the dist directory.
+func Dist() (fs.FS, error) {
+	return fs.Sub(distFS, "dist")
 }
 
 // RegisterSPARoutes adds a catch-all route that serves the React SPA.
-// Static files (JS, CSS, etc.) are served directly from the embedded filesystem.
-// Any other path falls back to index.html for client-side routing.
-// This must be called after all API routes are registered so they take priority.
+// Static files (JS, CSS, etc.) are served directly from the embedded
+// filesystem. Any other path falls back to index.html for client-side
+// routing. Must be called after all API routes so they take priority.
 func RegisterSPARoutes(e *echo.Echo, spaFS fs.FS) {
 	httpFS := http.FS(spaFS)
 
@@ -30,18 +31,16 @@ func RegisterSPARoutes(e *echo.Echo, spaFS fs.FS) {
 			path = "index.html"
 		}
 
-		// Try to serve the requested static file
 		if served, err := tryServeFile(c, httpFS, path); served {
 			return err
 		}
-
-		// Fall back to index.html for client-side routing
 		return serveIndex(c, httpFS)
 	})
 }
 
-// tryServeFile attempts to open and serve a file. Returns (true, nil) if served,
-// (true, err) if served with error, or (false, nil) if file not found/is directory.
+// tryServeFile attempts to open and serve a file. Returns (true, nil) if
+// served, (true, err) if served with error, or (false, nil) if not
+// found / is a directory.
 func tryServeFile(c *echo.Context, httpFS http.FileSystem, path string) (bool, error) {
 	f, err := httpFS.Open(path)
 	if err != nil {

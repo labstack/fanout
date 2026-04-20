@@ -26,7 +26,7 @@ repos:
         args: [--maxkb=1000]
         exclude: (node_modules|dist)
 
-  # Go + client quality (path-filtered)
+  # Go + web quality (path-filtered)
   - repo: local
     hooks:
       - id: go-fmt
@@ -51,14 +51,14 @@ repos:
         pass_filenames: false
 
       - id: tsc
-        name: Type check (client)
-        entry: bash -c 'cd client && npx tsc --noEmit'
+        name: Type check (web)
+        entry: bash -c 'cd web && npx tsc --noEmit'
         language: system
-        files: ^client/.*\.(ts|tsx)$
+        files: ^web/.*\.(ts|tsx)$
         pass_filenames: false
 
       - id: build
-        name: Build (Go + client)
+        name: Build (Go + web)
         entry: just build
         language: system
         files: \.(go|ts|tsx|css)$

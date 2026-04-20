@@ -1,0 +1,73 @@
+/* Fanout theme — matches web/src/index.css palette. */
+
+:root {
+  /* Fanout palette */
+  --fn-surface:      #09090b;
+  --fn-surface-1:    #121215;
+  --fn-surface-2:    #1a1a1f;
+  --fn-surface-3:    #252529;
+  --fn-foreground:   #e4e4e7;
+  --fn-muted:        #71717a;
+  --fn-border:       #27272a;
+  --fn-primary:      #60a5fa;
+  --fn-primary-dim:  #3b82f6;
+  --fn-primary-soft: #1e3a5f;
+}
+
+:root[data-theme="dark"] {
+  --sl-color-accent-low:  var(--fn-primary-soft);
+  --sl-color-accent:      var(--fn-primary);
+  --sl-color-accent-high: #93c5fd;
+
+  --sl-color-white:   var(--fn-foreground);
+  --sl-color-gray-1:  #e4e4e7;
+  --sl-color-gray-2:  #d4d4d8;
+  --sl-color-gray-3:  #a1a1aa;
+  --sl-color-gray-4:  var(--fn-muted);
+  --sl-color-gray-5:  #52525b;
+  --sl-color-gray-6:  var(--fn-surface-3);
+  --sl-color-gray-7:  var(--fn-surface-2);
+  --sl-color-black:   var(--fn-surface);
+
+  --sl-color-bg:                var(--fn-surface);
+  --sl-color-bg-nav:            var(--fn-surface);
+  --sl-color-bg-sidebar:        var(--fn-surface);
+  --sl-color-bg-inline-code:    var(--fn-surface-2);
+  --sl-color-bg-accent:         var(--fn-primary);
+  --sl-color-text:              var(--fn-foreground);
+  --sl-color-text-accent:       var(--fn-primary);
+  --sl-color-hairline:          var(--fn-border);
+  --sl-color-hairline-light:    #1f1f22;
+  --sl-color-hairline-shade:    #000;
+
+  --sl-font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sl-font-mono: ui-monospace, "SF Mono", "Menlo", "Monaco", "Consolas", "Liberation Mono", monospace;
+}
+
+:root[data-theme="light"] {
+  /* We ship dark-only. Mirror dark tokens so the toggle stays on-brand. */
+  --sl-color-accent-low:  var(--fn-primary-soft);
+  --sl-color-accent:      var(--fn-primary);
+  --sl-color-accent-high: #93c5fd;
+  --sl-color-bg:          var(--fn-surface);
+  --sl-color-text:        var(--fn-foreground);
+}
+
+/* Subtle polish to match the dev-tool aesthetic */
+body {
+  font-feature-settings: "cv11", "ss01";
+}
+
+.site-title {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* Inline code polish */
+:not(pre) > code {
+  color: var(--fn-foreground);
+  border: 1px solid var(--fn-border);
+  border-radius: 4px;
+  padding: 0.1em 0.35em;
+  font-size: 0.9em;
+}

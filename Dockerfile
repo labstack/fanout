@@ -1,12 +1,12 @@
 # syntax=docker/dockerfile:1
 
-# --- Client build stage ---
-FROM oven/bun:latest AS client
+# --- Web build stage ---
+FROM oven/bun:latest AS web
 
-WORKDIR /app/client
-COPY client/package.json client/bun.lock ./
+WORKDIR /app/web
+COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile
-COPY client/ .
+COPY web/ .
 RUN bun run build
 
 # --- Server build stage ---
@@ -19,7 +19,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go mod download
 
 COPY . .
-COPY --from=client /app/client/dist/ internal/web/dist/
+COPY --from=web /app/web/dist/ internal/ui/dist/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 go build -ldflags="-s -w" -o fanout ./cmd/fanout
