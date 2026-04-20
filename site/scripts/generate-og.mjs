@@ -1,13 +1,14 @@
 // Generates site/public/og.png (1200x630) from an SVG template.
-// Usage: bun run og   (runs `node scripts/generate-og.mjs`)
+// Wired as a `prebuild` script so the OG image is always fresh on `bun run build`.
 
 import sharp from "sharp";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outPath = resolve(__dirname, "../public/og.png");
+mkdirSync(dirname(outPath), { recursive: true });
 
 const svg = `
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
@@ -73,6 +74,11 @@ const svg = `
 </svg>
 `.trim();
 
-const png = await sharp(Buffer.from(svg)).png().toBuffer();
-writeFileSync(outPath, png);
-console.log(`wrote ${outPath} (${png.length} bytes)`);
+try {
+  const png = await sharp(Buffer.from(svg)).png().toBuffer();
+  writeFileSync(outPath, png);
+  console.log(`wrote ${outPath} (${png.length} bytes)`);
+} catch (err) {
+  console.error(`generate-og: failed to render or write ${outPath}: ${err.message}`);
+  process.exit(1);
+}

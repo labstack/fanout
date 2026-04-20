@@ -27,6 +27,10 @@ docker run -d --name fanout \
 
 The container listens on all interfaces by default (`HTTP_ADDR=:7520`, `OTLP_GRPC_ADDR=:4317`). For a host-only install, add `-e OTLP_GRPC_ADDR=127.0.0.1:4317`.
 
+:::caution
+On first boot Fanout requires several environment variables — JWT signing secrets, an SMTP relay (for email login codes), and an LLM API key (for the chat investigator). The snippet above will exit immediately without them. See [Getting started](/docs/getting-started/) for the full first-boot command.
+:::
+
 ## Pre-built binary
 
 Download the artifact for your platform from the [releases page](https://github.com/labstack/fanout/releases) and run it:

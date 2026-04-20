@@ -41,11 +41,11 @@ expression:  p95 > 2000
 for_seconds: 600
 ```
 
-**Throughput collapse.** Drops in traffic often signal an upstream outage. The `throughput > 10` clause prevents firing on naturally low-traffic services.
+**Throughput collapse.** Drops in traffic often signal an upstream outage. The `throughput > 10` clause prevents firing on naturally low-traffic services. Delta values are percentage points — `-50` means traffic halved.
 
 ```text
 name:        "sudden traffic drop"
-expression:  throughput_delta < -0.5 && throughput > 10
+expression:  throughput_delta < -50 && throughput > 10
 for_seconds: 120
 ```
 
@@ -57,11 +57,11 @@ expression:  z_score > 3
 for_seconds: 180
 ```
 
-**Compound condition.** Fires when both error rate and latency are abnormal — useful for promoting noise into actual pages.
+**Compound condition.** Fires when both error rate and latency are abnormal — useful for promoting noise into actual pages. Both deltas are in percent (`50` = +50% vs. baseline).
 
 ```text
 name:        "error + latency regression"
-expression:  error_rate_delta > 0.5 && p95_delta > 0.3
+expression:  error_rate_delta > 50 && p95_delta > 30
 for_seconds: 300
 ```
 
@@ -79,9 +79,9 @@ Every rule has these fields in scope.
 | `log_count` | float | Log entries seen in the window. |
 | `z_score` | float | Anomaly score against the historical baseline. |
 | `health_score` | float | Composite score, lower is worse. |
-| `error_rate_delta` | float | Relative change in `error_rate` vs. baseline. |
-| `p95_delta` | float | Relative change in `p95` vs. baseline. |
-| `throughput_delta` | float | Relative change in `throughput` vs. baseline. |
+| `error_rate_delta` | float | Percentage change in `error_rate` vs. baseline (e.g. `50` = +50%). |
+| `p95_delta` | float | Percentage change in `p95` vs. baseline. |
+| `throughput_delta` | float | Percentage change in `throughput` vs. baseline (e.g. `-50` = halved). |
 
 `p99` is available in the UI and through the `spans` MCP tool, but **not** in alert expressions today. If you need a 99th-percentile rule, file an issue.
 
