@@ -15,6 +15,12 @@ export default defineConfig({
       description:
         "Observability that runs anywhere you can run a binary. OpenTelemetry ingest, fast UI, chat investigator — self-hosted.",
       customCss: ["./src/styles/theme.css"],
+      // Dark-only site — pin one dark Shiki theme for every code block (not
+      // just terminal frames) so non-bash samples (yaml, json, http, text)
+      // stay readable.
+      expressiveCode: {
+        themes: ["github-dark-default"],
+      },
       head: [
         { tag: "link", attrs: { rel: "icon", type: "image/svg+xml", href: "/favicon.svg" } },
         { tag: "meta", attrs: { property: "og:type", content: "website" } },

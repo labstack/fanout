@@ -132,13 +132,21 @@ starlight-theme-select,
   border-bottom: none;
 }
 
-/* Code blocks — softer corners, tinted border */
+/* Code blocks — softer corners, tinted border, and a proper dark surface.
+   The pinned github-dark-default Shiki theme ships with transparent frame
+   and pre backgrounds; without these overrides terminal + non-terminal
+   blocks blend into the page and lose their container. */
 .expressive-code .frame {
   border-radius: 12px !important;
+  background: var(--fn-surface-2) !important;
 }
-.expressive-code .frame.has-title pre,
 .expressive-code .frame pre {
+  background: var(--fn-surface-2) !important;
   border: 1px solid var(--fn-tinted) !important;
+}
+.expressive-code .frame.is-terminal .header {
+  background: color-mix(in srgb, var(--fn-surface-1) 80%, transparent) !important;
+  border-bottom: 1px solid var(--fn-tinted) !important;
 }
 
 /* Asides (callouts) — tinted accent borders */

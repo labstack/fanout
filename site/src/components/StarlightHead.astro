@@ -8,3 +8,10 @@ import { ClientRouter } from "astro:transitions";
 
 <Default><slot /></Default>
 <ClientRouter />
+<script is:inline>
+  // Dark-only docs. The theme picker is hidden, so we lock data-theme=dark
+  // before Starlight's client script runs — otherwise it falls back to the
+  // stored/system preference and renders asides + code blocks in light mode.
+  document.documentElement.dataset.theme = "dark";
+  try { localStorage.setItem("starlight-theme", "dark"); } catch (_) {}
+</script>
