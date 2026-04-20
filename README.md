@@ -39,7 +39,12 @@ just check     # Format, vet, lint, type-check, build
 just test      # go test ./...
 ```
 
-With the shared local Caddy setup in `../docker`, use `https://fanout.test` for the website/docs and `https://demo.fanout.test` for the app.
+With the shared local Caddy setup in `../docker`:
+
+- Site/docs: `https://fanout.test`
+- App: `https://demo.fanout.test`
+
+Caddy owns `/api` and `/mcp` in local development, so the frontend dev flow expects that proxy to be running.
 
 ## License
 

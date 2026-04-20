@@ -5,6 +5,8 @@ import mdx from "@astrojs/mdx";
 export default defineConfig({
   site: "https://fanout.run",
   server: {
+    // Local dev keeps the public site on fanout.test; demo.fanout.test is
+    // reserved for the Vite-powered app shell.
     allowedHosts: ["fanout.test"],
   },
   integrations: [
