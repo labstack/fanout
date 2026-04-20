@@ -34,42 +34,17 @@ services:
       - webproxy
       - default
 
-  fanout:
-    image: ghcr.io/labstack/fanout:${VERSION:-main}
-    container_name: fanout
+  fanout-site:
+    image: ghcr.io/labstack/fanout-site:${VERSION:-latest}
+    container_name: fanout-site
     restart: unless-stopped
-    env_file: .env
     environment:
-      VIRTUAL_HOST: fanout.run
-      VIRTUAL_PORT: 7520
-      LETSENCRYPT_HOST: fanout.run
-      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-admin@fanout.run}
-      DATA_DIR: /var/lib/fanout/data
-      HTTP_ADDR: :7520
-      OTLP_GRPC_ADDR: :4317
-      AI_PROVIDER: ${AI_PROVIDER:-anthropic}
-      AI_API_KEY: ${AI_API_KEY:?set AI_API_KEY}
-      SMTP_HOST: ${SMTP_HOST:?set SMTP_HOST}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:?set SMTP_USER}
-      SMTP_PASS: ${SMTP_PASS:?set SMTP_PASS}
-      SMTP_FROM: ${SMTP_FROM:?set SMTP_FROM}
-      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set JWT_REFRESH_SECRET}
-      TLS_CERT_FILE: ${TLS_CERT_FILE:?set TLS_CERT_FILE}
-      TLS_KEY_FILE: ${TLS_KEY_FILE:?set TLS_KEY_FILE}
-    ports:
-      - "4317:4317"
+      VIRTUAL_HOST: fanout.run,www.fanout.run
+      VIRTUAL_PORT: "80"
+      LETSENCRYPT_HOST: fanout.run,www.fanout.run
+      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-v@labstack.com}
     expose:
-      - "7520"
-    volumes:
-      - /data/fanout:/var/lib/fanout
-      - /data/fanout/certs:/etc/fanout/certs:ro
-    healthcheck:
-      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:7520/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
+      - "80"
     networks:
       - webproxy
       - default
