@@ -166,7 +166,9 @@ OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=${ingestToken}`;
         setStep("code");
       } else {
         setError(
-          body.detail || body.message || "Unable to send verification code.",
+          body.detail ||
+            body.message ||
+            `Unable to send verification code (HTTP ${res.status})`,
         );
       }
     } catch (err) {

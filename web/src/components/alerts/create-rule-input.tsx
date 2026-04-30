@@ -39,9 +39,11 @@ const ruleSchema = z.object({
   webhookUrl: z
     .string()
     .trim()
-    .refine(
-      (v) => v === "" || /^https?:\/\//.test(v),
-      "Webhook URL must start with http:// or https://",
+    .pipe(
+      z.union([
+        z.literal(""),
+        z.httpUrl({ message: "Enter a valid http(s) URL" }),
+      ]),
     ),
   notifyResolve: z.boolean(),
 });
@@ -154,14 +156,18 @@ export function CreateRuleInput({ onCreated }: Props) {
                 }
               }
               if (
+                !hadError &&
                 currentEvent === "tool_result" &&
                 data.name === "alert_rules"
               ) {
-                setAiStatus(null);
                 onCreated();
               }
-              if (currentEvent === "error" && data.error) {
-                setAiError(data.error);
+              if (currentEvent === "error") {
+                setAiError(
+                  typeof data.error === "string" && data.error
+                    ? data.error
+                    : "AI service reported an unspecified error.",
+                );
                 hadError = true;
               }
             } catch (e) {
@@ -178,12 +184,11 @@ export function CreateRuleInput({ onCreated }: Props) {
         const msg =
           err instanceof Error ? err.message : "Failed to create rule";
         setAiError(msg);
-        hadError = true;
         console.error("AI alert creation failed:", err);
       }
     } finally {
       setStreaming(false);
-      if (!hadError) setAiStatus(null);
+      setAiStatus(null);
       abortRef.current = null;
     }
   }

@@ -7,8 +7,9 @@
 /* ─── Theme registration ───────────────────────────────────────────────
  * Tailwind sees these slots as utilities (`bg-card`, `text-success`, …).
  * Slot names follow shadcn canon; values come from the :root block below.
- * Each var() carries a fallback so utilities still produce visible color
- * if :root hasn't loaded yet (matches monk's pattern).
+ * Each color slot carries a hex fallback so utilities still render a
+ * visible color before :root loads (matches monk's pattern). Non-color
+ * slots (radius, motion) intentionally rely on :root being present.
  * ──────────────────────────────────────────────────────────────────── */
 @theme inline {
   /* Surfaces */
@@ -105,8 +106,10 @@
  * Ayu Dark surfaces (charcoal-navy, warm off-white text) with a Vercel-
  * style mono primary, so chrome never competes with the status hues.
  *
- * To swap the theme, replace the values in this :root block. Slot names
- * are canonical (shadcn-aligned) — never rename them; only override values.
+ * To swap the theme, replace the values in this :root block. Surface and
+ * chrome slots match shadcn canon (background/card/popover/primary/...);
+ * status slots (--success/--warning/--danger/--info) are Fanout additions.
+ * None of the slot names should be renamed without auditing every consumer.
  * ─────────────────────────────────────────────────────────────────── */
 :root {
   color-scheme: dark;
@@ -168,8 +171,12 @@
  *
  * Fanout currently ships dark only. This block reserves the `.light`
  * selector so a future fork (or a user with `prefers-color-scheme: light`
- * mapping) can flip without touching components. Status signals deepened
- * so text-{signal} on bg-{signal}/10 over paper still clears WCAG AA.
+ * mapping) can flip without touching components. Status signal hexes are
+ * deepened so plain `text-{signal}` clears WCAG AA on `--background`
+ * (paper). Pairing with a tinted surface (`bg-{signal}/10`) reduces
+ * contrast — for those cases prefer `text-{signal}-foreground` on
+ * `bg-{signal}` (a fully opaque fill), or use `bg-{signal}-bg` (the
+ * pre-mixed soft-tint slot) and keep text on the foreground above it.
  * ─────────────────────────────────────────────────────────────────── */
 .light {
   color-scheme: light;
@@ -198,18 +205,26 @@
   --primary-foreground: #fafaf9;
   --ring: #1f2937;
 
-  --success: #15803d;
+  /* Deepened to clear AA on paper. */
+  --success: #166534;
   --success-foreground: #ffffff;
   --success-bg: #dcfce7;
-  --warning: #b45309;
+  --warning: #92400e;
   --warning-foreground: #ffffff;
   --warning-bg: #fef3c7;
-  --danger: #b91c1c;
+  --danger: #991b1b;
   --danger-foreground: #ffffff;
   --danger-bg: #fee2e2;
-  --info: #6366f1;
+  --info: #4338ca;
   --info-foreground: #ffffff;
   --info-bg: #eef2ff;
+
+  /* Chart palette — light variants chosen to contrast against paper. */
+  --chart-1: #1f2937;
+  --chart-2: #166534;
+  --chart-3: #92400e;
+  --chart-4: #4338ca;
+  --chart-5: #c2410c;
 }
 
 /* ─── Base ─────────────────────────────────────────────────────────────── */
@@ -442,7 +457,9 @@
   height: 100%;
   width: 30%;
   background: var(--primary);
-  box-shadow: 0 0 12px var(--primary), 0 0 30px rgba(96, 165, 250, 0.3);
+  box-shadow:
+    0 0 12px var(--primary),
+    0 0 30px color-mix(in srgb, var(--primary) 30%, transparent);
   animation: navLoad 1.2s ease-in-out infinite;
 }
 
