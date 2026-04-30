@@ -30,14 +30,20 @@ import { ErrorState } from "@/components/states/error-state";
 
 type Step = "loading" | "setup" | "token_shown" | "email" | "code";
 
+const emailField = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .pipe(z.string().email("Enter a valid email").max(254));
+
 const setupSchema = z.object({
-  email: z.string().email("Enter a valid email"),
-  name: z.string().optional(),
-  setupToken: z.string().min(1, "Setup token is required"),
+  email: emailField,
+  name: z.string().trim().max(128).optional(),
+  setupToken: z.string().trim().min(1, "Setup token is required").max(256),
 });
 
 const emailSchema = z.object({
-  email: z.string().email("Enter a valid email"),
+  email: emailField,
 });
 
 const codeSchema = z.object({
@@ -103,9 +109,9 @@ export function LoginPage() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
-          email: values.email.trim().toLowerCase(),
-          name: values.name?.trim() ?? "",
-          setup_token: values.setupToken.trim(),
+          email: values.email,
+          name: values.name ?? "",
+          setup_token: values.setupToken,
         }),
       });
       if (!result.ok) {
@@ -152,11 +158,11 @@ OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=${ingestToken}`;
       const res = await fetch("/api/auth/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: values.email.trim().toLowerCase() }),
+        body: JSON.stringify({ email: values.email }),
       });
       const body = await res.json().catch(() => ({}));
       if (res.ok && body.code_sent) {
-        setVerifyEmail(values.email.trim().toLowerCase());
+        setVerifyEmail(values.email);
         setStep("code");
       } else {
         setError(

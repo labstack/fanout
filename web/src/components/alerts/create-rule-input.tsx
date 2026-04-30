@@ -30,13 +30,19 @@ interface CreatedRule {
 }
 
 const ruleSchema = z.object({
-  name: z.string().min(1, "Name is required"),
-  expression: z.string().min(1, "Expression is required"),
-  service: z.string(),
+  name: z.string().trim().min(1, "Name is required").max(128),
+  expression: z.string().trim().min(1, "Expression is required").max(512),
+  service: z.string().trim(),
   forSeconds: z.coerce.number().int().min(0),
   cooldownS: z.coerce.number().int().min(0),
   repeatS: z.coerce.number().int().min(0),
-  webhookUrl: z.string(),
+  webhookUrl: z
+    .string()
+    .trim()
+    .refine(
+      (v) => v === "" || /^https?:\/\//.test(v),
+      "Webhook URL must start with http:// or https://",
+    ),
   notifyResolve: z.boolean(),
 });
 
