@@ -1,13 +1,13 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { RootLayout } from "./components/layout/root-layout";
 import { AuthProvider, RequireAuth } from "./hooks/use-auth";
-import { HomePage } from "./pages/HomePage";
-import { ChatPage } from "./pages/ChatPage";
-import { ServicePage } from "./pages/ServicePage";
-import { AlertsPage } from "./pages/AlertsPage";
-import { LoginPage } from "./pages/LoginPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { DemoPage } from "./pages/DemoPage";
+import { HomePage } from "./pages/home-page";
+import { ChatPage } from "./pages/chat-page";
+import { ServicePage } from "./pages/service-page";
+import { AlertsPage } from "./pages/alerts-page";
+import { LoginPage } from "./pages/login-page";
+import { SettingsPage } from "./pages/settings-page";
+import { DemoPage } from "./pages/demo-page";
 
 function App() {
   return (

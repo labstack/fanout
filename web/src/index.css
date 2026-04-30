@@ -1,48 +1,88 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 @plugin "@tailwindcss/typography";
 
-/* ─── Theme tokens ─────────────────────────────────────────────────────── */
+@custom-variant dark (&:is(.dark *));
+
+/* ─── Theme registration ───────────────────────────────────────────────
+ * Tailwind sees these slots as utilities (`bg-card`, `text-success`, …).
+ * Slot names follow shadcn canon. Each var() carries a fallback so
+ * utilities still produce visible color if :root hasn't loaded yet.
+ * ──────────────────────────────────────────────────────────────────── */
 @theme inline {
-    --font-sans: "Fragment Mono", monospace;
-    --font-heading: "DM Sans", system-ui, -apple-system, sans-serif;
-    --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
-    --radius-sm: calc(var(--radius) - 4px);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) + 4px);
-    --radius-2xl: calc(var(--radius) + 8px);
-    --radius-3xl: calc(var(--radius) + 12px);
-    --radius-4xl: calc(var(--radius) + 16px);
-    --color-surface: var(--surface);
-    --color-surface-1: var(--surface-1);
-    --color-surface-2: var(--surface-2);
-    --color-surface-3: var(--surface-3);
-    --color-background: var(--background);
-    --color-foreground: var(--foreground);
-    --color-card: var(--card);
-    --color-card-foreground: var(--card-foreground);
-    --color-popover: var(--popover);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-primary: var(--primary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-secondary: var(--secondary);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-muted: var(--muted);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-accent: var(--accent);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-destructive: var(--destructive);
-    --color-border: var(--border);
-    --color-input: var(--input);
-    --color-ring: var(--ring);
-    --color-chart-1: var(--chart-1);
-    --color-chart-2: var(--chart-2);
-    --color-chart-3: var(--chart-3);
-    --color-chart-4: var(--chart-4);
-    --color-chart-5: var(--chart-5);
-    --color-healthy: var(--healthy);
-    --color-degraded: var(--degraded);
-    --color-unhealthy: var(--unhealthy);
+  /* Surfaces */
+  --color-surface: var(--surface);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  /* Brand / interactive */
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  /* Status signals (canonical) */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+
+  /* Service-status aliases — map 1:1 to canonical above. Use these only
+   * when the variable IS a service health value; canonical names everywhere
+   * else. */
+  --color-healthy: var(--success);
+  --color-degraded: var(--warning);
+  --color-unhealthy: var(--danger);
+
+  /* Legacy shadcn slot still referenced by some primitives */
+  --color-destructive: var(--danger);
+
+  /* Chrome */
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Charts */
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  /* Typography */
+  --font-sans: "Fragment Mono", monospace;
+  --font-heading: "DM Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", ui-monospace, monospace;
+
+  /* Radius scale */
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+
+  /* Motion */
+  --duration-100: 100ms;
+  --duration-200: 200ms;
+  --duration-300: 300ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ─── CSS Houdini for animated gradient border ─────────────────────────── */
@@ -52,48 +92,52 @@
   initial-value: 0deg;
 }
 
-/* ─── Dark-only theme ─────────────────────────────────────────────────── */
+/* ─── Dark theme ───────────────────────────────────────────────────────── */
 :root {
-    color-scheme: dark;
-    --radius: 0.625rem;
+  color-scheme: dark;
+  --radius: 0.625rem;
 
-    /* Surface tiers */
-    --surface:   #09090b;
-    --surface-1: #121215;
-    --surface-2: #1a1a1f;
-    --surface-3: #252529;
+  /* Surface tiers */
+  --surface: #09090b;
+  --surface-1: #121215;
+  --surface-2: #1a1a1f;
+  --surface-3: #252529;
 
-    /* Semantic colors */
-    --background: #09090b;
-    --foreground: #e4e4e7;
-    --card: #121215;
-    --card-foreground: #e4e4e7;
-    --popover: #1a1a1f;
-    --popover-foreground: #e4e4e7;
-    --primary: #60a5fa;
-    --primary-foreground: #09090b;
-    --secondary: #1a1a1f;
-    --secondary-foreground: #d4d4d8;
-    --muted: #1a1a1f;
-    --muted-foreground: #71717a;
-    --accent: #1a1a1f;
-    --accent-foreground: #e4e4e7;
-    --destructive: #f87171;
-    --border: #2a2a30;
-    --input: #2a2a30;
-    --ring: #60a5fa;
+  /* Semantic colors */
+  --background: #09090b;
+  --foreground: #e4e4e7;
+  --card: #121215;
+  --card-foreground: #e4e4e7;
+  --popover: #1a1a1f;
+  --popover-foreground: #e4e4e7;
+  --primary: #60a5fa;
+  --primary-foreground: #09090b;
+  --secondary: #1a1a1f;
+  --secondary-foreground: #d4d4d8;
+  --muted: #1a1a1f;
+  --muted-foreground: #71717a;
+  --accent: #1a1a1f;
+  --accent-foreground: #e4e4e7;
+  --border: #2a2a30;
+  --input: #2a2a30;
+  --ring: #60a5fa;
 
-    /* Chart palette */
-    --chart-1: #60a5fa;
-    --chart-2: #34d399;
-    --chart-3: #fbbf24;
-    --chart-4: #a78bfa;
-    --chart-5: #fb923c;
+  /* Status signals (canonical) */
+  --success: #34d399;
+  --success-foreground: #052e16;
+  --warning: #fbbf24;
+  --warning-foreground: #1a1000;
+  --danger: #f87171;
+  --danger-foreground: #1f0810;
+  --info: #a78bfa;
+  --info-foreground: #ffffff;
 
-    /* Status colors */
-    --healthy: #34d399;
-    --degraded: #fbbf24;
-    --unhealthy: #f87171;
+  /* Chart palette */
+  --chart-1: #60a5fa;
+  --chart-2: #34d399;
+  --chart-3: #fbbf24;
+  --chart-4: #a78bfa;
+  --chart-5: #fb923c;
 }
 
 /* ─── Base ─────────────────────────────────────────────────────────────── */
@@ -114,21 +158,6 @@
   button, [role="menuitem"], a, summary {
     outline: none;
   }
-}
-
-/* ─── Noise overlay ───────────────────────────────────────────────────── */
-.noise::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.015;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  z-index: 1;
-}
-
-/* ─── Tables ──────────────────────────────────────────────────────────── */
-@layer base {
   table { border-collapse: collapse; }
   th {
     font-family: var(--font-mono);
@@ -142,6 +171,17 @@
   tr:hover td {
     background: rgba(255, 255, 255, 0.02);
   }
+}
+
+/* ─── Noise overlay ───────────────────────────────────────────────────── */
+.noise::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  z-index: 1;
 }
 
 /* ─── Block card ──────────────────────────────────────────────────────── */
@@ -170,15 +210,15 @@
 /* ─── Prose theme (shared between chat markdown and text blocks) ──────── */
 .prose-themed {
   @apply prose prose-invert max-w-none;
-  @apply prose-a:text-[#60a5fa] prose-a:no-underline hover:prose-a:underline;
-  @apply prose-code:font-mono prose-code:text-[#93c5fd] prose-code:bg-[#60a5fa]/10;
+  @apply prose-a:text-primary prose-a:no-underline hover:prose-a:underline;
+  @apply prose-code:font-mono prose-code:text-primary prose-code:bg-primary/10;
   @apply prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:text-sm;
   @apply prose-code:before:content-none prose-code:after:content-none;
-  @apply prose-pre:bg-[#121215] prose-pre:border prose-pre:border-[#60a5fa]/15 prose-pre:rounded-[14px];
-  @apply prose-blockquote:border-l-[#60a5fa] prose-blockquote:border-l-2;
+  @apply prose-pre:bg-card prose-pre:border prose-pre:border-primary/15 prose-pre:rounded-2xl;
+  @apply prose-blockquote:border-l-primary prose-blockquote:border-l-2;
 }
 
-/* ─── Custom utilities (Monk-aligned) ─────────────────────────────────── */
+/* ─── Custom utilities ─────────────────────────────────────────────────── */
 @utility mono {
   font-family: var(--font-mono);
 }
@@ -196,92 +236,6 @@
   background: var(--surface-2);
   border-radius: 0.5rem;
   padding: 1.25rem;
-}
-
-/* ─── Buttons ─────────────────────────────────────────────────────────── */
-@utility btn-primary {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.5rem;
-  background: #3b82f6;
-  padding: 0.625rem 1.5rem;
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: white;
-  transition: all 0.2s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(96, 165, 250, 0.1);
-  &:hover {
-    background: #60a5fa;
-    box-shadow: 0 4px 16px -4px rgba(96, 165, 250, 0.35);
-    transform: translateY(-1px);
-  }
-  &:active { transform: translateY(0); }
-}
-
-@utility btn-ghost {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: 0.5rem;
-  padding: 0.5rem 1rem;
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #a1a1aa;
-  transition: all 0.2s;
-  &:hover {
-    border-color: #3f3f46;
-    color: #e4e4e7;
-    background: rgba(255, 255, 255, 0.02);
-  }
-}
-
-/* ─── Input ───────────────────────────────────────────────────────────── */
-@utility input-field {
-  width: 100%;
-  border-radius: 0.5rem;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  padding: 0.625rem 0.75rem;
-  font-size: 0.875rem;
-  color: #e4e4e7;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  &::placeholder { color: #52525b; }
-  &:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.08);
-    outline: none;
-  }
-}
-
-/* ─── Dropdown ────────────────────────────────────────────────────────── */
-@utility dropdown-content {
-  min-width: 160px;
-  border-radius: 0.5rem;
-  border: 1px solid var(--border);
-  background: var(--surface-1);
-  padding: 0.25rem;
-  box-shadow: 0 16px 48px -12px rgba(0, 0, 0, 0.6);
-  z-index: 50;
-  animation: dropdownIn 0.15s ease-out;
-}
-
-@utility dropdown-item {
-  display: flex;
-  cursor: pointer;
-  user-select: none;
-  align-items: center;
-  border-radius: 0.25rem;
-  padding: 0.375rem 0.625rem;
-  font-family: var(--font-mono);
-  font-size: 0.8125rem;
-  color: #d4d4d8;
-  transition: all 0.1s;
-  &:hover, &[data-highlighted] {
-    background: var(--surface-2);
-    color: #e4e4e7;
-  }
 }
 
 /* ─── Animations ───────────────────────────────────────────────────────── */
