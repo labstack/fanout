@@ -22,7 +22,7 @@ default | secondary | success | danger | warning | info | neutral | outline | gh
 
 ## Token slots
 
-Color values live in `app.css` token slots. Component code uses Tailwind utilities that resolve through the slots (`bg-card`, `text-success`, `border-warning/60`).
+Color values live in `index.css` token slots. Component code uses Tailwind utilities that resolve through the slots (`bg-card`, `text-success`, `border-warning/60`).
 
 **Banned in `className`** (lint-checked):
 
@@ -52,8 +52,8 @@ Same rule for status indicators: don't rely on a green dot alone — pair with t
 
 ## Data fetching
 
-- **TanStack Query for server state.** No `useEffect + fetch`.
-- **One primary fetch per page.** If a page needs N queries, compose hooks (`useServiceDetail` → calls `useService` + `useEndpoints` internally). Pages should look like data is one thing.
+- **Target**: TanStack Query for server state, no `useEffect + fetch`. Today the pages still hand-roll `useEffect + fetch + setInterval` (see `home-page.tsx`, `service-page.tsx`, `alerts-page.tsx`). Migrate as pages are touched.
+- **One primary fetch per page.** If a page needs N queries, compose hooks (`useServiceDetail` → calls `useService` + `useEndpoints` internally) or use `Promise.all` of `useQuery` calls. Pages should look like data is one thing.
 - **Query keys start with the resource:** `["overview"]`, `["service", name]`, `["alerts", { state }]`. Mutations invalidate by resource.
 - **Dependent queries use `enabled: Boolean(parent?.id)`** — never branch on conditional render.
 - **`<RequireAuth>` for protected routes.** Today it wraps every authenticated page in `App.tsx`.
@@ -67,7 +67,7 @@ Same rule for status indicators: don't rely on a green dot alone — pair with t
 
 ## Auth hooks
 
-- **`useAuth()`** — `{ user, isLoading, login, logout, refresh }`. Single context for now.
+- **`useAuth()`** — `{ user, isLoading, isAdmin, isOperator, setupRequired, login, logout }`. Single context for now (see `hooks/auth-context.ts`).
 
 If we add billing / tier-gating, split into smaller hooks (`useTier`, `useHasFeature`) that compose `useAuth` — don't grow a catch-all that returns everything; that pattern causes unrelated re-renders.
 

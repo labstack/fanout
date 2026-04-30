@@ -21,12 +21,14 @@ Three rules above all others:
 
 ### Tokens
 
-All colors live in `src/app.css` as CSS custom properties and as Tailwind utilities. **Never write a hex literal in JSX.**
+All colors live in `src/index.css` as CSS custom properties and as Tailwind utilities. **Never write a hex literal in JSX.**
 
 | Token | Hex | Tailwind | Use |
 |---|---|---|---|
-| `--background` | `#09090b` | `bg-background` | Page background |
-| `--card` | `#121215` | `bg-card` | Cards, panels, sidebars |
+| `--surface` | `#09090b` | `bg-surface` | Root page background (set on `body`) |
+| `--background` | `#09090b` | `bg-background` | Shadcn alias of `--surface` |
+| `--surface-1` | `#121215` | `bg-surface-1` | Subtle panels, list backgrounds |
+| `--card` | `#121215` | `bg-card` | Cards, popovers — same value as `--surface-1` |
 | `--surface-2` | `#1a1a1f` | `bg-surface-2` | Hover targets, secondary surfaces |
 | `--surface-3` | `#252529` | `bg-surface-3` | Track backgrounds (meters, scrollbars) |
 | `--border` | `#2a2a30` | `border-border` / `border-input` | All borders |
@@ -147,13 +149,15 @@ Use the **4-grid** (Tailwind default). Approved values:
 
 ## Border radius
 
+Derived from `--radius: 0.625rem` (10px) in `index.css`:
+
 | Class | Pixel | Use |
 |---|---|---|
-| `rounded-sm` | 3 | Meter bars, dense indicators |
+| `rounded-sm` | 6 | Meter bars, dense indicators |
 | `rounded-md` | 8 | Buttons, dropdowns, inputs |
-| `rounded-lg` | 12 | Cards, panels, table cells |
-| `rounded-xl` | 16 | Large cards |
-| `rounded-2xl` | 20 | Hero card |
+| `rounded-lg` | 10 | Cards, panels, table cells |
+| `rounded-xl` | 14 | Large cards |
+| `rounded-2xl` | 18 | Hero card |
 | `rounded-full` | — | Pills, chips, badges |
 
 ---
@@ -245,8 +249,7 @@ These are non-negotiable. PRs that regress these get rejected.
 
 ### Charts
 
-- Every chart has an `aria-label` summarizing range and key values.
-- Tooltips reachable by keyboard.
+- **Goal**: every chart has an `aria-label` summarizing range and key values, and tooltips reachable by keyboard. Today the block components in `components/blocks/` don't yet meet this — tracked as `style-debt`.
 
 ---
 
@@ -278,11 +281,11 @@ Don't ship a layout where mobile users have to horizontal-scroll.
 
 Three canonical primitives in `components/states/`:
 
-- **`<LoadingState />`** — skeleton/spinner matching the actual layout.
+- **`<LoadingState />`** — generic skeleton stack. Pages with custom layouts may compose `<Skeleton>` directly to mirror the actual shape.
 - **`<EmptyState title="..." />`** — muted mono caption, optional CTA. No illustrations.
 - **`<ErrorState error={…} resetErrorBoundary={…} />`** — `text-danger` mono caption with a one-line action.
 
-Use them; don't hand-roll per page.
+Prefer the primitives; reach for `<Skeleton>` directly only when the layout demands a specific shape.
 
 ---
 
@@ -325,7 +328,7 @@ The styleguide is partially enforced by lint (see `eslint.config.js`):
 - Hex literals in `className` strings — error
 - `cursor-pointer` on `<button>` / `<a>` — error
 - `transition-all` — error
-- `consistent-type-imports`, `switch-exhaustiveness-check`, `no-non-null-assertion`, `no-explicit-any` — error
+- `consistent-type-imports`, `no-non-null-assertion`, `no-explicit-any` — error
 
 The rest is enforced by **code review**. Cite this document by section.
 

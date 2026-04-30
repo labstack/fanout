@@ -14,15 +14,14 @@ export function PageContainer({
   noFade = false,
 }: PageContainerProps) {
   return (
-    <div className={cn("h-full overflow-y-auto", className)}>
-      <div
-        className={cn(
-          "max-w-[1400px] mx-auto px-4 sm:px-6 pt-6 pb-20",
-          !noFade && "fade-up",
-        )}
-      >
-        {children}
-      </div>
+    <div
+      className={cn(
+        "max-w-[1400px] mx-auto px-4 sm:px-6 pt-6 pb-20",
+        !noFade && "fade-up",
+        className,
+      )}
+    >
+      {children}
     </div>
   );
 }

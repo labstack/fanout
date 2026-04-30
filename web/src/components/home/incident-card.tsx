@@ -2,6 +2,8 @@ import { Search } from "lucide-react";
 import type { OverviewIncident } from "@/lib/types";
 import { Sparkline } from "./sparkline";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { serviceStatusVariant } from "@/lib/badge-variants";
 
 function timeAgo(iso?: string): string {
   if (!iso) return "";
@@ -113,9 +115,13 @@ export function IncidentCard({ incident, onInvestigate, compact = false, primary
           <span className={`text-[10px] mono ${statusCls} opacity-70`}>
             {primaryIssue(incident)}
           </span>
-          <span className={`inline-flex rounded-full border ${borderCls} ${bgCls} px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusCls}`}>
+          <StatusBadge
+            variant={serviceStatusVariant(incident.status)}
+            dot={false}
+            className="text-[10px] font-bold"
+          >
             {incident.status}
-          </span>
+          </StatusBadge>
         </div>
       </div>
 

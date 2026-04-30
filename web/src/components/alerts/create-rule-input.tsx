@@ -78,6 +78,7 @@ export function CreateRuleInput({ onCreated }: Props) {
     setAiError(null);
     setCreatedRule(null);
     abortRef.current = new AbortController();
+    let hadError = false;
 
     try {
       const headers: Record<string, string> = {
@@ -97,15 +98,16 @@ export function CreateRuleInput({ onCreated }: Props) {
       });
 
       if (!resp.ok) {
-        setAiError(`Failed: HTTP ${resp.status}`);
-        setStreaming(false);
-        setAiStatus(null);
+        const body = await resp.json().catch(() => ({}));
+        const detail = body.detail || body.message;
+        setAiError(detail || `Failed: HTTP ${resp.status}`);
+        hadError = true;
         return;
       }
 
       if (!resp.body) {
-        setStreaming(false);
-        setAiStatus(null);
+        setAiError("Server returned an empty response. Try again.");
+        hadError = true;
         return;
       }
       const reader = resp.body.getReader();
@@ -154,6 +156,7 @@ export function CreateRuleInput({ onCreated }: Props) {
               }
               if (currentEvent === "error" && data.error) {
                 setAiError(data.error);
+                hadError = true;
               }
             } catch (e) {
               console.warn("[AlertCreate] malformed SSE data:", e);
@@ -164,14 +167,17 @@ export function CreateRuleInput({ onCreated }: Props) {
       }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
-        setAiStatus(null);
+        // Intentional cancel — not an error
       } else {
-        setAiError("Failed to create rule");
+        const msg =
+          err instanceof Error ? err.message : "Failed to create rule";
+        setAiError(msg);
+        hadError = true;
         console.error("AI alert creation failed:", err);
       }
     } finally {
       setStreaming(false);
-      if (!aiError) setAiStatus(null);
+      if (!hadError) setAiStatus(null);
       abortRef.current = null;
     }
   }

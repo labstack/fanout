@@ -6,8 +6,7 @@
 
 /* ─── Theme registration ───────────────────────────────────────────────
  * Tailwind sees these slots as utilities (`bg-card`, `text-success`, …).
- * Slot names follow shadcn canon. Each var() carries a fallback so
- * utilities still produce visible color if :root hasn't loaded yet.
+ * Slot names follow shadcn canon; values come from the :root block below.
  * ──────────────────────────────────────────────────────────────────── */
 @theme inline {
   /* Surfaces */

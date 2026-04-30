@@ -2,6 +2,8 @@ import { useNavigate, useLocation } from "react-router";
 import type { Alert, Rule } from "@/lib/types";
 import { buildChatPath } from "@/lib/chat-route";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import type { StatusVariant } from "@/lib/badge-variants";
 
 function timeAgo(iso?: string): string {
   if (!iso) return "";
@@ -47,11 +49,12 @@ export function FiringAlerts({ alerts, rules }: Props) {
         const prompt = `Investigate ${a.service} — alert "${rule?.name || a.rule_id}" is firing. Expression: ${rule?.expression}. What's the root cause?`;
 
         const status = a.last_delivery_status;
-        const deliveryCls = status === "success"
-          ? "border-healthy/20 bg-healthy/10 text-healthy"
-          : status === "failed"
-            ? "border-unhealthy/20 bg-unhealthy/10 text-unhealthy"
-            : "border-border bg-surface-2 text-muted-foreground";
+        const deliveryVariant: StatusVariant =
+          status === "success"
+            ? "success"
+            : status === "failed"
+              ? "danger"
+              : "neutral";
         const deliveryLabel = !status || status === "skipped"
           ? "no webhook"
           : status === "success"
@@ -83,9 +86,9 @@ export function FiringAlerts({ alerts, rules }: Props) {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <span className={`inline-flex rounded-full border px-2 py-0.5 text-[9px] font-bold ${deliveryCls}`}>
+                <Badge variant={deliveryVariant} className="text-[10px] font-bold">
                   {deliveryLabel}
-                </span>
+                </Badge>
                 <Button
                   type="button"
                   variant="outline"

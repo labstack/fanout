@@ -68,13 +68,13 @@ export function NamespacePicker() {
             <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
           )}
           {label}
-          <span className="text-[9px] opacity-50" aria-hidden="true">
+          <span className="text-[10px] opacity-50" aria-hidden="true">
             {"▾"}
           </span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={4}>
-        <DropdownMenuLabel className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+        <DropdownMenuLabel className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
           Namespace
         </DropdownMenuLabel>
         {namespaces.map((ns) => (

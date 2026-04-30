@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Check, Copy, Loader2, Radio } from "lucide-react";
+import { toast } from "sonner";
 import { setApiToken } from "@/api/client";
 import { useAuth } from "@/hooks/auth-context";
 import { AuthShell } from "@/components/layout/auth-shell";
@@ -78,9 +79,13 @@ export function LoginPage() {
   useEffect(() => {
     (async () => {
       try {
-        const status = await fetch("/api/auth/status").then((r) => r.json());
+        const r = await fetch("/api/auth/status");
+        if (!r.ok) throw new Error(`auth status HTTP ${r.status}`);
+        const status = await r.json();
         setStep(status.setup_required ? "setup" : "email");
-      } catch {
+      } catch (err) {
+        console.error("[LoginPage] auth status probe failed:", err);
+        setError("Could not contact server. Check connectivity and reload.");
         setStep("email");
       }
     })();
@@ -104,10 +109,10 @@ export function LoginPage() {
         }),
       });
       if (!result.ok) {
-        const body = await result
-          .json()
-          .catch(() => ({ detail: "Setup failed" }));
-        setError(body.detail || body.message || "Setup failed");
+        const body = await result.json().catch(() => ({}));
+        setError(
+          body.detail || body.message || `Setup failed (HTTP ${result.status})`,
+        );
         return;
       }
       const data = await result.json();
@@ -135,8 +140,9 @@ OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=${ingestToken}`;
       await navigator.clipboard.writeText(cfg);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard may be unavailable */
+    } catch (err) {
+      console.warn("[LoginPage] clipboard write failed:", err);
+      toast.error("Couldn't copy. Select the token manually — it won't be shown again.");
     }
   }
 
@@ -172,10 +178,12 @@ OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=${ingestToken}`;
         body: JSON.stringify({ email: verifyEmail, code: values.code }),
       });
       if (!result.ok) {
-        const body = await result
-          .json()
-          .catch(() => ({ detail: "Invalid code" }));
-        setError(body.detail || body.message || "Invalid or expired code");
+        const body = await result.json().catch(() => ({}));
+        setError(
+          body.detail ||
+            body.message ||
+            `Invalid or expired code (HTTP ${result.status})`,
+        );
         return;
       }
       const data = await result.json();

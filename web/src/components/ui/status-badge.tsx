@@ -1,8 +1,9 @@
 import { cn } from "@/lib/utils";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
+import type { StatusVariant } from "@/lib/badge-variants";
 
 interface StatusBadgeProps extends Omit<BadgeProps, "variant"> {
-  variant: "success" | "danger" | "warning" | "info" | "neutral";
+  variant: StatusVariant;
   dot?: boolean;
 }
 

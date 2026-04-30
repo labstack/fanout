@@ -1,6 +1,8 @@
 import { ArrowLeft, Search } from "lucide-react";
 import { Link, useLocation } from "react-router";
 import { Button } from "@/components/ui/button";
+import { StatusBadge } from "@/components/ui/status-badge";
+import { serviceStatusVariant } from "@/lib/badge-variants";
 
 interface Props {
   name: string;
@@ -11,19 +13,6 @@ interface Props {
 
 export function ServiceHeader({ name, status, symptom, onInvestigate }: Props) {
   const { search } = useLocation();
-  const isUnhealthy = status === "unhealthy";
-  const isDegraded = status === "degraded";
-  const statusCls = isUnhealthy
-    ? "text-unhealthy"
-    : isDegraded
-      ? "text-degraded"
-      : "text-healthy";
-  const borderCls = isUnhealthy
-    ? "border-unhealthy/20 bg-unhealthy/10"
-    : isDegraded
-      ? "border-degraded/20 bg-degraded/10"
-      : "border-healthy/20 bg-healthy/10";
-
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
       <div className="flex items-center gap-3 min-w-0 flex-wrap">
@@ -37,11 +26,9 @@ export function ServiceHeader({ name, status, symptom, onInvestigate }: Props) {
         <span className="font-heading text-xl font-bold text-foreground truncate">
           {name}
         </span>
-        <span
-          className={`inline-flex rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${statusCls} ${borderCls}`}
-        >
+        <StatusBadge variant={serviceStatusVariant(status)}>
           {status}
-        </span>
+        </StatusBadge>
         {symptom && (
           <span className="text-[11px] text-muted-foreground mono">
             {symptom.replace(/_/g, " ")}

@@ -45,8 +45,9 @@ export function SettingsPage() {
       await navigator.clipboard.writeText(revealedToken);
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* clipboard may be unavailable */
+    } catch (err) {
+      console.warn("[Settings] clipboard write failed:", err);
+      toast.error("Couldn't copy. Select the token manually and copy with your keyboard.");
     }
   }
 
