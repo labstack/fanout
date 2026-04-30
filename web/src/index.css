@@ -96,47 +96,51 @@
   color-scheme: dark;
   --radius: 0.625rem;
 
+  /* Theme: Ayu Mono — Ayu Dark surfaces with Vercel-style mono primary.
+   * Charcoal-navy bg, warm off-white text, white interactive primary so the
+   * chrome never competes with status hues. */
+
   /* Surface tiers */
-  --surface: #09090b;
-  --surface-1: #121215;
-  --surface-2: #1a1a1f;
-  --surface-3: #252529;
+  --surface: #0b0e14;
+  --surface-1: #131721;
+  --surface-2: #1a1f2c;
+  --surface-3: #232838;
 
   /* Semantic colors */
-  --background: #09090b;
-  --foreground: #e4e4e7;
-  --card: #121215;
-  --card-foreground: #e4e4e7;
-  --popover: #1a1a1f;
-  --popover-foreground: #e4e4e7;
-  --primary: #60a5fa;
-  --primary-foreground: #09090b;
-  --secondary: #1a1a1f;
-  --secondary-foreground: #d4d4d8;
-  --muted: #1a1a1f;
-  --muted-foreground: #71717a;
-  --accent: #1a1a1f;
-  --accent-foreground: #e4e4e7;
-  --border: #2a2a30;
-  --input: #2a2a30;
-  --ring: #60a5fa;
+  --background: #0b0e14;
+  --foreground: #bfbdb6;
+  --card: #131721;
+  --card-foreground: #bfbdb6;
+  --popover: #1a1f2c;
+  --popover-foreground: #bfbdb6;
+  --primary: #fafafa;
+  --primary-foreground: #0b0e14;
+  --secondary: #1a1f2c;
+  --secondary-foreground: #bfbdb6;
+  --muted: #1a1f2c;
+  --muted-foreground: #737681;
+  --accent: #1a1f2c;
+  --accent-foreground: #bfbdb6;
+  --border: #1d2433;
+  --input: #1d2433;
+  --ring: #fafafa;
 
   /* Status signals (canonical) */
-  --success: #34d399;
-  --success-foreground: #052e16;
-  --warning: #fbbf24;
+  --success: #7fd962;
+  --success-foreground: #0a1a05;
+  --warning: #ffb454;
   --warning-foreground: #1a1000;
-  --danger: #f87171;
+  --danger: #f26d78;
   --danger-foreground: #1f0810;
-  --info: #a78bfa;
-  --info-foreground: #ffffff;
+  --info: #d2a6ff;
+  --info-foreground: #1a0c2a;
 
   /* Chart palette */
-  --chart-1: #60a5fa;
-  --chart-2: #34d399;
-  --chart-3: #fbbf24;
-  --chart-4: #a78bfa;
-  --chart-5: #fb923c;
+  --chart-1: #fafafa;
+  --chart-2: #7fd962;
+  --chart-3: #ffb454;
+  --chart-4: #d2a6ff;
+  --chart-5: #ff8f40;
 }
 
 /* ─── Base ─────────────────────────────────────────────────────────────── */
