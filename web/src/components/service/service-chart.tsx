@@ -1,6 +1,16 @@
 import { useMemo } from "react";
-import echarts, { ReactECharts, LinearGradient, tooltipStyle, axisLine, axisLabel, splitLine, cssVar } from "@/lib/echarts";
-import type { ServiceBucket, ChangePoint } from "@/lib/types";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { axisLine, axisTick, chartColors, gridStroke } from "@/lib/chart-theme";
+import type { ChangePoint, ServiceBucket } from "@/lib/types";
 
 interface Props {
   title: string;
@@ -22,113 +32,26 @@ function fmtTime(iso: string): string {
 }
 
 export function ServiceChart({ title, buckets, metric, color, changePoints, baselineValue }: Props) {
-  const option = useMemo(() => {
-    if (!buckets || buckets.length < 2) return null;
+  const data = useMemo(() => {
+    if (!buckets || buckets.length < 2) return [];
+    return buckets.map((b) => ({
+      time: fmtTime(b.time),
+      value: metric === "error_rate" ? b.error_rate : b.p95_ms,
+    }));
+  }, [buckets, metric]);
 
-    const times = buckets.map((b) => fmtTime(b.time));
-    const values = buckets.map((b) => (metric === "error_rate" ? b.error_rate : b.p95_ms));
+  const cpMarkers = useMemo(() => {
+    if (!changePoints) return [];
+    const metricName = metric === "error_rate" ? "error_rate" : "p95";
+    return changePoints
+      .filter((cp) => cp.metric.includes(metricName))
+      .map((cp) => ({
+        x: fmtTime(cp.time),
+        ratio: cp.before > 0 ? (cp.after / cp.before).toFixed(1) : "?",
+      }));
+  }, [changePoints, metric]);
 
-    // Mark lines for change points
-    const markLineData: Record<string, unknown>[] = [];
-
-    if (changePoints) {
-      const metricName = metric === "error_rate" ? "error_rate" : "p95";
-      for (const cp of changePoints) {
-        if (!cp.metric.includes(metricName)) continue;
-        const cpTime = fmtTime(cp.time);
-        const ratio = cp.before > 0 ? (cp.after / cp.before).toFixed(1) : "?";
-        markLineData.push({
-          xAxis: cpTime,
-          label: {
-            formatter: `${ratio}x`,
-            position: "insideStartTop",
-            color: cssVar("--primary"),
-            fontSize: 10,
-            fontFamily: "monospace",
-          },
-          lineStyle: {
-            color: cssVar("--primary"),
-            type: "dashed" as const,
-            width: 1,
-          },
-        });
-      }
-    }
-
-    // Baseline horizontal line
-    if (baselineValue !== undefined && baselineValue > 0) {
-      markLineData.push({
-        yAxis: baselineValue,
-        label: {
-          formatter: `baseline ${fmtVal(baselineValue, metric)}`,
-          position: "insideEndTop",
-          color: cssVar("--muted-foreground"),
-          fontSize: 9,
-          fontFamily: "monospace",
-        },
-        lineStyle: {
-          color,
-          type: "dashed" as const,
-          width: 0.5,
-          opacity: 0.4,
-        },
-      });
-    }
-
-    const yAxisName = metric === "error_rate" ? "Error %" : "ms";
-
-    return {
-      animation: false,
-      grid: { left: 52, right: 16, top: 16, bottom: 28, containLabel: false },
-      tooltip: {
-        trigger: "axis",
-        ...tooltipStyle(),
-        formatter: (params: { value: number; axisValue: string }[]) => {
-          if (!Array.isArray(params) || !params[0]) return "";
-          const p = params[0];
-          return `${p.axisValue}<br/>${fmtVal(p.value, metric)}`;
-        },
-      },
-      xAxis: {
-        type: "category" as const,
-        data: times,
-        axisLine: axisLine(),
-        axisLabel: { ...axisLabel(10), interval: Math.max(0, Math.floor(times.length / 6) - 1) },
-      },
-      yAxis: {
-        type: "value" as const,
-        name: yAxisName,
-        nameTextStyle: { color: cssVar("--muted-foreground"), fontSize: 10 },
-        axisLine: axisLine(),
-        axisLabel: {
-          ...axisLabel(10),
-          formatter: (v: number) => fmtVal(v, metric),
-        },
-        splitLine: splitLine(),
-      },
-      series: [
-        {
-          type: "line" as const,
-          data: values,
-          smooth: true,
-          symbol: "none",
-          lineStyle: { width: 2, color },
-          itemStyle: { color },
-          areaStyle: {
-            color: new LinearGradient(0, 0, 0, 1, [
-              { offset: 0, color: color + "33" },
-              { offset: 1, color: color + "00" },
-            ]),
-          },
-          markLine: markLineData.length > 0
-            ? { symbol: "none", data: markLineData }
-            : undefined,
-        },
-      ],
-    };
-  }, [buckets, metric, color, changePoints, baselineValue]);
-
-  if (!option) {
+  if (data.length === 0) {
     return (
       <div className="rounded-lg border border-border/60 bg-surface-1/80 p-4">
         <div className="detail-label mb-2">{title}</div>
@@ -137,10 +60,108 @@ export function ServiceChart({ title, buckets, metric, color, changePoints, base
     );
   }
 
+  const gradId = `service-chart-${metric}-${color.replace(/[^a-zA-Z0-9]/g, "")}`;
+  const tickInterval = Math.max(0, Math.floor(data.length / 6) - 1);
+  const yAxisName = metric === "error_rate" ? "Error %" : "ms";
+
   return (
     <div className="rounded-lg border border-border/60 bg-surface-1/80 p-4">
       <div className="detail-label mb-1">{title}</div>
-      <ReactECharts echarts={echarts} option={option} style={{ height: 200 }} opts={{ renderer: "svg" }} />
+      <ResponsiveContainer width="100%" height={200}>
+        <AreaChart data={data} margin={{ top: 16, right: 16, bottom: 4, left: 4 }}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.2} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid stroke={gridStroke()} strokeDasharray="3 3" vertical={false} />
+          <XAxis
+            dataKey="time"
+            interval={tickInterval}
+            tick={axisTick(10)}
+            tickLine={false}
+            axisLine={axisLine()}
+          />
+          <YAxis
+            width={52}
+            label={{
+              value: yAxisName,
+              angle: -90,
+              position: "insideLeft",
+              style: { fill: chartColors().mutedForeground, fontSize: 10 },
+            }}
+            tick={axisTick(10)}
+            tickLine={false}
+            axisLine={axisLine()}
+            tickFormatter={(v: number) => fmtVal(v, metric)}
+          />
+          <Tooltip
+            cursor={{ stroke: chartColors().border, strokeDasharray: "3 3" }}
+            content={(props) => {
+              const raw = props.payload?.[0]?.value;
+              const v = typeof raw === "number" ? raw : Number(raw);
+              if (!props.active || !Number.isFinite(v)) return null;
+              const c = chartColors();
+              return (
+                <div
+                  style={{
+                    background: c.popover,
+                    border: `1px solid ${c.border}`,
+                    color: c.popoverForeground,
+                    fontSize: 12,
+                    padding: "6px 8px",
+                    borderRadius: 4,
+                  }}
+                >
+                  <div>{props.label}</div>
+                  <div>{fmtVal(v, metric)}</div>
+                </div>
+              );
+            }}
+          />
+          {baselineValue !== undefined && baselineValue > 0 && (
+            <ReferenceLine
+              y={baselineValue}
+              stroke={color}
+              strokeOpacity={0.4}
+              strokeDasharray="3 3"
+              strokeWidth={0.5}
+              label={{
+                value: `baseline ${fmtVal(baselineValue, metric)}`,
+                position: "insideTopRight",
+                fill: chartColors().mutedForeground,
+                fontSize: 9,
+                fontFamily: "monospace",
+              }}
+            />
+          )}
+          {cpMarkers.map((cp) => (
+            <ReferenceLine
+              key={`${cp.x}-${cp.ratio}`}
+              x={cp.x}
+              stroke={chartColors().primary}
+              strokeDasharray="3 3"
+              strokeWidth={1}
+              label={{
+                value: `${cp.ratio}x`,
+                position: "insideTopLeft",
+                fill: chartColors().primary,
+                fontSize: 10,
+                fontFamily: "monospace",
+              }}
+            />
+          ))}
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke={color}
+            strokeWidth={2}
+            fill={`url(#${gradId})`}
+            isAnimationActive={false}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   );
 }
