@@ -35,7 +35,10 @@ jobs:
   # archives + checksums and publishes them with `gh release create`.
   binaries:
     strategy:
-      fail-fast: true
+      # Surface all three platform logs on cross-platform regressions; the
+      # release job requires all three artefacts anyway, so we fail-closed
+      # either way.
+      fail-fast: false
       matrix:
         include:
           - runner: ubuntu-24.04
@@ -71,7 +74,10 @@ jobs:
 
       - name: Archive + checksum
         env:
-          TAG: ${{ github.ref_name }}
+          # `inputs.tag` is set on workflow_dispatch; `github.ref_name` is the
+          # tag on push events. On workflow_dispatch alone, `github.ref_name`
+          # is a branch, so always prefer the explicit input.
+          TAG: ${{ inputs.tag || github.ref_name }}
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: |
@@ -82,17 +88,29 @@ jobs:
           archive="fanout_${version}_${GOOS}_${GOARCH}.tar.gz"
           # goreleaser nests binaries as dist/fanout_<goos>_<goarch>[_v1]/fanout.
           # The trailing `_v1` is GOAMD64 — only appears for amd64 builds.
-          bin_dir=$(find dist -mindepth 1 -maxdepth 1 -type d -name "fanout_${GOOS}_${GOARCH}*" | head -1)
-          if [[ -z "$bin_dir" || ! -x "$bin_dir/fanout" ]]; then
-            echo "::error::expected dist/fanout_${GOOS}_${GOARCH}*/fanout, found nothing"
+          mapfile -t bin_dirs < <(find dist -mindepth 1 -maxdepth 1 -type d -name "fanout_${GOOS}_${GOARCH}*")
+          if (( ${#bin_dirs[@]} != 1 )); then
+            echo "::error::expected exactly one dist/fanout_${GOOS}_${GOARCH}*/ dir, found ${#bin_dirs[@]}: ${bin_dirs[*]:-<none>}"
             ls -la dist/ || true
+            exit 1
+          fi
+          bin_dir="${bin_dirs[0]}"
+          if [[ ! -x "$bin_dir/fanout" ]]; then
+            echo "::error::$bin_dir/fanout is not executable"
             exit 1
           fi
           mkdir staging
           cp "$bin_dir/fanout" staging/
           cp README.md staging/
           tar -C staging -czf "$archive" .
-          sha256sum "$archive" > "$archive.sha256"
+          # macOS runners ship `shasum` (Perl) but no GNU `sha256sum`; both
+          # produce the same `<hash>  <file>` line format, so downstream
+          # `cat *.sha256 > SHA256SUMS` doesn't care which one ran.
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
 
       - name: Upload archive
         uses: actions/upload-artifact@v4
@@ -229,35 +247,36 @@ jobs:
 
       - name: Verify all archives present + assemble checksums
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           version="${TAG#fanout/v}"
           missing=()
           for target in linux_amd64 linux_arm64 darwin_arm64; do
             f="fanout_${version}_${target}.tar.gz"
-            if [[ ! -f "artifacts/$f" ]]; then
-              missing+=("$f")
-            fi
+            [[ -f "artifacts/$f" ]] || missing+=("$f")
+            [[ -f "artifacts/$f.sha256" ]] || missing+=("$f.sha256")
           done
           if (( ${#missing[@]} > 0 )); then
-            echo "::error::missing archive(s): ${missing[*]}"
+            echo "::error::missing artefact(s): ${missing[*]}"
             ls -la artifacts/ || true
             exit 1
           fi
-          # Combine per-runner sha256 files (each contains a single line) into
-          # one SHA256SUMS file in the conventional `<hash>  <file>` format.
+          # Assemble the combined SHA256SUMS from the per-target .sha256 files
+          # (each is one `<hash>  <file>` line). Iterating the explicit target
+          # list rather than a glob keeps a single missing .sha256 from being
+          # silently dropped.
           cd artifacts
           : > SHA256SUMS
-          for f in *.tar.gz.sha256; do
-            cat "$f" >> SHA256SUMS
+          for target in linux_amd64 linux_arm64 darwin_arm64; do
+            cat "fanout_${version}_${target}.tar.gz.sha256" >> SHA256SUMS
           done
           rm -f *.tar.gz.sha256
 
       - name: Generate changelog
         id: changelog
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           # Find the previous fanout/v* tag for the diff window. If this is
@@ -283,10 +302,10 @@ jobs:
           } > CHANGELOG.md
           echo "prev=${prev:-<initial>}" >>"$GITHUB_OUTPUT"
 
-      - name: Create GitHub release
+      - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           version="${TAG#fanout/v}"
@@ -296,9 +315,21 @@ jobs:
           if [[ "$version" == *-* ]]; then
             prerelease=(--prerelease)
           fi
-          gh release create "$TAG" \
-            --title "$TAG" \
-            --notes-file CHANGELOG.md \
-            "${prerelease[@]}" \
+          # Split create + upload so retries (workflow_dispatch on an
+          # existing partial release) converge instead of erroring with
+          # "release already exists". `--clobber` on upload replaces any
+          # asset whose name matches.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; updating notes + assets."
+            gh release edit "$TAG" \
+              --notes-file CHANGELOG.md \
+              "${prerelease[@]}"
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file CHANGELOG.md \
+              "${prerelease[@]}"
+          fi
+          gh release upload "$TAG" --clobber \
             artifacts/*.tar.gz \
             artifacts/SHA256SUMS
