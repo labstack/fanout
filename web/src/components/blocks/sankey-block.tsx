@@ -28,11 +28,14 @@ export function SankeyBlock({ data }: { data: SankeyData }) {
     status: n.status,
   }));
 
-  const links = data.links.map((l) => ({
-    source: nodeIndex.get(l.source) ?? 0,
-    target: nodeIndex.get(l.target) ?? 0,
-    value: l.value,
-  }));
+  // Drop links whose endpoints aren't in the node set rather than silently
+  // rewiring them to node 0 (which would fabricate misleading connections).
+  const links = data.links.flatMap((l) => {
+    const s = nodeIndex.get(l.source);
+    const t = nodeIndex.get(l.target);
+    if (s === undefined || t === undefined) return [];
+    return [{ source: s, target: t, value: l.value }];
+  });
 
   const height = Math.max(300, data.nodes.length * 40);
 
@@ -78,16 +81,22 @@ export function SankeyBlock({ data }: { data: SankeyData }) {
           <Tooltip
             content={(props) => {
               const item = props.payload?.[0]?.payload as
-                | (NodePayload & { source?: NodePayload; target?: NodePayload; value?: number })
+                | { source: number | NodePayload; target: number | NodePayload; value: number }
+                | NodePayload
                 | undefined;
               if (!props.active || !item) return null;
-              if (item.source && item.target) {
+              // Link payload: source/target may be numeric indices (tooltip path)
+              // or already-resolved NodePayload objects (node-render path).
+              if ("source" in item && "target" in item) {
+                const src = typeof item.source === "number" ? nodes[item.source] : item.source;
+                const tgt = typeof item.target === "number" ? nodes[item.target] : item.target;
                 return (
                   <div style={tooltipBox(c)}>
-                    {item.source.label} → {item.target.label}: {item.value}
+                    {src?.label ?? "?"} → {tgt?.label ?? "?"}: {item.value}
                   </div>
                 );
               }
+              // Node payload
               return (
                 <div style={tooltipBox(c)}>
                   <div style={{ fontWeight: 500 }}>{item.label}</div>

@@ -1,3 +1,4 @@
+import { useId } from "react";
 import {
   Area,
   AreaChart,
@@ -15,6 +16,7 @@ const PANEL_H = 100;
 
 export function CorrelationBlock({ data }: { data: CorrelationData }) {
   const c = chartColors();
+  const gradPrefix = useId();
 
   if (data.panels.length === 0 || data.times.length < 2) {
     return (
@@ -31,7 +33,7 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
         {data.panels.map((panel, i) => {
           const rows = data.times.map((t, ti) => ({ t, v: panel.values[ti] ?? 0 }));
           const isLast = i === data.panels.length - 1;
-          const gradId = `corr-${i}`;
+          const gradId = `${gradPrefix}-corr-${i}`;
           return (
             <ResponsiveContainer key={i} width="100%" height={PANEL_H}>
               <AreaChart data={rows} margin={{ top: 4, right: 12, bottom: isLast ? 16 : 0, left: 44 }}>
