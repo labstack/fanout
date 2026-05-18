@@ -85,22 +85,22 @@ export function SankeyBlock({ data }: { data: SankeyData }) {
                 | NodePayload
                 | undefined;
               if (!props.active || !item) return null;
-              // Link payload: source/target may be numeric indices (tooltip path)
-              // or already-resolved NodePayload objects (node-render path).
-              if ("source" in item && "target" in item) {
-                const src = typeof item.source === "number" ? nodes[item.source] : item.source;
-                const tgt = typeof item.target === "number" ? nodes[item.target] : item.target;
+              // Nodes carry `rpm`; links don't. Discriminate on that rather than
+              // on `source`/`target` so a future field rename on the node side
+              // can't silently misclassify a node hover as a link.
+              if ("rpm" in item) {
                 return (
                   <div style={tooltipBox(c)}>
-                    {src?.label ?? "?"} → {tgt?.label ?? "?"}: {item.value}
+                    <div style={{ fontWeight: 500 }}>{item.label}</div>
+                    <div>{item.rpm} rpm</div>
                   </div>
                 );
               }
-              // Node payload
+              const src = typeof item.source === "number" ? nodes[item.source] : item.source;
+              const tgt = typeof item.target === "number" ? nodes[item.target] : item.target;
               return (
                 <div style={tooltipBox(c)}>
-                  <div style={{ fontWeight: 500 }}>{item.label}</div>
-                  <div>{item.rpm} rpm</div>
+                  {src?.label ?? "?"} → {tgt?.label ?? "?"}: {item.value}
                 </div>
               );
             }}

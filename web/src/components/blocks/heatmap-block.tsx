@@ -27,6 +27,7 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 function clamp01(t: number): number {
+  if (!Number.isFinite(t)) return 0;
   return t < 0 ? 0 : t > 1 ? 1 : t;
 }
 
