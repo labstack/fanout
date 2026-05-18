@@ -1,93 +1,20 @@
-import { useMemo } from "react";
-import echarts, { ReactECharts, tooltipStyle, axisLine, splitLine, cssVar } from "@/lib/echarts";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { axisLine, axisTick, chartColors, gridStroke, tooltipBox } from "@/lib/chart-theme";
 import type { CorrelationData } from "@/lib/types";
-import { COLORS } from "@/lib/theme";
 
-const PANEL_H = 80;
-const GAP = 40;
+const PANEL_H = 100;
 
 export function CorrelationBlock({ data }: { data: CorrelationData }) {
-  const option = useMemo(() => {
-    if (data.panels.length === 0 || data.times.length < 2) return {};
-
-    type EChartsOpt = Record<string, unknown>;
-    const grids: EChartsOpt[] = [];
-    const xAxes: EChartsOpt[] = [];
-    const yAxes: EChartsOpt[] = [];
-    const series: EChartsOpt[] = [];
-
-    data.panels.forEach((panel, i) => {
-      const top = i * (PANEL_H + GAP) + 24;
-      grids.push({ left: 56, right: 12, top, height: PANEL_H });
-
-      xAxes.push({
-        type: "category",
-        data: data.times,
-        gridIndex: i,
-        show: i === data.panels.length - 1,
-        axisLine: axisLine(),
-        axisLabel: { color: cssVar("--muted-foreground"), fontSize: 9, interval: Math.max(0, Math.ceil(data.times.length / 10) - 1) },
-      });
-
-      const maxVal = Math.max(...panel.values) * 1.2 || 1;
-      yAxes.push({
-        type: "value",
-        gridIndex: i,
-        name: panel.label,
-        nameTextStyle: { color: cssVar("--foreground"), fontSize: 9 },
-        nameGap: 40,
-        max: maxVal,
-        axisLine: axisLine(),
-        axisLabel: { color: cssVar("--muted-foreground"), fontSize: 8 },
-        splitLine: splitLine(),
-      });
-
-      series.push({
-        type: "line",
-        data: panel.values,
-        xAxisIndex: i,
-        yAxisIndex: i,
-        symbol: "none",
-        lineStyle: { width: 1.5, color: panel.color },
-        areaStyle: { color: panel.color, opacity: 0.1 },
-        markLine: (() => {
-          const lines: EChartsOpt[] = [];
-          // Baseline
-          if (panel.baseline !== undefined) {
-            lines.push({ yAxis: panel.baseline, lineStyle: { color: panel.color, type: "dashed", width: 0.5, opacity: 0.4 }, label: { show: false } });
-          }
-          // Vertical marker lines at event positions
-          if (panel.markers?.length) {
-            for (const m of panel.markers) {
-              const color = m.severity === "critical" ? COLORS.unhealthy : COLORS.degraded;
-              lines.push({ xAxis: m.t, lineStyle: { color, type: "dashed", width: 0.75, opacity: 0.5 }, label: { show: true, formatter: m.label.length > 12 ? m.label.slice(0, 11) + "\u2026" : m.label, fontSize: 7, color, position: "start" } });
-            }
-          }
-          return lines.length > 0 ? { silent: true, symbol: "none", data: lines } : undefined;
-        })(),
-        markPoint: panel.markers?.length ? {
-          symbol: "circle",
-          symbolSize: 7,
-          data: panel.markers.map((m) => ({
-            coord: [m.t, panel.values[data.times.indexOf(m.t)] ?? 0],
-            itemStyle: { color: m.severity === "critical" ? COLORS.unhealthy : COLORS.degraded },
-            name: m.label,
-          })),
-        } : undefined,
-      });
-    });
-
-    return {
-      animation: false,
-      grid: grids,
-      xAxis: xAxes,
-      yAxis: yAxes,
-      series,
-      tooltip: { trigger: "axis", ...tooltipStyle() },
-    };
-  }, [data]);
-
-  const totalH = data.panels.length * (PANEL_H + GAP) + 40;
+  const c = chartColors();
 
   if (data.panels.length === 0 || data.times.length < 2) {
     return (
@@ -100,7 +27,98 @@ export function CorrelationBlock({ data }: { data: CorrelationData }) {
   return (
     <div className="block-card">
       <h3 className="block-title">Correlation</h3>
-      <ReactECharts echarts={echarts} option={option} style={{ height: totalH }} opts={{ renderer: "svg" }} />
+      <div className="flex flex-col gap-4">
+        {data.panels.map((panel, i) => {
+          const rows = data.times.map((t, ti) => ({ t, v: panel.values[ti] ?? 0 }));
+          const isLast = i === data.panels.length - 1;
+          const gradId = `corr-${i}`;
+          return (
+            <ResponsiveContainer key={i} width="100%" height={PANEL_H}>
+              <AreaChart data={rows} margin={{ top: 4, right: 12, bottom: isLast ? 16 : 0, left: 44 }}>
+                <defs>
+                  <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={panel.color} stopOpacity={0.2} />
+                    <stop offset="100%" stopColor={panel.color} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke={gridStroke()} strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="t"
+                  tick={isLast ? { ...axisTick(9), fill: c.mutedForeground } : false}
+                  tickLine={false}
+                  axisLine={axisLine()}
+                  height={isLast ? 16 : 1}
+                />
+                <YAxis
+                  tick={{ ...axisTick(8), fill: c.mutedForeground }}
+                  tickLine={false}
+                  axisLine={axisLine()}
+                  width={44}
+                  label={{
+                    value: panel.label,
+                    angle: -90,
+                    position: "insideLeft",
+                    style: { fill: c.foreground, fontSize: 9 },
+                  }}
+                />
+                <Tooltip
+                  cursor={{ stroke: c.border, strokeDasharray: "3 3" }}
+                  content={(props) => {
+                    const raw = props.payload?.[0]?.value;
+                    if (!props.active || typeof raw !== "number") return null;
+                    return (
+                      <div style={tooltipBox(c)}>
+                        <div>{props.label}</div>
+                        <div>
+                          {panel.label}: <b>{raw}</b>
+                        </div>
+                      </div>
+                    );
+                  }}
+                />
+                {panel.baseline !== undefined && (
+                  <ReferenceLine
+                    y={panel.baseline}
+                    stroke={panel.color}
+                    strokeDasharray="3 3"
+                    strokeWidth={0.5}
+                    strokeOpacity={0.4}
+                  />
+                )}
+                {panel.markers?.map((m, mi) => {
+                  const markerColor = m.severity === "critical" ? c.destructive : c.warning;
+                  const label = m.label.length > 12 ? m.label.slice(0, 11) + "…" : m.label;
+                  return (
+                    <ReferenceLine
+                      key={`m-${mi}`}
+                      x={m.t}
+                      stroke={markerColor}
+                      strokeDasharray="3 3"
+                      strokeWidth={0.75}
+                      strokeOpacity={0.5}
+                      label={{
+                        value: label,
+                        position: "insideTopLeft",
+                        fill: markerColor,
+                        fontSize: 8,
+                        fontFamily: "monospace",
+                      }}
+                    />
+                  );
+                })}
+                <Area
+                  type="monotone"
+                  dataKey="v"
+                  stroke={panel.color}
+                  strokeWidth={1.5}
+                  fill={`url(#${gradId})`}
+                  isAnimationActive={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          );
+        })}
+      </div>
     </div>
   );
 }
