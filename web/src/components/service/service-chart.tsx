@@ -63,6 +63,7 @@ export function ServiceChart({ title, buckets, metric, color, changePoints, base
   const gradId = `service-chart-${metric}-${color.replace(/[^a-zA-Z0-9]/g, "")}`;
   const tickInterval = Math.max(0, Math.floor(data.length / 6) - 1);
   const yAxisName = metric === "error_rate" ? "Error %" : "ms";
+  const c = chartColors();
 
   return (
     <div className="rounded-lg border border-border/60 bg-surface-1/80 p-4">
@@ -89,7 +90,7 @@ export function ServiceChart({ title, buckets, metric, color, changePoints, base
               value: yAxisName,
               angle: -90,
               position: "insideLeft",
-              style: { fill: chartColors().mutedForeground, fontSize: 10 },
+              style: { fill: c.mutedForeground, fontSize: 10 },
             }}
             tick={axisTick(10)}
             tickLine={false}
@@ -97,12 +98,10 @@ export function ServiceChart({ title, buckets, metric, color, changePoints, base
             tickFormatter={(v: number) => fmtVal(v, metric)}
           />
           <Tooltip
-            cursor={{ stroke: chartColors().border, strokeDasharray: "3 3" }}
+            cursor={{ stroke: c.border, strokeDasharray: "3 3" }}
             content={(props) => {
               const raw = props.payload?.[0]?.value;
-              const v = typeof raw === "number" ? raw : Number(raw);
-              if (!props.active || !Number.isFinite(v)) return null;
-              const c = chartColors();
+              if (!props.active || typeof raw !== "number") return null;
               return (
                 <div
                   style={{
@@ -115,7 +114,7 @@ export function ServiceChart({ title, buckets, metric, color, changePoints, base
                   }}
                 >
                   <div>{props.label}</div>
-                  <div>{fmtVal(v, metric)}</div>
+                  <div>{fmtVal(raw, metric)}</div>
                 </div>
               );
             }}
@@ -130,7 +129,7 @@ export function ServiceChart({ title, buckets, metric, color, changePoints, base
               label={{
                 value: `baseline ${fmtVal(baselineValue, metric)}`,
                 position: "insideTopRight",
-                fill: chartColors().mutedForeground,
+                fill: c.mutedForeground,
                 fontSize: 9,
                 fontFamily: "monospace",
               }}
@@ -140,13 +139,13 @@ export function ServiceChart({ title, buckets, metric, color, changePoints, base
             <ReferenceLine
               key={`${cp.x}-${cp.ratio}`}
               x={cp.x}
-              stroke={chartColors().primary}
+              stroke={c.primary}
               strokeDasharray="3 3"
               strokeWidth={1}
               label={{
                 value: `${cp.ratio}x`,
                 position: "insideTopLeft",
-                fill: chartColors().primary,
+                fill: c.primary,
                 fontSize: 10,
                 fontFamily: "monospace",
               }}
