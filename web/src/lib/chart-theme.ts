@@ -46,3 +46,22 @@ export function axisLine() {
 export function gridStroke() {
   return cssVar("--border");
 }
+
+// Inline style for the custom tooltip box used across chart blocks.
+// Caller supplies pre-resolved chartColors() to avoid repeated getComputedStyle.
+export function tooltipBox(c: ReturnType<typeof chartColors>) {
+  return {
+    background: c.popover,
+    border: `1px solid ${c.border}`,
+    color: c.popoverForeground,
+    fontSize: 12,
+    padding: "6px 8px",
+    borderRadius: 4,
+  } as const;
+}
+
+// Palette for multi-series charts. Cycles via i % length.
+export function seriesPalette(): string[] {
+  const c = chartColors();
+  return [c.primary, c.success, c.warning, c.destructive, cssVar("--accent") || c.primary];
+}
