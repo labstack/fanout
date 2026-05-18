@@ -62,7 +62,12 @@ export class ChatClient {
         return;
       }
 
-      const reader = resp.body!.getReader();
+      if (!resp.body) {
+        this.onEvent({ type: "error", error: "Response body is empty" });
+        this.onStatus("idle");
+        return;
+      }
+      const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
 

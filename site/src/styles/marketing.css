@@ -1,21 +1,25 @@
-/* Marketing site styles — matches web/src/index.css product theme.
-   Used by src/pages/index.astro via MarketingLayout. Not loaded in docs. */
+/* Marketing site styles — matches web/src/index.css product theme (Ayu Mono).
+   Used by src/pages/index.astro via MarketingLayout. Loaded by docs too via
+   DocsLayout extending MarketingLayout. Keep tokens in sync with product. */
 
 :root {
-  --bg: #09090b;
-  --surface-1: #121215;
-  --surface-2: #1a1a1f;
-  --fg: #e4e4e7;
-  --muted: #71717a;
-  --border: #2a2a30;
-  --primary: #60a5fa;
-  --primary-deep: #3b82f6;
-  --healthy: #34d399;
-  --degraded: #fbbf24;
-  --unhealthy: #f87171;
-  --tinted: color-mix(in srgb, var(--primary) 12%, transparent);
-  --tinted-strong: color-mix(in srgb, var(--primary) 25%, transparent);
-  --glow: 0 4px 16px -4px rgba(96, 165, 250, 0.35);
+  /* Ayu Mono palette — surfaces from Ayu Dark, white interactive primary. */
+  --bg: #0b0e14;
+  --surface-1: #131721;
+  --surface-2: #1a1f2c;
+  --fg: #bfbdb6;
+  --muted: #737681;
+  --border: #1d2433;
+  --primary: #fafafa;
+  --primary-deep: #e5e5e5;
+  --primary-fg: #0b0e14;
+  --healthy: #7fd962;
+  --degraded: #ffb454;
+  --unhealthy: #f26d78;
+  --info: #d2a6ff;
+  --tinted: color-mix(in srgb, var(--primary) 10%, transparent);
+  --tinted-strong: color-mix(in srgb, var(--primary) 22%, transparent);
+  --glow: 0 4px 16px -4px rgba(255, 255, 255, 0.18);
   --sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: "Fragment Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
 }
@@ -36,8 +40,8 @@ body::before {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(96, 165, 250, 0.10), transparent 70%),
-    radial-gradient(ellipse 50% 30% at 80% 110%, rgba(167, 139, 250, 0.06), transparent 70%);
+    radial-gradient(ellipse 80% 40% at 50% 0%, rgba(255, 255, 255, 0.05), transparent 70%),
+    radial-gradient(ellipse 50% 30% at 80% 110%, rgba(210, 166, 255, 0.05), transparent 70%);
 }
 body::after {
   content: "";
@@ -159,12 +163,13 @@ main.site {
   border: 1px solid transparent;
 }
 .btn-primary {
-  background: var(--primary-deep);
-  color: #fff;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(96, 165, 250, 0.1);
+  background: var(--primary);
+  color: var(--primary-fg);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 .btn-primary:hover {
-  background: var(--primary);
+  background: var(--primary-deep);
+  color: var(--primary-fg);
   transform: translateY(-1px);
   box-shadow: var(--glow);
 }
@@ -187,7 +192,7 @@ main.site {
   padding: 14px;
   box-shadow:
     0 50px 100px -30px rgba(0, 0, 0, 0.7),
-    0 0 0 1px rgba(96, 165, 250, 0.05),
+    0 0 0 1px rgba(255, 255, 255, 0.04),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 .preview .toolbar {
@@ -203,7 +208,7 @@ main.site {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #303034;
+  background: #232838;
   display: block;
 }
 .preview .url {
@@ -381,7 +386,7 @@ section.site-section {
   border: 1px solid var(--tinted);
   border-radius: 14px;
   padding: 24px 26px;
-  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(96, 165, 250, 0.04);
+  box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
   font-family: var(--mono);
   font-size: 13.5px;
   line-height: 1.85;

@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
-import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { clsx } from "clsx";
 import { api } from "@/api/client";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 
 export function NamespacePicker() {
   const { pathname, search } = useLocation();
@@ -18,11 +25,16 @@ export function NamespacePicker() {
       try {
         const ns = await api<string[]>("/api/namespaces");
         if (!cancelled) setNamespaces(ns ?? []);
-      } catch (err) { console.warn("namespace fetch failed:", err); }
+      } catch (err) {
+        console.warn("namespace fetch failed:", err);
+      }
     }
     load();
     const interval = setInterval(load, 60_000);
-    return () => { cancelled = true; clearInterval(interval); };
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
   if (namespaces.length <= 1) return null;
@@ -41,50 +53,61 @@ export function NamespacePicker() {
   const label = current || "All";
 
   return (
-    <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className={clsx(
-            "flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] mono transition-colors cursor-pointer",
+          className={cn(
+            "flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[11px] transition-colors",
             current
-              ? "border-primary/30 bg-primary/8 text-primary"
+              ? "border-primary/30 bg-primary/10 text-primary"
               : "border-border/60 bg-surface-1/70 text-muted-foreground hover:text-foreground",
           )}
         >
           {current && (
-            <span className="w-1.5 h-1.5 rounded-full bg-primary" />
+            <span className="size-1.5 rounded-full bg-primary" aria-hidden="true" />
           )}
           {label}
-          <span className="text-[9px] opacity-50">{"\u25BE"}</span>
+          <span className="text-[10px] opacity-50" aria-hidden="true">
+            {"▾"}
+          </span>
         </button>
-      </DropdownMenu.Trigger>
-
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content align="end" sideOffset={4} className="dropdown-content">
-          <div className="px-2.5 py-1.5 text-[9px] text-muted-foreground uppercase tracking-wider mono font-semibold">
-            Namespace
-          </div>
-          {namespaces.map((ns) => (
-            <DropdownMenu.Item
-              key={ns}
-              className="dropdown-item"
-              onSelect={() => select(ns)}
-            >
-              <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", current === ns ? "bg-primary" : "bg-surface-3")} />
-              <span className={clsx(current === ns && "text-foreground")}>{ns}</span>
-            </DropdownMenu.Item>
-          ))}
-          <DropdownMenu.Separator className="my-1 h-px bg-border/30" />
-          <DropdownMenu.Item
-            className="dropdown-item"
-            onSelect={() => select("")}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={4}>
+        <DropdownMenuLabel className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+          Namespace
+        </DropdownMenuLabel>
+        {namespaces.map((ns) => (
+          <DropdownMenuItem
+            key={ns}
+            onSelect={() => select(ns)}
+            className="font-mono text-[13px]"
           >
-            <span className={clsx("w-1.5 h-1.5 rounded-full shrink-0", !current ? "bg-primary" : "bg-surface-3")} />
-            <span className={clsx(!current && "text-foreground")}>All namespaces</span>
-          </DropdownMenu.Item>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu.Root>
+            <span
+              aria-hidden="true"
+              className={cn(
+                "size-1.5 shrink-0 rounded-full",
+                current === ns ? "bg-primary" : "bg-surface-3",
+              )}
+            />
+            <span className={cn(current === ns && "text-foreground")}>{ns}</span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onSelect={() => select("")}
+          className="font-mono text-[13px]"
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              "size-1.5 shrink-0 rounded-full",
+              !current ? "bg-primary" : "bg-surface-3",
+            )}
+          />
+          <span className={cn(!current && "text-foreground")}>All namespaces</span>
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

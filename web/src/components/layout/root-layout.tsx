@@ -1,9 +1,10 @@
 import { useRef, useEffect, Component, type ReactNode } from "react";
 import { Outlet, useLocation } from "react-router";
-import { Toaster } from "sonner";
 import { NavLoader } from "./nav-loader";
 import { Nav } from "./nav";
 import { Footer } from "./footer";
+import { Toaster } from "@/components/ui/sonner";
+import { ErrorState } from "@/components/states/error-state";
 import { setApiToken } from "@/api/client";
 
 const HIDE_FOOTER = new Set(["/chat"]);
@@ -25,20 +26,12 @@ class ErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="flex items-center justify-center h-screen bg-surface text-foreground">
-          <div className="text-center max-w-md px-6">
-            <h1 className="font-heading text-lg font-semibold mb-2">
-              Something went wrong
-            </h1>
-            <p className="text-sm text-muted-foreground mb-6">
-              {this.state.error?.message}
-            </p>
-            <button
-              onClick={() => window.location.reload()}
-              className="btn-primary"
-            >
-              Reload
-            </button>
+        <div className="flex h-screen items-center justify-center bg-background">
+          <div className="w-full max-w-md px-6">
+            <ErrorState
+              error={this.state.error}
+              resetErrorBoundary={() => window.location.reload()}
+            />
           </div>
         </div>
       );
@@ -64,12 +57,12 @@ export function RootLayout() {
   }, [search]);
 
   return (
-    <div className="h-screen flex flex-col noise">
+    <div className="flex h-screen flex-col noise">
       <NavLoader />
       <Nav />
       <main
         ref={mainRef}
-        className="flex-1 min-h-0 overflow-y-auto flex flex-col"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
       >
         <ErrorBoundary>
           <div className="flex-1">
@@ -78,18 +71,7 @@ export function RootLayout() {
           {showFooter && <Footer />}
         </ErrorBoundary>
       </main>
-      <Toaster
-        theme="dark"
-        position="bottom-right"
-        toastOptions={{
-          style: {
-            background: "var(--surface-2)",
-            border: "1px solid var(--border)",
-            color: "#d4d4d8",
-            fontSize: "0.8125rem",
-          },
-        }}
-      />
+      <Toaster />
     </div>
   );
 }

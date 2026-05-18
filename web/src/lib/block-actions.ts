@@ -11,7 +11,7 @@ import type {
   TopologyData,
   TraceWaterfallData,
 } from "@/lib/types";
-import type { AIAction } from "@/components/ai/AIActionBar";
+import type { AIAction } from "@/components/ai/ai-action-bar";
 
 function inferTableService(data: TableBlockData): string | null {
   for (const row of data.rows) {
