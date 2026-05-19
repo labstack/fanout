@@ -12,12 +12,12 @@ version: 2
 
 project_name: fanout
 
-git:
-  # Per-component tags coexist on this repo (fanout/v…, site/v…). Goreleaser
-  # scans all tags looking for the latest semver and chokes on non-fanout
-  # prefixes ("failed to parse tag 'site/v…' as semver"). Filter them out.
-  ignore_tags:
-    - "site/*"
+# Per-component tags coexist on this repo (fanout/v…, site/v…). Declaring
+# the prefix here tells goreleaser to strip `fanout/` before semver parsing
+# AND to ignore tags without this prefix — covers both the site/ tag noise
+# and the fanout/ prefix-parse failure in one config knob.
+monorepo:
+  tag_prefix: fanout/
 
 before:
   hooks:
