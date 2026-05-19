@@ -29,12 +29,16 @@ env:
 
 jobs:
   # ── Native binaries (Linux amd64, Linux arm64, macOS arm64) ──────────
-  # Each runner builds for its own native arch via `goreleaser release
-  # --split --single-target`. CGO + DuckDB under QEMU is impractical, so
-  # we avoid cross-compilation entirely.
+  # Each runner builds for its own native arch via `goreleaser build
+  # --single-target`. CGO + DuckDB under QEMU is impractical, so we avoid
+  # cross-compilation entirely. The `release` job collects the per-runner
+  # archives + checksums and publishes them with `gh release create`.
   binaries:
     strategy:
-      fail-fast: true
+      # Surface all three platform logs on cross-platform regressions; the
+      # release job requires all three artefacts anyway, so we fail-closed
+      # either way.
+      fail-fast: false
       matrix:
         include:
           - runner: ubuntu-24.04
@@ -60,27 +64,67 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
-      - name: goreleaser release --split --single-target
+      - name: goreleaser build --single-target
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean --split --single-target
+          args: build --clean --single-target
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload partial dist
+      - name: Archive + checksum
+        env:
+          # `inputs.tag` is set on workflow_dispatch; `github.ref_name` is the
+          # tag on push events. On workflow_dispatch alone, `github.ref_name`
+          # is a branch, so always prefer the explicit input.
+          TAG: ${{ inputs.tag || github.ref_name }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          # Tag is `fanout/vX.Y.Z`; strip the leading `fanout/v` so archive
+          # names match the historical `fanout_X.Y.Z_<os>_<arch>.tar.gz` shape.
+          version="${TAG#fanout/v}"
+          archive="fanout_${version}_${GOOS}_${GOARCH}.tar.gz"
+          # goreleaser nests binaries as dist/fanout_<goos>_<goarch>[_v1]/fanout.
+          # The trailing `_v1` is GOAMD64 — only appears for amd64 builds.
+          mapfile -t bin_dirs < <(find dist -mindepth 1 -maxdepth 1 -type d -name "fanout_${GOOS}_${GOARCH}*")
+          if (( ${#bin_dirs[@]} != 1 )); then
+            echo "::error::expected exactly one dist/fanout_${GOOS}_${GOARCH}*/ dir, found ${#bin_dirs[@]}: ${bin_dirs[*]:-<none>}"
+            ls -la dist/ || true
+            exit 1
+          fi
+          bin_dir="${bin_dirs[0]}"
+          if [[ ! -x "$bin_dir/fanout" ]]; then
+            echo "::error::$bin_dir/fanout is not executable"
+            exit 1
+          fi
+          mkdir staging
+          cp "$bin_dir/fanout" staging/
+          cp README.md staging/
+          tar -C staging -czf "$archive" .
+          # macOS runners ship `shasum` (Perl) but no GNU `sha256sum`; both
+          # produce the same `<hash>  <file>` line format, so downstream
+          # `cat *.sha256 > SHA256SUMS` doesn't care which one ran.
+          if command -v sha256sum >/dev/null; then
+            sha256sum "$archive" > "$archive.sha256"
+          else
+            shasum -a 256 "$archive" > "$archive.sha256"
+          fi
+
+      - name: Upload archive
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/
+          name: archive-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            fanout_*.tar.gz
+            fanout_*.tar.gz.sha256
           if-no-files-found: error
           retention-days: 1
 
   # ── Multi-arch Docker (linux/amd64, linux/arm64) ─────────────────────
   # Each native runner builds + pushes a SHA-suffixed single-arch image;
   # the manifest job stitches them together under the real tags.
-  # Keep this matrix in sync with the verify-partials list in the `release`
-  # job below.
   docker:
     strategy:
       fail-fast: true
@@ -185,7 +229,7 @@ jobs:
             "$IMAGE:$SHA-amd64" \
             "$IMAGE:$SHA-arm64"
 
-  # ── Finalise: merge partial dists + publish GH Release ───────────────
+  # ── Finalise: collect per-runner archives + publish GH Release ───────
   release:
     runs-on: ubuntu-24.04
     needs: [binaries, docker-manifest]
@@ -194,35 +238,98 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version: ${{ env.GO_VERSION }}
-
-      - name: Download partial dists
+      - name: Download archives
         uses: actions/download-artifact@v4
         with:
-          path: dist
-          pattern: dist-*
-          merge-multiple: false
+          path: artifacts
+          pattern: archive-*
+          merge-multiple: true
 
-      - name: Verify all partial dists present
+      - name: Verify all archives present + assemble checksums
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
+          version="${TAG#fanout/v}"
           missing=()
-          for d in dist-linux-amd64 dist-linux-arm64 dist-darwin-arm64; do
-            if [[ ! -f "dist/$d/artifacts.json" ]]; then
-              missing+=("$d")
-            fi
+          for target in linux_amd64 linux_arm64 darwin_arm64; do
+            f="fanout_${version}_${target}.tar.gz"
+            [[ -f "artifacts/$f" ]] || missing+=("$f")
+            [[ -f "artifacts/$f.sha256" ]] || missing+=("$f.sha256")
           done
           if (( ${#missing[@]} > 0 )); then
-            echo "::error::missing partial dist(s): ${missing[*]}"
+            echo "::error::missing artefact(s): ${missing[*]}"
+            ls -la artifacts/ || true
             exit 1
           fi
+          # Assemble the combined SHA256SUMS from the per-target .sha256 files
+          # (each is one `<hash>  <file>` line). Iterating the explicit target
+          # list rather than a glob keeps a single missing .sha256 from being
+          # silently dropped.
+          cd artifacts
+          : > SHA256SUMS
+          for target in linux_amd64 linux_arm64 darwin_arm64; do
+            cat "fanout_${version}_${target}.tar.gz.sha256" >> SHA256SUMS
+          done
+          rm -f *.tar.gz.sha256
 
-      - name: goreleaser continue --merge
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: "~> v2"
-          args: continue --merge
+      - name: Generate changelog
+        id: changelog
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          # Find the previous fanout/v* tag for the diff window. If this is
+          # the first per-component release, fall back to the prior monolithic
+          # `v*` tag (PR #98 introduced the `fanout/` prefix scheme).
+          prev=$(git tag --list "fanout/v*" --sort=-v:refname | grep -vFx "$TAG" | head -1 || true)
+          if [[ -z "$prev" ]]; then
+            prev=$(git tag --list "v*" --sort=-v:refname | head -1 || true)
+          fi
+          {
+            echo "## Changes"
+            echo
+            if [[ -n "$prev" ]]; then
+              git log "$prev..$TAG" \
+                --pretty='format:* %s (%h)' \
+                --invert-grep \
+                --grep='^chore:' --grep='^docs:' --grep='^test:' \
+                --grep='^style:' --grep='^ci:' --grep='^Merge pull request'
+              echo
+            else
+              echo "* Initial release."
+            fi
+          } > CHANGELOG.md
+          echo "prev=${prev:-<initial>}" >>"$GITHUB_OUTPUT"
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#fanout/v}"
+          # Treat a `-suffix` version as a prerelease so users pinning to
+          # latest don't get pulled in.
+          prerelease=()
+          if [[ "$version" == *-* ]]; then
+            prerelease=(--prerelease)
+          fi
+          # Split create + upload so retries (workflow_dispatch on an
+          # existing partial release) converge instead of erroring with
+          # "release already exists". `--clobber` on upload replaces any
+          # asset whose name matches.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; updating notes + assets."
+            gh release edit "$TAG" \
+              --notes-file CHANGELOG.md \
+              "${prerelease[@]}"
+          else
+            gh release create "$TAG" \
+              --title "$TAG" \
+              --notes-file CHANGELOG.md \
+              "${prerelease[@]}"
+          fi
+          gh release upload "$TAG" --clobber \
+            artifacts/*.tar.gz \
+            artifacts/SHA256SUMS

@@ -1,11 +1,12 @@
 # goreleaser config for Fanout.
 # Docs: https://goreleaser.com/customization/
 #
-# Each release pipeline runs three platform jobs in CI on native runners
-# (ubuntu-24.04, ubuntu-24.04-arm, macos-14) and uses `goreleaser release
-# --split --single-target` per runner; a final job merges with `goreleaser
-# continue --merge`. CGO is required (DuckDB), so cross-compilation isn't
-# attempted — every target builds on its own native arch.
+# CGO is required (DuckDB), so cross-compilation is impractical. The release
+# pipeline (.github/workflows/release.yml) runs `goreleaser build
+# --single-target` on three native runners (ubuntu-24.04, ubuntu-24.04-arm,
+# macos-14); a final job archives + checksums + publishes via `gh release
+# create`. The archive/changelog stanzas below stay for `goreleaser release`
+# in local snapshot/dev use.
 
 version: 2
 
