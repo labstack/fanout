@@ -155,6 +155,21 @@ jobs:
           if [[ -z "$prev" ]]; then
             prev=$(git tag --list "v[0-9]*" --sort=-v:refname | head -1 || true)
           fi
+          if [[ -n "$prev" ]]; then
+            changes=$(git log "$prev..$TAG" \
+              --pretty='format:* %s (%h)' \
+              --invert-grep \
+              --grep='^chore:' --grep='^docs:' --grep='^test:' \
+              --grep='^style:' --grep='^ci:' --grep='^Merge pull request')
+          else
+            changes='* Initial release.'
+          fi
+          # If every commit in the window was filtered (e.g., chore/ci-only
+          # release), surface a single "no user-facing changes" line rather
+          # than publishing an empty Changes section.
+          if [[ -z "$changes" ]]; then
+            changes='* Maintenance release (no user-facing changes).'
+          fi
           {
             echo "## Docker"
             echo
@@ -164,16 +179,7 @@ jobs:
             echo
             echo "## Changes"
             echo
-            if [[ -n "$prev" ]]; then
-              git log "$prev..$TAG" \
-                --pretty='format:* %s (%h)' \
-                --invert-grep \
-                --grep='^chore:' --grep='^docs:' --grep='^test:' \
-                --grep='^style:' --grep='^ci:' --grep='^Merge pull request'
-              echo
-            else
-              echo "* Initial release."
-            fi
+            printf '%s\n' "$changes"
           } > CHANGELOG.md
 
       - name: Create or update GitHub release
