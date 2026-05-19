@@ -12,6 +12,13 @@ version: 2
 
 project_name: fanout
 
+git:
+  # Per-component tags coexist on this repo (fanout/v…, site/v…). Goreleaser
+  # scans all tags looking for the latest semver and chokes on non-fanout
+  # prefixes ("failed to parse tag 'site/v…' as semver"). Filter them out.
+  ignore_tags:
+    - "site/*"
+
 before:
   hooks:
     - bun --cwd web install --frozen-lockfile
