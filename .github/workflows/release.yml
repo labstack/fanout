@@ -54,6 +54,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          # On tag push, `github.ref_name` is the tag and checkout would land
+          # on it naturally. On workflow_dispatch the run targets a branch
+          # (typically main), so we must check out the tag explicitly —
+          # otherwise goreleaser refuses with "tag <T> was not made against
+          # commit <HEAD>".
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0  # goreleaser needs full git history for changelog
 
       - uses: actions/setup-go@v6
@@ -142,6 +148,8 @@ jobs:
       stable: ${{ steps.version.outputs.stable }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
 
       - name: Resolve and validate version
         id: version
@@ -236,6 +244,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ inputs.tag || github.ref_name }}
           fetch-depth: 0
 
       - name: Download archives
