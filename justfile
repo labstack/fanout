@@ -149,9 +149,9 @@ release:
     }
     echo "Checking for changes since last release..."
     # Keep the fanout path list in sync with sources the binary embeds or
-    # compiles from — anything the Dockerfile or .goreleaser.yaml pulls in
+    # compiles from — anything the Dockerfile or release workflow pulls in
     # must be listed here, or changes there will silently skip the release.
-    maybe_release "fanout" "fanout/v" cmd/ internal/ web/ go.mod go.sum Dockerfile .goreleaser.yaml
+    maybe_release "fanout" "fanout/v" cmd/ internal/ web/ go.mod go.sum Dockerfile
     maybe_release "site" "site/v" site/
     if [ "$RELEASED" -eq 0 ]; then
       echo "Nothing to release."
