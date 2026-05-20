@@ -5,7 +5,7 @@ set -euo pipefail
 # fed by otel-demo), and fanout.labstack.com (own production instance) to
 # the target host. Single Docker Compose project — Caddy at the edge
 # handles TLS for all three hostnames and reverse-proxies to the
-# fanout-site, fanout-demo, and fanout-instance containers.
+# fanout-site, fanout-demo, and fanout containers.
 
 DEFAULT_SERVER="ubuntu@fanout.run"
 EMAIL="v@labstack.com"
@@ -100,7 +100,7 @@ if ! command -v docker &> /dev/null; then
     sudo usermod -aG docker $USER
 fi
 
-sudo mkdir -p /data/caddy /data/caddy-config /data/fanout-demo /data/fanout-instance /opt/fanout
+sudo mkdir -p /data/caddy /data/caddy-config /data/fanout-demo /data/fanout /opt/fanout
 sudo chown -R $USER:$USER /data /opt/fanout
 SETUP_EOF
 

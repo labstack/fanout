@@ -27,9 +27,9 @@ services:
   # fanout.labstack.com — own production instance. Secrets (JWT/SMTP/AI)
   # live in instance/.env.secrets (gitignored); the deploy host must have
   # this file in place before `docker compose up`.
-  fanout-instance:
+  fanout:
     image: ghcr.io/labstack/fanout:${FANOUT_VERSION:-latest}
-    container_name: fanout-instance
+    container_name: fanout
     restart: unless-stopped
     env_file:
       - instance/.env.secrets
@@ -40,7 +40,7 @@ services:
     expose:
       - "7520"
     volumes:
-      - /data/fanout-instance:/var/lib/fanout
+      - /data/fanout:/var/lib/fanout
     healthcheck:
       test: ["CMD", "wget", "-qO/dev/null", "http://localhost:7520/healthz"]
       interval: 30s
