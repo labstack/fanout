@@ -1,10 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# Deploy fanout.run (marketing + docs site) and demo.fanout.run (live
-# demo fed by otel-demo) to the target host. Single Docker Compose
-# project — Caddy at the edge handles TLS for both hostnames and
-# reverse-proxies to the fanout-site and fanout-demo containers.
+# Deploy fanout.run (marketing + docs site), demo.fanout.run (live demo
+# fed by otel-demo), and fanout.labstack.com (own production instance) to
+# the target host. Single Docker Compose project — Caddy at the edge
+# handles TLS for all three hostnames and reverse-proxies to the
+# fanout-site, fanout-demo, and fanout containers.
 
 DEFAULT_SERVER="ubuntu@fanout.run"
 EMAIL="v@labstack.com"
@@ -23,7 +24,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help)
-      echo "Deploy fanout.run + demo.fanout.run"
+      echo "Deploy fanout.run + demo.fanout.run + fanout.labstack.com"
       echo ""
       echo "Usage: $0 [user@]server [options]"
       echo ""
@@ -57,13 +58,18 @@ VERSION="${VERSION#v}"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REMOTE_DIR="/opt/fanout"
 
-# Preflight — demo/.env.secrets (gitignored) holds the demo instance's
+# Preflight — both .env.secrets files (gitignored) hold per-instance
 # JWT/SMTP/AI credentials. scp would silently skip a missing file and
 # the failure would only surface on the server as a cryptic "env file
 # not found" during docker compose up. Fail fast here with a pointer.
 if [[ ! -f "$REPO_DIR/demo/.env.secrets" ]]; then
   echo "ERROR: demo/.env.secrets not found locally." >&2
   echo "  Copy demo/.env.secrets.sample to demo/.env.secrets and fill in real values." >&2
+  exit 1
+fi
+if [[ ! -f "$REPO_DIR/instance/.env.secrets" ]]; then
+  echo "ERROR: instance/.env.secrets not found locally." >&2
+  echo "  Copy instance/.env.secrets.example to instance/.env.secrets and fill in real values." >&2
   exit 1
 fi
 
@@ -94,16 +100,17 @@ if ! command -v docker &> /dev/null; then
     sudo usermod -aG docker $USER
 fi
 
-sudo mkdir -p /data/caddy /data/caddy-config /data/fanout-demo /opt/fanout
+sudo mkdir -p /data/caddy /data/caddy-config /data/fanout-demo /data/fanout /opt/fanout
 sudo chown -R $USER:$USER /data /opt/fanout
 SETUP_EOF
 
-echo "Copying compose + Caddyfile + demo/..."
+echo "Copying compose + Caddyfile + demo/ + instance/..."
 scp "$REPO_DIR/docker-compose.yaml" "$SERVER:$REMOTE_DIR/docker-compose.yaml"
 scp "$REPO_DIR/Caddyfile"           "$SERVER:$REMOTE_DIR/Caddyfile"
 # Recursive copy of the whole demo/ tree — scp without -r on a glob
 # would silently skip any subdirectories that get added later.
-scp -r "$REPO_DIR/demo" "$SERVER:$REMOTE_DIR/"
+scp -r "$REPO_DIR/demo"     "$SERVER:$REMOTE_DIR/"
+scp -r "$REPO_DIR/instance" "$SERVER:$REMOTE_DIR/"
 
 # Root .env — Caddy's TLS email and the fanout-site image tag.
 # Demo-specific env has two consumers, both pointed at demo/.env:
@@ -114,7 +121,8 @@ scp -r "$REPO_DIR/demo" "$SERVER:$REMOTE_DIR/"
 #      `env_file: .env` (relative to demo/), which injects variables
 #      into the container at runtime. Both hats live in the same file
 #      — don't delete one thinking the other covers it.
-printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\n' "$EMAIL" "${VERSION:-latest}" \
+printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\nFANOUT_VERSION=%s\n' \
+    "$EMAIL" "${VERSION:-latest}" "${FANOUT_VERSION:-latest}" \
   | ssh "$SERVER" "cat > $REMOTE_DIR/.env && chmod 600 $REMOTE_DIR/.env"
 
 echo "Deploying..."
@@ -150,11 +158,13 @@ smoke() {
 }
 smoke https://fanout.run
 smoke https://demo.fanout.run
+smoke https://fanout.labstack.com/healthz
 
 echo ""
 echo "Deployed:"
 echo "  https://fanout.run"
 echo "  https://demo.fanout.run"
+echo "  https://fanout.labstack.com"
 echo ""
 echo "Status: ssh $SERVER 'cd $REMOTE_DIR && docker compose ps'"
 echo "Logs:   ssh $SERVER 'cd $REMOTE_DIR && docker compose logs -f caddy'"

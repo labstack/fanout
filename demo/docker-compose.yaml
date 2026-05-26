@@ -7,8 +7,8 @@ x-default-logging: &logging
 
 services:
   # Fanout (demo instance) — Caddy at the root proxies demo.fanout.run here.
-  fanout:
-    image: ghcr.io/labstack/fanout:main
+  fanout-demo:
+    image: ghcr.io/labstack/fanout:${FANOUT_VERSION:-latest}
     container_name: fanout-demo
     restart: unless-stopped
     env_file:
@@ -58,7 +58,7 @@ services:
       - OTEL_COLLECTOR_PORT_HTTP
       - GOMEMLIMIT=160MiB
     depends_on:
-      fanout:
+      fanout-demo:
         condition: service_healthy
     logging: *logging
 

@@ -39,6 +39,7 @@ cover.out
 # Env
 .env
 demo/.env.secrets
+instance/.env.secrets
 
 # Screenshots
 *.png
