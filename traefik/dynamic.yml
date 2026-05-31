@@ -1,13 +1,20 @@
-# Routers + services for fanout.run, demo.fanout.run, fanout.labstack.com,
-# and the OTLP gRPC ingest on :4317.
+# Routers + services for the four edge entries:
+#   site            fanout.run, www.fanout.run   → site:80         (marketing)
+#   demo            demo.fanout.run              → demo:7520       (public otel-demo backend)
+#   fanout          fanout.labstack.com          → fanout:7520     (our own production instance, web UI)
+#   fanout-ingest   ingest.fanout.labstack.com   → h2c://fanout:4317 (OTLP gRPC ingest)
 #
-# Cert strategy: ONE wildcard cert under fanout.run covers all three site
-# hostnames. The `demo` router carries the `tls.domains` block that orders
-# `*.fanout.run` + `fanout.run` (SAN). The `site` router intentionally
-# omits `tls.domains` so Traefik picks that same cert from the resolver
-# store by SNI at request time (`*.fanout.run` matches `www.fanout.run`;
-# the `fanout.run` SAN matches the apex). DO NOT add `tls.domains` to
-# `site` — that triggers a second redundant LE order.
+# Cert strategy: ONE wildcard cert under fanout.run covers `site` + `demo` + apex.
+# The `demo` router carries the `tls.domains` block that orders `*.fanout.run` +
+# `fanout.run` (SAN). `site` intentionally omits `tls.domains` so Traefik picks
+# that same cert from the resolver store by SNI at request time (`*.fanout.run`
+# matches `www.fanout.run`; the `fanout.run` SAN matches the apex). DO NOT add
+# `tls.domains` to `site` — that triggers a second redundant LE order.
+#
+# The two labstack hostnames (fanout + ingest) get their own LE certs via
+# auto-resolution from each router's Host rule. `ingest.fanout.labstack.com`
+# MUST be DNS-only at Cloudflare (gray cloud) — CF's free plan doesn't proxy
+# port 4317.
 
 http:
   routers:
@@ -29,17 +36,17 @@ http:
             sans:
               - fanout.run
 
-    instance:
+    fanout:
       rule: "Host(`fanout.labstack.com`)"
       entryPoints: [websecure]
-      service: instance
+      service: fanout
       tls:
         certResolver: le
 
-    instance-otlp:
-      rule: "Host(`fanout.labstack.com`)"
+    fanout-ingest:
+      rule: "Host(`ingest.fanout.labstack.com`)"
       entryPoints: [otlp]
-      service: instance-otlp
+      service: fanout-ingest
       tls:
         certResolver: le
 
@@ -47,19 +54,21 @@ http:
     site:
       loadBalancer:
         servers:
-          - url: "http://fanout-site:80"
+          - url: "http://site:80"
 
     demo:
       loadBalancer:
         servers:
-          - url: "http://fanout-demo:7520"
+          - url: "http://demo:7520"
 
-    instance:
+    fanout:
       loadBalancer:
         servers:
           - url: "http://fanout:7520"
 
-    instance-otlp:
+    fanout-ingest:
       loadBalancer:
         servers:
+          # h2c (HTTP/2 cleartext) — required for gRPC over an in-cluster non-TLS
+          # hop. Do not change to http://; OTLP/gRPC needs HTTP/2.
           - url: "h2c://fanout:4317"
