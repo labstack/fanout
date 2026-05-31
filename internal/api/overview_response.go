@@ -36,3 +36,28 @@ type OverviewResponse struct {
 	Incidents []service.OverviewIncident `json:"incidents"`
 	Alerts    AlertsOut                  `json:"alerts"`
 }
+
+// toOverviewResponse maps the internal value type into the wire shape.
+// Nil input slices become non-nil empty slices so the JSON serializes as
+// `[]` (not `null`). Health is dereferenced (handler guarantees non-nil
+// for UI calls — see ui.go Overview which always requests "health").
+func toOverviewResponse(r *service.OverviewResult, alerts AlertsOut) OverviewResponse {
+	out := OverviewResponse{
+		Services:  r.Services,
+		Incidents: r.Incidents,
+		Alerts:    alerts,
+	}
+	if r.Health != nil {
+		out.Health = *r.Health
+	}
+	if out.Services == nil {
+		out.Services = []service.OverviewService{}
+	}
+	if out.Incidents == nil {
+		out.Incidents = []service.OverviewIncident{}
+	}
+	if out.Alerts.Items == nil {
+		out.Alerts.Items = []service.OverviewAlert{}
+	}
+	return out
+}
