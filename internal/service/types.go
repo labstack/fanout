@@ -27,26 +27,22 @@ type TopIssue struct {
 	Detail  string
 }
 
-// OverviewResult is the in-process result type for the unified overview
-// query. The HTTP UI endpoint (internal/api/ui.go) serializes this directly;
-// the MCP overview tool maps it into its own response struct
-// (internal/mcp/overview.go OverviewOut) for the wire, so JSON tags here only
-// affect the UI shape.
+// OverviewResult is the in-process result of the unified overview query.
+// It is NOT a wire type at the outer level — the HTTP UI handler maps it
+// into internal/api.overviewResponse and the MCP tool maps it into
+// internal/mcp.OverviewOut, so JSON tags on this outer struct would be
+// dead. The element types (OverviewHealth, OverviewService,
+// OverviewIncident, OverviewAlert) DO carry JSON tags because they're
+// embedded by value into those wire response types.
 //
-// The UI-consumed array fields (Services, Incidents, Alerts) intentionally
-// do NOT use `omitempty`. Go's `omitempty` drops any zero-length slice (not
-// just nil) — and the React home page reads `.length`/`.filter` on these
-// fields without optional chaining. Without the tag, an empty result still
-// serializes as `[]` (provided the field is non-nil — see the handler's
-// initialization of Alerts before appending). Health stays `omitempty`
-// because it's a pointer and the UI handler always requests it. Issues is
-// not consumed by the UI; `omitempty` saves a few bytes per response.
+// Sections are populated based on OverviewParams.Include — fields not
+// requested stay zero-valued.
 type OverviewResult struct {
-	Health    *OverviewHealth    `json:"health,omitempty"`
-	Services  []OverviewService  `json:"services"`
-	Issues    []OverviewIssue    `json:"issues,omitempty"`
-	Incidents []OverviewIncident `json:"incidents"`
-	Alerts    []OverviewAlert    `json:"alerts"`
+	Health    *OverviewHealth
+	Services  []OverviewService
+	Issues    []OverviewIssue
+	Incidents []OverviewIncident
+	Alerts    []OverviewAlert
 }
 
 // OverviewHealth contains global health metrics.

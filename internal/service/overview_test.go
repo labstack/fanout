@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
@@ -519,53 +517,5 @@ func TestOverview_UsesCachedSnapshot(t *testing.T) {
 
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unfulfilled mock expectations: %v", err)
-	}
-}
-
-// TestOverviewResult_AlwaysEmitsUIArrays is a regression guard on the JSON
-// tags of the UI-consumed array fields. The React home page reads
-// `data.{services,incidents,alerts}.length` without optional chaining; the
-// `[]`-not-omitted contract is what keeps it from crashing. That contract has
-// two layers — this test pins layer 1 (struct tags); layer 2 (handler
-// non-nil init, see (*UIHandler).Overview in internal/api/ui.go) is what
-// upgrades `null` to `[]` on the wire. Together they're what the UI relies on.
-//
-// If someone reintroduces `,omitempty` on any of the three fields, the empty
-// non-nil case here trips. The nil case documents the consequence of relying
-// on the tag alone (`null` on the wire) — which would still crash the home
-// page without the handler init, hence both layers.
-func TestOverviewResult_AlwaysEmitsUIArrays(t *testing.T) {
-	tests := []struct {
-		name   string
-		result *OverviewResult
-		want   []string
-	}{
-		{
-			name: "empty non-nil slices serialize as []",
-			result: &OverviewResult{
-				Services:  []OverviewService{},
-				Incidents: []OverviewIncident{},
-				Alerts:    []OverviewAlert{},
-			},
-			want: []string{`"services":[]`, `"incidents":[]`, `"alerts":[]`},
-		},
-		{
-			name:   "nil slices still appear as null (no omitempty)",
-			result: &OverviewResult{},
-			want:   []string{`"services":null`, `"incidents":null`, `"alerts":null`},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			b, err := json.Marshal(tc.result)
-			if err != nil {
-				t.Fatalf("marshal: %v", err)
-			}
-			for _, field := range tc.want {
-				if !strings.Contains(string(b), field) {
-					t.Errorf("expected %s in JSON, got: %s", field, b)
-				}
-			}
-		})
 	}
 }
