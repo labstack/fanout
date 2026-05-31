@@ -26,7 +26,7 @@ services:
     volumes:
       - /data/fanout-demo:/var/lib/fanout
     healthcheck:
-      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:7520/healthz"]
+      test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:7520/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3

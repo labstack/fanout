@@ -25,13 +25,18 @@ services:
       - /data/caddy:/data
       - /data/caddy-config:/config
     healthcheck:
-      # Use explicit 127.0.0.1, not `localhost`. The Caddy image is Alpine
-      # (BusyBox wget); BusyBox `getaddrinfo("localhost")` returns the ::1
-      # entry from /etc/hosts first, and the v6 loopback isn't usable on
-      # Docker's default bridge (no IPv6) → the probe fails before wget
-      # tries 127.0.0.1. The fanout / fanout-demo containers are built FROM
-      # debian:bookworm-slim (GNU wget), which falls through to IPv4 cleanly,
-      # so `localhost` is safe in those healthchecks below.
+      # Use explicit 127.0.0.1 in every healthcheck (here + fanout below +
+      # fanout-demo in demo/docker-compose.yaml). Why:
+      #   - Caddy's admin endpoint binds only to 127.0.0.1:2019 (Go's default
+      #     `localhost` resolution; no `admin` override in Caddyfile).
+      #   - The Caddy image is Alpine; BusyBox wget's resolver returns the
+      #     ::1 entry from /etc/hosts first. Connecting to [::1]:2019 gets
+      #     ECONNREFUSED because nothing is listening there, and BusyBox wget
+      #     does NOT fall through to the next address.
+      # Other services happen to work with `localhost` (Debian + GNU wget
+      # has different fallthrough behavior, and the fanout listener binds
+      # dual-stack) — but using 127.0.0.1 everywhere removes the latent risk
+      # of a base-image or kernel-default change silently breaking probes.
       #
       # Cert issuance isn't gated here (first ACME DNS-01 run can take a few
       # minutes); yeet.sh's smoke tests are the end-to-end cert check.
@@ -66,7 +71,7 @@ services:
     volumes:
       - /data/fanout:/var/lib/fanout
     healthcheck:
-      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:7520/healthz"]
+      test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:7520/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -64,12 +64,19 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE_DIR="/opt/fanout"
 
 # Refresh tags from origin so the resolver sees what teammates have pushed —
-# otherwise a stale local repo silently deploys yesterday's release.
-git -C "$REPO_DIR" fetch --tags --quiet --force 2>/dev/null || true
+# otherwise a stale local repo silently deploys yesterday's release. If the
+# fetch fails (no origin, auth, offline), print a warning and fall through to
+# whatever's local: the banner will still show which tag was resolved, so the
+# operator can compare against `git ls-remote --tags origin` and abort.
+if ! fetch_err=$(git -C "$REPO_DIR" fetch --tags --quiet --force 2>&1); then
+  echo "WARN: git fetch --tags failed; resolver will use local tags only." >&2
+  echo "  $fetch_err" >&2
+fi
 
 # resolve_version PREFIX EXPLICIT — print "<source>\t<image-tag>" for a service.
-# - If EXPLICIT is set, validate semver and use it (strips a leading `v`).
-#   Source becomes the literal string "explicit".
+# - If EXPLICIT is set, validate against the stable-release regex (same shape
+#   the auto-resolve path uses, so an explicit pre-release tag is rejected
+#   too). Strips a leading `v`. Source becomes the literal string "explicit".
 # - Otherwise, return the highest stable <PREFIX>/v* git tag, excluding
 #   pre-release suffixes (-rc/-beta/etc.) — same filter `just release` uses
 #   when minting new tag numbers (see justfile `next_tag()`).
@@ -80,15 +87,21 @@ resolve_version() {
   local prefix="$1" explicit="${2:-}" stripped tag
   if [[ -n "$explicit" ]]; then
     stripped="${explicit#v}"
-    if [[ ! "$stripped" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
-      echo "ERROR: --${prefix}-version value '$explicit' doesn't look like a release (e.g. 2026.05.1)." >&2
+    # Reject pre-release suffixes on the explicit path too. An operator who
+    # truly wants to ship an rc/beta to prod must add a flag later (we don't
+    # have one yet — the symmetric refusal is the safer default).
+    if [[ ! "$stripped" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]+$ ]]; then
+      echo "ERROR: --${prefix}-version value '$explicit' doesn't look like a stable release (e.g. 2026.05.1)." >&2
+      echo "  Pre-release tags (-rc/-beta/etc.) are not accepted." >&2
       exit 1
     fi
     printf '%s\t%s\n' "explicit" "$stripped"
     return
   fi
+  # Note: { grep || true; } in the pipeline so grep's exit 1 on "no match"
+  # doesn't trip set -e/pipefail before the friendly error below can fire.
   tag=$(git -C "$REPO_DIR" tag --list "${prefix}/v*" --sort=-v:refname \
-          | grep -E "^${prefix}/v[0-9]{4}\.[0-9]{2}\.[0-9]+$" \
+          | { grep -E "^${prefix}/v[0-9]{4}\.[0-9]{2}\.[0-9]+$" || true; } \
           | head -1)
   if [[ -z "$tag" ]]; then
     echo "ERROR: no stable ${prefix}/v* tag found locally; run 'just release' or pass --${prefix}-version <value>." >&2
