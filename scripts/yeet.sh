@@ -58,6 +58,22 @@ VERSION="${VERSION#v}"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REMOTE_DIR="/opt/fanout"
 
+# Load deploy-time secrets from a local .env (gitignored). This is where
+# CF_API_TOKEN lives — keeping it next to the repo instead of in shell rc
+# files means the deploy is portable across operator shells and CI. See
+# .env.example for the schema. Variables already in the environment win
+# over .env values: we only `export` keys that aren't already set, so a
+# CI runner or one-shot `CF_API_TOKEN=… ./scripts/yeet.sh` still works.
+if [[ -f "$REPO_DIR/.env" ]]; then
+  while IFS='=' read -r key value; do
+    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
+    # Strip optional surrounding quotes from the value.
+    value="${value%\"}"; value="${value#\"}"
+    value="${value%\'}"; value="${value#\'}"
+    [[ -z "${!key:-}" ]] && export "$key=$value"
+  done < "$REPO_DIR/.env"
+fi
+
 # Preflight — both .env.secrets files (gitignored) hold per-instance
 # JWT/SMTP/AI credentials. scp would silently skip a missing file and
 # the failure would only surface on the server as a cryptic "env file
