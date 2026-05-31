@@ -7,7 +7,7 @@ set -euo pipefail
 # handles TLS for all three hostnames and reverse-proxies to the
 # fanout-site, fanout-demo, and fanout containers.
 
-DEFAULT_SERVER="ubuntu@fanout.run"
+DEFAULT_SERVER="root@fanout.labstack.net"
 EMAIL="v@labstack.com"
 
 SERVER=""
@@ -36,7 +36,7 @@ while [[ $# -gt 0 ]]; do
       echo "Examples:"
       echo "  $0                                            # Deploy :latest to $DEFAULT_SERVER"
       echo "  $0 --version v2026.04.2                       # Pin a release tag"
-      echo "  $0 ubuntu@other.server --version v2026.04.2   # Deploy to a different host"
+      echo "  $0 root@other.server --version v2026.05.2    # Deploy to a different host"
       exit 0
       ;;
     *)
@@ -70,6 +70,17 @@ fi
 if [[ ! -f "$REPO_DIR/instance/.env.secrets" ]]; then
   echo "ERROR: instance/.env.secrets not found locally." >&2
   echo "  Copy instance/.env.secrets.example to instance/.env.secrets and fill in real values." >&2
+  exit 1
+fi
+# Caddy's ACME DNS-01 challenge needs a Cloudflare API token with
+# `Zone.Zone:Read` + `Zone.DNS:Edit` on both fanout.run and labstack.com.
+# Without it, cert issuance fails on every site and the deploy comes up
+# with no TLS. Fail fast here with the same shape as the .env.secrets check.
+if [[ -z "${CF_API_TOKEN:-}" ]]; then
+  echo "ERROR: CF_API_TOKEN environment variable not set." >&2
+  echo "  Create a scoped Cloudflare API token (Zone.Zone:Read + Zone.DNS:Edit on fanout.run and labstack.com)" >&2
+  echo "  at https://dash.cloudflare.com/profile/api-tokens, then:" >&2
+  echo "    export CF_API_TOKEN=<token>" >&2
   exit 1
 fi
 
@@ -121,8 +132,8 @@ scp -r "$REPO_DIR/instance" "$SERVER:$REMOTE_DIR/"
 #      `env_file: .env` (relative to demo/), which injects variables
 #      into the container at runtime. Both hats live in the same file
 #      — don't delete one thinking the other covers it.
-printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\nFANOUT_VERSION=%s\n' \
-    "$EMAIL" "${VERSION:-latest}" "${FANOUT_VERSION:-latest}" \
+printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\nFANOUT_VERSION=%s\nCF_API_TOKEN=%s\n' \
+    "$EMAIL" "${VERSION:-latest}" "${FANOUT_VERSION:-latest}" "$CF_API_TOKEN" \
   | ssh "$SERVER" "cat > $REMOTE_DIR/.env && chmod 600 $REMOTE_DIR/.env"
 
 echo "Deploying..."

@@ -4,7 +4,13 @@ include:
 
 services:
   caddy:
-    image: caddy:alpine
+    # Built locally (see Dockerfile.caddy) because the wildcard cert for
+    # *.fanout.run + the apex requires the Cloudflare DNS plugin, which
+    # isn't in the stock caddy:alpine image. ACME uses the DNS-01 challenge
+    # — works regardless of Cloudflare's proxy state on the records.
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
     container_name: caddy
     restart: unless-stopped
     ports:
@@ -13,6 +19,7 @@ services:
       - "4317:4317"   # OTLP/gRPC ingest, TLS-terminated by Caddy
     environment:
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-v@labstack.com}
+      CF_API_TOKEN: ${CF_API_TOKEN}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - /data/caddy:/data

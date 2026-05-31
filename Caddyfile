@@ -1,21 +1,36 @@
-# Caddy at the edge of the Compose project. The host names must have
-# A records pointing at this server (DNS-only at Cloudflare — not proxied,
-# so Let's Encrypt HTTP-01 reaches Caddy directly). `fanout-site`,
-# `fanout-demo`, and `fanout` are resolved via Compose's default bridge
-# DNS. LETSENCRYPT_EMAIL comes from the `caddy` service's environment in
-# docker-compose.yaml.
+# Caddy at the edge of the Compose project. Uses the ACME DNS-01 challenge
+# via Cloudflare so we can manage a wildcard cert for *.fanout.run and stay
+# compatible with Cloudflare's proxy mode (HTTP-01 would be blocked by the
+# orange-cloud edge terminating :80). The CF_API_TOKEN secret is a single
+# Cloudflare API token with `Zone.Zone:Read` + `Zone.DNS:Edit` on both the
+# `fanout.run` and `labstack.com` zones — passed in via .env on the deploy
+# host. `fanout-site`, `fanout-demo`, and `fanout` are resolved over the
+# Compose default bridge DNS.
 
 {
 	email {$LETSENCRYPT_EMAIL}
+	acme_dns cloudflare {env.CF_API_TOKEN}
 }
 
-fanout.run, www.fanout.run {
-	reverse_proxy fanout-site:80
+# Wildcard cert covers any *.fanout.run subdomain. As of Caddy 2.10 the
+# wildcard is reused for individual subdomain site blocks too, so adding a
+# new subdomain later means just a host matcher here — no new cert.
+*.fanout.run {
+	@demo host demo.fanout.run
+	handle @demo {
+		reverse_proxy fanout-demo:7520
+	}
+
+	# Fallback for not-yet-configured subdomains.
+	handle {
+		abort
+	}
 	encode gzip zstd
 }
 
-demo.fanout.run {
-	reverse_proxy fanout-demo:7520
+# Wildcards don't cover the apex — separate site block.
+fanout.run, www.fanout.run {
+	reverse_proxy fanout-site:80
 	encode gzip zstd
 }
 
@@ -24,11 +39,9 @@ fanout.labstack.com {
 	encode gzip zstd
 }
 
-# OTLP/gRPC ingest on the standard port for fanout.labstack.com. Caddy
-# TLS-terminates here (reusing the cert it already manages for the host on
-# :443) and reverse-proxies to the container's gRPC listener over h2c on
-# the Compose bridge. Clients use OTEL_EXPORTER_OTLP_ENDPOINT=
-# https://fanout.labstack.com:4317 with the x-fanout-ingest-token header.
+# OTLP/gRPC ingest on the standard port, reusing the cert Caddy manages
+# for the host on :443. Caddy speaks h2c (HTTP/2 cleartext) to the gRPC
+# server inside the Compose bridge.
 fanout.labstack.com:4317 {
 	reverse_proxy h2c://fanout:4317
 }
