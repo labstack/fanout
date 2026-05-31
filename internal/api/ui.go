@@ -214,60 +214,32 @@ func (h *UIHandler) Overview(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "service layer not configured")
 	}
 
+	namespace := c.QueryParam("namespace")
+
 	result, err := h.svc.Overview(c.Request().Context(), service.OverviewParams{
 		Window:    window,
-		Namespace: c.QueryParam("namespace"),
+		Namespace: namespace,
 		Include:   []string{"health", "services", "sparklines", "incidents"},
 		Limit:     200,
 		Tracker:   h.incidents,
 	})
 	if err != nil {
 		slog.Error("overview query failed",
-			"namespace", c.QueryParam("namespace"),
+			"namespace", namespace,
 			"window_min", window,
+			"code", "overview.query_failed",
 			"err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to build overview data")
 	}
 
-	// Belt-and-braces: the service layer populates Services and Incidents as
-	// non-nil empty slices when requested, but we own the wire-shape contract
-	// at this handler and the React home page reads `.length`/`.filter` on
-	// these without optional chaining. Guarantee `[]` (not `null`) here too
-	// so a future change to the service layer can't silently break the UI.
-	if result.Services == nil {
-		result.Services = []service.OverviewService{}
-	}
-	if result.Incidents == nil {
-		result.Incidents = []service.OverviewIncident{}
+	alerts, err := computeAlertsState(c.Request().Context(), h.alertStore, namespace, window)
+	if err != nil {
+		// Context cancellation only. Echo discards the response; we've
+		// intentionally not logged (a hung-up client is not a failure).
+		return err
 	}
 
-	// Append firing alerts from alert store. Alerts isn't in svc.Overview's
-	// Include — they're stitched in here — so we initialize the slice first
-	// so a "zero firing rules" response is `"alerts": []` rather than the
-	// less-friendly `"alerts": null`. The struct tag (no omitempty; see
-	// internal/service/types.go OverviewResult) keeps the field present
-	// either way.
-	result.Alerts = []service.OverviewAlert{}
-	if h.alertStore != nil {
-		alerts, err := h.alertStore.ListAlerts("firing", "", "")
-		if err != nil {
-			slog.Error("list firing alerts for overview failed",
-				"namespace", c.QueryParam("namespace"),
-				"err", err)
-		} else {
-			for _, a := range alerts {
-				result.Alerts = append(result.Alerts, service.OverviewAlert{
-					Rule:    a.RuleID,
-					Service: a.Service,
-					State:   a.State,
-					Value:   a.Value,
-					FiredAt: a.FiredAt,
-				})
-			}
-		}
-	}
-
-	return c.JSON(http.StatusOK, result)
+	return c.JSON(http.StatusOK, toOverviewResponse(result, alerts))
 }
 
 // ServiceDetail returns deterministic data for the Service Detail page.
