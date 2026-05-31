@@ -130,13 +130,17 @@ export function HomePage() {
 
   if (!data) return null;
 
-  // Defense-in-depth defaults. The server contract (no `omitempty` on these
-  // fields in internal/service/types.go + handler-level non-nil init in
-  // internal/api/ui.go) guarantees these always arrive as arrays, and the TS
-  // type declares them required — but we keep the guard so a future regression
-  // (someone reintroduces `omitempty`, or a refactor drops the handler init)
-  // can't crash the home page on `.length`/`.filter`.
-  const { incidents = [], services = [], alerts = [] } = data;
+  // Defense-in-depth defaults. The server contract (api.OverviewResponse
+  // mapper in internal/api/overview_response.go guarantees non-nil arrays,
+  // and computeAlertsState always returns a populated AlertsOut) makes
+  // these always present — but we keep the guards so a future regression
+  // can't crash the home page on `.length`/`.filter`. The alerts default
+  // mirrors the "alerting disabled" state so render rules degrade gracefully.
+  const {
+    incidents = [],
+    services = [],
+    alerts = { status: "disabled" as const, items: [] },
+  } = data;
 
   const unhealthy = incidents.filter((i) => i.status === "unhealthy");
   const degraded = incidents.filter((i) => i.status === "degraded");
@@ -263,15 +267,26 @@ export function HomePage() {
           </div>
         )}
 
-        {alerts.length > 0 && (
+        {alerts.status === "unavailable" && (
+          <div className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-xs">
+            <span className="font-mono text-warning">
+              <strong>Alerts data temporarily unavailable.</strong> Retrying
+              automatically.
+            </span>
+          </div>
+        )}
+
+        {alerts.status === "ok" && alerts.items.length > 0 && (
           <div className="rounded-lg border border-danger/15 bg-danger/5 px-4 py-3">
             <div className="flex items-center gap-2 text-xs">
               <span className="font-mono text-danger">
-                {alerts.length} alert
-                {alerts.length !== 1 ? "s" : ""} firing
+                {alerts.items.length} alert
+                {alerts.items.length !== 1 ? "s" : ""} firing
               </span>
               <span className="font-mono text-muted-foreground">
-                {alerts.map((a) => `${a.rule} (${a.service})`).join(", ")}
+                {alerts.items
+                  .map((a) => `${a.rule} (${a.service})`)
+                  .join(", ")}
               </span>
             </div>
           </div>

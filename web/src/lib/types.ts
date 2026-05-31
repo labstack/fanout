@@ -245,11 +245,21 @@ export interface Bookmark {
 
 // ── Overview (Home page) types ─────────────────────────────
 
+// Overview alerts wrapper. Tagged enum on `status` distinguishes three
+// operator-visible states: disabled (alerting off at server), unavailable
+// (alert store errored), ok (normal). `items` is always a present array.
+export type AlertsStatus = "ok" | "unavailable" | "disabled";
+
+export interface OverviewAlerts {
+  status: AlertsStatus;
+  items: OverviewAlert[];
+}
+
 export interface OverviewResponse {
   health: OverviewHealth;
   services: OverviewService[];
   incidents: OverviewIncident[];
-  alerts: OverviewAlert[];
+  alerts: OverviewAlerts;
 }
 
 export interface OverviewHealth {
