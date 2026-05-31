@@ -222,15 +222,38 @@ func (h *UIHandler) Overview(c *echo.Context) error {
 		Tracker:   h.incidents,
 	})
 	if err != nil {
-		slog.Error("overview query failed", "err", err)
+		slog.Error("overview query failed",
+			"namespace", c.QueryParam("namespace"),
+			"window_min", window,
+			"err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to build overview data")
 	}
 
-	// Append firing alerts from alert store.
+	// Belt-and-braces: the service layer populates Services and Incidents as
+	// non-nil empty slices when requested, but we own the wire-shape contract
+	// at this handler and the React home page reads `.length`/`.filter` on
+	// these without optional chaining. Guarantee `[]` (not `null`) here too
+	// so a future change to the service layer can't silently break the UI.
+	if result.Services == nil {
+		result.Services = []service.OverviewService{}
+	}
+	if result.Incidents == nil {
+		result.Incidents = []service.OverviewIncident{}
+	}
+
+	// Append firing alerts from alert store. Alerts isn't in svc.Overview's
+	// Include — they're stitched in here — so we initialize the slice first
+	// so a "zero firing rules" response is `"alerts": []` rather than the
+	// less-friendly `"alerts": null`. The struct tag (no omitempty; see
+	// internal/service/types.go OverviewResult) keeps the field present
+	// either way.
+	result.Alerts = []service.OverviewAlert{}
 	if h.alertStore != nil {
 		alerts, err := h.alertStore.ListAlerts("firing", "", "")
 		if err != nil {
-			slog.Error("failed to list firing alerts for overview", "err", err)
+			slog.Error("list firing alerts for overview failed",
+				"namespace", c.QueryParam("namespace"),
+				"err", err)
 		} else {
 			for _, a := range alerts {
 				result.Alerts = append(result.Alerts, service.OverviewAlert{

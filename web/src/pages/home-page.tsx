@@ -130,14 +130,22 @@ export function HomePage() {
 
   if (!data) return null;
 
-  const unhealthy = data.incidents.filter((i) => i.status === "unhealthy");
-  const degraded = data.incidents.filter((i) => i.status === "degraded");
-  const incidentNames = new Set(data.incidents.map((i) => i.service));
-  const healthyServices = data.services.filter(
+  // Defense-in-depth defaults. The server contract (no `omitempty` on these
+  // fields in internal/service/types.go + handler-level non-nil init in
+  // internal/api/ui.go) guarantees these always arrive as arrays, and the TS
+  // type declares them required — but we keep the guard so a future regression
+  // (someone reintroduces `omitempty`, or a refactor drops the handler init)
+  // can't crash the home page on `.length`/`.filter`.
+  const { incidents = [], services = [], alerts = [] } = data;
+
+  const unhealthy = incidents.filter((i) => i.status === "unhealthy");
+  const degraded = incidents.filter((i) => i.status === "degraded");
+  const incidentNames = new Set(incidents.map((i) => i.service));
+  const healthyServices = services.filter(
     (s) => !incidentNames.has(s.service),
   );
   const healthyCount = healthyServices.length;
-  const hasIncidents = data.incidents.length > 0;
+  const hasIncidents = incidents.length > 0;
 
   const expandedUnhealthy = unhealthy.slice(0, MAX_EXPANDED_CARDS);
   const collapsedUnhealthy = unhealthy.slice(MAX_EXPANDED_CARDS);
@@ -255,15 +263,15 @@ export function HomePage() {
           </div>
         )}
 
-        {data.alerts.length > 0 && (
+        {alerts.length > 0 && (
           <div className="rounded-lg border border-danger/15 bg-danger/5 px-4 py-3">
             <div className="flex items-center gap-2 text-xs">
               <span className="font-mono text-danger">
-                {data.alerts.length} alert
-                {data.alerts.length !== 1 ? "s" : ""} firing
+                {alerts.length} alert
+                {alerts.length !== 1 ? "s" : ""} firing
               </span>
               <span className="font-mono text-muted-foreground">
-                {data.alerts.map((a) => `${a.rule} (${a.service})`).join(", ")}
+                {alerts.map((a) => `${a.rule} (${a.service})`).join(", ")}
               </span>
             </div>
           </div>
