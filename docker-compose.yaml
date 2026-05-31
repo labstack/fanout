@@ -10,6 +10,7 @@ services:
     ports:
       - "80:80"
       - "443:443"
+      - "4317:4317"   # OTLP/gRPC ingest, TLS-terminated by Caddy
     environment:
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-v@labstack.com}
     volumes:

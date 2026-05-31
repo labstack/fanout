@@ -23,3 +23,12 @@ fanout.labstack.com {
 	reverse_proxy fanout:7520
 	encode gzip zstd
 }
+
+# OTLP/gRPC ingest on the standard port for fanout.labstack.com. Caddy
+# TLS-terminates here (reusing the cert it already manages for the host on
+# :443) and reverse-proxies to the container's gRPC listener over h2c on
+# the Compose bridge. Clients use OTEL_EXPORTER_OTLP_ENDPOINT=
+# https://fanout.labstack.com:4317 with the x-fanout-ingest-token header.
+fanout.labstack.com:4317 {
+	reverse_proxy h2c://fanout:4317
+}
