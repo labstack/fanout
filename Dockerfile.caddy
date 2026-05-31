@@ -1,17 +1,16 @@
-# Custom Caddy image bundling the Cloudflare DNS plugin so we can solve the
-# ACME DNS-01 challenge — required for the wildcard `*.fanout.run`
-# certificate, and immune to Cloudflare's orange-cloud proxy mode (which
-# blocks the HTTP-01 challenge by terminating :80 at the edge).
-#
-# Pattern verbatim from https://caddyserver.com/docs/build#docker — uses
-# the official `:builder` image and BuildKit cache mounts for fast rebuilds.
+# Custom Caddy image with the Cloudflare DNS plugin so we can solve the
+# ACME DNS-01 challenge — Let's Encrypt requires DNS-01 for wildcards
+# (e.g. `*.fanout.run`); DNS-01 also keeps issuance working regardless of
+# Cloudflare's orange-cloud proxy state. Pattern adapted from
+# https://caddyserver.com/docs/build#docker — uses the official builder
+# image; BuildKit cache mounts added for faster rebuilds.
 
-FROM caddy:2-builder AS builder
+FROM caddy:2.11-builder AS builder
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     xcaddy build \
-    --with github.com/caddy-dns/cloudflare
+    --with github.com/caddy-dns/cloudflare@v0.2.4
 
-FROM caddy:2
+FROM caddy:2.11
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy

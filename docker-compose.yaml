@@ -4,10 +4,7 @@ include:
 
 services:
   caddy:
-    # Built locally (see Dockerfile.caddy) because the wildcard cert for
-    # *.fanout.run + the apex requires the Cloudflare DNS plugin, which
-    # isn't in the stock caddy:alpine image. ACME uses the DNS-01 challenge
-    # — works regardless of Cloudflare's proxy state on the records.
+    # Custom build for the Cloudflare DNS plugin (see Dockerfile.caddy).
     build:
       context: .
       dockerfile: Dockerfile.caddy

@@ -1,34 +1,35 @@
-# Caddy at the edge of the Compose project. Uses the ACME DNS-01 challenge
-# via Cloudflare so we can manage a wildcard cert for *.fanout.run and stay
-# compatible with Cloudflare's proxy mode (HTTP-01 would be blocked by the
-# orange-cloud edge terminating :80). The CF_API_TOKEN secret is a single
-# Cloudflare API token with `Zone.Zone:Read` + `Zone.DNS:Edit` on both the
-# `fanout.run` and `labstack.com` zones — passed in via .env on the deploy
-# host. `fanout-site`, `fanout-demo`, and `fanout` are resolved over the
-# Compose default bridge DNS.
+# Caddy at the edge of the Compose project. Uses ACME DNS-01 via
+# Cloudflare (see Dockerfile.caddy for the rationale and plugin). CF_API_TOKEN
+# is a single scoped Cloudflare API token with `Zone.Zone:Read` +
+# `Zone.DNS:Edit` on the `fanout.run` and `labstack.com` zones — provided
+# via .env on the deploy host. `fanout-site`, `fanout-demo`, and `fanout`
+# resolve over the Compose default bridge DNS.
 
 {
-	email {$LETSENCRYPT_EMAIL}
+	email {env.LETSENCRYPT_EMAIL}
 	acme_dns cloudflare {env.CF_API_TOKEN}
 }
 
-# Wildcard cert covers any *.fanout.run subdomain. As of Caddy 2.10 the
-# wildcard is reused for individual subdomain site blocks too, so adding a
-# new subdomain later means just a host matcher here — no new cert.
+# Wildcard cert covers any *.fanout.run subdomain. Caddy reuses this cert
+# for sibling subdomain site blocks too, so adding a new subdomain later
+# means a `@name host …` matcher + a matching `reverse_proxy @name …` line
+# inside this block — no new cert needed.
 *.fanout.run {
 	@demo host demo.fanout.run
-	handle @demo {
-		reverse_proxy fanout-demo:7520
-	}
+	reverse_proxy @demo fanout-demo:7520
 
-	# Fallback for not-yet-configured subdomains.
-	handle {
-		abort
-	}
+	# Fallback for not-yet-configured subdomains. 404 (vs. abort) so the
+	# failure mode is debuggable — a clear HTTP response beats a connection
+	# reset that looks like an outage to anyone troubleshooting DNS/routing.
+	respond "fanout.run: subdomain not configured" 404
+
 	encode gzip zstd
 }
 
-# Wildcards don't cover the apex — separate site block.
+# Wildcards don't cover the apex (WebPKI restriction), so the apex needs
+# its own site block. `www.fanout.run` is intentionally routed here too so
+# it shares the apex's marketing-site backend instead of falling into the
+# wildcard's 404.
 fanout.run, www.fanout.run {
 	reverse_proxy fanout-site:80
 	encode gzip zstd
@@ -40,8 +41,11 @@ fanout.labstack.com {
 }
 
 # OTLP/gRPC ingest on the standard port, reusing the cert Caddy manages
-# for the host on :443. Caddy speaks h2c (HTTP/2 cleartext) to the gRPC
-# server inside the Compose bridge.
+# for the host on :443 (TLS doesn't care about port). h2c (HTTP/2 cleartext)
+# upstream is required for gRPC. Clients:
+#   OTEL_EXPORTER_OTLP_ENDPOINT=https://fanout.labstack.com:4317
+#   OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+#   OTEL_EXPORTER_OTLP_HEADERS=x-fanout-ingest-token=fo_...
 fanout.labstack.com:4317 {
 	reverse_proxy h2c://fanout:4317
 }

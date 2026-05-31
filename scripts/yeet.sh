@@ -83,6 +83,25 @@ if [[ -z "${CF_API_TOKEN:-}" ]]; then
   echo "    export CF_API_TOKEN=<token>" >&2
   exit 1
 fi
+# Validate the token against Cloudflare's verify endpoint. Without this,
+# a typo'd / revoked / wrong-scope token deploys "successfully" against
+# whatever cached cert Caddy has on disk, then breaks weeks later when
+# renewal fails. This catches the empty-token's siblings:
+#   - typo, revoked, expired, wrong-account, wrong-zone scope.
+# (It does NOT prove the token has the *right* scope — only that it's
+# accepted by Cloudflare's auth layer. The first ACME run still surfaces
+# scope errors via Caddy logs.)
+echo "Validating CF_API_TOKEN..."
+verify=$(curl -fsS --max-time 10 \
+  -H "Authorization: Bearer $CF_API_TOKEN" \
+  https://api.cloudflare.com/client/v4/user/tokens/verify 2>&1) || {
+  echo "ERROR: Cloudflare rejected CF_API_TOKEN: $verify" >&2
+  exit 1
+}
+if ! echo "$verify" | grep -q '"status":"active"'; then
+  echo "ERROR: CF_API_TOKEN is not active: $verify" >&2
+  exit 1
+fi
 
 echo "Deploying to $SERVER"
 echo "  version: ${VERSION:-latest}"
@@ -108,11 +127,15 @@ if ! command -v docker &> /dev/null; then
     rm -f "$tmp"
     sudo systemctl enable docker
     sudo systemctl start docker
-    sudo usermod -aG docker $USER
+    # usermod -aG docker only matters for non-root deploy users — skip it
+    # when the deploy SSH user is root (current default: root@fanout.labstack.net).
+    if [[ "$(id -un)" != "root" ]]; then
+        sudo usermod -aG docker "$(id -un)"
+    fi
 fi
 
 sudo mkdir -p /data/caddy /data/caddy-config /data/fanout-demo /data/fanout /opt/fanout
-sudo chown -R $USER:$USER /data /opt/fanout
+sudo chown -R "$(id -un):$(id -un)" /data /opt/fanout
 SETUP_EOF
 
 echo "Copying compose + Caddyfile + demo/ + instance/..."
@@ -141,11 +164,16 @@ ssh "$SERVER" "
 set -euo pipefail
 cd $REMOTE_DIR
 
+# --build forces the caddy service to rebuild when Dockerfile.caddy or its
+# context changes — without it, docker compose pull only fetches image:
+# services and a stale custom-built caddy stays in the local cache silently.
+# --pull always also ensures the caddy:<version>-builder base gets refreshed.
 docker compose pull
+docker compose build --pull caddy
 # --wait blocks until all services with healthchecks are healthy (or
 # the timeout elapses), so a success exit actually reflects a working
 # deploy. Services without healthchecks only need to start.
-docker compose up -d --wait --wait-timeout 180 --remove-orphans
+docker compose up -d --build --wait --wait-timeout 180 --remove-orphans
 
 echo ''
 docker compose ps
