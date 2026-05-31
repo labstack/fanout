@@ -10,10 +10,9 @@
 	acme_dns cloudflare {env.CF_API_TOKEN}
 }
 
-# Wildcard cert covers any *.fanout.run subdomain. Caddy reuses this cert
-# for sibling subdomain site blocks too, so adding a new subdomain later
-# means a `@name host …` matcher + a matching `reverse_proxy @name …` line
-# inside this block — no new cert needed.
+# Wildcard cert covers any *.fanout.run subdomain. Adding a new subdomain
+# later means a `@name host name.fanout.run` matcher + a matching
+# `reverse_proxy @name …` line inside this block — no new cert needed.
 *.fanout.run {
 	@demo host demo.fanout.run
 	reverse_proxy @demo fanout-demo:7520

@@ -68,6 +68,15 @@ for dir in demo fanout caddy; do
     echo "  Copy $dir/.env.example to $dir/.env and fill in real values." >&2
     exit 1
   fi
+  # Catch the "cp .env.example .env; forgot to edit" case — the templates
+  # use `replace-with-` placeholders. Shipping those = known-public JWT
+  # signing keys in production. Length checks alone don't catch them
+  # (the placeholders are >32 chars).
+  if grep -qE 'replace-with-|<your-' "$REPO_DIR/$dir/.env"; then
+    echo "ERROR: $dir/.env still contains template placeholders." >&2
+    echo "  Open $dir/.env and replace every 'replace-with-…' value." >&2
+    exit 1
+  fi
 done
 # Validate the Cloudflare token against the verify endpoint before deploy.
 # Without this, a typo'd / revoked / wrong-account / expired token reaches
@@ -76,7 +85,16 @@ done
 # token's siblings. (Does NOT prove the token has the *right* scope — only
 # that it's accepted by Cloudflare's auth layer. Scope errors still surface
 # via Caddy logs on the first ACME run.)
-CF_API_TOKEN=$(grep -E '^CF_API_TOKEN=' "$REPO_DIR/caddy/.env" | cut -d= -f2-)
+CF_API_TOKEN=$(grep -E '^CF_API_TOKEN=' "$REPO_DIR/caddy/.env" | tail -1 | cut -d= -f2-)
+# Sanitize common .env quirks before the value lands in a curl Bearer header:
+#   - CRLF line endings (file edited on Windows)
+#   - Single or double-quoted values
+#   - Surrounding whitespace
+# Docker Compose's env_file parser handles these silently; grep|cut does not.
+CF_API_TOKEN="${CF_API_TOKEN%$'\r'}"
+CF_API_TOKEN="${CF_API_TOKEN#\"}"; CF_API_TOKEN="${CF_API_TOKEN%\"}"
+CF_API_TOKEN="${CF_API_TOKEN#\'}"; CF_API_TOKEN="${CF_API_TOKEN%\'}"
+CF_API_TOKEN="${CF_API_TOKEN## }"; CF_API_TOKEN="${CF_API_TOKEN%% }"
 if [[ -z "$CF_API_TOKEN" ]]; then
   echo "ERROR: CF_API_TOKEN not set in caddy/.env." >&2
   exit 1
@@ -143,8 +161,12 @@ scp -r "$REPO_DIR/fanout" "$SERVER:$REMOTE_DIR/"
 # interpolation in docker-compose.yaml. Per-service secrets live in
 # <service>/.env (scp'd above) and are loaded via env_file: in compose,
 # not from this root file.
+# FANOUT_VERSION defaults to VERSION so `--version 2026.05.2` pins both
+# the fanout-site image AND the instance + demo containers to the same
+# tag. Operators can still override with `FANOUT_VERSION=… ./scripts/yeet.sh`
+# if they need to ship a site update without bumping the instance.
 printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\nFANOUT_VERSION=%s\n' \
-    "$EMAIL" "${VERSION:-latest}" "${FANOUT_VERSION:-latest}" \
+    "$EMAIL" "${VERSION:-latest}" "${FANOUT_VERSION:-${VERSION:-latest}}" \
   | ssh "$SERVER" "cat > $REMOTE_DIR/.env && chmod 600 $REMOTE_DIR/.env"
 
 echo "Deploying..."
@@ -152,16 +174,16 @@ ssh "$SERVER" "
 set -euo pipefail
 cd $REMOTE_DIR
 
-# --build forces the caddy service to rebuild when Dockerfile.caddy or its
-# context changes — without it, docker compose pull only fetches image:
-# services and a stale custom-built caddy stays in the local cache silently.
-# --pull always also ensures the caddy:<version>-builder base gets refreshed.
+# Rebuild caddy from Dockerfile.caddy on every deploy; `pull` alone wouldn't
+# catch local context changes. The `--pull` flag on `build` refreshes the
+# `caddy:<version>-builder` base too, so we pick up upstream security fixes
+# without needing to bump the pinned tag.
 docker compose pull
 docker compose build --pull caddy
 # --wait blocks until all services with healthchecks are healthy (or
 # the timeout elapses), so a success exit actually reflects a working
 # deploy. Services without healthchecks only need to start.
-docker compose up -d --build --wait --wait-timeout 180 --remove-orphans
+docker compose up -d --wait --wait-timeout 180 --remove-orphans
 
 echo ''
 docker compose ps
