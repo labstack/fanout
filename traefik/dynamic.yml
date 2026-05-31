@@ -1,0 +1,63 @@
+# Routers + services for fanout.run, demo.fanout.run, fanout.labstack.com,
+# and the OTLP gRPC ingest on :4317. The `*.fanout.run` wildcard cert is
+# requested on the demo router and reused by Traefik for sibling
+# subdomains under fanout.run.
+
+http:
+  routers:
+    site:
+      rule: "Host(`fanout.run`) || Host(`www.fanout.run`)"
+      entryPoints: [websecure]
+      service: site
+      tls:
+        certResolver: le
+        domains:
+          - main: fanout.run
+            sans:
+              - www.fanout.run
+
+    demo:
+      rule: "Host(`demo.fanout.run`)"
+      entryPoints: [websecure]
+      service: demo
+      tls:
+        certResolver: le
+        domains:
+          - main: "*.fanout.run"
+            sans:
+              - fanout.run
+
+    instance:
+      rule: "Host(`fanout.labstack.com`)"
+      entryPoints: [websecure]
+      service: instance
+      tls:
+        certResolver: le
+
+    instance-otlp:
+      rule: "Host(`fanout.labstack.com`)"
+      entryPoints: [otlp]
+      service: instance-otlp
+      tls:
+        certResolver: le
+
+  services:
+    site:
+      loadBalancer:
+        servers:
+          - url: "http://fanout-site:80"
+
+    demo:
+      loadBalancer:
+        servers:
+          - url: "http://fanout-demo:7520"
+
+    instance:
+      loadBalancer:
+        servers:
+          - url: "http://fanout:7520"
+
+    instance-otlp:
+      loadBalancer:
+        servers:
+          - url: "h2c://fanout:4317"
