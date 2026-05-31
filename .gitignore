@@ -37,7 +37,7 @@ coverage.html
 cover.out
 
 # Env — `.env` matches at every depth, so per-service env files
-# (caddy/.env, demo/.env, fanout/.env) are all ignored automatically.
+# (traefik/.env, demo/.env, fanout/.env) are all ignored automatically.
 # Templates live alongside as `<dir>/.env.example` (committed).
 .env
 

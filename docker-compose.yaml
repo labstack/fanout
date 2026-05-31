@@ -3,48 +3,31 @@ include:
     env_file: demo/.env
 
 services:
-  caddy:
-    # Custom build for the Cloudflare DNS plugin (see Dockerfile.caddy).
-    # CF_API_TOKEN lives in caddy/.env (gitignored); LETSENCRYPT_EMAIL stays
-    # as compose interpolation since it's not a secret.
-    build:
-      context: .
-      dockerfile: Dockerfile.caddy
-    container_name: caddy
+  traefik:
+    # Stock image; lego (with Cloudflare DNS provider) is built in.
+    # CF_DNS_API_TOKEN lives in traefik/.env (gitignored).
+    image: traefik:v3.7
+    container_name: traefik
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
-      - "4317:4317"   # OTLP/gRPC ingest, TLS-terminated by Caddy
-    environment:
-      LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-v@labstack.com}
+      - "4317:4317"   # OTLP/gRPC ingest, TLS-terminated by Traefik
     env_file:
-      - caddy/.env
+      - traefik/.env
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - /data/caddy:/data
-      - /data/caddy-config:/config
+      - ./traefik/static.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - /data/traefik/letsencrypt:/letsencrypt
     healthcheck:
-      # Use explicit 127.0.0.1 in every healthcheck (here + fanout below +
-      # fanout-demo in demo/docker-compose.yaml). Why:
-      #   - Caddy's admin endpoint binds only to 127.0.0.1:2019 (Go's default
-      #     `localhost` resolution; no `admin` override in Caddyfile).
-      #   - The Caddy image is Alpine; BusyBox wget's resolver returns the
-      #     ::1 entry from /etc/hosts first. Connecting to [::1]:2019 gets
-      #     ECONNREFUSED because nothing is listening there, and BusyBox wget
-      #     does NOT fall through to the next address.
-      # Other services happen to work with `localhost` (Debian + GNU wget
-      # has different fallthrough behavior, and the fanout listener binds
-      # dual-stack) — but using 127.0.0.1 everywhere removes the latent risk
-      # of a base-image or kernel-default change silently breaking probes.
-      #
-      # Cert issuance isn't gated here (first ACME DNS-01 run can take a few
-      # minutes); yeet.sh's smoke tests are the end-to-end cert check.
-      test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:2019/config/"]
+      # `traefik healthcheck` hits the /ping endpoint enabled in static.yml.
+      # No `--ping` flag — that's the static-config switch (already set),
+      # not a subcommand argument.
+      test: ["CMD", "traefik", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      start_period: 15s
 
   fanout-site:
     image: ghcr.io/labstack/fanout-site:${SITE_VERSION:?SITE_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}

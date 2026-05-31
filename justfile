@@ -159,7 +159,7 @@ release:
 
 # ── Ops ──────────────────────────────────────────────────────────────────────
 
-# Deploy site + demo to production (Caddy at the edge + fanout-site + otel-demo)
+# Deploy site + demo to production (Traefik at the edge + fanout-site + otel-demo)
 deploy *ARGS='':
     ./scripts/yeet.sh {{ARGS}}
 

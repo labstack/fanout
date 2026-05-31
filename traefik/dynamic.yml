@@ -1,0 +1,65 @@
+# Routers + services for fanout.run, demo.fanout.run, fanout.labstack.com,
+# and the OTLP gRPC ingest on :4317.
+#
+# Cert strategy: ONE wildcard cert under fanout.run covers all three site
+# hostnames. The `demo` router carries the `tls.domains` block that orders
+# `*.fanout.run` + `fanout.run` (SAN). The `site` router intentionally
+# omits `tls.domains` so Traefik picks that same cert from the resolver
+# store by SNI at request time (`*.fanout.run` matches `www.fanout.run`;
+# the `fanout.run` SAN matches the apex). DO NOT add `tls.domains` to
+# `site` — that triggers a second redundant LE order.
+
+http:
+  routers:
+    site:
+      rule: "Host(`fanout.run`) || Host(`www.fanout.run`)"
+      entryPoints: [websecure]
+      service: site
+      tls:
+        certResolver: le
+
+    demo:
+      rule: "Host(`demo.fanout.run`)"
+      entryPoints: [websecure]
+      service: demo
+      tls:
+        certResolver: le
+        domains:
+          - main: "*.fanout.run"
+            sans:
+              - fanout.run
+
+    instance:
+      rule: "Host(`fanout.labstack.com`)"
+      entryPoints: [websecure]
+      service: instance
+      tls:
+        certResolver: le
+
+    instance-otlp:
+      rule: "Host(`fanout.labstack.com`)"
+      entryPoints: [otlp]
+      service: instance-otlp
+      tls:
+        certResolver: le
+
+  services:
+    site:
+      loadBalancer:
+        servers:
+          - url: "http://fanout-site:80"
+
+    demo:
+      loadBalancer:
+        servers:
+          - url: "http://fanout-demo:7520"
+
+    instance:
+      loadBalancer:
+        servers:
+          - url: "http://fanout:7520"
+
+    instance-otlp:
+      loadBalancer:
+        servers:
+          - url: "h2c://fanout:4317"

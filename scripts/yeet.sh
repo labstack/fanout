@@ -3,12 +3,11 @@ set -euo pipefail
 
 # Deploy fanout.run (marketing + docs site), demo.fanout.run (live demo
 # fed by otel-demo), and fanout.labstack.com (own production instance) to
-# the target host. Single Docker Compose project — Caddy at the edge
+# the target host. Single Docker Compose project — Traefik at the edge
 # handles TLS for all three hostnames and reverse-proxies to the
 # fanout-site, fanout-demo, and fanout containers.
 
 DEFAULT_SERVER="root@fanout.labstack.net"
-EMAIL="v@labstack.com"
 
 SERVER=""
 SITE_VERSION=""
@@ -16,10 +15,6 @@ FANOUT_VERSION=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --email)
-      EMAIL="$2"
-      shift 2
-      ;;
     --site-version)
       SITE_VERSION="$2"
       shift 2
@@ -34,7 +29,6 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [user@]server [options]"
       echo ""
       echo "Options:"
-      echo "  --email EMAIL                Let's Encrypt contact (default: $EMAIL)"
       echo "  --site-version VERSION       fanout-site image tag (default: latest site/v* tag)"
       echo "  --fanout-version VERSION     fanout + fanout-demo image tag (default: latest fanout/v* tag)"
       echo "  --help                       Show this help"
@@ -57,7 +51,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ -n "${LETSENCRYPT_EMAIL:-}" ]] && EMAIL="$LETSENCRYPT_EMAIL"
 [[ -z "$SERVER" ]] && SERVER="$DEFAULT_SERVER"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -117,7 +110,7 @@ IFS=$'\t' read -r FANOUT_SOURCE FANOUT_VERSION < <(resolve_version fanout "$FANO
 # credentials. scp would silently skip a missing file and the failure
 # would only surface on the server as a cryptic "env file not found"
 # during docker compose up. Fail fast here with a pointer.
-for dir in demo fanout caddy; do
+for dir in demo fanout traefik; do
   if [[ ! -f "$REPO_DIR/$dir/.env" ]]; then
     echo "ERROR: $dir/.env not found locally." >&2
     echo "  Copy $dir/.env.example to $dir/.env and fill in real values." >&2
@@ -135,41 +128,42 @@ for dir in demo fanout caddy; do
 done
 # Validate the Cloudflare token against the verify endpoint before deploy.
 # Without this, a typo'd / revoked / wrong-account / expired token reaches
-# Caddy unchecked and the failure mode is "deploy succeeds against a cached
-# cert, then breaks weeks later when renewal fails." This catches the empty-
-# token's siblings. (Does NOT prove the token has the *right* scope — only
-# that it's accepted by Cloudflare's auth layer. Scope errors still surface
-# via Caddy logs on the first ACME run.)
-CF_API_TOKEN=$(grep -E '^CF_API_TOKEN=' "$REPO_DIR/caddy/.env" | tail -1 | cut -d= -f2-)
+# Traefik unchecked and the failure mode is "deploy succeeds against a
+# cached cert, then breaks weeks later when renewal fails." Does NOT prove
+# the token has the *right* scope — only that it's accepted by Cloudflare's
+# auth layer. Scope errors still surface via Traefik logs on first ACME run.
+# { grep || true; } so a missing key (typo, commented out) hits the empty
+# check below with a friendly error, not a silent pipefail exit. Mirrors
+# the same idiom in resolve_version above.
+CF_DNS_API_TOKEN=$({ grep -E '^CF_DNS_API_TOKEN=' "$REPO_DIR/traefik/.env" || true; } | tail -1 | cut -d= -f2-)
 # Sanitize common .env quirks before the value lands in a curl Bearer header:
 #   - CRLF line endings (file edited on Windows)
 #   - Single or double-quoted values
 #   - Surrounding whitespace
 # Docker Compose's env_file parser handles these silently; grep|cut does not.
-CF_API_TOKEN="${CF_API_TOKEN%$'\r'}"
-CF_API_TOKEN="${CF_API_TOKEN#\"}"; CF_API_TOKEN="${CF_API_TOKEN%\"}"
-CF_API_TOKEN="${CF_API_TOKEN#\'}"; CF_API_TOKEN="${CF_API_TOKEN%\'}"
-CF_API_TOKEN="${CF_API_TOKEN## }"; CF_API_TOKEN="${CF_API_TOKEN%% }"
-if [[ -z "$CF_API_TOKEN" ]]; then
-  echo "ERROR: CF_API_TOKEN not set in caddy/.env." >&2
+CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN%$'\r'}"
+CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN#\"}"; CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN%\"}"
+CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN#\'}"; CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN%\'}"
+CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN## }"; CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN%% }"
+if [[ -z "$CF_DNS_API_TOKEN" ]]; then
+  echo "ERROR: CF_DNS_API_TOKEN not set in traefik/.env." >&2
   exit 1
 fi
-echo "Validating CF_API_TOKEN against Cloudflare..."
+echo "Validating CF_DNS_API_TOKEN against Cloudflare..."
 verify=$(curl -fsS --max-time 10 \
-  -H "Authorization: Bearer $CF_API_TOKEN" \
+  -H "Authorization: Bearer $CF_DNS_API_TOKEN" \
   https://api.cloudflare.com/client/v4/user/tokens/verify 2>&1) || {
-  echo "ERROR: Cloudflare rejected CF_API_TOKEN: $verify" >&2
+  echo "ERROR: Cloudflare rejected CF_DNS_API_TOKEN: $verify" >&2
   exit 1
 }
 if ! echo "$verify" | grep -q '"status":"active"'; then
-  echo "ERROR: CF_API_TOKEN is not active: $verify" >&2
+  echo "ERROR: CF_DNS_API_TOKEN is not active: $verify" >&2
   exit 1
 fi
 
 echo "Deploying to $SERVER"
 echo "  site:    $SITE_VERSION  ($SITE_SOURCE)"
 echo "  fanout:  $FANOUT_VERSION  ($FANOUT_SOURCE)"
-echo "  email:   $EMAIL"
 echo ""
 
 echo "Testing SSH..."
@@ -198,32 +192,29 @@ if ! command -v docker &> /dev/null; then
     fi
 fi
 
-sudo mkdir -p /data/caddy /data/caddy-config /data/fanout-demo /data/fanout /opt/fanout
+sudo mkdir -p /data/traefik/letsencrypt /data/fanout-demo /data/fanout /opt/fanout
+sudo touch /data/traefik/letsencrypt/acme.json
+sudo chmod 600 /data/traefik/letsencrypt/acme.json
 sudo chown -R "$(id -un):$(id -un)" /data /opt/fanout
 SETUP_EOF
 
-echo "Copying compose + Caddyfile + Dockerfile.caddy + caddy/ + demo/ + fanout/..."
+echo "Copying compose + traefik/ + demo/ + fanout/..."
 scp "$REPO_DIR/docker-compose.yaml" "$SERVER:$REMOTE_DIR/docker-compose.yaml"
-scp "$REPO_DIR/Caddyfile"           "$SERVER:$REMOTE_DIR/Caddyfile"
-scp "$REPO_DIR/Dockerfile.caddy"    "$SERVER:$REMOTE_DIR/Dockerfile.caddy"
 # Recursive copy of each service tree — scp without -r on a glob would
 # silently skip subdirectories. Each tree carries its own .env (gitignored,
 # loaded by env_file: in compose) and .env.example (committed template).
-scp -r "$REPO_DIR/caddy"  "$SERVER:$REMOTE_DIR/"
-scp -r "$REPO_DIR/demo"   "$SERVER:$REMOTE_DIR/"
-scp -r "$REPO_DIR/fanout" "$SERVER:$REMOTE_DIR/"
+scp -r "$REPO_DIR/traefik" "$SERVER:$REMOTE_DIR/"
+scp -r "$REPO_DIR/demo"    "$SERVER:$REMOTE_DIR/"
+scp -r "$REPO_DIR/fanout"  "$SERVER:$REMOTE_DIR/"
 
-# Root .env on the host — Caddy's TLS email + the image tags for compose
-# interpolation in docker-compose.yaml. Per-service secrets live in
-# <service>/.env (scp'd above) and are loaded via env_file: in compose,
-# not from this root file.
-# SITE_VERSION (fanout-site) and FANOUT_VERSION (fanout + fanout-demo)
-# are resolved separately above — each from its own git-tag namespace
-# (site/v* and fanout/v*). docker-compose.yaml + demo/docker-compose.yaml
-# enforce non-empty via ${VAR:?...} so a missing one fails compose parse,
-# not later as a confusing "manifest unknown" pull error.
-printf 'LETSENCRYPT_EMAIL=%s\nSITE_VERSION=%s\nFANOUT_VERSION=%s\n' \
-    "$EMAIL" "$SITE_VERSION" "$FANOUT_VERSION" \
+# Root .env on the host — image tags for docker-compose.yaml interpolation.
+# Per-service secrets live in <service>/.env (scp'd above) and are loaded
+# via env_file: in compose, not from this root file. SITE_VERSION and
+# FANOUT_VERSION resolve from their own git-tag namespaces (site/v* and
+# fanout/v*); compose enforces non-empty via ${VAR:?...} so a missing one
+# fails parse, not later as a confusing "manifest unknown" pull error.
+printf 'SITE_VERSION=%s\nFANOUT_VERSION=%s\n' \
+    "$SITE_VERSION" "$FANOUT_VERSION" \
   | ssh "$SERVER" "cat > $REMOTE_DIR/.env && chmod 600 $REMOTE_DIR/.env"
 
 echo "Deploying..."
@@ -233,13 +224,7 @@ ssh "$SERVER" "
 set -euo pipefail
 cd $REMOTE_DIR
 
-# Rebuild caddy from Dockerfile.caddy on every deploy; plain pull alone
-# would not catch local context changes (ghcr image-only services pull;
-# the build-context caddy service must be rebuilt explicitly). The
-# build --pull flag refreshes the caddy:NN-builder base too, so upstream
-# security fixes flow in without bumping the pinned tag.
 docker compose pull
-docker compose build --pull caddy
 # --wait blocks until all services with healthchecks are healthy (or
 # the timeout elapses), so a success exit actually reflects a working
 # deploy. Services without healthchecks only need to start.
@@ -251,7 +236,7 @@ docker compose ps
 
 echo ""
 echo "Smoke test..."
-# Caddy's first-boot cert issuance can take 30-60s after it comes up.
+# Traefik's first-boot cert issuance can take 30-60s after it comes up.
 # Retry a handful of times; bail only if it still fails.
 smoke() {
   local url="$1"
@@ -265,9 +250,18 @@ smoke() {
   echo "  FAIL $url" >&2
   return 1
 }
-smoke https://fanout.run
-smoke https://demo.fanout.run
-smoke https://fanout.labstack.com/healthz
+# Aggregate failures so one bad URL doesn't mask the others. Three hosts
+# share one Traefik + one ACME process, so they tend to fail together —
+# reporting the first and quitting paints a misleading partial-outage
+# picture exactly when the operator needs the full view.
+failed=0
+smoke https://fanout.run                   || failed=1
+smoke https://demo.fanout.run              || failed=1
+smoke https://fanout.labstack.com/healthz  || failed=1
+if (( failed )); then
+  echo "ERROR: one or more smoke checks failed; inspect 'docker compose logs -f traefik' on the host." >&2
+  exit 1
+fi
 
 echo ""
 echo "Deployed:"
@@ -276,4 +270,4 @@ echo "  https://demo.fanout.run"
 echo "  https://fanout.labstack.com"
 echo ""
 echo "Status: ssh $SERVER 'cd $REMOTE_DIR && docker compose ps'"
-echo "Logs:   ssh $SERVER 'cd $REMOTE_DIR && docker compose logs -f caddy'"
+echo "Logs:   ssh $SERVER 'cd $REMOTE_DIR && docker compose logs -f traefik'"
