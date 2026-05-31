@@ -8,7 +8,7 @@ x-default-logging: &logging
 services:
   # Fanout (demo instance) — Caddy at the root proxies demo.fanout.run here.
   fanout-demo:
-    image: ghcr.io/labstack/fanout:${FANOUT_VERSION:-latest}
+    image: ghcr.io/labstack/fanout:${FANOUT_VERSION:?FANOUT_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
     container_name: fanout-demo
     restart: unless-stopped
     env_file:
@@ -26,7 +26,7 @@ services:
     volumes:
       - /data/fanout-demo:/var/lib/fanout
     healthcheck:
-      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:7520/healthz"]
+      test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:7520/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3

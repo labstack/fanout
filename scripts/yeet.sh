@@ -11,7 +11,8 @@ DEFAULT_SERVER="root@fanout.labstack.net"
 EMAIL="v@labstack.com"
 
 SERVER=""
-VERSION=""
+SITE_VERSION=""
+FANOUT_VERSION=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -19,8 +20,12 @@ while [[ $# -gt 0 ]]; do
       EMAIL="$2"
       shift 2
       ;;
-    --version)
-      VERSION="$2"
+    --site-version)
+      SITE_VERSION="$2"
+      shift 2
+      ;;
+    --fanout-version)
+      FANOUT_VERSION="$2"
       shift 2
       ;;
     --help)
@@ -29,14 +34,15 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [user@]server [options]"
       echo ""
       echo "Options:"
-      echo "  --email EMAIL       Let's Encrypt contact (default: $EMAIL)"
-      echo "  --version VERSION   fanout-site image tag (default: latest)"
-      echo "  --help              Show this help"
+      echo "  --email EMAIL                Let's Encrypt contact (default: $EMAIL)"
+      echo "  --site-version VERSION       fanout-site image tag (default: latest site/v* tag)"
+      echo "  --fanout-version VERSION     fanout + fanout-demo image tag (default: latest fanout/v* tag)"
+      echo "  --help                       Show this help"
       echo ""
       echo "Examples:"
-      echo "  $0                                            # Deploy :latest to $DEFAULT_SERVER"
-      echo "  $0 --version v2026.04.2                       # Pin a release tag"
-      echo "  $0 root@other.server --version v2026.05.2    # Deploy to a different host"
+      echo "  $0                                                # Auto-resolve both versions from git tags"
+      echo "  $0 --fanout-version 2026.05.2                     # Pin fanout, auto-resolve site"
+      echo "  $0 root@other.server --site-version 2026.05.1     # Deploy to a different host"
       exit 0
       ;;
     *)
@@ -52,11 +58,60 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "${LETSENCRYPT_EMAIL:-}" ]] && EMAIL="$LETSENCRYPT_EMAIL"
-VERSION="${VERSION#v}"
 [[ -z "$SERVER" ]] && SERVER="$DEFAULT_SERVER"
 
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE_DIR="/opt/fanout"
+
+# Refresh tags from origin so the resolver sees what teammates have pushed —
+# otherwise a stale local repo silently deploys yesterday's release. If the
+# fetch fails (no origin, auth, offline), print a warning and fall through to
+# whatever's local: the banner will still show which tag was resolved, so the
+# operator can compare against `git ls-remote --tags origin` and abort.
+if ! fetch_err=$(git -C "$REPO_DIR" fetch --tags --quiet --force 2>&1); then
+  echo "WARN: git fetch --tags failed; resolver will use local tags only." >&2
+  echo "  $fetch_err" >&2
+fi
+
+# resolve_version PREFIX EXPLICIT — print "<source>\t<image-tag>" for a service.
+# - If EXPLICIT is set, validate against the stable-release regex (same shape
+#   the auto-resolve path uses, so an explicit pre-release tag is rejected
+#   too). Strips a leading `v`. Source becomes the literal string "explicit".
+# - Otherwise, return the highest stable <PREFIX>/v* git tag, excluding
+#   pre-release suffixes (-rc/-beta/etc.) — same filter `just release` uses
+#   when minting new tag numbers (see justfile `next_tag()`).
+#   Source is the matching git tag (e.g. "fanout/v2026.05.2").
+# Both fields land on the same line, tab-separated, so a single call captures
+# them via `IFS=$'\t' read -r SRC VER < <(resolve_version ...)`.
+resolve_version() {
+  local prefix="$1" explicit="${2:-}" stripped tag
+  if [[ -n "$explicit" ]]; then
+    stripped="${explicit#v}"
+    # Reject pre-release suffixes on the explicit path too. An operator who
+    # truly wants to ship an rc/beta to prod must add a flag later (we don't
+    # have one yet — the symmetric refusal is the safer default).
+    if [[ ! "$stripped" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]+$ ]]; then
+      echo "ERROR: --${prefix}-version value '$explicit' doesn't look like a stable release (e.g. 2026.05.1)." >&2
+      echo "  Pre-release tags (-rc/-beta/etc.) are not accepted." >&2
+      exit 1
+    fi
+    printf '%s\t%s\n' "explicit" "$stripped"
+    return
+  fi
+  # Note: { grep || true; } in the pipeline so grep's exit 1 on "no match"
+  # doesn't trip set -e/pipefail before the friendly error below can fire.
+  tag=$(git -C "$REPO_DIR" tag --list "${prefix}/v*" --sort=-v:refname \
+          | { grep -E "^${prefix}/v[0-9]{4}\.[0-9]{2}\.[0-9]+$" || true; } \
+          | head -1)
+  if [[ -z "$tag" ]]; then
+    echo "ERROR: no stable ${prefix}/v* tag found locally; run 'just release' or pass --${prefix}-version <value>." >&2
+    exit 1
+  fi
+  printf '%s\t%s\n' "$tag" "${tag#${prefix}/v}"
+}
+
+IFS=$'\t' read -r SITE_SOURCE   SITE_VERSION   < <(resolve_version site   "$SITE_VERSION")
+IFS=$'\t' read -r FANOUT_SOURCE FANOUT_VERSION < <(resolve_version fanout "$FANOUT_VERSION")
 
 # Preflight — three .env files (gitignored) hold per-service config +
 # credentials. scp would silently skip a missing file and the failure
@@ -112,7 +167,8 @@ if ! echo "$verify" | grep -q '"status":"active"'; then
 fi
 
 echo "Deploying to $SERVER"
-echo "  version: ${VERSION:-latest}"
+echo "  site:    $SITE_VERSION  ($SITE_SOURCE)"
+echo "  fanout:  $FANOUT_VERSION  ($FANOUT_SOURCE)"
 echo "  email:   $EMAIL"
 echo ""
 
@@ -161,23 +217,27 @@ scp -r "$REPO_DIR/fanout" "$SERVER:$REMOTE_DIR/"
 # interpolation in docker-compose.yaml. Per-service secrets live in
 # <service>/.env (scp'd above) and are loaded via env_file: in compose,
 # not from this root file.
-# FANOUT_VERSION defaults to VERSION so `--version 2026.05.2` pins both
-# the fanout-site image AND the instance + demo containers to the same
-# tag. Operators can still override with `FANOUT_VERSION=… ./scripts/yeet.sh`
-# if they need to ship a site update without bumping the instance.
-printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\nFANOUT_VERSION=%s\n' \
-    "$EMAIL" "${VERSION:-latest}" "${FANOUT_VERSION:-${VERSION:-latest}}" \
+# SITE_VERSION (fanout-site) and FANOUT_VERSION (fanout + fanout-demo)
+# are resolved separately above — each from its own git-tag namespace
+# (site/v* and fanout/v*). docker-compose.yaml + demo/docker-compose.yaml
+# enforce non-empty via ${VAR:?...} so a missing one fails compose parse,
+# not later as a confusing "manifest unknown" pull error.
+printf 'LETSENCRYPT_EMAIL=%s\nSITE_VERSION=%s\nFANOUT_VERSION=%s\n' \
+    "$EMAIL" "$SITE_VERSION" "$FANOUT_VERSION" \
   | ssh "$SERVER" "cat > $REMOTE_DIR/.env && chmod 600 $REMOTE_DIR/.env"
 
 echo "Deploying..."
+# NOTE: the SSH command is double-quoted, so backticks inside this heredoc
+# would trigger LOCAL command substitution. Phrase comments without backticks.
 ssh "$SERVER" "
 set -euo pipefail
 cd $REMOTE_DIR
 
-# Rebuild caddy from Dockerfile.caddy on every deploy; `pull` alone wouldn't
-# catch local context changes. The `--pull` flag on `build` refreshes the
-# `caddy:<version>-builder` base too, so we pick up upstream security fixes
-# without needing to bump the pinned tag.
+# Rebuild caddy from Dockerfile.caddy on every deploy; plain pull alone
+# would not catch local context changes (ghcr image-only services pull;
+# the build-context caddy service must be rebuilt explicitly). The
+# build --pull flag refreshes the caddy:NN-builder base too, so upstream
+# security fixes flow in without bumping the pinned tag.
 docker compose pull
 docker compose build --pull caddy
 # --wait blocks until all services with healthchecks are healthy (or

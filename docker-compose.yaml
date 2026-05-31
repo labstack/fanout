@@ -25,18 +25,29 @@ services:
       - /data/caddy:/data
       - /data/caddy-config:/config
     healthcheck:
-      # Caddy's admin API on :2019 (loopback only by default) — confirms the
-      # process is up and the Caddyfile parsed cleanly. Cert issuance isn't
-      # gated here (first ACME run can take minutes); yeet.sh's smoke tests
-      # are the cert check.
-      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:2019/config/"]
+      # Use explicit 127.0.0.1 in every healthcheck (here + fanout below +
+      # fanout-demo in demo/docker-compose.yaml). Why:
+      #   - Caddy's admin endpoint binds only to 127.0.0.1:2019 (Go's default
+      #     `localhost` resolution; no `admin` override in Caddyfile).
+      #   - The Caddy image is Alpine; BusyBox wget's resolver returns the
+      #     ::1 entry from /etc/hosts first. Connecting to [::1]:2019 gets
+      #     ECONNREFUSED because nothing is listening there, and BusyBox wget
+      #     does NOT fall through to the next address.
+      # Other services happen to work with `localhost` (Debian + GNU wget
+      # has different fallthrough behavior, and the fanout listener binds
+      # dual-stack) — but using 127.0.0.1 everywhere removes the latent risk
+      # of a base-image or kernel-default change silently breaking probes.
+      #
+      # Cert issuance isn't gated here (first ACME DNS-01 run can take a few
+      # minutes); yeet.sh's smoke tests are the end-to-end cert check.
+      test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:2019/config/"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 30s
 
   fanout-site:
-    image: ghcr.io/labstack/fanout-site:${VERSION:-latest}
+    image: ghcr.io/labstack/fanout-site:${SITE_VERSION:?SITE_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
     container_name: fanout-site
     restart: unless-stopped
     expose:
@@ -46,7 +57,7 @@ services:
   # live in fanout/.env (gitignored); the deploy host must have this
   # file in place before `docker compose up`.
   fanout:
-    image: ghcr.io/labstack/fanout:${FANOUT_VERSION:-latest}
+    image: ghcr.io/labstack/fanout:${FANOUT_VERSION:?FANOUT_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
     container_name: fanout
     restart: unless-stopped
     env_file:
@@ -60,7 +71,7 @@ services:
     volumes:
       - /data/fanout:/var/lib/fanout
     healthcheck:
-      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:7520/healthz"]
+      test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:7520/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
