@@ -4,7 +4,12 @@ include:
 
 services:
   caddy:
-    image: caddy:alpine
+    # Custom build for the Cloudflare DNS plugin (see Dockerfile.caddy).
+    # CF_API_TOKEN lives in caddy/.env (gitignored); LETSENCRYPT_EMAIL stays
+    # as compose interpolation since it's not a secret.
+    build:
+      context: .
+      dockerfile: Dockerfile.caddy
     container_name: caddy
     restart: unless-stopped
     ports:
@@ -13,10 +18,22 @@ services:
       - "4317:4317"   # OTLP/gRPC ingest, TLS-terminated by Caddy
     environment:
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-v@labstack.com}
+    env_file:
+      - caddy/.env
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - /data/caddy:/data
       - /data/caddy-config:/config
+    healthcheck:
+      # Caddy's admin API on :2019 (loopback only by default) — confirms the
+      # process is up and the Caddyfile parsed cleanly. Cert issuance isn't
+      # gated here (first ACME run can take minutes); yeet.sh's smoke tests
+      # are the cert check.
+      test: ["CMD", "wget", "-qO/dev/null", "http://localhost:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
 
   fanout-site:
     image: ghcr.io/labstack/fanout-site:${VERSION:-latest}
@@ -26,14 +43,14 @@ services:
       - "80"
 
   # fanout.labstack.com — own production instance. Secrets (JWT/SMTP/AI)
-  # live in instance/.env.secrets (gitignored); the deploy host must have
-  # this file in place before `docker compose up`.
+  # live in fanout/.env (gitignored); the deploy host must have this
+  # file in place before `docker compose up`.
   fanout:
     image: ghcr.io/labstack/fanout:${FANOUT_VERSION:-latest}
     container_name: fanout
     restart: unless-stopped
     env_file:
-      - instance/.env.secrets
+      - fanout/.env
     environment:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520

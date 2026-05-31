@@ -153,15 +153,30 @@ data/             # Data storage (gitignored)
 ```bash
 # Build (requires CGO for DuckDB)
 export CGO_ENABLED=1
-go build ./cmd/fanout
+go build -o bin/fanout ./cmd/fanout
 
 # Run
-./fanout
+./bin/fanout
 
 # Or with just
 just build
 just run
 ```
+
+## First-time setup (per service .env files)
+
+The deploy + local compose flows read per-service env files that are
+gitignored. Before the first `docker compose` invocation or `./scripts/yeet.sh`
+deploy, bootstrap them from their committed templates:
+
+```bash
+cp caddy/.env.example  caddy/.env   && $EDITOR caddy/.env   # CF_API_TOKEN
+cp fanout/.env.example fanout/.env  && $EDITOR fanout/.env  # JWT/SMTP/AI
+cp demo/.env.example   demo/.env    && $EDITOR demo/.env    # JWT/SMTP/AI + otel-demo pins
+```
+
+Without these files, `docker compose config` / `up` / `build` errors out
+at parse time on `include.env_file: demo/.env`.
 
 ## Configuration
 
@@ -333,7 +348,7 @@ graph TB
 
 ```bash
 # Start fanout
-./fanout
+./bin/fanout
 
 # Use otel-demo for test data (in separate terminal)
 cd ../otel-demo && docker compose up -d

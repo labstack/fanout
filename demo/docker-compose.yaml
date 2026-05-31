@@ -12,9 +12,10 @@ services:
     container_name: fanout-demo
     restart: unless-stopped
     env_file:
-      # Compose applies these in order — later files override earlier ones.
-      - .env          # otel-demo pin + ports (tracked)
-      - .env.secrets  # demo instance secrets — JWT/SMTP/AI (gitignored)
+      # Single .env (gitignored) holds both the otel-demo config and the
+      # demo instance's JWT/SMTP/AI secrets — see demo/.env.example for
+      # the template.
+      - .env
     environment:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520

@@ -63,10 +63,10 @@
 ```bash
 # Build (requires CGO for DuckDB)
 export CGO_ENABLED=1
-go build ./cmd/fanout
+go build -o bin/fanout ./cmd/fanout
 
 # Run
-./fanout
+./bin/fanout
 
 # Or with Docker
 docker compose up -d

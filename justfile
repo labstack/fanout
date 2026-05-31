@@ -5,7 +5,7 @@ set dotenv-load
 
 export CGO_ENABLED := "1"
 
-bin := "fanout"
+bin := "bin/fanout"
 sock := env("SOCK", "/tmp/pc-fanout.sock")
 
 default:
