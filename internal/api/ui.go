@@ -232,7 +232,15 @@ func (h *UIHandler) Overview(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to build overview data")
 	}
 
-	alerts, err := computeAlertsState(c.Request().Context(), h.alertStore, namespace, window)
+	// Guard against the typed-nil-interface gotcha: passing a nil
+	// *alert.Store to an alertLister parameter would produce a non-nil
+	// interface holding a nil pointer, defeating the store == nil check
+	// in computeAlertsState.
+	var lister alertLister
+	if h.alertStore != nil {
+		lister = h.alertStore
+	}
+	alerts, err := computeAlertsState(c.Request().Context(), lister, namespace, window)
 	if err != nil {
 		// Context cancellation only. Echo discards the response; we've
 		// intentionally not logged (a hung-up client is not a failure).

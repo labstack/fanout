@@ -7,9 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/ai"
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/service"
 )
 
 func TestFavicon(t *testing.T) {
@@ -378,5 +381,67 @@ func TestServiceDetail_EmptyName(t *testing.T) {
 	httpErr, _ := err.(*echo.HTTPError)
 	if httpErr.Code != 400 {
 		t.Errorf("code = %d, want 400", httpErr.Code)
+	}
+}
+
+// TestOverview_HappyPath drives (*UIHandler).Overview end-to-end via httptest
+// over a sqlmock-backed *service.Service with a nil alertStore. This exercises
+// the wire-shape contract: alerts.status="disabled" + items=[], plus
+// presence of services/incidents/health on the response body. It's the
+// regression guard for the handler-init layer that the struct-tag test
+// (now deleted in service package) could not cover.
+func TestOverview_HappyPath(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	// Empty rollup result set — sufficient to drive svc.Overview to a
+	// successful return without exercising the full result-builder.
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}))
+
+	duck := &query.Duck{DB: db}
+	svc := service.New(duck, env.Config{})
+
+	h := &UIHandler{svc: svc /* alertStore intentionally nil → status=disabled */}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/api/overview?window=60", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.Overview(c); err != nil {
+		t.Fatalf("Overview returned err: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v body=%s", err, rec.Body.String())
+	}
+
+	alerts, ok := body["alerts"].(map[string]any)
+	if !ok {
+		t.Fatalf("alerts not an object: %T body=%s", body["alerts"], rec.Body.String())
+	}
+	if alerts["status"] != "disabled" {
+		t.Errorf("alerts.status = %v, want disabled", alerts["status"])
+	}
+	items, ok := alerts["items"].([]any)
+	if !ok {
+		t.Fatalf("alerts.items not a JSON array: %T", alerts["items"])
+	}
+	if len(items) != 0 {
+		t.Errorf("alerts.items len = %d, want 0", len(items))
+	}
+
+	for _, key := range []string{"services", "incidents", "health"} {
+		if _, present := body[key]; !present {
+			t.Errorf("%q missing from response body=%s", key, rec.Body.String())
+		}
 	}
 }
