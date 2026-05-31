@@ -29,16 +29,19 @@ services:
       retries: 3
       start_period: 15s
 
-  fanout-site:
+  # Marketing site at fanout.run + www.fanout.run. Image still published as
+  # `ghcr.io/labstack/fanout-site` (registry coordinate is permanent); the
+  # local service/container is just `site`.
+  site:
     image: ghcr.io/labstack/fanout-site:${SITE_VERSION:?SITE_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
-    container_name: fanout-site
+    container_name: site
     restart: unless-stopped
     expose:
       - "80"
 
-  # fanout.labstack.com — own production instance. Secrets (JWT/SMTP/AI)
-  # live in fanout/.env (gitignored); the deploy host must have this
-  # file in place before `docker compose up`.
+  # fanout.labstack.com (web UI) + ingest.fanout.labstack.com:4317 (OTLP).
+  # Our own production instance. Secrets (JWT/SMTP/AI) live in fanout/.env
+  # (gitignored); the deploy host must have this file in place before `up`.
   fanout:
     image: ghcr.io/labstack/fanout:${FANOUT_VERSION:?FANOUT_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
     container_name: fanout

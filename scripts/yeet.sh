@@ -4,8 +4,9 @@ set -euo pipefail
 # Deploy fanout.run (marketing + docs site), demo.fanout.run (live demo
 # fed by otel-demo), and fanout.labstack.com (own production instance) to
 # the target host. Single Docker Compose project — Traefik at the edge
-# handles TLS for all three hostnames and reverse-proxies to the
-# fanout-site, fanout-demo, and fanout containers.
+# handles TLS for four hostnames (fanout.run, demo.fanout.run,
+# fanout.labstack.com web, ingest.fanout.labstack.com OTLP gRPC) and
+# reverse-proxies to the `site`, `demo`, and `fanout` containers.
 
 DEFAULT_SERVER="root@fanout.labstack.net"
 
@@ -29,8 +30,8 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [user@]server [options]"
       echo ""
       echo "Options:"
-      echo "  --site-version VERSION       fanout-site image tag (default: latest site/v* tag)"
-      echo "  --fanout-version VERSION     fanout + fanout-demo image tag (default: latest fanout/v* tag)"
+      echo "  --site-version VERSION       site image tag (default: latest site/v* tag)"
+      echo "  --fanout-version VERSION     fanout + demo image tag (default: latest fanout/v* tag)"
       echo "  --help                       Show this help"
       echo ""
       echo "Examples:"
@@ -250,14 +251,37 @@ smoke() {
   echo "  FAIL $url" >&2
   return 1
 }
+# TLS-only handshake check (no HTTP) — for the OTLP gRPC entrypoint on :4317.
+# openssl completes the TLS handshake before any gRPC frames are exchanged,
+# so it catches the failure modes that matter (DNS, port reachability,
+# Traefik routing for the SNI host, LE cert issued for the right name).
+# Asserts:
+#   - cert verifies (chain back to LE)
+#   - served cert CN matches the expected hostname (not Traefik's default)
+tls_smoke() {
+  local host="$1" port="$2" out
+  for _ in 1 2 3 4 5 6; do
+    out=$(echo | openssl s_client -connect "$host:$port" -servername "$host" -verify_return_error 2>&1) || true
+    if echo "$out" | grep -q "Verify return code: 0 (ok)" \
+       && echo "$out" | grep -q "subject=CN=$host"; then
+      echo "  OK  tls $host:$port"
+      return 0
+    fi
+    sleep 10
+  done
+  echo "  FAIL tls $host:$port" >&2
+  echo "$out" | grep -E "Verify return code|subject=CN=" | head -3 >&2
+  return 1
+}
 # Aggregate failures so one bad URL doesn't mask the others. Three hosts
 # share one Traefik + one ACME process, so they tend to fail together —
 # reporting the first and quitting paints a misleading partial-outage
 # picture exactly when the operator needs the full view.
 failed=0
-smoke https://fanout.run                   || failed=1
-smoke https://demo.fanout.run              || failed=1
-smoke https://fanout.labstack.com/healthz  || failed=1
+smoke https://fanout.run                          || failed=1
+smoke https://demo.fanout.run                     || failed=1
+smoke https://fanout.labstack.com/healthz         || failed=1
+tls_smoke ingest.fanout.labstack.com 4317         || failed=1
 if (( failed )); then
   echo "ERROR: one or more smoke checks failed; inspect 'docker compose logs -f traefik' on the host." >&2
   exit 1
@@ -268,6 +292,7 @@ echo "Deployed:"
 echo "  https://fanout.run"
 echo "  https://demo.fanout.run"
 echo "  https://fanout.labstack.com"
+echo "  ingest.fanout.labstack.com:4317  (OTLP gRPC, TLS)"
 echo ""
 echo "Status: ssh $SERVER 'cd $REMOTE_DIR && docker compose ps'"
 echo "Logs:   ssh $SERVER 'cd $REMOTE_DIR && docker compose logs -f traefik'"

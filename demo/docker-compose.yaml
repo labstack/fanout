@@ -6,10 +6,13 @@ x-default-logging: &logging
     tag: "{{.Name}}"
 
 services:
-  # Fanout (demo instance) — Traefik at the root proxies demo.fanout.run here.
-  fanout-demo:
+  # Public OTel-demo backend at demo.fanout.run. Image is still
+  # `ghcr.io/labstack/fanout` (same binary as the production instance); the
+  # service/container is just `demo`. Host data dir `/data/fanout-demo`
+  # intentionally NOT renamed — preserves the existing demo dataset.
+  demo:
     image: ghcr.io/labstack/fanout:${FANOUT_VERSION:?FANOUT_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
-    container_name: fanout-demo
+    container_name: demo
     restart: unless-stopped
     env_file:
       # Single .env (gitignored) holds both the otel-demo config and the
@@ -59,7 +62,7 @@ services:
       - OTEL_COLLECTOR_PORT_HTTP
       - GOMEMLIMIT=160MiB
     depends_on:
-      fanout-demo:
+      demo:
         condition: service_healthy
     logging: *logging
 
