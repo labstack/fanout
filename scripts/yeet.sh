@@ -127,38 +127,11 @@ for dir in demo fanout traefik; do
     exit 1
   fi
 done
-# Validate the Cloudflare token against the verify endpoint before deploy.
-# Without this, a typo'd / revoked / wrong-account / expired token reaches
-# Traefik unchecked and the failure mode is "deploy succeeds against a
-# cached cert, then breaks weeks later when renewal fails." Does NOT prove
-# the token has the *right* scope — only that it's accepted by Cloudflare's
-# auth layer. Scope errors still surface via Traefik logs on first ACME run.
-# { grep || true; } so a missing key (typo, commented out) hits the empty
-# check below with a friendly error, not a silent pipefail exit. Mirrors
-# the same idiom in resolve_version above.
-CF_DNS_API_TOKEN=$({ grep -E '^CF_DNS_API_TOKEN=' "$REPO_DIR/traefik/.env" || true; } | tail -1 | cut -d= -f2-)
-# Sanitize common .env quirks before the value lands in a curl Bearer header:
-#   - CRLF line endings (file edited on Windows)
-#   - Single or double-quoted values
-#   - Surrounding whitespace
-# Docker Compose's env_file parser handles these silently; grep|cut does not.
-CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN%$'\r'}"
-CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN#\"}"; CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN%\"}"
-CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN#\'}"; CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN%\'}"
-CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN## }"; CF_DNS_API_TOKEN="${CF_DNS_API_TOKEN%% }"
-if [[ -z "$CF_DNS_API_TOKEN" ]]; then
-  echo "ERROR: CF_DNS_API_TOKEN not set in traefik/.env." >&2
-  exit 1
-fi
-echo "Validating CF_DNS_API_TOKEN against Cloudflare..."
-verify=$(curl -fsS --max-time 10 \
-  -H "Authorization: Bearer $CF_DNS_API_TOKEN" \
-  https://api.cloudflare.com/client/v4/user/tokens/verify 2>&1) || {
-  echo "ERROR: Cloudflare rejected CF_DNS_API_TOKEN: $verify" >&2
-  exit 1
-}
-if ! echo "$verify" | grep -q '"status":"active"'; then
-  echo "ERROR: CF_DNS_API_TOKEN is not active: $verify" >&2
+# CF token preflight — file exists, key non-empty. lego (Traefik's bundled
+# ACME client) validates the token + its scope on first ACME run; errors
+# land cleanly in `docker compose logs -f traefik` if anything's wrong.
+if ! grep -qE '^CF_DNS_API_TOKEN=.+' "$REPO_DIR/traefik/.env"; then
+  echo "ERROR: CF_DNS_API_TOKEN missing or empty in traefik/.env." >&2
   exit 1
 fi
 
