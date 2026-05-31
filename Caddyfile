@@ -11,16 +11,29 @@
 }
 
 # Wildcard cert covers any *.fanout.run subdomain. Adding a new subdomain
-# later means a `@name host name.fanout.run` matcher + a matching
-# `reverse_proxy @name …` line inside this block — no new cert needed.
+# means a `@name host name.fanout.run` matcher + a `handle @name { reverse_proxy … }`
+# block inside this site block — no new cert needed. The `handle` wrapper
+# is REQUIRED (see fallback-block comment below); a bare `reverse_proxy @name`
+# would re-introduce the routing bug PR #117 fixed.
+# Canonical pattern: https://caddyserver.com/docs/caddyfile/patterns#wildcard-certificates
 *.fanout.run {
+	# Wrap each subdomain route in `handle @name { … }`. Do NOT unwrap them.
 	@demo host demo.fanout.run
-	reverse_proxy @demo fanout-demo:7520
+	handle @demo {
+		reverse_proxy fanout-demo:7520
+	}
 
-	# Fallback for not-yet-configured subdomains. 404 (vs. abort) so the
-	# failure mode is debuggable — a clear HTTP response beats a connection
-	# reset that looks like an outage to anyone troubleshooting DNS/routing.
-	respond "fanout.run: subdomain not configured" 404
+	# Fallback for not-yet-configured subdomains. `handle` blocks are mutually
+	# exclusive at the same nesting level — only the first matching one runs.
+	# That mutual exclusion is what keeps this `respond` from firing on
+	# `demo.fanout.run`: without `handle`, both `reverse_proxy @demo` and a
+	# bare `respond` would coexist in Caddy's single auto-ordered middleware
+	# chain, and `respond` (ordered ahead of `reverse_proxy`) would win.
+	# 404 (not abort) keeps the failure debuggable — a clear HTTP response
+	# beats a connection reset that looks like an outage when troubleshooting DNS.
+	handle {
+		respond "fanout.run: subdomain not configured" 404
+	}
 
 	encode gzip zstd
 }
