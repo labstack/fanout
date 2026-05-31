@@ -1,7 +1,13 @@
 # Routers + services for fanout.run, demo.fanout.run, fanout.labstack.com,
-# and the OTLP gRPC ingest on :4317. The `*.fanout.run` wildcard cert is
-# requested on the demo router and reused by Traefik for sibling
-# subdomains under fanout.run.
+# and the OTLP gRPC ingest on :4317.
+#
+# Cert strategy: ONE wildcard cert under fanout.run covers all three site
+# hostnames. The `demo` router carries the `tls.domains` block that orders
+# `*.fanout.run` + `fanout.run` (SAN). The `site` router intentionally
+# omits `tls.domains` so Traefik picks that same cert from the resolver
+# store by SNI at request time (`*.fanout.run` matches `www.fanout.run`;
+# the `fanout.run` SAN matches the apex). DO NOT add `tls.domains` to
+# `site` — that triggers a second redundant LE order.
 
 http:
   routers:
@@ -11,10 +17,6 @@ http:
       service: site
       tls:
         certResolver: le
-        domains:
-          - main: fanout.run
-            sans:
-              - www.fanout.run
 
     demo:
       rule: "Host(`demo.fanout.run`)"

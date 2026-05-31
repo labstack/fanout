@@ -6,7 +6,7 @@ x-default-logging: &logging
     tag: "{{.Name}}"
 
 services:
-  # Fanout (demo instance) — Caddy at the root proxies demo.fanout.run here.
+  # Fanout (demo instance) — Traefik at the root proxies demo.fanout.run here.
   fanout-demo:
     image: ghcr.io/labstack/fanout:${FANOUT_VERSION:?FANOUT_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
     container_name: fanout-demo

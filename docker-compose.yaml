@@ -20,7 +20,10 @@ services:
       - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
       - /data/traefik/letsencrypt:/letsencrypt
     healthcheck:
-      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      # `traefik healthcheck` hits the /ping endpoint enabled in static.yml.
+      # No `--ping` flag — that's the static-config switch (already set),
+      # not a subcommand argument.
+      test: ["CMD", "traefik", "healthcheck"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -132,7 +132,10 @@ done
 # cached cert, then breaks weeks later when renewal fails." Does NOT prove
 # the token has the *right* scope — only that it's accepted by Cloudflare's
 # auth layer. Scope errors still surface via Traefik logs on first ACME run.
-CF_DNS_API_TOKEN=$(grep -E '^CF_DNS_API_TOKEN=' "$REPO_DIR/traefik/.env" | tail -1 | cut -d= -f2-)
+# { grep || true; } so a missing key (typo, commented out) hits the empty
+# check below with a friendly error, not a silent pipefail exit. Mirrors
+# the same idiom in resolve_version above.
+CF_DNS_API_TOKEN=$({ grep -E '^CF_DNS_API_TOKEN=' "$REPO_DIR/traefik/.env" || true; } | tail -1 | cut -d= -f2-)
 # Sanitize common .env quirks before the value lands in a curl Bearer header:
 #   - CRLF line endings (file edited on Windows)
 #   - Single or double-quoted values
@@ -247,9 +250,18 @@ smoke() {
   echo "  FAIL $url" >&2
   return 1
 }
-smoke https://fanout.run
-smoke https://demo.fanout.run
-smoke https://fanout.labstack.com/healthz
+# Aggregate failures so one bad URL doesn't mask the others. Three hosts
+# share one Traefik + one ACME process, so they tend to fail together —
+# reporting the first and quitting paints a misleading partial-outage
+# picture exactly when the operator needs the full view.
+failed=0
+smoke https://fanout.run                   || failed=1
+smoke https://demo.fanout.run              || failed=1
+smoke https://fanout.labstack.com/healthz  || failed=1
+if (( failed )); then
+  echo "ERROR: one or more smoke checks failed; inspect 'docker compose logs -f traefik' on the host." >&2
+  exit 1
+fi
 
 echo ""
 echo "Deployed:"
