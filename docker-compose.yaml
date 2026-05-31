@@ -5,6 +5,8 @@ include:
 services:
   caddy:
     # Custom build for the Cloudflare DNS plugin (see Dockerfile.caddy).
+    # CF_API_TOKEN lives in caddy/.env (gitignored); LETSENCRYPT_EMAIL stays
+    # as compose interpolation since it's not a secret.
     build:
       context: .
       dockerfile: Dockerfile.caddy
@@ -16,7 +18,8 @@ services:
       - "4317:4317"   # OTLP/gRPC ingest, TLS-terminated by Caddy
     environment:
       LETSENCRYPT_EMAIL: ${LETSENCRYPT_EMAIL:-v@labstack.com}
-      CF_API_TOKEN: ${CF_API_TOKEN}
+    env_file:
+      - caddy/.env
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - /data/caddy:/data
@@ -30,14 +33,14 @@ services:
       - "80"
 
   # fanout.labstack.com — own production instance. Secrets (JWT/SMTP/AI)
-  # live in instance/.env.secrets (gitignored); the deploy host must have
-  # this file in place before `docker compose up`.
+  # live in instance/.env (gitignored); the deploy host must have this
+  # file in place before `docker compose up`.
   fanout:
     image: ghcr.io/labstack/fanout:${FANOUT_VERSION:-latest}
     container_name: fanout
     restart: unless-stopped
     env_file:
-      - instance/.env.secrets
+      - instance/.env
     environment:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520

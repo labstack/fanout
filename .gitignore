@@ -36,10 +36,10 @@ coverage.out
 coverage.html
 cover.out
 
-# Env
+# Env — `.env` matches at every depth, so per-service env files
+# (caddy/.env, demo/.env, instance/.env) are all ignored automatically.
+# Templates live alongside as `<dir>/.env.example` (committed).
 .env
-demo/.env.secrets
-instance/.env.secrets
 
 # Screenshots
 *.png

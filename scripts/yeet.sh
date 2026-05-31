@@ -58,56 +58,30 @@ VERSION="${VERSION#v}"
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 REMOTE_DIR="/opt/fanout"
 
-# Load deploy-time secrets from a local .env (gitignored). This is where
-# CF_API_TOKEN lives — keeping it next to the repo instead of in shell rc
-# files means the deploy is portable across operator shells and CI. See
-# .env.example for the schema. Variables already in the environment win
-# over .env values: we only `export` keys that aren't already set, so a
-# CI runner or one-shot `CF_API_TOKEN=… ./scripts/yeet.sh` still works.
-if [[ -f "$REPO_DIR/.env" ]]; then
-  while IFS='=' read -r key value; do
-    [[ -z "$key" || "$key" =~ ^[[:space:]]*# ]] && continue
-    # Strip optional surrounding quotes from the value.
-    value="${value%\"}"; value="${value#\"}"
-    value="${value%\'}"; value="${value#\'}"
-    [[ -z "${!key:-}" ]] && export "$key=$value"
-  done < "$REPO_DIR/.env"
-fi
-
-# Preflight — both .env.secrets files (gitignored) hold per-instance
-# JWT/SMTP/AI credentials. scp would silently skip a missing file and
-# the failure would only surface on the server as a cryptic "env file
-# not found" during docker compose up. Fail fast here with a pointer.
-if [[ ! -f "$REPO_DIR/demo/.env.secrets" ]]; then
-  echo "ERROR: demo/.env.secrets not found locally." >&2
-  echo "  Copy demo/.env.secrets.sample to demo/.env.secrets and fill in real values." >&2
+# Preflight — three .env files (gitignored) hold per-service config +
+# credentials. scp would silently skip a missing file and the failure
+# would only surface on the server as a cryptic "env file not found"
+# during docker compose up. Fail fast here with a pointer.
+for dir in demo instance caddy; do
+  if [[ ! -f "$REPO_DIR/$dir/.env" ]]; then
+    echo "ERROR: $dir/.env not found locally." >&2
+    echo "  Copy $dir/.env.example to $dir/.env and fill in real values." >&2
+    exit 1
+  fi
+done
+# Validate the Cloudflare token against the verify endpoint before deploy.
+# Without this, a typo'd / revoked / wrong-account / expired token reaches
+# Caddy unchecked and the failure mode is "deploy succeeds against a cached
+# cert, then breaks weeks later when renewal fails." This catches the empty-
+# token's siblings. (Does NOT prove the token has the *right* scope — only
+# that it's accepted by Cloudflare's auth layer. Scope errors still surface
+# via Caddy logs on the first ACME run.)
+CF_API_TOKEN=$(grep -E '^CF_API_TOKEN=' "$REPO_DIR/caddy/.env" | cut -d= -f2-)
+if [[ -z "$CF_API_TOKEN" ]]; then
+  echo "ERROR: CF_API_TOKEN not set in caddy/.env." >&2
   exit 1
 fi
-if [[ ! -f "$REPO_DIR/instance/.env.secrets" ]]; then
-  echo "ERROR: instance/.env.secrets not found locally." >&2
-  echo "  Copy instance/.env.secrets.example to instance/.env.secrets and fill in real values." >&2
-  exit 1
-fi
-# Caddy's ACME DNS-01 challenge needs a Cloudflare API token with
-# `Zone.Zone:Read` + `Zone.DNS:Edit` on both fanout.run and labstack.com.
-# Without it, cert issuance fails on every site and the deploy comes up
-# with no TLS. Fail fast here with the same shape as the .env.secrets check.
-if [[ -z "${CF_API_TOKEN:-}" ]]; then
-  echo "ERROR: CF_API_TOKEN environment variable not set." >&2
-  echo "  Create a scoped Cloudflare API token (Zone.Zone:Read + Zone.DNS:Edit on fanout.run and labstack.com)" >&2
-  echo "  at https://dash.cloudflare.com/profile/api-tokens, then:" >&2
-  echo "    export CF_API_TOKEN=<token>" >&2
-  exit 1
-fi
-# Validate the token against Cloudflare's verify endpoint. Without this,
-# a typo'd / revoked / wrong-scope token deploys "successfully" against
-# whatever cached cert Caddy has on disk, then breaks weeks later when
-# renewal fails. This catches the empty-token's siblings:
-#   - typo, revoked, expired, wrong-account, wrong-zone scope.
-# (It does NOT prove the token has the *right* scope — only that it's
-# accepted by Cloudflare's auth layer. The first ACME run still surfaces
-# scope errors via Caddy logs.)
-echo "Validating CF_API_TOKEN..."
+echo "Validating CF_API_TOKEN against Cloudflare..."
 verify=$(curl -fsS --max-time 10 \
   -H "Authorization: Bearer $CF_API_TOKEN" \
   https://api.cloudflare.com/client/v4/user/tokens/verify 2>&1) || {
@@ -154,25 +128,23 @@ sudo mkdir -p /data/caddy /data/caddy-config /data/fanout-demo /data/fanout /opt
 sudo chown -R "$(id -un):$(id -un)" /data /opt/fanout
 SETUP_EOF
 
-echo "Copying compose + Caddyfile + demo/ + instance/..."
+echo "Copying compose + Caddyfile + Dockerfile.caddy + caddy/ + demo/ + instance/..."
 scp "$REPO_DIR/docker-compose.yaml" "$SERVER:$REMOTE_DIR/docker-compose.yaml"
 scp "$REPO_DIR/Caddyfile"           "$SERVER:$REMOTE_DIR/Caddyfile"
-# Recursive copy of the whole demo/ tree — scp without -r on a glob
-# would silently skip any subdirectories that get added later.
+scp "$REPO_DIR/Dockerfile.caddy"    "$SERVER:$REMOTE_DIR/Dockerfile.caddy"
+# Recursive copy of each service tree — scp without -r on a glob would
+# silently skip subdirectories. Each tree carries its own .env (gitignored,
+# loaded by env_file: in compose) and .env.example (committed template).
+scp -r "$REPO_DIR/caddy"    "$SERVER:$REMOTE_DIR/"
 scp -r "$REPO_DIR/demo"     "$SERVER:$REMOTE_DIR/"
 scp -r "$REPO_DIR/instance" "$SERVER:$REMOTE_DIR/"
 
-# Root .env — Caddy's TLS email and the fanout-site image tag.
-# Demo-specific env has two consumers, both pointed at demo/.env:
-#   1. Variable interpolation for the included compose file: the
-#      root compose declares `include.env_file: demo/.env`, which
-#      expands `${COLLECTOR_CONTRIB_IMAGE}` and friends at parse time.
-#   2. Container runtime env: the demo `fanout` service has its own
-#      `env_file: .env` (relative to demo/), which injects variables
-#      into the container at runtime. Both hats live in the same file
-#      — don't delete one thinking the other covers it.
-printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\nFANOUT_VERSION=%s\nCF_API_TOKEN=%s\n' \
-    "$EMAIL" "${VERSION:-latest}" "${FANOUT_VERSION:-latest}" "$CF_API_TOKEN" \
+# Root .env on the host — Caddy's TLS email + the image tags for compose
+# interpolation in docker-compose.yaml. Per-service secrets live in
+# <service>/.env (scp'd above) and are loaded via env_file: in compose,
+# not from this root file.
+printf 'LETSENCRYPT_EMAIL=%s\nVERSION=%s\nFANOUT_VERSION=%s\n' \
+    "$EMAIL" "${VERSION:-latest}" "${FANOUT_VERSION:-latest}" \
   | ssh "$SERVER" "cat > $REMOTE_DIR/.env && chmod 600 $REMOTE_DIR/.env"
 
 echo "Deploying..."
