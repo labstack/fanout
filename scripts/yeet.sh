@@ -62,7 +62,7 @@ REMOTE_DIR="/opt/fanout"
 # credentials. scp would silently skip a missing file and the failure
 # would only surface on the server as a cryptic "env file not found"
 # during docker compose up. Fail fast here with a pointer.
-for dir in demo instance caddy; do
+for dir in demo fanout caddy; do
   if [[ ! -f "$REPO_DIR/$dir/.env" ]]; then
     echo "ERROR: $dir/.env not found locally." >&2
     echo "  Copy $dir/.env.example to $dir/.env and fill in real values." >&2
@@ -128,16 +128,16 @@ sudo mkdir -p /data/caddy /data/caddy-config /data/fanout-demo /data/fanout /opt
 sudo chown -R "$(id -un):$(id -un)" /data /opt/fanout
 SETUP_EOF
 
-echo "Copying compose + Caddyfile + Dockerfile.caddy + caddy/ + demo/ + instance/..."
+echo "Copying compose + Caddyfile + Dockerfile.caddy + caddy/ + demo/ + fanout/..."
 scp "$REPO_DIR/docker-compose.yaml" "$SERVER:$REMOTE_DIR/docker-compose.yaml"
 scp "$REPO_DIR/Caddyfile"           "$SERVER:$REMOTE_DIR/Caddyfile"
 scp "$REPO_DIR/Dockerfile.caddy"    "$SERVER:$REMOTE_DIR/Dockerfile.caddy"
 # Recursive copy of each service tree — scp without -r on a glob would
 # silently skip subdirectories. Each tree carries its own .env (gitignored,
 # loaded by env_file: in compose) and .env.example (committed template).
-scp -r "$REPO_DIR/caddy"    "$SERVER:$REMOTE_DIR/"
-scp -r "$REPO_DIR/demo"     "$SERVER:$REMOTE_DIR/"
-scp -r "$REPO_DIR/instance" "$SERVER:$REMOTE_DIR/"
+scp -r "$REPO_DIR/caddy"  "$SERVER:$REMOTE_DIR/"
+scp -r "$REPO_DIR/demo"   "$SERVER:$REMOTE_DIR/"
+scp -r "$REPO_DIR/fanout" "$SERVER:$REMOTE_DIR/"
 
 # Root .env on the host — Caddy's TLS email + the image tags for compose
 # interpolation in docker-compose.yaml. Per-service secrets live in

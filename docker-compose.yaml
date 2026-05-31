@@ -33,14 +33,14 @@ services:
       - "80"
 
   # fanout.labstack.com — own production instance. Secrets (JWT/SMTP/AI)
-  # live in instance/.env (gitignored); the deploy host must have this
+  # live in fanout/.env (gitignored); the deploy host must have this
   # file in place before `docker compose up`.
   fanout:
     image: ghcr.io/labstack/fanout:${FANOUT_VERSION:-latest}
     container_name: fanout
     restart: unless-stopped
     env_file:
-      - instance/.env
+      - fanout/.env
     environment:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520

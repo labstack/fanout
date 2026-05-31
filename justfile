@@ -5,7 +5,7 @@ set dotenv-load
 
 export CGO_ENABLED := "1"
 
-bin := "fanout"
+bin := "bin/fanout"
 sock := env("SOCK", "/tmp/pc-fanout.sock")
 
 default:
@@ -41,6 +41,7 @@ build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`:
     cd web && bun run build
     rm -rf internal/ui/dist/*
     cp -r web/dist/* internal/ui/dist/
+    mkdir -p bin
     go build -ldflags "-s -w -X main.version={{VERSION}}" -o {{bin}} ./cmd/fanout
 
 # Generate TypeScript types from Go block structs + sqlc queries

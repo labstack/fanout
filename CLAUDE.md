@@ -153,10 +153,10 @@ data/             # Data storage (gitignored)
 ```bash
 # Build (requires CGO for DuckDB)
 export CGO_ENABLED=1
-go build ./cmd/fanout
+go build -o bin/fanout ./cmd/fanout
 
 # Run
-./fanout
+./bin/fanout
 
 # Or with just
 just build
@@ -333,7 +333,7 @@ graph TB
 
 ```bash
 # Start fanout
-./fanout
+./bin/fanout
 
 # Use otel-demo for test data (in separate terminal)
 cd ../otel-demo && docker compose up -d
