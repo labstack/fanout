@@ -25,11 +25,16 @@ services:
       - /data/caddy:/data
       - /data/caddy-config:/config
     healthcheck:
-      # Caddy's admin API on :2019 binds to IPv4 127.0.0.1 only. Alpine's
-      # wget resolves `localhost` to IPv6 ::1 first, producing a confusing
-      # "Connection refused" — use explicit IPv4. Cert issuance isn't gated
-      # here (first ACME run can take minutes); yeet.sh's smoke tests are
-      # the cert check.
+      # Use explicit 127.0.0.1, not `localhost`. The Caddy image is Alpine
+      # (BusyBox wget); BusyBox `getaddrinfo("localhost")` returns the ::1
+      # entry from /etc/hosts first, and the v6 loopback isn't usable on
+      # Docker's default bridge (no IPv6) → the probe fails before wget
+      # tries 127.0.0.1. The fanout / fanout-demo containers are built FROM
+      # debian:bookworm-slim (GNU wget), which falls through to IPv4 cleanly,
+      # so `localhost` is safe in those healthchecks below.
+      #
+      # Cert issuance isn't gated here (first ACME DNS-01 run can take a few
+      # minutes); yeet.sh's smoke tests are the end-to-end cert check.
       test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:2019/config/"]
       interval: 30s
       timeout: 5s

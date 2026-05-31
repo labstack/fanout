@@ -60,29 +60,45 @@ done
 [[ -n "${LETSENCRYPT_EMAIL:-}" ]] && EMAIL="$LETSENCRYPT_EMAIL"
 [[ -z "$SERVER" ]] && SERVER="$DEFAULT_SERVER"
 
-# Auto-resolve per-service versions from git tags when not passed (mirrors
-# monk's pattern). `<service>/v*` tags are cut by `just release`. The leading
-# `v` and the `<service>/` prefix are both stripped so the value matches the
-# Docker image tag exactly.
-latest_tag_version() {
-  local prefix="$1"
-  local tag
-  tag=$(git -C "$(dirname "$0")/.." tag --list "${prefix}/v*" --sort=-v:refname | head -1)
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REMOTE_DIR="/opt/fanout"
+
+# Refresh tags from origin so the resolver sees what teammates have pushed —
+# otherwise a stale local repo silently deploys yesterday's release.
+git -C "$REPO_DIR" fetch --tags --quiet --force 2>/dev/null || true
+
+# resolve_version PREFIX EXPLICIT — print "<source>\t<image-tag>" for a service.
+# - If EXPLICIT is set, validate semver and use it (strips a leading `v`).
+#   Source becomes the literal string "explicit".
+# - Otherwise, return the highest stable <PREFIX>/v* git tag, excluding
+#   pre-release suffixes (-rc/-beta/etc.) — same filter `just release` uses
+#   when minting new tag numbers (see justfile `next_tag()`).
+#   Source is the matching git tag (e.g. "fanout/v2026.05.2").
+# Both fields land on the same line, tab-separated, so a single call captures
+# them via `IFS=$'\t' read -r SRC VER < <(resolve_version ...)`.
+resolve_version() {
+  local prefix="$1" explicit="${2:-}" stripped tag
+  if [[ -n "$explicit" ]]; then
+    stripped="${explicit#v}"
+    if [[ ! "$stripped" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]+(-[A-Za-z0-9.]+)?$ ]]; then
+      echo "ERROR: --${prefix}-version value '$explicit' doesn't look like a release (e.g. 2026.05.1)." >&2
+      exit 1
+    fi
+    printf '%s\t%s\n' "explicit" "$stripped"
+    return
+  fi
+  tag=$(git -C "$REPO_DIR" tag --list "${prefix}/v*" --sort=-v:refname \
+          | grep -E "^${prefix}/v[0-9]{4}\.[0-9]{2}\.[0-9]+$" \
+          | head -1)
   if [[ -z "$tag" ]]; then
-    echo "ERROR: no ${prefix}/v* tag found locally; pass --${prefix}-version explicitly or run 'just release'." >&2
+    echo "ERROR: no stable ${prefix}/v* tag found locally; run 'just release' or pass --${prefix}-version <value>." >&2
     exit 1
   fi
-  echo "${tag#${prefix}/v}"
+  printf '%s\t%s\n' "$tag" "${tag#${prefix}/v}"
 }
 
-[[ -z "$SITE_VERSION"   ]] && SITE_VERSION=$(latest_tag_version site)
-[[ -z "$FANOUT_VERSION" ]] && FANOUT_VERSION=$(latest_tag_version fanout)
-# Tolerate explicit `--site-version v2026.05.1` (strip leading v).
-SITE_VERSION="${SITE_VERSION#v}"
-FANOUT_VERSION="${FANOUT_VERSION#v}"
-
-REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-REMOTE_DIR="/opt/fanout"
+IFS=$'\t' read -r SITE_SOURCE   SITE_VERSION   < <(resolve_version site   "$SITE_VERSION")
+IFS=$'\t' read -r FANOUT_SOURCE FANOUT_VERSION < <(resolve_version fanout "$FANOUT_VERSION")
 
 # Preflight — three .env files (gitignored) hold per-service config +
 # credentials. scp would silently skip a missing file and the failure
@@ -138,8 +154,8 @@ if ! echo "$verify" | grep -q '"status":"active"'; then
 fi
 
 echo "Deploying to $SERVER"
-echo "  site:    $SITE_VERSION"
-echo "  fanout:  $FANOUT_VERSION"
+echo "  site:    $SITE_VERSION  ($SITE_SOURCE)"
+echo "  fanout:  $FANOUT_VERSION  ($FANOUT_SOURCE)"
 echo "  email:   $EMAIL"
 echo ""
 
