@@ -22,6 +22,7 @@ http:
       rule: "Host(`fanout.run`) || Host(`www.fanout.run`)"
       entryPoints: [websecure]
       service: site
+      middlewares: [compress]
       tls:
         certResolver: le
 
@@ -29,6 +30,7 @@ http:
       rule: "Host(`demo.fanout.run`)"
       entryPoints: [websecure]
       service: demo
+      middlewares: [compress]
       tls:
         certResolver: le
         domains:
@@ -40,15 +42,28 @@ http:
       rule: "Host(`fanout.labstack.com`)"
       entryPoints: [websecure]
       service: fanout
+      middlewares: [compress]
       tls:
         certResolver: le
 
+    # NOTE: fanout-ingest deliberately does NOT use `compress`. OTLP/gRPC carries
+    # its own per-message compression negotiated by the OTEL exporter (gzip on
+    # the wire by default); a transport-level second pass would just burn CPU.
     fanout-ingest:
       rule: "Host(`ingest.fanout.labstack.com`)"
       entryPoints: [otlp]
       service: fanout-ingest
       tls:
         certResolver: le
+
+  middlewares:
+    # Gzip for the web routers (HTML/JS/CSS/JSON/SVG). `text/event-stream` is
+    # excluded so the AI chat SSE stream at /api/chat isn't buffered/held for
+    # compression — same shape monk uses on its /api/stream.
+    compress:
+      compress:
+        excludedContentTypes:
+          - text/event-stream
 
   services:
     site:
