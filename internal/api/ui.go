@@ -227,20 +227,11 @@ func (h *UIHandler) Overview(c *echo.Context) error {
 		slog.Error("overview query failed",
 			"namespace", namespace,
 			"window_min", window,
-			"code", "overview.query_failed",
 			"err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to build overview data")
 	}
 
-	// Guard against the typed-nil-interface gotcha: passing a nil
-	// *alert.Store to an alertLister parameter would produce a non-nil
-	// interface holding a nil pointer, defeating the store == nil check
-	// in computeAlertsState.
-	var lister alertLister
-	if h.alertStore != nil {
-		lister = h.alertStore
-	}
-	alerts, err := computeAlertsState(c.Request().Context(), lister, namespace, window)
+	alerts, err := computeAlertsState(c.Request().Context(), asAlertLister(h.alertStore), namespace, window)
 	if err != nil {
 		// Context cancellation only. Echo discards the response; we've
 		// intentionally not logged (a hung-up client is not a failure).

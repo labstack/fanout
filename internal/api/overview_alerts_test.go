@@ -22,8 +22,8 @@ func TestComputeAlertsState_NilStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Status != AlertsStatusDisabled {
-		t.Errorf("Status = %q, want %q", out.Status, AlertsStatusDisabled)
+	if out.Status != alertsStatusDisabled {
+		t.Errorf("Status = %q, want %q", out.Status, alertsStatusDisabled)
 	}
 	if out.Items == nil || len(out.Items) != 0 {
 		t.Errorf("Items should be non-nil empty, got %v", out.Items)
@@ -59,8 +59,8 @@ func TestComputeAlertsState_GenericError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected err propagation: %v", err)
 	}
-	if out.Status != AlertsStatusUnavailable {
-		t.Errorf("Status = %q, want %q", out.Status, AlertsStatusUnavailable)
+	if out.Status != alertsStatusUnavailable {
+		t.Errorf("Status = %q, want %q", out.Status, alertsStatusUnavailable)
 	}
 	if out.Items == nil || len(out.Items) != 0 {
 		t.Errorf("Items should be non-nil empty, got %v", out.Items)
@@ -75,8 +75,8 @@ func TestComputeAlertsState_SuccessEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Status != AlertsStatusOK {
-		t.Errorf("Status = %q, want %q", out.Status, AlertsStatusOK)
+	if out.Status != alertsStatusOK {
+		t.Errorf("Status = %q, want %q", out.Status, alertsStatusOK)
 	}
 	if out.Items == nil || len(out.Items) != 0 {
 		t.Errorf("Items should be non-nil empty, got %v", out.Items)
@@ -98,8 +98,8 @@ func TestComputeAlertsState_SuccessWithItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.Status != AlertsStatusOK {
-		t.Errorf("Status = %q, want %q", out.Status, AlertsStatusOK)
+	if out.Status != alertsStatusOK {
+		t.Errorf("Status = %q, want %q", out.Status, alertsStatusOK)
 	}
 	if len(out.Items) != 2 {
 		t.Fatalf("Items len = %d, want 2", len(out.Items))

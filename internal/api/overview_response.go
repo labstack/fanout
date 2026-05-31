@@ -1,48 +1,47 @@
-// Package api — overview_response.go
-//
-// Wire types for GET /api/overview. The internal in-memory result lives in
-// internal/service.OverviewResult; this file owns the HTTP wire shape,
-// mirroring the MCP pattern in internal/mcp/overview.go.
+// Wire types for GET /api/overview. The internal in-memory result lives
+// in service.OverviewResult; this file owns the HTTP wire shape,
+// mirroring the MCP pattern in internal/mcp/overview.go. Types are
+// package-private because they're only marshaled via c.JSON inside the
+// handler — never returned to a caller outside the api package.
 
 package api
 
 import "github.com/labstack/fanout/internal/service"
 
-// AlertsStatus is the tri-state for the alerts wrapper. The tagged-enum
+// alertsStatus is the tri-state for the alerts wrapper. The tagged-enum
 // form makes degenerate combinations (e.g. "disabled but available")
 // unrepresentable — there are exactly three valid wire states.
-type AlertsStatus string
+type alertsStatus string
 
 const (
-	AlertsStatusOK          AlertsStatus = "ok"
-	AlertsStatusUnavailable AlertsStatus = "unavailable"
-	AlertsStatusDisabled    AlertsStatus = "disabled"
+	alertsStatusOK          alertsStatus = "ok"
+	alertsStatusUnavailable alertsStatus = "unavailable"
+	alertsStatusDisabled    alertsStatus = "disabled"
 )
 
-// AlertsOut is the wire wrapper around the firing-alerts list. Items is
+// alertsOut is the wire wrapper around the firing-alerts list. Items is
 // always non-nil so the JSON serializes as `[]` (not `null`).
-type AlertsOut struct {
-	Status AlertsStatus            `json:"status"`
+type alertsOut struct {
+	Status alertsStatus            `json:"status"`
 	Items  []service.OverviewAlert `json:"items"`
 }
 
-// OverviewResponse is the wire shape of GET /api/overview. Constructed by
-// toOverviewResponse from a service.OverviewResult + AlertsOut. All array
+// overviewResponse is the wire shape of GET /api/overview. Constructed by
+// toOverviewResponse from a service.OverviewResult + alertsOut. All array
 // fields are guaranteed non-nil; Health is a value (not pointer) because
 // the UI handler always requests it.
-type OverviewResponse struct {
+type overviewResponse struct {
 	Health    service.OverviewHealth     `json:"health"`
 	Services  []service.OverviewService  `json:"services"`
 	Incidents []service.OverviewIncident `json:"incidents"`
-	Alerts    AlertsOut                  `json:"alerts"`
+	Alerts    alertsOut                  `json:"alerts"`
 }
 
-// toOverviewResponse maps the internal value type into the wire shape.
-// Nil input slices become non-nil empty slices so the JSON serializes as
-// `[]` (not `null`). Health is dereferenced (handler guarantees non-nil
-// for UI calls — see ui.go Overview which always requests "health").
-func toOverviewResponse(r *service.OverviewResult, alerts AlertsOut) OverviewResponse {
-	out := OverviewResponse{
+// toOverviewResponse maps the internal result into the wire shape, normalizing
+// nil slices to `[]` and copying Health by value when present (the UI handler
+// requests "health", but we don't depend on that here).
+func toOverviewResponse(r *service.OverviewResult, alerts alertsOut) overviewResponse {
+	out := overviewResponse{
 		Services:  r.Services,
 		Incidents: r.Incidents,
 		Alerts:    alerts,

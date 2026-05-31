@@ -130,16 +130,14 @@ export function HomePage() {
 
   if (!data) return null;
 
-  // Defense-in-depth defaults. The server contract (api.OverviewResponse
-  // mapper in internal/api/overview_response.go guarantees non-nil arrays,
-  // and computeAlertsState always returns a populated AlertsOut) makes
-  // these always present — but we keep the guards so a future regression
-  // can't crash the home page on `.length`/`.filter`. The alerts default
-  // mirrors the "alerting disabled" state so render rules degrade gracefully.
+  // Defense-in-depth: server guarantees these are present; defaults keep
+  // .length/.filter safe if that contract ever regresses. The alerts default
+  // is `unavailable` (not `disabled`) — "we can't tell you" is honest about
+  // a server regression; `disabled` would be a positive assertion that hides it.
   const {
     incidents = [],
     services = [],
-    alerts = { status: "disabled" as const, items: [] },
+    alerts = { status: "unavailable" as const, items: [] },
   } = data;
 
   const unhealthy = incidents.filter((i) => i.status === "unhealthy");

@@ -9,45 +9,47 @@ import (
 	"github.com/labstack/fanout/internal/service"
 )
 
-// alertLister is the narrow interface computeAlertsState needs from the
-// alert store. *alert.Store satisfies it; tests use a stub.
+// alertLister is the narrow interface computeAlertsState needs; tests stub it.
 type alertLister interface {
 	ListAlerts(state, service, ruleID string) ([]alert.Alert, error)
 }
 
-// computeAlertsState determines the wire-level alerts wrapper from the
-// alert store. See the state matrix in the spec for the full table.
-//
-// Context cancellation (Canceled / DeadlineExceeded) is propagated as the
-// returned error WITHOUT logging or flipping to "unavailable" — a hung-up
-// client is not a subsystem failure and the response is being abandoned.
-// Other errors are logged with namespace + a stable code= field and the
-// wrapper returns status=unavailable so the UI can show a banner.
-func computeAlertsState(ctx context.Context, store alertLister, namespace string, windowMin int) (AlertsOut, error) {
+// asAlertLister returns the lister interface, preserving nil-ness so
+// computeAlertsState's `store == nil` check works (the classic Go
+// typed-nil-interface gotcha: a typed-nil pointer assigned to an
+// interface produces a non-nil interface value).
+func asAlertLister(s *alert.Store) alertLister {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
+// computeAlertsState builds the wire-level alerts wrapper. Context cancellation
+// propagates as an error (the client hung up, response is being abandoned);
+// other store errors log + return status=unavailable so the UI can show a banner.
+func computeAlertsState(ctx context.Context, store alertLister, namespace string, windowMin int) (alertsOut, error) {
 	if store == nil {
-		return AlertsOut{Status: AlertsStatusDisabled, Items: []service.OverviewAlert{}}, nil
+		return alertsOut{Status: alertsStatusDisabled, Items: []service.OverviewAlert{}}, nil
 	}
 
 	// Bail early if the caller already hung up — avoids a store hit and
 	// surfaces the cancellation without misclassifying it as a failure.
 	if err := ctx.Err(); err != nil {
-		return AlertsOut{}, err
+		return alertsOut{}, err
 	}
 
 	rows, err := store.ListAlerts("firing", "", "")
 	if err != nil {
-		// Forward-compat: if ListAlerts is ever plumbed for context (it
-		// currently uses context.Background internally), context errors
-		// should propagate rather than be treated as subsystem failure.
+		// Forward-compat: propagate context errors if ListAlerts gains ctx plumbing.
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return AlertsOut{}, err
+			return alertsOut{}, err
 		}
 		slog.Error("list firing alerts for overview failed",
 			"namespace", namespace,
 			"window_min", windowMin,
-			"code", "overview.alerts.list_failed",
 			"err", err)
-		return AlertsOut{Status: AlertsStatusUnavailable, Items: []service.OverviewAlert{}}, nil
+		return alertsOut{Status: alertsStatusUnavailable, Items: []service.OverviewAlert{}}, nil
 	}
 
 	items := make([]service.OverviewAlert, 0, len(rows))
@@ -60,5 +62,5 @@ func computeAlertsState(ctx context.Context, store alertLister, namespace string
 			FiredAt: a.FiredAt,
 		})
 	}
-	return AlertsOut{Status: AlertsStatusOK, Items: items}, nil
+	return alertsOut{Status: alertsStatusOK, Items: items}, nil
 }

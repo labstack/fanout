@@ -17,7 +17,7 @@ func TestToOverviewResponse_NilSlicesBecomeEmptyArrays(t *testing.T) {
 		Health: &service.OverviewHealth{Score: 1.0, TotalServices: 0},
 		// Services, Incidents intentionally nil
 	}
-	alerts := AlertsOut{Status: AlertsStatusDisabled, Items: nil}
+	alerts := alertsOut{Status: alertsStatusDisabled, Items: nil}
 
 	out := toOverviewResponse(in, alerts)
 	if out.Services == nil {
@@ -49,22 +49,22 @@ func TestToOverviewResponse_NilSlicesBecomeEmptyArrays(t *testing.T) {
 func TestToOverviewResponse_StatusVariants(t *testing.T) {
 	tests := []struct {
 		name       string
-		alerts     AlertsOut
+		alerts     alertsOut
 		wantInJSON string
 	}{
 		{
 			name:       "ok with one firing",
-			alerts:     AlertsOut{Status: AlertsStatusOK, Items: []service.OverviewAlert{{Rule: "r1", Service: "cart", State: "firing", FiredAt: time.Unix(0, 0).UTC().Format(time.RFC3339)}}},
+			alerts:     alertsOut{Status: alertsStatusOK, Items: []service.OverviewAlert{{Rule: "r1", Service: "cart", State: "firing", FiredAt: time.Unix(0, 0).UTC().Format(time.RFC3339)}}},
 			wantInJSON: `"alerts":{"status":"ok","items":[{`,
 		},
 		{
 			name:       "unavailable empty",
-			alerts:     AlertsOut{Status: AlertsStatusUnavailable, Items: []service.OverviewAlert{}},
+			alerts:     alertsOut{Status: alertsStatusUnavailable, Items: []service.OverviewAlert{}},
 			wantInJSON: `"alerts":{"status":"unavailable","items":[]}`,
 		},
 		{
 			name:       "disabled empty",
-			alerts:     AlertsOut{Status: AlertsStatusDisabled, Items: []service.OverviewAlert{}},
+			alerts:     alertsOut{Status: alertsStatusDisabled, Items: []service.OverviewAlert{}},
 			wantInJSON: `"alerts":{"status":"disabled","items":[]}`,
 		},
 	}
@@ -86,7 +86,7 @@ func TestToOverviewResponse_HealthCopiedByValue(t *testing.T) {
 	in := &service.OverviewResult{
 		Health: &service.OverviewHealth{Score: 0.42, TotalServices: 3},
 	}
-	out := toOverviewResponse(in, AlertsOut{Status: AlertsStatusOK, Items: []service.OverviewAlert{}})
+	out := toOverviewResponse(in, alertsOut{Status: alertsStatusOK, Items: []service.OverviewAlert{}})
 	if out.Health.Score != 0.42 || out.Health.TotalServices != 3 {
 		t.Errorf("Health not copied, got %+v", out.Health)
 	}

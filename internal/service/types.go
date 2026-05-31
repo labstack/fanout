@@ -28,9 +28,12 @@ type TopIssue struct {
 }
 
 // OverviewResult is the in-process result of the unified overview query.
-// It is NOT a wire type. The HTTP UI handler maps it into
-// internal/api.OverviewResponse; the MCP overview tool maps it into
-// internal/mcp.OverviewOut. JSON tags belong on those wire types, not here.
+// It is NOT a wire type at the outer level — the HTTP UI handler maps it
+// into internal/api.overviewResponse and the MCP tool maps it into
+// internal/mcp.OverviewOut, so JSON tags on this outer struct would be
+// dead. The element types (OverviewHealth, OverviewService,
+// OverviewIncident, OverviewAlert) DO carry JSON tags because they're
+// embedded by value into those wire response types.
 //
 // Sections are populated based on OverviewParams.Include — fields not
 // requested stay zero-valued.
