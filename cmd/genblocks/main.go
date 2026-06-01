@@ -46,7 +46,7 @@ func run() error {
 	// Generate data interfaces for each block type
 	for _, entry := range ai.BlockTypeRegistry {
 		t := reflect.TypeOf(entry.Data)
-		if t.Kind() == reflect.Ptr {
+		if t.Kind() == reflect.Pointer {
 			t = t.Elem()
 		}
 		writeInterface(&b, t)
@@ -91,7 +91,7 @@ func writeInterface(b *strings.Builder, t reflect.Type) {
 		optMark := ""
 		if opts.contains("omitempty") {
 			optMark = "?"
-			if fieldType.Kind() == reflect.Ptr {
+			if fieldType.Kind() == reflect.Pointer {
 				fieldType = fieldType.Elem() // unwrap: *T with omitempty → T (not nullable)
 			}
 		}
@@ -124,7 +124,7 @@ func collectNestedTypes(t reflect.Type) []reflect.Type {
 }
 
 func unwrapType(t reflect.Type) reflect.Type {
-	for t.Kind() == reflect.Ptr || t.Kind() == reflect.Slice {
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice {
 		t = t.Elem()
 	}
 	return t
@@ -141,7 +141,7 @@ func isBuiltinType(t reflect.Type) bool {
 }
 
 func goTypeToTS(t reflect.Type) string {
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		return goTypeToTS(t.Elem()) + " | null"
 	}
 
@@ -194,7 +194,7 @@ func inlineObject(t reflect.Type) string {
 		if name == "" {
 			name = field.Name
 		}
-		optional := opts.contains("omitempty") || field.Type.Kind() == reflect.Ptr
+		optional := opts.contains("omitempty") || field.Type.Kind() == reflect.Pointer
 		tsType := goTypeToTS(field.Type)
 		optMark := ""
 		if optional {
