@@ -116,6 +116,34 @@ func TestUserStore_APIKeyLifecycle(t *testing.T) {
 	}
 }
 
+func TestUserStore_GenerateAPIKeyReplacesPrevious(t *testing.T) {
+	s := newTestUserStore(t)
+	u, _ := s.Create("rotate@example.com", "", "operator")
+
+	first, err := s.GenerateAPIKey(u.ID)
+	if err != nil {
+		t.Fatalf("GenerateAPIKey first: %v", err)
+	}
+	second, err := s.GenerateAPIKey(u.ID)
+	if err != nil {
+		t.Fatalf("GenerateAPIKey second: %v", err)
+	}
+
+	// Each user holds at most one key (single users.key column), so generating
+	// a new one must invalidate the first — the contract behind the UI's
+	// "Regenerate" action.
+	if _, err := s.GetByAPIKey(first); !errors.Is(err, ErrUserNotFound) {
+		t.Fatalf("old key still valid after regenerate: err = %v, want ErrUserNotFound", err)
+	}
+	got, err := s.GetByAPIKey(second)
+	if err != nil {
+		t.Fatalf("GetByAPIKey second: %v", err)
+	}
+	if got.ID != u.ID {
+		t.Errorf("GetByAPIKey id = %q, want %q", got.ID, u.ID)
+	}
+}
+
 func TestUserStore_CreateFirstAdmin(t *testing.T) {
 	s := newTestUserStore(t)
 

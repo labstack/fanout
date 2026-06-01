@@ -74,7 +74,17 @@ export function SettingsPage() {
       setRevealedKey(r.api_key);
       setHasKey(true);
     } catch (err) {
-      toast.error(isApiError(err) ? err.message : "Failed to generate API key");
+      // Generation rotates the key server-side before the response returns, so
+      // a lost response may mean the previous key is already dead. Never leave
+      // a stale key on screen labelled "save this" — clear it and tell the user
+      // the old one may no longer work.
+      setRevealedKey(null);
+      setHasKey(false);
+      toast.error(
+        isApiError(err)
+          ? err.message
+          : "Failed to generate API key. The previous key may no longer work — generate again to get a usable one.",
+      );
     } finally {
       setKeyBusy(false);
     }
@@ -173,8 +183,8 @@ export function SettingsPage() {
               <div className="space-y-1">
                 <CardTitle className="text-base">API key</CardTitle>
                 <CardDescription>
-                  A personal key for programmatic access to the API and MCP
-                  endpoint. Send it as <code className="font-mono">Authorization: Bearer fo_…</code>.
+                  A key for programmatic access to the API and MCP endpoint.
+                  Send it as <code className="font-mono">Authorization: Bearer fo_…</code>.
                   Each user has at most one key; generating a new one replaces the old.
                 </CardDescription>
               </div>

@@ -101,6 +101,69 @@ func TestMeRejectsInactiveUser(t *testing.T) {
 	}
 }
 
+func TestAuthAcceptsValidAPIKey(t *testing.T) {
+	e, users, _, _, _, _ := newTestAuthServer(t)
+	user, err := users.Create("apikey@example.com", "", "operator")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	key, err := users.GenerateAPIKey(user.ID)
+	if err != nil {
+		t.Fatalf("GenerateAPIKey: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestAuthRejectsInactiveUserAPIKey(t *testing.T) {
+	e, users, _, _, _, _ := newTestAuthServer(t)
+	user, err := users.Create("inactive-key@example.com", "", "operator")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	key, err := users.GenerateAPIKey(user.ID)
+	if err != nil {
+		t.Fatalf("GenerateAPIKey: %v", err)
+	}
+
+	// GetByAPIKey does not filter on active state — the middleware's
+	// !user.Active guard is the only thing rejecting a deactivated user's
+	// still-valid key. Cover that path explicitly.
+	active := false
+	if _, err := users.Update(user.ID, nil, nil, nil, &active); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer "+key)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestAuthRejectsUnknownAPIKey(t *testing.T) {
+	e, _, _, _, _, _ := newTestAuthServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
+	req.Header.Set("Authorization", "Bearer fo_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestRefreshRotatesAndLogoutRevokesSession(t *testing.T) {
 	e, users, _, _, _, refreshSecret := newTestAuthServer(t)
 	user, err := users.Create("user@example.com", "", "operator")
