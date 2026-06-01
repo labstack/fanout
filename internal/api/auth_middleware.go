@@ -72,7 +72,7 @@ func RequireRole(minRole string) echo.MiddlewareFunc {
 }
 
 func authenticateBearer(users *auth.UserStore, jwtSecret, bearer string) (auth.User, error) {
-	if strings.HasPrefix(bearer, "mk_") {
+	if strings.HasPrefix(bearer, "fo_") {
 		user, err := users.GetByAPIKey(bearer)
 		if err != nil || !user.Active {
 			return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")

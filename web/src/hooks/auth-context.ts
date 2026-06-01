@@ -6,6 +6,7 @@ export interface User {
   name?: string;
   role: string;
   active: boolean;
+  has_api_key?: boolean;
 }
 
 export interface AuthStatus {
