@@ -263,7 +263,7 @@ claude mcp add fanout --transport http https://fanout.example.com/mcp
 claude mcp add fanout --transport http http://localhost:7520/mcp
 ```
 
-The MCP endpoint accepts an ingest token the same way as OTLP — pass `Authorization: Bearer fo_<token>` if your transport supports custom headers, or rely on session-based auth through a logged-in browser.
+The MCP endpoint requires a user API key — generate one from **Settings → API key** and pass it as `Authorization: Bearer fo_<token>` if your transport supports custom headers, or rely on session-based auth through a logged-in browser. (The ingest token is for OTLP only; it is not accepted here.)
 
 ### Tools
 
