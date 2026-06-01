@@ -124,7 +124,7 @@ func generateDashboardSchema() json.RawMessage {
 // It reads json tags for field names and handles omitempty/pointer optionality.
 func reflectSchema(v any) map[string]any {
 	t := reflect.TypeOf(v)
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 	return reflectTypeSchema(t)
@@ -133,7 +133,7 @@ func reflectSchema(v any) map[string]any {
 // reflectTypeSchema recursively generates a JSON Schema for the given reflect.Type.
 func reflectTypeSchema(t reflect.Type) map[string]any {
 	// Unwrap pointer types.
-	if t.Kind() == reflect.Ptr {
+	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
 	}
 
@@ -195,10 +195,10 @@ func reflectStructSchema(t reflect.Type) map[string]any {
 			name = field.Name
 		}
 
-		isOptional := opts.contains("omitempty") || field.Type.Kind() == reflect.Ptr
+		isOptional := opts.contains("omitempty") || field.Type.Kind() == reflect.Pointer
 
 		fieldType := field.Type
-		if fieldType.Kind() == reflect.Ptr {
+		if fieldType.Kind() == reflect.Pointer {
 			fieldType = fieldType.Elem()
 		}
 

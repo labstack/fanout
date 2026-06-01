@@ -313,7 +313,7 @@ func (s *UserStore) GenerateAPIKey(userID string) (string, error) {
 	if _, err := rand.Read(b); err != nil {
 		return "", fmt.Errorf("auth: generate api key: %w", err)
 	}
-	key := "mk_" + hex.EncodeToString(b)
+	key := "fo_" + hex.EncodeToString(b)
 	hash := hashAPIKey(key)
 
 	now := time.Now().UTC().Format(time.RFC3339)
