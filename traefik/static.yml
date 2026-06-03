@@ -11,8 +11,6 @@ entryPoints:
           permanent: true
   websecure:
     address: :443
-  otlp:
-    address: :4317
 
 providers:
   file:

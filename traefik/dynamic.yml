@@ -2,7 +2,7 @@
 #   site            fanout.run, www.fanout.run   → site:80         (marketing)
 #   demo            demo.fanout.run              → demo:7520       (public otel-demo backend)
 #   fanout          fanout.labstack.com          → fanout:7520     (our own production instance, web UI)
-#   fanout-ingest   ingest.fanout.labstack.com   → h2c://fanout:4317 (OTLP gRPC ingest)
+#   fanout-ingest   ingest.fanout.labstack.com   → h2c://fanout:4317 (OTLP gRPC ingest, on 443)
 #
 # Cert strategy: ONE wildcard cert under fanout.run covers `site` + `demo` + apex.
 # The `demo` router carries the `tls.domains` block that orders `*.fanout.run` +
@@ -12,9 +12,12 @@
 # `tls.domains` to `site` — that triggers a second redundant LE order.
 #
 # The two labstack hostnames (fanout + ingest) get their own LE certs via
-# auto-resolution from each router's Host rule. `ingest.fanout.labstack.com`
-# MUST be DNS-only at Cloudflare (gray cloud) — CF's free plan doesn't proxy
-# port 4317.
+# auto-resolution from each router's Host rule. OTLP gRPC ingest shares the
+# `websecure` (:443) entrypoint with the web UI — Traefik separates them by
+# Host (gRPC is just HTTP/2 over TLS), so the public endpoint is a clean
+# `ingest.fanout.labstack.com` (443, no custom port). `ingest.fanout.labstack.com`
+# MUST stay DNS-only at Cloudflare (gray cloud) — CF's free plan doesn't proxy
+# OTLP gRPC; clients must reach the origin directly.
 
 http:
   routers:
@@ -51,7 +54,7 @@ http:
     # the wire by default); a transport-level second pass would just burn CPU.
     fanout-ingest:
       rule: "Host(`ingest.fanout.labstack.com`)"
-      entryPoints: [otlp]
+      entryPoints: [websecure]
       service: fanout-ingest
       tls:
         certResolver: le

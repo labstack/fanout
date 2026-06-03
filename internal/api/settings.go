@@ -37,7 +37,7 @@ func (h *SettingsHandler) GetIngest(c *echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     current.TokenHash != "",
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr),
+		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestPublicEndpoint),
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "x-fanout-ingest-token",
 	})
@@ -57,7 +57,7 @@ func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     true,
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr),
+		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestPublicEndpoint),
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "x-fanout-ingest-token",
 		IngestToken:       token,
@@ -72,7 +72,13 @@ type ingestResponse struct {
 	IngestToken       string `json:"ingest_token,omitempty"`
 }
 
-func suggestedIngestEndpoint(req *http.Request, grpcAddr string) string {
+func suggestedIngestEndpoint(req *http.Request, grpcAddr, configured string) string {
+	// An explicit public endpoint (e.g. "https://ingest.fanout.labstack.com")
+	// wins — it's the only value that's correct behind a reverse proxy, where
+	// the browser host and the OTLP host differ.
+	if configured != "" {
+		return configured
+	}
 	host, port := splitHostPort(grpcAddr)
 	if host == "" || host == "0.0.0.0" || host == "::" {
 		host = req.Host

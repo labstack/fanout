@@ -11,8 +11,7 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
-      - "4317:4317"   # OTLP/gRPC ingest, TLS-terminated by Traefik
+      - "443:443"   # web UI + OTLP/gRPC ingest (routed by Host, TLS by Traefik)
     env_file:
       - traefik/.env
     volumes:
@@ -39,7 +38,7 @@ services:
     expose:
       - "80"
 
-  # fanout.labstack.com (web UI) + ingest.fanout.labstack.com:4317 (OTLP).
+  # fanout.labstack.com (web UI) + ingest.fanout.labstack.com (OTLP gRPC, 443).
   # Our own production instance. Secrets (JWT/SMTP/AI) live in fanout/.env
   # (gitignored); the deploy host must have this file in place before `up`.
   fanout:
