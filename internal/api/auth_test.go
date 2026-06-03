@@ -164,48 +164,60 @@ func TestAuthRejectsUnknownAPIKey(t *testing.T) {
 	}
 }
 
-func TestRefreshRotatesAndLogoutRevokesSession(t *testing.T) {
+// Refresh accepts any valid, unexpired refresh token for an active user and
+// rotates it. Matching the monk server, it does NOT evict tokens issued before
+// the latest login — concurrent sessions coexist and a redeploy/second tab does
+// not log anyone out. Logout clears the cookie but does not revoke server-side.
+func TestRefreshAcceptsConcurrentSessionsAndRotates(t *testing.T) {
 	e, users, _, _, _, refreshSecret := newTestAuthServer(t)
 	user, err := users.Create("user@example.com", "", "operator")
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	issuedAt := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
-	if err := users.TouchLoginAt(user.ID, issuedAt); err != nil {
-		t.Fatalf("TouchLoginAt: %v", err)
-	}
-	refreshToken, err := auth.SignRefresh(refreshSecret, user.ID, issuedAt)
+	// An OLD token (issued before a later login bumped LoggedInAt) must still be
+	// accepted — this is exactly the session that the old sessionRevoked check
+	// rejected and that caused the spurious logouts.
+	oldIssuedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	oldToken, err := auth.SignRefresh(refreshSecret, user.ID, oldIssuedAt)
 	if err != nil {
 		t.Fatalf("SignRefresh: %v", err)
 	}
+	// Simulate a more recent login from another device/tab.
+	if err := users.TouchLoginAt(user.ID, time.Now().UTC()); err != nil {
+		t.Fatalf("TouchLoginAt: %v", err)
+	}
 
 	refreshReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	refreshReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: refreshToken})
+	refreshReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: oldToken})
 	refreshRec := httptest.NewRecorder()
 	e.ServeHTTP(refreshRec, refreshReq)
 
 	if refreshRec.Code != http.StatusOK {
-		t.Fatalf("refresh status = %d, want %d", refreshRec.Code, http.StatusOK)
+		t.Fatalf("refresh status = %d, want %d (old token must still be accepted)", refreshRec.Code, http.StatusOK)
 	}
 
+	// Refresh rotates: a fresh refresh cookie is issued, not older than the original.
 	newCookie := refreshRec.Result().Cookies()[0]
 	newClaims, err := auth.VerifyRefresh(refreshSecret, newCookie.Value)
 	if err != nil {
 		t.Fatalf("VerifyRefresh(new cookie): %v", err)
 	}
-	if !newClaims.IssuedAt.Time.After(issuedAt) && !newClaims.IssuedAt.Time.Equal(issuedAt) {
-		t.Fatalf("new refresh token should not be older than original")
+	if newClaims.IssuedAt.Time.Before(oldIssuedAt) {
+		t.Fatalf("rotated refresh token is older than the original")
 	}
 
+	// Reuse of the same valid token is still accepted (no one-time-use / denylist).
 	reuseReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	reuseReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: refreshToken})
+	reuseReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: oldToken})
 	reuseRec := httptest.NewRecorder()
 	e.ServeHTTP(reuseRec, reuseReq)
-	if reuseRec.Code != http.StatusUnauthorized {
-		t.Fatalf("reuse status = %d, want %d", reuseRec.Code, http.StatusUnauthorized)
+	if reuseRec.Code != http.StatusOK {
+		t.Fatalf("reuse status = %d, want %d (stateless refresh has no reuse rejection)", reuseRec.Code, http.StatusOK)
 	}
 
+	// Logout returns OK and clears the cookie (Max-Age<0), but does not revoke
+	// the token server-side — a held copy keeps working until it expires.
 	logoutReq := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	logoutReq.AddCookie(newCookie)
 	logoutRec := httptest.NewRecorder()
@@ -213,13 +225,9 @@ func TestRefreshRotatesAndLogoutRevokesSession(t *testing.T) {
 	if logoutRec.Code != http.StatusOK {
 		t.Fatalf("logout status = %d, want %d", logoutRec.Code, http.StatusOK)
 	}
-
-	postLogoutReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	postLogoutReq.AddCookie(newCookie)
-	postLogoutRec := httptest.NewRecorder()
-	e.ServeHTTP(postLogoutRec, postLogoutReq)
-	if postLogoutRec.Code != http.StatusUnauthorized {
-		t.Fatalf("post-logout refresh status = %d, want %d", postLogoutRec.Code, http.StatusUnauthorized)
+	cleared := logoutRec.Result().Cookies()[0]
+	if cleared.Name != "refresh_token" || cleared.MaxAge >= 0 {
+		t.Fatalf("logout should clear the refresh cookie (got name=%q maxage=%d)", cleared.Name, cleared.MaxAge)
 	}
 }
 

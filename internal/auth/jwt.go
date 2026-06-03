@@ -12,7 +12,8 @@ const (
 	AccessTTL = 15 * time.Minute
 	// RefreshTTL is the lifetime of a refresh token.
 	RefreshTTL = 7 * 24 * time.Hour
-	// TokenTimePrecision keeps JWT iat/exp stable enough for refresh revocation checks.
+	// TokenTimePrecision sets the rounding of JWT iat/exp claims, keeping the
+	// stored last-login timestamp and token timestamps at a consistent precision.
 	TokenTimePrecision = time.Millisecond
 )
 
