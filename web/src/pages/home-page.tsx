@@ -113,10 +113,6 @@ export function HomePage() {
     );
   }
 
-  if (!loading && (!data || data.health.total_services === 0)) {
-    return <EmptyState />;
-  }
-
   if (loading && !data) {
     return (
       <PageContainer>
@@ -151,6 +147,10 @@ export function HomePage() {
   const collapsedUnhealthy = unhealthy.slice(MAX_EXPANDED_CARDS);
 
   const isStale = staleSeconds >= 60;
+  const isEmpty = data.health.total_services === 0;
+  const windowLabel =
+    windowOptions.find((o) => o.value === timeWindow)?.label ??
+    `${timeWindow}m`;
 
   return (
     <PageContainer>
@@ -193,9 +193,13 @@ export function HomePage() {
 
         {fetchError && <ErrorState error={fetchError} />}
 
-        <SummaryHeader health={data.health} />
+        {isEmpty ? (
+          <EmptyState windowLabel={windowLabel} />
+        ) : (
+          <>
+            <SummaryHeader health={data.health} />
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_340px]">
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_340px]">
           {/* Main column — activity, incidents, fleet heatmap */}
           <div className="min-w-0 space-y-4">
             <ActivityChart buckets={activity.buckets} />
@@ -286,7 +290,9 @@ export function HomePage() {
 
             <RecentErrors errors={recentErrors} />
           </div>
-        </div>
+            </div>
+          </>
+        )}
       </div>
     </PageContainer>
   );
