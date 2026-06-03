@@ -223,10 +223,13 @@ func (h *AuthHandler) Refresh(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or inactive")
 	}
 
-	if sessionRevoked(user, claims) {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid refresh token")
-	}
-
+	// A valid, unexpired refresh token for an active user is accepted as-is.
+	// We intentionally do NOT reject tokens issued before the user's most recent
+	// login (the old sessionRevoked/LoggedInAt check) — that enforced a single
+	// active session per user and logged people out on a second tab/device or
+	// after a redeploy. The monk server keeps last-login purely for analytics
+	// and never enforces it; fanout now matches. Concurrent sessions coexist;
+	// the tradeoff is no server-side revocation (see Logout).
 	accessToken, err := h.issueTokens(c, user)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
@@ -243,13 +246,12 @@ func (h *AuthHandler) Me(c *echo.Context) error {
 }
 
 func (h *AuthHandler) Logout(c *echo.Context) error {
-	if cookie, err := c.Cookie("refresh_token"); err == nil && cookie.Value != "" {
-		if claims, err := auth.VerifyRefresh(h.refreshSecret, cookie.Value); err == nil {
-			if err := h.users.TouchLoginAt(claims.Subject, time.Now().UTC().Add(auth.TokenTimePrecision)); err != nil {
-				slog.Warn("auth: logout TouchLoginAt failed — session not revoked", "user_id", claims.Subject, "err", err)
-			}
-		}
-	}
+	// Clearing the cookie is the whole of logout. Refresh tokens are stateless
+	// (signature + expiry only), matching the monk server's model — there is no
+	// server-side revocation list, so a token can't be invalidated before its
+	// TTL. This is deliberate: it's the cost of not evicting concurrent sessions
+	// (see Refresh). A copy of the refresh token kept outside the browser stays
+	// valid until it expires; add a per-session denylist if that's unacceptable.
 	h.clearRefreshCookie(c)
 	return c.JSON(200, map[string]bool{"ok": true})
 }
@@ -302,15 +304,4 @@ func isSecureRequest(c *echo.Context) bool {
 		return true
 	}
 	return strings.EqualFold(c.Request().Header.Get("X-Forwarded-Proto"), "https")
-}
-
-func sessionRevoked(user auth.User, claims *auth.Claims) bool {
-	if claims.IssuedAt == nil || user.LoggedInAt == "" {
-		return false
-	}
-	lastLogin, err := time.Parse(time.RFC3339Nano, user.LoggedInAt)
-	if err != nil {
-		return true
-	}
-	return claims.IssuedAt.Time.Before(lastLogin)
 }
