@@ -32,6 +32,9 @@ type overviewSnapshot struct {
 	TopErrors    map[string][]TopError
 	Activity     *OverviewActivity
 	RecentErrors []RecentError
+	// RecentErrorsFailed marks that the recent-errors scan ran but errored, so
+	// the UI can show "unavailable" instead of a false "no errors" all-clear.
+	RecentErrorsFailed bool
 }
 
 type overviewRow struct {
@@ -76,8 +79,11 @@ func (s *Service) Overview(ctx context.Context, p OverviewParams) (*OverviewResu
 
 // overviewSnapshot queries the rollup for per-service aggregates. If the
 // caller asked for sparklines, it also queries per-minute rollup data; if it
-// asked for incidents, it queries top errors for degraded/unhealthy services.
-// Results are cached by (window, namespace, limit, wantSparkline, wantIncidents).
+// asked for incidents, it queries top errors for degraded/unhealthy services;
+// if it asked for activity, it queries a per-minute global throughput/error
+// aggregate; if it asked for recent_errors, it scans raw spans (gated on a
+// non-zero fleet error rate). Results are cached by
+// (window, namespace, limit, wantSparkline, wantIncidents, wantActivity, wantRecentErrors).
 func (s *Service) overviewSnapshot(ctx context.Context, window int, namespace string, limit int, wantSparkline, wantIncidents, wantActivity, wantRecentErrors bool) (*overviewSnapshot, error) {
 	cacheKey := fmt.Sprintf("overview:%d:%s:%d:%t:%t:%t:%t", window, namespace, limit, wantSparkline, wantIncidents, wantActivity, wantRecentErrors)
 	if v, ok := query.GetCached(cacheKey); ok {
@@ -217,6 +223,7 @@ LIMIT %d;
 			recent, err := s.overviewRecentErrors(ctx, errWindow, namespace)
 			if err != nil {
 				slog.Error("recent errors query failed", "method", "Overview", "err", err)
+				snap.RecentErrorsFailed = true
 			} else {
 				snap.RecentErrors = recent
 			}
@@ -533,6 +540,7 @@ func buildOverviewResult(snap *overviewSnapshot, p OverviewParams, window int, w
 		if out.RecentErrors == nil {
 			out.RecentErrors = []RecentError{}
 		}
+		out.RecentErrorsUnavailable = snap.RecentErrorsFailed
 	}
 
 	return out

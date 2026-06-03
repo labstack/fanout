@@ -45,6 +45,9 @@ type OverviewResult struct {
 	Alerts       []OverviewAlert
 	Activity     *OverviewActivity
 	RecentErrors []RecentError
+	// RecentErrorsUnavailable is true when the recent-errors scan was requested
+	// and ran but errored — lets the UI avoid a false "no errors" all-clear.
+	RecentErrorsUnavailable bool
 }
 
 // OverviewActivity is the global throughput + error-rate timeseries powering

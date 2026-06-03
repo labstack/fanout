@@ -8,9 +8,11 @@ function truncate(msg: string, max = 48): string {
 
 interface Props {
   errors: RecentError[];
+  /** The scan ran but failed — show "unavailable" instead of a false all-clear. */
+  unavailable?: boolean;
 }
 
-export function RecentErrors({ errors }: Props) {
+export function RecentErrors({ errors, unavailable = false }: Props) {
   const navigate = useNavigate();
   const { search } = useLocation();
   const token = new URLSearchParams(search).get("token") ?? undefined;
@@ -23,7 +25,11 @@ export function RecentErrors({ errors }: Props) {
   return (
     <div className="rounded-xl border border-border/60 bg-surface-1/80 p-4">
       <div className="detail-label mb-2">Recent errors · last 5m</div>
-      {errors.length === 0 ? (
+      {unavailable ? (
+        <div className="py-1 text-[12px] text-warning">
+          Recent errors unavailable — retrying
+        </div>
+      ) : errors.length === 0 ? (
         <div className="py-1 text-[12px] text-muted-foreground">
           No errors in last 5m
         </div>

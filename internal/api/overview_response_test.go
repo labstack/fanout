@@ -46,6 +46,7 @@ func TestToOverviewResponse_NilSlicesBecomeEmptyArrays(t *testing.T) {
 		`"incidents":[]`,
 		`"activity":{"buckets":[]}`,
 		`"recent_errors":[]`,
+		`"recent_errors_unavailable":false`,
 		`"alerts":{"status":"disabled","items":[]}`,
 	} {
 		if !strings.Contains(string(b), want) {

@@ -370,16 +370,18 @@ func TestOverview_ActivitySection(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
 			AddRow("svc-a", int64(1000), 10.0, 100.0, 0.001))
-	// Activity aggregate query (bucket, spans, error_rate).
-	mock.ExpectQuery("SELECT").WillReturnRows(
+	// Activity aggregate query (bucket, spans, error_rate). WithArgs pins the
+	// namespace bind order/count — a swapped/dropped placeholder would leak.
+	mock.ExpectQuery("SELECT").WithArgs("prod", "prod").WillReturnRows(
 		sqlmock.NewRows([]string{"bucket", "spans", "error_rate"}).
 			AddRow(time.Now().Add(-2*time.Minute), int64(200), 0.01).
 			AddRow(time.Now().Add(-1*time.Minute), int64(220), 0.02))
 
 	result, err := svc.Overview(context.Background(), OverviewParams{
-		Window:  60,
-		Include: []string{"health", "services", "activity"},
-		Limit:   200,
+		Window:    60,
+		Namespace: "prod",
+		Include:   []string{"health", "services", "activity"},
+		Limit:     200,
 	})
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
@@ -409,16 +411,18 @@ func TestOverview_RecentErrorsSection(t *testing.T) {
 	mock.ExpectQuery("SELECT").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
 			AddRow("svc-a", int64(1000), 10.0, 100.0, 0.08))
-	// Global recent-errors query (service, message, cnt).
-	mock.ExpectQuery("SELECT").WillReturnRows(
+	// Global recent-errors query (service, message, cnt). WithArgs pins the
+	// namespace bind order/count — a swapped/dropped placeholder would leak.
+	mock.ExpectQuery("SELECT").WithArgs("prod", "prod").WillReturnRows(
 		sqlmock.NewRows([]string{"service", "message", "cnt"}).
 			AddRow("svc-a", "connection timeout", int64(120)).
 			AddRow("svc-a", "bad gateway", int64(30)))
 
 	result, err := svc.Overview(context.Background(), OverviewParams{
-		Window:  60,
-		Include: []string{"health", "services", "recent_errors"},
-		Limit:   200,
+		Window:    60,
+		Namespace: "prod",
+		Include:   []string{"health", "services", "recent_errors"},
+		Limit:     200,
 	})
 	if err != nil {
 		t.Fatalf("Overview() error = %v", err)
@@ -461,6 +465,34 @@ func TestOverview_RecentErrorsGatedWhenHealthy(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Errorf("unfulfilled mock expectations (gate should skip spans scan): %v", err)
+	}
+}
+
+// A failed recent-errors scan must surface as RecentErrorsUnavailable (not an
+// empty feed that the UI would render as a false "no errors" all-clear).
+func TestOverview_RecentErrorsUnavailableOnError(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
+			AddRow("svc-a", int64(1000), 10.0, 100.0, 0.08))
+	// Gate opens (errorRate > 0); the spans scan then fails.
+	mock.ExpectQuery("SELECT").WillReturnError(errTest)
+
+	result, err := svc.Overview(context.Background(), OverviewParams{
+		Window:  60,
+		Include: []string{"health", "services", "recent_errors"},
+		Limit:   200,
+	})
+	if err != nil {
+		t.Fatalf("Overview() error = %v (a failed best-effort section must not fail the request)", err)
+	}
+	if !result.RecentErrorsUnavailable {
+		t.Error("RecentErrorsUnavailable = false, want true after scan error")
+	}
+	if len(result.RecentErrors) != 0 {
+		t.Errorf("RecentErrors = %d, want 0 on failure", len(result.RecentErrors))
 	}
 }
 

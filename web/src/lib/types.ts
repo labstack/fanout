@@ -261,6 +261,7 @@ export interface OverviewResponse {
   incidents: OverviewIncident[];
   activity: OverviewActivity;
   recent_errors: RecentError[];
+  recent_errors_unavailable: boolean;
   alerts: OverviewAlerts;
 }
 

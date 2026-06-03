@@ -137,6 +137,7 @@ export function HomePage() {
     services = [],
     alerts = { status: "unavailable" as const, items: [] },
     recent_errors: recentErrors = [],
+    recent_errors_unavailable: recentErrorsUnavailable = false,
     activity = { buckets: [] },
   } = data;
 
@@ -288,7 +289,10 @@ export function HomePage() {
               </div>
             )}
 
-            <RecentErrors errors={recentErrors} />
+            <RecentErrors
+              errors={recentErrors}
+              unavailable={recentErrorsUnavailable}
+            />
           </div>
             </div>
           </>

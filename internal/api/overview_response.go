@@ -31,12 +31,13 @@ type alertsOut struct {
 // fields are guaranteed non-nil; Health is a value (not pointer) because
 // the UI handler always requests it.
 type overviewResponse struct {
-	Health       service.OverviewHealth     `json:"health"`
-	Services     []service.OverviewService  `json:"services"`
-	Incidents    []service.OverviewIncident `json:"incidents"`
-	Activity     service.OverviewActivity   `json:"activity"`
-	RecentErrors []service.RecentError      `json:"recent_errors"`
-	Alerts       alertsOut                  `json:"alerts"`
+	Health                  service.OverviewHealth     `json:"health"`
+	Services                []service.OverviewService  `json:"services"`
+	Incidents               []service.OverviewIncident `json:"incidents"`
+	Activity                service.OverviewActivity   `json:"activity"`
+	RecentErrors            []service.RecentError      `json:"recent_errors"`
+	RecentErrorsUnavailable bool                       `json:"recent_errors_unavailable"`
+	Alerts                  alertsOut                  `json:"alerts"`
 }
 
 // toOverviewResponse maps the internal result into the wire shape, normalizing
@@ -44,10 +45,11 @@ type overviewResponse struct {
 // requests "health", but we don't depend on that here).
 func toOverviewResponse(r *service.OverviewResult, alerts alertsOut) overviewResponse {
 	out := overviewResponse{
-		Services:     r.Services,
-		Incidents:    r.Incidents,
-		RecentErrors: r.RecentErrors,
-		Alerts:       alerts,
+		Services:                r.Services,
+		Incidents:               r.Incidents,
+		RecentErrors:            r.RecentErrors,
+		RecentErrorsUnavailable: r.RecentErrorsUnavailable,
+		Alerts:                  alerts,
 	}
 	if r.Health != nil {
 		out.Health = *r.Health
