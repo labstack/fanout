@@ -360,6 +360,182 @@ func TestOverview_IncidentsWithServicesAndSummary(t *testing.T) {
 	}
 }
 
+// --- Activity & recent-errors sections (Home command center) ---
+
+func TestOverview_ActivitySection(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	// Main rollup query (one service, so we don't early-return).
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
+			AddRow("svc-a", int64(1000), 10.0, 100.0, 0.001))
+	// Activity aggregate query (bucket, spans, error_rate).
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"bucket", "spans", "error_rate"}).
+			AddRow(time.Now().Add(-2*time.Minute), int64(200), 0.01).
+			AddRow(time.Now().Add(-1*time.Minute), int64(220), 0.02))
+
+	result, err := svc.Overview(context.Background(), OverviewParams{
+		Window:  60,
+		Include: []string{"health", "services", "activity"},
+		Limit:   200,
+	})
+	if err != nil {
+		t.Fatalf("Overview() error = %v", err)
+	}
+	if result.Activity == nil {
+		t.Fatal("Activity should be populated when requested")
+	}
+	if len(result.Activity.Buckets) != 2 {
+		t.Fatalf("Activity.Buckets = %d, want 2", len(result.Activity.Buckets))
+	}
+	if result.Activity.Buckets[0].Spans != 200 {
+		t.Errorf("Buckets[0].Spans = %d, want 200", result.Activity.Buckets[0].Spans)
+	}
+	if result.Activity.Buckets[1].ErrorRate != 0.02 {
+		t.Errorf("Buckets[1].ErrorRate = %v, want 0.02", result.Activity.Buckets[1].ErrorRate)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unfulfilled mock expectations: %v", err)
+	}
+}
+
+func TestOverview_RecentErrorsSection(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	// Main rollup query — a service WITH errors so the gate opens.
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
+			AddRow("svc-a", int64(1000), 10.0, 100.0, 0.08))
+	// Global recent-errors query (service, message, cnt).
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "message", "cnt"}).
+			AddRow("svc-a", "connection timeout", int64(120)).
+			AddRow("svc-a", "bad gateway", int64(30)))
+
+	result, err := svc.Overview(context.Background(), OverviewParams{
+		Window:  60,
+		Include: []string{"health", "services", "recent_errors"},
+		Limit:   200,
+	})
+	if err != nil {
+		t.Fatalf("Overview() error = %v", err)
+	}
+	if len(result.RecentErrors) != 2 {
+		t.Fatalf("RecentErrors = %d, want 2", len(result.RecentErrors))
+	}
+	if result.RecentErrors[0].Message != "connection timeout" || result.RecentErrors[0].Count != 120 {
+		t.Errorf("RecentErrors[0] = %+v, want {svc-a, connection timeout, 120}", result.RecentErrors[0])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unfulfilled mock expectations: %v", err)
+	}
+}
+
+// A healthy fleet (no service with errors) must skip the raw-spans scan
+// entirely — only the main rollup query runs.
+func TestOverview_RecentErrorsGatedWhenHealthy(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
+			AddRow("svc-a", int64(1000), 10.0, 100.0, 0.0))
+	// No recent-errors query expected.
+
+	result, err := svc.Overview(context.Background(), OverviewParams{
+		Window:  60,
+		Include: []string{"health", "services", "recent_errors"},
+		Limit:   200,
+	})
+	if err != nil {
+		t.Fatalf("Overview() error = %v", err)
+	}
+	if len(result.RecentErrors) != 0 {
+		t.Errorf("RecentErrors = %d, want 0 (gated on healthy fleet)", len(result.RecentErrors))
+	}
+	if result.RecentErrors == nil {
+		t.Error("RecentErrors should be non-nil empty when requested")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unfulfilled mock expectations (gate should skip spans scan): %v", err)
+	}
+}
+
+// When the new sections aren't requested, no extra queries run and the fields
+// stay nil.
+func TestOverview_ActivityRecentErrorsNotIncluded(t *testing.T) {
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
+			AddRow("svc-a", int64(1000), 10.0, 100.0, 0.08))
+
+	result, err := svc.Overview(context.Background(), OverviewParams{
+		Window:  60,
+		Include: []string{"health", "services"},
+		Limit:   200,
+	})
+	if err != nil {
+		t.Fatalf("Overview() error = %v", err)
+	}
+	if result.Activity != nil {
+		t.Errorf("Activity = %+v, want nil (not requested)", result.Activity)
+	}
+	if result.RecentErrors != nil {
+		t.Errorf("RecentErrors = %+v, want nil (not requested)", result.RecentErrors)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unfulfilled mock expectations: %v", err)
+	}
+}
+
+// A cached snapshot for an MCP-shaped call (no activity) must NOT satisfy a
+// Home-shaped call (with activity) — the cache key distinguishes them.
+func TestOverview_CacheSeparatesNewSections(t *testing.T) {
+	cacheCtx, cancel := context.WithCancel(context.Background())
+	query.InitQueryCache(cacheCtx)
+	t.Cleanup(func() {
+		cancel()
+		query.QueryCache = nil
+	})
+
+	svc, mock := newMockService(t)
+	defer svc.duck.DB.Close()
+
+	// Call 1: compact (no activity) — one query, gets cached.
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
+			AddRow("svc-a", int64(1000), 10.0, 100.0, 0.001))
+	// Call 2: with activity — must miss the cache and run BOTH its queries.
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"service", "span_cnt", "p50_ms", "p95_ms", "error_rate"}).
+			AddRow("svc-a", int64(1000), 10.0, 100.0, 0.001))
+	mock.ExpectQuery("SELECT").WillReturnRows(
+		sqlmock.NewRows([]string{"bucket", "spans", "error_rate"}).
+			AddRow(time.Now(), int64(100), 0.0))
+
+	compact := OverviewParams{Window: 77, Include: []string{"health", "services"}, Limit: 200}
+	withActivity := OverviewParams{Window: 77, Include: []string{"health", "services", "activity"}, Limit: 200}
+
+	if _, err := svc.Overview(context.Background(), compact); err != nil {
+		t.Fatalf("compact Overview() error = %v", err)
+	}
+	result, err := svc.Overview(context.Background(), withActivity)
+	if err != nil {
+		t.Fatalf("activity Overview() error = %v", err)
+	}
+	if result.Activity == nil || len(result.Activity.Buckets) != 1 {
+		t.Fatalf("Activity not populated on cache-separated call: %+v", result.Activity)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("cache key did not separate sections (activity call reused compact cache): %v", err)
+	}
+}
+
 func TestOverview_IncidentsEmptyState(t *testing.T) {
 	svc, mock := newMockService(t)
 	defer svc.duck.DB.Close()

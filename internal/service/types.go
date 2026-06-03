@@ -38,11 +38,36 @@ type TopIssue struct {
 // Sections are populated based on OverviewParams.Include — fields not
 // requested stay zero-valued.
 type OverviewResult struct {
-	Health    *OverviewHealth
-	Services  []OverviewService
-	Issues    []OverviewIssue
-	Incidents []OverviewIncident
-	Alerts    []OverviewAlert
+	Health       *OverviewHealth
+	Services     []OverviewService
+	Issues       []OverviewIssue
+	Incidents    []OverviewIncident
+	Alerts       []OverviewAlert
+	Activity     *OverviewActivity
+	RecentErrors []RecentError
+}
+
+// OverviewActivity is the global throughput + error-rate timeseries powering
+// the Home activity chart. Populated only when the "activity" section is
+// requested via OverviewParams.Include.
+type OverviewActivity struct {
+	Buckets []ActivityBucket `json:"buckets"`
+}
+
+// ActivityBucket is one per-minute point of global activity across all services.
+type ActivityBucket struct {
+	T         string  `json:"t"` // RFC3339 bucket start
+	Spans     int64   `json:"spans"`
+	ErrorRate float64 `json:"error_rate"`
+}
+
+// RecentError is a global top-error entry across all services, for the Home
+// recent-errors feed. Populated only when the "recent_errors" section is
+// requested via OverviewParams.Include.
+type RecentError struct {
+	Service string `json:"service"`
+	Message string `json:"message"`
+	Count   int64  `json:"count"`
 }
 
 // OverviewHealth contains global health metrics.

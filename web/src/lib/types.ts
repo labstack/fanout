@@ -259,7 +259,27 @@ export interface OverviewResponse {
   health: OverviewHealth;
   services: OverviewService[];
   incidents: OverviewIncident[];
+  activity: OverviewActivity;
+  recent_errors: RecentError[];
   alerts: OverviewAlerts;
+}
+
+// Global throughput + error-rate timeseries for the Home activity chart.
+export interface OverviewActivity {
+  buckets: ActivityBucket[];
+}
+
+export interface ActivityBucket {
+  t: string; // RFC3339 bucket start
+  spans: number;
+  error_rate: number;
+}
+
+// Global top-error entry across services, for the Home recent-errors feed.
+export interface RecentError {
+  service: string;
+  message: string;
+  count: number;
 }
 
 export interface OverviewHealth {

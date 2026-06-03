@@ -17,7 +17,7 @@ import (
 type OverviewParams struct {
 	Window    int      // minutes; 0 → 15
 	Namespace string   // empty = all namespaces
-	Include   []string // sections to populate: "health", "services", "issues", "incidents", "sparklines". Empty = all except "incidents" and "sparklines". Specifying "incidents" implies "sparklines".
+	Include   []string // sections to populate: "health", "services", "issues", "incidents", "sparklines", "activity", "recent_errors". Empty = all except "incidents", "sparklines", "activity", "recent_errors". Specifying "incidents" implies "sparklines".
 	SortBy    string   // services sort: "severity" (default), "error_rate", "latency", "throughput"
 	Limit     int      // max services; 0 → 100
 	Tracker   *IncidentTracker
@@ -27,9 +27,11 @@ type OverviewParams struct {
 // the rows and any sparkline / top-error data fetched from the DB. Tracker
 // state is applied on top per call and is not cached.
 type overviewSnapshot struct {
-	Rows       []overviewRow
-	Sparklines map[string][]float64 // key: "<service>_traffic" or "<service>_err"
-	TopErrors  map[string][]TopError
+	Rows         []overviewRow
+	Sparklines   map[string][]float64 // key: "<service>_traffic" or "<service>_err"
+	TopErrors    map[string][]TopError
+	Activity     *OverviewActivity
+	RecentErrors []RecentError
 }
 
 type overviewRow struct {
@@ -61,21 +63,23 @@ func (s *Service) Overview(ctx context.Context, p OverviewParams) (*OverviewResu
 	wantIssues := includeAll || containsStr(p.Include, "issues")
 	wantIncidents := containsStr(p.Include, "incidents")
 	wantSparkline := containsStr(p.Include, "sparklines") || wantIncidents
+	wantActivity := containsStr(p.Include, "activity")
+	wantRecentErrors := containsStr(p.Include, "recent_errors")
 
-	snapshot, err := s.overviewSnapshot(ctx, window, p.Namespace, limit, wantSparkline, wantIncidents)
+	snapshot, err := s.overviewSnapshot(ctx, window, p.Namespace, limit, wantSparkline, wantIncidents, wantActivity, wantRecentErrors)
 	if err != nil {
 		return nil, err
 	}
 
-	return buildOverviewResult(snapshot, p, window, wantHealth, wantServices, wantIssues, wantIncidents, wantSparkline), nil
+	return buildOverviewResult(snapshot, p, window, wantHealth, wantServices, wantIssues, wantIncidents, wantSparkline, wantActivity, wantRecentErrors), nil
 }
 
 // overviewSnapshot queries the rollup for per-service aggregates. If the
 // caller asked for sparklines, it also queries per-minute rollup data; if it
 // asked for incidents, it queries top errors for degraded/unhealthy services.
 // Results are cached by (window, namespace, limit, wantSparkline, wantIncidents).
-func (s *Service) overviewSnapshot(ctx context.Context, window int, namespace string, limit int, wantSparkline, wantIncidents bool) (*overviewSnapshot, error) {
-	cacheKey := fmt.Sprintf("overview:%d:%s:%d:%t:%t", window, namespace, limit, wantSparkline, wantIncidents)
+func (s *Service) overviewSnapshot(ctx context.Context, window int, namespace string, limit int, wantSparkline, wantIncidents, wantActivity, wantRecentErrors bool) (*overviewSnapshot, error) {
+	cacheKey := fmt.Sprintf("overview:%d:%s:%d:%t:%t:%t:%t", window, namespace, limit, wantSparkline, wantIncidents, wantActivity, wantRecentErrors)
 	if v, ok := query.GetCached(cacheKey); ok {
 		if snap, ok := v.(*overviewSnapshot); ok {
 			return snap, nil
@@ -180,6 +184,41 @@ LIMIT %d;
 				slog.Error("top errors query failed", "method", "Overview", "err", err)
 			} else {
 				snap.TopErrors = topErrs
+			}
+		}
+	}
+
+	if wantActivity {
+		act, err := s.overviewActivity(ctx, window, namespace)
+		if err != nil {
+			slog.Error("activity query failed", "method", "Overview", "err", err)
+		} else {
+			snap.Activity = act
+		}
+	}
+
+	if wantRecentErrors {
+		// Gate the only always-on raw-spans scan: skip it on a healthy fleet
+		// so calm-state Home costs nothing. The rollup pass above already
+		// computed per-service error rates.
+		hasErrors := false
+		for _, r := range svcs {
+			if r.errorRate > 0 {
+				hasErrors = true
+				break
+			}
+		}
+		if hasErrors {
+			// Raw spans — cap window at 5 min to avoid full table scans.
+			errWindow := window
+			if errWindow > 5 {
+				errWindow = 5
+			}
+			recent, err := s.overviewRecentErrors(ctx, errWindow, namespace)
+			if err != nil {
+				slog.Error("recent errors query failed", "method", "Overview", "err", err)
+			} else {
+				snap.RecentErrors = recent
 			}
 		}
 	}
@@ -309,7 +348,93 @@ LIMIT 20;
 	return out, nil
 }
 
-func buildOverviewResult(snap *overviewSnapshot, p OverviewParams, window int, wantHealth, wantServices, wantIssues, wantIncidents, wantSparkline bool) *OverviewResult {
+// overviewActivity returns the global per-minute throughput + error-rate
+// timeseries across all services in the window. A cheap aggregate over the
+// already-materialized service_rollup (one row per service per minute).
+func (s *Service) overviewActivity(ctx context.Context, window int, namespace string) (*OverviewActivity, error) {
+	q := fmt.Sprintf(`
+SELECT bucket,
+  SUM(spans)::BIGINT AS spans,
+  CASE WHEN SUM(spans) > 0
+       THEN SUM(spans * error_rate) / SUM(spans) ELSE 0 END AS error_rate
+FROM service_rollup
+WHERE bucket >= now() - INTERVAL %d MINUTE
+  AND (? = '' OR namespace = ?)
+GROUP BY bucket
+ORDER BY bucket;
+`, window)
+
+	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("activity query failed: %w", err)
+	}
+	defer rows.Close()
+
+	out := &OverviewActivity{Buckets: []ActivityBucket{}}
+	for rows.Next() {
+		var bucket time.Time
+		var spans int64
+		var errRate sql.NullFloat64
+		if err := rows.Scan(&bucket, &spans, &errRate); err != nil {
+			slog.Warn("activity scan failed", "err", err)
+			continue
+		}
+		er := 0.0
+		if errRate.Valid {
+			er = errRate.Float64
+		}
+		out.Buckets = append(out.Buckets, ActivityBucket{
+			T:         bucket.UTC().Format(time.RFC3339),
+			Spans:     spans,
+			ErrorRate: er,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("activity rows error", "err", err)
+	}
+	return out, nil
+}
+
+// overviewRecentErrors returns the top global error messages across all
+// services in the (<=5 min) window. A raw spans scan — callers gate it to run
+// only when at least one service has errors, so calm-state Home pays nothing.
+func (s *Service) overviewRecentErrors(ctx context.Context, window int, namespace string) ([]RecentError, error) {
+	q := fmt.Sprintf(`
+SELECT service,
+  COALESCE(NULLIF(status_message, ''), 'error') AS message,
+  COUNT(*) AS cnt
+FROM spans
+WHERE start_time >= now() - INTERVAL %d MINUTE
+  AND (? = '' OR namespace = ?)
+  AND status IN ('STATUS_CODE_ERROR', 'ERROR')
+GROUP BY service, message
+ORDER BY cnt DESC
+LIMIT 8;
+`, window)
+
+	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace)
+	if err != nil {
+		return nil, fmt.Errorf("recent errors query failed: %w", err)
+	}
+	defer rows.Close()
+
+	out := []RecentError{}
+	for rows.Next() {
+		var svc, msg string
+		var cnt int64
+		if err := rows.Scan(&svc, &msg, &cnt); err != nil {
+			slog.Warn("recent errors scan failed", "err", err)
+			continue
+		}
+		out = append(out, RecentError{Service: svc, Message: msg, Count: cnt})
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("recent errors rows error", "err", err)
+	}
+	return out, nil
+}
+
+func buildOverviewResult(snap *overviewSnapshot, p OverviewParams, window int, wantHealth, wantServices, wantIssues, wantIncidents, wantSparkline, wantActivity, wantRecentErrors bool) *OverviewResult {
 	out := &OverviewResult{}
 
 	// Global aggregates.
@@ -394,6 +519,20 @@ func buildOverviewResult(snap *overviewSnapshot, p OverviewParams, window int, w
 
 	if wantIncidents {
 		out.Incidents = buildIncidents(snap, p.Tracker, window, time.Now())
+	}
+
+	if wantActivity {
+		out.Activity = snap.Activity
+		if out.Activity == nil {
+			out.Activity = &OverviewActivity{Buckets: []ActivityBucket{}}
+		}
+	}
+
+	if wantRecentErrors {
+		out.RecentErrors = snap.RecentErrors
+		if out.RecentErrors == nil {
+			out.RecentErrors = []RecentError{}
+		}
 	}
 
 	return out

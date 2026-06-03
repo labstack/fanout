@@ -35,14 +35,46 @@ func TestToOverviewResponse_NilSlicesBecomeEmptyArrays(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
+	if out.Activity.Buckets == nil {
+		t.Error("Activity.Buckets should be non-nil empty slice, got nil")
+	}
+	if out.RecentErrors == nil {
+		t.Error("RecentErrors should be non-nil empty slice, got nil")
+	}
 	for _, want := range []string{
 		`"services":[]`,
 		`"incidents":[]`,
+		`"activity":{"buckets":[]}`,
+		`"recent_errors":[]`,
 		`"alerts":{"status":"disabled","items":[]}`,
 	} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("expected %s in JSON, got: %s", want, b)
 		}
+	}
+}
+
+func TestToOverviewResponse_ActivityAndRecentErrorsCopied(t *testing.T) {
+	in := &service.OverviewResult{
+		Health: &service.OverviewHealth{},
+		Activity: &service.OverviewActivity{Buckets: []service.ActivityBucket{
+			{T: "2026-06-03T00:00:00Z", Spans: 100, ErrorRate: 0.01},
+		}},
+		RecentErrors: []service.RecentError{{Service: "cart", Message: "timeout", Count: 5}},
+	}
+	out := toOverviewResponse(in, alertsOut{Status: alertsStatusOK, Items: []service.OverviewAlert{}})
+	if len(out.Activity.Buckets) != 1 || out.Activity.Buckets[0].Spans != 100 {
+		t.Errorf("Activity not copied, got %+v", out.Activity)
+	}
+	if len(out.RecentErrors) != 1 || out.RecentErrors[0].Service != "cart" {
+		t.Errorf("RecentErrors not copied, got %+v", out.RecentErrors)
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"recent_errors":[{"service":"cart"`) {
+		t.Errorf("expected recent_errors in JSON, got: %s", b)
 	}
 }
 
