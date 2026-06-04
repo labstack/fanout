@@ -5,6 +5,7 @@ import { api } from "@/api/client";
 interface IngestResponse {
   suggested_endpoint: string;
   header_name: string;
+  token_required: boolean;
 }
 
 function CopyButton({ text, label }: { text: string; label?: string }) {
@@ -38,8 +39,7 @@ function CopyButton({ text, label }: { text: string; label?: string }) {
 }
 
 interface Props {
-  /** When set, hints the user that present-but-stale data may be hidden by the
-   *  current window — shown alongside the welcome card. */
+  /** Current window label (e.g. "1h") — shown in the "no data in window" state. */
   windowLabel?: string;
 }
 
@@ -55,6 +55,33 @@ export function EmptyState({ windowLabel }: Props) {
   const endpoint = ingest?.suggested_endpoint ?? "127.0.0.1:4317";
   const headerName = ingest?.header_name ?? "x-fanout-ingest-token";
 
+  // "Setup done" = an ingest token is configured. Assume configured until the
+  // fetch resolves so returning users don't flash the onboarding card.
+  const configured = ingest?.token_required ?? true;
+
+  // Configured instance with no data in the selected window — not a first run.
+  // Show a lightweight "nothing in this range" hint, not the setup card.
+  if (configured) {
+    return (
+      <div className="flex min-h-[50vh] items-center justify-center px-4">
+        <div className="fade-up max-w-md space-y-3 text-center">
+          <div className="mx-auto inline-flex size-10 items-center justify-center rounded-xl border border-border bg-surface-2 text-muted-foreground">
+            <Radio className="size-4" />
+          </div>
+          <h2 className="font-heading text-base font-semibold text-foreground">
+            No telemetry in the last {windowLabel ?? "window"}
+          </h2>
+          <p className="text-sm leading-6 text-muted-foreground">
+            Nothing arrived in this range. Try a wider time range above, or check
+            that your collector is running and pointed at{" "}
+            <span className="font-mono text-foreground/80">{endpoint}</span>.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // First run — no ingest token configured yet. Full onboarding.
   const lines = [
     { k: "OTEL_EXPORTER_OTLP_ENDPOINT", v: endpoint },
     { k: "OTEL_EXPORTER_OTLP_PROTOCOL", v: "grpc" },
@@ -96,14 +123,6 @@ export function EmptyState({ windowLabel }: Props) {
             ))}
           </div>
         </div>
-
-        {windowLabel && (
-          <p className="mx-auto max-w-md text-xs text-muted-foreground">
-            Already sending data? Nothing arrived in the last{" "}
-            <span className="font-mono text-foreground/80">{windowLabel}</span> —
-            try a wider time range above.
-          </p>
-        )}
 
         <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
           <ShieldCheck className="size-3.5 text-healthy" />
