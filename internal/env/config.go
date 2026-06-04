@@ -16,35 +16,36 @@ import (
 type Config struct {
 	HTTPAddr     string `env:"HTTP_ADDR" envDefault:":7520"`
 	OTLPGRPCAddr string `env:"OTLP_GRPC_ADDR" envDefault:"127.0.0.1:4317"`
-	// IngestPublicEndpoint is the externally-reachable OTLP endpoint shown in
-	// the UI's "collector configuration" hint (e.g.
-	// "https://ingest.fanout.labstack.com"). Empty → derive host:port from the
-	// browser request + OTLPGRPCAddr (best-effort, dev-friendly).
-	IngestPublicEndpoint string `env:"INGEST_PUBLIC_ENDPOINT"`
-	DataDir              string `env:"DATA_DIR" envDefault:"./data"`
-	FlushSeconds         int    `env:"FLUSH_SECONDS" envDefault:"15"`
-	FlushBatchSize       int    `env:"FLUSH_BATCH_SIZE" envDefault:"50000"`
-	RollupEvery          int    `env:"ROLLUP_EVERY" envDefault:"60"`
-	MCPEnabled           bool   `env:"MCP_ENABLED" envDefault:"true"`
-	RetentionDays        int    `env:"RETENTION_DAYS" envDefault:"30"`
-	DefaultNS            string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
-	DuckDBMemory         string `env:"DUCKDB_MEMORY" envDefault:"512MB"`
-	AlertEnabled         bool   `env:"ALERT_ENABLED" envDefault:"true"`
-	AlertEvalInterval    int    `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
-	AlertHistoryDays     int    `env:"ALERT_HISTORY_DAYS" envDefault:"7"`
-	AIProvider           string `env:"AI_PROVIDER" envDefault:"anthropic"`
-	AIAPIKey             string `env:"AI_API_KEY"`
-	AIModel              string `env:"AI_MODEL"`
-	AIBaseURL            string `env:"AI_BASE_URL"`
-	SMTPHost             string `env:"SMTP_HOST"`
-	SMTPPort             int    `env:"SMTP_PORT" envDefault:"587"`
-	SMTPUser             string `env:"SMTP_USER"`
-	SMTPPass             string `env:"SMTP_PASS"`
-	SMTPFrom             string `env:"SMTP_FROM"`
-	JWTSecret            string `env:"JWT_SECRET"`
-	JWTRefreshSecret     string `env:"JWT_REFRESH_SECRET"`
-	TLSCertFile          string `env:"TLS_CERT_FILE"`
-	TLSKeyFile           string `env:"TLS_KEY_FILE"`
+	// IngestEndpoint is the OTLP endpoint the UI advertises in its "collector
+	// configuration" hint (e.g. "https://ingest.fanout.labstack.com"). It may be
+	// public or private — it's just the externally-reachable address, distinct
+	// from OTLPGRPCAddr (the bind/listen address). Empty → derive host:port from
+	// the browser request + OTLPGRPCAddr (best-effort, dev-friendly).
+	IngestEndpoint    string `env:"INGEST_ENDPOINT"`
+	DataDir           string `env:"DATA_DIR" envDefault:"./data"`
+	FlushSeconds      int    `env:"FLUSH_SECONDS" envDefault:"15"`
+	FlushBatchSize    int    `env:"FLUSH_BATCH_SIZE" envDefault:"50000"`
+	RollupEvery       int    `env:"ROLLUP_EVERY" envDefault:"60"`
+	MCPEnabled        bool   `env:"MCP_ENABLED" envDefault:"true"`
+	RetentionDays     int    `env:"RETENTION_DAYS" envDefault:"30"`
+	DefaultNS         string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	DuckDBMemory      string `env:"DUCKDB_MEMORY" envDefault:"512MB"`
+	AlertEnabled      bool   `env:"ALERT_ENABLED" envDefault:"true"`
+	AlertEvalInterval int    `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
+	AlertHistoryDays  int    `env:"ALERT_HISTORY_DAYS" envDefault:"7"`
+	AIProvider        string `env:"AI_PROVIDER" envDefault:"anthropic"`
+	AIAPIKey          string `env:"AI_API_KEY"`
+	AIModel           string `env:"AI_MODEL"`
+	AIBaseURL         string `env:"AI_BASE_URL"`
+	SMTPHost          string `env:"SMTP_HOST"`
+	SMTPPort          int    `env:"SMTP_PORT" envDefault:"587"`
+	SMTPUser          string `env:"SMTP_USER"`
+	SMTPPass          string `env:"SMTP_PASS"`
+	SMTPFrom          string `env:"SMTP_FROM"`
+	JWTSecret         string `env:"JWT_SECRET"`
+	JWTRefreshSecret  string `env:"JWT_REFRESH_SECRET"`
+	TLSCertFile       string `env:"TLS_CERT_FILE"`
+	TLSKeyFile        string `env:"TLS_KEY_FILE"`
 }
 
 // Load reads .env non-destructively (does not overwrite pre-set OS env), then
