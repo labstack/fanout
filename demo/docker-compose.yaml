@@ -23,6 +23,9 @@ services:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520
       OTLP_GRPC_ADDR: :4317
+      # Concurrent read queries; write commits stay serialized by the shared
+      # write mutex. This high-ingest instance is the canary for SQLITE_BUSY.
+      DUCKDB_MAX_CONNS: "4"
     expose:
       - "7520"
       - "4317"
