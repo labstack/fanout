@@ -6,12 +6,13 @@ require (
 	ariga.io/atlas v1.2.0
 	github.com/DATA-DOG/go-sqlmock v1.5.2
 	github.com/caarlos0/env/v11 v11.4.0
-	github.com/duckdb/duckdb-go/v2 v2.10501.0
+	github.com/duckdb/duckdb-go/v2 v2.10503.1
 	github.com/expr-lang/expr v1.17.8
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/labstack/echo/v5 v5.1.0
+	github.com/labstack/gommon v0.5.0
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	github.com/prometheus/client_golang v1.23.2
@@ -29,12 +30,12 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bmatcuk/doublestar v1.3.4 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/duckdb/duckdb-go-bindings v0.10501.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/darwin-amd64 v0.10501.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/darwin-arm64 v0.10501.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/linux-amd64 v0.10501.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/linux-arm64 v0.10501.0 // indirect
-	github.com/duckdb/duckdb-go-bindings/lib/windows-amd64 v0.10501.0 // indirect
+	github.com/duckdb/duckdb-go-bindings v0.10503.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/darwin-amd64 v0.10503.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/darwin-arm64 v0.10503.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/linux-amd64 v0.10503.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/linux-arm64 v0.10503.0 // indirect
+	github.com/duckdb/duckdb-go-bindings/lib/windows-amd64 v0.10503.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-openapi/inflect v0.19.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
@@ -48,7 +49,6 @@ require (
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/labstack/gommon v0.5.0 // indirect
 	github.com/mattn/go-isatty v0.0.21 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
