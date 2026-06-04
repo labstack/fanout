@@ -37,7 +37,7 @@ func (h *SettingsHandler) GetIngest(c *echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     current.TokenHash != "",
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestPublicEndpoint),
+		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestEndpoint),
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "x-fanout-ingest-token",
 	})
@@ -57,7 +57,7 @@ func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     true,
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestPublicEndpoint),
+		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestEndpoint),
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "x-fanout-ingest-token",
 		IngestToken:       token,
