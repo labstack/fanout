@@ -40,6 +40,14 @@ func TestValidateSQL(t *testing.T) {
 
 		// Must start with SELECT or WITH
 		{"blocked SHOW", "SHOW TABLES", true},
+
+		// Keywords inside string literals must NOT trip the blocklist
+		{"allowed DELETE in string", "SELECT * FROM logs WHERE body ILIKE '%DELETE button%'", false},
+		{"allowed DROP in string", "SELECT * FROM logs WHERE body = 'failed to DROP cache'", false},
+		{"allowed UPDATE in string", "SELECT count(*) FROM logs WHERE body LIKE '%UPDATE failed%'", false},
+		{"allowed replace() function", "SELECT replace(body, 'x', 'y') FROM logs", false},
+		// But real write keywords outside strings are still blocked
+		{"blocked DELETE statement-ish", "SELECT * FROM logs; DELETE FROM logs", true},
 	}
 
 	for _, tt := range tests {

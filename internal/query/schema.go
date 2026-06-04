@@ -103,12 +103,15 @@ edge_rollup columns:
 1. Prefer spans, logs, and metrics over raw lake.* tables.
 2. Always add a recent time filter for large queries.
 3. Filter by namespace when relevant.
-4. JSON columns are already text; use json_extract_string(attributes_json, '$.key') directly.
+4. JSON columns are flat objects keyed by the literal attribute name. Attribute keys
+   contain dots (e.g. "http.method"), so the key MUST be double-quoted in the path:
+   json_extract_string(attributes_json, '$."http.method"') — or use the attr() macro:
+   attr(attributes_json, 'http.method'). An unquoted '$.http.method' returns NULL.
 5. Use service_rollup and edge_rollup as rebuildable cache tables for dashboards before scanning raw telemetry.
 6. Always include a LIMIT unless aggregation makes it unnecessary.
 
 ## Useful DuckDB Functions
-- json_extract_string(json_text, '$.key')
+- json_extract_string(json_text, '$."dotted.key"')  -- quote keys that contain dots
 - time_bucket(INTERVAL '5 minutes', time)
 - strftime(timestamp, format)
 - approx_quantile(value, 0.95)

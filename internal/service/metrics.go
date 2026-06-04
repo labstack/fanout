@@ -89,7 +89,7 @@ func (s *Service) MetricsList(ctx context.Context, p MetricListParams) (*Metrics
 	}
 	for k, v := range p.Attrs {
 		clauses = append(clauses, "json_extract_string(attributes_json, ?) = ?")
-		args = append(args, "$."+k, v)
+		args = append(args, jsonAttrPath(k), v)
 	}
 
 	where := ""
@@ -236,7 +236,7 @@ func (s *Service) MetricsQuery(ctx context.Context, p MetricQueryParams) (*Metri
 		}
 		for k, v := range p.Attrs {
 			clauses = append(clauses, "json_extract_string(attributes_json, ?) = ?")
-			args = append(args, "$."+k, v)
+			args = append(args, jsonAttrPath(k), v)
 		}
 
 		where := ""

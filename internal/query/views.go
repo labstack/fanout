@@ -216,7 +216,7 @@ FROM lake.metrics;`
 
 const macroAttr = `
 CREATE OR REPLACE MACRO attr(json_col, key) AS
-  json_extract_string(json_col, '$.' || key);`
+  json_extract_string(json_col, '$."' || key || '"');`
 
 func CreateTables(db *sql.DB) error {
 	for _, stmt := range []string{createSpansTable, createLogsTable, createMetricsTable} {
