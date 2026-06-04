@@ -111,7 +111,12 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 			"LOAD ducklake",
 			"LOAD sqlite",
 			fmt.Sprintf("SET temp_directory=%s", sqlLiteral(tempDir)),
-			fmt.Sprintf("ATTACH IF NOT EXISTS %s AS lake (DATA_PATH %s)",
+			// AUTOMATIC_MIGRATION upgrades an older on-disk DuckLake catalog to the
+			// format the loaded extension requires. Without it, a fanout build that
+			// bundles a newer DuckLake (e.g. the DuckDB 1.5.3 bump, which needs
+			// catalog v1.0) fails to attach an existing v0.4 catalog and the server
+			// can't boot. Migration is in place and forward-only.
+			fmt.Sprintf("ATTACH IF NOT EXISTS %s AS lake (DATA_PATH %s, AUTOMATIC_MIGRATION true)",
 				sqlLiteral("ducklake:sqlite:"+metadataPath),
 				sqlLiteral(dataPath)),
 		}
