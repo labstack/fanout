@@ -286,7 +286,7 @@ Gotchas:
 - Use the views (spans, logs, metrics) rather than querying lake.* directly. Views have clean column names.
 - Always add a time filter (WHERE start_time > now() - INTERVAL ...) to avoid full scans.
 - Avoid GROUP BY trace_id, span_id, or attributes_json — these are high-cardinality and will be slow.
-- Use attr(attributes_json, 'key') macro to extract JSON attributes.
+- Use attr(attributes_json, 'key') macro to extract JSON attributes. attributes_json/resource_json are flat objects whose keys keep their literal dotted names, so a raw path must quote the key: json_extract_string(attributes_json, '$."http.method"'). The attr() macro quotes for you.
 
 DuckDB Views (clean column names):
 - spans: trace_id, span_id, service, operation, kind, start_time, end_time, duration_ms, status, status_message, attributes_json, resource_json, events_json, namespace

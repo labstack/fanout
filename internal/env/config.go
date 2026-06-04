@@ -21,15 +21,24 @@ type Config struct {
 	// public or private — it's just the externally-reachable address, distinct
 	// from OTLPGRPCAddr (the bind/listen address). Empty → derive host:port from
 	// the browser request + OTLPGRPCAddr (best-effort, dev-friendly).
-	IngestEndpoint    string `env:"INGEST_ENDPOINT"`
-	DataDir           string `env:"DATA_DIR" envDefault:"./data"`
-	FlushSeconds      int    `env:"FLUSH_SECONDS" envDefault:"15"`
-	FlushBatchSize    int    `env:"FLUSH_BATCH_SIZE" envDefault:"50000"`
-	RollupEvery       int    `env:"ROLLUP_EVERY" envDefault:"60"`
-	MCPEnabled        bool   `env:"MCP_ENABLED" envDefault:"true"`
-	RetentionDays     int    `env:"RETENTION_DAYS" envDefault:"30"`
-	DefaultNS         string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
-	DuckDBMemory      string `env:"DUCKDB_MEMORY" envDefault:"512MB"`
+	IngestEndpoint string `env:"INGEST_ENDPOINT"`
+	DataDir        string `env:"DATA_DIR" envDefault:"./data"`
+	FlushSeconds   int    `env:"FLUSH_SECONDS" envDefault:"15"`
+	FlushBatchSize int    `env:"FLUSH_BATCH_SIZE" envDefault:"50000"`
+	RollupEvery    int    `env:"ROLLUP_EVERY" envDefault:"60"`
+	MCPEnabled     bool   `env:"MCP_ENABLED" envDefault:"true"`
+	RetentionDays  int    `env:"RETENTION_DAYS" envDefault:"30"`
+	DefaultNS      string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	DuckDBMemory   string `env:"DUCKDB_MEMORY" envDefault:"512MB"`
+	// DuckDBMaxConns caps the DuckDB connection pool. The default of 1 serializes
+	// everything through one handle, which is the safe baseline for the DuckLake
+	// SQLite catalog. Raising it lets read queries run concurrently with each
+	// other and with ingest flushes; write commits are still serialized by the
+	// shared write mutex (Duck.WriteLock wired into the writer via UseWriteLock in
+	// cmd/fanout/main.go), so concurrent-commit catalog locking is avoided — the
+	// writer enforces this at startup. Values >1 should be load-tested for your
+	// workload before relying on them.
+	DuckDBMaxConns    int    `env:"DUCKDB_MAX_CONNS" envDefault:"1"`
 	AlertEnabled      bool   `env:"ALERT_ENABLED" envDefault:"true"`
 	AlertEvalInterval int    `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
 	AlertHistoryDays  int    `env:"ALERT_HISTORY_DAYS" envDefault:"7"`

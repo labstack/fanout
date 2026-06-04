@@ -86,8 +86,10 @@ func main() {
 	}
 	defer q.Close()
 
-	// Start Lake Writer
+	// Start Lake Writer. Share the query layer's write lock so appender flushes
+	// serialize with rollup/maintenance commits when the pool holds >1 connection.
 	writer := lake.NewWriter(cfg, q.DB, chSpans, chLogs, chMetrics)
+	writer.UseWriteLock(q.WriteLock())
 	go func() {
 		if err := writer.Run(ctx); err != nil {
 			errCh <- fmt.Errorf("lake writer: %w", err)

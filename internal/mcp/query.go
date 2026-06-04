@@ -146,7 +146,7 @@ func buildSchemaResponse() *SchemaResponse {
 			{
 				Name:        "attr",
 				Signature:   "attr(json_col, key)",
-				Description: "Extract JSON key: json_extract_string(json_col, '$.' || key)",
+				Description: "Extract a flat attribute by literal (dotted) key: equivalent to json_extract_string(json_col, '$.\"' || key || '\"'). Prefer this over a raw '$.key' path, which mis-parses dotted keys.",
 			},
 		},
 		Examples: []QueryExample{
@@ -178,7 +178,7 @@ func (s *Server) query(ctx context.Context, req *mcp.CallToolRequest, in QueryIn
 		}, nil
 	}
 
-	if in.MaxRows == 0 {
+	if in.MaxRows <= 0 {
 		in.MaxRows = 1000
 	}
 	if in.MaxRows > 10000 {

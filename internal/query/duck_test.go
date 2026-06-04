@@ -3,12 +3,9 @@ package query
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/fanout/internal/env"
@@ -122,38 +119,6 @@ func TestErrorRouteRowStruct(t *testing.T) {
 	}
 }
 
-func TestParquetGlob_DayLevel(t *testing.T) {
-	lakeDir, err := os.MkdirTemp("", "fanout-parquetglob-dayLevel-*")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(lakeDir)
-
-	// Create files spanning 2 days
-	now := time.Now()
-	yesterday := now.Add(-24 * time.Hour)
-
-	for _, d := range []time.Time{now, yesterday} {
-		dir := filepath.Join(
-			lakeDir,
-			"spans",
-			"namespace=default",
-			d.Format("year=2006"),
-			d.Format("month=01"),
-			d.Format("day=02"),
-			d.Format("hour=15"),
-		)
-		os.MkdirAll(dir, 0o755)
-		os.WriteFile(filepath.Join(dir, "part-1.parquet"), []byte("test"), 0o644)
-	}
-
-	// Use window > 1440 to trigger day-level glob
-	glob := ParquetGlob(lakeDir, "spans", "default", 2880) // 48 hours
-	if glob == "" {
-		t.Error("ParquetGlob returned empty string")
-	}
-}
-
 func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -213,7 +178,22 @@ func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 	defer d.Close()
 
 	stats := d.DB.Stats()
-	if stats.MaxOpenConnections != duckDBPoolSize {
-		t.Fatalf("MaxOpenConnections = %d, want %d for DuckLake serialization", stats.MaxOpenConnections, duckDBPoolSize)
+	if stats.MaxOpenConnections != 1 {
+		t.Fatalf("MaxOpenConnections = %d, want 1 by default for DuckLake serialization", stats.MaxOpenConnections)
+	}
+}
+
+func TestDuckDBPoolSizeConfigurable(t *testing.T) {
+	if got := duckDBPoolSize(env.Config{}); got != 1 {
+		t.Errorf("default pool size = %d, want 1", got)
+	}
+	if got := duckDBPoolSize(env.Config{DuckDBMaxConns: 0}); got != 1 {
+		t.Errorf("zero pool size = %d, want floored to 1", got)
+	}
+	if got := duckDBPoolSize(env.Config{DuckDBMaxConns: -5}); got != 1 {
+		t.Errorf("negative pool size = %d, want floored to 1", got)
+	}
+	if got := duckDBPoolSize(env.Config{DuckDBMaxConns: 8}); got != 8 {
+		t.Errorf("configured pool size = %d, want 8", got)
 	}
 }

@@ -89,18 +89,41 @@ type MetricRow struct {
 	IngestedAt     int64
 }
 
+// flushQueueDepth bounds how many filled batches can be queued for the flush
+// worker before the receive loop blocks. Blocking here is the intended
+// backpressure: it propagates to the ingest channels rather than letting memory
+// grow unbounded when the database can't keep up.
+const flushQueueDepth = 4
+
 type Writer struct {
-	cfg        env.Config
-	db         *sql.DB
-	chSpans    <-chan SpanRow
-	chLogs     <-chan LogRow
-	chMetrics  <-chan MetricRow
-	mu         sync.Mutex
+	cfg       env.Config
+	db        *sql.DB
+	chSpans   <-chan SpanRow
+	chLogs    <-chan LogRow
+	chMetrics <-chan MetricRow
+	// Buffers are owned exclusively by the Run goroutine — no mutex needed. On
+	// flush they are detached (handed to the flush worker) and replaced.
 	bufSpans   []SpanRow
 	bufLogs    []LogRow
 	bufMetrics []MetricRow
-	lastFlush  time.Time
 	done       chan struct{}
+	// writeMu, when set, serializes appender flushes against the query layer's
+	// rollup/maintenance commits so two connections never commit to the DuckLake
+	// catalog at once on a multi-connection pool. Nil is fine (single-connection
+	// pools already serialize through one handle).
+	writeMu *sync.Mutex
+}
+
+// UseWriteLock shares the query layer's write-serialization mutex with the
+// writer. Call before Run when the DuckDB pool may hold more than one connection.
+func (w *Writer) UseWriteLock(mu *sync.Mutex) { w.writeMu = mu }
+
+// flushBatch is a detached set of rows handed to the flush worker. The worker
+// owns the slices once sent.
+type flushBatch struct {
+	spans   []SpanRow
+	logs    []LogRow
+	metrics []MetricRow
 }
 
 func NewWriter(cfg env.Config, db *sql.DB, spans <-chan SpanRow, logs <-chan LogRow, metricsCh <-chan MetricRow) *Writer {
@@ -110,7 +133,6 @@ func NewWriter(cfg env.Config, db *sql.DB, spans <-chan SpanRow, logs <-chan Log
 		chSpans:   spans,
 		chLogs:    logs,
 		chMetrics: metricsCh,
-		lastFlush: time.Now(),
 		done:      make(chan struct{}),
 	}
 }
@@ -123,12 +145,36 @@ func (w *Writer) Wait() {
 func (w *Writer) Run(ctx context.Context) error {
 	defer close(w.done)
 
+	// A multi-connection pool requires the shared write lock so appender flushes
+	// don't commit concurrently with rollups. Fail loudly rather than silently
+	// running unserialized writes (which surface only as catalog-lock errors
+	// under load). Single-connection pools serialize through the one handle, so a
+	// nil lock is fine there.
+	if w.cfg.DuckDBMaxConns > 1 && w.writeMu == nil {
+		return fmt.Errorf("lake writer: DUCKDB_MAX_CONNS=%d requires a shared write lock; call UseWriteLock before Run", w.cfg.DuckDBMaxConns)
+	}
+
+	// Flushes run on a dedicated worker so a slow database insert never stalls the
+	// receive loop below (which would stop draining the ingest channels and apply
+	// backpressure all the way to the gRPC handlers). Run detaches a filled batch
+	// and hands it off; the worker serializes the actual writes and retries.
+	flushCh := make(chan flushBatch, flushQueueDepth)
+	workerDone := make(chan struct{})
+	go w.flushWorker(flushCh, workerDone)
+
 	ticker := time.NewTicker(time.Duration(w.cfg.FlushSeconds) * time.Second)
 	defer ticker.Stop()
 
 	spansCh := w.chSpans
 	logsCh := w.chLogs
 	metricsCh := w.chMetrics
+
+	finish := func() {
+		w.drainChannels(&spansCh, &logsCh, &metricsCh)
+		w.flush(flushCh)
+		close(flushCh)
+		<-workerDone
+	}
 
 	for {
 		select {
@@ -137,75 +183,146 @@ func (w *Writer) Run(ctx context.Context) error {
 				spansCh = nil
 				continue
 			}
-			w.mu.Lock()
 			w.bufSpans = append(w.bufSpans, r)
 			metrics.RecordIngest("spans", 1)
 			metrics.UpdateQueueDepth("spans", len(spansCh))
-			w.maybeFlush()
-			w.mu.Unlock()
+			if w.shouldFlush() {
+				w.flush(flushCh)
+			}
 		case r, ok := <-logsCh:
 			if !ok {
 				logsCh = nil
 				continue
 			}
-			w.mu.Lock()
 			w.bufLogs = append(w.bufLogs, r)
 			metrics.RecordIngest("logs", 1)
 			metrics.UpdateQueueDepth("logs", len(logsCh))
-			w.maybeFlush()
-			w.mu.Unlock()
+			if w.shouldFlush() {
+				w.flush(flushCh)
+			}
 		case r, ok := <-metricsCh:
 			if !ok {
 				metricsCh = nil
 				continue
 			}
-			w.mu.Lock()
 			w.bufMetrics = append(w.bufMetrics, r)
 			metrics.RecordIngest("metrics", 1)
 			metrics.UpdateQueueDepth("metrics", len(metricsCh))
-			w.maybeFlush()
-			w.mu.Unlock()
+			if w.shouldFlush() {
+				w.flush(flushCh)
+			}
 		case <-ticker.C:
-			w.mu.Lock()
-			w.flushLocked()
-			w.mu.Unlock()
+			w.flush(flushCh)
 		case <-ctx.Done():
-			w.mu.Lock()
-			w.drainChannels(spansCh, logsCh, metricsCh)
-			w.flushLocked()
-			w.mu.Unlock()
+			finish()
 			return nil
 		}
 
 		if spansCh == nil && logsCh == nil && metricsCh == nil {
-			w.mu.Lock()
-			w.flushLocked()
-			w.mu.Unlock()
+			finish()
 			return nil
 		}
 	}
 }
 
-func (w *Writer) drainChannels(spansCh <-chan SpanRow, logsCh <-chan LogRow, metricsCh <-chan MetricRow) {
+// shouldFlush reports whether any buffer has reached the configured batch size.
+func (w *Writer) shouldFlush() bool {
+	total := len(w.bufSpans) + len(w.bufLogs) + len(w.bufMetrics)
+	return len(w.bufSpans) >= w.cfg.FlushBatchSize ||
+		len(w.bufLogs) >= w.cfg.FlushBatchSize ||
+		len(w.bufMetrics) >= w.cfg.FlushBatchSize ||
+		total >= w.cfg.FlushBatchSize
+}
+
+// flush detaches the current buffers and hands them to the flush worker. Sending
+// on flushCh blocks if the worker is behind, which is the intended backpressure.
+func (w *Writer) flush(flushCh chan<- flushBatch) {
+	batch := flushBatch{}
+	if len(w.bufSpans) > 0 {
+		batch.spans = w.bufSpans
+		w.bufSpans = nil
+	}
+	if len(w.bufLogs) > 0 {
+		batch.logs = w.bufLogs
+		w.bufLogs = nil
+	}
+	if len(w.bufMetrics) > 0 {
+		batch.metrics = w.bufMetrics
+		w.bufMetrics = nil
+	}
+	if batch.spans == nil && batch.logs == nil && batch.metrics == nil {
+		return
+	}
+	flushCh <- batch
+}
+
+// flushWorker serializes all database writes. It carries rows that failed to
+// insert forward and prepends them to the next batch so a transient error
+// doesn't drop data (until the retry buffer cap is exceeded — see retainRows).
+func (w *Writer) flushWorker(flushCh <-chan flushBatch, workerDone chan<- struct{}) {
+	defer close(workerDone)
+	var carry flushBatch
+	for batch := range flushCh {
+		carry.spans = append(carry.spans, batch.spans...)
+		carry.logs = append(carry.logs, batch.logs...)
+		carry.metrics = append(carry.metrics, batch.metrics...)
+		carry.spans = writeRows(carry.spans, "spans", w.insertSpans, w.retryCap())
+		carry.logs = writeRows(carry.logs, "logs", w.insertLogs, w.retryCap())
+		carry.metrics = writeRows(carry.metrics, "metrics", w.insertMetrics, w.retryCap())
+	}
+}
+
+// writeRows inserts a batch and returns the rows to carry forward: empty on
+// success, or the retry-capped remainder on failure.
+func writeRows[T any](rows []T, signal string, insert func([]T) error, retryCap int) []T {
+	if len(rows) == 0 {
+		return rows[:0]
+	}
+	start := time.Now()
+	if err := insert(rows); err != nil {
+		slog.Error("write failed", "signal", signal, "err", err)
+		metrics.FlushErrors.WithLabelValues(signal).Inc()
+		return retainRows(rows, retryCap, signal)
+	}
+	metrics.RecordFlush(signal, 0, time.Since(start).Seconds())
+	return rows[:0]
+}
+
+// drainChannels non-blockingly pulls any buffered rows into the local buffers
+// during shutdown. It honors the ok flag so a closed channel is retired (set to
+// nil) instead of spinning on zero values.
+func (w *Writer) drainChannels(spansCh *<-chan SpanRow, logsCh *<-chan LogRow, metricsCh *<-chan MetricRow) {
 	for {
 		drained := false
 
 		select {
-		case r := <-spansCh:
-			w.bufSpans = append(w.bufSpans, r)
-			drained = true
+		case r, ok := <-*spansCh:
+			if ok {
+				w.bufSpans = append(w.bufSpans, r)
+				drained = true
+			} else {
+				*spansCh = nil
+			}
 		default:
 		}
 		select {
-		case r := <-logsCh:
-			w.bufLogs = append(w.bufLogs, r)
-			drained = true
+		case r, ok := <-*logsCh:
+			if ok {
+				w.bufLogs = append(w.bufLogs, r)
+				drained = true
+			} else {
+				*logsCh = nil
+			}
 		default:
 		}
 		select {
-		case r := <-metricsCh:
-			w.bufMetrics = append(w.bufMetrics, r)
-			drained = true
+		case r, ok := <-*metricsCh:
+			if ok {
+				w.bufMetrics = append(w.bufMetrics, r)
+				drained = true
+			} else {
+				*metricsCh = nil
+			}
 		default:
 		}
 
@@ -213,72 +330,6 @@ func (w *Writer) drainChannels(spansCh <-chan SpanRow, logsCh <-chan LogRow, met
 			return
 		}
 	}
-}
-
-func (w *Writer) maybeFlush() {
-	total := len(w.bufSpans) + len(w.bufLogs) + len(w.bufMetrics)
-	if len(w.bufSpans) >= w.cfg.FlushBatchSize ||
-		len(w.bufLogs) >= w.cfg.FlushBatchSize ||
-		len(w.bufMetrics) >= w.cfg.FlushBatchSize ||
-		total >= w.cfg.FlushBatchSize {
-		w.flushLocked()
-		return
-	}
-	if time.Since(w.lastFlush) >= time.Duration(w.cfg.FlushSeconds)*time.Second {
-		w.flushLocked()
-	}
-}
-
-func (w *Writer) flushLocked() {
-	w.flushSpansLocked()
-	w.flushLogsLocked()
-	w.flushMetricsLocked()
-	w.lastFlush = time.Now()
-}
-
-func (w *Writer) flushSpansLocked() {
-	if len(w.bufSpans) == 0 {
-		return
-	}
-	start := time.Now()
-	if err := w.insertSpans(w.bufSpans); err != nil {
-		slog.Error("write spans failed", "err", err)
-		metrics.FlushErrors.WithLabelValues("spans").Inc()
-		w.bufSpans = retainRows(w.bufSpans, w.retryCap(), "spans")
-		return
-	}
-	metrics.RecordFlush("spans", 0, time.Since(start).Seconds())
-	w.bufSpans = w.bufSpans[:0]
-}
-
-func (w *Writer) flushLogsLocked() {
-	if len(w.bufLogs) == 0 {
-		return
-	}
-	start := time.Now()
-	if err := w.insertLogs(w.bufLogs); err != nil {
-		slog.Error("write logs failed", "err", err)
-		metrics.FlushErrors.WithLabelValues("logs").Inc()
-		w.bufLogs = retainRows(w.bufLogs, w.retryCap(), "logs")
-		return
-	}
-	metrics.RecordFlush("logs", 0, time.Since(start).Seconds())
-	w.bufLogs = w.bufLogs[:0]
-}
-
-func (w *Writer) flushMetricsLocked() {
-	if len(w.bufMetrics) == 0 {
-		return
-	}
-	start := time.Now()
-	if err := w.insertMetrics(w.bufMetrics); err != nil {
-		slog.Error("write metrics failed", "err", err)
-		metrics.FlushErrors.WithLabelValues("metrics").Inc()
-		w.bufMetrics = retainRows(w.bufMetrics, w.retryCap(), "metrics")
-		return
-	}
-	metrics.RecordFlush("metrics", 0, time.Since(start).Seconds())
-	w.bufMetrics = w.bufMetrics[:0]
 }
 
 func (w *Writer) retryCap() int {
@@ -292,7 +343,7 @@ func (w *Writer) retryCap() int {
 func (w *Writer) insertSpans(rows []SpanRow) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return withAppender(ctx, w.db, "spans", func(a *duckdb.Appender) error {
+	return withAppender(ctx, w.db, w.writeMu, "spans", func(a *duckdb.Appender) error {
 		for _, row := range rows {
 			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
@@ -332,7 +383,13 @@ func (w *Writer) insertSpans(rows []SpanRow) error {
 				optionalString(row.ExceptionType),
 				optionalString(row.ExceptionMessage),
 			); err != nil {
-				return err
+				// Skip the malformed row rather than aborting the batch: the
+				// appender flushes rows already added on Close, so returning here
+				// would commit the prefix and then re-append it on retry (a
+				// duplicate), and a permanently-bad row would poison every flush.
+				slog.Error("skip malformed span row", "err", err)
+				metrics.RowsDropped.WithLabelValues("spans").Inc()
+				continue
 			}
 		}
 		return nil
@@ -342,7 +399,7 @@ func (w *Writer) insertSpans(rows []SpanRow) error {
 func (w *Writer) insertLogs(rows []LogRow) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return withAppender(ctx, w.db, "logs", func(a *duckdb.Appender) error {
+	return withAppender(ctx, w.db, w.writeMu, "logs", func(a *duckdb.Appender) error {
 		for _, row := range rows {
 			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
@@ -366,7 +423,9 @@ func (w *Writer) insertLogs(rows []LogRow) error {
 				row.IngestedAt,
 				optionalString(row.BodyTemplate),
 			); err != nil {
-				return err
+				slog.Error("skip malformed log row", "err", err)
+				metrics.RowsDropped.WithLabelValues("logs").Inc()
+				continue
 			}
 		}
 		return nil
@@ -376,7 +435,7 @@ func (w *Writer) insertLogs(rows []LogRow) error {
 func (w *Writer) insertMetrics(rows []MetricRow) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return withAppender(ctx, w.db, "metrics", func(a *duckdb.Appender) error {
+	return withAppender(ctx, w.db, w.writeMu, "metrics", func(a *duckdb.Appender) error {
 		for _, row := range rows {
 			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
@@ -401,7 +460,9 @@ func (w *Writer) insertMetrics(rows []MetricRow) error {
 				optionalTime(row.IngestedAt),
 				row.IngestedAt,
 			); err != nil {
-				return err
+				slog.Error("skip malformed metric row", "err", err)
+				metrics.RowsDropped.WithLabelValues("metrics").Inc()
+				continue
 			}
 		}
 		return nil
@@ -443,7 +504,16 @@ func optionalInt64(v int64) any {
 	return v
 }
 
-func withAppender(ctx context.Context, db *sql.DB, table string, fn func(a *duckdb.Appender) error) error {
+func withAppender(ctx context.Context, db *sql.DB, mu *sync.Mutex, table string, fn func(a *duckdb.Appender) error) error {
+	// Acquire the write lock before the connection so lock ordering matches the
+	// query layer (writeMu → conn); the two write paths therefore can't deadlock
+	// against each other. (A writer holding writeMu can still wait on a connection
+	// behind long-running readers on a small pool — that's throughput, not a
+	// deadlock, since readers never take writeMu.)
+	if mu != nil {
+		mu.Lock()
+		defer mu.Unlock()
+	}
 	conn, err := db.Conn(ctx)
 	if err != nil {
 		return err

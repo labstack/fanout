@@ -32,8 +32,9 @@ type RowMap map[string]interface{}
 func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
 	start := time.Now()
 
-	// Set default max rows
-	if req.MaxRows == 0 {
+	// Set default max rows. Guard against non-positive values too: a negative
+	// MaxRows would reach make([]RowMap, 0, req.MaxRows) below and panic.
+	if req.MaxRows <= 0 {
 		req.MaxRows = 1000
 	}
 
@@ -163,17 +164,26 @@ func validateSQL(query string) error {
 		return fmt.Errorf("only SELECT and WITH queries are allowed")
 	}
 
+	// Keyword/function checks run against a copy with string-literal contents
+	// blanked out, so log searches like body ILIKE '%DELETE%' or scalar calls
+	// like replace(body, ...) are not rejected for words that only appear inside
+	// quoted strings.
+	scrubbed := strings.ToUpper(stripStringLiterals(query))
+
 	// Disallowed keywords (write operations, schema changes, etc.)
+	// Note: REPLACE is intentionally omitted — it is a common scalar function
+	// (replace(body, …)) and its only write forms, INSERT OR REPLACE / CREATE OR
+	// REPLACE, are already blocked by INSERT / CREATE.
 	disallowedKeywords := []string{
 		"INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER",
-		"TRUNCATE", "REPLACE", "MERGE", "EXEC", "EXECUTE",
+		"TRUNCATE", "MERGE", "EXEC", "EXECUTE",
 		"GRANT", "REVOKE", "ATTACH", "DETACH",
 	}
 
 	for _, keyword := range disallowedKeywords {
 		// Use word boundaries to avoid false positives (e.g., "DROP" in "DROPDUPLICATE")
 		pattern := regexp.MustCompile(`\b` + keyword + `\b`)
-		if pattern.MatchString(upperQuery) {
+		if pattern.MatchString(scrubbed) {
 			return fmt.Errorf("keyword '%s' is not allowed", keyword)
 		}
 	}
@@ -185,7 +195,7 @@ func validateSQL(query string) error {
 
 	for _, fn := range dangerousFunctions {
 		pattern := regexp.MustCompile(`\b` + fn + `\s*\(`)
-		if pattern.MatchString(upperQuery) {
+		if pattern.MatchString(scrubbed) {
 			return fmt.Errorf("function '%s' is not allowed", fn)
 		}
 	}
@@ -197,7 +207,7 @@ func validateSQL(query string) error {
 	}
 	for _, fn := range fileReaders {
 		pattern := regexp.MustCompile(`\b` + fn + `\s*\(`)
-		if pattern.MatchString(upperQuery) {
+		if pattern.MatchString(scrubbed) {
 			return fmt.Errorf("function '%s' is not allowed", fn)
 		}
 	}
@@ -211,6 +221,33 @@ func validateSQL(query string) error {
 	}
 
 	return nil
+}
+
+// stripStringLiterals replaces the contents of single-quoted string literals
+// (and the quotes) with spaces, preserving everything outside them and the
+// overall length/structure. This lets keyword/function scanners ignore SQL
+// keywords that appear only inside string literals (e.g. body = 'DROP TABLE').
+// Escaped quotes (”) inside a string are handled.
+func stripStringLiterals(query string) string {
+	out := []byte(query)
+	inString := false
+	for i := 0; i < len(query); i++ {
+		if query[i] == '\'' {
+			if inString && i+1 < len(query) && query[i+1] == '\'' {
+				out[i] = ' '
+				out[i+1] = ' '
+				i++
+				continue
+			}
+			out[i] = ' '
+			inString = !inString
+			continue
+		}
+		if inString {
+			out[i] = ' '
+		}
+	}
+	return string(out)
 }
 
 // tokenOutsideStrings returns true if the given token appears outside single-quoted strings.
@@ -304,28 +341,15 @@ func CheckQueryCost(sql string) []string {
 	return warnings
 }
 
-// ensureLimit adds or replaces LIMIT clause
+// ensureLimit caps the result set at maxRows by wrapping the query in an outer
+// SELECT … LIMIT. Wrapping (rather than rewriting a LIMIT in place) avoids
+// clobbering LIMIT clauses inside subqueries or CTEs — a regex replace would
+// rewrite an inner `LIMIT 5000` and silently change query semantics. Any
+// user-supplied outer LIMIT smaller than maxRows still wins, since the outer cap
+// only ever shrinks the result.
 func ensureLimit(query string, maxRows int) string {
-	upperQuery := strings.ToUpper(query)
-
-	// Check if LIMIT already exists
-	limitPattern := regexp.MustCompile(`\bLIMIT\s+(\d+)`)
-	match := limitPattern.FindStringSubmatch(upperQuery)
-
-	if match != nil {
-		// LIMIT exists, check if it's within maxRows
-		var existingLimit int
-		fmt.Sscanf(match[1], "%d", &existingLimit)
-
-		if existingLimit > maxRows {
-			// Replace with maxRows
-			return limitPattern.ReplaceAllString(query, fmt.Sprintf("LIMIT %d", maxRows))
-		}
-		return query
-	}
-
-	// No LIMIT, add it
-	query = strings.TrimSpace(query)
-	query = strings.TrimSuffix(query, ";")
-	return fmt.Sprintf("%s LIMIT %d", query, maxRows)
+	trimmed := strings.TrimSpace(query)
+	trimmed = strings.TrimSuffix(trimmed, ";")
+	trimmed = strings.TrimSpace(trimmed)
+	return fmt.Sprintf("SELECT * FROM (%s) AS _capped LIMIT %d", trimmed, maxRows)
 }

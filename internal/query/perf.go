@@ -2,83 +2,9 @@ package query
 
 import (
 	"context"
-	"fmt"
-	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 )
-
-// ParquetGlob returns a DuckDB-ready file list or glob for parquet files.
-// parquetRoot should point at the DuckLake DATA_PATH directory
-// (for example data/telemetry/parquet). Empty namespace searches all
-// namespaces via wildcard.
-func ParquetGlob(parquetRoot, signal, namespace string, windowMinutes int) string {
-	if namespace == "" {
-		namespace = "*"
-	}
-	now := time.Now().UTC()
-	start := now.Add(-time.Duration(windowMinutes) * time.Minute)
-
-	filesSet := make(map[string]struct{})
-
-	if windowMinutes > 1440 {
-		for t := start.Truncate(24 * time.Hour); !t.After(now.Truncate(24 * time.Hour)); t = t.Add(24 * time.Hour) {
-			dayBase := fmt.Sprintf("%s/main/%s/namespace=%s/year=%d/month=%02d/day=%02d",
-				parquetRoot, signal, namespace, t.Year(), t.Month(), t.Day())
-			matches, _ := filepath.Glob(filepath.Join(dayBase, "hour=*/*.parquet"))
-			for _, m := range matches {
-				filesSet[m] = struct{}{}
-			}
-		}
-	} else {
-		seenDays := make(map[string]struct{})
-		for t := start.Truncate(time.Hour); !t.After(now.Truncate(time.Hour)); t = t.Add(time.Hour) {
-			dayBase := fmt.Sprintf("%s/main/%s/namespace=%s/year=%d/month=%02d/day=%02d",
-				parquetRoot, signal, namespace, t.Year(), t.Month(), t.Day())
-			matches, _ := filepath.Glob(filepath.Join(dayBase, fmt.Sprintf("hour=%02d/*.parquet", t.Hour())))
-			for _, m := range matches {
-				filesSet[m] = struct{}{}
-			}
-			if _, seen := seenDays[dayBase]; !seen {
-				seenDays[dayBase] = struct{}{}
-				// Use Glob for compacted files — os.Stat doesn't expand wildcards
-				compacted, _ := filepath.Glob(filepath.Join(dayBase, "hour=00", "compacted.parquet"))
-				for _, m := range compacted {
-					filesSet[m] = struct{}{}
-				}
-			}
-		}
-	}
-
-	if len(filesSet) == 0 {
-		return sqlQuote(fmt.Sprintf("%s/main/%s/namespace=%s/year=*/month=*/day=*/hour=*/*.parquet",
-			parquetRoot, signal, namespace))
-	}
-
-	files := make([]string, 0, len(filesSet))
-	for f := range filesSet {
-		files = append(files, f)
-	}
-	sort.Strings(files)
-	if len(files) == 1 {
-		return sqlQuote(files[0])
-	}
-	return fmt.Sprintf("[%s]", strings.Join(wrapQuotes(files), ","))
-}
-
-func wrapQuotes(ss []string) []string {
-	out := make([]string, len(ss))
-	for i, s := range ss {
-		out[i] = sqlQuote(s)
-	}
-	return out
-}
-
-func sqlQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
 
 // Cache provides a simple TTL cache for query results
 type Cache struct {

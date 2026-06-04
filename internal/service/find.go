@@ -103,7 +103,7 @@ func (s *Service) findSpans(ctx context.Context, p FindParams) ([]SpanResult, bo
 	// Attribute filters
 	for key, val := range p.Attrs {
 		filters = append(filters, `json_extract_string(attributes_json, ?) = ?`)
-		args = append(args, "$."+key, val)
+		args = append(args, jsonAttrPath(key), val)
 	}
 	if p.Namespace != "" {
 		filters = append(filters, `namespace = ?`)

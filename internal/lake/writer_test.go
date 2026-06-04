@@ -72,6 +72,43 @@ func TestWriterFlushBatchSize(t *testing.T) {
 	requireCount(t, db, `SELECT count(*) FROM lake.spans`, 2)
 }
 
+func TestWriterFlushesRemainderOnShutdown(t *testing.T) {
+	db := openWriterTestDB(t)
+
+	chSpans := make(chan SpanRow, 10)
+	chLogs := make(chan LogRow, 10)
+	chMetrics := make(chan MetricRow, 10)
+
+	w := NewWriter(env.Config{
+		FlushSeconds:   3600, // long, so only shutdown triggers the flush
+		FlushBatchSize: 1000, // large, so the single row never hits a size flush
+		DefaultNS:      "default",
+	}, db, chSpans, chLogs, chMetrics)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = w.Run(ctx) }()
+
+	now := time.Now().UnixNano()
+	chSpans <- SpanRow{
+		Namespace: "ns-a", TraceID: "t", SpanID: "s", ServiceName: "svc", Name: "op",
+		StartUnixNanos: now, EndUnixNanos: now + 1, DurationMs: 1, IngestedAt: now,
+	}
+
+	// Give the row time to be received into the buffer, then shut down. The
+	// remaining buffered row must be drained and flushed before Wait() returns.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	w.Wait()
+
+	var got int
+	if err := db.QueryRow(`SELECT count(*) FROM lake.spans`).Scan(&got); err != nil {
+		t.Fatalf("count query failed: %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("count = %d, want 1 (row should be flushed on shutdown)", got)
+	}
+}
+
 func requireCount(t *testing.T, db *sql.DB, q string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

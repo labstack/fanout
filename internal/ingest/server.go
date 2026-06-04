@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -60,7 +61,7 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 	cfg := ts.srv.cfg
 	now := time.Now().UnixNano()
 	for _, rs := range req.ResourceSpans {
-		resourceJSON := toJSON(rs.Resource)
+		resourceJSON := resourceAttrsJSON(rs.Resource)
 		svc := getServiceName(rs.Resource)
 		namespace := getServiceNamespace(rs.Resource)
 		if namespace == "" {
@@ -79,11 +80,11 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 					Kind:           sp.Kind.String(),
 					StartUnixNanos: int64(sp.StartTimeUnixNano),
 					EndUnixNanos:   int64(sp.EndTimeUnixNano),
-					DurationMs:     float64(sp.EndTimeUnixNano-sp.StartTimeUnixNano) / 1e6,
+					DurationMs:     spanDurationMs(sp.StartTimeUnixNano, sp.EndTimeUnixNano),
 					StatusCode:     sp.Status.Code.String(),
 					StatusMsg:      sp.Status.Message,
 					ResourceJSON:   resourceJSON,
-					AttributesJSON: toJSON(sp.Attributes),
+					AttributesJSON: attrsJSON(sp.Attributes),
 					EventsJSON:     eventsToJSON(sp.Events),
 					LinksJSON:      linksToJSON(sp.Links),
 					TraceState:     sp.TraceState,
@@ -124,7 +125,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 	cfg := ls.srv.cfg
 	now := time.Now().UnixNano()
 	for _, rl := range req.ResourceLogs {
-		resourceJSON := toJSON(rl.Resource)
+		resourceJSON := resourceAttrsJSON(rl.Resource)
 		svc := getServiceName(rl.Resource)
 		namespace := getServiceNamespace(rl.Resource)
 		if namespace == "" {
@@ -148,7 +149,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 					SpanID:            hexOrEmpty(lr.SpanId),
 					Flags:             lr.Flags,
 					ResourceJSON:      resourceJSON,
-					AttributesJSON:    toJSON(lr.Attributes),
+					AttributesJSON:    attrsJSON(lr.Attributes),
 					ScopeName:         scopeName,
 					ScopeVersion:      scopeVer,
 					IngestedAt:        now,
@@ -170,7 +171,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 	cfg := ms.srv.cfg
 	now := time.Now().UnixNano()
 	for _, rm := range req.ResourceMetrics {
-		resourceJSON := toJSON(rm.Resource)
+		resourceJSON := resourceAttrsJSON(rm.Resource)
 		svc := getServiceName(rm.Resource)
 		namespace := getServiceNamespace(rm.Resource)
 		if namespace == "" {
@@ -192,7 +193,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							ServiceName:    svc,
 							Value:          number(dp.Value),
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							AttributesJSON: toJSON(dp.Attributes),
+							AttributesJSON: attrsJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
@@ -220,7 +221,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							ServiceName:    svc,
 							Value:          number(dp.Value),
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							AttributesJSON: toJSON(dp.Attributes),
+							AttributesJSON: attrsJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
@@ -251,7 +252,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							HistCount:      int64(dp.Count),
 							HistSum:        histSum,
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							AttributesJSON: toJSON(dp.Attributes),
+							AttributesJSON: attrsJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
@@ -282,7 +283,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							HistCount:      int64(dp.Count),
 							HistSum:        histSum,
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							AttributesJSON: toJSON(dp.Attributes),
+							AttributesJSON: attrsJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
@@ -308,7 +309,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							HistCountsJSON: toJSON(summaryValues(dp)),
 							HistCount:      int64(dp.Count),
 							HistSum:        dp.Sum,
-							AttributesJSON: toJSON(dp.Attributes),
+							AttributesJSON: attrsJSON(dp.Attributes),
 							ResourceJSON:   resourceJSON,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
@@ -329,6 +330,17 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 
 // ---- helpers ----
 
+// spanDurationMs computes a span's duration in milliseconds, guarding against
+// the unsigned underflow that a malformed span (end before start) would produce:
+// uint64 subtraction wraps to a huge positive value, which would otherwise be
+// stored as a multi-century duration. Such spans are clamped to 0.
+func spanDurationMs(startNano, endNano uint64) float64 {
+	if endNano < startNano {
+		return 0
+	}
+	return float64(endNano-startNano) / 1e6
+}
+
 func toJSON(v interface{}) []byte {
 	if v == nil {
 		return nil
@@ -339,6 +351,87 @@ func toJSON(v interface{}) []byte {
 		return []byte("null")
 	}
 	return b
+}
+
+// attrsJSON flattens an OTLP attribute list into a flat JSON object keyed by the
+// literal (dotted) attribute name, e.g. {"http.method":"GET","http.status_code":200}.
+// This is the shape the attr() macro and json_extract_string(col, '$."key"') paths
+// expect. Marshaling the raw []*KeyValue (as the old toJSON path did) produced an
+// array of {Key,Value} structs that no JSON-path query could read. Returns nil for
+// an empty list so the column stays NULL.
+func attrsJSON(attrs []*common.KeyValue) []byte {
+	if len(attrs) == 0 {
+		return nil
+	}
+	m := make(map[string]any, len(attrs))
+	for _, kv := range attrs {
+		if kv == nil || kv.Key == "" {
+			continue
+		}
+		m[kv.Key] = attrValue(kv.Value)
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		slog.Error("attrs json marshal failed", "err", err)
+		return nil
+	}
+	return b
+}
+
+// resourceAttrsJSON flattens a resource's attributes into the same flat object
+// shape as attrsJSON, so attr(resource_json, 'key') resolves.
+func resourceAttrsJSON(r *resourcepb.Resource) []byte {
+	if r == nil {
+		return nil
+	}
+	return attrsJSON(r.Attributes)
+}
+
+// attrValue converts an OTLP AnyValue into a native Go value for JSON encoding,
+// preserving scalar types (string/int/double/bool) and recursing into arrays and
+// key-value lists.
+func attrValue(v *common.AnyValue) any {
+	if v == nil {
+		return nil
+	}
+	switch x := v.Value.(type) {
+	case *common.AnyValue_StringValue:
+		return x.StringValue
+	case *common.AnyValue_IntValue:
+		return x.IntValue
+	case *common.AnyValue_DoubleValue:
+		return x.DoubleValue
+	case *common.AnyValue_BoolValue:
+		return x.BoolValue
+	case *common.AnyValue_BytesValue:
+		return base64.StdEncoding.EncodeToString(x.BytesValue)
+	case *common.AnyValue_ArrayValue:
+		if x.ArrayValue == nil {
+			return nil
+		}
+		arr := make([]any, 0, len(x.ArrayValue.Values))
+		for _, e := range x.ArrayValue.Values {
+			arr = append(arr, attrValue(e))
+		}
+		return arr
+	case *common.AnyValue_KvlistValue:
+		if x.KvlistValue == nil {
+			return nil
+		}
+		m := make(map[string]any, len(x.KvlistValue.Values))
+		for _, e := range x.KvlistValue.Values {
+			if e == nil || e.Key == "" {
+				continue
+			}
+			m[e.Key] = attrValue(e.Value)
+		}
+		return m
+	default:
+		return nil
+	}
 }
 
 func bodyString(v *common.AnyValue) string {

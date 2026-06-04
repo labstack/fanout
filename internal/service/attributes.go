@@ -263,7 +263,7 @@ WITH sample AS (
   SELECT {col} FROM %s %s AND {col} IS NOT NULL AND {col} != '' LIMIT 1000
 ),
 kv AS (
-  SELECT k AS key, json_extract_string({col}::JSON, '$.' || k) AS val
+  SELECT k AS key, json_extract_string({col}::JSON, '$."' || k || '"') AS val
   FROM sample, UNNEST(json_keys({col}::JSON)) AS t(k)
 )
 SELECT key, COUNT(*) AS count, COUNT(DISTINCT val) AS cardinality

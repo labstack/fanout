@@ -102,7 +102,7 @@ func buildSpanFilters(p SpanParams) (filters []string, args []any) {
 	}
 	for key, val := range p.Attrs {
 		filters = append(filters, `json_extract_string(attributes_json, ?) = ?`)
-		args = append(args, "$."+key, val)
+		args = append(args, jsonAttrPath(key), val)
 	}
 	return filters, args
 }
@@ -142,9 +142,9 @@ func groupOrderByClause(orderBy string) string {
 func groupByExpr(field string) string {
 	switch field {
 	case "http.method":
-		return `COALESCE(http_method, json_extract_string(attributes_json, '$.http.method'))`
+		return `COALESCE(http_method, json_extract_string(attributes_json, '$."http.method"'))`
 	case "http.status_code":
-		return `COALESCE(http_status_code, json_extract_string(attributes_json, '$.http.status_code'))`
+		return `COALESCE(http_status_code, json_extract_string(attributes_json, '$."http.status_code"'))`
 	default:
 		return field
 	}

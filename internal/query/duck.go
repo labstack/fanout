@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
@@ -21,13 +22,37 @@ type Duck struct {
 	DB              *sql.DB
 	cfg             env.Config
 	lastMaintenance time.Time
+	// rollupLagNanos holds the rollup watermark back from the max ingested
+	// timestamp so late/out-of-order commits aren't skipped. Zero disables the
+	// lag (no trailing window).
+	rollupLagNanos int64
+	// writeMu serializes write commits (rollups, maintenance, and ingest appender
+	// flushes) so that, when the pool holds more than one connection, two
+	// connections never commit to the DuckLake SQLite catalog concurrently.
+	writeMu sync.Mutex
 }
 
 const (
-	serviceRollupStateKey = "service_rollup_v2"
-	edgeRollupStateKey    = "edge_rollup_v2"
-	duckDBPoolSize        = 1
+	serviceRollupStateKey  = "service_rollup_v2"
+	serviceRollupRawMaxKey = "service_rollup_v2_rawmax"
+	edgeRollupStateKey     = "edge_rollup_v2"
+	edgeRollupRawMaxKey    = "edge_rollup_v2_rawmax"
+	defaultDuckDBPoolSize  = 1
 )
+
+// WriteLock returns the shared write-serialization mutex. The ingest writer must
+// hold it around appender flushes so writes never overlap rollup/maintenance
+// commits on a multi-connection pool.
+func (d *Duck) WriteLock() *sync.Mutex { return &d.writeMu }
+
+// duckDBPoolSize is the effective connection-pool size: the configured value,
+// floored at 1.
+func duckDBPoolSize(cfg env.Config) int {
+	if cfg.DuckDBMaxConns < 1 {
+		return 1
+	}
+	return cfg.DuckDBMaxConns
+}
 
 func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 	if err := os.MkdirAll(cfg.QueryDir(), 0o755); err != nil {
@@ -57,7 +82,7 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 	}
 	dsn := dbPath + "?threads=4&memory_limit=" + mem
 
-	db, err := openDuckDB(ctx, dsn, tempDir, metadataPath, dataPath)
+	db, err := openDuckDB(ctx, dsn, tempDir, metadataPath, dataPath, duckDBPoolSize(cfg))
 	if err != nil {
 		return nil, fmt.Errorf(
 			"open duckdb catalog: %w (if the local cache catalog is corrupted, remove %s and %s; DuckLake data remains in %s)",
@@ -68,7 +93,7 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 		)
 	}
 
-	d := &Duck{DB: db, cfg: cfg}
+	d := &Duck{DB: db, cfg: cfg, rollupLagNanos: rollupLagFromConfig(cfg)}
 	if err := CreateTables(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -80,7 +105,7 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 	return d, nil
 }
 
-func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string) (*sql.DB, error) {
+func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string, maxConns int) (*sql.DB, error) {
 	connector, err := duckdb.NewConnector(dsn, func(execer driver.ExecerContext) error {
 		boot := []string{
 			"LOAD ducklake",
@@ -102,11 +127,17 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 	}
 
 	db := sql.OpenDB(connector)
-	// DuckLake metadata lives in a SQLite catalog and will lock under concurrent
-	// commits from multiple database/sql connections. Keep one shared connection
-	// so readers, rollups, and appenders serialize through the same handle.
-	db.SetMaxOpenConns(duckDBPoolSize)
-	db.SetMaxIdleConns(duckDBPoolSize)
+	// DuckLake metadata lives in a SQLite catalog that locks under *concurrent*
+	// commits from multiple connections. The default pool of 1 serializes
+	// everything through one handle. Larger pools are allowed (read queries then
+	// run concurrently), but write commits must still be serialized by the
+	// caller's write mutex (Duck.WriteLock) so two connections never commit at
+	// once.
+	if maxConns < 1 {
+		maxConns = 1
+	}
+	db.SetMaxOpenConns(maxConns)
+	db.SetMaxIdleConns(maxConns)
 	return db, nil
 }
 
@@ -172,6 +203,12 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 }
 
 func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
+	// Serialize against other writers (edge rollup, maintenance, ingest flushes).
+	// writeMu is always acquired before a connection to keep lock ordering
+	// consistent and deadlock-free.
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -182,13 +219,36 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-
-	currentWatermark, err := maxServiceRollupWatermark(ctx, tx)
+	lastRawMax, err := rollupWatermark(ctx, tx, serviceRollupRawMaxKey)
 	if err != nil {
 		return 0, err
 	}
-	if currentWatermark <= lastWatermark {
+
+	rawWatermark, err := maxServiceRollupWatermark(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if rawWatermark <= lastWatermark {
 		return 0, tx.Commit()
+	}
+
+	// The affected scan below uses lastWatermark as its lower bound. Choosing the
+	// stored watermark:
+	//   - While the max is advancing (new ingest), hold the stored watermark a
+	//     lag behind the raw max so the next pass reprocesses a trailing window —
+	//     ingested_unix_nano is stamped at ingest but signals flush independently
+	//     and the writer retries, so a row can commit below the current max and
+	//     must still be picked up (delete+insert is idempotent per bucket).
+	//   - Once the max plateaus (no new ingest), we've reprocessed that trailing
+	//     window once already, so advance straight to the raw max and let the next
+	//     cycle short-circuit. Otherwise a burst's trailing window would be
+	//     re-aggregated every cycle forever after ingest goes quiet.
+	newWatermark := rawWatermark
+	if rawWatermark > lastRawMax {
+		newWatermark = rawWatermark - d.rollupSafetyLagNanos()
+		if newWatermark < lastWatermark {
+			newWatermark = lastWatermark
+		}
 	}
 
 	args := []any{lastWatermark, lastWatermark, lastWatermark}
@@ -200,7 +260,10 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 
-	if err := storeRollupWatermark(ctx, tx, serviceRollupStateKey, currentWatermark); err != nil {
+	if err := storeRollupWatermark(ctx, tx, serviceRollupStateKey, newWatermark); err != nil {
+		return 0, err
+	}
+	if err := storeRollupWatermark(ctx, tx, serviceRollupRawMaxKey, rawWatermark); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -214,6 +277,9 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 }
 
 func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
@@ -224,13 +290,28 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-
-	currentWatermark, err := maxEdgeRollupWatermark(ctx, tx)
+	lastRawMax, err := rollupWatermark(ctx, tx, edgeRollupRawMaxKey)
 	if err != nil {
 		return 0, err
 	}
-	if currentWatermark <= lastWatermark {
+
+	rawWatermark, err := maxEdgeRollupWatermark(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if rawWatermark <= lastWatermark {
 		return 0, tx.Commit()
+	}
+	// Same trailing-window logic as the service rollup (see refreshServiceRollup):
+	// a child span can commit after its parent's bucket watermark advanced, or
+	// after a retry, so keep a window open while the max advances, then close it
+	// once ingest plateaus to avoid re-aggregating a burst's tail every cycle.
+	newWatermark := rawWatermark
+	if rawWatermark > lastRawMax {
+		newWatermark = rawWatermark - d.rollupSafetyLagNanos()
+		if newWatermark < lastWatermark {
+			newWatermark = lastWatermark
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, lastWatermark); err != nil {
@@ -241,7 +322,10 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 
-	if err := storeRollupWatermark(ctx, tx, edgeRollupStateKey, currentWatermark); err != nil {
+	if err := storeRollupWatermark(ctx, tx, edgeRollupStateKey, newWatermark); err != nil {
+		return 0, err
+	}
+	if err := storeRollupWatermark(ctx, tx, edgeRollupRawMaxKey, rawWatermark); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -274,6 +358,23 @@ ON CONFLICT (cache_key) DO UPDATE
 SET last_ingested_unix_nano = excluded.last_ingested_unix_nano,
     updated_at = excluded.updated_at`, key, watermark)
 	return err
+}
+
+// rollupSafetyLagNanos is how far behind the max ingested timestamp the rollup
+// watermark is held, covering the worst-case delay between a row being stamped at
+// ingest and committed to the lake (normal flush latency plus a retry or two).
+func (d *Duck) rollupSafetyLagNanos() int64 {
+	return d.rollupLagNanos
+}
+
+// rollupLagFromConfig derives the watermark safety lag from the flush interval:
+// two flush cycles, with a 30s floor.
+func rollupLagFromConfig(cfg env.Config) int64 {
+	lag := 2 * time.Duration(cfg.FlushSeconds) * time.Second
+	if lag < 30*time.Second {
+		lag = 30 * time.Second
+	}
+	return lag.Nanoseconds()
 }
 
 func maxServiceRollupWatermark(ctx context.Context, tx *sql.Tx) (int64, error) {
@@ -473,8 +574,8 @@ producers AS (
     s.namespace,
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
-    json_extract_string(s.attributes_json, '$.messaging.destination.name') AS destination,
-    json_extract_string(s.attributes_json, '$.messaging.system') AS msg_system
+    json_extract_string(s.attributes_json, '$."messaging.destination.name"') AS destination,
+    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
@@ -482,15 +583,15 @@ producers AS (
   WHERE s.kind = 'SPAN_KIND_PRODUCER'
     AND s.service IS NOT NULL
     AND s.service != ''
-    AND json_extract_string(s.attributes_json, '$.messaging.destination.name') IS NOT NULL
+    AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
 ),
 consumers AS (
   SELECT
     s.namespace,
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
-    json_extract_string(s.attributes_json, '$.messaging.destination.name') AS destination,
-    json_extract_string(s.attributes_json, '$.messaging.system') AS msg_system
+    json_extract_string(s.attributes_json, '$."messaging.destination.name"') AS destination,
+    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
@@ -498,7 +599,7 @@ consumers AS (
   WHERE s.kind = 'SPAN_KIND_CONSUMER'
     AND s.service IS NOT NULL
     AND s.service != ''
-    AND json_extract_string(s.attributes_json, '$.messaging.destination.name') IS NOT NULL
+    AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
 ),
 messaging_edges AS (
   SELECT
@@ -539,6 +640,10 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	if !d.lastMaintenance.IsZero() && time.Since(d.lastMaintenance) < time.Hour {
 		return nil
 	}
+
+	// Retention deletes and the checkpoint are writes — serialize them too.
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
 
 	var errs []error
 	if d.cfg.RetentionDays > 0 {
@@ -699,7 +804,7 @@ type ServiceThroughputRow struct {
 func (d *Duck) ServiceThroughput(ctx context.Context, windowMinutes int) ([]ServiceThroughputRow, error) {
 	namespace := d.DefaultNamespace()
 	q := fmt.Sprintf(`
-SELECT service, (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0)))::BIGINT / %d AS spans_per_minute
+SELECT service, ROUND((SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 0)))::DOUBLE / %d)::BIGINT AS spans_per_minute
 FROM service_rollup
 WHERE bucket >= now() - INTERVAL %d MINUTE
   AND (? = '' OR namespace = ?)

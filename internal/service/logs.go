@@ -87,7 +87,7 @@ func buildLogFilters(p LogParams) (filters []string, args []any) {
 	}
 	for key, val := range p.Attrs {
 		filters = append(filters, `json_extract_string(attributes_json, ?) = ?`)
-		args = append(args, "$."+key, val)
+		args = append(args, jsonAttrPath(key), val)
 	}
 	return filters, args
 }
