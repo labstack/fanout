@@ -6,7 +6,9 @@ import { buildChatPath } from "@/lib/chat-route";
 import { EmptyState } from "@/components/home/empty-state";
 import { SummaryHeader } from "@/components/home/summary-header";
 import { IncidentCard } from "@/components/home/incident-card";
-import { ServiceRow } from "@/components/home/service-row";
+import { ActivityChart } from "@/components/home/activity-chart";
+import { ServiceHeatmap } from "@/components/home/service-heatmap";
+import { RecentErrors } from "@/components/home/recent-errors";
 import { PageContainer } from "@/components/layout/page-container";
 import { ErrorState } from "@/components/states/error-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -111,14 +113,10 @@ export function HomePage() {
     );
   }
 
-  if (!loading && (!data || data.health.total_services === 0)) {
-    return <EmptyState />;
-  }
-
   if (loading && !data) {
     return (
       <PageContainer>
-        <div className="mx-auto max-w-5xl space-y-4">
+        <div className="mx-auto max-w-6xl space-y-4">
           <Skeleton className="h-14" />
           <Skeleton className="h-40 rounded-xl" />
           <Skeleton className="h-10" />
@@ -138,25 +136,26 @@ export function HomePage() {
     incidents = [],
     services = [],
     alerts = { status: "unavailable" as const, items: [] },
+    recent_errors: recentErrors = [],
+    recent_errors_unavailable: recentErrorsUnavailable = false,
+    activity = { buckets: [] },
   } = data;
 
   const unhealthy = incidents.filter((i) => i.status === "unhealthy");
   const degraded = incidents.filter((i) => i.status === "degraded");
-  const incidentNames = new Set(incidents.map((i) => i.service));
-  const healthyServices = services.filter(
-    (s) => !incidentNames.has(s.service),
-  );
-  const healthyCount = healthyServices.length;
-  const hasIncidents = incidents.length > 0;
 
   const expandedUnhealthy = unhealthy.slice(0, MAX_EXPANDED_CARDS);
   const collapsedUnhealthy = unhealthy.slice(MAX_EXPANDED_CARDS);
 
   const isStale = staleSeconds >= 60;
+  const isEmpty = data.health.total_services === 0;
+  const windowLabel =
+    windowOptions.find((o) => o.value === timeWindow)?.label ??
+    `${timeWindow}m`;
 
   return (
     <PageContainer>
-      <div className="mx-auto max-w-5xl space-y-4">
+      <div className="mx-auto max-w-6xl space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1 rounded-full border border-border/60 bg-surface-1/70 p-1">
             {windowOptions.map((opt) => (
@@ -195,99 +194,108 @@ export function HomePage() {
 
         {fetchError && <ErrorState error={fetchError} />}
 
-        <SummaryHeader health={data.health} />
+        {isEmpty ? (
+          <EmptyState windowLabel={windowLabel} />
+        ) : (
+          <>
+            <SummaryHeader health={data.health} />
 
-        {expandedUnhealthy.length > 0 && (
-          <div className="space-y-3">
-            {expandedUnhealthy.map((inc, i) => (
-              <IncidentCard
-                key={inc.service}
-                incident={inc}
-                onInvestigate={investigate}
-                primary={i === 0}
-              />
-            ))}
-          </div>
-        )}
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_340px]">
+          {/* Main column — activity, incidents, fleet heatmap */}
+          <div className="min-w-0 space-y-4">
+            <ActivityChart buckets={activity.buckets} />
 
-        {(collapsedUnhealthy.length > 0 || degraded.length > 0) && (
-          <div className="space-y-1.5">
-            {collapsedUnhealthy.length > 0 && (
-              <>
-                <div className="px-1 font-mono text-[11px] text-muted-foreground">
-                  {collapsedUnhealthy.length} more unhealthy
-                </div>
-                {collapsedUnhealthy.map((inc) => (
+            {expandedUnhealthy.length > 0 && (
+              <div className="space-y-3">
+                {expandedUnhealthy.map((inc, i) => (
                   <IncidentCard
                     key={inc.service}
                     incident={inc}
                     onInvestigate={investigate}
-                    compact
+                    primary={i === 0}
                   />
                 ))}
-              </>
+              </div>
             )}
-            {degraded.length > 0 && (
-              <>
-                <div className="px-1 font-mono text-[11px] text-muted-foreground">
-                  {degraded.length} degraded
+
+            {(collapsedUnhealthy.length > 0 || degraded.length > 0) && (
+              <div className="space-y-1.5">
+                {collapsedUnhealthy.length > 0 && (
+                  <>
+                    <div className="px-1 font-mono text-[11px] text-muted-foreground">
+                      {collapsedUnhealthy.length} more unhealthy
+                    </div>
+                    {collapsedUnhealthy.map((inc) => (
+                      <IncidentCard
+                        key={inc.service}
+                        incident={inc}
+                        onInvestigate={investigate}
+                        compact
+                      />
+                    ))}
+                  </>
+                )}
+                {degraded.length > 0 && (
+                  <>
+                    <div className="px-1 font-mono text-[11px] text-muted-foreground">
+                      {degraded.length} degraded
+                    </div>
+                    {degraded.map((inc) => (
+                      <IncidentCard
+                        key={inc.service}
+                        incident={inc}
+                        onInvestigate={investigate}
+                        compact
+                      />
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+
+            <ServiceHeatmap services={services} />
+          </div>
+
+          {/* Right rail — alerts + recent errors (sticky on desktop) */}
+          <div className="space-y-4 lg:sticky lg:top-16 lg:self-start">
+            {alerts.status === "unavailable" && (
+              <div className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-xs">
+                <span className="font-mono text-warning">
+                  <strong>Alerts data temporarily unavailable.</strong> Retrying
+                  automatically.
+                </span>
+              </div>
+            )}
+
+            {alerts.status === "ok" && alerts.items.length > 0 && (
+              <div className="rounded-xl border border-danger/15 bg-danger/5 p-4">
+                <div className="font-mono text-xs text-danger">
+                  {alerts.items.length} alert
+                  {alerts.items.length !== 1 ? "s" : ""} firing
                 </div>
-                {degraded.map((inc) => (
-                  <IncidentCard
-                    key={inc.service}
-                    incident={inc}
-                    onInvestigate={investigate}
-                    compact
-                  />
-                ))}
-              </>
+                <div className="mt-1 space-y-0.5 font-mono text-[11px] text-muted-foreground">
+                  {alerts.items.map((a) => (
+                    <div key={`${a.rule}:${a.service}`} className="truncate">
+                      {a.rule} ({a.service})
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
-          </div>
-        )}
 
-        {healthyCount > 0 && (
-          <div className="rounded-xl border border-border/60 bg-surface-1/80 py-1">
-            <div className="flex items-center gap-4 px-4 py-2">
-              <span className="font-mono text-[11px] text-muted-foreground">
-                {hasIncidents
-                  ? `${healthyCount} service${healthyCount !== 1 ? "s" : ""} healthy`
-                  : `${healthyCount} services`}
-              </span>
-              <span className="ml-auto flex items-center gap-4 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">
-                <span className="w-24 text-right">traffic</span>
-                <span className="w-14 text-right">errors</span>
-                <span className="w-16 text-right">p95</span>
-              </span>
+            {alerts.status === "ok" && alerts.items.length === 0 && (
+              <div className="rounded-xl border border-border/60 bg-surface-1/80 p-4 text-[12px] text-muted-foreground">
+                No alerts firing
+              </div>
+            )}
+
+            <RecentErrors
+              errors={recentErrors}
+              unavailable={recentErrorsUnavailable}
+            />
+          </div>
             </div>
-            {healthyServices.map((svc) => (
-              <ServiceRow key={svc.service} service={svc} />
-            ))}
-          </div>
-        )}
-
-        {alerts.status === "unavailable" && (
-          <div className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-xs">
-            <span className="font-mono text-warning">
-              <strong>Alerts data temporarily unavailable.</strong> Retrying
-              automatically.
-            </span>
-          </div>
-        )}
-
-        {alerts.status === "ok" && alerts.items.length > 0 && (
-          <div className="rounded-lg border border-danger/15 bg-danger/5 px-4 py-3">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="font-mono text-danger">
-                {alerts.items.length} alert
-                {alerts.items.length !== 1 ? "s" : ""} firing
-              </span>
-              <span className="font-mono text-muted-foreground">
-                {alerts.items
-                  .map((a) => `${a.rule} (${a.service})`)
-                  .join(", ")}
-              </span>
-            </div>
-          </div>
+          </>
         )}
       </div>
     </PageContainer>

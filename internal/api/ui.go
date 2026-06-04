@@ -219,7 +219,7 @@ func (h *UIHandler) Overview(c *echo.Context) error {
 	result, err := h.svc.Overview(c.Request().Context(), service.OverviewParams{
 		Window:    window,
 		Namespace: namespace,
-		Include:   []string{"health", "services", "sparklines", "incidents"},
+		Include:   []string{"health", "services", "sparklines", "incidents", "activity", "recent_errors"},
 		Limit:     200,
 		Tracker:   h.incidents,
 	})

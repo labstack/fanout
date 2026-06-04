@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Fanout · Home command-center mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --surface:#0b0e14; --surface-1:#131721; --surface-2:#1a1f2c; --surface-3:#232838;
+    --background:#0b0e14; --foreground:#bfbdb6;
+    --muted:#1a1f2c; --muted-foreground:#737681;
+    --border:#1d2433;
+    --primary:#fafafa;
+    --success:#7fd962; --success-bg:#0a1a05;
+    --warning:#ffb454; --warning-bg:#2a1a00;
+    --danger:#f26d78;  --danger-bg:#1f0810;
+    --healthy:var(--success); --degraded:var(--warning); --unhealthy:var(--danger);
+    --accent:#59c2ff;
+    --radius:0.625rem;
+    --font-heading:"DM Sans",system-ui,sans-serif;
+    --font-mono:"JetBrains Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--background); color:var(--foreground);
+    font-family:var(--font-mono); font-size:13px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  .heading{font-family:var(--font-heading)}
+  .mono{font-family:var(--font-mono)}
+  a{color:inherit;text-decoration:none}
+
+  /* ── top app nav ── */
+  .nav{
+    height:48px; display:flex; align-items:center; justify-content:space-between;
+    padding:0 24px; border-bottom:1px solid color-mix(in srgb,var(--border) 70%, transparent);
+    position:sticky; top:0; z-index:50; background:color-mix(in srgb,var(--surface) 85%, transparent);
+    backdrop-filter:blur(8px);
+  }
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .dot{width:8px;height:8px;border-radius:99px;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+  .brand b{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:#e6e4dd}
+  .navlinks{display:flex;gap:18px;margin-left:14px}
+  .navlinks a{font-size:12px;color:var(--muted-foreground)}
+  .navlinks a.active{color:#e6e4dd}
+
+  /* ── mockup control bar (NOT part of product) ── */
+  .controls{
+    display:flex;flex-wrap:wrap;align-items:center;gap:12px;
+    padding:10px 24px;border-bottom:1px dashed color-mix(in srgb,var(--accent) 35%,transparent);
+    background:color-mix(in srgb,var(--accent) 6%,transparent);
+  }
+  .controls .tag{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  .seg{display:inline-flex;border:1px solid var(--border);border-radius:99px;padding:3px;background:var(--surface-1);gap:2px}
+  .seg button{
+    font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);
+    background:transparent;border:0;padding:4px 11px;border-radius:99px;cursor:pointer;
+  }
+  .seg button.on{background:color-mix(in srgb,var(--primary) 14%,transparent);color:#fff}
+  .controls label{font-size:11px;color:var(--muted-foreground)}
+
+  /* ── page ── */
+  .page{padding:22px 24px 64px}
+  .wrap{margin:0 auto}
+  .v1 .wrap{max-width:1040px}            /* stacked */
+  .v2 .wrap{max-width:1220px}            /* two-column */
+
+  .toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+  .window{display:inline-flex;border:1px solid color-mix(in srgb,var(--border) 60%,transparent);border-radius:99px;padding:4px;background:color-mix(in srgb,var(--surface-1) 70%,transparent);gap:2px}
+  .window button{font-family:var(--font-mono);font-size:11px;color:var(--muted-foreground);background:transparent;border:0;padding:4px 11px;border-radius:99px;cursor:pointer}
+  .window button.on{background:color-mix(in srgb,var(--primary) 14%,transparent);color:#e6e4dd}
+  .fresh{display:flex;align-items:center;gap:6px;font-size:11px;color:color-mix(in srgb,var(--muted-foreground) 80%,transparent)}
+  .fresh .live{width:6px;height:6px;border-radius:99px;background:color-mix(in srgb,var(--success) 70%,transparent)}
+
+  .card{border:1px solid color-mix(in srgb,var(--border) 75%,transparent);background:color-mix(in srgb,var(--surface-1) 80%,transparent);border-radius:var(--radius)}
+  .pad{padding:14px 16px}
+  .sectlabel{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:color-mix(in srgb,var(--muted-foreground) 80%,transparent);margin:0 2px 8px}
+
+  /* ── health strip ── */
+  .strip{display:flex;align-items:center;gap:18px;padding:12px 16px;flex-wrap:wrap}
+  .health-state{display:flex;align-items:center;gap:9px}
+  .glyph{font-size:15px}
+  .health-state b{font-family:var(--font-heading);font-size:14px}
+  .pill-counts{display:flex;gap:6px}
+  .countpill{font-size:11px;padding:2px 8px;border-radius:99px;border:1px solid transparent}
+  .c-ok{color:var(--success);border-color:color-mix(in srgb,var(--success) 30%,transparent);background:color-mix(in srgb,var(--success) 8%,transparent)}
+  .c-deg{color:var(--warning);border-color:color-mix(in srgb,var(--warning) 30%,transparent);background:color-mix(in srgb,var(--warning) 8%,transparent)}
+  .c-bad{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 30%,transparent);background:color-mix(in srgb,var(--danger) 8%,transparent)}
+  .metrics{margin-left:auto;display:flex;gap:22px}
+  .metric{text-align:right}
+  .metric .k{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:color-mix(in srgb,var(--muted-foreground) 75%,transparent)}
+  .metric .val{font-size:14px;color:#e6e4dd}
+  .metric .val small{font-size:10px;color:var(--muted-foreground)}
+  .val.bad{color:var(--danger)} .val.deg{color:var(--warning)}
+
+  /* ── activity chart ── */
+  .activity .head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .legend{display:flex;gap:14px;font-size:11px;color:var(--muted-foreground)}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+  /* ── incident card ── */
+  .incident{border-radius:var(--radius);padding:14px 16px;margin-bottom:10px}
+  .inc-bad{border:1px solid color-mix(in srgb,var(--danger) 28%,transparent);background:color-mix(in srgb,var(--danger) 6%,transparent)}
+  .inc-deg{border:1px solid color-mix(in srgb,var(--warning) 26%,transparent);background:color-mix(in srgb,var(--warning) 5%,transparent)}
+  .inc-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+  .inc-name{display:flex;align-items:center;gap:9px}
+  .inc-name b{font-family:var(--font-heading);font-size:14px;color:#e6e4dd}
+  .badge{font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;padding:3px 9px;border-radius:99px}
+  .b-bad{color:var(--danger);background:color-mix(in srgb,var(--danger) 12%,transparent);border:1px solid color-mix(in srgb,var(--danger) 25%,transparent)}
+  .b-deg{color:var(--warning);background:color-mix(in srgb,var(--warning) 12%,transparent);border:1px solid color-mix(in srgb,var(--warning) 25%,transparent)}
+  .inc-row{display:flex;gap:20px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .kv .k{color:var(--muted-foreground);font-size:11px}
+  .kv .v{font-size:13px}
+  .errs{border-top:1px solid color-mix(in srgb,var(--border) 70%,transparent);padding-top:9px;margin-bottom:11px}
+  .err-line{display:flex;justify-content:space-between;font-size:11.5px;padding:1.5px 0}
+  .err-line .msg{color:color-mix(in srgb,var(--foreground) 80%,transparent)}
+  .err-line .cnt{color:var(--muted-foreground)}
+  .btn{display:inline-flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11.5px;color:#e6e4dd;border:1px solid var(--border);background:var(--surface-2);padding:6px 12px;border-radius:7px;cursor:pointer}
+  .btn:hover{background:var(--surface-3)}
+  .related{font-size:11px;color:var(--muted-foreground)}
+
+  /* ── heatmap ── */
+  .heatgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:7px}
+  .tile{border-radius:8px;border:1px solid var(--border);background:var(--surface-1);padding:9px 10px;cursor:pointer;position:relative;overflow:hidden;transition:transform .08s ease,border-color .08s}
+  .tile:hover{transform:translateY(-1px);border-color:color-mix(in srgb,var(--accent) 40%,transparent)}
+  .tile .tn{display:flex;align-items:center;gap:6px;font-size:11.5px;color:#d8d6cf;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tile .sd{width:6px;height:6px;border-radius:99px;flex:none}
+  .tile .tm{display:flex;align-items:center;justify-content:space-between;margin-top:6px;font-size:10.5px;color:var(--muted-foreground)}
+  .tile .er{font-weight:600}
+  .tile.ok{background:linear-gradient(180deg,color-mix(in srgb,var(--success) 7%,var(--surface-1)),var(--surface-1))}
+  .tile.deg{background:linear-gradient(180deg,color-mix(in srgb,var(--warning) 11%,var(--surface-1)),var(--surface-1));border-color:color-mix(in srgb,var(--warning) 30%,transparent)}
+  .tile.bad{background:linear-gradient(180deg,color-mix(in srgb,var(--danger) 13%,var(--surface-1)),var(--surface-1));border-color:color-mix(in srgb,var(--danger) 32%,transparent)}
+  .sd.ok{background:var(--success)} .sd.deg{background:var(--warning)} .sd.bad{background:var(--danger)}
+  .er.ok{color:var(--muted-foreground)} .er.deg{color:var(--warning)} .er.bad{color:var(--danger)}
+
+  /* ── feeds / movers / topo ── */
+  .feedrow{display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid color-mix(in srgb,var(--border) 45%,transparent);font-size:11.5px}
+  .feedrow:last-child{border-bottom:0}
+  .feedrow .svc{color:var(--accent);font-size:10.5px}
+  .feedrow .msg{color:color-mix(in srgb,var(--foreground) 82%,transparent);flex:1;margin:0 10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .feedrow .cnt{color:var(--muted-foreground)}
+  .mover{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid color-mix(in srgb,var(--border) 45%,transparent);font-size:11.5px}
+  .mover:last-child{border-bottom:0}
+  .mover .nm{flex:1;color:#d8d6cf}
+  .mover .delta{font-weight:600}
+  .up{color:var(--danger)} .down{color:var(--success)}
+  .mover .base{color:var(--muted-foreground);font-size:10.5px}
+
+  /* alerts footer */
+  .alert{border-radius:8px;padding:11px 14px;border:1px solid color-mix(in srgb,var(--danger) 22%,transparent);background:color-mix(in srgb,var(--danger) 6%,transparent);font-size:12px}
+  .alert .bell{color:var(--danger)}
+  .alert .ctx{color:var(--muted-foreground)}
+
+  /* layout grids */
+  .stack{display:flex;flex-direction:column;gap:14px}
+  .triple{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  .cols{display:grid;grid-template-columns:1fr 340px;gap:16px;align-items:start}
+  .rail{display:flex;flex-direction:column;gap:14px;position:sticky;top:70px}
+  @media(max-width:980px){.cols{grid-template-columns:1fr}.triple{grid-template-columns:1fr}.rail{position:static}}
+
+  .empty-wrap{min-height:60vh;display:flex;align-items:center;justify-content:center}
+  .empty{max-width:440px;text-align:center}
+  .empty .logo{width:46px;height:46px;border-radius:12px;border:1px solid var(--border);background:var(--surface-2);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;color:var(--accent)}
+  .empty h1{font-family:var(--font-heading);font-size:20px;margin:0 0 8px}
+  .empty p{color:var(--muted-foreground);margin:0 0 18px}
+  .envbox{text-align:left;border:1px solid var(--border);background:var(--surface-1);border-radius:8px;padding:12px 14px;font-size:11.5px}
+  .envbox .k{color:var(--muted-foreground)} .envbox .v{color:var(--accent)}
+
+  .hide{display:none !important}
+</style>
+</head>
+<body class="v2">
+
+<!-- product nav (for context) -->
+<div class="nav">
+  <div class="brand">
+    <span class="dot"></span><b>Fanout</b>
+    <span class="navlinks"><a class="active">Home</a><a>Services</a><a>Investigate</a><a>Alerts</a></span>
+  </div>
+  <div style="font-size:11px;color:var(--muted-foreground)">demo · v@labstack.com</div>
+</div>
+
+<!-- MOCKUP CONTROLS (not part of the product) -->
+<div class="controls">
+  <span class="tag">Mockup controls</span>
+  <label>Layout</label>
+  <div class="seg" id="layoutSeg">
+    <button data-layout="v2" class="on">Two-column rail</button>
+    <button data-layout="v1">Stacked</button>
+  </div>
+  <label>State</label>
+  <div class="seg" id="stateSeg">
+    <button data-state="incident" class="on">Incident</button>
+    <button data-state="calm">Calm</button>
+    <button data-state="empty">Empty</button>
+  </div>
+  <span style="margin-left:auto;font-size:10.5px;color:var(--muted-foreground)">Toggle to compare — same data, two arrangements.</span>
+</div>
+
+<div class="page">
+  <div class="wrap" id="root"></div>
+</div>
+
+<script>
+/* ───────────────────────── demo data ───────────────────────── */
+const SERVICES = [
+  {n:"frontend",          s:"ok",  tpm:12100, err:0.001, p95:45},
+  {n:"product-catalog",   s:"ok",  tpm:8800,  err:0.000, p95:38},
+  {n:"cart",              s:"ok",  tpm:6400,  err:0.002, p95:61},
+  {n:"currency",          s:"ok",  tpm:5200,  err:0.000, p95:12},
+  {n:"shipping",          s:"ok",  tpm:3100,  err:0.001, p95:88},
+  {n:"recommendation",    s:"ok",  tpm:2900,  err:0.003, p95:120},
+  {n:"ad",                s:"ok",  tpm:2400,  err:0.001, p95:54},
+  {n:"email",             s:"ok",  tpm:1800,  err:0.000, p95:33},
+  {n:"quote",             s:"ok",  tpm:1500,  err:0.002, p95:77},
+  {n:"accounting",        s:"ok",  tpm:980,   err:0.001, p95:41},
+  {n:"payment",           s:"deg", tpm:1820,  err:0.041, p95:1240},
+  {n:"checkout",          s:"bad", tpm:3200,  err:0.123, p95:890},
+];
+const INCIDENTS = [
+  {n:"checkout", s:"bad", err:0.123, p95:890, tpm:3200, started:"~8 min ago",
+   spark:[1,1,1,1,2,4,6,8,9], related:["payment"],
+   errs:[["timeout: upstream connect",1847],["503: service unavailable",412],["context deadline exceeded",96]]},
+  {n:"payment", s:"deg", err:0.041, p95:1240, tpm:1820, started:"~12 min ago",
+   spark:[1,1,2,2,3,4,5,5,6], related:[],
+   errs:[["grpc: deadline exceeded",233],["pool exhausted",58]]},
+];
+const RECENT_ERRORS = [
+  ["checkout","timeout: upstream connect",1847],
+  ["checkout","503: service unavailable",412],
+  ["payment","grpc: deadline exceeded",233],
+  ["payment","connection pool exhausted",58],
+  ["recommendation","model load timeout",19],
+  ["cart","redis: i/o timeout",11],
+];
+const MOVERS = [
+  {n:"checkout", metric:"err", dir:"up", from:0.003, to:0.123},
+  {n:"payment",  metric:"p95", dir:"up", from:210,   to:1240},
+  {n:"recommendation", metric:"p95", dir:"up", from:90, to:120},
+  {n:"currency", metric:"err", dir:"down", from:0.004, to:0.000},
+];
+// topology mini-map nodes (x,y normalized 0..1) + edges
+const TOPO = {
+  nodes:{
+    frontend:{x:.10,y:.5,s:"ok"}, cart:{x:.36,y:.22,s:"ok"},
+    checkout:{x:.40,y:.62,s:"bad"}, payment:{x:.70,y:.45,s:"deg"},
+    shipping:{x:.72,y:.80,s:"ok"}, email:{x:.93,y:.62,s:"ok"},
+  },
+  edges:[["frontend","cart"],["frontend","checkout"],["checkout","payment"],
+         ["checkout","shipping"],["payment","email"],["checkout","cart"]],
+};
+
+/* ───────────────────────── helpers ───────────────────────── */
+const C = {ok:"var(--success)",deg:"var(--warning)",bad:"var(--danger)"};
+const fmtT = v => v>=1000 ? (v/1000).toFixed(1)+"k" : ""+v;
+const pct  = v => (v*100).toFixed(v<0.001?0:1)+"%";
+const ms   = v => v>=1000 ? (v/1000).toFixed(1)+"s" : Math.round(v)+"ms";
+const sumTpm = SERVICES.reduce((a,b)=>a+b.tpm,0);
+
+function sparkline(vals,{w=120,h=30,stroke="var(--accent)",fill=null}={}){
+  const min=Math.min(...vals),max=Math.max(...vals),r=(max-min)||1,p=2;
+  const pts=vals.map((v,i)=>{
+    const x=(i/(vals.length-1))*(w-p*2)+p;
+    const y=h-p-((v-min)/r)*(h-p*2);
+    return [x,y];
+  });
+  const line=pts.map(q=>q.join(",")).join(" ");
+  const area=fill?`<polygon points="${p},${h-p} ${line} ${w-p},${h-p}" fill="${fill}" opacity=".18"/>`:"";
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">${area}<polyline points="${line}" fill="none" stroke="${stroke}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
+
+/* combined throughput area + error overlay line */
+function activityChart(){
+  const w=940,h=120,p=8;
+  const tp=[28,30,31,33,38,42,45,44,46,45,41,40].map(v=>v*1000);
+  const er=[.002,.002,.002,.003,.004,.01,.03,.06,.09,.12,.12,.123];
+  const sc=(arr)=>{const mn=Math.min(...arr),mx=Math.max(...arr),r=(mx-mn)||1;
+    return arr.map((v,i)=>[ (i/(arr.length-1))*(w-p*2)+p , h-p-((v-mn)/r)*(h-p*2) ]);};
+  const tpts=sc(tp), epts=sc(er);
+  const tl=tpts.map(q=>q.join(",")).join(" ");
+  const el=epts.map(q=>q.join(",")).join(" ");
+  return `<svg width="100%" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="display:block">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="var(--accent)" stop-opacity=".28"/>
+      <stop offset="1" stop-color="var(--accent)" stop-opacity="0"/></linearGradient></defs>
+    <polygon points="${p},${h-p} ${tl} ${w-p},${h-p}" fill="url(#g)"/>
+    <polyline points="${tl}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+    <polyline points="${el}" fill="none" stroke="var(--danger)" stroke-width="2" stroke-dasharray="0"/>
+  </svg>`;
+}
+
+function healthStrip(state){
+  const ok=SERVICES.filter(s=>s.s==="ok").length;
+  const deg=SERVICES.filter(s=>s.s==="deg").length;
+  const bad=SERVICES.filter(s=>s.s==="bad").length;
+  let glyph,label,cls;
+  if(state==="incident"){glyph="✖";label=`${bad} unhealthy`;cls="bad";}
+  else if(deg>0&&state!=="calm"){glyph="◐";label=`${deg} degraded`;cls="deg";}
+  else {glyph="●";label="All healthy";cls="ok";}
+  const gErr = state==="calm"?0.002:0.042;
+  const gP95 = state==="calm"?82:290;
+  return `<div class="card strip">
+    <div class="health-state"><span class="glyph" style="color:${C[cls]}">${glyph}</span>
+      <b style="color:${C[cls]}">${state==="calm"?"All healthy":label}</b></div>
+    <div class="pill-counts">
+      <span class="countpill c-ok">${state==="calm"?SERVICES.length:ok} ok</span>
+      ${state!=="calm"?`<span class="countpill c-deg">${deg} deg</span><span class="countpill c-bad">${bad} down</span>`:""}
+    </div>
+    <div class="metrics">
+      <div class="metric"><div class="k">Traffic</div><div class="val">${fmtT(sumTpm)} <small>spans/min</small></div></div>
+      <div class="metric"><div class="k">Errors</div><div class="val ${gErr>0.05?'bad':gErr>0.01?'deg':''}">${pct(gErr)}</div></div>
+      <div class="metric"><div class="k">P95</div><div class="val ${gP95>1000?'bad':gP95>500?'deg':''}">${ms(gP95)}</div></div>
+    </div></div>`;
+}
+
+function activityCard(){
+  return `<div class="card pad activity">
+    <div class="head"><div class="sectlabel" style="margin:0">System activity · last 1h</div>
+    <div class="legend"><span><i style="background:var(--accent)"></i>throughput</span><span><i style="background:var(--danger)"></i>error rate</span></div></div>
+    ${activityChart()}</div>`;
+}
+
+function incidentCard(inc){
+  const cls=inc.s==="bad"?"inc-bad":"inc-deg";
+  const bcls=inc.s==="bad"?"b-bad":"b-deg";
+  const glyph=inc.s==="bad"?"✖":"▲";
+  const col=C[inc.s];
+  return `<div class="incident ${cls}">
+    <div class="inc-top">
+      <div class="inc-name"><span style="color:${col}">${glyph}</span><b>${inc.n}</b></div>
+      <span class="badge ${bcls}">${inc.s==="bad"?"unhealthy":"degraded"}</span>
+    </div>
+    <div class="inc-row">
+      <div class="kv"><span class="k">Error rate </span><span class="v" style="color:${col};font-weight:600">${pct(inc.err)}</span></div>
+      <div class="kv"><span class="k">P95 </span><span class="v">${ms(inc.p95)}</span></div>
+      <div class="kv"><span class="k">Traffic </span><span class="v">${fmtT(inc.tpm)} spans/min</span></div>
+      <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+        ${sparkline(inc.spark,{w:120,h:28,stroke:col,fill:col})}
+        <span class="related">started ${inc.started}</span></div>
+    </div>
+    ${inc.related.length?`<div class="related" style="margin-bottom:8px">Related: ${inc.related.join(", ")} also affected</div>`:""}
+    <div class="errs"><div class="sectlabel" style="margin:0 0 5px">Top errors</div>
+      ${inc.errs.map(e=>`<div class="err-line"><span class="msg">${e[0]}</span><span class="cnt">${e[1].toLocaleString()}</span></div>`).join("")}
+    </div>
+    <button class="btn">🔍 Investigate</button>
+  </div>`;
+}
+
+function heatmap(state){
+  const list = state==="calm"
+    ? SERVICES.map(s=>({...s,s:"ok",err:Math.min(s.err,0.004)}))
+    : [...SERVICES].sort((a,b)=>({bad:0,deg:1,ok:2}[a.s]-{bad:0,deg:1,ok:2}[b.s]));
+  return `<div class="card pad">
+    <div class="sectlabel">Services · ${list.length} · sorted by health</div>
+    <div class="heatgrid">${list.map(s=>{
+      const spark=Array.from({length:8},(_,i)=>s.tpm*(0.85+0.3*Math.sin(i+s.n.length)));
+      return `<div class="tile ${s.s}">
+        <div class="tn"><span class="sd ${s.s}"></span>${s.n}</div>
+        <div style="margin-top:4px;opacity:.6">${sparkline(spark,{w:130,h:18,stroke:C[s.s]})}</div>
+        <div class="tm"><span>${fmtT(s.tpm)}/min</span><span class="er ${s.s}">${pct(s.err)}</span></div>
+      </div>`;}).join("")}</div></div>`;
+}
+
+function recentErrors(state){
+  const rows = state==="calm" ? RECENT_ERRORS.slice(4) : RECENT_ERRORS;
+  return `<div class="card pad"><div class="sectlabel">Recent errors</div>
+    ${rows.length? rows.map(r=>`<div class="feedrow"><span class="svc">${r[0]}</span><span class="msg">${r[1]}</span><span class="cnt">${r[2].toLocaleString()}</span></div>`).join("")
+      : `<div style="color:var(--muted-foreground);font-size:11.5px;padding:6px 0">No errors in window.</div>`}</div>`;
+}
+
+function topMovers(state){
+  const rows = state==="calm" ? MOVERS.filter(m=>m.dir==="down").concat(MOVERS.slice(2,3)) : MOVERS;
+  const fmt = m => m.metric==="err"?pct:ms;
+  return `<div class="card pad"><div class="sectlabel">Top movers · vs 24h baseline</div>
+    ${rows.map(m=>{const f=fmt(m);const arrow=m.dir==="up"?"↑":"↓";
+      return `<div class="mover"><span class="nm">${m.n}</span>
+        <span class="base">${m.metric.toUpperCase()} ${f(m.from)} →</span>
+        <span class="delta ${m.dir}">${f(m.to)} ${arrow}</span></div>`;}).join("")}</div>`;
+}
+
+function topoMap(){
+  const w=312,h=190;
+  const N=TOPO.nodes;
+  const px=k=>N[k].x*(w-40)+20, py=k=>N[k].y*(h-40)+20;
+  const edges=TOPO.edges.map(([a,b])=>`<line x1="${px(a)}" y1="${py(a)}" x2="${px(b)}" y2="${py(b)}" stroke="var(--border)" stroke-width="1.4"/>`).join("");
+  const nodes=Object.entries(N).map(([k,v])=>{
+    const col=C[v.s], r=v.s==="bad"?9:7;
+    const halo=v.s!=="ok"?`<circle cx="${px(k)}" cy="${py(k)}" r="${r+6}" fill="${col}" opacity=".14"/>`:"";
+    return `${halo}<circle cx="${px(k)}" cy="${py(k)}" r="${r}" fill="${col}"/>
+      <text x="${px(k)}" y="${py(k)+r+11}" fill="var(--muted-foreground)" font-size="9" text-anchor="middle" font-family="var(--font-mono)">${k}</text>`;
+  }).join("");
+  return `<div class="card pad"><div class="sectlabel">Topology · blast radius</div>
+    <svg width="100%" viewBox="0 0 ${w} ${h}">${edges}${nodes}</svg></div>`;
+}
+
+function alertsFooter(state){
+  if(state==="calm") return `<div class="card pad" style="font-size:11.5px;color:var(--muted-foreground)">No alerts firing</div>`;
+  return `<div class="alert"><span class="bell">🔔 1 alert firing</span>
+    <span class="ctx"> — checkout_error_rate &gt; 5% (checkout)</span></div>`;
+}
+
+/* ───────────────────────── render ───────────────────────── */
+function toolbar(){
+  const opts=["15m","1h","6h","24h"];
+  return `<div class="toolbar">
+    <div class="window">${opts.map((o,i)=>`<button class="${i===1?'on':''}">${o}</button>`).join("")}</div>
+    <div class="fresh"><span class="live"></span>Live</div></div>`;
+}
+
+function render(){
+  const root=document.getElementById("root");
+  const layout=document.body.classList.contains("v1")?"v1":"v2";
+  const state=window.__state||"incident";
+
+  if(state==="empty"){
+    root.innerHTML=`<div class="empty-wrap"><div class="empty">
+      <div class="logo">◎</div><h1>Welcome to Fanout</h1>
+      <p>Point your OTLP exporter here to get started.</p>
+      <div class="envbox">
+        <div><span class="k">OTEL_EXPORTER_OTLP_ENDPOINT</span><span class="v">=localhost:4317</span></div>
+        <div><span class="k">OTEL_EXPORTER_OTLP_PROTOCOL</span><span class="v">=grpc</span></div>
+      </div></div></div>`;
+    return;
+  }
+
+  const incidents = state==="incident" ? INCIDENTS.map(incidentCard).join("") : "";
+
+  if(layout==="v1"){ /* stacked single column */
+    root.innerHTML = toolbar() + `<div class="stack">
+      ${healthStrip(state)}
+      ${activityCard()}
+      ${incidents}
+      ${heatmap(state)}
+      <div class="triple">${recentErrors(state)}${topMovers(state)}${topoMap()}</div>
+      ${alertsFooter(state)}
+    </div>`;
+  } else { /* two-column rail */
+    root.innerHTML = toolbar() + healthStrip(state) +
+      `<div style="height:14px"></div>
+      <div class="cols">
+        <div class="stack">
+          ${activityCard()}
+          ${incidents}
+          ${heatmap(state)}
+        </div>
+        <div class="rail">
+          ${alertsFooter(state)}
+          ${recentErrors(state)}
+          ${topMovers(state)}
+          ${topoMap()}
+        </div>
+      </div>`;
+  }
+}
+
+/* controls */
+document.getElementById("layoutSeg").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  document.querySelectorAll("#layoutSeg button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");
+  document.body.classList.remove("v1","v2");
+  document.body.classList.add(b.dataset.layout);
+  render();
+});
+document.getElementById("stateSeg").addEventListener("click",e=>{
+  const b=e.target.closest("button"); if(!b)return;
+  document.querySelectorAll("#stateSeg button").forEach(x=>x.classList.remove("on"));
+  b.classList.add("on");
+  window.__state=b.dataset.state;
+  render();
+});
+window.__state="incident";
+render();
+</script>
+</body>
+</html>

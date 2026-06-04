@@ -224,7 +224,7 @@ smoke() {
   echo "  FAIL $url" >&2
   return 1
 }
-# TLS-only handshake check (no HTTP) — for the OTLP gRPC entrypoint on :4317.
+# TLS-only handshake check (no HTTP) — for the OTLP gRPC ingest host on :443.
 # openssl completes the TLS handshake before any gRPC frames are exchanged,
 # so it catches the failure modes that matter (DNS, port reachability,
 # Traefik routing for the SNI host, LE cert issued for the right name).
@@ -254,7 +254,7 @@ failed=0
 smoke https://fanout.run                          || failed=1
 smoke https://demo.fanout.run                     || failed=1
 smoke https://fanout.labstack.com/healthz         || failed=1
-tls_smoke ingest.fanout.labstack.com 4317         || failed=1
+tls_smoke ingest.fanout.labstack.com 443          || failed=1
 if (( failed )); then
   echo "ERROR: one or more smoke checks failed; inspect 'docker compose logs -f traefik' on the host." >&2
   exit 1
@@ -265,7 +265,7 @@ echo "Deployed:"
 echo "  https://fanout.run"
 echo "  https://demo.fanout.run"
 echo "  https://fanout.labstack.com"
-echo "  ingest.fanout.labstack.com:4317  (OTLP gRPC, TLS)"
+echo "  https://ingest.fanout.labstack.com  (OTLP gRPC, TLS on 443)"
 echo ""
 echo "Status: ssh $SERVER 'cd $REMOTE_DIR && docker compose ps'"
 echo "Logs:   ssh $SERVER 'cd $REMOTE_DIR && docker compose logs -f traefik'"

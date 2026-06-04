@@ -11,8 +11,7 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"
-      - "4317:4317"   # OTLP/gRPC ingest, TLS-terminated by Traefik
+      - "443:443"   # web UI + OTLP/gRPC ingest (routed by Host, TLS by Traefik)
     env_file:
       - traefik/.env
     volumes:
@@ -39,7 +38,7 @@ services:
     expose:
       - "80"
 
-  # fanout.labstack.com (web UI) + ingest.fanout.labstack.com:4317 (OTLP).
+  # fanout.labstack.com (web UI) + ingest.fanout.labstack.com (OTLP gRPC, 443).
   # Our own production instance. Secrets (JWT/SMTP/AI) live in fanout/.env
   # (gitignored); the deploy host must have this file in place before `up`.
   fanout:
@@ -52,6 +51,9 @@ services:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520
       OTLP_GRPC_ADDR: :4317
+      # Public OTLP endpoint shown in the UI's collector-config hint. Behind
+      # Traefik the browser host differs from the OTLP host, so set it explicitly.
+      INGEST_PUBLIC_ENDPOINT: https://ingest.fanout.labstack.com
     expose:
       - "7520"
     volumes:

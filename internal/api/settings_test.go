@@ -152,3 +152,42 @@ func createAdminForRuntimeConfigTest(t *testing.T, users *auth.UserStore, secret
 	}
 	return user, token
 }
+
+func TestSuggestedIngestEndpoint(t *testing.T) {
+	tests := []struct {
+		name       string
+		grpcAddr   string
+		configured string
+		reqHost    string
+		want       string
+	}{
+		{
+			name:       "configured wins verbatim",
+			grpcAddr:   ":4317",
+			configured: "https://ingest.fanout.labstack.com",
+			reqHost:    "fanout.labstack.com",
+			want:       "https://ingest.fanout.labstack.com",
+		},
+		{
+			name:     "wildcard addr derives host from request",
+			grpcAddr: ":4317",
+			reqHost:  "fanout.labstack.com:443",
+			want:     "fanout.labstack.com:4317",
+		},
+		{
+			name:     "explicit grpc host is used as-is",
+			grpcAddr: "1.2.3.4:5317",
+			reqHost:  "ignored.example.com",
+			want:     "1.2.3.4:5317",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/api/settings/ingest", nil)
+			req.Host = tc.reqHost
+			if got := suggestedIngestEndpoint(req, tc.grpcAddr, tc.configured); got != tc.want {
+				t.Errorf("suggestedIngestEndpoint() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
