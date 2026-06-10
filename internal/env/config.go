@@ -30,14 +30,15 @@ type Config struct {
 	RetentionDays  int    `env:"RETENTION_DAYS" envDefault:"30"`
 	DefaultNS      string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
 	DuckDBMemory   string `env:"DUCKDB_MEMORY" envDefault:"512MB"`
-	// DuckDBMaxConns caps the DuckDB connection pool. The default of 1 serializes
-	// everything through one handle, which is the safe baseline for the DuckLake
-	// SQLite catalog. Raising it lets read queries run concurrently with each
-	// other and with ingest flushes; write commits are still serialized by the
-	// shared write mutex (Duck.WriteLock wired into the writer via UseWriteLock in
-	// cmd/fanout/main.go), so concurrent-commit catalog locking is avoided — the
-	// writer enforces this at startup. Values >1 should be load-tested for your
-	// workload before relying on them.
+	// DuckDBMaxConns caps the DuckDB connection pool. A value of 1 serializes
+	// everything through one handle. Raising it lets read queries run concurrently
+	// with each other and with ingest flushes. Two things make >1 safe: the
+	// DuckLake SQLite catalog is opened in WAL mode (enableCatalogWAL), so readers
+	// don't collide with the single writer and a crashed writer can't leave the
+	// catalog permanently locked; and write commits are serialized by the shared
+	// write mutex (Duck.WriteLock, wired into the writer via UseWriteLock in
+	// cmd/fanout/main.go, enforced at startup). Without the WAL mode, pool >1 fails
+	// with "database is locked".
 	DuckDBMaxConns    int    `env:"DUCKDB_MAX_CONNS" envDefault:"1"`
 	AlertEnabled      bool   `env:"ALERT_ENABLED" envDefault:"true"`
 	AlertEvalInterval int    `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
+	_ "modernc.org/sqlite" // SQLite driver used to put the DuckLake catalog in WAL mode
 
 	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/metrics"
@@ -73,6 +74,14 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 		return nil, fmt.Errorf("create telemetry parquet dir: %w", err)
 	}
 
+	// Put the DuckLake SQLite catalog in WAL mode before DuckDB attaches it, so
+	// read queries run concurrently with the single writer instead of failing
+	// with "database is locked" (rollback-journal mode), and a crashed writer
+	// can't leave the catalog permanently locked. Must run before openDuckDB.
+	if err := enableCatalogWAL(metadataPath); err != nil {
+		return nil, fmt.Errorf("enable WAL on DuckLake catalog: %w", err)
+	}
+
 	mem := cfg.DuckDBMemory
 	if mem == "" {
 		mem = "512MB"
@@ -106,24 +115,37 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 }
 
 func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string, maxConns int) (*sql.DB, error) {
+	// AUTOMATIC_MIGRATION upgrades an older on-disk DuckLake catalog to the format
+	// the loaded extension requires. Without it, a fanout build that bundles a
+	// newer DuckLake (e.g. the DuckDB 1.5.3 bump, which needs catalog v1.0) fails
+	// to attach an existing v0.4 catalog and the server can't boot. Migration is
+	// in place and forward-only.
+	attach := fmt.Sprintf("ATTACH IF NOT EXISTS %s AS lake (DATA_PATH %s, AUTOMATIC_MIGRATION true)",
+		sqlLiteral("ducklake:sqlite:"+metadataPath),
+		sqlLiteral(dataPath))
+
+	// temp_directory is an instance-global setting: re-setting it after the temp
+	// dir has already been used fails with "Cannot switch temporary directory
+	// after the current one has been used". The boot hook runs once per pooled
+	// connection, so only the first connection sets it; the rest inherit the
+	// instance-wide value. LOAD/ATTACH stay per-connection — they're idempotent.
+	var tempDirOnce sync.Once
+	var tempDirErr error
+
 	connector, err := duckdb.NewConnector(dsn, func(execer driver.ExecerContext) error {
-		boot := []string{
-			"LOAD ducklake",
-			"LOAD sqlite",
-			fmt.Sprintf("SET temp_directory=%s", sqlLiteral(tempDir)),
-			// AUTOMATIC_MIGRATION upgrades an older on-disk DuckLake catalog to the
-			// format the loaded extension requires. Without it, a fanout build that
-			// bundles a newer DuckLake (e.g. the DuckDB 1.5.3 bump, which needs
-			// catalog v1.0) fails to attach an existing v0.4 catalog and the server
-			// can't boot. Migration is in place and forward-only.
-			fmt.Sprintf("ATTACH IF NOT EXISTS %s AS lake (DATA_PATH %s, AUTOMATIC_MIGRATION true)",
-				sqlLiteral("ducklake:sqlite:"+metadataPath),
-				sqlLiteral(dataPath)),
-		}
-		for _, stmt := range boot {
+		for _, stmt := range []string{"LOAD ducklake", "LOAD sqlite"} {
 			if _, err := execer.ExecContext(ctx, stmt, nil); err != nil {
 				return err
 			}
+		}
+		tempDirOnce.Do(func() {
+			_, tempDirErr = execer.ExecContext(ctx, "SET temp_directory="+sqlLiteral(tempDir), nil)
+		})
+		if tempDirErr != nil {
+			return tempDirErr
+		}
+		if _, err := execer.ExecContext(ctx, attach, nil); err != nil {
+			return err
 		}
 		return nil
 	})
@@ -144,6 +166,36 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 	db.SetMaxOpenConns(maxConns)
 	db.SetMaxIdleConns(maxConns)
 	return db, nil
+}
+
+// enableCatalogWAL switches the DuckLake SQLite catalog at metadataPath to WAL
+// journal mode before DuckDB attaches it. The default rollback-journal mode
+// makes a committing writer take an exclusive lock that fails concurrent readers
+// with "database is locked", and a crashed or stuck writer can leave a hot
+// journal that locks the catalog until every connection is dropped (observed in
+// prod as a multi-day write+query outage). WAL lets readers run concurrently
+// with the single writer and recovers cleanly after a crash. journal_mode is
+// persisted in the database header, so this is effectively a one-time migration,
+// but it is cheap and idempotent to assert on every boot. The DuckDB sqlite
+// extension exposes no busy_timeout knob, so the retry timeout is set here on
+// the bootstrap connection; the persisted WAL mode is what carries over to the
+// connections DuckDB opens.
+func enableCatalogWAL(metadataPath string) error {
+	db, err := sql.Open("sqlite", metadataPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
+	if err != nil {
+		return fmt.Errorf("open catalog: %w", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	var mode string
+	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
+		return fmt.Errorf("read journal_mode: %w", err)
+	}
+	if !strings.EqualFold(mode, "wal") {
+		return fmt.Errorf("catalog journal_mode = %q, want wal", mode)
+	}
+	return nil
 }
 
 func sqlLiteral(v string) string {
