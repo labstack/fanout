@@ -99,12 +99,13 @@ func TestNewDuckCatalogUsesWAL(t *testing.T) {
 	}
 }
 
-// TestPoolConcurrentReadsNoLock reproduces the production incident: with a
-// multi-connection pool, concurrent read queries running alongside serialized
-// writes must not fail with "database is locked" or "Cannot switch temporary
-// directory". It exercises both fixes — WAL read/write concurrency and the
-// once-only temp_directory boot — since opening multiple pooled connections is
-// what triggered both errors.
+// TestPoolConcurrentReadsNoLock exercises the WAL fix: with a multi-connection
+// pool, concurrent read queries running alongside serialized writes must not
+// fail with "database is locked". A start barrier releases all goroutines at
+// once so the pool is forced to open multiple physical connections (otherwise a
+// low-contention run could funnel through a single reused handle and never
+// exercise concurrency). The temp_directory fix is covered separately by
+// TestTempDirectorySetOnce.
 func TestPoolConcurrentReadsNoLock(t *testing.T) {
 	d := newTestDuck(t, 4)
 	ctx := context.Background()
@@ -117,6 +118,7 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 	const iters = 25
 	var wg sync.WaitGroup
 	errCh := make(chan error, workers*iters)
+	start := make(chan struct{}) // released once all goroutines are parked
 
 	// Writers: serialized via the shared write lock, exactly as the ingest path
 	// holds it around appender flushes.
@@ -124,6 +126,7 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 		wg.Add(1)
 		go func(w int) {
 			defer wg.Done()
+			<-start
 			for i := 0; i < iters; i++ {
 				mu := d.WriteLock()
 				mu.Lock()
@@ -142,6 +145,7 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-start
 			for i := 0; i < iters; i++ {
 				var n int
 				if err := d.DB.QueryRowContext(ctx,
@@ -152,6 +156,7 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 			}
 		}()
 	}
+	close(start)
 	wg.Wait()
 	close(errCh)
 
@@ -162,5 +167,59 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 			t.Fatalf("regression — pool>1 catalog/temp error: %v", err)
 		}
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// TestTempDirectorySetOnce deterministically reproduces the "Cannot switch
+// temporary directory" regression. temp_directory is an instance-global setting:
+// once any connection has spilled to it, re-running SET temp_directory on a later
+// connection's boot hook fails. The test forces a spill on a pinned connection,
+// then opens a second pooled connection (which runs the boot hook) and asserts it
+// doesn't fail. Reverting the sync.Once in openDuckDB makes this test fail.
+func TestTempDirectorySetOnce(t *testing.T) {
+	ctx := context.Background()
+	// A small memory limit makes a modest sort spill to the temp directory.
+	cfg := env.Config{
+		DataDir:        t.TempDir(),
+		RollupEvery:    60,
+		DuckDBMemory:   "64MB",
+		DuckDBMaxConns: 4,
+	}
+	d, err := NewDuck(ctx, cfg)
+	if err != nil {
+		if strings.Contains(err.Error(), "LOAD ducklake") ||
+			strings.Contains(err.Error(), "LOAD sqlite") ||
+			strings.Contains(err.Error(), "ATTACH") {
+			t.Skipf("DuckLake extensions unavailable: %v", err)
+		}
+		t.Fatalf("NewDuck() error = %v", err)
+	}
+	defer d.Close()
+
+	// Pin connection 1 and force it to spill to the instance temp directory.
+	conn1, err := d.DB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("conn1: %v", err)
+	}
+	defer conn1.Close()
+	var sink int64
+	if err := conn1.QueryRowContext(ctx,
+		"SELECT count(*) FROM (SELECT i FROM range(20000000) t(i) ORDER BY i DESC)").Scan(&sink); err != nil {
+		t.Fatalf("forced-spill query: %v", err)
+	}
+
+	// With conn1 still held, this must open a second physical connection and run
+	// its boot hook. Pre-fix, that boot re-ran SET temp_directory after the temp
+	// dir was in use and failed with "Cannot switch temporary directory".
+	conn2, err := d.DB.Conn(ctx)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "switch temporary directory") {
+			t.Fatalf("regression — temp_directory re-set on 2nd connection: %v", err)
+		}
+		t.Fatalf("conn2 (boots a fresh pooled connection): %v", err)
+	}
+	defer conn2.Close()
+	if err := conn2.QueryRowContext(ctx, "SELECT 1").Scan(&sink); err != nil {
+		t.Fatalf("conn2 query: %v", err)
 	}
 }

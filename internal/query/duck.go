@@ -141,8 +141,11 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 		tempDirOnce.Do(func() {
 			_, tempDirErr = execer.ExecContext(ctx, "SET temp_directory="+sqlLiteral(tempDir), nil)
 		})
+		// sync.Once synchronizes the closure's completion before this read, so
+		// every concurrently-booting connection observes tempDirErr without a race;
+		// if the one SET failed, no connection proceeds to ATTACH.
 		if tempDirErr != nil {
-			return tempDirErr
+			return fmt.Errorf("set temp_directory: %w", tempDirErr)
 		}
 		if _, err := execer.ExecContext(ctx, attach, nil); err != nil {
 			return err
@@ -173,24 +176,32 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 // makes a committing writer take an exclusive lock that fails concurrent readers
 // with "database is locked", and a crashed or stuck writer can leave a hot
 // journal that locks the catalog until every connection is dropped (observed in
-// prod as a multi-day write+query outage). WAL lets readers run concurrently
-// with the single writer and recovers cleanly after a crash. journal_mode is
-// persisted in the database header, so this is effectively a one-time migration,
-// but it is cheap and idempotent to assert on every boot. The DuckDB sqlite
-// extension exposes no busy_timeout knob, so the retry timeout is set here on
-// the bootstrap connection; the persisted WAL mode is what carries over to the
-// connections DuckDB opens.
-func enableCatalogWAL(metadataPath string) error {
-	db, err := sql.Open("sqlite", metadataPath+"?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)")
+// prod as a multi-day write+query outage). In WAL mode readers run concurrently
+// with the single writer, and the next connection to open the catalog recovers
+// the WAL automatically after a crash instead of leaving a lock-holding hot
+// journal. journal_mode is persisted in the database header, so this is
+// effectively a one-time migration, but it is cheap and idempotent to assert on
+// every boot. WAL is the only lever available: the DuckDB sqlite extension
+// exposes no busy_timeout knob, so DuckDB's own catalog connections have no
+// lock-retry timeout — WAL is what prevents the reader/writer collisions.
+func enableCatalogWAL(metadataPath string) (err error) {
+	db, err := sql.Open("sqlite", metadataPath+"?_pragma=journal_mode(wal)")
 	if err != nil {
 		return fmt.Errorf("open catalog: %w", err)
 	}
-	defer db.Close()
+	defer func() {
+		// Closing the last connection checkpoints the WAL; surface a failure here
+		// (e.g. the filesystem can't maintain the -wal/-shm sidecars) instead of
+		// discovering it later as a mysterious lock.
+		if cerr := db.Close(); cerr != nil && err == nil {
+			err = fmt.Errorf("close catalog bootstrap conn: %w", cerr)
+		}
+	}()
 	db.SetMaxOpenConns(1)
 
 	var mode string
-	if err := db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
-		return fmt.Errorf("read journal_mode: %w", err)
+	if scanErr := db.QueryRow("PRAGMA journal_mode").Scan(&mode); scanErr != nil {
+		return fmt.Errorf("read journal_mode: %w", scanErr)
 	}
 	if !strings.EqualFold(mode, "wal") {
 		return fmt.Errorf("catalog journal_mode = %q, want wal", mode)
