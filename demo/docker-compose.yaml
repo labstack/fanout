@@ -26,6 +26,9 @@ services:
       # Concurrent read queries; write commits stay serialized by the shared
       # write mutex. This high-ingest instance is the canary for SQLITE_BUSY.
       DUCKDB_MAX_CONNS: "4"
+      # The binary's default is 512MB, sized for laptops — 4 connections plus
+      # the rollup loop OOM against it (rollups stall, big span queries fail).
+      DUCKDB_MEMORY: "8GB"
     expose:
       - "7520"
       - "4317"
