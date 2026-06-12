@@ -55,6 +55,21 @@ func duckDBPoolSize(cfg env.Config) int {
 	return cfg.DuckDBMaxConns
 }
 
+// duckDSN builds the DuckDB connection string. An empty mem leaves DuckDB's
+// own memory_limit default in place (80% of detected RAM, cgroup-aware), so
+// the cap scales with the deployment instead of a constant that's wrong
+// everywhere but the box it was tuned for.
+func duckDSN(dbPath, mem string) (string, error) {
+	if strings.ContainsAny(mem, "&?'\"\\; ") {
+		return "", fmt.Errorf("invalid DUCKDB_MEMORY value: %q", mem)
+	}
+	dsn := dbPath + "?threads=4"
+	if mem != "" {
+		dsn += "&memory_limit=" + mem
+	}
+	return dsn, nil
+}
+
 func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 	if err := os.MkdirAll(cfg.QueryDir(), 0o755); err != nil {
 		return nil, fmt.Errorf("create query dir: %w", err)
@@ -82,14 +97,10 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 		return nil, fmt.Errorf("enable WAL on DuckLake catalog: %w", err)
 	}
 
-	mem := cfg.DuckDBMemory
-	if mem == "" {
-		mem = "512MB"
+	dsn, err := duckDSN(dbPath, cfg.DuckDBMemory)
+	if err != nil {
+		return nil, err
 	}
-	if strings.ContainsAny(mem, "&?'\"\\; ") {
-		return nil, fmt.Errorf("invalid DUCKDB_MEMORY value: %q", mem)
-	}
-	dsn := dbPath + "?threads=4&memory_limit=" + mem
 
 	db, err := openDuckDB(ctx, dsn, tempDir, metadataPath, dataPath, duckDBPoolSize(cfg))
 	if err != nil {

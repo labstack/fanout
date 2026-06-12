@@ -57,8 +57,9 @@ services:
       # Allow concurrent read queries; write commits stay serialized by the
       # shared write mutex. Watch logs for SQLITE_BUSY after raising this.
       DUCKDB_MAX_CONNS: "4"
-      # The binary's default is 512MB, sized for laptops — 4 connections plus
-      # the rollup loop OOM against it (rollups stall, big span queries fail).
+      # Explicit cap: fanout and demo share this host with no cgroup limits,
+      # so the unset default (80% of detected RAM) would let each instance
+      # claim 80% of the whole box.
       DUCKDB_MEMORY: "8GB"
     expose:
       - "7520"

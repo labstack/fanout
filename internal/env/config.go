@@ -29,7 +29,11 @@ type Config struct {
 	MCPEnabled     bool   `env:"MCP_ENABLED" envDefault:"true"`
 	RetentionDays  int    `env:"RETENTION_DAYS" envDefault:"30"`
 	DefaultNS      string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
-	DuckDBMemory   string `env:"DUCKDB_MEMORY" envDefault:"512MB"`
+	// DuckDBMemory caps DuckDB's memory (e.g. "8GB"). Empty leaves DuckDB's
+	// own default in place — 80% of detected RAM, cgroup-aware in containers —
+	// so the cap scales with the deployment. Set it only to constrain an
+	// instance that shares its host with other memory-hungry services.
+	DuckDBMemory string `env:"DUCKDB_MEMORY"`
 	// DuckDBMaxConns caps the DuckDB connection pool. A value of 1 serializes
 	// everything through one handle. Raising it lets read queries run concurrently
 	// with each other and with ingest flushes. Two things make >1 safe: the
