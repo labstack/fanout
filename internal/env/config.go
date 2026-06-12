@@ -29,21 +29,30 @@ type Config struct {
 	MCPEnabled     bool   `env:"MCP_ENABLED" envDefault:"true"`
 	RetentionDays  int    `env:"RETENTION_DAYS" envDefault:"30"`
 	DefaultNS      string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	// The DuckDB knobs below self-size where possible and otherwise default to
+	// values validated on the reference deployment target, a small dedicated VM
+	// (Hetzner CPX42: 8 vCPU, 16 GB RAM, 240 GB disk). There the self-sizing
+	// resolves to a ~12.8 GB memory cap and 8 query threads.
+	//
 	// DuckDBMemory caps DuckDB's memory (e.g. "8GB"). Empty leaves DuckDB's
 	// own default in place — 80% of detected RAM, cgroup-aware in containers —
 	// so the cap scales with the deployment. Set it only to constrain an
 	// instance that shares its host with other memory-hungry services.
 	DuckDBMemory string `env:"DUCKDB_MEMORY"`
+	// DuckDBThreads caps DuckDB's global query worker pool. Zero leaves
+	// DuckDB's own default in place (one worker per core). Set it to leave
+	// cores free for ingest on a query-heavy co-tenant host.
+	DuckDBThreads int `env:"DUCKDB_THREADS"`
 	// DuckDBMaxConns caps the DuckDB connection pool. A value of 1 serializes
-	// everything through one handle. Raising it lets read queries run concurrently
-	// with each other and with ingest flushes. Two things make >1 safe: the
-	// DuckLake SQLite catalog is opened in WAL mode (enableCatalogWAL), so readers
-	// don't collide with the single writer and a crashed writer can't leave the
-	// catalog permanently locked; and write commits are serialized by the shared
-	// write mutex (Duck.WriteLock, wired into the writer via UseWriteLock in
-	// cmd/fanout/main.go, enforced at startup). Without the WAL mode, pool >1 fails
-	// with "database is locked".
-	DuckDBMaxConns    int    `env:"DUCKDB_MAX_CONNS" envDefault:"1"`
+	// everything through one handle; the default of 4 lets read queries run
+	// concurrently with each other and with ingest flushes. Two things make >1
+	// safe: the DuckLake SQLite catalog is opened in WAL mode (enableCatalogWAL),
+	// so readers don't collide with the single writer and a crashed writer can't
+	// leave the catalog permanently locked; and write commits are serialized by
+	// the shared write mutex (Duck.WriteLock, wired into the writer via
+	// UseWriteLock in cmd/fanout/main.go, enforced at startup). Without the WAL
+	// mode, pool >1 fails with "database is locked".
+	DuckDBMaxConns    int    `env:"DUCKDB_MAX_CONNS" envDefault:"4"`
 	AlertEnabled      bool   `env:"ALERT_ENABLED" envDefault:"true"`
 	AlertEvalInterval int    `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
 	AlertHistoryDays  int    `env:"ALERT_HISTORY_DAYS" envDefault:"7"`

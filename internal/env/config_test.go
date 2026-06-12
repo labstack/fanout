@@ -64,6 +64,15 @@ func TestLoadReturnsDefaults(t *testing.T) {
 	if cfg.DefaultNS != "default" {
 		t.Errorf("DefaultNS = %q, want %q", cfg.DefaultNS, "default")
 	}
+	if cfg.DuckDBMemory != "" {
+		t.Errorf("DuckDBMemory = %q, want empty (DuckDB self-sizes to 80%% of RAM)", cfg.DuckDBMemory)
+	}
+	if cfg.DuckDBThreads != 0 {
+		t.Errorf("DuckDBThreads = %d, want 0 (DuckDB self-sizes to core count)", cfg.DuckDBThreads)
+	}
+	if cfg.DuckDBMaxConns != 4 {
+		t.Errorf("DuckDBMaxConns = %d, want 4", cfg.DuckDBMaxConns)
+	}
 }
 
 // TestLoadLayering exercises the precedence contract: .env.{ENV} > OS env > .env > defaults.

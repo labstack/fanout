@@ -179,7 +179,7 @@ func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 
 	stats := d.DB.Stats()
 	if stats.MaxOpenConnections != 1 {
-		t.Fatalf("MaxOpenConnections = %d, want 1 by default for DuckLake serialization", stats.MaxOpenConnections)
+		t.Fatalf("MaxOpenConnections = %d, want 1 when DuckDBMaxConns is unset (floored for DuckLake serialization)", stats.MaxOpenConnections)
 	}
 }
 
@@ -187,17 +187,21 @@ func TestDuckDSN(t *testing.T) {
 	tests := []struct {
 		name    string
 		mem     string
+		threads int
 		want    string
 		wantErr bool
 	}{
-		{name: "empty leaves DuckDB default memory_limit", mem: "", want: "/x/cache.duckdb?threads=4"},
-		{name: "explicit cap", mem: "8GB", want: "/x/cache.duckdb?threads=4&memory_limit=8GB"},
+		{name: "zero values leave DuckDB defaults", mem: "", threads: 0, want: "/x/cache.duckdb"},
+		{name: "explicit memory cap", mem: "8GB", want: "/x/cache.duckdb?memory_limit=8GB"},
+		{name: "explicit threads cap", threads: 4, want: "/x/cache.duckdb?threads=4"},
+		{name: "both caps", mem: "8GB", threads: 4, want: "/x/cache.duckdb?threads=4&memory_limit=8GB"},
+		{name: "negative threads ignored", threads: -2, want: "/x/cache.duckdb"},
 		{name: "rejects DSN metacharacters", mem: "8GB&allow_unsigned_extensions=true", wantErr: true},
 		{name: "rejects quotes", mem: "8GB'", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := duckDSN("/x/cache.duckdb", tt.mem)
+			got, err := duckDSN("/x/cache.duckdb", tt.mem, tt.threads)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("duckDSN(%q) error = nil, want error", tt.mem)

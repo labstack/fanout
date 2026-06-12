@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,17 +56,24 @@ func duckDBPoolSize(cfg env.Config) int {
 	return cfg.DuckDBMaxConns
 }
 
-// duckDSN builds the DuckDB connection string. An empty mem leaves DuckDB's
-// own memory_limit default in place (80% of detected RAM, cgroup-aware), so
-// the cap scales with the deployment instead of a constant that's wrong
-// everywhere but the box it was tuned for.
-func duckDSN(dbPath, mem string) (string, error) {
+// duckDSN builds the DuckDB connection string. Zero values leave DuckDB's own
+// defaults in place — memory_limit at 80% of detected RAM (cgroup-aware) and
+// threads at the core count — so the caps scale with the deployment instead
+// of a constant that's wrong everywhere but the box it was tuned for.
+func duckDSN(dbPath, mem string, threads int) (string, error) {
 	if strings.ContainsAny(mem, "&?'\"\\; ") {
 		return "", fmt.Errorf("invalid DUCKDB_MEMORY value: %q", mem)
 	}
-	dsn := dbPath + "?threads=4"
+	params := make([]string, 0, 2)
+	if threads > 0 {
+		params = append(params, "threads="+strconv.Itoa(threads))
+	}
 	if mem != "" {
-		dsn += "&memory_limit=" + mem
+		params = append(params, "memory_limit="+mem)
+	}
+	dsn := dbPath
+	if len(params) > 0 {
+		dsn += "?" + strings.Join(params, "&")
 	}
 	return dsn, nil
 }
@@ -97,7 +105,7 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 		return nil, fmt.Errorf("enable WAL on DuckLake catalog: %w", err)
 	}
 
-	dsn, err := duckDSN(dbPath, cfg.DuckDBMemory)
+	dsn, err := duckDSN(dbPath, cfg.DuckDBMemory, cfg.DuckDBThreads)
 	if err != nil {
 		return nil, err
 	}

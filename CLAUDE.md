@@ -188,6 +188,9 @@ at parse time on `include.env_file: demo/.env`.
 | `FLUSH_SECONDS` | `15` | Batch flush interval |
 | `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
 | `ROLLUP_EVERY` | `60` | Rollup interval (seconds) |
+| `DUCKDB_MEMORY` | self-sized (80% of RAM, cgroup-aware) | DuckDB memory cap (e.g. `8GB`) |
+| `DUCKDB_THREADS` | self-sized (one per core) | DuckDB query worker threads |
+| `DUCKDB_MAX_CONNS` | `4` | DuckDB connection pool size |
 | `JWT_SECRET` | - | HS256 access-token signing key |
 | `JWT_REFRESH_SECRET` | - | HS256 refresh-token signing key |
 | `MCP_ENABLED` | `true` | Enable MCP server |
