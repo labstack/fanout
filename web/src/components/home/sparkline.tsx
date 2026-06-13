@@ -17,7 +17,11 @@ function downsample(values: number[], maxPoints: number): number[] {
     const end = Math.floor((i + 1) * bucketSize);
     let sum = 0;
     for (let j = start; j < end; j++) sum += values[j];
-    out.push(sum / (end - start));
+    const count = end - start;
+    // Empty bucket (possible for certain values.length/maxPoints ratios) would
+    // make sum/count === 0/0 === NaN and break the polyline — fall back to the
+    // boundary sample instead.
+    out.push(count > 0 ? sum / count : (values[start] ?? values[values.length - 1] ?? 0));
   }
   return out;
 }

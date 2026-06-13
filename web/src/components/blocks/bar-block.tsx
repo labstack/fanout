@@ -92,8 +92,8 @@ export function BarBlock({ data }: { data: BarBlockData }) {
             }}
           />
           <Bar dataKey="value" radius={radius} isAnimationActive={false}>
-            {items.map((item, i) => (
-              <Cell key={i} fill={item.fill} />
+            {items.map((item) => (
+              <Cell key={item.label} fill={item.fill} />
             ))}
           </Bar>
         </BarChart>

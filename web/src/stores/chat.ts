@@ -139,7 +139,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   streaming: false,
 
   init: (token?: string) => {
-    if (client) return;
+    if (client) {
+      // Already initialized — refresh the token in case auth changed (re-auth /
+      // refresh) so the client doesn't keep streaming with a stale credential.
+      if (token) client.setToken(token);
+      return;
+    }
 
     client = new ChatClient(
       "",

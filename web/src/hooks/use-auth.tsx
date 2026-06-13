@@ -1,9 +1,17 @@
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { Navigate, useLocation } from "react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { api, setApiToken, tryRefresh } from "@/api/client";
 import { AuthContext, useAuth, type AuthStatus, type User } from "./auth-context";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [setupRequired, setSetupRequired] = useState(false);
@@ -31,8 +39,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
           }
         }
-      } catch {
-        // Auth endpoints don't exist (very old build) — skip
+      } catch (err) {
+        // Usually means the auth endpoints are absent (very old build), but a
+        // transient network/5xx failure is indistinguishable here — log it so a
+        // real backend outage isn't completely invisible.
+        console.error("auth: status/bootstrap failed", err);
       }
 
       setIsLoading(false);
@@ -40,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })();
   }, []);
 
-  async function login(accessToken: string) {
+  const login = useCallback(async (accessToken: string) => {
     setApiToken(accessToken);
     try {
       const me = await api<User>("/api/auth/me");
@@ -50,31 +61,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("auth: login fetch user failed", err);
       setUser(null);
     }
-  }
+  }, []);
 
-  async function logout() {
+  const logout = useCallback(async () => {
     try {
       await fetch("/api/auth/logout", {
         method: "POST",
         credentials: "include",
       });
-    } catch { /* ignore */ }
+    } catch (err) {
+      // Best-effort: clear local state regardless so the user is logged out
+      // locally even if the server call fails — but log it, since a chronically
+      // failing logout (refresh cookie never revoked server-side) is invisible.
+      console.warn("auth: logout request failed", err);
+    }
     setApiToken(null);
     setUser(null);
-  }
+    // Drop all cached query data so a subsequent login doesn't surface the
+    // previous user's overview/alerts/etc. (queryKeys don't include the token).
+    queryClient.clear();
+  }, [queryClient]);
 
   const isAdmin = user?.role === "admin";
   const isOperator = isAdmin || user?.role === "operator";
+
+  const value = useMemo(
+    () => ({ user, isLoading, isAdmin, isOperator, setupRequired, login, logout }),
+    [user, isLoading, isAdmin, isOperator, setupRequired, login, logout],
+  );
 
   if (!ready) {
     return null;
   }
 
-  return (
-    <AuthContext.Provider value={{ user, isLoading, isAdmin, isOperator, setupRequired, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 /** Wraps protected routes — redirects to /login if not authenticated or setup needed. */

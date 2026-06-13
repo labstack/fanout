@@ -1,10 +1,11 @@
+import { toast } from "sonner";
 import type { Block } from "@/lib/types";
 import { BlockRenderer } from "@/components/blocks/block-renderer";
 import { PageContainer } from "@/components/layout/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import { Button } from "@/components/ui/button";
 
-const demoAction = (prompt: string) => alert(`Action: ${prompt}`);
+const demoAction = (prompt: string) => toast(`Action: ${prompt}`);
 
 const blocks: { title: string; description: string; block: Block }[] = [
   {

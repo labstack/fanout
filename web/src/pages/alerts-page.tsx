@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useLocation } from "react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, setApiToken } from "@/api/client";
+import { useFreshness } from "@/hooks/use-freshness";
 import type { Rule, Alert, AlertSummary } from "@/lib/types";
 import { FiringAlerts } from "@/components/alerts/firing-alerts";
 import { RulesTable } from "@/components/alerts/rules-table";
@@ -21,62 +23,54 @@ export function AlertsPage() {
     [search],
   );
 
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [rules, setRules] = useState<Rule[]>([]);
-  const [summary, setSummary] = useState<AlertSummary>({
-    firing: 0,
-    pending: 0,
-    resolved: 0,
-  });
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [staleSeconds, setStaleSeconds] = useState(0);
-  const [lastFetch, setLastFetch] = useState(0);
-  const loading = lastFetch === 0 && fetchError === null;
-
   useEffect(() => {
     if (token) setApiToken(token);
   }, [token]);
 
-  const load = useCallback(async () => {
-    try {
-      const [alertsRes, rulesRes, summaryRes] = await Promise.all([
-        api<Alert[]>("/api/alerts"),
-        api<Rule[]>("/api/rules"),
-        api<AlertSummary>("/api/alerts/summary"),
-      ]);
-      setAlerts(alertsRes ?? []);
-      setRules(rulesRes ?? []);
-      setSummary(summaryRes ?? { firing: 0, pending: 0, resolved: 0 });
-      setFetchError(null);
-      setLastFetch(Date.now());
-      setStaleSeconds(0);
-    } catch (err) {
-      setFetchError(
-        err instanceof ApiError
-          ? `Failed to load: ${err.message}`
-          : "Failed to load alerts",
-      );
-      console.error("Alerts fetch failed:", err);
-    }
-  }, []);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    // load() is async — every setState happens after an `await`. The
-    // react-hooks/set-state-in-effect rule can't trace async functions, so
-    // it flags this; a proper fix is migrating to TanStack Query's useQuery.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    load();
-    const interval = setInterval(load, REFRESH_INTERVAL);
-    const staleTick = setInterval(() => {
-      if (lastFetch > 0) {
-        setStaleSeconds(Math.floor((Date.now() - lastFetch) / 1000));
-      }
-    }, 5_000);
-    return () => {
-      clearInterval(interval);
-      clearInterval(staleTick);
-    };
-  }, [load, lastFetch]);
+  const alertsQuery = useQuery({
+    queryKey: ["alerts"],
+    queryFn: () => api<Alert[]>("/api/alerts"),
+    refetchInterval: REFRESH_INTERVAL,
+  });
+  const rulesQuery = useQuery({
+    queryKey: ["rules"],
+    queryFn: () => api<Rule[]>("/api/rules"),
+    refetchInterval: REFRESH_INTERVAL,
+  });
+  // Same key the nav badge polls — TanStack Query dedupes them into one request.
+  const summaryQuery = useQuery({
+    queryKey: ["alerts", "summary"],
+    queryFn: () => api<AlertSummary>("/api/alerts/summary"),
+    refetchInterval: REFRESH_INTERVAL,
+  });
+
+  const alerts = alertsQuery.data ?? [];
+  const rules = rulesQuery.data ?? [];
+  const summary = summaryQuery.data ?? { firing: 0, pending: 0, resolved: 0 };
+
+  const loading =
+    alertsQuery.isPending || rulesQuery.isPending || summaryQuery.isPending;
+  const lastUpdated = Math.max(
+    alertsQuery.dataUpdatedAt,
+    rulesQuery.dataUpdatedAt,
+    summaryQuery.dataUpdatedAt,
+  );
+  const staleSeconds = useFreshness(lastUpdated);
+  const firstError = alertsQuery.error ?? rulesQuery.error ?? summaryQuery.error;
+  const fetchError = firstError
+    ? firstError instanceof ApiError
+      ? `Failed to load: ${firstError.message}`
+      : "Failed to load alerts"
+    : null;
+
+  // Invalidating the "alerts" prefix also refreshes ["alerts","summary"];
+  // ["rules"] is a separate key, so it's invalidated explicitly.
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["alerts"] });
+    queryClient.invalidateQueries({ queryKey: ["rules"] });
+  };
 
   if (loading && rules.length === 0) {
     return (
@@ -85,6 +79,19 @@ export function AlertsPage() {
           <Skeleton className="h-10" />
           <Skeleton className="h-24" />
           <Skeleton className="h-40" />
+        </div>
+      </PageContainer>
+    );
+  }
+
+  // Nothing ever loaded and the fetch failed — show a real error instead of the
+  // normal layout, which would otherwise assert "no rules configured" and a
+  // green "Live" indicator while everything is actually down.
+  if (fetchError && lastUpdated === 0) {
+    return (
+      <PageContainer>
+        <div className="mx-auto max-w-md py-12">
+          <ErrorState error={fetchError} resetErrorBoundary={refresh} />
         </div>
       </PageContainer>
     );
@@ -100,24 +107,27 @@ export function AlertsPage() {
       {summary.pending > 0 && (
         <Badge variant="warning">{summary.pending} pending</Badge>
       )}
-      <div
-        className={cn(
-          "flex items-center gap-1.5 font-mono text-[11px]",
-          isStale ? "text-warning/70" : "text-muted-foreground/50",
-        )}
-      >
-        {!isStale && (
-          <span
-            aria-hidden="true"
-            className="inline-block size-1.5 rounded-full bg-success/60"
-          />
-        )}
-        {staleSeconds < 10
-          ? "Live"
-          : staleSeconds < 30
-            ? `${staleSeconds}s ago`
-            : `${Math.floor(staleSeconds / 60)}m ago`}
-      </div>
+      {/* Only show freshness once we've actually loaded — otherwise "Live" lies. */}
+      {lastUpdated > 0 && (
+        <div
+          className={cn(
+            "flex items-center gap-1.5 font-mono text-[11px]",
+            isStale ? "text-warning/70" : "text-muted-foreground/50",
+          )}
+        >
+          {!isStale && (
+            <span
+              aria-hidden="true"
+              className="inline-block size-1.5 rounded-full bg-success/60"
+            />
+          )}
+          {staleSeconds < 10
+            ? "Live"
+            : staleSeconds < 30
+              ? `${staleSeconds}s ago`
+              : `${Math.floor(staleSeconds / 60)}m ago`}
+        </div>
+      )}
     </>
   );
 
@@ -134,8 +144,8 @@ export function AlertsPage() {
           <div className="flex items-center justify-between">
             <div className="detail-label">Rules ({rules.length})</div>
           </div>
-          <CreateRuleInput onCreated={load} />
-          <RulesTable rules={rules} alerts={alerts} onRefresh={load} />
+          <CreateRuleInput onCreated={refresh} />
+          <RulesTable rules={rules} alerts={alerts} onRefresh={refresh} />
         </div>
 
         {alerts.filter((a) => a.state === "resolved").length > 0 && (

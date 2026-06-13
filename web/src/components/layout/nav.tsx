@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Loader2, LogOut, Radio, RotateCcw, Settings } from "lucide-react";
 import { useChatStore } from "@/stores/chat";
 import { buildChatPath, buildDashboardPath } from "@/lib/chat-route";
@@ -13,23 +13,20 @@ export function Nav() {
   const navigate = useNavigate();
   const token = new URLSearchParams(search).get("token") ?? undefined;
   const { user, logout, isAdmin } = useAuth();
-  const { streaming, messages, clear } = useChatStore();
-  const hasMessages = messages.length > 0;
+  // Narrow selectors: subscribing to the whole store would re-render the nav on
+  // every streamed chat token.
+  const streaming = useChatStore((s) => s.streaming);
+  const hasMessages = useChatStore((s) => s.messages.length > 0);
+  const clear = useChatStore((s) => s.clear);
   const isChatRoute = pathname === "/chat";
-  const [firingCount, setFiringCount] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        const s = await api<AlertSummary>("/api/alerts/summary");
-        if (!cancelled) setFiringCount(s.firing);
-      } catch { /* ignore */ }
-    }
-    load();
-    const interval = setInterval(load, 30_000);
-    return () => { cancelled = true; clearInterval(interval); };
-  }, []);
+  // Shares its cache entry with the alerts page (same key) — one poll, not two.
+  const { data: summary, isError: summaryError } = useQuery({
+    queryKey: ["alerts", "summary"],
+    queryFn: () => api<AlertSummary>("/api/alerts/summary"),
+    refetchInterval: 30_000,
+  });
+  const firingCount = summary?.firing ?? 0;
 
   return (
     <nav className="border-b border-border/50 px-6 h-12 flex items-center justify-between backdrop-blur-sm sticky top-0 z-50 bg-surface/80">
@@ -50,11 +47,18 @@ export function Nav() {
             }
           >
             Alerts
-            {firingCount > 0 && (
+            {summaryError ? (
+              <span
+                title="Alert status unavailable"
+                className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-surface-3 text-muted-foreground text-[9px] font-bold px-1"
+              >
+                !
+              </span>
+            ) : firingCount > 0 ? (
               <span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-unhealthy text-white text-[9px] font-bold px-1">
                 {firingCount}
               </span>
-            )}
+            ) : null}
           </NavLink>
           <NavLink
             to={buildChatPath(undefined, token)}

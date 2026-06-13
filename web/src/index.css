@@ -316,7 +316,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: #52525b;
+  color: var(--muted-foreground);
 }
 
 @utility stat-card {

@@ -71,28 +71,73 @@ export class ChatClient {
       const decoder = new TextDecoder();
       let buffer = "";
 
+      // SSE accumulator state: fields collect until a blank line dispatches the
+      // event. Defaults to the "message" event type per the SSE spec, supports
+      // multi-line `data:`, and tolerates CRLF (`\r\n`) line endings.
+      let eventType = "";
+      let dataLines: string[] = [];
+      // Track whether a terminal frame (done/error) was successfully dispatched,
+      // so a truncated or unparseable final frame doesn't leave chat spinning.
+      let sawTerminal = false;
+
+      const dispatch = () => {
+        if (dataLines.length === 0) {
+          eventType = "";
+          return;
+        }
+        const type = eventType || "message";
+        const payload = dataLines.join("\n");
+        eventType = "";
+        dataLines = [];
+        try {
+          const data = JSON.parse(payload);
+          if (type === "done" || type === "error") sawTerminal = true;
+          this.onEvent({ type, ...data } as ChatEvent);
+        } catch (err) {
+          console.warn("[ChatClient] malformed SSE data, skipping:", payload.slice(0, 100), err);
+        }
+      };
+
+      const handleLine = (raw: string) => {
+        // Strip a trailing CR (CRLF servers) so field names/values stay clean.
+        const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
+        if (line === "") {
+          dispatch();
+          return;
+        }
+        if (line.startsWith(":")) return; // comment line
+        const colon = line.indexOf(":");
+        const field = colon === -1 ? line : line.slice(0, colon);
+        // A single leading space after the colon is part of the syntax, not data.
+        let value = colon === -1 ? "" : line.slice(colon + 1);
+        if (value.startsWith(" ")) value = value.slice(1);
+        if (field === "event") eventType = value;
+        else if (field === "data") dataLines.push(value);
+        // id/retry fields are intentionally ignored
+      };
+
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
+        buffer = lines.pop() ?? "";
+        for (const line of lines) handleLine(line);
+      }
 
-        let currentEvent = "";
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            currentEvent = line.slice(7);
-          } else if (line.startsWith("data: ") && currentEvent) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              this.onEvent({ type: currentEvent, ...data } as ChatEvent);
-            } catch (err) {
-              console.warn("[ChatClient] malformed SSE data, skipping:", line.slice(6, 100), err);
-            }
-            currentEvent = "";
-          }
-        }
+      // Flush any trailing line + pending event the server left unterminated.
+      if (buffer) handleLine(buffer);
+      dispatch();
+
+      // The stream closed cleanly but we never got a done/error frame (e.g. the
+      // terminal frame was truncated or failed to parse). Surface an error so
+      // the assistant message doesn't stay stuck in its loading state forever.
+      if (!sawTerminal) {
+        this.onEvent({
+          type: "error",
+          error: "The response ended unexpectedly. Please try again.",
+        });
       }
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {

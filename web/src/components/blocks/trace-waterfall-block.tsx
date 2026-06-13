@@ -133,6 +133,8 @@ export function TraceWaterfallBlock({ data, onAction }: { data: TraceWaterfallDa
         width={width}
         height={svgHeight}
         className="block select-none"
+        role="img"
+        aria-label="Distributed trace waterfall of span timings"
         onMouseLeave={() => setTooltip(null)}
       >
         {/* Ruler ticks and grid lines */}

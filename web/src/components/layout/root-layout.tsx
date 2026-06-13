@@ -1,10 +1,12 @@
-import { useRef, useEffect, Component, type ReactNode } from "react";
+import { useRef, useEffect, Component, Suspense, type ReactNode } from "react";
 import { Outlet, useLocation } from "react-router";
 import { NavLoader } from "./nav-loader";
 import { Nav } from "./nav";
 import { Footer } from "./footer";
 import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorState } from "@/components/states/error-state";
+import { LoadingState } from "@/components/states/loading-state";
 import { setApiToken } from "@/api/client";
 
 const HIDE_FOOTER = new Set(["/chat"]);
@@ -57,21 +59,33 @@ export function RootLayout() {
   }, [search]);
 
   return (
-    <div className="flex h-screen flex-col noise">
-      <NavLoader />
-      <Nav />
-      <main
-        ref={mainRef}
-        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-      >
-        <ErrorBoundary>
-          <div className="flex-1">
-            <Outlet />
-          </div>
-          {showFooter && <Footer />}
-        </ErrorBoundary>
-      </main>
-      <Toaster />
-    </div>
+    <TooltipProvider>
+      <div className="flex h-screen flex-col noise">
+        <NavLoader />
+        <Nav />
+        <main
+          ref={mainRef}
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+        >
+          <ErrorBoundary>
+            {/* Inner boundary so lazy page chunks load without unmounting the
+                nav shell — only the content area shows the fallback. */}
+            <Suspense
+              fallback={
+                <div className="mx-auto max-w-5xl p-6">
+                  <LoadingState />
+                </div>
+              }
+            >
+              <div className="flex-1">
+                <Outlet />
+              </div>
+              {showFooter && <Footer />}
+            </Suspense>
+          </ErrorBoundary>
+        </main>
+        <Toaster />
+      </div>
+    </TooltipProvider>
   );
 }

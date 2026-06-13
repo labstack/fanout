@@ -67,6 +67,8 @@ export function FlameGraphBlock({ data }: { data: FlameGraphData }) {
         width={width}
         height={svgHeight}
         className="block select-none"
+        role="img"
+        aria-label="Flame graph of span self-time across services"
         onMouseLeave={() => setTooltip(null)}
       >
         {/* Frames */}

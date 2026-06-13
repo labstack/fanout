@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, setApiToken } from "@/api/client";
+import { useFreshness } from "@/hooks/use-freshness";
 import type { OverviewResponse } from "@/lib/types";
 import { buildChatPath } from "@/lib/chat-route";
 import { EmptyState } from "@/components/home/empty-state";
@@ -18,6 +20,13 @@ import { cn } from "@/lib/utils";
 const REFRESH_INTERVAL = 30_000;
 const MAX_EXPANDED_CARDS = 2;
 
+const windowOptions = [
+  { label: "15m", value: 15 },
+  { label: "1h", value: 60 },
+  { label: "6h", value: 360 },
+  { label: "24h", value: 1440 },
+];
+
 function freshnessLabel(seconds: number): string {
   if (seconds < 10) return "Live";
   if (seconds < 60) return `${seconds}s ago`;
@@ -32,73 +41,39 @@ export function HomePage() {
     [search],
   );
 
-  const [data, setData] = useState<OverviewResponse | null>(null);
-  const [loading, setLoading] = useState(true);
   const [timeWindow, setTimeWindow] = useState(60);
-  const [staleSeconds, setStaleSeconds] = useState(0);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const lastFetch = useRef(0);
+  const namespace = useMemo(
+    () => new URLSearchParams(search).get("namespace") ?? "",
+    [search],
+  );
 
   useEffect(() => {
     if (token) setApiToken(token);
   }, [token]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
+  const { data, isPending, isError, error, dataUpdatedAt } =
+    useQuery({
+      queryKey: ["overview", timeWindow, namespace],
+      queryFn: () => {
         const params = new URLSearchParams();
         params.set("window", String(timeWindow));
-        const ns = new URLSearchParams(search).get("namespace");
-        if (ns) params.set("namespace", ns);
-        const result = await api<OverviewResponse>(`/api/overview?${params}`);
-        if (!cancelled) {
-          setData(result);
-          setLoading(false);
-          setFetchError(null);
-          lastFetch.current = Date.now();
-          setStaleSeconds(0);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setLoading(false);
-          const message =
-            err instanceof ApiError
-              ? `Failed to load: ${err.message}`
-              : "Failed to load overview data";
-          setFetchError(message);
-          console.error("Overview fetch failed:", err);
-        }
-      }
-    }
+        if (namespace) params.set("namespace", namespace);
+        return api<OverviewResponse>(`/api/overview?${params}`);
+      },
+      refetchInterval: REFRESH_INTERVAL,
+    });
 
-    load();
-    const interval = setInterval(load, REFRESH_INTERVAL);
-
-    const staleTick = setInterval(() => {
-      if (lastFetch.current > 0) {
-        setStaleSeconds(Math.floor((Date.now() - lastFetch.current) / 1000));
-      }
-    }, 5_000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      clearInterval(staleTick);
-    };
-  }, [timeWindow, search]);
+  const loading = isPending;
+  const staleSeconds = useFreshness(dataUpdatedAt);
+  const fetchError = isError
+    ? error instanceof ApiError
+      ? `Failed to load: ${error.message}`
+      : "Failed to load overview data"
+    : null;
 
   const investigate = (prompt: string) => {
     navigate(buildChatPath(prompt, token));
   };
-
-  const windowOptions = [
-    { label: "15m", value: 15 },
-    { label: "1h", value: 60 },
-    { label: "6h", value: 360 },
-    { label: "24h", value: 1440 },
-  ];
 
   if (!loading && !data && fetchError) {
     return (

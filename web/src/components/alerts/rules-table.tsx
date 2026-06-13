@@ -1,5 +1,7 @@
+import { useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
 import type { Rule, Alert } from "@/lib/types";
-import { api } from "@/api/client";
+import { api, isApiError } from "@/api/client";
 
 interface Props {
   rules: Rule[];
@@ -8,6 +10,26 @@ interface Props {
 }
 
 export function RulesTable({ rules, alerts, onRefresh }: Props) {
+  const toggleMutation = useMutation({
+    mutationFn: (rule: Rule) =>
+      api(`/api/rules/${rule.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
+      }),
+    onSuccess: onRefresh,
+    onError: (err) =>
+      toast.error(isApiError(err) ? err.message : "Failed to toggle rule"),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api(`/api/rules/${id}`, { method: "DELETE" }),
+    onSuccess: onRefresh,
+    onError: (err) =>
+      toast.error(isApiError(err) ? err.message : "Failed to delete rule"),
+  });
+
+  const busy = toggleMutation.isPending || deleteMutation.isPending;
+
   if (rules.length === 0) {
     return (
       <div className="rounded-lg border border-border/60 bg-surface-1/80 px-4 py-6 text-center text-sm text-muted-foreground">
@@ -21,27 +43,6 @@ export function RulesTable({ rules, alerts, onRefresh }: Props) {
   for (const a of alerts) {
     if (a.state === "firing") {
       firingByRule.set(a.rule_id, (firingByRule.get(a.rule_id) || 0) + 1);
-    }
-  }
-
-  async function toggleEnabled(rule: Rule) {
-    try {
-      await api(`/api/rules/${rule.id}`, {
-        method: "PUT",
-        body: JSON.stringify({ ...rule, enabled: !rule.enabled }),
-      });
-      onRefresh();
-    } catch (err) {
-      console.error("Toggle rule failed:", err);
-    }
-  }
-
-  async function deleteRule(id: string) {
-    try {
-      await api(`/api/rules/${id}`, { method: "DELETE" });
-      onRefresh();
-    } catch (err) {
-      console.error("Delete rule failed:", err);
     }
   }
 
@@ -68,8 +69,9 @@ export function RulesTable({ rules, alerts, onRefresh }: Props) {
                   <td className="p-3">
                     <button
                       type="button"
-                      onClick={() => toggleEnabled(rule)}
-                      className={`relative w-8 h-[18px] rounded-full transition-colors cursor-pointer ${
+                      onClick={() => toggleMutation.mutate(rule)}
+                      disabled={busy}
+                      className={`relative w-8 h-[18px] rounded-full transition-colors cursor-pointer disabled:opacity-50 ${
                         rule.enabled ? "bg-healthy/30" : "bg-surface-3"
                       }`}
                       title={rule.enabled ? "Disable" : "Enable"}
@@ -105,8 +107,9 @@ export function RulesTable({ rules, alerts, onRefresh }: Props) {
                   <td className="p-3 text-right">
                     <button
                       type="button"
-                      onClick={() => deleteRule(rule.id)}
-                      className="text-[10px] text-muted-foreground hover:text-unhealthy transition-colors mono"
+                      onClick={() => deleteMutation.mutate(rule.id)}
+                      disabled={busy}
+                      className="text-[10px] text-muted-foreground hover:text-unhealthy transition-colors mono disabled:opacity-50"
                     >
                       delete
                     </button>

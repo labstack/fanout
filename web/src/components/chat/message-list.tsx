@@ -6,9 +6,11 @@ export function MessageList() {
   const messages = useChatStore((s) => s.messages);
   const endRef = useRef<HTMLDivElement>(null);
 
+  // Scroll when a message is added (not on every streamed token, which would
+  // spam smooth-scroll for each character).
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages.length]);
 
   return (
     <div className="relative h-full">
