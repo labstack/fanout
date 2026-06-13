@@ -133,6 +133,24 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	}
 }
 
+// A maintenance pass that never executes must degrade once the startup grace
+// period elapses — the wedged-first-rollup case the check exists to expose.
+func TestCheckMaintenance_DegradedWhenNeverRanPastGrace(t *testing.T) {
+	h := &HealthHandler{
+		duck:    &query.Duck{},
+		cfg:     env.Config{RollupEvery: 60},
+		started: time.Now().Add(-10 * time.Minute),
+	}
+
+	res := h.checkMaintenance()
+	if res.Status != "degraded" {
+		t.Fatalf("status = %q, want degraded", res.Status)
+	}
+	if res.Detail != "maintenance has not run since process start" {
+		t.Fatalf("detail = %q, want 'maintenance has not run since process start'", res.Detail)
+	}
+}
+
 func TestRegisterHealthRoutes_RegistersAPIHealth(t *testing.T) {
 	e := echo.New()
 	RegisterHealthRoutes(e, nil, env.Config{DataDir: os.TempDir()})
