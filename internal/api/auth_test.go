@@ -36,9 +36,44 @@ func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Setup, 
 	}
 
 	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret)
+	RegisterAuthMiddleware(e, users, secret, false)
 	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{}, env.Config{})
 	return e, users, setup, setupToken, secret, refreshSecret
+}
+
+// PUBLIC_READ serves unauthenticated GETs as a viewer, but only GETs: writes
+// stay locked, and admin-gated routes stay locked even for the synthetic viewer.
+func TestPublicReadServesAnonymousReadsOnly(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close() })
+	users := auth.NewUserStore(sqlite.DB)
+
+	e := echo.New()
+	RegisterAuthMiddleware(e, users, "0123456789abcdef0123456789abcdef", true) // publicRead on
+	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	e.POST("/api/bookmarks", func(c *echo.Context) error { return c.NoContent(http.StatusCreated) })
+	e.GET("/api/admin", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }, RequireRole("admin"))
+
+	cases := []struct {
+		name, method, path string
+		want               int
+	}{
+		{"anon GET data endpoint", http.MethodGet, "/api/overview", http.StatusNoContent},
+		{"anon write rejected", http.MethodPost, "/api/bookmarks", http.StatusUnauthorized},
+		{"anon admin route forbidden", http.MethodGet, "/api/admin", http.StatusForbidden},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+			if rec.Code != tc.want {
+				t.Fatalf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
+			}
+		})
+	}
 }
 
 func TestRequireRoleUsesCurrentUserState(t *testing.T) {
@@ -319,7 +354,7 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 	}
 
 	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret)
+	RegisterAuthMiddleware(e, users, secret, false)
 	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{}, env.Config{})
 
 	for _, email := range []string{"missing@example.com", "inactive@example.com"} {
@@ -359,7 +394,7 @@ func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 	}
 
 	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret)
+	RegisterAuthMiddleware(e, users, secret, false)
 	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{
 		Host: "127.0.0.1",
 		Port: 1,
@@ -487,7 +522,7 @@ func TestSetupReturnsConfiguredIngestEndpoint(t *testing.T) {
 	}
 
 	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret)
+	RegisterAuthMiddleware(e, users, secret, false)
 	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, secret, auth.SMTPConfig{}, env.Config{IngestEndpoint: endpoint})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+setupToken+`"}`))
