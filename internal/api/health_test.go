@@ -112,7 +112,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	if resp.Status != "ready" {
 		t.Fatalf("status = %q, want ready", resp.Status)
 	}
-	for _, key := range []string{"duckdb", "ducklake", "data", "rollups"} {
+	for _, key := range []string{"duckdb", "ducklake", "data", "rollups", "maintenance"} {
 		if _, ok := resp.Checks[key]; !ok {
 			t.Fatalf("missing %s check", key)
 		}
@@ -122,6 +122,11 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	}
 	if resp.Checks["rollups"].Status != "ok" {
 		t.Fatalf("rollups status = %q, want ok", resp.Checks["rollups"].Status)
+	}
+	// Freshly started handler + no maintenance pass yet = within the startup
+	// grace period, so the check reports ok with a detail, not degraded.
+	if m := resp.Checks["maintenance"]; m.Status != "ok" || m.Detail != "no maintenance pass yet" {
+		t.Fatalf("maintenance check = %+v, want ok / 'no maintenance pass yet'", m)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)

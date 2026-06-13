@@ -36,18 +36,22 @@ type Duck struct {
 	// readiness probe reads while the maintenance pass writes them.
 	maintHealthMu      sync.Mutex
 	lastMaintenanceOK  time.Time
+	lastMaintenanceAt  time.Time
 	lastMaintenanceErr error
 }
 
 // MaintenanceHealth reports the maintenance loop's own health: when it last
-// completed cleanly, and the error from the most recent pass (nil after a
-// clean one). Surfaced via /readyz so an instance whose retention/compaction
-// is failing — and therefore re-entering the storage growth spiral — tells
-// its operator instead of only logging.
-func (d *Duck) MaintenanceHealth() (lastOK time.Time, lastErr error) {
+// completed cleanly, when a pass last executed at all (throttled calls don't
+// count), and the error from the most recent executed pass (nil after a clean
+// one). Surfaced via /readyz so an instance whose retention/compaction is
+// failing — and therefore re-entering the storage growth spiral — tells its
+// operator instead of only logging. lastAt distinguishes "failing right now"
+// from a stale error awaiting the hourly retry; a zero lastAt means no pass
+// has executed since the process started.
+func (d *Duck) MaintenanceHealth() (lastOK, lastAt time.Time, lastErr error) {
 	d.maintHealthMu.Lock()
 	defer d.maintHealthMu.Unlock()
-	return d.lastMaintenanceOK, d.lastMaintenanceErr
+	return d.lastMaintenanceOK, d.lastMaintenanceAt, d.lastMaintenanceErr
 }
 
 const (
@@ -256,13 +260,17 @@ func (d *Duck) DefaultNamespace() string {
 }
 
 func (d *Duck) RunRollups(ctx context.Context) {
+	// rollupOnce can return rows AND an error (one rollup committed, the other
+	// failed), so telemetry is recorded unconditionally — otherwise the rollup
+	// throughput metric flatlines on an instance whose service rollup is
+	// advancing fine behind a failing edge rollup.
 	start := time.Now()
 	rows, err := d.rollupOnce(ctx)
+	metrics.RecordRollup(rows, time.Since(start).Seconds())
 	if err != nil {
-		slog.Error("startup rollup failed", "err", err)
+		slog.Error("startup rollup failed", "rows", rows, "err", err)
 	} else if rows > 0 {
 		slog.Info("startup rollup complete", "rows", rows, "duration", time.Since(start))
-		metrics.RecordRollup(rows, time.Since(start).Seconds())
 	}
 
 	ticker := time.NewTicker(time.Duration(d.cfg.RollupEvery) * time.Second)
@@ -272,11 +280,10 @@ func (d *Duck) RunRollups(ctx context.Context) {
 		case <-ticker.C:
 			start := time.Now()
 			rows, err := d.rollupOnce(ctx)
-			if err != nil {
-				slog.Error("rollup failed", "component", "rollup", "err", err)
-				continue
-			}
 			metrics.RecordRollup(rows, time.Since(start).Seconds())
+			if err != nil {
+				slog.Error("rollup failed", "component", "rollup", "rows", rows, "err", err)
+			}
 		case <-ctx.Done():
 			return
 		}
@@ -349,23 +356,34 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 
 	// The affected scan below covers (windowStart, windowEnd]. Choosing the
 	// stored watermark:
-	//   - While catching up (chunked), advance exactly to the chunk's end; the
-	//     rows in it are already committed, no trailing lag needed.
-	//   - While the max is advancing (new ingest), hold the stored watermark a
-	//     lag behind the raw max so the next pass reprocesses a trailing window —
-	//     ingested_unix_nano is stamped at ingest but signals flush independently
-	//     and the writer retries, so a row can commit below the current max and
-	//     must still be picked up (delete+insert is idempotent per bucket).
-	//   - Once the max plateaus (no new ingest), we've reprocessed that trailing
-	//     window once already, so advance straight to the raw max and let the next
-	//     cycle short-circuit. Otherwise a burst's trailing window would be
+	//   - While the raw max is ahead of what any prior pass processed, never
+	//     advance the watermark into the trailing lag window below it —
+	//     ingested_unix_nano is stamped at ingest but signals flush
+	//     independently and the writer retries, so a row can commit below the
+	//     current max and must still be picked up (delete+insert is idempotent
+	//     per bucket). This clamp applies to chunked passes too: a chunk end
+	//     can land inside the lag window of the live tip.
+	//   - Once the max plateaus (no new ingest since a pass processed up to
+	//     it), the trailing window has been reprocessed once already, so
+	//     advance straight to the raw max and let the next cycle
+	//     short-circuit. Otherwise a burst's trailing window would be
 	//     re-aggregated every cycle forever after ingest goes quiet.
 	newWatermark := windowEnd
-	if !chunked && rawWatermark > lastRawMax {
-		newWatermark = rawWatermark - d.rollupSafetyLagNanos()
+	if rawWatermark > lastRawMax {
+		if guarded := rawWatermark - d.rollupSafetyLagNanos(); newWatermark > guarded {
+			newWatermark = guarded
+		}
 		if newWatermark < lastWatermark {
 			newWatermark = lastWatermark
 		}
+	}
+	// The rawmax key records the highest tip whose trailing lag window a pass
+	// has actually processed — advance it only as far as this pass scanned,
+	// or the plateau shortcut above would fire before the catch-up reached
+	// the tip and skip the backlog's last lag window.
+	rawMaxProcessed := rawWatermark
+	if chunked {
+		rawMaxProcessed = windowEnd
 	}
 
 	args := []any{windowStart, windowEnd, windowStart, windowEnd, windowStart, windowEnd}
@@ -380,7 +398,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	if err := storeRollupWatermark(ctx, tx, serviceRollupStateKey, newWatermark); err != nil {
 		return 0, err
 	}
-	if err := storeRollupWatermark(ctx, tx, serviceRollupRawMaxKey, rawWatermark); err != nil {
+	if err := storeRollupWatermark(ctx, tx, serviceRollupRawMaxKey, rawMaxProcessed); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -428,15 +446,21 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	windowStart, windowEnd, chunked := rollupWindow(lastWatermark, minIngested, rawWatermark)
 
 	// Same chunking + trailing-window logic as the service rollup (see
-	// refreshServiceRollup): catch up one chunk per pass, and keep a lag window
-	// open at the tip while the max advances so late commits are re-picked-up,
-	// closing it once ingest plateaus.
+	// refreshServiceRollup): never advance into the lag window below an
+	// unprocessed tip — chunked or not — and only let the plateau shortcut
+	// fire once a pass has actually processed up to the recorded raw max.
 	newWatermark := windowEnd
-	if !chunked && rawWatermark > lastRawMax {
-		newWatermark = rawWatermark - d.rollupSafetyLagNanos()
+	if rawWatermark > lastRawMax {
+		if guarded := rawWatermark - d.rollupSafetyLagNanos(); newWatermark > guarded {
+			newWatermark = guarded
+		}
 		if newWatermark < lastWatermark {
 			newWatermark = lastWatermark
 		}
+	}
+	rawMaxProcessed := rawWatermark
+	if chunked {
+		rawMaxProcessed = windowEnd
 	}
 
 	if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, windowStart, windowEnd); err != nil {
@@ -450,7 +474,7 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	if err := storeRollupWatermark(ctx, tx, edgeRollupStateKey, newWatermark); err != nil {
 		return 0, err
 	}
-	if err := storeRollupWatermark(ctx, tx, edgeRollupRawMaxKey, rawWatermark); err != nil {
+	if err := storeRollupWatermark(ctx, tx, edgeRollupRawMaxKey, rawMaxProcessed); err != nil {
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -467,8 +491,8 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 // that starts far behind — first run on an existing dataset, or recovery after
 // an outage — catches up one chunk per tick instead of aggregating the whole
 // backlog in a single statement. Unbounded catch-up is what took prod down on
-// 2026-06-13: the edge rollup's first pass covered 12 days of spans, spilled
-// 375 GiB to temp, filled the disk, and never committed.
+// 2026-06-13 (UTC): the edge rollup's first pass covered 12 days of spans,
+// spilled 375 GiB to temp, filled the disk, and never committed.
 const rollupChunkNanos = int64(time.Hour)
 
 // rollupWindow bounds one pass's scan to (start, end]. start falls back to
@@ -739,11 +763,13 @@ call_edges AS (
     ON child.parent_span_id = parent.span_id
    AND child.trace_id = parent.trace_id
    AND child.namespace = parent.namespace
-   -- Bound the parent side to the affected window (±1h): without this the
-   -- hash build covers every span ever ingested and the pass scales with
-   -- total dataset size instead of window size. Edges whose parent started
-   -- more than an hour before the child are dropped — acceptable for
-   -- minute-bucket dependency edges.
+   -- Bound the parent side to the affected BUCKET RANGE ±1h: without this
+   -- the hash build covers every span ever ingested. Parents more than 1h
+   -- outside [MIN(affected.bucket), MAX(affected.bucket)] are dropped —
+   -- acceptable for minute-bucket dependency edges. Caveat: buckets come
+   -- from span start_time while the window bounds ingested_unix_nano, so
+   -- one late-arriving span with an old start_time widens the range (and
+   -- this scan) back to that bucket for the pass that ingests it.
    AND parent.start_time >= (SELECT MIN(bucket) FROM affected) - INTERVAL 1 HOUR
    AND parent.start_time <= (SELECT MAX(bucket) FROM affected) + INTERVAL 1 HOUR
   JOIN affected a
@@ -756,11 +782,12 @@ call_edges AS (
     AND parent.service != child.service
   GROUP BY child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
 ),
--- Producers and consumers are aggregated per (bucket, service, destination)
--- BEFORE the join. Joining raw span rows multiplies producer spans by
--- consumer spans per destination — quadratic in per-bucket span count — and
--- COUNT(*) over those pairs was meaningless anyway. calls now counts consumed
--- messages, attributed to each producer service on the destination.
+-- Producers and consumers are aggregated per (namespace, bucket, service,
+-- destination, msg_system) BEFORE the join — joining raw span rows multiplies
+-- producer spans by consumer spans per destination, quadratic in per-bucket
+-- span count. calls = consumed messages on the destination, attributed to
+-- each producer service publishing to it (a message consumed once appears on
+-- every producer's edge).
 producers AS (
   SELECT DISTINCT
     s.namespace,
@@ -904,8 +931,9 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 
 	err := errors.Join(errs...)
 	d.maintHealthMu.Lock()
+	d.lastMaintenanceAt = time.Now()
 	if err == nil {
-		d.lastMaintenanceOK = time.Now()
+		d.lastMaintenanceOK = d.lastMaintenanceAt
 	}
 	d.lastMaintenanceErr = err
 	d.maintHealthMu.Unlock()

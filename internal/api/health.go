@@ -16,13 +16,14 @@ import (
 
 // HealthHandler handles health check endpoints
 type HealthHandler struct {
-	duck *query.Duck
-	cfg  env.Config
+	duck    *query.Duck
+	cfg     env.Config
+	started time.Time
 }
 
 // NewHealthHandler creates a new health handler
 func NewHealthHandler(duck *query.Duck, cfg env.Config) *HealthHandler {
-	return &HealthHandler{duck: duck, cfg: cfg}
+	return &HealthHandler{duck: duck, cfg: cfg, started: time.Now()}
 }
 
 // CheckResult represents a single health check result
@@ -167,7 +168,11 @@ func (h *HealthHandler) checkDuckLake() CheckResult {
 // DuckLake compaction). A failing pass reports "degraded", not "unhealthy":
 // ingest and queries still work while maintenance fails, and a restart
 // wouldn't fix it — pulling the instance from rotation would only hide the
-// signal that storage growth is no longer being reclaimed.
+// signal that storage growth is no longer being reclaimed. A maintenance pass
+// that never executes (e.g. the rollup loop is wedged before it) also reports
+// degraded once the process has been up past a startup grace period. A loop
+// that stalls AFTER a clean pass is not detected here — operators must alert
+// on a stale updated_at.
 func (h *HealthHandler) checkMaintenance() CheckResult {
 	if h.duck == nil {
 		return CheckResult{
@@ -176,18 +181,30 @@ func (h *HealthHandler) checkMaintenance() CheckResult {
 		}
 	}
 
-	lastOK, lastErr := h.duck.MaintenanceHealth()
+	lastOK, lastAt, lastErr := h.duck.MaintenanceHealth()
 	res := CheckResult{Status: "ok"}
-	if !lastOK.IsZero() {
-		res.UpdatedAt = lastOK.UTC().Format(time.RFC3339)
+	if !lastAt.IsZero() {
+		res.UpdatedAt = lastAt.UTC().Format(time.RFC3339)
 	}
 	if lastErr != nil {
 		res.Status = "degraded"
 		res.Error = lastErr.Error()
+		if !lastOK.IsZero() {
+			res.Detail = "last clean pass: " + lastOK.UTC().Format(time.RFC3339)
+		}
 		return res
 	}
-	if lastOK.IsZero() {
-		res.Detail = "no maintenance pass yet"
+	if lastAt.IsZero() {
+		grace := 3 * time.Duration(h.cfg.RollupEvery) * time.Second
+		if grace < 5*time.Minute {
+			grace = 5 * time.Minute
+		}
+		if time.Since(h.started) > grace {
+			res.Status = "degraded"
+			res.Detail = "maintenance has not run since process start"
+		} else {
+			res.Detail = "no maintenance pass yet"
+		}
 	}
 	return res
 }

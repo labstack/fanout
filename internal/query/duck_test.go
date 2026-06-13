@@ -186,8 +186,8 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("runMaintenance() error = nil, want merge error surfaced")
 	}
-	if lastOK, lastErr := d.MaintenanceHealth(); lastErr == nil || !lastOK.IsZero() {
-		t.Fatalf("MaintenanceHealth() = (%v, %v), want zero lastOK and non-nil lastErr", lastOK, lastErr)
+	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr == nil || !lastOK.IsZero() || lastAt.IsZero() {
+		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want zero lastOK, non-zero lastAt, non-nil lastErr", lastOK, lastAt, lastErr)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -223,8 +223,8 @@ func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("rollupOnce() error = nil, want rollup errors surfaced")
 	}
-	if lastOK, lastErr := d.MaintenanceHealth(); lastErr != nil || lastOK.IsZero() {
-		t.Fatalf("MaintenanceHealth() = (%v, %v), want non-zero lastOK and nil lastErr", lastOK, lastErr)
+	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr != nil || lastOK.IsZero() || lastAt.IsZero() {
+		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want non-zero lastOK and lastAt, nil lastErr", lastOK, lastAt, lastErr)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
