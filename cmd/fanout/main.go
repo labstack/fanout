@@ -187,7 +187,7 @@ func main() {
 
 	jwtSecret := cfg.JWTSecret
 	refreshSecret := cfg.JWTRefreshSecret
-	api.RegisterAuthMiddleware(e, userStore, jwtSecret)
+	api.RegisterAuthMiddleware(e, userStore, jwtSecret, cfg.PublicRead)
 
 	// Health checks (liveness + readiness)
 	api.RegisterHealthRoutes(e, q, cfg)

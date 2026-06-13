@@ -11,11 +11,17 @@ import (
 
 const authUserKey = "auth_user"
 
-func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, jwtSecret string) {
-	e.Use(AuthMiddleware(users, jwtSecret))
+func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, jwtSecret string, publicRead bool) {
+	e.Use(AuthMiddleware(users, jwtSecret, publicRead))
 }
 
-func AuthMiddleware(users *auth.UserStore, jwtSecret string) echo.MiddlewareFunc {
+// publicViewer is the synthetic identity served to unauthenticated read
+// requests when PUBLIC_READ is on. Role "viewer" clears endpoints with no
+// RequireRole guard while still failing RequireRole("operator"/"admin"), so
+// settings/users/api-key routes stay locked.
+var publicViewer = auth.User{ID: "public", Email: "public@demo", Role: "viewer", Active: true}
+
+func AuthMiddleware(users *auth.UserStore, jwtSecret string, publicRead bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			if isPublicRoute(c.Request().URL.Path) {
@@ -27,6 +33,18 @@ func AuthMiddleware(users *auth.UserStore, jwtSecret string) echo.MiddlewareFunc
 				user, err := authenticateBearer(users, jwtSecret, bearer)
 				if err == nil {
 					c.Set(authUserKey, &user)
+					return next(c)
+				}
+			}
+
+			// Public demo mode: serve unauthenticated reads as a viewer. Gated to
+			// GET/HEAD so writes (POST/DELETE) still require real auth regardless
+			// of a route's RequireRole, keeping "public" strictly read-only.
+			if publicRead {
+				switch c.Request().Method {
+				case http.MethodGet, http.MethodHead:
+					viewer := publicViewer
+					c.Set(authUserKey, &viewer)
 					return next(c)
 				}
 			}
