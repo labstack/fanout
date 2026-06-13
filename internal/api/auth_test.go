@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/settings"
 	appstore "github.com/labstack/fanout/internal/store"
 )
@@ -36,7 +37,7 @@ func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Setup, 
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{}, env.Config{})
 	return e, users, setup, setupToken, secret, refreshSecret
 }
 
@@ -319,7 +320,7 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{}, env.Config{})
 
 	for _, email := range []string{"missing@example.com", "inactive@example.com"} {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"`+email+`"}`))
@@ -365,7 +366,7 @@ func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 		User: "user",
 		Pass: "pass",
 		From: "Fanout <noreply@example.com>",
-	})
+	}, env.Config{})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"active@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -462,6 +463,50 @@ func TestSetupCreatesAdminWithValidToken(t *testing.T) {
 
 	if got := setup.Verify(setupToken); got != auth.SetupStatusUnset {
 		t.Fatalf("setup state after admin creation = %v, want Unset", got)
+	}
+}
+
+// The setup response must advertise the configured public ingest endpoint
+// (e.g. https://ingest.fanout.labstack.com behind Traefik on :443), not the
+// internal :4317 — that endpoint is what the displayed collector config uses.
+func TestSetupReturnsConfiguredIngestEndpoint(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close() })
+
+	const endpoint = "https://ingest.fanout.labstack.com"
+	secret := "0123456789abcdef0123456789abcdef"
+	users := auth.NewUserStore(sqlite.DB)
+	codes := auth.NewCodeStore(sqlite.DB, secret)
+	setup := auth.NewSetup()
+	setupToken, _, err := setup.Rotate()
+	if err != nil {
+		t.Fatalf("Rotate setup: %v", err)
+	}
+
+	e := echo.New()
+	RegisterAuthMiddleware(e, users, secret)
+	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, secret, auth.SMTPConfig{}, env.Config{IngestEndpoint: endpoint})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+setupToken+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body["suggested_endpoint"] != endpoint {
+		t.Fatalf("suggested_endpoint = %q, want %q", body["suggested_endpoint"], endpoint)
+	}
+	if strings.Contains(body["suggested_endpoint"], ":4317") {
+		t.Fatalf("suggested_endpoint = %q, must not advertise the internal :4317", body["suggested_endpoint"])
 	}
 }
 

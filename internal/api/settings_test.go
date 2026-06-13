@@ -134,7 +134,7 @@ func newConfigServer(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore,
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret)
-	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{})
+	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{}, env.Config{})
 	RegisterSettingsRoutes(e, cfg, store)
 	return e, users, secret, store
 }
