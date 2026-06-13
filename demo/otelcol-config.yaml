@@ -91,7 +91,10 @@ exporters:
   debug:
     verbosity: basic
   otlp/fanout:
-    endpoint: "fanout:4317"
+    # The demo fanout instance, reached container-to-container on the internal
+    # network. No ingest token: the demo runs with PUBLIC_READ=true, which
+    # accepts OTLP without one (see demo/docker-compose.yaml).
+    endpoint: "demo:4317"
     tls:
       insecure: true
     sending_queue:
