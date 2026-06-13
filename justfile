@@ -157,35 +157,36 @@ release:
       echo "Nothing to release."
     fi
 
-# ── Stress ─────────────────────────────────────────────────────────────────────
+# ── Stress / performance suite ───────────────────────────────────────────────
 
-# Push synthetic OTLP load at a local fanout (cmd/loadgen). Pass any loadgen
-# flags through, e.g. `just stress -rate 2000 -duration 10m -services 50`.
-# Run fanout with PUBLIC_READ=true for tokenless ingest, or pass -token=fo_…
-# Defaults: 1000 traces/s for 60s across 20 services with cross-service edges.
-stress *ARGS='':
-    go run ./cmd/loadgen {{ARGS}}
-
-# Ingest benchmark: throwaway fanout + N parallel loadgens → server-side rows/s.
-# Args: generators rate-per-gen duration-sec. e.g. `just bench 3 25000 30`
-bench *ARGS='':
-    ./scripts/bench.sh {{ARGS}}
-
-# Profile fanout under load (CPU/heap/alloc/mutex/block) → top hotspots.
-# Args: cpu-seconds rate-per-gen generators. Profiles saved to bench-profiles/.
-profile *ARGS='':
-    ./scripts/profile.sh {{ARGS}}
-
-# Provision a Hetzner VM (default cpx32 — the reference target), build the
-# current branch on it, stress test, and tear down (always). Needs hcloud auth.
-# Args: server-type ssh-key location. e.g. `just bench-hetzner cpx32`
-bench-hetzner *ARGS='':
-    ./scripts/bench-hetzner.sh {{ARGS}}
-
-# Watch the stress-relevant metrics on a local fanout (the ones that flagged the
-# prod incident: file/snapshot growth, ingest backpressure, rollup freshness).
-stress-watch ADDR="localhost:7520":
-    watch -n5 'curl -s {{ADDR}}/-/metrics | grep -E "^(fanout_lake_partitions|fanout_lake_size_bytes|fanout_ingest_queue_depth|fanout_rows_dropped_total|fanout_rollup_last_success_timestamp|fanout_flush_duration_seconds_count)"'
+# Performance suite dispatcher. Logic lives in scripts/ + cmd/loadgen; this just
+# routes. Run `just stress` (no args) for the subcommand list.
+#   local   [gens rate dur]    throwaway fanout + parallel loadgens → rows/s
+#                              (gens auto-scales to CPU cores → max utilization)
+#   hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down
+#   profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots
+#   drive   [loadgen flags]    fire loadgen at an already-running fanout
+#   watch   [host:port]        tail the incident-relevant metrics
+stress *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    set -- {{ARGS}}
+    sub="${1:-}"; [ $# -gt 0 ] && shift || true
+    case "$sub" in
+      local)   exec ./scripts/bench.sh "$@" ;;
+      hetzner) exec ./scripts/bench-hetzner.sh "$@" ;;
+      profile) exec ./scripts/profile.sh "$@" ;;
+      drive)   exec go run ./cmd/loadgen "$@" ;;
+      watch)   exec ./scripts/stress-watch.sh "$@" ;;
+      ""|help|-h|--help)
+        echo "just stress <subcommand> [args]"
+        echo "  local   [gens rate dur]    throwaway fanout + parallel loadgens → rows/s (auto-scales to cores)"
+        echo "  hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down"
+        echo "  profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots"
+        echo "  drive   [loadgen flags]    fire loadgen at an already-running fanout"
+        echo "  watch   [host:port]        tail the incident-relevant metrics" ;;
+      *) echo "unknown subcommand: $sub (run 'just stress' for the list)" >&2; exit 1 ;;
+    esac
 
 # ── Ops ──────────────────────────────────────────────────────────────────────
 

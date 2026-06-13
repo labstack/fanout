@@ -74,6 +74,7 @@ echo "── stress test (self-sizing DuckDB defaults) ──"
 ssh_vm "bash -s" <<'REMOTE'
 set -uo pipefail
 cd /root/fanout
+CORES=$(nproc)
 set -a; . ./.env; set +a
 DATA_DIR=/root/fanout/data PUBLIC_READ=true OTLP_GRPC_ADDR=:4317 HTTP_ADDR=:7520 ENV=development \
   FLUSH_SECONDS=5 ROLLUP_EVERY=15 ./bin/fanout >/root/fanout/f.log 2>&1 &
@@ -81,12 +82,20 @@ FPID=$!
 for i in $(seq 1 40); do curl -fsS -m2 localhost:7520/healthz >/dev/null 2>&1 && break; sleep 1; done
 snap(){ curl -s -m3 localhost:7520/-/metrics | awk -v k="$1" '$0 ~ "^"k {s+=$2} END{printf "%d",s+0}'; }
 ./bin/loadgen -endpoint localhost:4317 -duration 8s -rate 5000 -workers 8 -services 30 >/dev/null 2>&1
+# CPU peak sampler (sum of all %cpu; / cores / 100 = utilization)
+echo 0 > /tmp/cpupeak
+( while :; do tot=$(ps -A -o %cpu= 2>/dev/null | awk '{s+=$1} END{printf "%d",s}'); [ "${tot:-0}" -gt "$(cat /tmp/cpupeak)" ] && echo "$tot" > /tmp/cpupeak; sleep 1; done ) & SAMPLER=$!
 rows0=$(snap fanout_ingest_rows_total); t0=$(date +%s)
+# One generator per core → drive the VM to saturation.
 pids=()
-for n in 1 2; do ./bin/loadgen -endpoint localhost:4317 -duration 30s -rate 15000 -workers 12 -services 50 -messaging-ratio 0.15 >/root/fanout/lg$n.log 2>&1 & pids+=($!); done
+for n in $(seq 1 "$CORES"); do ./bin/loadgen -endpoint localhost:4317 -duration 30s -rate 50000 -workers 20 -services 50 -messaging-ratio 0.15 >/root/fanout/lg$n.log 2>&1 & pids+=($!); done
 wait "${pids[@]}"
+kill $SAMPLER 2>/dev/null
 t1=$(date +%s); rows1=$(snap fanout_ingest_rows_total); dt=$((t1-t0))
+peakcpu=$(cat /tmp/cpupeak); util=$(( peakcpu / CORES ))
 echo
+echo "machine         : ${CORES} cores | ${CORES} generators driving it"
+echo "peak CPU         : ~${util}% of ${CORES} cores (${peakcpu}% summed)"
 echo "rows accepted   : $((rows1-rows0)) in ${dt}s = $(( (rows1-rows0)/dt )) rows/s"
 echo "drops           : $(snap fanout_rows_dropped_total)"
 echo "lake_partitions : $(snap fanout_lake_partitions) files | $(( $(snap fanout_lake_size_bytes)/1048576 )) MB"

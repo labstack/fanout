@@ -11,9 +11,14 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
-GENS="${1:-3}"
-RATE="${2:-25000}"
-DUR="${3:-20}"
+# Auto-scale the load to the host: one generator per CPU core saturates the
+# machine (loadgen + fanout share the cores), so the result reflects THIS
+# machine's max. Override any of gens/rate/duration positionally.
+detect_cores() { command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4; }
+CORES=$(detect_cores)
+GENS="${1:-$CORES}"
+RATE="${2:-50000}" # high per-gen rate so the generator's pacing isn't the cap
+DUR="${3:-30}"
 GHTTP=:17520
 GGRPC=:14317
 
@@ -22,8 +27,27 @@ command -v go >/dev/null || { echo "go not found" >&2; exit 1; }
 
 TMPD=$(mktemp -d)
 FPID=""
-cleanup() { [ -n "$FPID" ] && kill "$FPID" 2>/dev/null; rm -rf "$TMPD"; }
+SAMPLER=""
+cleanup() {
+  [ -n "$SAMPLER" ] && kill "$SAMPLER" 2>/dev/null
+  if [ -n "$FPID" ]; then
+    kill "$FPID" 2>/dev/null
+    wait "$FPID" 2>/dev/null || true # let fanout finish flushing before we rm its data dir
+  fi
+  rm -rf "$TMPD"
+}
 trap cleanup EXIT INT TERM
+
+# Peak total CPU sampler (sum of all processes' %cpu; / cores / 100 = utilization).
+# Portable across macOS/Linux ps. Records the peak seen during the measured run.
+echo 0 > "$TMPD/cpupeak"
+sample_cpu() {
+  while :; do
+    tot=$(ps -A -o %cpu= 2>/dev/null | awk '{s+=$1} END{printf "%d", s}')
+    [ "${tot:-0}" -gt "$(cat "$TMPD/cpupeak")" ] && echo "$tot" > "$TMPD/cpupeak"
+    sleep 1
+  done
+}
 
 echo "building fanout + loadgen…"
 CGO_ENABLED=1 go build -o "$TMPD/fanout" ./cmd/fanout || exit 1
@@ -40,7 +64,8 @@ snap() { curl -s -m3 "localhost${GHTTP}/-/metrics" | awk -v k="$1" '$0 ~ "^"k {s
 echo "warmup…"; "$TMPD/loadgen" -endpoint "localhost${GGRPC}" -duration 8s -rate 5000 -workers 12 -services 30 >/dev/null 2>&1
 
 rows0=$(snap fanout_ingest_rows_total); t0=$(date +%s)
-echo "running: $GENS generators × $RATE traces/s for ${DUR}s…"
+echo "running: $GENS generators (=${CORES} cores) × $RATE traces/s for ${DUR}s — driving the machine to saturation…"
+sample_cpu & SAMPLER=$!
 pids=()
 for n in $(seq 1 "$GENS"); do
   "$TMPD/loadgen" -endpoint "localhost${GGRPC}" -duration "${DUR}s" -rate "$RATE" -workers 20 \
@@ -48,10 +73,14 @@ for n in $(seq 1 "$GENS"); do
   pids+=($!)
 done
 wait "${pids[@]}"
+kill "$SAMPLER" 2>/dev/null; SAMPLER=""
 t1=$(date +%s); rows1=$(snap fanout_ingest_rows_total); dt=$((t1 - t0))
+peakcpu=$(cat "$TMPD/cpupeak"); util=$(( peakcpu / CORES ))
 
 echo
-echo "── fanout ingest benchmark ─────────────────────────────────"
+echo "── fanout ingest benchmark (max utilization) ───────────────"
+echo "machine         : ${CORES} cores | $GENS generators driving it"
+echo "peak CPU         : ~${util}% of ${CORES} cores (${peakcpu}% summed)"
 echo "rows accepted   : $((rows1 - rows0)) in ${dt}s = $(( (rows1 - rows0) / dt )) rows/s"
 echo "drops           : $(snap fanout_rows_dropped_total)"
 echo "lake_partitions : $(snap fanout_lake_partitions) files | $(( $(snap fanout_lake_size_bytes) / 1048576 )) MB"
