@@ -36,6 +36,11 @@ type Config struct {
 	// reach it — only enable it on an instance whose data is meant to be public
 	// (e.g. the otel-demo showcase). NEVER set it where data is private.
 	PublicRead bool `env:"PUBLIC_READ" envDefault:"false"`
+	// PprofEnabled exposes Go's net/http/pprof handlers at /debug/pprof/* for
+	// CPU/heap/mutex/goroutine profiling under load. Off by default; the routes
+	// are unauthenticated (non-/api/), so only enable on localhost or a trusted
+	// network (e.g. during a benchmark — see scripts/bench.sh / just bench).
+	PprofEnabled bool `env:"PPROF_ENABLED" envDefault:"false"`
 	// The DuckDB knobs below self-size where possible and otherwise default to
 	// values validated on the reference deployment target, a small dedicated VM
 	// (Hetzner CPX42: 8 vCPU, 16 GB RAM, 240 GB disk). There the self-sizing

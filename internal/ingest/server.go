@@ -1,14 +1,18 @@
 package ingest
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -359,10 +363,169 @@ func toJSON(v interface{}) []byte {
 // expect. Marshaling the raw []*KeyValue (as the old toJSON path did) produced an
 // array of {Key,Value} structs that no JSON-path query could read. Returns nil for
 // an empty list so the column stays NULL.
+var attrBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
+// attrsJSON flattens an OTLP attribute list into a flat JSON object. The fast
+// path writes the object directly into a pooled buffer, skipping the
+// map[string]any + interface boxing + reflection that json.Marshal needs — that
+// path dominated ingest allocations under load (profiled: ~7GB / 14% of
+// alloc_space at 175k rows/s). Attributes whose values are nested (array/kvlist)
+// or non-finite floats fall back to the reflection encoder for exactness.
 func attrsJSON(attrs []*common.KeyValue) []byte {
 	if len(attrs) == 0 {
 		return nil
 	}
+	if attrsNeedReflect(attrs) {
+		return attrsJSONReflect(attrs)
+	}
+
+	buf := attrBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	buf.WriteByte('{')
+	n := 0
+	for _, kv := range attrs {
+		if kv == nil || kv.Key == "" {
+			continue
+		}
+		if n > 0 {
+			buf.WriteByte(',')
+		}
+		appendJSONString(buf, kv.Key)
+		buf.WriteByte(':')
+		appendScalarJSON(buf, kv.Value)
+		n++
+	}
+	var out []byte
+	if n > 0 {
+		buf.WriteByte('}')
+		out = append([]byte(nil), buf.Bytes()...) // copy out before returning buf to the pool
+	}
+	attrBufPool.Put(buf)
+	return out
+}
+
+// attrsNeedReflect reports whether any value is nested (array/kvlist) or a
+// non-finite float — the cases the direct encoder doesn't handle.
+func attrsNeedReflect(attrs []*common.KeyValue) bool {
+	for _, kv := range attrs {
+		if kv == nil || kv.Value == nil {
+			continue
+		}
+		switch x := kv.Value.Value.(type) {
+		case *common.AnyValue_ArrayValue, *common.AnyValue_KvlistValue:
+			return true
+		case *common.AnyValue_DoubleValue:
+			if math.IsInf(x.DoubleValue, 0) || math.IsNaN(x.DoubleValue) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// appendScalarJSON writes a scalar OTLP value as JSON. Callers guarantee no
+// nested/non-finite values reach here (see attrsNeedReflect).
+func appendScalarJSON(buf *bytes.Buffer, v *common.AnyValue) {
+	if v == nil {
+		buf.WriteString("null")
+		return
+	}
+	var tmp [32]byte
+	switch x := v.Value.(type) {
+	case *common.AnyValue_StringValue:
+		appendJSONString(buf, x.StringValue)
+	case *common.AnyValue_IntValue:
+		buf.Write(strconv.AppendInt(tmp[:0], x.IntValue, 10))
+	case *common.AnyValue_DoubleValue:
+		buf.Write(strconv.AppendFloat(tmp[:0], x.DoubleValue, 'g', -1, 64))
+	case *common.AnyValue_BoolValue:
+		if x.BoolValue {
+			buf.WriteString("true")
+		} else {
+			buf.WriteString("false")
+		}
+	case *common.AnyValue_BytesValue:
+		appendJSONString(buf, base64.StdEncoding.EncodeToString(x.BytesValue))
+	default:
+		buf.WriteString("null")
+	}
+}
+
+// jsonHTMLSafe[b] is true for ASCII bytes that need no escaping — matching
+// encoding/json's default htmlSafeSet (escapes " \ control chars and < > &).
+var jsonHTMLSafe = func() (s [utf8.RuneSelf]bool) {
+	for b := 0; b < utf8.RuneSelf; b++ {
+		s[b] = b >= 0x20 && b != '"' && b != '\\' && b != '<' && b != '>' && b != '&'
+	}
+	return
+}()
+
+const jsonHex = "0123456789abcdef"
+
+// appendJSONString writes s as a JSON string, byte-for-byte identical to
+// encoding/json.Marshal(s) with the default HTML escaping (verified by test).
+func appendJSONString(buf *bytes.Buffer, s string) {
+	buf.WriteByte('"')
+	start := 0
+	for i := 0; i < len(s); {
+		if b := s[i]; b < utf8.RuneSelf {
+			if jsonHTMLSafe[b] {
+				i++
+				continue
+			}
+			if start < i {
+				buf.WriteString(s[start:i])
+			}
+			switch b {
+			case '\\', '"':
+				buf.WriteByte('\\')
+				buf.WriteByte(b)
+			case '\n':
+				buf.WriteString(`\n`)
+			case '\r':
+				buf.WriteString(`\r`)
+			case '\t':
+				buf.WriteString(`\t`)
+			default:
+				buf.WriteString(`\u00`)
+				buf.WriteByte(jsonHex[b>>4])
+				buf.WriteByte(jsonHex[b&0xF])
+			}
+			i++
+			start = i
+			continue
+		}
+		c, size := utf8.DecodeRuneInString(s[i:])
+		if c == utf8.RuneError && size == 1 {
+			if start < i {
+				buf.WriteString(s[start:i])
+			}
+			buf.WriteString(`\ufffd`)
+			i += size
+			start = i
+			continue
+		}
+		// U+2028/U+2029 are valid JSON but break JS; encoding/json escapes them.
+		if c == '\u2028' || c == '\u2029' {
+			if start < i {
+				buf.WriteString(s[start:i])
+			}
+			buf.WriteString(`\u202`)
+			buf.WriteByte(jsonHex[c&0xF])
+			i += size
+			start = i
+			continue
+		}
+		i += size
+	}
+	if start < len(s) {
+		buf.WriteString(s[start:])
+	}
+	buf.WriteByte('"')
+}
+
+// attrsJSONReflect is the reflection-based encoder, retained for nested values.
+func attrsJSONReflect(attrs []*common.KeyValue) []byte {
 	m := make(map[string]any, len(attrs))
 	for _, kv := range attrs {
 		if kv == nil || kv.Key == "" {

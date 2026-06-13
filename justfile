@@ -166,6 +166,16 @@ release:
 stress *ARGS='':
     go run ./cmd/loadgen {{ARGS}}
 
+# Ingest benchmark: throwaway fanout + N parallel loadgens → server-side rows/s.
+# Args: generators rate-per-gen duration-sec. e.g. `just bench 3 25000 30`
+bench *ARGS='':
+    ./scripts/bench.sh {{ARGS}}
+
+# Profile fanout under load (CPU/heap/alloc/mutex/block) → top hotspots.
+# Args: cpu-seconds rate-per-gen generators. Profiles saved to bench-profiles/.
+profile *ARGS='':
+    ./scripts/profile.sh {{ARGS}}
+
 # Watch the stress-relevant metrics on a local fanout (the ones that flagged the
 # prod incident: file/snapshot growth, ingest backpressure, rollup freshness).
 stress-watch ADDR="localhost:7520":
