@@ -76,7 +76,12 @@ for n in $(seq 1 "$GENS"); do
     -services 50 -messaging-ratio 0.15 "${q[@]}" >"$TMPD/lg$n.log" 2>&1 &
   pids+=($!)
 done
-wait "${pids[@]}"
+# Collect each generator's exit code (a bare `wait "${pids[@]}"` discards them).
+# loadgen's own gate catches client-side failures the server-side metric scrape
+# below cannot see — export RPCs failing while fanout stays healthy (drops=0,
+# no OOM/errors) would otherwise read as PASS.
+genfail=0
+for pid in "${pids[@]}"; do wait "$pid" || genfail=1; done
 kill "$SAMPLER" 2>/dev/null; SAMPLER=""
 t1=$(date +%s); rows1=$(snap fanout_ingest_rows_total); dt=$((t1 - t0))
 peakcpu=$(cat "$TMPD/cpupeak"); util=$(( peakcpu / CORES ))
@@ -111,6 +116,9 @@ curl -fsS -m3 "localhost${GHTTP}/healthz" >/dev/null 2>&1 || fail="${fail} healt
 # (no successful queries / report not written) — fail, don't skip.
 if [ -z "${qp95:-}" ]; then fail="${fail} query-p95-missing;"; elif [ "${qp95}" -gt 1500 ]; then fail="${fail} query-p95=${qp95}ms>1500;"; fi
 [ "${rps:-0}" -lt "${MIN_ROWS:-0}" ] && fail="${fail} throughput=${rps}<${MIN_ROWS};"
+# A non-zero generator exit means loadgen's own gate tripped (zero successful
+# exports, send/query errors, or server-side drops it observed) — see lg*.log.
+[ "${genfail:-0}" -ne 0 ] && fail="${fail} loadgen-gate-failed(see lg*.log);"
 if [ -n "$fail" ]; then
   echo "RESULT          : ✗ FAIL —${fail}"
   echo "────────────────────────────────────────────────────────────"
