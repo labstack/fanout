@@ -51,6 +51,9 @@ services:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520
       OTLP_GRPC_ADDR: :4317
+      # 4x fewer DuckLake snapshots/files per day than the 15s default; the
+      # in-binary hourly compaction keeps the residue bounded either way.
+      FLUSH_SECONDS: "60"
       # OTLP endpoint shown in the UI's collector-config hint. Behind Traefik the
       # browser host differs from the OTLP host, so set it explicitly.
       INGEST_ENDPOINT: https://ingest.fanout.labstack.com

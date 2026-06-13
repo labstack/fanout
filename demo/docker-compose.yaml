@@ -23,6 +23,9 @@ services:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520
       OTLP_GRPC_ADDR: :4317
+      # 4x fewer DuckLake snapshots/files per day than the 15s default; the
+      # in-binary hourly compaction keeps the residue bounded either way.
+      FLUSH_SECONDS: "60"
       # Concurrent read queries; write commits stay serialized by the shared
       # write mutex. This high-ingest instance is the canary for SQLITE_BUSY.
       DUCKDB_MAX_CONNS: "4"
