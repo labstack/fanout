@@ -59,6 +59,10 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 	return c.JSON(200, map[string]any{
 		"setup_required": count == 0,
 		"auth_enabled":   true,
+		// Lets the SPA boot anonymously into read-only mode: when true, an
+		// unauthenticated GET /api/auth/me returns the synthetic viewer, so the
+		// frontend can render dashboards without a login.
+		"public_read": h.cfg.PublicRead,
 	})
 }
 

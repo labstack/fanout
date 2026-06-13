@@ -12,6 +12,8 @@ export interface User {
 export interface AuthStatus {
   setup_required: boolean;
   auth_enabled: boolean;
+  /** Public demo instance: anonymous visitors get read-only viewer access. */
+  public_read?: boolean;
 }
 
 export interface AuthCtx {

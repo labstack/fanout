@@ -76,6 +76,54 @@ func TestPublicReadServesAnonymousReadsOnly(t *testing.T) {
 	}
 }
 
+// With PUBLIC_READ on, /api/auth/status advertises public_read and an
+// unauthenticated GET /api/auth/me returns the synthetic viewer — the two
+// signals the SPA uses to boot anonymously into read-only mode.
+func TestPublicReadStatusAndAnonymousMe(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close() })
+
+	secret := "0123456789abcdef0123456789abcdef"
+	users := auth.NewUserStore(sqlite.DB)
+	if _, err := users.Create("admin@example.com", "", "admin"); err != nil {
+		t.Fatalf("Create admin: %v", err)
+	}
+	codes := auth.NewCodeStore(sqlite.DB, secret)
+	cfg := env.Config{PublicRead: true}
+
+	e := echo.New()
+	RegisterAuthMiddleware(e, users, secret, cfg.PublicRead)
+	RegisterAuthRoutes(e, users, codes, auth.NewSetup(), settings.NewStore(sqlite.DB), secret, secret, auth.SMTPConfig{}, cfg)
+
+	// status advertises public_read
+	statusRec := httptest.NewRecorder()
+	e.ServeHTTP(statusRec, httptest.NewRequest(http.MethodGet, "/api/auth/status", nil))
+	var status map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if status["public_read"] != true {
+		t.Fatalf("status.public_read = %v, want true", status["public_read"])
+	}
+
+	// anonymous /api/auth/me returns the synthetic viewer
+	meRec := httptest.NewRecorder()
+	e.ServeHTTP(meRec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("anonymous /api/auth/me = %d, want 200", meRec.Code)
+	}
+	var me map[string]any
+	if err := json.Unmarshal(meRec.Body.Bytes(), &me); err != nil {
+		t.Fatalf("decode me: %v", err)
+	}
+	if me["role"] != "viewer" {
+		t.Fatalf("anonymous viewer role = %v, want viewer", me["role"])
+	}
+}
+
 func TestRequireRoleUsesCurrentUserState(t *testing.T) {
 	e, users, _, _, secret, _ := newTestAuthServer(t)
 	user, err := users.Create("admin@example.com", "", "admin")

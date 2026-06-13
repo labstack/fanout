@@ -17,7 +17,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (!status.setup_required) {
           const refreshed = await tryRefresh();
-          if (refreshed) {
+          // On a public-read demo, an anonymous visitor still gets a read-only
+          // viewer from /api/auth/me (synthesized server-side), so fetch the
+          // user even without a refresh cookie — that's what lets the demo
+          // render its dashboards without a login.
+          if (refreshed || status.public_read) {
             try {
               const me = await api<User>("/api/auth/me");
               setUser(me);
