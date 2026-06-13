@@ -176,6 +176,12 @@ bench *ARGS='':
 profile *ARGS='':
     ./scripts/profile.sh {{ARGS}}
 
+# Provision a Hetzner VM (default cpx32 — the reference target), build the
+# current branch on it, stress test, and tear down (always). Needs hcloud auth.
+# Args: server-type ssh-key location. e.g. `just bench-hetzner cpx32`
+bench-hetzner *ARGS='':
+    ./scripts/bench-hetzner.sh {{ARGS}}
+
 # Watch the stress-relevant metrics on a local fanout (the ones that flagged the
 # prod incident: file/snapshot growth, ingest backpressure, rollup freshness).
 stress-watch ADDR="localhost:7520":
