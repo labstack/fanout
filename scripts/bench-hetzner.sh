@@ -36,22 +36,26 @@ CREATED=1
 IP=$(hcloud server ip "$NAME")
 echo "  IP: $IP"
 
-ssh_vm() { ssh -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -o BatchMode=yes "root@$IP" "$@"; }
+# Ephemeral throwaway VM: bypass known_hosts entirely (Hetzner recycles IPs, so
+# a reused IP with a different host key would otherwise be rejected).
+SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes)
+ssh_vm() { ssh "${SSHOPTS[@]}" "root@$IP" "$@"; }
 for _ in $(seq 1 40); do ssh_vm true 2>/dev/null && break; sleep 5; done
 
 echo "── installing toolchain (gcc + Go $GOVER) ──"
-ssh_vm "bash -s" <<REMOTE
+# Quoted heredoc so $(…) runs on the VM, not locally; GOVER passed via remote env.
+ssh_vm "GOVER='$GOVER' bash -s" <<'REMOTE'
 set -e
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null && apt-get install -y -qq build-essential git curl >/dev/null 2>&1
-cd /tmp && curl -fsSL https://go.dev/dl/go${GOVER}.linux-amd64.tar.gz -o go.tgz
+cd /tmp && curl -fsSL "https://go.dev/dl/go${GOVER}.linux-amd64.tar.gz" -o go.tgz
 rm -rf /usr/local/go && tar -C /usr/local -xzf go.tgz
-echo "  $(/usr/local/go/bin/go version) | $(nproc) cores, $(free -g | awk '/Mem/{print \$2}')GB RAM"
+echo "  $(/usr/local/go/bin/go version) | $(nproc) cores, $(free -g | awk '/Mem/{print $2}')GB RAM"
 REMOTE
 
 echo "── shipping current branch ($(git rev-parse --short HEAD)) + building ──"
 git archive --format=tar.gz HEAD -o /tmp/fanout-src.tgz
-scp -q -o BatchMode=yes /tmp/fanout-src.tgz "root@$IP:/root/"
+scp "${SSHOPTS[@]}" -q /tmp/fanout-src.tgz "root@$IP:/root/"
 rm -f /tmp/fanout-src.tgz
 ssh_vm "bash -s" <<'REMOTE'
 set -e
