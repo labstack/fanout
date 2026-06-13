@@ -67,6 +67,10 @@ export function LoginPage() {
   const [ingestHeaderName, setIngestHeaderName] = useState(
     "x-fanout-ingest-token",
   );
+  // Server-suggested endpoint — behind a reverse proxy this is the public TLS
+  // host (e.g. https://ingest.fanout.labstack.com), not the internal :4317.
+  // The placeholder is only shown if the server doesn't supply one.
+  const [ingestEndpoint, setIngestEndpoint] = useState("<host>:4317");
   const [copied, setCopied] = useState(false);
 
   const setupForm = useForm<SetupValues>({
@@ -126,6 +130,7 @@ export function LoginPage() {
       setAccessToken(data.access_token);
       setIngestToken(data.ingest_token || null);
       if (data.ingest_header_name) setIngestHeaderName(data.ingest_header_name);
+      if (data.suggested_endpoint) setIngestEndpoint(data.suggested_endpoint);
       setStep("token_shown");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Setup failed");
@@ -139,7 +144,7 @@ export function LoginPage() {
 
   async function copyIngestConfig() {
     if (!ingestToken) return;
-    const cfg = `OTEL_EXPORTER_OTLP_ENDPOINT=<host>:4317
+    const cfg = `OTEL_EXPORTER_OTLP_ENDPOINT=${ingestEndpoint}
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=${ingestToken}`;
     try {
@@ -346,7 +351,7 @@ OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=${ingestToken}`;
                 </Button>
               </div>
               <pre className="whitespace-pre-wrap break-all font-mono text-xs leading-6 text-foreground/80">
-                {`OTEL_EXPORTER_OTLP_ENDPOINT=<host>:4317
+                {`OTEL_EXPORTER_OTLP_ENDPOINT=${ingestEndpoint}
 OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=`}
                 <span className="text-primary">{ingestToken}</span>

@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/settings"
 )
 
@@ -22,9 +23,10 @@ type AuthHandler struct {
 	jwtSecret     string
 	refreshSecret string
 	smtp          auth.SMTPConfig
+	cfg           env.Config
 }
 
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, jwtSecret, refreshSecret string, smtp auth.SMTPConfig) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, jwtSecret, refreshSecret string, smtp auth.SMTPConfig, cfg env.Config) {
 	h := &AuthHandler{
 		users:         users,
 		codes:         codes,
@@ -33,6 +35,7 @@ func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeSto
 		jwtSecret:     jwtSecret,
 		refreshSecret: refreshSecret,
 		smtp:          smtp,
+		cfg:           cfg,
 	}
 
 	e.GET("/api/auth/status", h.Status)
@@ -132,6 +135,10 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		}
 		resp["ingest_token"] = ingestToken
 		resp["ingest_header_name"] = "x-fanout-ingest-token"
+		// The endpoint collectors should actually use. Behind a reverse proxy
+		// this is the public TLS host (e.g. https://ingest.fanout.labstack.com),
+		// NOT the internal :4317 — see suggestedIngestEndpoint.
+		resp["suggested_endpoint"] = suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestEndpoint)
 	}
 
 	slog.Info("auth: first admin setup completed", "email", email)

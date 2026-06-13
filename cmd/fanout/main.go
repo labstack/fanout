@@ -244,7 +244,7 @@ func main() {
 		From: cfg.SMTPFrom,
 	}
 	codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
-	api.RegisterAuthRoutes(e, userStore, codeStore, setup, settingsStore, jwtSecret, refreshSecret, smtpCfg)
+	api.RegisterAuthRoutes(e, userStore, codeStore, setup, settingsStore, jwtSecret, refreshSecret, smtpCfg, cfg)
 	api.RegisterUserRoutes(e, userStore, smtpCfg)
 	api.RegisterSettingsRoutes(e, cfg, settingsStore)
 	slog.Info("auth enabled")
