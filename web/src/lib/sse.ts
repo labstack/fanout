@@ -73,9 +73,12 @@ export class ChatClient {
 
       // SSE accumulator state: fields collect until a blank line dispatches the
       // event. Defaults to the "message" event type per the SSE spec, supports
-      // multi-line `data:`, and tolerates CRLF line endings.
+      // multi-line `data:`, and tolerates CRLF (`\r\n`) line endings.
       let eventType = "";
       let dataLines: string[] = [];
+      // Track whether a terminal frame (done/error) was successfully dispatched,
+      // so a truncated or unparseable final frame doesn't leave chat spinning.
+      let sawTerminal = false;
 
       const dispatch = () => {
         if (dataLines.length === 0) {
@@ -88,6 +91,7 @@ export class ChatClient {
         dataLines = [];
         try {
           const data = JSON.parse(payload);
+          if (type === "done" || type === "error") sawTerminal = true;
           this.onEvent({ type, ...data } as ChatEvent);
         } catch (err) {
           console.warn("[ChatClient] malformed SSE data, skipping:", payload.slice(0, 100), err);
@@ -125,6 +129,16 @@ export class ChatClient {
       // Flush any trailing line + pending event the server left unterminated.
       if (buffer) handleLine(buffer);
       dispatch();
+
+      // The stream closed cleanly but we never got a done/error frame (e.g. the
+      // terminal frame was truncated or failed to parse). Surface an error so
+      // the assistant message doesn't stay stuck in its loading state forever.
+      if (!sawTerminal) {
+        this.onEvent({
+          type: "error",
+          error: "The response ended unexpectedly. Please try again.",
+        });
+      }
     } catch (err: unknown) {
       if (err instanceof DOMException && err.name === "AbortError") {
         // Intentional cancel — not an error

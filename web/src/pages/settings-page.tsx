@@ -117,6 +117,9 @@ export function SettingsPage() {
     rotateMutation.isPending ||
     generateKeyMutation.isPending ||
     revokeMutation.isPending;
+  // Kept mounted (open toggles) so the close animation plays; copy is null when
+  // closed, in which case Radix doesn't render the content anyway.
+  const confirmCopy = confirm ? CONFIRM_COPY[confirm] : null;
 
   function onGenerateClick() {
     // Only confirm when replacing an existing key; first-time generation is safe.
@@ -291,9 +294,9 @@ export function SettingsPage() {
         onOpenChange={(open) => {
           if (!open && !confirmBusy) setConfirm(null);
         }}
-        title={confirm ? CONFIRM_COPY[confirm].title : ""}
-        description={confirm ? CONFIRM_COPY[confirm].description : undefined}
-        confirmLabel={confirm ? CONFIRM_COPY[confirm].confirmLabel : "Confirm"}
+        title={confirmCopy?.title ?? ""}
+        description={confirmCopy?.description}
+        confirmLabel={confirmCopy?.confirmLabel}
         destructive
         loading={confirmBusy}
         onConfirm={handleConfirm}

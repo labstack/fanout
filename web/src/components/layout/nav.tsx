@@ -21,7 +21,7 @@ export function Nav() {
   const isChatRoute = pathname === "/chat";
 
   // Shares its cache entry with the alerts page (same key) — one poll, not two.
-  const { data: summary } = useQuery({
+  const { data: summary, isError: summaryError } = useQuery({
     queryKey: ["alerts", "summary"],
     queryFn: () => api<AlertSummary>("/api/alerts/summary"),
     refetchInterval: 30_000,
@@ -47,11 +47,18 @@ export function Nav() {
             }
           >
             Alerts
-            {firingCount > 0 && (
+            {summaryError ? (
+              <span
+                title="Alert status unavailable"
+                className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-surface-3 text-muted-foreground text-[9px] font-bold px-1"
+              >
+                !
+              </span>
+            ) : firingCount > 0 ? (
               <span className="inline-flex items-center justify-center min-w-[16px] h-[16px] rounded-full bg-unhealthy text-white text-[9px] font-bold px-1">
                 {firingCount}
               </span>
-            )}
+            ) : null}
           </NavLink>
           <NavLink
             to={buildChatPath(undefined, token)}

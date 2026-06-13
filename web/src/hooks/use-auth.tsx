@@ -39,8 +39,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
           }
         }
-      } catch {
-        // Auth endpoints don't exist (very old build) — skip
+      } catch (err) {
+        // Usually means the auth endpoints are absent (very old build), but a
+        // transient network/5xx failure is indistinguishable here — log it so a
+        // real backend outage isn't completely invisible.
+        console.error("auth: status/bootstrap failed", err);
       }
 
       setIsLoading(false);
@@ -66,7 +69,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: "POST",
         credentials: "include",
       });
-    } catch { /* ignore */ }
+    } catch (err) {
+      // Best-effort: clear local state regardless so the user is logged out
+      // locally even if the server call fails — but log it, since a chronically
+      // failing logout (refresh cookie never revoked server-side) is invisible.
+      console.warn("auth: logout request failed", err);
+    }
     setApiToken(null);
     setUser(null);
     // Drop all cached query data so a subsequent login doesn't surface the

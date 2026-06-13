@@ -65,7 +65,8 @@ export function AlertsPage() {
       : "Failed to load alerts"
     : null;
 
-  // Invalidating the "alerts" prefix also refreshes ["alerts","summary"].
+  // Invalidating the "alerts" prefix also refreshes ["alerts","summary"];
+  // ["rules"] is a separate key, so it's invalidated explicitly.
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["alerts"] });
     queryClient.invalidateQueries({ queryKey: ["rules"] });
@@ -83,6 +84,19 @@ export function AlertsPage() {
     );
   }
 
+  // Nothing ever loaded and the fetch failed — show a real error instead of the
+  // normal layout, which would otherwise assert "no rules configured" and a
+  // green "Live" indicator while everything is actually down.
+  if (fetchError && lastUpdated === 0) {
+    return (
+      <PageContainer>
+        <div className="mx-auto max-w-md py-12">
+          <ErrorState error={fetchError} resetErrorBoundary={refresh} />
+        </div>
+      </PageContainer>
+    );
+  }
+
   const isStale = staleSeconds >= 30;
 
   const summaryActions = (
@@ -93,24 +107,27 @@ export function AlertsPage() {
       {summary.pending > 0 && (
         <Badge variant="warning">{summary.pending} pending</Badge>
       )}
-      <div
-        className={cn(
-          "flex items-center gap-1.5 font-mono text-[11px]",
-          isStale ? "text-warning/70" : "text-muted-foreground/50",
-        )}
-      >
-        {!isStale && (
-          <span
-            aria-hidden="true"
-            className="inline-block size-1.5 rounded-full bg-success/60"
-          />
-        )}
-        {staleSeconds < 10
-          ? "Live"
-          : staleSeconds < 30
-            ? `${staleSeconds}s ago`
-            : `${Math.floor(staleSeconds / 60)}m ago`}
-      </div>
+      {/* Only show freshness once we've actually loaded — otherwise "Live" lies. */}
+      {lastUpdated > 0 && (
+        <div
+          className={cn(
+            "flex items-center gap-1.5 font-mono text-[11px]",
+            isStale ? "text-warning/70" : "text-muted-foreground/50",
+          )}
+        >
+          {!isStale && (
+            <span
+              aria-hidden="true"
+              className="inline-block size-1.5 rounded-full bg-success/60"
+            />
+          )}
+          {staleSeconds < 10
+            ? "Live"
+            : staleSeconds < 30
+              ? `${staleSeconds}s ago`
+              : `${Math.floor(staleSeconds / 60)}m ago`}
+        </div>
+      )}
     </>
   );
 
