@@ -41,6 +41,21 @@ func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Setup, 
 	return e, users, setup, setupToken, secret, refreshSecret
 }
 
+// /debug/pprof must not be a public route — it exposes heap dumps, cmdline, and
+// a repeatable CPU-profile DoS, so it has to require auth even when mounted.
+func TestIsPublicRoute_DebugRequiresAuth(t *testing.T) {
+	for _, p := range []string{"/debug/pprof/", "/debug/pprof/heap", "/debug/pprof/profile"} {
+		if isPublicRoute(p) {
+			t.Errorf("isPublicRoute(%q) = true, want false (pprof must require auth)", p)
+		}
+	}
+	for _, p := range []string{"/healthz", "/readyz", "/", "/assets/app.js"} {
+		if !isPublicRoute(p) {
+			t.Errorf("isPublicRoute(%q) = false, want true", p)
+		}
+	}
+}
+
 // PUBLIC_READ serves unauthenticated GETs as a viewer, but only GETs: writes
 // stay locked, and admin-gated routes stay locked even for the synthetic viewer.
 func TestPublicReadServesAnonymousReadsOnly(t *testing.T) {

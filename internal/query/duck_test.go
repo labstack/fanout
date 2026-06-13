@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/fanout/internal/env"
@@ -164,6 +165,26 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 
 // A merge failure must not stop snapshot expiry, file cleanup, or the
 // checkpoint — each compaction step degrades independently.
+// Within DUCKLAKE_MAINTENANCE_EVERY_SECONDS of the last pass, runMaintenance
+// must short-circuit before issuing ANY SQL — the throttle that keeps the
+// retention+compaction cycle off every rollup tick.
+func TestRunMaintenanceThrottle(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	d := &Duck{DB: db, cfg: env.Config{MaintenanceEverySeconds: 3600}, lastMaintenance: time.Now()}
+	if err := d.runMaintenance(context.Background()); err != nil {
+		t.Fatalf("throttled runMaintenance() = %v, want nil", err)
+	}
+	// No expectations were registered: if it ran any SQL, this fails.
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("throttled runMaintenance should issue no SQL: %v", err)
+	}
+}
+
 func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

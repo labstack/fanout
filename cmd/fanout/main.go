@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"regexp"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -194,6 +196,22 @@ func main() {
 
 	// Prometheus metrics (internal/ops)
 	e.GET("/-/metrics", echo.WrapHandler(promhttp.Handler()))
+
+	// pprof for profiling under load (off by default; routes are unauthenticated).
+	if cfg.PprofEnabled {
+		slog.Warn("pprof enabled at /debug/pprof — do not expose on an untrusted network")
+		// Enable mutex/block sampling so those profiles aren't empty — this is how
+		// writeMu / channel contention shows up under load. Small runtime cost,
+		// acceptable because pprof is opt-in.
+		runtime.SetMutexProfileFraction(5)
+		runtime.SetBlockProfileRate(10_000) // sample a block event ~every 10µs
+		e.GET("/debug/pprof/", echo.WrapHandler(http.HandlerFunc(pprof.Index)))
+		e.GET("/debug/pprof/cmdline", echo.WrapHandler(http.HandlerFunc(pprof.Cmdline)))
+		e.GET("/debug/pprof/profile", echo.WrapHandler(http.HandlerFunc(pprof.Profile)))
+		e.GET("/debug/pprof/symbol", echo.WrapHandler(http.HandlerFunc(pprof.Symbol)))
+		e.GET("/debug/pprof/trace", echo.WrapHandler(http.HandlerFunc(pprof.Trace)))
+		e.GET("/debug/pprof/:name", echo.WrapHandler(http.HandlerFunc(pprof.Index))) // heap, goroutine, allocs, mutex, block…
+	}
 
 	// Create shared service layer
 	svc := service.New(q, cfg)

@@ -1,8 +1,36 @@
 package query
 
 import (
+	"context"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
+	"github.com/labstack/fanout/internal/metrics"
 )
+
+// Guards the RecordQuery wiring: ExecuteSQL must record query latency + status
+// to fanout_query_*. These metrics were dead (defined, never called) until the
+// raw-SQL path was instrumented — this test fails if that wiring is removed.
+func TestExecuteSQLRecordsQueryMetric(t *testing.T) {
+	db := openTestDuck(t)
+	d := &Duck{DB: db}
+
+	before := testutil.ToFloat64(metrics.QueryTotal.WithLabelValues("sql", "ok"))
+	resp := d.ExecuteSQL(context.Background(), SQLRequest{Query: "SELECT 1"})
+	if resp.Error != "" {
+		t.Fatalf("ExecuteSQL error: %s", resp.Error)
+	}
+	if after := testutil.ToFloat64(metrics.QueryTotal.WithLabelValues("sql", "ok")); after != before+1 {
+		t.Fatalf("QueryTotal{sql,ok} = %v, want %v (RecordQuery not wired)", after, before+1)
+	}
+
+	beforeErr := testutil.ToFloat64(metrics.QueryTotal.WithLabelValues("sql", "error"))
+	d.ExecuteSQL(context.Background(), SQLRequest{Query: "DROP TABLE foo"}) // blocked by validateSQL → error status
+	if after := testutil.ToFloat64(metrics.QueryTotal.WithLabelValues("sql", "error")); after != beforeErr+1 {
+		t.Fatalf("QueryTotal{sql,error} = %v, want %v", after, beforeErr+1)
+	}
+}
 
 func TestValidateSQL(t *testing.T) {
 	tests := []struct {

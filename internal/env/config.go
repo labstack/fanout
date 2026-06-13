@@ -28,7 +28,12 @@ type Config struct {
 	RollupEvery    int    `env:"ROLLUP_EVERY" envDefault:"60"`
 	MCPEnabled     bool   `env:"MCP_ENABLED" envDefault:"true"`
 	RetentionDays  int    `env:"RETENTION_DAYS" envDefault:"30"`
-	DefaultNS      string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	// MaintenanceEverySeconds throttles the DuckLake maintenance cycle (retention
+	// deletes + compaction). Default 3600 (hourly). Lower it to compact more
+	// aggressively, or for soak tests that need to observe file-count staying
+	// bounded within minutes (see scripts/soak.sh).
+	MaintenanceEverySeconds int    `env:"DUCKLAKE_MAINTENANCE_EVERY_SECONDS" envDefault:"3600"`
+	DefaultNS               string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
 	// PublicRead turns the instance into a public demo: unauthenticated GET/HEAD
 	// requests are served as a read-only viewer (writes, admin routes, /mcp, and
 	// the API-key routes still require real auth), and OTLP ingest is accepted
@@ -36,10 +41,18 @@ type Config struct {
 	// reach it — only enable it on an instance whose data is meant to be public
 	// (e.g. the otel-demo showcase). NEVER set it where data is private.
 	PublicRead bool `env:"PUBLIC_READ" envDefault:"false"`
+	// PprofEnabled exposes Go's net/http/pprof handlers at /debug/pprof/* for
+	// CPU/heap/mutex/goroutine profiling under load. Off by default; the routes
+	// are unauthenticated (non-/api/), so only enable on localhost or a trusted
+	// network (e.g. during a benchmark — see scripts/bench.sh / just bench).
+	PprofEnabled bool `env:"PPROF_ENABLED" envDefault:"false"`
 	// The DuckDB knobs below self-size where possible and otherwise default to
-	// values validated on the reference deployment target, a small dedicated VM
-	// (Hetzner CPX42: 8 vCPU, 16 GB RAM, 240 GB disk). There the self-sizing
-	// resolves to a ~12.8 GB memory cap and 8 query threads.
+	// values validated on the reference deployment target, a small shared VM
+	// (Hetzner CPX32: 4 vCPU, 8 GB RAM, 160 GB disk). There the self-sizing
+	// resolves to a ~6.4 GB memory cap and 4 query threads (deterministic from
+	// 8 GB / 4 vCPU). For a current throughput figure run `just stress hetzner`
+	// rather than trusting a number here — as of 2026-06 it handled ~55k rows/s
+	// with 0 drops and ~0.4 GB RSS, but that will drift with the ingest path.
 	//
 	// DuckDBMemory caps DuckDB's memory (e.g. "8GB"). Empty leaves DuckDB's
 	// own default in place — 80% of detected RAM, cgroup-aware in containers —

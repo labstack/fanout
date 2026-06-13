@@ -102,7 +102,8 @@ type Writer struct {
 	chLogs    <-chan LogRow
 	chMetrics <-chan MetricRow
 	// Buffers are owned exclusively by the Run goroutine — no mutex needed. On
-	// flush they are detached (handed to the flush worker) and replaced.
+	// flush their contents are copied into a detached batch and the buffers are
+	// truncated-and-retained, so the hot receive-loop append never reallocates.
 	bufSpans   []SpanRow
 	bufLogs    []LogRow
 	bufMetrics []MetricRow
@@ -237,18 +238,27 @@ func (w *Writer) shouldFlush() bool {
 // flush detaches the current buffers and hands them to the flush worker. Sending
 // on flushCh blocks if the worker is behind, which is the intended backpressure.
 func (w *Writer) flush(flushCh chan<- flushBatch) {
+	// Copy the filled rows into a freshly-sized batch and RETAIN the receive
+	// buffers (truncate, keep the backing array). The per-row append in the hot
+	// receive loop then never reallocates after warmup — it was the top ingest
+	// allocator (profiled ~11.5GB / 23%), and a sync.Pool didn't help because
+	// the GC-heavy workload evicts pooled buffers every cycle. The cost moves to
+	// one exact-sized copy per flush (infrequent) instead of a per-row regrow.
 	batch := flushBatch{}
 	if len(w.bufSpans) > 0 {
-		batch.spans = w.bufSpans
-		w.bufSpans = nil
+		batch.spans = make([]SpanRow, len(w.bufSpans))
+		copy(batch.spans, w.bufSpans)
+		w.bufSpans = w.bufSpans[:0]
 	}
 	if len(w.bufLogs) > 0 {
-		batch.logs = w.bufLogs
-		w.bufLogs = nil
+		batch.logs = make([]LogRow, len(w.bufLogs))
+		copy(batch.logs, w.bufLogs)
+		w.bufLogs = w.bufLogs[:0]
 	}
 	if len(w.bufMetrics) > 0 {
-		batch.metrics = w.bufMetrics
-		w.bufMetrics = nil
+		batch.metrics = make([]MetricRow, len(w.bufMetrics))
+		copy(batch.metrics, w.bufMetrics)
+		w.bufMetrics = w.bufMetrics[:0]
 	}
 	if batch.spans == nil && batch.logs == nil && batch.metrics == nil {
 		return
@@ -263,9 +273,24 @@ func (w *Writer) flushWorker(flushCh <-chan flushBatch, workerDone chan<- struct
 	defer close(workerDone)
 	var carry flushBatch
 	for batch := range flushCh {
-		carry.spans = append(carry.spans, batch.spans...)
-		carry.logs = append(carry.logs, batch.logs...)
-		carry.metrics = append(carry.metrics, batch.metrics...)
+		// Common path (no retry leftover): adopt the batch slice directly — no
+		// copy. Only when carry holds un-written rows from a failed flush do we
+		// append (carry's backing array is reused across flushes).
+		if len(carry.spans) == 0 {
+			carry.spans = batch.spans
+		} else {
+			carry.spans = append(carry.spans, batch.spans...)
+		}
+		if len(carry.logs) == 0 {
+			carry.logs = batch.logs
+		} else {
+			carry.logs = append(carry.logs, batch.logs...)
+		}
+		if len(carry.metrics) == 0 {
+			carry.metrics = batch.metrics
+		} else {
+			carry.metrics = append(carry.metrics, batch.metrics...)
+		}
 		carry.spans = writeRows(carry.spans, "spans", w.insertSpans, w.retryCap())
 		carry.logs = writeRows(carry.logs, "logs", w.insertLogs, w.retryCap())
 		carry.metrics = writeRows(carry.metrics, "metrics", w.insertMetrics, w.retryCap())

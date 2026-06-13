@@ -157,6 +157,39 @@ release:
       echo "Nothing to release."
     fi
 
+# ── Stress / performance suite ───────────────────────────────────────────────
+
+# Performance suite dispatcher. Logic lives in scripts/ + cmd/loadgen; this just
+# routes. Run `just stress` (no args) for the subcommand list.
+#   local   [gens rate dur]    throwaway fanout + parallel loadgens → rows/s
+#                              (gens auto-scales to CPU cores → max utilization)
+#   hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down
+#   profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots
+#   drive   [loadgen flags]    fire loadgen at an already-running fanout
+#   watch   [host:port]        tail the incident-relevant metrics
+stress *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    set -- {{ARGS}}
+    sub="${1:-}"; [ $# -gt 0 ] && shift || true
+    case "$sub" in
+      local)   exec ./scripts/bench.sh "$@" ;;
+      soak)    exec ./scripts/soak.sh "$@" ;;
+      hetzner) exec ./scripts/bench-hetzner.sh "$@" ;;
+      profile) exec ./scripts/profile.sh "$@" ;;
+      drive)   exec go run ./cmd/loadgen "$@" ;;
+      watch)   exec ./scripts/stress-watch.sh "$@" ;;
+      ""|help|-h|--help)
+        echo "just stress <subcommand> [args]"
+        echo "  local   [gens rate dur]    throwaway fanout + parallel loadgens + query load → rows/s (auto-scales to cores)"
+        echo "  soak    [min rate]         sustained load asserting growth invariants (file count, rollup freshness)"
+        echo "  hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down"
+        echo "  profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots"
+        echo "  drive   [loadgen flags]    fire loadgen at an already-running fanout"
+        echo "  watch   [host:port]        tail the incident-relevant metrics" ;;
+      *) echo "unknown subcommand: $sub (run 'just stress' for the list)" >&2; exit 1 ;;
+    esac
+
 # ── Ops ──────────────────────────────────────────────────────────────────────
 
 # Deploy site + demo to production (Traefik at the edge + site + demo + fanout)
