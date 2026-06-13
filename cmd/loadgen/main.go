@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"math/rand/v2"
@@ -66,6 +67,14 @@ type config struct {
 	sendMetrics bool
 	metricsURL  string
 	reportPath  string
+	// Query-under-load: drive the read path concurrently with ingest.
+	queryURL     string
+	queryWorkers int
+	queryRate    float64
+	// Pass/fail thresholds (0 = no threshold). Non-zero exit on violation so
+	// the harness can gate CI / releases.
+	maxExportP95 float64
+	maxQueryP95  float64
 }
 
 func main() {
@@ -84,6 +93,11 @@ func main() {
 	flag.BoolVar(&cfg.sendMetrics, "metrics", true, "also emit metrics")
 	flag.StringVar(&cfg.metricsURL, "metrics-url", "", "fanout /-/metrics URL to capture server-side deltas (e.g. http://localhost:7520/-/metrics)")
 	flag.StringVar(&cfg.reportPath, "report", "", "write a JSON performance report to this path")
+	flag.StringVar(&cfg.queryURL, "query-url", "", "fanout HTTP base URL to drive read load under ingest (e.g. http://localhost:7520)")
+	flag.IntVar(&cfg.queryWorkers, "query-workers", 0, "concurrent query workers (0 = ingest only)")
+	flag.Float64Var(&cfg.queryRate, "query-rate", 50, "target queries/sec (aggregate) when query-workers > 0")
+	flag.Float64Var(&cfg.maxExportP95, "max-export-p95-ms", 0, "fail (exit 1) if ingest export p95 exceeds this")
+	flag.Float64Var(&cfg.maxQueryP95, "max-query-p95-ms", 0, "fail (exit 1) if query p95 exceeds this")
 	flag.Parse()
 
 	if cfg.services < 2 {
@@ -105,11 +119,13 @@ func main() {
 	defer conn.Close()
 
 	g := &generator{
-		cfg:     cfg,
-		traces:  collectortrace.NewTraceServiceClient(conn),
-		logs:    collectorlogs.NewLogsServiceClient(conn),
-		metrics: collectormetrics.NewMetricsServiceClient(conn),
-		lat:     newHistogram(),
+		cfg:      cfg,
+		traces:   collectortrace.NewTraceServiceClient(conn),
+		logs:     collectorlogs.NewLogsServiceClient(conn),
+		metrics:  collectormetrics.NewMetricsServiceClient(conn),
+		lat:      newHistogram(),
+		queryLat: newHistogram(),
+		http:     &http.Client{Timeout: 30 * time.Second},
 		svcNames: func() []string {
 			names := make([]string, cfg.services)
 			for i := range names {
@@ -140,6 +156,17 @@ func main() {
 			defer wg.Done()
 			g.run(ctx, interval)
 		}()
+	}
+	if cfg.queryURL != "" && cfg.queryWorkers > 0 {
+		qInterval := time.Duration(float64(time.Second) * float64(cfg.queryWorkers) / cfg.queryRate)
+		fmt.Printf("query load: %d workers @ %.0f q/s → %s/api/overview\n", cfg.queryWorkers, cfg.queryRate, strings.TrimRight(cfg.queryURL, "/"))
+		for w := 0; w < cfg.queryWorkers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				g.runQueries(ctx, qInterval)
+			}()
+		}
 	}
 
 	done := make(chan struct{})
@@ -178,6 +205,12 @@ func main() {
 		AvgTracesPerSec: round2(float64(g.tracesSent.Load()) / elapsed),
 		ExportLatencyMs: g.lat.snapshot(),
 	}
+	if cfg.queryURL != "" && cfg.queryWorkers > 0 {
+		ql := g.queryLat.snapshot()
+		rep.QueryLatencyMs = &ql
+		rep.QueriesRun = g.queriesRun.Load()
+		rep.QueryErrors = g.queryErrs.Load()
+	}
 	if cfg.metricsURL != "" {
 		if final, ferr := scrapeMetrics(cfg.metricsURL); ferr != nil {
 			fmt.Fprintf(os.Stderr, "  warn: final metrics scrape failed: %v\n", ferr)
@@ -194,6 +227,19 @@ func main() {
 			fmt.Printf("report written: %s\n", cfg.reportPath)
 		}
 	}
+
+	// Pass/fail thresholds → non-zero exit so the harness can gate on it.
+	var fails []string
+	if cfg.maxExportP95 > 0 && rep.ExportLatencyMs.P95Ms > cfg.maxExportP95 {
+		fails = append(fails, fmt.Sprintf("export p95 %.0fms > %.0fms", rep.ExportLatencyMs.P95Ms, cfg.maxExportP95))
+	}
+	if cfg.maxQueryP95 > 0 && rep.QueryLatencyMs != nil && rep.QueryLatencyMs.P95Ms > cfg.maxQueryP95 {
+		fails = append(fails, fmt.Sprintf("query p95 %.0fms > %.0fms", rep.QueryLatencyMs.P95Ms, cfg.maxQueryP95))
+	}
+	if len(fails) > 0 {
+		fmt.Fprintf(os.Stderr, "FAIL: %s\n", strings.Join(fails, "; "))
+		os.Exit(1)
+	}
 }
 
 type generator struct {
@@ -202,6 +248,8 @@ type generator struct {
 	logs     collectorlogs.LogsServiceClient
 	metrics  collectormetrics.MetricsServiceClient
 	lat      *histogram
+	queryLat *histogram
+	http     *http.Client
 	svcNames []string
 
 	tracesSent  atomic.Int64
@@ -210,6 +258,46 @@ type generator struct {
 	metricsSent atomic.Int64
 	sendErrs    atomic.Int64
 	lastErr     atomic.Pointer[error]
+	queriesRun  atomic.Int64
+	queryErrs   atomic.Int64
+}
+
+// queryWindows rotate so the read load hits both small (cheap rollup) and wide
+// (heavier scan) windows, exercising the latency SLOs under ingest.
+var queryWindows = []string{"15m", "1h", "6h", "24h", "7d"}
+
+// runQueries drives the read path concurrently with ingest: GET /api/overview
+// across rotating windows, recording latency into queryLat.
+func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	i := 0
+	base := strings.TrimRight(g.cfg.queryURL, "/")
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			url := fmt.Sprintf("%s/api/overview?window=%s", base, queryWindows[i%len(queryWindows)])
+			i++
+			t0 := time.Now()
+			resp, err := g.http.Get(url) //nolint:noctx // bounded by client timeout
+			if err != nil {
+				if ctx.Err() == nil {
+					g.queryErrs.Add(1)
+				}
+				continue
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				g.queryErrs.Add(1)
+				continue
+			}
+			g.queryLat.record(time.Since(t0))
+			g.queriesRun.Add(1)
+		}
+	}
 }
 
 func (g *generator) run(ctx context.Context, interval time.Duration) {
@@ -568,19 +656,22 @@ func serverDelta(base, final map[string]float64) *serverReport {
 // ── Report ─────────────────────────────────────────────────────────────────
 
 type report struct {
-	Endpoint        string        `json:"endpoint"`
-	DurationSec     float64       `json:"duration_sec"`
-	TargetRate      float64       `json:"target_rate"`
-	Workers         int           `json:"workers"`
-	Services        int           `json:"services"`
-	TracesSent      int64         `json:"traces_sent"`
-	SpansSent       int64         `json:"spans_sent"`
-	LogsSent        int64         `json:"logs_sent"`
-	MetricsSent     int64         `json:"metrics_sent"`
-	SendErrors      int64         `json:"send_errors"`
-	AvgTracesPerSec float64       `json:"avg_traces_per_sec"`
-	ExportLatencyMs latencyReport `json:"export_latency_ms"`
-	Server          *serverReport `json:"server,omitempty"`
+	Endpoint        string         `json:"endpoint"`
+	DurationSec     float64        `json:"duration_sec"`
+	TargetRate      float64        `json:"target_rate"`
+	Workers         int            `json:"workers"`
+	Services        int            `json:"services"`
+	TracesSent      int64          `json:"traces_sent"`
+	SpansSent       int64          `json:"spans_sent"`
+	LogsSent        int64          `json:"logs_sent"`
+	MetricsSent     int64          `json:"metrics_sent"`
+	SendErrors      int64          `json:"send_errors"`
+	AvgTracesPerSec float64        `json:"avg_traces_per_sec"`
+	ExportLatencyMs latencyReport  `json:"export_latency_ms"`
+	QueriesRun      int64          `json:"queries_run,omitempty"`
+	QueryErrors     int64          `json:"query_errors,omitempty"`
+	QueryLatencyMs  *latencyReport `json:"query_latency_ms,omitempty"`
+	Server          *serverReport  `json:"server,omitempty"`
 }
 
 type latencyReport struct {
@@ -611,6 +702,11 @@ func printReport(r report) {
 	l := r.ExportLatencyMs
 	fmt.Printf("export latency mean=%.1fms  p50≈%.0f  p95≈%.0f  p99≈%.0f  >30s=%d  (n=%d)\n",
 		l.MeanMs, l.P50Ms, l.P95Ms, l.P99Ms, l.Over30s, l.Count)
+	if r.QueryLatencyMs != nil {
+		q := r.QueryLatencyMs
+		fmt.Printf("query latency  mean=%.0fms  p50≈%.0f  p95≈%.0f  p99≈%.0f  (n=%d, errors=%d)\n",
+			q.MeanMs, q.P50Ms, q.P95Ms, q.P99Ms, q.Count, r.QueryErrors)
+	}
 	if r.Server != nil {
 		s := r.Server
 		fmt.Printf("server (Δ over run):\n")

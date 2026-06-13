@@ -64,26 +64,51 @@ snap() { curl -s -m3 "localhost${GHTTP}/-/metrics" | awk -v k="$1" '$0 ~ "^"k {s
 echo "warmup…"; "$TMPD/loadgen" -endpoint "localhost${GGRPC}" -duration 8s -rate 5000 -workers 12 -services 30 >/dev/null 2>&1
 
 rows0=$(snap fanout_ingest_rows_total); t0=$(date +%s)
-echo "running: $GENS generators (=${CORES} cores) × $RATE traces/s for ${DUR}s — driving the machine to saturation…"
+echo "running: $GENS generators (=${CORES} cores) × $RATE traces/s for ${DUR}s + query-under-load — driving the machine to saturation…"
 sample_cpu & SAMPLER=$!
 pids=()
 for n in $(seq 1 "$GENS"); do
+  # The first generator also drives read load (query-under-load) and writes a
+  # JSON report so we can read its query latency percentiles.
+  q=()
+  [ "$n" = "1" ] && q=(-query-url "http://localhost${GHTTP}" -query-workers 4 -query-rate 40 -report "$TMPD/lg1.json")
   "$TMPD/loadgen" -endpoint "localhost${GGRPC}" -duration "${DUR}s" -rate "$RATE" -workers 20 \
-    -services 50 -messaging-ratio 0.15 >"$TMPD/lg$n.log" 2>&1 &
+    -services 50 -messaging-ratio 0.15 "${q[@]}" >"$TMPD/lg$n.log" 2>&1 &
   pids+=($!)
 done
 wait "${pids[@]}"
 kill "$SAMPLER" 2>/dev/null; SAMPLER=""
 t1=$(date +%s); rows1=$(snap fanout_ingest_rows_total); dt=$((t1 - t0))
 peakcpu=$(cat "$TMPD/cpupeak"); util=$(( peakcpu / CORES ))
+rps=$(( (rows1 - rows0) / dt ))
+drops=$(snap fanout_rows_dropped_total)
+oom=$(grep -ciE 'out of memory' "$TMPD/fanout.log")
+errs=$(grep -cE 'level":"ERROR' "$TMPD/fanout.log")
+qp95=$(awk -F'[:,]' '/"query_latency_ms"/{f=1} f&&/"p95_ms"/{gsub(/[^0-9.]/,"",$2);print int($2);exit}' "$TMPD/lg1.json" 2>/dev/null)
 
 echo
-echo "── fanout ingest benchmark (max utilization) ───────────────"
+echo "── fanout ingest+query benchmark (max utilization) ─────────"
 echo "machine         : ${CORES} cores | $GENS generators driving it"
 echo "peak CPU         : ~${util}% of ${CORES} cores (${peakcpu}% summed)"
-echo "rows accepted   : $((rows1 - rows0)) in ${dt}s = $(( (rows1 - rows0) / dt )) rows/s"
-echo "drops           : $(snap fanout_rows_dropped_total)"
+echo "rows accepted   : $((rows1 - rows0)) in ${dt}s = ${rps} rows/s"
+echo "drops           : ${drops}"
+echo "query p95       : ${qp95:-n/a} ms (/api/overview under load — SLO 1500ms)"
 echo "lake_partitions : $(snap fanout_lake_partitions) files | $(( $(snap fanout_lake_size_bytes) / 1048576 )) MB"
 echo "rollups         : $(curl -s -m3 localhost${GHTTP}/-/metrics | awk '/rollup_duration_seconds_count/{c=$2}/rollup_duration_seconds_sum/{s=$2} END{printf "%d done, avg %.0fms", c, (c>0?s/c*1000:0)}')"
-echo "fanout health   : OOM=$(grep -ciE 'out of memory' "$TMPD/fanout.log") ERR=$(grep -cE 'level":"ERROR' "$TMPD/fanout.log") RSS=$(ps -o rss= -p $FPID | awk '{printf "%.2f GB", $1/1024/1024}')"
+echo "fanout health   : OOM=${oom} ERR=${errs} RSS=$(ps -o rss= -p $FPID | awk '{printf "%.2f GB", $1/1024/1024}')"
+
+# Pass/fail gate: zero drops, no OOM/errors, query p95 within SLO, throughput
+# above MIN_ROWS (env, default 0 = skip). Non-zero exit so it can gate releases.
+fail=""
+[ "${drops:-0}" -gt 0 ] && fail="${fail} drops=${drops};"
+[ "${oom:-0}" -gt 0 ] && fail="${fail} OOM;"
+[ "${errs:-0}" -gt 0 ] && fail="${fail} server-errors=${errs};"
+[ -n "${qp95:-}" ] && [ "${qp95:-0}" -gt 1500 ] && fail="${fail} query-p95=${qp95}ms>1500;"
+[ "${rps:-0}" -lt "${MIN_ROWS:-0}" ] && fail="${fail} throughput=${rps}<${MIN_ROWS};"
+if [ -n "$fail" ]; then
+  echo "RESULT          : ✗ FAIL —${fail}"
+  echo "────────────────────────────────────────────────────────────"
+  exit 1
+fi
+echo "RESULT          : ✓ PASS"
 echo "────────────────────────────────────────────────────────────"

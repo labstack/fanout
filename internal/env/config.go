@@ -28,7 +28,12 @@ type Config struct {
 	RollupEvery    int    `env:"ROLLUP_EVERY" envDefault:"60"`
 	MCPEnabled     bool   `env:"MCP_ENABLED" envDefault:"true"`
 	RetentionDays  int    `env:"RETENTION_DAYS" envDefault:"30"`
-	DefaultNS      string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	// MaintenanceEverySeconds throttles the DuckLake maintenance cycle (retention
+	// deletes + compaction). Default 3600 (hourly). Lower it to compact more
+	// aggressively, or for soak tests that need to observe file-count staying
+	// bounded within minutes (see scripts/soak.sh).
+	MaintenanceEverySeconds int    `env:"DUCKLAKE_MAINTENANCE_EVERY_SECONDS" envDefault:"3600"`
+	DefaultNS               string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
 	// PublicRead turns the instance into a public demo: unauthenticated GET/HEAD
 	// requests are served as a read-only viewer (writes, admin routes, /mcp, and
 	// the API-key routes still require real auth), and OTLP ingest is accepted

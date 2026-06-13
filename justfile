@@ -174,13 +174,15 @@ stress *ARGS:
     sub="${1:-}"; [ $# -gt 0 ] && shift || true
     case "$sub" in
       local)   exec ./scripts/bench.sh "$@" ;;
+      soak)    exec ./scripts/soak.sh "$@" ;;
       hetzner) exec ./scripts/bench-hetzner.sh "$@" ;;
       profile) exec ./scripts/profile.sh "$@" ;;
       drive)   exec go run ./cmd/loadgen "$@" ;;
       watch)   exec ./scripts/stress-watch.sh "$@" ;;
       ""|help|-h|--help)
         echo "just stress <subcommand> [args]"
-        echo "  local   [gens rate dur]    throwaway fanout + parallel loadgens → rows/s (auto-scales to cores)"
+        echo "  local   [gens rate dur]    throwaway fanout + parallel loadgens + query load → rows/s (auto-scales to cores)"
+        echo "  soak    [min rate]         sustained load asserting growth invariants (file count, rollup freshness)"
         echo "  hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down"
         echo "  profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots"
         echo "  drive   [loadgen flags]    fire loadgen at an already-running fanout"

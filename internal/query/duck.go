@@ -889,7 +889,11 @@ SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
 FROM messaging_edges;`
 
 func (d *Duck) runMaintenance(ctx context.Context) error {
-	if !d.lastMaintenance.IsZero() && time.Since(d.lastMaintenance) < time.Hour {
+	every := time.Duration(d.cfg.MaintenanceEverySeconds) * time.Second
+	if every <= 0 {
+		every = time.Hour
+	}
+	if !d.lastMaintenance.IsZero() && time.Since(d.lastMaintenance) < every {
 		return nil
 	}
 
