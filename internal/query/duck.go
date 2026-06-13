@@ -272,6 +272,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	} else if rows > 0 {
 		slog.Info("startup rollup complete", "rows", rows, "duration", time.Since(start))
 	}
+	d.updateLakeStats(ctx)
 
 	ticker := time.NewTicker(time.Duration(d.cfg.RollupEvery) * time.Second)
 	defer ticker.Stop()
@@ -284,9 +285,37 @@ func (d *Duck) RunRollups(ctx context.Context) {
 			if err != nil {
 				slog.Error("rollup failed", "component", "rollup", "rows", rows, "err", err)
 			}
+			d.updateLakeStats(ctx)
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+// updateLakeStats refreshes the per-signal file-count and byte-size gauges
+// (fanout_lake_partitions / fanout_lake_size_bytes) from the DuckLake catalog.
+// This is the signal that surfaces unbounded file/snapshot growth — the failure
+// mode that previously OOM'd the rollup engine — so an operator or soak test can
+// watch it climb. It's a cheap read; a failure here must not disturb rollups.
+func (d *Duck) updateLakeStats(ctx context.Context) {
+	rows, err := d.DB.QueryContext(ctx, `SELECT table_name, file_count, file_size_bytes FROM ducklake_table_info('lake')`)
+	if err != nil {
+		slog.Warn("lake stats query failed", "err", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var table string
+		var fileCount, sizeBytes int64
+		if err := rows.Scan(&table, &fileCount, &sizeBytes); err != nil {
+			slog.Warn("lake stats scan failed", "err", err)
+			return
+		}
+		// DuckLake table names (spans/logs/metrics) are the metric signal labels.
+		metrics.UpdateLakeStats(table, sizeBytes, int(fileCount))
+	}
+	if err := rows.Err(); err != nil {
+		slog.Warn("lake stats iteration failed", "err", err)
 	}
 }
 

@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/labstack/fanout/internal/metrics"
 )
 
 // SQLRequest represents a direct SQL query request
@@ -29,8 +31,19 @@ type SQLResponse struct {
 type RowMap map[string]interface{}
 
 // ExecuteSQL validates and executes a SQL query
-func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) SQLResponse {
+func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse) {
 	start := time.Now()
+
+	// Record query latency + status for /-/metrics (fanout_query_*). Covers the
+	// raw SQL path (MCP query tool); service-layer endpoints are timed by the
+	// HTTP request-duration metric.
+	defer func() {
+		status := "ok"
+		if resp.Error != "" {
+			status = "error"
+		}
+		metrics.RecordQuery("sql", status, time.Since(start).Seconds())
+	}()
 
 	// Set default max rows. Guard against non-positive values too: a negative
 	// MaxRows would reach make([]RowMap, 0, req.MaxRows) below and panic.
