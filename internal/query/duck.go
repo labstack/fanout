@@ -32,6 +32,22 @@ type Duck struct {
 	// flushes) so that, when the pool holds more than one connection, two
 	// connections never commit to the DuckLake SQLite catalog concurrently.
 	writeMu sync.Mutex
+	// maintHealthMu guards the maintenance health fields below, which the
+	// readiness probe reads while the maintenance pass writes them.
+	maintHealthMu      sync.Mutex
+	lastMaintenanceOK  time.Time
+	lastMaintenanceErr error
+}
+
+// MaintenanceHealth reports the maintenance loop's own health: when it last
+// completed cleanly, and the error from the most recent pass (nil after a
+// clean one). Surfaced via /readyz so an instance whose retention/compaction
+// is failing — and therefore re-entering the storage growth spiral — tells
+// its operator instead of only logging.
+func (d *Duck) MaintenanceHealth() (lastOK time.Time, lastErr error) {
+	d.maintHealthMu.Lock()
+	defer d.maintHealthMu.Unlock()
+	return d.lastMaintenanceOK, d.lastMaintenanceErr
 }
 
 const (
@@ -268,25 +284,29 @@ func (d *Duck) RunRollups(ctx context.Context) {
 }
 
 func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
+	var errs []error
 	affected := int64(0)
 
-	n, err := d.refreshServiceRollup(ctx)
-	if err != nil {
-		return 0, err
+	if n, err := d.refreshServiceRollup(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("service rollup: %w", err))
+	} else {
+		affected += n
 	}
-	affected += n
 
-	n, err = d.refreshEdgeRollup(ctx)
-	if err != nil {
-		return 0, err
+	if n, err := d.refreshEdgeRollup(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("edge rollup: %w", err))
+	} else {
+		affected += n
 	}
-	affected += n
 
+	// Maintenance (retention + DuckLake compaction) must run even when a
+	// rollup fails: a failing rollup is exactly when compaction matters most,
+	// since file/snapshot growth makes every retried pass heavier.
 	if err := d.runMaintenance(ctx); err != nil {
 		slog.Warn("ducklake maintenance failed", "err", err)
 	}
 
-	return int(affected), nil
+	return int(affected), errors.Join(errs...)
 }
 
 func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
@@ -319,8 +339,18 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 		return 0, tx.Commit()
 	}
 
-	// The affected scan below uses lastWatermark as its lower bound. Choosing the
+	minIngested := int64(0)
+	if lastWatermark == 0 {
+		if minIngested, err = minServiceRollupIngested(ctx, tx); err != nil {
+			return 0, err
+		}
+	}
+	windowStart, windowEnd, chunked := rollupWindow(lastWatermark, minIngested, rawWatermark)
+
+	// The affected scan below covers (windowStart, windowEnd]. Choosing the
 	// stored watermark:
+	//   - While catching up (chunked), advance exactly to the chunk's end; the
+	//     rows in it are already committed, no trailing lag needed.
 	//   - While the max is advancing (new ingest), hold the stored watermark a
 	//     lag behind the raw max so the next pass reprocesses a trailing window —
 	//     ingested_unix_nano is stamped at ingest but signals flush independently
@@ -330,15 +360,15 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	//     window once already, so advance straight to the raw max and let the next
 	//     cycle short-circuit. Otherwise a burst's trailing window would be
 	//     re-aggregated every cycle forever after ingest goes quiet.
-	newWatermark := rawWatermark
-	if rawWatermark > lastRawMax {
+	newWatermark := windowEnd
+	if !chunked && rawWatermark > lastRawMax {
 		newWatermark = rawWatermark - d.rollupSafetyLagNanos()
 		if newWatermark < lastWatermark {
 			newWatermark = lastWatermark
 		}
 	}
 
-	args := []any{lastWatermark, lastWatermark, lastWatermark}
+	args := []any{windowStart, windowEnd, windowStart, windowEnd, windowStart, windowEnd}
 	if _, err := tx.ExecContext(ctx, serviceRollupDeleteSQL, args...); err != nil {
 		return 0, err
 	}
@@ -389,22 +419,30 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	if rawWatermark <= lastWatermark {
 		return 0, tx.Commit()
 	}
-	// Same trailing-window logic as the service rollup (see refreshServiceRollup):
-	// a child span can commit after its parent's bucket watermark advanced, or
-	// after a retry, so keep a window open while the max advances, then close it
-	// once ingest plateaus to avoid re-aggregating a burst's tail every cycle.
-	newWatermark := rawWatermark
-	if rawWatermark > lastRawMax {
+	minIngested := int64(0)
+	if lastWatermark == 0 {
+		if minIngested, err = minEdgeRollupIngested(ctx, tx); err != nil {
+			return 0, err
+		}
+	}
+	windowStart, windowEnd, chunked := rollupWindow(lastWatermark, minIngested, rawWatermark)
+
+	// Same chunking + trailing-window logic as the service rollup (see
+	// refreshServiceRollup): catch up one chunk per pass, and keep a lag window
+	// open at the tip while the max advances so late commits are re-picked-up,
+	// closing it once ingest plateaus.
+	newWatermark := windowEnd
+	if !chunked && rawWatermark > lastRawMax {
 		newWatermark = rawWatermark - d.rollupSafetyLagNanos()
 		if newWatermark < lastWatermark {
 			newWatermark = lastWatermark
 		}
 	}
 
-	if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, lastWatermark); err != nil {
+	if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, windowStart, windowEnd); err != nil {
 		return 0, err
 	}
-	res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, lastWatermark)
+	res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, windowStart, windowEnd)
 	if err != nil {
 		return 0, err
 	}
@@ -423,6 +461,53 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 		return rows, nil
 	}
 	return 0, nil
+}
+
+// rollupChunkNanos caps how much ingest history one rollup pass scans. A pass
+// that starts far behind — first run on an existing dataset, or recovery after
+// an outage — catches up one chunk per tick instead of aggregating the whole
+// backlog in a single statement. Unbounded catch-up is what took prod down on
+// 2026-06-13: the edge rollup's first pass covered 12 days of spans, spilled
+// 375 GiB to temp, filled the disk, and never committed.
+const rollupChunkNanos = int64(time.Hour)
+
+// rollupWindow bounds one pass's scan to (start, end]. start falls back to
+// just before the oldest ingested row when there's no stored watermark, so a
+// first pass doesn't open the window at the epoch.
+func rollupWindow(lastWatermark, minIngested, rawMax int64) (start, end int64, chunked bool) {
+	start = lastWatermark
+	if start == 0 && minIngested > 0 {
+		start = minIngested - 1
+	}
+	end = rawMax
+	if end > start+rollupChunkNanos {
+		end = start + rollupChunkNanos
+		chunked = true
+	}
+	return start, end, chunked
+}
+
+func minServiceRollupIngested(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var v int64
+	err := tx.QueryRowContext(ctx, `
+SELECT COALESCE(MIN(v), 0)::BIGINT
+FROM (
+  SELECT MIN(ingested_unix_nano) AS v FROM spans
+  UNION ALL
+  SELECT MIN(ingested_unix_nano) AS v FROM logs
+  UNION ALL
+  SELECT MIN(ingested_unix_nano) AS v FROM metrics
+) mins
+WHERE v IS NOT NULL`).Scan(&v)
+	return v, err
+}
+
+func minEdgeRollupIngested(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var v int64
+	err := tx.QueryRowContext(ctx, `
+SELECT COALESCE(MIN(ingested_unix_nano), 0)::BIGINT
+FROM spans`).Scan(&v)
+	return v, err
 }
 
 func rollupWatermark(ctx context.Context, tx *sql.Tx, key string) (int64, error) {
@@ -491,6 +576,7 @@ WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
@@ -498,6 +584,7 @@ WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
     AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
@@ -505,6 +592,7 @@ WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
     AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
@@ -523,6 +611,7 @@ WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
@@ -530,6 +619,7 @@ WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
     AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
@@ -537,6 +627,7 @@ WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
     AND time IS NOT NULL
     AND service IS NOT NULL
     AND service != ''
@@ -614,6 +705,7 @@ WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
 )
 DELETE FROM edge_rollup
@@ -629,6 +721,7 @@ WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
 ),
 call_edges AS (
@@ -646,6 +739,13 @@ call_edges AS (
     ON child.parent_span_id = parent.span_id
    AND child.trace_id = parent.trace_id
    AND child.namespace = parent.namespace
+   -- Bound the parent side to the affected window (±1h): without this the
+   -- hash build covers every span ever ingested and the pass scales with
+   -- total dataset size instead of window size. Edges whose parent started
+   -- more than an hour before the child are dropped — acceptable for
+   -- minute-bucket dependency edges.
+   AND parent.start_time >= (SELECT MIN(bucket) FROM affected) - INTERVAL 1 HOUR
+   AND parent.start_time <= (SELECT MAX(bucket) FROM affected) + INTERVAL 1 HOUR
   JOIN affected a
     ON a.namespace = child.namespace
    AND a.bucket = date_trunc('minute', child.start_time)
@@ -656,8 +756,13 @@ call_edges AS (
     AND parent.service != child.service
   GROUP BY child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
 ),
+-- Producers and consumers are aggregated per (bucket, service, destination)
+-- BEFORE the join. Joining raw span rows multiplies producer spans by
+-- consumer spans per destination — quadratic in per-bucket span count — and
+-- COUNT(*) over those pairs was meaningless anyway. calls now counts consumed
+-- messages, attributed to each producer service on the destination.
 producers AS (
-  SELECT
+  SELECT DISTINCT
     s.namespace,
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
@@ -678,7 +783,8 @@ consumers AS (
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
     json_extract_string(s.attributes_json, '$."messaging.destination.name"') AS destination,
-    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system
+    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system,
+    COUNT(*) AS calls
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
@@ -687,6 +793,9 @@ consumers AS (
     AND s.service IS NOT NULL
     AND s.service != ''
     AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
+  GROUP BY s.namespace, date_trunc('minute', s.start_time), s.service,
+    json_extract_string(s.attributes_json, '$."messaging.destination.name"'),
+    json_extract_string(s.attributes_json, '$."messaging.system"')
 ),
 messaging_edges AS (
   SELECT
@@ -694,7 +803,7 @@ messaging_edges AS (
     p.bucket,
     p.service AS caller,
     c.service AS callee,
-    COUNT(*) AS calls,
+    SUM(c.calls) AS calls,
     0.0 AS avg_ms,
     0.0 AS error_rate,
     'messaging' AS edge_type
@@ -792,7 +901,15 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 		errs = append(errs, fmt.Errorf("checkpoint main: %w", err))
 	}
 	d.lastMaintenance = time.Now()
-	return errors.Join(errs...)
+
+	err := errors.Join(errs...)
+	d.maintHealthMu.Lock()
+	if err == nil {
+		d.lastMaintenanceOK = time.Now()
+	}
+	d.lastMaintenanceErr = err
+	d.maintHealthMu.Unlock()
+	return err
 }
 
 // ---- Queries for API ----

@@ -236,6 +236,68 @@ FROM service_rollup
 WHERE namespace = 'ns-a'`, nil, 1)
 }
 
+// A backlog wider than rollupChunkNanos must be processed across passes, one
+// chunk each, not in a single unbounded statement (the 2026-06-13 prod
+// incident: a first-run edge rollup over 12 days spilled 375 GiB and never
+// committed).
+func TestRollupOnceChunksWideBacklog(t *testing.T) {
+	db := openTestDuck(t)
+	if err := CreateTables(db); err != nil {
+		t.Fatalf("CreateTables failed: %v", err)
+	}
+	if err := CreateViews(db); err != nil {
+		t.Fatalf("CreateViews failed: %v", err)
+	}
+
+	d := &Duck{
+		DB:              db,
+		cfg:             env.Config{RetentionDays: 30},
+		lastMaintenance: time.Now(),
+	}
+	ctx := context.Background()
+
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-5 * time.Minute)
+	insertRollupTestSpan(t, db, rollupTestSpan{
+		namespace: "ns-old",
+		traceID:   "trace-1",
+		spanID:    "span-1",
+		service:   "checkout",
+		operation: "POST /checkout",
+		start:     bucket.Add(5 * time.Second),
+		duration:  50 * time.Millisecond,
+		ingested:  100,
+	})
+	// Ingested two chunk-widths later than span-1: outside both the first
+	// pass's chunk and the second's.
+	insertRollupTestSpan(t, db, rollupTestSpan{
+		namespace: "ns-new",
+		traceID:   "trace-2",
+		spanID:    "span-2",
+		service:   "checkout",
+		operation: "POST /checkout",
+		start:     bucket.Add(15 * time.Second),
+		duration:  70 * time.Millisecond,
+		ingested:  100 + 2*rollupChunkNanos,
+	})
+
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("first rollupOnce failed: %v", err)
+	}
+	requireServiceRollupSpans(t, db, "ns-old", bucket, "checkout", 1)
+	requireRowCount(t, db, `
+SELECT count(*)
+FROM service_rollup
+WHERE namespace = 'ns-new'`, nil, 0)
+
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("second rollupOnce failed: %v", err)
+	}
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("third rollupOnce failed: %v", err)
+	}
+	requireServiceRollupSpans(t, db, "ns-new", bucket, "checkout", 1)
+}
+
 type rollupTestSpan struct {
 	namespace    string
 	traceID      string
