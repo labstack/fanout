@@ -32,7 +32,7 @@ services:
       # of the whole box and run 20-way queries whose pinned blocks blow the
       # memory cap (seen on the post-outage rollup backfill).
       DUCKDB_MEMORY: "16GB"
-      DUCKDB_THREADS: "8"
+      DUCKDB_THREADS: "4"
     expose:
       - "7520"
       - "4317"
