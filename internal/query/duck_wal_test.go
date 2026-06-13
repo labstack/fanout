@@ -179,10 +179,14 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 func TestTempDirectorySetOnce(t *testing.T) {
 	ctx := context.Background()
 	// A small memory limit makes a modest sort spill to the temp directory.
+	// Threads pinned low to keep the per-thread pinned working set inside the
+	// tiny cap — with one worker per core (the default) the sort OOMs on
+	// many-core machines before it can spill.
 	cfg := env.Config{
 		DataDir:        t.TempDir(),
 		RollupEvery:    60,
 		DuckDBMemory:   "64MB",
+		DuckDBThreads:  2,
 		DuckDBMaxConns: 4,
 	}
 	d, err := NewDuck(ctx, cfg)

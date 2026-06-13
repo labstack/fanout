@@ -186,6 +186,46 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("runMaintenance() error = nil, want merge error surfaced")
 	}
+	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr == nil || !lastOK.IsZero() || lastAt.IsZero() {
+		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want zero lastOK, non-zero lastAt, non-nil lastErr", lastOK, lastAt, lastErr)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// A failing rollup must not skip maintenance: file/snapshot growth is what
+// makes the failing rollup heavier each retry, so compaction has to run anyway.
+func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	d := &Duck{DB: db, cfg: env.Config{}}
+
+	// Both rollup transactions fail at BeginTx.
+	mock.ExpectBegin().WillReturnError(errors.New("service tx failed"))
+	mock.ExpectBegin().WillReturnError(errors.New("edge tx failed"))
+	// Maintenance still runs: compaction calls + checkpoint (RetentionDays=0
+	// skips the TTL deletes).
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now())")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("CHECKPOINT")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	_, err = d.rollupOnce(context.Background())
+	if err == nil {
+		t.Fatal("rollupOnce() error = nil, want rollup errors surfaced")
+	}
+	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr != nil || lastOK.IsZero() || lastAt.IsZero() {
+		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want non-zero lastOK and lastAt, nil lastErr", lastOK, lastAt, lastErr)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
