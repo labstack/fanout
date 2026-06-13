@@ -157,6 +157,20 @@ release:
       echo "Nothing to release."
     fi
 
+# ── Stress ─────────────────────────────────────────────────────────────────────
+
+# Push synthetic OTLP load at a local fanout (cmd/loadgen). Pass any loadgen
+# flags through, e.g. `just stress -rate 2000 -duration 10m -services 50`.
+# Run fanout with PUBLIC_READ=true for tokenless ingest, or pass -token=fo_…
+# Defaults: 1000 traces/s for 60s across 20 services with cross-service edges.
+stress *ARGS='':
+    go run ./cmd/loadgen {{ARGS}}
+
+# Watch the stress-relevant metrics on a local fanout (the ones that flagged the
+# prod incident: file/snapshot growth, ingest backpressure, rollup freshness).
+stress-watch ADDR="localhost:7520":
+    watch -n5 'curl -s {{ADDR}}/-/metrics | grep -E "^(fanout_lake_partitions|fanout_lake_size_bytes|fanout_ingest_queue_depth|fanout_rows_dropped_total|fanout_rollup_last_success_timestamp|fanout_flush_duration_seconds_count)"'
+
 # ── Ops ──────────────────────────────────────────────────────────────────────
 
 # Deploy site + demo to production (Traefik at the edge + site + demo + fanout)
