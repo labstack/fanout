@@ -216,7 +216,7 @@ OTEL_EXPORTER_OTLP_HEADERS=${ingestHeaderName}=${ingestToken}`;
   }
 
   return (
-    <AuthShell className="max-w-md">
+    <AuthShell className={step === "token_shown" ? "max-w-4xl" : "max-w-md"}>
       <div className="mb-6 space-y-3 text-center">
         <div className="inline-flex items-center justify-center">
           <Radio className="size-8 text-primary" aria-hidden="true" />
