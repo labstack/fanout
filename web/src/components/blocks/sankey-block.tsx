@@ -51,7 +51,7 @@ export function SankeyBlock({ data }: { data: SankeyData }) {
           link={{ stroke: c.border, strokeOpacity: 0.35 }}
           node={({ x, y, width, height: h, payload }) => {
             const p = payload as unknown as NodePayload;
-            const fill = statusColor(p.status ?? "healthy");
+            const fill = statusColor(p.status ?? "healthy", c);
             return (
               <g>
                 <rect x={x} y={y} width={width} height={h} fill={fill} />

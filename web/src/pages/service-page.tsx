@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation, useParams } from "react-router";
+import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, setApiToken } from "@/api/client";
+import { useFreshness } from "@/hooks/use-freshness";
 import type { ServiceDetailResponse } from "@/lib/types";
 import { buildChatPath } from "@/lib/chat-route";
 import { ServiceHeader } from "@/components/service/service-header";
@@ -18,6 +20,13 @@ import { cn } from "@/lib/utils";
 
 const REFRESH_INTERVAL = 30_000;
 
+const windowOptions = [
+  { label: "15m", value: 15 },
+  { label: "1h", value: 60 },
+  { label: "6h", value: 360 },
+  { label: "24h", value: 1440 },
+];
+
 export function ServicePage() {
   const { name } = useParams<{ name: string }>();
   const navigate = useNavigate();
@@ -27,71 +36,39 @@ export function ServicePage() {
     [search],
   );
 
-  const [data, setData] = useState<ServiceDetailResponse | null>(null);
   const [timeWindow, setTimeWindow] = useState(60);
-  const [fetchError, setFetchError] = useState<string | null>(null);
-  const [staleSeconds, setStaleSeconds] = useState(0);
-  const [lastFetch, setLastFetch] = useState(0);
-  const loading = lastFetch === 0 && fetchError === null;
+  const namespace = useMemo(
+    () => new URLSearchParams(search).get("namespace") ?? "",
+    [search],
+  );
 
   useEffect(() => {
     if (token) setApiToken(token);
   }, [token]);
 
-  useEffect(() => {
-    if (!name) return;
-    let cancelled = false;
+  const { data, isPending, isError, error, dataUpdatedAt } = useQuery({
+    queryKey: ["service", name, timeWindow, namespace],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      params.set("window", String(timeWindow));
+      if (namespace) params.set("namespace", namespace);
+      return api<ServiceDetailResponse>(
+        `/api/services/${encodeURIComponent(name ?? "")}?${params}`,
+      );
+    },
+    enabled: !!name,
+    refetchInterval: REFRESH_INTERVAL,
+  });
 
-    async function load() {
-      try {
-        const params = new URLSearchParams();
-        params.set("window", String(timeWindow));
-        const ns = new URLSearchParams(search).get("namespace");
-        if (ns) params.set("namespace", ns);
-        const result = await api<ServiceDetailResponse>(
-          `/api/services/${encodeURIComponent(name ?? "")}?${params}`,
-        );
-        if (!cancelled) {
-          setData(result);
-          setFetchError(null);
-          setLastFetch(Date.now());
-          setStaleSeconds(0);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setFetchError(
-            err instanceof ApiError
-              ? `Failed to load: ${err.message}`
-              : "Failed to load service data",
-          );
-          console.error("Service detail fetch failed:", err);
-        }
-      }
-    }
-
-    load();
-    const interval = setInterval(load, REFRESH_INTERVAL);
-    const staleTick = setInterval(() => {
-      if (lastFetch > 0) {
-        setStaleSeconds(Math.floor((Date.now() - lastFetch) / 1000));
-      }
-    }, 5_000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-      clearInterval(staleTick);
-    };
-  }, [name, timeWindow, search, lastFetch]);
+  const loading = isPending;
+  const staleSeconds = useFreshness(dataUpdatedAt);
+  const fetchError = isError
+    ? error instanceof ApiError
+      ? `Failed to load: ${error.message}`
+      : "Failed to load service data"
+    : null;
 
   const openChat = (prompt: string) => navigate(buildChatPath(prompt, token));
-
-  const windowOptions = [
-    { label: "15m", value: 15 },
-    { label: "1h", value: 60 },
-    { label: "6h", value: 360 },
-    { label: "24h", value: 1440 },
-  ];
 
   if (loading && !data) {
     return (

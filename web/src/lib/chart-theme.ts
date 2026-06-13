@@ -17,12 +17,19 @@ export function chartColors() {
     primary: cssVar("--primary"),
     success: cssVar("--success"),
     warning: cssVar("--warning"),
-    destructive: cssVar("--destructive"),
+    // The app's red token is --danger; there is no raw --destructive var (only
+    // the --color-destructive Tailwind alias), so reading --destructive here
+    // returned "" and rendered unhealthy nodes/edges black.
+    destructive: cssVar("--danger"),
   };
 }
 
-export function statusColor(status?: string): string {
-  const c = chartColors();
+// Pass a pre-resolved `chartColors()` when calling per-item (e.g. per graph
+// node) to avoid re-reading every CSS var on each call.
+export function statusColor(
+  status?: string,
+  c: ReturnType<typeof chartColors> = chartColors(),
+): string {
   switch (status?.toLowerCase()) {
     case "healthy":
       return c.success;

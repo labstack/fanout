@@ -86,12 +86,12 @@ export function EndpointsBlock({ data }: { data: EndpointsData }) {
           </tr>
         </thead>
         <tbody>
-          {data.endpoints.map((ep, i) => {
+          {data.endpoints.map((ep) => {
             const pill = statusPill(ep.status, ep.errorRate);
 
             return (
               <tr
-                key={i}
+                key={`${ep.method}-${ep.path}`}
                 className="border-b border-border last:border-b-0 transition-colors hover:bg-muted/50"
               >
                 <td className="px-4 py-2">

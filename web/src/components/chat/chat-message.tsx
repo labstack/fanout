@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Message } from "@/stores/chat";
 import { useChatStore } from "@/stores/chat";
 import { BlockRenderer } from "@/components/blocks/block-renderer";
@@ -5,7 +6,7 @@ import { ToolStatus } from "./tool-status";
 import { Markdown } from "@/components/markdown";
 import { Radio } from "lucide-react";
 
-export function ChatMessage({ message }: { message: Message }) {
+function ChatMessageImpl({ message }: { message: Message }) {
   const sendMessage = useChatStore((s) => s.sendMessage);
   if (message.role === "user") {
     return (
@@ -28,8 +29,8 @@ export function ChatMessage({ message }: { message: Message }) {
       <div className="flex-1 space-y-3 min-w-0">
         {hasTools && (
           <div className="flex flex-wrap gap-1.5">
-            {[...new Map(message.toolCalls.map((tc) => [tc.name, tc])).values()].map((tc, i) => (
-              <ToolStatus key={i} toolCall={tc} />
+            {[...new Map(message.toolCalls.map((tc) => [tc.name, tc])).values()].map((tc) => (
+              <ToolStatus key={tc.name} toolCall={tc} />
             ))}
           </div>
         )}
@@ -37,7 +38,7 @@ export function ChatMessage({ message }: { message: Message }) {
         {!message.loading && message.blocks?.length ? (
           <div className="space-y-4">
             {message.blocks.map((block, i) => (
-              <BlockRenderer key={i} block={block} onAction={(prompt) => sendMessage(prompt)} />
+              <BlockRenderer key={i} block={block} onAction={sendMessage} />
             ))}
           </div>
         ) : message.content ? (
@@ -63,3 +64,7 @@ export function ChatMessage({ message }: { message: Message }) {
     </div>
   );
 }
+
+// Memoized: during streaming only the last message's object identity changes,
+// so finalized messages (incl. heavy chart/D3 blocks) skip re-rendering.
+export const ChatMessage = memo(ChatMessageImpl);

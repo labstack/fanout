@@ -5,8 +5,14 @@ import { ArrowUp, Square } from "lucide-react";
 export function ChatInput() {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { sendMessage, cancel, messages } = useChatStore();
-  const isLoading = messages[messages.length - 1]?.loading ?? false;
+  // Select narrowly: subscribing to the whole store (incl. `messages`) would
+  // re-render this input on every streamed token. Deriving the boolean inside
+  // the selector means we only re-render when the loading state actually flips.
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const cancel = useChatStore((s) => s.cancel);
+  const isLoading = useChatStore(
+    (s) => s.messages[s.messages.length - 1]?.loading ?? false,
+  );
 
   const handleSend = () => {
     const trimmed = text.trim();

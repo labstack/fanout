@@ -4,9 +4,7 @@ import {
   ScatterChart,
   XAxis,
   YAxis,
-  useChartHeight,
-  useChartWidth,
-  useMargin,
+  usePlotArea,
 } from "recharts";
 import { axisLine, axisTick, chartColors, cssVar, tooltipBox } from "@/lib/chart-theme";
 import type { HeatmapBlockData } from "@/lib/types";
@@ -61,16 +59,13 @@ function HeatmapCells({
   high: string;
   onHover: (h: Hover | null) => void;
 }) {
-  const chartW = useChartWidth() ?? 0;
-  const chartH = useChartHeight() ?? 0;
-  const margin = (useMargin() ?? {}) as { left?: number; right?: number; top?: number; bottom?: number };
-  const left = margin.left ?? 0;
-  const right = margin.right ?? 0;
-  const top = margin.top ?? 0;
-  const bottom = margin.bottom ?? 0;
-
-  const innerW = Math.max(0, chartW - left - right);
-  const innerH = Math.max(0, chartH - top - bottom);
+  // usePlotArea() returns the actual inner plot rect (accounting for axis
+  // widths), so cells stay aligned with the axes even if tick sizes change.
+  const plot = usePlotArea();
+  const left = plot?.x ?? 0;
+  const top = plot?.y ?? 0;
+  const innerW = plot?.width ?? 0;
+  const innerH = plot?.height ?? 0;
   const nT = data.times.length;
   const nB = data.buckets.length;
   if (nT === 0 || nB === 0 || innerW === 0 || innerH === 0) return null;

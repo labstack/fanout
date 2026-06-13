@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Navigate } from "react-router";
+import { useMutation } from "@tanstack/react-query";
 import { Check, Copy, KeyRound, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { api, isApiError } from "@/api/client";
@@ -8,6 +9,7 @@ import { PageContainer } from "@/components/layout/page-container";
 import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StatusBadge } from "@/components/ui/status-badge";
 
 interface RotateResponse {
@@ -18,62 +20,68 @@ interface ApiKeyResponse {
   api_key: string;
 }
 
+type ConfirmKind = "rotate" | "regen" | "revoke";
+
+const CONFIRM_COPY: Record<
+  ConfirmKind,
+  { title: string; description: string; confirmLabel: string }
+> = {
+  rotate: {
+    title: "Rotate ingest token?",
+    description: "The previous token stops working immediately — collectors using it will fail until updated.",
+    confirmLabel: "Rotate token",
+  },
+  regen: {
+    title: "Regenerate API key?",
+    description: "The current key stops working immediately. Any client using it loses access.",
+    confirmLabel: "Regenerate key",
+  },
+  revoke: {
+    title: "Revoke API key?",
+    description: "Any client using it loses access immediately. This cannot be undone.",
+    confirmLabel: "Revoke key",
+  },
+};
+
 export function SettingsPage() {
   const { isAdmin, isLoading: authLoading, user } = useAuth();
-  const [busy, setBusy] = useState(false);
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
-  const [keyBusy, setKeyBusy] = useState(false);
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
   const [keyCopied, setKeyCopied] = useState(false);
   // Tracked locally: the context user is fetched once at login, so mirror the
   // existence flag here and update it as the admin generates/revokes the key.
   const [hasKey, setHasKey] = useState(user?.has_api_key ?? false);
 
-  if (authLoading) return null;
-  if (!isAdmin) return <Navigate to="/" replace />;
+  const [confirm, setConfirm] = useState<ConfirmKind | null>(null);
 
-  async function rotate() {
-    if (!confirm("Generate a new ingest token? The previous token will stop working.")) return;
-    setBusy(true);
-    try {
-      const r = await api<RotateResponse>("/api/settings/ingest/rotate-token", { method: "POST" });
+  const rotateMutation = useMutation({
+    mutationFn: () =>
+      api<RotateResponse>("/api/settings/ingest/rotate-token", { method: "POST" }),
+    onSuccess: (r) => {
       if (!r.ingest_token) {
-        throw new Error("server returned an empty token");
+        toast.error("Server returned an empty token");
+        return;
       }
       setRevealedToken(r.ingest_token);
-    } catch (err) {
-      toast.error(isApiError(err) ? err.message : "Failed to rotate token");
-    } finally {
-      setBusy(false);
-    }
-  }
+    },
+    onError: (err) =>
+      toast.error(isApiError(err) ? err.message : "Failed to rotate token"),
+    onSettled: () => setConfirm(null),
+  });
 
-  async function copyToken() {
-    if (!revealedToken) return;
-    try {
-      await navigator.clipboard.writeText(revealedToken);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch (err) {
-      console.warn("[Settings] clipboard write failed:", err);
-      toast.error("Couldn't copy. Select the token manually and copy with your keyboard.");
-    }
-  }
-
-  async function generateApiKey() {
-    if (hasKey && !confirm("Regenerate the API key? The current key stops working immediately."))
-      return;
-    setKeyBusy(true);
-    try {
-      const r = await api<ApiKeyResponse>("/api/auth/api-key", { method: "POST" });
+  const generateKeyMutation = useMutation({
+    mutationFn: () => api<ApiKeyResponse>("/api/auth/api-key", { method: "POST" }),
+    onSuccess: (r) => {
       if (!r.api_key) {
-        throw new Error("server returned an empty key");
+        toast.error("Server returned an empty key");
+        return;
       }
       setRevealedKey(r.api_key);
       setHasKey(true);
-    } catch (err) {
+    },
+    onError: (err) => {
       // Generation rotates the key server-side before the response returns, so
       // a lost response may mean the previous key is already dead. Never leave
       // a stale key on screen labelled "save this" — clear it and tell the user
@@ -85,22 +93,52 @@ export function SettingsPage() {
           ? err.message
           : "Failed to generate API key. The previous key may no longer work — generate again to get a usable one.",
       );
-    } finally {
-      setKeyBusy(false);
-    }
-  }
+    },
+    onSettled: () => setConfirm(null),
+  });
 
-  async function revokeApiKey() {
-    if (!confirm("Revoke the API key? Any client using it loses access immediately.")) return;
-    setKeyBusy(true);
-    try {
-      await api("/api/auth/api-key", { method: "DELETE" });
+  const revokeMutation = useMutation({
+    mutationFn: () => api("/api/auth/api-key", { method: "DELETE" }),
+    onSuccess: () => {
       setRevealedKey(null);
       setHasKey(false);
+    },
+    onError: (err) =>
+      toast.error(isApiError(err) ? err.message : "Failed to revoke API key"),
+    onSettled: () => setConfirm(null),
+  });
+
+  if (authLoading) return null;
+  if (!isAdmin) return <Navigate to="/" replace />;
+
+  const tokenBusy = rotateMutation.isPending;
+  const keyBusy = generateKeyMutation.isPending || revokeMutation.isPending;
+  const confirmBusy =
+    rotateMutation.isPending ||
+    generateKeyMutation.isPending ||
+    revokeMutation.isPending;
+
+  function onGenerateClick() {
+    // Only confirm when replacing an existing key; first-time generation is safe.
+    if (hasKey) setConfirm("regen");
+    else generateKeyMutation.mutate();
+  }
+
+  function handleConfirm() {
+    if (confirm === "rotate") rotateMutation.mutate();
+    else if (confirm === "regen") generateKeyMutation.mutate();
+    else if (confirm === "revoke") revokeMutation.mutate();
+  }
+
+  async function copyToken() {
+    if (!revealedToken) return;
+    try {
+      await navigator.clipboard.writeText(revealedToken);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     } catch (err) {
-      toast.error(isApiError(err) ? err.message : "Failed to revoke API key");
-    } finally {
-      setKeyBusy(false);
+      console.warn("[Settings] clipboard write failed:", err);
+      toast.error("Couldn't copy. Select the token manually and copy with your keyboard.");
     }
   }
 
@@ -169,10 +207,10 @@ export function SettingsPage() {
             <Button
               type="button"
               size="sm"
-              onClick={() => void rotate()}
-              disabled={busy}
+              onClick={() => setConfirm("rotate")}
+              disabled={tokenBusy}
             >
-              {busy ? "Working…" : "Rotate token"}
+              {tokenBusy ? "Working…" : "Rotate token"}
             </Button>
           </CardContent>
         </Card>
@@ -227,7 +265,7 @@ export function SettingsPage() {
               <Button
                 type="button"
                 size="sm"
-                onClick={() => void generateApiKey()}
+                onClick={onGenerateClick}
                 disabled={keyBusy}
               >
                 {keyBusy ? "Working…" : hasKey ? "Regenerate key" : "Generate key"}
@@ -237,7 +275,7 @@ export function SettingsPage() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => void revokeApiKey()}
+                  onClick={() => setConfirm("revoke")}
                   disabled={keyBusy}
                 >
                   Revoke
@@ -247,6 +285,19 @@ export function SettingsPage() {
           </CardContent>
         </Card>
       </div>
+
+      <ConfirmDialog
+        open={confirm !== null}
+        onOpenChange={(open) => {
+          if (!open && !confirmBusy) setConfirm(null);
+        }}
+        title={confirm ? CONFIRM_COPY[confirm].title : ""}
+        description={confirm ? CONFIRM_COPY[confirm].description : undefined}
+        confirmLabel={confirm ? CONFIRM_COPY[confirm].confirmLabel : "Confirm"}
+        destructive
+        loading={confirmBusy}
+        onConfirm={handleConfirm}
+      />
     </PageContainer>
   );
 }
