@@ -760,10 +760,33 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 		}
 	}
 
-	// DuckLake's catalog checkpoint currently trips an internal error on live datasets
-	// with nullable string fields, which invalidates the whole database connection.
-	// Keep runtime maintenance to TTL deletes and the main-cache checkpoint until the
-	// upstream checkpoint path is stable.
+	// DuckLake compaction. Every flush commits a snapshot and writes new parquet
+	// files; without merge + expiry both grow without bound until per-file
+	// metadata pins OOM every wide query (prod 2026-06-13: 60k snapshots, 50k
+	// files averaging 21KB, rollups dead at any memory_limit). Holding writeMu
+	// here quiesces the dataset, which is the precondition for these calls.
+	// Order matters: merge rewrites small files into large ones, expiry releases
+	// the snapshots that referenced the small ones, cleanup deletes the files no
+	// live snapshot references. Fanout exposes no time travel, so only the
+	// latest snapshot is kept (expire_snapshots never drops the newest).
+	for _, stmt := range []struct {
+		name string
+		sql  string
+	}{
+		{name: "merge_adjacent_files", sql: "CALL ducklake_merge_adjacent_files('lake')"},
+		{name: "expire_snapshots", sql: "CALL ducklake_expire_snapshots('lake', older_than => now())"},
+		{name: "cleanup_old_files", sql: "CALL ducklake_cleanup_old_files('lake', cleanup_all => true)"},
+	} {
+		if _, err := d.DB.ExecContext(ctx, stmt.sql); err != nil {
+			slog.Error("maintenance compaction failed", "step", stmt.name, "err", err)
+			errs = append(errs, fmt.Errorf("compaction %s: %w", stmt.name, err))
+		}
+	}
+
+	// DuckLake's catalog CHECKPOINT (as opposed to the compaction calls above)
+	// currently trips an internal error on live datasets with nullable string
+	// fields, which invalidates the whole database connection. Checkpoint only
+	// the main local cache until the upstream checkpoint path is stable.
 	if _, err := d.DB.ExecContext(ctx, "CHECKPOINT"); err != nil {
 		slog.Error("maintenance checkpoint failed", "target", "main", "err", err)
 		errs = append(errs, fmt.Errorf("checkpoint main: %w", err))
