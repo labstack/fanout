@@ -102,7 +102,8 @@ type Writer struct {
 	chLogs    <-chan LogRow
 	chMetrics <-chan MetricRow
 	// Buffers are owned exclusively by the Run goroutine — no mutex needed. On
-	// flush they are detached (handed to the flush worker) and replaced.
+	// flush their contents are copied into a detached batch and the buffers are
+	// truncated-and-retained, so the hot receive-loop append never reallocates.
 	bufSpans   []SpanRow
 	bufLogs    []LogRow
 	bufMetrics []MetricRow
