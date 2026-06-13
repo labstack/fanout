@@ -74,6 +74,10 @@ echo "rollup stale samples: ${stale}"
 echo "drops / OOM / errors: ${drops} / ${oom} / ${errs}"
 
 fail=""
+# Liveness FIRST: a kernel OOM-kill leaves no app log, and snap() returns "0"
+# for an unreachable server — so without this a dead fanout reads as PASS.
+kill -0 "$FPID" 2>/dev/null || fail="${fail} fanout-died;"
+curl -fsS -m3 "localhost${GHTTP}/healthz" >/dev/null 2>&1 || fail="${fail} healthz-unreachable;"
 [ "${drops:-0}" -gt 0 ] && fail="${fail} drops=${drops};"
 [ "${oom:-0}" -gt 0 ] && fail="${fail} OOM;"
 [ "${errs:-0}" -gt 0 ] && fail="${fail} errors=${errs};"

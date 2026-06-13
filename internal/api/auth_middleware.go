@@ -122,6 +122,14 @@ func isPublicRoute(path string) bool {
 		path != "/api/auth/me" &&
 		!strings.HasPrefix(path, "/api/auth/api-key")
 
+	// /debug/pprof (mounted only when PPROF_ENABLED) must NOT be public — it
+	// exposes heap dumps, cmdline, and a repeatable CPU-profile DoS. Excluding it
+	// here means it needs real auth on a private instance; under PUBLIC_READ a GET
+	// still resolves via the synthetic viewer, which is fine for a local bench.
+	if strings.HasPrefix(path, "/debug/") {
+		return false
+	}
+
 	return path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
 		path == "/favicon.ico" || path == "/favicon.svg" ||
 		isPublicAuth ||

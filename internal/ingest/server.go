@@ -371,6 +371,11 @@ var attrBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 // path dominated ingest allocations under load (profiled: ~7GB / 14% of
 // alloc_space at 175k rows/s). Attributes whose values are nested (array/kvlist)
 // or non-finite floats fall back to the reflection encoder for exactness.
+//
+// The fast path preserves the OTLP attribute order and keeps duplicate keys,
+// whereas the reflect fallback (a map) sorts keys and keeps last-wins. This is
+// immaterial for fanout: OTLP attribute keys are unique by spec, and queries
+// read attributes_json by key via attr()/json_extract (order-independent).
 func attrsJSON(attrs []*common.KeyValue) []byte {
 	if len(attrs) == 0 {
 		return nil
@@ -486,6 +491,10 @@ func appendJSONString(buf *bytes.Buffer, s string) {
 				buf.WriteString(`\r`)
 			case '\t':
 				buf.WriteString(`\t`)
+			case '\b':
+				buf.WriteString(`\b`)
+			case '\f':
+				buf.WriteString(`\f`)
 			default:
 				buf.WriteString(`\u00`)
 				buf.WriteByte(jsonHex[b>>4])

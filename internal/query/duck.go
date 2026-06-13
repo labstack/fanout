@@ -298,6 +298,10 @@ func (d *Duck) RunRollups(ctx context.Context) {
 // mode that previously OOM'd the rollup engine — so an operator or soak test can
 // watch it climb. It's a cheap read; a failure here must not disturb rollups.
 func (d *Duck) updateLakeStats(ctx context.Context) {
+	// Bound the catalog read so a degraded/bloated DuckLake can't stall the
+	// rollup loop (this runs inline after rollupOnce in RunRollups).
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
 	rows, err := d.DB.QueryContext(ctx, `SELECT table_name, file_count, file_size_bytes FROM ducklake_table_info('lake')`)
 	if err != nil {
 		slog.Warn("lake stats query failed", "err", err)

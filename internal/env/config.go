@@ -49,8 +49,10 @@ type Config struct {
 	// The DuckDB knobs below self-size where possible and otherwise default to
 	// values validated on the reference deployment target, a small shared VM
 	// (Hetzner CPX32: 4 vCPU, 8 GB RAM, 160 GB disk). There the self-sizing
-	// resolves to a ~6.4 GB memory cap and 4 query threads — measured handling
-	// ~55k rows/s with 0 drops and ~0.4 GB RSS (just bench-hetzner).
+	// resolves to a ~6.4 GB memory cap and 4 query threads (deterministic from
+	// 8 GB / 4 vCPU). For a current throughput figure run `just stress hetzner`
+	// rather than trusting a number here — as of 2026-06 it handled ~55k rows/s
+	// with 0 drops and ~0.4 GB RSS, but that will drift with the ingest path.
 	//
 	// DuckDBMemory caps DuckDB's memory (e.g. "8GB"). Empty leaves DuckDB's
 	// own default in place — 80% of detected RAM, cgroup-aware in containers —

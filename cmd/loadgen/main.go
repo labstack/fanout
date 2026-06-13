@@ -229,7 +229,22 @@ func main() {
 	}
 
 	// Pass/fail thresholds → non-zero exit so the harness can gate on it.
+	// Always-on failure signals first: a run that ingested nothing, dropped rows,
+	// or hit send/query errors must FAIL — otherwise p95-of-survivors reads 0 and
+	// a totally broken run looks like a clean pass.
 	var fails []string
+	if rep.ExportLatencyMs.Count == 0 {
+		fails = append(fails, "no OTLP exports succeeded")
+	}
+	if rep.SendErrors > 0 {
+		fails = append(fails, fmt.Sprintf("send errors=%d", rep.SendErrors))
+	}
+	if rep.QueryErrors > 0 {
+		fails = append(fails, fmt.Sprintf("query errors=%d", rep.QueryErrors))
+	}
+	if rep.Server != nil && rep.Server.RowsDroppedDelta > 0 {
+		fails = append(fails, fmt.Sprintf("rows dropped=%.0f", rep.Server.RowsDroppedDelta))
+	}
 	if cfg.maxExportP95 > 0 && rep.ExportLatencyMs.P95Ms > cfg.maxExportP95 {
 		fails = append(fails, fmt.Sprintf("export p95 %.0fms > %.0fms", rep.ExportLatencyMs.P95Ms, cfg.maxExportP95))
 	}

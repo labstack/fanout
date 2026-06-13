@@ -100,10 +100,16 @@ echo "fanout health   : OOM=${oom} ERR=${errs} RSS=$(ps -o rss= -p $FPID | awk '
 # Pass/fail gate: zero drops, no OOM/errors, query p95 within SLO, throughput
 # above MIN_ROWS (env, default 0 = skip). Non-zero exit so it can gate releases.
 fail=""
+# Liveness FIRST: snap() returns "0" for a dead/unreachable server, so without
+# this a crashed (or OOM-killed, which leaves no app log) fanout reads as PASS.
+kill -0 "$FPID" 2>/dev/null || fail="${fail} fanout-died;"
+curl -fsS -m3 "localhost${GHTTP}/healthz" >/dev/null 2>&1 || fail="${fail} healthz-unreachable;"
 [ "${drops:-0}" -gt 0 ] && fail="${fail} drops=${drops};"
 [ "${oom:-0}" -gt 0 ] && fail="${fail} OOM;"
 [ "${errs:-0}" -gt 0 ] && fail="${fail} server-errors=${errs};"
-[ -n "${qp95:-}" ] && [ "${qp95:-0}" -gt 1500 ] && fail="${fail} query-p95=${qp95}ms>1500;"
+# Query load always runs here, so a missing/empty p95 means the read path broke
+# (no successful queries / report not written) — fail, don't skip.
+if [ -z "${qp95:-}" ]; then fail="${fail} query-p95-missing;"; elif [ "${qp95}" -gt 1500 ]; then fail="${fail} query-p95=${qp95}ms>1500;"; fi
 [ "${rps:-0}" -lt "${MIN_ROWS:-0}" ] && fail="${fail} throughput=${rps}<${MIN_ROWS};"
 if [ -n "$fail" ]; then
   echo "RESULT          : ✗ FAIL —${fail}"

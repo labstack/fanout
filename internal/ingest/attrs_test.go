@@ -3,7 +3,9 @@ package ingest
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"reflect"
+	"sync"
 	"testing"
 
 	common "go.opentelemetry.io/proto/otlp/common/v1"
@@ -23,6 +25,11 @@ func TestAppendJSONString_MatchesEncodingJSON(t *testing.T) {
 		"newline\ntab\tcr\r", "bell\x07null\x00", "html < > & chars",
 		"unicode ☃ 日本語 😀", "line sep para",
 		"slash / ok", string([]byte{0xff, 0xfe}), "trailing\x1f",
+	}
+	// Brute-force every single byte 0x00-0xff so no control char (incl. \b 0x08
+	// and \f 0x0c, which json shortens but others \u-escape) can diverge unseen.
+	for b := 0; b < 256; b++ {
+		cases = append(cases, string([]byte{byte(b)}))
 	}
 	for _, s := range cases {
 		want, _ := json.Marshal(s)
@@ -45,11 +52,19 @@ func TestAttrsJSON_MatchesReflect(t *testing.T) {
 		{kvDouble("big", 1e20), kvDouble("small", -3.5), kvDouble("whole", 200)},
 		{{Key: "nilval", Value: nil}},
 		{{Key: "bytes", Value: &common.AnyValue{Value: &common.AnyValue_BytesValue{BytesValue: []byte{1, 2, 3}}}}},
-		{ // nested → both must route through the reflect encoder
+		{ // nested kvlist → both must route through the reflect encoder
 			{Key: "outer", Value: &common.AnyValue{Value: &common.AnyValue_KvlistValue{
 				KvlistValue: &common.KeyValueList{Values: []*common.KeyValue{kvStr("inner", "v")}},
 			}}},
 			kvStr("flat", "x"),
+		},
+		{ // nested array → reflect fallback (distinct from kvlist)
+			{Key: "arr", Value: &common.AnyValue{Value: &common.AnyValue_ArrayValue{
+				ArrayValue: &common.ArrayValue{Values: []*common.AnyValue{
+					{Value: &common.AnyValue_StringValue{StringValue: "a"}},
+					{Value: &common.AnyValue_IntValue{IntValue: 2}},
+				}},
+			}}},
 		},
 	}
 	for i, attrs := range cases {
@@ -66,6 +81,43 @@ func TestAttrsJSON_MatchesReflect(t *testing.T) {
 			t.Errorf("case %d mismatch:\n fast=%s\n slow=%s", i, fast, slow)
 		}
 	}
+}
+
+// Non-finite floats route to the reflect path (json.Marshal errors on Inf/NaN),
+// so attrsJSON must never emit invalid JSON like {"k":Inf} — it returns nil for
+// the whole object (the reflect encoder's documented behavior).
+func TestAttrsJSON_NonFiniteFloatIsSafe(t *testing.T) {
+	for _, v := range []float64{math.Inf(1), math.Inf(-1), math.NaN()} {
+		got := attrsJSON([]*common.KeyValue{kvDouble("k", v)})
+		if got != nil {
+			var m map[string]any
+			if err := json.Unmarshal(got, &m); err != nil {
+				t.Errorf("attrsJSON(%v) produced invalid JSON: %s", v, got)
+			}
+		}
+	}
+}
+
+// attrsJSON shares a sync.Pool buffer across calls; it must copy the result out
+// before returning the buffer. Run under -race to catch a regression that
+// aliased the pooled buffer (corrupting attributes_json under concurrent ingest).
+func TestAttrsJSON_ConcurrentSafe(t *testing.T) {
+	attrs := []*common.KeyValue{kvStr("svc", "checkout"), kvInt("code", 200), kvStr("user", "u-1")}
+	want := attrsJSON(attrs)
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 1000; j++ {
+				if got := attrsJSON(attrs); !bytes.Equal(got, want) {
+					t.Errorf("concurrent attrsJSON = %s, want %s", got, want)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func BenchmarkAttrsJSON(b *testing.B) {
