@@ -1,7 +1,9 @@
-// Command loadgen is fanout's local stress/soak generator. It pushes synthetic
-// OTLP (traces, logs, metrics) straight at the gRPC ingest port with knobs for
-// rate, duration, service/namespace count, attribute cardinality, and error
-// rate.
+// Command loadgen is fanout's local stress/soak generator and benchmark
+// reporter. It pushes synthetic OTLP (traces, logs, metrics) straight at the
+// gRPC ingest port with knobs for rate, duration, service/namespace count,
+// attribute cardinality, and error rate, then reports OTLP export latency
+// percentiles and — when pointed at fanout's /-/metrics — the server-side
+// deltas that matter (rows accepted/dropped, file growth, rollup/flush time).
 //
 // Unlike telemetrygen (single service per process), loadgen emits cross-service
 // parent/child traces and producer/consumer pairs, so it exercises BOTH rollups
@@ -9,23 +11,28 @@
 // GROUP BY cardinality cost. It reuses fanout's own vendored OTLP proto, so it
 // adds no new dependencies.
 //
-// Example — a 10-minute soak at 2k traces/s across 50 services, watching for
-// the file/snapshot accumulation that took prod down:
+// Example — a 10-minute soak at 2k traces/s across 50 services, with a report:
 //
-//	go run ./cmd/loadgen -rate 2000 -duration 10m -services 50 -attr-cardinality 200
-//	# in another shell: watch -n5 'curl -s localhost:7520/-/metrics | grep -E "fanout_lake_partitions|fanout_ingest_queue_depth|fanout_rollup_last_success"'
+//	go run ./cmd/loadgen -rate 2000 -duration 10m -services 50 -attr-cardinality 200 \
+//	  -metrics-url http://localhost:7520/-/metrics -report run.json
 //
 // Run fanout locally with PUBLIC_READ=true for tokenless ingest, or pass -token.
 package main
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"math/rand/v2"
+	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -57,6 +64,8 @@ type config struct {
 	msgRatio    float64
 	sendLogs    bool
 	sendMetrics bool
+	metricsURL  string
+	reportPath  string
 }
 
 func main() {
@@ -73,6 +82,8 @@ func main() {
 	flag.Float64Var(&cfg.msgRatio, "messaging-ratio", 0.2, "fraction of traces that also emit a producer/consumer pair (0..1)")
 	flag.BoolVar(&cfg.sendLogs, "logs", true, "also emit logs")
 	flag.BoolVar(&cfg.sendMetrics, "metrics", true, "also emit metrics")
+	flag.StringVar(&cfg.metricsURL, "metrics-url", "", "fanout /-/metrics URL to capture server-side deltas (e.g. http://localhost:7520/-/metrics)")
+	flag.StringVar(&cfg.reportPath, "report", "", "write a JSON performance report to this path")
 	flag.Parse()
 
 	if cfg.services < 2 {
@@ -98,6 +109,7 @@ func main() {
 		traces:  collectortrace.NewTraceServiceClient(conn),
 		logs:    collectorlogs.NewLogsServiceClient(conn),
 		metrics: collectormetrics.NewMetricsServiceClient(conn),
+		lat:     newHistogram(),
 		svcNames: func() []string {
 			names := make([]string, cfg.services)
 			for i := range names {
@@ -110,7 +122,14 @@ func main() {
 	fmt.Printf("loadgen → %s | rate=%.0f/s workers=%d services=%d namespaces=%d cardinality=%d error-rate=%.2f\n",
 		cfg.endpoint, cfg.rate, cfg.workers, cfg.services, cfg.namespaces, cfg.cardinality, cfg.errorRate)
 
-	// Per-worker pacing: each worker sends one trace every `interval`.
+	// Baseline server metrics before load (for end-of-run deltas).
+	var baseline map[string]float64
+	if cfg.metricsURL != "" {
+		if baseline, err = scrapeMetrics(cfg.metricsURL); err != nil {
+			fmt.Fprintf(os.Stderr, "  warn: baseline metrics scrape failed: %v\n", err)
+		}
+	}
+
 	interval := time.Duration(float64(time.Second) * float64(cfg.workers) / cfg.rate)
 	start := time.Now()
 
@@ -123,7 +142,6 @@ func main() {
 		}()
 	}
 
-	// Progress line every 5s until the run ends.
 	done := make(chan struct{})
 	go func() {
 		t := time.NewTicker(5 * time.Second)
@@ -136,8 +154,8 @@ func main() {
 			case <-t.C:
 				elapsed := time.Since(start).Seconds()
 				sent := g.tracesSent.Load()
-				fmt.Printf("  %5.0fs  traces=%d (%.0f/s)  spans=%d  errors=%d\n",
-					elapsed, sent, float64(sent)/elapsed, g.spansSent.Load(), g.sendErrs.Load())
+				fmt.Printf("  %5.0fs  traces=%d (%.0f/s)  spans=%d  p95=%.1fms  errors=%d\n",
+					elapsed, sent, float64(sent)/elapsed, g.spansSent.Load(), g.lat.quantile(0.95), g.sendErrs.Load())
 			}
 		}
 	}()
@@ -145,9 +163,37 @@ func main() {
 	wg.Wait()
 	<-done
 	elapsed := time.Since(start).Seconds()
-	fmt.Printf("\ndone: %.1fs | traces=%d spans=%d logs=%d metrics=%d | send errors=%d | avg %.0f traces/s\n",
-		elapsed, g.tracesSent.Load(), g.spansSent.Load(), g.logsSent.Load(), g.metricsSent.Load(),
-		g.sendErrs.Load(), float64(g.tracesSent.Load())/elapsed)
+
+	rep := report{
+		Endpoint:        cfg.endpoint,
+		DurationSec:     round2(elapsed),
+		TargetRate:      cfg.rate,
+		Workers:         cfg.workers,
+		Services:        cfg.services,
+		TracesSent:      g.tracesSent.Load(),
+		SpansSent:       g.spansSent.Load(),
+		LogsSent:        g.logsSent.Load(),
+		MetricsSent:     g.metricsSent.Load(),
+		SendErrors:      g.sendErrs.Load(),
+		AvgTracesPerSec: round2(float64(g.tracesSent.Load()) / elapsed),
+		ExportLatencyMs: g.lat.snapshot(),
+	}
+	if cfg.metricsURL != "" {
+		if final, ferr := scrapeMetrics(cfg.metricsURL); ferr != nil {
+			fmt.Fprintf(os.Stderr, "  warn: final metrics scrape failed: %v\n", ferr)
+		} else {
+			rep.Server = serverDelta(baseline, final)
+		}
+	}
+
+	printReport(rep)
+	if cfg.reportPath != "" {
+		if err := writeReport(cfg.reportPath, rep); err != nil {
+			fmt.Fprintf(os.Stderr, "  warn: write report: %v\n", err)
+		} else {
+			fmt.Printf("report written: %s\n", cfg.reportPath)
+		}
+	}
 }
 
 type generator struct {
@@ -155,6 +201,7 @@ type generator struct {
 	traces   collectortrace.TraceServiceClient
 	logs     collectorlogs.LogsServiceClient
 	metrics  collectormetrics.MetricsServiceClient
+	lat      *histogram
 	svcNames []string
 
 	tracesSent  atomic.Int64
@@ -269,11 +316,13 @@ func (g *generator) sendTrace(ctx context.Context) {
 		spans += 2
 	}
 
+	t0 := time.Now()
 	_, err := g.traces.Export(g.outCtx(ctx), &collectortrace.ExportTraceServiceRequest{ResourceSpans: resSpans})
 	if err != nil {
 		g.countSendErr(ctx, err)
 		return
 	}
+	g.lat.record(time.Since(t0))
 	g.tracesSent.Add(1)
 	g.spansSent.Add(int64(spans))
 }
@@ -313,10 +362,12 @@ func (g *generator) sendLog(ctx context.Context) {
 			}},
 		}},
 	}}}
+	t0 := time.Now()
 	if _, err := g.logs.Export(g.outCtx(ctx), req); err != nil {
 		g.countSendErr(ctx, err)
 		return
 	}
+	g.lat.record(time.Since(t0))
 	g.logsSent.Add(1)
 }
 
@@ -341,10 +392,12 @@ func (g *generator) sendMetric(ctx context.Context) {
 			}},
 		}},
 	}}}
+	t0 := time.Now()
 	if _, err := g.metrics.Export(g.outCtx(ctx), req); err != nil {
 		g.countSendErr(ctx, err)
 		return
 	}
+	g.lat.record(time.Since(t0))
 	g.metricsSent.Add(1)
 }
 
@@ -386,3 +439,195 @@ func randBytes(n int) []byte {
 	}
 	return b
 }
+
+// ── Export-latency histogram ───────────────────────────────────────────────
+// Lock-free, fixed-bucket (log-spaced ms) so it's safe and bounded under a
+// multi-hour soak. Percentiles are bucket-granular approximations (the upper
+// bound of the bucket the quantile falls in).
+
+var latBoundsMs = []float64{0.5, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 1000, 2000, 5000, 10000, 30000}
+
+type histogram struct {
+	counts    []atomic.Int64 // counts[i] = samples in (bounds[i-1], bounds[i]]
+	over      atomic.Int64   // samples > last bound
+	n         atomic.Int64
+	sumMicros atomic.Int64
+}
+
+func newHistogram() *histogram { return &histogram{counts: make([]atomic.Int64, len(latBoundsMs))} }
+
+func (h *histogram) record(d time.Duration) {
+	h.n.Add(1)
+	h.sumMicros.Add(d.Microseconds())
+	ms := float64(d) / float64(time.Millisecond)
+	for i, b := range latBoundsMs {
+		if ms <= b {
+			h.counts[i].Add(1)
+			return
+		}
+	}
+	h.over.Add(1)
+}
+
+func (h *histogram) quantile(q float64) float64 {
+	total := h.n.Load()
+	if total == 0 {
+		return 0
+	}
+	target := int64(math.Ceil(q * float64(total)))
+	var cum int64
+	for i := range latBoundsMs {
+		cum += h.counts[i].Load()
+		if cum >= target {
+			return latBoundsMs[i]
+		}
+	}
+	return latBoundsMs[len(latBoundsMs)-1] // in the overflow bucket: report the cap as a floor
+}
+
+func (h *histogram) snapshot() latencyReport {
+	n := h.n.Load()
+	mean := 0.0
+	if n > 0 {
+		mean = float64(h.sumMicros.Load()) / float64(n) / 1000.0
+	}
+	return latencyReport{
+		Count:   n,
+		MeanMs:  round2(mean),
+		P50Ms:   h.quantile(0.50),
+		P95Ms:   h.quantile(0.95),
+		P99Ms:   h.quantile(0.99),
+		Over30s: h.over.Load(),
+	}
+}
+
+// ── Server-metrics scrape ──────────────────────────────────────────────────
+
+// scrapeMetrics fetches a Prometheus text endpoint and sums each metric across
+// its label series (good enough for the totals/gauges we report).
+func scrapeMetrics(url string) (map[string]float64, error) {
+	resp, err := http.Get(url) //nolint:noctx // short-lived CLI scrape
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d", resp.StatusCode)
+	}
+	out := map[string]float64{}
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64*1024), 1<<20) // metric lines can be long with labels
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "" || line[0] == '#' {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		name := fields[0]
+		if i := strings.IndexByte(name, '{'); i >= 0 {
+			name = name[:i]
+		}
+		if v, err := strconv.ParseFloat(fields[1], 64); err == nil {
+			out[name] += v
+		}
+	}
+	return out, sc.Err()
+}
+
+// serverDelta turns baseline+final scrapes into the curated report fields —
+// counter deltas, gauge finals, and histogram-derived averages over the run.
+func serverDelta(base, final map[string]float64) *serverReport {
+	if final == nil {
+		return nil
+	}
+	if base == nil {
+		base = map[string]float64{}
+	}
+	avg := func(sumKey, countKey string) float64 {
+		dc := final[countKey] - base[countKey]
+		if dc <= 0 {
+			return 0
+		}
+		return round2((final[sumKey] - base[sumKey]) / dc * 1000.0) // seconds → ms
+	}
+	return &serverReport{
+		IngestRowsDelta:  final["fanout_ingest_rows_total"] - base["fanout_ingest_rows_total"],
+		RowsDroppedDelta: final["fanout_rows_dropped_total"] - base["fanout_rows_dropped_total"],
+		LakePartitions:   final["fanout_lake_partitions"],
+		LakeSizeBytes:    final["fanout_lake_size_bytes"],
+		IngestQueueDepth: final["fanout_ingest_queue_depth"],
+		AvgRollupMs:      avg("fanout_rollup_duration_seconds_sum", "fanout_rollup_duration_seconds_count"),
+		AvgFlushMs:       avg("fanout_flush_duration_seconds_sum", "fanout_flush_duration_seconds_count"),
+		AvgQueryMs:       avg("fanout_query_duration_seconds_sum", "fanout_query_duration_seconds_count"),
+	}
+}
+
+// ── Report ─────────────────────────────────────────────────────────────────
+
+type report struct {
+	Endpoint        string        `json:"endpoint"`
+	DurationSec     float64       `json:"duration_sec"`
+	TargetRate      float64       `json:"target_rate"`
+	Workers         int           `json:"workers"`
+	Services        int           `json:"services"`
+	TracesSent      int64         `json:"traces_sent"`
+	SpansSent       int64         `json:"spans_sent"`
+	LogsSent        int64         `json:"logs_sent"`
+	MetricsSent     int64         `json:"metrics_sent"`
+	SendErrors      int64         `json:"send_errors"`
+	AvgTracesPerSec float64       `json:"avg_traces_per_sec"`
+	ExportLatencyMs latencyReport `json:"export_latency_ms"`
+	Server          *serverReport `json:"server,omitempty"`
+}
+
+type latencyReport struct {
+	Count   int64   `json:"count"`
+	MeanMs  float64 `json:"mean_ms"`
+	P50Ms   float64 `json:"p50_ms"`
+	P95Ms   float64 `json:"p95_ms"`
+	P99Ms   float64 `json:"p99_ms"`
+	Over30s int64   `json:"over_30s"`
+}
+
+type serverReport struct {
+	IngestRowsDelta  float64 `json:"ingest_rows_delta"`
+	RowsDroppedDelta float64 `json:"rows_dropped_delta"`
+	LakePartitions   float64 `json:"lake_partitions"`
+	LakeSizeBytes    float64 `json:"lake_size_bytes"`
+	IngestQueueDepth float64 `json:"ingest_queue_depth"`
+	AvgRollupMs      float64 `json:"avg_rollup_ms"`
+	AvgFlushMs       float64 `json:"avg_flush_ms"`
+	AvgQueryMs       float64 `json:"avg_query_ms"`
+}
+
+func printReport(r report) {
+	fmt.Printf("\n── performance report ──────────────────────────────────────\n")
+	fmt.Printf("duration       %.1fs  (target %.0f traces/s → actual %.0f)\n", r.DurationSec, r.TargetRate, r.AvgTracesPerSec)
+	fmt.Printf("sent           traces=%d spans=%d logs=%d metrics=%d\n", r.TracesSent, r.SpansSent, r.LogsSent, r.MetricsSent)
+	fmt.Printf("send errors    %d\n", r.SendErrors)
+	l := r.ExportLatencyMs
+	fmt.Printf("export latency mean=%.1fms  p50≈%.0f  p95≈%.0f  p99≈%.0f  >30s=%d  (n=%d)\n",
+		l.MeanMs, l.P50Ms, l.P95Ms, l.P99Ms, l.Over30s, l.Count)
+	if r.Server != nil {
+		s := r.Server
+		fmt.Printf("server (Δ over run):\n")
+		fmt.Printf("  rows accepted=%.0f  dropped=%.0f\n", s.IngestRowsDelta, s.RowsDroppedDelta)
+		fmt.Printf("  lake_partitions=%.0f  lake_size=%.1fMB  ingest_queue_depth=%.0f\n",
+			s.LakePartitions, s.LakeSizeBytes/(1<<20), s.IngestQueueDepth)
+		fmt.Printf("  avg rollup=%.1fms  flush=%.1fms  query=%.1fms\n", s.AvgRollupMs, s.AvgFlushMs, s.AvgQueryMs)
+	}
+	fmt.Printf("────────────────────────────────────────────────────────────\n")
+}
+
+func writeReport(path string, r report) error {
+	b, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+
+func round2(f float64) float64 { return math.Round(f*100) / 100 }
