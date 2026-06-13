@@ -29,6 +29,13 @@ type Config struct {
 	MCPEnabled     bool   `env:"MCP_ENABLED" envDefault:"true"`
 	RetentionDays  int    `env:"RETENTION_DAYS" envDefault:"30"`
 	DefaultNS      string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	// PublicRead turns the instance into a public demo: unauthenticated GET/HEAD
+	// requests are served as a read-only viewer (writes, admin routes, /mcp, and
+	// the API-key routes still require real auth), and OTLP ingest is accepted
+	// without a token. It exposes ALL telemetry on the instance to anyone who can
+	// reach it — only enable it on an instance whose data is meant to be public
+	// (e.g. the otel-demo showcase). NEVER set it where data is private.
+	PublicRead bool `env:"PUBLIC_READ" envDefault:"false"`
 	// The DuckDB knobs below self-size where possible and otherwise default to
 	// values validated on the reference deployment target, a small dedicated VM
 	// (Hetzner CPX42: 8 vCPU, 16 GB RAM, 240 GB disk). There the self-sizing

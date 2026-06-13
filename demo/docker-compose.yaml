@@ -23,6 +23,10 @@ services:
       DATA_DIR: /var/lib/fanout/data
       HTTP_ADDR: :7520
       OTLP_GRPC_ADDR: :4317
+      # Public showcase: anonymous read-only UI access + tokenless OTLP ingest.
+      # Safe ONLY because this instance serves synthetic otel-demo data; never
+      # set on an instance with private telemetry.
+      PUBLIC_READ: "true"
       # 4x fewer DuckLake snapshots/files per day than the 15s default; the
       # in-binary hourly compaction keeps the residue bounded either way.
       FLUSH_SECONDS: "60"
