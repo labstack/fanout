@@ -164,7 +164,7 @@ release:
 #   local   [gens rate dur]    throwaway fanout + parallel loadgens → rows/s
 #                              (gens auto-scales to CPU cores → max utilization)
 #   hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down
-#   throughput [target driver]   two-VM SLO-gated ceiling + rated capacity (rows/s)
+#   throughput [type]          two-VM SLO-gated ceiling + rated capacity (rows/s)
 #   profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots
 #   drive   [loadgen flags]    fire loadgen at an already-running fanout
 #   watch   [host:port]        tail the incident-relevant metrics
@@ -186,7 +186,7 @@ stress *ARGS:
         echo "  local   [gens rate dur]    throwaway fanout + parallel loadgens + query load → rows/s (auto-scales to cores)"
         echo "  soak    [min rate]         sustained load asserting growth invariants (file count, rollup freshness)"
         echo "  hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down"
-        echo "  throughput [target driver]   two-VM SLO-gated ceiling + rated capacity (rows/s)"
+        echo "  throughput [type]          two-VM SLO-gated ceiling + rated capacity (rows/s)"
         echo "  profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots"
         echo "  drive   [loadgen flags]    fire loadgen at an already-running fanout"
         echo "  watch   [host:port]        tail the incident-relevant metrics" ;;

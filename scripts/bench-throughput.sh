@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Throughput benchmark: provisions a Hetzner private network + two VMs
-# (a cpx32 fanout-under-test and a larger cpx41 load driver), ships the current
+# Throughput benchmark: provisions a Hetzner private network + two VMs of the
+# SAME type — a fanout-under-test and a separate load driver — ships the current
 # git HEAD, ramps loadgen through rate steps under an SLO gate to find the
 # ingest CEILING, then certifies a sustained RATED CAPACITY with a 15-min soak.
 # Both numbers are reported in achieved server-side rows/s. All cloud resources
 # are deleted on exit (trap), including on failure or Ctrl-C.
 #
-# Usage:  scripts/bench-throughput.sh [TARGET_TYPE] [DRIVER_TYPE] [SSH_KEY] [LOCATION]
-# Example: scripts/bench-throughput.sh cpx32 cpx41 v@labstack.com fsn1
+# Usage:  scripts/bench-throughput.sh [TYPE] [SSH_KEY] [LOCATION]
+# Example: scripts/bench-throughput.sh cpx32 v@labstack.com fsn1
 # Env:    PART_CAP (max allowed lake_partitions, default 800)
 #
 # Requires: hcloud CLI with an authenticated context, an uploaded SSH key whose
@@ -17,11 +17,10 @@ set -uo pipefail
 # shellcheck disable=SC2164
 cd "$(dirname "$0")/.."
 
-TARGET_TYPE="${1:-cpx32}"
-DRIVER_TYPE="${2:-cpx41}"
+TYPE="${1:-cpx32}"   # both VMs use the same instance type
 # shellcheck disable=SC2034
-SSH_KEY="${3:-v@labstack.com}"
-LOC="${4:-fsn1}"
+SSH_KEY="${2:-v@labstack.com}"
+LOC="${3:-fsn1}"
 # shellcheck disable=SC2034
 GOVER="1.26.4"
 PART_CAP="${PART_CAP:-800}"
@@ -53,7 +52,7 @@ SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/
 ssh_to()  { local ip="$1"; shift; ssh "${SSHOPTS[@]}" "root@$ip" "$@"; }
 scp_to()  { local ip="$1" src="$2" dst="$3"; scp "${SSHOPTS[@]}" -q "$src" "root@$ip:$dst"; }
 
-echo "throughput-bench run $RUN | target=$TARGET_TYPE driver=$DRIVER_TYPE loc=$LOC part_cap=$PART_CAP"
+echo "throughput-bench run $RUN | type=$TYPE (×2) loc=$LOC part_cap=$PART_CAP"
 
 make_network() {
   hcloud network create --name "$RUN-net" --ip-range 10.10.0.0/16 >/dev/null
@@ -61,13 +60,16 @@ make_network() {
   register_network "$RUN-net"
 }
 
-# provision NAME TYPE → echoes "PUBLIC_IP PRIVATE_IP"
+# provision NAME TYPE → echoes "PUBLIC_IP PRIVATE_IP".
+# NOTE: this runs in a subshell via `read < <(provision …)`, so it must NOT
+# register the server — array mutations in a subshell are lost. The caller
+# registers the name in the main shell BEFORE calling provision (see below),
+# so the trap can tear the server down even if create/ip/describe fails here.
 provision() {
   local name="$1" type="$2"
   hcloud server create --name "$name" --type "$type" --image ubuntu-24.04 \
     --location "$LOC" --ssh-key "$SSH_KEY" --network "$RUN-net" \
     --label purpose=fanout-throughput-bench >/dev/null
-  register_server "$name"
   local pub priv
   pub=$(hcloud server ip "$name")
   priv=$(hcloud server describe "$name" -o format='{{(index .PrivateNet 0).IP}}')
@@ -78,9 +80,13 @@ wait_ssh() { local ip="$1"; for _ in $(seq 1 40); do ssh_to "$ip" true 2>/dev/nu
 
 echo "── creating private network $RUN-net ──"
 make_network
-echo "── provisioning target ($TARGET_TYPE) + driver ($DRIVER_TYPE) ──"
-read -r TARGET_PUB TARGET_PRIV < <(provision "$RUN-target" "$TARGET_TYPE")
-read -r DRIVER_PUB DRIVER_PRIV < <(provision "$RUN-driver" "$DRIVER_TYPE")
+echo "── provisioning target + driver ($TYPE × 2) ──"
+# Register in the MAIN shell before provisioning — provision() runs in a
+# process-substitution subshell and cannot mutate SERVERS itself.
+register_server "$RUN-target"
+register_server "$RUN-driver"
+read -r TARGET_PUB TARGET_PRIV < <(provision "$RUN-target" "$TYPE")
+read -r DRIVER_PUB DRIVER_PRIV < <(provision "$RUN-driver" "$TYPE")
 echo "  target: pub=$TARGET_PUB priv=$TARGET_PRIV"
 echo "  driver: pub=$DRIVER_PUB priv=$DRIVER_PRIV"
 wait_ssh "$TARGET_PUB" || { echo "target SSH never came up" >&2; exit 1; }
@@ -254,7 +260,7 @@ fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo
-echo "════════ THROUGHPUT — ${TARGET_TYPE} (HEAD $(git rev-parse --short HEAD)) ════════"
+echo "════════ THROUGHPUT — ${TYPE} (HEAD $(git rev-parse --short HEAD)) ════════"
 printf "%-14s %14s %-12s %s\n" "target tr/s" "achieved rows/s" "verdict" "reason"
 for row in "${RESULTS[@]}"; do
   # shellcheck disable=SC2086
