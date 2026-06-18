@@ -175,16 +175,16 @@ Prod-realistic, not the aggressive burst settings:
 
 ## Components
 
-- **`scripts/bench-fair.sh`** — the new harness. Orchestrates provisioning,
+- **`scripts/bench-throughput.sh`** — the new harness. Orchestrates provisioning,
   shipping, the ramp loop, the soak, result aggregation, and teardown. Reuses
   existing `loadgen` flags; **no Go changes**. Modeled on `bench-hetzner.sh`
   (provision/trap/ship/build) + `soak.sh` (between-sample growth invariants),
   extended to two VMs and rate-stepping.
-- **`just stress fair`** — a new subcommand in the `justfile` stress dispatcher
-  routing to `scripts/bench-fair.sh`.
+- **`just stress throughput`** — a new subcommand in the `justfile` stress dispatcher
+  routing to `scripts/bench-throughput.sh`.
 - **`cmd/loadgen`** — unchanged; consumed as-is.
 
-### bench-fair.sh internal structure
+### bench-throughput.sh internal structure
 
 - `make_network` — `hcloud network create` (+ subnet) in the run location;
   register for teardown.

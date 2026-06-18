@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build `scripts/bench-fair.sh` — a two-VM, SLO-gated harness that measures fanout's ingest **ceiling** and defensible **rated capacity** in achieved rows/s.
+**Goal:** Build `scripts/bench-throughput.sh` — a two-VM, SLO-gated harness that measures fanout's ingest **ceiling** and defensible **rated capacity** in achieved rows/s.
 
 **Architecture:** A bash orchestrator provisions a Hetzner private network + two VMs (a `cpx32` fanout-under-test and a larger `cpx41` load driver), ships the current git HEAD to both, boots fanout with prod-default config, ramps `loadgen` through rate steps with an SLO gate to find the ceiling, then certifies a rated capacity with a 15-min sustained soak. All cloud resources are torn down on any exit. Reuses existing `cmd/loadgen` flags — **no Go changes**.
 
@@ -25,7 +25,7 @@
 ### Task 1: Script skeleton — arg parsing, resource registry, teardown trap
 
 **Files:**
-- Create: `scripts/bench-fair.sh`
+- Create: `scripts/bench-throughput.sh`
 
 **Interfaces:**
 - Produces: a runnable skeleton with globals `LOC`, `SSH_KEY`, `GOVER`, `TARGET_TYPE`, `DRIVER_TYPE`, `PART_CAP`; arrays `SERVERS=()` and `NETWORKS=()`; functions `register_server <name>`, `register_network <name>`, `cleanup`. `SSHOPTS=(...)` array and `ssh_to <ip> ...` / `scp_to <ip> <src> <dst>` helpers (bypass known_hosts like bench-hetzner.sh).
@@ -41,8 +41,8 @@
 # Both numbers are reported in achieved server-side rows/s. All cloud resources
 # are deleted on exit (trap), including on failure or Ctrl-C.
 #
-# Usage:  scripts/bench-fair.sh [TARGET_TYPE] [DRIVER_TYPE] [SSH_KEY] [LOCATION]
-# Example: scripts/bench-fair.sh cpx32 cpx41 v@labstack.com fsn1
+# Usage:  scripts/bench-throughput.sh [TARGET_TYPE] [DRIVER_TYPE] [SSH_KEY] [LOCATION]
+# Example: scripts/bench-throughput.sh cpx32 cpx41 v@labstack.com fsn1
 # Env:    PART_CAP (max allowed lake_partitions, default 800)
 #
 # Requires: hcloud CLI with an authenticated context, an uploaded SSH key whose
@@ -57,7 +57,7 @@ SSH_KEY="${3:-v@labstack.com}"
 LOC="${4:-fsn1}"
 GOVER="1.26.4"
 PART_CAP="${PART_CAP:-800}"
-RUN="fanout-fair-$$"
+RUN="fanout-tput-$$"
 
 command -v hcloud >/dev/null || { echo "hcloud CLI required" >&2; exit 1; }
 
@@ -84,23 +84,23 @@ SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/
 ssh_to()  { local ip="$1"; shift; ssh "${SSHOPTS[@]}" "root@$ip" "$@"; }
 scp_to()  { local ip="$1" src="$2" dst="$3"; scp "${SSHOPTS[@]}" -q "$src" "root@$ip:$dst"; }
 
-echo "fair-bench run $RUN | target=$TARGET_TYPE driver=$DRIVER_TYPE loc=$LOC part_cap=$PART_CAP"
+echo "throughput-bench run $RUN | target=$TARGET_TYPE driver=$DRIVER_TYPE loc=$LOC part_cap=$PART_CAP"
 ```
 
 - [ ] **Step 2: Lint and syntax-check**
 
-Run: `shellcheck scripts/bench-fair.sh && bash -n scripts/bench-fair.sh`
+Run: `shellcheck scripts/bench-throughput.sh && bash -n scripts/bench-throughput.sh`
 Expected: no output, exit 0. (If `shellcheck` is absent, `brew install shellcheck` first.)
 
 - [ ] **Step 3: Verify the trap fires on empty registries**
 
-Run: `bash scripts/bench-fair.sh cpx32 cpx41 v@labstack.com fsn1`
-Expected: prints the `fair-bench run …` line, then exits 0 with no "deleting" lines (empty `SERVERS`/`NETWORKS`), proving the `${SERVERS[@]:-}` guard handles the empty case under `set -u`.
+Run: `bash scripts/bench-throughput.sh cpx32 cpx41 v@labstack.com fsn1`
+Expected: prints the `throughput-bench run …` line, then exits 0 with no "deleting" lines (empty `SERVERS`/`NETWORKS`), proving the `${SERVERS[@]:-}` guard handles the empty case under `set -u`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/bench-fair.sh
+git add scripts/bench-throughput.sh
 git commit -m "feat(bench): fair-throughput harness skeleton + teardown trap"
 ```
 
@@ -109,7 +109,7 @@ git commit -m "feat(bench): fair-throughput harness skeleton + teardown trap"
 ### Task 2: Provision the private network and both VMs
 
 **Files:**
-- Modify: `scripts/bench-fair.sh`
+- Modify: `scripts/bench-throughput.sh`
 
 **Interfaces:**
 - Consumes: `register_server`, `register_network`, `SSHOPTS`, `ssh_to`, globals from Task 1.
@@ -129,7 +129,7 @@ provision() {
   local name="$1" type="$2"
   hcloud server create --name "$name" --type "$type" --image ubuntu-24.04 \
     --location "$LOC" --ssh-key "$SSH_KEY" --network "$RUN-net" \
-    --label purpose=fanout-fair-bench >/dev/null
+    --label purpose=fanout-throughput-bench >/dev/null
   register_server "$name"
   local pub priv
   pub=$(hcloud server ip "$name")
@@ -153,7 +153,7 @@ echo "✓ both VMs reachable"
 
 - [ ] **Step 2: Lint and syntax-check**
 
-Run: `shellcheck scripts/bench-fair.sh && bash -n scripts/bench-fair.sh`
+Run: `shellcheck scripts/bench-throughput.sh && bash -n scripts/bench-throughput.sh`
 Expected: clean. (Note: `<(...)` process substitution requires bash, which the shebang guarantees — `shellcheck` may warn SC2046 elsewhere; resolve any warnings before commit.)
 
 - [ ] **Step 3: Confirm the private-IP query format against hcloud**
@@ -164,7 +164,7 @@ Expected: confirms `-o format='{{...}}'` Go-template support exists in `hcloud v
 - [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/bench-fair.sh
+git add scripts/bench-throughput.sh
 git commit -m "feat(bench): provision private network + target/driver VMs"
 ```
 
@@ -173,7 +173,7 @@ git commit -m "feat(bench): provision private network + target/driver VMs"
 ### Task 3: Toolchain install, ship HEAD, and build (target=fanout, driver=loadgen)
 
 **Files:**
-- Modify: `scripts/bench-fair.sh`
+- Modify: `scripts/bench-throughput.sh`
 
 **Interfaces:**
 - Consumes: `ssh_to`, `scp_to`, `TARGET_PUB`, `DRIVER_PUB`, `GOVER`.
@@ -233,7 +233,7 @@ rm -f /tmp/fanout-src.tgz
 
 - [ ] **Step 2: Lint and syntax-check**
 
-Run: `shellcheck scripts/bench-fair.sh && bash -n scripts/bench-fair.sh`
+Run: `shellcheck scripts/bench-throughput.sh && bash -n scripts/bench-throughput.sh`
 Expected: clean.
 
 - [ ] **Step 3: Verify HEAD archives cleanly (local dry-run, no VM)**
@@ -244,7 +244,7 @@ Expected: lists `cmd/fanout/...` and `cmd/loadgen/main.go`, proving both build t
 - [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/bench-fair.sh
+git add scripts/bench-throughput.sh
 git commit -m "feat(bench): install toolchain, ship HEAD, build fanout/loadgen per role"
 ```
 
@@ -253,7 +253,7 @@ git commit -m "feat(bench): install toolchain, ship HEAD, build fanout/loadgen p
 ### Task 4: Boot fanout on the target with prod-default config
 
 **Files:**
-- Modify: `scripts/bench-fair.sh`
+- Modify: `scripts/bench-throughput.sh`
 
 **Interfaces:**
 - Consumes: `ssh_to`, `TARGET_PUB`, `TARGET_PRIV`.
@@ -291,19 +291,19 @@ boot_fanout
 
 - [ ] **Step 2: Lint and syntax-check**
 
-Run: `shellcheck scripts/bench-fair.sh && bash -n scripts/bench-fair.sh`
+Run: `shellcheck scripts/bench-throughput.sh && bash -n scripts/bench-throughput.sh`
 Expected: clean. Confirm the `snap()` awk escaping (`\"%d\"`) survives the outer double-quoted `ssh_to` string — `bash -n` will catch an unbalanced quote.
 
 - [ ] **Step 3: Verify healthz is reached over the PRIVATE ip**
 
 Inspection check (no VM): confirm both the `boot_fanout` readiness loop and `snap` curl use `$TARGET_PRIV`, not `$TARGET_PUB`, so the SLO path is the private network.
-Run: `grep -nE 'curl .*TARGET_(PRIV|PUB):(7520|4317)' scripts/bench-fair.sh`
+Run: `grep -nE 'curl .*TARGET_(PRIV|PUB):(7520|4317)' scripts/bench-throughput.sh`
 Expected: every test-traffic curl uses `TARGET_PRIV`.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/bench-fair.sh
+git add scripts/bench-throughput.sh
 git commit -m "feat(bench): boot fanout with prod-default config, private-net healthz"
 ```
 
@@ -312,7 +312,7 @@ git commit -m "feat(bench): boot fanout with prod-default config, private-net he
 ### Task 5: `run_step` — drive one rate step, evaluate the SLO gate, classify pass/fail/inconclusive
 
 **Files:**
-- Modify: `scripts/bench-fair.sh`
+- Modify: `scripts/bench-throughput.sh`
 
 **Interfaces:**
 - Consumes: `ssh_to`, `snap`, `DRIVER_PUB`, `TARGET_PRIV`, `TARGET_PUB`, `PART_CAP`.
@@ -373,7 +373,7 @@ REMOTE
 
 - [ ] **Step 2: Lint and syntax-check**
 
-Run: `shellcheck scripts/bench-fair.sh && bash -n scripts/bench-fair.sh`
+Run: `shellcheck scripts/bench-throughput.sh && bash -n scripts/bench-throughput.sh`
 Expected: clean. Watch SC2086 on the integer `$(( ))` math and the nested heredoc escaping (`\$?`, `\"`) — the `<<REMOTE` here is **unquoted** so `$TARGET_PRIV`/`$traces` interpolate locally; verify that is intentional and that `\$?` stays literal for the remote shell.
 
 - [ ] **Step 3: Unit-check the achieved-vs-target math in isolation**
@@ -387,7 +387,7 @@ Expected: `target_rps=51600 95pct=49020` — confirms the rows/s target derivati
 - [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/bench-fair.sh
+git add scripts/bench-throughput.sh
 git commit -m "feat(bench): run_step drives one rate step + classifies SLO verdict"
 ```
 
@@ -396,7 +396,7 @@ git commit -m "feat(bench): run_step drives one rate step + classifies SLO verdi
 ### Task 6: Ramp loop — find the ceiling and the last passing step
 
 **Files:**
-- Modify: `scripts/bench-fair.sh`
+- Modify: `scripts/bench-throughput.sh`
 
 **Interfaces:**
 - Consumes: `run_step` and its output globals.
@@ -432,7 +432,7 @@ fi
 
 - [ ] **Step 2: Lint and syntax-check**
 
-Run: `shellcheck scripts/bench-fair.sh && bash -n scripts/bench-fair.sh`
+Run: `shellcheck scripts/bench-throughput.sh && bash -n scripts/bench-throughput.sh`
 Expected: clean.
 
 - [ ] **Step 3: Verify the verdict state-machine with a stubbed run_step**
@@ -450,7 +450,7 @@ Expected: `lastpass=2000 ceiling=3000` — confirms last-pass tracks the highest
 - [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/bench-fair.sh
+git add scripts/bench-throughput.sh
 git commit -m "feat(bench): ramp loop finds ceiling + last-passing step"
 ```
 
@@ -459,7 +459,7 @@ git commit -m "feat(bench): ramp loop finds ceiling + last-passing step"
 ### Task 7: Soak certification — sustain ~80% of last-pass for 15 min
 
 **Files:**
-- Modify: `scripts/bench-fair.sh`
+- Modify: `scripts/bench-throughput.sh`
 
 **Interfaces:**
 - Consumes: `LASTPASS_RPS`, `ROWS_PER_TRACE`, `run_step` (reused at soak duration), its verdict globals.
@@ -487,7 +487,7 @@ fi
 
 - [ ] **Step 2: Lint and syntax-check**
 
-Run: `shellcheck scripts/bench-fair.sh && bash -n scripts/bench-fair.sh`
+Run: `shellcheck scripts/bench-throughput.sh && bash -n scripts/bench-throughput.sh`
 Expected: clean.
 
 - [ ] **Step 3: Verify the 80%-of-last-pass traces target math**
@@ -498,7 +498,7 @@ Expected: `soak_traces=11906` — i.e. given a 64k rows/s last-pass, the soak dr
 - [ ] **Step 4: Commit**
 
 ```bash
-git add scripts/bench-fair.sh
+git add scripts/bench-throughput.sh
 git commit -m "feat(bench): soak certifies rated capacity at 80% of last-pass"
 ```
 
@@ -507,7 +507,7 @@ git commit -m "feat(bench): soak certifies rated capacity at 80% of last-pass"
 ### Task 8: Summary report
 
 **Files:**
-- Modify: `scripts/bench-fair.sh`
+- Modify: `scripts/bench-throughput.sh`
 
 **Interfaces:**
 - Consumes: `RESULTS`, `CEILING_RPS`, `LASTPASS_RPS`, `RATED_RPS`, `SOAK_VERDICT`, `TARGET_TYPE`.
@@ -517,7 +517,7 @@ git commit -m "feat(bench): soak certifies rated capacity at 80% of last-pass"
 
 ```bash
 echo
-echo "════════ FAIR THROUGHPUT — ${TARGET_TYPE} (HEAD $(git rev-parse --short HEAD)) ════════"
+echo "════════ THROUGHPUT — ${TARGET_TYPE} (HEAD $(git rev-parse --short HEAD)) ════════"
 printf "%-14s %14s %-12s %s\n" "target tr/s" "achieved rows/s" "verdict" "reason"
 for row in "${RESULTS[@]}"; do
   # shellcheck disable=SC2086
@@ -540,7 +540,7 @@ echo "per-step JSON reports: ./bench-results/$RUN.tgz"
 
 - [ ] **Step 2: Lint and syntax-check**
 
-Run: `shellcheck scripts/bench-fair.sh && bash -n scripts/bench-fair.sh`
+Run: `shellcheck scripts/bench-throughput.sh && bash -n scripts/bench-throughput.sh`
 Expected: clean (the `SC2086` on `set -- $row` word-splitting is intentional and disabled inline).
 
 - [ ] **Step 3: Verify the table renderer with stub data**
@@ -557,28 +557,28 @@ Expected: a 4-row aligned table, with the `SOAK:9000` label and `drops=12` reaso
 
 ```bash
 grep -qxF 'bench-results/' .gitignore || echo 'bench-results/' >> .gitignore
-git add scripts/bench-fair.sh .gitignore
+git add scripts/bench-throughput.sh .gitignore
 git commit -m "feat(bench): summary table with ceiling, rated capacity, headroom"
 ```
 
 ---
 
-### Task 9: Wire `just stress fair` and document usage
+### Task 9: Wire `just stress throughput` and document usage
 
 **Files:**
 - Modify: `justfile` (the `stress` recipe dispatcher)
-- Modify: `scripts/bench-fair.sh` (top-of-file usage comment already added in Task 1 — confirm accuracy)
+- Modify: `scripts/bench-throughput.sh` (top-of-file usage comment already added in Task 1 — confirm accuracy)
 
 **Interfaces:**
-- Consumes: `scripts/bench-fair.sh`.
-- Produces: `just stress fair [args]` routing to the harness, and a `fair` line in the `just stress` help text.
+- Consumes: `scripts/bench-throughput.sh`.
+- Produces: `just stress throughput [args]` routing to the harness, and a `fair` line in the `just stress` help text.
 
 - [ ] **Step 1: Add the `fair` case and help line to the stress dispatcher**
 
 In `justfile`, inside the `stress` recipe `case "$sub" in` block, add a case beside the existing `hetzner)` line:
 
 ```bash
-      fair)    exec ./scripts/bench-fair.sh "$@" ;;
+      throughput) exec ./scripts/bench-throughput.sh "$@" ;;
 ```
 
 And add to the help heredoc (beside the `hetzner` help line):
@@ -592,15 +592,15 @@ And add to the help heredoc (beside the `hetzner` help line):
 Run: `just stress` (no args)
 Expected: the help text now lists the `fair` subcommand alongside `local/soak/hetzner/profile/drive/watch`.
 
-Run: `just stress fair --help 2>&1 | head -1` — if the script has no `--help`, expect it to begin provisioning; instead verify routing without spending money:
+Run: `just stress throughput --help 2>&1 | head -1` — if the script has no `--help`, expect it to begin provisioning; instead verify routing without spending money:
 Run: `grep -n 'fair)' justfile`
-Expected: shows the `fair) exec ./scripts/bench-fair.sh "$@"` line.
+Expected: shows the `throughput) exec ./scripts/bench-throughput.sh "$@"` line.
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add justfile scripts/bench-fair.sh
-git commit -m "feat(bench): wire 'just stress fair' + help text"
+git add justfile scripts/bench-throughput.sh
+git commit -m "feat(bench): wire 'just stress throughput' + help text"
 ```
 
 ---
@@ -620,12 +620,12 @@ Expected: `ok` and `key usable` (matches the verified setup; if the key were enc
 
 - [ ] **Step 2: Launch in the background and watch**
 
-Run: `just stress fair 2>&1 | tee bench-results/run-$(date +%s).log` (run in background per the harness's long duration)
+Run: `just stress throughput 2>&1 | tee bench-results/run-$(date +%s).log` (run in background per the harness's long duration)
 Expected: provisioning lines → toolchain → build → per-step ramp lines → ceiling → soak → summary table → teardown (`✓ … deleted` for both servers and the network).
 
 - [ ] **Step 3: Confirm no orphaned resources**
 
-Run: `hcloud server list -l purpose=fanout-fair-bench && hcloud network list | grep fanout-fair || echo "clean"`
+Run: `hcloud server list -l purpose=fanout-throughput-bench && hcloud network list | grep fanout-tput || echo "clean"`
 Expected: no servers, no network — `clean`.
 
 - [ ] **Step 4: Record the result**

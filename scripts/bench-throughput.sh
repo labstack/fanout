@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Fair throughput benchmark: provisions a Hetzner private network + two VMs
+# Throughput benchmark: provisions a Hetzner private network + two VMs
 # (a cpx32 fanout-under-test and a larger cpx41 load driver), ships the current
 # git HEAD, ramps loadgen through rate steps under an SLO gate to find the
 # ingest CEILING, then certifies a sustained RATED CAPACITY with a 15-min soak.
 # Both numbers are reported in achieved server-side rows/s. All cloud resources
 # are deleted on exit (trap), including on failure or Ctrl-C.
 #
-# Usage:  scripts/bench-fair.sh [TARGET_TYPE] [DRIVER_TYPE] [SSH_KEY] [LOCATION]
-# Example: scripts/bench-fair.sh cpx32 cpx41 v@labstack.com fsn1
+# Usage:  scripts/bench-throughput.sh [TARGET_TYPE] [DRIVER_TYPE] [SSH_KEY] [LOCATION]
+# Example: scripts/bench-throughput.sh cpx32 cpx41 v@labstack.com fsn1
 # Env:    PART_CAP (max allowed lake_partitions, default 800)
 #
 # Requires: hcloud CLI with an authenticated context, an uploaded SSH key whose
@@ -25,7 +25,7 @@ LOC="${4:-fsn1}"
 # shellcheck disable=SC2034
 GOVER="1.26.4"
 PART_CAP="${PART_CAP:-800}"
-RUN="fanout-fair-$$"
+RUN="fanout-tput-$$"
 
 command -v hcloud >/dev/null || { echo "hcloud CLI required" >&2; exit 1; }
 
@@ -53,7 +53,7 @@ SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/
 ssh_to()  { local ip="$1"; shift; ssh "${SSHOPTS[@]}" "root@$ip" "$@"; }
 scp_to()  { local ip="$1" src="$2" dst="$3"; scp "${SSHOPTS[@]}" -q "$src" "root@$ip:$dst"; }
 
-echo "fair-bench run $RUN | target=$TARGET_TYPE driver=$DRIVER_TYPE loc=$LOC part_cap=$PART_CAP"
+echo "throughput-bench run $RUN | target=$TARGET_TYPE driver=$DRIVER_TYPE loc=$LOC part_cap=$PART_CAP"
 
 make_network() {
   hcloud network create --name "$RUN-net" --ip-range 10.10.0.0/16 >/dev/null
@@ -66,7 +66,7 @@ provision() {
   local name="$1" type="$2"
   hcloud server create --name "$name" --type "$type" --image ubuntu-24.04 \
     --location "$LOC" --ssh-key "$SSH_KEY" --network "$RUN-net" \
-    --label purpose=fanout-fair-bench >/dev/null
+    --label purpose=fanout-throughput-bench >/dev/null
   register_server "$name"
   local pub priv
   pub=$(hcloud server ip "$name")
@@ -254,7 +254,7 @@ fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo
-echo "════════ FAIR THROUGHPUT — ${TARGET_TYPE} (HEAD $(git rev-parse --short HEAD)) ════════"
+echo "════════ THROUGHPUT — ${TARGET_TYPE} (HEAD $(git rev-parse --short HEAD)) ════════"
 printf "%-14s %14s %-12s %s\n" "target tr/s" "achieved rows/s" "verdict" "reason"
 for row in "${RESULTS[@]}"; do
   # shellcheck disable=SC2086
