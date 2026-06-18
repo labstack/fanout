@@ -86,3 +86,51 @@ echo "  driver: pub=$DRIVER_PUB priv=$DRIVER_PRIV"
 wait_ssh "$TARGET_PUB" || { echo "target SSH never came up" >&2; exit 1; }
 wait_ssh "$DRIVER_PUB" || { echo "driver SSH never came up" >&2; exit 1; }
 echo "✓ both VMs reachable"
+
+setup_toolchain() {
+  local ip="$1"
+  ssh_to "$ip" "GOVER='$GOVER' bash -s" <<'REMOTE'
+set -e
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq >/dev/null && apt-get install -y -qq build-essential git curl >/dev/null 2>&1
+cd /tmp && curl -fsSL "https://go.dev/dl/go${GOVER}.linux-amd64.tar.gz" -o go.tgz
+rm -rf /usr/local/go && tar -C /usr/local -xzf go.tgz
+echo "  $(/usr/local/go/bin/go version) | $(nproc) cores, $(free -g | awk '/Mem/{print $2}')GB RAM"
+REMOTE
+}
+
+# ship_and_build PUBLIC_IP ROLE   (ROLE = target | driver)
+ship_and_build() {
+  local ip="$1" role="$2"
+  scp_to "$ip" /tmp/fanout-src.tgz /root/fanout-src.tgz
+  ssh_to "$ip" "ROLE='$role' bash -s" <<'REMOTE'
+set -e
+export PATH=$PATH:/usr/local/go/bin CGO_ENABLED=1
+mkdir -p /root/fanout && tar -xzf /root/fanout-src.tgz -C /root/fanout && cd /root/fanout
+if [ "$ROLE" = "target" ]; then
+  cat > .env <<'ENV'
+JWT_SECRET=0123456789abcdef0123456789abcdef
+JWT_REFRESH_SECRET=abcdef0123456789abcdef0123456789
+SMTP_HOST=localhost
+SMTP_USER=x
+SMTP_PASS=x
+SMTP_FROM=fanout@example.com
+AI_API_KEY=dummy
+AI_PROVIDER=anthropic
+ENV
+  go build -o bin/fanout ./cmd/fanout
+else
+  go build -o bin/loadgen ./cmd/loadgen
+fi
+echo "  built $ROLE binary"
+REMOTE
+}
+
+echo "── installing toolchain on both VMs ──"
+setup_toolchain "$TARGET_PUB"
+setup_toolchain "$DRIVER_PUB"
+echo "── shipping HEAD ($(git rev-parse --short HEAD)) + building ──"
+git archive --format=tar.gz HEAD -o /tmp/fanout-src.tgz
+ship_and_build "$TARGET_PUB" target
+ship_and_build "$DRIVER_PUB" driver
+rm -f /tmp/fanout-src.tgz
