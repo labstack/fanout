@@ -47,11 +47,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# IdentityAgent=none bypasses the ssh-agent entirely and uses the on-disk
-# default key (passphraseless id_rsa). A wedged/transient macOS launchd agent
-# mid-run otherwise fails every ssh_to ("signing failed … from agent") and
-# breaks a 40-minute run; pinning to the file makes auth deterministic.
-SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes -o IdentityAgent=none)
+SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes)
 # shellcheck disable=SC2029
 ssh_to()  { local ip="$1"; shift; ssh "${SSHOPTS[@]}" "root@$ip" "$@"; }
 scp_to()  { local ip="$1" src="$2" dst="$3"; scp "${SSHOPTS[@]}" -q "$src" "root@$ip:$dst"; }
