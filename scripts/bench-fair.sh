@@ -134,3 +134,29 @@ git archive --format=tar.gz HEAD -o /tmp/fanout-src.tgz
 ship_and_build "$TARGET_PUB" target
 ship_and_build "$DRIVER_PUB" driver
 rm -f /tmp/fanout-src.tgz
+
+# snap METRIC → integer sum across label series, scraped over the private net.
+# The curl runs on the driver (double-quoted, remote); the awk runs locally in a
+# single-quoted program, so its quotes are NOT escaped.
+snap() { ssh_to "$DRIVER_PUB" "curl -s -m3 http://$TARGET_PRIV:7520/-/metrics" | awk -v k="$1" '$0 ~ "^"k {s+=$2} END{printf "%d", s+0}'; }
+
+boot_fanout() {
+  ssh_to "$TARGET_PUB" "bash -s" <<'REMOTE'
+set -e
+cd /root/fanout
+set -a; . ./.env; set +a
+DATA_DIR=/root/fanout/data PUBLIC_READ=true ENV=development \
+  OTLP_GRPC_ADDR=:4317 HTTP_ADDR=:7520 \
+  FLUSH_SECONDS=15 ROLLUP_EVERY=60 DUCKLAKE_MAINTENANCE_EVERY_SECONDS=60 \
+  nohup ./bin/fanout >/root/fanout/f.log 2>&1 &
+echo "started fanout pid $!"
+REMOTE
+  echo "── waiting for fanout /healthz ──"
+  for _ in $(seq 1 40); do
+    ssh_to "$DRIVER_PUB" "curl -fsS -m2 http://$TARGET_PRIV:7520/healthz" >/dev/null 2>&1 && { echo "✓ fanout healthy"; return 0; }
+    sleep 2
+  done
+  echo "fanout never became healthy" >&2; ssh_to "$TARGET_PUB" "tail -30 /root/fanout/f.log" >&2; return 1
+}
+
+boot_fanout
