@@ -160,3 +160,52 @@ REMOTE
 }
 
 boot_fanout
+
+ROWS_PER_TRACE=4.3   # 2 spans + 0.15*2 messaging spans + 1 log + 1 metric, at the default data shape
+
+# run_step TARGET_TRACES DUR_SEC  → sets STEP_ACHIEVED_RPS / STEP_VERDICT / STEP_REASON
+run_step() {
+  local traces="$1" dur="$2"
+  local rows0 rows1 drops0 drops1 t0 t1 part rts age rss errs
+  rows0=$(snap fanout_ingest_rows_total); drops0=$(snap fanout_rows_dropped_total); t0=$(date +%s)
+
+  # Driver fires loadgen at the target's PRIVATE ip, query-under-load on, query-p95
+  # gate armed. loadgen runs on the driver but its stdout/stderr stream back over
+  # SSH — capture to a LOCAL file so we can grep its verdict locally. loadgen
+  # exits non-zero on any SLO/error failure (the `|| true` keeps the harness alive
+  # so we can classify it ourselves).
+  local steplog="/tmp/$RUN-step-$traces.log"
+  ssh_to "$DRIVER_PUB" "bash -s" <<REMOTE >"$steplog" 2>&1 || true
+cd /root/fanout
+./bin/loadgen -endpoint $TARGET_PRIV:4317 -rate $traces -duration ${dur}s -workers 48 \
+  -services 50 -attr-cardinality 200 -error-rate 0.05 -messaging-ratio 0.15 \
+  -metrics-url http://$TARGET_PRIV:7520/-/metrics \
+  -query-url http://$TARGET_PRIV:7520 -query-workers 4 -query-rate 20 \
+  -max-query-p95-ms 1500 -report /root/fanout/step-$traces.json
+REMOTE
+
+  t1=$(date +%s); rows1=$(snap fanout_ingest_rows_total); drops1=$(snap fanout_rows_dropped_total)
+  part=$(snap fanout_lake_partitions)
+  rts=$(snap fanout_rollup_last_success_timestamp); age=$(( rts > 0 ? t1 - rts : 999 ))
+  rss=$(ssh_to "$TARGET_PUB" "ps -C fanout -o rss= 2>/dev/null | awk '{printf \"%d\", \$1/1024}'")
+  errs=$(ssh_to "$TARGET_PUB" "grep -cE 'level\":\"ERROR' /root/fanout/f.log")
+
+  local secs=$(( t1 - t0 )); [ "$secs" -lt 1 ] && secs=1
+  STEP_ACHIEVED_RPS=$(( (rows1 - rows0) / secs ))
+  local target_rps; target_rps=$(awk -v t="$traces" -v r="$ROWS_PER_TRACE" 'BEGIN{printf "%d", t*r}')
+
+  # loadgen prints "FAIL: ..." to stderr (now in the local steplog) on any SLO
+  # breach, send error, or query error — grep the LOCAL capture, not the driver.
+  local lg_fail; lg_fail=$(grep -c '^FAIL:' "$steplog" 2>/dev/null || echo 0)
+
+  STEP_VERDICT=pass; STEP_REASON=""
+  if [ "$(( drops1 - drops0 ))" -gt 0 ]; then STEP_VERDICT=fail; STEP_REASON="drops=$(( drops1 - drops0 ))"
+  elif [ "$lg_fail" -gt 0 ]; then STEP_VERDICT=fail; STEP_REASON="loadgen SLO/errors (see step log)"
+  elif [ "$age" -gt 240 ]; then STEP_VERDICT=fail; STEP_REASON="rollup age ${age}s>240s"
+  elif [ "${part:-0}" -gt "$PART_CAP" ]; then STEP_VERDICT=fail; STEP_REASON="partitions ${part}>${PART_CAP}"
+  elif [ "${errs:-0}" -gt 0 ]; then STEP_VERDICT=fail; STEP_REASON="ERROR logs=${errs}"
+  elif [ "$STEP_ACHIEVED_RPS" -lt "$(( target_rps * 95 / 100 ))" ]; then STEP_VERDICT=inconclusive; STEP_REASON="achieved ${STEP_ACHIEVED_RPS}<95% of target ${target_rps} rps — driver may be capped"
+  fi
+  printf "  step %6d tr/s → achieved %7d rows/s | part=%s ageS=%s rssMB=%s | %s %s\n" \
+    "$traces" "$STEP_ACHIEVED_RPS" "$part" "$age" "$rss" "$STEP_VERDICT" "$STEP_REASON"
+}
