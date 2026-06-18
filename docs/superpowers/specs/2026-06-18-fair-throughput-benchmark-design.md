@@ -41,6 +41,28 @@ Produce **two numbers** from one harness run:
   holds, confirmed by a longer soak. This is the customer-facing "supported
   throughput."
 
+Both numbers are reported in **achieved server-side rows/s** (the
+`fanout_ingest_rows_total` delta over wall-clock), not in the generator's target
+traces/s — see "Units" below.
+
+## Units — traces/s vs rows/s (do not conflate)
+
+`loadgen`'s `-rate` is in **traces/s**, but one trace tick emits multiple
+ingested rows: ~2 spans always + a messaging producer/consumer pair for a
+`-messaging-ratio` fraction (≈ +0.3 spans at 0.15), **plus** one log and one
+metric per tick. So at the default data shape, **≈ 4.3 rows per trace**
+(`2 + 0.15·2 spans + 1 log + 1 metric`). The headline metric is **rows/s**, so:
+
+- All targets/ceilings are stated and compared in **achieved rows/s**, derived
+  from the `fanout_ingest_rows_total` delta — never from the loadgen target rate.
+- A step is **saturated** when achieved rows/s falls below ~95% of its target
+  (target_traces/s × rows-per-trace) — i.e. the server can't keep up — *or* when
+  an SLO breaks, whichever comes first.
+
+The prior burst run is the anchor: it *achieved* ~64K rows/s (≈ 15K traces/s)
+while *targeting* 200K traces/s — proof that target rate is meaningless under
+saturation and only achieved rows/s is comparable.
+
 ## SLO gate
 
 A run/step PASSES only if all hold:
@@ -63,16 +85,41 @@ metric scrapes read `0`, which would otherwise look like a clean pass.
 Two Hetzner VMs, both always torn down on exit (trap), in the same location for
 low driver→target latency:
 
-- **Fanout-under-test:** `cpx32` (4 vCPU / 8 GB) — *same tier as the prior burst
-  run*, so the fair number is directly comparable to the 64K figure. Only the
-  methodology changes, not the hardware.
+- **Fanout-under-test:** `cpx32` (4 vCPU / 8 GB) — *same hardware tier as the
+  prior burst run*. Note this is a fundamentally **fairer measurement**, not a
+  clean single-variable comparison: topology, flush config (15s/60s vs 5s/15s),
+  duration (15 min vs 30s), and added query load all differ. Expect the number
+  to move for several reasons at once; do not frame the delta as "the 64K figure
+  was wrong by X."
 - **Load driver:** a separate `cpx41` (8 vCPU / 16 GB) — more cores than the
   target so the generator is never the bottleneck and fanout keeps all 4 of its
   cores. This removes the co-location flaw.
 
+### Networking
+
+Both VMs join a **Hetzner private network** (`hcloud network create`, same
+location, sub-ms intra-DC latency) and the driver targets fanout's **private
+IP**. This keeps WAN RTT out of the export-p95 and query-p95 SLO measurements —
+the gate must measure fanout, not the internet. The harness opens nothing on the
+public interface for the test traffic; `:4317` (ingest) and `:7520`
+(metrics + query) are reached over the private network only. (Hetzner has no
+cloud firewall by default, but binding the test path to the private IP is both
+faster and cleaner.)
+
 Ingest path: **direct gRPC** to the target's `:4317` (insecure). We are measuring
 engine capacity, not the edge; TLS/Traefik overhead is explicitly out of scope
 for the headline number.
+
+### Driver concurrency
+
+`loadgen`'s send loop is **synchronous per worker** (each worker blocks on the
+gRPC `Export` round-trip), so per-worker throughput is RTT-bound and a single
+low-worker process cannot push the higher steps. The driver must therefore run
+with high concurrency: a single `loadgen` invocation with **`-workers 48`** (12×
+the target's 4 cores), scaling workers up if a step's achieved rate plateaus
+below target while the *target's* CPU is not yet saturated (the
+driver-bottleneck signal). The driver is sized larger (8 cores) precisely so
+this concurrency is cheap on its side.
 
 ## Configuration
 
@@ -95,23 +142,36 @@ Prod-realistic, not the aggressive burst settings:
    HEAD (`git archive`), build `fanout` on the target and `loadgen` on the driver.
 2. **Boot fanout** on the target with prod-default config and `PUBLIC_READ=true`
    (tokenless ingest). Wait for `/healthz`.
-3. **Ramp** — for each rate step in `10000 25000 50000 100000 200000` traces/s,
-   the driver runs `loadgen` for ~3 min with the SLO gate armed and query load on:
+3. **Ramp** — steps are chosen to **bracket the known ~15K traces/s (~64K rows/s)
+   region** on cpx32, not to overshoot it: `6000 9000 12000 16000 20000 28000`
+   traces/s (≈ 26K → 120K rows/s target). For each step the driver runs `loadgen`
+   for ~3 min with the SLO gate armed and query load on:
    ```
-   loadgen -endpoint <target>:4317 -rate <step> -duration 3m \
+   loadgen -endpoint <target-private-ip>:4317 -rate <step> -duration 3m -workers 48 \
      -services 50 -attr-cardinality 200 -error-rate 0.05 -messaging-ratio 0.15 \
-     -metrics-url http://<target>:7520/-/metrics \
-     -query-url http://<target>:7520 -query-workers 4 -query-rate 20 \
+     -metrics-url http://<target-private-ip>:7520/-/metrics \
+     -query-url http://<target-private-ip>:7520 -query-workers 4 -query-rate 20 \
      -max-query-p95-ms 1500 -report step-<step>.json
    ```
-   The harness also samples rollup age / partitions / RSS between steps (the
-   signals loadgen's own report does not gate on). The **ceiling** is the first
-   step that fails the gate; the **last passing step** is recorded.
-4. **Certify** — a **15-min sustained soak** at ~80% of the last-passing rate,
-   query-under-load on, full SLO gate. Passing this is the **rated capacity**.
-5. **Report** — print a summary table (per-step pass/fail, ceiling, rated
-   capacity, headroom ratio, and the achieved server-side rows/s vs target
-   traces/s) and keep the per-step JSON reports. Tear down both VMs.
+   For each step the harness records **achieved rows/s** (the
+   `fanout_ingest_rows_total` delta ÷ step duration) and samples rollup age /
+   partitions / RSS between steps (signals loadgen's own report does not gate on).
+   A step **passes** iff every SLO holds AND achieved rows/s ≥ 95% of target
+   (below that with the target's CPU unsaturated ⇒ driver bottleneck ⇒ step is
+   **inconclusive**, bump `-workers` and retry, do not silently pass). The
+   **ceiling** is the achieved rows/s of the first failing (not inconclusive)
+   step; the **last passing step**'s achieved rows/s is carried forward.
+   If even the first step (6000) already fails, restart the ramp lower; if the
+   top step (28000) still passes, extend upward — the harness must not cap the
+   ceiling silently.
+4. **Certify** — a **15-min sustained soak** at **~80% of the last-passing step's
+   achieved rows/s** (converted back to a traces/s target via the ÷4.3 factor),
+   query-under-load on, full SLO gate. Passing this is the **rated capacity**
+   (reported as achieved rows/s over the soak).
+5. **Report** — print a summary table: per-step target traces/s, achieved rows/s,
+   pass/fail/inconclusive, plus the ceiling, rated capacity, and headroom ratio
+   (ceiling ÷ rated). Keep the per-step JSON reports. Tear down both VMs and the
+   private network.
 
 ## Components
 
@@ -126,15 +186,21 @@ Prod-realistic, not the aggressive burst settings:
 
 ### bench-fair.sh internal structure
 
-- `provision <name> <type>` — `hcloud server create`, return IP; register for
-  teardown.
-- `setup_toolchain <ip>` — apt + Go (matches bench-hetzner.sh).
+- `make_network` — `hcloud network create` (+ subnet) in the run location;
+  register for teardown.
+- `provision <name> <type>` — `hcloud server create --network <net>`, return the
+  **private IP** (and public IP for our SSH/control plane); register for teardown.
+- `setup_toolchain <ip>` — apt + Go (matches bench-hetzner.sh), over the public IP.
 - `ship_and_build <ip> <target|driver>` — `git archive HEAD` → scp → build only
   what that VM needs (`fanout` on target, `loadgen` on driver).
-- `run_step <rate> <dur> <slo-args...>` — driver fires loadgen; returns
-  pass/fail + the JSON report; harness samples target growth invariants.
-- `summarize` — aggregate steps → ceiling, last-pass, rated capacity, table.
-- `cleanup` (trap EXIT INT TERM) — delete BOTH VMs; warn loudly on delete failure.
+- `run_step <target_traces> <dur> <slo-args...>` — driver fires loadgen at the
+  target's **private IP**; returns pass/fail/inconclusive + the JSON report +
+  achieved rows/s; harness samples target growth invariants between steps.
+- `summarize` — aggregate steps → ceiling, last-pass, rated capacity (all in
+  achieved rows/s), headroom ratio, table.
+- `cleanup` (trap EXIT INT TERM) — delete BOTH VMs **and the private network**
+  (network delete after servers detach); warn loudly on any delete failure and
+  print the resource names for manual cleanup.
 
 ## Out of scope (YAGNI)
 
@@ -150,12 +216,15 @@ Prod-realistic, not the aggressive burst settings:
 ## Risks
 
 - **Driver is the bottleneck.** Mitigated by sizing the driver larger (cpx41 8c
-  vs cpx32 4c) and by reporting *achieved* server-side rows/s — if achieved rate
-  plateaus well below target while fanout CPU is not saturated, the driver is the
-  limit and the step is inconclusive (flagged, not silently passed).
-- **Ramp step too coarse.** 2× steps may straddle the ceiling widely. Acceptable
-  for a first fair number; a bisection refinement between the last-pass and
-  first-fail step is a possible follow-up, not built now.
-- **Cost / orphaned VMs.** Two VMs for ~1 hour is pennies; the teardown trap
-  deletes both on any exit, and the harness prints the server names so a manual
-  `hcloud server delete` is trivial if a delete ever fails.
+  vs cpx32 4c), driving with `-workers 48`, and reporting *achieved* server-side
+  rows/s — if achieved rate plateaus below 95% of target while fanout CPU is not
+  saturated, the step is **inconclusive** (bump workers and retry; never silently
+  passed).
+- **Ramp step too coarse.** The ~1.4–1.5× steps around the known ceiling are
+  tighter than the old 2× steps, but may still straddle it. Acceptable for a
+  first fair number; a bisection refinement between last-pass and first-fail is a
+  possible follow-up, not built now.
+- **Orphaned cloud resources.** Two VMs + one network for ~1 hour is pennies; the
+  teardown trap deletes all three on any exit (servers first, then network), and
+  the harness prints every resource name so manual `hcloud ... delete` is trivial
+  if a delete ever fails.
