@@ -164,6 +164,7 @@ release:
 #   local   [gens rate dur]    throwaway fanout + parallel loadgens → rows/s
 #                              (gens auto-scales to CPU cores → max utilization)
 #   hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down
+#   fair    [target driver]    two-VM SLO-gated ceiling + rated capacity (rows/s)
 #   profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots
 #   drive   [loadgen flags]    fire loadgen at an already-running fanout
 #   watch   [host:port]        tail the incident-relevant metrics
@@ -176,6 +177,7 @@ stress *ARGS:
       local)   exec ./scripts/bench.sh "$@" ;;
       soak)    exec ./scripts/soak.sh "$@" ;;
       hetzner) exec ./scripts/bench-hetzner.sh "$@" ;;
+      fair)    exec ./scripts/bench-fair.sh "$@" ;;
       profile) exec ./scripts/profile.sh "$@" ;;
       drive)   exec go run ./cmd/loadgen "$@" ;;
       watch)   exec ./scripts/stress-watch.sh "$@" ;;
@@ -184,6 +186,7 @@ stress *ARGS:
         echo "  local   [gens rate dur]    throwaway fanout + parallel loadgens + query load → rows/s (auto-scales to cores)"
         echo "  soak    [min rate]         sustained load asserting growth invariants (file count, rollup freshness)"
         echo "  hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down"
+        echo "  fair    [target driver]    two-VM SLO-gated ceiling + rated capacity (rows/s)"
         echo "  profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots"
         echo "  drive   [loadgen flags]    fire loadgen at an already-running fanout"
         echo "  watch   [host:port]        tail the incident-relevant metrics" ;;

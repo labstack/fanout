@@ -209,3 +209,67 @@ REMOTE
   printf "  step %6d tr/s → achieved %7d rows/s | part=%s ageS=%s rssMB=%s | %s %s\n" \
     "$traces" "$STEP_ACHIEVED_RPS" "$part" "$age" "$rss" "$STEP_VERDICT" "$STEP_REASON"
 }
+
+# ── Ramp: find the ceiling (first SLO break) and the last passing step ────────
+RAMP_STEPS=(6000 9000 12000 16000 20000 28000)
+STEP_DUR=180
+RESULTS=()
+CEILING_RPS=0
+LASTPASS_RPS=0
+
+echo "── RAMP (${STEP_DUR}s/step) ──"
+for traces in "${RAMP_STEPS[@]}"; do
+  run_step "$traces" "$STEP_DUR"
+  RESULTS+=("$traces $STEP_ACHIEVED_RPS $STEP_VERDICT ${STEP_REASON:-ok}")
+  case "$STEP_VERDICT" in
+    pass)         LASTPASS_RPS=$STEP_ACHIEVED_RPS ;;
+    fail)         CEILING_RPS=$STEP_ACHIEVED_RPS; echo "  ceiling found at ${CEILING_RPS} rows/s (${STEP_REASON})"; break ;;
+    inconclusive) echo "  ⚠ inconclusive — driver may be the bottleneck; not advancing ceiling" ;;
+  esac
+done
+
+if [ "$CEILING_RPS" -eq 0 ]; then
+  echo "  ⚠ top ramp step still PASSED — true ceiling is above ${LASTPASS_RPS} rows/s; extend RAMP_STEPS upward to bracket it"
+fi
+if [ "$LASTPASS_RPS" -eq 0 ]; then
+  echo "  ⚠ even the first ramp step did not PASS — lower RAMP_STEPS; skipping soak" >&2
+fi
+
+# ── Soak: certify the rated capacity at ~80% of the last passing step ─────────
+SOAK_DUR=900
+RATED_RPS=0
+SOAK_VERDICT=skipped
+if [ "$LASTPASS_RPS" -gt 0 ]; then
+  soak_traces=$(awk -v rps="$LASTPASS_RPS" -v r="$ROWS_PER_TRACE" 'BEGIN{printf "%d", (rps*0.8)/r}')
+  echo "── SOAK (${SOAK_DUR}s @ ~80% of last-pass = ${soak_traces} tr/s) ──"
+  run_step "$soak_traces" "$SOAK_DUR"
+  SOAK_VERDICT=$STEP_VERDICT
+  if [ "$STEP_VERDICT" = pass ]; then RATED_RPS=$STEP_ACHIEVED_RPS; fi
+  RESULTS+=("SOAK:$soak_traces $STEP_ACHIEVED_RPS $STEP_VERDICT ${STEP_REASON:-ok}")
+  # Final liveness assertion (a mid-soak OOM makes snap read 0 → would look like a pass).
+  if ! ssh_to "$DRIVER_PUB" "curl -fsS -m3 http://$TARGET_PRIV:7520/healthz" >/dev/null 2>&1; then
+    SOAK_VERDICT=fail; RATED_RPS=0; echo "  ✗ fanout unreachable after soak — rated capacity void"
+  fi
+fi
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+echo
+echo "════════ FAIR THROUGHPUT — ${TARGET_TYPE} (HEAD $(git rev-parse --short HEAD)) ════════"
+printf "%-14s %14s %-12s %s\n" "target tr/s" "achieved rows/s" "verdict" "reason"
+for row in "${RESULTS[@]}"; do
+  # shellcheck disable=SC2086
+  set -- $row
+  printf "%-14s %14s %-12s %s\n" "$1" "$2" "$3" "${*:4}"
+done
+echo "────────────────────────────────────────────────────────────"
+echo "ceiling        : ${CEILING_RPS} rows/s (first SLO break)"
+echo "rated capacity : ${RATED_RPS} rows/s (sustained ${SOAK_DUR}s, all SLOs held: ${SOAK_VERDICT})"
+if [ "$RATED_RPS" -gt 0 ] && [ "$CEILING_RPS" -gt 0 ]; then
+  awk -v c="$CEILING_RPS" -v r="$RATED_RPS" 'BEGIN{printf "headroom       : %.2fx (ceiling / rated)\n", c/r}'
+fi
+echo "════════════════════════════════════════════════════════════"
+
+mkdir -p ./bench-results
+ssh_to "$TARGET_PUB" "cd /root/fanout && tar czf - step-*.json 2>/dev/null" > "./bench-results/$RUN.tgz" || true
+echo "per-step JSON reports: ./bench-results/$RUN.tgz"
+# trap deletes both VMs + the network
