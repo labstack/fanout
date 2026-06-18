@@ -54,3 +54,35 @@ ssh_to()  { local ip="$1"; shift; ssh "${SSHOPTS[@]}" "root@$ip" "$@"; }
 scp_to()  { local ip="$1" src="$2" dst="$3"; scp "${SSHOPTS[@]}" -q "$src" "root@$ip:$dst"; }
 
 echo "fair-bench run $RUN | target=$TARGET_TYPE driver=$DRIVER_TYPE loc=$LOC part_cap=$PART_CAP"
+
+make_network() {
+  hcloud network create --name "$RUN-net" --ip-range 10.10.0.0/16 >/dev/null
+  hcloud network add-subnet "$RUN-net" --network-zone eu-central --type cloud --ip-range 10.10.1.0/24 >/dev/null
+  register_network "$RUN-net"
+}
+
+# provision NAME TYPE → echoes "PUBLIC_IP PRIVATE_IP"
+provision() {
+  local name="$1" type="$2"
+  hcloud server create --name "$name" --type "$type" --image ubuntu-24.04 \
+    --location "$LOC" --ssh-key "$SSH_KEY" --network "$RUN-net" \
+    --label purpose=fanout-fair-bench >/dev/null
+  register_server "$name"
+  local pub priv
+  pub=$(hcloud server ip "$name")
+  priv=$(hcloud server describe "$name" -o format='{{(index .PrivateNet 0).IP}}')
+  echo "$pub $priv"
+}
+
+wait_ssh() { local ip="$1"; for _ in $(seq 1 40); do ssh_to "$ip" true 2>/dev/null && return 0; sleep 5; done; return 1; }
+
+echo "── creating private network $RUN-net ──"
+make_network
+echo "── provisioning target ($TARGET_TYPE) + driver ($DRIVER_TYPE) ──"
+read -r TARGET_PUB TARGET_PRIV < <(provision "$RUN-target" "$TARGET_TYPE")
+read -r DRIVER_PUB DRIVER_PRIV < <(provision "$RUN-driver" "$DRIVER_TYPE")
+echo "  target: pub=$TARGET_PUB priv=$TARGET_PRIV"
+echo "  driver: pub=$DRIVER_PUB priv=$DRIVER_PRIV"
+wait_ssh "$TARGET_PUB" || { echo "target SSH never came up" >&2; exit 1; }
+wait_ssh "$DRIVER_PUB" || { echo "driver SSH never came up" >&2; exit 1; }
+echo "✓ both VMs reachable"
