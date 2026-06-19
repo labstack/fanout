@@ -110,6 +110,19 @@ wait_ssh "$TARGET_PUB" || { echo "target SSH never came up" >&2; exit 1; }
 wait_ssh "$DRIVER_PUB" || { echo "driver SSH never came up" >&2; exit 1; }
 echo "✓ both VMs reachable"
 
+# ── Adaptive sizing: scale load to the actual VMs, not hardcoded cpx32 numbers ─
+# Driver concurrency scales with driver cores (12 synchronous senders/core
+# saturates the RTT-bound gRPC path). Ramp rates scale with TARGET cores around
+# the per-core ceiling validated on cpx32 (4c → the original 6k..28k tr/s ramp,
+# i.e. ~1500..7000 tr/s per core); a bigger target gets a proportionally higher
+# ramp so the ceiling is bracketed regardless of VM size.
+TARGET_CORES=$(ssh_to "$TARGET_PUB" nproc 2>/dev/null | tr -dc '0-9'); TARGET_CORES=${TARGET_CORES:-4}
+DRIVER_CORES=$(ssh_to "$DRIVER_PUB" nproc 2>/dev/null | tr -dc '0-9'); DRIVER_CORES=${DRIVER_CORES:-4}
+WORKERS=$(( DRIVER_CORES * 12 ))
+RAMP_STEPS=()
+for b in 1500 2250 3000 4000 5000 7000; do RAMP_STEPS+=( "$(( TARGET_CORES * b ))" ); done
+echo "  adaptive: target=${TARGET_CORES}c driver=${DRIVER_CORES}c → workers=$WORKERS ramp=[${RAMP_STEPS[*]}] tr/s"
+
 setup_toolchain() {
   local ip="$1"
   ssh_to "$ip" "GOVER='$GOVER' bash -s" <<'REMOTE'
@@ -192,7 +205,7 @@ boot_fanout
 if [ "${SEED_HOURS:-0}" -gt 0 ] 2>/dev/null; then
   echo "── pre-seed: ${SEED_HOURS}h backdated data ──"
   ssh_to "$DRIVER_PUB" "cd /root/fanout && ./bin/loadgen -endpoint $TARGET_PRIV:4317 \
-    -rate 60000 -duration 150s -workers 48 -services 50 -attr-cardinality 200 \
+    -rate 60000 -duration 150s -workers $WORKERS -services 50 -attr-cardinality 200 \
     -error-rate 0.05 -messaging-ratio 0.15 -backfill-hours $SEED_HOURS" >/dev/null 2>&1 || true
   echo "  seeded: lake_partitions=$(snap fanout_lake_partitions) rows=$(snap fanout_ingest_rows_total)"
   # Let the rollup work through the seeded backlog so the ramp measures steady
@@ -220,7 +233,11 @@ capture_forensics() {
     echo "--- fanout process ---"; ssh_to "$TARGET_PUB" 'pgrep -a fanout || echo "DEAD (no fanout process)"'
     echo "--- memory ---";         ssh_to "$TARGET_PUB" 'free -h'
     echo "--- kernel OOM killer ---"; ssh_to "$TARGET_PUB" 'dmesg 2>/dev/null | grep -iE "out of memory|killed process|oom-kill" | tail -10 || echo "none"'
-    echo "--- f.log tail (250) ---"; ssh_to "$TARGET_PUB" 'tail -250 /root/fanout/f.log'
+    # ERROR lines FIRST and grepped directly — request logging floods f.log, so a
+    # plain tail can scroll the actual error out of view.
+    echo "--- f.log ERROR lines (last 30) ---"; ssh_to "$TARGET_PUB" 'grep -E "\"level\":\"ERROR\"" /root/fanout/f.log | tail -30 || echo "none"'
+    echo "--- f.log non-request tail (last 40 non-INFO-request lines) ---"; ssh_to "$TARGET_PUB" 'grep -vE "\"msg\":\"request\"" /root/fanout/f.log | tail -40'
+    echo "--- f.log raw tail (250) ---"; ssh_to "$TARGET_PUB" 'tail -250 /root/fanout/f.log'
   } > "$out" 2>&1
   echo "      forensics captured → $out"
 }
@@ -239,7 +256,7 @@ run_step() {
   local steplog="/tmp/$RUN-step-$traces.log"
   ssh_to "$DRIVER_PUB" "bash -s" <<REMOTE >"$steplog" 2>&1 || true
 cd /root/fanout
-./bin/loadgen -endpoint $TARGET_PRIV:4317 -rate $traces -duration ${dur}s -workers 48 \
+./bin/loadgen -endpoint $TARGET_PRIV:4317 -rate $traces -duration ${dur}s -workers $WORKERS \
   -services 50 -attr-cardinality 200 -error-rate 0.05 -messaging-ratio 0.15 \
   -metrics-url http://$TARGET_PRIV:7520/-/metrics \
   -query-url http://$TARGET_PRIV:7520 -query-workers 4 -query-rate 20 \
@@ -286,7 +303,7 @@ REMOTE
 }
 
 # ── Ramp: find the ceiling (first SLO break) and the last passing step ────────
-RAMP_STEPS=(6000 9000 12000 16000 20000 28000)
+# RAMP_STEPS was computed adaptively from TARGET_CORES right after the VMs came up.
 STEP_DUR=180
 RESULTS=()
 CEILING_RPS=0
