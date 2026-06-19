@@ -892,6 +892,14 @@ UNION ALL
 SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
 FROM messaging_edges;`
 
+// snapshotGraceMinutes is how long a superseded DuckLake snapshot (and the
+// parquet files it references) is kept past compaction before expiry/cleanup
+// may reclaim it. It must exceed the longest read query — reads don't hold
+// writeMu, so a shorter window lets cleanup delete a file mid-scan — while
+// staying well under the maintenance interval so file/snapshot growth stays
+// bounded. Queries are sub-second to a few seconds; 10 minutes is ample margin.
+const snapshotGraceMinutes = 10
+
 func (d *Duck) runMaintenance(ctx context.Context) error {
 	every := time.Duration(d.cfg.MaintenanceEverySeconds) * time.Second
 	if every <= 0 {
@@ -937,17 +945,29 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	// files; without merge + expiry both grow without bound until per-file
 	// metadata pins OOM every wide query (prod 2026-06-13: 60k snapshots, 50k
 	// files averaging 21KB, rollups dead at any memory_limit). Holding writeMu
-	// here quiesces the dataset, which is the precondition for these calls.
-	// Order matters: merge rewrites small files into large ones, expiry releases
-	// the snapshots that referenced the small ones, cleanup deletes the files no
-	// live snapshot references. Fanout exposes no time travel, so only the
-	// latest snapshot is kept (expire_snapshots never drops the newest).
+	// here quiesces the dataset against WRITES, which is the precondition for
+	// these calls. Order matters: merge rewrites small files into large ones,
+	// expiry releases the snapshots that referenced the small ones, cleanup
+	// deletes the files no live snapshot references.
+	//
+	// expiry keeps a GRACE WINDOW (now() - snapshotGraceMinutes) instead of
+	// expiring everything older than now(). writeMu does NOT serialize reads, so
+	// an Overview/diagnose query can be mid-scan against a snapshot that merge
+	// just superseded; expiring + cleaning that snapshot's files immediately
+	// yanks the parquet out from under the reader ("IO Error: Cannot open file
+	// …: No such file or directory"). Retaining recently-superseded snapshots
+	// for longer than any query lets in-flight readers finish; their files are
+	// reclaimed a cycle later. The grace is far below the maintenance interval,
+	// so growth stays bounded.
+	expireSQL := fmt.Sprintf(
+		"CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL %d MINUTE)",
+		snapshotGraceMinutes)
 	for _, stmt := range []struct {
 		name string
 		sql  string
 	}{
 		{name: "merge_adjacent_files", sql: "CALL ducklake_merge_adjacent_files('lake')"},
-		{name: "expire_snapshots", sql: "CALL ducklake_expire_snapshots('lake', older_than => now())"},
+		{name: "expire_snapshots", sql: expireSQL},
 		{name: "cleanup_old_files", sql: "CALL ducklake_cleanup_old_files('lake', cleanup_all => true)"},
 	} {
 		if _, err := d.DB.ExecContext(ctx, stmt.sql); err != nil {

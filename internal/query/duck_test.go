@@ -144,7 +144,7 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 3))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now())")).
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -196,7 +196,7 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnError(errors.New("merge failed"))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now())")).
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -233,7 +233,7 @@ func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
 	// skips the TTL deletes).
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now())")).
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
