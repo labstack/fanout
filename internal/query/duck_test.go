@@ -370,3 +370,27 @@ func TestDuckDBPoolSizeConfigurable(t *testing.T) {
 		t.Errorf("configured pool size = %d, want 8", got)
 	}
 }
+
+func TestParseDuckBytes(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int64
+		ok   bool
+	}{
+		{"6.4 GiB", 6871947673, true},
+		{"512.0 MiB", 512 << 20, true},
+		{"1024 bytes", 1024, true},
+		{"8 GiB", 8 << 30, true},
+		{"1000 MB", 1_000_000_000, true},
+		{"0", 0, true},
+		{"", 0, false},
+		{"GiB", 0, false},
+		{"6.4 PiB", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := parseDuckBytes(c.in)
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("parseDuckBytes(%q) = (%d, %v), want (%d, %v)", c.in, got, ok, c.want, c.ok)
+		}
+	}
+}

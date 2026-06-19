@@ -99,6 +99,71 @@ func duckDSN(dbPath, mem string, threads int) (string, error) {
 	return dsn, nil
 }
 
+// memoryHeadroomBytes is the absolute RAM left free below DuckDB's memory_limit
+// for the Go heap, the ingest appender, and untracked allocations. On a small
+// box DuckDB's default (80% of RAM) leaves too little — observed: kernel
+// OOM-kill at RSS 7.6 GB on an 8 GB box under a heavy rollup+query+ingest load.
+const memoryHeadroomBytes = int64(2) << 30 // 2 GiB
+
+// applyMemoryHeadroom caps DuckDB's auto memory_limit to (RAM - headroom) on
+// small boxes, keeping the default on large ones. It reads DuckDB's own
+// cgroup-aware auto value (so containers stay correct) and only lowers it when
+// 80% would leave less than the headroom — converting a kernel OOM-kill into a
+// graceful DuckDB memory-limit error. No-op (and non-fatal) if it can't parse.
+func applyMemoryHeadroom(ctx context.Context, db *sql.DB) error {
+	var raw string
+	if err := db.QueryRowContext(ctx, "SELECT current_setting('memory_limit')").Scan(&raw); err != nil {
+		return err
+	}
+	limit, ok := parseDuckBytes(raw)
+	if !ok || limit <= 0 {
+		return nil // unparseable — leave DuckDB's default in place
+	}
+	total := int64(float64(limit) / 0.8) // DuckDB defaults memory_limit to 80% of RAM
+	capped := total - memoryHeadroomBytes
+	if capped <= 0 || capped >= limit {
+		return nil // big box (80% already leaves >= headroom) — keep the default
+	}
+	_, err := db.ExecContext(ctx, fmt.Sprintf("SET memory_limit='%dB'", capped))
+	return err
+}
+
+// parseDuckBytes parses a DuckDB byte-size string ("6.4 GiB", "512.0 MiB",
+// "1024 bytes") into bytes. Returns false if unparseable.
+func parseDuckBytes(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	i := 0
+	for i < len(s) && ((s[i] >= '0' && s[i] <= '9') || s[i] == '.') {
+		i++
+	}
+	num, err := strconv.ParseFloat(strings.TrimSpace(s[:i]), 64)
+	if err != nil {
+		return 0, false
+	}
+	switch strings.ToLower(strings.TrimSpace(s[i:])) {
+	case "", "b", "byte", "bytes":
+		return int64(num), true
+	case "kib":
+		return int64(num * (1 << 10)), true
+	case "mib":
+		return int64(num * (1 << 20)), true
+	case "gib":
+		return int64(num * (1 << 30)), true
+	case "tib":
+		return int64(num * (1 << 40)), true
+	case "kb":
+		return int64(num * 1e3), true
+	case "mb":
+		return int64(num * 1e6), true
+	case "gb":
+		return int64(num * 1e9), true
+	case "tb":
+		return int64(num * 1e12), true
+	default:
+		return 0, false
+	}
+}
+
 func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 	if err := os.MkdirAll(cfg.QueryDir(), 0o755); err != nil {
 		return nil, fmt.Errorf("create query dir: %w", err)
@@ -143,6 +208,14 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 	}
 
 	d := &Duck{DB: db, cfg: cfg, rollupLagNanos: rollupLagFromConfig(cfg)}
+	if cfg.DuckDBMemory == "" {
+		// Only when the operator hasn't pinned DUCKDB_MEMORY: keep DuckDB's
+		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
+		// small ones, so the kernel doesn't OOM-kill the whole process.
+		if err := applyMemoryHeadroom(ctx, db); err != nil {
+			slog.Warn("apply memory headroom failed; using DuckDB default memory_limit", "err", err)
+		}
+	}
 	if err := CreateTables(db); err != nil {
 		_ = db.Close()
 		return nil, err
