@@ -176,8 +176,10 @@ rm -f /tmp/fanout-src.tgz
 # single-quoted program, so its quotes are NOT escaped.
 snap() { ssh_to "$DRIVER_PUB" "curl -s -m3 http://$TARGET_PRIV:7520/-/metrics" | awk -v k="$1" '$0 ~ "^"k {s+=$2} END{printf "%d", s+0}'; }
 
+# boot_fanout [SKIP_ROLLUP]   (SKIP_ROLLUP=true marks existing data already-rolled-up)
 boot_fanout() {
-  ssh_to "$TARGET_PUB" "MERGE_SECONDS='$MERGE_SECONDS' MAINT_SECONDS='$MAINT_SECONDS' bash -s" <<'REMOTE'
+  local skip="${1:-false}"
+  ssh_to "$TARGET_PUB" "MERGE_SECONDS='$MERGE_SECONDS' MAINT_SECONDS='$MAINT_SECONDS' SKIP_ROLLUP='$skip' bash -s" <<'REMOTE'
 set -e
 cd /root/fanout
 set -a; . ./.env; set +a
@@ -185,8 +187,9 @@ DATA_DIR=/root/fanout/data PUBLIC_READ=true ENV=development \
   OTLP_GRPC_ADDR=:4317 HTTP_ADDR=:7520 \
   FLUSH_SECONDS=15 ROLLUP_EVERY=60 \
   DUCKLAKE_MERGE_EVERY_SECONDS="$MERGE_SECONDS" DUCKLAKE_MAINTENANCE_EVERY_SECONDS="$MAINT_SECONDS" \
+  ROLLUP_SKIP_TO_LATEST="$SKIP_ROLLUP" \
   nohup ./bin/fanout >/root/fanout/f.log 2>&1 &
-echo "started fanout pid $! (merge every ${MERGE_SECONDS}s, maintenance every ${MAINT_SECONDS}s)"
+echo "started fanout pid $! (merge ${MERGE_SECONDS}s, maint ${MAINT_SECONDS}s, skip_rollup=${SKIP_ROLLUP})"
 REMOTE
   echo "── waiting for fanout /healthz ──"
   for _ in $(seq 1 40); do
@@ -195,6 +198,9 @@ REMOTE
   done
   echo "fanout never became healthy" >&2; ssh_to "$TARGET_PUB" "tail -30 /root/fanout/f.log" >&2; return 1
 }
+
+# Graceful stop (lets fanout flush its buffer to the lake), KILL fallback.
+kill_fanout() { ssh_to "$TARGET_PUB" "pkill -TERM -x fanout 2>/dev/null; sleep 4; pkill -KILL -x fanout 2>/dev/null; true"; }
 
 boot_fanout
 
@@ -208,17 +214,22 @@ if [ "$SEED_HOURS" -gt 0 ] 2>/dev/null; then
     -rate 60000 -duration 150s -workers $WORKERS -services 50 -attr-cardinality 200 \
     -error-rate 0.05 -messaging-ratio 0.15 -backfill-hours $SEED_HOURS" >/dev/null 2>&1 || true
   echo "  seeded: lake_partitions=$(snap fanout_lake_partitions) rows=$(snap fanout_ingest_rows_total)"
-  # Settle so the ramp measures steady state, not the seed's one-time catch-up:
-  # wait for BOTH the rollup to be fresh AND the ingest flush backlog to drain
-  # (queue depth ~0). Gating on rollup age alone left a flush backlog that could
-  # skew the first ramp step. Capped at 8×30s.
-  echo "── settling after pre-seed (rollup fresh + ingest drained) ──"
-  for _ in $(seq 1 8); do
-    sleep 30
-    rts=$(snap fanout_rollup_last_success_timestamp); now=$(date +%s)
-    age=$(( rts > 0 ? now - rts : 999 ))
+  # The seed is a burst-ingested, hours-wide backlog. Rolling it up would take
+  # minutes holding the write lock and starve ingest during the ramp — but the
+  # within-day-pruning query path scans RAW spans, not rollups, so the seed
+  # doesn't need rolling up at all. Flush it to the lake, then restart fanout with
+  # ROLLUP_SKIP_TO_LATEST so it marks the seed already-rolled-up (watermark jumps
+  # past it). The ramp/soak then roll up only their own live data.
+  echo "── flushing seed to lake + restarting fanout with skip-rollup ──"
+  sleep 25   # > FLUSH_SECONDS so the seed lands in parquet before the restart
+  kill_fanout
+  boot_fanout true
+  # Brief readiness check: with the seed skipped there's no backlog, so the rollup
+  # is idle — just wait for the ingest queue to be clear before ramping.
+  for _ in $(seq 1 6); do
+    sleep 10
     qd=$(snap fanout_ingest_queue_depth)
-    [ "$age" -lt 70 ] && [ "${qd:-1}" -le 0 ] && { echo "  settled (rollup age ${age}s, queue ${qd})"; break; }
+    [ "${qd:-1}" -le 0 ] && { echo "  ready (queue ${qd}, rollup skipped seed)"; break; }
   done
 fi
 

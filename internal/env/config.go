@@ -39,8 +39,14 @@ type Config struct {
 	// keeps the queryable file count continuously low, which is what bounds
 	// rollup/query scan latency — WITHOUT the churn, deletion race, or catalog
 	// cost of the full hourly maintenance pass (expire + cleanup). 0 disables it.
-	MergeEverySeconds int    `env:"DUCKLAKE_MERGE_EVERY_SECONDS" envDefault:"60"`
-	DefaultNS         string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	MergeEverySeconds int `env:"DUCKLAKE_MERGE_EVERY_SECONDS" envDefault:"60"`
+	// RollupSkipToLatest, set once at boot, advances every rollup watermark to the
+	// current max ingested timestamp so existing data is treated as already-rolled-up
+	// instead of aggregated as a backlog. Stands up a large pre-seeded historical
+	// dataset (benchmarks, restores) without a multi-minute first-rollup catch-up that
+	// holds the write lock and starves ingest. Off in normal operation.
+	RollupSkipToLatest bool   `env:"ROLLUP_SKIP_TO_LATEST" envDefault:"false"`
+	DefaultNS          string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
 	// PublicRead turns the instance into a public demo: unauthenticated GET/HEAD
 	// requests are served as a read-only viewer (writes, admin routes, /mcp, and
 	// the API-key routes still require real auth), and OTLP ingest is accepted

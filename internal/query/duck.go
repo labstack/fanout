@@ -224,7 +224,55 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("create views: %w", err)
 	}
+	if cfg.RollupSkipToLatest {
+		// Best-effort: on failure the rollup just catches up normally.
+		if err := d.skipRollupToLatest(ctx); err != nil {
+			slog.Warn("rollup skip-to-latest failed; rollup will catch up normally", "err", err)
+		} else {
+			slog.Info("rollup skip-to-latest: existing data marked already-rolled-up")
+		}
+	}
 	return d, nil
+}
+
+// skipRollupToLatest advances every rollup watermark to the current max ingested
+// timestamp, so existing data is treated as already-processed rather than
+// aggregated as a backlog. This avoids a multi-minute first-rollup catch-up
+// (a wide-start_time backlog holds writeMu and starves ingest) when standing up
+// a large pre-seeded historical dataset. Runs once at boot before RunRollups, so
+// taking writeMu here is uncontended.
+func (d *Duck) skipRollupToLatest(ctx context.Context) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	svc, err := maxServiceRollupWatermark(ctx, tx)
+	if err != nil {
+		return err
+	}
+	edge, err := maxEdgeRollupWatermark(ctx, tx)
+	if err != nil {
+		return err
+	}
+	for _, w := range []struct {
+		key       string
+		watermark int64
+	}{
+		{serviceRollupStateKey, svc},
+		{serviceRollupRawMaxKey, svc},
+		{edgeRollupStateKey, edge},
+		{edgeRollupRawMaxKey, edge},
+	} {
+		if err := storeRollupWatermark(ctx, tx, w.key, w.watermark); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string, maxConns int) (*sql.DB, error) {
