@@ -202,6 +202,12 @@ REMOTE
   rts=$(snap fanout_rollup_last_success_timestamp); age=$(( rts > 0 ? t1 - rts : 999 ))
   rss=$(ssh_to "$TARGET_PUB" "ps -C fanout -o rss= 2>/dev/null | awk '{printf \"%d\", \$1/1024}'")
   errs=$(ssh_to "$TARGET_PUB" "grep -cE 'level\":\"ERROR' /root/fanout/f.log")
+  # Capture the actual ERROR text now — the target is torn down on exit, so a
+  # bare count is undiagnosable after the run. Pulled only when errs>0.
+  local errsample=""
+  if [ "${errs:-0}" -gt 0 ]; then
+    errsample=$(ssh_to "$TARGET_PUB" "grep -E 'level\":\"ERROR' /root/fanout/f.log | tail -3")
+  fi
 
   local secs=$(( t1 - t0 )); [ "$secs" -lt 1 ] && secs=1
   STEP_ACHIEVED_RPS=$(( (rows1 - rows0) / secs ))
@@ -224,6 +230,7 @@ REMOTE
   fi
   printf "  step %6d tr/s → achieved %7d rows/s | part=%s ageS=%s rssMB=%s | %s %s\n" \
     "$traces" "$STEP_ACHIEVED_RPS" "$part" "$age" "$rss" "$STEP_VERDICT" "$STEP_REASON"
+  [ -n "$errsample" ] && printf '      server ERROR sample:\n%s\n' "$errsample" | sed 's/^/      /'
 }
 
 # ── Ramp: find the ceiling (first SLO break) and the last passing step ────────
