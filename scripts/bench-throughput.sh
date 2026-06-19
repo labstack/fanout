@@ -119,8 +119,11 @@ echo "✓ both VMs reachable"
 TARGET_CORES=$(ssh_to "$TARGET_PUB" nproc 2>/dev/null | tr -dc '0-9'); TARGET_CORES=${TARGET_CORES:-4}
 DRIVER_CORES=$(ssh_to "$DRIVER_PUB" nproc 2>/dev/null | tr -dc '0-9'); DRIVER_CORES=${DRIVER_CORES:-4}
 WORKERS=$(( DRIVER_CORES * 12 ))
+# Per-core tr/s steps. The binding ceiling is query-latency-under-load (wide-window
+# Overview scans), which on a dedicated box bites well below the ingest ceiling, so
+# the ramp starts low (750/core) with fine steps to bracket it before the SLO break.
 RAMP_STEPS=()
-for b in 1500 2250 3000 4000 5000 7000; do RAMP_STEPS+=( "$(( TARGET_CORES * b ))" ); done
+for b in 750 1125 1500 2250 3000 4500; do RAMP_STEPS+=( "$(( TARGET_CORES * b ))" ); done
 echo "  adaptive: target=${TARGET_CORES}c driver=${DRIVER_CORES}c → workers=$WORKERS ramp=[${RAMP_STEPS[*]}] tr/s"
 
 setup_toolchain() {
