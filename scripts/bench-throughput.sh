@@ -7,20 +7,26 @@
 # are deleted on exit (trap), including on failure or Ctrl-C.
 #
 # Usage:  scripts/bench-throughput.sh [TYPE] [SSH_KEY] [LOCATION]
-# Example: scripts/bench-throughput.sh cpx32 v@labstack.com fsn1
+# Example: scripts/bench-throughput.sh cpx32 hetzner fsn1
 # Env:    PART_CAP (max allowed lake_partitions, default 800)
 #
-# Requires: hcloud CLI with an authenticated context, an uploaded SSH key whose
-# private key is a default identity (or loaded in the agent), and a clean build
-# of HEAD (HEAD is shipped via git archive).
+# Requires: hcloud CLI with an authenticated context; a PASSPHRASELESS ssh key
+# at $SSH_IDENTITY (default ~/.ssh/hetzner) whose public half is uploaded to
+# Hetzner as $SSH_KEY (default "hetzner") — the agent is bypassed, so a
+# passphrase-protected key will NOT work. HEAD is shipped via git archive.
 set -uo pipefail
 # shellcheck disable=SC2164
 cd "$(dirname "$0")/.."
 
 TYPE="${1:-cpx32}"   # both VMs use the same instance type
 # shellcheck disable=SC2034
-SSH_KEY="${2:-v@labstack.com}"
+SSH_KEY="${2:-hetzner}"               # Hetzner-side key name injected into the VMs
 LOC="${3:-fsn1}"
+# Dedicated PASSPHRASELESS identity used for ssh auth. A 40-minute run makes
+# hundreds of signing requests; the macOS launchd ssh-agent wedges under that
+# load ("agent refused operation"), so we sign from this on-disk key directly
+# and disable the agent entirely (see SSHOPTS below).
+SSH_IDENTITY="${SSH_IDENTITY:-$HOME/.ssh/hetzner}"
 # shellcheck disable=SC2034
 GOVER="1.26.4"
 PART_CAP="${PART_CAP:-800}"
@@ -47,7 +53,7 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes)
+SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none -i "$SSH_IDENTITY")
 # shellcheck disable=SC2029
 ssh_to()  { local ip="$1"; shift; ssh "${SSHOPTS[@]}" "root@$ip" "$@"; }
 scp_to()  { local ip="$1" src="$2" dst="$3"; scp "${SSHOPTS[@]}" -q "$src" "root@$ip:$dst"; }
