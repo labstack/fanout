@@ -69,7 +69,7 @@ SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/
 ssh_to()  { local ip="$1"; shift; ssh "${SSHOPTS[@]}" "root@$ip" "$@"; }
 scp_to()  { local ip="$1" src="$2" dst="$3"; scp "${SSHOPTS[@]}" -q "$src" "root@$ip:$dst"; }
 
-echo "throughput-bench run $RUN | type=$TYPE (×2) loc=$LOC part_cap=$PART_CAP merge=${MERGE_SECONDS}s maint=${MAINT_SECONDS}s seed=${SEED_HOURS:-3}h"
+echo "throughput-bench run $RUN | type=$TYPE (×2) loc=$LOC part_cap=$PART_CAP merge=${MERGE_SECONDS}s maint=${MAINT_SECONDS}s seed=${SEED_HOURS}h"
 
 make_network() {
   hcloud network create --name "$RUN-net" --ip-range 10.10.0.0/16 >/dev/null
@@ -202,20 +202,23 @@ boot_fanout
 # partitions. The ramp/soak emit at now(), so their recent-window queries must
 # prune PAST the seeded hours — which only works if hour partitioning prunes
 # within a day. A same-hour run (no seed) can't exercise this. 0 disables.
-if [ "${SEED_HOURS:-0}" -gt 0 ] 2>/dev/null; then
+if [ "$SEED_HOURS" -gt 0 ] 2>/dev/null; then
   echo "── pre-seed: ${SEED_HOURS}h backdated data ──"
   ssh_to "$DRIVER_PUB" "cd /root/fanout && ./bin/loadgen -endpoint $TARGET_PRIV:4317 \
     -rate 60000 -duration 150s -workers $WORKERS -services 50 -attr-cardinality 200 \
     -error-rate 0.05 -messaging-ratio 0.15 -backfill-hours $SEED_HOURS" >/dev/null 2>&1 || true
   echo "  seeded: lake_partitions=$(snap fanout_lake_partitions) rows=$(snap fanout_ingest_rows_total)"
-  # Let the rollup work through the seeded backlog so the ramp measures steady
-  # state, not the one-time catch-up. Poll rollup freshness, cap the wait.
-  echo "── settling rollup after pre-seed ──"
-  for _ in $(seq 1 6); do
+  # Settle so the ramp measures steady state, not the seed's one-time catch-up:
+  # wait for BOTH the rollup to be fresh AND the ingest flush backlog to drain
+  # (queue depth ~0). Gating on rollup age alone left a flush backlog that could
+  # skew the first ramp step. Capped at 8×30s.
+  echo "── settling after pre-seed (rollup fresh + ingest drained) ──"
+  for _ in $(seq 1 8); do
     sleep 30
     rts=$(snap fanout_rollup_last_success_timestamp); now=$(date +%s)
     age=$(( rts > 0 ? now - rts : 999 ))
-    [ "$age" -lt 70 ] && { echo "  rollup caught up (age ${age}s)"; break; }
+    qd=$(snap fanout_ingest_queue_depth)
+    [ "$age" -lt 70 ] && [ "${qd:-1}" -le 0 ] && { echo "  settled (rollup age ${age}s, queue ${qd})"; break; }
   done
 fi
 
