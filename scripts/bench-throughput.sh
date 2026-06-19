@@ -31,6 +31,7 @@ SSH_IDENTITY="${SSH_IDENTITY:-$HOME/.ssh/hetzner}"
 GOVER="1.26.4"
 PART_CAP="${PART_CAP:-800}"
 RUN="fanout-tput-$$"
+HEAD_SHA="$(git rev-parse --short HEAD)"   # captured at launch — this is what git archive ships
 
 command -v hcloud >/dev/null || { echo "hcloud CLI required" >&2; exit 1; }
 
@@ -141,7 +142,7 @@ REMOTE
 echo "── installing toolchain on both VMs ──"
 setup_toolchain "$TARGET_PUB"
 setup_toolchain "$DRIVER_PUB"
-echo "── shipping HEAD ($(git rev-parse --short HEAD)) + building ──"
+echo "── shipping HEAD ($HEAD_SHA) + building ──"
 git archive --format=tar.gz HEAD -o /tmp/fanout-src.tgz
 ship_and_build "$TARGET_PUB" target
 ship_and_build "$DRIVER_PUB" driver
@@ -269,7 +270,7 @@ fi
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo
-echo "════════ THROUGHPUT — ${TYPE} (HEAD $(git rev-parse --short HEAD)) ════════"
+echo "════════ THROUGHPUT — ${TYPE} (HEAD $HEAD_SHA) ════════"
 printf "%-14s %14s %-12s %s\n" "target tr/s" "achieved rows/s" "verdict" "reason"
 for row in "${RESULTS[@]}"; do
   # shellcheck disable=SC2086
