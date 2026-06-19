@@ -181,3 +181,25 @@ partition-count explosion) — see Risk 2.
 - Sub-hour partitioning or zonemap clustering (revisit only if hour granularity
   proves insufficient).
 - Raising the ingest ceiling / driver sizing (separate; ingest is not the limit).
+
+## Gate results (2026-06-19, implemented)
+
+Implemented: `configureDuckLake` now partitions spans/logs/metrics by
+`hour(ts)` (`internal/query/views.go`). Verified locally against the real
+bundled DuckLake (no cloud run needed):
+
+- **hour() transform accepted** — `NewDuck` boots and all real-DuckLake rollup
+  tests pass under hour partitioning (late-data, watermark, chunked,
+  affected-bucket, edge). No fallback to `(day, hour)` needed.
+- **Gate C1 (merge stays within an hour) — PASS.** Experiment
+  (`TestHourPartitionPrunesRecentWindow`): 600k spans across 3 hours,
+  `merge_adjacent_files` produced **exactly 3 files (one per hour)** — no
+  straddling, zonemaps stay ~1 hour wide.
+- **Gate #1 (range predicate prunes) — PASS.** `start_time >= now()-15min`
+  scanned **10k of 600k rows** (the recent hour), vs scanning all 600k under
+  day partitioning. Kept as a regression test.
+
+Remaining for end-to-end showcase: the cloud throughput bench needs the
+multi-hour pre-seed mode (a 40-min run stays within ~1 hour partition and so
+doesn't exercise cross-hour pruning). The local experiment already proves the
+mechanism; the cloud run would confirm query p95 under sustained load.
