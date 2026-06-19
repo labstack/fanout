@@ -703,6 +703,15 @@ span_agg AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
    AND a.service = s.service
+  -- Bound the scan to the affected bucket range so DuckLake prunes parquet by
+  -- start_time stats instead of scanning all history (the join on a computed
+  -- date_trunc bucket alone does not prune). The range is a provable superset
+  -- of the affected buckets — every row in an affected bucket has start_time in
+  -- [MIN(bucket), MAX(bucket)+1min) — so it drops no rows. A late span with an
+  -- old start_time widens the range (and this scan) only for the pass that
+  -- ingests it, same trade-off as the edge rollup's parent bound.
+  WHERE s.start_time >= (SELECT MIN(bucket) FROM affected)
+    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
   GROUP BY s.namespace, date_trunc('minute', s.start_time), s.service
 ),
 log_agg AS (
@@ -716,6 +725,8 @@ log_agg AS (
     ON a.namespace = l.namespace
    AND a.bucket = date_trunc('minute', l.time)
    AND a.service = l.service
+  WHERE l.time >= (SELECT MIN(bucket) FROM affected)
+    AND l.time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
   GROUP BY l.namespace, date_trunc('minute', l.time), l.service
 ),
 metric_agg AS (
@@ -729,6 +740,8 @@ metric_agg AS (
     ON a.namespace = m.namespace
    AND a.bucket = date_trunc('minute', m.time)
    AND a.service = m.service
+  WHERE m.time >= (SELECT MIN(bucket) FROM affected)
+    AND m.time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
   GROUP BY m.namespace, date_trunc('minute', m.time), m.service
 )
 INSERT INTO service_rollup (
@@ -813,6 +826,8 @@ call_edges AS (
     AND child.service IS NOT NULL
     AND child.service != ''
     AND parent.service != child.service
+    AND child.start_time >= (SELECT MIN(bucket) FROM affected)
+    AND child.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
   GROUP BY child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
 ),
 -- Producers and consumers are aggregated per (namespace, bucket, service,
@@ -833,6 +848,8 @@ producers AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_PRODUCER'
+    AND s.start_time >= (SELECT MIN(bucket) FROM affected)
+    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
     AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
@@ -850,6 +867,8 @@ consumers AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_CONSUMER'
+    AND s.start_time >= (SELECT MIN(bucket) FROM affected)
+    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
     AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
