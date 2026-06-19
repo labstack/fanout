@@ -176,6 +176,23 @@ boot_fanout
 
 ROWS_PER_TRACE=4.3   # 2 spans + 0.15*2 messaging spans + 1 log + 1 metric, at the default data shape
 
+# capture_forensics LABEL — pull crash diagnostics off the target into a local
+# file while the VM is still up (the trap deletes it on exit, so a count or a
+# "connection refused" is otherwise undiagnosable). Captures whether fanout is
+# alive, memory state, the kernel OOM killer, and the tail of f.log.
+capture_forensics() {
+  local label="$1"
+  local out="./bench-results/$RUN-$label-forensics.txt"
+  {
+    echo "=== forensics: $label ==="
+    echo "--- fanout process ---"; ssh_to "$TARGET_PUB" 'pgrep -a fanout || echo "DEAD (no fanout process)"'
+    echo "--- memory ---";         ssh_to "$TARGET_PUB" 'free -h'
+    echo "--- kernel OOM killer ---"; ssh_to "$TARGET_PUB" 'dmesg 2>/dev/null | grep -iE "out of memory|killed process|oom-kill" | tail -10 || echo "none"'
+    echo "--- f.log tail (250) ---"; ssh_to "$TARGET_PUB" 'tail -250 /root/fanout/f.log'
+  } > "$out" 2>&1
+  echo "      forensics captured → $out"
+}
+
 # run_step TARGET_TRACES DUR_SEC  → sets STEP_ACHIEVED_RPS / STEP_VERDICT / STEP_REASON
 run_step() {
   local traces="$1" dur="$2"
@@ -231,6 +248,9 @@ REMOTE
   printf "  step %6d tr/s → achieved %7d rows/s | part=%s ageS=%s rssMB=%s | %s %s\n" \
     "$traces" "$STEP_ACHIEVED_RPS" "$part" "$age" "$rss" "$STEP_VERDICT" "$STEP_REASON"
   [ -n "$errsample" ] && printf '      server ERROR sample:\n%s\n' "$errsample" | sed 's/^/      /'
+  # On any failure (esp. a crash → negative achieved / unreachable), grab full
+  # forensics now while the target is still up.
+  [ "$STEP_VERDICT" = fail ] && capture_forensics "step-$traces"
 }
 
 # ── Ramp: find the ceiling (first SLO break) and the last passing step ────────
