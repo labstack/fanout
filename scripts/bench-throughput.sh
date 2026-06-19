@@ -39,6 +39,9 @@ HEAD_SHA="$(git rev-parse --short HEAD)"   # captured at launch — this is what
 #                   fine: frequent merge alone keeps query/rollup scans fast.
 MERGE_SECONDS="${MERGE_SECONDS:-60}"
 MAINT_SECONDS="${MAINT_SECONDS:-3600}"
+# Pre-seed N hours of backdated data before the ramp so the lake spans multiple
+# hour partitions (exercises within-day pruning; a same-hour run can't). 0 = off.
+SEED_HOURS="${SEED_HOURS:-3}"
 
 command -v hcloud >/dev/null || { echo "hcloud CLI required" >&2; exit 1; }
 
@@ -66,7 +69,7 @@ SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/
 ssh_to()  { local ip="$1"; shift; ssh "${SSHOPTS[@]}" "root@$ip" "$@"; }
 scp_to()  { local ip="$1" src="$2" dst="$3"; scp "${SSHOPTS[@]}" -q "$src" "root@$ip:$dst"; }
 
-echo "throughput-bench run $RUN | type=$TYPE (×2) loc=$LOC part_cap=$PART_CAP merge=${MERGE_SECONDS}s maint=${MAINT_SECONDS}s"
+echo "throughput-bench run $RUN | type=$TYPE (×2) loc=$LOC part_cap=$PART_CAP merge=${MERGE_SECONDS}s maint=${MAINT_SECONDS}s seed=${SEED_HOURS:-3}h"
 
 make_network() {
   hcloud network create --name "$RUN-net" --ip-range 10.10.0.0/16 >/dev/null
@@ -181,6 +184,27 @@ REMOTE
 }
 
 boot_fanout
+
+# ── Pre-seed: backdate SEED_HOURS of data so the lake spans multiple hour
+# partitions. The ramp/soak emit at now(), so their recent-window queries must
+# prune PAST the seeded hours — which only works if hour partitioning prunes
+# within a day. A same-hour run (no seed) can't exercise this. 0 disables.
+if [ "${SEED_HOURS:-0}" -gt 0 ] 2>/dev/null; then
+  echo "── pre-seed: ${SEED_HOURS}h backdated data ──"
+  ssh_to "$DRIVER_PUB" "cd /root/fanout && ./bin/loadgen -endpoint $TARGET_PRIV:4317 \
+    -rate 60000 -duration 150s -workers 48 -services 50 -attr-cardinality 200 \
+    -error-rate 0.05 -messaging-ratio 0.15 -backfill-hours $SEED_HOURS" >/dev/null 2>&1 || true
+  echo "  seeded: lake_partitions=$(snap fanout_lake_partitions) rows=$(snap fanout_ingest_rows_total)"
+  # Let the rollup work through the seeded backlog so the ramp measures steady
+  # state, not the one-time catch-up. Poll rollup freshness, cap the wait.
+  echo "── settling rollup after pre-seed ──"
+  for _ in $(seq 1 6); do
+    sleep 30
+    rts=$(snap fanout_rollup_last_success_timestamp); now=$(date +%s)
+    age=$(( rts > 0 ? now - rts : 999 ))
+    [ "$age" -lt 70 ] && { echo "  rollup caught up (age ${age}s)"; break; }
+  done
+fi
 
 ROWS_PER_TRACE=4.3   # 2 spans + 0.15*2 messaging spans + 1 log + 1 metric, at the default data shape
 
