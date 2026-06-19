@@ -32,6 +32,10 @@ GOVER="1.26.4"
 PART_CAP="${PART_CAP:-800}"
 RUN="fanout-tput-$$"
 HEAD_SHA="$(git rev-parse --short HEAD)"   # captured at launch — this is what git archive ships
+# Maintenance cadence for the run. Default is the PROD value (3600s / 1h); set
+# MAINT_SECONDS=60 to stress compaction in a short soak (the original adversarial
+# setting — amplifies merge churn 60× vs prod).
+MAINT_SECONDS="${MAINT_SECONDS:-3600}"
 
 command -v hcloud >/dev/null || { echo "hcloud CLI required" >&2; exit 1; }
 
@@ -59,7 +63,7 @@ SSHOPTS=(-o ConnectTimeout=8 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/
 ssh_to()  { local ip="$1"; shift; ssh "${SSHOPTS[@]}" "root@$ip" "$@"; }
 scp_to()  { local ip="$1" src="$2" dst="$3"; scp "${SSHOPTS[@]}" -q "$src" "root@$ip:$dst"; }
 
-echo "throughput-bench run $RUN | type=$TYPE (×2) loc=$LOC part_cap=$PART_CAP"
+echo "throughput-bench run $RUN | type=$TYPE (×2) loc=$LOC part_cap=$PART_CAP maint=${MAINT_SECONDS}s"
 
 make_network() {
   hcloud network create --name "$RUN-net" --ip-range 10.10.0.0/16 >/dev/null
@@ -154,15 +158,15 @@ rm -f /tmp/fanout-src.tgz
 snap() { ssh_to "$DRIVER_PUB" "curl -s -m3 http://$TARGET_PRIV:7520/-/metrics" | awk -v k="$1" '$0 ~ "^"k {s+=$2} END{printf "%d", s+0}'; }
 
 boot_fanout() {
-  ssh_to "$TARGET_PUB" "bash -s" <<'REMOTE'
+  ssh_to "$TARGET_PUB" "MAINT_SECONDS='$MAINT_SECONDS' bash -s" <<'REMOTE'
 set -e
 cd /root/fanout
 set -a; . ./.env; set +a
 DATA_DIR=/root/fanout/data PUBLIC_READ=true ENV=development \
   OTLP_GRPC_ADDR=:4317 HTTP_ADDR=:7520 \
-  FLUSH_SECONDS=15 ROLLUP_EVERY=60 DUCKLAKE_MAINTENANCE_EVERY_SECONDS=60 \
+  FLUSH_SECONDS=15 ROLLUP_EVERY=60 DUCKLAKE_MAINTENANCE_EVERY_SECONDS="$MAINT_SECONDS" \
   nohup ./bin/fanout >/root/fanout/f.log 2>&1 &
-echo "started fanout pid $!"
+echo "started fanout pid $! (maintenance every ${MAINT_SECONDS}s)"
 REMOTE
   echo "── waiting for fanout /healthz ──"
   for _ in $(seq 1 40); do
