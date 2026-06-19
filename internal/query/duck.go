@@ -501,12 +501,41 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 		rawMaxProcessed = windowEnd
 	}
 
-	if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, windowStart, windowEnd); err != nil {
-		return 0, err
-	}
-	res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, windowStart, windowEnd)
+	// Query the start_time range that the affected ingested-window spans cover.
+	// We sub-window this range in edgeStartChunkNanos increments so the
+	// call_edges self-join never fans out over more than 30 min of start_time,
+	// even when a burst catches up hours of backlog in a single ingested window.
+	var minStartT, maxStartT sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+SELECT
+  MIN(date_trunc('minute', start_time)),
+  MAX(date_trunc('minute', start_time))
+FROM spans
+WHERE ingested_unix_nano > ?
+  AND ingested_unix_nano <= ?
+  AND start_time IS NOT NULL`, windowStart, windowEnd).Scan(&minStartT, &maxStartT)
 	if err != nil {
 		return 0, err
+	}
+
+	var totalAffected int64
+	if minStartT.Valid {
+		subLo := minStartT.Time
+		maxT := maxStartT.Time
+		for !subLo.After(maxT) {
+			subHi := subLo.Add(time.Duration(edgeStartChunkNanos))
+			if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, windowStart, windowEnd, subLo, subHi); err != nil {
+				return 0, err
+			}
+			res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, windowStart, windowEnd, subLo, subHi)
+			if err != nil {
+				return 0, err
+			}
+			if rows, err := res.RowsAffected(); err == nil {
+				totalAffected += rows
+			}
+			subLo = subHi
+		}
 	}
 
 	if err := storeRollupWatermark(ctx, tx, edgeRollupStateKey, newWatermark); err != nil {
@@ -519,10 +548,7 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 
-	if rows, err := res.RowsAffected(); err == nil {
-		return rows, nil
-	}
-	return 0, nil
+	return totalAffected, nil
 }
 
 // rollupChunkNanos caps how much ingest history one rollup pass scans. A pass
@@ -532,6 +558,11 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 // 2026-06-13 (UTC): the edge rollup's first pass covered 12 days of spans,
 // spilled 375 GiB to temp, filled the disk, and never committed.
 const rollupChunkNanos = int64(time.Hour)
+
+// edgeStartChunkNanos bounds how wide a start_time range one edge-rollup
+// DELETE+INSERT processes, so the call_edges self-join over a wide backlog
+// (catch-up/bulk-load) can't exhaust memory. The pass loops over sub-windows.
+const edgeStartChunkNanos = int64(30 * time.Minute)
 
 // rollupWindow bounds one pass's scan to (start, end]. start falls back to
 // just before the oldest ingested row when there's no stored watermark, so a
@@ -782,6 +813,8 @@ WITH affected AS (
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
+    AND start_time >= ?
+    AND start_time < ?
 )
 DELETE FROM edge_rollup
 WHERE EXISTS (
@@ -798,6 +831,8 @@ WITH affected AS (
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
+    AND start_time >= ?
+    AND start_time < ?
 ),
 call_edges AS (
   SELECT
