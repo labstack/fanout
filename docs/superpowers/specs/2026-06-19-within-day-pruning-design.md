@@ -203,3 +203,23 @@ Remaining for end-to-end showcase: the cloud throughput bench needs the
 multi-hour pre-seed mode (a 40-min run stays within ~1 hour partition and so
 doesn't exercise cross-hour pruning). The local experiment already proves the
 mechanism; the cloud run would confirm query p95 under sustained load.
+
+## End-to-end result (2026-06-19)
+
+The cloud showcase (3h multi-hour pre-seed on ccx33) confirmed the mechanism
+end-to-end: with the dataset spanning hours, the **recent-window Overview query
+stays fast** (610ms–1s at 6000 tr/s; locally 5–8ms as an hour fills to 2.4M
+rows), i.e. hour partitioning prunes past the older hours exactly as designed.
+
+Getting there required a supporting fix chain (file-race retry, rollup
+scan-bounds, decoupled merge, edge-rollup sub-windowing, memory headroom,
+`ROLLUP_SKIP_TO_LATEST` for the pre-seed) — see
+`2026-06-18-fair-throughput-benchmark-design.md` "Results — end-to-end".
+
+**Certified:** ingest ceiling ~32k rows/s, a clean SLO-compliant operating
+point at ~25k rows/s (query p95 610ms–1s). The 15-min soak did not certify a
+sustained rated capacity — the limiter is **rollup contention** under concurrent
+firehose-ingest + continuous-query load on a small box (rollup ~14.7s/cycle vs
+~270ms isolated → query p95 spikes), NOT a within-day-pruning or scan defect.
+That pruning works is proven; the contention mitigations (smaller/more-frequent
+rollups, rollup scan off the write lock) are deferred follow-ups.

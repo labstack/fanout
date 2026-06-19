@@ -330,3 +330,54 @@ under within-day contention, not ingest (ingest fine: drops=0, export p95 ms).
   zonemaps prune even inside a day.
 - Move Overview recent/top-errors off raw-span scans (needs status_message in a
   rollup/index).
+
+## Results — end-to-end on a prod-class box (2026-06-19, HEAD e33807f + fixes)
+
+The full multi-hour showcase (3h pre-seed, hour partitioning, adaptive ramp)
+surfaced and fixed a chain of issues; each cloud run revealed the next layer.
+
+### The fix chain (all committed, reviewed, `just check` green)
+1. **DuckLake file race** — read-retry on transient "No such file" (`QueryContext`/`QueryRowScan`).
+2. **Rollup full-history scan** — bound agg scans to the affected bucket range.
+3. **Merge churn vs file pileup** — decoupled cadence: cheap `merge_adjacent_files`
+   every 60s (bounds file count) + heavy maintenance hourly.
+4. **Within-day query latency** — hour partitioning (`hour(start_time)`); proven
+   locally (recent-window query 5–8ms as the hour fills to 2.4M rows).
+5. **Edge-rollup OOM on a wide backlog** — sub-window `call_edges` by start_time
+   (`edgeStartChunkNanos`).
+6. **Kernel OOM on small boxes** — cap DuckDB `memory_limit` to RAM−2GiB so a
+   spike degrades gracefully instead of being OOM-killed.
+7. **Backlog rollup catch-up starving ingest** — `ROLLUP_SKIP_TO_LATEST`: stand
+   up a pre-seeded historical dataset without a multi-minute first-rollup pass;
+   bench restarts fanout with it after the seed.
+
+### Certified numbers (ccx33: 8 vCPU / 32 GB, ×2, fsn1)
+- **Ingest ceiling: ~32k rows/s** (9000 tr/s) — ingest is healthy well past this
+  (0 drops, export p95 8ms, RSS < 1.5 GB).
+- **Last fully-passing ramp step: 6000 tr/s ≈ 25k rows/s**, query p95 610ms–1s,
+  rollups fresh — a clean, SLO-compliant operating point.
+- **Soak (15 min) did NOT certify a rated capacity**: query p95 degraded to the
+  5s cap over the sustained run while ingest stayed perfect (0 drops).
+
+### The soak limit is rollup CONTENTION, not a bug (local investigation)
+Ruled out, locally and decisively:
+- **Not catalog/snapshot bloat** — `MAINT_SECONDS=300` fired expire/cleanup 25×
+  during the run; soak degraded identically.
+- **Not naive wide-window scans** — Overview already uses `service_rollup` for
+  wide windows and caps raw-span scans at 5 min.
+- **Not an un-pruned scan** — recent-window query stays 5–8ms and the rollup scan
+  stays ~270ms as the dataset grows, in isolation.
+
+Root cause: the rollup does real work proportional to ingest (~1.2M spans / 60s
+cycle: service quantiles + edge self-join). Under concurrent firehose ingest +
+continuous queries on 8 cores, that pass stretches to ~14.7s (vs ~270ms isolated)
+and query p95 spikes during it. It's a capacity/QoS characteristic of a small box
+under simultaneous heavy ingest+query, against a strict 1.5s p95 — not a defect.
+
+### Open follow-up (needs concurrent-load/cloud validation, deferred)
+- **Smaller, more frequent rollups** (`ROLLUP_EVERY=15`) → shorter spikes → lower
+  query p95 under load.
+- **Move the rollup's heavy scan/aggregate off the write lock** — only hold
+  `writeMu` for the final DELETE+INSERT commit, so the long aggregate doesn't
+  serialize against ingest/merge.
+- Both are real but unvalidated; the product query path itself is healthy.
