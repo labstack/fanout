@@ -267,9 +267,16 @@ WHERE extension_name = 'ducklake' AND loaded`).Scan(&loaded); err != nil {
 	stmts := []string{
 		`CALL lake.set_option('parquet_compression', 'zstd')`,
 		`CALL lake.set_option('target_file_size', '256MB')`,
-		`ALTER TABLE lake.spans SET PARTITIONED BY (namespace, day(start_time))`,
-		`ALTER TABLE lake.logs SET PARTITIONED BY (namespace, day(log_time))`,
-		`ALTER TABLE lake.metrics SET PARTITIONED BY (namespace, day(metric_time))`,
+		// Partition by HOUR (not day) of the event time so recent-window scans
+		// (Overview error queries, rollup aggregations) prune by per-file
+		// start_time zonemaps to ~the current 1-2 hours' files instead of the whole
+		// day. day-partitioning let merge produce day-spanning files whose zonemaps
+		// couldn't prune within a day — the rollup hit 35s and query p95 5s as a UTC
+		// day filled. hour() is DuckLake's date-inclusive, order-preserving hour
+		// transform (hours since epoch), so it uniquely identifies a calendar hour.
+		`ALTER TABLE lake.spans SET PARTITIONED BY (namespace, hour(start_time))`,
+		`ALTER TABLE lake.logs SET PARTITIONED BY (namespace, hour(log_time))`,
+		`ALTER TABLE lake.metrics SET PARTITIONED BY (namespace, hour(metric_time))`,
 	}
 	for _, stmt := range stmts {
 		if _, err := db.Exec(stmt); err != nil {
