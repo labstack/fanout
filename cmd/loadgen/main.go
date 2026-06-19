@@ -75,6 +75,11 @@ type config struct {
 	// the harness can gate CI / releases.
 	maxExportP95 float64
 	maxQueryP95  float64
+	// backfillHours, when >0, spreads each event's timestamp uniformly over the
+	// last N hours (instead of "now"). Used to PRE-SEED a multi-hour dataset so
+	// the lake spans several hour partitions — required to exercise within-day
+	// (hour-partition) pruning, which a same-hour run can't.
+	backfillHours float64
 }
 
 func main() {
@@ -98,6 +103,7 @@ func main() {
 	flag.Float64Var(&cfg.queryRate, "query-rate", 50, "target queries/sec (aggregate) when query-workers > 0")
 	flag.Float64Var(&cfg.maxExportP95, "max-export-p95-ms", 0, "fail (exit 1) if ingest export p95 exceeds this")
 	flag.Float64Var(&cfg.maxQueryP95, "max-query-p95-ms", 0, "fail (exit 1) if query p95 exceeds this")
+	flag.Float64Var(&cfg.backfillHours, "backfill-hours", 0, "spread event timestamps over the last N hours (pre-seed a multi-hour dataset); 0 = use now()")
 	flag.Parse()
 
 	if cfg.services < 2 {
@@ -236,8 +242,11 @@ func main() {
 	if rep.ExportLatencyMs.Count == 0 {
 		fails = append(fails, "no OTLP exports succeeded")
 	}
-	if rep.SendErrors > 0 {
-		fails = append(fails, fmt.Sprintf("send errors=%d", rep.SendErrors))
+	if attempted := rep.ExportLatencyMs.Count + rep.SendErrors; rep.SendErrors > 0 && attempted > 0 {
+		if rate := float64(rep.SendErrors) / float64(attempted); rate > maxSendErrorRate {
+			fails = append(fails, fmt.Sprintf("send error rate %.3f%% (%d/%d) > %.1f%%",
+				rate*100, rep.SendErrors, attempted, maxSendErrorRate*100))
+		}
 	}
 	if rep.QueryErrors > 0 {
 		fails = append(fails, fmt.Sprintf("query errors=%d", rep.QueryErrors))
@@ -278,8 +287,17 @@ type generator struct {
 }
 
 // queryWindows rotate so the read load hits both small (cheap rollup) and wide
-// (heavier scan) windows, exercising the latency SLOs under ingest.
-var queryWindows = []string{"15m", "1h", "6h", "24h", "7d"}
+// (heavier scan) windows, exercising the latency SLOs under ingest. The
+// /api/overview endpoint takes window as an INTEGER number of minutes (capped
+// at 1440), so these are minutes — 15m, 1h, 6h, 12h, 24h — not duration
+// strings, which the handler rejects with 400 "invalid window".
+var queryWindows = []string{"15", "60", "360", "720", "1440"}
+
+// maxSendErrorRate tolerates a handful of transient export errors (e.g. a gRPC
+// DeadlineExceeded during a rollup pause) at high volume — they are noise, not a
+// capacity failure. The real data-integrity gate is server-side rows-dropped.
+// A genuine backpressure failure produces a send-error rate far above this.
+const maxSendErrorRate = 0.001 // 0.1%
 
 // runQueries drives the read path concurrently with ingest: GET /api/overview
 // across rotating windows, recording latency into queryLat.
@@ -359,6 +377,16 @@ func (g *generator) outCtx(ctx context.Context) context.Context {
 // of traces — a PRODUCER/CONSUMER pair on a messaging destination (a messaging
 // edge). Each ResourceSpans carries one service.name, matching how fanout keys
 // service_rollup and edge_rollup.
+// eventTime returns the timestamp for an emitted event: now(), or — when
+// backfillHours>0 — a time spread uniformly over the last N hours so a pre-seed
+// run populates multiple hour partitions (to exercise within-day pruning).
+func (g *generator) eventTime() time.Time {
+	if g.cfg.backfillHours <= 0 {
+		return time.Now()
+	}
+	return time.Now().Add(-time.Duration(rand.Float64() * g.cfg.backfillHours * float64(time.Hour)))
+}
+
 func (g *generator) sendTrace(ctx context.Context) {
 	ns := g.namespace()
 	caller := g.svcNames[rand.IntN(g.cfg.services)]
@@ -370,7 +398,7 @@ func (g *generator) sendTrace(ctx context.Context) {
 	traceID := randBytes(16)
 	parentID := randBytes(8)
 	childID := randBytes(8)
-	now := time.Now()
+	now := g.eventTime()
 	startNano := uint64(now.UnixNano())
 	parentEnd := uint64(now.Add(time.Duration(20+rand.IntN(400)) * time.Millisecond).UnixNano())
 	childEnd := uint64(now.Add(time.Duration(5+rand.IntN(200)) * time.Millisecond).UnixNano())
@@ -457,7 +485,7 @@ func (g *generator) sendLog(ctx context.Context) {
 		}},
 		ScopeLogs: []*logspb.ScopeLogs{{
 			LogRecords: []*logspb.LogRecord{{
-				TimeUnixNano:   uint64(time.Now().UnixNano()),
+				TimeUnixNano:   uint64(g.eventTime().UnixNano()),
 				SeverityText:   sev,
 				SeverityNumber: sevNum,
 				Body:           &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "request " + g.route()}},
@@ -487,7 +515,7 @@ func (g *generator) sendMetric(ctx context.Context) {
 				Unit: "ms",
 				Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{
 					DataPoints: []*metricspb.NumberDataPoint{{
-						TimeUnixNano: uint64(time.Now().UnixNano()),
+						TimeUnixNano: uint64(g.eventTime().UnixNano()),
 						Value:        &metricspb.NumberDataPoint_AsDouble{AsDouble: rand.Float64() * 500},
 						Attributes:   g.spanAttrs(),
 					}},

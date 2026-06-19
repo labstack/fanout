@@ -51,10 +51,18 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse
 		req.MaxRows = 1000
 	}
 
-	// Set default timeout
+	// Set default timeout, then clamp to a hard ceiling. A query that outlives
+	// the DuckLake snapshot grace window can have its parquet files deleted
+	// mid-scan by maintenance (see snapshotGraceMinutes in duck.go), so a
+	// caller-supplied TimeoutMs must never exceed it. Half the grace leaves
+	// ample margin for the longest legitimate scan.
+	const maxQueryTimeoutMs = snapshotGraceMinutes * 60 * 1000 / 2 // half the snapshot grace
 	timeoutMs := req.TimeoutMs
 	if timeoutMs <= 0 {
 		timeoutMs = 30000
+	}
+	if timeoutMs > maxQueryTimeoutMs {
+		timeoutMs = maxQueryTimeoutMs
 	}
 
 	// Validate SQL (skip validation for EXPLAIN-prefixed queries that we construct)
@@ -78,7 +86,11 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse
 	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
-	// Execute query
+	// Execute query. The raw `query` tool deliberately uses DB.QueryContext, not
+	// the d.QueryContext retry wrapper: arbitrary user SQL may stream large/long
+	// results, and a blind re-plan on a transient lake IO error is less obviously
+	// safe than for the fixed internal aggregate reads. This path is instead
+	// bounded by the timeout clamp above (well under the snapshot grace).
 	rows, err := d.DB.QueryContext(queryCtx, execQuery)
 	if err != nil {
 		return SQLResponse{

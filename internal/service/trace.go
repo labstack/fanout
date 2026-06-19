@@ -57,7 +57,7 @@ ORDER BY start_unix_nano ASC
 LIMIT 200;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, traceID, namespace, namespace)
+	rows, err := s.duck.QueryContext(ctx, q, traceID, namespace, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("query failed: %w", err)
 	}
@@ -391,7 +391,7 @@ GROUP BY service
 ORDER BY service ASC;
 `, placeholders)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("FetchMetricContext: rollup query failed", "err", err)
 		return nil
@@ -441,7 +441,7 @@ ORDER BY time_unix_nano ASC
 LIMIT 100;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, traceID, namespace, namespace)
+	rows, err := s.duck.QueryContext(ctx, q, traceID, namespace, namespace)
 	if err != nil {
 		slog.Warn("fetch trace logs query failed", "method", "fetchTraceLogs", "trace_id", traceID, "err", err)
 		return logs

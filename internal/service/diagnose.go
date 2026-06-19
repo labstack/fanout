@@ -39,8 +39,7 @@ WHERE start_time >= now() - INTERVAL %d MINUTE
   AND service = ?;
 `, window)
 
-	row := s.duck.DB.QueryRowContext(ctx, q, namespace, namespace, svc)
-	if err := row.Scan(&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate); err != nil {
+	if err := s.duck.QueryRowScan(ctx, []any{&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate}, q, namespace, namespace, svc); err != nil {
 		return nil, fmt.Errorf("diagnose query failed: %w", err)
 	}
 
@@ -67,7 +66,7 @@ ORDER BY cnt DESC
 LIMIT 10;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace, svc)
+	rows, err := s.duck.QueryContext(ctx, q, namespace, namespace, svc)
 	if err != nil {
 		slog.Warn("top errors query failed", "method", "Diagnose.errors", "service", svc, "err", err)
 	} else {
@@ -109,7 +108,7 @@ ORDER BY p95 DESC
 LIMIT 5;
 `, window)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q, namespace, namespace, svc)
+	rows, err = s.duck.QueryContext(ctx, q, namespace, namespace, svc)
 	if err != nil {
 		slog.Warn("slow ops query failed", "method", "Diagnose.slowOps", "service", svc, "err", err)
 	} else {
@@ -143,7 +142,7 @@ ORDER BY calls DESC
 LIMIT 10;
 `, window)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q, svc, namespace, namespace)
+	rows, err = s.duck.QueryContext(ctx, q, svc, namespace, namespace)
 	if err != nil {
 		slog.Warn("dependencies query failed", "method", "Diagnose.deps", "service", svc, "err", err)
 	} else {
@@ -299,7 +298,7 @@ WHERE service = ?
   AND bucket >= NOW() - INTERVAL %d MINUTE
 ORDER BY bucket ASC;`, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, svc, namespace, namespace)
+	rows, err := s.duck.QueryContext(ctx, q, svc, namespace, namespace)
 	windowStart := time.Now().Add(-time.Duration(window) * time.Minute)
 	if err != nil {
 		slog.Warn("change point query failed", "err", err)
@@ -409,7 +408,7 @@ GROUP BY pattern, severity
 ORDER BY cnt DESC
 LIMIT 5;`, tokenize)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, svc, namespace, namespace, from, to)
+	rows, err := s.duck.QueryContext(ctx, q, svc, namespace, namespace, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("correlated logs query: %w", err)
 	}
@@ -470,7 +469,7 @@ UNION ALL
  LIMIT 1)
 `
 
-	rows, err := s.duck.DB.QueryContext(
+	rows, err := s.duck.QueryContext(
 		ctx,
 		q,
 		svc, namespace, namespace, fromNano, toNano,

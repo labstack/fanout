@@ -144,7 +144,7 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 3))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now())")).
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -168,6 +168,48 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 // Within DUCKLAKE_MAINTENANCE_EVERY_SECONDS of the last pass, runMaintenance
 // must short-circuit before issuing ANY SQL — the throttle that keeps the
 // retention+compaction cycle off every rollup tick.
+// runMerge issues exactly one merge_adjacent_files call when due, and nothing
+// on the next call within the DUCKLAKE_MERGE_EVERY_SECONDS cadence.
+func TestRunMergeExecutesThenThrottles(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	d := &Duck{DB: db, cfg: env.Config{MergeEverySeconds: 60}}
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	if err := d.runMerge(context.Background()); err != nil {
+		t.Fatalf("runMerge() = %v, want nil", err)
+	}
+	// Second call is within the cadence → must issue no SQL.
+	if err := d.runMerge(context.Background()); err != nil {
+		t.Fatalf("throttled runMerge() = %v, want nil", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+// MergeEverySeconds <= 0 disables the frequent merge pass entirely.
+func TestRunMergeDisabled(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	d := &Duck{DB: db, cfg: env.Config{MergeEverySeconds: 0}}
+	if err := d.runMerge(context.Background()); err != nil {
+		t.Fatalf("disabled runMerge() = %v, want nil", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("disabled runMerge should issue no SQL: %v", err)
+	}
+}
+
 func TestRunMaintenanceThrottle(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -196,7 +238,7 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnError(errors.New("merge failed"))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now())")).
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -233,7 +275,7 @@ func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
 	// skips the TTL deletes).
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now())")).
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -326,5 +368,29 @@ func TestDuckDBPoolSizeConfigurable(t *testing.T) {
 	}
 	if got := duckDBPoolSize(env.Config{DuckDBMaxConns: 8}); got != 8 {
 		t.Errorf("configured pool size = %d, want 8", got)
+	}
+}
+
+func TestParseDuckBytes(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int64
+		ok   bool
+	}{
+		{"6.4 GiB", 6871947673, true},
+		{"512.0 MiB", 512 << 20, true},
+		{"1024 bytes", 1024, true},
+		{"8 GiB", 8 << 30, true},
+		{"1000 MB", 1_000_000_000, true},
+		{"0", 0, true},
+		{"", 0, false},
+		{"GiB", 0, false},
+		{"6.4 PiB", 0, false},
+	}
+	for _, c := range cases {
+		got, ok := parseDuckBytes(c.in)
+		if ok != c.ok || (ok && got != c.want) {
+			t.Errorf("parseDuckBytes(%q) = (%d, %v), want (%d, %v)", c.in, got, ok, c.want, c.ok)
+		}
 	}
 }

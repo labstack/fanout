@@ -132,7 +132,7 @@ ORDER BY start_unix_nano DESC
 LIMIT %d;
 `, p.Window, filterStr, p.Limit+1)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("findSpans query failed", "err", err)
 		return []SpanResult{}, false, fmt.Errorf("findSpans query: %w", err)
@@ -222,7 +222,7 @@ ORDER BY time_unix_nano DESC
 LIMIT %d;
 `, p.Window, filterStr, p.Limit+1)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("findLogs query failed", "err", err)
 		return []LogResult{}, false, fmt.Errorf("findLogs query: %w", err)
@@ -318,7 +318,7 @@ ORDER BY time_unix_nano DESC
 LIMIT %d;
 `, p.Window, filterStr, p.Limit+1)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("findMetrics query failed", "err", err)
 		return []MetricInfo{}, false, fmt.Errorf("findMetrics query: %w", err)

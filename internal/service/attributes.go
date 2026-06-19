@@ -159,7 +159,7 @@ FROM combined
 ORDER BY count DESC`,
 		strings.Join(cols, ", "), where, strings.Join(cols, ", "))
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("attributes query: %w", err)
 	}
@@ -237,7 +237,7 @@ func (s *Service) attributesFromJSON(ctx context.Context, p AttributeParams) (*A
 
 	countQ := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", table, where)
 	var totalRows int64
-	if err := s.duck.DB.QueryRowContext(ctx, countQ, args...).Scan(&totalRows); err != nil {
+	if err := s.duck.QueryRowScan(ctx, []any{&totalRows}, countQ, args...); err != nil {
 		slog.Warn("attributes count query failed", "signal", p.Signal, "err", err)
 		out.Warnings = append(out.Warnings, fmt.Sprintf("Count query failed: %s — results may be incomplete", err))
 	}
@@ -273,7 +273,7 @@ ORDER BY count DESC
 LIMIT %d`, table, where, limit), "{col}", jsonCol)
 
 	var warnings []string
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("JSON attribute discovery failed", "table", table, "col", jsonCol, "err", err)
 		warnings = append(warnings, fmt.Sprintf("Discovery failed for %s.%s: %s", table, jsonCol, err))

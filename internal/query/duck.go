@@ -24,6 +24,7 @@ type Duck struct {
 	DB              *sql.DB
 	cfg             env.Config
 	lastMaintenance time.Time
+	lastMerge       time.Time // cadence for the frequent merge-only compaction pass
 	// rollupLagNanos holds the rollup watermark back from the max ingested
 	// timestamp so late/out-of-order commits aren't skipped. Zero disables the
 	// lag (no trailing window).
@@ -98,6 +99,74 @@ func duckDSN(dbPath, mem string, threads int) (string, error) {
 	return dsn, nil
 }
 
+// memoryHeadroomBytes is the absolute RAM left free below DuckDB's memory_limit
+// for the Go heap, the ingest appender, and untracked allocations. On a small
+// box DuckDB's default (80% of RAM) leaves too little — observed: kernel
+// OOM-kill at RSS 7.6 GB on an 8 GB box under a heavy rollup+query+ingest load.
+const memoryHeadroomBytes = int64(2) << 30 // 2 GiB
+
+// applyMemoryHeadroom caps DuckDB's auto memory_limit to (RAM - headroom) on
+// small boxes, keeping the default on large ones. It reads DuckDB's own
+// cgroup-aware auto value (so containers stay correct) and only lowers it when
+// 80% would leave less than the headroom — converting a kernel OOM-kill into a
+// graceful DuckDB memory-limit error. No-op (and non-fatal) if it can't parse.
+func applyMemoryHeadroom(ctx context.Context, db *sql.DB) error {
+	var raw string
+	if err := db.QueryRowContext(ctx, "SELECT current_setting('memory_limit')").Scan(&raw); err != nil {
+		return err
+	}
+	limit, ok := parseDuckBytes(raw)
+	if !ok || limit <= 0 {
+		return nil // unparseable — leave DuckDB's default in place
+	}
+	// Invert DuckDB's default memory_limit (80% of RAM) to recover total RAM.
+	// The 0.8 is coupled to that default — re-check on DuckDB upgrades — and is
+	// only valid because the caller runs this with an unpinned limit (cfg.DuckDBMemory == "").
+	total := int64(float64(limit) / 0.8)
+	capped := total - memoryHeadroomBytes
+	if capped <= 0 || capped >= limit {
+		return nil // big box (80% already leaves >= headroom) — keep the default
+	}
+	_, err := db.ExecContext(ctx, fmt.Sprintf("SET memory_limit='%dB'", capped))
+	return err
+}
+
+// parseDuckBytes parses a DuckDB byte-size string ("6.4 GiB", "512.0 MiB",
+// "1024 bytes") into bytes. Returns false if unparseable.
+func parseDuckBytes(s string) (int64, bool) {
+	s = strings.TrimSpace(s)
+	i := 0
+	for i < len(s) && ((s[i] >= '0' && s[i] <= '9') || s[i] == '.') {
+		i++
+	}
+	num, err := strconv.ParseFloat(strings.TrimSpace(s[:i]), 64)
+	if err != nil {
+		return 0, false
+	}
+	switch strings.ToLower(strings.TrimSpace(s[i:])) {
+	case "", "b", "byte", "bytes":
+		return int64(num), true
+	case "kib":
+		return int64(num * (1 << 10)), true
+	case "mib":
+		return int64(num * (1 << 20)), true
+	case "gib":
+		return int64(num * (1 << 30)), true
+	case "tib":
+		return int64(num * (1 << 40)), true
+	case "kb":
+		return int64(num * 1e3), true
+	case "mb":
+		return int64(num * 1e6), true
+	case "gb":
+		return int64(num * 1e9), true
+	case "tb":
+		return int64(num * 1e12), true
+	default:
+		return 0, false
+	}
+}
+
 func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 	if err := os.MkdirAll(cfg.QueryDir(), 0o755); err != nil {
 		return nil, fmt.Errorf("create query dir: %w", err)
@@ -142,6 +211,14 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 	}
 
 	d := &Duck{DB: db, cfg: cfg, rollupLagNanos: rollupLagFromConfig(cfg)}
+	if cfg.DuckDBMemory == "" {
+		// Only when the operator hasn't pinned DUCKDB_MEMORY: keep DuckDB's
+		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
+		// small ones, so the kernel doesn't OOM-kill the whole process.
+		if err := applyMemoryHeadroom(ctx, db); err != nil {
+			slog.Warn("apply memory headroom failed; using DuckDB default memory_limit", "err", err)
+		}
+	}
 	if err := CreateTables(db); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -150,7 +227,55 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("create views: %w", err)
 	}
+	if cfg.RollupSkipToLatest {
+		// Best-effort: on failure the rollup just catches up normally.
+		if err := d.skipRollupToLatest(ctx); err != nil {
+			slog.Warn("rollup skip-to-latest failed; rollup will catch up normally", "err", err)
+		} else {
+			slog.Info("rollup skip-to-latest: existing data marked already-rolled-up")
+		}
+	}
 	return d, nil
+}
+
+// skipRollupToLatest advances every rollup watermark to the current max ingested
+// timestamp, so existing data is treated as already-processed rather than
+// aggregated as a backlog. This avoids a multi-minute first-rollup catch-up
+// (a wide-start_time backlog holds writeMu and starves ingest) when standing up
+// a large pre-seeded historical dataset. Runs once at boot before RunRollups, so
+// taking writeMu here is uncontended.
+func (d *Duck) skipRollupToLatest(ctx context.Context) error {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	svc, err := maxServiceRollupWatermark(ctx, tx)
+	if err != nil {
+		return err
+	}
+	edge, err := maxEdgeRollupWatermark(ctx, tx)
+	if err != nil {
+		return err
+	}
+	for _, w := range []struct {
+		key       string
+		watermark int64
+	}{
+		{serviceRollupStateKey, svc},
+		{serviceRollupRawMaxKey, svc},
+		{edgeRollupStateKey, edge},
+		{edgeRollupRawMaxKey, edge},
+	} {
+		if err := storeRollupWatermark(ctx, tx, w.key, w.watermark); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string, maxConns int) (*sql.DB, error) {
@@ -339,9 +464,13 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 		affected += n
 	}
 
-	// Maintenance (retention + DuckLake compaction) must run even when a
-	// rollup fails: a failing rollup is exactly when compaction matters most,
-	// since file/snapshot growth makes every retried pass heavier.
+	// Compaction must run even when a rollup fails: a failing rollup is exactly
+	// when compaction matters most, since file/snapshot growth makes every
+	// retried pass heavier. The frequent merge pass keeps the file count low; the
+	// hourly maintenance pass handles retention + snapshot expiry + cleanup.
+	if err := d.runMerge(ctx); err != nil {
+		slog.Warn("ducklake merge failed", "err", err)
+	}
 	if err := d.runMaintenance(ctx); err != nil {
 		slog.Warn("ducklake maintenance failed", "err", err)
 	}
@@ -496,12 +625,41 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 		rawMaxProcessed = windowEnd
 	}
 
-	if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, windowStart, windowEnd); err != nil {
-		return 0, err
-	}
-	res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, windowStart, windowEnd)
+	// Query the start_time range that the affected ingested-window spans cover.
+	// We sub-window this range in edgeStartChunkNanos increments so the
+	// call_edges self-join never fans out over more than 30 min of start_time,
+	// even when a burst catches up hours of backlog in a single ingested window.
+	var minStartT, maxStartT sql.NullTime
+	err = tx.QueryRowContext(ctx, `
+SELECT
+  MIN(date_trunc('minute', start_time)),
+  MAX(date_trunc('minute', start_time))
+FROM spans
+WHERE ingested_unix_nano > ?
+  AND ingested_unix_nano <= ?
+  AND start_time IS NOT NULL`, windowStart, windowEnd).Scan(&minStartT, &maxStartT)
 	if err != nil {
 		return 0, err
+	}
+
+	var totalAffected int64
+	if minStartT.Valid {
+		subLo := minStartT.Time
+		maxT := maxStartT.Time
+		for !subLo.After(maxT) {
+			subHi := subLo.Add(time.Duration(edgeStartChunkNanos))
+			if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, windowStart, windowEnd, subLo, subHi); err != nil {
+				return 0, err
+			}
+			res, err := tx.ExecContext(ctx, edgeRollupInsertSQL, windowStart, windowEnd, subLo, subHi)
+			if err != nil {
+				return 0, err
+			}
+			if rows, err := res.RowsAffected(); err == nil {
+				totalAffected += rows
+			}
+			subLo = subHi
+		}
 	}
 
 	if err := storeRollupWatermark(ctx, tx, edgeRollupStateKey, newWatermark); err != nil {
@@ -514,10 +672,7 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 
-	if rows, err := res.RowsAffected(); err == nil {
-		return rows, nil
-	}
-	return 0, nil
+	return totalAffected, nil
 }
 
 // rollupChunkNanos caps how much ingest history one rollup pass scans. A pass
@@ -527,6 +682,11 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 // 2026-06-13 (UTC): the edge rollup's first pass covered 12 days of spans,
 // spilled 375 GiB to temp, filled the disk, and never committed.
 const rollupChunkNanos = int64(time.Hour)
+
+// edgeStartChunkNanos bounds how wide a start_time range one edge-rollup
+// DELETE+INSERT processes, so the call_edges self-join over a wide backlog
+// (catch-up/bulk-load) can't exhaust memory. The pass loops over sub-windows.
+const edgeStartChunkNanos = int64(30 * time.Minute)
 
 // rollupWindow bounds one pass's scan to (start, end]. start falls back to
 // just before the oldest ingested row when there's no stored watermark, so a
@@ -703,6 +863,15 @@ span_agg AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
    AND a.service = s.service
+  -- Bound the scan to the affected bucket range so DuckLake prunes parquet by
+  -- start_time stats instead of scanning all history (the join on a computed
+  -- date_trunc bucket alone does not prune). The range is a provable superset
+  -- of the affected buckets — every row in an affected bucket has start_time in
+  -- [MIN(bucket), MAX(bucket)+1min) — so it drops no rows. A late span with an
+  -- old start_time widens the range (and this scan) only for the pass that
+  -- ingests it, same trade-off as the edge rollup's parent bound.
+  WHERE s.start_time >= (SELECT MIN(bucket) FROM affected)
+    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
   GROUP BY s.namespace, date_trunc('minute', s.start_time), s.service
 ),
 log_agg AS (
@@ -716,6 +885,8 @@ log_agg AS (
     ON a.namespace = l.namespace
    AND a.bucket = date_trunc('minute', l.time)
    AND a.service = l.service
+  WHERE l.time >= (SELECT MIN(bucket) FROM affected)
+    AND l.time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
   GROUP BY l.namespace, date_trunc('minute', l.time), l.service
 ),
 metric_agg AS (
@@ -729,6 +900,8 @@ metric_agg AS (
     ON a.namespace = m.namespace
    AND a.bucket = date_trunc('minute', m.time)
    AND a.service = m.service
+  WHERE m.time >= (SELECT MIN(bucket) FROM affected)
+    AND m.time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
   GROUP BY m.namespace, date_trunc('minute', m.time), m.service
 )
 INSERT INTO service_rollup (
@@ -764,6 +937,8 @@ WITH affected AS (
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
+    AND start_time >= ?
+    AND start_time < ?
 )
 DELETE FROM edge_rollup
 WHERE EXISTS (
@@ -780,6 +955,8 @@ WITH affected AS (
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
+    AND start_time >= ?
+    AND start_time < ?
 ),
 call_edges AS (
   SELECT
@@ -813,6 +990,8 @@ call_edges AS (
     AND child.service IS NOT NULL
     AND child.service != ''
     AND parent.service != child.service
+    AND child.start_time >= (SELECT MIN(bucket) FROM affected)
+    AND child.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
   GROUP BY child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
 ),
 -- Producers and consumers are aggregated per (namespace, bucket, service,
@@ -833,6 +1012,8 @@ producers AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_PRODUCER'
+    AND s.start_time >= (SELECT MIN(bucket) FROM affected)
+    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
     AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
@@ -850,6 +1031,8 @@ consumers AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_CONSUMER'
+    AND s.start_time >= (SELECT MIN(bucket) FROM affected)
+    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
     AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
@@ -891,6 +1074,42 @@ FROM call_edges
 UNION ALL
 SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
 FROM messaging_edges;`
+
+// snapshotGraceMinutes is how long a superseded DuckLake snapshot (and the
+// parquet files it references) is kept past compaction before expiry/cleanup
+// may reclaim it. It must exceed the longest read query — reads don't hold
+// writeMu, so a shorter window lets cleanup delete a file mid-scan — while
+// staying well under the maintenance interval so file/snapshot growth stays
+// bounded. Queries are sub-second to a few seconds; 10 minutes is ample margin.
+const snapshotGraceMinutes = 10
+
+// runMerge runs ONLY ducklake_merge_adjacent_files on a short cadence
+// (DUCKLAKE_MERGE_EVERY_SECONDS, default 60s). Merge consolidates the newest
+// small parquet files and deletes nothing, so it's cheap and safe to run often —
+// keeping the queryable file count continuously low is what bounds rollup/query
+// scan latency. The deletions (expire_snapshots + cleanup_old_files), which
+// carry the read race and catalog cost, stay on the hourly runMaintenance
+// cadence. Decoupling the two resolves the churn-vs-pileup tension: frequent
+// cheap merge keeps scans fast; rare deletes keep the race and overhead away.
+func (d *Duck) runMerge(ctx context.Context) error {
+	every := time.Duration(d.cfg.MergeEverySeconds) * time.Second
+	if every <= 0 {
+		return nil // merge pass disabled
+	}
+	if !d.lastMerge.IsZero() && time.Since(d.lastMerge) < every {
+		return nil
+	}
+	// merge commits new files — serialize against other writers like maintenance.
+	d.writeMu.Lock()
+	_, err := d.DB.ExecContext(ctx, "CALL ducklake_merge_adjacent_files('lake')")
+	d.writeMu.Unlock()
+	d.lastMerge = time.Now()
+	if err != nil {
+		slog.Error("merge_adjacent_files failed", "err", err)
+		return fmt.Errorf("merge_adjacent_files: %w", err)
+	}
+	return nil
+}
 
 func (d *Duck) runMaintenance(ctx context.Context) error {
 	every := time.Duration(d.cfg.MaintenanceEverySeconds) * time.Second
@@ -937,17 +1156,37 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	// files; without merge + expiry both grow without bound until per-file
 	// metadata pins OOM every wide query (prod 2026-06-13: 60k snapshots, 50k
 	// files averaging 21KB, rollups dead at any memory_limit). Holding writeMu
-	// here quiesces the dataset, which is the precondition for these calls.
-	// Order matters: merge rewrites small files into large ones, expiry releases
-	// the snapshots that referenced the small ones, cleanup deletes the files no
-	// live snapshot references. Fanout exposes no time travel, so only the
-	// latest snapshot is kept (expire_snapshots never drops the newest).
+	// here quiesces the dataset against WRITES, the precondition for these calls.
+	// Order: merge rewrites small files into large ones, expiry releases the
+	// snapshots that referenced the small ones, cleanup deletes the files no live
+	// snapshot references. DuckLake never expires the newest snapshot, so a
+	// low-traffic instance (no new commits within the grace) still keeps a
+	// readable one.
+	//
+	// GRACE WINDOW (now() - snapshotGraceMinutes) on EXPIRY: writeMu does NOT
+	// serialize reads, so an Overview/diagnose query can be mid-scan against a
+	// snapshot merge just superseded; expiring + deleting its parquet immediately
+	// yanks the file out from under the reader ("IO Error: Cannot open file …: No
+	// such file or directory"). Sparing recently-superseded snapshots keeps their
+	// files referenced (so cleanup won't delete them) until any in-flight reader
+	// has finished; they're reclaimed a cycle later. At FLUSH_SECONDS=15 the grace
+	// retains ~40 snapshots (4/min × 10min) — bounded, nowhere near the 60k OOM,
+	// and far below the (default 1h) maintenance cycle.
+	//
+	// cleanup stays cleanup_all => true: the bundled DuckLake's
+	// ducklake_cleanup_old_files does NOT accept an older_than grace (verified by
+	// benchmark — the call errored every cycle), and it isn't needed: expiry's
+	// grace already prevents within-grace files from being scheduled for deletion,
+	// so cleanup_all only unlinks files no live snapshot references.
+	expireSQL := fmt.Sprintf(
+		"CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL %d MINUTE)",
+		snapshotGraceMinutes)
 	for _, stmt := range []struct {
 		name string
 		sql  string
 	}{
 		{name: "merge_adjacent_files", sql: "CALL ducklake_merge_adjacent_files('lake')"},
-		{name: "expire_snapshots", sql: "CALL ducklake_expire_snapshots('lake', older_than => now())"},
+		{name: "expire_snapshots", sql: expireSQL},
 		{name: "cleanup_old_files", sql: "CALL ducklake_cleanup_old_files('lake', cleanup_all => true)"},
 	} {
 		if _, err := d.DB.ExecContext(ctx, stmt.sql); err != nil {
@@ -974,6 +1213,68 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	}
 	d.lastMaintenanceErr = err
 	d.maintHealthMu.Unlock()
+	return err
+}
+
+// ---- Read query helpers ----
+
+// isTransientLakeIOError reports whether err is a DuckLake compaction race: a
+// concurrent maintenance pass (merge + cleanup, which runs without blocking
+// reads) unlinked a parquet file this read had planned against. Re-running the
+// query re-plans against the current snapshot (the merged file), which succeeds.
+func isTransientLakeIOError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "IO Error") && strings.Contains(msg, "No such file or directory")
+}
+
+// QueryContext runs a read query, retrying briefly on the transient DuckLake
+// "file deleted mid-scan" race (reads don't take writeMu, so maintenance can
+// unlink a just-merged file underneath them). Cleanup is instantaneous, so a
+// short backoff lets the retry re-plan against fresh files. Use this for every
+// read that scans the lake instead of DB.QueryContext directly.
+func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	const maxAttempts = 3
+	var rows *sql.Rows
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		rows, err = d.DB.QueryContext(ctx, query, args...)
+		if err == nil || attempt == maxAttempts || !isTransientLakeIOError(err) {
+			return rows, err
+		}
+		if rows != nil {
+			_ = rows.Close()
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt) * 25 * time.Millisecond):
+		}
+	}
+	return rows, err
+}
+
+// QueryRowScan is the single-row analogue of QueryContext: it retries the same
+// transient DuckLake "file deleted mid-scan" race. For a single-row read the IO
+// error surfaces at Scan (not at QueryRowContext), so the retry wraps
+// QueryRowContext+Scan together. Use it for lake-scanning single-row reads
+// (`*Duck.QueryContext` covers the multi-row ones).
+func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
+	const maxAttempts = 3
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = d.DB.QueryRowContext(ctx, query, args...).Scan(dest...)
+		if err == nil || attempt == maxAttempts || !isTransientLakeIOError(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt) * 25 * time.Millisecond):
+		}
+	}
 	return err
 }
 

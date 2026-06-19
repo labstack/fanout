@@ -167,7 +167,7 @@ ORDER BY %s
 LIMIT %d;
 `, p.Window, whereClause, orderExpr, p.Limit+1)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("spans ungrouped query failed", "err", err)
 		return &SpansResult{Spans: []SpanRow{}}, fmt.Errorf("spans query: %w", err)
@@ -258,7 +258,7 @@ ORDER BY %s
 LIMIT %d;
 `, selectList, exemplarCol, p.Window, whereClause, groupList, orderExpr, p.Limit+1)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("spans grouped query failed", "err", err)
 		return &SpansResult{Groups: []SpanGroup{}}, fmt.Errorf("spans grouped query: %w", err)

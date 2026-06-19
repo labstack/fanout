@@ -102,7 +102,7 @@ ORDER BY metric_name
 LIMIT 100;
 `, whereClause)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("query failed", "method", "Metrics", "err", err)
 		return &MetricsResult{Metrics: []MetricSummary{}}, nil
@@ -184,8 +184,7 @@ GROUP BY type;
 
 	out := &MetricDetailResult{Name: name}
 	var services any
-	row := s.duck.DB.QueryRowContext(ctx, q, namespace, namespace, name)
-	if err := row.Scan(&out.Type, &out.Count, &out.Avg, &out.Min, &out.Max, &services); err != nil {
+	if err := s.duck.QueryRowScan(ctx, []any{&out.Type, &out.Count, &out.Avg, &out.Min, &out.Max, &services}, q, namespace, namespace, name); err != nil {
 		slog.Warn("query failed", "method", "MetricDetail.summary", "metric", name, "err", err)
 		return out, nil
 	}
@@ -210,7 +209,7 @@ GROUP BY bucket
 ORDER BY bucket ASC;
 `, bucketMins, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, tsQ, namespace, namespace, name)
+	rows, err := s.duck.QueryContext(ctx, tsQ, namespace, namespace, name)
 	if err != nil {
 		slog.Warn("query failed", "method", "MetricDetail.timeseries", "metric", name, "err", err)
 		return out, nil
@@ -261,7 +260,7 @@ ORDER BY metric_name, bucket ASC;
 
 	queryArgs := []any{namespace, namespace}
 	queryArgs = append(queryArgs, args...)
-	rows, err := s.duck.DB.QueryContext(ctx, q, queryArgs...)
+	rows, err := s.duck.QueryContext(ctx, q, queryArgs...)
 	if err != nil {
 		slog.Warn("query failed", "method", "metricSparklines", "err", err)
 		return out
@@ -355,7 +354,7 @@ func (s *Service) Compare(ctx context.Context, services []string, window int, na
 // Namespaces discovers namespaces from recent telemetry data.
 func (s *Service) Namespaces(ctx context.Context) []string {
 	var namespaces []string
-	rows, err := s.duck.DB.QueryContext(ctx, `
+	rows, err := s.duck.QueryContext(ctx, `
 SELECT DISTINCT namespace
 FROM spans
 WHERE start_time >= now() - INTERVAL 7 DAY
