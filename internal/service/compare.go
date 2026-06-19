@@ -220,7 +220,7 @@ func (s *Service) QueryRollupBuckets(ctx context.Context, service string, start,
 			AND (? = '' OR namespace = ?)
 		ORDER BY bucket ASC
 	`
-	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end, namespace, namespace)
+	rows, err := s.duck.QueryContext(ctx, q, service, start, end, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +251,7 @@ func (s *Service) queryServiceStats(ctx context.Context, service string, start, 
 		  AND start_time >= ?
 		  AND start_time < ?
 	`
-	rows, err := s.duck.DB.QueryContext(ctx, q, service, start, end)
+	rows, err := s.duck.QueryContext(ctx, q, service, start, end)
 	if err != nil {
 		return AggStats{}, err
 	}
@@ -287,7 +287,7 @@ func (s *Service) queryOperationStats(ctx context.Context, service, operation st
 		  AND start_time >= ?
 		  AND start_time < ?
 	`
-	rows, err := s.duck.DB.QueryContext(ctx, q, service, operation, start, end)
+	rows, err := s.duck.QueryContext(ctx, q, service, operation, start, end)
 	if err != nil {
 		return AggStats{}, err
 	}
@@ -479,7 +479,7 @@ func (s *Service) compareServicesRollup(ctx context.Context, services []string, 
 		ORDER BY requests DESC
 	`, window, strings.Join(placeholders, ","))
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}

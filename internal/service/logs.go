@@ -128,7 +128,7 @@ ORDER BY %s
 LIMIT %d;
 `, p.Window, whereClause, orderExpr, p.Limit+1)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("logs ungrouped query failed", "err", err)
 		return &LogsResult{Logs: []LogRow{}}, fmt.Errorf("logs query: %w", err)
@@ -203,7 +203,7 @@ ORDER BY %s
 LIMIT %d;
 `, selectCols, p.Window, whereClause, groupCols, orderExpr, p.Limit+1)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		slog.Warn("logs grouped query failed", "err", err)
 		return &LogsResult{Groups: []LogGroup{}}, fmt.Errorf("logs grouped query: %w", err)

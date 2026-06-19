@@ -110,7 +110,7 @@ GROUP BY name
 ORDER BY name
 LIMIT %d`, where, p.Limit)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("metrics list query failed: %w", err)
 	}
@@ -285,7 +285,7 @@ WINDOW w AS (PARTITION BY service ORDER BY bucket)
 ORDER BY bucket ASC
 LIMIT %d`, selectCols, effectiveValueExpr, where, groupCols, p.Limit)
 
-		rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+		rows, err := s.duck.QueryContext(ctx, q, args...)
 		if err != nil {
 			slog.Warn("query failed", "method", "MetricsQuery", "metric", metricName, "err", err)
 			failedMetrics = append(failedMetrics, metricName)
@@ -395,7 +395,7 @@ FROM metrics
 ORDER BY time DESC
 LIMIT 20`, where)
 
-		rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+		rows, err := s.duck.QueryContext(ctx, q, args...)
 		if err != nil {
 			slog.Warn("histogram query failed", "metric", metricName, "err", err)
 			continue
@@ -480,7 +480,7 @@ FROM metrics
 ORDER BY time DESC
 LIMIT 50`, where)
 
-		rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+		rows, err := s.duck.QueryContext(ctx, q, args...)
 		if err != nil {
 			slog.Warn("exemplars query failed", "metric", metricName, "err", err)
 			continue

@@ -1024,6 +1024,43 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	return err
 }
 
+// ---- Read query helpers ----
+
+// isTransientLakeIOError reports whether err is a DuckLake compaction race: a
+// concurrent maintenance pass (merge + cleanup, which runs without blocking
+// reads) unlinked a parquet file this read had planned against. Re-running the
+// query re-plans against the current snapshot (the merged file), which succeeds.
+func isTransientLakeIOError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "IO Error") && strings.Contains(msg, "No such file or directory")
+}
+
+// QueryContext runs a read query, retrying briefly on the transient DuckLake
+// "file deleted mid-scan" race (reads don't take writeMu, so maintenance can
+// unlink a just-merged file underneath them). Cleanup is instantaneous, so a
+// short backoff lets the retry re-plan against fresh files. Use this for every
+// read that scans the lake instead of DB.QueryContext directly.
+func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+	const maxAttempts = 3
+	var rows *sql.Rows
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		rows, err = d.DB.QueryContext(ctx, query, args...)
+		if err == nil || attempt == maxAttempts || !isTransientLakeIOError(err) {
+			return rows, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(attempt) * 25 * time.Millisecond):
+		}
+	}
+	return rows, err
+}
+
 // ---- Queries for API ----
 
 type LatencyRow struct {

@@ -117,7 +117,7 @@ ORDER BY
 LIMIT %d;
 `, window, limit)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace)
+	rows, err := s.duck.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("overview query failed: %w", err)
 	}
@@ -257,7 +257,7 @@ WHERE bucket >= now() - INTERVAL %d MINUTE
 ORDER BY service, bucket;
 `, window, strings.Join(placeholders, ", "))
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("sparklines query failed: %w", err)
 	}
@@ -326,7 +326,7 @@ ORDER BY service, cnt DESC
 LIMIT 20;
 `, window, strings.Join(placeholders, ", "))
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, args...)
+	rows, err := s.duck.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, fmt.Errorf("top errors query failed: %w", err)
 	}
@@ -371,7 +371,7 @@ GROUP BY bucket
 ORDER BY bucket;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace)
+	rows, err := s.duck.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("activity query failed: %w", err)
 	}
@@ -419,7 +419,7 @@ ORDER BY cnt DESC
 LIMIT 8;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace)
+	rows, err := s.duck.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, fmt.Errorf("recent errors query failed: %w", err)
 	}

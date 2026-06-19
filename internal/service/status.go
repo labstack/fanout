@@ -39,7 +39,7 @@ ORDER BY (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 
 LIMIT 100;
 `, window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, namespace, namespace)
+	rows, err := s.duck.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		slog.Warn("query failed", "method", "Status", "err", err)
 		return &StatusResult{

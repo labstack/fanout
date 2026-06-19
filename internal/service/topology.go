@@ -60,7 +60,7 @@ ORDER BY (SUM(spans) + SUM(COALESCE(log_count, 0)) + SUM(COALESCE(metric_count, 
 LIMIT 50;
 `, p.Window)
 
-	rows, err := s.duck.DB.QueryContext(ctx, q, p.Namespace, p.Namespace)
+	rows, err := s.duck.QueryContext(ctx, q, p.Namespace, p.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("topology nodes query failed: %w", err)
 	}
@@ -115,7 +115,7 @@ ORDER BY call_count DESC
 LIMIT 100;
 `, p.Window, edgeTypeFilter)
 
-	rows, err = s.duck.DB.QueryContext(ctx, q, p.Namespace, p.Namespace)
+	rows, err = s.duck.QueryContext(ctx, q, p.Namespace, p.Namespace)
 	if err != nil {
 		return nil, fmt.Errorf("topology edges query failed: %w", err)
 	}
