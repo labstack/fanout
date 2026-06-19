@@ -50,13 +50,30 @@ no separate `day` term is needed). Tables/columns:
 - `lake.logs` → `(namespace, hour(log_time))`
 - `lake.metrics` → `(namespace, hour(metric_time))`
 
+**Mechanism (stated precisely — this is file-level zonemap pruning, NOT partition
+pruning):** DuckLake prunes by per-file `start_time` min/max stats
+(`ducklake_file_column_stats`). `hour()` is an order-preserving transform whose
+only job is to physically segregate rows into per-hour files so those zonemaps
+stay ~1 hour wide. A range predicate (`start_time >= now() - INTERVAL N MINUTE`)
+then prunes any file whose `start_time` max is below the bound — range pruning is
+inherent to min/max, so there is no Iceberg-style "ranges don't prune on a
+transform" hazard. Today's day-wide files can't exclude anything within the day;
+hour-wide files can.
+
 **Why this fixes all three scanners with almost no query changes:**
 - Overview error queries and rollup agg scans already filter `start_time`, so
-  DuckLake prunes them to the **1–2 relevant hour partitions** (~1/24 of a day).
-- The rollup `affected` CTE (ingested-time filter) benefits indirectly: merge
-  now runs *per hour partition*, so merged files span ≤1 hour of data → tight
-  zonemaps → the ingested-time scan prunes to the current hour's files instead of
-  day-spanning files (the exact failure at "4 merged files = 13s").
+  their files prune to ≈ the **current 1–2 hours' files** (~1/24 of a day).
+- The rollup `affected` CTE (ingested-time filter, no `start_time` bound) prunes
+  **indirectly and conditionally**: files written/merged in earlier hours have an
+  `ingested_unix_nano` max below the rollup watermark, so they prune out — leaving
+  ≈ the current hour's files. **This holds only while old hour partitions are not
+  backfilled.** A late-arriving span (old `start_time`, fresh `ingested_unix_nano`)
+  lands in an *old* hour partition and re-widens that partition's newest file's
+  ingested zonemap up to "now", so it stops pruning for subsequent rollup passes
+  (same trade-off already documented for the span_agg scan at duck.go ~711-719).
+  Steady state: the affected scan reads ≈ current-hour ingested files (small).
+  Heavy late data: partial reversion. The benchmark MUST measure the affected
+  scan cost, not assume it is free.
 
 The partition key does the work; the query/rollup SQL is essentially unchanged.
 
@@ -94,6 +111,32 @@ path. `ALTER ... SET PARTITIONED BY` governs new writes; existing data is wiped.
 On a deployed instance this is a one-time `/data` wipe, documented in the change.
 `configureDuckLake` runs the new `SET PARTITIONED BY` on boot.
 
+## Verification gate (local experiment — BEFORE building or any paid run)
+
+A few hours of local work that de-risks the two Critical assumptions for far less
+than discovering them in a paid cloud soak. Build a local DuckLake with the
+bundled duckdb-go v2.10503.1, `SET PARTITIONED BY (namespace, hour(start_time))`,
+then:
+
+1. Write ~2 hours of synthetic spans **through the real Appender path** (enough
+   that one hour exceeds the 256MB target so merge actively runs). Run
+   `ducklake_merge_adjacent_files`.
+2. **Gate C1 — merge stays within an hour:** query `ducklake_data_file` /
+   `ducklake_file_column_stats` and assert **no merged file's `start_time`
+   min/max straddles an hour boundary**. If merge crosses hours, zonemaps
+   re-widen and the design fails — stop and reconsider.
+3. **Gate #1/#4 — range predicate prunes:** `EXPLAIN`/`EXPLAIN ANALYZE`
+   `WHERE start_time >= now() - INTERVAL 15 MINUTE` and assert **files scanned ≈
+   current-hour files only** (not all hours). Files scanned is the real pruning
+   unit — assert on that, not "partitions".
+4. **Gate C2 — backfill impact:** write one backdated late span (old
+   `start_time`, fresh ingest) and re-check the old partition's ingested zonemap
+   to quantify how much the affected-CTE pruning degrades.
+
+Only proceed to implementation if C1 and #1 pass. If C1 fails, the fallback is
+DuckLake `sorted_tables`/clustering on `start_time` (tighten zonemaps without the
+partition-count explosion) — see Risk 2.
+
 ## Testing
 
 - **Unit:** `configureDuckLake` issues the `hour(...)` partition statements (and
@@ -110,12 +153,25 @@ On a deployed instance this is a one-time `/data` wipe, documented in the change
 1. **`hour` transform support/semantics** in bundled DuckLake (duckdb-go
    v2.10503.1) — verify first; fall back to `(namespace, day, hour)` if `hour()`
    is hour-of-day.
-2. **Partition/file proliferation** — 24 partitions/day/namespace × retention;
-   low-traffic hours yield tiny partitions. Bounded; `target_file_size` + merge
-   mitigate. Revisit if file count balloons (e.g., coarser at low volume).
-3. **Range-predicate pruning over a transform** — confirm DuckLake prunes
-   `start_time >= X` to hour partitions (it should; verify empirically).
-4. **Bench must span multiple hours** or it won't exercise the fix (addressed by
+2. **Partition/file proliferation (take seriously — adjacent to the known
+   catalog-bloat problem).** 24× more partitions/day/namespace × retention, and
+   low-traffic hours yield many tiny files merge can't coalesce across an hour
+   boundary. This is the same family as the prior 60k-snapshot / per-file-metadata
+   bloat ([[storage_compaction_gap]]). The benchmark MUST track file/catalog row
+   counts over the multi-hour soak, not just query p95. Escape hatch if file count
+   balloons: DuckLake `sorted_tables`/clustering on `start_time` to tighten
+   zonemaps without the partition explosion (keep day partitioning). Design this
+   fallback concretely if the gate experiment shows low-volume proliferation —
+   don't defer.
+3. **Merge must not straddle hour boundaries** (Critical) — proven by the gate
+   experiment (step 2) before building, not asserted.
+4. **`SET PARTITIONED BY` is new-writes-only** (confirmed by DuckLake docs: it
+   does not rewrite or error; old data keeps its old partitioning until retention
+   ages it out). So the `/data` wipe is a clean-slate convenience, not strictly
+   required. One check: `configureDuckLake` re-issues `SET PARTITIONED BY` every
+   boot — confirm re-issuing the same spec is a no-op and does not churn a new
+   partition-spec snapshot each restart (snapshot-bloat history).
+5. **Bench must span multiple hours** or it won't exercise the fix (addressed by
    the multi-hour mode above).
 
 ## Out of scope
