@@ -112,6 +112,23 @@ FROM range(?, ?) t(i)`,
 	}
 	t.Logf("edge_rollup rows after wide-backlog rollup: %d", count)
 
+	// Stronger: the number of distinct minute buckets in edge_rollup must equal
+	// the number of distinct minute buckets in the inserted spans' start_times.
+	// This proves sub-windowing didn't drop or duplicate any 1-minute bucket.
+	var edgeBuckets, spanBuckets int64
+	if err := db.QueryRowContext(ctx, `SELECT count(DISTINCT bucket) FROM edge_rollup`).Scan(&edgeBuckets); err != nil {
+		t.Fatalf("count distinct edge_rollup buckets: %v", err)
+	}
+	if err := db.QueryRowContext(ctx, `
+SELECT count(DISTINCT date_trunc('minute', start_time))
+FROM lake.spans`).Scan(&spanBuckets); err != nil {
+		t.Fatalf("count distinct span minute buckets: %v", err)
+	}
+	if edgeBuckets != spanBuckets {
+		t.Errorf("edge_rollup has %d distinct buckets, spans have %d distinct minute buckets — sub-windowing dropped or duplicated buckets",
+			edgeBuckets, spanBuckets)
+	}
+	t.Logf("distinct buckets: edge_rollup=%d span_minutes=%d", edgeBuckets, spanBuckets)
 }
 
 func TestSkipRollupToLatest(t *testing.T) {
@@ -144,5 +161,24 @@ FROM range(5000) t(i)`); err != nil {
 	}
 	if n != 0 {
 		t.Errorf("rollupOnce processed %d rows after skip-to-latest; want 0 (backlog should be skipped)", n)
+	}
+
+	// Insert one fresh live span (ingested_unix_nano = now) and verify that
+	// rollupOnce picks it up — proves the watermark didn't over-advance and
+	// swallow data that arrived after the skip.
+	if _, err := d.DB.ExecContext(ctx, `
+INSERT INTO lake.spans (namespace, trace_id, span_id, parent_span_id, service, kind,
+                        start_time, duration_ms, status, ingested_unix_nano)
+VALUES ('default', 'tr-live-1', 'sp-live-1', '', 'svc-live', 'SPAN_KIND_SERVER',
+        now(), 5.0, 'STATUS_CODE_OK', epoch_ns(now()))`); err != nil {
+		t.Fatalf("insert live span: %v", err)
+	}
+
+	n2, err := d.rollupOnce(ctx)
+	if err != nil {
+		t.Fatalf("rollupOnce (live data): %v", err)
+	}
+	if n2 == 0 {
+		t.Error("rollupOnce processed 0 rows for live span after skip-to-latest; watermark may have over-advanced")
 	}
 }

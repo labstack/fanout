@@ -119,7 +119,10 @@ func applyMemoryHeadroom(ctx context.Context, db *sql.DB) error {
 	if !ok || limit <= 0 {
 		return nil // unparseable — leave DuckDB's default in place
 	}
-	total := int64(float64(limit) / 0.8) // DuckDB defaults memory_limit to 80% of RAM
+	// Invert DuckDB's default memory_limit (80% of RAM) to recover total RAM.
+	// The 0.8 is coupled to that default — re-check on DuckDB upgrades — and is
+	// only valid because the caller runs this with an unpinned limit (cfg.DuckDBMemory == "").
+	total := int64(float64(limit) / 0.8)
 	capped := total - memoryHeadroomBytes
 	if capped <= 0 || capped >= limit {
 		return nil // big box (80% already leaves >= headroom) — keep the default
@@ -1240,6 +1243,9 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (*sq
 		rows, err = d.DB.QueryContext(ctx, query, args...)
 		if err == nil || attempt == maxAttempts || !isTransientLakeIOError(err) {
 			return rows, err
+		}
+		if rows != nil {
+			_ = rows.Close()
 		}
 		select {
 		case <-ctx.Done():

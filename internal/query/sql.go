@@ -56,7 +56,7 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse
 	// mid-scan by maintenance (see snapshotGraceMinutes in duck.go), so a
 	// caller-supplied TimeoutMs must never exceed it. Half the grace leaves
 	// ample margin for the longest legitimate scan.
-	const maxQueryTimeoutMs = snapshotGraceMinutes * 60 * 1000 / 2 // 5 min at a 10-min grace
+	const maxQueryTimeoutMs = snapshotGraceMinutes * 60 * 1000 / 2 // half the snapshot grace
 	timeoutMs := req.TimeoutMs
 	if timeoutMs <= 0 {
 		timeoutMs = 30000
