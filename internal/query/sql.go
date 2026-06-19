@@ -86,7 +86,11 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse
 	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
-	// Execute query
+	// Execute query. The raw `query` tool deliberately uses DB.QueryContext, not
+	// the d.QueryContext retry wrapper: arbitrary user SQL may stream large/long
+	// results, and a blind re-plan on a transient lake IO error is less obviously
+	// safe than for the fixed internal aggregate reads. This path is instead
+	// bounded by the timeout clamp above (well under the snapshot grace).
 	rows, err := d.DB.QueryContext(queryCtx, execQuery)
 	if err != nil {
 		return SQLResponse{

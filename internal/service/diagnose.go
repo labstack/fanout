@@ -39,8 +39,7 @@ WHERE start_time >= now() - INTERVAL %d MINUTE
   AND service = ?;
 `, window)
 
-	row := s.duck.DB.QueryRowContext(ctx, q, namespace, namespace, svc)
-	if err := row.Scan(&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate); err != nil {
+	if err := s.duck.QueryRowScan(ctx, []any{&out.SpanCount, &out.P50Ms, &out.P95Ms, &out.P99Ms, &out.ErrorRate}, q, namespace, namespace, svc); err != nil {
 		return nil, fmt.Errorf("diagnose query failed: %w", err)
 	}
 

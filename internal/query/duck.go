@@ -1094,6 +1094,28 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (*sq
 	return rows, err
 }
 
+// QueryRowScan is the single-row analogue of QueryContext: it retries the same
+// transient DuckLake "file deleted mid-scan" race. For a single-row read the IO
+// error surfaces at Scan (not at QueryRowContext), so the retry wraps
+// QueryRowContext+Scan together. Use it for lake-scanning single-row reads
+// (`*Duck.QueryContext` covers the multi-row ones).
+func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
+	const maxAttempts = 3
+	var err error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err = d.DB.QueryRowContext(ctx, query, args...).Scan(dest...)
+		if err == nil || attempt == maxAttempts || !isTransientLakeIOError(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Duration(attempt) * 25 * time.Millisecond):
+		}
+	}
+	return err
+}
+
 // ---- Queries for API ----
 
 type LatencyRow struct {

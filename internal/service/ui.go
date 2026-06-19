@@ -184,8 +184,7 @@ GROUP BY type;
 
 	out := &MetricDetailResult{Name: name}
 	var services any
-	row := s.duck.DB.QueryRowContext(ctx, q, namespace, namespace, name)
-	if err := row.Scan(&out.Type, &out.Count, &out.Avg, &out.Min, &out.Max, &services); err != nil {
+	if err := s.duck.QueryRowScan(ctx, []any{&out.Type, &out.Count, &out.Avg, &out.Min, &out.Max, &services}, q, namespace, namespace, name); err != nil {
 		slog.Warn("query failed", "method", "MetricDetail.summary", "metric", name, "err", err)
 		return out, nil
 	}

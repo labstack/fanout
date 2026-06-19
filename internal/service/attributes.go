@@ -237,7 +237,7 @@ func (s *Service) attributesFromJSON(ctx context.Context, p AttributeParams) (*A
 
 	countQ := fmt.Sprintf("SELECT COUNT(*) FROM %s %s", table, where)
 	var totalRows int64
-	if err := s.duck.DB.QueryRowContext(ctx, countQ, args...).Scan(&totalRows); err != nil {
+	if err := s.duck.QueryRowScan(ctx, []any{&totalRows}, countQ, args...); err != nil {
 		slog.Warn("attributes count query failed", "signal", p.Signal, "err", err)
 		out.Warnings = append(out.Warnings, fmt.Sprintf("Count query failed: %s — results may be incomplete", err))
 	}
