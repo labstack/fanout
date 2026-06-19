@@ -32,8 +32,15 @@ type Config struct {
 	// deletes + compaction). Default 3600 (hourly). Lower it to compact more
 	// aggressively, or for soak tests that need to observe file-count staying
 	// bounded within minutes (see scripts/soak.sh).
-	MaintenanceEverySeconds int    `env:"DUCKLAKE_MAINTENANCE_EVERY_SECONDS" envDefault:"3600"`
-	DefaultNS               string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
+	MaintenanceEverySeconds int `env:"DUCKLAKE_MAINTENANCE_EVERY_SECONDS" envDefault:"3600"`
+	// MergeEverySeconds is the cadence for the cheap, frequent DuckLake file
+	// compaction pass (ducklake_merge_adjacent_files only — it consolidates the
+	// newest small parquet files and deletes nothing). Run often (default 60s) it
+	// keeps the queryable file count continuously low, which is what bounds
+	// rollup/query scan latency — WITHOUT the churn, deletion race, or catalog
+	// cost of the full hourly maintenance pass (expire + cleanup). 0 disables it.
+	MergeEverySeconds int    `env:"DUCKLAKE_MERGE_EVERY_SECONDS" envDefault:"60"`
+	DefaultNS         string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
 	// PublicRead turns the instance into a public demo: unauthenticated GET/HEAD
 	// requests are served as a read-only viewer (writes, admin routes, /mcp, and
 	// the API-key routes still require real auth), and OTLP ingest is accepted

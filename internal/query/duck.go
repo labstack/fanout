@@ -24,6 +24,7 @@ type Duck struct {
 	DB              *sql.DB
 	cfg             env.Config
 	lastMaintenance time.Time
+	lastMerge       time.Time // cadence for the frequent merge-only compaction pass
 	// rollupLagNanos holds the rollup watermark back from the max ingested
 	// timestamp so late/out-of-order commits aren't skipped. Zero disables the
 	// lag (no trailing window).
@@ -339,9 +340,13 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 		affected += n
 	}
 
-	// Maintenance (retention + DuckLake compaction) must run even when a
-	// rollup fails: a failing rollup is exactly when compaction matters most,
-	// since file/snapshot growth makes every retried pass heavier.
+	// Compaction must run even when a rollup fails: a failing rollup is exactly
+	// when compaction matters most, since file/snapshot growth makes every
+	// retried pass heavier. The frequent merge pass keeps the file count low; the
+	// hourly maintenance pass handles retention + snapshot expiry + cleanup.
+	if err := d.runMerge(ctx); err != nil {
+		slog.Warn("ducklake merge failed", "err", err)
+	}
 	if err := d.runMaintenance(ctx); err != nil {
 		slog.Warn("ducklake maintenance failed", "err", err)
 	}
@@ -918,6 +923,34 @@ FROM messaging_edges;`
 // staying well under the maintenance interval so file/snapshot growth stays
 // bounded. Queries are sub-second to a few seconds; 10 minutes is ample margin.
 const snapshotGraceMinutes = 10
+
+// runMerge runs ONLY ducklake_merge_adjacent_files on a short cadence
+// (DUCKLAKE_MERGE_EVERY_SECONDS, default 60s). Merge consolidates the newest
+// small parquet files and deletes nothing, so it's cheap and safe to run often —
+// keeping the queryable file count continuously low is what bounds rollup/query
+// scan latency. The deletions (expire_snapshots + cleanup_old_files), which
+// carry the read race and catalog cost, stay on the hourly runMaintenance
+// cadence. Decoupling the two resolves the churn-vs-pileup tension: frequent
+// cheap merge keeps scans fast; rare deletes keep the race and overhead away.
+func (d *Duck) runMerge(ctx context.Context) error {
+	every := time.Duration(d.cfg.MergeEverySeconds) * time.Second
+	if every <= 0 {
+		return nil // merge pass disabled
+	}
+	if !d.lastMerge.IsZero() && time.Since(d.lastMerge) < every {
+		return nil
+	}
+	// merge commits new files — serialize against other writers like maintenance.
+	d.writeMu.Lock()
+	_, err := d.DB.ExecContext(ctx, "CALL ducklake_merge_adjacent_files('lake')")
+	d.writeMu.Unlock()
+	d.lastMerge = time.Now()
+	if err != nil {
+		slog.Error("merge_adjacent_files failed", "err", err)
+		return fmt.Errorf("merge_adjacent_files: %w", err)
+	}
+	return nil
+}
 
 func (d *Duck) runMaintenance(ctx context.Context) error {
 	every := time.Duration(d.cfg.MaintenanceEverySeconds) * time.Second
