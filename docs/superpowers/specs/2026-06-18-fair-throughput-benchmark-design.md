@@ -228,3 +228,58 @@ Prod-realistic, not the aggressive burst settings:
   teardown trap deletes all three on any exit (servers first, then network), and
   the harness prints every resource name so manual `hcloud ... delete` is trivial
   if a delete ever fails.
+
+## Results (2026-06-19)
+
+First clean end-to-end run. Two VMs `cpx32` ×2 (4 vCPU / 8 GB each), driver +
+target on a private network, direct gRPC. **Code under test: `f28cad2`** (the
+DuckLake expire-grace race fix). NOTE: the run banner printed HEAD `1e8cea7`
+because the summary re-reads `git HEAD` at the end rather than capturing the
+SHA shipped at launch — a harness bug to fix; `git archive` shipped `f28cad2`.
+
+| Step (tr/s) | Achieved rows/s | Verdict | Why |
+|---|---|---|---|
+| 6000  | 25,403 | **pass** | all SLOs held |
+| 9000  | 34,403 | inconclusive | achieved < 95% of target — same-size driver caps generation |
+| 12000 | 30,769 | fail | **query p95 2000ms > 1500ms** (drops=0, query errors=0) |
+| soak 4726 (15 min) | 17,465 | **fail** | **query p95 5000ms > 1500ms** (drops=0) |
+
+- **Ceiling ≈ 30,769 rows/s** — the rate at which query-P95-under-load first
+  breaches the 1.5s SLO. Not a crash, not drops (drops=0 everywhere), not the
+  race (0 "Cannot open file" all run — the `f44f7e6` fix held).
+- **Rated capacity: not certified.** The soak FAILED at a modest ~17.5k rows/s
+  on query p95 = 5s, so the SLO-bound sustainable rate is *below* 17.5k.
+
+### Root cause of the query-latency limit (the real finding)
+
+Ingest is not the bottleneck — at 17.5k rows/s ingest was trivial (export p95
+8ms, `ingest_queue_depth=0`, drops=0, 15.8M rows accepted). The limiter is the
+**rollup**: `avg rollup ≈ 14–20s under load`. Rollups run every
+`ROLLUP_EVERY=60s` (prod default), hold `writeMu`, and contend for the
+4-connection DuckDB pool (`DUCKDB_MAX_CONNS=4`); concurrent `Overview` queries
+queue behind them, so query p95 spikes to 5s on every rollup cycle. Ingest also
+visibly stalls (~20s, no drops) while maintenance holds `writeMu`.
+
+**Implication:** raising the rated capacity is a *query/rollup-contention*
+problem, not an ingest-throughput problem. Candidate work: make rollups
+incremental (not full-window recompute), shorten or drop the `writeMu` critical
+section for rollups, run rollups/queries on separate DuckDB connections, or cap
+rollup cost. This is the lever — not ingest.
+
+### vs the ~64k burst anchor
+
+Not comparable: the 64k figure was ingest-only (no query gate), aggressive
+5s/15s flush, four loadgen processes sharing cores with fanout. This fair run
+shows ingest is comfortably strong (~30k rows/s on 4 shared cores while *also*
+serving queries at prod 15s/60s cadence), but surfaces that query-latency-under-
+load — gated by rollup cost — is the true product limit.
+
+### Follow-ups surfaced
+- **Perf (high value):** rollup cost (~20s) gates query-latency-under-load.
+- **Harness:** summary banner re-reads `git HEAD` at end → mislabels the shipped
+  SHA; capture `git rev-parse HEAD` once at launch instead.
+- **Ceiling needs a bigger driver:** same-size cpx32 driver caps generation
+  (~8k tr/s); the true ingest ceiling is above 30.7k. Use multiple loadgen
+  processes or a larger driver to push past it.
+- **Hardening `1e8cea7` (cleanup grace + query-timeout clamp) not yet
+  live-validated** — wouldn't change this result (limiter is rollup cost).
