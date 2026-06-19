@@ -208,7 +208,10 @@ REMOTE
 
   # loadgen prints "FAIL: ..." to stderr (now in the local steplog) on any SLO
   # breach, send error, or query error — grep the LOCAL capture, not the driver.
-  local lg_fail; lg_fail=$(grep -c '^FAIL:' "$steplog" 2>/dev/null || echo 0)
+  # grep -c prints "0" AND exits 1 on no-match; a `|| echo 0` would then append a
+  # second "0", yielding "0\n0" and breaking the -gt test. Capture the count and
+  # default an empty result (missing file) to 0 instead.
+  local lg_fail; lg_fail=$(grep -c '^FAIL:' "$steplog" 2>/dev/null); lg_fail=${lg_fail:-0}
 
   STEP_VERDICT=pass; STEP_REASON=""
   if [ "$(( drops1 - drops0 ))" -gt 0 ]; then STEP_VERDICT=fail; STEP_REASON="drops=$(( drops1 - drops0 ))"
