@@ -283,3 +283,50 @@ load — gated by rollup cost — is the true product limit.
   processes or a larger driver to push past it.
 - **Hardening `1e8cea7` (cleanup grace + query-timeout clamp) not yet
   live-validated** — wouldn't change this result (limiter is rollup cost).
+
+## Results — after fixes (2026-06-19, HEAD 7472ff3)
+
+Iterated fixes, each validated by re-running the benchmark:
+
+| Fix | Commit | Effect |
+|---|---|---|
+| DuckLake snapshot-expiry grace | f44f7e6 | stops most expiry-side file races |
+| Bound rollup agg scans to affected bucket range | cc16454 | rollup 14–20s → **2.6–3.2s at small data**; query p95 5s → 233ms early |
+| Read-retry on transient "No such file" | 7472ff3 | race fully absorbed — **0 file-not-found**, ramp now reaches the soak |
+| Harness: forensics capture, banner SHA, lg_fail, ssh key | several | runs are diagnosable + reproducible |
+
+**Stability: resolved.** The earlier "crash" (connection refused, negative
+counter) does NOT recur. Final run: fanout alive serving 200s to the end, no
+panic/fatal, no OOM (1.6 GiB / 7.6 GiB), 0 query errors.
+
+**Remaining limit (architectural): within-day scan growth.** rollup + Overview
+raw-span error queries filter recent minutes but can't prune WITHIN a day —
+`merge_adjacent_files` rewrites the day's parquet into wide-`start_time`-range
+files, so DuckLake's file/row-group zonemaps can't skip to the recent window.
+So both grow with accumulated daily volume:
+
+| step (early→late, day=19 filling) | avg rollup | query p95 |
+|---|---|---|
+| 6000 (small data) | 3.2s | 233ms ✅ |
+| 9000 | 6.4s | 1000ms |
+| 12000 | 14.4s | 5000ms ❌ |
+| soak 4670 (low load, large day) | **18.7s** | 5000ms ❌ |
+
+The 18.7s rollup at LOW load proves it's dataset-size-driven, not rate-driven.
+A ~18s rollup every 60s on 4 cores contends with concurrent Overview queries →
+p95 5s. In prod this means query latency degrades through a UTC day and resets
+at midnight.
+
+**Ceiling ~27k rows/s, rated capacity still uncertified** — gated by query p95
+under within-day contention, not ingest (ingest fine: drops=0, export p95 ms).
+
+### Candidate fixes for the within-day limit (architectural — needs decision)
+- **Finer partitioning** (hour, or day+hour) so recent-window scans prune to 1–2
+  partitions instead of the whole day. Highest leverage; storage-layout change.
+- **Keep recent data in small, time-local files** (cap merge target size / don't
+  merge the newest hour) so zonemaps stay tight — balances against the file-count
+  OOM that motivated merge.
+- **Sort/cluster parquet by start_time** within merged files so row-group
+  zonemaps prune even inside a day.
+- Move Overview recent/top-errors off raw-span scans (needs status_message in a
+  rollup/index).
