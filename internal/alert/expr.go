@@ -62,8 +62,11 @@ func CompileExpression(expression string) (Program, error) {
 	return prog, nil
 }
 
-// celActivation binds the CEL variables to an AlertEnv's values. The keys match
-// the cel.Variable declarations above (and the AlertEnv `expr` field tags).
+// celActivation binds the CEL variables to an AlertEnv's values. The keys must
+// stay in sync with the cel.Variable declarations in mustAlertCELEnv above;
+// TestAlertEnvVariablesDeclaredAndBound enforces that against the AlertEnv `expr`
+// field tags, so a drift fails the build instead of silently breaking a rule at
+// eval time.
 func celActivation(env AlertEnv) map[string]any {
 	return map[string]any{
 		"error_rate":       env.ErrorRate,
