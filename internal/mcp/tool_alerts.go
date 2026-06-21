@@ -108,7 +108,8 @@ func (s *Server) alertRules(ctx context.Context, req *mcp.CallToolRequest, in Al
 		}
 		// Compile into the engine immediately so it evaluates on the next tick.
 		if err := s.alerts.RecompileRule(created.ID, created.Expression); err != nil {
-			slog.Warn("alert: recompile after create", "rule", created.ID, "err", err)
+			slog.Error("alert: recompile after create", "rule", created.ID, "err", err)
+			return nil, AlertRulesOut{Rule: &created, Message: "rule saved, but live evaluation could not start (it will begin on the next engine reload): " + err.Error()}, nil
 		}
 		return nil, AlertRulesOut{Rule: &created}, nil
 
@@ -182,7 +183,8 @@ func (s *Server) alertRules(ctx context.Context, req *mcp.CallToolRequest, in Al
 			return nil, AlertRulesOut{Message: fmt.Sprintf("update failed: %s", err)}, nil
 		}
 		if err := s.alerts.RecompileRule(updated.ID, updated.Expression); err != nil {
-			slog.Warn("alert: recompile after update", "rule", updated.ID, "err", err)
+			slog.Error("alert: recompile after update", "rule", updated.ID, "err", err)
+			return nil, AlertRulesOut{Rule: &updated, Message: "rule saved, but live evaluation could not restart (it will resume on the next engine reload): " + err.Error()}, nil
 		}
 		return nil, AlertRulesOut{Rule: &updated}, nil
 
@@ -210,7 +212,8 @@ func (s *Server) alertRules(ctx context.Context, req *mcp.CallToolRequest, in Al
 			return nil, AlertRulesOut{Message: fmt.Sprintf("enable failed: %s", err)}, nil
 		}
 		if err := s.alerts.RecompileRule(updated.ID, updated.Expression); err != nil {
-			slog.Warn("alert: recompile after enable", "rule", updated.ID, "err", err)
+			slog.Error("alert: recompile after enable", "rule", updated.ID, "err", err)
+			return nil, AlertRulesOut{Rule: &updated, Message: "rule enabled, but live evaluation could not start (it will begin on the next engine reload): " + err.Error()}, nil
 		}
 		return nil, AlertRulesOut{Rule: &updated}, nil
 

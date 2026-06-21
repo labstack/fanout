@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -109,12 +110,20 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 		t.Fatalf("unmarshal error: %v", err)
 	}
 
-	if resp.Status != "ready" {
-		t.Fatalf("status = %q, want ready", resp.Status)
+	// The "data" check reads real host free space, which can legitimately be
+	// degraded on a low-disk CI/dev box. This test is about ducklake+rollups, so
+	// tolerate a data-only degradation but require the actual subjects to be ok.
+	if resp.Status != "ready" && resp.Status != "degraded" {
+		t.Fatalf("status = %q, want ready or degraded", resp.Status)
 	}
 	for _, key := range []string{"duckdb", "ducklake", "data", "rollups", "maintenance"} {
 		if _, ok := resp.Checks[key]; !ok {
 			t.Fatalf("missing %s check", key)
+		}
+	}
+	for _, key := range []string{"duckdb", "ducklake", "rollups", "maintenance"} {
+		if got := resp.Checks[key].Status; got != "ok" {
+			t.Fatalf("%s check = %q, want ok", key, got)
 		}
 	}
 	if resp.Checks["ducklake"].Status != "ok" {
@@ -161,5 +170,78 @@ func TestRegisterHealthRoutes_RegistersAPIHealth(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("/api/health status = %d, want 503", rec.Code)
+	}
+}
+
+func TestDiskSpaceResult(t *testing.T) {
+	const gib = uint64(1) << 30
+	cases := []struct {
+		name       string
+		free, tot  uint64
+		wantStatus string
+	}{
+		{"plenty free", 50 * gib, 100 * gib, "ok"},
+		{"exactly at threshold", 10 * gib, 100 * gib, "ok"},     // 10.0% not < 10
+		{"below threshold", 9 * gib, 100 * gib, "degraded"},     // 9% < 10
+		{"nearly full", 100 * (1 << 20), 100 * gib, "degraded"}, // ~0.1%
+		{"unknown total", 0, 0, "ok"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := diskSpaceResult(c.free, c.tot)
+			if got.Status != c.wantStatus {
+				t.Errorf("diskSpaceResult(%d,%d).Status = %q, want %q", c.free, c.tot, got.Status, c.wantStatus)
+			}
+			if c.tot > 0 && got.Detail == "" {
+				t.Errorf("expected a free-space Detail, got empty")
+			}
+			if got.Status == "degraded" && got.Error == "" {
+				t.Errorf("degraded result should carry an Error explaining low space")
+			}
+		})
+	}
+}
+
+func TestMaintenanceStaleThreshold(t *testing.T) {
+	cases := []struct {
+		every time.Duration
+		want  time.Duration
+	}{
+		{time.Hour, 2 * time.Hour},     // 2× the interval
+		{3 * time.Hour, 6 * time.Hour}, // 2×
+		{60 * time.Second, time.Hour},  // floored at 1h
+		{20 * time.Minute, time.Hour},  // 40m → floored to 1h
+	}
+	for _, c := range cases {
+		if got := maintenanceStaleThreshold(c.every); got != c.want {
+			t.Errorf("maintenanceStaleThreshold(%s) = %s, want %s", c.every, got, c.want)
+		}
+	}
+}
+
+func TestMaintenanceResult(t *testing.T) {
+	now := time.Now()
+	rollupEvery := 60 * time.Second
+	maintEvery := time.Hour
+	cases := []struct {
+		name           string
+		lastOK, lastAt time.Time
+		lastErr        error
+		started        time.Time
+		wantStatus     string
+	}{
+		{"clean recent pass", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, now.Add(-2 * time.Hour), "ok"},
+		{"failing pass", now.Add(-3 * time.Hour), now.Add(-time.Hour), errors.New("boom"), now.Add(-4 * time.Hour), "degraded"},
+		{"never ran, past grace", time.Time{}, time.Time{}, nil, now.Add(-10 * time.Minute), "degraded"},
+		{"never ran, within grace", time.Time{}, time.Time{}, nil, now.Add(-time.Minute), "ok"},
+		{"stalled after clean pass", now.Add(-5 * time.Hour), now.Add(-5 * time.Hour), nil, now.Add(-6 * time.Hour), "degraded"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res := maintenanceResult(c.lastOK, c.lastAt, c.lastErr, c.started, rollupEvery, maintEvery, now)
+			if res.Status != c.wantStatus {
+				t.Errorf("status = %q, want %q (detail=%q err=%q)", res.Status, c.wantStatus, res.Detail, res.Error)
+			}
+		})
 	}
 }
