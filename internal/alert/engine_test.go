@@ -5,8 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/expr-lang/expr/vm"
-
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -21,7 +19,7 @@ func newTestEngine(t *testing.T) (*Engine, *Store) {
 	store := NewStore(sqlite.DB)
 	engine := &Engine{
 		store:    store,
-		programs: make(map[string]*vm.Program),
+		programs: make(map[string]Program),
 		interval: 30 * time.Second,
 	}
 	return engine, store

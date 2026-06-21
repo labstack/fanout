@@ -54,7 +54,8 @@ func TestCompileExpression_Invalid(t *testing.T) {
 }
 
 func TestCompileExpression_Invalid_NonBoolean(t *testing.T) {
-	// error_rate alone is a float, not a bool — expr-lang rejects non-bool with AsBool().
+	// error_rate + p95 is a double, not a bool — CompileExpression rejects any
+	// expression whose CEL output type isn't bool.
 	_, err := CompileExpression("error_rate + p95")
 	if err == nil {
 		t.Error("CompileExpression(non-bool): expected error, got nil")

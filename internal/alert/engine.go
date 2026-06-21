@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/expr-lang/expr/vm"
-
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/query"
 )
@@ -24,7 +22,7 @@ type Engine struct {
 	duck        *query.Duck            // may be nil in tests
 	detector    *intelligence.Detector // may be nil in tests
 	mu          sync.RWMutex
-	programs    map[string]*vm.Program // rule ID → compiled program
+	programs    map[string]Program // rule ID → compiled program
 	interval    time.Duration
 	histDays    int
 	lastPrune   time.Time
@@ -43,7 +41,7 @@ func NewEngine(
 		store:    store,
 		duck:     duck,
 		detector: detector,
-		programs: make(map[string]*vm.Program),
+		programs: make(map[string]Program),
 		interval: interval,
 		histDays: histDays,
 	}

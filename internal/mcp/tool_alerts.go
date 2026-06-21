@@ -20,7 +20,7 @@ type AlertRulesIn struct {
 	RuleID          string `json:"rule_id,omitempty"           jsonschema:"Rule ID (for get/update/delete/enable/disable/test_webhook)"`
 	Name            string `json:"name,omitempty"              jsonschema:"Rule name"`
 	Description     string `json:"description,omitempty"       jsonschema:"Rule description"`
-	Expression      string `json:"expression,omitempty"        jsonschema:"expr-lang expression: error_rate > 0.05 && p95 > 1000"`
+	Expression      string `json:"expression,omitempty"        jsonschema:"CEL expression: error_rate > 0.05 && p95 > 1000"`
 	Service         string `json:"service,omitempty"           jsonschema:"Target service, or '*' for all"`
 	ForSeconds      *int   `json:"for_seconds,omitempty"       jsonschema:"Seconds condition must hold before firing (default 60)"`
 	CooldownS       *int   `json:"cooldown_s,omitempty"        jsonschema:"Seconds before re-alerting after resolve (default 600)"`
