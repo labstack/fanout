@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -134,13 +135,15 @@ func (h *HealthHandler) checkDataDir() CheckResult {
 	os.Remove(testFile)
 
 	// Writability alone doesn't catch a near-full disk — surface free space.
-	// Best-effort: a Statfs failure leaves the writable "ok".
+	// Best-effort: if Statfs fails, stay "ok" (the dir is writable) but make the
+	// gap visible rather than indistinguishable from a healthy disk.
 	var stat syscall.Statfs_t
-	if err := syscall.Statfs(h.cfg.DataDir, &stat); err == nil {
-		bsize := uint64(stat.Bsize)
-		return diskSpaceResult(stat.Bavail*bsize, uint64(stat.Blocks)*bsize)
+	if err := syscall.Statfs(h.cfg.DataDir, &stat); err != nil {
+		slog.Warn("data dir statfs failed; free-space check skipped", "dir", h.cfg.DataDir, "err", err)
+		return CheckResult{Status: "ok", Detail: "free space unknown: statfs failed"}
 	}
-	return CheckResult{Status: "ok"}
+	bsize := uint64(stat.Bsize)
+	return diskSpaceResult(stat.Bavail*bsize, uint64(stat.Blocks)*bsize)
 }
 
 // diskSpaceResult classifies free vs total bytes into ok/degraded. Pure so it's
@@ -255,9 +258,15 @@ func maintenanceResult(lastOK, lastAt time.Time, lastErr error, started time.Tim
 		} else {
 			res.Detail = "no maintenance pass yet"
 		}
-	} else if maintEvery > 0 {
+	} else {
 		// Caught a clean pass before, but the loop may have wedged since:
-		// lastAt stops advancing while maintenance should keep executing.
+		// lastAt stops advancing while maintenance should keep executing. Mirror
+		// runMaintenance's flooring of a 0/unset interval to 1h so staleness is
+		// still monitored at MaintenanceEverySeconds=0 (where the loop keeps
+		// running hourly) instead of being silently skipped.
+		if maintEvery <= 0 {
+			maintEvery = time.Hour
+		}
 		if since := now.Sub(lastAt); since > maintenanceStaleThreshold(maintEvery) {
 			res.Status = "degraded"
 			res.Detail = fmt.Sprintf("maintenance stale: last pass %s ago", since.Round(time.Second))
