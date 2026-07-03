@@ -1,0 +1,79 @@
+name: Uptime
+
+# External availability backstop for the deploy host. The fanout instances
+# alert on their own telemetry, but if the box, Traefik, or DNS dies there is
+# nothing left to send the alert — this is the outside-in check. A failed run
+# emails the workflow's last committer via GitHub's default notification.
+#
+# Caveat: on PUBLIC repos GitHub auto-disables scheduled workflows after 60
+# days of repo inactivity; this repo is private, so that doesn't apply. The
+# residual ways this backstop dies are Actions minutes exhaustion and cron
+# drift — revisit this note if the repo ever goes public.
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub cron is best-effort; this is a backstop, not
+    # a pager.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    # Worst case (every host blackholed) is ~5 min of capped attempts and
+    # sleeps; leave headroom so the aggregated FAIL picture always prints
+    # instead of the job dying mid-probe.
+    timeout-minutes: 10
+    steps:
+      - name: Probe public hostnames
+        run: |
+          # -e is inherited from GitHub's default shell (bash -e {0}), so
+          # every fallible command below must stay inside an if/|| guard.
+          set -uo pipefail
+          check() {
+            local url="$1" attempt
+            # One retry to ride out a blip — this should page-by-email on
+            # outages, not on a single dropped packet.
+            for attempt in 1 2; do
+              if (( attempt > 1 )); then sleep 20; fi
+              if curl -fsS --max-time 15 -o /dev/null "$url"; then
+                echo "OK   $url"
+                return 0
+              fi
+            done
+            echo "FAIL $url"
+            return 1
+          }
+          tls_check() {
+            local host="$1" attempt out=""
+            for attempt in 1 2; do
+              if (( attempt > 1 )); then sleep 20; fi
+              # timeout: a blackholed connect otherwise hangs ~2 min on the
+              # OS default — exactly the total-outage case this exists for.
+              out=$(echo | timeout 20 openssl s_client -connect "$host:443" \
+                      -servername "$host" -verify_return_error 2>&1) || true
+              if grep -q "Verify return code: 0 (ok)" <<<"$out"; then
+                echo "OK   tls $host"
+                return 0
+              fi
+            done
+            echo "FAIL tls $host"
+            # The run log is the incident record — say WHY it failed
+            # (expired cert vs refused vs wrong SNI cert), not just that it did.
+            if [[ -n "$out" ]]; then
+              grep -E "Verify return code|error|refused|subject=" <<<"$out" | head -5
+            else
+              echo "  (no openssl output — connect timed out or was blackholed)"
+            fi
+            return 1
+          }
+          failed=0
+          check https://fanout.run                   || failed=1
+          check https://demo.fanout.run              || failed=1
+          check https://fanout.labstack.com/healthz  || failed=1
+          check https://demo.fanout.run/healthz      || failed=1
+          tls_check ingest.fanout.labstack.com       || failed=1
+          exit "$failed"

@@ -40,6 +40,11 @@ services:
       # memory cap (seen on the post-outage rollup backfill).
       DUCKDB_MEMORY: "16GB"
       DUCKDB_THREADS: "4"
+      # Synthetic Locust traffic — nobody queries week-old demo data. On the
+      # 30-day default, retention never engaged during the demo's first
+      # month, so the lake grew the whole time and dragged rollup/query scan
+      # times up with it.
+      RETENTION_DAYS: "7"
     expose:
       - "7520"
       - "4317"
@@ -61,7 +66,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 200M
+          # 200M ran at ~69% steady — the collector's memory_limiter drops
+          # telemetry under pressure, which silently thins the demo data.
+          memory: 400M
     restart: unless-stopped
     command: ["--config=/etc/otelcol-config.yml"]
     user: 0:0
@@ -77,7 +84,8 @@ services:
       - OTEL_COLLECTOR_HOST
       - OTEL_COLLECTOR_PORT_GRPC
       - OTEL_COLLECTOR_PORT_HTTP
-      - GOMEMLIMIT=160MiB
+      # ~80% of the container memory limit — keep the ratio when changing either.
+      - GOMEMLIMIT=320MiB
     depends_on:
       demo:
         condition: service_healthy
@@ -92,7 +100,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 300M
+          # JVM service; 300M OOM-cycled (6 restarts at ~91% steady).
+          memory: 512M
     restart: unless-stopped
     environment:
       - AD_PORT
@@ -143,7 +152,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 20M
+          memory: 40M
     restart: unless-stopped
     environment:
       - FLAGD_HOST
@@ -156,7 +165,8 @@ services:
       - PRODUCT_CATALOG_ADDR
       - SHIPPING_ADDR
       - KAFKA_ADDR
-      - GOMEMLIMIT=16MiB
+      # ~80% of the container memory limit — keep the ratio when changing either.
+      - GOMEMLIMIT=32MiB
       - OTEL_EXPORTER_OTLP_ENDPOINT
       - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
       - OTEL_RESOURCE_ATTRIBUTES
@@ -343,7 +353,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 120M
+          # Locust sat at 99% of 120M and restarted repeatedly; a dying load
+          # generator makes the demo data gappy.
+          memory: 256M
     restart: unless-stopped
     environment:
       - LOCUST_WEB_PORT
@@ -374,7 +386,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 120M
+          memory: 200M
     restart: unless-stopped
     environment:
       - IPV6_ENABLED
@@ -398,13 +410,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 20M
+          memory: 40M
     restart: unless-stopped
     environment:
       - PRODUCT_CATALOG_PORT
       - FLAGD_HOST
       - FLAGD_PORT
-      - GOMEMLIMIT=16MiB
+      # ~80% of the container memory limit — keep the ratio when changing either.
+      - GOMEMLIMIT=32MiB
       - OTEL_EXPORTER_OTLP_ENDPOINT
       - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
       - OTEL_RESOURCE_ATTRIBUTES
@@ -448,7 +461,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 50M
+          memory: 100M
     restart: unless-stopped
     environment:
       - RECOMMENDATION_PORT
@@ -500,7 +513,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 160M
+          memory: 256M
     restart: unless-stopped
     environment:
       - KAFKA_ADDR
@@ -523,7 +536,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 300M
+          # JVM service at ~86% of 300M steady.
+          memory: 512M
     restart: unless-stopped
     environment:
       - FLAGD_HOST

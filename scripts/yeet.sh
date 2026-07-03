@@ -141,8 +141,14 @@ echo "  fanout:  $FANOUT_VERSION  ($FANOUT_SOURCE)"
 echo ""
 
 echo "Testing SSH..."
-if ! ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$SERVER" "echo 'OK'" > /dev/null 2>&1; then
-    echo "SSH connection failed"
+# Capture stderr instead of discarding it: with CI's pinned known_hosts, a
+# host-key mismatch (stale DEPLOY_KNOWN_HOSTS after a host rebuild — or a
+# MITM) lands here, and "REMOTE HOST IDENTIFICATION HAS CHANGED" needs a
+# different remediation than a network blip or a revoked deploy key.
+if ! err=$(ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$SERVER" true 2>&1 >/dev/null); then
+    echo "ERROR: SSH connection to $SERVER failed:" >&2
+    printf '%s\n' "$err" | tail -5 >&2
+    echo "  (in CI, a host-key mismatch means DEPLOY_KNOWN_HOSTS is stale — refresh: ssh-keyscan fanout.labstack.net | gh secret set DEPLOY_KNOWN_HOSTS)" >&2
     exit 1
 fi
 
@@ -258,6 +264,27 @@ tls_smoke ingest.fanout.labstack.com 443          || failed=1
 if (( failed )); then
   echo "ERROR: one or more smoke checks failed; inspect 'docker compose logs -f traefik' on the host." >&2
   exit 1
+fi
+
+echo ""
+echo "Pruning old images..."
+# Only after the smoke tests pass — a failed deploy keeps every image around
+# for rollback. until=168h keeps the last week of releases for the same
+# reason (the filter is on image CREATION time, so an unused third-party pin
+# whose upstream build is older than a week gets pruned right after a pin
+# bump — rollback of a pin then means a re-pull). Build cache goes entirely:
+# this host pulls, it never builds.
+# Non-fatal: the deploy is already live and smoke-tested at this point, so a
+# prune hiccup is a housekeeping problem, not a deploy failure — don't let
+# set -e turn it into a red deploy. The next deploy retries the prune.
+if ! ssh "$SERVER" 'docker image prune -af --filter "until=168h" && docker builder prune -af' | tail -2; then
+  prune_warn="image/builder prune failed — deploy is live; disk housekeeping skipped this run"
+  echo "WARN: $prune_warn" >&2
+  # In CI a stderr WARN inside a green run is never seen — surface it as a
+  # run annotation so a prune that fails every deploy eventually gets noticed.
+  if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+    echo "::warning::$prune_warn"
+  fi
 fi
 
 echo ""
