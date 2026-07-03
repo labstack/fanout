@@ -1,0 +1,98 @@
+name: Deploy
+
+# Deploys automatically after a successful stable Release, or on demand via
+# workflow_dispatch. Wraps scripts/yeet.sh — the same script operators run
+# locally — so CI and laptop deploys can't drift.
+#
+# Required repository secrets:
+#   DEPLOY_SSH_KEY    private key authorized on the deploy host (dedicated
+#                     key, not a personal one)
+#   FANOUT_ENV_B64    base64 of fanout/.env
+#   DEMO_ENV_B64      base64 of demo/.env
+#   TRAEFIK_ENV_B64   base64 of traefik/.env
+# Refresh the env secrets after editing a local .env:
+#   base64 -i fanout/.env  | gh secret set FANOUT_ENV_B64
+#   base64 -i demo/.env    | gh secret set DEMO_ENV_B64
+#   base64 -i traefik/.env | gh secret set TRAEFIK_ENV_B64
+
+on:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      fanout-version:
+        description: "fanout image tag (e.g. 2026.06.16); empty = latest stable fanout/v* tag"
+        required: false
+
+# One deploy at a time; a queued deploy of a newer release should wait for,
+# not cancel, the one in flight (half-applied compose state is worse than a
+# short delay).
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # workflow_run fires on every Release completion — only proceed for a
+    # successful run of a stable fanout/v* tag (no prerelease suffix).
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'fanout/v') &&
+       !contains(github.event.workflow_run.head_branch, '-'))
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # yeet.sh resolves site/v* and fanout/v* versions from git tags.
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Materialize env files
+        env:
+          FANOUT_ENV_B64: ${{ secrets.FANOUT_ENV_B64 }}
+          DEMO_ENV_B64: ${{ secrets.DEMO_ENV_B64 }}
+          TRAEFIK_ENV_B64: ${{ secrets.TRAEFIK_ENV_B64 }}
+        run: |
+          set -euo pipefail
+          for pair in "FANOUT_ENV_B64:fanout/.env" "DEMO_ENV_B64:demo/.env" "TRAEFIK_ENV_B64:traefik/.env"; do
+            name="${pair%%:*}" dest="${pair#*:}"
+            if [[ -z "${!name}" ]]; then
+              echo "::error::secret $name is empty — see the header of this workflow for setup"
+              exit 1
+            fi
+            printf '%s' "${!name}" | base64 -d > "$dest"
+            chmod 600 "$dest"
+          done
+
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H fanout.labstack.net >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          INPUT_VERSION: ${{ inputs.fanout-version }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [[ "$EVENT" == "workflow_run" ]]; then
+            # Deploy exactly the tag that was just released, not whatever
+            # resolves as latest (a race with a newer tag push).
+            args+=(--fanout-version "${HEAD_BRANCH#fanout/v}")
+          elif [[ -n "$INPUT_VERSION" ]]; then
+            args+=(--fanout-version "$INPUT_VERSION")
+          fi
+          ./scripts/yeet.sh "${args[@]}"

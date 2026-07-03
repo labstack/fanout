@@ -1,0 +1,59 @@
+name: Uptime
+
+# External availability backstop for the deploy host. The fanout instances
+# alert on their own telemetry, but if the box, Traefik, or DNS dies there is
+# nothing left to send the alert — this is the outside-in check. A failed run
+# emails the workflow's last committer via GitHub's default notification.
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub cron is best-effort; this is a backstop, not
+    # a pager.
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Probe public hostnames
+        run: |
+          set -uo pipefail
+          check() {
+            local url="$1"
+            # One retry to ride out a blip — this should page-by-email on
+            # outages, not on a single dropped packet.
+            for _ in 1 2; do
+              if curl -fsS --max-time 15 -o /dev/null "$url"; then
+                echo "OK   $url"
+                return 0
+              fi
+              sleep 20
+            done
+            echo "FAIL $url"
+            return 1
+          }
+          tls_check() {
+            local host="$1"
+            for _ in 1 2; do
+              if echo | openssl s_client -connect "$host:443" -servername "$host" \
+                   -verify_return_error 2>&1 | grep -q "Verify return code: 0 (ok)"; then
+                echo "OK   tls $host"
+                return 0
+              fi
+              sleep 20
+            done
+            echo "FAIL tls $host"
+            return 1
+          }
+          failed=0
+          check https://fanout.run                   || failed=1
+          check https://demo.fanout.run              || failed=1
+          check https://fanout.labstack.com/healthz  || failed=1
+          check https://demo.fanout.run/healthz      || failed=1
+          tls_check ingest.fanout.labstack.com       || failed=1
+          exit "$failed"

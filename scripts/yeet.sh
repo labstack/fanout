@@ -261,6 +261,13 @@ if (( failed )); then
 fi
 
 echo ""
+echo "Pruning old images..."
+# Only after the smoke tests pass — a failed deploy keeps every image around
+# for rollback. until=168h keeps the last week of releases for the same
+# reason. Build cache goes entirely: this host pulls, it never builds.
+ssh "$SERVER" 'docker image prune -af --filter "until=168h" && docker builder prune -af' | tail -2
+
+echo ""
 echo "Deployed:"
 echo "  https://fanout.run"
 echo "  https://demo.fanout.run"
