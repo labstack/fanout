@@ -3,6 +3,7 @@ package alert
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/big"
 	"runtime/debug"
@@ -516,10 +517,22 @@ func toFloat(v interface{}) float64 {
 		// scans as *big.Int — sum(spans)/sum(log_count) arrive here.
 		f, _ := new(big.Float).SetInt(n).Float64()
 		return f
+	case nil:
+		// NULL from SQL (e.g. delta columns when no previous window) — 0 is
+		// the intended semantics, not a conversion loss.
+		return 0
 	default:
+		// A type this switch doesn't know silently zeroed throughput/log_count
+		// for months (the *big.Int case above). Never let the next widened
+		// type hide the same way — but log once, not on every 30s eval tick.
+		toFloatUnknownOnce.Do(func() {
+			slog.Warn("alert: env value of unhandled type coerced to 0", "type", fmt.Sprintf("%T", v))
+		})
 		return 0
 	}
 }
+
+var toFloatUnknownOnce sync.Once
 
 // abs returns the absolute value of f.
 func abs(f float64) float64 {
