@@ -241,15 +241,19 @@ tls_smoke() {
   local host="$1" port="$2" out
   for _ in 1 2 3 4 5 6; do
     out=$(echo | openssl s_client -connect "$host:$port" -servername "$host" -verify_return_error 2>&1) || true
+    # Subject formatting is toolchain-dependent: macOS LibreSSL prints
+    # "subject=CN=host", the ubuntu runner's OpenSSL 3 prints
+    # "subject=CN = host" (first CI deploy false-FAILed on this). Allow
+    # optional spaces around '=' so both pass.
     if echo "$out" | grep -q "Verify return code: 0 (ok)" \
-       && echo "$out" | grep -q "subject=CN=$host"; then
+       && echo "$out" | grep -Eq "subject=.*CN *= *$host"; then
       echo "  OK  tls $host:$port"
       return 0
     fi
     sleep 10
   done
   echo "  FAIL tls $host:$port" >&2
-  echo "$out" | grep -E "Verify return code|subject=CN=" | head -3 >&2
+  echo "$out" | grep -E "Verify return code|subject=" | head -3 >&2
   return 1
 }
 # Aggregate failures so one bad URL doesn't mask the others. Three hosts
