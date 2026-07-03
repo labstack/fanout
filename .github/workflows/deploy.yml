@@ -5,15 +5,21 @@ name: Deploy
 # locally — so CI and laptop deploys can't drift.
 #
 # Required repository secrets:
-#   DEPLOY_SSH_KEY    private key authorized on the deploy host (dedicated
-#                     key, not a personal one)
-#   FANOUT_ENV_B64    base64 of fanout/.env
-#   DEMO_ENV_B64      base64 of demo/.env
-#   TRAEFIK_ENV_B64   base64 of traefik/.env
+#   DEPLOY_SSH_KEY      private key authorized on the deploy host (dedicated
+#                       key, not a personal one)
+#   DEPLOY_KNOWN_HOSTS  pinned host key: ssh-keyscan fanout.labstack.net | gh secret set DEPLOY_KNOWN_HOSTS
+#   FANOUT_ENV_B64      base64 of fanout/.env
+#   DEMO_ENV_B64        base64 of demo/.env
+#   TRAEFIK_ENV_B64     base64 of traefik/.env
 # Refresh the env secrets after editing a local .env:
 #   base64 -i fanout/.env  | gh secret set FANOUT_ENV_B64
 #   base64 -i demo/.env    | gh secret set DEMO_ENV_B64
 #   base64 -i traefik/.env | gh secret set TRAEFIK_ENV_B64
+#
+# Note: a Release started via workflow_dispatch does NOT auto-deploy —
+# workflow_run.head_branch carries the source branch (e.g. main), not the
+# tag, so the filter below skips it. Use this workflow's own
+# workflow_dispatch instead.
 
 on:
   workflow_run:
@@ -67,18 +73,34 @@ jobs:
               exit 1
             fi
             printf '%s' "${!name}" | base64 -d > "$dest"
+            # Tripwire for a secret that is valid base64 of the wrong thing —
+            # that would otherwise only surface later as a compose parse error.
+            if ! grep -q '=' "$dest"; then
+              echo "::error::$dest decoded but doesn't look like an env file"
+              exit 1
+            fi
             chmod 600 "$dest"
           done
 
       - name: Set up SSH
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
         run: |
           set -euo pipefail
+          for name in DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::secret $name is empty — see the header of this workflow for setup"
+              exit 1
+            fi
+          done
           mkdir -p ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H fanout.labstack.net >> ~/.ssh/known_hosts 2>/dev/null
+          # Pinned host key from a secret — keyscan at deploy time would
+          # trust whatever answers (TOFU, no MITM protection) and its
+          # failure modes surface as unrelated errors two steps later.
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
       - name: Deploy
         env:

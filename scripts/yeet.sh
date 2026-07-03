@@ -264,8 +264,16 @@ echo ""
 echo "Pruning old images..."
 # Only after the smoke tests pass — a failed deploy keeps every image around
 # for rollback. until=168h keeps the last week of releases for the same
-# reason. Build cache goes entirely: this host pulls, it never builds.
-ssh "$SERVER" 'docker image prune -af --filter "until=168h" && docker builder prune -af' | tail -2
+# reason (the filter is on image CREATION time, so an unused third-party pin
+# whose upstream build is older than a week gets pruned right after a pin
+# bump — rollback of a pin then means a re-pull). Build cache goes entirely:
+# this host pulls, it never builds.
+# Non-fatal: the deploy is already live and smoke-tested at this point, so a
+# prune hiccup is a housekeeping problem, not a deploy failure — don't let
+# set -e turn it into a red deploy. The next deploy retries the prune.
+if ! ssh "$SERVER" 'docker image prune -af --filter "until=168h" && docker builder prune -af' | tail -2; then
+  echo "WARN: image/builder prune failed — deploy is live; disk housekeeping skipped this run" >&2
+fi
 
 echo ""
 echo "Deployed:"

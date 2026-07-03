@@ -40,9 +40,10 @@ services:
       # memory cap (seen on the post-outage rollup backfill).
       DUCKDB_MEMORY: "16GB"
       DUCKDB_THREADS: "4"
-      # Synthetic Locust traffic — nobody queries week-old demo data. The
-      # 30-day default let the lake grow without bound for a month straight,
-      # dragging rollup/query scan times up with it.
+      # Synthetic Locust traffic — nobody queries week-old demo data. On the
+      # 30-day default, retention never engaged during the demo's first
+      # month, so the lake grew the whole time and dragged rollup/query scan
+      # times up with it.
       RETENTION_DAYS: "7"
     expose:
       - "7520"
@@ -83,6 +84,7 @@ services:
       - OTEL_COLLECTOR_HOST
       - OTEL_COLLECTOR_PORT_GRPC
       - OTEL_COLLECTOR_PORT_HTTP
+      # ~80% of the container memory limit — keep the ratio when changing either.
       - GOMEMLIMIT=320MiB
     depends_on:
       demo:
@@ -163,6 +165,7 @@ services:
       - PRODUCT_CATALOG_ADDR
       - SHIPPING_ADDR
       - KAFKA_ADDR
+      # ~80% of the container memory limit — keep the ratio when changing either.
       - GOMEMLIMIT=32MiB
       - OTEL_EXPORTER_OTLP_ENDPOINT
       - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE
@@ -413,6 +416,7 @@ services:
       - PRODUCT_CATALOG_PORT
       - FLAGD_HOST
       - FLAGD_PORT
+      # ~80% of the container memory limit — keep the ratio when changing either.
       - GOMEMLIMIT=32MiB
       - OTEL_EXPORTER_OTLP_ENDPOINT
       - OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE

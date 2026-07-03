@@ -4,6 +4,10 @@ name: Uptime
 # alert on their own telemetry, but if the box, Traefik, or DNS dies there is
 # nothing left to send the alert — this is the outside-in check. A failed run
 # emails the workflow's last committer via GitHub's default notification.
+#
+# Caveat: GitHub disables scheduled workflows after 60 days without repo
+# activity — if this repo ever goes quiet that long, the backstop silently
+# stops running (GitHub emails a warning first; re-enable under Actions).
 
 on:
   schedule:
@@ -18,36 +22,47 @@ permissions:
 jobs:
   probe:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    # Worst case (every host blackholed) is ~5 min of capped attempts and
+    # sleeps; leave headroom so the aggregated FAIL picture always prints
+    # instead of the job dying mid-probe.
+    timeout-minutes: 10
     steps:
       - name: Probe public hostnames
         run: |
+          # -e is inherited from GitHub's default shell (bash -e {0}), so
+          # every fallible command below must stay inside an if/|| guard.
           set -uo pipefail
           check() {
-            local url="$1"
+            local url="$1" attempt
             # One retry to ride out a blip — this should page-by-email on
             # outages, not on a single dropped packet.
-            for _ in 1 2; do
+            for attempt in 1 2; do
+              if (( attempt > 1 )); then sleep 20; fi
               if curl -fsS --max-time 15 -o /dev/null "$url"; then
                 echo "OK   $url"
                 return 0
               fi
-              sleep 20
             done
             echo "FAIL $url"
             return 1
           }
           tls_check() {
-            local host="$1"
-            for _ in 1 2; do
-              if echo | openssl s_client -connect "$host:443" -servername "$host" \
-                   -verify_return_error 2>&1 | grep -q "Verify return code: 0 (ok)"; then
+            local host="$1" attempt out=""
+            for attempt in 1 2; do
+              if (( attempt > 1 )); then sleep 20; fi
+              # timeout: a blackholed connect otherwise hangs ~2 min on the
+              # OS default — exactly the total-outage case this exists for.
+              out=$(echo | timeout 20 openssl s_client -connect "$host:443" \
+                      -servername "$host" -verify_return_error 2>&1) || true
+              if grep -q "Verify return code: 0 (ok)" <<<"$out"; then
                 echo "OK   tls $host"
                 return 0
               fi
-              sleep 20
             done
             echo "FAIL tls $host"
+            # The run log is the incident record — say WHY it failed
+            # (expired cert vs refused vs wrong SNI cert), not just that it did.
+            grep -E "Verify return code|error|refused|subject=" <<<"$out" | head -5
             return 1
           }
           failed=0
