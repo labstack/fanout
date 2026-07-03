@@ -5,9 +5,10 @@ name: Uptime
 # nothing left to send the alert — this is the outside-in check. A failed run
 # emails the workflow's last committer via GitHub's default notification.
 #
-# Caveat: GitHub disables scheduled workflows after 60 days without repo
-# activity — if this repo ever goes quiet that long, the backstop silently
-# stops running (GitHub emails a warning first; re-enable under Actions).
+# Caveat: on PUBLIC repos GitHub auto-disables scheduled workflows after 60
+# days of repo inactivity; this repo is private, so that doesn't apply. The
+# residual ways this backstop dies are Actions minutes exhaustion and cron
+# drift — revisit this note if the repo ever goes public.
 
 on:
   schedule:
@@ -62,7 +63,11 @@ jobs:
             echo "FAIL tls $host"
             # The run log is the incident record — say WHY it failed
             # (expired cert vs refused vs wrong SNI cert), not just that it did.
-            grep -E "Verify return code|error|refused|subject=" <<<"$out" | head -5
+            if [[ -n "$out" ]]; then
+              grep -E "Verify return code|error|refused|subject=" <<<"$out" | head -5
+            else
+              echo "  (no openssl output — connect timed out or was blackholed)"
+            fi
             return 1
           }
           failed=0

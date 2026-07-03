@@ -72,10 +72,15 @@ jobs:
               echo "::error::secret $name is empty — see the header of this workflow for setup"
               exit 1
             fi
-            printf '%s' "${!name}" | base64 -d > "$dest"
+            if ! printf '%s' "${!name}" | base64 -d > "$dest" 2>/dev/null; then
+              echo "::error::secret $name is not valid base64"
+              exit 1
+            fi
             # Tripwire for a secret that is valid base64 of the wrong thing —
             # that would otherwise only surface later as a compose parse error.
-            if ! grep -q '=' "$dest"; then
+            # Anchored to UPPER_SNAKE= so a pasted SSH key or known_hosts blob
+            # (whose base64 bodies contain '=') is rejected too.
+            if ! grep -qE '^[A-Z][A-Z0-9_]*=' "$dest"; then
               echo "::error::$dest decoded but doesn't look like an env file"
               exit 1
             fi
