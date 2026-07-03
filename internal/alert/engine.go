@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math/big"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -510,6 +511,11 @@ func toFloat(v interface{}) float64 {
 		return float64(n)
 	case int:
 		return float64(n)
+	case *big.Int:
+		// DuckDB widens SUM over integer columns to HUGEINT, which the driver
+		// scans as *big.Int — sum(spans)/sum(log_count) arrive here.
+		f, _ := new(big.Float).SetInt(n).Float64()
+		return f
 	default:
 		return 0
 	}
