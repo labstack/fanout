@@ -219,13 +219,13 @@ echo "Smoke test..."
 # Traefik's first-boot cert issuance can take 30-60s after it comes up.
 # Retry a handful of times; bail only if it still fails.
 smoke() {
-  local url="$1"
-  for _ in 1 2 3 4 5 6; do
+  local url="$1" attempt
+  for attempt in 1 2 3 4 5 6; do
+    if (( attempt > 1 )); then sleep 10; fi
     if curl -fsS --max-time 10 -o /dev/null "$url"; then
       echo "  OK  $url"
       return 0
     fi
-    sleep 10
   done
   echo "  FAIL $url" >&2
   return 1
@@ -238,19 +238,20 @@ smoke() {
 #   - cert verifies (chain back to LE)
 #   - served cert CN matches the expected hostname (not Traefik's default)
 tls_smoke() {
-  local host="$1" port="$2" out
-  for _ in 1 2 3 4 5 6; do
+  local host="$1" port="$2" out attempt
+  for attempt in 1 2 3 4 5 6; do
+    if (( attempt > 1 )); then sleep 10; fi
     out=$(echo | openssl s_client -connect "$host:$port" -servername "$host" -verify_return_error 2>&1) || true
     # Subject formatting is toolchain-dependent: macOS LibreSSL prints
     # "subject=CN=host", the ubuntu runner's OpenSSL 3 prints
     # "subject=CN = host" (first CI deploy false-FAILed on this). Allow
-    # optional spaces around '=' so both pass.
+    # optional spaces around '='; escape the host's dots and anchor after it
+    # so the ERE matches exactly this CN and not a superstring.
     if echo "$out" | grep -q "Verify return code: 0 (ok)" \
-       && echo "$out" | grep -Eq "subject=.*CN *= *$host"; then
+       && echo "$out" | grep -Eq "subject=.*CN *= *${host//./\\.}( |\$)"; then
       echo "  OK  tls $host:$port"
       return 0
     fi
-    sleep 10
   done
   echo "  FAIL tls $host:$port" >&2
   echo "$out" | grep -E "Verify return code|subject=" | head -3 >&2
