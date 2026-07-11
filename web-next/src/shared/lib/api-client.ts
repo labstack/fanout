@@ -1,4 +1,4 @@
-import type { ZodType } from "zod";
+import { z, type ZodType } from "zod";
 
 export class ApiError extends Error {
   status: number;
@@ -17,11 +17,21 @@ export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+// Body of a successful refresh — untrusted, parsed defensively.
+const refreshResponseSchema = z.object({ access_token: z.string().min(1) });
+
 // Dedupe concurrent refreshes: one in-flight refresh shared by all 401s.
 let refreshInFlight: Promise<boolean> | null = null;
 function refresh(): Promise<boolean> {
   refreshInFlight ??= fetch("/api/auth/refresh", { method: "POST", credentials: "include" })
-    .then((r) => r.ok)
+    .then(async (r) => {
+      if (!r.ok) return false;
+      const json: unknown = await r.json().catch(() => undefined);
+      const parsed = refreshResponseSchema.safeParse(json);
+      if (!parsed.success) return false;
+      setAccessToken(parsed.data.access_token);
+      return true;
+    })
     .catch(() => false)
     .finally(() => {
       refreshInFlight = null;

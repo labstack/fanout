@@ -12,9 +12,13 @@ export function HomePage() {
     return <EmptyState title="Waiting for data" hint="Point OTLP at this instance to see your services." />;
 
   const { total_services, throughput_per_min, global_error_rate } = data.health;
+  // TODO(home-lifecycle): the healthy affirmation below (and lack of a
+  // freshness/last-updated indicator) is a placeholder for this slice, not
+  // finished logic. The full calm-state lifecycle (empty/degraded/incident/
+  // recovery + freshness) lands with the Home-lifecycle plan.
   return (
     <section className="flex items-baseline gap-2">
-      <span className="text-ok-text" aria-hidden>●</span>
+      <span className="text-ok" aria-hidden>●</span>
       <h1 className="text-[22px] font-semibold tracking-tight tnum">
         {total_services} services healthy
       </h1>

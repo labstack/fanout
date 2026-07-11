@@ -34,18 +34,45 @@ describe("api()", () => {
     await expect(api("/x", schema)).rejects.toBeInstanceOf(ApiError);
   });
 
-  it("refreshes once on 401 then retries", async () => {
-    const calls: string[] = [];
+  it("refreshes once on 401, applies the new token, then retries with it", async () => {
+    const calls: { url: string; auth: string | null }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const auth = init?.headers instanceof Headers ? init.headers.get("Authorization") : null;
+        calls.push({ url, auth });
+        if (url === "/api/auth/refresh") {
+          return new Response(JSON.stringify({ access_token: "NEW" }), { status: 200 });
+        }
+        if (url === "/x") {
+          // First call carries no/old token and must 401. The retry only
+          // succeeds if it actually presents the freshly-refreshed bearer —
+          // this is what catches a refresh() that discards the new token.
+          return auth === "Bearer NEW"
+            ? new Response(JSON.stringify({ ok: true }), { status: 200 })
+            : new Response(null, { status: 401 });
+        }
+        return new Response(null, { status: 404 });
+      }),
+    );
+
+    await expect(api("/x", schema)).resolves.toEqual({ ok: true });
+
+    const xCalls = calls.filter((c) => c.url === "/x");
+    expect(xCalls).toHaveLength(2);
+    expect(xCalls[0]?.auth).toBeNull();
+    expect(xCalls[1]?.auth).toBe("Bearer NEW");
+    expect(calls.some((c) => c.url === "/api/auth/refresh")).toBe(true);
+  });
+
+  it("surfaces the original 401 when refresh succeeds but the body has no access_token", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
-        calls.push(url);
-        if (url === "/api/auth/refresh") return new Response(null, { status: 200 });
-        if (calls.filter((u) => u === "/x").length === 1) return new Response(null, { status: 401 });
-        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+        if (url === "/api/auth/refresh") return new Response(JSON.stringify({}), { status: 200 });
+        return new Response(null, { status: 401 });
       }),
     );
-    await expect(api("/x", schema)).resolves.toEqual({ ok: true });
-    expect(calls).toContain("/api/auth/refresh");
+    await expect(api("/x", schema)).rejects.toMatchObject({ status: 401 } satisfies Partial<ApiError>);
   });
 });
