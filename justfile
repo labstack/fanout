@@ -77,6 +77,9 @@ check:
     go vet ./...
     just lint
     cd web && npx tsc --noEmit
+    cd web-next && bun run lint
+    cd web-next && bun run typecheck
+    cd web-next && bun run test
     just build
     @echo "All checks passed"
 
