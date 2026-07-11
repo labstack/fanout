@@ -17,6 +17,8 @@
 # Build artifacts (keep .gitkeep so go:embed always has a directory)
 internal/ui/dist/*
 !internal/ui/dist/.gitkeep
+internal/uinext/dist/*
+!internal/uinext/dist/.gitkeep
 
 # Site build output
 site/dist/

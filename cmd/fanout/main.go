@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
@@ -37,6 +38,7 @@ import (
 	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/ui"
+	"github.com/labstack/fanout/internal/uinext"
 )
 
 var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
@@ -274,13 +276,28 @@ func main() {
 	}
 
 	// SPA catch-all — serves the embedded React app for any unmatched route.
-	// API routes registered above take priority; everything else falls through here.
-	spaFS, spaErr := ui.Dist()
-	if spaErr != nil {
-		slog.Warn("React SPA not available (not built?)", "err", spaErr)
+	// FANOUT_UI_NEXT=1 selects the clean-rewrite UI (web-next); default is the
+	// current UI. API routes registered above take priority.
+	var (
+		spaFS  fs.FS
+		spaErr error
+		uiName = "react-spa"
+	)
+	if os.Getenv("FANOUT_UI_NEXT") == "1" {
+		spaFS, spaErr = uinext.Dist()
+		uiName = "react-spa-next"
 	} else {
-		ui.RegisterSPARoutes(e, spaFS)
-		slog.Info("React SPA enabled", "path", "/*")
+		spaFS, spaErr = ui.Dist()
+	}
+	if spaErr != nil {
+		slog.Warn("SPA not available (not built?)", "ui", uiName, "err", spaErr)
+	} else {
+		if uiName == "react-spa-next" {
+			uinext.RegisterSPARoutes(e, spaFS)
+		} else {
+			ui.RegisterSPARoutes(e, spaFS)
+		}
+		slog.Info("SPA enabled", "ui", uiName, "path", "/*")
 	}
 
 	// Run HTTP

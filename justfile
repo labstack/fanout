@@ -43,6 +43,13 @@ build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`:
     cp -r web/dist/* internal/ui/dist/
     go build -ldflags "-s -w -X main.version={{VERSION}}" -o {{bin}} ./cmd/fanout
 
+# Build production binary serving the clean-rewrite UI (web-next) behind the flag.
+build-next VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`:
+    cd web-next && bun install && bun run build
+    rm -rf internal/uinext/dist/*
+    cp -r web-next/dist/* internal/uinext/dist/
+    go build -ldflags "-s -w -X main.version={{VERSION}}" -o {{bin}} ./cmd/fanout
+
 # Generate TypeScript types from Go block structs + sqlc queries
 gen:
     go generate ./internal/ai/...

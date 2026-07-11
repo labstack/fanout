@@ -10,6 +10,8 @@ linters:
     presets:
       - comments
       - std-error-handling
+    paths:
+      - node_modules
     rules:
       - linters: [errcheck]
         path: _test\.go
