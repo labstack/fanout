@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-raised: var(--raised);
+  --color-raised-2: var(--raised-2);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-ok: var(--ok);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok-text: var(--ok-text);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-warn-text: var(--warn-text);
+  --color-crit: var(--crit);
+  --color-crit-bg: var(--crit-bg);
+  --color-crit-text: var(--crit-text);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
+  --color-info-text: var(--info-text);
+  --color-gen-bg: var(--gen-bg);
+  --radius: 0.625rem;
+  --duration-100: 100ms;
+  --duration-200: 200ms;
+  --duration-300: 300ms;
+  --ease-default: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Light (default). ink-3 is hairline-only; labels use ink-2. */
+:root {
+  color-scheme: light;
+  --paper: #f7f8f9;
+  --raised: #ffffff;
+  --raised-2: #f0f2f4;
+  --line: #e4e7ea;
+  --ink: #14171d;
+  --ink-2: #565b66;
+  --ink-3: #878d99;
+  --accent: #14171d;
+  --accent-fg: #ffffff;
+  --ok: #3f9d78;   --ok-bg: #eaf4ef;   --ok-text: #2b6f52;
+  --warn: #b7852b; --warn-bg: #f7efdf; --warn-text: #855f0f;
+  --crit: #cf574d; --crit-bg: #fbebe9; --crit-text: #b23127;
+  --info: #4f7fb0; --info-bg: #eaf1f8; --info-text: #396792;
+  --gen-bg: #f4f2fb;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --paper: #0b0e14;
+    --raised: #12151d;
+    --raised-2: #1a1f2c;
+    --line: #20242e;
+    --ink: #c5c8ce;
+    --ink-2: #7d8390;
+    --ink-3: #5c626e;
+    --accent: #e8eaed;
+    --accent-fg: #0b0e14;
+    --ok: #4bb489;   --ok-bg: #0f1a17;   --ok-text: #4bb489;
+    --warn: #cf9d42; --warn-bg: #1c1810; --warn-text: #cf9d42;
+    --crit: #e0685d; --crit-bg: #1e1210; --crit-text: #e0685d;
+    --info: #6b9bd0; --info-bg: #0f1620; --info-text: #6b9bd0;
+    --gen-bg: #14121c;
+  }
+}
+
+/* Explicit toggle wins in both directions */
+:root[data-theme="light"] { color-scheme: light;
+  --paper:#f7f8f9;--raised:#ffffff;--raised-2:#f0f2f4;--line:#e4e7ea;
+  --ink:#14171d;--ink-2:#565b66;--ink-3:#878d99;--accent:#14171d;--accent-fg:#ffffff;
+  --ok:#3f9d78;--ok-bg:#eaf4ef;--ok-text:#2b6f52;--warn:#b7852b;--warn-bg:#f7efdf;--warn-text:#855f0f;
+  --crit:#cf574d;--crit-bg:#fbebe9;--crit-text:#b23127;--info:#4f7fb0;--info-bg:#eaf1f8;--info-text:#396792;
+  --gen-bg:#f4f2fb; }
+:root[data-theme="dark"] { color-scheme: dark;
+  --paper:#0b0e14;--raised:#12151d;--raised-2:#1a1f2c;--line:#20242e;
+  --ink:#c5c8ce;--ink-2:#7d8390;--ink-3:#5c626e;--accent:#e8eaed;--accent-fg:#0b0e14;
+  --ok:#4bb489;--ok-bg:#0f1a17;--ok-text:#4bb489;--warn:#cf9d42;--warn-bg:#1c1810;--warn-text:#cf9d42;
+  --crit:#e0685d;--crit-bg:#1e1210;--crit-text:#e0685d;--info:#6b9bd0;--info-bg:#0f1620;--info-text:#6b9bd0;
+  --gen-bg:#14121c; }
