@@ -217,6 +217,7 @@ func main() {
 	// typed query kernel through deterministic HTTP or standard MCP tools.
 	queries := observability.New(q.DB, cfg.DefaultNS)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability"))
+	api.RegisterDashboardRoutes(e, sqlite.DB)
 
 	// Alert management REST endpoints
 	api.RegisterAlertRoutes(e, alertStore, alertEngine)

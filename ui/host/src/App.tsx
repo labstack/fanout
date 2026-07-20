@@ -1,15 +1,18 @@
 import { HttpAgent, type Message } from "@ag-ui/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import AuthGate, { authorizedFetch, logout } from "./auth";
 import type { MCPAppContent } from "./mcp-app-frame";
+import Dashboard from "./dashboard";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
 
 const threadKey = "fanout.thread-id";
 
 function Chat() {
+  const [view, setView] = useState<"chat" | "dashboard">("chat");
   const storedThreadID = useMemo(() => localStorage.getItem(threadKey), []);
   const threadID = useMemo(() => storedThreadID ?? crypto.randomUUID(), [storedThreadID]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -93,11 +96,12 @@ function Chat() {
         <div className="brand"><span className="brand-mark small" aria-hidden="true">F</span><div><strong>Fanout</strong><small>Operations intelligence</small></div></div>
         <div className="header-actions">
           <span className="live"><i />Connected</span>
-          <button type="button" className="ghost" onClick={newThread}><span aria-hidden="true">＋</span> New chat</button>
+          <button type="button" className="ghost" onClick={() => setView(view === "chat" ? "dashboard" : "chat")}>{view === "chat" ? "Dashboard" : "Chat"}</button>
+          {view === "chat" && <button type="button" className="ghost" onClick={newThread}><span aria-hidden="true">＋</span> New chat</button>}
           <button type="button" className="ghost quiet" onClick={() => void logout()}>Sign out</button>
         </div>
       </header>
-      <main className="chat">
+      {view === "dashboard" ? <Dashboard onOpenChat={(prompt) => { setView("chat"); if (prompt) void send(prompt); }} /> : <main className="chat">
         {!ready && <div className="thread-loading" role="status"><span /><span /><span /> Loading conversation</div>}
         {visibleMessages.length === 0 && ready && (
           <section className="welcome">
@@ -116,14 +120,14 @@ function Chat() {
           {error && <div className="error-banner" role="alert"><strong>Something went wrong</strong><span>{error}</span></div>}
           <div ref={bottomRef} />
         </section>
-      </main>
-      <footer className="composer-wrap">
+      </main>}
+      {view === "chat" && <footer className="composer-wrap">
         <form className="composer" onSubmit={submit}>
           <textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is analyzing…" : "Ask about health, errors, or latency…"} rows={1} disabled={!ready || running} />
           <button type="submit" disabled={!input.trim() || !ready || running} aria-label="Send message"><span aria-hidden="true">↑</span></button>
         </form>
         <small>Enter to send <span>·</span> Shift + Enter for a new line</small>
-      </footer>
+      </footer>}
     </div>
   );
 }
@@ -158,5 +162,6 @@ function toolTitle(name: string) {
 }
 
 export default function App() {
-  return <AuthGate><Chat /></AuthGate>;
+  const queryClient = useMemo(() => new QueryClient(), []);
+  return <QueryClientProvider client={queryClient}><AuthGate><Chat /></AuthGate></QueryClientProvider>;
 }
