@@ -291,7 +291,9 @@ func (h *AuthHandler) setRefreshCookie(c *echo.Context, value string, expiresAt 
 		Path:     "/api/auth/",
 		HttpOnly: true,
 		Secure:   isSecureRequest(c),
-		SameSite: http.SameSiteStrictMode,
+		// Lax permits the top-level browser navigation used by OAuth MCP clients
+		// while still withholding the cookie from cross-site subrequests and POSTs.
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   int(time.Until(expiresAt).Seconds()),
 		Expires:  expiresAt,
 	})
@@ -304,7 +306,7 @@ func (h *AuthHandler) clearRefreshCookie(c *echo.Context) {
 		Path:     "/api/auth/",
 		HttpOnly: true,
 		Secure:   isSecureRequest(c),
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode,
 		MaxAge:   -1,
 		Expires:  time.Unix(0, 0),
 	})

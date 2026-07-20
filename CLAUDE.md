@@ -158,7 +158,7 @@ and SDK changes current and verify them against upstream sources before bumping.
 | `GET /api/agent/threads/:threadID` | owner-scoped thread history |
 | `GET /api/observability/...` | deterministic typed query API |
 | `ANY /mcp` | streamable HTTP MCP server |
-| `/api/auth/*` | setup, email login, refresh, logout, and API keys |
+| `/api/auth/*` | setup, email login, refresh, logout, and MCP OAuth consent |
 | `GET /`, `GET /*` | embedded browser shell and SPA fallback |
 
 Auth middleware is global. Browser access tokens refresh through the HttpOnly

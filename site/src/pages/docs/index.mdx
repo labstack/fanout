@@ -264,7 +264,7 @@ claude mcp add fanout --transport http https://fanout.example.com/mcp
 claude mcp add fanout --transport http https://demo.fanout.test/mcp
 ```
 
-The MCP endpoint requires a user API key. Generate one with `POST /api/auth/api-key` from an authenticated session, then pass it as `Authorization: Bearer fo_<token>` if your transport supports custom headers. The ingest token is for OTLP only and is not accepted by `/mcp`.
+The MCP endpoint uses OAuth 2.1 for remote clients. Add `https://demo.fanout.test/mcp` to Codex or Claude Code as a Streamable HTTP server, then use the client's MCP authentication flow (`codex mcp login` or `/mcp`). Fanout opens a browser consent screen, uses PKCE, and issues a short-lived audience-bound access token with rotating refresh credentials. The ingest token is for OTLP only and is not accepted by `/mcp`.
 
 ### Tools
 
@@ -279,7 +279,7 @@ The MCP endpoint requires a user API key. Generate one with `POST /api/auth/api-
 Both tools are read-only, window- and namespace-bounded, return structured
 output with provenance, and remain useful in hosts that cannot render MCP Apps.
 
-Ingest and user API keys are deliberately separate: a collector credential cannot query telemetry or open an MCP session.
+Ingest credentials and MCP OAuth credentials are deliberately separate: a collector credential cannot query telemetry or open an MCP session.
 
 ## Operate
 

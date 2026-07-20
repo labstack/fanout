@@ -73,7 +73,7 @@ func New(queries Observability, version string) *Server {
 func (s *Server) MCP() *mcp.Server { return s.mcp }
 
 func (s *Server) HTTPHandler() http.Handler {
-	// Echo's bearer-auth middleware runs before this handler. Disable the SDK's
+	// The MCP OAuth bearer middleware runs before this handler. Disable the SDK's
 	// localhost Host heuristic because a legitimate local reverse proxy connects
 	// over loopback while preserving the public Host (for example,
 	// demo.fanout.test); the heuristic otherwise rejects every browser MCP App.

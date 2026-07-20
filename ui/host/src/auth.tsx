@@ -13,6 +13,14 @@ function saveToken(token: string) {
   localStorage.setItem(tokenKey, token);
 }
 
+function oauthReturnTo(): string {
+  const value = new URLSearchParams(window.location.search).get("return_to");
+  if (!value) return "";
+  const target = new URL(value, window.location.origin);
+  if (target.origin !== window.location.origin || target.pathname !== "/api/auth/oauth/authorize") return "";
+  return `${target.pathname}${target.search}`;
+}
+
 export function clearSession() {
   localStorage.removeItem(tokenKey);
   window.dispatchEvent(new Event(unauthorizedEvent));
@@ -93,6 +101,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [setupResult, setSetupResult] = useState<SetupResult | null>(null);
   const [copied, setCopied] = useState(false);
+  const returnTo = oauthReturnTo();
 
   useEffect(() => {
     jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value)));
@@ -100,6 +109,10 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     window.addEventListener(unauthorizedEvent, handleUnauthorized);
     return () => window.removeEventListener(unauthorizedEvent, handleUnauthorized);
   }, []);
+
+  useEffect(() => {
+    if (token && returnTo) window.location.replace(returnTo);
+  }, [returnTo, token]);
 
   async function copyIngestToken() {
     try {
@@ -133,6 +146,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     );
   }
 
+  if (token && returnTo) return null;
   if (token) return <>{children}</>;
 
   async function submit(event: FormEvent) {

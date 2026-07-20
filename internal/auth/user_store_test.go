@@ -2,7 +2,6 @@ package auth
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	appstore "github.com/labstack/fanout/internal/store"
@@ -84,63 +83,6 @@ func TestUserStore_Delete(t *testing.T) {
 	_, err := s.GetByID(u.ID)
 	if err == nil {
 		t.Fatal("expected ErrUserNotFound after delete")
-	}
-}
-
-func TestUserStore_APIKeyLifecycle(t *testing.T) {
-	s := newTestUserStore(t)
-	u, _ := s.Create("key@example.com", "", "operator")
-
-	key, err := s.GenerateAPIKey(u.ID)
-	if err != nil {
-		t.Fatalf("GenerateAPIKey: %v", err)
-	}
-	// Keys share the "fo_" namespace with the ingest token (not monk's "mk_").
-	if !strings.HasPrefix(key, "fo_") {
-		t.Errorf("key = %q, want fo_-prefixed value", key)
-	}
-
-	got, err := s.GetByAPIKey(key)
-	if err != nil {
-		t.Fatalf("GetByAPIKey: %v", err)
-	}
-	if got.ID != u.ID {
-		t.Errorf("GetByAPIKey id = %q, want %q", got.ID, u.ID)
-	}
-
-	if err := s.RevokeAPIKey(u.ID); err != nil {
-		t.Fatalf("RevokeAPIKey: %v", err)
-	}
-	if _, err := s.GetByAPIKey(key); !errors.Is(err, ErrUserNotFound) {
-		t.Fatalf("GetByAPIKey after revoke = %v, want ErrUserNotFound", err)
-	}
-}
-
-func TestUserStore_GenerateAPIKeyReplacesPrevious(t *testing.T) {
-	s := newTestUserStore(t)
-	u, _ := s.Create("rotate@example.com", "", "operator")
-
-	first, err := s.GenerateAPIKey(u.ID)
-	if err != nil {
-		t.Fatalf("GenerateAPIKey first: %v", err)
-	}
-	second, err := s.GenerateAPIKey(u.ID)
-	if err != nil {
-		t.Fatalf("GenerateAPIKey second: %v", err)
-	}
-
-	// Each user holds at most one key (single users.key column), so generating
-	// a new one must invalidate the first — the contract behind the UI's
-	// "Regenerate" action.
-	if _, err := s.GetByAPIKey(first); !errors.Is(err, ErrUserNotFound) {
-		t.Fatalf("old key still valid after regenerate: err = %v, want ErrUserNotFound", err)
-	}
-	got, err := s.GetByAPIKey(second)
-	if err != nil {
-		t.Fatalf("GetByAPIKey second: %v", err)
-	}
-	if got.ID != u.ID {
-		t.Errorf("GetByAPIKey id = %q, want %q", got.ID, u.ID)
 	}
 }
 

@@ -2,10 +2,7 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -27,7 +24,6 @@ type User struct {
 	Name       string `json:"name,omitempty"`
 	Role       string `json:"role"`
 	Active     bool   `json:"active"`
-	HasAPIKey  bool   `json:"has_api_key"`
 	LoggedInAt string `json:"logged_in_at,omitempty"`
 	CreatedAt  string `json:"created_at"`
 	UpdatedAt  string `json:"updated_at"`
@@ -52,7 +48,6 @@ func toUser(u generated.User) User {
 		Name:       u.Name.String,
 		Role:       u.Role,
 		Active:     u.Active == 1,
-		HasAPIKey:  u.Key.Valid && u.Key.String != "",
 		LoggedInAt: u.LoggedInAt.String,
 		CreatedAt:  u.CreatedAt,
 		UpdatedAt:  u.UpdatedAt,
@@ -305,55 +300,6 @@ func (s *UserStore) CreateFirstAdmin(email, name string) (User, error) {
 
 // ErrSetupComplete is returned when setup is attempted but users already exist.
 var ErrSetupComplete = errors.New("setup already complete")
-
-// GenerateAPIKey creates a new API key for the user. Returns the plaintext key.
-// The key is stored as a SHA-256 hash in the database.
-func (s *UserStore) GenerateAPIKey(userID string) (string, error) {
-	b := make([]byte, 24)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("auth: generate api key: %w", err)
-	}
-	key := "fo_" + hex.EncodeToString(b)
-	hash := hashAPIKey(key)
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	err := s.q.SetAPIKeyHash(context.Background(), generated.SetAPIKeyHashParams{
-		Key:       sql.NullString{String: hash, Valid: true},
-		UpdatedAt: now,
-		ID:        userID,
-	})
-	if err != nil {
-		return "", fmt.Errorf("auth: store api key: %w", err)
-	}
-	return key, nil
-}
-
-// RevokeAPIKey removes the API key for a user.
-func (s *UserStore) RevokeAPIKey(userID string) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	return s.q.RevokeAPIKey(context.Background(), generated.RevokeAPIKeyParams{
-		UpdatedAt: now,
-		ID:        userID,
-	})
-}
-
-// GetByAPIKey looks up a user by their API key (plaintext → hash → lookup).
-func (s *UserStore) GetByAPIKey(key string) (User, error) {
-	hash := hashAPIKey(key)
-	u, err := s.q.GetUserByKey(context.Background(), sql.NullString{String: hash, Valid: true})
-	if errors.Is(err, sql.ErrNoRows) {
-		return User{}, ErrUserNotFound
-	}
-	if err != nil {
-		return User{}, fmt.Errorf("auth: get user by api key: %w", err)
-	}
-	return toUser(u), nil
-}
-
-func hashAPIKey(key string) string {
-	h := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(h[:])
-}
 
 func newCreateUserParams(email, name, role string) (generated.CreateUserParams, error) {
 	id, err := uuid.NewV7()

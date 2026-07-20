@@ -8,6 +8,26 @@ import (
 	"database/sql"
 )
 
+type AguiRun struct {
+	RunID       string         `json:"run_id"`
+	ThreadID    string         `json:"thread_id"`
+	ParentRunID sql.NullString `json:"parent_run_id"`
+	InputJson   string         `json:"input_json"`
+	EventsJson  string         `json:"events_json"`
+	Status      string         `json:"status"`
+	Error       string         `json:"error"`
+	CreatedAt   string         `json:"created_at"`
+	CompletedAt sql.NullString `json:"completed_at"`
+}
+
+type AguiThread struct {
+	ThreadID     string `json:"thread_id"`
+	OwnerID      string `json:"owner_id"`
+	MessagesJson string `json:"messages_json"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
 type Alert struct {
 	ID                 string          `json:"id"`
 	RuleID             string          `json:"rule_id"`
@@ -42,6 +62,42 @@ type AlertRule struct {
 	UpdatedAt       string         `json:"updated_at"`
 }
 
+type OauthAuthorizationCode struct {
+	CodeHash      string `json:"code_hash"`
+	ClientID      string `json:"client_id"`
+	UserID        string `json:"user_id"`
+	RedirectUri   string `json:"redirect_uri"`
+	Scope         string `json:"scope"`
+	Resource      string `json:"resource"`
+	CodeChallenge string `json:"code_challenge"`
+	ExpiresAt     int64  `json:"expires_at"`
+	CreatedAt     int64  `json:"created_at"`
+}
+
+type OauthClient struct {
+	ClientID                string `json:"client_id"`
+	ClientName              string `json:"client_name"`
+	ClientUri               string `json:"client_uri"`
+	RedirectUrisJson        string `json:"redirect_uris_json"`
+	GrantTypesJson          string `json:"grant_types_json"`
+	ResponseTypesJson       string `json:"response_types_json"`
+	TokenEndpointAuthMethod string `json:"token_endpoint_auth_method"`
+	CreatedAt               int64  `json:"created_at"`
+}
+
+type OauthToken struct {
+	TokenHash string        `json:"token_hash"`
+	Kind      string        `json:"kind"`
+	FamilyID  string        `json:"family_id"`
+	ClientID  string        `json:"client_id"`
+	UserID    string        `json:"user_id"`
+	Scope     string        `json:"scope"`
+	Resource  string        `json:"resource"`
+	ExpiresAt int64         `json:"expires_at"`
+	RevokedAt sql.NullInt64 `json:"revoked_at"`
+	CreatedAt int64         `json:"created_at"`
+}
+
 type Setting struct {
 	Key       string `json:"key"`
 	Value     string `json:"value"`
@@ -54,7 +110,6 @@ type User struct {
 	Name       sql.NullString `json:"name"`
 	Role       string         `json:"role"`
 	Active     int64          `json:"active"`
-	Key        sql.NullString `json:"key"`
 	LoggedInAt sql.NullString `json:"logged_in_at"`
 	CreatedAt  string         `json:"created_at"`
 	UpdatedAt  string         `json:"updated_at"`

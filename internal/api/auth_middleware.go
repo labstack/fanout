@@ -18,7 +18,7 @@ func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, jwtSecret strin
 // publicViewer is the synthetic identity served to unauthenticated read
 // requests when PUBLIC_READ is on. Role "viewer" clears endpoints with no
 // RequireRole guard while still failing RequireRole("operator"/"admin"), so
-// settings/users/api-key routes stay locked.
+// settings and user-management routes stay locked.
 var publicViewer = auth.User{ID: "public", Email: "public@demo", Role: "viewer", Active: true}
 
 func AuthMiddleware(users *auth.UserStore, jwtSecret string, publicRead bool) echo.MiddlewareFunc {
@@ -89,14 +89,6 @@ func RequireRole(minRole string) echo.MiddlewareFunc {
 }
 
 func authenticateBearer(users *auth.UserStore, jwtSecret, bearer string) (auth.User, error) {
-	if strings.HasPrefix(bearer, "fo_") {
-		user, err := users.GetByAPIKey(bearer)
-		if err != nil || !user.Active {
-			return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-		}
-		return user, nil
-	}
-
 	claims, err := auth.VerifyAccess(jwtSecret, bearer)
 	if err != nil {
 		return auth.User{}, err
@@ -117,9 +109,7 @@ func bearerToken(header string) string {
 }
 
 func isPublicRoute(path string) bool {
-	isPublicAuth := strings.HasPrefix(path, "/api/auth/") &&
-		path != "/api/auth/me" &&
-		!strings.HasPrefix(path, "/api/auth/api-key")
+	isPublicAuth := strings.HasPrefix(path, "/api/auth/") && path != "/api/auth/me"
 
 	// /debug/pprof (mounted only when PPROF_ENABLED) must NOT be public — it
 	// exposes heap dumps, cmdline, and a repeatable CPU-profile DoS. Excluding it
@@ -130,7 +120,8 @@ func isPublicRoute(path string) bool {
 	}
 
 	return path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
+		path == "/mcp" || strings.HasPrefix(path, "/.well-known/") || strings.HasPrefix(path, "/oauth/") ||
 		path == "/favicon.ico" || path == "/favicon.svg" ||
 		isPublicAuth ||
-		(!strings.HasPrefix(path, "/api/") && path != "/mcp")
+		!strings.HasPrefix(path, "/api/")
 }
