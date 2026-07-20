@@ -39,8 +39,10 @@ jobs:
           version: v2.9
           args: --help
 
-      - name: Install web deps
-        run: cd web && bun install --frozen-lockfile
+      - name: Install UI deps
+        run: |
+          cd ui/host && bun install --frozen-lockfile
+          cd ../apps && bun install --frozen-lockfile
 
       - name: Install site deps
         run: cd site && bun install --frozen-lockfile

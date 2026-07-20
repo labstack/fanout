@@ -1,6 +1,13 @@
 # Fanout
 
-Single-binary OpenTelemetry ingest, storage, and query. Self-hosted.
+Single-binary, agent-native OpenTelemetry investigation. Fanout owns ingest,
+storage, the AG-UI runtime, typed MCP tools, SQLite conversation history, and
+an embedded browser client. Rich results are portable MCP Apps.
+
+Five typed domains cover system health, service topology, performance,
+trace inspection, and logs. Their React visualizations are compiled at build
+time and embedded with the host in the same Go executable; Node or Bun is not
+required at runtime.
 
 - **Docs:** [fanout.run/docs](https://fanout.run/docs/)
 - **Demo:** [demo.fanout.run](https://demo.fanout.run)
@@ -15,17 +22,18 @@ docker run -d --name fanout \
   ghcr.io/labstack/fanout:latest
 ```
 
-Open <http://localhost:7520>, complete setup, copy the generated ingest token, and point any OTLP collector or SDK at `:4317` with header `x-fanout-ingest-token: fo_<token>`.
+Open <https://demo.fanout.test>, complete setup, and copy the ingest token. Point any OTLP collector or SDK at
+`demo.fanout.test:4317` with header `x-fanout-ingest-token: fo_<token>`.
 
 Full setup walkthrough: [fanout.run/docs#first-boot](https://fanout.run/docs/#first-boot).
 
 ## Repo layout
 
 ```
-cmd/fanout/      Go binary
-internal/        Go packages (ingest, lake, query, api, mcp, …)
-internal/ui/     Embedded admin UI (Go glue)
-web/             React admin UI source (Vite)
+cmd/fanout/      Single Go server/runtime binary
+internal/        Ingest, query, AG-UI, MCP, auth, and embedded web packages
+ui/host/         Static React AG-UI client (compiled and embedded at build time)
+ui/apps/         Portable React MCP Apps embedded by the MCP server
 site/            Marketing + public docs (Astro)
 docs/            Internal plans, specs, design notes
 ```
@@ -34,15 +42,15 @@ docs/            Internal plans, specs, design notes
 
 ```sh
 just install   # Go tools, bun deps (web + site), pre-commit
-just up        # Run server + web + site together
+just up        # Run server + browser build watcher + site
 just check     # Format, vet, lint, type-check, build
 just test      # go test ./...
 ```
 
 With the shared local Caddy setup in `../docker`:
 
-- Site/docs: `https://fanout.test`
 - App: `https://demo.fanout.test`
+- Site/docs: `https://fanout.test`
 
 Caddy owns `/api` and `/mcp` in local development, so the frontend dev flow expects that proxy to be running.
 

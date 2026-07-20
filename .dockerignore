@@ -9,8 +9,10 @@ testdata/
 
 # Build
 fanout
-web/node_modules/
-web/dist/
+ui/host/node_modules/
+ui/host/dist/
+ui/apps/node_modules/
+ui/apps/dist/
 site/node_modules/
 site/dist/
 

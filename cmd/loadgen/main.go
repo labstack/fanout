@@ -14,7 +14,7 @@
 // Example — a 10-minute soak at 2k traces/s across 50 services, with a report:
 //
 //	go run ./cmd/loadgen -rate 2000 -duration 10m -services 50 -attr-cardinality 200 \
-//	  -metrics-url http://localhost:7520/-/metrics -report run.json
+//	  -metrics-url https://demo.fanout.test/-/metrics -report run.json
 //
 // Run fanout locally with PUBLIC_READ=true for tokenless ingest, or pass -token.
 package main
@@ -84,7 +84,7 @@ type config struct {
 
 func main() {
 	var cfg config
-	flag.StringVar(&cfg.endpoint, "endpoint", "localhost:4317", "OTLP gRPC endpoint")
+	flag.StringVar(&cfg.endpoint, "endpoint", "demo.fanout.test:4317", "OTLP gRPC endpoint")
 	flag.StringVar(&cfg.token, "token", "", "ingest token (x-fanout-ingest-token); omit when fanout runs with PUBLIC_READ=true")
 	flag.Float64Var(&cfg.rate, "rate", 1000, "target traces per second (aggregate)")
 	flag.DurationVar(&cfg.duration, "duration", time.Minute, "run duration; 0 means run until interrupted")
@@ -96,9 +96,9 @@ func main() {
 	flag.Float64Var(&cfg.msgRatio, "messaging-ratio", 0.2, "fraction of traces that also emit a producer/consumer pair (0..1)")
 	flag.BoolVar(&cfg.sendLogs, "logs", true, "also emit logs")
 	flag.BoolVar(&cfg.sendMetrics, "metrics", true, "also emit metrics")
-	flag.StringVar(&cfg.metricsURL, "metrics-url", "", "fanout /-/metrics URL to capture server-side deltas (e.g. http://localhost:7520/-/metrics)")
+	flag.StringVar(&cfg.metricsURL, "metrics-url", "", "fanout /-/metrics URL to capture server-side deltas (e.g. https://demo.fanout.test/-/metrics)")
 	flag.StringVar(&cfg.reportPath, "report", "", "write a JSON performance report to this path")
-	flag.StringVar(&cfg.queryURL, "query-url", "", "fanout HTTP base URL to drive read load under ingest (e.g. http://localhost:7520)")
+	flag.StringVar(&cfg.queryURL, "query-url", "", "fanout HTTP base URL to drive read load under ingest (e.g. https://demo.fanout.test)")
 	flag.IntVar(&cfg.queryWorkers, "query-workers", 0, "concurrent query workers (0 = ingest only)")
 	flag.Float64Var(&cfg.queryRate, "query-rate", 50, "target queries/sec (aggregate) when query-workers > 0")
 	flag.Float64Var(&cfg.maxExportP95, "max-export-p95-ms", 0, "fail (exit 1) if ingest export p95 exceeds this")

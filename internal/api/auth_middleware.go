@@ -27,7 +27,6 @@ func AuthMiddleware(users *auth.UserStore, jwtSecret string, publicRead bool) ec
 			if isPublicRoute(c.Request().URL.Path) {
 				return next(c)
 			}
-
 			bearer := bearerToken(c.Request().Header.Get("Authorization"))
 			if bearer != "" {
 				user, err := authenticateBearer(users, jwtSecret, bearer)

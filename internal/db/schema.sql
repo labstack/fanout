@@ -66,3 +66,29 @@ CREATE TABLE settings (
     value      TEXT NOT NULL,
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE agui_threads (
+    thread_id     TEXT PRIMARY KEY,
+    owner_id      TEXT NOT NULL,
+    messages_json TEXT NOT NULL DEFAULT '[]',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_agui_threads_owner_updated
+    ON agui_threads(owner_id, updated_at DESC);
+
+CREATE TABLE agui_runs (
+    run_id        TEXT PRIMARY KEY,
+    thread_id     TEXT NOT NULL REFERENCES agui_threads(thread_id) ON DELETE CASCADE,
+    parent_run_id TEXT,
+    input_json    TEXT NOT NULL,
+    events_json   TEXT NOT NULL DEFAULT '[]',
+    status        TEXT NOT NULL,
+    error         TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    completed_at  TEXT
+);
+
+CREATE INDEX idx_agui_runs_thread_created
+    ON agui_runs(thread_id, created_at DESC);

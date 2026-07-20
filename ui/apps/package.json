@@ -1,0 +1,35 @@
+{
+  "name": "@fanout/ui-apps",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && cross-env NODE_ENV=production INPUT=overview.html vite build && cross-env NODE_ENV=production INPUT=topology.html vite build && cross-env NODE_ENV=production INPUT=performance.html vite build && cross-env NODE_ENV=production INPUT=trace.html vite build && cross-env NODE_ENV=production INPUT=logs.html vite build && cp dist/overview.html ../../internal/mcp/apps/overview.html && cp dist/topology.html ../../internal/mcp/apps/topology.html && cp dist/performance.html ../../internal/mcp/apps/performance.html && cp dist/trace.html ../../internal/mcp/apps/trace.html && cp dist/logs.html ../../internal/mcp/apps/logs.html",
+    "lint": "tsc --noEmit",
+    "dev:overview": "cross-env NODE_ENV=development INPUT=overview.html vite",
+    "dev:topology": "cross-env NODE_ENV=development INPUT=topology.html vite",
+    "dev:performance": "cross-env NODE_ENV=development INPUT=performance.html vite",
+    "dev:trace": "cross-env NODE_ENV=development INPUT=trace.html vite",
+    "dev:logs": "cross-env NODE_ENV=development INPUT=logs.html vite"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.7.4",
+    "@modelcontextprotocol/sdk": "1.29.0",
+    "@radix-ui/react-tabs": "1.1.18",
+    "@radix-ui/react-tooltip": "1.2.13",
+    "echarts": "6.1.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "4.3.3",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.3",
+    "cross-env": "10.1.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.1.5",
+    "vite-plugin-singlefile": "2.3.3"
+  }
+}

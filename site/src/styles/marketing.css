@@ -1,4 +1,4 @@
-/* Marketing site styles — matches web/src/index.css product theme (Ayu Mono).
+/* Marketing site styles — matches ui/host/src/index.css product theme (Ayu Mono).
    Used by src/pages/index.astro via MarketingLayout. Loaded by docs too via
    DocsLayout extending MarketingLayout. Keep tokens in sync with product. */
 

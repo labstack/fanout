@@ -180,6 +180,17 @@ func TestSuggestedIngestEndpoint(t *testing.T) {
 			reqHost:  "ignored.example.com",
 			want:     "1.2.3.4:5317",
 		},
+		{
+			name:     "loopback bind advertises the application host",
+			grpcAddr: "127.0.0.1:4317",
+			reqHost:  "demo.fanout.test",
+			want:     "demo.fanout.test:4317",
+		},
+		{
+			name:     "missing request host uses local development hostname",
+			grpcAddr: ":4317",
+			want:     "demo.fanout.test:4317",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

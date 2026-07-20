@@ -80,14 +80,15 @@ func suggestedIngestEndpoint(req *http.Request, grpcAddr, configured string) str
 		return configured
 	}
 	host, port := splitHostPort(grpcAddr)
-	if host == "" || host == "0.0.0.0" || host == "::" {
+	bindIP := net.ParseIP(strings.Trim(host, "[]"))
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "localhost" || (bindIP != nil && bindIP.IsLoopback()) {
 		host = req.Host
 		if requestHost, _, err := net.SplitHostPort(req.Host); err == nil {
 			host = requestHost
 		}
 	}
 	if host == "" {
-		host = "localhost"
+		host = "demo.fanout.test"
 	}
 	return net.JoinHostPort(host, port)
 }

@@ -229,7 +229,7 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.AIAPIKey) == "" {
 		return fmt.Errorf("AI_API_KEY is required")
 	}
-	switch strings.TrimSpace(c.AIProvider) {
+	switch strings.ToLower(strings.TrimSpace(c.AIProvider)) {
 	case "", "anthropic", "openai":
 	default:
 		return fmt.Errorf("AI_PROVIDER must be anthropic or openai")

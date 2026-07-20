@@ -38,8 +38,8 @@ services:
     expose:
       - "80"
 
-  # fanout.labstack.com (web UI) + ingest.fanout.labstack.com (OTLP gRPC, 443).
-  # Our own production instance. Secrets (JWT/SMTP/AI) live in fanout/.env
+  # Single Fanout runtime: ingest, query, AG-UI, MCP, and embedded web client.
+  # Secrets (JWT/SMTP/model provider) live in fanout/.env
   # (gitignored); the deploy host must have this file in place before `up`.
   fanout:
     image: ghcr.io/labstack/fanout:${FANOUT_VERSION:?FANOUT_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}

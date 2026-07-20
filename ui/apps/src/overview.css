@@ -1,0 +1,21 @@
+.metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0 20px 14px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--line); }
+.metric { background: var(--surface-2); padding: 12px 14px; display: grid; gap: 5px; }
+.metric span { color: var(--muted); font-size: 11px; }
+.metric strong { font-size: 19px; letter-spacing: -.03em; }
+.metric strong.health-degraded { color: var(--degraded); }
+.metric strong.health-unhealthy { color: var(--unhealthy); }
+.metric strong.health-healthy { color: var(--healthy); }
+.health-strip { display: flex; gap: 2px; height: 7px; margin: 0 20px; overflow: hidden; border-radius: 999px; background: var(--surface-2); }
+.segment { min-width: 0; }
+.segment.healthy { background: var(--healthy); }.segment.degraded { background: var(--degraded); }.segment.unhealthy { background: var(--unhealthy); }
+.legend { color: var(--muted); display: flex; gap: 15px; padding: 8px 20px 15px; font-size: 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 5px; }
+.legend-dot { width: 5px; height: 5px; border-radius: 50%; }
+.legend-dot.healthy { background: var(--healthy); }.legend-dot.degraded { background: var(--degraded); }.legend-dot.unhealthy { background: var(--unhealthy); }
+.service-list { border-top: 1px solid var(--line); }
+.service-row { display: grid; grid-template-columns: minmax(130px, 1.8fr) repeat(3, minmax(58px, .65fr)); gap: 10px; align-items: center; padding: 10px 20px; font-size: 12px; text-align: right; }
+.service-row > :first-child { text-align: left; }
+.service-head { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }
+.service-button { border: 0; border-top: 1px solid var(--line); width: 100%; background: transparent; color: var(--text); cursor: pointer; }
+.service-button:hover { background: var(--surface-2); }
+@media (max-width: 520px) { .metrics { margin-inline: 15px; }.health-strip { margin-inline: 15px; }.legend { padding-inline: 15px; }.service-row { padding-inline: 15px; grid-template-columns: minmax(110px, 1.5fr) repeat(2, minmax(52px, .6fr)); }.service-row > :nth-child(2) { display: none; } }

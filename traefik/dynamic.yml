@@ -1,7 +1,7 @@
 # Routers + services for the four edge entries:
 #   site            fanout.run, www.fanout.run   → site:80         (marketing)
-#   demo            demo.fanout.run              → demo:7520       (public otel-demo backend)
-#   fanout          fanout.labstack.com          → fanout:7520     (our own production instance, web UI)
+#   demo            demo.fanout.run              → demo:7520       (single binary)
+#   fanout          fanout.labstack.com          → fanout:7520     (single binary)
 #   fanout-ingest   ingest.fanout.labstack.com   → h2c://fanout:4317 (OTLP gRPC ingest, on 443)
 #
 # Cert strategy: ONE wildcard cert under fanout.run covers `site` + `demo` + apex.
@@ -60,9 +60,7 @@ http:
         certResolver: le
 
   middlewares:
-    # Gzip for the web routers (HTML/JS/CSS/JSON/SVG). `text/event-stream` is
-    # excluded so the AI chat SSE stream at /api/chat isn't buffered/held for
-    # compression — same shape monk uses on its /api/stream.
+    # Gzip web assets and JSON, but never buffer AG-UI event streams.
     compress:
       compress:
         excludedContentTypes:
