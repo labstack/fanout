@@ -13,14 +13,14 @@ import (
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/events"
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 	"github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/encoding/sse"
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/dashboard"
+	appid "github.com/labstack/fanout/internal/id"
 )
 
-const systemPrompt = `You are Fanout's observability assistant. Use observability_overview first for broad health questions, service_topology for dependencies, service_performance for activity/latency/endpoints/comparisons, trace_detail for trace or root-cause inspection, and search_logs for log questions. Treat structured outputs as authoritative. You can also list, inspect, create, and update the user's named dashboards. When asked to create a dashboard, compose a useful complete layout using overview, topology, activity, performance, trace, logs, and assistant widgets; use stable descriptive widget IDs, valid non-overlapping 12-column positions, and the requested time window. Creating is additive. Only update an existing dashboard after the user explicitly asks to change or replace it; inspect it first and preserve unrelated views. State the time window you used, distinguish missing data from healthy behavior, and never invent services, metrics, or causal claims. Keep answers concise because attached views provide interactive details. Never expose implementation details to the user: do not mention protocol names, tool names, schemas, query IDs, data-source names, storage engines, providers, or internal execution steps. Refer to attached interactive content simply as a view.`
+const systemPrompt = `You are Fanout's observability assistant. Use observability_overview first for broad health questions, service_topology for dependencies, service_performance for activity/latency/endpoints/comparisons, trace_detail for trace or root-cause inspection, and search_logs for log questions. Treat structured outputs as authoritative. You can also list, inspect, create, and update the user's named dashboards. When asked to create a dashboard, compose a useful complete layout using overview, topology, activity, performance, trace, logs, and assistant widgets; use unique stable widget IDs, valid non-overlapping 12-column positions, and the requested time window. Creating is additive. Only update an existing dashboard after the user explicitly asks to change or replace it; inspect it first and preserve unrelated views. State the time window you used, distinguish missing data from healthy behavior, and never invent services, metrics, or causal claims. Keep answers concise because attached views provide interactive details. Never expose implementation details to the user: do not mention protocol names, tool names, schemas, query IDs, data-source names, storage engines, providers, or internal execution steps. Refer to attached interactive content simply as a view.`
 
 type Runtime struct {
 	provider Provider
@@ -63,10 +63,18 @@ func (r *Runtime) Run(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid AG-UI input")
 	}
 	if input.ThreadID == "" {
-		input.ThreadID = uuid.NewString()
+		threadID, err := appid.New()
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate thread id").Wrap(err)
+		}
+		input.ThreadID = threadID
 	}
 	if input.RunID == "" {
-		input.RunID = uuid.NewString()
+		runID, err := appid.New()
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate run id").Wrap(err)
+		}
+		input.RunID = runID
 	}
 	if err := r.store.StartRun(c.Request().Context(), user.ID, input); err != nil {
 		if errors.Is(err, ErrThreadNotFound) {
@@ -102,7 +110,10 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 	}
 	conversation := providerMessages(*messages)
 	for step := 0; step < r.maxSteps; step++ {
-		messageID := uuid.NewString()
+		messageID, err := appid.New()
+		if err != nil {
+			return err
+		}
 		var text strings.Builder
 		var toolCalls []ToolCall
 		textStarted := false
@@ -163,14 +174,20 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			if err != nil {
 				execution = ToolExecution{Content: fmt.Sprintf(`{"error":%q}`, err.Error()), IsError: true}
 			}
-			toolMessageID := uuid.NewString()
+			toolMessageID, err := appid.New()
+			if err != nil {
+				return err
+			}
 			if err := emitter.emit(events.NewToolCallResultEvent(toolMessageID, call.ID, execution.Content)); err != nil {
 				return err
 			}
 			*messages = append(*messages, agtypes.Message{ID: toolMessageID, Role: agtypes.RoleTool, Content: execution.Content, ToolCallID: call.ID, Error: errorString(execution.IsError)})
 			conversation = append(conversation, ProviderMessage{Role: RoleTool, ToolResult: &ToolResult{ToolCallID: call.ID, Content: execution.Content, IsError: execution.IsError}})
 			if execution.AppResourceURI != "" {
-				activityID := uuid.NewString()
+				activityID, err := appid.New()
+				if err != nil {
+					return err
+				}
 				content := map[string]any{"resourceUri": execution.AppResourceURI, "toolName": call.Name, "toolInput": json.RawMessage(call.Input), "toolResult": execution.Structured, "isError": execution.IsError}
 				if content["toolResult"] == nil {
 					content["toolResult"] = execution.Content

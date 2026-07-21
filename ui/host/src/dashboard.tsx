@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowClockwise, ArrowUpRight, ListMagnifyingGlass, PlusCircle, Sparkle, SquaresFour, X } from "@phosphor-icons/react";
+import { ArrowClockwise, ArrowUpRight, ListMagnifyingGlass, Plus, Sparkle, SquaresFour, X } from "@phosphor-icons/react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import { useEffect, useMemo, useState } from "react";
 import { authorizedFetch } from "./auth";
@@ -76,7 +76,7 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
   function choose(id: string, replace = false) { setSelectedID(id); localStorage.setItem(dashboardKey, id); onDashboardChange?.(id, replace); }
   function update(next: State) { setState(next); save.mutate(next); }
   function add(type: WidgetType) {
-    const id = `${type}-${createID().slice(0, 6)}`;
+    const id = createID();
     const wide = type === "topology" || type === "performance" || type === "trace" || type === "logs";
     const minimumRows = widgetMinimumRows[type];
     update({ ...state, widgets: [...state.widgets, { id, type, title: widgetTitles[type], enabled: true }], layout: [...state.layout, { i: id, x: 0, y: Infinity, w: wide ? 8 : 4, h: minimumRows, minW: 3, minH: minimumRows }] });
@@ -98,8 +98,8 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
       <label className="grid gap-1.5 text-[11px] font-medium uppercase tracking-[.08em] text-muted">Namespace<input className="h-10 w-[180px] rounded-lg border border-line-strong bg-field px-3 text-xs font-medium normal-case tracking-normal text-text outline-none transition placeholder:text-muted hover:border-accent hover:bg-field-hover focus:border-accent focus:ring-3 focus:ring-accent/10 max-[520px]:w-full" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.target.value } })} onBlur={() => update(state)} placeholder="All namespaces" /></label>
       <span className="mr-1 mb-3 ml-auto inline-flex items-center gap-2 text-xs text-muted max-[520px]:order-last max-[520px]:m-0 max-[520px]:w-full"><i className="size-1.5 rounded-full bg-accent shadow-[0_0_8px_var(--accent-glow)]" />{save.isPending ? "Saving" : save.isError ? "Save failed" : "Saved"}</span>
       <div className="flex items-center gap-1">
-        <Select quiet label="Add view" value="" placeholder="Add view" onValueChange={(type) => add(type as WidgetType)} options={Object.entries(widgetTitles).map(([value, label]) => ({ value, label }))} icon={<span className="grid size-6 shrink-0 place-items-center rounded-md bg-accent/10 text-accent"><PlusCircle size={15} weight="bold" aria-hidden="true" /></span>} className="w-[132px] px-1.5 text-muted hover:text-text" />
-        <button className="inline-flex h-10 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-muted transition hover:bg-panel-raised hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" onClick={() => onOpenChat()}>Ask Fanout<ArrowUpRight size={15} weight="bold" aria-hidden="true" /></button>
+        <Select quiet label="Add view" value="" placeholder="Add view" onValueChange={(type) => add(type as WidgetType)} options={Object.entries(widgetTitles).map(([value, label]) => ({ value, label }))} icon={<Plus size={15} weight="bold" aria-hidden="true" />} className="w-[116px] gap-1.5 px-2.5 text-text-soft hover:bg-transparent hover:text-text" />
+        <button className="inline-flex h-10 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-muted transition hover:text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent" onClick={() => onOpenChat()}>Ask Fanout<ArrowUpRight size={15} weight="bold" aria-hidden="true" /></button>
       </div>
     </div>
     <Grid className="dashboard-grid" layouts={layouts} breakpoints={{ lg: 1100, md: 800, sm: 600, xs: 420, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 2, xxs: 1 }} rowHeight={76} margin={[16, 16]} containerPadding={[0, 0]} compactType="vertical" draggableCancel="button,input,select,textarea,a,label" onBreakpointChange={setBreakpoint} onDragStop={(layout: any) => { if (breakpoint === "lg") update({ ...state, layout }); }} onResizeStop={(layout: any) => { if (breakpoint === "lg") update({ ...state, layout }); }}>

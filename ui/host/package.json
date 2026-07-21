@@ -24,6 +24,7 @@
     "react-grid-layout": "2.2.3",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "uuid": "14.0.1",
     "zustand": "5.0.14"
   },
   "devDependencies": {

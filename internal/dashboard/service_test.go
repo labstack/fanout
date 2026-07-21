@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	appid "github.com/labstack/fanout/internal/id"
 	controlstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -42,6 +43,7 @@ func TestServiceCreatesNamedOwnerScopedDashboards(t *testing.T) {
 	if created.State.Widgets[0].Config["severity"] != "ERROR" {
 		t.Fatalf("widget config = %#v", created.State.Widgets[0].Config)
 	}
+	assertDashboardUUIDv7s(t, created)
 	if _, err := service.Get(ctx, "owner-b", created.ID); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("cross-owner read = %v", err)
 	}
@@ -85,5 +87,25 @@ func TestServiceMigratesLegacyCanvasOnFirstRead(t *testing.T) {
 	}
 	if item.State.Filters.Window != "6h" || item.State.Widgets[0].Title != "Legacy health" {
 		t.Fatalf("migrated dashboard = %#v", item)
+	}
+	assertDashboardUUIDv7s(t, item)
+}
+
+func assertDashboardUUIDv7s(t *testing.T, item Dashboard) {
+	t.Helper()
+	if !appid.IsV7(item.ID) {
+		t.Fatalf("dashboard id %q is not UUIDv7", item.ID)
+	}
+	widgetIDs := make(map[string]bool, len(item.State.Widgets))
+	for _, widget := range item.State.Widgets {
+		if !appid.IsV7(widget.ID) {
+			t.Fatalf("widget id %q is not UUIDv7", widget.ID)
+		}
+		widgetIDs[widget.ID] = true
+	}
+	for _, layout := range item.State.Layout {
+		if !appid.IsV7(layout.I) || !widgetIDs[layout.I] {
+			t.Fatalf("layout id %q is not a persisted widget UUIDv7", layout.I)
+		}
 	}
 }

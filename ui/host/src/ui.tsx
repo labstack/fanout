@@ -25,7 +25,7 @@ export function Select({ value, onValueChange, options, label, placeholder, icon
   className?: string;
 }) {
   return <SelectPrimitive.Root value={value} onValueChange={onValueChange}>
-    <SelectPrimitive.Trigger aria-label={label} className={`${quiet ? "border-transparent bg-transparent hover:bg-panel-raised" : "border-line-strong bg-field hover:border-accent hover:bg-field-hover"} inline-flex h-10 min-w-0 items-center gap-2 whitespace-nowrap rounded-lg border px-3 text-left text-xs font-semibold text-text-soft outline-none transition focus:border-accent focus:ring-3 focus:ring-accent/10 data-[placeholder]:text-muted [&>svg]:shrink-0 ${className}`}>
+    <SelectPrimitive.Trigger aria-label={label} className={`${quiet ? "border-transparent bg-transparent hover:text-text focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent" : "border-line-strong bg-field hover:border-accent hover:bg-field-hover focus:border-accent focus:ring-3 focus:ring-accent/10"} inline-flex h-10 min-w-0 items-center gap-2 whitespace-nowrap rounded-lg border px-3 text-left text-xs font-semibold text-text-soft outline-none transition data-[placeholder]:text-muted [&>svg]:shrink-0 ${className}`}>
       {icon}<SelectPrimitive.Value placeholder={placeholder} /><SelectPrimitive.Icon className="ml-auto text-muted"><CaretDown size={13} weight="bold" aria-hidden="true" /></SelectPrimitive.Icon>
     </SelectPrimitive.Trigger>
     <SelectPrimitive.Portal>

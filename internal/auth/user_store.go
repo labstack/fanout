@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/db/generated"
+	appid "github.com/labstack/fanout/internal/id"
 )
 
 // ErrUserNotFound is returned when a requested user does not exist.
@@ -302,13 +302,13 @@ func (s *UserStore) CreateFirstAdmin(email, name string) (User, error) {
 var ErrSetupComplete = errors.New("setup already complete")
 
 func newCreateUserParams(email, name, role string) (generated.CreateUserParams, error) {
-	id, err := uuid.NewV7()
+	id, err := appid.New()
 	if err != nil {
 		return generated.CreateUserParams{}, fmt.Errorf("auth: generate user id: %w", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	return generated.CreateUserParams{
-		ID:        id.String(),
+		ID:        id,
 		Email:     email,
 		Name:      sql.NullString{String: name, Valid: name != ""},
 		Role:      role,

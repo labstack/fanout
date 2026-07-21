@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	appid "github.com/labstack/fanout/internal/id"
 )
 
 var (
@@ -153,6 +153,11 @@ func (s *Service) Create(ctx context.Context, ownerID string, input CreateInput)
 	if input.State.Filters.Window == "" {
 		input.State.Filters.Window = "1h"
 	}
+	state, err := normalizeStateIDs(input.State)
+	if err != nil {
+		return Dashboard{}, fmt.Errorf("generate dashboard widget ids: %w", err)
+	}
+	input.State = state
 	if err := Validate(input.Name, input.Description, input.State); err != nil {
 		return Dashboard{}, err
 	}
@@ -166,7 +171,10 @@ func (s *Service) Create(ctx context.Context, ownerID string, input CreateInput)
 		return Dashboard{}, err
 	}
 	now := s.now().UTC().Format(time.RFC3339Nano)
-	id := uuid.NewString()
+	id, err := appid.New()
+	if err != nil {
+		return Dashboard{}, fmt.Errorf("generate dashboard id: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO dashboards(id,owner_id,name,description,window,namespace,is_default,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, id, ownerID, input.Name, strings.TrimSpace(input.Description), input.State.Filters.Window, strings.TrimSpace(input.State.Filters.Namespace), count == 0, now, now); err != nil {
 		if isUnique(err) {
 			return Dashboard{}, ErrConflict
@@ -187,6 +195,11 @@ func (s *Service) Update(ctx context.Context, ownerID, id string, input UpdateIn
 	if input.State.Filters.Window == "" {
 		input.State.Filters.Window = "1h"
 	}
+	state, err := normalizeStateIDs(input.State)
+	if err != nil {
+		return Dashboard{}, fmt.Errorf("generate dashboard widget ids: %w", err)
+	}
+	input.State = state
 	if err := Validate(input.Name, input.Description, input.State); err != nil {
 		return Dashboard{}, err
 	}
@@ -306,8 +319,12 @@ func (s *Service) ensureInitial(ctx context.Context, ownerID string) error {
 	state := DefaultState()
 	var raw string
 	if err := s.db.QueryRowContext(ctx, `SELECT state_json FROM dashboard_state WHERE owner_id=?`, ownerID).Scan(&raw); err == nil {
-		if json.Unmarshal([]byte(raw), &state) != nil || Validate("System overview", "", state) != nil {
+		if json.Unmarshal([]byte(raw), &state) != nil {
 			state = DefaultState()
+		} else if normalized, normalizeErr := normalizeStateIDs(state); normalizeErr != nil || Validate("System overview", "", normalized) != nil {
+			state = DefaultState()
+		} else {
+			state = normalized
 		}
 	}
 	_, err := s.Create(ctx, ownerID, CreateInput{Name: "System overview", Description: "Live health, dependencies, and recent activity.", State: state})
@@ -330,8 +347,8 @@ func Validate(name, description string, state State) error {
 	allowed := map[string]bool{"overview": true, "topology": true, "activity": true, "assistant": true, "performance": true, "trace": true, "logs": true}
 	ids := make(map[string]bool, len(state.Widgets))
 	for _, widget := range state.Widgets {
-		if len(widget.ID) == 0 || len(widget.ID) > 64 || ids[widget.ID] {
-			return invalid("widget ids must be unique and at most 64 characters")
+		if !appid.IsV7(widget.ID) || ids[widget.ID] {
+			return invalid("widget ids must be unique UUIDv7 values")
 		}
 		if !allowed[widget.Type] {
 			return invalid("unsupported widget type %q", widget.Type)
@@ -352,6 +369,38 @@ func Validate(name, description string, state State) error {
 		return invalid("unsupported dashboard window")
 	}
 	return nil
+}
+
+// normalizeStateIDs makes the service, rather than callers or the model, the
+// authority for widget identifiers. Existing UUIDv7 values remain stable;
+// omitted, descriptive, and legacy values are replaced and layout references
+// are updated atomically before validation and persistence.
+func normalizeStateIDs(state State) (State, error) {
+	state.Widgets = append([]Widget(nil), state.Widgets...)
+	state.Layout = append([]Layout(nil), state.Layout...)
+	replacements := make(map[string]string, len(state.Widgets))
+	for index := range state.Widgets {
+		oldID := state.Widgets[index].ID
+		newID, exists := replacements[oldID]
+		if !exists {
+			newID = oldID
+			if !appid.IsV7(newID) {
+				var err error
+				newID, err = appid.New()
+				if err != nil {
+					return State{}, err
+				}
+			}
+			replacements[oldID] = newID
+		}
+		state.Widgets[index].ID = newID
+	}
+	for index := range state.Layout {
+		if newID, ok := replacements[state.Layout[index].I]; ok {
+			state.Layout[index].I = newID
+		}
+	}
+	return state, nil
 }
 
 func isUnique(err error) bool {

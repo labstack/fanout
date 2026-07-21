@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
+	appid "github.com/labstack/fanout/internal/id"
 )
 
 const (
@@ -77,12 +77,12 @@ func NewOAuthStore(db *sql.DB) *OAuthStore {
 }
 
 func (s *OAuthStore) RegisterClient(ctx context.Context, name, clientURI string, redirectURIs []string) (OAuthClient, error) {
-	id, err := uuid.NewV7()
+	id, err := appid.New()
 	if err != nil {
 		return OAuthClient{}, fmt.Errorf("oauth: generate client id: %w", err)
 	}
 	client := OAuthClient{
-		ClientID:                "fanout_" + id.String(),
+		ClientID:                id,
 		ClientName:              name,
 		ClientURI:               clientURI,
 		RedirectURIs:            append([]string(nil), redirectURIs...),
@@ -199,11 +199,11 @@ func (s *OAuthStore) ConsumeAuthorizationCode(ctx context.Context, raw string) (
 }
 
 func (s *OAuthStore) IssueTokenPair(ctx context.Context, clientID, userID, scope, resource string) (OAuthTokenPair, error) {
-	family, err := uuid.NewV7()
+	family, err := appid.New()
 	if err != nil {
 		return OAuthTokenPair{}, fmt.Errorf("oauth: generate token family: %w", err)
 	}
-	return s.insertTokenPair(ctx, s.db, family.String(), clientID, userID, scope, resource)
+	return s.insertTokenPair(ctx, s.db, family, clientID, userID, scope, resource)
 }
 
 func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, resource string) (OAuthTokenPair, error) {

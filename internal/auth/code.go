@@ -12,8 +12,8 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/db/generated"
+	appid "github.com/labstack/fanout/internal/id"
 )
 
 const (
@@ -61,14 +61,14 @@ func (s *CodeStore) Create(email string) (string, error) {
 		return "", err
 	}
 	hash := HashCode(code, s.secret)
-	id, err := uuid.NewV7()
+	id, err := appid.New()
 	if err != nil {
 		return "", fmt.Errorf("auth: generate code id: %w", err)
 	}
 	expiresAt := time.Now().Add(codeTTL).UTC().Format(time.RFC3339)
 
 	err = s.q.CreateVerificationCode(context.Background(), generated.CreateVerificationCodeParams{
-		ID:        id.String(),
+		ID:        id,
 		Email:     email,
 		CodeHash:  hash,
 		ExpiresAt: expiresAt,

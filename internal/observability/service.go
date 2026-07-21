@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	appid "github.com/labstack/fanout/internal/id"
 )
 
 const (
@@ -75,7 +75,7 @@ func provenance(scope Scope) Provenance {
 
 func provenanceFor(scope Scope, source string) Provenance {
 	return Provenance{
-		QueryID:    uuid.NewString(),
+		QueryID:    appid.MustNew(),
 		Window:     scope.Start.Format(time.RFC3339Nano) + "/" + scope.End.Format(time.RFC3339Nano),
 		Generated:  time.Now().UTC(),
 		Complete:   true,
