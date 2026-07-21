@@ -31,6 +31,8 @@ Important columns:
 - service, operation, kind (VARCHAR)
 - start_time, end_time, ingested_at (TIMESTAMP)
 - start_unix_nano, end_unix_nano, ingested_unix_nano (BIGINT)
+- start_time falls back to ingest time when the producer omits it; the raw
+  *_unix_nano columns are unchanged and preserve producer-supplied truth
 - duration_ms (DOUBLE)
 - status, status_message (VARCHAR)
 - attributes_json, resource_json, events_json, links_json (VARCHAR JSON text)
@@ -54,6 +56,8 @@ Important columns:
 - namespace (VARCHAR)
 - time, observed_time, ingested_at (TIMESTAMP)
 - time_unix_nano, observed_time_unix_nano, ingested_unix_nano (BIGINT)
+- time and observed_time use producer time, then the other log timestamp, then
+  ingest time; the raw *_unix_nano columns remain unchanged
 - severity, severity_number (VARCHAR/BIGINT)
 - body, body_template (VARCHAR)
 - service, trace_id, span_id (VARCHAR)
@@ -73,6 +77,7 @@ Important columns:
 - namespace (VARCHAR)
 - time, ingested_at (TIMESTAMP)
 - time_unix_nano, ingested_unix_nano (BIGINT)
+- time falls back to ingest time when omitted; time_unix_nano remains unchanged
 - name, type, unit, description (VARCHAR)
 - service (VARCHAR)
 - value, hist_sum (DOUBLE)

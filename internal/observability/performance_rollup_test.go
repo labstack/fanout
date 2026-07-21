@@ -8,6 +8,8 @@ import (
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
+
+	"github.com/labstack/fanout/internal/query"
 )
 
 func TestEndpointRollupQueryMergesBucketsAndExactBoundaries(t *testing.T) {
@@ -19,23 +21,14 @@ func TestEndpointRollupQueryMergesBucketsAndExactBoundaries(t *testing.T) {
 	if _, err := db.Exec(`SET TimeZone='UTC'`); err != nil {
 		t.Fatalf("set timezone: %v", err)
 	}
-	if _, err := db.Exec(`
-CREATE TABLE spans (
-  namespace VARCHAR, service VARCHAR, start_time TIMESTAMP, duration_ms DOUBLE,
-  status VARCHAR, http_method VARCHAR, http_route VARCHAR, operation VARCHAR
-);
-CREATE TABLE endpoint_rollup (
-  namespace TEXT, bucket TIMESTAMP, service TEXT, method TEXT, path TEXT,
-  calls BIGINT, error_count BIGINT, duration_count BIGINT,
-  duration_buckets STRUCT(
-    le_0_1 UBIGINT, le_0_5 UBIGINT, le_1 UBIGINT, le_2_5 UBIGINT,
-    le_5 UBIGINT, le_10 UBIGINT, le_25 UBIGINT, le_50 UBIGINT,
-    le_100 UBIGINT, le_250 UBIGINT, le_500 UBIGINT, le_750 UBIGINT,
-    le_1000 UBIGINT, le_2000 UBIGINT, le_5000 UBIGINT,
-    le_30000 UBIGINT, le_300000 UBIGINT
-  )
-);`); err != nil {
-		t.Fatalf("create tables: %v", err)
+	if _, err := db.Exec(`ATTACH ':memory:' AS lake`); err != nil {
+		t.Fatalf("attach lake catalog: %v", err)
+	}
+	if err := query.CreateTables(db); err != nil {
+		t.Fatalf("CreateTables: %v", err)
+	}
+	if err := query.CreateViews(db); err != nil {
+		t.Fatalf("CreateViews: %v", err)
 	}
 
 	start := time.Date(2026, 7, 20, 10, 0, 30, 0, time.UTC)
@@ -47,6 +40,10 @@ CREATE TABLE endpoint_rollup (
 	}{
 		{start.Truncate(time.Minute).Add(time.Minute), "(10.0),(100.0)", 0},
 		{start.Truncate(time.Minute).Add(2 * time.Minute), "(500.0),(1000.0)", 1},
+		// Cached boundary buckets must never be included: their minute totals
+		// extend outside the requested [start,end) range.
+		{start.Truncate(time.Minute), "(300000.0)", 1},
+		{end.Truncate(time.Minute), "(300000.0)", 1},
 	} {
 		q := `INSERT INTO endpoint_rollup
 SELECT 'prod', ?, 'checkout', 'GET', '/pay', COUNT(*), ?, COUNT(ms), struct_pack(
@@ -65,10 +62,12 @@ FROM (VALUES ` + seed.values + `) t(ms)`
 			t.Fatalf("seed endpoint_rollup: %v", err)
 		}
 	}
-	// Include raw rows for every minute. The query must use only the two partial
-	// boundary minutes from raw spans; interior raw rows are already represented
-	// by the rollup and would double count if the boundary predicate were wrong.
-	if _, err := db.Exec(`INSERT INTO spans VALUES
+	// Include raw rows for every minute. The query must use raw rows for the two
+	// partial boundaries and for complete minutes newer than the watermark, while
+	// excluding raw rows already represented by mature cached buckets.
+	if _, err := db.Exec(`INSERT INTO lake.spans (
+  namespace, service, start_time, duration_ms, status, http_method, http_route, operation
+) VALUES
 ('prod','checkout',?,5.0,'OK','GET','/pay','GET /pay'),
 ('prod','checkout',?,10.0,'OK','GET','/pay','GET /pay'),
 ('prod','checkout',?,100.0,'OK','GET','/pay','GET /pay'),
@@ -84,9 +83,17 @@ FROM (VALUES ` + seed.values + `) t(ms)`
 	); err != nil {
 		t.Fatalf("seed spans: %v", err)
 	}
+	// The cache watermark is within the second interior minute. That entire
+	// minute and everything newer must come from raw spans, not disappear while
+	// waiting for the next rollup pass.
+	watermark := start.Truncate(time.Minute).Add(2*time.Minute + 30*time.Second)
+	if _, err := db.Exec(`INSERT INTO rollup_state VALUES
+(?, 1, now()),
+(?, ?, now())`, query.EndpointReadyStateKey, query.EndpointRollupStateKey, watermark.UnixNano()); err != nil {
+		t.Fatalf("seed endpoint rollup state: %v", err)
+	}
 
 	svc := New(db, "prod")
-	svc.endpointReady.Store(true)
 	svc.endpointMature.Store(true)
 	var cachedCalls, totalCachedCalls int64
 	var minBucket, maxBucket time.Time
@@ -105,7 +112,7 @@ WHERE bucket >= ? AND bucket < ? AND namespace = 'prod' AND service = 'checkout'
 	if err != nil {
 		t.Fatalf("queryEndpoints: %v", err)
 	}
-	if source != "endpoint_rollup + boundary spans" || len(got) != 1 {
+	if source != "endpoint_rollup + raw spans (histogram upper-bound percentiles)" || len(got) != 1 {
 		t.Fatalf("queryEndpoints = (%#v, %q), want one rollup endpoint", got, source)
 	}
 	endpoint := got[0]
@@ -114,5 +121,16 @@ WHERE bucket >= ? AND bucket < ? AND namespace = 'prod' AND service = 'checkout'
 	}
 	if math.Abs(endpoint.ErrorRate-2.0/6.0) > 1e-9 {
 		t.Fatalf("error rate = %v, want %v", endpoint.ErrorRate, 2.0/6.0)
+	}
+
+	if _, err := db.Exec(`INSERT INTO rollup_state VALUES (?, 1, now())`, query.EndpointDisabledStateKey); err != nil {
+		t.Fatalf("disable endpoint rollup: %v", err)
+	}
+	ready, _, err := svc.endpointCacheState(context.Background())
+	if err != nil {
+		t.Fatalf("endpointCacheState after disable: %v", err)
+	}
+	if ready {
+		t.Fatal("endpointCacheState returned ready for a disabled cache")
 	}
 }

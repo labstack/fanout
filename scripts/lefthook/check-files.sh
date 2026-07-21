@@ -7,17 +7,55 @@ shift
 
 is_text_file() {
   local file="$1"
-  local added deleted
+  local stat added deleted path
 
-  read -r added deleted < <(git diff --cached --numstat -- "$file") || return 1
+  if ! stat=$(git diff --cached --numstat -- "$file"); then
+    printf 'failed to inspect staged file: %s\n' "$file" >&2
+    return 2
+  fi
+  IFS=$'\t' read -r added deleted path <<< "$stat"
   [[ "$added" != "-" && "$deleted" != "-" ]]
+}
+
+skip_non_text() {
+  local file="$1"
+  local status
+  if is_text_file "$file"; then
+    return 1
+  else
+    status=$?
+  fi
+  if (( status == 1 )); then
+    return 0
+  fi
+  exit "$status"
+}
+
+collect_go_packages() {
+  go_packages=()
+  local file dir package existing seen
+  for file in "$@"; do
+    dir=$(dirname "$file")
+    package="./$dir"
+    [[ "$dir" == "." ]] && package="."
+    seen=false
+    for existing in "${go_packages[@]}"; do
+      if [[ "$existing" == "$package" ]]; then
+        seen=true
+        break
+      fi
+    done
+    if [[ "$seen" == false ]]; then
+      go_packages+=("$package")
+    fi
+  done
 }
 
 case "$mode" in
   trailing-whitespace)
     for file in "$@"; do
       [[ -f "$file" ]] || continue
-      is_text_file "$file" || continue
+      skip_non_text "$file" && continue
       perl -pi -e 's/[ \t]+(?=\r?\n$)//' -- "$file"
     done
     ;;
@@ -25,14 +63,14 @@ case "$mode" in
   end-of-file)
     for file in "$@"; do
       [[ -f "$file" ]] || continue
-      is_text_file "$file" || continue
+      skip_non_text "$file" && continue
       perl -0777 -pi -e 's/(?:\r?\n)*\z/\n/' -- "$file"
     done
     ;;
 
   yaml)
     bun -e '
-      for (const file of Bun.argv.slice(2)) {
+      for (const file of Bun.argv.slice(1)) {
         try {
           Bun.YAML.parse(await Bun.file(file).text());
         } catch (error) {
@@ -47,8 +85,8 @@ case "$mode" in
     status=0
     for file in "$@"; do
       [[ -f "$file" ]] || continue
-      is_text_file "$file" || continue
-      if grep -nE '^(<<<<<<< |=======|>>>>>>> )' -- "$file"; then
+      skip_non_text "$file" && continue
+      if grep -nE '^(<<<<<<< |>>>>>>> )' -- "$file"; then
         printf 'merge conflict marker found in %s\n' "$file" >&2
         status=1
       fi
@@ -59,7 +97,7 @@ case "$mode" in
   mixed-line-ending)
     for file in "$@"; do
       [[ -f "$file" ]] || continue
-      is_text_file "$file" || continue
+      skip_non_text "$file" && continue
       perl -pi -e 's/\r\n?/\n/g' -- "$file"
     done
     ;;
@@ -76,6 +114,16 @@ case "$mode" in
       fi
     done
     exit "$status"
+    ;;
+
+  go-vet)
+    collect_go_packages "$@"
+    CGO_ENABLED=1 go vet "${go_packages[@]}"
+    ;;
+
+  go-lint)
+    collect_go_packages "$@"
+    golangci-lint run "${go_packages[@]}"
     ;;
 
   *)

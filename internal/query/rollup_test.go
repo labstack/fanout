@@ -41,7 +41,7 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
 	var ready int64
-	if err := db.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key = ?`, endpointReadyStateKey).Scan(&ready); err != nil {
+	if err := db.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key = ?`, EndpointReadyStateKey).Scan(&ready); err != nil {
 		t.Fatalf("query endpoint readiness: %v", err)
 	}
 	if ready != 1 {
@@ -107,7 +107,6 @@ func TestRollupOnceRebuildsAffectedEndpointBuckets(t *testing.T) {
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
-
 	// A late row in the same minute must rebuild, not append to, the cached
 	// bucket; otherwise calls and histogram bins double count prior rows.
 	insertRollupTestSpan(t, db, rollupTestSpan{
@@ -567,6 +566,13 @@ WHERE namespace = ?
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
+	var endpointReady int64
+	if err := db.QueryRow(`SELECT COALESCE(MAX(last_ingested_unix_nano), 0)::BIGINT FROM rollup_state WHERE cache_key = ?`, EndpointReadyStateKey).Scan(&endpointReady); err != nil {
+		t.Fatalf("query endpoint readiness after first chunk: %v", err)
+	}
+	if endpointReady != 0 {
+		t.Fatalf("endpoint readiness after first chunk = %d, want 0", endpointReady)
+	}
 	requireServiceRollupSpans(t, db, "ns-old", bucket, "checkout", 1)
 	if got := edgeCount("ns-old"); got != 1 {
 		t.Fatalf("ns-old call edges after first pass = %d, want 1", got)
@@ -584,6 +590,12 @@ WHERE namespace = 'ns-new'`, nil, 0)
 	}
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("third rollupOnce failed: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COALESCE(MAX(last_ingested_unix_nano), 0)::BIGINT FROM rollup_state WHERE cache_key = ?`, EndpointReadyStateKey).Scan(&endpointReady); err != nil {
+		t.Fatalf("query endpoint readiness after catch-up: %v", err)
+	}
+	if endpointReady != 1 {
+		t.Fatalf("endpoint readiness after catch-up = %d, want 1", endpointReady)
 	}
 	requireServiceRollupSpans(t, db, "ns-new", bucket, "checkout", 1)
 	if got := edgeCount("ns-new"); got != 1 {

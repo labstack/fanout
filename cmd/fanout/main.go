@@ -93,8 +93,14 @@ func main() {
 	// serialize with rollup/maintenance commits when the pool holds >1 connection.
 	writer := lake.NewWriter(cfg, q.DB, chSpans, chLogs, chMetrics)
 	writer.UseWriteLock(q.WriteLock())
+	writerResult := make(chan error, 1)
 	go func() {
-		if err := writer.Run(ctx); err != nil {
+		err := writer.Run(ctx)
+		// Publish the result before notifying the process-wide error channel. The
+		// shutdown path waits on writerResult after Writer.Wait, so a final-flush
+		// failure cannot be lost in the close(done) -> goroutine-send scheduling gap.
+		writerResult <- err
+		if err != nil {
 			errCh <- fmt.Errorf("lake writer: %w", err)
 		}
 	}()
@@ -350,6 +356,9 @@ func main() {
 	grpcSrv.GracefulStop()
 	cancel()
 	writer.Wait()
+	if err := <-writerResult; err != nil {
+		slog.Error("lake writer stopped with unwritten telemetry", "err", err)
+	}
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 

@@ -1,4 +1,4 @@
-# Keep local checks aligned with `just check` and CI.
+# Run staged-file hygiene plus the relevant project checks before each commit.
 # Install with `just install` or `lefthook install`.
 
 pre-commit:
@@ -38,17 +38,17 @@ pre-commit:
 
     go-fmt:
       glob: "*.go"
-      run: bash -c 'test -z "$(gofmt -l .)" || (gofmt -d .; exit 1)'
+      run: bash -c 'out=$(gofmt -l "$@") || exit 1; test -z "$out" || { gofmt -d "$@"; exit 1; }' -- {staged_files}
 
     go-vet:
       glob: "*.go"
-      run: CGO_ENABLED=1 go vet ./...
+      run: bash scripts/lefthook/check-files.sh go-vet {staged_files}
 
     go-lint:
       glob: "*.go"
-      run: golangci-lint run
+      run: bash scripts/lefthook/check-files.sh go-lint {staged_files}
 
-    ui-type-check:
+    ui-lint:
       glob: "ui/{host,apps}/**/*.{ts,tsx}"
       run: bash -c 'cd ui/host && bun run lint && cd ../apps && bun run lint'
 

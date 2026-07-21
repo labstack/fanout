@@ -6,6 +6,8 @@ import (
 	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
+
+	"github.com/labstack/fanout/internal/query"
 )
 
 func BenchmarkEndpointQueries24Hours(b *testing.B) {
@@ -17,8 +19,19 @@ func BenchmarkEndpointQueries24Hours(b *testing.B) {
 	if _, err := db.Exec(`SET TimeZone='UTC'; SET threads=4`); err != nil {
 		b.Fatal(err)
 	}
+	if _, err := db.Exec(`ATTACH ':memory:' AS lake`); err != nil {
+		b.Fatal(err)
+	}
+	if err := query.CreateTables(db); err != nil {
+		b.Fatal(err)
+	}
+	if err := query.CreateViews(db); err != nil {
+		b.Fatal(err)
+	}
 	start := time.Date(2026, 7, 20, 0, 0, 30, 0, time.UTC)
-	if _, err := db.Exec(`CREATE TABLE spans AS
+	if _, err := db.Exec(`INSERT INTO lake.spans (
+  namespace, service, start_time, duration_ms, status, http_method, http_route, operation
+)
 SELECT
   'prod'::VARCHAR AS namespace,
   'svc-' || lpad((i % 50)::VARCHAR, 2, '0') AS service,
@@ -29,19 +42,6 @@ SELECT
   '/route-' || (i % 20)::VARCHAR AS http_route,
   'operation-' || (i % 20)::VARCHAR AS operation
 FROM range(5000000) t(i)`, start); err != nil {
-		b.Fatal(err)
-	}
-	if _, err := db.Exec(`CREATE TABLE endpoint_rollup (
-  namespace TEXT, bucket TIMESTAMP, service TEXT, method TEXT, path TEXT,
-  calls BIGINT, error_count BIGINT, duration_count BIGINT,
-  duration_buckets STRUCT(
-    le_0_1 UBIGINT, le_0_5 UBIGINT, le_1 UBIGINT, le_2_5 UBIGINT,
-    le_5 UBIGINT, le_10 UBIGINT, le_25 UBIGINT, le_50 UBIGINT,
-    le_100 UBIGINT, le_250 UBIGINT, le_500 UBIGINT, le_750 UBIGINT,
-    le_1000 UBIGINT, le_2000 UBIGINT, le_5000 UBIGINT,
-    le_30000 UBIGINT, le_300000 UBIGINT
-  )
-)`); err != nil {
 		b.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO endpoint_rollup
@@ -116,6 +116,6 @@ GROUP BY
 	})
 	b.Run("endpoint-rollup", func(b *testing.B) {
 		b.ReportMetric(5000000, "dataset_spans")
-		bench(b, endpointRollupQuery, start, end, "prod", "", 100)
+		bench(b, endpointRollupQuery, start, end, end, "prod", "", 100)
 	})
 }

@@ -124,6 +124,12 @@ func TestEventTimeFallsBackWithoutSchemaDuplication(t *testing.T) {
 	if !ok || !got.Equal(observed) {
 		t.Fatalf("eventTime() secondary fallback = %v, want %s", got, observed)
 	}
+
+	primary := observed.Add(-time.Second)
+	got, ok = eventTime(primary.UnixNano(), observed.UnixNano(), ingested.UnixNano()).(time.Time)
+	if !ok || !got.Equal(primary) {
+		t.Fatalf("eventTime() primary timestamp = %v, want %s", got, primary)
+	}
 }
 
 func TestFlushWorkerReportsUnwrittenFinalCarry(t *testing.T) {

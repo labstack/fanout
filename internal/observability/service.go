@@ -34,7 +34,6 @@ type Service struct {
 	db               DB
 	defaultNamespace string
 	now              func() time.Time
-	endpointReady    atomic.Bool
 	endpointMature   atomic.Bool
 }
 

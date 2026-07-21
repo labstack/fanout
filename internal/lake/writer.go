@@ -268,9 +268,8 @@ func (w *Writer) flush(flushCh chan<- flushBatch) {
 // flushWorker serializes all database writes. It carries rows that failed to
 // insert forward and prepends them to the next batch so a transient error
 // doesn't drop data (until the retry buffer cap is exceeded — see retainRows).
-// When the input closes it retries the final carry before reporting failure;
-// previously a failed last batch had no next batch to trigger a retry and was
-// silently lost during shutdown.
+// When the input closes, it retries the final carry and reports any rows that
+// remain unwritten to Run.
 func (w *Writer) flushWorker(flushCh <-chan flushBatch, workerDone chan<- error) {
 	var carry flushBatch
 	var spanErr, logErr, metricErr error
@@ -531,9 +530,10 @@ func normalizeNamespace(namespace string) string {
 	return namespace
 }
 
-// eventTime keeps event-time partition keys populated even for producers that
-// omit the primary OTLP timestamp. That preserves hour pruning and makes those
-// rows eligible for retention without adding a duplicate schema column.
+// eventTime keeps query event-time columns populated when a producer omits its
+// primary OTLP timestamp. The fallback order is primary, secondary (for logs),
+// then ingest time. Raw *_unix_nano fields remain unchanged and therefore
+// preserve which timestamps the producer actually supplied.
 func eventTime(primary, secondary, ingested int64) any {
 	for _, nanos := range []int64{primary, secondary, ingested} {
 		if nanos > 0 {

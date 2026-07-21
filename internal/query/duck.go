@@ -60,11 +60,11 @@ const (
 	serviceRollupRawMaxKey   = "service_rollup_v2_rawmax"
 	edgeRollupStateKey       = "edge_rollup_v2"
 	edgeRollupRawMaxKey      = "edge_rollup_v2_rawmax"
-	endpointRollupStateKey   = "endpoint_rollup_v1"
+	EndpointRollupStateKey   = "endpoint_rollup_v1"
 	endpointRollupRawMaxKey  = "endpoint_rollup_v1_rawmax"
 	endpointBackfillStateKey = "endpoint_rollup_v1_backfill_started"
-	endpointReadyStateKey    = "endpoint_rollup_v1_ready"
-	endpointDisabledStateKey = "endpoint_rollup_v1_disabled"
+	EndpointReadyStateKey    = "endpoint_rollup_v1_ready"
+	EndpointDisabledStateKey = "endpoint_rollup_v1_disabled"
 	defaultDuckDBPoolSize    = 1
 )
 
@@ -267,6 +267,11 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// A skipped endpoint cache is never queryable: clear any cache left by a
+	// previous normal backfill as well as its persisted readiness bit.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM endpoint_rollup`); err != nil {
+		return err
+	}
 	for _, w := range []struct {
 		key       string
 		watermark int64
@@ -278,7 +283,8 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 		// Endpoint queries remain on their raw-span fallback when the operator
 		// explicitly skips historical rollups. Mark this cache disabled instead of
 		// later declaring a new-only, incomplete endpoint cache ready.
-		{endpointDisabledStateKey, 1},
+		{EndpointReadyStateKey, 0},
+		{EndpointDisabledStateKey, 1},
 	} {
 		if err := storeRollupWatermark(ctx, tx, w.key, w.watermark); err != nil {
 			return err
@@ -598,14 +604,14 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	disabled, err := rollupWatermark(ctx, tx, endpointDisabledStateKey)
+	disabled, err := rollupWatermark(ctx, tx, EndpointDisabledStateKey)
 	if err != nil {
 		return 0, err
 	}
 	if disabled != 0 {
 		return 0, tx.Commit()
 	}
-	lastWatermark, err := rollupWatermark(ctx, tx, endpointRollupStateKey)
+	lastWatermark, err := rollupWatermark(ctx, tx, EndpointRollupStateKey)
 	if err != nil {
 		return 0, err
 	}
@@ -658,7 +664,7 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := storeRollupWatermark(ctx, tx, endpointRollupStateKey, newWatermark); err != nil {
+	if err := storeRollupWatermark(ctx, tx, EndpointRollupStateKey, newWatermark); err != nil {
 		return 0, err
 	}
 	if err := storeRollupWatermark(ctx, tx, endpointRollupRawMaxKey, rawMaxProcessed); err != nil {
@@ -667,17 +673,19 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	// The product query remains on raw spans until a normal (non-skip) backfill
 	// reaches the live tip. This prevents partial endpoint history on upgrade.
 	if backfillStarted != 0 && !chunked && windowEnd == rawWatermark {
-		if err := storeRollupWatermark(ctx, tx, endpointReadyStateKey, 1); err != nil {
+		if err := storeRollupWatermark(ctx, tx, EndpointReadyStateKey, 1); err != nil {
 			return 0, err
 		}
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
-	if rows, err := res.RowsAffected(); err == nil {
-		return rows, nil
+	rows, err := res.RowsAffected()
+	if err != nil {
+		slog.Debug("endpoint rollup rows affected unavailable", "err", err)
+		return 0, nil
 	}
-	return 0, nil
+	return rows, nil
 }
 
 func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {

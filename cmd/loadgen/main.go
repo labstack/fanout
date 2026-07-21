@@ -310,8 +310,13 @@ type queryTarget struct {
 }
 
 func queryTargetAt(i int) queryTarget {
-	window := queryWindows[i%len(queryWindows)]
-	operation := [...]string{"overview", "topology", "performance", "trace", "logs"}[i%5]
+	operations := [...]string{"overview", "topology", "performance", "trace", "logs"}
+	operationIndex := i % len(operations)
+	round := i / len(operations)
+	// Offset each successive round so every operation exercises every window;
+	// using i for both dimensions locks equal-length lists into fixed pairs.
+	window := queryWindows[(operationIndex+round)%len(queryWindows)]
+	operation := operations[operationIndex]
 	return queryTarget{
 		operation: operation,
 		path:      fmt.Sprintf("/api/observability/%s?window=%s&limit=100", operation, window),
@@ -331,6 +336,14 @@ func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 	defer ticker.Stop()
 	i := 0
 	base := strings.TrimRight(g.cfg.queryURL, "/")
+	reportedFailure := make(map[string]bool)
+	reportFailure := func(operation, detail string) {
+		if reportedFailure[operation] {
+			return
+		}
+		reportedFailure[operation] = true
+		log.Printf("query %s first failure: %s", operation, detail)
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -344,6 +357,7 @@ func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 			if err != nil {
 				if ctx.Err() == nil {
 					g.queryErrs.Add(1)
+					reportFailure(target.operation, err.Error())
 				}
 				continue
 			}
@@ -354,6 +368,11 @@ func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 				!strings.HasPrefix(contentType, "application/json") ||
 				!json.Valid(body) {
 				g.queryErrs.Add(1)
+				sample := body
+				if len(sample) > 256 {
+					sample = sample[:256]
+				}
+				reportFailure(target.operation, fmt.Sprintf("status=%d content_type=%q read_err=%v body=%q", resp.StatusCode, contentType, readErr, sample))
 				continue
 			}
 			latency := time.Since(t0)

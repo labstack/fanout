@@ -3,8 +3,12 @@ package observability
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"strings"
+	"time"
+
+	"github.com/labstack/fanout/internal/query"
 )
 
 const performancePointsQuery = `
@@ -36,26 +40,26 @@ GROUP BY method, path
 ORDER BY calls DESC, p95_ms DESC
 LIMIT ?`
 
-const endpointRollupReadyQuery = `
-SELECT EXISTS (
-  SELECT 1 FROM rollup_state
-  WHERE cache_key = 'endpoint_rollup_v1_ready'
-    AND last_ingested_unix_nano = 1
-)`
+const endpointRollupStatusQuery = `
+SELECT
+  COALESCE(MAX(CASE WHEN cache_key = '` + query.EndpointReadyStateKey + `' THEN last_ingested_unix_nano END), 0) != 0
+    AND COALESCE(MAX(CASE WHEN cache_key = '` + query.EndpointDisabledStateKey + `' THEN last_ingested_unix_nano END), 0) = 0 AS ready,
+  COALESCE(MAX(CASE WHEN cache_key = '` + query.EndpointRollupStateKey + `' THEN last_ingested_unix_nano END), 0)::BIGINT AS watermark
+FROM rollup_state`
 
 const endpointRollupMatureQuery = `
 SELECT COUNT(*) >= 5
 FROM (SELECT DISTINCT bucket FROM endpoint_rollup LIMIT 5)`
 
-// endpointRollupQuery uses the minute cache for complete interior buckets and
-// scans raw spans only for the two partial boundary minutes. This preserves the
-// exact [start,end) API semantics while bounding raw work independently of the
-// requested window width.
+// endpointRollupQuery uses the minute cache only through its current watermark.
+// Raw spans cover both partial boundary minutes and any newer complete minutes,
+// so the cache lag cannot appear as zero traffic and raw work stays bounded.
 const endpointRollupQuery = `
 WITH params AS (
   SELECT
     ?::TIMESTAMP AS start_time,
     ?::TIMESTAMP AS end_time,
+    ?::TIMESTAMP AS rollup_end,
     ?::VARCHAR AS namespace,
     ?::VARCHAR AS service
 ),
@@ -66,7 +70,7 @@ bounds AS (
       WHEN start_time = date_trunc('minute', start_time) THEN start_time
       ELSE date_trunc('minute', start_time) + INTERVAL 1 MINUTE
     END AS interior_start,
-    date_trunc('minute', end_time) AS interior_end
+    LEAST(date_trunc('minute', end_time), date_trunc('minute', rollup_end)) AS interior_end
   FROM params
 ),
 rollup_source AS (
@@ -289,9 +293,12 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 }
 
 func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service string, limit int) ([]Endpoint, string, error) {
-	ready, err := s.endpointCacheReady(ctx)
+	ready, watermark, err := s.endpointCacheState(ctx)
 	if err != nil {
-		return nil, "", fmt.Errorf("check endpoint rollup readiness: %w", err)
+		// The endpoint cache is an optimization. A transient local-state probe
+		// failure must not take down the raw-span query path.
+		slog.Warn("endpoint rollup state unavailable; using raw spans", "err", err)
+		ready = false
 	}
 
 	query := rawEndpointsQuery
@@ -299,8 +306,8 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 	source := "spans"
 	if ready {
 		query = endpointRollupQuery
-		args = []any{scope.Start, scope.End, scope.Namespace, service, limit}
-		source = "endpoint_rollup + boundary spans"
+		args = []any{scope.Start, scope.End, watermark, scope.Namespace, service, limit}
+		source = "endpoint_rollup + raw spans (histogram upper-bound percentiles)"
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -323,54 +330,53 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 	return endpoints, source, nil
 }
 
-func (s *Service) endpointCacheReady(ctx context.Context) (bool, error) {
-	if s.endpointReady.Load() && s.endpointMature.Load() {
-		return true, nil
+func (s *Service) endpointCacheState(ctx context.Context) (bool, time.Time, error) {
+	rows, err := s.db.QueryContext(ctx, endpointRollupStatusQuery)
+	if err != nil {
+		return false, time.Time{}, err
 	}
-	if !s.endpointReady.Load() {
-		rows, err := s.db.QueryContext(ctx, endpointRollupReadyQuery)
-		if err != nil {
-			return false, err
-		}
-		var ready bool
-		if rows.Next() {
-			if err := rows.Scan(&ready); err != nil {
-				rows.Close()
-				return false, err
-			}
-		}
-		if err := rows.Err(); err != nil {
+	var ready bool
+	var watermarkNanos int64
+	if rows.Next() {
+		if err := rows.Scan(&ready, &watermarkNanos); err != nil {
 			rows.Close()
-			return false, err
+			return false, time.Time{}, err
 		}
+	}
+	if err := rows.Err(); err != nil {
 		rows.Close()
-		if !ready {
-			return false, nil
-		}
-		s.endpointReady.Store(true)
+		return false, time.Time{}, err
+	}
+	rows.Close()
+	if !ready || watermarkNanos <= 0 {
+		return false, time.Time{}, nil
+	}
+	watermark := time.Unix(0, watermarkNanos).UTC()
+	if s.endpointMature.Load() {
+		return true, watermark, nil
 	}
 
 	// On a brand-new/hot dataset, fewer than five cached minutes cannot offset
 	// the wider histogram aggregation. Stay on the simpler raw query until the
 	// cache is large enough to replace meaningful work, then remember that fact.
-	rows, err := s.db.QueryContext(ctx, endpointRollupMatureQuery)
+	rows, err = s.db.QueryContext(ctx, endpointRollupMatureQuery)
 	if err != nil {
-		return false, err
+		return false, time.Time{}, err
 	}
 	defer rows.Close()
 	var mature bool
 	if rows.Next() {
 		if err := rows.Scan(&mature); err != nil {
-			return false, err
+			return false, time.Time{}, err
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return false, err
+		return false, time.Time{}, err
 	}
 	if mature {
 		s.endpointMature.Store(true)
 	}
-	return mature, nil
+	return mature, watermark, nil
 }
 
 type performanceAggregate struct {
