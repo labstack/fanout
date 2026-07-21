@@ -1,0 +1,57 @@
+# Keep local checks aligned with `just check` and CI.
+# Install with `just install` or `lefthook install`.
+
+pre-commit:
+  commands:
+    trailing-whitespace:
+      glob: "*"
+      exclude: "(^|/)(node_modules|dist)/|\\.lock$"
+      run: bash scripts/lefthook/check-files.sh trailing-whitespace {staged_files}
+      stage_fixed: true
+
+    end-of-file:
+      glob: "*"
+      exclude: "(^|/)(node_modules|dist)/|\\.lock$"
+      run: bash scripts/lefthook/check-files.sh end-of-file {staged_files}
+      stage_fixed: true
+
+    yaml:
+      glob: "*.{yaml,yml}"
+      exclude: "(^|/)node_modules/"
+      run: bash scripts/lefthook/check-files.sh yaml {staged_files}
+
+    merge-conflict:
+      glob: "*"
+      exclude: "(^|/)node_modules/"
+      run: bash scripts/lefthook/check-files.sh merge-conflict {staged_files}
+
+    mixed-line-ending:
+      glob: "*"
+      exclude: "(^|/)(node_modules|dist)/|\\.lock$"
+      run: bash scripts/lefthook/check-files.sh mixed-line-ending {staged_files}
+      stage_fixed: true
+
+    added-large-files:
+      glob: "*"
+      exclude: "(^|/)(node_modules|dist)/|^internal/mcp/apps/"
+      run: bash scripts/lefthook/check-files.sh added-large-files {staged_files}
+
+    go-fmt:
+      glob: "*.go"
+      run: bash -c 'test -z "$(gofmt -l .)" || (gofmt -d .; exit 1)'
+
+    go-vet:
+      glob: "*.go"
+      run: CGO_ENABLED=1 go vet ./...
+
+    go-lint:
+      glob: "*.go"
+      run: golangci-lint run
+
+    ui-type-check:
+      glob: "ui/{host,apps}/**/*.{ts,tsx}"
+      run: bash -c 'cd ui/host && bun run lint && cd ../apps && bun run lint'
+
+    build:
+      glob: "*.{go,ts,tsx,css}"
+      run: just build
