@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	appid "github.com/labstack/fanout/internal/id"
@@ -33,6 +34,7 @@ type Service struct {
 	db               DB
 	defaultNamespace string
 	now              func() time.Time
+	endpointMature   atomic.Bool
 }
 
 func New(db DB, defaultNamespace string) *Service {

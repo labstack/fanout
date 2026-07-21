@@ -150,6 +150,23 @@ SELECT 'default', 'tr-'||i, 'c-'||i, 'p-'||i, 'svc-'||(i%5), 'SPAN_KIND_CLIENT',
 FROM range(5000) t(i)`); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
+	if _, err := d.DB.ExecContext(ctx, `
+INSERT INTO endpoint_rollup (
+  namespace, bucket, service, method, path, calls, error_count, duration_count, duration_buckets
+) VALUES (
+  'default', date_trunc('minute', now()), 'old', 'GET', '/stale', 1, 0, 1,
+  struct_pack(
+    le_0_1 := 0, le_0_5 := 0, le_1 := 0, le_2_5 := 0, le_5 := 0,
+    le_10 := 1, le_25 := 1, le_50 := 1, le_100 := 1, le_250 := 1,
+    le_500 := 1, le_750 := 1, le_1000 := 1, le_2000 := 1,
+    le_5000 := 1, le_30000 := 1, le_300000 := 1
+  )
+);
+INSERT INTO rollup_state (cache_key, last_ingested_unix_nano, updated_at)
+VALUES (?, 1, now())
+ON CONFLICT (cache_key) DO UPDATE SET last_ingested_unix_nano = 1, updated_at = now()`, EndpointReadyStateKey); err != nil {
+		t.Fatalf("seed prior endpoint cache state: %v", err)
+	}
 
 	if err := d.skipRollupToLatest(ctx); err != nil {
 		t.Fatalf("skipRollupToLatest: %v", err)
@@ -161,6 +178,19 @@ FROM range(5000) t(i)`); err != nil {
 	}
 	if n != 0 {
 		t.Errorf("rollupOnce processed %d rows after skip-to-latest; want 0 (backlog should be skipped)", n)
+	}
+	var endpointRows, endpointReady, endpointDisabled int64
+	if err := d.DB.QueryRowContext(ctx, `SELECT count(*) FROM endpoint_rollup`).Scan(&endpointRows); err != nil {
+		t.Fatalf("count endpoint_rollup after skip: %v", err)
+	}
+	if err := d.DB.QueryRowContext(ctx, `SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key = ?`, EndpointReadyStateKey).Scan(&endpointReady); err != nil {
+		t.Fatalf("query endpoint ready state: %v", err)
+	}
+	if err := d.DB.QueryRowContext(ctx, `SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key = ?`, EndpointDisabledStateKey).Scan(&endpointDisabled); err != nil {
+		t.Fatalf("query endpoint disabled state: %v", err)
+	}
+	if endpointRows != 0 || endpointReady != 0 || endpointDisabled == 0 {
+		t.Fatalf("endpoint state after skip = rows:%d ready:%d disabled:%d, want 0/0/nonzero", endpointRows, endpointReady, endpointDisabled)
 	}
 
 	// Insert one fresh live span (ingested_unix_nano = now) and verify that

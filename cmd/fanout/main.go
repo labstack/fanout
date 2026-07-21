@@ -93,8 +93,14 @@ func main() {
 	// serialize with rollup/maintenance commits when the pool holds >1 connection.
 	writer := lake.NewWriter(cfg, q.DB, chSpans, chLogs, chMetrics)
 	writer.UseWriteLock(q.WriteLock())
+	writerResult := make(chan error, 1)
 	go func() {
-		if err := writer.Run(ctx); err != nil {
+		err := writer.Run(ctx)
+		// Publish the result before notifying the process-wide error channel. The
+		// shutdown path waits on writerResult after Writer.Wait, so a final-flush
+		// failure cannot be lost in the close(done) -> goroutine-send scheduling gap.
+		writerResult <- err
+		if err != nil {
 			errCh <- fmt.Errorf("lake writer: %w", err)
 		}
 	}()
@@ -224,7 +230,9 @@ func main() {
 
 	// Fanout owns telemetry semantics; agents and web clients consume this one
 	// typed query kernel through deterministic HTTP or standard MCP tools.
-	queries := observability.New(q.DB, cfg.DefaultNS)
+	// Route both HTTP and MCP reads through Duck's retrying adapter. Passing the
+	// raw *sql.DB here bypassed the DuckLake maintenance-race protection.
+	queries := observability.New(q, cfg.DefaultNS)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability"))
 	dashboards := dashboard.New(sqlite.DB)
 	api.RegisterDashboardRoutes(e, dashboards)
@@ -342,10 +350,15 @@ func main() {
 		slog.Error("fatal error, shutting down", "err", err)
 	}
 
-	// Coordinated shutdown: stop background work, flush ingest, then stop servers.
+	// Stop accepting OTLP and let in-flight exporters finish while the writer is
+	// still draining. Cancelling the writer first could strand a handler on a full
+	// channel or accept rows after its final drain.
+	grpcSrv.GracefulStop()
 	cancel()
 	writer.Wait()
-	grpcSrv.GracefulStop()
+	if err := <-writerResult; err != nil {
+		slog.Error("lake writer stopped with unwritten telemetry", "err", err)
+	}
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 

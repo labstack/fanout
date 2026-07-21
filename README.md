@@ -54,7 +54,7 @@ docs/            Internal plans, specs, design notes
 ## Develop
 
 ```sh
-just install   # Go tools, bun deps (web + site), pre-commit
+just install   # Go tools, bun deps (web + site), Lefthook
 just up        # Run server + browser build watcher + site
 just check     # Format, vet, lint, type-check, build
 just test      # go test ./...

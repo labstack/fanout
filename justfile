@@ -14,11 +14,11 @@ default:
 # Install dev tools + application dependencies
 install:
     go install github.com/air-verse/air@latest
-    brew install process-compose pre-commit 2>/dev/null || true
+    brew install process-compose lefthook 2>/dev/null || true
     cd ui/host && bun install
     cd ui/apps && bun install
     cd site && bun install
-    pre-commit install
+    lefthook install
 
 # ── Dev ──────────────────────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ docker TAG="local":
 
 # ── Quality ──────────────────────────────────────────────────────────────────
 
-# Full check (pre-commit + CI use this)
+# Full check (Lefthook + CI use this)
 check:
     go fmt ./...
     go vet ./...

@@ -109,6 +109,49 @@ func TestWriterFlushesRemainderOnShutdown(t *testing.T) {
 	}
 }
 
+func TestEventTimeFallsBackWithoutSchemaDuplication(t *testing.T) {
+	ingested := time.Now().UTC().Truncate(time.Microsecond)
+	got, ok := eventTime(0, 0, ingested.UnixNano()).(time.Time)
+	if !ok {
+		t.Fatalf("eventTime() type = %T, want time.Time", got)
+	}
+	if !got.Equal(ingested) {
+		t.Fatalf("eventTime() = %s, want %s", got, ingested)
+	}
+
+	observed := ingested.Add(-time.Second)
+	got, ok = eventTime(0, observed.UnixNano(), ingested.UnixNano()).(time.Time)
+	if !ok || !got.Equal(observed) {
+		t.Fatalf("eventTime() secondary fallback = %v, want %s", got, observed)
+	}
+
+	primary := observed.Add(-time.Second)
+	got, ok = eventTime(primary.UnixNano(), observed.UnixNano(), ingested.UnixNano()).(time.Time)
+	if !ok || !got.Equal(primary) {
+		t.Fatalf("eventTime() primary timestamp = %v, want %s", got, primary)
+	}
+}
+
+func TestFlushWorkerReportsUnwrittenFinalCarry(t *testing.T) {
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatalf("open duckdb: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close duckdb: %v", err)
+	}
+
+	w := &Writer{db: db, cfg: env.Config{FlushBatchSize: 10}}
+	flushCh := make(chan flushBatch, 1)
+	done := make(chan error, 1)
+	flushCh <- flushBatch{spans: []SpanRow{{TraceID: "t", SpanID: "s"}}}
+	close(flushCh)
+	w.flushWorker(flushCh, done)
+	if err := <-done; err == nil {
+		t.Fatal("flushWorker() error = nil, want final-flush error")
+	}
+}
+
 func requireCount(t *testing.T, db *sql.DB, q string, want int) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
