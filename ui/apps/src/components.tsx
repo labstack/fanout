@@ -36,7 +36,7 @@ export function EmptyState({ icon, title, children, tall = false }: { icon: Reac
 }
 
 export function MetaFooter({ left, right }: { left: ReactNode; right: ReactNode }) {
-  return <Group justify="space-between" px={{ base: "md", sm: "lg" }} py="xs" bd="1px solid var(--mantine-color-default-border)"><Text c="dimmed" size="xs">{left}</Text><Text c="dimmed" size="xs" ta="right">{right}</Text></Group>;
+  return <Group justify="space-between" px={{ base: "md", sm: "lg" }} py="xs" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}><Text c="dimmed" size="xs">{left}</Text><Text c="dimmed" size="xs" ta="right">{right}</Text></Group>;
 }
 
 export function Metric({ label, value, color }: { label: string; value: ReactNode; color?: string }) {

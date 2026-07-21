@@ -1,5 +1,5 @@
-import { ActionIcon, Badge, Box, Button, Center, Flex, Group, Indicator, Loader, Menu, Paper, ScrollArea, Select, SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
-import { ArrowClockwise, ArrowUpRight, CaretDown, ListMagnifyingGlass, Plus, Sparkle, SquaresFour, X } from "@phosphor-icons/react";
+import { ActionIcon, Badge, Box, Button, Center, Divider, Flex, Group, Indicator, Loader, Menu, Paper, ScrollArea, Select, SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { ArrowClockwise, ArrowUpRight, CaretDown, Check, ListMagnifyingGlass, Plus, Sparkle, SquaresFour, X } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
@@ -87,7 +87,10 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
   return <Box component="main" maw={1440} mx="auto" px={{ base: "md", sm: "xl", lg: 72 }} pt={{ base: "xl", sm: 52 }} pb={100}>
     <Flex justify="space-between" align={{ base: "flex-start", md: "flex-end" }} direction={{ base: "column", md: "row" }} gap="lg" mb="xl">
       <Box miw={0}>
-        <Select aria-label="Dashboard" value={selectedID} onChange={(value) => value && choose(value)} data={(dashboards.data?.dashboards ?? []).map((dashboard) => ({ value: dashboard.id, label: dashboard.name }))} leftSection={<SquaresFour size={16} weight="fill" />} variant="unstyled" size="xs" maw={360} fw={700} />
+        <Menu shadow="md" position="bottom-start" withinPortal>
+          <Menu.Target><Button variant="subtle" color="gray" size="compact-sm" leftSection={<SquaresFour size={16} weight="fill" />} rightSection={<CaretDown size={13} weight="bold" />}>Dashboards</Button></Menu.Target>
+          <Menu.Dropdown><Menu.Label>Switch dashboard</Menu.Label>{(dashboards.data?.dashboards ?? []).map((dashboard) => <Menu.Item key={dashboard.id} leftSection={dashboard.id === selectedID ? <Check size={14} weight="bold" /> : <Box w={14} />} onClick={() => choose(dashboard.id)}>{dashboard.name}</Menu.Item>)}</Menu.Dropdown>
+        </Menu>
         <Title order={1} fz={{ base: 36, sm: 52 }} lts="-0.045em" mt={4}>{item.name}</Title>
         <Text c="dimmed" mt={4}>{item.description || "A focused view of the signals that matter now."}</Text>
       </Box>
@@ -97,18 +100,21 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
       </Group>
     </Flex>
 
-    <Paper withBorder radius="lg" p="md" mb="lg" role="group" aria-label="Dashboard controls">
-      <Flex align="flex-end" gap="md" wrap="wrap">
-        <Select label="Window" value={state.filters.window} onChange={(window) => window && update({ ...state, filters: { ...state.filters, window } })} data={[{ value: "15m", label: "15 minutes" }, { value: "1h", label: "1 hour" }, { value: "6h", label: "6 hours" }, { value: "24h", label: "24 hours" }]} w={140} />
-        <TextInput label="Namespace" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={() => update(state)} placeholder="All namespaces" w={{ base: "100%", xs: 200 }} />
-        <Group gap="xs" ml={{ base: 0, sm: "auto" }} mb={10}><Indicator color={save.isError ? "red" : save.isPending ? "yellow" : "teal"} processing={save.isPending} size={8} /><Text c="dimmed" size="sm">{save.isPending ? "Saving" : save.isError ? "Save failed" : "Saved"}</Text></Group>
-        <Group wrap="nowrap" ml={{ base: 0, sm: "md" }}>
+    <Paper withBorder radius="lg" p="lg" mb="lg" role="group" aria-label="Dashboard controls">
+      <Flex align={{ base: "stretch", md: "flex-end" }} justify="space-between" direction={{ base: "column", md: "row" }} gap="md">
+        <Group align="flex-end" gap="md" grow wrap="wrap" w={{ base: "100%", md: "auto" }}>
+          <Select label="Window" value={state.filters.window} onChange={(window) => window && update({ ...state, filters: { ...state.filters, window } })} data={[{ value: "15m", label: "15 minutes" }, { value: "1h", label: "1 hour" }, { value: "6h", label: "6 hours" }, { value: "24h", label: "24 hours" }]} w={{ base: "100%", xs: 150 }} />
+          <TextInput label="Namespace" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={() => update(state)} placeholder="All namespaces" w={{ base: "100%", xs: 220 }} />
+        </Group>
+        <Flex wrap="nowrap" justify={{ base: "space-between", md: "flex-end" }} align="center" gap="md" w={{ base: "100%", md: "auto" }}>
+          <Group gap="xs" wrap="nowrap"><Indicator color={save.isError ? "red" : save.isPending ? "yellow" : "teal"} processing={save.isPending} size={8} /><Text c="dimmed" size="sm" miw={48}>{save.isPending ? "Saving" : save.isError ? "Failed" : "Saved"}</Text></Group>
+          <Divider orientation="vertical" h={28} />
           <Menu shadow="md" position="bottom-end" withinPortal>
             <Menu.Target><Button variant="default" leftSection={<Plus size={16} weight="bold" />} rightSection={<CaretDown size={14} weight="bold" />}>Add view</Button></Menu.Target>
             <Menu.Dropdown><Menu.Label>Dashboard views</Menu.Label>{Object.entries(widgetTitles).map(([value, label]) => <Menu.Item key={value} onClick={() => add(value as WidgetType)}>{label}</Menu.Item>)}</Menu.Dropdown>
           </Menu>
           <Button variant="subtle" color="gray" rightSection={<ArrowUpRight size={16} weight="bold" />} onClick={() => onOpenChat()}>Ask Fanout</Button>
-        </Group>
+        </Flex>
       </Flex>
     </Paper>
 

@@ -1,5 +1,5 @@
 import { HttpAgent, type Message } from "@ag-ui/client";
-import { ActionIcon, Alert, AppShell, Avatar, Box, Button, Center, Container, Group, Kbd, Loader, Paper, SimpleGrid, Stack, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
+import { ActionIcon, Alert, AppShell, Avatar, Box, Button, Center, Container, Group, Loader, Paper, SimpleGrid, Stack, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
 import { ArrowUpRight, ChatCircleText, GithubLogo, GlobeHemisphereWest, Layout, PaperPlaneTilt, Plus, SignOut } from "@phosphor-icons/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
@@ -165,8 +165,7 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
 
 function ProductFooter() {
   return <AppShell.Footer><Group h="100%" px={{ base: "sm", sm: "lg" }} justify="space-between" wrap="nowrap">
-    <Text c="dimmed" size="xs">© 2026 Recast by <Text component="a" href="https://labstack.com" target="_blank" rel="noreferrer" inherit fw={600}>LabStack</Text></Text>
-    <Group gap="md" visibleFrom="md"><Text c="dimmed" size="xs"><Kbd>/</Kbd> focus</Text><Text c="dimmed" size="xs"><Kbd>Esc</Kbd> clear</Text></Group>
+    <Text c="dimmed" size="xs">© 2026 Fanout by <Text component="a" href="https://labstack.com" target="_blank" rel="noreferrer" inherit fw={600} c="var(--mantine-color-text)">LabStack</Text></Text>
     <Group gap={4}><Tooltip label="GitHub"><ActionIcon component="a" href="https://github.com/labstack/fanout" target="_blank" rel="noreferrer" variant="subtle" color="gray" size="sm" aria-label="Fanout on GitHub"><GithubLogo size={14} weight="bold" /></ActionIcon></Tooltip><Tooltip label="LabStack"><ActionIcon component="a" href="https://labstack.com" target="_blank" rel="noreferrer" variant="subtle" color="gray" size="sm" aria-label="LabStack website"><GlobeHemisphereWest size={14} /></ActionIcon></Tooltip></Group>
   </Group></AppShell.Footer>;
 }
@@ -180,7 +179,7 @@ function ChatMessage({ message, send }: { message: Message; send: (text: string)
   const content = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
   if (!content && message.role === "assistant") return null;
   const user = message.role === "user";
-  return <Stack gap="xs" align={user ? "flex-end" : "stretch"} maw={user ? "76%" : 780} ml={user ? "auto" : undefined}>
+  return <Stack gap="xs" align={user ? "flex-end" : "stretch"} maw={user ? "min(92%, 650px)" : 780} ml={user ? "auto" : undefined}>
     <Group gap="xs" justify={user ? "flex-end" : "flex-start"}><Avatar size={22} radius="sm" color={user ? "gray" : "teal"}>{user ? "Y" : "F"}</Avatar><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.08em">{user ? "You" : "Fanout"}</Text></Group>
     {user ? <Paper withBorder radius="lg" p="sm" bg="teal.0"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper> : <Typography><Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown></Typography>}
   </Stack>;

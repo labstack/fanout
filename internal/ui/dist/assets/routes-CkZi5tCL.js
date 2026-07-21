@@ -1,1 +1,0 @@
-import{n as e}from"./index-Bj2_JjN4.js";var t=e;export{t as component};
