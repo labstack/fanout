@@ -1,7 +1,8 @@
 import { GraphChart, HeatmapChart, SankeyChart } from "echarts/charts";
+import { FlowArrow, MagnifyingGlass, ShareNetwork } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, Tabs } from "./components";
+import { EmptyState, RefreshButton, Tabs } from "./components";
 import type { Edge, Result, Topology } from "./contracts";
 import { EChart, useECharts } from "./echart";
 import { duration, integer, percent, windowLabel } from "./format";
@@ -17,10 +18,10 @@ function TopologyApp() {
   const [selected, setSelected] = useState<string | null>(null);
   const [view, setView] = useState<View>("graph");
   return <main className={`app ${host?.theme === "dark" ? "dark" : ""}`}>
-    <header className="header"><div><div className="eyebrow">Service map</div><h1 className="title">Dependencies</h1>{result && <p className="summary">{result.data.nodes.length} services connected by {result.data.edges.length} routes</p>}</div><button className="refresh" onClick={() => callTool("service_topology")} disabled={!app}>Refresh</button></header>
+    <header className="header"><div><div className="eyebrow">Service map</div><h1 className="title">Dependencies</h1>{result && <p className="summary">{result.data.nodes.length} services connected by {result.data.edges.length} routes</p>}</div><RefreshButton onClick={() => callTool("service_topology")} disabled={!app} /></header>
     {(error || toolError) && <div className="error">{toolError ?? "This view could not be loaded. Please try again."}</div>}
     {!result && !error && !toolError && <div className="loading">Loading service relationships…</div>}
-    {result && result.data.nodes.length === 0 && <><EmptyState icon="⌘" title="No service relationships yet">Connections will appear as services communicate.</EmptyState><footer className="meta"><span>{windowLabel(result.provenance.window)}</span><span>No routes found</span></footer></>}
+    {result && result.data.nodes.length === 0 && <><EmptyState icon={<ShareNetwork size={18} weight="duotone" />} title="No service relationships yet">Connections will appear as services communicate.</EmptyState><footer className="meta"><span>{windowLabel(result.provenance.window)}</span><span>No routes found</span></footer></>}
     {result && result.data.nodes.length > 0 && <>
       <Tabs active={view} onChange={setView} items={[{ id: "graph", label: "Graph" }, { id: "flow", label: "Traffic flow" }, { id: "matrix", label: "Matrix" }]} />
       <TopologyBody data={result.data} view={view} selected={selected} onSelect={setSelected} onInvestigate={(service) => askAbout(app, `Investigate dependencies and failures around ${service}.`)} />
@@ -36,7 +37,7 @@ function TopologyBody({ data, view, selected, onSelect, onInvestigate }: { data:
       {view === "graph" && <GraphView data={data} selected={selected} onSelect={onSelect} />}
       {view === "flow" && <FlowView data={data} onSelect={onSelect} />}
       {view === "matrix" && <MatrixView data={data} />}
-      {selected && <button className="investigate" onClick={() => onInvestigate(selected)}>Investigate {selected}</button>}
+      {selected && <button className="investigate" onClick={() => onInvestigate(selected)}><MagnifyingGlass size={14} weight="bold" aria-hidden="true" />Investigate {selected}</button>}
     </section>
     <EdgeList edges={activeEdges} onSelect={onSelect} />
   </>;
@@ -60,7 +61,7 @@ function FlowView({ data, onSelect }: { data: Topology; onSelect: (id: string) =
     tooltip: { trigger: "item", backgroundColor: "#1a221e", borderColor: "#2b3832", textStyle: { color: "#eff5f1", fontSize: 10 } },
     series: [{ type: "sankey", left: 20, right: 30, top: 20, bottom: 20, nodeWidth: 14, nodeGap: 12, draggable: true, emphasis: { focus: "adjacency" }, label: { color: "#dfe7e2", fontSize: 10 }, lineStyle: { color: "gradient", opacity: .28, curveness: .55 }, data: data.nodes.map((node) => ({ name: node.service, itemStyle: { color: healthColor(node.health), borderColor: "#121815", borderWidth: 2 } })), links: links.map((edge) => ({ source: edge.caller, target: edge.callee, value: Math.max(edge.calls, 1) })) }],
   }), [data.nodes, links]);
-  if (links.length === 0) return <EmptyState icon="⇢" title="No traffic routes observed">Services are visible, but this window contains no direct service-to-service calls.</EmptyState>;
+  if (links.length === 0) return <EmptyState icon={<FlowArrow size={18} weight="duotone" />} title="No traffic routes observed">Services are visible, but this window contains no direct service-to-service calls.</EmptyState>;
   return <><EChart option={option} height={350} label="Primary service traffic flow" onClick={(params) => { const item = params as { dataType?: string; name?: string }; if (item.dataType === "node" && item.name) onSelect(item.name); }} /><p className="flow-note">Showing {links.length} primary routes from {data.edges.length} observed connections</p></>;
 }
 

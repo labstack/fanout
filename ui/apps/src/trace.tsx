@@ -1,7 +1,8 @@
 import { StrictMode, useMemo, useState } from "react";
+import { ListBullets, Path } from "@phosphor-icons/react";
 import type { CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, Hint, Tabs } from "./components";
+import { EmptyState, Hint, RefreshButton, Tabs } from "./components";
 import type { LogEntry, Result, TraceDetail, TraceSpan } from "./contracts";
 import { duration, integer, windowLabel } from "./format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
@@ -14,10 +15,10 @@ function TraceApp() {
   const { app, callTool, error, host, result, toolError } = useFanoutApp<Result<TraceDetail>>("Fanout trace detail");
   const [view, setView] = useState<View>("waterfall");
   return <main className={`app ${host?.theme === "dark" ? "dark" : ""}`}>
-    <header className="header"><div><div className="eyebrow">Request journey</div><h1 className="title">{result?.data.trace_id ? `Trace ${shortID(result.data.trace_id)}` : "Trace analysis"}</h1>{result && <p className="summary">{result.data.spans.length} spans across {result.data.services.length} services</p>}</div><button className="refresh" onClick={() => callTool("trace_detail")} disabled={!app}>Refresh</button></header>
+    <header className="header"><div><div className="eyebrow">Request journey</div><h1 className="title">{result?.data.trace_id ? `Trace ${shortID(result.data.trace_id)}` : "Trace analysis"}</h1>{result && <p className="summary">{result.data.spans.length} spans across {result.data.services.length} services</p>}</div><RefreshButton onClick={() => callTool("trace_detail")} disabled={!app} /></header>
     {(error || toolError) && <div className="error">{toolError ?? "This view could not be loaded. Please try again."}</div>}
     {!result && !error && !toolError && <div className="loading">Finding a representative trace…</div>}
-    {result && result.data.spans.length === 0 && <><EmptyState icon="⌁" title="No traces in this window">Try a wider time window.</EmptyState><footer className="meta"><span>{windowLabel(result.provenance.window)}</span><span>No traces found</span></footer></>}
+    {result && result.data.spans.length === 0 && <><EmptyState icon={<Path size={18} weight="duotone" />} title="No traces in this window">Try a wider time window.</EmptyState><footer className="meta"><span>{windowLabel(result.provenance.window)}</span><span>No traces found</span></footer></>}
     {result && result.data.spans.length > 0 && <>
       <section className="trace-metrics"><div><span>Duration</span><strong>{duration(result.data.duration_ms)}</strong></div><div><span>Spans</span><strong>{integer.format(result.data.spans.length)}</strong></div><div><span>Services</span><strong>{integer.format(result.data.services.length)}</strong></div><div><span>Status</span><strong className={result.data.has_error ? "health-unhealthy" : "health-healthy"}>{result.data.has_error ? "Error" : "OK"}</strong></div></section>
       <Tabs active={view} onChange={setView} items={[{ id: "waterfall", label: "Waterfall", count: result.data.spans.length }, { id: "flame", label: "Flame graph" }, { id: "logs", label: "Correlated logs", count: result.data.logs.length }]} />
@@ -102,7 +103,7 @@ function flameModel(spans: TraceSpan[]) {
 }
 
 function TraceLogs({ entries }: { entries: LogEntry[] }) {
-  if (entries.length === 0) return <EmptyState icon="≡" title="No correlated logs">No logs in this window carry the selected trace ID.</EmptyState>;
+  if (entries.length === 0) return <EmptyState icon={<ListBullets size={18} weight="duotone" />} title="No correlated logs">No logs in this window carry the selected trace ID.</EmptyState>;
   return <section className="trace-logs">{entries.map((entry, index) => <article key={`${entry.time}-${index}`}><time>{new Date(entry.time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</time><span className={`severity severity-${entry.severity.toLowerCase()}`}>{entry.severity || "LOG"}</span><strong>{entry.service}</strong><p>{entry.body}</p></article>)}</section>;
 }
 

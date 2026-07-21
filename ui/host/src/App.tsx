@@ -1,5 +1,6 @@
 import { HttpAgent, type Message } from "@ag-ui/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ArrowUpRight, ChatCircleText, Layout, PaperPlaneTilt, Plus, SignOut } from "@phosphor-icons/react";
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -97,9 +98,9 @@ function Chat() {
         <div className="brand"><span className="brand-mark small" aria-hidden="true">F</span><div><strong>Fanout</strong><small>Operations intelligence</small></div></div>
         <div className="header-actions">
           <span className="live"><i />Connected</span>
-          <button type="button" className="ghost" onClick={() => setView(view === "chat" ? "dashboard" : "chat")}>{view === "chat" ? "Dashboard" : "Chat"}</button>
-          {view === "chat" && <button type="button" className="ghost" onClick={newThread}><span aria-hidden="true">＋</span> New chat</button>}
-          <button type="button" className="ghost quiet" onClick={() => void logout()}>Sign out</button>
+          <button type="button" className="ghost view-switch" onClick={() => setView(view === "chat" ? "dashboard" : "chat")}>{view === "chat" ? <Layout size={15} weight="bold" aria-hidden="true" /> : <ChatCircleText size={15} weight="bold" aria-hidden="true" />}<span className="action-label">{view === "chat" ? "Dashboard" : "Chat"}</span></button>
+          {view === "chat" && <button type="button" className="ghost new-thread" onClick={newThread} aria-label="New chat"><Plus size={15} weight="bold" aria-hidden="true" /><span className="action-label">New chat</span></button>}
+          <button type="button" className="ghost quiet signout" onClick={() => void logout()} aria-label="Sign out"><SignOut size={15} aria-hidden="true" /><span className="action-label">Sign out</span></button>
         </div>
       </header>
       {view === "dashboard" ? <Dashboard onOpenChat={(prompt) => { setView("chat"); if (prompt) void send(prompt); }} /> : <main className="chat">
@@ -111,7 +112,7 @@ function Chat() {
             <h1>See what changed.<br />Know what to do next.</h1>
             <p>Ask about service health, latency, errors, or dependencies. Fanout turns live signals into clear answers and focused views.</p>
             <div className="suggestions">
-              {["Summarize system health for the last hour", "Find the source of elevated errors", "Map the current service dependencies"].map((suggestion, index) => <button key={suggestion} onClick={() => void send(suggestion)}><small>0{index + 1}</small>{suggestion}<span aria-hidden="true">↗</span></button>)}
+              {["Summarize system health for the last hour", "Find the source of elevated errors", "Map the current service dependencies"].map((suggestion, index) => <button key={suggestion} onClick={() => void send(suggestion)}><small>0{index + 1}</small>{suggestion}<ArrowUpRight size={17} weight="bold" aria-hidden="true" /></button>)}
             </div>
           </section>
         )}
@@ -125,7 +126,7 @@ function Chat() {
       {view === "chat" && <footer className="composer-wrap">
         <form className="composer" onSubmit={submit}>
           <textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is analyzing…" : "Ask about health, errors, or latency…"} rows={1} disabled={!ready || running} />
-          <button type="submit" disabled={!input.trim() || !ready || running} aria-label="Send message"><span aria-hidden="true">↑</span></button>
+          <button type="submit" disabled={!input.trim() || !ready || running} aria-label="Send message"><PaperPlaneTilt size={19} weight="fill" aria-hidden="true" /></button>
         </form>
         <small>Enter to send <span>·</span> Shift + Enter for a new line</small>
       </footer>}

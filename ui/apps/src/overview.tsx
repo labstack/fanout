@@ -1,6 +1,8 @@
 import { StrictMode } from "react";
+import { Pulse } from "@phosphor-icons/react";
 import { createRoot } from "react-dom/client";
 import type { Overview, Result, ServiceHealth } from "./contracts";
+import { RefreshButton } from "./components";
 import { duration, integer, percent, windowLabel } from "./format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
@@ -22,7 +24,7 @@ function OverviewApp() {
           <h1 className="title">System health</h1>
           {result && <p className="summary">{result.summary}</p>}
         </div>
-        <button className="refresh" onClick={refresh} disabled={!app}>Refresh</button>
+        <RefreshButton onClick={refresh} disabled={!app} />
       </header>
       {(error || toolError) && <div className="error">{toolError ?? "This view could not be loaded. Please try again."}</div>}
       {!result && !error && !toolError && <div className="loading">Loading system health…</div>}
@@ -49,7 +51,7 @@ function OverviewBody({ result, onService }: { result: Result<Overview>; onServi
       <span><i className="legend-dot healthy" />{data.counts.healthy} healthy</span><span><i className="legend-dot degraded" />{data.counts.degraded} degraded</span><span><i className="legend-dot unhealthy" />{data.counts.unhealthy} unhealthy</span>
     </div>
     {data.services.length === 0 ? <section className="empty-state">
-      <span className="empty-icon" aria-hidden="true">⌁</span>
+      <span className="empty-icon" aria-hidden="true"><Pulse size={18} weight="duotone" /></span>
       <div><strong>No activity in this window</strong><p>Services will appear as data begins to arrive.</p></div>
     </section> : <section className="service-list">
       <div className="service-row service-head"><span>Service</span><span>Traffic</span><span>P95</span><span>Errors</span></div>

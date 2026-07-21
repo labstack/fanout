@@ -160,7 +160,7 @@ header {
 }
 .suggestions button:hover { transform: translateY(-2px); border-color: #4c5946; background: #182019; }
 .suggestions button small { color: #677167; font-size: 9px; font-weight: 800; letter-spacing: .12em; }
-.suggestions button > span { position: absolute; right: 15px; bottom: 13px; color: var(--accent); font-size: 16px; }
+.suggestions button > svg { position: absolute; right: 15px; bottom: 13px; color: var(--accent); }
 
 .thread-loading { display: flex; justify-content: center; align-items: center; min-height: 50vh; color: var(--muted); font-size: 13px; }
 .thread-loading span, .thinking span {
@@ -222,7 +222,7 @@ header {
 .composer textarea { flex: 1; min-height: 38px; max-height: 160px; resize: none; overflow-y: auto; border: 0; outline: 0; color: #f3f5f2; background: transparent; padding: 9px 0 7px; line-height: 1.45; }
 .composer textarea::placeholder { color: #747d74; }
 .composer button, .auth-card button { border: 0; color: #11150e; background: linear-gradient(145deg, #b6f37e, #97df5c); border-radius: 10px; font-weight: 850; box-shadow: 0 4px 14px rgba(141, 220, 82, .14); }
-.composer button { flex: 0 0 auto; width: 39px; height: 39px; font-size: 19px; }
+.composer button { display:grid; place-items:center; flex: 0 0 auto; width: 39px; height: 39px; font-size: 19px; }
 .composer button:disabled, .auth-card button:disabled { opacity: .32; cursor: default; box-shadow: none; }
 .composer-wrap > small { display: block; margin-top: 8px; color: #606960; font-size: 9px; letter-spacing: .02em; }
 .composer-wrap > small span { margin: 0 4px; color: #434943; }
@@ -235,7 +235,7 @@ header {
 .auth-card label { display: grid; gap: 7px; color: #aab2aa; font-size: 12px; font-weight: 650; }
 .auth-card input { width: 100%; padding: 12px 13px; border: 1px solid var(--line); border-radius: 10px; outline: none; background: #0c0f0c; color: white; }
 .auth-card input:focus { border-color: #637b51; }
-.auth-card button { min-height: 45px; margin-top: 5px; }
+.auth-card button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:45px; margin-top:5px; }
 .setup-complete { width: min(620px, 100%); }
 .setup-complete label { margin-top: 18px; }
 .token-value { display: block; margin-top: 7px; padding: 12px 13px; overflow-wrap: anywhere; border: 1px solid var(--line); border-radius: 10px; background: #0c0f0c; color: #dce1dc; font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -265,6 +265,8 @@ header {
   .brand strong { font-size: 13px; }
   .brand-mark.small { width: 29px; height: 29px; }
   .ghost.quiet { padding-inline: 7px; }
+  .header-actions .new-thread, .header-actions .signout { width:32px; padding:0; justify-content:center; }
+  .header-actions .new-thread .action-label, .header-actions .signout .action-label { display:none; }
   .chat { width: calc(100% - 20px); }
   .welcome > p:not(.eyebrow) { font-size: 14px; }
 }

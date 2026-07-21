@@ -1,7 +1,8 @@
 import { StrictMode, useMemo, useState } from "react";
+import { ArrowUpRight, ArrowsLeftRight, GridFour, Pulse } from "@phosphor-icons/react";
 import { createRoot } from "react-dom/client";
 import { HeatmapChart, LineChart } from "echarts/charts";
-import { EmptyState, Tabs } from "./components";
+import { EmptyState, RefreshButton, Tabs } from "./components";
 import type { Endpoint, Performance, Result } from "./contracts";
 import { EChart, useECharts } from "./echart";
 import { duration, integer, percent, windowLabel } from "./format";
@@ -17,7 +18,7 @@ function PerformanceApp() {
   const { app, callTool, error, host, result, toolError } = useFanoutApp<Result<Performance>>("Fanout service performance");
   const [view, setView] = useState<View>("activity");
   return <main className={`app ${host?.theme === "dark" ? "dark" : ""}`}>
-    <header className="header"><div><div className="eyebrow">Trends and latency</div><h1 className="title">{result?.data.service || "System performance"}</h1>{result && <p className="summary">Traffic, latency, and errors {result.data.service ? `for ${result.data.service}` : "across all services"}</p>}</div><button className="refresh" onClick={() => callTool("service_performance")} disabled={!app}>Refresh</button></header>
+    <header className="header"><div><div className="eyebrow">Trends and latency</div><h1 className="title">{result?.data.service || "System performance"}</h1>{result && <p className="summary">Traffic, latency, and errors {result.data.service ? `for ${result.data.service}` : "across all services"}</p>}</div><RefreshButton onClick={() => callTool("service_performance")} disabled={!app} /></header>
     {(error || toolError) && <div className="error">{toolError ?? "This view could not be loaded. Please try again."}</div>}
     {!result && !error && !toolError && <div className="loading">Loading performance signals…</div>}
     {result && <>
@@ -33,7 +34,7 @@ function PerformanceApp() {
 
 function ActivityView({ data }: { data: Performance }) {
   const last = data.points.at(-1);
-  if (!last) return <EmptyState icon="⌁" title="No activity in this window">Trends will appear as activity is recorded.</EmptyState>;
+  if (!last) return <EmptyState icon={<Pulse size={18} weight="duotone" />} title="No activity in this window">Trends will appear as activity is recorded.</EmptyState>;
   const labels = data.points.map((point) => point.time);
   return <div className="performance-view">
     <section className="metrics performance-metrics"><Metric label="Operations" value={integer.format(last.spans)} /><Metric label="P95 latency" value={duration(last.p95_ms)} tone={last.p95_ms >= 750 ? "degraded" : "healthy"} /><Metric label="Error rate" value={percent(last.error_rate)} tone={last.error_rate >= .01 ? "degraded" : "healthy"} /></section>
@@ -67,7 +68,7 @@ function HeatmapView({ data }: { data: Performance }) {
     const max = Math.max(...data.heatmap.map((point) => point.p95_ms), 1);
     return { services, times, values, max };
   }, [data.heatmap]);
-  if (model.services.length === 0) return <EmptyState icon="▦" title="No latency samples yet">The heatmap will compare service latency across time buckets.</EmptyState>;
+  if (model.services.length === 0) return <EmptyState icon={<GridFour size={18} weight="duotone" />} title="No latency samples yet">The heatmap will compare service latency across time buckets.</EmptyState>;
   const option = {
     grid: { left: 105, right: 20, top: 20, bottom: 45 },
     tooltip: { position: "top", backgroundColor: "#1a221e", borderColor: "#2b3832", textStyle: { color: "#eff5f1", fontSize: 10 }, formatter: (params: { data: [number, number, number] }) => `${model.services[params.data[1]]}<br/>${duration(params.data[2])}` },
@@ -80,12 +81,12 @@ function HeatmapView({ data }: { data: Performance }) {
 }
 
 function EndpointsView({ endpoints, onEndpoint }: { endpoints: Endpoint[]; onEndpoint: (endpoint: Endpoint) => void }) {
-  if (endpoints.length === 0) return <EmptyState icon="↗" title="No endpoints detected">HTTP routes and span operations will appear here as traffic arrives.</EmptyState>;
+  if (endpoints.length === 0) return <EmptyState icon={<ArrowUpRight size={18} weight="duotone" />} title="No endpoints detected">HTTP routes and span operations will appear here as traffic arrives.</EmptyState>;
   return <section className="endpoint-list"><div className="endpoint-row endpoint-head"><span>Endpoint</span><span>Calls</span><span>P50</span><span>P95</span><span>P99</span><span>Errors</span></div>{endpoints.map((endpoint) => <button className="endpoint-row" key={`${endpoint.method}-${endpoint.path}`} onClick={() => onEndpoint(endpoint)}><span><i className={`method method-${endpoint.method.toLowerCase()}`}>{endpoint.method}</i><code>{endpoint.path}</code></span><span>{integer.format(endpoint.calls)}</span><span>{duration(endpoint.p50_ms)}</span><span>{duration(endpoint.p95_ms)}</span><span>{duration(endpoint.p99_ms)}</span><span className={`health-${endpoint.health}`}>{percent(endpoint.error_rate)}</span></button>)}</section>;
 }
 
 function ComparisonView({ data }: { data: Performance }) {
-  if (data.comparison.length === 0) return <EmptyState icon="⇄" title="Nothing to compare yet">Fanout compares the first and second half of the selected window.</EmptyState>;
+  if (data.comparison.length === 0) return <EmptyState icon={<ArrowsLeftRight size={18} weight="duotone" />} title="Nothing to compare yet">Fanout compares the first and second half of the selected window.</EmptyState>;
   return <section className="comparison"><div className="compare-head"><span>Signal</span><span>Earlier</span><span>Change</span><span>Recent</span></div>{data.comparison.map((metric) => <div className={`compare-row ${metric.direction}`} key={metric.label}><div><strong>{metric.label}</strong><small>{metric.unit}</small></div><strong>{formatMetric(metric.before, metric.unit)}</strong><span className="change"><b>{metric.change_pct > 0 ? "↑" : metric.change_pct < 0 ? "↓" : "→"} {Math.abs(metric.change_pct).toFixed(1)}%</b>{metric.significant && <small>notable</small>}</span><strong>{formatMetric(metric.after, metric.unit)}</strong></div>)}</section>;
 }
 

@@ -11,7 +11,7 @@
 .log-list time { color: var(--muted); font-variant-numeric: tabular-nums; }
 .log-list strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-list p { margin: 0; overflow-wrap: anywhere; line-height: 1.45; }
-.log-list article > button { padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; color: var(--muted); background: transparent; font: 8px ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.log-list article > button { display:inline-flex; align-items:center; gap:4px; padding:3px 6px; border:1px solid var(--line); border-radius:5px; color:var(--muted); background:transparent; font:8px ui-monospace,SFMono-Regular,Menlo,monospace; white-space:nowrap; }
 .log-list article > button:hover { color: var(--healthy); border-color: var(--healthy); }
 .severity { width: fit-content; padding: 2px 5px; border-radius: 4px; color: var(--muted); background: var(--surface-2); font-size: 8px; font-weight: 750; }
 .severity-error, .severity-fatal { color: var(--unhealthy); background: color-mix(in srgb, var(--unhealthy) 12%, transparent); }.severity-warn, .severity-warning { color: var(--degraded); background: color-mix(in srgb, var(--degraded) 12%, transparent); }.severity-info { color: var(--healthy); }

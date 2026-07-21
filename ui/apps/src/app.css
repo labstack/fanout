@@ -54,7 +54,7 @@ button:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--h
 .eyebrow { color: var(--muted); font-size: 11px; font-weight: 750; letter-spacing: .11em; text-transform: uppercase; }
 .title { margin: 4px 0 0; font-size: 18px; letter-spacing: -.02em; }
 .summary { margin: 5px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
-.refresh { border: 1px solid var(--line); border-radius: 9px; background: var(--surface-2); color: var(--text); cursor: pointer; padding: 7px 10px; font-size: 12px; }
+.refresh { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--line); border-radius:9px; background:var(--surface-2); color:var(--text); cursor:pointer; padding:7px 10px; font-size:12px; }
 .refresh:hover:not(:disabled) { border-color: var(--muted); }
 .refresh:disabled { opacity: .45; cursor: default; }
 .loading, .error { padding: 28px 20px; color: var(--muted); }
@@ -69,6 +69,7 @@ button:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--h
 .empty-state strong { display: block; margin-bottom: 4px; color: var(--text); font-size: 13px; }
 .empty-state p { margin: 0; font-size: 11px; line-height: 1.5; }
 .empty-icon { display: grid; place-items: center; flex: 0 0 auto; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); color: var(--healthy); font-size: 17px; }
+.empty-icon svg { display:block; }
 .rich-empty { min-height: 220px; margin-top: 0; }
 .tabs { display: flex; align-items: center; gap: 3px; padding: 0 20px 13px; overflow-x: auto; }
 .tabs button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; padding: 6px 9px; border: 1px solid transparent; border-radius: 8px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11px; font-weight: 650; }

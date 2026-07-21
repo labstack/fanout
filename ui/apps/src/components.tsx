@@ -1,5 +1,6 @@
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+import { ArrowClockwise } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 
 export function Tabs<T extends string>({ active, items, onChange }: { active: T; items: Array<{ id: T; label: string; count?: number }>; onChange: (id: T) => void }) {
@@ -10,7 +11,11 @@ export function Hint({ label, children }: { label: string; children: ReactNode }
   return <TooltipPrimitive.Provider delayDuration={250}><TooltipPrimitive.Root><TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger><TooltipPrimitive.Portal><TooltipPrimitive.Content className="tooltip" sideOffset={6}>{label}<TooltipPrimitive.Arrow className="tooltip-arrow" /></TooltipPrimitive.Content></TooltipPrimitive.Portal></TooltipPrimitive.Root></TooltipPrimitive.Provider>;
 }
 
-export function EmptyState({ icon, title, children }: { icon: string; title: string; children: ReactNode }) {
+export function RefreshButton({ disabled, onClick }: { disabled?: boolean; onClick: () => void | Promise<unknown> }) {
+  return <button className="refresh" onClick={() => void onClick()} disabled={disabled}><ArrowClockwise size={15} weight="bold" aria-hidden="true" />Refresh</button>;
+}
+
+export function EmptyState({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
   return <section className="empty-state rich-empty"><span className="empty-icon" aria-hidden="true">{icon}</span><div><strong>{title}</strong><p>{children}</p></div></section>;
 }
 
