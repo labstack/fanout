@@ -1,5 +1,6 @@
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
+import { BrandMark } from "./appearance";
 
 const tokenKey = "fanout.access-token";
 const unauthorizedEvent = "fanout:unauthorized";
@@ -128,7 +129,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     return (
       <main className="auth-shell">
         <section className="auth-card setup-complete">
-          <div className="brand-mark">F</div>
+          <BrandMark />
           <p className="eyebrow">SETUP COMPLETE</p>
           <h1>Save your ingest token</h1>
           <p className="muted">Fanout shows this token once. Store it with your collector secrets before continuing.</p>
@@ -178,7 +179,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   return (
     <main className="auth-shell">
       <section className="auth-card">
-        <div className="brand-mark">F</div>
+        <BrandMark />
         <p className="eyebrow">FANOUT</p>
         <h1>{status?.setup_required ? "Create the first admin" : "Sign in to investigate"}</h1>
         <p className="muted">

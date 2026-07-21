@@ -5,6 +5,7 @@ import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from 
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import AuthGate, { authorizedFetch, logout } from "./auth";
+import { AppearanceMenu, BrandMark } from "./appearance";
 import type { MCPAppContent } from "./mcp-app-frame";
 import Dashboard from "./dashboard";
 import { createID } from "./id";
@@ -95,11 +96,12 @@ function Chat() {
   return (
     <div className="app-shell">
       <header>
-        <div className="brand"><span className="brand-mark small" aria-hidden="true">F</span><div><strong>Fanout</strong><small>Operations intelligence</small></div></div>
+        <div className="brand"><BrandMark size="small" /><div><strong>Fanout</strong><small>Operations intelligence</small></div></div>
         <div className="header-actions">
           <span className="live"><i />Connected</span>
           <button type="button" className="ghost view-switch" onClick={() => setView(view === "chat" ? "dashboard" : "chat")}>{view === "chat" ? <Layout size={15} weight="bold" aria-hidden="true" /> : <ChatCircleText size={15} weight="bold" aria-hidden="true" />}<span className="action-label">{view === "chat" ? "Dashboard" : "Chat"}</span></button>
           {view === "chat" && <button type="button" className="ghost new-thread" onClick={newThread} aria-label="New chat"><Plus size={15} weight="bold" aria-hidden="true" /><span className="action-label">New chat</span></button>}
+          <AppearanceMenu />
           <button type="button" className="ghost quiet signout" onClick={() => void logout()} aria-label="Sign out"><SignOut size={15} aria-hidden="true" /><span className="action-label">Sign out</span></button>
         </div>
       </header>
@@ -107,7 +109,7 @@ function Chat() {
         {!ready && <div className="thread-loading" role="status"><span /><span /><span /> Loading conversation</div>}
         {visibleMessages.length === 0 && ready && (
           <section className="welcome">
-            <div className="welcome-mark" aria-hidden="true">F</div>
+            <BrandMark size="large" />
             <p className="eyebrow">YOUR SYSTEM, UNDERSTOOD</p>
             <h1>See what changed.<br />Know what to do next.</h1>
             <p>Ask about service health, latency, errors, or dependencies. Fanout turns live signals into clear answers and focused views.</p>
