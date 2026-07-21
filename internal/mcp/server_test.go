@@ -6,12 +6,47 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/observability"
+	controlstore "github.com/labstack/fanout/internal/store"
+	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type fakeObservability struct {
 	scope observability.Scope
+}
+
+func TestDashboardToolsUseAuthenticatedOwner(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES('owner','owner@example.test','Owner','admin',1)`); err != nil {
+		t.Fatal(err)
+	}
+	server := New(&fakeObservability{}, dashboard.New(database.DB), "test")
+	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{}, Extra: &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}}
+	state := dashboard.State{Filters: dashboard.Filters{Window: "1h"}, Widgets: []dashboard.Widget{{ID: "health", Type: "overview", Title: "System health", Enabled: true}}, Layout: []dashboard.Layout{{I: "health", X: 0, Y: 0, W: 12, H: 3}}}
+	_, output, err := server.dashboardCreate(ctx, req, DashboardCreateInput{Name: "AI overview", State: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output.Dashboard.Name != "AI overview" {
+		t.Fatalf("dashboard = %#v", output.Dashboard)
+	}
+	_, listed, err := server.dashboardList(ctx, req, struct{}{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Dashboards) != 1 {
+		t.Fatalf("dashboard count = %d, want 1", len(listed.Dashboards))
+	}
+	if _, _, err := server.dashboardList(ctx, &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{}}, struct{}{}); err == nil {
+		t.Fatal("unauthenticated dashboard tool succeeded")
+	}
 }
 
 func (f *fakeObservability) Overview(_ context.Context, scope observability.Scope, _ int) (observability.Result[observability.Overview], error) {
@@ -49,7 +84,7 @@ func (f *fakeObservability) Logs(_ context.Context, scope observability.Scope, _
 
 func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
 	backend := &fakeObservability{}
-	s := New(backend, "test")
+	s := New(backend, nil, "test")
 	s.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
 	result, output, err := s.overview(context.Background(), nil, QueryInput{Window: "15m", Namespace: "prod"})
 	if err != nil {
@@ -64,14 +99,14 @@ func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
 }
 
 func TestInvalidWindowIsToolError(t *testing.T) {
-	s := New(&fakeObservability{}, "test")
+	s := New(&fakeObservability{}, nil, "test")
 	if _, _, err := s.topology(context.Background(), nil, QueryInput{Window: "later"}); err == nil {
 		t.Fatal("expected invalid window error")
 	}
 }
 
 func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
-	server := New(&fakeObservability{}, "test")
+	server := New(&fakeObservability{}, nil, "test")
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverConnected := make(chan error, 1)
 	go func() {

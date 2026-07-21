@@ -155,11 +155,12 @@ Setting only one of the two TLS variables is a startup error — a guardrail to 
 Open [https://demo.fanout.test](https://demo.fanout.test) locally, or your production Fanout URL, and sign in.
 
 - **Chat** is the primary interface. Ask in plain English; the Go agent runtime calls the standard MCP tools and streams standard AG-UI events back to the browser.
-- **Interactive results** are five domain MCP Apps: health, topology, performance, trace, and logs. They are resources served by `/mcp` and hosted with the official MCP `AppBridge`, not Fanout-specific dashboard blocks.
+- **Interactive results** are five portable domain MCP Apps: health, topology, performance, trace, and logs. They are resources served by `/mcp` and hosted with the official MCP `AppBridge`.
+- **Dashboards** are named, owner-scoped canvases stored in SQLite. Their embedded blocks use the same typed query kernel, shared time and namespace filters, and a draggable 12-column layout. Ask Fanout to create a complete dashboard, or create one from an OAuth-connected MCP client; it appears in the dashboard picker automatically.
 - **Threads** are persisted in the control SQLite database and scoped to the signed-in owner. **New thread** starts a clean investigation.
 - **Session refresh** is automatic across AG-UI, MCP, and history requests. **Sign out** clears both the access token and HttpOnly refresh cookie.
 
-The shell is intentionally small. Product-specific visual components should be added as portable MCP Apps so the same tool can render in Fanout and other MCP App hosts.
+Use portable MCP Apps for rich tool results that should render in other hosts. Use dashboard blocks for persistent, composable operational views inside Fanout; adding a block means registering its validated widget type and renderer, without changing the ingest or query backbone.
 
 ## Alerts
 
@@ -275,9 +276,15 @@ The MCP endpoint uses OAuth 2.1 for remote clients. Add `https://demo.fanout.tes
 | `service_performance` | Activity, latency heatmap, endpoint, and period-comparison views. |
 | `trace_detail` | Trace waterfall, flame graph, and correlated-log views. |
 | `search_logs` | Filterable log stream with a severity histogram. |
+| `dashboard_list` | List the signed-in owner's named dashboards. |
+| `dashboard_get` | Read one dashboard's widgets, filters, and 12-column layout. |
+| `dashboard_create` | Add a complete named dashboard without changing existing dashboards. |
+| `dashboard_update` | Replace an explicitly selected dashboard design; advertised as a destructive mutation to MCP clients. |
 
-Both tools are read-only, window- and namespace-bounded, return structured
+The observability tools are read-only, window- and namespace-bounded, return structured
 output with provenance, and remain useful in hosts that cannot render MCP Apps.
+Dashboard tools require the `fanout:dashboard` OAuth scope in addition to
+`fanout:read`; Fanout derives ownership from the verified token, never from tool input.
 
 Ingest credentials and MCP OAuth credentials are deliberately separate: a collector credential cannot query telemetry or open an MCP session.
 

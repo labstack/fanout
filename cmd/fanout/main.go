@@ -27,6 +27,7 @@ import (
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
@@ -217,7 +218,8 @@ func main() {
 	// typed query kernel through deterministic HTTP or standard MCP tools.
 	queries := observability.New(q.DB, cfg.DefaultNS)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability"))
-	api.RegisterDashboardRoutes(e, sqlite.DB)
+	dashboards := dashboard.New(sqlite.DB)
+	api.RegisterDashboardRoutes(e, dashboards)
 
 	// Alert management REST endpoints
 	api.RegisterAlertRoutes(e, alertStore, alertEngine)
@@ -239,7 +241,7 @@ func main() {
 	// The model executes the same standard MCP tools exposed to external clients.
 	// The internal connection is in-memory, so the single binary has no HTTP
 	// self-call, shared secret, or sidecar runtime.
-	mcpServer := mcp.New(queries, version)
+	mcpServer := mcp.New(queries, dashboards, version)
 	if cfg.MCPEnabled {
 		mcpAuthorization, err := api.NewMCPAuthorization(
 			auth.NewOAuthStore(sqlite.DB), userStore, refreshSecret, cfg.MCPPublicURL,

@@ -33,6 +33,18 @@ func (f *fakeQueries) Topology(_ context.Context, scope observability.Scope, _ i
 	}, nil
 }
 
+func (f *fakeQueries) Performance(_ context.Context, _ observability.Scope, _ string, _ int) (observability.Result[observability.Performance], error) {
+	return observability.Result[observability.Performance]{Schema: observability.PerformanceSchema}, nil
+}
+
+func (f *fakeQueries) Trace(_ context.Context, _ observability.Scope, _, _ string, _ int) (observability.Result[observability.TraceDetail], error) {
+	return observability.Result[observability.TraceDetail]{Schema: observability.TraceSchema}, nil
+}
+
+func (f *fakeQueries) Logs(_ context.Context, _ observability.Scope, _, _, _ string, _ int) (observability.Result[observability.Logs], error) {
+	return observability.Result[observability.Logs]{Schema: observability.LogsSchema}, nil
+}
+
 func TestOverviewRouteUsesDurationScope(t *testing.T) {
 	queries := &fakeQueries{}
 	h := NewObservabilityHandler(queries)

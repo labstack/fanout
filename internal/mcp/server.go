@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -50,22 +51,25 @@ type LogsInput struct {
 }
 
 type Server struct {
-	mcp     *mcp.Server
-	queries Observability
-	now     func() time.Time
+	mcp        *mcp.Server
+	queries    Observability
+	dashboards *dashboard.Service
+	now        func() time.Time
 }
 
-func New(queries Observability, version string) *Server {
+func New(queries Observability, dashboards *dashboard.Service, version string) *Server {
 	s := &Server{
 		mcp: mcp.NewServer(&mcp.Implementation{
 			Name:    "fanout",
 			Title:   "Fanout Observability",
 			Version: version,
 		}, nil),
-		queries: queries,
-		now:     time.Now,
+		queries:    queries,
+		dashboards: dashboards,
+		now:        time.Now,
 	}
 	s.registerTools()
+	s.registerDashboardTools()
 	s.registerAppResources()
 	return s
 }

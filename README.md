@@ -2,7 +2,9 @@
 
 Single-binary, agent-native OpenTelemetry investigation. Fanout owns ingest,
 storage, the AG-UI runtime, typed MCP tools, SQLite conversation history, and
-an embedded browser client. Rich results are portable MCP Apps.
+an embedded browser client. Rich results are portable MCP Apps, while named
+dashboard layouts and widget configuration persist in SQLite and can be created
+from the browser assistant or any OAuth-connected MCP client.
 
 Five typed domains cover system health, service topology, performance,
 trace inspection, and logs. Their React visualizations are compiled at build

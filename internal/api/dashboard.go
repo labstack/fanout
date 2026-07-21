@@ -1,126 +1,161 @@
 package api
 
 import (
-	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
-	"strings"
-	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/fanout/internal/dashboard"
 )
 
-type DashboardHandler struct{ db *sql.DB }
+type DashboardHandler struct{ dashboards *dashboard.Service }
 
-type DashboardState struct {
-	Layout  []DashboardLayout `json:"layout"`
-	Widgets []DashboardWidget `json:"widgets"`
-	Filters DashboardFilters  `json:"filters"`
+func RegisterDashboardRoutes(e *echo.Echo, dashboards *dashboard.Service) {
+	h := &DashboardHandler{dashboards: dashboards}
+	e.GET("/api/dashboards", h.List)
+	e.POST("/api/dashboards", h.Create)
+	e.GET("/api/dashboards/:id", h.Get)
+	e.PUT("/api/dashboards/:id", h.Put)
+	e.DELETE("/api/dashboards/:id", h.Delete)
+
+	// Compatibility for the first canvas client. It always addresses the owner's
+	// default dashboard while newer clients use the named collection above.
+	e.GET("/api/dashboard", h.GetDefault)
+	e.PUT("/api/dashboard", h.PutDefault)
 }
 
-type DashboardLayout struct {
-	I    string `json:"i"`
-	X    int    `json:"x"`
-	Y    int    `json:"y"`
-	W    int    `json:"w"`
-	H    int    `json:"h"`
-	MinW int    `json:"minW,omitempty"`
-	MinH int    `json:"minH,omitempty"`
+func (h *DashboardHandler) List(c *echo.Context) error {
+	owner, err := dashboardOwner(c)
+	if err != nil {
+		return err
+	}
+	items, err := h.dashboards.List(c.Request().Context(), owner)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "dashboards unavailable").Wrap(err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"dashboards": items})
 }
 
-type DashboardWidget struct {
-	ID      string `json:"id"`
-	Type    string `json:"type"`
-	Title   string `json:"title"`
-	Enabled bool   `json:"enabled"`
-}
-
-type DashboardFilters struct {
-	Window    string `json:"window"`
-	Namespace string `json:"namespace"`
-}
-
-func RegisterDashboardRoutes(e *echo.Echo, db *sql.DB) {
-	h := &DashboardHandler{db: db}
-	e.GET("/api/dashboard", h.Get)
-	e.PUT("/api/dashboard", h.Put)
+func (h *DashboardHandler) Create(c *echo.Context) error {
+	owner, err := dashboardOwner(c)
+	if err != nil {
+		return err
+	}
+	var input dashboard.CreateInput
+	if err := decodeDashboard(c, &input); err != nil {
+		return err
+	}
+	created, err := h.dashboards.Create(c.Request().Context(), owner, input)
+	if err != nil {
+		return mapDashboardError(err)
+	}
+	return c.JSON(http.StatusCreated, created)
 }
 
 func (h *DashboardHandler) Get(c *echo.Context) error {
-	user := GetCurrentUser(c)
-	if user == nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
-	}
-	var raw, updated string
-	err := h.db.QueryRowContext(c.Request().Context(), `SELECT state_json, updated_at FROM dashboard_state WHERE owner_id = ?`, user.ID).Scan(&raw, &updated)
-	if err == sql.ErrNoRows {
-		return c.JSON(http.StatusOK, map[string]any{"state": defaultDashboardState(), "updated_at": time.Now().UTC().Format(time.RFC3339)})
-	}
+	owner, err := dashboardOwner(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "dashboard state unavailable")
+		return err
 	}
-	var state DashboardState
-	if json.Unmarshal([]byte(raw), &state) != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "dashboard state is invalid")
+	item, err := h.dashboards.Get(c.Request().Context(), owner, c.Param("id"))
+	if err != nil {
+		return mapDashboardError(err)
 	}
-	return c.JSON(http.StatusOK, map[string]any{"state": state, "updated_at": updated})
+	return c.JSON(http.StatusOK, item)
 }
 
 func (h *DashboardHandler) Put(c *echo.Context) error {
-	user := GetCurrentUser(c)
-	if user == nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
-	}
-	var state DashboardState
-	dec := json.NewDecoder(io.LimitReader(c.Request().Body, 64<<10))
-	if err := dec.Decode(&state); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid dashboard state")
-	}
-	if err := validateDashboardState(state); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
-	}
-	raw, _ := json.Marshal(state)
-	updated := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := h.db.ExecContext(c.Request().Context(), `INSERT INTO dashboard_state (owner_id,state_json,updated_at) VALUES (?,?,?) ON CONFLICT(owner_id) DO UPDATE SET state_json=excluded.state_json, updated_at=excluded.updated_at`, user.ID, raw, updated)
+	owner, err := dashboardOwner(c)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "dashboard state could not be saved")
+		return err
 	}
-	return c.JSON(http.StatusOK, map[string]any{"state": state, "updated_at": updated})
+	var input dashboard.UpdateInput
+	if err := decodeDashboard(c, &input); err != nil {
+		return err
+	}
+	updated, err := h.dashboards.Update(c.Request().Context(), owner, c.Param("id"), input)
+	if err != nil {
+		return mapDashboardError(err)
+	}
+	return c.JSON(http.StatusOK, updated)
 }
 
-func validateDashboardState(state DashboardState) error {
-	if len(state.Layout) > 32 || len(state.Widgets) > 32 {
-		return echo.NewHTTPError(http.StatusBadRequest, "dashboard is limited to 32 widgets")
+func (h *DashboardHandler) Delete(c *echo.Context) error {
+	owner, err := dashboardOwner(c)
+	if err != nil {
+		return err
 	}
-	ids := make(map[string]bool, len(state.Widgets))
-	for _, widget := range state.Widgets {
-		if strings.TrimSpace(widget.ID) == "" || ids[widget.ID] {
-			return echo.NewHTTPError(http.StatusBadRequest, "widget ids must be unique")
-		}
-		ids[widget.ID] = true
-		if widget.Type != "overview" && widget.Type != "topology" && widget.Type != "activity" && widget.Type != "assistant" {
-			return echo.NewHTTPError(http.StatusBadRequest, "unsupported widget type")
-		}
+	if c.Request().Header.Get("X-Fanout-Confirm-Delete") != c.Param("id") {
+		return echo.NewHTTPError(http.StatusPreconditionRequired, "dashboard deletion requires confirmation")
 	}
-	for _, item := range state.Layout {
-		if !ids[item.I] || item.W < 1 || item.H < 1 || item.X < 0 || item.Y < 0 || item.X+item.W > 12 {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid widget layout")
-		}
+	if err := h.dashboards.Delete(c.Request().Context(), owner, c.Param("id")); err != nil {
+		return mapDashboardError(err)
 	}
-	if state.Filters.Window == "" {
-		state.Filters.Window = "1h"
+	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *DashboardHandler) GetDefault(c *echo.Context) error {
+	owner, err := dashboardOwner(c)
+	if err != nil {
+		return err
 	}
-	if state.Filters.Window != "15m" && state.Filters.Window != "1h" && state.Filters.Window != "6h" && state.Filters.Window != "24h" {
-		return echo.NewHTTPError(http.StatusBadRequest, "unsupported dashboard window")
+	item, err := h.dashboards.Default(c.Request().Context(), owner)
+	if err != nil {
+		return mapDashboardError(err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"state": item.State, "updated_at": item.UpdatedAt})
+}
+
+func (h *DashboardHandler) PutDefault(c *echo.Context) error {
+	owner, err := dashboardOwner(c)
+	if err != nil {
+		return err
+	}
+	item, err := h.dashboards.Default(c.Request().Context(), owner)
+	if err != nil {
+		return mapDashboardError(err)
+	}
+	var state dashboard.State
+	if err := decodeDashboard(c, &state); err != nil {
+		return err
+	}
+	updated, err := h.dashboards.Update(c.Request().Context(), owner, item.ID, dashboard.UpdateInput{Name: item.Name, Description: item.Description, State: state})
+	if err != nil {
+		return mapDashboardError(err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"state": updated.State, "updated_at": updated.UpdatedAt})
+}
+
+func dashboardOwner(c *echo.Context) (string, error) {
+	user := GetCurrentUser(c)
+	if user == nil {
+		return "", echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+	}
+	return user.ID, nil
+}
+
+func decodeDashboard(c *echo.Context, value any) error {
+	decoder := json.NewDecoder(io.LimitReader(c.Request().Body, 128<<10))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(value); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid dashboard document")
 	}
 	return nil
 }
 
-func defaultDashboardState() DashboardState {
-	return DashboardState{
-		Widgets: []DashboardWidget{{ID: "health", Type: "overview", Title: "System health", Enabled: true}, {ID: "topology", Type: "topology", Title: "Service map", Enabled: true}, {ID: "activity", Type: "activity", Title: "Recent activity", Enabled: true}, {ID: "assistant", Type: "assistant", Title: "Ask Fanout", Enabled: true}},
-		Layout:  []DashboardLayout{{I: "health", X: 0, Y: 0, W: 4, H: 3, MinW: 3, MinH: 2}, {I: "topology", X: 4, Y: 0, W: 8, H: 6, MinW: 4, MinH: 4}, {I: "activity", X: 0, Y: 3, W: 4, H: 3, MinW: 3, MinH: 2}, {I: "assistant", X: 0, Y: 6, W: 12, H: 3, MinW: 4, MinH: 2}},
-		Filters: DashboardFilters{Window: "1h"},
+func mapDashboardError(err error) error {
+	switch {
+	case errors.Is(err, dashboard.ErrNotFound):
+		return echo.NewHTTPError(http.StatusNotFound, "dashboard not found")
+	case errors.Is(err, dashboard.ErrConflict):
+		return echo.NewHTTPError(http.StatusConflict, "a dashboard with that name already exists")
+	default:
+		var validation *dashboard.ValidationError
+		if errors.As(err, &validation) {
+			return echo.NewHTTPError(http.StatusBadRequest, validation.Message)
+		}
+		return echo.NewHTTPError(http.StatusInternalServerError, "dashboard operation failed").Wrap(err)
 	}
 }

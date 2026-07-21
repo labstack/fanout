@@ -17,9 +17,10 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/api"
+	"github.com/labstack/fanout/internal/dashboard"
 )
 
-const systemPrompt = `You are Fanout's observability assistant. Use observability_overview first for broad health questions, service_topology for dependencies, service_performance for activity/latency/endpoints/comparisons, trace_detail for trace or root-cause inspection, and search_logs for log questions. Treat structured outputs as authoritative. State the time window you used, distinguish missing data from healthy behavior, and never invent services, metrics, or causal claims. Keep answers concise because the attached view provides the interactive details. Never expose implementation details to the user: do not mention protocol names, tool names, schemas, query IDs, data-source names, storage engines, providers, or internal execution steps. Refer to attached interactive content simply as a view.`
+const systemPrompt = `You are Fanout's observability assistant. Use observability_overview first for broad health questions, service_topology for dependencies, service_performance for activity/latency/endpoints/comparisons, trace_detail for trace or root-cause inspection, and search_logs for log questions. Treat structured outputs as authoritative. You can also list, inspect, create, and update the user's named dashboards. When asked to create a dashboard, compose a useful complete layout using overview, topology, activity, performance, trace, logs, and assistant widgets; use stable descriptive widget IDs, valid non-overlapping 12-column positions, and the requested time window. Creating is additive. Only update an existing dashboard after the user explicitly asks to change or replace it; inspect it first and preserve unrelated views. State the time window you used, distinguish missing data from healthy behavior, and never invent services, metrics, or causal claims. Keep answers concise because attached views provide interactive details. Never expose implementation details to the user: do not mention protocol names, tool names, schemas, query IDs, data-source names, storage engines, providers, or internal execution steps. Refer to attached interactive content simply as a view.`
 
 type Runtime struct {
 	provider Provider
@@ -81,7 +82,8 @@ func (r *Runtime) Run(c *echo.Context) error {
 	response.WriteHeader(http.StatusOK)
 	emitter := &eventEmitter{ctx: c.Request().Context(), writer: response, sse: sse.NewSSEWriter()}
 	messages := append([]agtypes.Message(nil), input.Messages...)
-	runErr := r.execute(c.Request().Context(), input.ThreadID, input.RunID, &messages, emitter)
+	runCtx := dashboard.WithOwner(c.Request().Context(), user.ID)
+	runErr := r.execute(runCtx, input.ThreadID, input.RunID, &messages, emitter)
 
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
 	defer cancel()

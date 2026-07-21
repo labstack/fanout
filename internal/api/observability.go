@@ -15,6 +15,9 @@ import (
 type ObservabilityQueries interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
 	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
+	Performance(context.Context, observability.Scope, string, int) (observability.Result[observability.Performance], error)
+	Trace(context.Context, observability.Scope, string, string, int) (observability.Result[observability.TraceDetail], error)
+	Logs(context.Context, observability.Scope, string, string, string, int) (observability.Result[observability.Logs], error)
 }
 
 type ObservabilityHandler struct {
@@ -32,6 +35,45 @@ func NewObservabilityHandler(queries ObservabilityQueries) *ObservabilityHandler
 func (h *ObservabilityHandler) Register(group *echo.Group) {
 	group.GET("/overview", h.overview)
 	group.GET("/topology", h.topology)
+	group.GET("/performance", h.performance)
+	group.GET("/trace", h.trace)
+	group.GET("/logs", h.logs)
+}
+
+func (h *ObservabilityHandler) performance(c *echo.Context) error {
+	scope, limit, err := h.request(c)
+	if err != nil {
+		return err
+	}
+	result, err := h.queries.Performance(c.Request().Context(), scope, c.QueryParam("service"), limit)
+	if err != nil {
+		return mapQueryError(err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func (h *ObservabilityHandler) trace(c *echo.Context) error {
+	scope, limit, err := h.request(c)
+	if err != nil {
+		return err
+	}
+	result, err := h.queries.Trace(c.Request().Context(), scope, c.QueryParam("trace_id"), c.QueryParam("service"), limit)
+	if err != nil {
+		return mapQueryError(err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func (h *ObservabilityHandler) logs(c *echo.Context) error {
+	scope, limit, err := h.request(c)
+	if err != nil {
+		return err
+	}
+	result, err := h.queries.Logs(c.Request().Context(), scope, c.QueryParam("service"), c.QueryParam("severity"), c.QueryParam("search"), limit)
+	if err != nil {
+		return mapQueryError(err)
+	}
+	return c.JSON(http.StatusOK, result)
 }
 
 func (h *ObservabilityHandler) overview(c *echo.Context) error {

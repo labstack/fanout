@@ -18,12 +18,15 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
+	"github.com/labstack/fanout/internal/dashboard"
 
 	appauth "github.com/labstack/fanout/internal/auth"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 const mcpReadScope = "fanout:read"
+
+var mcpSupportedScopes = []string{mcpReadScope, dashboard.OAuthScope}
 
 type MCPAuthorization struct {
 	store         *appauth.OAuthStore
@@ -92,7 +95,7 @@ func (h *MCPAuthorization) ProtectedResourceMetadata(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]any{
 		"resource":                 h.resource,
 		"authorization_servers":    []string{h.issuer},
-		"scopes_supported":         []string{mcpReadScope},
+		"scopes_supported":         mcpSupportedScopes,
 		"bearer_methods_supported": []string{"header"},
 	})
 }
@@ -104,7 +107,7 @@ func (h *MCPAuthorization) AuthorizationServerMetadata(c *echo.Context) error {
 		"authorization_endpoint":                h.issuer + "/api/auth/oauth/authorize",
 		"token_endpoint":                        h.issuer + "/oauth/token",
 		"registration_endpoint":                 h.issuer + "/oauth/register",
-		"scopes_supported":                      []string{mcpReadScope},
+		"scopes_supported":                      mcpSupportedScopes,
 		"response_types_supported":              []string{"code"},
 		"response_modes_supported":              []string{"query"},
 		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
@@ -236,7 +239,7 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 		ClientID:      req.ClientID,
 		UserID:        user.ID,
 		RedirectURI:   req.RedirectURI,
-		Scope:         mcpReadScope,
+		Scope:         authorizationScope(req.Scope),
 		Resource:      h.resource,
 		CodeChallenge: req.CodeChallenge,
 	})
@@ -244,7 +247,7 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 		slog.Error("oauth authorization code creation failed", "client_id", req.ClientID, "user_id", user.ID, "err", err)
 		return oauthJSONError(c, http.StatusInternalServerError, "server_error", "authorization failed")
 	}
-	slog.Info("oauth authorization approved", "client_id", req.ClientID, "user_id", user.ID, "scope", mcpReadScope)
+	slog.Info("oauth authorization approved", "client_id", req.ClientID, "user_id", user.ID, "scope", authorizationScope(req.Scope))
 	return redirectOAuthSuccess(c, req.RedirectURI, req.State, code)
 }
 
@@ -262,13 +265,32 @@ func (h *MCPAuthorization) validateAuthorizationRequest(ctx context.Context, req
 	if req.Resource != h.resource {
 		return client, "invalid_target", "resource must identify this MCP server"
 	}
-	if req.Scope != "" && !sameStringSet(strings.Fields(req.Scope), []string{mcpReadScope}) {
+	if req.Scope != "" && !validMCPScopes(strings.Fields(req.Scope)) {
 		return client, "invalid_scope", "unsupported scope"
 	}
 	if req.CodeMethod != "S256" || !validS256Challenge(req.CodeChallenge) {
 		return client, "invalid_request", "PKCE with S256 is required"
 	}
 	return client, "", ""
+}
+
+func authorizationScope(requested string) string {
+	if strings.TrimSpace(requested) == "" {
+		return strings.Join(mcpSupportedScopes, " ")
+	}
+	return strings.Join(strings.Fields(requested), " ")
+}
+
+func validMCPScopes(scopes []string) bool {
+	if !slices.Contains(scopes, mcpReadScope) {
+		return false
+	}
+	for _, scope := range scopes {
+		if !slices.Contains(mcpSupportedScopes, scope) {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *MCPAuthorization) browserUser(c *echo.Context) (appauth.User, bool) {

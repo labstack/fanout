@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -71,7 +72,11 @@ func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecutio
 	if len(arguments) == 0 {
 		arguments = json.RawMessage(`{}`)
 	}
-	result, err := r.session.CallTool(ctx, &mcp.CallToolParams{Name: call.Name, Arguments: arguments})
+	params := &mcp.CallToolParams{Name: call.Name, Arguments: arguments}
+	if owner := dashboard.OwnerFromContext(ctx); owner != "" {
+		params.Meta = mcp.Meta{dashboard.OwnerMetaKey: owner}
+	}
+	result, err := r.session.CallTool(ctx, params)
 	if err != nil {
 		return ToolExecution{}, fmt.Errorf("call MCP tool %s: %w", call.Name, err)
 	}
