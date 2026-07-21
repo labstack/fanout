@@ -1,1 +1,0 @@
-import{n as e}from"./index-CRuzTm6n.js";var t=e;export{t as component};

@@ -105,7 +105,21 @@ describe("authorizedFetch", () => {
     expect(requestsTo("/api/auth/refresh")).toHaveLength(1);
   });
 
-  it("clears the session and returns the 401 when refresh fails", async () => {
+  it("clears the session and returns the 401 when refresh is definitively rejected", async () => {
+    const unauthorized = vi.fn();
+    window.addEventListener(unauthorizedEvent, unauthorized);
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === "/api/auth/refresh") return new Response("", { status: 401 });
+      return new Response("", { status: 401 });
+    });
+    const response = await authorizedFetch("/api/data");
+    expect(response.status).toBe(401);
+    expect(localStorage.getItem(tokenKey)).toBeNull();
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+    window.removeEventListener(unauthorizedEvent, unauthorized);
+  });
+
+  it("keeps the session when refresh fails transiently (5xx)", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const unauthorized = vi.fn();
     window.addEventListener(unauthorizedEvent, unauthorized);
@@ -115,10 +129,32 @@ describe("authorizedFetch", () => {
     });
     const response = await authorizedFetch("/api/data");
     expect(response.status).toBe(401);
-    expect(localStorage.getItem(tokenKey)).toBeNull();
-    expect(unauthorized).toHaveBeenCalledTimes(1);
+    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
+    expect(unauthorized).not.toHaveBeenCalled();
     expect(consoleError).toHaveBeenCalled();
     window.removeEventListener(unauthorizedEvent, unauthorized);
     consoleError.mockRestore();
+  });
+
+  it("keeps the session when refresh fails with a network error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === "/api/auth/refresh") throw new TypeError("Failed to fetch");
+      return new Response("", { status: 401 });
+    });
+    const response = await authorizedFetch("/api/data");
+    expect(response.status).toBe(401);
+    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("does not attempt refresh on non-401 responses (403/503)", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 403 }));
+    expect((await authorizedFetch("/api/data")).status).toBe(403);
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 503 }));
+    expect((await authorizedFetch("/api/data")).status).toBe(503);
+    expect(requestsTo("/api/auth/refresh")).toHaveLength(0);
+    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
   });
 });

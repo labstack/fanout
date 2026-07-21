@@ -24,10 +24,16 @@ export function clearSession() {
   window.dispatchEvent(new Event(unauthorizedEvent));
 }
 
+// SessionExpiredError marks a definitive rejection of the refresh token; only
+// that may end the session. Transient failures (network blips, server
+// restarts, 5xx) must not log the user out of every open tab.
+export class SessionExpiredError extends Error {}
+
 export async function refreshAccessToken(): Promise<string> {
   if (!refreshPromise) {
     refreshPromise = fetch("/api/auth/refresh", { method: "POST", credentials: "same-origin" })
       .then(async (response) => {
+        if (response.status === 401 || response.status === 403) throw new SessionExpiredError(`Session refresh rejected (${response.status})`);
         if (!response.ok) throw new Error(`Session refresh failed (${response.status})`);
         const payload = await response.json() as { access_token?: string };
         if (!payload.access_token) throw new Error("Session refresh returned no access token");
@@ -50,8 +56,11 @@ export async function authorizedFetch(input: RequestInfo | URL, init: RequestIni
   try {
     return await request(await refreshAccessToken());
   } catch (cause) {
-    console.error("Session refresh failed", cause);
-    clearSession();
+    if (cause instanceof SessionExpiredError) {
+      clearSession();
+    } else {
+      console.error("Session refresh failed", cause);
+    }
     return response;
   }
 }

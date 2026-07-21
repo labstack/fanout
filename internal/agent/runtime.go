@@ -168,6 +168,8 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				const notice = "\n\n[Response truncated: output limit reached.]"
 				if err := emitter.emit(events.NewTextMessageContentEvent(messageID, notice)); err == nil {
 					text.WriteString(notice)
+				} else if streamErr == nil {
+					streamErr = err
 				}
 			}
 		}
@@ -207,6 +209,9 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			}
 			execution, err := r.tools.Execute(ctx, call)
 			if err != nil {
+				// Relayed to the model as a tool error; log it so repeated
+				// tool-transport failures are findable server-side.
+				slog.Warn("agent tool execution failed", "thread_id", threadID, "run_id", runID, "tool", call.Name, "err", err)
 				execution = ToolExecution{Content: fmt.Sprintf(`{"error":%q}`, err.Error()), IsError: true}
 			}
 			toolMessageID, err := appid.New()

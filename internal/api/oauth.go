@@ -224,7 +224,11 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 		if client.ClientID != "" {
 			return redirectOAuthError(c, req.RedirectURI, req.State, errorCode, description)
 		}
-		return oauthJSONError(c, http.StatusBadRequest, errorCode, description)
+		status := http.StatusBadRequest
+		if errorCode == "server_error" {
+			status = http.StatusInternalServerError
+		}
+		return oauthJSONError(c, status, errorCode, description)
 	}
 
 	user, ok := h.browserUser(c)
@@ -271,6 +275,11 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 func (h *MCPAuthorization) validateAuthorizationRequest(ctx context.Context, req authorizationRequest) (appauth.OAuthClient, string, string) {
 	client, err := h.store.GetClient(ctx, req.ClientID)
 	if err != nil {
+		if !errors.Is(err, appauth.ErrOAuthClientNotFound) {
+			// Infrastructure failure, not a bad client — do not report it as one.
+			slog.Error("oauth client lookup failed", "client_id", req.ClientID, "err", err)
+			return appauth.OAuthClient{}, "server_error", "authorization failed"
+		}
 		return appauth.OAuthClient{}, "invalid_request", "unknown client"
 	}
 	if !slices.Contains(client.RedirectURIs, req.RedirectURI) {
@@ -363,7 +372,14 @@ func (h *MCPAuthorization) Token(c *echo.Context) error {
 		return oauthJSONError(c, http.StatusUnauthorized, "invalid_client", "client_id is required")
 	}
 	client, err := h.store.GetClient(c.Request().Context(), clientID)
-	if err != nil || client.TokenEndpointAuthMethod != "none" {
+	if err != nil {
+		if !errors.Is(err, appauth.ErrOAuthClientNotFound) {
+			slog.Error("oauth client lookup failed", "client_id", clientID, "err", err)
+			return oauthJSONError(c, http.StatusInternalServerError, "server_error", "token exchange failed")
+		}
+		return oauthJSONError(c, http.StatusUnauthorized, "invalid_client", "unknown client")
+	}
+	if client.TokenEndpointAuthMethod != "none" {
 		return oauthJSONError(c, http.StatusUnauthorized, "invalid_client", "unknown client")
 	}
 

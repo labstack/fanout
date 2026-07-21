@@ -66,6 +66,11 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
     if (save.isPending || save.isError) return;
     if (selected.data?.state) setState(selected.data.state);
   }, [selected.data?.updated_at, save.isPending, save.isError]);
+  // A failed save must not follow the user to another dashboard: reset the
+  // mutation on switch so state sync and polling resume for the new
+  // selection, and a retry can never write the previous dashboard's layout
+  // into the newly selected one.
+  useEffect(() => { save.reset(); }, [selectedID]);
 
   const layouts = useMemo(() => {
     const widgetType = new Map(state.widgets.map((widget) => [widget.id, widget.type]));
