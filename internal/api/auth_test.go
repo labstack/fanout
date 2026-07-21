@@ -91,6 +91,29 @@ func TestPublicReadServesAnonymousReadsOnly(t *testing.T) {
 	}
 }
 
+func TestPublicReadDoesNotDowngradeInvalidBearer(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close() })
+	users := auth.NewUserStore(sqlite.DB)
+	if _, err := users.Create("admin@example.com", "", "admin"); err != nil {
+		t.Fatalf("Create admin: %v", err)
+	}
+
+	e := echo.New()
+	RegisterAuthMiddleware(e, users, "0123456789abcdef0123456789abcdef", true)
+	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	req.Header.Set("Authorization", "Bearer expired-or-invalid")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid bearer in public-read mode = %d, want 401", rec.Code)
+	}
+}
+
 // With PUBLIC_READ on, /api/auth/status advertises public_read and an
 // unauthenticated GET /api/auth/me returns the synthetic viewer — the two
 // signals the SPA uses to boot anonymously into read-only mode.
@@ -136,6 +159,56 @@ func TestPublicReadStatusAndAnonymousMe(t *testing.T) {
 	}
 	if me["role"] != "viewer" {
 		t.Fatalf("anonymous viewer role = %v, want viewer", me["role"])
+	}
+}
+
+// A DB failure while resolving a valid bearer token is an infrastructure
+// error: it must return 500, not 401 "invalid token" — a 401 would make
+// clients discard perfectly good credentials during an outage.
+func TestBearerAuthDBFailureReturns500NotInvalidToken(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close() })
+
+	secret := "0123456789abcdef0123456789abcdef"
+	users := auth.NewUserStore(sqlite.DB)
+	user, err := users.Create("db-outage@example.com", "", "admin")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, err := auth.SignAccess(secret, user.ID)
+	if err != nil {
+		t.Fatalf("SignAccess: %v", err)
+	}
+
+	e := echo.New()
+	RegisterAuthMiddleware(e, users, secret, false)
+	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+
+	// Simulate a DB failure on the user lookup.
+	if _, err := sqlite.DB.Exec(`ALTER TABLE users RENAME TO users_offline`); err != nil {
+		t.Fatalf("hide users table: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("bearer during DB failure = %d, want 500", rec.Code)
+	}
+
+	// Same token works once the DB recovers — nothing was invalidated.
+	if _, err := sqlite.DB.Exec(`ALTER TABLE users_offline RENAME TO users`); err != nil {
+		t.Fatalf("restore users table: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("bearer after DB recovery = %d, want 204", rec.Code)
 	}
 }
 
@@ -192,69 +265,6 @@ func TestMeRejectsInactiveUser(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-}
-
-func TestAuthAcceptsValidAPIKey(t *testing.T) {
-	e, users, _, _, _, _ := newTestAuthServer(t)
-	user, err := users.Create("apikey@example.com", "", "operator")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	key, err := users.GenerateAPIKey(user.ID)
-	if err != nil {
-		t.Fatalf("GenerateAPIKey: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	req.Header.Set("Authorization", "Bearer "+key)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-}
-
-func TestAuthRejectsInactiveUserAPIKey(t *testing.T) {
-	e, users, _, _, _, _ := newTestAuthServer(t)
-	user, err := users.Create("inactive-key@example.com", "", "operator")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	key, err := users.GenerateAPIKey(user.ID)
-	if err != nil {
-		t.Fatalf("GenerateAPIKey: %v", err)
-	}
-
-	// GetByAPIKey does not filter on active state — the middleware's
-	// !user.Active guard is the only thing rejecting a deactivated user's
-	// still-valid key. Cover that path explicitly.
-	active := false
-	if _, err := users.Update(user.ID, nil, nil, nil, &active); err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	req.Header.Set("Authorization", "Bearer "+key)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-}
-
-func TestAuthRejectsUnknownAPIKey(t *testing.T) {
-	e, _, _, _, _, _ := newTestAuthServer(t)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	req.Header.Set("Authorization", "Bearer fo_deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 

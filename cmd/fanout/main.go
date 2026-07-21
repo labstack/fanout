@@ -23,17 +23,18 @@ import (
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip" // Register gzip decompressor
 
-	"github.com/labstack/fanout/internal/ai"
+	"github.com/labstack/fanout/internal/agent"
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/lake"
 	"github.com/labstack/fanout/internal/mcp"
+	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
-	"github.com/labstack/fanout/internal/service"
 	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
 	"github.com/labstack/fanout/internal/ui"
@@ -182,7 +183,15 @@ func main() {
 			if strings.Contains(uri, "token=") {
 				uri = tokenRedactRe.ReplaceAllString(uri, "token=REDACTED")
 			}
-			slog.Info("request", "method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency)
+			attrs := []any{"method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency}
+			if v.Error != nil {
+				attrs = append(attrs, "err", v.Error)
+			}
+			if v.Status >= 500 {
+				slog.Error("request", attrs...)
+			} else {
+				slog.Info("request", attrs...)
+			}
 			return nil
 		},
 	}))
@@ -213,42 +222,12 @@ func main() {
 		e.GET("/debug/pprof/:name", echo.WrapHandler(http.HandlerFunc(pprof.Index))) // heap, goroutine, allocs, mutex, block…
 	}
 
-	// Create shared service layer
-	svc := service.New(q, cfg)
-
-	// Create MCP server unconditionally (AI orchestrator connects to it in-process)
-	mcpServer := mcp.NewServer(svc, q, cfg, alertEngine)
-	go mcp.RunCleanup(ctx)
-
-	var provider ai.Provider
-	switch cfg.AIProvider {
-	case "openai":
-		provider = ai.NewOpenAIProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
-		slog.Info("AI provider: OpenAI", "model", cfg.AIModel)
-	case "anthropic", "":
-		provider = ai.NewAnthropicProvider(cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
-		slog.Info("AI provider: Anthropic", "model", cfg.AIModel)
-	default:
-		slog.Error("unsupported AI_PROVIDER", "value", cfg.AIProvider, "supported", "anthropic, openai")
-		os.Exit(1)
-	}
-
-	aiTools, err := ai.NewToolRegistry(ctx, mcpServer.MCP(), svc, cfg)
-	if err != nil {
-		slog.Error("AI tool registry init failed", "err", err)
-		os.Exit(1)
-	}
-	orch := ai.NewOrchestrator(provider, aiTools, svc, cfg)
-	sseHandler := ai.NewSSEHandler(ctx, orch)
-
-	bookmarks, err := ai.NewBookmarkStore(cfg.BookmarksDir())
-	if err != nil {
-		slog.Error("bookmarks init failed", "err", err)
-		os.Exit(1)
-	}
-
-	// UI routes (chat SSE + bookmarks + suggestions)
-	api.RegisterUIRoutes(e, cfg, orch, sseHandler, bookmarks, svc, alertStore)
+	// Fanout owns telemetry semantics; agents and web clients consume this one
+	// typed query kernel through deterministic HTTP or standard MCP tools.
+	queries := observability.New(q.DB, cfg.DefaultNS)
+	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability"))
+	dashboards := dashboard.New(sqlite.DB)
+	api.RegisterDashboardRoutes(e, dashboards)
 
 	// Alert management REST endpoints
 	api.RegisterAlertRoutes(e, alertStore, alertEngine)
@@ -267,21 +246,68 @@ func main() {
 	api.RegisterSettingsRoutes(e, cfg, settingsStore)
 	slog.Info("auth enabled")
 
-	// MCP HTTP routes (Model Context Protocol) — expose if enabled
-	if cfg.MCPEnabled {
-		mcpServer.RegisterRoutes(e)
-		slog.Info("MCP server enabled", "path", "/mcp")
-	}
+	// Hourly auth-state sweep: expired verification codes, expired/revoked OAuth
+	// codes and tokens, and abandoned dynamically-registered OAuth clients.
+	// Without it these tables grow without bound (open DCR on /oauth/register).
+	oauthStore := auth.NewOAuthStore(sqlite.DB)
+	go func() {
+		sweep := func() {
+			if err := codeStore.Cleanup(); err != nil {
+				slog.Error("auth code cleanup failed", "err", err)
+			}
+			if n, err := oauthStore.CleanupExpired(ctx, time.Now()); err != nil {
+				slog.Error("oauth cleanup failed", "err", err)
+			} else if n > 0 {
+				slog.Info("oauth cleanup", "deleted", n)
+			}
+		}
+		sweep()
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				sweep()
+			}
+		}
+	}()
 
-	// SPA catch-all — serves the embedded React app for any unmatched route.
-	// API routes registered above take priority; everything else falls through here.
-	spaFS, spaErr := ui.Dist()
-	if spaErr != nil {
-		slog.Warn("React SPA not available (not built?)", "err", spaErr)
-	} else {
-		ui.RegisterSPARoutes(e, spaFS)
-		slog.Info("React SPA enabled", "path", "/*")
+	// The model executes the same standard MCP tools exposed to external clients.
+	// The internal connection is in-memory, so the single binary has no HTTP
+	// self-call, shared secret, or sidecar runtime.
+	mcpServer := mcp.New(queries, dashboards, version)
+	if cfg.MCPEnabled {
+		mcpAuthorization, err := api.NewMCPAuthorization(
+			oauthStore, userStore, refreshSecret, cfg.MCPPublicURL,
+		)
+		if err != nil {
+			slog.Error("MCP OAuth init failed", "err", err)
+			os.Exit(1)
+		}
+		mcpAuthorization.Register(e)
+		e.Any("/mcp", echo.WrapHandler(mcpAuthorization.ProtectMCP(mcpServer.HTTPHandler())))
+		slog.Info("MCP server enabled", "path", "/mcp", "auth", "oauth", "resource", cfg.MCPPublicURL)
 	}
+	provider, err := agent.NewProvider(cfg.AIProvider, cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
+	if err != nil {
+		slog.Error("agent provider init failed", "err", err)
+		os.Exit(1)
+	}
+	toolRegistry, err := agent.NewToolRegistry(ctx, mcpServer.MCP())
+	if err != nil {
+		slog.Error("agent MCP registry init failed", "err", err)
+		os.Exit(1)
+	}
+	defer toolRegistry.Close()
+	agent.NewRuntime(provider, toolRegistry, agent.NewStore(sqlite.DB)).Register(e.Group("/api/agent"))
+	slog.Info("AG-UI agent enabled", "path", "/api/agent", "provider", cfg.AIProvider)
+
+	// The compiled browser client is an embedded asset, not a second runtime.
+	spa := echo.WrapHandler(ui.Handler())
+	e.GET("/", spa)
+	e.GET("/*", spa)
 
 	// Run HTTP
 	httpCtx, httpCancel := context.WithCancel(context.Background())
@@ -316,13 +342,8 @@ func main() {
 		slog.Error("fatal error, shutting down", "err", err)
 	}
 
-	// Coordinated shutdown: cancel context → close AI session → flush writer → stop servers
+	// Coordinated shutdown: stop background work, flush ingest, then stop servers.
 	cancel()
-	if aiTools != nil {
-		if err := aiTools.Close(); err != nil {
-			slog.Error("AI tool registry close failed", "err", err)
-		}
-	}
 	writer.Wait()
 	grpcSrv.GracefulStop()
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)

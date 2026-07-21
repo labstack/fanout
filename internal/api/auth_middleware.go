@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -9,7 +11,10 @@ import (
 	"github.com/labstack/fanout/internal/auth"
 )
 
-const authUserKey = "auth_user"
+const (
+	authUserKey    = "auth_user"
+	publicViewerID = "public"
+)
 
 func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, jwtSecret string, publicRead bool) {
 	e.Use(AuthMiddleware(users, jwtSecret, publicRead))
@@ -18,8 +23,8 @@ func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, jwtSecret strin
 // publicViewer is the synthetic identity served to unauthenticated read
 // requests when PUBLIC_READ is on. Role "viewer" clears endpoints with no
 // RequireRole guard while still failing RequireRole("operator"/"admin"), so
-// settings/users/api-key routes stay locked.
-var publicViewer = auth.User{ID: "public", Email: "public@demo", Role: "viewer", Active: true}
+// settings and user-management routes stay locked.
+var publicViewer = auth.User{ID: publicViewerID, Email: "public@demo", Role: "viewer", Active: true}
 
 func AuthMiddleware(users *auth.UserStore, jwtSecret string, publicRead bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -27,7 +32,6 @@ func AuthMiddleware(users *auth.UserStore, jwtSecret string, publicRead bool) ec
 			if isPublicRoute(c.Request().URL.Path) {
 				return next(c)
 			}
-
 			bearer := bearerToken(c.Request().Header.Get("Authorization"))
 			if bearer != "" {
 				user, err := authenticateBearer(users, jwtSecret, bearer)
@@ -35,6 +39,10 @@ func AuthMiddleware(users *auth.UserStore, jwtSecret string, publicRead bool) ec
 					c.Set(authUserKey, &user)
 					return next(c)
 				}
+				// Never downgrade an explicitly authenticated request to the public
+				// viewer. A 401 lets browser and MCP clients refresh or restart
+				// OAuth; a DB failure surfaces as 500 instead of "invalid token".
+				return err
 			}
 
 			// Public demo mode: serve unauthenticated reads as a viewer. Gated to
@@ -89,22 +97,24 @@ func RequireRole(minRole string) echo.MiddlewareFunc {
 	}
 }
 
+// authenticateBearer resolves a bearer token to a user. Every error it
+// returns is an *echo.HTTPError: 401 for genuinely invalid credentials
+// (bad signature, unknown or inactive user) and 500 for database failures —
+// an infrastructure error must never masquerade as "invalid token".
 func authenticateBearer(users *auth.UserStore, jwtSecret, bearer string) (auth.User, error) {
-	if strings.HasPrefix(bearer, "fo_") {
-		user, err := users.GetByAPIKey(bearer)
-		if err != nil || !user.Active {
-			return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-		}
-		return user, nil
-	}
-
 	claims, err := auth.VerifyAccess(jwtSecret, bearer)
 	if err != nil {
-		return auth.User{}, err
+		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 	}
 
 	user, err := users.GetByID(claims.Subject)
-	if err != nil || !user.Active {
+	switch {
+	case errors.Is(err, auth.ErrUserNotFound):
+		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+	case err != nil:
+		slog.Error("auth user lookup failed", "user_id", claims.Subject, "err", err)
+		return auth.User{}, echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
+	case !user.Active:
 		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 	}
 	return user, nil
@@ -118,9 +128,7 @@ func bearerToken(header string) string {
 }
 
 func isPublicRoute(path string) bool {
-	isPublicAuth := strings.HasPrefix(path, "/api/auth/") &&
-		path != "/api/auth/me" &&
-		!strings.HasPrefix(path, "/api/auth/api-key")
+	isPublicAuth := strings.HasPrefix(path, "/api/auth/") && path != "/api/auth/me"
 
 	// /debug/pprof (mounted only when PPROF_ENABLED) must NOT be public — it
 	// exposes heap dumps, cmdline, and a repeatable CPU-profile DoS. Excluding it
@@ -131,7 +139,8 @@ func isPublicRoute(path string) bool {
 	}
 
 	return path == "/healthz" || path == "/readyz" || path == "/api/health" || path == "/-/metrics" ||
+		path == "/mcp" || strings.HasPrefix(path, "/.well-known/") || strings.HasPrefix(path, "/oauth/") ||
 		path == "/favicon.ico" || path == "/favicon.svg" ||
 		isPublicAuth ||
-		(!strings.HasPrefix(path, "/api/") && path != "/mcp")
+		!strings.HasPrefix(path, "/api/")
 }

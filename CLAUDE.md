@@ -1,370 +1,218 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the working architecture guide for Claude Code and other coding
+agents in this repository.
 
-## Project Overview
+## Product boundary
 
-Fanout is a single-binary observability platform that ingests OpenTelemetry (OTLP) traces, logs, and metrics via gRPC, stores them as partitioned Parquet files, and queries them using embedded DuckDB. Built with Go and Echo framework.
+Fanout is one Go executable for OpenTelemetry investigation. It owns:
+
+- OTLP gRPC ingest and durable telemetry storage.
+- DuckDB/DuckLake queries and typed observability semantics.
+- a standard MCP server and portable MCP App resources.
+- the model/tool execution loop exposed as an AG-UI event stream.
+- owner-scoped thread/run history in the existing control SQLite database.
+- the compiled React host, embedded into the executable.
+
+Fanout does not own a proprietary UI-block protocol. Rich tool results use MCP
+Apps, while AG-UI is the wire contract between the Go agent runtime and the
+browser. Bun is required only while compiling browser assets; Node and Bun are
+not present in the release image or required at runtime.
 
 ## Architecture
 
 ```mermaid
-graph TB
-    subgraph Ingest
-        OTLP[OTLP gRPC :4317]
-    end
+flowchart LR
+    OTLP[OTLP gRPC :4317] --> INGEST[Go ingest pipeline]
+    INGEST --> LAKE[(DuckLake + Parquet)]
+    LAKE --> DUCK[Embedded DuckDB]
+    DUCK --> QUERY[Typed observability kernel]
 
-    subgraph Channels
-        CS[Spans Channel]
-        CL[Logs Channel]
-        CM[Metrics Channel]
-        OTLP --> CS & CL & CM
-    end
+    QUERY --> HTTP[Deterministic HTTP API]
+    QUERY --> MCP[MCP tools + MCP Apps]
+    MCP --> EXT[External MCP hosts]
+    MCP -->|in-memory transport| AGENT[Go model/tool loop]
+    MODEL[Anthropic or OpenAI] <--> AGENT
+    AGENT --> AGUI[AG-UI stream]
+    AGENT --> SQLITE[(Control SQLite threads/runs)]
 
-    subgraph Storage
-        LW[Lake Writer]
-        CS & CL & CM --> LW
-        LW --> PQ[(Parquet Files)]
-        PQ --> |year/month/day/hour| PART[Partitioned Storage]
-    end
-
-    subgraph Query
-        DUCK[DuckDB]
-        PART --> DUCK
-        DUCK --> ROLL[Rollups: service_rollup]
-    end
-
-    subgraph API
-        ECHO[Echo HTTP :7520]
-        SVC[Service Layer]
-        DUCK --> SVC
-        SVC --> ECHO
-    end
-
-    subgraph Interfaces
-        UI[Web UI]
-        MCP[MCP Server]
-        REPORTS[Reports]
-        ECHO --> UI & MCP & REPORTS
-    end
-
-    subgraph Clients
-        BROWSER[Browser]
-        CLAUDE[Claude Code]
-        UI --> BROWSER
-        MCP --> CLAUDE
-        REPORTS --> BROWSER
-    end
+    AGUI --> WEB[Embedded React host]
+    MCP --> WEB
 ```
 
-## Data Flow
+The internal agent calls the same MCP tools as external clients. Its connection
+is in-memory, so there is no HTTP self-call, internal bearer token, sidecar, or
+second service.
 
-```mermaid
-sequenceDiagram
-    participant App as Application
-    participant OTLP as OTLP gRPC
-    participant Chan as Channels
-    participant Lake as Lake Writer
-    participant PQ as Parquet
-    participant Duck as DuckDB
-    participant API as HTTP API
+## Interface contracts
 
-    App->>OTLP: Send traces/logs/metrics
-    OTLP->>Chan: Push to channels
-    Chan->>Lake: Batch rows
-    Lake->>PQ: Flush to Parquet (15s)
-    Duck->>PQ: Read Parquet files
-    Duck->>Duck: Maintain rollups (60s)
-    API->>Duck: Query data
-    Duck->>API: Return results
+### AG-UI
+
+`internal/agent` emits standard run, text-message, tool-call, tool-result, and
+activity events at `POST /api/agent`. MCP App results are carried as
+`ACTIVITY_SNAPSHOT` events with `activityType: "mcp-app"`; the activity payload
+contains the MCP resource URI and the tool input/result needed by the app.
+
+The browser uses `@ag-ui/client` directly. Do not add a JavaScript agent server
+or CopilotKit runtime unless the product intentionally gives up the one-process
+constraint.
+
+### MCP and MCP Apps
+
+The current standard tools are:
+
+| Tool | Result |
+| --- | --- |
+| `observability_overview` | Health, service metrics, and status overview plus `ui://fanout/observability-overview.html` |
+| `service_topology` | Dependency graph, traffic flow, and error matrix plus `ui://fanout/service-topology.html` |
+| `service_performance` | Activity, latency heatmap, endpoints, and comparison plus `ui://fanout/service-performance.html` |
+| `trace_detail` | Trace waterfall, flame graph, and correlated logs plus `ui://fanout/trace-detail.html` |
+| `search_logs` | Searchable logs and severity histogram plus `ui://fanout/log-explorer.html` |
+
+Each tool returns authoritative structured output with scope and provenance.
+Hosts without MCP Apps still receive useful structured/text results. The web
+host renders app resources using the official `AppBridge` and
+`PostMessageTransport`; do not reintroduce Fanout-specific block mapping.
+
+Four dashboard tools (`internal/mcp/dashboards.go`) manage named, owner-scoped
+dashboards stored in the control SQLite database:
+
+| Tool | Result |
+| --- | --- |
+| `dashboard_list` | The owner's dashboards with widget counts |
+| `dashboard_get` | One dashboard's widgets, shared filters, and 12-column layout |
+| `dashboard_create` | Adds a complete named dashboard (additive) |
+| `dashboard_update` | Replaces an existing dashboard's design (destructive; explicit request only) |
+
+Dashboard tools require the `fanout:dashboard` OAuth scope in addition to
+`fanout:read`; the owner comes from the verified token (or the internal
+agent's request meta), never from tool input.
+
+### UI package naming
+
+`internal/ui` is intentionally small: it embeds and serves the compiled
+browser shell. React source lives in `ui/host`; portable tool-result apps live
+in `ui/apps`. The Go `ui` package is not a renderer registry.
+
+## Repository layout
+
+```text
+cmd/fanout/                 process composition and the single entry point
+internal/agent/             providers, AG-UI runtime, MCP tool adapter, history
+internal/alert/             expr-lang alert engine, rule store, webhook delivery
+internal/api/               HTTP routes, auth middleware, settings, alerts, health
+internal/auth/              email-code login, JWT issuance, MCP OAuth store
+internal/dashboard/         dashboard domain service, validation, and identity
+internal/db/                control SQLite schema, migrations, and sqlc queries
+internal/env/               environment config loading and validation
+internal/id/                UUIDv7 identifier generation
+internal/ingest/            OTLP gRPC receiver
+internal/intelligence/      anomaly detection
+internal/lake/              DuckLake/Parquet writer and maintenance
+internal/mcp/               MCP tools, server, and embedded MCP App HTML
+internal/metrics/           Prometheus metrics
+internal/observability/     typed query/result domain types
+internal/query/             DuckDB catalog, queries, and rollups
+internal/settings/          ingest-token and application settings store
+internal/store/             control SQLite bootstrap
+internal/ui/                embedded compiled browser assets only
+ui/host/                    React AG-UI browser host (build-time)
+ui/apps/                    portable React MCP Apps (build-time)
+site/                       public site and documentation
 ```
 
-## MCP Tools
+Deleted packages such as `internal/ai`, `internal/render`, and
+`internal/service` belonged to the former orchestrator/block-renderer stack.
+The current `internal/mcp` is a clean standard-protocol implementation, not the
+legacy tool layer.
 
-```mermaid
-graph LR
-    subgraph Discovery
-        OV[overview]
-        TOPO[topology]
-        ATTR[attributes]
-    end
-
-    subgraph Investigation
-        DIAG[diagnose]
-        SPANS[spans]
-        LOGS[logs]
-        METRICS[metrics]
-        TRACE[trace]
-        COMPARE[compare]
-    end
-
-    subgraph Advanced
-        QUERY[query]
-    end
-
-    OV --> |service issues| DIAG
-    TOPO --> |dependencies| DIAG
-    DIAG --> |trace IDs| TRACE
-    SPANS --> |trace IDs| TRACE
-    ATTR --> |filter keys| SPANS & LOGS & METRICS
-    METRICS --> |anomalies| SPANS
-```
-
-| Tool | Description |
-|------|-------------|
-| `overview` | System health, scores, top issues |
-| `topology` | Service dependency map with blast radius |
-| `spans` | Search/aggregate trace spans |
-| `logs` | Search/aggregate log entries |
-| `metrics` | Discover and query OTLP metric timeseries |
-| `trace` | Distributed trace with root-cause analysis |
-| `diagnose` | Deep-dive service analysis with baseline comparison |
-| `compare` | Side-by-side: services, time windows, or operations |
-| `attributes` | Discover filterable attribute keys |
-| `query` | Raw SQL against DuckDB |
-
-## Directory Structure
-
-```
-cmd/
-  fanout/         # Main binary
-
-internal/
-  api/            # HTTP handlers (health, UI routes)
-  config/         # Environment config
-  ingest/         # OTLP gRPC server
-  intelligence/   # Anomaly detection
-  lake/           # Parquet writer + retention
-  mcp/            # MCP server + tools
-  metrics/        # Prometheus metrics
-  query/          # DuckDB queries + rollups
-  render/         # ASCII/HTML rendering
-  service/        # Business logic layer
-  web/            # Templ templates
-
-data/             # Data storage (gitignored)
-  telemetry/      # DuckLake metadata + parquet files
-  query/          # DuckDB catalog + temp files
-  control/        # Fanout SQLite, bookmarks, reports
-```
-
-## Build & Run
+## Build and run
 
 ```bash
-# Build (requires CGO for DuckDB)
-export CGO_ENABLED=1
-go build -o bin/fanout ./cmd/fanout
-
-# Run
-./bin/fanout
-
-# Or with just
+just install
 just build
-just run
+just up   # local dev stack; `just down` to stop
 ```
 
-## First-time setup (per service .env files)
+`just build` compiles both TypeScript projects and then builds `bin/fanout`.
+The Dockerfile uses Bun stages for those assets and copies only the Go binary
+into the final `fanout` image.
 
-The deploy + local compose flows read per-service env files that are
-gitignored. Before the first `docker compose` invocation or `./scripts/yeet.sh`
-deploy, bootstrap them from their committed templates:
+Local application URLs use the shared development hostname:
+
+- application: `https://demo.fanout.test`
+- MCP: `https://demo.fanout.test/mcp`
+- OTLP endpoint advertised to local collectors: `demo.fanout.test:4317`
+- marketing/docs: `https://fanout.test`
+
+Use `127.0.0.1` only when describing an actual bind address, reverse-proxy
+upstream, or container health check—not as a user-facing application URL.
+
+## Required configuration
+
+Fanout loads `.env`, then `.env.${ENV}` (default `development`). Core settings:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HTTP_ADDR` | `:7520` | HTTP, AG-UI, MCP, and embedded web listener |
+| `OTLP_GRPC_ADDR` | `127.0.0.1:4317` | OTLP gRPC bind address |
+| `INGEST_ENDPOINT` | derived | public collector endpoint shown during setup |
+| `DATA_DIR` | `./data` | telemetry, query state, and control SQLite |
+| `DEFAULT_NAMESPACE` | `default` | fallback OTLP service namespace |
+| `MCP_ENABLED` | `true` | expose `/mcp` to external clients |
+| `MCP_PUBLIC_URL` | `https://demo.fanout.test/mcp` | canonical public MCP URL — the OAuth issuer/resource (audience) for `/mcp`; MUST be set to the deployment's public URL for external MCP clients; HTTPS ending in `/mcp` |
+| `AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
+| `AI_API_KEY` | required | model provider credential |
+| `AI_MODEL` | provider default | optional model override |
+| `AI_BASE_URL` | provider default | optional compatible gateway |
+| `JWT_SECRET` | required | access-token signing key, at least 32 characters |
+| `JWT_REFRESH_SECRET` | required | distinct refresh-token key |
+| `SMTP_HOST/USER/PASS/FROM` | required | email-code login delivery |
+
+The provider defaults are defined in `internal/agent/provider_http.go`. Keep model
+and SDK changes current and verify them against upstream sources before bumping.
+
+## HTTP surface
+
+| Method/path | Purpose |
+| --- | --- |
+| `GET /healthz`, `GET /readyz` | liveness/readiness |
+| `GET /-/metrics` | Prometheus metrics |
+| `POST /api/agent` | AG-UI event stream |
+| `GET /api/agent/threads/:threadID` | owner-scoped thread history |
+| `GET /api/observability/...` | deterministic typed query API |
+| `/api/dashboards*`, `/api/dashboard` | owner-scoped dashboard CRUD and default dashboard state |
+| `ANY /mcp` | streamable HTTP MCP server |
+| `/api/auth/*` | setup, email login, refresh, logout, and MCP OAuth consent |
+| `GET /`, `GET /*` | embedded browser shell and SPA fallback |
+
+Auth middleware is global. Browser access tokens refresh through the HttpOnly
+refresh cookie. Thread IDs are not authorization boundaries; the SQLite store
+always scopes them to the authenticated owner ID.
+
+## Persistence
+
+- telemetry data: DuckLake catalog plus partitioned Parquet under
+  `DATA_DIR/telemetry`.
+- query catalog/temp data: `DATA_DIR/query`.
+- users, settings, alerts, MCP OAuth clients/codes/tokens, dashboards,
+  AG-UI threads, and runs: `DATA_DIR/control/fanout.sqlite`.
+
+Agent history tables are `agui_threads` and `agui_runs`. No PostgreSQL or
+separate conversation database is used.
+
+## Verification
 
 ```bash
-cp traefik/.env.example traefik/.env && $EDITOR traefik/.env  # CF_DNS_API_TOKEN
-cp fanout/.env.example  fanout/.env  && $EDITOR fanout/.env   # JWT/SMTP/AI
-cp demo/.env.example    demo/.env    && $EDITOR demo/.env     # JWT/SMTP/AI + otel-demo pins
+just check
+go test ./...
+go vet ./...
+docker build --target fanout -t fanout:dev .
 ```
 
-Without these files, `docker compose config` / `up` / `build` errors out
-at parse time on `include.env_file: demo/.env`.
+The existing alert webhook tests open a loopback listener, so restricted
+sandboxes may need local-listener permission. Browser assets must be rebuilt
+before Go tests because `internal/ui` embeds the generated `dist` directory.
 
-## Configuration
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `HTTP_ADDR` | `:7520` | HTTP server address |
-| `OTLP_GRPC_ADDR` | `:4317` | OTLP gRPC address |
-| `DATA_DIR` | `./data` | Storage root for telemetry, query cache, and control data |
-| `FLUSH_SECONDS` | `15` | Batch flush interval |
-| `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
-| `ROLLUP_EVERY` | `60` | Rollup interval (seconds) |
-| `DUCKDB_MEMORY` | self-sized (80% of RAM, cgroup-aware) | DuckDB memory cap (e.g. `8GB`) |
-| `DUCKDB_THREADS` | self-sized (one per core) | DuckDB query worker threads |
-| `DUCKDB_MAX_CONNS` | `4` | DuckDB connection pool size |
-| `JWT_SECRET` | - | HS256 access-token signing key |
-| `JWT_REFRESH_SECRET` | - | HS256 refresh-token signing key |
-| `MCP_ENABLED` | `true` | Enable MCP server |
-| `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
-
-## API Endpoints
-
-```mermaid
-graph LR
-    subgraph Health
-        H1[GET /healthz]
-        H2[GET /readyz]
-        H3[GET /-/metrics]
-    end
-
-    subgraph Chat
-        C1[GET /ws/chat]
-    end
-
-    subgraph Bookmarks
-        B1[GET /api/bookmarks]
-        B2[POST /api/bookmarks]
-        B3[DELETE /api/bookmarks/:id]
-    end
-
-    subgraph Suggestions
-        S1[GET /api/suggestions]
-    end
-
-    subgraph MCP
-        M1[ANY /mcp]
-    end
-
-    subgraph Reports
-        R1[GET /reports]
-        R2[GET /view/r/:id]
-        R3[GET /api/reports]
-        R4[DELETE /api/reports/:id]
-    end
-
-    subgraph SPA
-        D1[GET /demo]
-        SP[GET /* catch-all]
-    end
-```
-
-## Data Schema
-
-### Parquet Files
-
-```mermaid
-erDiagram
-    SPANS {
-        string trace_id PK
-        string span_id PK
-        string parent_span_id
-        string service_name
-        string namespace
-        string name
-        string kind
-        bigint start_unix_nano
-        bigint end_unix_nano
-        double duration_ms
-        string status_code
-        string status_msg
-        blob resource_json
-        blob attributes_json
-    }
-
-    LOGS {
-        bigint time_unix_nano PK
-        string severity
-        string body
-        string service_name
-        string namespace
-        string trace_id FK
-        string span_id FK
-        blob resource_json
-        blob attributes_json
-    }
-
-    METRICS {
-        bigint time_unix_nano PK
-        string name
-        string mtype
-        string service_name
-        string namespace
-        double value
-        blob hist_bounds_json
-        blob hist_counts_json
-        blob attributes_json
-        blob resource_json
-    }
-
-    SPANS ||--o{ LOGS : "trace_id"
-```
-
-### Namespace Support
-
-The `namespace` field captures OTLP's `service.namespace` resource attribute, allowing multi-product deployments to logically separate services. Switch namespace via the header picker in the UI; MCP tools accept an explicit `namespace` argument.
-
-```bash
-# Configure via OTEL resource attributes
-OTEL_RESOURCE_ATTRIBUTES=service.namespace=product-a
-```
-
-### Rollup Table (service_rollup)
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `bucket` | TIMESTAMP | 1-minute bucket |
-| `service` | VARCHAR | Service name |
-| `spans` | BIGINT | Request count |
-| `error_rate` | DOUBLE | Error rate (0-1) |
-| `p50_ms` | DOUBLE | P50 latency |
-| `p95_ms` | DOUBLE | P95 latency |
-
-## Report System
-
-```mermaid
-graph TB
-    subgraph Generation
-        LLM[Claude Code]
-        QUERY[query tool]
-        RENDER[render tool]
-        LLM --> QUERY
-        QUERY --> LLM
-        LLM --> RENDER
-    end
-
-    subgraph Storage
-        RENDER --> JSON[(data/control/reports/*.json)]
-        JSON --> |expires 24h| CLEANUP[Cleanup Goroutine]
-    end
-
-    subgraph Viewing
-        JSON --> VIEW[/view/r/:id]
-        JSON --> LIST[/reports]
-        VIEW --> HTML[Shoelace + Vega-Lite]
-    end
-```
-
-**Components:** metric, table, chart, text, grid, panel, badge, bar, sparkline
-
-## Dependencies
-
-| Library | Purpose |
-|---------|---------|
-| `echo/v4` | HTTP framework |
-| `duckdb-go/v2` | DuckDB driver (CGO) |
-| `parquet-go` | Parquet writer |
-| `templ` | Template engine |
-| `go-sdk/mcp` | MCP SDK |
-| `grpc` | gRPC server |
-| `otlp` | OTLP protocol |
-
-## Testing
-
-```bash
-# Start fanout
-./bin/fanout
-
-# Use otel-demo for test data (in separate terminal)
-cd ../otel-demo && docker compose up -d
-
-# Or configure any OTLP-compatible app
-OTEL_EXPORTER_OTLP_ENDPOINT=demo.fanout.test:4317
-OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-OTEL_SERVICE_NAME=my-service
-```
-
-## Performance
-
-- Flush interval: 15s (freshness vs I/O tradeoff)
-- Rollups: 60s aggregation cycle
-- Query targets: P95 < 1.5s (rollups), < 5s (raw scans)
-- Report cleanup: hourly, 24h expiration
+For manual testing, open `https://demo.fanout.test`; do not document local app flows
+with `localhost` or `127.0.0.1`.

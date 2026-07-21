@@ -1,0 +1,17 @@
+/* Embedded-document and visualization integration only. */
+html,
+body,
+#root {
+  min-width: 280px;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: transparent;
+}
+
+.echart {
+  width: 100%;
+  min-width: 0;
+}

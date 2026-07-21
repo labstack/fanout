@@ -1,0 +1,27 @@
+/* Third-party integration boundaries only. Product components are styled by Mantine. */
+html,
+body,
+#root {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+.dashboard-grid {
+  min-height: 420px;
+}
+
+.react-grid-item.react-grid-placeholder {
+  border-radius: var(--mantine-radius-lg);
+  background: var(--mantine-primary-color-filled);
+  opacity: 0.14;
+}
+
+.react-grid-item > .react-resizable-handle {
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.react-grid-item:hover > .react-resizable-handle,
+.react-grid-item:focus-within > .react-resizable-handle {
+  opacity: 0.55;
+}

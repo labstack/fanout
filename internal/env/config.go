@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,7 +28,11 @@ type Config struct {
 	FlushBatchSize int    `env:"FLUSH_BATCH_SIZE" envDefault:"50000"`
 	RollupEvery    int    `env:"ROLLUP_EVERY" envDefault:"60"`
 	MCPEnabled     bool   `env:"MCP_ENABLED" envDefault:"true"`
-	RetentionDays  int    `env:"RETENTION_DAYS" envDefault:"30"`
+	// MCPPublicURL is the canonical externally reachable MCP resource URI used
+	// for OAuth discovery and token audience binding. It must be stable across
+	// restarts and include the /mcp path.
+	MCPPublicURL  string `env:"MCP_PUBLIC_URL" envDefault:"https://demo.fanout.test/mcp"`
+	RetentionDays int    `env:"RETENTION_DAYS" envDefault:"30"`
 	// MaintenanceEverySeconds throttles the DuckLake maintenance cycle (retention
 	// deletes + compaction). Default 3600 (hourly). Lower it to compact more
 	// aggressively, or for soak tests that need to observe file-count staying
@@ -48,8 +53,8 @@ type Config struct {
 	RollupSkipToLatest bool   `env:"ROLLUP_SKIP_TO_LATEST" envDefault:"false"`
 	DefaultNS          string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
 	// PublicRead turns the instance into a public demo: unauthenticated GET/HEAD
-	// requests are served as a read-only viewer (writes, admin routes, /mcp, and
-	// the API-key routes still require real auth), and OTLP ingest is accepted
+	// requests are served as a read-only viewer (writes, admin routes, and /mcp
+	// still require OAuth or web auth), and OTLP ingest is accepted
 	// without a token. It exposes ALL telemetry on the instance to anyone who can
 	// reach it — only enable it on an instance whose data is meant to be public
 	// (e.g. the otel-demo showcase). NEVER set it where data is private.
@@ -191,14 +196,6 @@ func (c Config) ControlSQLitePath() string {
 	return filepath.Join(c.ControlDir(), "fanout.sqlite")
 }
 
-func (c Config) BookmarksDir() string {
-	return filepath.Join(c.ControlDir(), "bookmarks")
-}
-
-func (c Config) ReportsDir() string {
-	return filepath.Join(c.ControlDir(), "reports")
-}
-
 // TLSEnabled reports whether a cert/key pair is configured. When true, HTTP
 // serves HTTPS on HTTP_ADDR and OTLP gRPC accepts TLS (required for public ingest).
 func (c Config) TLSEnabled() bool {
@@ -220,6 +217,12 @@ func (c Config) Validate() error {
 	if c.RetentionDays < 0 {
 		return fmt.Errorf("RetentionDays (RETENTION_DAYS) must be >= 0, got %d", c.RetentionDays)
 	}
+	if c.MCPEnabled {
+		u, err := url.Parse(strings.TrimSpace(c.MCPPublicURL))
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "/mcp" || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("MCP_PUBLIC_URL must be an HTTPS URL ending in /mcp")
+		}
+	}
 	if !c.SMTPConfigured() {
 		return fmt.Errorf("SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM are required")
 	}
@@ -229,7 +232,7 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.AIAPIKey) == "" {
 		return fmt.Errorf("AI_API_KEY is required")
 	}
-	switch strings.TrimSpace(c.AIProvider) {
+	switch strings.ToLower(strings.TrimSpace(c.AIProvider)) {
 	case "", "anthropic", "openai":
 	default:
 		return fmt.Errorf("AI_PROVIDER must be anthropic or openai")

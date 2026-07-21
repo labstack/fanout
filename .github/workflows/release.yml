@@ -78,7 +78,7 @@ jobs:
             suffix: arm64
     runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.tag }}
 
@@ -90,10 +90,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push (${{ matrix.platform }})
+      - name: Build and push Fanout (${{ matrix.platform }})
         uses: docker/build-push-action@v7
         with:
           context: .
+          target: fanout
           platforms: ${{ matrix.platform }}
           push: true
           provenance: false
@@ -138,7 +139,7 @@ jobs:
     runs-on: ubuntu-24.04
     needs: [prepare, docker-manifest]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.tag }}
           fetch-depth: 0  # full history for changelog

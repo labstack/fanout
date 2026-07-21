@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/db/generated"
+	appid "github.com/labstack/fanout/internal/id"
 )
 
 // ErrNotFound is returned when a requested record does not exist.
@@ -25,11 +25,11 @@ func NewStore(db *sql.DB) *Store {
 
 // newID returns a new UUIDv7 string.
 func newID() (string, error) {
-	id, err := uuid.NewV7()
+	id, err := appid.New()
 	if err != nil {
 		return "", fmt.Errorf("store: generate uuidv7: %w", err)
 	}
-	return id.String(), nil
+	return id, nil
 }
 
 // ruleToRow converts a domain Rule to generated CreateRuleParams.

@@ -11,17 +11,18 @@ sock := env("SOCK", "/tmp/pc-fanout.sock")
 default:
     @just --list
 
-# Install dev tools + web/site deps
+# Install dev tools + application dependencies
 install:
     go install github.com/air-verse/air@latest
     brew install process-compose pre-commit 2>/dev/null || true
-    cd web && bun install
+    cd ui/host && bun install
+    cd ui/apps && bun install
     cd site && bun install
     pre-commit install
 
 # ── Dev ──────────────────────────────────────────────────────────────────────
 
-# Start dev environment (Go auto-reload + Vite HMR)
+# Start dev environment (Go auto-reload + static web build watcher + site)
 up:
     process-compose up --unix-socket {{sock}}
 
@@ -35,17 +36,14 @@ down:
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
-# Build production binary (web + server). VERSION embeds via -ldflags;
-# defaults to git describe so local builds are self-identifying.
+# Build MCP Apps and the browser client, then embed both in one Go binary.
 build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`:
-    cd web && bun run build
-    rm -rf internal/ui/dist/*
-    cp -r web/dist/* internal/ui/dist/
+    cd ui/apps && bun run build
+    cd ui/host && bun run build
     go build -ldflags "-s -w -X main.version={{VERSION}}" -o {{bin}} ./cmd/fanout
 
-# Generate TypeScript types from Go block structs + sqlc queries
+# Generate SQLite query bindings
 gen:
-    go generate ./internal/ai/...
     cd internal/db && sqlc generate
 
 # Create a new Atlas migration from schema changes
@@ -69,7 +67,8 @@ check:
     go fmt ./...
     go vet ./...
     just lint
-    cd web && npx tsc --noEmit
+    cd ui/host && bun run lint
+    cd ui/apps && bun run lint
     just build
     @echo "All checks passed"
 
@@ -151,13 +150,18 @@ release:
     # Keep the fanout path list in sync with sources the binary embeds or
     # compiles from — anything the Dockerfile or release workflow pulls in
     # must be listed here, or changes there will silently skip the release.
-    maybe_release "fanout" "fanout/v" cmd/ internal/ web/ go.mod go.sum Dockerfile
+    maybe_release "fanout" "fanout/v" cmd/ internal/ ui/ go.mod go.sum Dockerfile
     maybe_release "site" "site/v" site/
     if [ "$RELEASED" -eq 0 ]; then
       echo "Nothing to release."
     fi
 
 # ── Stress / performance suite ───────────────────────────────────────────────
+
+# Populate a local/demo instance once with representative OTLP telemetry.
+# Override DATA_DIR, DEMO_OTLP_ENDPOINT, or DEMO_INGEST_TOKEN as needed.
+demo-data:
+    ./scripts/demo-data.sh
 
 # Performance suite dispatcher. Logic lives in scripts/ + cmd/loadgen; this just
 # routes. Run `just stress` (no args) for the subcommand list.
@@ -203,5 +207,5 @@ deploy *ARGS='':
 clean *ARGS='':
     rm -f {{bin}} coverage.out coverage.html
     rm -rf tmp/
-    find internal/ui/dist -mindepth 1 ! -name '.gitkeep' -delete 2>/dev/null || true
+    rm -rf ui/host/dist ui/apps/dist
     {{ if ARGS == "--all" { "rm -rf data/" } else { "" } }}

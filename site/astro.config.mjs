@@ -6,8 +6,8 @@ import rehypeAutolinkHeadings from "rehype-autolink-headings";
 export default defineConfig({
   site: "https://fanout.run",
   server: {
-    // Local dev keeps the public site on fanout.test; demo.fanout.test is
-    // reserved for the Vite-powered app shell.
+    // Local marketing/docs retain fanout.test; the application uses the
+    // demo.fanout.test subdomain.
     allowedHosts: ["fanout.test"],
   },
   markdown: {

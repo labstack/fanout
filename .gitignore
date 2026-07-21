@@ -14,16 +14,18 @@
 # OS
 .DS_Store
 
-# Build artifacts (keep .gitkeep so go:embed always has a directory)
-internal/ui/dist/*
-!internal/ui/dist/.gitkeep
+# Browser assets are committed/generated because go:embed requires them when
+# building directly from a source checkout.
 
 # Site build output
 site/dist/
 site/.astro/
 site/node_modules/
-web/node_modules/
-web/dist/
+ui/host/node_modules/
+ui/host/dist/
+ui/host/tsconfig.tsbuildinfo
+ui/apps/node_modules/
+ui/apps/dist/
 
 # Test/temp
 testdata/

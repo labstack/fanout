@@ -8,9 +8,10 @@ processes:
       - OTEL_SERVICE_NAME=fanout
     env_file: ./.env
 
-  web:
-    command: bun run dev
-    working_dir: ./web
+  ui:
+    # Compiler/watch process only; the Go server still serves the UI.
+    command: bun run build:watch
+    working_dir: ./ui/host
 
   site:
     command: bun run dev --host --port 7522

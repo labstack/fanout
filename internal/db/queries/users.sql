@@ -4,9 +4,6 @@ SELECT * FROM users WHERE id = ?;
 -- name: GetUserByEmail :one
 SELECT * FROM users WHERE email = ?;
 
--- name: GetUserByKey :one
-SELECT * FROM users WHERE key = ?;
-
 -- name: ListUsers :many
 SELECT * FROM users ORDER BY created_at DESC;
 
@@ -31,9 +28,3 @@ DELETE FROM users WHERE id = ?;
 
 -- name: TouchLogin :exec
 UPDATE users SET logged_in_at = ?, updated_at = ? WHERE id = ?;
-
--- name: SetAPIKeyHash :exec
-UPDATE users SET key = ?, updated_at = ? WHERE id = ?;
-
--- name: RevokeAPIKey :exec
-UPDATE users SET key = NULL, updated_at = ? WHERE id = ?;

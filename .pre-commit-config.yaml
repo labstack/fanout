@@ -24,7 +24,9 @@ repos:
         exclude: (node_modules|\.lock|dist)
       - id: check-added-large-files
         args: [--maxkb=1000]
-        exclude: (node_modules|dist)
+        # MCP Apps are intentionally self-contained HTML bundles embedded in
+        # the Go binary; ECharts views are slightly larger than this guard.
+        exclude: (node_modules|dist|^internal/mcp/apps/)
 
   # Go + web quality (path-filtered)
   - repo: local
@@ -51,10 +53,10 @@ repos:
         pass_filenames: false
 
       - id: tsc
-        name: Type check (web)
-        entry: bash -c 'cd web && npx tsc --noEmit'
+        name: Type check (UI)
+        entry: bash -c 'cd ui/host && bun run lint && cd ../apps && bun run lint'
         language: system
-        files: ^web/.*\.(ts|tsx)$
+        files: ^ui/(host|apps)/.*\.(ts|tsx)$
         pass_filenames: false
 
       - id: build
