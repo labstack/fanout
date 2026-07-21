@@ -118,6 +118,38 @@ CREATE TABLE edge_rollup (
   PRIMARY KEY (namespace, bucket, caller, callee, edge_type)
 );`
 
+const createEndpointRollupTable = `
+CREATE TABLE endpoint_rollup (
+  namespace TEXT,
+  bucket TIMESTAMP,
+  service TEXT,
+  method TEXT,
+  path TEXT,
+  calls BIGINT,
+  error_count BIGINT,
+  duration_count BIGINT,
+  duration_buckets STRUCT(
+    le_0_1 UBIGINT,
+    le_0_5 UBIGINT,
+    le_1 UBIGINT,
+    le_2_5 UBIGINT,
+    le_5 UBIGINT,
+    le_10 UBIGINT,
+    le_25 UBIGINT,
+    le_50 UBIGINT,
+    le_100 UBIGINT,
+    le_250 UBIGINT,
+    le_500 UBIGINT,
+    le_750 UBIGINT,
+    le_1000 UBIGINT,
+    le_2000 UBIGINT,
+    le_5000 UBIGINT,
+    le_30000 UBIGINT,
+    le_300000 UBIGINT
+  ),
+  PRIMARY KEY (namespace, bucket, service, method, path)
+);`
+
 const createRollupStateTable = `
 CREATE TABLE rollup_state (
   cache_key TEXT PRIMARY KEY,
@@ -233,6 +265,10 @@ func CreateTables(db *sql.DB) error {
 	}
 	if err := ensureCacheTable(db, "edge_rollup", createEdgeRollupTable,
 		"namespace", "bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"); err != nil {
+		return err
+	}
+	if err := ensureCacheTable(db, "endpoint_rollup", createEndpointRollupTable,
+		"namespace", "bucket", "service", "method", "path", "calls", "error_count", "duration_count", "duration_buckets"); err != nil {
 		return err
 	}
 	if err := ensureCacheTable(db, "rollup_state", createRollupStateTable,

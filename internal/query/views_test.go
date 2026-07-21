@@ -55,7 +55,7 @@ func TestCreateTables_CacheTablesIncludePartitionColumns(t *testing.T) {
 	rows, err := db.Query(`
 SELECT table_name, column_name
 FROM duckdb_columns()
-WHERE table_name IN ('service_rollup', 'edge_rollup', 'rollup_state')
+WHERE table_name IN ('service_rollup', 'edge_rollup', 'endpoint_rollup', 'rollup_state')
 ORDER BY table_name, column_name`)
 	if err != nil {
 		t.Fatalf("query duckdb_columns failed: %v", err)
@@ -78,9 +78,10 @@ ORDER BY table_name, column_name`)
 	}
 
 	required := map[string][]string{
-		"service_rollup": {"namespace", "bucket", "service"},
-		"edge_rollup":    {"namespace", "bucket", "caller", "callee", "edge_type"},
-		"rollup_state":   {"cache_key", "last_ingested_unix_nano", "updated_at"},
+		"service_rollup":  {"namespace", "bucket", "service"},
+		"edge_rollup":     {"namespace", "bucket", "caller", "callee", "edge_type"},
+		"endpoint_rollup": {"namespace", "bucket", "service", "method", "path", "calls", "error_count", "duration_count", "duration_buckets"},
+		"rollup_state":    {"cache_key", "last_ingested_unix_nano", "updated_at"},
 	}
 	for table, columns := range required {
 		for _, column := range columns {

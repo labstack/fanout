@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -160,7 +161,7 @@ func (w *Writer) Run(ctx context.Context) error {
 	// backpressure all the way to the gRPC handlers). Run detaches a filled batch
 	// and hands it off; the worker serializes the actual writes and retries.
 	flushCh := make(chan flushBatch, flushQueueDepth)
-	workerDone := make(chan struct{})
+	workerDone := make(chan error, 1)
 	go w.flushWorker(flushCh, workerDone)
 
 	ticker := time.NewTicker(time.Duration(w.cfg.FlushSeconds) * time.Second)
@@ -170,11 +171,11 @@ func (w *Writer) Run(ctx context.Context) error {
 	logsCh := w.chLogs
 	metricsCh := w.chMetrics
 
-	finish := func() {
+	finish := func() error {
 		w.drainChannels(&spansCh, &logsCh, &metricsCh)
 		w.flush(flushCh)
 		close(flushCh)
-		<-workerDone
+		return <-workerDone
 	}
 
 	for {
@@ -215,13 +216,11 @@ func (w *Writer) Run(ctx context.Context) error {
 		case <-ticker.C:
 			w.flush(flushCh)
 		case <-ctx.Done():
-			finish()
-			return nil
+			return finish()
 		}
 
 		if spansCh == nil && logsCh == nil && metricsCh == nil {
-			finish()
-			return nil
+			return finish()
 		}
 	}
 }
@@ -269,9 +268,12 @@ func (w *Writer) flush(flushCh chan<- flushBatch) {
 // flushWorker serializes all database writes. It carries rows that failed to
 // insert forward and prepends them to the next batch so a transient error
 // doesn't drop data (until the retry buffer cap is exceeded — see retainRows).
-func (w *Writer) flushWorker(flushCh <-chan flushBatch, workerDone chan<- struct{}) {
-	defer close(workerDone)
+// When the input closes it retries the final carry before reporting failure;
+// previously a failed last batch had no next batch to trigger a retry and was
+// silently lost during shutdown.
+func (w *Writer) flushWorker(flushCh <-chan flushBatch, workerDone chan<- error) {
 	var carry flushBatch
+	var spanErr, logErr, metricErr error
 	for batch := range flushCh {
 		// Common path (no retry leftover): adopt the batch slice directly — no
 		// copy. Only when carry holds un-written rows from a failed flush do we
@@ -291,26 +293,54 @@ func (w *Writer) flushWorker(flushCh <-chan flushBatch, workerDone chan<- struct
 		} else {
 			carry.metrics = append(carry.metrics, batch.metrics...)
 		}
-		carry.spans = writeRows(carry.spans, "spans", w.insertSpans, w.retryCap())
-		carry.logs = writeRows(carry.logs, "logs", w.insertLogs, w.retryCap())
-		carry.metrics = writeRows(carry.metrics, "metrics", w.insertMetrics, w.retryCap())
+		carry.spans, spanErr = writeRows(carry.spans, "spans", w.insertSpans, w.retryCap())
+		carry.logs, logErr = writeRows(carry.logs, "logs", w.insertLogs, w.retryCap())
+		carry.metrics, metricErr = writeRows(carry.metrics, "metrics", w.insertMetrics, w.retryCap())
 	}
+
+	// A normal batch already had one attempt above. Give the final carry two
+	// additional attempts with a short backoff, then surface a hard error to Run.
+	// Successful signals are cleared independently so one failing table cannot
+	// cause already-committed rows from another table to be duplicated.
+	for attempt := 1; hasRows(carry) && attempt <= 2; attempt++ {
+		time.Sleep(time.Duration(attempt) * 100 * time.Millisecond)
+		carry.spans, spanErr = writeRows(carry.spans, "spans", w.insertSpans, w.retryCap())
+		carry.logs, logErr = writeRows(carry.logs, "logs", w.insertLogs, w.retryCap())
+		carry.metrics, metricErr = writeRows(carry.metrics, "metrics", w.insertMetrics, w.retryCap())
+	}
+
+	var errs []error
+	if len(carry.spans) > 0 {
+		errs = append(errs, fmt.Errorf("spans final flush (%d rows): %w", len(carry.spans), spanErr))
+	}
+	if len(carry.logs) > 0 {
+		errs = append(errs, fmt.Errorf("logs final flush (%d rows): %w", len(carry.logs), logErr))
+	}
+	if len(carry.metrics) > 0 {
+		errs = append(errs, fmt.Errorf("metrics final flush (%d rows): %w", len(carry.metrics), metricErr))
+	}
+	workerDone <- errors.Join(errs...)
 }
 
-// writeRows inserts a batch and returns the rows to carry forward: empty on
-// success, or the retry-capped remainder on failure.
-func writeRows[T any](rows []T, signal string, insert func([]T) error, retryCap int) []T {
+func hasRows(batch flushBatch) bool {
+	return len(batch.spans) > 0 || len(batch.logs) > 0 || len(batch.metrics) > 0
+}
+
+// writeRows inserts a batch and returns the rows to carry forward plus the
+// insertion error: empty/nil on success, or the retry-capped remainder/error
+// on failure.
+func writeRows[T any](rows []T, signal string, insert func([]T) error, retryCap int) ([]T, error) {
 	if len(rows) == 0 {
-		return rows[:0]
+		return rows[:0], nil
 	}
 	start := time.Now()
 	if err := insert(rows); err != nil {
 		slog.Error("write failed", "signal", signal, "err", err)
 		metrics.FlushErrors.WithLabelValues(signal).Inc()
-		return retainRows(rows, retryCap, signal)
+		return retainRows(rows, retryCap, signal), err
 	}
 	metrics.RecordFlush(signal, 0, time.Since(start).Seconds())
-	return rows[:0]
+	return rows[:0], nil
 }
 
 // drainChannels non-blockingly pulls any buffered rows into the local buffers
@@ -379,7 +409,7 @@ func (w *Writer) insertSpans(rows []SpanRow) error {
 				row.ServiceName,
 				row.Name,
 				row.Kind,
-				optionalTime(row.StartUnixNanos),
+				eventTime(row.StartUnixNanos, 0, row.IngestedAt),
 				optionalTime(row.EndUnixNanos),
 				row.StartUnixNanos,
 				row.EndUnixNanos,
@@ -429,8 +459,8 @@ func (w *Writer) insertLogs(rows []LogRow) error {
 			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
 				namespace,
-				optionalTime(row.TimeUnixNanos),
-				optionalTime(row.ObservedTimeNanos),
+				eventTime(row.TimeUnixNanos, row.ObservedTimeNanos, row.IngestedAt),
+				eventTime(row.ObservedTimeNanos, row.TimeUnixNanos, row.IngestedAt),
 				row.TimeUnixNanos,
 				optionalInt64(row.ObservedTimeNanos),
 				row.Severity,
@@ -465,7 +495,7 @@ func (w *Writer) insertMetrics(rows []MetricRow) error {
 			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
 				namespace,
-				optionalTime(row.TimeUnixNanos),
+				eventTime(row.TimeUnixNanos, 0, row.IngestedAt),
 				row.TimeUnixNanos,
 				row.Name,
 				optionalString(row.Description),
@@ -499,6 +529,18 @@ func normalizeNamespace(namespace string) string {
 		namespace = "default"
 	}
 	return namespace
+}
+
+// eventTime keeps event-time partition keys populated even for producers that
+// omit the primary OTLP timestamp. That preserves hour pruning and makes those
+// rows eligible for retention without adding a duplicate schema column.
+func eventTime(primary, secondary, ingested int64) any {
+	for _, nanos := range []int64{primary, secondary, ingested} {
+		if nanos > 0 {
+			return time.Unix(0, nanos).UTC()
+		}
+	}
+	return nil
 }
 
 func optionalString(v string) any {

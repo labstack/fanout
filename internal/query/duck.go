@@ -56,11 +56,16 @@ func (d *Duck) MaintenanceHealth() (lastOK, lastAt time.Time, lastErr error) {
 }
 
 const (
-	serviceRollupStateKey  = "service_rollup_v2"
-	serviceRollupRawMaxKey = "service_rollup_v2_rawmax"
-	edgeRollupStateKey     = "edge_rollup_v2"
-	edgeRollupRawMaxKey    = "edge_rollup_v2_rawmax"
-	defaultDuckDBPoolSize  = 1
+	serviceRollupStateKey    = "service_rollup_v2"
+	serviceRollupRawMaxKey   = "service_rollup_v2_rawmax"
+	edgeRollupStateKey       = "edge_rollup_v2"
+	edgeRollupRawMaxKey      = "edge_rollup_v2_rawmax"
+	endpointRollupStateKey   = "endpoint_rollup_v1"
+	endpointRollupRawMaxKey  = "endpoint_rollup_v1_rawmax"
+	endpointBackfillStateKey = "endpoint_rollup_v1_backfill_started"
+	endpointReadyStateKey    = "endpoint_rollup_v1_ready"
+	endpointDisabledStateKey = "endpoint_rollup_v1_disabled"
+	defaultDuckDBPoolSize    = 1
 )
 
 // WriteLock returns the shared write-serialization mutex. The ingest writer must
@@ -270,6 +275,10 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 		{serviceRollupRawMaxKey, svc},
 		{edgeRollupStateKey, edge},
 		{edgeRollupRawMaxKey, edge},
+		// Endpoint queries remain on their raw-span fallback when the operator
+		// explicitly skips historical rollups. Mark this cache disabled instead of
+		// later declaring a new-only, incomplete endpoint cache ready.
+		{endpointDisabledStateKey, 1},
 	} {
 		if err := storeRollupWatermark(ctx, tx, w.key, w.watermark); err != nil {
 			return err
@@ -385,7 +394,7 @@ func (d *Duck) DefaultNamespace() string {
 }
 
 func (d *Duck) RunRollups(ctx context.Context) {
-	// rollupOnce can return rows AND an error (one rollup committed, the other
+	// rollupOnce can return rows AND an error (one cache committed while another
 	// failed), so telemetry is recorded unconditionally — otherwise the rollup
 	// throughput metric flatlines on an instance whose service rollup is
 	// advancing fine behind a failing edge rollup.
@@ -454,6 +463,12 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 
 	if n, err := d.refreshServiceRollup(ctx); err != nil {
 		errs = append(errs, fmt.Errorf("service rollup: %w", err))
+	} else {
+		affected += n
+	}
+
+	if n, err := d.refreshEndpointRollup(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("endpoint rollup: %w", err))
 	} else {
 		affected += n
 	}
@@ -567,6 +582,98 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 
+	if rows, err := res.RowsAffected(); err == nil {
+		return rows, nil
+	}
+	return 0, nil
+}
+
+func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
+	d.writeMu.Lock()
+	defer d.writeMu.Unlock()
+
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	disabled, err := rollupWatermark(ctx, tx, endpointDisabledStateKey)
+	if err != nil {
+		return 0, err
+	}
+	if disabled != 0 {
+		return 0, tx.Commit()
+	}
+	lastWatermark, err := rollupWatermark(ctx, tx, endpointRollupStateKey)
+	if err != nil {
+		return 0, err
+	}
+	lastRawMax, err := rollupWatermark(ctx, tx, endpointRollupRawMaxKey)
+	if err != nil {
+		return 0, err
+	}
+	backfillStarted, err := rollupWatermark(ctx, tx, endpointBackfillStateKey)
+	if err != nil {
+		return 0, err
+	}
+
+	rawWatermark, err := maxEdgeRollupWatermark(ctx, tx)
+	if err != nil {
+		return 0, err
+	}
+	if rawWatermark <= lastWatermark {
+		return 0, tx.Commit()
+	}
+	minIngested := int64(0)
+	if lastWatermark == 0 {
+		if minIngested, err = minEdgeRollupIngested(ctx, tx); err != nil {
+			return 0, err
+		}
+		if err := storeRollupWatermark(ctx, tx, endpointBackfillStateKey, 1); err != nil {
+			return 0, err
+		}
+		backfillStarted = 1
+	}
+	windowStart, windowEnd, chunked := rollupWindow(lastWatermark, minIngested, rawWatermark)
+
+	newWatermark := windowEnd
+	if rawWatermark > lastRawMax {
+		if guarded := rawWatermark - d.rollupSafetyLagNanos(); newWatermark > guarded {
+			newWatermark = guarded
+		}
+		if newWatermark < lastWatermark {
+			newWatermark = lastWatermark
+		}
+	}
+	rawMaxProcessed := rawWatermark
+	if chunked {
+		rawMaxProcessed = windowEnd
+	}
+
+	if _, err := tx.ExecContext(ctx, endpointRollupDeleteSQL, windowStart, windowEnd); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, endpointRollupInsertSQL, windowStart, windowEnd)
+	if err != nil {
+		return 0, err
+	}
+	if err := storeRollupWatermark(ctx, tx, endpointRollupStateKey, newWatermark); err != nil {
+		return 0, err
+	}
+	if err := storeRollupWatermark(ctx, tx, endpointRollupRawMaxKey, rawMaxProcessed); err != nil {
+		return 0, err
+	}
+	// The product query remains on raw spans until a normal (non-skip) backfill
+	// reaches the live tip. This prevents partial endpoint history on upgrade.
+	if backfillStarted != 0 && !chunked && windowEnd == rawWatermark {
+		if err := storeRollupWatermark(ctx, tx, endpointReadyStateKey, 1); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	if rows, err := res.RowsAffected(); err == nil {
 		return rows, nil
 	}
@@ -930,6 +1037,94 @@ LEFT JOIN span_agg s USING (namespace, bucket, service)
 LEFT JOIN log_agg l USING (namespace, bucket, service)
 LEFT JOIN metric_agg m USING (namespace, bucket, service);`
 
+// Endpoint latency is stored as a mergeable fixed-boundary histogram. Unlike
+// averaging minute p95 values, summing these bin counts preserves the latency
+// distribution across arbitrary query windows. Bounds include Fanout's health
+// thresholds (750ms and 2s) and cap the overflow bucket at five minutes.
+const endpointRollupDeleteSQL = `
+WITH affected AS (
+  SELECT DISTINCT
+    namespace,
+    date_trunc('minute', start_time) AS bucket,
+    COALESCE(service, '') AS service,
+    COALESCE(NULLIF(http_method, ''), 'CALL') AS method,
+    COALESCE(NULLIF(http_route, ''), NULLIF(operation, ''), 'unknown') AS path
+  FROM spans
+  WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
+    AND start_time IS NOT NULL
+)
+DELETE FROM endpoint_rollup
+WHERE EXISTS (
+  SELECT 1
+  FROM affected
+  WHERE affected.namespace = endpoint_rollup.namespace
+    AND affected.bucket = endpoint_rollup.bucket
+    AND affected.service = endpoint_rollup.service
+    AND affected.method = endpoint_rollup.method
+    AND affected.path = endpoint_rollup.path
+);`
+
+const endpointRollupInsertSQL = `
+WITH affected AS (
+  SELECT DISTINCT
+    namespace,
+    date_trunc('minute', start_time) AS bucket,
+    COALESCE(service, '') AS service,
+    COALESCE(NULLIF(http_method, ''), 'CALL') AS method,
+    COALESCE(NULLIF(http_route, ''), NULLIF(operation, ''), 'unknown') AS path
+  FROM spans
+  WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
+    AND start_time IS NOT NULL
+)
+INSERT INTO endpoint_rollup (
+  namespace, bucket, service, method, path, calls, error_count, duration_count, duration_buckets
+)
+SELECT
+  s.namespace,
+  date_trunc('minute', s.start_time) AS bucket,
+  COALESCE(s.service, '') AS service,
+  COALESCE(NULLIF(s.http_method, ''), 'CALL') AS method,
+  COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown') AS path,
+  COUNT(*) AS calls,
+  COUNT(*) FILTER (WHERE upper(s.status) IN ('ERROR', 'STATUS_CODE_ERROR')) AS error_count,
+  COUNT(s.duration_ms) AS duration_count,
+  struct_pack(
+    le_0_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.1),
+    le_0_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.5),
+    le_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 1),
+    le_2_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 2.5),
+    le_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 5),
+    le_10 := COUNT(*) FILTER (WHERE s.duration_ms <= 10),
+    le_25 := COUNT(*) FILTER (WHERE s.duration_ms <= 25),
+    le_50 := COUNT(*) FILTER (WHERE s.duration_ms <= 50),
+    le_100 := COUNT(*) FILTER (WHERE s.duration_ms <= 100),
+    le_250 := COUNT(*) FILTER (WHERE s.duration_ms <= 250),
+    le_500 := COUNT(*) FILTER (WHERE s.duration_ms <= 500),
+    le_750 := COUNT(*) FILTER (WHERE s.duration_ms <= 750),
+    le_1000 := COUNT(*) FILTER (WHERE s.duration_ms <= 1000),
+    le_2000 := COUNT(*) FILTER (WHERE s.duration_ms <= 2000),
+    le_5000 := COUNT(*) FILTER (WHERE s.duration_ms <= 5000),
+    le_30000 := COUNT(*) FILTER (WHERE s.duration_ms <= 30000),
+    le_300000 := COUNT(*) FILTER (WHERE s.duration_ms <= 300000)
+  ) AS duration_buckets
+FROM spans s
+JOIN affected a
+  ON a.namespace = s.namespace
+ AND a.bucket = date_trunc('minute', s.start_time)
+ AND a.service = COALESCE(s.service, '')
+ AND a.method = COALESCE(NULLIF(s.http_method, ''), 'CALL')
+ AND a.path = COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown')
+WHERE s.start_time >= (SELECT MIN(bucket) FROM affected)
+  AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
+GROUP BY
+  s.namespace,
+  date_trunc('minute', s.start_time),
+  COALESCE(s.service, ''),
+  COALESCE(NULLIF(s.http_method, ''), 'CALL'),
+  COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown');`
+
 const edgeRollupDeleteSQL = `
 WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket
@@ -1130,10 +1325,11 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 			name string
 			sql  string
 		}{
-			{name: "lake.spans", sql: fmt.Sprintf("DELETE FROM lake.spans WHERE start_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
-			{name: "lake.logs", sql: fmt.Sprintf("DELETE FROM lake.logs WHERE log_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
-			{name: "lake.metrics", sql: fmt.Sprintf("DELETE FROM lake.metrics WHERE metric_time < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "lake.spans", sql: fmt.Sprintf("DELETE FROM lake.spans WHERE COALESCE(start_time, ingested_at) < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "lake.logs", sql: fmt.Sprintf("DELETE FROM lake.logs WHERE COALESCE(log_time, observed_time, ingested_at) < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "lake.metrics", sql: fmt.Sprintf("DELETE FROM lake.metrics WHERE COALESCE(metric_time, ingested_at) < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
 			{name: "service_rollup", sql: fmt.Sprintf("DELETE FROM service_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
+			{name: "endpoint_rollup", sql: fmt.Sprintf("DELETE FROM endpoint_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
 			{name: "edge_rollup", sql: fmt.Sprintf("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
 		}
 		for _, stmt := range stmts {
@@ -1186,6 +1382,9 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 		sql  string
 	}{
 		{name: "merge_adjacent_files", sql: "CALL ducklake_merge_adjacent_files('lake')"},
+		// DuckLake deletes are merge-on-read. Rewriting materializes the retention
+		// deletes into Parquet so expired rows stop consuming scan and disk budget.
+		{name: "rewrite_data_files", sql: "CALL ducklake_rewrite_data_files('lake')"},
 		{name: "expire_snapshots", sql: expireSQL},
 		{name: "cleanup_old_files", sql: "CALL ducklake_cleanup_old_files('lake', cleanup_all => true)"},
 	} {

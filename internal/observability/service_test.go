@@ -105,6 +105,8 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 
 func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	svc, mock := newMockService(t)
+	svc.endpointReady.Store(true)
+	svc.endpointMature.Store(true)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	midpoint := start.Add(30 * time.Minute)
@@ -113,8 +115,8 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 		WithArgs(start, end, "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}).
 			AddRow(start, int64(120), 0.10, 80.0, 220.0, int64(30), int64(8)))
-	mock.ExpectQuery(regexp.QuoteMeta(endpointsQuery)).
-		WithArgs(start, end, "prod", "checkout", "checkout", 25).
+	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupQuery)).
+		WithArgs(start, end, "prod", "checkout", 25).
 		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
 			AddRow("GET", "/pay", int64(50), 75.0, 210.0, 350.0, 0.08))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceHeatmapQuery)).
@@ -140,6 +142,30 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	}
 	if result.Data.Comparison[1].Direction != "improvement" {
 		t.Fatalf("error-rate comparison = %#v", result.Data.Comparison[1])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestQueryEndpointsFallsBackToRawUntilBackfillReady(t *testing.T) {
+	svc, mock := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+
+	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupReadyQuery)).
+		WillReturnRows(sqlmock.NewRows([]string{"ready"}).AddRow(false))
+	mock.ExpectQuery(regexp.QuoteMeta(rawEndpointsQuery)).
+		WithArgs(start, end, "prod", "checkout", "checkout", 25).
+		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
+			AddRow("GET", "/pay", int64(2), 10.0, 20.0, 25.0, 0.0))
+
+	endpoints, source, err := svc.queryEndpoints(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", 25)
+	if err != nil {
+		t.Fatalf("queryEndpoints: %v", err)
+	}
+	if source != "spans" || len(endpoints) != 1 {
+		t.Fatalf("queryEndpoints = (%#v, %q), want one raw endpoint", endpoints, source)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

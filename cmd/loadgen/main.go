@@ -131,7 +131,14 @@ func main() {
 		metrics:  collectormetrics.NewMetricsServiceClient(conn),
 		lat:      newHistogram(),
 		queryLat: newHistogram(),
-		http:     &http.Client{Timeout: 30 * time.Second},
+		queryLatByOperation: map[string]*histogram{
+			"overview":    newHistogram(),
+			"topology":    newHistogram(),
+			"performance": newHistogram(),
+			"trace":       newHistogram(),
+			"logs":        newHistogram(),
+		},
+		http: &http.Client{Timeout: 30 * time.Second},
 		svcNames: func() []string {
 			names := make([]string, cfg.services)
 			for i := range names {
@@ -165,7 +172,7 @@ func main() {
 	}
 	if cfg.queryURL != "" && cfg.queryWorkers > 0 {
 		qInterval := time.Duration(float64(time.Second) * float64(cfg.queryWorkers) / cfg.queryRate)
-		fmt.Printf("query load: %d workers @ %.0f q/s → %s/api/overview\n", cfg.queryWorkers, cfg.queryRate, strings.TrimRight(cfg.queryURL, "/"))
+		fmt.Printf("query load: %d workers @ %.0f q/s → %s/api/observability/{overview,topology,performance,trace,logs}\n", cfg.queryWorkers, cfg.queryRate, strings.TrimRight(cfg.queryURL, "/"))
 		for w := 0; w < cfg.queryWorkers; w++ {
 			wg.Add(1)
 			go func() {
@@ -214,6 +221,10 @@ func main() {
 	if cfg.queryURL != "" && cfg.queryWorkers > 0 {
 		ql := g.queryLat.snapshot()
 		rep.QueryLatencyMs = &ql
+		rep.QueryLatencyByOperation = make(map[string]latencyReport, len(g.queryLatByOperation))
+		for operation, histogram := range g.queryLatByOperation {
+			rep.QueryLatencyByOperation[operation] = histogram.snapshot()
+		}
 		rep.QueriesRun = g.queriesRun.Load()
 		rep.QueryErrors = g.queryErrs.Load()
 	}
@@ -273,8 +284,10 @@ type generator struct {
 	metrics  collectormetrics.MetricsServiceClient
 	lat      *histogram
 	queryLat *histogram
-	http     *http.Client
-	svcNames []string
+	// Populated before workers start and never mutated. Histograms use atomics.
+	queryLatByOperation map[string]*histogram
+	http                *http.Client
+	svcNames            []string
 
 	tracesSent  atomic.Int64
 	spansSent   atomic.Int64
@@ -286,12 +299,24 @@ type generator struct {
 	queryErrs   atomic.Int64
 }
 
-// queryWindows rotate so the read load hits both small (cheap rollup) and wide
-// (heavier scan) windows, exercising the latency SLOs under ingest. The
-// /api/overview endpoint takes window as an INTEGER number of minutes (capped
-// at 1440), so these are minutes — 15m, 1h, 6h, 12h, 24h — not duration
-// strings, which the handler rejects with 400 "invalid window".
-var queryWindows = []string{"15", "60", "360", "720", "1440"}
+// queryWindows rotate so the read load hits both small and wide rollup windows,
+// exercising the latency SLOs under ingest. The shared HTTP/MCP observability
+// kernel accepts Go duration strings and caps the window at 24 hours.
+var queryWindows = []string{"15m", "1h", "6h", "12h", "24h"}
+
+type queryTarget struct {
+	operation string
+	path      string
+}
+
+func queryTargetAt(i int) queryTarget {
+	window := queryWindows[i%len(queryWindows)]
+	operation := [...]string{"overview", "topology", "performance", "trace", "logs"}[i%5]
+	return queryTarget{
+		operation: operation,
+		path:      fmt.Sprintf("/api/observability/%s?window=%s&limit=100", operation, window),
+	}
+}
 
 // maxSendErrorRate tolerates a handful of transient export errors (e.g. a gRPC
 // DeadlineExceeded during a rollup pause) at high volume — they are noise, not a
@@ -299,8 +324,8 @@ var queryWindows = []string{"15", "60", "360", "720", "1440"}
 // A genuine backpressure failure produces a send-error rate far above this.
 const maxSendErrorRate = 0.001 // 0.1%
 
-// runQueries drives the read path concurrently with ingest: GET /api/overview
-// across rotating windows, recording latency into queryLat.
+// runQueries drives the shared HTTP/MCP observability read path concurrently
+// with ingest, recording latency into queryLat.
 func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -311,7 +336,8 @@ func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			url := fmt.Sprintf("%s/api/overview?window=%s", base, queryWindows[i%len(queryWindows)])
+			target := queryTargetAt(i)
+			url := base + target.path
 			i++
 			t0 := time.Now()
 			resp, err := g.http.Get(url) //nolint:noctx // bounded by client timeout
@@ -321,13 +347,18 @@ func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 				}
 				continue
 			}
-			_, _ = io.Copy(io.Discard, resp.Body)
+			contentType := resp.Header.Get("Content-Type")
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
-			if resp.StatusCode != http.StatusOK {
+			if resp.StatusCode != http.StatusOK || readErr != nil ||
+				!strings.HasPrefix(contentType, "application/json") ||
+				!json.Valid(body) {
 				g.queryErrs.Add(1)
 				continue
 			}
-			g.queryLat.record(time.Since(t0))
+			latency := time.Since(t0)
+			g.queryLat.record(latency)
+			g.queryLatByOperation[target.operation].record(latency)
 			g.queriesRun.Add(1)
 		}
 	}
@@ -699,22 +730,23 @@ func serverDelta(base, final map[string]float64) *serverReport {
 // ── Report ─────────────────────────────────────────────────────────────────
 
 type report struct {
-	Endpoint        string         `json:"endpoint"`
-	DurationSec     float64        `json:"duration_sec"`
-	TargetRate      float64        `json:"target_rate"`
-	Workers         int            `json:"workers"`
-	Services        int            `json:"services"`
-	TracesSent      int64          `json:"traces_sent"`
-	SpansSent       int64          `json:"spans_sent"`
-	LogsSent        int64          `json:"logs_sent"`
-	MetricsSent     int64          `json:"metrics_sent"`
-	SendErrors      int64          `json:"send_errors"`
-	AvgTracesPerSec float64        `json:"avg_traces_per_sec"`
-	ExportLatencyMs latencyReport  `json:"export_latency_ms"`
-	QueriesRun      int64          `json:"queries_run,omitempty"`
-	QueryErrors     int64          `json:"query_errors,omitempty"`
-	QueryLatencyMs  *latencyReport `json:"query_latency_ms,omitempty"`
-	Server          *serverReport  `json:"server,omitempty"`
+	Endpoint                string                   `json:"endpoint"`
+	DurationSec             float64                  `json:"duration_sec"`
+	TargetRate              float64                  `json:"target_rate"`
+	Workers                 int                      `json:"workers"`
+	Services                int                      `json:"services"`
+	TracesSent              int64                    `json:"traces_sent"`
+	SpansSent               int64                    `json:"spans_sent"`
+	LogsSent                int64                    `json:"logs_sent"`
+	MetricsSent             int64                    `json:"metrics_sent"`
+	SendErrors              int64                    `json:"send_errors"`
+	AvgTracesPerSec         float64                  `json:"avg_traces_per_sec"`
+	ExportLatencyMs         latencyReport            `json:"export_latency_ms"`
+	QueriesRun              int64                    `json:"queries_run,omitempty"`
+	QueryErrors             int64                    `json:"query_errors,omitempty"`
+	QueryLatencyMs          *latencyReport           `json:"query_latency_ms,omitempty"`
+	QueryLatencyByOperation map[string]latencyReport `json:"query_latency_by_operation,omitempty"`
+	Server                  *serverReport            `json:"server,omitempty"`
 }
 
 type latencyReport struct {
@@ -749,6 +781,12 @@ func printReport(r report) {
 		q := r.QueryLatencyMs
 		fmt.Printf("query latency  mean=%.0fms  p50≈%.0f  p95≈%.0f  p99≈%.0f  (n=%d, errors=%d)\n",
 			q.MeanMs, q.P50Ms, q.P95Ms, q.P99Ms, q.Count, r.QueryErrors)
+		for _, operation := range []string{"overview", "topology", "performance", "trace", "logs"} {
+			if item, ok := r.QueryLatencyByOperation[operation]; ok {
+				fmt.Printf("  %-11s p50≈%-5.0f p95≈%-5.0f p99≈%-5.0f (n=%d)\n",
+					operation, item.P50Ms, item.P95Ms, item.P99Ms, item.Count)
+			}
+		}
 	}
 	if r.Server != nil {
 		s := r.Server

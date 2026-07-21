@@ -224,7 +224,9 @@ func main() {
 
 	// Fanout owns telemetry semantics; agents and web clients consume this one
 	// typed query kernel through deterministic HTTP or standard MCP tools.
-	queries := observability.New(q.DB, cfg.DefaultNS)
+	// Route both HTTP and MCP reads through Duck's retrying adapter. Passing the
+	// raw *sql.DB here bypassed the DuckLake maintenance-race protection.
+	queries := observability.New(q, cfg.DefaultNS)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability"))
 	dashboards := dashboard.New(sqlite.DB)
 	api.RegisterDashboardRoutes(e, dashboards)
@@ -342,10 +344,12 @@ func main() {
 		slog.Error("fatal error, shutting down", "err", err)
 	}
 
-	// Coordinated shutdown: stop background work, flush ingest, then stop servers.
+	// Stop accepting OTLP and let in-flight exporters finish while the writer is
+	// still draining. Cancelling the writer first could strand a handler on a full
+	// channel or accept rows after its final drain.
+	grpcSrv.GracefulStop()
 	cancel()
 	writer.Wait()
-	grpcSrv.GracefulStop()
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 

@@ -132,17 +132,21 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 		cfg: env.Config{RetentionDays: 7},
 	}
 
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.spans WHERE start_time < now() - INTERVAL 7 DAY")).
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.spans WHERE COALESCE(start_time, ingested_at) < now() - INTERVAL 7 DAY")).
 		WillReturnResult(sqlmock.NewResult(0, 11))
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.logs WHERE log_time < now() - INTERVAL 7 DAY")).
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.logs WHERE COALESCE(log_time, observed_time, ingested_at) < now() - INTERVAL 7 DAY")).
 		WillReturnError(errors.New("log delete failed"))
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.metrics WHERE metric_time < now() - INTERVAL 7 DAY")).
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.metrics WHERE COALESCE(metric_time, ingested_at) < now() - INTERVAL 7 DAY")).
 		WillReturnResult(sqlmock.NewResult(0, 7))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM service_rollup WHERE bucket < now() - INTERVAL 7 DAY")).
 		WillReturnResult(sqlmock.NewResult(0, 5))
+	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM endpoint_rollup WHERE bucket < now() - INTERVAL 7 DAY")).
+		WillReturnResult(sqlmock.NewResult(0, 4))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL 7 DAY")).
 		WillReturnResult(sqlmock.NewResult(0, 3))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_rewrite_data_files('lake')")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -238,6 +242,8 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnError(errors.New("merge failed"))
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_rewrite_data_files('lake')")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
@@ -268,12 +274,15 @@ func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
 
 	d := &Duck{DB: db, cfg: env.Config{}}
 
-	// Both rollup transactions fail at BeginTx.
+	// All rollup transactions fail at BeginTx.
 	mock.ExpectBegin().WillReturnError(errors.New("service tx failed"))
+	mock.ExpectBegin().WillReturnError(errors.New("endpoint tx failed"))
 	mock.ExpectBegin().WillReturnError(errors.New("edge tx failed"))
 	// Maintenance still runs: compaction calls + checkpoint (RetentionDays=0
 	// skips the TTL deletes).
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_rewrite_data_files('lake')")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
 		WillReturnResult(sqlmock.NewResult(0, 0))

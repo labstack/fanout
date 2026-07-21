@@ -21,7 +21,7 @@ WHERE bucket >= ? AND bucket < ? AND namespace = ? AND (? = '' OR service = ?)
 GROUP BY point_time
 ORDER BY point_time ASC`
 
-const endpointsQuery = `
+const rawEndpointsQuery = `
 SELECT
   COALESCE(NULLIF(http_method, ''), 'CALL') AS method,
   COALESCE(NULLIF(http_route, ''), NULLIF(operation, ''), 'unknown') AS path,
@@ -34,6 +34,155 @@ FROM spans
 WHERE start_time >= ? AND start_time < ? AND namespace = ? AND (? = '' OR service = ?)
 GROUP BY method, path
 ORDER BY calls DESC, p95_ms DESC
+LIMIT ?`
+
+const endpointRollupReadyQuery = `
+SELECT EXISTS (
+  SELECT 1 FROM rollup_state
+  WHERE cache_key = 'endpoint_rollup_v1_ready'
+    AND last_ingested_unix_nano = 1
+)`
+
+const endpointRollupMatureQuery = `
+SELECT COUNT(*) >= 5
+FROM (SELECT DISTINCT bucket FROM endpoint_rollup LIMIT 5)`
+
+// endpointRollupQuery uses the minute cache for complete interior buckets and
+// scans raw spans only for the two partial boundary minutes. This preserves the
+// exact [start,end) API semantics while bounding raw work independently of the
+// requested window width.
+const endpointRollupQuery = `
+WITH params AS (
+  SELECT
+    ?::TIMESTAMP AS start_time,
+    ?::TIMESTAMP AS end_time,
+    ?::VARCHAR AS namespace,
+    ?::VARCHAR AS service
+),
+bounds AS (
+  SELECT
+    *,
+    CASE
+      WHEN start_time = date_trunc('minute', start_time) THEN start_time
+      ELSE date_trunc('minute', start_time) + INTERVAL 1 MINUTE
+    END AS interior_start,
+    date_trunc('minute', end_time) AS interior_end
+  FROM params
+),
+rollup_source AS (
+  SELECT e.method, e.path, e.calls, e.error_count, e.duration_count, e.duration_buckets
+  FROM endpoint_rollup e, bounds b
+  WHERE e.bucket >= b.interior_start
+    AND e.bucket < b.interior_end
+    AND e.namespace = b.namespace
+    AND (b.service = '' OR e.service = b.service)
+),
+boundary_source AS (
+  SELECT
+    COALESCE(NULLIF(s.http_method, ''), 'CALL') AS method,
+    COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown') AS path,
+    COUNT(*) AS calls,
+    COUNT(*) FILTER (WHERE upper(s.status) IN ('ERROR', 'STATUS_CODE_ERROR')) AS error_count,
+    COUNT(s.duration_ms) AS duration_count,
+    struct_pack(
+      le_0_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.1),
+      le_0_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.5),
+      le_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 1),
+      le_2_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 2.5),
+      le_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 5),
+      le_10 := COUNT(*) FILTER (WHERE s.duration_ms <= 10),
+      le_25 := COUNT(*) FILTER (WHERE s.duration_ms <= 25),
+      le_50 := COUNT(*) FILTER (WHERE s.duration_ms <= 50),
+      le_100 := COUNT(*) FILTER (WHERE s.duration_ms <= 100),
+      le_250 := COUNT(*) FILTER (WHERE s.duration_ms <= 250),
+      le_500 := COUNT(*) FILTER (WHERE s.duration_ms <= 500),
+      le_750 := COUNT(*) FILTER (WHERE s.duration_ms <= 750),
+      le_1000 := COUNT(*) FILTER (WHERE s.duration_ms <= 1000),
+      le_2000 := COUNT(*) FILTER (WHERE s.duration_ms <= 2000),
+      le_5000 := COUNT(*) FILTER (WHERE s.duration_ms <= 5000),
+      le_30000 := COUNT(*) FILTER (WHERE s.duration_ms <= 30000),
+      le_300000 := COUNT(*) FILTER (WHERE s.duration_ms <= 300000)
+    ) AS duration_buckets
+  FROM spans s, bounds b
+  WHERE s.start_time >= b.start_time
+    AND s.start_time < b.end_time
+    AND (s.start_time < b.interior_start OR s.start_time >= b.interior_end)
+    AND s.namespace = b.namespace
+    AND (b.service = '' OR COALESCE(s.service, '') = b.service)
+  GROUP BY method, path
+),
+sources AS (
+  SELECT * FROM rollup_source
+  UNION ALL
+  SELECT * FROM boundary_source
+),
+endpoint_totals AS (
+  SELECT
+    method,
+    path,
+    CAST(SUM(calls) AS BIGINT) AS calls,
+    COALESCE(SUM(error_count)::DOUBLE / NULLIF(SUM(calls), 0), 0) AS error_rate,
+    SUM(duration_count) AS duration_count,
+    SUM(duration_buckets.le_0_1) AS le_0_1,
+    SUM(duration_buckets.le_0_5) AS le_0_5,
+    SUM(duration_buckets.le_1) AS le_1,
+    SUM(duration_buckets.le_2_5) AS le_2_5,
+    SUM(duration_buckets.le_5) AS le_5,
+    SUM(duration_buckets.le_10) AS le_10,
+    SUM(duration_buckets.le_25) AS le_25,
+    SUM(duration_buckets.le_50) AS le_50,
+    SUM(duration_buckets.le_100) AS le_100,
+    SUM(duration_buckets.le_250) AS le_250,
+    SUM(duration_buckets.le_500) AS le_500,
+    SUM(duration_buckets.le_750) AS le_750,
+    SUM(duration_buckets.le_1000) AS le_1000,
+    SUM(duration_buckets.le_2000) AS le_2000,
+    SUM(duration_buckets.le_5000) AS le_5000,
+    SUM(duration_buckets.le_30000) AS le_30000,
+    SUM(duration_buckets.le_300000) AS le_300000
+  FROM sources
+  GROUP BY method, path
+)
+SELECT
+  t.method,
+  t.path,
+  t.calls,
+  CASE
+    WHEN duration_count = 0 THEN 0
+    WHEN le_0_1 >= duration_count * 0.50 THEN 0.1 WHEN le_0_5 >= duration_count * 0.50 THEN 0.5
+    WHEN le_1 >= duration_count * 0.50 THEN 1 WHEN le_2_5 >= duration_count * 0.50 THEN 2.5
+    WHEN le_5 >= duration_count * 0.50 THEN 5 WHEN le_10 >= duration_count * 0.50 THEN 10
+    WHEN le_25 >= duration_count * 0.50 THEN 25 WHEN le_50 >= duration_count * 0.50 THEN 50
+    WHEN le_100 >= duration_count * 0.50 THEN 100 WHEN le_250 >= duration_count * 0.50 THEN 250
+    WHEN le_500 >= duration_count * 0.50 THEN 500 WHEN le_750 >= duration_count * 0.50 THEN 750
+    WHEN le_1000 >= duration_count * 0.50 THEN 1000 WHEN le_2000 >= duration_count * 0.50 THEN 2000
+    WHEN le_5000 >= duration_count * 0.50 THEN 5000 WHEN le_30000 >= duration_count * 0.50 THEN 30000
+    ELSE 300000 END AS p50_ms,
+  CASE
+    WHEN duration_count = 0 THEN 0
+    WHEN le_0_1 >= duration_count * 0.95 THEN 0.1 WHEN le_0_5 >= duration_count * 0.95 THEN 0.5
+    WHEN le_1 >= duration_count * 0.95 THEN 1 WHEN le_2_5 >= duration_count * 0.95 THEN 2.5
+    WHEN le_5 >= duration_count * 0.95 THEN 5 WHEN le_10 >= duration_count * 0.95 THEN 10
+    WHEN le_25 >= duration_count * 0.95 THEN 25 WHEN le_50 >= duration_count * 0.95 THEN 50
+    WHEN le_100 >= duration_count * 0.95 THEN 100 WHEN le_250 >= duration_count * 0.95 THEN 250
+    WHEN le_500 >= duration_count * 0.95 THEN 500 WHEN le_750 >= duration_count * 0.95 THEN 750
+    WHEN le_1000 >= duration_count * 0.95 THEN 1000 WHEN le_2000 >= duration_count * 0.95 THEN 2000
+    WHEN le_5000 >= duration_count * 0.95 THEN 5000 WHEN le_30000 >= duration_count * 0.95 THEN 30000
+    ELSE 300000 END AS p95_ms,
+  CASE
+    WHEN duration_count = 0 THEN 0
+    WHEN le_0_1 >= duration_count * 0.99 THEN 0.1 WHEN le_0_5 >= duration_count * 0.99 THEN 0.5
+    WHEN le_1 >= duration_count * 0.99 THEN 1 WHEN le_2_5 >= duration_count * 0.99 THEN 2.5
+    WHEN le_5 >= duration_count * 0.99 THEN 5 WHEN le_10 >= duration_count * 0.99 THEN 10
+    WHEN le_25 >= duration_count * 0.99 THEN 25 WHEN le_50 >= duration_count * 0.99 THEN 50
+    WHEN le_100 >= duration_count * 0.99 THEN 100 WHEN le_250 >= duration_count * 0.99 THEN 250
+    WHEN le_500 >= duration_count * 0.99 THEN 500 WHEN le_750 >= duration_count * 0.99 THEN 750
+    WHEN le_1000 >= duration_count * 0.99 THEN 1000 WHEN le_2000 >= duration_count * 0.99 THEN 2000
+    WHEN le_5000 >= duration_count * 0.99 THEN 5000 WHEN le_30000 >= duration_count * 0.99 THEN 30000
+    ELSE 300000 END AS p99_ms,
+  t.error_rate
+FROM endpoint_totals t
+ORDER BY t.calls DESC, p95_ms DESC
 LIMIT ?`
 
 const performanceHeatmapQuery = `
@@ -87,24 +236,11 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 	}
 	rows.Close()
 
-	rows, err = s.db.QueryContext(ctx, endpointsQuery, scope.Start, scope.End, scope.Namespace, service, service, limit)
+	endpoints, endpointSource, err := s.queryEndpoints(ctx, scope, service, limit)
 	if err != nil {
-		return Result[Performance]{}, fmt.Errorf("query endpoints: %w", err)
+		return Result[Performance]{}, err
 	}
-	for rows.Next() {
-		var endpoint Endpoint
-		if err := rows.Scan(&endpoint.Method, &endpoint.Path, &endpoint.Calls, &endpoint.P50MS, &endpoint.P95MS, &endpoint.P99MS, &endpoint.ErrorRate); err != nil {
-			rows.Close()
-			return Result[Performance]{}, fmt.Errorf("scan endpoint: %w", err)
-		}
-		endpoint.Health = classify(endpoint.ErrorRate, endpoint.P95MS)
-		data.Endpoints = append(data.Endpoints, endpoint)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return Result[Performance]{}, fmt.Errorf("iterate endpoints: %w", err)
-	}
-	rows.Close()
+	data.Endpoints = endpoints
 
 	rows, err = s.db.QueryContext(ctx, performanceHeatmapQuery, scope.Start, scope.End, scope.Namespace, scope.Start, scope.End, scope.Namespace)
 	if err != nil {
@@ -148,8 +284,93 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 		Schema:     PerformanceSchema,
 		Summary:    fmt.Sprintf("%d activity points and %d endpoints for %s", len(data.Points), len(data.Endpoints), target),
 		Data:       data,
-		Provenance: s.provenanceFor(scope, "service_rollup + spans"),
+		Provenance: s.provenanceFor(scope, "service_rollup + "+endpointSource),
 	}, nil
+}
+
+func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service string, limit int) ([]Endpoint, string, error) {
+	ready, err := s.endpointCacheReady(ctx)
+	if err != nil {
+		return nil, "", fmt.Errorf("check endpoint rollup readiness: %w", err)
+	}
+
+	query := rawEndpointsQuery
+	args := []any{scope.Start, scope.End, scope.Namespace, service, service, limit}
+	source := "spans"
+	if ready {
+		query = endpointRollupQuery
+		args = []any{scope.Start, scope.End, scope.Namespace, service, limit}
+		source = "endpoint_rollup + boundary spans"
+	}
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, "", fmt.Errorf("query endpoints: %w", err)
+	}
+	defer rows.Close()
+
+	endpoints := make([]Endpoint, 0)
+	for rows.Next() {
+		var endpoint Endpoint
+		if err := rows.Scan(&endpoint.Method, &endpoint.Path, &endpoint.Calls, &endpoint.P50MS, &endpoint.P95MS, &endpoint.P99MS, &endpoint.ErrorRate); err != nil {
+			return nil, "", fmt.Errorf("scan endpoint: %w", err)
+		}
+		endpoint.Health = classify(endpoint.ErrorRate, endpoint.P95MS)
+		endpoints = append(endpoints, endpoint)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, "", fmt.Errorf("iterate endpoints: %w", err)
+	}
+	return endpoints, source, nil
+}
+
+func (s *Service) endpointCacheReady(ctx context.Context) (bool, error) {
+	if s.endpointReady.Load() && s.endpointMature.Load() {
+		return true, nil
+	}
+	if !s.endpointReady.Load() {
+		rows, err := s.db.QueryContext(ctx, endpointRollupReadyQuery)
+		if err != nil {
+			return false, err
+		}
+		var ready bool
+		if rows.Next() {
+			if err := rows.Scan(&ready); err != nil {
+				rows.Close()
+				return false, err
+			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return false, err
+		}
+		rows.Close()
+		if !ready {
+			return false, nil
+		}
+		s.endpointReady.Store(true)
+	}
+
+	// On a brand-new/hot dataset, fewer than five cached minutes cannot offset
+	// the wider histogram aggregation. Stay on the simpler raw query until the
+	// cache is large enough to replace meaningful work, then remember that fact.
+	rows, err := s.db.QueryContext(ctx, endpointRollupMatureQuery)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	var mature bool
+	if rows.Next() {
+		if err := rows.Scan(&mature); err != nil {
+			return false, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	if mature {
+		s.endpointMature.Store(true)
+	}
+	return mature, nil
 }
 
 type performanceAggregate struct {

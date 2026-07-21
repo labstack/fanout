@@ -19,6 +19,7 @@ Primary query surfaces:
 - metrics view: clean metric columns for most queries
 - service_rollup table: partition-aware cached service health buckets
 - edge_rollup table: partition-aware cached service dependency edges
+- endpoint_rollup table: minute endpoint counts, errors, and mergeable latency histograms
 
 ### 1. Spans
 Base table: lake.spans
@@ -99,6 +100,12 @@ edge_rollup columns:
 - calls (BIGINT)
 - avg_ms, error_rate (DOUBLE)
 
+endpoint_rollup columns:
+- namespace, service, method, path (VARCHAR)
+- bucket (TIMESTAMP)
+- calls, error_count, duration_count (BIGINT)
+- duration_buckets (STRUCT): cumulative fixed-boundary latency counters
+
 ## Query Guidelines
 1. Prefer spans, logs, and metrics over raw lake.* tables.
 2. Always add a recent time filter for large queries.
@@ -107,7 +114,7 @@ edge_rollup columns:
    contain dots (e.g. "http.method"), so the key MUST be double-quoted in the path:
    json_extract_string(attributes_json, '$."http.method"') — or use the attr() macro:
    attr(attributes_json, 'http.method'). An unquoted '$.http.method' returns NULL.
-5. Use service_rollup and edge_rollup as rebuildable cache tables for dashboards before scanning raw telemetry.
+5. Use service_rollup, edge_rollup, and endpoint_rollup as rebuildable cache tables for dashboards before scanning raw telemetry.
 6. Always include a LIMIT unless aggregation makes it unnecessary.
 
 ## Useful DuckDB Functions
