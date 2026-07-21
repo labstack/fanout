@@ -1,51 +1,54 @@
-import * as TabsPrimitive from "@radix-ui/react-tabs";
-import * as TooltipPrimitive from "@radix-ui/react-tooltip";
+import "@mantine/core/styles.css";
+import { Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
+import { fanoutThemeConfig } from "../../theme";
+
+const fanoutTheme = createTheme(fanoutThemeConfig);
+
+export function ViewShell({ dark, children }: { dark: boolean; children: ReactNode }) {
+  return <MantineProvider theme={fanoutTheme} forceColorScheme={dark ? "dark" : "light"}><Paper withBorder radius="lg" style={{ overflow: "hidden" }}>{children}</Paper></MantineProvider>;
+}
+
+export function ViewHeader({ eyebrow, title, summary, onRefresh, disabled }: { eyebrow: string; title: string; summary?: string; onRefresh: () => void | Promise<unknown>; disabled?: boolean }) {
+  return <Group justify="space-between" align="flex-start" wrap="nowrap" px={{ base: "md", sm: "lg" }} pt="md" pb="sm">
+    <Box miw={0}><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.1em">{eyebrow}</Text><Title order={1} fz="lg" mt={2} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</Title>{summary && <Text c="dimmed" size="sm" mt={4}>{summary}</Text>}</Box>
+    <Button variant="default" size="xs" leftSection={<ArrowClockwise size={15} weight="bold" />} onClick={() => void onRefresh()} disabled={disabled}>Refresh</Button>
+  </Group>;
+}
+
+export function ViewStatus({ error, loading }: { error?: string | null; loading?: string }) {
+  if (error) return <Alert color="red" m="md">{error}</Alert>;
+  if (loading) return <Center mih={160} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">{loading}</Text></Center>;
+  return null;
+}
 
 export function Tabs<T extends string>({ active, items, onChange }: { active: T; items: Array<{ id: T; label: string; count?: number }>; onChange: (id: T) => void }) {
-  return <TabsPrimitive.Root value={active} onValueChange={(value) => onChange(value as T)}><TabsPrimitive.List className="tabs" aria-label="Visualization view">{items.map((item) => <TabsPrimitive.Trigger key={item.id} value={item.id}>{item.label}{item.count !== undefined && <span>{item.count}</span>}</TabsPrimitive.Trigger>)}</TabsPrimitive.List></TabsPrimitive.Root>;
+  return <ScrollArea type="auto" offsetScrollbars scrollbarSize={6}><MantineTabs value={active} onChange={(value) => value && onChange(value as T)} variant="pills" px={{ base: "md", sm: "lg" }} pb="sm"><MantineTabs.List style={{ flexWrap: "nowrap" }}>{items.map((item) => <MantineTabs.Tab key={item.id} value={item.id} rightSection={item.count !== undefined ? <Badge size="xs" variant="light" circle>{item.count}</Badge> : undefined}>{item.label}</MantineTabs.Tab>)}</MantineTabs.List></MantineTabs></ScrollArea>;
 }
 
 export function Hint({ label, children }: { label: string; children: ReactNode }) {
-  return <TooltipPrimitive.Provider delayDuration={250}><TooltipPrimitive.Root><TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger><TooltipPrimitive.Portal><TooltipPrimitive.Content className="tooltip" sideOffset={6}>{label}<TooltipPrimitive.Arrow className="tooltip-arrow" /></TooltipPrimitive.Content></TooltipPrimitive.Portal></TooltipPrimitive.Root></TooltipPrimitive.Provider>;
+  return <Tooltip label={label} multiline maw={280} withArrow>{children}</Tooltip>;
 }
 
-export function RefreshButton({ disabled, onClick }: { disabled?: boolean; onClick: () => void | Promise<unknown> }) {
-  return <button className="refresh" onClick={() => void onClick()} disabled={disabled}><ArrowClockwise size={15} weight="bold" aria-hidden="true" />Refresh</button>;
+export function EmptyState({ icon, title, children, tall = false }: { icon: ReactNode; title: string; children: ReactNode; tall?: boolean }) {
+  return <Center mih={tall ? 220 : 130} p="xl"><Group wrap="nowrap"><ThemeIcon variant="light" size="xl" radius="md">{icon}</ThemeIcon><Box><Text fw={700} size="sm">{title}</Text><Text c="dimmed" size="xs" mt={3}>{children}</Text></Box></Group></Center>;
 }
 
-export function EmptyState({ icon, title, children }: { icon: ReactNode; title: string; children: ReactNode }) {
-  return <section className="empty-state rich-empty"><span className="empty-icon" aria-hidden="true">{icon}</span><div><strong>{title}</strong><p>{children}</p></div></section>;
+export function MetaFooter({ left, right }: { left: ReactNode; right: ReactNode }) {
+  return <Group justify="space-between" px={{ base: "md", sm: "lg" }} py="xs" bd="1px solid var(--mantine-color-default-border)"><Text c="dimmed" size="xs">{left}</Text><Text c="dimmed" size="xs" ta="right">{right}</Text></Group>;
 }
 
-export interface ChartSeries { label: string; values: number[]; color: string; format?: (value: number) => string }
-
-export function SeriesChart({ labels, series, height = 150 }: { labels: string[]; series: ChartSeries[]; height?: number }) {
-  if (labels.length === 0 || series.every((item) => item.values.length === 0)) return null;
-  const width = 760;
-  const left = 22;
-  const right = 12;
-  const top = 14;
-  const bottom = 25;
-  const innerWidth = width - left - right;
-  const innerHeight = height - top - bottom;
-  const all = series.flatMap((item) => item.values).filter(Number.isFinite);
-  const min = Math.min(0, ...all);
-  const max = Math.max(...all, 1);
-  const x = (index: number) => left + index * innerWidth / Math.max(labels.length - 1, 1);
-  const y = (value: number) => top + (max - value) * innerHeight / Math.max(max - min, 1);
-  return <div className="series-chart">
-    <div className="chart-legend">{series.map((item) => <span key={item.label}><i style={{ background: item.color }} /><span>{item.label}</span><strong>{item.format?.(item.values.at(-1) ?? 0) ?? (item.values.at(-1) ?? 0).toLocaleString()}</strong></span>)}</div>
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${series.map((item) => item.label).join(", ")} over time`}>
-      {[0, .5, 1].map((value) => <line key={value} x1={left} x2={width - right} y1={top + innerHeight * value} y2={top + innerHeight * value} className="grid-line" />)}
-      {series.map((item) => <polyline key={item.label} points={item.values.map((value, index) => `${x(index)},${y(value)}`).join(" ")} fill="none" stroke={item.color} strokeWidth="2.2" strokeLinejoin="round" strokeLinecap="round" />)}
-      {labels.length > 0 && <><text x={left} y={height - 6}>{shortTime(labels[0])}</text><text x={width - right} y={height - 6} textAnchor="end">{shortTime(labels.at(-1)!)}</text></>}
-    </svg>
-  </div>;
+export function Metric({ label, value, color }: { label: string; value: ReactNode; color?: string }) {
+  return <Paper withBorder radius="md" p="sm"><Text c="dimmed" size="xs">{label}</Text><Text fw={700} fz="xl" c={color} mt={3}>{value}</Text></Paper>;
 }
 
-function shortTime(value: string) {
-  const time = new Date(value);
-  return Number.isNaN(time.valueOf()) ? value : time.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+export function healthColor(health: string) {
+  return health === "healthy" ? "teal" : health === "degraded" ? "yellow" : "red";
+}
+
+export function chartTheme(dark: boolean) {
+  return dark
+    ? { text: "#c1c9c5", muted: "#8c9892", grid: "#303a35", surface: "#1b211e", border: "#38443e" }
+    : { text: "#344039", muted: "#748078", grid: "#e5e9e6", surface: "#ffffff", border: "#d7ddd9" };
 }

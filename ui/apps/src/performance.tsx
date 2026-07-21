@@ -1,99 +1,80 @@
-import { StrictMode, useMemo, useState } from "react";
-import { ArrowUpRight, ArrowsLeftRight, GridFour, Pulse } from "@phosphor-icons/react";
-import { createRoot } from "react-dom/client";
 import { HeatmapChart, LineChart } from "echarts/charts";
-import { EmptyState, RefreshButton, Tabs } from "./components";
+import { Badge, Paper, ScrollArea, SimpleGrid, Stack, Table, Text } from "@mantine/core";
+import { ArrowUpRight, ArrowsLeftRight, GridFour, Pulse } from "@phosphor-icons/react";
+import { StrictMode, useMemo, useState } from "react";
+import { createRoot } from "react-dom/client";
+import { EmptyState, MetaFooter, Metric, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme, healthColor } from "./components";
 import type { Endpoint, Performance, Result } from "./contracts";
 import { EChart, useECharts } from "./echart";
 import { duration, integer, percent, windowLabel } from "./format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
-import "./performance.css";
 
 type View = "activity" | "latency" | "endpoints" | "compare";
-
 useECharts([LineChart, HeatmapChart]);
 
 function PerformanceApp() {
   const { app, callTool, error, host, result, toolError } = useFanoutApp<Result<Performance>>("Fanout service performance");
   const [view, setView] = useState<View>("activity");
-  return <main className={`app ${host?.theme === "dark" ? "dark" : ""}`}>
-    <header className="header"><div><div className="eyebrow">Trends and latency</div><h1 className="title">{result?.data.service || "System performance"}</h1>{result && <p className="summary">Traffic, latency, and errors {result.data.service ? `for ${result.data.service}` : "across all services"}</p>}</div><RefreshButton onClick={() => callTool("service_performance")} disabled={!app} /></header>
-    {(error || toolError) && <div className="error">{toolError ?? "This view could not be loaded. Please try again."}</div>}
-    {!result && !error && !toolError && <div className="loading">Loading performance signals…</div>}
+  const dark = host?.theme === "dark";
+  return <ViewShell dark={dark}>
+    <ViewHeader eyebrow="Trends and latency" title={result?.data.service || "System performance"} summary={result ? `Traffic, latency, and errors ${result.data.service ? `for ${result.data.service}` : "across all services"}` : undefined} onRefresh={() => callTool("service_performance")} disabled={!app} />
+    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading performance signals…" : undefined} />
     {result && <>
       <Tabs active={view} onChange={setView} items={[{ id: "activity", label: "Activity" }, { id: "latency", label: "Latency map" }, { id: "endpoints", label: "Endpoints", count: result.data.endpoints.length }, { id: "compare", label: "Compare" }]} />
-      {view === "activity" && <ActivityView data={result.data} />}
-      {view === "latency" && <HeatmapView data={result.data} />}
+      {view === "activity" && <ActivityView data={result.data} dark={dark} />}
+      {view === "latency" && <HeatmapView data={result.data} dark={dark} />}
       {view === "endpoints" && <EndpointsView endpoints={result.data.endpoints} onEndpoint={(endpoint) => askAbout(app, `Investigate ${endpoint.method} ${endpoint.path}. Explain its latency and errors.`)} />}
       {view === "compare" && <ComparisonView data={result.data} />}
-      <footer className="meta"><span>{windowLabel(result.provenance.window)}</span><span>Updated {new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></footer>
+      <MetaFooter left={windowLabel(result.provenance.window)} right={`Updated ${new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`} />
     </>}
-  </main>;
+  </ViewShell>;
 }
 
-function ActivityView({ data }: { data: Performance }) {
+function ActivityView({ data, dark }: { data: Performance; dark: boolean }) {
   const last = data.points.at(-1);
-  if (!last) return <EmptyState icon={<Pulse size={18} weight="duotone" />} title="No activity in this window">Trends will appear as activity is recorded.</EmptyState>;
+  if (!last) return <EmptyState tall icon={<Pulse size={20} weight="duotone" />} title="No activity in this window">Trends will appear as activity is recorded.</EmptyState>;
   const labels = data.points.map((point) => point.time);
-  return <div className="performance-view">
-    <section className="metrics performance-metrics"><Metric label="Operations" value={integer.format(last.spans)} /><Metric label="P95 latency" value={duration(last.p95_ms)} tone={last.p95_ms >= 750 ? "degraded" : "healthy"} /><Metric label="Error rate" value={percent(last.error_rate)} tone={last.error_rate >= .01 ? "degraded" : "healthy"} /></section>
-    <PerformanceChart labels={labels} title="Traffic and logs" series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: "#7bdff2" }, { name: "Logs", data: data.points.map((point) => point.log_count), color: "#a7f06a" }]} />
-    <PerformanceChart labels={labels} title="Latency and error correlation" series={[{ name: "P95 latency", data: data.points.map((point) => point.p95_ms), color: "#e3a33d" }, { name: "Error rate × 1000", data: data.points.map((point) => point.error_rate * 1000), color: "#f06a6a" }]} />
-  </div>;
+  return <Stack px={{ base: "md", sm: "lg" }} pb="md">
+    <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm"><Metric label="Operations" value={integer.format(last.spans)} /><Metric label="P95 latency" value={duration(last.p95_ms)} color={last.p95_ms >= 750 ? "yellow.7" : "teal.7"} /><Metric label="Error rate" value={percent(last.error_rate)} color={last.error_rate >= .01 ? "red.7" : "teal.7"} /></SimpleGrid>
+    <PerformanceChart dark={dark} labels={labels} title="Traffic and logs" series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: "#228be6" }, { name: "Logs", data: data.points.map((point) => point.log_count), color: "#12b886" }]} />
+    <PerformanceChart dark={dark} labels={labels} title="Latency and error correlation" series={[{ name: "P95 latency", data: data.points.map((point) => point.p95_ms), color: "#fab005" }, { name: "Error rate × 1000", data: data.points.map((point) => point.error_rate * 1000), color: "#fa5252" }]} />
+  </Stack>;
 }
 
-function PerformanceChart({ labels, title, series }: { labels: string[]; title: string; series: Array<{ name: string; data: number[]; color: string }> }) {
-  const option = useMemo(() => ({
-    color: series.map((item) => item.color),
-    grid: { left: 38, right: 18, top: 40, bottom: 30 },
-    legend: { top: 5, left: 0, textStyle: { color: "#9eaca5", fontSize: 10 }, icon: "circle", itemWidth: 7, itemHeight: 7 },
-    tooltip: { trigger: "axis", backgroundColor: "#1a221e", borderColor: "#2b3832", textStyle: { color: "#eff5f1", fontSize: 10 } },
-    xAxis: { type: "category", data: labels.map((value) => new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })), boundaryGap: false, axisLine: { lineStyle: { color: "#2b3832" } }, axisTick: { show: false }, axisLabel: { color: "#7f8d85", fontSize: 9, hideOverlap: true } },
-    yAxis: { type: "value", splitLine: { lineStyle: { color: "#253029" } }, axisLabel: { color: "#7f8d85", fontSize: 9 } },
-    series: series.map((item) => ({ name: item.name, type: "line", data: item.data, smooth: .22, showSymbol: false, lineStyle: { width: 2 }, areaStyle: { opacity: .045 } })),
-  }), [labels, series]);
-  return <section className="chart-panel"><h2>{title}</h2><EChart option={option} height={210} label={title} /></section>;
+function PerformanceChart({ labels, title, series, dark }: { labels: string[]; title: string; series: Array<{ name: string; data: number[]; color: string }>; dark: boolean }) {
+  const option = useMemo(() => {
+    const colors = chartTheme(dark);
+    return { color: series.map((item) => item.color), grid: { left: 42, right: 18, top: 42, bottom: 30 }, legend: { top: 5, left: 0, textStyle: { color: colors.muted, fontSize: 10 }, icon: "circle", itemWidth: 7, itemHeight: 7 }, tooltip: { trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } }, xAxis: { type: "category", data: labels.map((value) => new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true } }, yAxis: { type: "value", splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: 9 } }, series: series.map((item) => ({ name: item.name, type: "line", data: item.data, smooth: .22, showSymbol: false, lineStyle: { width: 2 }, areaStyle: { opacity: .045 } })) };
+  }, [dark, labels, series]);
+  return <Paper withBorder radius="md" p="sm"><Text fw={650} size="sm" mb="xs">{title}</Text><EChart option={option} height={210} label={title} /></Paper>;
 }
 
-function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return <div className="metric"><span>{label}</span><strong className={tone ? `health-${tone}` : ""}>{value}</strong></div>;
-}
-
-function HeatmapView({ data }: { data: Performance }) {
+function HeatmapView({ data, dark }: { data: Performance; dark: boolean }) {
   const model = useMemo(() => {
     const services = [...new Set(data.heatmap.map((point) => point.service))];
     const times = [...new Set(data.heatmap.map((point) => point.time))];
     const values = new Map(data.heatmap.map((point) => [`${point.service}\u0000${point.time}`, point.p95_ms]));
-    const max = Math.max(...data.heatmap.map((point) => point.p95_ms), 1);
-    return { services, times, values, max };
+    return { services, times, values, max: Math.max(...data.heatmap.map((point) => point.p95_ms), 1) };
   }, [data.heatmap]);
-  if (model.services.length === 0) return <EmptyState icon={<GridFour size={18} weight="duotone" />} title="No latency samples yet">The heatmap will compare service latency across time buckets.</EmptyState>;
-  const option = {
-    grid: { left: 105, right: 20, top: 20, bottom: 45 },
-    tooltip: { position: "top", backgroundColor: "#1a221e", borderColor: "#2b3832", textStyle: { color: "#eff5f1", fontSize: 10 }, formatter: (params: { data: [number, number, number] }) => `${model.services[params.data[1]]}<br/>${duration(params.data[2])}` },
-    xAxis: { type: "category", data: model.times.map((time) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })), splitArea: { show: true }, axisLabel: { color: "#7f8d85", fontSize: 9, hideOverlap: true }, axisLine: { lineStyle: { color: "#2b3832" } } },
-    yAxis: { type: "category", data: model.services, splitArea: { show: true }, axisLabel: { color: "#aab5ae", fontSize: 9 }, axisLine: { lineStyle: { color: "#2b3832" } } },
-    visualMap: { min: 0, max: model.max, calculable: true, orient: "horizontal", left: "center", bottom: 0, textStyle: { color: "#7f8d85", fontSize: 8 }, inRange: { color: ["#1a221e", "#7b5b22", "#e3a33d", "#f06a6a"] } },
-    series: [{ type: "heatmap", data: model.services.flatMap((service, y) => model.times.map((time, x) => [x, y, model.values.get(`${service}\u0000${time}`) ?? 0])), emphasis: { itemStyle: { shadowBlur: 8, shadowColor: "rgba(0,0,0,.4)" } } }],
-  };
-  return <section className="heatmap-wrap"><EChart option={option} height={Math.max(280, model.services.length * 32 + 110)} label="Service P95 latency heatmap" /></section>;
+  if (model.services.length === 0) return <EmptyState tall icon={<GridFour size={20} weight="duotone" />} title="No latency samples yet">The heatmap will compare service latency across time buckets.</EmptyState>;
+  const colors = chartTheme(dark);
+  const option = { grid: { left: 105, right: 20, top: 20, bottom: 45 }, tooltip: { position: "top", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 }, formatter: (params: { data: [number, number, number] }) => `${model.services[params.data[1]]}<br/>${duration(params.data[2])}` }, xAxis: { type: "category", data: model.times.map((time) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })), splitArea: { show: true }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "category", data: model.services, splitArea: { show: true }, axisLabel: { color: colors.text, fontSize: 9 }, axisLine: { lineStyle: { color: colors.border } } }, visualMap: { min: 0, max: model.max, calculable: true, orient: "horizontal", left: "center", bottom: 0, textStyle: { color: colors.muted, fontSize: 8 }, inRange: { color: [dark ? "#18211d" : "#e6fcf5", "#fab005", "#fa5252"] } }, series: [{ type: "heatmap", data: model.services.flatMap((service, y) => model.times.map((time, x) => [x, y, model.values.get(`${service}\u0000${time}`) ?? 0])) }] };
+  return <Paper withBorder radius="md" mx={{ base: "md", sm: "lg" }} mb="md" p="xs"><EChart option={option} height={Math.max(280, model.services.length * 32 + 110)} label="Service P95 latency heatmap" /></Paper>;
 }
 
 function EndpointsView({ endpoints, onEndpoint }: { endpoints: Endpoint[]; onEndpoint: (endpoint: Endpoint) => void }) {
-  if (endpoints.length === 0) return <EmptyState icon={<ArrowUpRight size={18} weight="duotone" />} title="No endpoints detected">HTTP routes and span operations will appear here as traffic arrives.</EmptyState>;
-  return <section className="endpoint-list"><div className="endpoint-row endpoint-head"><span>Endpoint</span><span>Calls</span><span>P50</span><span>P95</span><span>P99</span><span>Errors</span></div>{endpoints.map((endpoint) => <button className="endpoint-row" key={`${endpoint.method}-${endpoint.path}`} onClick={() => onEndpoint(endpoint)}><span><i className={`method method-${endpoint.method.toLowerCase()}`}>{endpoint.method}</i><code>{endpoint.path}</code></span><span>{integer.format(endpoint.calls)}</span><span>{duration(endpoint.p50_ms)}</span><span>{duration(endpoint.p95_ms)}</span><span>{duration(endpoint.p99_ms)}</span><span className={`health-${endpoint.health}`}>{percent(endpoint.error_rate)}</span></button>)}</section>;
+  if (endpoints.length === 0) return <EmptyState tall icon={<ArrowUpRight size={20} weight="duotone" />} title="No endpoints detected">HTTP routes and span operations will appear here as traffic arrives.</EmptyState>;
+  return <ScrollArea.Autosize mah={520} type="auto"><Table striped highlightOnHover verticalSpacing="sm" miw={700}>
+    <Table.Thead><Table.Tr><Table.Th>Endpoint</Table.Th><Table.Th>Calls</Table.Th><Table.Th>P50</Table.Th><Table.Th>P95</Table.Th><Table.Th>P99</Table.Th><Table.Th>Errors</Table.Th></Table.Tr></Table.Thead>
+    <Table.Tbody>{endpoints.map((endpoint) => <Table.Tr key={`${endpoint.method}-${endpoint.path}`} tabIndex={0} onClick={() => onEndpoint(endpoint)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEndpoint(endpoint); }} style={{ cursor: "pointer" }}><Table.Td><Badge variant="light" mr="xs">{endpoint.method}</Badge><Text component="code" size="sm">{endpoint.path}</Text></Table.Td><Table.Td>{integer.format(endpoint.calls)}</Table.Td><Table.Td>{duration(endpoint.p50_ms)}</Table.Td><Table.Td>{duration(endpoint.p95_ms)}</Table.Td><Table.Td>{duration(endpoint.p99_ms)}</Table.Td><Table.Td><Text c={`${healthColor(endpoint.health)}.7`}>{percent(endpoint.error_rate)}</Text></Table.Td></Table.Tr>)}</Table.Tbody>
+  </Table></ScrollArea.Autosize>;
 }
 
 function ComparisonView({ data }: { data: Performance }) {
-  if (data.comparison.length === 0) return <EmptyState icon={<ArrowsLeftRight size={18} weight="duotone" />} title="Nothing to compare yet">Fanout compares the first and second half of the selected window.</EmptyState>;
-  return <section className="comparison"><div className="compare-head"><span>Signal</span><span>Earlier</span><span>Change</span><span>Recent</span></div>{data.comparison.map((metric) => <div className={`compare-row ${metric.direction}`} key={metric.label}><div><strong>{metric.label}</strong><small>{metric.unit}</small></div><strong>{formatMetric(metric.before, metric.unit)}</strong><span className="change"><b>{metric.change_pct > 0 ? "↑" : metric.change_pct < 0 ? "↓" : "→"} {Math.abs(metric.change_pct).toFixed(1)}%</b>{metric.significant && <small>notable</small>}</span><strong>{formatMetric(metric.after, metric.unit)}</strong></div>)}</section>;
+  if (data.comparison.length === 0) return <EmptyState tall icon={<ArrowsLeftRight size={20} weight="duotone" />} title="Nothing to compare yet">Fanout compares the first and second half of the selected window.</EmptyState>;
+  return <Table.ScrollContainer minWidth={620}><Table striped verticalSpacing="sm"><Table.Thead><Table.Tr><Table.Th>Signal</Table.Th><Table.Th>Earlier</Table.Th><Table.Th>Change</Table.Th><Table.Th>Recent</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{data.comparison.map((metric) => <Table.Tr key={metric.label}><Table.Td><Text fw={650}>{metric.label}</Text><Text c="dimmed" size="xs">{metric.unit}</Text></Table.Td><Table.Td>{formatMetric(metric.before, metric.unit)}</Table.Td><Table.Td><Badge color={metric.direction === "improvement" ? "teal" : metric.direction === "regression" ? "red" : "gray"} variant="light">{metric.change_pct > 0 ? "↑" : metric.change_pct < 0 ? "↓" : "→"} {Math.abs(metric.change_pct).toFixed(1)}%</Badge>{metric.significant && <Text c="dimmed" size="xs" mt={3}>notable</Text>}</Table.Td><Table.Td>{formatMetric(metric.after, metric.unit)}</Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer>;
 }
 
-function formatMetric(value: number, unit: string) {
-  if (unit === "ms") return duration(value);
-  if (unit === "%") return `${value.toFixed(2)}%`;
-  return integer.format(value);
-}
-
+function formatMetric(value: number, unit: string) { if (unit === "ms") return duration(value); if (unit === "%") return `${value.toFixed(2)}%`; return integer.format(value); }
 createRoot(document.getElementById("root")!).render(<StrictMode><PerformanceApp /></StrictMode>);

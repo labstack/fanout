@@ -1,16 +1,17 @@
+import { ActionIcon, Badge, Box, Button, Center, Flex, Group, Indicator, Loader, Menu, Paper, ScrollArea, Select, SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { ArrowClockwise, ArrowUpRight, CaretDown, ListMagnifyingGlass, Plus, Sparkle, SquaresFour, X } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowClockwise, ArrowUpRight, ListMagnifyingGlass, Plus, Sparkle, SquaresFour, X } from "@phosphor-icons/react";
-import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import { useEffect, useMemo, useState } from "react";
+import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import { authorizedFetch } from "./auth";
 import { createID } from "./id";
-import { Button, Select, Tooltip } from "./ui";
 
 const Grid = WidthProvider(Responsive);
 const dashboardKey = "fanout.dashboard-id";
 type WidgetType = "overview" | "topology" | "activity" | "assistant" | "performance" | "trace" | "logs";
 type Widget = { id: string; type: WidgetType; title: string; config?: Record<string, unknown>; enabled: boolean };
-type State = { layout: Array<{ i: string; x: number; y: number; w: number; h: number; minW?: number; minH?: number }>; widgets: Widget[]; filters: { window: string; namespace: string } };
+type LayoutItem = { i: string; x: number; y: number; w: number; h: number; minW?: number; minH?: number };
+type State = { layout: LayoutItem[]; widgets: Widget[]; filters: { window: string; namespace: string } };
 type DashboardRecord = { id: string; name: string; description: string; is_default: boolean; state: State; updated_at: string };
 type DashboardSummary = { id: string; name: string; description: string; is_default: boolean; widget_count: number; updated_at: string };
 type Envelope<T> = { data: T };
@@ -42,10 +43,7 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
     const items = dashboards.data?.dashboards;
     if (!items?.length) return;
     if (dashboardID && items.some((item) => item.id === dashboardID)) return;
-    if (!dashboardID && selectedID && items.some((item) => item.id === selectedID)) {
-      onDashboardChange?.(selectedID, true);
-      return;
-    }
+    if (!dashboardID && selectedID && items.some((item) => item.id === selectedID)) { onDashboardChange?.(selectedID, true); return; }
     const next = items.find((item) => item.is_default) ?? items[0];
     choose(next.id, true);
   }, [dashboardID, dashboards.data, selectedID]);
@@ -59,12 +57,9 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
       return response.json() as Promise<DashboardRecord>;
     },
     scope: { id: `dashboard-${selectedID}` },
-    onSuccess: (data) => {
-      queryClient.setQueryData(["dashboard", data.id], data);
-      void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
-    },
+    onSuccess: (data) => { queryClient.setQueryData(["dashboard", data.id], data); void queryClient.invalidateQueries({ queryKey: ["dashboards"] }); },
   });
-  const layouts = useMemo<any>(() => {
+  const layouts = useMemo(() => {
     const widgetType = new Map(state.widgets.map((widget) => [widget.id, widget.type]));
     const normalized = state.layout.map((item) => {
       const minimum = widgetMinimumRows[widgetType.get(item.i) ?? "overview"];
@@ -73,39 +68,58 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
     const compact = (columns: number) => normalized.map((item) => ({ ...item, x: 0, w: columns }));
     return { lg: normalized, md: normalized, sm: compact(6), xs: compact(2), xxs: compact(1) };
   }, [state.layout, state.widgets]);
+
   function choose(id: string, replace = false) { setSelectedID(id); localStorage.setItem(dashboardKey, id); onDashboardChange?.(id, replace); }
   function update(next: State) { setState(next); save.mutate(next); }
   function add(type: WidgetType) {
     const id = createID();
-    const wide = type === "topology" || type === "performance" || type === "trace" || type === "logs";
+    const wide = ["topology", "performance", "trace", "logs"].includes(type);
     const minimumRows = widgetMinimumRows[type];
     update({ ...state, widgets: [...state.widgets, { id, type, title: widgetTitles[type], enabled: true }], layout: [...state.layout, { i: id, x: 0, y: Infinity, w: wide ? 8 : 4, h: minimumRows, minW: 3, minH: minimumRows }] });
   }
   function remove(id: string) { update({ ...state, widgets: state.widgets.filter((widget) => widget.id !== id), layout: state.layout.filter((item) => item.i !== id) }); }
 
-  if (dashboards.isLoading || (selectedID && selected.isLoading)) return <main className="dashboard-loading">Loading your workspace…</main>;
-  if (dashboards.isError || selected.isError) return <main className="dashboard-loading">Your workspace is unavailable. Try refreshing.</main>;
+  if (dashboards.isLoading || (selectedID && selected.isLoading)) return <LoadingState label="Loading your workspace…" />;
+  if (dashboards.isError || selected.isError) return <LoadingState label="Your workspace is unavailable. Try refreshing." />;
   const item = selected.data;
-  if (!item) return <main className="dashboard-loading">Preparing your workspace…</main>;
+  if (!item) return <LoadingState label="Preparing your workspace…" />;
 
-  return <main className="dashboard">
-    <div className="dashboard-heading">
-      <div className="dashboard-title"><Select quiet label="Dashboard" value={selectedID} onValueChange={choose} options={(dashboards.data?.dashboards ?? []).map((dashboard) => ({ value: dashboard.id, label: dashboard.name }))} icon={<SquaresFour size={16} weight="fill" aria-hidden="true" />} className="h-8 max-w-[360px] px-2 text-[11px] uppercase tracking-[.1em]" /><h1>{item.name}</h1><p>{item.description || "A focused view of the signals that matter now."}</p></div>
-      <div className="dashboard-heading-actions"><Button onClick={() => onOpenChat("Create a new dashboard for me. First ask what I want to monitor, then design it when you have enough context.")}><Sparkle size={16} weight="fill" aria-hidden="true" />Create with AI</Button><Button variant="primary" onClick={() => void queryClient.invalidateQueries()}><ArrowClockwise size={16} weight="bold" aria-hidden="true" className={selected.isFetching ? "button-icon spinning" : "button-icon"} />{selected.isFetching ? "Refreshing" : "Refresh"}</Button></div>
-    </div>
-    <div role="group" aria-label="Dashboard controls" className="mb-5 flex flex-wrap items-end gap-3.5 rounded-2xl border border-line bg-panel/95 p-3.5">
-      <label className="grid gap-1.5 text-[11px] font-medium uppercase tracking-[.08em] text-muted">Window<Select label="Window" value={state.filters.window} onValueChange={(window) => update({ ...state, filters: { ...state.filters, window } })} options={[{ value: "15m", label: "15 minutes" }, { value: "1h", label: "1 hour" }, { value: "6h", label: "6 hours" }, { value: "24h", label: "24 hours" }]} className="w-[132px]" /></label>
-      <label className="grid gap-1.5 text-[11px] font-medium uppercase tracking-[.08em] text-muted">Namespace<input className="h-10 w-[180px] rounded-lg border border-line-strong bg-field px-3 text-xs font-medium normal-case tracking-normal text-text outline-none transition placeholder:text-muted hover:border-accent hover:bg-field-hover focus:border-accent focus:ring-3 focus:ring-accent/10 max-[520px]:w-full" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.target.value } })} onBlur={() => update(state)} placeholder="All namespaces" /></label>
-      <span className="mr-1 mb-3 ml-auto inline-flex items-center gap-2 text-xs text-muted max-[520px]:order-last max-[520px]:m-0 max-[520px]:w-full"><i className="size-1.5 rounded-full bg-accent shadow-[0_0_8px_var(--accent-glow)]" />{save.isPending ? "Saving" : save.isError ? "Save failed" : "Saved"}</span>
-      <div className="flex items-center gap-3">
-        <Select quiet label="Add view" value="" placeholder="Add view" onValueChange={(type) => add(type as WidgetType)} options={Object.entries(widgetTitles).map(([value, label]) => ({ value, label }))} icon={<Plus size={15} weight="bold" aria-hidden="true" />} className="w-[120px] gap-2 !px-2.5 text-text-soft hover:bg-transparent hover:text-text focus-visible:!outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/60" />
-        <button className="inline-flex h-10 items-center gap-2 rounded-lg px-2.5 text-xs font-semibold text-muted transition hover:text-text focus-visible:!outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-accent/60" onClick={() => onOpenChat()}>Ask Fanout<ArrowUpRight size={15} weight="bold" aria-hidden="true" /></button>
-      </div>
-    </div>
-    <Grid className="dashboard-grid" layouts={layouts} breakpoints={{ lg: 1100, md: 800, sm: 600, xs: 420, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 2, xxs: 1 }} rowHeight={76} margin={[16, 16]} containerPadding={[0, 0]} compactType="vertical" draggableCancel="button,input,select,textarea,a,label" onBreakpointChange={setBreakpoint} onDragStop={(layout: any) => { if (breakpoint === "lg") update({ ...state, layout }); }} onResizeStop={(layout: any) => { if (breakpoint === "lg") update({ ...state, layout }); }}>
+  return <Box component="main" maw={1440} mx="auto" px={{ base: "md", sm: "xl", lg: 72 }} pt={{ base: "xl", sm: 52 }} pb={100}>
+    <Flex justify="space-between" align={{ base: "flex-start", md: "flex-end" }} direction={{ base: "column", md: "row" }} gap="lg" mb="xl">
+      <Box miw={0}>
+        <Select aria-label="Dashboard" value={selectedID} onChange={(value) => value && choose(value)} data={(dashboards.data?.dashboards ?? []).map((dashboard) => ({ value: dashboard.id, label: dashboard.name }))} leftSection={<SquaresFour size={16} weight="fill" />} variant="unstyled" size="xs" maw={360} fw={700} />
+        <Title order={1} fz={{ base: 36, sm: 52 }} lts="-0.045em" mt={4}>{item.name}</Title>
+        <Text c="dimmed" mt={4}>{item.description || "A focused view of the signals that matter now."}</Text>
+      </Box>
+      <Group wrap="nowrap" w={{ base: "100%", md: "auto" }}>
+        <Button variant="default" leftSection={<Sparkle size={16} weight="fill" />} flex={{ base: 1, md: "initial" }} onClick={() => onOpenChat("Create a new dashboard for me. First ask what I want to monitor, then design it when you have enough context.")}>Create with AI</Button>
+        <Button leftSection={selected.isFetching ? <Loader size={15} color="white" /> : <ArrowClockwise size={16} weight="bold" />} onClick={() => void queryClient.invalidateQueries()}>{selected.isFetching ? "Refreshing" : "Refresh"}</Button>
+      </Group>
+    </Flex>
+
+    <Paper withBorder radius="lg" p="md" mb="lg" role="group" aria-label="Dashboard controls">
+      <Flex align="flex-end" gap="md" wrap="wrap">
+        <Select label="Window" value={state.filters.window} onChange={(window) => window && update({ ...state, filters: { ...state.filters, window } })} data={[{ value: "15m", label: "15 minutes" }, { value: "1h", label: "1 hour" }, { value: "6h", label: "6 hours" }, { value: "24h", label: "24 hours" }]} w={140} />
+        <TextInput label="Namespace" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={() => update(state)} placeholder="All namespaces" w={{ base: "100%", xs: 200 }} />
+        <Group gap="xs" ml={{ base: 0, sm: "auto" }} mb={10}><Indicator color={save.isError ? "red" : save.isPending ? "yellow" : "teal"} processing={save.isPending} size={8} /><Text c="dimmed" size="sm">{save.isPending ? "Saving" : save.isError ? "Save failed" : "Saved"}</Text></Group>
+        <Group wrap="nowrap" ml={{ base: 0, sm: "md" }}>
+          <Menu shadow="md" position="bottom-end" withinPortal>
+            <Menu.Target><Button variant="default" leftSection={<Plus size={16} weight="bold" />} rightSection={<CaretDown size={14} weight="bold" />}>Add view</Button></Menu.Target>
+            <Menu.Dropdown><Menu.Label>Dashboard views</Menu.Label>{Object.entries(widgetTitles).map(([value, label]) => <Menu.Item key={value} onClick={() => add(value as WidgetType)}>{label}</Menu.Item>)}</Menu.Dropdown>
+          </Menu>
+          <Button variant="subtle" color="gray" rightSection={<ArrowUpRight size={16} weight="bold" />} onClick={() => onOpenChat()}>Ask Fanout</Button>
+        </Group>
+      </Flex>
+    </Paper>
+
+    <Grid className="dashboard-grid" layouts={layouts} breakpoints={{ lg: 1100, md: 800, sm: 600, xs: 420, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 2, xxs: 1 }} rowHeight={76} margin={[16, 16]} containerPadding={[0, 0]} compactType="vertical" draggableCancel="button,input,select,textarea,a,label,[role=menu]" onBreakpointChange={setBreakpoint} onDragStop={(layout: readonly LayoutItem[]) => { if (breakpoint === "lg") update({ ...state, layout: [...layout] }); }} onResizeStop={(layout: readonly LayoutItem[]) => { if (breakpoint === "lg") update({ ...state, layout: [...layout] }); }}>
       {state.widgets.map((widget) => <div key={widget.id}><WidgetCard widget={widget} filters={state.filters} onRemove={() => remove(widget.id)} onOpenChat={onOpenChat} /></div>)}
     </Grid>
-  </main>;
+  </Box>;
+}
+
+function LoadingState({ label }: { label: string }) {
+  return <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">{label}</Text></Center>;
 }
 
 function WidgetCard({ widget, filters, onRemove, onOpenChat }: { widget: Widget; filters: State["filters"]; onRemove: () => void; onOpenChat: (prompt?: string) => void }) {
@@ -121,15 +135,39 @@ function WidgetCard({ widget, filters, onRemove, onOpenChat }: { widget: Widget;
   const traceQuery = new URLSearchParams(base); if (typeof widget.config?.trace_id === "string") traceQuery.set("trace_id", widget.config.trace_id);
   const trace = useQuery({ queryKey: ["trace", traceQuery.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/trace?${traceQuery}`), enabled: widget.type === "trace" });
   const health = overview.data?.data;
-  return <section className="dashboard-card group"><div className="card-heading"><div><span className="card-kicker">{widget.type === "assistant" ? "GUIDANCE" : widget.type.toUpperCase()}</span><h2>{widget.title}</h2></div><Tooltip label={`Remove ${widget.title}`}><button className="grid size-[30px] place-items-center rounded-lg text-muted opacity-60 transition hover:bg-danger/10 hover:text-danger focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent group-hover:opacity-100" aria-label={`Remove ${widget.title}`} onClick={onRemove}><X size={16} weight="bold" aria-hidden="true" /></button></Tooltip></div>
-    {widget.type === "overview" && <div className="metric-grid"><Metric label="Health" value={health?.health ?? "—"} /><Metric label="Services" value={health?.service_count ?? "—"} /><Metric label="Spans" value={health?.total_spans?.toLocaleString?.() ?? "—"} /><Metric label="Error rate" value={health ? `${(health.error_rate * 100).toFixed(2)}%` : "—"} /></div>}
-    {widget.type === "topology" && <div className="service-list">{(topology.data?.data?.nodes ?? []).slice(0, 6).map((node: any) => <div className="service-row" key={node.service}><span className={`status-dot ${node.health}`} /><strong>{node.service}</strong><span>{node.spans?.toLocaleString?.() ?? 0} spans</span><small>{node.p95_ms?.toFixed?.(1) ?? "—"} ms p95</small></div>)}{!topology.data?.data?.nodes?.length && <Empty text="No service relationships in this window" />}</div>}
-    {widget.type === "activity" && <div className="activity-list">{(health?.services ?? []).slice(0, 5).map((entry: any) => <div className="activity-row" key={entry.service}><span className={`status-dot ${entry.health}`} /><span>{entry.service}</span><small>{entry.error_rate ? `${(entry.error_rate * 100).toFixed(2)}% errors` : "Operating normally"}</small></div>)}{!health?.services?.length && <Empty text="No recent activity" />}</div>}
-    {widget.type === "performance" && <div className="compact-table">{(performance.data?.data?.endpoints ?? []).slice(0, 5).map((endpoint: any) => <div key={`${endpoint.method}-${endpoint.path}`}><strong>{endpoint.method} {endpoint.path}</strong><span>{endpoint.calls?.toLocaleString?.()} calls</span><small>{endpoint.p95_ms?.toFixed?.(1)} ms p95</small></div>)}{!performance.data?.data?.endpoints?.length && <Empty text="No endpoint activity in this window" />}</div>}
-    {widget.type === "logs" && <div className="compact-table logs-preview">{(logs.data?.data?.entries ?? []).slice(0, 5).map((entry: any, index: number) => <div key={`${entry.time}-${index}`}><strong className={`severity-${String(entry.severity).toLowerCase()}`}>{entry.severity}</strong><span>{entry.service}</span><small>{entry.body}</small></div>)}{!logs.data?.data?.entries?.length && <Empty text="No matching logs in this window" />}</div>}
-    {widget.type === "trace" && <div className="trace-preview"><div className="metric-grid"><Metric label="Duration" value={trace.data?.data ? `${trace.data.data.duration_ms.toFixed?.(1)} ms` : "—"} /><Metric label="Spans" value={trace.data?.data?.spans?.length ?? "—"} /><Metric label="Services" value={trace.data?.data?.services?.length ?? "—"} /><Metric label="Status" value={trace.data?.data ? trace.data.data.has_error ? "Error" : "Healthy" : "—"} /></div><small>{trace.data?.data?.trace_id ? `Trace ${trace.data.data.trace_id.slice(0, 12)}…` : "Most relevant recent trace"}</small></div>}
-    {widget.type === "assistant" && <div className="assistant-card"><p>Ask a focused question about health, latency, errors, or dependencies.</p><Button variant="primary" className="min-w-[170px]" onClick={() => onOpenChat("Summarize the most important system changes in the selected window")}><Sparkle size={16} weight="fill" aria-hidden="true" />Start a conversation</Button></div>}
-  </section>;
+
+  return <Paper withBorder shadow="xs" radius="lg" p="lg" h="100%" style={{ overflow: "hidden" }}><Stack h="100%" gap="sm">
+    <Group justify="space-between" align="flex-start" wrap="nowrap"><Box><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.1em">{widget.type === "assistant" ? "Guidance" : widget.type}</Text><Title order={2} fz="lg" mt={2}>{widget.title}</Title></Box><Tooltip label={`Remove ${widget.title}`}><ActionIcon variant="subtle" color="red" aria-label={`Remove ${widget.title}`} onClick={onRemove}><X size={16} weight="bold" /></ActionIcon></Tooltip></Group>
+    <ScrollArea type="auto" offsetScrollbars flex={1}>
+      {widget.type === "overview" && <SimpleGrid cols={2} spacing="sm"><Metric label="Health" value={health?.health ?? "—"} /><Metric label="Services" value={health?.service_count ?? "—"} /><Metric label="Spans" value={health?.total_spans?.toLocaleString?.() ?? "—"} /><Metric label="Error rate" value={health ? `${(health.error_rate * 100).toFixed(2)}%` : "—"} /></SimpleGrid>}
+      {widget.type === "topology" && <DataTable rows={(topology.data?.data?.nodes ?? []).slice(0, 6).map((node: any) => [<HealthBadge key="health" health={node.health} label={node.service} />, `${node.spans?.toLocaleString?.() ?? 0} spans`, `${node.p95_ms?.toFixed?.(1) ?? "—"} ms p95`])} empty="No service relationships in this window" />}
+      {widget.type === "activity" && <DataTable rows={(health?.services ?? []).slice(0, 5).map((entry: any) => [<HealthBadge key="health" health={entry.health} label={entry.service} />, entry.error_rate ? `${(entry.error_rate * 100).toFixed(2)}% errors` : "Operating normally"])} empty="No recent activity" />}
+      {widget.type === "performance" && <DataTable rows={(performance.data?.data?.endpoints ?? []).slice(0, 5).map((endpoint: any) => [<Text key="path" fw={600} size="sm" truncate>{endpoint.method} {endpoint.path}</Text>, `${endpoint.calls?.toLocaleString?.()} calls`, `${endpoint.p95_ms?.toFixed?.(1)} ms p95`])} empty="No endpoint activity in this window" />}
+      {widget.type === "logs" && <DataTable rows={(logs.data?.data?.entries ?? []).slice(0, 5).map((entry: any) => [<Badge key="severity" color={severityColor(entry.severity)} variant="light">{entry.severity}</Badge>, entry.service, entry.body])} empty="No matching logs in this window" />}
+      {widget.type === "trace" && <Stack><SimpleGrid cols={2} spacing="sm"><Metric label="Duration" value={trace.data?.data ? `${trace.data.data.duration_ms.toFixed?.(1)} ms` : "—"} /><Metric label="Spans" value={trace.data?.data?.spans?.length ?? "—"} /><Metric label="Services" value={trace.data?.data?.services?.length ?? "—"} /><Metric label="Status" value={trace.data?.data ? trace.data.data.has_error ? "Error" : "Healthy" : "—"} /></SimpleGrid><Text c="dimmed" size="xs" ff="monospace" truncate>{trace.data?.data?.trace_id ? `Trace ${trace.data.data.trace_id}` : "Most relevant recent trace"}</Text></Stack>}
+      {widget.type === "assistant" && <Stack align="flex-start"><Text c="dimmed">Ask a focused question about health, latency, errors, or dependencies.</Text><Button leftSection={<Sparkle size={16} weight="fill" />} onClick={() => onOpenChat("Summarize the most important system changes in the selected window")}>Start a conversation</Button></Stack>}
+    </ScrollArea>
+  </Stack></Paper>;
 }
-function Metric({ label, value }: { label: string; value: string | number }) { return <div className="metric"><small>{label}</small><strong>{value}</strong></div>; }
-function Empty({ text }: { text: string }) { return <div className="empty-state"><ListMagnifyingGlass size={20} aria-hidden="true" /><span>{text}</span></div>; }
+
+function DataTable({ rows, empty }: { rows: React.ReactNode[][]; empty: string }) {
+  if (!rows.length) return <Empty text={empty} />;
+  return <Table.ScrollContainer minWidth={420}><Table verticalSpacing="sm" highlightOnHover>{<Table.Tbody>{rows.map((cells, rowIndex) => <Table.Tr key={rowIndex}>{cells.map((cell, cellIndex) => <Table.Td key={cellIndex}><Text component="span" size="sm" c={cellIndex ? "dimmed" : undefined} lineClamp={1}>{cell}</Text></Table.Td>)}</Table.Tr>)}</Table.Tbody>}</Table></Table.ScrollContainer>;
+}
+
+function HealthBadge({ health, label }: { health: string; label: string }) {
+  return <Badge color={health === "healthy" ? "teal" : health === "degraded" ? "yellow" : "red"} variant="light" tt="none">{label}</Badge>;
+}
+
+function severityColor(severity: string) {
+  const value = String(severity).toUpperCase();
+  return value === "ERROR" || value === "FATAL" ? "red" : value === "WARN" || value === "WARNING" ? "yellow" : value === "INFO" ? "teal" : "blue";
+}
+
+function Metric({ label, value }: { label: string; value: string | number }) {
+  return <Paper withBorder radius="md" p="sm" bg="gray.0"><Text c="dimmed" size="xs">{label}</Text><Text fw={700} fz="xl" mt={4} tt="capitalize">{value}</Text></Paper>;
+}
+
+function Empty({ text }: { text: string }) {
+  return <Center py="xl"><ListMagnifyingGlass size={20} /><Text c="dimmed" size="sm" ml="xs">{text}</Text></Center>;
+}

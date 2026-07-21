@@ -1,5 +1,4 @@
 import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import { viteSingleFile } from "vite-plugin-singlefile";
 
@@ -19,7 +18,7 @@ const stripTrailingWhitespace = () => ({
 });
 
 export default defineConfig({
-  plugins: [tailwindcss(), react(), viteSingleFile(), stripTrailingWhitespace()],
+  plugins: [react(), viteSingleFile(), stripTrailingWhitespace()],
   build: {
     cssMinify: true,
     minify: true,

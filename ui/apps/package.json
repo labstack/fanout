@@ -13,22 +13,20 @@
     "dev:logs": "cross-env NODE_ENV=development INPUT=logs.html vite"
   },
   "dependencies": {
+    "@mantine/core": "9.4.2",
+    "@mantine/hooks": "9.4.2",
     "@modelcontextprotocol/ext-apps": "1.7.4",
     "@modelcontextprotocol/sdk": "1.29.0",
     "@phosphor-icons/react": "2.1.10",
-    "@radix-ui/react-tabs": "1.1.18",
-    "@radix-ui/react-tooltip": "1.2.13",
     "echarts": "6.1.0",
     "react": "19.2.7",
     "react-dom": "19.2.7"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "4.3.3",
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
     "cross-env": "10.1.0",
-    "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.1.5",
     "vite-plugin-singlefile": "2.3.3"

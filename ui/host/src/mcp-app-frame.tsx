@@ -1,6 +1,7 @@
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { Alert, Box, Center, Loader, Text } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { authorizedFetch } from "./auth";
 
@@ -91,7 +92,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
     }
   }
 
-  if (error) return <div className="app-error">{error}</div>;
-  if (!html) return <div className="app-loading">Preparing view…</div>;
-  return <iframe ref={iframeRef} title="Fanout analysis view" className="mcp-app" sandbox="allow-scripts" srcDoc={html} style={{ height }} onLoad={() => void connectBridge()} />;
+  if (error) return <Alert color="red" m="md">{error}</Alert>;
+  if (!html) return <Center mih={180} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Preparing view…</Text></Center>;
+  return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height, transition: "height 200ms ease" }} onLoad={() => void connectBridge()} />;
 }
