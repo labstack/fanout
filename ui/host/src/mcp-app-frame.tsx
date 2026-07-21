@@ -65,7 +65,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
         mcpClient,
         { name: "Fanout", version: "0.2.0" },
         { openLinks: {}, serverTools: {}, logging: {} },
-        { hostContext: { theme: "dark", displayMode: "inline" } },
+        { hostContext: { theme: "light", displayMode: "inline" } },
       );
       bridgeRef.current = bridge;
       bridge.onsizechange = ({ height: requested }) => {

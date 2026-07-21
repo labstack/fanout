@@ -1,14 +1,15 @@
 import { HttpAgent, type Message } from "@ag-ui/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ArrowUpRight, ChatCircleText, Layout, PaperPlaneTilt, Plus, SignOut } from "@phosphor-icons/react";
+import { ArrowUpRight, ChatCircleText, GithubLogo, GlobeHemisphereWest, Layout, PaperPlaneTilt, Plus, SignOut } from "@phosphor-icons/react";
 import { FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import AuthGate, { authorizedFetch, logout } from "./auth";
-import { AppearanceMenu, BrandMark } from "./appearance";
+import { BrandMark } from "./brand";
 import type { MCPAppContent } from "./mcp-app-frame";
 import Dashboard from "./dashboard";
 import { createID } from "./id";
+import { Tooltip, TooltipProvider } from "./ui";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
 
@@ -71,6 +72,24 @@ function Chat() {
     textarea.style.height = `${Math.min(textarea.scrollHeight, 160)}px`;
   }, [input]);
 
+  useEffect(() => {
+    const shortcuts = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const editing = target?.matches("input, textarea, [contenteditable='true']");
+      if (event.key === "/" && !editing) {
+        event.preventDefault();
+        setView("chat");
+        requestAnimationFrame(() => inputRef.current?.focus());
+      }
+      if (event.key === "Escape" && target === inputRef.current) {
+        setInput("");
+        inputRef.current?.blur();
+      }
+    };
+    window.addEventListener("keydown", shortcuts);
+    return () => window.removeEventListener("keydown", shortcuts);
+  }, []);
+
   async function send(text: string) {
     const content = text.trim();
     if (!content || running || !ready) return;
@@ -95,14 +114,13 @@ function Chat() {
   const visibleMessages = messages.filter((message) => message.role !== "tool");
   return (
     <div className="app-shell">
-      <header>
-        <div className="brand"><BrandMark size="small" /><div><strong>Fanout</strong><small>Operations intelligence</small></div></div>
-        <div className="header-actions">
-          <span className="live"><i />Connected</span>
-          <button type="button" className="ghost view-switch" onClick={() => setView(view === "chat" ? "dashboard" : "chat")}>{view === "chat" ? <Layout size={15} weight="bold" aria-hidden="true" /> : <ChatCircleText size={15} weight="bold" aria-hidden="true" />}<span className="action-label">{view === "chat" ? "Dashboard" : "Chat"}</span></button>
-          {view === "chat" && <button type="button" className="ghost new-thread" onClick={newThread} aria-label="New chat"><Plus size={15} weight="bold" aria-hidden="true" /><span className="action-label">New chat</span></button>}
-          <AppearanceMenu />
-          <button type="button" className="ghost quiet signout" onClick={() => void logout()} aria-label="Sign out"><SignOut size={15} aria-hidden="true" /><span className="action-label">Sign out</span></button>
+      <header className="sticky top-0 z-20 flex h-[54px] min-w-0 items-center justify-between border-b border-line bg-canvas/90 px-6 backdrop-blur-xl">
+        <div className="flex min-w-0 items-center gap-2.5"><BrandMark size="small" /><div><strong className="block text-sm tracking-[-.02em]">Fanout</strong><small className="mt-0.5 hidden text-[10px] text-muted sm:block">Operations intelligence</small></div></div>
+        <div className="flex items-center gap-1.5">
+          <span className="mr-1 hidden items-center gap-1.5 text-[10px] font-semibold text-muted md:inline-flex"><i className="size-1.5 rounded-full bg-accent shadow-[0_0_8px_var(--accent-glow)]" />Live</span>
+          <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-text-soft transition hover:bg-panel-raised hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" onClick={() => setView(view === "chat" ? "dashboard" : "chat")}>{view === "chat" ? <Layout size={15} weight="bold" aria-hidden="true" /> : <ChatCircleText size={15} weight="bold" aria-hidden="true" />}<span>{view === "chat" ? "Dashboard" : "Chat"}</span></button>
+          {view === "chat" && <Tooltip label="New chat"><button type="button" className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-panel-raised hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" onClick={newThread} aria-label="New chat"><Plus size={16} weight="bold" aria-hidden="true" /></button></Tooltip>}
+          <Tooltip label="Sign out"><button type="button" className="grid size-8 place-items-center rounded-lg text-muted transition hover:bg-panel-raised hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" onClick={() => void logout()} aria-label="Sign out"><SignOut size={16} aria-hidden="true" /></button></Tooltip>
         </div>
       </header>
       {view === "dashboard" ? <Dashboard onOpenChat={(prompt) => { setView("chat"); if (prompt) void send(prompt); }} /> : <main className="chat">
@@ -132,8 +150,17 @@ function Chat() {
         </form>
         <small>Enter to send <span>·</span> Shift + Enter for a new line</small>
       </footer>}
+      <ProductFooter />
     </div>
   );
+}
+
+function ProductFooter() {
+  return <footer className="fixed inset-x-0 bottom-0 z-30 flex h-[42px] items-center justify-between border-t border-line bg-canvas/95 px-6 text-[10px] text-muted backdrop-blur-xl">
+    <div className="flex items-center gap-2"><span>© 2026</span><a className="font-semibold text-text-soft transition hover:text-text" href="https://labstack.com" target="_blank" rel="noreferrer">LabStack LLC</a><span>·</span><a className="transition hover:text-text" href="https://github.com/labstack/fanout" target="_blank" rel="noreferrer">Fanout</a></div>
+    <div className="hidden items-center gap-3 md:flex"><span className="inline-flex items-center gap-1.5"><kbd className="min-w-5 rounded border border-line bg-panel-soft px-1.5 py-0.5 text-center font-mono text-[9px] text-text-soft">/</kbd> focus</span><span className="inline-flex items-center gap-1.5"><kbd className="rounded border border-line bg-panel-soft px-1.5 py-0.5 font-mono text-[9px] text-text-soft">Esc</kbd> clear</span></div>
+    <div className="flex items-center gap-1"><Tooltip label="GitHub"><a className="grid size-7 place-items-center rounded-md transition hover:bg-panel-raised hover:text-text" href="https://github.com/labstack/fanout" target="_blank" rel="noreferrer" aria-label="Fanout on GitHub"><GithubLogo size={14} weight="bold" /></a></Tooltip><Tooltip label="LabStack"><a className="grid size-7 place-items-center rounded-md transition hover:bg-panel-raised hover:text-text" href="https://labstack.com" target="_blank" rel="noreferrer" aria-label="LabStack website"><GlobeHemisphereWest size={14} /></a></Tooltip></div>
+  </footer>;
 }
 
 function ChatMessage({ message, send }: { message: Message; send: (text: string) => Promise<void> }) {
@@ -167,5 +194,5 @@ function toolTitle(name: string) {
 
 export default function App() {
   const queryClient = useMemo(() => new QueryClient(), []);
-  return <QueryClientProvider client={queryClient}><AuthGate><Chat /></AuthGate></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><TooltipProvider delayDuration={300}><AuthGate><Chat /></AuthGate></TooltipProvider></QueryClientProvider>;
 }

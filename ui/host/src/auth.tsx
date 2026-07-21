@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
-import { BrandMark } from "./appearance";
+import { BrandMark } from "./brand";
+import { Button } from "./ui";
 
 const tokenKey = "fanout.access-token";
 const unauthorizedEvent = "fanout:unauthorized";
@@ -137,11 +138,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           <label>Header<code className="token-value">{setupResult.ingest_header_name ?? "x-fanout-ingest-token"}: {setupResult.ingest_token}</code></label>
           {error && <p className="error">{error}</p>}
           <div className="setup-actions">
-            <button type="button" className="ghost" onClick={() => void copyIngestToken()}>{copied ? <Check size={16} weight="bold" aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}{copied ? "Copied" : "Copy token"}</button>
-            <button type="button" onClick={() => {
+            <Button type="button" onClick={() => void copyIngestToken()}>{copied ? <Check size={16} weight="bold" aria-hidden="true" /> : <Copy size={16} aria-hidden="true" />}{copied ? "Copied" : "Copy token"}</Button>
+            <Button variant="primary" type="button" onClick={() => {
               setToken(setupResult.access_token);
               setSetupResult(null);
-            }}>Continue to Fanout<ArrowRight size={16} weight="bold" aria-hidden="true" /></button>
+            }}>Continue to Fanout<ArrowRight size={16} weight="bold" aria-hidden="true" /></Button>
           </div>
         </section>
       </main>
@@ -195,7 +196,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
           {status?.setup_required && <label>Setup token<input required value={setupToken} onChange={(event) => setSetupToken(event.target.value)} autoComplete="one-time-code" /></label>}
           {!status?.setup_required && codeSent && <label>Verification code<input required value={code} onChange={(event) => setCode(event.target.value)} autoComplete="one-time-code" /></label>}
           {error && <p className="error">{error}</p>}
-          <button type="submit" disabled={busy || !status}>{status?.setup_required ? <UserPlus size={17} weight="bold" aria-hidden="true" /> : <ArrowRight size={17} weight="bold" aria-hidden="true" />}{busy ? "Working…" : status?.setup_required ? "Create admin" : codeSent ? "Verify" : "Send code"}</button>
+          <Button variant="primary" type="submit" className="mt-1 min-h-[45px]" disabled={busy || !status}>{status?.setup_required ? <UserPlus size={17} weight="bold" aria-hidden="true" /> : <ArrowRight size={17} weight="bold" aria-hidden="true" />}{busy ? "Working…" : status?.setup_required ? "Create admin" : codeSent ? "Verify" : "Send code"}</Button>
         </form>
       </section>
     </main>
