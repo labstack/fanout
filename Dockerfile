@@ -6,6 +6,7 @@ FROM oven/bun:1.3.14 AS ui-apps-build
 WORKDIR /app
 COPY ui/apps/package.json ui/apps/bun.lock ./ui/apps/
 RUN cd ui/apps && bun install --frozen-lockfile
+COPY ui/theme.ts ./ui/
 COPY ui/apps/ ./ui/apps/
 COPY internal/mcp/apps/ ./internal/mcp/apps/
 RUN cd ui/apps && bun run build
@@ -14,6 +15,7 @@ FROM oven/bun:1.3.14 AS ui-host-build
 WORKDIR /app
 COPY ui/host/package.json ui/host/bun.lock ./ui/host/
 RUN cd ui/host && bun install --frozen-lockfile
+COPY ui/theme.ts ./ui/
 COPY ui/host/ ./ui/host/
 COPY internal/ui/ ./internal/ui/
 RUN cd ui/host && bun run build
