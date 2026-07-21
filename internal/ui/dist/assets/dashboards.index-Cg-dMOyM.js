@@ -1,0 +1,1 @@
+import{y as e}from"./auth-tIbMCfVy.js";import{t}from"./dashboard-BlksHcBh.js";import{T as n,r}from"./index-BtYmlsFe.js";var i=e();function a(){let e=n(),{openChat:a}=r();return(0,i.jsx)(t,{onOpenChat:a,onDashboardChange:t=>void e({to:`/dashboards/$dashboardId`,params:{dashboardId:t},replace:!0})})}export{a as component};
