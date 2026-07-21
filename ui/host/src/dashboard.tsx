@@ -1,5 +1,5 @@
-import { ActionIcon, Badge, Box, Button, Center, Divider, Flex, Group, Indicator, Loader, Menu, Paper, ScrollArea, Select, SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
-import { ArrowClockwise, ArrowUpRight, CaretDown, Check, ListMagnifyingGlass, Plus, Sparkle, SquaresFour, X } from "@phosphor-icons/react";
+import { ActionIcon, Alert, Badge, Box, Button, Center, Divider, Flex, Group, Indicator, Loader, Menu, Paper, ScrollArea, Select, SimpleGrid, Stack, Table, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { ArrowClockwise, ArrowUpRight, CaretDown, Check, ListMagnifyingGlass, Plus, Sparkle, SquaresFour, WarningCircle, X } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
@@ -22,6 +22,9 @@ async function getJSON<T>(url: string): Promise<T> {
   return response.json();
 }
 
+// Keep polling a widget whose backend call failed so it recovers without a manual refresh.
+const retryEvery = (query: { state: { status: string } }) => (query.state.status === "error" ? 15000 : false);
+
 const emptyState: State = { layout: [], widgets: [], filters: { window: "1h", namespace: "" } };
 const widgetTitles: Record<WidgetType, string> = { overview: "System health", topology: "Service map", activity: "Recent activity", assistant: "Ask Fanout", performance: "Performance", trace: "Trace focus", logs: "Logs" };
 const widgetMinimumRows: Record<WidgetType, number> = { overview: 4, topology: 4, activity: 4, assistant: 3, performance: 4, trace: 4, logs: 4 };
@@ -30,7 +33,19 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
   const queryClient = useQueryClient();
   const dashboards = useQuery({ queryKey: ["dashboards"], queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 3000 });
   const [selectedID, setSelectedID] = useState(() => dashboardID || localStorage.getItem(dashboardKey) || "");
-  const selected = useQuery({ queryKey: ["dashboard", selectedID], queryFn: () => getJSON<DashboardRecord>(`/api/dashboards/${encodeURIComponent(selectedID)}`), enabled: Boolean(selectedID), refetchInterval: 3000 });
+  const save = useMutation({
+    mutationFn: async (next: State) => {
+      if (!selected.data) throw new Error("No dashboard selected");
+      const response = await authorizedFetch(`/api/dashboards/${encodeURIComponent(selected.data.id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: selected.data.name, description: selected.data.description, state: next }) });
+      if (!response.ok) throw new Error("Unable to save dashboard");
+      return response.json() as Promise<DashboardRecord>;
+    },
+    scope: { id: `dashboard-${selectedID}` },
+    onSuccess: (data) => { queryClient.setQueryData(["dashboard", data.id], data); void queryClient.invalidateQueries({ queryKey: ["dashboards"] }); },
+    onError: (cause) => console.error("Dashboard save failed", cause),
+  });
+  // Pause polling while a save is in flight or failing so the refetch cannot clobber unsaved local edits.
+  const selected = useQuery({ queryKey: ["dashboard", selectedID], queryFn: () => getJSON<DashboardRecord>(`/api/dashboards/${encodeURIComponent(selectedID)}`), enabled: Boolean(selectedID), refetchInterval: save.isPending || save.isError ? false : 3000 });
   const [state, setState] = useState<State>(emptyState);
   const [breakpoint, setBreakpoint] = useState("lg");
 
@@ -47,18 +62,11 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
     const next = items.find((item) => item.is_default) ?? items[0];
     choose(next.id, true);
   }, [dashboardID, dashboards.data, selectedID]);
-  useEffect(() => { if (selected.data?.state) setState(selected.data.state); }, [selected.data?.updated_at]);
+  useEffect(() => {
+    if (save.isPending || save.isError) return;
+    if (selected.data?.state) setState(selected.data.state);
+  }, [selected.data?.updated_at, save.isPending, save.isError]);
 
-  const save = useMutation({
-    mutationFn: async (next: State) => {
-      if (!selected.data) throw new Error("No dashboard selected");
-      const response = await authorizedFetch(`/api/dashboards/${encodeURIComponent(selected.data.id)}`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: selected.data.name, description: selected.data.description, state: next }) });
-      if (!response.ok) throw new Error("Unable to save dashboard");
-      return response.json() as Promise<DashboardRecord>;
-    },
-    scope: { id: `dashboard-${selectedID}` },
-    onSuccess: (data) => { queryClient.setQueryData(["dashboard", data.id], data); void queryClient.invalidateQueries({ queryKey: ["dashboards"] }); },
-  });
   const layouts = useMemo(() => {
     const widgetType = new Map(state.widgets.map((widget) => [widget.id, widget.type]));
     const normalized = state.layout.map((item) => {
@@ -100,6 +108,13 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
       </Group>
     </Flex>
 
+    {save.isError && <Alert color="red" radius="lg" mb="lg" icon={<WarningCircle size={18} weight="fill" />} title="Dashboard changes not saved">
+      <Group justify="space-between" gap="sm">
+        <Text size="sm">Your latest edits are kept on this screen but Fanout could not store them.</Text>
+        <Button size="compact-sm" color="red" variant="light" onClick={() => save.mutate(state)}>Retry save</Button>
+      </Group>
+    </Alert>}
+
     <Paper withBorder radius="lg" p="lg" mb="lg" role="group" aria-label="Dashboard controls">
       <Flex align={{ base: "stretch", md: "flex-end" }} justify="space-between" direction={{ base: "column", md: "row" }} gap="md">
         <Group align="flex-end" gap="md" grow wrap="wrap" w={{ base: "100%", md: "auto" }}>
@@ -133,25 +148,28 @@ function WidgetCard({ widget, filters, onRemove, onOpenChat }: { widget: Widget;
   if (filters.namespace) base.set("namespace", filters.namespace);
   const service = typeof widget.config?.service === "string" ? widget.config.service : "";
   if (service) base.set("service", service);
-  const overview = useQuery({ queryKey: ["overview", base.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/overview?${base}`), enabled: widget.type === "overview" || widget.type === "activity" });
-  const topology = useQuery({ queryKey: ["topology", base.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/topology?${base}`), enabled: widget.type === "topology" });
-  const performance = useQuery({ queryKey: ["performance", base.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/performance?${base}`), enabled: widget.type === "performance" });
+  const overview = useQuery({ queryKey: ["overview", base.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/overview?${base}`), enabled: widget.type === "overview" || widget.type === "activity", refetchInterval: retryEvery });
+  const topology = useQuery({ queryKey: ["topology", base.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/topology?${base}`), enabled: widget.type === "topology", refetchInterval: retryEvery });
+  const performance = useQuery({ queryKey: ["performance", base.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/performance?${base}`), enabled: widget.type === "performance", refetchInterval: retryEvery });
   const logQuery = new URLSearchParams(base); if (typeof widget.config?.severity === "string") logQuery.set("severity", widget.config.severity); if (typeof widget.config?.search === "string") logQuery.set("search", widget.config.search);
-  const logs = useQuery({ queryKey: ["logs", logQuery.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/logs?${logQuery}`), enabled: widget.type === "logs" });
+  const logs = useQuery({ queryKey: ["logs", logQuery.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/logs?${logQuery}`), enabled: widget.type === "logs", refetchInterval: retryEvery });
   const traceQuery = new URLSearchParams(base); if (typeof widget.config?.trace_id === "string") traceQuery.set("trace_id", widget.config.trace_id);
-  const trace = useQuery({ queryKey: ["trace", traceQuery.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/trace?${traceQuery}`), enabled: widget.type === "trace" });
+  const trace = useQuery({ queryKey: ["trace", traceQuery.toString()], queryFn: () => getJSON<Envelope<any>>(`/api/observability/trace?${traceQuery}`), enabled: widget.type === "trace", refetchInterval: retryEvery });
   const health = overview.data?.data;
+  const sources: Partial<Record<WidgetType, { isError: boolean }>> = { overview, activity: overview, topology, performance, logs, trace };
+  const failed = sources[widget.type]?.isError ?? false;
 
   return <Paper withBorder shadow="xs" radius="lg" p="lg" h="100%" style={{ overflow: "hidden" }}><Stack h="100%" gap="sm">
     <Group justify="space-between" align="flex-start" wrap="nowrap"><Box><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.1em">{widget.type === "assistant" ? "Guidance" : widget.type}</Text><Title order={2} fz="lg" mt={2}>{widget.title}</Title></Box><Tooltip label={`Remove ${widget.title}`}><ActionIcon variant="subtle" color="red" aria-label={`Remove ${widget.title}`} onClick={onRemove}><X size={16} weight="bold" /></ActionIcon></Tooltip></Group>
     <ScrollArea type="auto" offsetScrollbars flex={1}>
-      {widget.type === "overview" && <SimpleGrid cols={2} spacing="sm"><Metric label="Health" value={health?.health ?? "—"} /><Metric label="Services" value={health?.service_count ?? "—"} /><Metric label="Spans" value={health?.total_spans?.toLocaleString?.() ?? "—"} /><Metric label="Error rate" value={health ? `${(health.error_rate * 100).toFixed(2)}%` : "—"} /></SimpleGrid>}
-      {widget.type === "topology" && <DataTable rows={(topology.data?.data?.nodes ?? []).slice(0, 6).map((node: any) => [<HealthBadge key="health" health={node.health} label={node.service} />, `${node.spans?.toLocaleString?.() ?? 0} spans`, `${node.p95_ms?.toFixed?.(1) ?? "—"} ms p95`])} empty="No service relationships in this window" />}
-      {widget.type === "activity" && <DataTable rows={(health?.services ?? []).slice(0, 5).map((entry: any) => [<HealthBadge key="health" health={entry.health} label={entry.service} />, entry.error_rate ? `${(entry.error_rate * 100).toFixed(2)}% errors` : "Operating normally"])} empty="No recent activity" />}
-      {widget.type === "performance" && <DataTable rows={(performance.data?.data?.endpoints ?? []).slice(0, 5).map((endpoint: any) => [<Text key="path" fw={600} size="sm" truncate>{endpoint.method} {endpoint.path}</Text>, `${endpoint.calls?.toLocaleString?.()} calls`, `${endpoint.p95_ms?.toFixed?.(1)} ms p95`])} empty="No endpoint activity in this window" />}
-      {widget.type === "logs" && <DataTable rows={(logs.data?.data?.entries ?? []).slice(0, 5).map((entry: any) => [<Badge key="severity" color={severityColor(entry.severity)} variant="light">{entry.severity}</Badge>, entry.service, entry.body])} empty="No matching logs in this window" />}
-      {widget.type === "trace" && <Stack><SimpleGrid cols={2} spacing="sm"><Metric label="Duration" value={trace.data?.data ? `${trace.data.data.duration_ms.toFixed?.(1)} ms` : "—"} /><Metric label="Spans" value={trace.data?.data?.spans?.length ?? "—"} /><Metric label="Services" value={trace.data?.data?.services?.length ?? "—"} /><Metric label="Status" value={trace.data?.data ? trace.data.data.has_error ? "Error" : "Healthy" : "—"} /></SimpleGrid><Text c="dimmed" size="xs" ff="monospace" truncate>{trace.data?.data?.trace_id ? `Trace ${trace.data.data.trace_id}` : "Most relevant recent trace"}</Text></Stack>}
-      {widget.type === "assistant" && <Stack align="flex-start"><Text c="dimmed">Ask a focused question about health, latency, errors, or dependencies.</Text><Button leftSection={<Sparkle size={16} weight="fill" />} onClick={() => onOpenChat("Summarize the most important system changes in the selected window")}>Start a conversation</Button></Stack>}
+      {failed && <WidgetError />}
+      {!failed && widget.type === "overview" && <SimpleGrid cols={2} spacing="sm"><Metric label="Health" value={health?.health ?? "—"} /><Metric label="Services" value={health?.service_count ?? "—"} /><Metric label="Spans" value={health?.total_spans?.toLocaleString?.() ?? "—"} /><Metric label="Error rate" value={health ? `${(health.error_rate * 100).toFixed(2)}%` : "—"} /></SimpleGrid>}
+      {!failed && widget.type === "topology" && <DataTable rows={(topology.data?.data?.nodes ?? []).slice(0, 6).map((node: any) => [<HealthBadge key="health" health={node.health} label={node.service} />, `${node.spans?.toLocaleString?.() ?? 0} spans`, `${node.p95_ms?.toFixed?.(1) ?? "—"} ms p95`])} empty="No service relationships in this window" />}
+      {!failed && widget.type === "activity" && <DataTable rows={(health?.services ?? []).slice(0, 5).map((entry: any) => [<HealthBadge key="health" health={entry.health} label={entry.service} />, entry.error_rate ? `${(entry.error_rate * 100).toFixed(2)}% errors` : "Operating normally"])} empty="No recent activity" />}
+      {!failed && widget.type === "performance" && <DataTable rows={(performance.data?.data?.endpoints ?? []).slice(0, 5).map((endpoint: any) => [<Text key="path" fw={600} size="sm" truncate>{endpoint.method} {endpoint.path}</Text>, `${endpoint.calls?.toLocaleString?.()} calls`, `${endpoint.p95_ms?.toFixed?.(1)} ms p95`])} empty="No endpoint activity in this window" />}
+      {!failed && widget.type === "logs" && <DataTable rows={(logs.data?.data?.entries ?? []).slice(0, 5).map((entry: any) => [<Badge key="severity" color={severityColor(entry.severity)} variant="light">{entry.severity}</Badge>, entry.service, entry.body])} empty="No matching logs in this window" />}
+      {!failed && widget.type === "trace" && <Stack><SimpleGrid cols={2} spacing="sm"><Metric label="Duration" value={trace.data?.data ? `${trace.data.data.duration_ms.toFixed?.(1)} ms` : "—"} /><Metric label="Spans" value={trace.data?.data?.spans?.length ?? "—"} /><Metric label="Services" value={trace.data?.data?.services?.length ?? "—"} /><Metric label="Status" value={trace.data?.data ? trace.data.data.has_error ? "Error" : "Healthy" : "—"} /></SimpleGrid><Text c="dimmed" size="xs" ff="monospace" truncate>{trace.data?.data?.trace_id ? `Trace ${trace.data.data.trace_id}` : "Most relevant recent trace"}</Text></Stack>}
+      {!failed && widget.type === "assistant" && <Stack align="flex-start"><Text c="dimmed">Ask a focused question about health, latency, errors, or dependencies.</Text><Button leftSection={<Sparkle size={16} weight="fill" />} onClick={() => onOpenChat("Summarize the most important system changes in the selected window")}>Start a conversation</Button></Stack>}
     </ScrollArea>
   </Stack></Paper>;
 }
@@ -176,4 +194,8 @@ function Metric({ label, value }: { label: string; value: string | number }) {
 
 function Empty({ text }: { text: string }) {
   return <Center py="xl"><ListMagnifyingGlass size={20} /><Text c="dimmed" size="sm" ml="xs">{text}</Text></Center>;
+}
+
+function WidgetError() {
+  return <Center py="xl"><WarningCircle size={20} weight="fill" color="var(--mantine-color-red-6)" /><Text c="red.7" fw={500} size="sm" ml="xs">Couldn't load this view — retrying automatically</Text></Center>;
 }

@@ -41,6 +41,10 @@ func (s *Store) Thread(ctx context.Context, ownerID, threadID string) (Thread, e
 	return Thread{ThreadID: threadID, Messages: messages, Updated: updated}, nil
 }
 
+// StartRun creates or updates the caller's thread and records the run as
+// running. The SELECT-then-INSERT runs under BEGIN IMMEDIATE on a pinned
+// connection so two concurrent first-runs on the same thread serialize
+// instead of racing into a unique-constraint error.
 func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunAgentInput) error {
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
@@ -50,17 +54,26 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 	if err != nil {
 		return fmt.Errorf("encode messages: %w", err)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
+		return fmt.Errorf("open run connection: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return fmt.Errorf("begin run: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
 
 	var existingOwner string
-	err = tx.QueryRowContext(ctx, `SELECT owner_id FROM agui_threads WHERE thread_id = ?`, input.ThreadID).Scan(&existingOwner)
+	err = conn.QueryRowContext(ctx, `SELECT owner_id FROM agui_threads WHERE thread_id = ?`, input.ThreadID).Scan(&existingOwner)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if _, err := tx.ExecContext(ctx,
+		if _, err := conn.ExecContext(ctx,
 			`INSERT INTO agui_threads (thread_id, owner_id, messages_json) VALUES (?, ?, ?)`,
 			input.ThreadID, ownerID, string(messagesJSON),
 		); err != nil {
@@ -71,7 +84,7 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 	case existingOwner != ownerID:
 		return ErrThreadNotFound
 	default:
-		if _, err := tx.ExecContext(ctx,
+		if _, err := conn.ExecContext(ctx,
 			`UPDATE agui_threads SET messages_json = ?, updated_at = datetime('now') WHERE thread_id = ?`,
 			string(messagesJSON), input.ThreadID,
 		); err != nil {
@@ -82,16 +95,26 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 	if input.ParentRunID != nil {
 		parent = *input.ParentRunID
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := conn.ExecContext(ctx,
 		`INSERT INTO agui_runs (run_id, thread_id, parent_run_id, input_json, status) VALUES (?, ?, ?, ?, 'running')`,
 		input.RunID, input.ThreadID, parent, string(inputJSON),
 	); err != nil {
 		return fmt.Errorf("create run: %w", err)
 	}
-	return tx.Commit()
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("commit run: %w", err)
+	}
+	committed = true
+	return nil
 }
 
-func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, messages []agtypes.Message, eventJSON [][]byte, runErr error) error {
+// FinishRun persists the final conversation and the run outcome. The thread's
+// messages_json is written wholesale: if two runs on the same thread finish
+// concurrently, the later commit wins (last-write-wins) — concurrent runs on
+// one thread are not a supported flow, and each run row still records its own
+// events and outcome. truncated marks a run whose answer was cut off at the
+// provider's token limit; it only applies when runErr is nil.
+func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, messages []agtypes.Message, eventJSON [][]byte, truncated bool, runErr error) error {
 	messagesJSON, err := json.Marshal(messages)
 	if err != nil {
 		return fmt.Errorf("encode final messages: %w", err)
@@ -105,8 +128,11 @@ func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, 
 		return fmt.Errorf("encode events: %w", err)
 	}
 	status, errorText := "completed", ""
-	if runErr != nil {
+	switch {
+	case runErr != nil:
 		status, errorText = "failed", runErr.Error()
+	case truncated:
+		status, errorText = "truncated", "response truncated at model token limit"
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -20,8 +20,9 @@ func RegisterDashboardRoutes(e *echo.Echo, dashboards *dashboard.Service) {
 	e.PUT("/api/dashboards/:id", h.Put)
 	e.DELETE("/api/dashboards/:id", h.Delete)
 
-	// Compatibility for the first canvas client. It always addresses the owner's
-	// default dashboard while newer clients use the named collection above.
+	// Legacy single-canvas endpoints, retained for API clients: they always
+	// address the owner's default dashboard, while the named collection above
+	// addresses dashboards individually.
 	e.GET("/api/dashboard", h.GetDefault)
 	e.PUT("/api/dashboard", h.PutDefault)
 }

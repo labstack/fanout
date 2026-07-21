@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -38,9 +40,9 @@ func AuthMiddleware(users *auth.UserStore, jwtSecret string, publicRead bool) ec
 					return next(c)
 				}
 				// Never downgrade an explicitly authenticated request to the public
-				// viewer. Returning 401 lets browser and MCP clients refresh or
-				// restart OAuth instead of receiving misleading downstream errors.
-				return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+				// viewer. A 401 lets browser and MCP clients refresh or restart
+				// OAuth; a DB failure surfaces as 500 instead of "invalid token".
+				return err
 			}
 
 			// Public demo mode: serve unauthenticated reads as a viewer. Gated to
@@ -95,14 +97,24 @@ func RequireRole(minRole string) echo.MiddlewareFunc {
 	}
 }
 
+// authenticateBearer resolves a bearer token to a user. Every error it
+// returns is an *echo.HTTPError: 401 for genuinely invalid credentials
+// (bad signature, unknown or inactive user) and 500 for database failures —
+// an infrastructure error must never masquerade as "invalid token".
 func authenticateBearer(users *auth.UserStore, jwtSecret, bearer string) (auth.User, error) {
 	claims, err := auth.VerifyAccess(jwtSecret, bearer)
 	if err != nil {
-		return auth.User{}, err
+		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 	}
 
 	user, err := users.GetByID(claims.Subject)
-	if err != nil || !user.Active {
+	switch {
+	case errors.Is(err, auth.ErrUserNotFound):
+		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
+	case err != nil:
+		slog.Error("auth user lookup failed", "user_id", claims.Subject, "err", err)
+		return auth.User{}, echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
+	case !user.Active:
 		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 	}
 	return user, nil

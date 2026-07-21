@@ -10,8 +10,11 @@ const (
 	LogsSchema        = "fanout.logs.result@1"
 )
 
-// Scope is the mandatory boundary for every telemetry query. Callers derive
-// Namespace from authenticated application state; models never choose it.
+// Scope is the mandatory boundary for every telemetry query. Namespace is a
+// query filter, not an authorization boundary: every MCP tool input exposes
+// it (Server.scope copies input.Namespace into the Scope) and the HTTP API
+// reads it from a query param, so any caller — including models — may select
+// any namespace. Do not rely on it for access control.
 type Scope struct {
 	Namespace string    `json:"namespace"`
 	Start     time.Time `json:"start"`
@@ -113,14 +116,24 @@ type HeatmapPoint struct {
 	P95MS   float64   `json:"p95_ms"`
 }
 
+// Direction mirrors the closed union in ui/apps/src/contracts.ts
+// ("improvement" | "regression" | "stable"); keep the two in sync.
+type Direction string
+
+const (
+	DirectionImprovement Direction = "improvement"
+	DirectionRegression  Direction = "regression"
+	DirectionStable      Direction = "stable"
+)
+
 type ComparisonMetric struct {
-	Label       string  `json:"label"`
-	Unit        string  `json:"unit"`
-	Before      float64 `json:"before"`
-	After       float64 `json:"after"`
-	ChangePct   float64 `json:"change_pct"`
-	Direction   string  `json:"direction"`
-	Significant bool    `json:"significant"`
+	Label       string    `json:"label"`
+	Unit        string    `json:"unit"`
+	Before      float64   `json:"before"`
+	After       float64   `json:"after"`
+	ChangePct   float64   `json:"change_pct"`
+	Direction   Direction `json:"direction"`
+	Significant bool      `json:"significant"`
 }
 
 type Performance struct {

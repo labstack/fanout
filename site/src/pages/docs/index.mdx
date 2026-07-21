@@ -18,8 +18,18 @@ Pick whichever path matches how you already deploy. Fanout is a single native ex
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 \
   -v $PWD/data:/var/lib/fanout/data \
+  -e JWT_SECRET=$(openssl rand -hex 32) \
+  -e JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+  -e SMTP_HOST=smtp.example.com \
+  -e SMTP_USER=fanout@example.com \
+  -e SMTP_PASS=<smtp-password> \
+  -e SMTP_FROM='"Fanout" <fanout@example.com>' \
+  -e AI_API_KEY=<anthropic-or-openai-key> \
   ghcr.io/labstack/fanout:latest
 ```
+
+The `-e` variables are required — Fanout refuses to start without them; see
+[First boot](#first-boot) for what each one does.
 
 | Port / path | Purpose |
 | --- | --- |
@@ -79,7 +89,7 @@ On first boot Fanout logs a one-time **setup token** that authorises the admin-c
 docker logs fanout 2>&1 | grep "setup token"
 ```
 
-Open [https://demo.fanout.test](https://demo.fanout.test) and fill in the setup form with your name, email, and the token. Fanout creates the admin, signs you in, and **shows the ingest token once** — copy it before continuing. Rotation remains available through `POST /api/settings/ingest/rotate-token` for authenticated admins.
+Open `http://localhost:7520` (or `http://<your-host>:7520`) and fill in the setup form with your name, email, and the token. Fanout creates the admin, signs you in, and **shows the ingest token once** — copy it before continuing. Rotation remains available through `POST /api/settings/ingest/rotate-token` for authenticated admins.
 
 After this, the setup form is closed for the lifetime of the data directory. User-management APIs can send email invitations; logins use one-time codes delivered via SMTP. No passwords are ever stored.
 
@@ -152,7 +162,7 @@ Setting only one of the two TLS variables is a startup error — a guardrail to 
 
 ## Use the UI
 
-Open [https://demo.fanout.test](https://demo.fanout.test) locally, or your production Fanout URL, and sign in.
+Open `http://<your-host>:7520`, or your production Fanout URL, and sign in.
 
 - **Chat** is the primary interface. Ask in plain English; the Go agent runtime calls the standard MCP tools and streams standard AG-UI events back to the browser.
 - **Interactive results** are five portable domain MCP Apps: health, topology, performance, trace, and logs. They are resources served by `/mcp` and hosted with the official MCP `AppBridge`.
@@ -258,14 +268,16 @@ runtime become available there too.
 ### Connect Claude Code
 
 ```sh
-# Production
 claude mcp add fanout --transport http https://fanout.example.com/mcp
-
-# Local
-claude mcp add fanout --transport http https://demo.fanout.test/mcp
 ```
 
-The MCP endpoint uses OAuth 2.1 for remote clients. Add `https://demo.fanout.test/mcp` to Codex or Claude Code as a Streamable HTTP server, then use the client's MCP authentication flow (`codex mcp login` or `/mcp`). Fanout opens a browser consent screen, uses PKCE, and issues a short-lived audience-bound access token with rotating refresh credentials. The ingest token is for OTLP only and is not accepted by `/mcp`.
+This only works when `MCP_PUBLIC_URL` is set to the same public URL
+(`https://fanout.example.com/mcp` here) — it is the OAuth issuer and token
+audience for `/mcp`, and clients cannot complete the OAuth flow against a
+server whose `MCP_PUBLIC_URL` points elsewhere. See the
+[environment reference](#mcp).
+
+The MCP endpoint uses OAuth 2.1 for remote clients. Add your instance's `/mcp` URL to Codex or Claude Code as a Streamable HTTP server, then use the client's MCP authentication flow (`codex mcp login` or `/mcp`). Fanout opens a browser consent screen, uses PKCE, and issues a short-lived audience-bound access token with rotating refresh credentials. The ingest token is for OTLP only and is not accepted by `/mcp`.
 
 ### Tools
 
@@ -398,6 +410,7 @@ database under `DATA_DIR`; no separate web runtime or database is required.
 | Variable | Default | Description |
 | --- | --- | --- |
 | `MCP_ENABLED` | `true` | Expose the MCP server at `/mcp`. Disable if you don't want it reachable. |
+| `MCP_PUBLIC_URL` | `https://demo.fanout.test/mcp` | Canonical public URL of the MCP endpoint — the OAuth issuer and token audience. **Must** be set to your deployment's public URL (HTTPS, ending in `/mcp`) or external MCP clients cannot authenticate; the default is a development placeholder. |
 
 ### TLS
 

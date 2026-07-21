@@ -28,6 +28,20 @@ var (
 	ErrInvalidOAuthToken   = errors.New("invalid oauth token")
 )
 
+// TokenKind discriminates the two token rows stored per grant.
+type TokenKind string
+
+const (
+	TokenKindAccess  TokenKind = "access"
+	TokenKindRefresh TokenKind = "refresh"
+)
+
+// oauthClientGCAge is how old a dynamically-registered client must be before
+// CleanupExpired collects it once no codes or tokens reference it. MCP
+// clients re-register automatically (RFC 7591), so a stale client_id is
+// cheap to lose.
+const oauthClientGCAge = 24 * time.Hour
+
 type OAuthClient struct {
 	ClientID                string   `json:"client_id"`
 	ClientName              string   `json:"client_name"`
@@ -50,7 +64,7 @@ type OAuthAuthorizationCode struct {
 }
 
 type OAuthTokenRecord struct {
-	Kind      string
+	Kind      TokenKind
 	FamilyID  string
 	ClientID  string
 	UserID    string
@@ -65,6 +79,12 @@ type OAuthTokenPair struct {
 	RefreshToken string
 	ExpiresIn    int64
 	Scope        string
+}
+
+// String implements fmt.Stringer with the token material redacted so that a
+// stray %v/%s log of a pair can never leak raw credentials.
+func (p OAuthTokenPair) String() string {
+	return fmt.Sprintf("OAuthTokenPair{AccessToken:[REDACTED], RefreshToken:[REDACTED], ExpiresIn:%d, Scope:%q}", p.ExpiresIn, p.Scope)
 }
 
 type OAuthStore struct {
@@ -161,6 +181,9 @@ func (s *OAuthStore) ConsumeAuthorizationCode(ctx context.Context, raw string) (
 		return OAuthAuthorizationCode{}, fmt.Errorf("oauth: open code transaction: %w", err)
 	}
 	defer conn.Close()
+	// Raw BEGIN IMMEDIATE on a pinned conn (instead of db.BeginTx) takes
+	// SQLite's write lock up front, so the read-then-delete below can't race
+	// another consumer of the same code between its SELECT and DELETE.
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return OAuthAuthorizationCode{}, fmt.Errorf("oauth: begin code transaction: %w", err)
 	}
@@ -212,6 +235,9 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 		return OAuthTokenPair{}, fmt.Errorf("oauth: open refresh transaction: %w", err)
 	}
 	defer conn.Close()
+	// Raw BEGIN IMMEDIATE on a pinned conn (instead of db.BeginTx) takes
+	// SQLite's write lock up front, so two concurrent rotations of the same
+	// refresh token serialize instead of both reading it as unrevoked.
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		return OAuthTokenPair{}, fmt.Errorf("oauth: begin refresh transaction: %w", err)
 	}
@@ -227,10 +253,16 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 		return OAuthTokenPair{}, err
 	}
 	now := s.now().UTC().Unix()
-	if record.Kind != "refresh" || record.ClientID != clientID || record.Resource != resource || record.ExpiresAt.Unix() <= now {
+	if record.Kind != TokenKindRefresh || record.ClientID != clientID || record.Resource != resource {
 		return OAuthTokenPair{}, ErrInvalidOAuthGrant
 	}
+	// Reuse detection runs BEFORE the expiry check: replaying a refresh token
+	// that was rotated and has since expired is still evidence of theft and
+	// must revoke the family, not fall through to a plain invalid grant.
 	if record.RevokedAt.Valid {
+		// The family revocation is committed BEFORE returning the error on
+		// purpose: the call fails, but the revocation must persist — rolling
+		// it back with the failed transaction would undo the defense.
 		if _, revokeErr := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE family_id = ?`, now, record.FamilyID); revokeErr != nil {
 			return OAuthTokenPair{}, fmt.Errorf("oauth: revoke reused token family: %w", revokeErr)
 		}
@@ -240,8 +272,22 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 		committed = true
 		return OAuthTokenPair{}, ErrOAuthRefreshReuse
 	}
+	if record.ExpiresAt.Unix() <= now {
+		return OAuthTokenPair{}, ErrInvalidOAuthGrant
+	}
 	var active int64
-	if err := conn.QueryRowContext(ctx, `SELECT active FROM users WHERE id = ?`, record.UserID).Scan(&active); err != nil || active != 1 {
+	err = conn.QueryRowContext(ctx, `SELECT active FROM users WHERE id = ?`, record.UserID).Scan(&active)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		active = 0 // user row is definitively gone: treat as inactive
+	case err != nil:
+		// A failed read is an infrastructure error, never an invalid grant:
+		// do not revoke the family because the database hiccuped.
+		return OAuthTokenPair{}, fmt.Errorf("oauth: read user for refresh: %w", err)
+	}
+	if active != 1 {
+		// Same deliberate commit-before-error as the reuse branch above: the
+		// revocation of the inactive user's family must outlive the failure.
 		if _, revokeErr := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE family_id = ?`, now, record.FamilyID); revokeErr != nil {
 			return OAuthTokenPair{}, fmt.Errorf("oauth: revoke inactive user token family: %w", revokeErr)
 		}
@@ -265,15 +311,76 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 	return pair, nil
 }
 
+// VerifyAccessToken returns ErrInvalidOAuthToken only for tokens that are
+// definitively invalid (unknown, expired, revoked, or wrong audience). A
+// database failure is returned as a wrapped infrastructure error so callers
+// can fail closed without treating an outage as a bad credential.
 func (s *OAuthStore) VerifyAccessToken(ctx context.Context, raw, resource string) (OAuthTokenRecord, error) {
 	record, err := readOAuthToken(ctx, s.db, raw)
-	if err != nil {
+	if errors.Is(err, ErrInvalidOAuthGrant) {
 		return OAuthTokenRecord{}, ErrInvalidOAuthToken
 	}
-	if record.Kind != "access" || record.Resource != resource || record.RevokedAt.Valid || !record.ExpiresAt.After(s.now()) {
+	if err != nil {
+		return OAuthTokenRecord{}, err
+	}
+	if record.Kind != TokenKindAccess || record.Resource != resource || record.RevokedAt.Valid || !record.ExpiresAt.After(s.now()) {
 		return OAuthTokenRecord{}, ErrInvalidOAuthToken
 	}
 	return record, nil
+}
+
+// CleanupExpired garbage-collects OAuth state that can no longer affect any
+// flow, returning the total number of rows deleted. It removes:
+//
+//   - authorization codes past their expiry,
+//   - token rows that are individually dead (expired or revoked) AND whose
+//     refresh family has no live refresh token left — revoked rows in a
+//     still-live family are kept because they are exactly what refresh-reuse
+//     detection matches against,
+//   - dynamically-registered clients older than oauthClientGCAge with no
+//     remaining codes or tokens.
+func (s *OAuthStore) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {
+	cutoff := now.UTC().Unix()
+	var total int64
+
+	res, err := s.db.ExecContext(ctx, `DELETE FROM oauth_authorization_codes WHERE expires_at <= ?`, cutoff)
+	if err != nil {
+		return total, fmt.Errorf("oauth: cleanup authorization codes: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil {
+		total += n
+	}
+
+	res, err = s.db.ExecContext(ctx, `
+		DELETE FROM oauth_tokens
+		WHERE (expires_at <= ? OR revoked_at IS NOT NULL)
+		  AND NOT EXISTS (
+			SELECT 1 FROM oauth_tokens live
+			WHERE live.family_id = oauth_tokens.family_id
+			  AND live.kind = ?
+			  AND live.revoked_at IS NULL
+			  AND live.expires_at > ?
+		  )`, cutoff, string(TokenKindRefresh), cutoff)
+	if err != nil {
+		return total, fmt.Errorf("oauth: cleanup tokens: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil {
+		total += n
+	}
+
+	res, err = s.db.ExecContext(ctx, `
+		DELETE FROM oauth_clients
+		WHERE created_at <= ?
+		  AND NOT EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.client_id = oauth_clients.client_id)
+		  AND NOT EXISTS (SELECT 1 FROM oauth_authorization_codes c WHERE c.client_id = oauth_clients.client_id)`,
+		now.UTC().Add(-oauthClientGCAge).Unix())
+	if err != nil {
+		return total, fmt.Errorf("oauth: cleanup clients: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil {
+		total += n
+	}
+	return total, nil
 }
 
 type oauthDB interface {
@@ -294,9 +401,9 @@ func (s *OAuthStore) insertTokenPair(ctx context.Context, db oauthDB, familyID, 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO oauth_tokens (
 			token_hash, kind, family_id, client_id, user_id, scope, resource, expires_at, created_at
-		) VALUES (?, 'access', ?, ?, ?, ?, ?, ?, ?), (?, 'refresh', ?, ?, ?, ?, ?, ?, ?)`,
-		oauthHash(access), familyID, clientID, userID, scope, resource, now.Add(OAuthAccessTTL).Unix(), now.Unix(),
-		oauthHash(refresh), familyID, clientID, userID, scope, resource, now.Add(OAuthRefreshTTL).Unix(), now.Unix(),
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		oauthHash(access), string(TokenKindAccess), familyID, clientID, userID, scope, resource, now.Add(OAuthAccessTTL).Unix(), now.Unix(),
+		oauthHash(refresh), string(TokenKindRefresh), familyID, clientID, userID, scope, resource, now.Add(OAuthRefreshTTL).Unix(), now.Unix(),
 	); err != nil {
 		return OAuthTokenPair{}, fmt.Errorf("oauth: store token pair: %w", err)
 	}

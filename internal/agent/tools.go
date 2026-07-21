@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/labstack/fanout/internal/dashboard"
@@ -84,6 +85,8 @@ func (r *ToolRegistry) Execute(ctx context.Context, call ToolCall) (ToolExecutio
 	if result.StructuredContent != nil {
 		if encoded, marshalErr := json.Marshal(result.StructuredContent); marshalErr == nil {
 			content = string(encoded)
+		} else {
+			slog.Warn("encode MCP structured content failed, falling back to text content", "tool", call.Name, "err", marshalErr)
 		}
 	}
 	if content == "" {

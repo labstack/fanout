@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -109,6 +110,15 @@ func (s *Server) dashboardUpdate(ctx context.Context, req *mcp.CallToolRequest, 
 	return summary(fmt.Sprintf("Updated dashboard %q with %d widgets.", item.Name, len(item.State.Widgets))), dashboardOutput{Dashboard: item}, nil
 }
 
+// dashboardOwner resolves the authenticated owner for a dashboard tool call.
+//
+// Trust model: OAuth TokenInfo, when present, is always authoritative — the
+// client-suppliable _meta owner key is never consulted alongside it, so a
+// remote client cannot spoof another owner. The _meta fallback is safe only
+// because ProtectMCP (internal/api/oauth.go) attaches TokenInfo to every
+// HTTP-transport request, leaving the fallback reachable solely via the
+// in-process transport, where the agent runtime (internal/agent/tools.go)
+// injects the already-authenticated user's ID. See dashboard.OwnerMetaKey.
 func dashboardOwner(req *mcp.CallToolRequest) (string, error) {
 	if req != nil && req.Extra != nil && req.Extra.TokenInfo != nil && strings.TrimSpace(req.Extra.TokenInfo.UserID) != "" {
 		if !slices.Contains(req.Extra.TokenInfo.Scopes, dashboard.OAuthScope) {
@@ -135,6 +145,9 @@ func dashboardToolError(err error) error {
 		if errors.As(err, &validation) {
 			return validation
 		}
+		// MCP tool errors bypass the HTTP request logger, so this is the only
+		// place the underlying storage/tx failure gets recorded.
+		slog.Error("dashboard tool operation failed", "error", err)
 		return errors.New("dashboard operation failed")
 	}
 }

@@ -187,9 +187,9 @@ func TestSuggestedIngestEndpoint(t *testing.T) {
 			want:     "demo.fanout.test:4317",
 		},
 		{
-			name:     "missing request host uses local development hostname",
+			name:     "missing request host falls back to localhost",
 			grpcAddr: ":4317",
-			want:     "demo.fanout.test:4317",
+			want:     "localhost:4317",
 		},
 	}
 	for _, tc := range tests {

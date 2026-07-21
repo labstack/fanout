@@ -17,15 +17,26 @@ required at runtime.
 
 ## Quick start
 
+Fanout refuses to start without JWT secrets, SMTP credentials (email-code
+login), and an LLM API key (chat investigator). Replace the `<...>`
+placeholders with your values:
+
 ```sh
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 \
   -v $PWD/data:/var/lib/fanout/data \
+  -e JWT_SECRET=$(openssl rand -hex 32) \
+  -e JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+  -e SMTP_HOST=<smtp-host> \
+  -e SMTP_USER=<smtp-user> \
+  -e SMTP_PASS=<smtp-password> \
+  -e SMTP_FROM='"Fanout" <fanout@example.com>' \
+  -e AI_API_KEY=<anthropic-or-openai-key> \
   ghcr.io/labstack/fanout:latest
 ```
 
-Open <https://demo.fanout.test>, complete setup, and copy the ingest token. Point any OTLP collector or SDK at
-`demo.fanout.test:4317` with header `x-fanout-ingest-token: fo_<token>`.
+Open <http://localhost:7520>, complete setup, and copy the ingest token. Point any OTLP collector or SDK at
+`localhost:4317` (or your host's address) with header `x-fanout-ingest-token: fo_<token>`.
 
 Full setup walkthrough: [fanout.run/docs#first-boot](https://fanout.run/docs/#first-boot).
 

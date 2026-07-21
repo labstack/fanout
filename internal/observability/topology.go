@@ -56,6 +56,6 @@ func (s *Service) Topology(ctx context.Context, scope Scope, limit int) (Result[
 		Schema:     TopologySchema,
 		Summary:    fmt.Sprintf("%d services connected by %d dependency edges", len(nodes), len(edges)),
 		Data:       data,
-		Provenance: provenance(scope),
+		Provenance: s.provenance(scope),
 	}, nil
 }

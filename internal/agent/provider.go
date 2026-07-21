@@ -13,6 +13,22 @@ const (
 	RoleTool      Role = "tool"
 )
 
+// EventType classifies a stream event.
+type EventType int
+
+const (
+	EventText    EventType = iota // text token
+	EventToolUse                  // model requested a tool call
+	EventStop                     // generation stopped
+	EventError                    // provider error
+)
+
+// Provider streams model completions. The provider must:
+//   - Emit zero or more EventText events with text deltas
+//   - Emit zero or more EventToolUse events (ToolCall must be non-nil)
+//   - Emit exactly one EventStop OR EventError as the final event
+//   - EventError is terminal: the provider must return after emitting it
+//   - Stop streaming if the callback returns a non-nil error
 type Provider interface {
 	Stream(context.Context, StreamParams, func(StreamEvent) error) error
 }
@@ -49,11 +65,14 @@ type ToolDef struct {
 	InputSchema any    `json:"input_schema"`
 }
 
+// StreamEvent is a single event from the model stream; Type discriminates
+// which payload field is set.
 type StreamEvent struct {
-	Delta      string
-	ToolCall   *ToolCall
-	StopReason string
-	Error      string
+	Type       EventType
+	Delta      string    // text token (EventText)
+	ToolCall   *ToolCall // completed tool call (EventToolUse)
+	StopReason string    // e.g. "end_turn", "tool_calls", "length", "max_tokens" (EventStop)
+	Error      string    // error message (EventError)
 }
 
 type APIError struct {

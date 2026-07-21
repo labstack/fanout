@@ -196,14 +196,6 @@ func (c Config) ControlSQLitePath() string {
 	return filepath.Join(c.ControlDir(), "fanout.sqlite")
 }
 
-func (c Config) BookmarksDir() string {
-	return filepath.Join(c.ControlDir(), "bookmarks")
-}
-
-func (c Config) ReportsDir() string {
-	return filepath.Join(c.ControlDir(), "reports")
-}
-
 // TLSEnabled reports whether a cert/key pair is configured. When true, HTTP
 // serves HTTPS on HTTP_ADDR and OTLP gRPC accepts TLS (required for public ingest).
 func (c Config) TLSEnabled() bool {

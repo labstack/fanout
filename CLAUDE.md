@@ -67,12 +67,26 @@ The current standard tools are:
 | `service_topology` | Dependency graph, traffic flow, and error matrix plus `ui://fanout/service-topology.html` |
 | `service_performance` | Activity, latency heatmap, endpoints, and comparison plus `ui://fanout/service-performance.html` |
 | `trace_detail` | Trace waterfall, flame graph, and correlated logs plus `ui://fanout/trace-detail.html` |
-| `search_logs` | Searchable logs and severity histogram plus `ui://fanout/log-search.html` |
+| `search_logs` | Searchable logs and severity histogram plus `ui://fanout/log-explorer.html` |
 
-Both tools return authoritative structured output with scope and provenance.
+Each tool returns authoritative structured output with scope and provenance.
 Hosts without MCP Apps still receive useful structured/text results. The web
 host renders app resources using the official `AppBridge` and
 `PostMessageTransport`; do not reintroduce Fanout-specific block mapping.
+
+Four dashboard tools (`internal/mcp/dashboards.go`) manage named, owner-scoped
+dashboards stored in the control SQLite database:
+
+| Tool | Result |
+| --- | --- |
+| `dashboard_list` | The owner's dashboards with widget counts |
+| `dashboard_get` | One dashboard's widgets, shared filters, and 12-column layout |
+| `dashboard_create` | Adds a complete named dashboard (additive) |
+| `dashboard_update` | Replaces an existing dashboard's design (destructive; explicit request only) |
+
+Dashboard tools require the `fanout:dashboard` OAuth scope in addition to
+`fanout:read`; the owner comes from the verified token (or the internal
+agent's request meta), never from tool input.
 
 ### UI package naming
 
@@ -85,17 +99,26 @@ in `ui/apps`. The Go `ui` package is not a renderer registry.
 ```text
 cmd/fanout/                 process composition and the single entry point
 internal/agent/             providers, AG-UI runtime, MCP tool adapter, history
-internal/api/               HTTP routes, auth, settings, alerts, and health
+internal/alert/             expr-lang alert engine, rule store, webhook delivery
+internal/api/               HTTP routes, auth middleware, settings, alerts, health
+internal/auth/              email-code login, JWT issuance, MCP OAuth store
+internal/dashboard/         dashboard domain service, validation, and identity
+internal/db/                control SQLite schema, migrations, and sqlc queries
+internal/env/               environment config loading and validation
+internal/id/                UUIDv7 identifier generation
+internal/ingest/            OTLP gRPC receiver
+internal/intelligence/      anomaly detection
+internal/lake/              DuckLake/Parquet writer and maintenance
 internal/mcp/               MCP tools, server, and embedded MCP App HTML
+internal/metrics/           Prometheus metrics
 internal/observability/     typed query/result domain types
-internal/ingest/             OTLP gRPC receiver
-internal/lake/               DuckLake/Parquet writer and maintenance
-internal/query/              DuckDB catalog, queries, and rollups
-internal/store/              control SQLite bootstrap
-internal/ui/                 embedded compiled browser assets only
-ui/host/                     React AG-UI browser host (build-time)
-ui/apps/                     portable React MCP Apps (build-time)
-site/                        public site and documentation
+internal/query/             DuckDB catalog, queries, and rollups
+internal/settings/          ingest-token and application settings store
+internal/store/             control SQLite bootstrap
+internal/ui/                embedded compiled browser assets only
+ui/host/                    React AG-UI browser host (build-time)
+ui/apps/                    portable React MCP Apps (build-time)
+site/                       public site and documentation
 ```
 
 Deleted packages such as `internal/ai`, `internal/render`, and
@@ -108,7 +131,7 @@ legacy tool layer.
 ```bash
 just install
 just build
-just run
+just up   # local dev stack; `just down` to stop
 ```
 
 `just build` compiles both TypeScript projects and then builds `bin/fanout`.
@@ -137,6 +160,7 @@ Fanout loads `.env`, then `.env.${ENV}` (default `development`). Core settings:
 | `DATA_DIR` | `./data` | telemetry, query state, and control SQLite |
 | `DEFAULT_NAMESPACE` | `default` | fallback OTLP service namespace |
 | `MCP_ENABLED` | `true` | expose `/mcp` to external clients |
+| `MCP_PUBLIC_URL` | `https://demo.fanout.test/mcp` | canonical public MCP URL — the OAuth issuer/resource (audience) for `/mcp`; MUST be set to the deployment's public URL for external MCP clients; HTTPS ending in `/mcp` |
 | `AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
 | `AI_API_KEY` | required | model provider credential |
 | `AI_MODEL` | provider default | optional model override |
@@ -145,7 +169,7 @@ Fanout loads `.env`, then `.env.${ENV}` (default `development`). Core settings:
 | `JWT_REFRESH_SECRET` | required | distinct refresh-token key |
 | `SMTP_HOST/USER/PASS/FROM` | required | email-code login delivery |
 
-The provider defaults are defined in `internal/agent/provider.go`. Keep model
+The provider defaults are defined in `internal/agent/provider_http.go`. Keep model
 and SDK changes current and verify them against upstream sources before bumping.
 
 ## HTTP surface
@@ -157,6 +181,7 @@ and SDK changes current and verify them against upstream sources before bumping.
 | `POST /api/agent` | AG-UI event stream |
 | `GET /api/agent/threads/:threadID` | owner-scoped thread history |
 | `GET /api/observability/...` | deterministic typed query API |
+| `/api/dashboards*`, `/api/dashboard` | owner-scoped dashboard CRUD and default dashboard state |
 | `ANY /mcp` | streamable HTTP MCP server |
 | `/api/auth/*` | setup, email login, refresh, logout, and MCP OAuth consent |
 | `GET /`, `GET /*` | embedded browser shell and SPA fallback |
@@ -170,8 +195,8 @@ always scopes them to the authenticated owner ID.
 - telemetry data: DuckLake catalog plus partitioned Parquet under
   `DATA_DIR/telemetry`.
 - query catalog/temp data: `DATA_DIR/query`.
-- users, settings, alerts, AG-UI threads, and runs:
-  `DATA_DIR/control/fanout.sqlite`.
+- users, settings, alerts, MCP OAuth clients/codes/tokens, dashboards,
+  AG-UI threads, and runs: `DATA_DIR/control/fanout.sqlite`.
 
 Agent history tables are `agui_threads` and `agui_runs`. No PostgreSQL or
 separate conversation database is used.

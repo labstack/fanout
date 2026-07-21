@@ -162,6 +162,56 @@ func TestPublicReadStatusAndAnonymousMe(t *testing.T) {
 	}
 }
 
+// A DB failure while resolving a valid bearer token is an infrastructure
+// error: it must return 500, not 401 "invalid token" — a 401 would make
+// clients discard perfectly good credentials during an outage.
+func TestBearerAuthDBFailureReturns500NotInvalidToken(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close() })
+
+	secret := "0123456789abcdef0123456789abcdef"
+	users := auth.NewUserStore(sqlite.DB)
+	user, err := users.Create("db-outage@example.com", "", "admin")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, err := auth.SignAccess(secret, user.ID)
+	if err != nil {
+		t.Fatalf("SignAccess: %v", err)
+	}
+
+	e := echo.New()
+	RegisterAuthMiddleware(e, users, secret, false)
+	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+
+	// Simulate a DB failure on the user lookup.
+	if _, err := sqlite.DB.Exec(`ALTER TABLE users RENAME TO users_offline`); err != nil {
+		t.Fatalf("hide users table: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("bearer during DB failure = %d, want 500", rec.Code)
+	}
+
+	// Same token works once the DB recovers — nothing was invalidated.
+	if _, err := sqlite.DB.Exec(`ALTER TABLE users_offline RENAME TO users`); err != nil {
+		t.Fatalf("restore users table: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec = httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("bearer after DB recovery = %d, want 204", rec.Code)
+	}
+}
+
 func TestRequireRoleUsesCurrentUserState(t *testing.T) {
 	e, users, _, _, secret, _ := newTestAuthServer(t)
 	user, err := users.Create("admin@example.com", "", "admin")

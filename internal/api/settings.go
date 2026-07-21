@@ -88,7 +88,7 @@ func suggestedIngestEndpoint(req *http.Request, grpcAddr, configured string) str
 		}
 	}
 	if host == "" {
-		host = "demo.fanout.test"
+		host = "localhost"
 	}
 	return net.JoinHostPort(host, port)
 }

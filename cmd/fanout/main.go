@@ -183,7 +183,15 @@ func main() {
 			if strings.Contains(uri, "token=") {
 				uri = tokenRedactRe.ReplaceAllString(uri, "token=REDACTED")
 			}
-			slog.Info("request", "method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency)
+			attrs := []any{"method", v.Method, "uri", uri, "status", v.Status, "latency", v.Latency}
+			if v.Error != nil {
+				attrs = append(attrs, "err", v.Error)
+			}
+			if v.Status >= 500 {
+				slog.Error("request", attrs...)
+			} else {
+				slog.Info("request", attrs...)
+			}
 			return nil
 		},
 	}))
@@ -238,13 +246,41 @@ func main() {
 	api.RegisterSettingsRoutes(e, cfg, settingsStore)
 	slog.Info("auth enabled")
 
+	// Hourly auth-state sweep: expired verification codes, expired/revoked OAuth
+	// codes and tokens, and abandoned dynamically-registered OAuth clients.
+	// Without it these tables grow without bound (open DCR on /oauth/register).
+	oauthStore := auth.NewOAuthStore(sqlite.DB)
+	go func() {
+		sweep := func() {
+			if err := codeStore.Cleanup(); err != nil {
+				slog.Error("auth code cleanup failed", "err", err)
+			}
+			if n, err := oauthStore.CleanupExpired(ctx, time.Now()); err != nil {
+				slog.Error("oauth cleanup failed", "err", err)
+			} else if n > 0 {
+				slog.Info("oauth cleanup", "deleted", n)
+			}
+		}
+		sweep()
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				sweep()
+			}
+		}
+	}()
+
 	// The model executes the same standard MCP tools exposed to external clients.
 	// The internal connection is in-memory, so the single binary has no HTTP
 	// self-call, shared secret, or sidecar runtime.
 	mcpServer := mcp.New(queries, dashboards, version)
 	if cfg.MCPEnabled {
 		mcpAuthorization, err := api.NewMCPAuthorization(
-			auth.NewOAuthStore(sqlite.DB), userStore, refreshSecret, cfg.MCPPublicURL,
+			oauthStore, userStore, refreshSecret, cfg.MCPPublicURL,
 		)
 		if err != nil {
 			slog.Error("MCP OAuth init failed", "err", err)
@@ -327,6 +363,20 @@ func printSetupBanner(httpAddr, token string) {
 	fmt.Fprintln(os.Stderr, strings.Join(lines, "\n"))
 }
 
-func setupLoginURL(_ string) string {
-	return "https://demo.fanout.test/login"
+func setupLoginURL(addr string) string {
+	if strings.HasPrefix(addr, ":") {
+		return "http://127.0.0.1" + addr + "/login"
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		switch host {
+		case "", "0.0.0.0", "::":
+			host = "127.0.0.1"
+		}
+		if strings.Contains(host, ":") {
+			host = "[" + strings.Trim(host, "[]") + "]"
+		}
+		return "http://" + host + ":" + port + "/login"
+	}
+	return "http://" + addr + "/login"
 }

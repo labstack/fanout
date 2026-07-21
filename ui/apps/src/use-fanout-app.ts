@@ -27,7 +27,10 @@ export function useFanoutApp<T>(name: string) {
       };
       app.ontoolresult = acceptResult;
       app.onhostcontextchanged = (context) => setHost((previous) => ({ ...previous, ...context }));
-      app.onerror = () => setToolError("This view could not be refreshed. Please try again.");
+      app.onerror = (cause) => {
+        console.error("MCP app error", cause);
+        setToolError("This view could not be refreshed. Please try again.");
+      };
     },
   });
 
@@ -39,7 +42,8 @@ export function useFanoutApp<T>(name: string) {
     if (!connection.app) return;
     try {
       acceptResult(await connection.app.callServerTool({ name: toolName, arguments: toolInput }));
-    } catch {
+    } catch (cause) {
+      console.error(`Tool call ${toolName} failed`, cause);
       setToolError("This view could not be refreshed. Please try again.");
     }
   }

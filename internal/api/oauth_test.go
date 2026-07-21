@@ -162,6 +162,262 @@ func TestMCPOAuthRegistrationRejectsUnsafeRedirect(t *testing.T) {
 	}
 }
 
+// --- HTTP-layer flow helpers -------------------------------------------------
+
+const testRedirectURI = "http://localhost:4321/callback"
+
+var formHeaders = map[string]string{"Content-Type": "application/x-www-form-urlencoded"}
+
+func oauthSessionCookie(t *testing.T, users *auth.UserStore, refreshSecret, email string) *http.Cookie {
+	t.Helper()
+	user, err := users.Create(email, "", "admin")
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	token, err := auth.SignRefresh(refreshSecret, user.ID, time.Now())
+	if err != nil {
+		t.Fatalf("SignRefresh: %v", err)
+	}
+	return &http.Cookie{Name: "refresh_token", Value: token}
+}
+
+func registerOAuthClient(t *testing.T, e *echo.Echo) auth.OAuthClient {
+	t.Helper()
+	rec := serve(t, e, http.MethodPost, "/oauth/register",
+		`{"client_name":"Test Client","redirect_uris":["`+testRedirectURI+`"]}`,
+		map[string]string{"Content-Type": "application/json"})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("registration = %d %s", rec.Code, rec.Body.String())
+	}
+	var client auth.OAuthClient
+	if err := json.Unmarshal(rec.Body.Bytes(), &client); err != nil {
+		t.Fatalf("decode registration: %v", err)
+	}
+	return client
+}
+
+func pkcePair() (verifier, challenge string) {
+	verifier = strings.Repeat("k", 64)
+	sum := sha256.Sum256([]byte(verifier))
+	return verifier, base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
+// authorizeParams builds a valid authorization request; scope "" omits the
+// scope parameter entirely.
+func authorizeParams(clientID, scope, challenge string) url.Values {
+	params := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {clientID},
+		"redirect_uri":          {testRedirectURI},
+		"state":                 {"state-xyz"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"resource":              {testMCPResource},
+	}
+	if scope != "" {
+		params.Set("scope", scope)
+	}
+	return params
+}
+
+func approveAndGetCode(t *testing.T, e *echo.Echo, params url.Values, cookie *http.Cookie) string {
+	t.Helper()
+	params.Set("decision", "approve")
+	rec := serve(t, e, http.MethodPost, "/api/auth/oauth/authorize", params.Encode(), formHeaders, cookie)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("approve = %d %s", rec.Code, rec.Body.String())
+	}
+	callback, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse callback: %v", err)
+	}
+	code := callback.Query().Get("code")
+	if code == "" {
+		t.Fatalf("callback without code: %s", callback)
+	}
+	return code
+}
+
+func exchangeCode(t *testing.T, e *echo.Echo, clientID, code, redirectURI, verifier string) *httptest.ResponseRecorder {
+	t.Helper()
+	form := url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {clientID},
+		"code":          {code},
+		"redirect_uri":  {redirectURI},
+		"code_verifier": {verifier},
+		"resource":      {testMCPResource},
+	}
+	return serve(t, e, http.MethodPost, "/oauth/token", form.Encode(), formHeaders)
+}
+
+func decodeTokens(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("token exchange = %d %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode tokens: %v", err)
+	}
+	return body
+}
+
+// --- HTTP-layer negative-path and scope tests ---------------------------------
+
+func TestMCPOAuthTokenExchangeRejectsWrongPKCEVerifier(t *testing.T) {
+	e, users, refreshSecret := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, users, refreshSecret, "pkce@example.com")
+	client := registerOAuthClient(t, e)
+	_, challenge := pkcePair()
+	code := approveAndGetCode(t, e, authorizeParams(client.ClientID, mcpReadScope, challenge), cookie)
+
+	rec := exchangeCode(t, e, client.ClientID, code, testRedirectURI, strings.Repeat("x", 64))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_grant") {
+		t.Fatalf("wrong PKCE verifier = %d %s, want 400 invalid_grant", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMCPOAuthConsentDenyRedirectsAccessDenied(t *testing.T) {
+	e, users, refreshSecret := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, users, refreshSecret, "deny@example.com")
+	client := registerOAuthClient(t, e)
+	_, challenge := pkcePair()
+	params := authorizeParams(client.ClientID, mcpReadScope, challenge)
+	params.Set("decision", "deny")
+
+	rec := serve(t, e, http.MethodPost, "/api/auth/oauth/authorize", params.Encode(), formHeaders, cookie)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("deny = %d %s, want redirect", rec.Code, rec.Body.String())
+	}
+	callback, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse callback: %v", err)
+	}
+	if callback.Query().Get("error") != "access_denied" || callback.Query().Get("code") != "" {
+		t.Fatalf("deny callback = %s, want error=access_denied and no code", callback)
+	}
+	if callback.Query().Get("state") != "state-xyz" {
+		t.Fatalf("deny callback dropped state: %s", callback)
+	}
+}
+
+func TestMCPOAuthTokenExchangeRejectsRedirectURIMismatch(t *testing.T) {
+	e, users, refreshSecret := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, users, refreshSecret, "redirect-mismatch@example.com")
+	client := registerOAuthClient(t, e)
+	verifier, challenge := pkcePair()
+	code := approveAndGetCode(t, e, authorizeParams(client.ClientID, mcpReadScope, challenge), cookie)
+
+	rec := exchangeCode(t, e, client.ClientID, code, "http://localhost:4321/other", verifier)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_grant") {
+		t.Fatalf("redirect_uri mismatch = %d %s, want 400 invalid_grant", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMCPOAuthRefreshGrantOverHTTP(t *testing.T) {
+	e, users, refreshSecret := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, users, refreshSecret, "refresh-http@example.com")
+	client := registerOAuthClient(t, e)
+	verifier, challenge := pkcePair()
+	code := approveAndGetCode(t, e, authorizeParams(client.ClientID, mcpReadScope, challenge), cookie)
+	tokens := decodeTokens(t, exchangeCode(t, e, client.ClientID, code, testRedirectURI, verifier))
+	firstRefresh := tokens["refresh_token"].(string)
+
+	// A resource that is not this MCP server is rejected before rotation.
+	mismatch := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {client.ClientID},
+		"refresh_token": {firstRefresh},
+		"resource":      {"https://other.example/mcp"},
+	}
+	rec := serve(t, e, http.MethodPost, "/oauth/token", mismatch.Encode(), formHeaders)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_target") {
+		t.Fatalf("resource mismatch = %d %s, want 400 invalid_target", rec.Code, rec.Body.String())
+	}
+
+	// Omitted resource defaults to this MCP server and rotates successfully.
+	rotate := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {client.ClientID},
+		"refresh_token": {firstRefresh},
+	}
+	rotated := decodeTokens(t, serve(t, e, http.MethodPost, "/oauth/token", rotate.Encode(), formHeaders))
+	if rotated["access_token"] == tokens["access_token"] || rotated["refresh_token"] == firstRefresh {
+		t.Fatalf("refresh grant did not rotate credentials: %v", rotated)
+	}
+	if rotated["scope"] != mcpReadScope {
+		t.Fatalf("rotated scope = %v, want %q", rotated["scope"], mcpReadScope)
+	}
+	mcp := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer " + rotated["access_token"].(string)})
+	if mcp.Code != http.StatusNoContent {
+		t.Fatalf("MCP with rotated token = %d %s", mcp.Code, mcp.Body.String())
+	}
+
+	// Replaying the consumed refresh token is invalid_grant at the HTTP layer.
+	rec = serve(t, e, http.MethodPost, "/oauth/token", rotate.Encode(), formHeaders)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_grant") {
+		t.Fatalf("refresh replay = %d %s, want 400 invalid_grant", rec.Code, rec.Body.String())
+	}
+}
+
+// An omitted scope must grant read-only access, and the consent card must say
+// exactly that — never the full supported-scope set.
+func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
+	e, users, refreshSecret := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, users, refreshSecret, "default-scope@example.com")
+	client := registerOAuthClient(t, e)
+	verifier, challenge := pkcePair()
+	params := authorizeParams(client.ClientID, "", challenge) // no scope
+
+	consent := serve(t, e, http.MethodGet, "/api/auth/oauth/authorize?"+params.Encode(), "", nil, cookie)
+	if consent.Code != http.StatusOK {
+		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
+	}
+	body := consent.Body.String()
+	if !strings.Contains(body, "read-only") || !strings.Contains(body, mcpReadScope) {
+		t.Fatalf("consent for omitted scope must advertise read-only %s, got: %s", mcpReadScope, body)
+	}
+	if strings.Contains(body, "fanout:dashboard") || strings.Contains(body, "dashboards and overwrite") {
+		t.Fatalf("consent for omitted scope leaked dashboard write access: %s", body)
+	}
+
+	code := approveAndGetCode(t, e, params, cookie)
+	tokens := decodeTokens(t, exchangeCode(t, e, client.ClientID, code, testRedirectURI, verifier))
+	if tokens["scope"] != mcpReadScope {
+		t.Fatalf("granted scope = %v, want %q", tokens["scope"], mcpReadScope)
+	}
+}
+
+// When dashboard write access is requested, the consent card must say so and
+// must not claim the grant is read-only.
+func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
+	e, users, refreshSecret := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, users, refreshSecret, "dashboard-scope@example.com")
+	client := registerOAuthClient(t, e)
+	verifier, challenge := pkcePair()
+	scope := mcpReadScope + " fanout:dashboard"
+	params := authorizeParams(client.ClientID, scope, challenge)
+
+	consent := serve(t, e, http.MethodGet, "/api/auth/oauth/authorize?"+params.Encode(), "", nil, cookie)
+	if consent.Code != http.StatusOK {
+		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
+	}
+	body := consent.Body.String()
+	if !strings.Contains(body, "Create and replace dashboards") || !strings.Contains(body, "fanout:dashboard") {
+		t.Fatalf("consent must disclose dashboard write access, got: %s", body)
+	}
+	if strings.Contains(body, "read-only") {
+		t.Fatalf("consent claims read-only for a write-capable grant: %s", body)
+	}
+
+	code := approveAndGetCode(t, e, params, cookie)
+	tokens := decodeTokens(t, exchangeCode(t, e, client.ClientID, code, testRedirectURI, verifier))
+	if tokens["scope"] != scope {
+		t.Fatalf("granted scope = %v, want %q", tokens["scope"], scope)
+	}
+}
+
 func serve(t *testing.T, e *echo.Echo, method, target, body string, headers map[string]string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, target, strings.NewReader(body))

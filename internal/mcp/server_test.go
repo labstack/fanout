@@ -49,6 +49,53 @@ func TestDashboardToolsUseAuthenticatedOwner(t *testing.T) {
 	}
 }
 
+func TestDashboardOwnerIgnoresSpoofedMetaWhenTokenPresent(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	for _, owner := range []string{"owner", "attacker"} {
+		if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES(?,?,?,'admin',1)`, owner, owner+"@example.test", owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	server := New(&fakeObservability{}, dashboard.New(database.DB), "test")
+	// A remote client always carries TokenInfo (ProtectMCP guarantees it), so a
+	// spoofed _meta owner key must lose to the token identity.
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{dashboard.OwnerMetaKey: "attacker"}},
+		Extra:  &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}},
+	}
+	state := dashboard.State{Filters: dashboard.Filters{Window: "1h"}, Widgets: []dashboard.Widget{{ID: "health", Type: "overview", Title: "System health", Enabled: true}}, Layout: []dashboard.Layout{{I: "health", X: 0, Y: 0, W: 12, H: 3}}}
+	if _, _, err := server.dashboardCreate(ctx, req, DashboardCreateInput{Name: "Spoof check", State: state}); err != nil {
+		t.Fatal(err)
+	}
+	var ownerID string
+	if err := database.DB.QueryRowContext(ctx, `SELECT owner_id FROM dashboards WHERE name='Spoof check'`).Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
+	if ownerID != "owner" {
+		t.Fatalf("dashboard owner = %q, want token identity \"owner\"", ownerID)
+	}
+}
+
+func TestDashboardOwnerRejectsTokenMissingDashboardScope(t *testing.T) {
+	server := New(&fakeObservability{}, nil, "test")
+	// Even with a spoofed _meta owner key, a token lacking the dashboard scope
+	// must be rejected outright — the meta fallback never applies once
+	// TokenInfo is present.
+	req := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{Meta: mcp.Meta{dashboard.OwnerMetaKey: "owner"}},
+		Extra:  &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{"mcp:read"}}},
+	}
+	_, _, err := server.dashboardList(context.Background(), req, struct{}{})
+	if err == nil || !strings.Contains(err.Error(), "dashboard permission") {
+		t.Fatalf("scope-less token error = %v, want dashboard permission rejection", err)
+	}
+}
+
 func (f *fakeObservability) Overview(_ context.Context, scope observability.Scope, _ int) (observability.Result[observability.Overview], error) {
 	f.scope = scope
 	return observability.Result[observability.Overview]{

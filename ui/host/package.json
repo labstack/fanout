@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "build:watch": "vite build --watch",
     "preview": "vite preview --host 0.0.0.0 --port 5173",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@ag-ui/client": "0.0.57",
@@ -31,7 +32,9 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.3",
+    "happy-dom": "20.11.0",
     "typescript": "7.0.2",
-    "vite": "8.1.5"
+    "vite": "8.1.5",
+    "vitest": "^4.1.10"
   }
 }

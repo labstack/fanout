@@ -91,6 +91,136 @@ func TestServiceMigratesLegacyCanvasOnFirstRead(t *testing.T) {
 	assertDashboardUUIDv7s(t, item)
 }
 
+func TestValidateRejectsInvalidStates(t *testing.T) {
+	newID := func() string {
+		t.Helper()
+		id, err := appid.New()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	first, second := newID(), newID()
+	valid := func() State {
+		return State{
+			Filters: Filters{Window: "1h"},
+			Widgets: []Widget{
+				{ID: first, Type: "overview", Title: "Health", Enabled: true},
+				{ID: second, Type: "logs", Title: "Errors", Enabled: true},
+			},
+			Layout: []Layout{
+				{I: first, X: 0, Y: 0, W: 6, H: 3},
+				{I: second, X: 6, Y: 0, W: 6, H: 3},
+			},
+		}
+	}
+	if err := Validate("Baseline", "", valid()); err != nil {
+		t.Fatalf("baseline state rejected: %v", err)
+	}
+	cases := []struct {
+		name   string
+		mutate func(*State)
+	}{
+		{"bad widget type", func(s *State) { s.Widgets[0].Type = "chart" }},
+		{"out of 12-column bounds", func(s *State) { s.Layout[1].X = 8 }},
+		{"negative position", func(s *State) { s.Layout[0].X = -1 }},
+		{"zero widgets", func(s *State) { s.Widgets = nil; s.Layout = nil }},
+		{"too many widgets", func(s *State) {
+			s.Widgets = nil
+			s.Layout = nil
+			for i := 0; i < 33; i++ {
+				id := newID()
+				s.Widgets = append(s.Widgets, Widget{ID: id, Type: "logs", Title: "W", Enabled: true})
+				s.Layout = append(s.Layout, Layout{I: id, X: 0, Y: i, W: 12, H: 1})
+			}
+		}},
+		{"layout references unknown widget id", func(s *State) { s.Layout[1].I = newID() }},
+		{"layout count mismatch", func(s *State) { s.Layout = s.Layout[:1] }},
+		{"duplicate widget id", func(s *State) { s.Widgets[1].ID = first }},
+		{"non-UUID widget id", func(s *State) { s.Widgets[0].ID = "health"; s.Layout[0].I = "health" }},
+		{"invalid window", func(s *State) { s.Filters.Window = "7d" }},
+		{"overlapping widgets", func(s *State) { s.Layout[1].X = 3 }},
+		{"contained widget overlaps", func(s *State) { s.Layout[1] = Layout{I: second, X: 1, Y: 1, W: 2, H: 1} }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := valid()
+			tc.mutate(&state)
+			err := Validate("Baseline", "", state)
+			if err == nil {
+				t.Fatal("expected validation rejection")
+			}
+			var validation *ValidationError
+			if !errors.As(err, &validation) {
+				t.Fatalf("error %v is not a ValidationError", err)
+			}
+		})
+	}
+}
+
+func TestValidateAcceptsAdjacentWidgets(t *testing.T) {
+	// Widgets sharing an edge (touching, not intersecting) are legal.
+	first, err := appid.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := appid.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := State{
+		Filters: Filters{Window: "1h"},
+		Widgets: []Widget{
+			{ID: first, Type: "overview", Title: "Health", Enabled: true},
+			{ID: second, Type: "logs", Title: "Errors", Enabled: true},
+		},
+		Layout: []Layout{
+			{I: first, X: 0, Y: 0, W: 12, H: 3},
+			{I: second, X: 0, Y: 3, W: 12, H: 3},
+		},
+	}
+	if err := Validate("Stacked", "", state); err != nil {
+		t.Fatalf("adjacent widgets rejected: %v", err)
+	}
+}
+
+func TestNormalizeStateIDsRemapsNonUUIDWidgetIDs(t *testing.T) {
+	stable, err := appid.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := State{
+		Widgets: []Widget{
+			{ID: "health", Type: "overview", Title: "Health", Enabled: true},
+			{ID: stable, Type: "logs", Title: "Errors", Enabled: true},
+		},
+		Layout: []Layout{
+			{I: "health", X: 0, Y: 0, W: 6, H: 3},
+			{I: stable, X: 6, Y: 0, W: 6, H: 3},
+		},
+	}
+	normalized, err := normalizeStateIDs(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	remapped := normalized.Widgets[0].ID
+	if !appid.IsV7(remapped) || remapped == "health" {
+		t.Fatalf("non-UUID widget id remapped to %q", remapped)
+	}
+	if normalized.Widgets[1].ID != stable {
+		t.Fatalf("stable UUIDv7 id changed to %q", normalized.Widgets[1].ID)
+	}
+	if normalized.Layout[0].I != remapped {
+		t.Fatalf("layout reference %q does not follow remapped widget id %q", normalized.Layout[0].I, remapped)
+	}
+	if normalized.Layout[1].I != stable {
+		t.Fatalf("layout reference for stable id changed to %q", normalized.Layout[1].I)
+	}
+	if state.Widgets[0].ID != "health" || state.Layout[0].I != "health" {
+		t.Fatalf("normalizeStateIDs mutated its input: %#v", state)
+	}
+}
+
 func assertDashboardUUIDv7s(t *testing.T, item Dashboard) {
 	t.Helper()
 	if !appid.IsV7(item.ID) {

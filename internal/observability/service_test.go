@@ -161,14 +161,18 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
 		WithArgs(start, end, "prod", "trace-1", 20).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(150*time.Millisecond), "ERROR", "checkout", "payment declined", "trace-1", "root"))
+			AddRow(start.Add(150*time.Millisecond), "ERROR", "checkout", "payment declined", "trace-1", "root").
+			AddRow(start.Add(160*time.Millisecond), "ERROR", "payments", `charge failed: token=abc123 {"client_secret":"cs_live_9"}`, "trace-1", "child"))
 
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "checkout", 20)
 	if err != nil {
 		t.Fatalf("Trace: %v", err)
 	}
-	if result.Schema != TraceSchema || !result.Data.HasError || len(result.Data.Spans) != 2 || len(result.Data.Services) != 2 || len(result.Data.Logs) != 1 {
+	if result.Schema != TraceSchema || !result.Data.HasError || len(result.Data.Spans) != 2 || len(result.Data.Services) != 2 || len(result.Data.Logs) != 2 {
 		t.Fatalf("unexpected trace detail: %#v", result)
+	}
+	if want := `charge failed: token=[REDACTED] {"client_secret":"[REDACTED]"}`; result.Data.Logs[1].Body != want {
+		t.Fatalf("trace log body = %q, want %q (redaction bypassed)", result.Data.Logs[1].Body, want)
 	}
 	if result.Data.DurationMS != 200 {
 		t.Fatalf("duration = %v, want 200ms", result.Data.DurationMS)
@@ -185,18 +189,26 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(logsEntriesQuery)).
 		WithArgs(start, end, "prod", "checkout", "checkout", "error", "error", "declined", "%declined%", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root"))
+			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root").
+			AddRow(start, "ERROR", "checkout", "card declined: token=abc123", "trace-2", "root2").
+			AddRow(start, "ERROR", "checkout", `auth declined: {"password":"hunter2"}`, "trace-3", "root3"))
 	mock.ExpectQuery(regexp.QuoteMeta(logsBucketsQuery)).
 		WithArgs(start, end, "prod", "checkout", "checkout", "error", "error", "declined", "%declined%").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
-			AddRow(start, "ERROR", int64(1)))
+			AddRow(start, "ERROR", int64(3)))
 
 	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", "error", "declined", 10)
 	if err != nil {
 		t.Fatalf("Logs: %v", err)
 	}
-	if result.Schema != LogsSchema || len(result.Data.Entries) != 1 || len(result.Data.Buckets) != 1 || result.Data.Buckets[0].Count != 1 {
+	if result.Schema != LogsSchema || len(result.Data.Entries) != 3 || len(result.Data.Buckets) != 1 || result.Data.Buckets[0].Count != 3 {
 		t.Fatalf("unexpected logs result: %#v", result)
+	}
+	if want := "card declined: token=[REDACTED]"; result.Data.Entries[1].Body != want {
+		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[1].Body, want)
+	}
+	if want := `auth declined: {"password":"[REDACTED]"}`; result.Data.Entries[2].Body != want {
+		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[2].Body, want)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

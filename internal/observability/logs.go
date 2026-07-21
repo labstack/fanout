@@ -6,25 +6,34 @@ import (
 	"strings"
 )
 
-const logsEntriesQuery = `
+// The user-supplied search filter must compare against the REDACTED body,
+// not the raw column: in PUBLIC_READ demo mode an anonymous caller could
+// otherwise confirm a secret's presence by probing search=<candidate> even
+// though the display shows [REDACTED]. redactedBodySQL replays the exact
+// Go-side patterns inside DuckDB (same RE2 engine; parity pinned by
+// TestRedactSQLMatchesGo), and both the row query and the histogram query
+// use it so their counts can never disagree and leak the same signal.
+var redactedBodySQL = redactLogBodySQL("COALESCE(body, '')")
+
+var logsEntriesQuery = `
 SELECT time, COALESCE(severity, ''), COALESCE(service, ''), COALESCE(body, ''),
        COALESCE(trace_id, ''), COALESCE(span_id, '')
 FROM logs
 WHERE time >= ? AND time < ? AND namespace = ?
   AND (? = '' OR service = ?)
   AND (? = '' OR upper(severity) = upper(?))
-  AND (? = '' OR body ILIKE ?)
+  AND (? = '' OR ` + redactedBodySQL + ` ILIKE ?)
 ORDER BY time DESC
 LIMIT ?`
 
-const logsBucketsQuery = `
+var logsBucketsQuery = `
 SELECT time_bucket(INTERVAL '5 minutes', time) AS point_time,
        COALESCE(NULLIF(upper(severity), ''), 'UNSPECIFIED'), CAST(COUNT(*) AS BIGINT)
 FROM logs
 WHERE time >= ? AND time < ? AND namespace = ?
   AND (? = '' OR service = ?)
   AND (? = '' OR upper(severity) = upper(?))
-  AND (? = '' OR body ILIKE ?)
+  AND (? = '' OR ` + redactedBodySQL + ` ILIKE ?)
 GROUP BY point_time, severity
 ORDER BY point_time ASC, severity ASC`
 
@@ -87,6 +96,6 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 		Schema:     LogsSchema,
 		Summary:    fmt.Sprintf("%d logs matched the selected telemetry window", len(data.Entries)),
 		Data:       data,
-		Provenance: provenanceFor(scope, "logs"),
+		Provenance: s.provenanceFor(scope, "logs"),
 	}, nil
 }

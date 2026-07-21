@@ -41,7 +41,8 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
         const first = resource.contents[0];
         if (!first || !("text" in first) || !first.text) throw new Error("MCP App resource has no HTML content");
         if (!disposed) setHTML(first.text);
-      } catch {
+      } catch (cause) {
+        console.error("MCP app resource load failed", cause);
         if (!disposed) setError("This view could not be loaded. Please try again.");
       }
     }
@@ -87,7 +88,8 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
         });
       };
       await bridge.connect(new PostMessageTransport(iframe.contentWindow, iframe.contentWindow));
-    } catch {
+    } catch (cause) {
+      console.error("MCP app bridge connect failed", cause);
       setError("This view could not be loaded. Please try again.");
     }
   }

@@ -72,11 +72,24 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 
 func (h *MCPAuthorization) verifyMCPToken(ctx context.Context, raw string, _ *http.Request) (*mcpgoauth.TokenInfo, error) {
 	record, err := h.store.VerifyAccessToken(ctx, raw, h.resource)
-	if err != nil {
+	if errors.Is(err, appauth.ErrInvalidOAuthToken) {
 		return nil, mcpgoauth.ErrInvalidToken
 	}
+	if err != nil {
+		// Infrastructure failure, not a bad credential: log it and return a
+		// non-ErrInvalidToken error so the middleware renders 500, not 401.
+		slog.Error("mcp oauth token verification failed", "err", err)
+		return nil, fmt.Errorf("verify mcp access token: %w", err)
+	}
 	user, err := h.users.GetByID(record.UserID)
-	if err != nil || !user.Active {
+	if errors.Is(err, appauth.ErrUserNotFound) {
+		return nil, mcpgoauth.ErrInvalidToken
+	}
+	if err != nil {
+		slog.Error("mcp oauth user lookup failed", "user_id", record.UserID, "err", err)
+		return nil, fmt.Errorf("load mcp token user: %w", err)
+	}
+	if !user.Active {
 		return nil, mcpgoauth.ErrInvalidToken
 	}
 	return &mcpgoauth.TokenInfo{
@@ -221,6 +234,7 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 	}
 	if c.Request().Method == http.MethodGet {
 		redirectURL, _ := url.Parse(req.RedirectURI)
+		grantedScope := authorizationScope(req.Scope)
 		c.Response().Header().Set("Cache-Control", "no-store")
 		c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
 		c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -229,6 +243,9 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 			"Redirect":   redirectURL.Scheme + "://" + redirectURL.Host,
 			"Email":      user.Email,
 			"Request":    req,
+			"Scope":      grantedScope,
+			"ReadOnly":   grantedScope == mcpReadScope,
+			"Grants":     consentGrants(grantedScope),
 		})
 	}
 
@@ -274,11 +291,36 @@ func (h *MCPAuthorization) validateAuthorizationRequest(ctx context.Context, req
 	return client, "", ""
 }
 
+// authorizationScope resolves the scope actually granted. An omitted scope
+// defaults to read-only — never to every supported scope, which would grant
+// dashboard write access the consent screen never asked about.
 func authorizationScope(requested string) string {
 	if strings.TrimSpace(requested) == "" {
-		return strings.Join(mcpSupportedScopes, " ")
+		return mcpReadScope
 	}
 	return strings.Join(strings.Fields(requested), " ")
+}
+
+type consentGrant struct {
+	Title  string
+	Detail string
+}
+
+// consentGrants translates the scope string that will actually be granted
+// into the human-readable entries shown on the consent card, so the screen
+// never understates (or overstates) the authority being handed out.
+func consentGrants(scope string) []consentGrant {
+	grants := []consentGrant{{
+		Title:  "Read observability data",
+		Detail: "View service health, topology, performance, traces, and logs.",
+	}}
+	if slices.Contains(strings.Fields(scope), dashboard.OAuthScope) {
+		grants = append(grants, consentGrant{
+			Title:  "Create and replace dashboards",
+			Detail: "Write access: this application can add new dashboards and overwrite existing ones.",
+		})
+	}
+	return grants
 }
 
 func validMCPScopes(scopes []string) bool {
@@ -303,6 +345,11 @@ func (h *MCPAuthorization) browserUser(c *echo.Context) (appauth.User, bool) {
 		return appauth.User{}, false
 	}
 	user, err := h.users.GetByID(claims.Subject)
+	if err != nil && !errors.Is(err, appauth.ErrUserNotFound) {
+		// The consent flow can't proceed either way, but a DB failure must be
+		// visible to the operator instead of looking like a logged-out user.
+		slog.Error("oauth consent user lookup failed", "user_id", claims.Subject, "err", err)
+	}
 	return user, err == nil && user.Active
 }
 
@@ -369,7 +416,14 @@ func (h *MCPAuthorization) exchangeAuthorizationCode(c *echo.Context, clientID s
 		return appauth.OAuthTokenPair{}, appauth.ErrInvalidOAuthGrant
 	}
 	user, err := h.users.GetByID(code.UserID)
-	if err != nil || !user.Active {
+	if errors.Is(err, appauth.ErrUserNotFound) {
+		return appauth.OAuthTokenPair{}, appauth.ErrInvalidOAuthGrant
+	}
+	if err != nil {
+		// DB failure is an infrastructure error, not an invalid grant.
+		return appauth.OAuthTokenPair{}, fmt.Errorf("load code user: %w", err)
+	}
+	if !user.Active {
 		return appauth.OAuthTokenPair{}, appauth.ErrInvalidOAuthGrant
 	}
 	return h.store.IssueTokenPair(c.Request().Context(), code.ClientID, code.UserID, code.Scope, code.Resource)
@@ -453,10 +507,10 @@ var oauthConsentTemplate = template.Must(template.New("oauth-consent").Parse(`<!
 .actions{display:grid;grid-template-columns:1fr 1.5fr;gap:12px;margin-top:28px}button{border:1px solid #314139;border-radius:12px;padding:13px 16px;background:#151d18;color:#edf3ef;font:inherit;font-weight:700;cursor:pointer}button.primary{border-color:#627a47;background:#627a47;color:#071007}button:hover{filter:brightness(1.08)}
 @media(max-width:520px){.card{padding:24px}.actions{grid-template-columns:1fr}}
 </style></head><body><main class="card"><div class="mark">F</div><p class="eyebrow">Secure connection</p><h1>Allow {{.ClientName}} to access Fanout?</h1>
-<p class="lede">This application is requesting read-only access to your observability data through MCP.</p>
-<div class="detail"><b>{{.ClientName}}</b><span>Returns to {{.Redirect}}</span></div>
-<div class="access"><span class="check">✓</span><div><b>Read observability data</b><p>View service health, topology, performance, traces, and logs. It cannot change settings or alerts.</p></div></div>
-<p class="signed">Signed in as {{.Email}}</p>
+<p class="lede">{{if .ReadOnly}}This application is requesting read-only access to your observability data through MCP. It cannot change settings, alerts, or dashboards.{{else}}This application is requesting the access listed below through MCP.{{end}}</p>
+<div class="detail"><b>{{.ClientName}}</b><span>Returns to {{.Redirect}}</span><span>Scopes: {{.Scope}}</span></div>
+{{range .Grants}}<div class="access"><span class="check">✓</span><div><b>{{.Title}}</b><p>{{.Detail}}</p></div></div>
+{{end}}<p class="signed">Signed in as {{.Email}}</p>
 <form method="post" action="/api/auth/oauth/authorize">
-<input type="hidden" name="response_type" value="{{.Request.ResponseType}}"><input type="hidden" name="client_id" value="{{.Request.ClientID}}"><input type="hidden" name="redirect_uri" value="{{.Request.RedirectURI}}"><input type="hidden" name="scope" value="{{.Request.Scope}}"><input type="hidden" name="state" value="{{.Request.State}}"><input type="hidden" name="code_challenge" value="{{.Request.CodeChallenge}}"><input type="hidden" name="code_challenge_method" value="{{.Request.CodeMethod}}"><input type="hidden" name="resource" value="{{.Request.Resource}}">
+<input type="hidden" name="response_type" value="{{.Request.ResponseType}}"><input type="hidden" name="client_id" value="{{.Request.ClientID}}"><input type="hidden" name="redirect_uri" value="{{.Request.RedirectURI}}"><input type="hidden" name="scope" value="{{.Scope}}"><input type="hidden" name="state" value="{{.Request.State}}"><input type="hidden" name="code_challenge" value="{{.Request.CodeChallenge}}"><input type="hidden" name="code_challenge_method" value="{{.Request.CodeMethod}}"><input type="hidden" name="resource" value="{{.Request.Resource}}">
 <div class="actions"><button name="decision" value="deny">Cancel</button><button class="primary" name="decision" value="approve">Allow access</button></div></form></main></body></html>`))

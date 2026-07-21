@@ -1,72 +1,10 @@
 import { Alert, Button, Center, Code, Container, Group, Loader, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { getToken, oauthReturnTo, refreshAccessToken, saveToken, unauthorizedEvent } from "./auth-session";
 import { BrandMark } from "./brand";
 
-const tokenKey = "fanout.access-token";
-const unauthorizedEvent = "fanout:unauthorized";
-
-let refreshPromise: Promise<string> | null = null;
-
-export function getToken(): string {
-  return localStorage.getItem(tokenKey) ?? "";
-}
-
-function saveToken(token: string) {
-  localStorage.setItem(tokenKey, token);
-}
-
-function oauthReturnTo(): string {
-  const value = new URLSearchParams(window.location.search).get("return_to");
-  if (!value) return "";
-  const target = new URL(value, window.location.origin);
-  if (target.origin !== window.location.origin || target.pathname !== "/api/auth/oauth/authorize") return "";
-  return `${target.pathname}${target.search}`;
-}
-
-export function clearSession() {
-  localStorage.removeItem(tokenKey);
-  window.dispatchEvent(new Event(unauthorizedEvent));
-}
-
-async function refreshAccessToken(): Promise<string> {
-  if (!refreshPromise) {
-    refreshPromise = fetch("/api/auth/refresh", { method: "POST", credentials: "same-origin" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`Session refresh failed (${response.status})`);
-        const payload = await response.json() as { access_token?: string };
-        if (!payload.access_token) throw new Error("Session refresh returned no access token");
-        saveToken(payload.access_token);
-        return payload.access_token;
-      })
-      .finally(() => { refreshPromise = null; });
-  }
-  return refreshPromise;
-}
-
-export async function authorizedFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
-  const request = (token: string) => {
-    const headers = new Headers(init.headers);
-    if (token) headers.set("Authorization", `Bearer ${token}`);
-    return fetch(input, { ...init, headers, credentials: "same-origin" });
-  };
-  const response = await request(getToken());
-  if (response.status !== 401) return response;
-  try {
-    return await request(await refreshAccessToken());
-  } catch {
-    clearSession();
-    return response;
-  }
-}
-
-export async function logout() {
-  try {
-    await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
-  } finally {
-    clearSession();
-  }
-}
+export { authorizedFetch, clearSession, getToken, logout } from "./auth-session";
 
 type Status = { setup_required: boolean; public_read: boolean };
 type SetupResult = { access_token: string; ingest_token?: string; ingest_header_name?: string; suggested_endpoint?: string };
@@ -104,7 +42,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value)));
     if (getToken()) {
-      refreshAccessToken().then((accessToken) => setToken(accessToken)).catch(() => undefined).finally(() => setSessionReady(true));
+      refreshAccessToken().then((accessToken) => setToken(accessToken)).catch((cause) => console.warn("Session refresh failed on boot", cause)).finally(() => setSessionReady(true));
     }
     const handleUnauthorized = () => setToken("");
     window.addEventListener(unauthorizedEvent, handleUnauthorized);
@@ -129,7 +67,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       <BrandMark />
       <div><Text c="teal" fw={700} size="xs" tt="uppercase" lts="0.12em">Setup complete</Text><Title order={1} mt="xs">Save your ingest token</Title></div>
       <Text c="dimmed">Fanout shows this token once. Store it with your collector secrets before continuing.</Text>
-      <Stack gap="xs"><Text size="sm" fw={600}>OTLP endpoint</Text><Code block>{setupResult.suggested_endpoint ?? "demo.fanout.test:4317"}</Code></Stack>
+      <Stack gap="xs"><Text size="sm" fw={600}>OTLP endpoint</Text><Code block>{setupResult.suggested_endpoint ?? `${window.location.hostname}:4317`}</Code></Stack>
       <Stack gap="xs"><Text size="sm" fw={600}>Header</Text><Code block>{setupResult.ingest_header_name ?? "x-fanout-ingest-token"}: {setupResult.ingest_token}</Code></Stack>
       {error && <Alert color="red">{error}</Alert>}
       <Group grow align="stretch">

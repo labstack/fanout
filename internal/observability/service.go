@@ -69,15 +69,16 @@ func normalizeLimit(limit int) (int, error) {
 	return limit, nil
 }
 
-func provenance(scope Scope) Provenance {
-	return provenanceFor(scope, "service_rollup")
+func (s *Service) provenance(scope Scope) Provenance {
+	return s.provenanceFor(scope, "service_rollup")
 }
 
-func provenanceFor(scope Scope, source string) Provenance {
+func (s *Service) provenanceFor(scope Scope, source string) Provenance {
 	return Provenance{
-		QueryID:    appid.MustNew(),
-		Window:     scope.Start.Format(time.RFC3339Nano) + "/" + scope.End.Format(time.RFC3339Nano),
-		Generated:  time.Now().UTC(),
+		QueryID:   appid.MustNew(),
+		Window:    scope.Start.Format(time.RFC3339Nano) + "/" + scope.End.Format(time.RFC3339Nano),
+		Generated: s.now().UTC(),
+		// Complete is always true today; reserved for partial-scan results.
 		Complete:   true,
 		DataSource: source,
 	}

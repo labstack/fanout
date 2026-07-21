@@ -50,7 +50,7 @@ ORDER BY point_time ASC, service ASC`
 
 const performanceAggregateQuery = `
 SELECT
-  COALESCE(SUM(spans), 0),
+  CAST(COALESCE(SUM(spans), 0) AS DOUBLE),
   COALESCE(SUM(error_rate * spans) / NULLIF(SUM(spans), 0), 0),
   COALESCE(SUM(p50_ms * spans) / NULLIF(SUM(spans), 0), 0),
   COALESCE(MAX(p95_ms), 0)
@@ -148,7 +148,7 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 		Schema:     PerformanceSchema,
 		Summary:    fmt.Sprintf("%d activity points and %d endpoints for %s", len(data.Points), len(data.Endpoints), target),
 		Data:       data,
-		Provenance: provenanceFor(scope, "service_rollup + spans"),
+		Provenance: s.provenanceFor(scope, "service_rollup + spans"),
 	}, nil
 }
 
@@ -181,16 +181,16 @@ func comparisonMetric(label, unit string, before, after float64, lowerIsBetter b
 	} else if after != 0 {
 		change = 100
 	}
-	direction := "stable"
+	direction := DirectionStable
 	if math.Abs(change) >= 1 {
 		improved := change > 0
 		if lowerIsBetter {
 			improved = change < 0
 		}
 		if improved {
-			direction = "improvement"
+			direction = DirectionImprovement
 		} else {
-			direction = "regression"
+			direction = DirectionRegression
 		}
 	}
 	return ComparisonMetric{Label: label, Unit: unit, Before: before, After: after, ChangePct: change, Direction: direction, Significant: math.Abs(change) >= 10}

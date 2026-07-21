@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -216,7 +217,10 @@ func (s *Service) Update(ctx context.Context, ownerID, id string, input UpdateIn
 		}
 		return Dashboard{}, err
 	}
-	affected, _ := result.RowsAffected()
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Dashboard{}, err
+	}
 	if affected == 0 {
 		return Dashboard{}, ErrNotFound
 	}
@@ -308,6 +312,14 @@ func replaceWidgets(ctx context.Context, tx *sql.Tx, dashboardID string, state S
 	return nil
 }
 
+// ensureInitial lazily provisions an owner's first dashboard. The legacy
+// single-canvas dashboard_state row (see the 20260720200000_dashboard_state
+// migration) is retained for exactly this one-way lazy migration: on the
+// owner's first dashboard read, valid legacy state seeds the initial
+// "System overview" dashboard; otherwise the default layout is used. The
+// migration is one-shot — once any dashboard exists for the owner, the
+// legacy row is never consulted again — so a transient read failure must be
+// surfaced rather than treated as "no legacy state".
 func (s *Service) ensureInitial(ctx context.Context, ownerID string) error {
 	if strings.TrimSpace(ownerID) == "" {
 		return errors.New("dashboard owner is required")
@@ -318,21 +330,42 @@ func (s *Service) ensureInitial(ctx context.Context, ownerID string) error {
 	}
 	state := DefaultState()
 	var raw string
-	if err := s.db.QueryRowContext(ctx, `SELECT state_json FROM dashboard_state WHERE owner_id=?`, ownerID).Scan(&raw); err == nil {
-		if json.Unmarshal([]byte(raw), &state) != nil {
+	err := s.db.QueryRowContext(ctx, `SELECT state_json FROM dashboard_state WHERE owner_id=?`, ownerID).Scan(&raw)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		// No legacy canvas; seed from the default layout.
+	case err != nil:
+		// A real read failure (locked database, etc.) is not "no legacy
+		// state". Proceeding would create the default dashboard and the
+		// count check above would skip migration forever, silently
+		// orphaning the user's saved layout.
+		return fmt.Errorf("read legacy dashboard state: %w", err)
+	default:
+		if jsonErr := json.Unmarshal([]byte(raw), &state); jsonErr != nil {
+			slog.Warn("discarding legacy dashboard state; falling back to default layout", "owner_id", ownerID, "reason", "corrupt state_json", "error", jsonErr)
 			state = DefaultState()
-		} else if normalized, normalizeErr := normalizeStateIDs(state); normalizeErr != nil || Validate("System overview", "", normalized) != nil {
+		} else if normalized, normalizeErr := normalizeStateIDs(state); normalizeErr != nil {
+			slog.Warn("discarding legacy dashboard state; falling back to default layout", "owner_id", ownerID, "reason", "widget id normalization failed", "error", normalizeErr)
+			state = DefaultState()
+		} else if validateErr := Validate("System overview", "", normalized); validateErr != nil {
+			slog.Warn("discarding legacy dashboard state; falling back to default layout", "owner_id", ownerID, "reason", "validation failed", "error", validateErr)
 			state = DefaultState()
 		} else {
 			state = normalized
 		}
 	}
-	_, err := s.Create(ctx, ownerID, CreateInput{Name: "System overview", Description: "Live health, dependencies, and recent activity.", State: state})
+	_, err = s.Create(ctx, ownerID, CreateInput{Name: "System overview", Description: "Live health, dependencies, and recent activity.", State: state})
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}
 	return err
 }
+
+// WidgetTypes is the single source of truth for the dashboard widget-type
+// allowlist. The agent system prompt and the frontend widget registry mirror
+// this list; derive any validation or documentation from it rather than
+// duplicating the literals.
+var WidgetTypes = []string{"overview", "topology", "activity", "assistant", "performance", "trace", "logs"}
 
 func Validate(name, description string, state State) error {
 	if len(strings.TrimSpace(name)) == 0 || len([]rune(strings.TrimSpace(name))) > 80 {
@@ -344,7 +377,10 @@ func Validate(name, description string, state State) error {
 	if len(state.Widgets) == 0 || len(state.Widgets) > 32 || len(state.Layout) != len(state.Widgets) {
 		return invalid("dashboard must contain between 1 and 32 positioned widgets")
 	}
-	allowed := map[string]bool{"overview": true, "topology": true, "activity": true, "assistant": true, "performance": true, "trace": true, "logs": true}
+	allowed := make(map[string]bool, len(WidgetTypes))
+	for _, widgetType := range WidgetTypes {
+		allowed[widgetType] = true
+	}
 	ids := make(map[string]bool, len(state.Widgets))
 	for _, widget := range state.Widgets {
 		if !appid.IsV7(widget.ID) || ids[widget.ID] {
@@ -364,6 +400,14 @@ func Validate(name, description string, state State) error {
 			return invalid("invalid widget layout")
 		}
 		seen[item.I] = true
+	}
+	for i := 0; i < len(state.Layout); i++ {
+		for j := i + 1; j < len(state.Layout); j++ {
+			a, b := state.Layout[i], state.Layout[j]
+			if a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H {
+				return invalid("widgets must not overlap")
+			}
+		}
 	}
 	if state.Filters.Window != "15m" && state.Filters.Window != "1h" && state.Filters.Window != "6h" && state.Filters.Window != "24h" {
 		return invalid("unsupported dashboard window")
@@ -403,6 +447,8 @@ func normalizeStateIDs(state State) (State, error) {
 	return state, nil
 }
 
+// isUnique detects SQLite unique-constraint violations by substring match on
+// the driver error message; this is driver-version-sensitive but pragmatic.
 func isUnique(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique constraint")
 }

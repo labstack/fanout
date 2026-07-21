@@ -58,7 +58,7 @@ services:
       # browser host differs from the OTLP host, so set it explicitly.
       INGEST_ENDPOINT: https://ingest.fanout.labstack.com
       # Canonical OAuth resource/audience for remote MCP clients.
-      MCP_PUBLIC_URL: https://demo.fanout.run/mcp
+      MCP_PUBLIC_URL: https://fanout.labstack.com/mcp
       # Allow concurrent read queries; write commits stay serialized by the
       # shared write mutex. Watch logs for SQLITE_BUSY after raising this.
       DUCKDB_MAX_CONNS: "4"

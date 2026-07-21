@@ -129,5 +129,5 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	if traceID != "" {
 		summary = fmt.Sprintf("Trace %s contains %d spans across %d services", traceID, len(data.Spans), len(data.Services))
 	}
-	return Result[TraceDetail]{Schema: TraceSchema, Summary: summary, Data: data, Provenance: provenanceFor(scope, "spans + logs")}, nil
+	return Result[TraceDetail]{Schema: TraceSchema, Summary: summary, Data: data, Provenance: s.provenanceFor(scope, "spans + logs")}, nil
 }

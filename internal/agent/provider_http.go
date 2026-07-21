@@ -125,14 +125,14 @@ func parseOpenAI(reader io.Reader, cb func(StreamEvent) error) error {
 			return fmt.Errorf("decode OpenAI stream: %w", err)
 		}
 		if chunk.Error != nil {
-			return cb(StreamEvent{Error: chunk.Error.Message})
+			return cb(StreamEvent{Type: EventError, Error: chunk.Error.Message})
 		}
 		if len(chunk.Choices) == 0 {
 			continue
 		}
 		choice := chunk.Choices[0]
 		if choice.Delta.Content != "" {
-			if err := cb(StreamEvent{Delta: choice.Delta.Content}); err != nil {
+			if err := cb(StreamEvent{Type: EventText, Delta: choice.Delta.Content}); err != nil {
 				return err
 			}
 		}
@@ -163,13 +163,13 @@ func parseOpenAI(reader io.Reader, cb func(StreamEvent) error) error {
 					if args == "" {
 						args = "{}"
 					}
-					if err := cb(StreamEvent{ToolCall: &ToolCall{ID: call.id, Name: call.name, Input: args}}); err != nil {
+					if err := cb(StreamEvent{Type: EventToolUse, ToolCall: &ToolCall{ID: call.id, Name: call.name, Input: args}}); err != nil {
 						return err
 					}
 				}
 			}
 			stopped = true
-			if err := cb(StreamEvent{StopReason: *choice.FinishReason}); err != nil {
+			if err := cb(StreamEvent{Type: EventStop, StopReason: *choice.FinishReason}); err != nil {
 				return err
 			}
 		}
@@ -244,10 +244,15 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 			continue
 		}
 		var event struct {
-			Type         string                                               `json:"type"`
-			ContentBlock struct{ Type, ID, Name string }                      `json:"content_block"`
-			Delta        struct{ Type, Text, PartialJSON, StopReason string } `json:"delta"`
-			Error        *struct {
+			Type         string                          `json:"type"`
+			ContentBlock struct{ Type, ID, Name string } `json:"content_block"`
+			Delta        struct {
+				Type        string `json:"type"`
+				Text        string `json:"text"`
+				PartialJSON string `json:"partial_json"`
+				StopReason  string `json:"stop_reason"`
+			} `json:"delta"`
+			Error *struct {
 				Message string `json:"message"`
 			} `json:"error"`
 		}
@@ -262,7 +267,7 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 			}
 		case "content_block_delta":
 			if event.Delta.Type == "text_delta" && event.Delta.Text != "" {
-				if err := cb(StreamEvent{Delta: event.Delta.Text}); err != nil {
+				if err := cb(StreamEvent{Type: EventText, Delta: event.Delta.Text}); err != nil {
 					return err
 				}
 			}
@@ -275,14 +280,14 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 				if raw == "" {
 					raw = "{}"
 				}
-				if err := cb(StreamEvent{ToolCall: &ToolCall{ID: currentID, Name: currentName, Input: raw}}); err != nil {
+				if err := cb(StreamEvent{Type: EventToolUse, ToolCall: &ToolCall{ID: currentID, Name: currentName, Input: raw}}); err != nil {
 					return err
 				}
 				currentID, currentName = "", ""
 			}
 		case "message_delta":
 			stopped = true
-			if err := cb(StreamEvent{StopReason: event.Delta.StopReason}); err != nil {
+			if err := cb(StreamEvent{Type: EventStop, StopReason: event.Delta.StopReason}); err != nil {
 				return err
 			}
 		case "error":
@@ -290,7 +295,7 @@ func parseAnthropic(reader io.Reader, cb func(StreamEvent) error) error {
 			if event.Error != nil && event.Error.Message != "" {
 				message = event.Error.Message
 			}
-			return cb(StreamEvent{Error: message})
+			return cb(StreamEvent{Type: EventError, Error: message})
 		}
 	}
 	if err := scanner.Err(); err != nil {

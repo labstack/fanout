@@ -68,7 +68,7 @@ function Chat() {
       onEvent: ({ messages: next }) => setMessages([...next] as Message[]),
       onRunInitialized: () => { setRunning(true); setError(""); },
       onRunFinalized: ({ messages: next }) => { setMessages([...next] as Message[]); setRunning(false); },
-      onRunFailed: () => { setError("Fanout could not complete this analysis. Please try again."); setRunning(false); },
+      onRunFailed: (failure) => { console.error("Agent run failed", failure); setError("Fanout could not complete this analysis. Please try again."); setRunning(false); },
     });
     return () => { active = false; subscription.unsubscribe(); agent.abortRun(); };
   }, [agent, storedThreadID, threadID]);
@@ -100,7 +100,7 @@ function Chat() {
     setRunning(true);
     setError("");
     localStorage.setItem(threadKey, threadID);
-    try { await agent.runAgent(); } catch { setError("Fanout could not complete this analysis. Please try again."); setRunning(false); }
+    try { await agent.runAgent(); } catch (cause) { console.error("Agent run failed", cause); setError("Fanout could not complete this analysis. Please try again."); setRunning(false); }
   }
 
   function submit(event: FormEvent) { event.preventDefault(); void send(input); }

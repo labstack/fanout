@@ -58,7 +58,7 @@ func (s *Service) Overview(ctx context.Context, scope Scope, limit int) (Result[
 		Schema:     OverviewSchema,
 		Summary:    fmt.Sprintf("%d services: %d unhealthy, %d degraded, %d healthy", data.ServiceCount, data.Counts.Unhealthy, data.Counts.Degraded, data.Counts.Healthy),
 		Data:       data,
-		Provenance: provenance(scope),
+		Provenance: s.provenance(scope),
 	}, nil
 }
 
