@@ -1,0 +1,1 @@
+import{n as e}from"./index-nRg3vib0.js";var t=e;export{t as component};

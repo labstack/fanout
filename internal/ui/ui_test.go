@@ -16,7 +16,7 @@ func TestHandlerServesEmbeddedSPAAndFallback(t *testing.T) {
 		t.Fatalf("GET / = %d %q", index.Code, index.Body.String())
 	}
 
-	fallback := request(t, handler, "/threads/example")
+	fallback := request(t, handler, "/dashboards/incident-command")
 	if fallback.Code != http.StatusOK || fallback.Body.String() != index.Body.String() {
 		t.Fatalf("SPA fallback did not return index.html")
 	}

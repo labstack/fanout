@@ -23,24 +23,32 @@ async function getJSON<T>(url: string): Promise<T> {
 
 const emptyState: State = { layout: [], widgets: [], filters: { window: "1h", namespace: "" } };
 const widgetTitles: Record<WidgetType, string> = { overview: "System health", topology: "Service map", activity: "Recent activity", assistant: "Ask Fanout", performance: "Performance", trace: "Trace focus", logs: "Logs" };
+const widgetMinimumRows: Record<WidgetType, number> = { overview: 4, topology: 4, activity: 4, assistant: 3, performance: 4, trace: 4, logs: 4 };
 
-export default function Dashboard({ onOpenChat }: { onOpenChat: (prompt?: string) => void }) {
+export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardChange }: { dashboardID?: string; onOpenChat: (prompt?: string) => void; onDashboardChange?: (id: string, replace?: boolean) => void }) {
   const queryClient = useQueryClient();
   const dashboards = useQuery({ queryKey: ["dashboards"], queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 3000 });
-  const [selectedID, setSelectedID] = useState(() => localStorage.getItem(dashboardKey) ?? "");
+  const [selectedID, setSelectedID] = useState(() => dashboardID || localStorage.getItem(dashboardKey) || "");
   const selected = useQuery({ queryKey: ["dashboard", selectedID], queryFn: () => getJSON<DashboardRecord>(`/api/dashboards/${encodeURIComponent(selectedID)}`), enabled: Boolean(selectedID), refetchInterval: 3000 });
   const [state, setState] = useState<State>(emptyState);
   const [breakpoint, setBreakpoint] = useState("lg");
 
   useEffect(() => {
+    if (!dashboardID || dashboardID === selectedID) return;
+    setSelectedID(dashboardID);
+    localStorage.setItem(dashboardKey, dashboardID);
+  }, [dashboardID, selectedID]);
+  useEffect(() => {
     const items = dashboards.data?.dashboards;
     if (!items?.length) return;
-    if (!items.some((item) => item.id === selectedID)) {
-      const next = items.find((item) => item.is_default) ?? items[0];
-      setSelectedID(next.id);
-      localStorage.setItem(dashboardKey, next.id);
+    if (dashboardID && items.some((item) => item.id === dashboardID)) return;
+    if (!dashboardID && selectedID && items.some((item) => item.id === selectedID)) {
+      onDashboardChange?.(selectedID, true);
+      return;
     }
-  }, [dashboards.data, selectedID]);
+    const next = items.find((item) => item.is_default) ?? items[0];
+    choose(next.id, true);
+  }, [dashboardID, dashboards.data, selectedID]);
   useEffect(() => { if (selected.data?.state) setState(selected.data.state); }, [selected.data?.updated_at]);
 
   const save = useMutation({
@@ -56,13 +64,22 @@ export default function Dashboard({ onOpenChat }: { onOpenChat: (prompt?: string
       void queryClient.invalidateQueries({ queryKey: ["dashboards"] });
     },
   });
-  const layouts = useMemo<any>(() => ({ lg: state.layout }), [state.layout]);
-  function choose(id: string) { setSelectedID(id); localStorage.setItem(dashboardKey, id); }
+  const layouts = useMemo<any>(() => {
+    const widgetType = new Map(state.widgets.map((widget) => [widget.id, widget.type]));
+    const normalized = state.layout.map((item) => {
+      const minimum = widgetMinimumRows[widgetType.get(item.i) ?? "overview"];
+      return { ...item, h: Math.max(item.h, minimum), minH: Math.max(item.minH ?? 0, minimum) };
+    });
+    const compact = (columns: number) => normalized.map((item) => ({ ...item, x: 0, w: columns }));
+    return { lg: normalized, md: normalized, sm: compact(6), xs: compact(2), xxs: compact(1) };
+  }, [state.layout, state.widgets]);
+  function choose(id: string, replace = false) { setSelectedID(id); localStorage.setItem(dashboardKey, id); onDashboardChange?.(id, replace); }
   function update(next: State) { setState(next); save.mutate(next); }
   function add(type: WidgetType) {
     const id = `${type}-${createID().slice(0, 6)}`;
     const wide = type === "topology" || type === "performance" || type === "trace" || type === "logs";
-    update({ ...state, widgets: [...state.widgets, { id, type, title: widgetTitles[type], enabled: true }], layout: [...state.layout, { i: id, x: 0, y: Infinity, w: wide ? 8 : 4, h: type === "assistant" ? 2 : wide ? 4 : 3, minW: 3, minH: 2 }] });
+    const minimumRows = widgetMinimumRows[type];
+    update({ ...state, widgets: [...state.widgets, { id, type, title: widgetTitles[type], enabled: true }], layout: [...state.layout, { i: id, x: 0, y: Infinity, w: wide ? 8 : 4, h: minimumRows, minW: 3, minH: minimumRows }] });
   }
   function remove(id: string) { update({ ...state, widgets: state.widgets.filter((widget) => widget.id !== id), layout: state.layout.filter((item) => item.i !== id) }); }
 
