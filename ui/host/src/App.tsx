@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import AuthGate, { authorizedFetch, logout } from "./auth";
 import type { MCPAppContent } from "./mcp-app-frame";
 import Dashboard from "./dashboard";
+import { createID } from "./id";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
 
@@ -14,7 +15,7 @@ const threadKey = "fanout.thread-id";
 function Chat() {
   const [view, setView] = useState<"chat" | "dashboard">("chat");
   const storedThreadID = useMemo(() => localStorage.getItem(threadKey), []);
-  const threadID = useMemo(() => storedThreadID ?? crypto.randomUUID(), [storedThreadID]);
+  const threadID = useMemo(() => storedThreadID ?? createID(), [storedThreadID]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [ready, setReady] = useState(false);
   const [running, setRunning] = useState(false);
@@ -71,7 +72,7 @@ function Chat() {
   async function send(text: string) {
     const content = text.trim();
     if (!content || running || !ready) return;
-    const message = { id: crypto.randomUUID(), role: "user", content } as Message;
+    const message = { id: createID(), role: "user", content } as Message;
     agent.addMessage(message);
     setMessages([...agent.messages]);
     setInput("");
