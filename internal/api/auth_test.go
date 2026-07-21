@@ -91,6 +91,29 @@ func TestPublicReadServesAnonymousReadsOnly(t *testing.T) {
 	}
 }
 
+func TestPublicReadDoesNotDowngradeInvalidBearer(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { sqlite.Close() })
+	users := auth.NewUserStore(sqlite.DB)
+	if _, err := users.Create("admin@example.com", "", "admin"); err != nil {
+		t.Fatalf("Create admin: %v", err)
+	}
+
+	e := echo.New()
+	RegisterAuthMiddleware(e, users, "0123456789abcdef0123456789abcdef", true)
+	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	req.Header.Set("Authorization", "Bearer expired-or-invalid")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("invalid bearer in public-read mode = %d, want 401", rec.Code)
+	}
+}
+
 // With PUBLIC_READ on, /api/auth/status advertises public_read and an
 // unauthenticated GET /api/auth/me returns the synthetic viewer — the two
 // signals the SPA uses to boot anonymously into read-only mode.

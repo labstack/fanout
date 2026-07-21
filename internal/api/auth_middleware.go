@@ -9,7 +9,10 @@ import (
 	"github.com/labstack/fanout/internal/auth"
 )
 
-const authUserKey = "auth_user"
+const (
+	authUserKey    = "auth_user"
+	publicViewerID = "public"
+)
 
 func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, jwtSecret string, publicRead bool) {
 	e.Use(AuthMiddleware(users, jwtSecret, publicRead))
@@ -19,7 +22,7 @@ func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, jwtSecret strin
 // requests when PUBLIC_READ is on. Role "viewer" clears endpoints with no
 // RequireRole guard while still failing RequireRole("operator"/"admin"), so
 // settings and user-management routes stay locked.
-var publicViewer = auth.User{ID: "public", Email: "public@demo", Role: "viewer", Active: true}
+var publicViewer = auth.User{ID: publicViewerID, Email: "public@demo", Role: "viewer", Active: true}
 
 func AuthMiddleware(users *auth.UserStore, jwtSecret string, publicRead bool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -34,6 +37,10 @@ func AuthMiddleware(users *auth.UserStore, jwtSecret string, publicRead bool) ec
 					c.Set(authUserKey, &user)
 					return next(c)
 				}
+				// Never downgrade an explicitly authenticated request to the public
+				// viewer. Returning 401 lets browser and MCP clients refresh or
+				// restart OAuth instead of receiving misleading downstream errors.
+				return echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
 			}
 
 			// Public demo mode: serve unauthenticated reads as a viewer. Gated to
