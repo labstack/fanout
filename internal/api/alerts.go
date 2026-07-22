@@ -14,13 +14,15 @@ import (
 func RegisterAlertRoutes(e *echo.Echo, store *alert.Store, engine *alert.Engine) {
 	h := &alertHandler{store: store, engine: engine}
 
-	e.GET("/api/alerts", h.ListAlerts)
-	e.GET("/api/alerts/summary", h.AlertSummary)
-	e.GET("/api/rules", h.ListRules)
-	e.POST("/api/rules", h.CreateRule)
-	e.PUT("/api/rules/:id", h.UpdateRule)
-	e.DELETE("/api/rules/:id", h.DeleteRule)
-	e.POST("/api/rules/:id/test", h.TestRule)
+	read := RequireCapability(ReadTelemetry)
+	manage := RequireCapability(ManageAlerts)
+	e.GET("/api/alerts", h.ListAlerts, read)
+	e.GET("/api/alerts/summary", h.AlertSummary, read)
+	e.GET("/api/rules", h.ListRules, read)
+	e.POST("/api/rules", h.CreateRule, manage)
+	e.PUT("/api/rules/:id", h.UpdateRule, manage)
+	e.DELETE("/api/rules/:id", h.DeleteRule, manage)
+	e.POST("/api/rules/:id/test", h.TestRule, manage)
 }
 
 type alertHandler struct {

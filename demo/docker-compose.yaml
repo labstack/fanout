@@ -16,7 +16,7 @@ services:
     restart: unless-stopped
     env_file:
       # Single .env (gitignored) holds both the otel-demo config and the
-      # demo instance's JWT/SMTP/AI secrets — see demo/.env.example for
+      # demo instance's auth/SMTP/AI secrets — see demo/.env.example for
       # the template.
       - .env
     environment:
@@ -27,6 +27,9 @@ services:
       # Safe ONLY because this instance serves synthetic otel-demo data; never
       # set on an instance with private telemetry.
       PUBLIC_READ: "true"
+      PUBLIC_INGEST: "true"
+      # Trusted external origin for Secure browser-session cookies behind Traefik.
+      PUBLIC_URL: https://demo.fanout.run
       # Canonical OAuth resource/audience for remote MCP clients.
       MCP_PUBLIC_URL: https://demo.fanout.run/mcp
       # 4x fewer DuckLake snapshots/files per day than the 15s default; the

@@ -35,7 +35,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (id, email, name, role, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?)
-RETURNING id, email, name, role, active, logged_in_at, created_at, updated_at
+RETURNING id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at
 `
 
 type CreateUserParams struct {
@@ -63,6 +63,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.Name,
 		&i.Role,
 		&i.Active,
+		&i.AuthVersion,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -79,7 +80,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id string) (sql.Result, error)
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, name, role, active, logged_in_at, created_at, updated_at FROM users WHERE email = ?
+SELECT id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at FROM users WHERE email = ?
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -91,6 +92,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.Name,
 		&i.Role,
 		&i.Active,
+		&i.AuthVersion,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -99,7 +101,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, email, name, role, active, logged_in_at, created_at, updated_at FROM users WHERE id = ?
+SELECT id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at FROM users WHERE id = ?
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
@@ -111,6 +113,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 		&i.Name,
 		&i.Role,
 		&i.Active,
+		&i.AuthVersion,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -118,8 +121,22 @@ func (q *Queries) GetUserByID(ctx context.Context, id string) (User, error) {
 	return i, err
 }
 
+const incrementUserAuthVersion = `-- name: IncrementUserAuthVersion :exec
+UPDATE users SET auth_version = auth_version + 1, updated_at = ? WHERE id = ?
+`
+
+type IncrementUserAuthVersionParams struct {
+	UpdatedAt string `json:"updated_at"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) IncrementUserAuthVersion(ctx context.Context, arg IncrementUserAuthVersionParams) error {
+	_, err := q.db.ExecContext(ctx, incrementUserAuthVersion, arg.UpdatedAt, arg.ID)
+	return err
+}
+
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, name, role, active, logged_in_at, created_at, updated_at FROM users ORDER BY created_at DESC
+SELECT id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at FROM users ORDER BY created_at DESC
 `
 
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
@@ -137,6 +154,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.Name,
 			&i.Role,
 			&i.Active,
+			&i.AuthVersion,
 			&i.LoggedInAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -172,7 +190,7 @@ func (q *Queries) TouchLogin(ctx context.Context, arg TouchLoginParams) error {
 const updateUser = `-- name: UpdateUser :one
 UPDATE users SET email = ?, name = ?, role = ?, active = ?, updated_at = ?
 WHERE id = ?
-RETURNING id, email, name, role, active, logged_in_at, created_at, updated_at
+RETURNING id, email, name, role, active, auth_version, logged_in_at, created_at, updated_at
 `
 
 type UpdateUserParams struct {
@@ -200,6 +218,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.Name,
 		&i.Role,
 		&i.Active,
+		&i.AuthVersion,
 		&i.LoggedInAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,

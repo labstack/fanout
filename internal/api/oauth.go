@@ -37,7 +37,15 @@ type MCPAuthorization struct {
 	metadataURL   string
 }
 
-func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, refreshSecret, publicMCPURL string) (*MCPAuthorization, error) {
+func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, args ...string) (*MCPAuthorization, error) {
+	if len(args) == 0 || len(args) > 2 {
+		return nil, fmt.Errorf("invalid MCP authorization configuration")
+	}
+	publicMCPURL := args[len(args)-1]
+	refreshSecret := ""
+	if len(args) == 2 {
+		refreshSecret = args[0]
+	}
 	resource, err := url.Parse(publicMCPURL)
 	if err != nil || resource.Scheme != "https" || resource.Host == "" || resource.Path != "/mcp" {
 		return nil, fmt.Errorf("invalid public MCP URL")
@@ -252,6 +260,9 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 			"Grants":     consentGrants(grantedScope),
 		})
 	}
+	if GetCurrentUser(c) != nil && !validBrowserMutation(c.Request()) {
+		return oauthJSONError(c, http.StatusForbidden, "access_denied", "browser request validation failed")
+	}
 
 	if c.Request().Form.Get("decision") != "approve" {
 		return redirectOAuthError(c, req.RedirectURI, req.State, "access_denied", "authorization was denied")
@@ -345,6 +356,13 @@ func validMCPScopes(scopes []string) bool {
 }
 
 func (h *MCPAuthorization) browserUser(c *echo.Context) (appauth.User, bool) {
+	user := GetCurrentUser(c)
+	if user != nil && user.ID != publicViewerID && user.Active {
+		return *user, true
+	}
+	if h.refreshSecret == "" {
+		return appauth.User{}, false
+	}
 	cookie, err := c.Cookie("refresh_token")
 	if err != nil || cookie.Value == "" {
 		return appauth.User{}, false
@@ -353,13 +371,8 @@ func (h *MCPAuthorization) browserUser(c *echo.Context) (appauth.User, bool) {
 	if err != nil {
 		return appauth.User{}, false
 	}
-	user, err := h.users.GetByID(claims.Subject)
-	if err != nil && !errors.Is(err, appauth.ErrUserNotFound) {
-		// The consent flow can't proceed either way, but a DB failure must be
-		// visible to the operator instead of looking like a logged-out user.
-		slog.Error("oauth consent user lookup failed", "user_id", claims.Subject, "err", err)
-	}
-	return user, err == nil && user.Active
+	resolved, err := h.users.GetByID(claims.Subject)
+	return resolved, err == nil && resolved.Active
 }
 
 func (h *MCPAuthorization) Token(c *echo.Context) error {

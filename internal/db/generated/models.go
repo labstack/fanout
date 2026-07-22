@@ -62,6 +62,53 @@ type AlertRule struct {
 	UpdatedAt       string         `json:"updated_at"`
 }
 
+type AuthAuditEvent struct {
+	ID           string         `json:"id"`
+	ActorUserID  sql.NullString `json:"actor_user_id"`
+	EventType    string         `json:"event_type"`
+	Outcome      string         `json:"outcome"`
+	TargetType   sql.NullString `json:"target_type"`
+	TargetID     sql.NullString `json:"target_id"`
+	RemoteIp     sql.NullString `json:"remote_ip"`
+	UserAgent    sql.NullString `json:"user_agent"`
+	MetadataJson string         `json:"metadata_json"`
+	CreatedAt    string         `json:"created_at"`
+}
+
+type Dashboard struct {
+	ID          string `json:"id"`
+	OwnerID     string `json:"owner_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Window      string `json:"window"`
+	Namespace   string `json:"namespace"`
+	IsDefault   int64  `json:"is_default"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+type DashboardState struct {
+	OwnerID   string `json:"owner_id"`
+	StateJson string `json:"state_json"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+type DashboardWidget struct {
+	ID          string `json:"id"`
+	DashboardID string `json:"dashboard_id"`
+	Type        string `json:"type"`
+	Title       string `json:"title"`
+	ConfigJson  string `json:"config_json"`
+	Enabled     int64  `json:"enabled"`
+	X           int64  `json:"x"`
+	Y           int64  `json:"y"`
+	W           int64  `json:"w"`
+	H           int64  `json:"h"`
+	MinW        int64  `json:"min_w"`
+	MinH        int64  `json:"min_h"`
+	SortOrder   int64  `json:"sort_order"`
+}
+
 type OauthAuthorizationCode struct {
 	CodeHash      string `json:"code_hash"`
 	ClientID      string `json:"client_id"`
@@ -98,6 +145,15 @@ type OauthToken struct {
 	CreatedAt int64         `json:"created_at"`
 }
 
+type Session struct {
+	TokenHash         string         `json:"token_hash"`
+	UserID            sql.NullString `json:"user_id"`
+	Data              []byte         `json:"data"`
+	CreatedAt         int64          `json:"created_at"`
+	LastActivityAt    int64          `json:"last_activity_at"`
+	AbsoluteExpiresAt int64          `json:"absolute_expires_at"`
+}
+
 type Setting struct {
 	Key       string `json:"key"`
 	Value     string `json:"value"`
@@ -105,14 +161,25 @@ type Setting struct {
 }
 
 type User struct {
-	ID         string         `json:"id"`
-	Email      string         `json:"email"`
-	Name       sql.NullString `json:"name"`
-	Role       string         `json:"role"`
-	Active     int64          `json:"active"`
-	LoggedInAt sql.NullString `json:"logged_in_at"`
-	CreatedAt  string         `json:"created_at"`
-	UpdatedAt  string         `json:"updated_at"`
+	ID          string         `json:"id"`
+	Email       string         `json:"email"`
+	Name        sql.NullString `json:"name"`
+	Role        string         `json:"role"`
+	Active      int64          `json:"active"`
+	AuthVersion int64          `json:"auth_version"`
+	LoggedInAt  sql.NullString `json:"logged_in_at"`
+	CreatedAt   string         `json:"created_at"`
+	UpdatedAt   string         `json:"updated_at"`
+}
+
+type UserIdentity struct {
+	ID          string         `json:"id"`
+	UserID      string         `json:"user_id"`
+	Issuer      string         `json:"issuer"`
+	Subject     string         `json:"subject"`
+	EmailAtLink string         `json:"email_at_link"`
+	CreatedAt   string         `json:"created_at"`
+	LastLoginAt sql.NullString `json:"last_login_at"`
 }
 
 type Verification struct {

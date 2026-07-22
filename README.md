@@ -17,16 +17,15 @@ required at runtime.
 
 ## Quick start
 
-Fanout refuses to start without JWT secrets, SMTP credentials (email-code
-login), and an LLM API key (chat investigator). Replace the `<...>`
+Fanout refuses to start without an authentication-code secret, SMTP credentials
+(email-code login), and an LLM API key (chat investigator). Replace the `<...>`
 placeholders with your values:
 
 ```sh
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 \
   -v $PWD/data:/var/lib/fanout/data \
-  -e JWT_SECRET=$(openssl rand -hex 32) \
-  -e JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+  -e AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   -e SMTP_HOST=<smtp-host> \
   -e SMTP_USER=<smtp-user> \
   -e SMTP_PASS=<smtp-password> \

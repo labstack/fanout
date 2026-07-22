@@ -41,18 +41,49 @@ func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Setup, 
 	return e, users, setup, setupToken, secret, refreshSecret
 }
 
-// /debug/pprof must not be a public route — it exposes heap dumps, cmdline, and
-// a repeatable CPU-profile DoS, so it has to require auth even when mounted.
-func TestIsPublicRoute_DebugRequiresAuth(t *testing.T) {
-	for _, p := range []string{"/debug/pprof/", "/debug/pprof/heap", "/debug/pprof/profile"} {
-		if isPublicRoute(p) {
-			t.Errorf("isPublicRoute(%q) = true, want false (pprof must require auth)", p)
+func TestRoutePolicyClassification(t *testing.T) {
+	tests := []struct {
+		method, path string
+		kind         routePolicyKind
+		capability   Capability
+	}{
+		{http.MethodGet, "/healthz", routePolicyPublic, ""},
+		{http.MethodGet, "/readyz", routePolicyPublic, ""},
+		{http.MethodGet, "/api/health", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/setup", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/start", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/verify", routePolicyPublic, ""},
+		{http.MethodGet, "/api/auth/oidc/start", routePolicyPublic, ""},
+		{http.MethodGet, "/api/auth/oidc/callback", routePolicyPublic, ""},
+		{http.MethodGet, "/api/auth/me", routePolicyAuthenticated, ""},
+		{http.MethodPost, "/api/auth/logout", routePolicyAuthenticated, ""},
+		{http.MethodGet, "/api/observability/overview", routePolicyCapability, ReadTelemetry},
+		{http.MethodGet, "/api/alerts", routePolicyCapability, ReadTelemetry},
+		{http.MethodPost, "/api/rules", routePolicyCapability, ManageAlerts},
+		{http.MethodPut, "/api/rules/rule-1", routePolicyCapability, ManageAlerts},
+		{http.MethodGet, "/api/dashboards/dashboard-1", routePolicyCapability, ManageOwnDashboards},
+		{http.MethodPost, "/api/agent", routePolicyCapability, RunAgent},
+		{http.MethodGet, "/api/settings/ingest", routePolicyCapability, ReadIngestMetadata},
+		{http.MethodPost, "/api/settings/ingest/rotate-token", routePolicyCapability, ManageIngest},
+		{http.MethodPost, "/api/users/user-1/logout-all", routePolicyCapability, ManageUsers},
+		{http.MethodGet, "/debug/pprof/heap", routePolicyCapability, ReadOperations},
+		{http.MethodGet, "/-/metrics", routePolicyServiceCredential, ReadOperations},
+		{http.MethodPost, "/oauth/token", routePolicyProtocol, ""},
+		{http.MethodPost, "/mcp", routePolicyProtocol, ""},
+		{http.MethodGet, "/assets/app.js", routePolicyPublic, ""},
+	}
+	for _, tc := range tests {
+		policy, ok := classifyRoute(tc.method, tc.path)
+		if !ok {
+			t.Errorf("%s %s is unclassified", tc.method, tc.path)
+			continue
+		}
+		if policy.kind != tc.kind || policy.capability != tc.capability {
+			t.Errorf("%s %s policy = {%v %q}, want {%v %q}", tc.method, tc.path, policy.kind, policy.capability, tc.kind, tc.capability)
 		}
 	}
-	for _, p := range []string{"/healthz", "/readyz", "/", "/assets/app.js"} {
-		if !isPublicRoute(p) {
-			t.Errorf("isPublicRoute(%q) = false, want true", p)
-		}
+	if _, ok := classifyRoute(http.MethodPost, "/api/new-unreviewed-route"); ok {
+		t.Fatal("unreviewed API route must be unclassified")
 	}
 }
 
@@ -68,17 +99,17 @@ func TestPublicReadServesAnonymousReadsOnly(t *testing.T) {
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, "0123456789abcdef0123456789abcdef", true) // publicRead on
-	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	e.POST("/api/bookmarks", func(c *echo.Context) error { return c.NoContent(http.StatusCreated) })
-	e.GET("/api/admin", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }, RequireRole("admin"))
+	e.GET("/api/observability/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	e.POST("/api/rules", func(c *echo.Context) error { return c.NoContent(http.StatusCreated) })
+	e.GET("/api/users", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }, RequireRole("admin"))
 
 	cases := []struct {
 		name, method, path string
 		want               int
 	}{
-		{"anon GET data endpoint", http.MethodGet, "/api/overview", http.StatusNoContent},
-		{"anon write rejected", http.MethodPost, "/api/bookmarks", http.StatusUnauthorized},
-		{"anon admin route forbidden", http.MethodGet, "/api/admin", http.StatusForbidden},
+		{"anon GET data endpoint", http.MethodGet, "/api/observability/overview", http.StatusNoContent},
+		{"anon write rejected", http.MethodPost, "/api/rules", http.StatusUnauthorized},
+		{"anon admin route unauthenticated", http.MethodGet, "/api/users", http.StatusUnauthorized},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,8 +135,8 @@ func TestPublicReadDoesNotDowngradeInvalidBearer(t *testing.T) {
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, "0123456789abcdef0123456789abcdef", true)
-	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	e.GET("/api/observability/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	req := httptest.NewRequest(http.MethodGet, "/api/observability/overview", nil)
 	req.Header.Set("Authorization", "Bearer expired-or-invalid")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -185,13 +216,13 @@ func TestBearerAuthDBFailureReturns500NotInvalidToken(t *testing.T) {
 
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, secret, false)
-	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	e.GET("/api/observability/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 
 	// Simulate a DB failure on the user lookup.
 	if _, err := sqlite.DB.Exec(`ALTER TABLE users RENAME TO users_offline`); err != nil {
 		t.Fatalf("hide users table: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/observability/overview", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -203,7 +234,7 @@ func TestBearerAuthDBFailureReturns500NotInvalidToken(t *testing.T) {
 	if _, err := sqlite.DB.Exec(`ALTER TABLE users_offline RENAME TO users`); err != nil {
 		t.Fatalf("restore users table: %v", err)
 	}
-	req = httptest.NewRequest(http.MethodGet, "/api/overview", nil)
+	req = httptest.NewRequest(http.MethodGet, "/api/observability/overview", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec = httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -222,7 +253,7 @@ func TestRequireRoleUsesCurrentUserState(t *testing.T) {
 		t.Fatalf("Create second admin: %v", err)
 	}
 
-	e.GET("/api/admin", func(c *echo.Context) error {
+	e.GET("/api/users", func(c *echo.Context) error {
 		return c.NoContent(http.StatusNoContent)
 	}, RequireRole("admin"))
 
@@ -236,7 +267,7 @@ func TestRequireRoleUsesCurrentUserState(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodGet, "/api/admin", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/users", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
@@ -273,10 +304,8 @@ func TestMeRejectsInactiveUser(t *testing.T) {
 	}
 }
 
-// Refresh accepts any valid, unexpired refresh token for an active user and
-// rotates it. Matching the monk server, it does NOT evict tokens issued before
-// the latest login — concurrent sessions coexist and a redeploy/second tab does
-// not log anyone out. Logout clears the cookie but does not revoke server-side.
+// Refresh remains temporarily available for pre-migration browser clients and
+// rotates their legacy cookie while also establishing the new server session.
 func TestRefreshAcceptsConcurrentSessionsAndRotates(t *testing.T) {
 	e, users, _, _, _, refreshSecret := newTestAuthServer(t)
 	user, err := users.Create("user@example.com", "", "operator")
@@ -317,29 +346,6 @@ func TestRefreshAcceptsConcurrentSessionsAndRotates(t *testing.T) {
 		t.Fatalf("rotated refresh token is not fresh: iat=%v", newClaims.IssuedAt.Time)
 	}
 
-	// Logout returns OK and clears the cookie (Max-Age<0).
-	logoutReq := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
-	logoutReq.AddCookie(newCookie)
-	logoutRec := httptest.NewRecorder()
-	e.ServeHTTP(logoutRec, logoutReq)
-	if logoutRec.Code != http.StatusOK {
-		t.Fatalf("logout status = %d, want %d", logoutRec.Code, http.StatusOK)
-	}
-	cleared := firstCookie(t, logoutRec, "refresh_token")
-	if cleared.MaxAge >= 0 {
-		t.Fatalf("logout should clear the refresh cookie (got maxage=%d)", cleared.MaxAge)
-	}
-
-	// The tradeoff made explicit: logout does NOT revoke server-side. A held
-	// copy of the (still-unexpired) refresh token keeps working — this is the
-	// behavioral inverse of the old post-logout=401 assertion.
-	postLogoutReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	postLogoutReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: newCookie.Value})
-	postLogoutRec := httptest.NewRecorder()
-	e.ServeHTTP(postLogoutRec, postLogoutReq)
-	if postLogoutRec.Code != http.StatusOK {
-		t.Fatalf("post-logout refresh status = %d, want %d (no server-side revocation)", postLogoutRec.Code, http.StatusOK)
-	}
 }
 
 // TestRefreshRejectsInactiveUser covers the !user.Active guard in Refresh —

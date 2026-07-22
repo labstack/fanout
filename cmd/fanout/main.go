@@ -33,6 +33,7 @@ import (
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/lake"
 	"github.com/labstack/fanout/internal/mcp"
+	appmetrics "github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/settings"
@@ -135,6 +136,9 @@ func main() {
 
 	settingsStore := settings.NewStore(sqlite.DB)
 	userStore := auth.NewUserStore(sqlite.DB)
+	identityStore := auth.NewIdentityStore(sqlite.DB)
+	browserSessions := auth.NewBrowserSessions(sqlite.DB, cfg.SessionIdleTTL, cfg.SessionAbsoluteTTL, cfg.SecureCookies())
+	auditStore := auth.NewAuditStore(sqlite.DB)
 	setup := auth.NewSetup()
 
 	userCount, err := userStore.CountUsers()
@@ -202,9 +206,7 @@ func main() {
 		},
 	}))
 
-	jwtSecret := cfg.JWTSecret
-	refreshSecret := cfg.JWTRefreshSecret
-	api.RegisterAuthMiddleware(e, userStore, jwtSecret, cfg.PublicRead)
+	api.RegisterAuthMiddleware(e, userStore, browserSessions, auditStore, cfg)
 
 	// Health checks (liveness + readiness)
 	api.RegisterHealthRoutes(e, q, cfg)
@@ -212,7 +214,7 @@ func main() {
 	// Prometheus metrics (internal/ops)
 	e.GET("/-/metrics", echo.WrapHandler(promhttp.Handler()))
 
-	// pprof for profiling under load (off by default; routes are unauthenticated).
+	// pprof for profiling under load (off by default; admin session required).
 	if cfg.PprofEnabled {
 		slog.Warn("pprof enabled at /debug/pprof — do not expose on an untrusted network")
 		// Enable mutex/block sampling so those profiles aren't empty — this is how
@@ -220,12 +222,13 @@ func main() {
 		// acceptable because pprof is opt-in.
 		runtime.SetMutexProfileFraction(5)
 		runtime.SetBlockProfileRate(10_000) // sample a block event ~every 10µs
-		e.GET("/debug/pprof/", echo.WrapHandler(http.HandlerFunc(pprof.Index)))
-		e.GET("/debug/pprof/cmdline", echo.WrapHandler(http.HandlerFunc(pprof.Cmdline)))
-		e.GET("/debug/pprof/profile", echo.WrapHandler(http.HandlerFunc(pprof.Profile)))
-		e.GET("/debug/pprof/symbol", echo.WrapHandler(http.HandlerFunc(pprof.Symbol)))
-		e.GET("/debug/pprof/trace", echo.WrapHandler(http.HandlerFunc(pprof.Trace)))
-		e.GET("/debug/pprof/:name", echo.WrapHandler(http.HandlerFunc(pprof.Index))) // heap, goroutine, allocs, mutex, block…
+		operations := api.RequireCapability(api.ReadOperations)
+		e.GET("/debug/pprof/", echo.WrapHandler(http.HandlerFunc(pprof.Index)), operations)
+		e.GET("/debug/pprof/cmdline", echo.WrapHandler(http.HandlerFunc(pprof.Cmdline)), operations)
+		e.GET("/debug/pprof/profile", echo.WrapHandler(http.HandlerFunc(pprof.Profile)), operations)
+		e.GET("/debug/pprof/symbol", echo.WrapHandler(http.HandlerFunc(pprof.Symbol)), operations)
+		e.GET("/debug/pprof/trace", echo.WrapHandler(http.HandlerFunc(pprof.Trace)), operations)
+		e.GET("/debug/pprof/:name", echo.WrapHandler(http.HandlerFunc(pprof.Index)), operations) // heap, goroutine, allocs, mutex, block…
 	}
 
 	// Fanout owns telemetry semantics; agents and web clients consume this one
@@ -233,7 +236,7 @@ func main() {
 	// Route both HTTP and MCP reads through Duck's retrying adapter. Passing the
 	// raw *sql.DB here bypassed the DuckLake maintenance-race protection.
 	queries := observability.New(q, cfg.DefaultNS)
-	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability"))
+	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
 	dashboards := dashboard.New(sqlite.DB)
 	api.RegisterDashboardRoutes(e, dashboards)
 
@@ -248,10 +251,14 @@ func main() {
 		Pass: cfg.SMTPPass,
 		From: cfg.SMTPFrom,
 	}
-	codeStore := auth.NewCodeStore(sqlite.DB, jwtSecret)
-	api.RegisterAuthRoutes(e, userStore, codeStore, setup, settingsStore, jwtSecret, refreshSecret, smtpCfg, cfg)
-	api.RegisterUserRoutes(e, userStore, smtpCfg)
-	api.RegisterSettingsRoutes(e, cfg, settingsStore)
+	codeStore := auth.NewCodeStore(sqlite.DB, cfg.EffectiveAuthCodeSecret())
+	api.RegisterAuthRoutes(e, userStore, codeStore, setup, settingsStore, browserSessions, auditStore, smtpCfg, cfg)
+	if err := api.RegisterOIDCRoutes(ctx, e, cfg, userStore, identityStore, browserSessions, auditStore); err != nil {
+		slog.Error("OIDC initialization failed", "err", err)
+		os.Exit(1)
+	}
+	api.RegisterUserRoutes(e, userStore, smtpCfg, cfg)
+	api.RegisterSettingsRoutes(e, cfg, settingsStore, auditStore)
 	slog.Info("auth enabled")
 
 	// Hourly auth-state sweep: expired verification codes, expired/revoked OAuth
@@ -267,6 +274,23 @@ func main() {
 				slog.Error("oauth cleanup failed", "err", err)
 			} else if n > 0 {
 				slog.Info("oauth cleanup", "deleted", n)
+			}
+			now := time.Now()
+			if active, expired, err := browserSessions.Store.CountStatus(ctx, cfg.SessionIdleTTL, now); err != nil {
+				slog.Error("browser session count failed", "err", err)
+			} else {
+				appmetrics.BrowserSessions.WithLabelValues("active").Set(float64(active))
+				appmetrics.BrowserSessions.WithLabelValues("expired").Set(float64(expired))
+			}
+			if n, err := browserSessions.Store.CleanupExpired(ctx, cfg.SessionIdleTTL, now); err != nil {
+				slog.Error("browser session cleanup failed", "err", err)
+			} else if n > 0 {
+				slog.Info("browser session cleanup", "deleted", n)
+			}
+			if n, err := auditStore.Cleanup(ctx, 90*24*time.Hour, time.Now()); err != nil {
+				slog.Error("auth audit cleanup failed", "err", err)
+			} else if n > 0 {
+				slog.Info("auth audit cleanup", "deleted", n)
 			}
 		}
 		sweep()
@@ -288,7 +312,7 @@ func main() {
 	mcpServer := mcp.New(queries, dashboards, version)
 	if cfg.MCPEnabled {
 		mcpAuthorization, err := api.NewMCPAuthorization(
-			oauthStore, userStore, refreshSecret, cfg.MCPPublicURL,
+			oauthStore, userStore, cfg.MCPPublicURL,
 		)
 		if err != nil {
 			slog.Error("MCP OAuth init failed", "err", err)
@@ -309,7 +333,7 @@ func main() {
 		os.Exit(1)
 	}
 	defer toolRegistry.Close()
-	agent.NewRuntime(provider, toolRegistry, agent.NewStore(sqlite.DB)).Register(e.Group("/api/agent"))
+	agent.NewRuntime(provider, toolRegistry, agent.NewStore(sqlite.DB)).Register(e.Group("/api/agent", api.RequireCapability(api.RunAgent)))
 	slog.Info("AG-UI agent enabled", "path", "/api/agent", "provider", cfg.AIProvider)
 
 	// The compiled browser client is an embedded asset, not a second runtime.

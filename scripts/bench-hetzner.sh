@@ -62,8 +62,7 @@ set -e
 export PATH=$PATH:/usr/local/go/bin CGO_ENABLED=1
 mkdir -p /root/fanout && tar -xzf /root/fanout-src.tgz -C /root/fanout && cd /root/fanout
 cat > .env <<'ENV'
-JWT_SECRET=0123456789abcdef0123456789abcdef
-JWT_REFRESH_SECRET=abcdef0123456789abcdef0123456789
+AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef
 SMTP_HOST=localhost
 SMTP_USER=x
 SMTP_PASS=x
@@ -80,7 +79,7 @@ set -uo pipefail
 cd /root/fanout
 CORES=$(nproc)
 set -a; . ./.env; set +a
-DATA_DIR=/root/fanout/data PUBLIC_READ=true OTLP_GRPC_ADDR=:4317 HTTP_ADDR=:7520 ENV=development \
+DATA_DIR=/root/fanout/data PUBLIC_READ=true PUBLIC_INGEST=true METRICS_PUBLIC=true OTLP_GRPC_ADDR=:4317 HTTP_ADDR=:7520 ENV=development \
   FLUSH_SECONDS=5 ROLLUP_EVERY=15 ./bin/fanout >/root/fanout/f.log 2>&1 &
 FPID=$!
 for i in $(seq 1 40); do curl -fsS -m2 localhost:7520/healthz >/dev/null 2>&1 && break; sleep 1; done

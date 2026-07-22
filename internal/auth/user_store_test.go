@@ -17,6 +17,43 @@ func newTestSQLite(t *testing.T) *appstore.SQLite {
 	return sqlite
 }
 
+func TestAuthorizationMutationRollsBackWhenAuditWriteFails(t *testing.T) {
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	defer db.Close()
+	users := NewUserStore(db.DB)
+	user, err := users.Create("audit@example.com", "", "viewer")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO sessions (token_hash, user_id, data, created_at, last_activity_at, absolute_expires_at) VALUES ('audit-token', ?, X'00', 1, 1, 9999999999)`, user.ID); err != nil {
+		t.Fatalf("insert session: %v", err)
+	}
+	if _, err := db.DB.Exec(`ALTER TABLE auth_audit_events RENAME TO auth_audit_events_offline`); err != nil {
+		t.Fatalf("hide audit table: %v", err)
+	}
+	role := "operator"
+	if _, err := users.UpdateWithAudit(user.ID, nil, nil, &role, nil, AuditEvent{EventType: "role.changed", Outcome: "success"}); err == nil {
+		t.Fatal("UpdateWithAudit succeeded without audit table")
+	}
+	unchanged, err := users.GetByID(user.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if unchanged.Role != "viewer" || unchanged.AuthVersion != user.AuthVersion {
+		t.Fatalf("mutation was not rolled back: %+v", unchanged)
+	}
+	var sessions int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM sessions WHERE user_id = ?`, user.ID).Scan(&sessions); err != nil {
+		t.Fatalf("count sessions: %v", err)
+	}
+	if sessions != 1 {
+		t.Fatalf("session revocation was not rolled back: rows=%d", sessions)
+	}
+}
+
 func newTestUserStore(t *testing.T) *UserStore {
 	t.Helper()
 	return NewUserStore(newTestSQLite(t).DB)

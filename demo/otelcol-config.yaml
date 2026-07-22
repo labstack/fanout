@@ -92,7 +92,7 @@ exporters:
     verbosity: basic
   otlp/fanout:
     # The demo fanout instance, reached container-to-container on the internal
-    # network. No ingest token: the demo runs with PUBLIC_READ=true, which
+    # network. No ingest token: the demo runs with PUBLIC_INGEST=true, which
     # accepts OTLP without one (see demo/docker-compose.yaml).
     endpoint: "demo:4317"
     tls:

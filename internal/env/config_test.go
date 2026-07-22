@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 var requiredEnvVars = []string{
@@ -11,6 +12,11 @@ var requiredEnvVars = []string{
 	"FLUSH_BATCH_SIZE", "ROLLUP_EVERY",
 	"RETENTION_DAYS", "DEFAULT_NAMESPACE", "ENV",
 	"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL",
+	"AUTH_MODE", "PUBLIC_URL", "AUTH_CODE_SECRET", "SESSION_IDLE_TTL", "SESSION_ABSOLUTE_TTL",
+	"OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_EMAIL_CLAIM",
+	"OIDC_EMAIL_VERIFICATION", "OIDC_AUTO_PROVISION", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOWED_DOMAINS",
+	"OIDC_DEFAULT_ROLE", "OIDC_OPERATOR_GROUPS", "OIDC_ADMIN_GROUPS", "METRICS_TOKEN", "METRICS_PUBLIC",
+	"PUBLIC_READ", "PUBLIC_INGEST",
 	"JWT_SECRET", "JWT_REFRESH_SECRET",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
 	"TLS_CERT_FILE", "TLS_KEY_FILE",
@@ -25,8 +31,7 @@ func clearEnv(t *testing.T) {
 
 func seedValidEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
-	t.Setenv("JWT_REFRESH_SECRET", "abcdef0123456789abcdef0123456789")
+	t.Setenv("AUTH_CODE_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("AI_API_KEY", "sk-test")
 	t.Setenv("SMTP_HOST", "smtp.example.com")
 	t.Setenv("SMTP_USER", "user")
@@ -152,19 +157,19 @@ func TestLoadLayering(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	valid := Config{
-		FlushSeconds:     15,
-		FlushBatchSize:   50000,
-		RollupEvery:      60,
-		RetentionDays:    30,
-		AIProvider:       "anthropic",
-		AIAPIKey:         "sk-test",
-		SMTPHost:         "smtp.example.com",
-		SMTPPort:         587,
-		SMTPUser:         "user",
-		SMTPPass:         "pass",
-		SMTPFrom:         "Fanout <noreply@example.com>",
-		JWTSecret:        "0123456789abcdef0123456789abcdef",
-		JWTRefreshSecret: "abcdef0123456789abcdef0123456789",
+		FlushSeconds:   15,
+		FlushBatchSize: 50000,
+		RollupEvery:    60,
+		RetentionDays:  30,
+		AIProvider:     "anthropic",
+		AIAPIKey:       "sk-test",
+		SMTPHost:       "smtp.example.com",
+		SMTPPort:       587,
+		SMTPUser:       "user",
+		SMTPPass:       "pass",
+		SMTPFrom:       "Fanout <noreply@example.com>",
+		AuthMode:       "local",
+		AuthCodeSecret: "0123456789abcdef0123456789abcdef",
 	}
 	if err := valid.Validate(); err != nil {
 		t.Errorf("valid config should pass: %v", err)
@@ -188,11 +193,10 @@ func TestValidate(t *testing.T) {
 		{"SMTP invalid port", func(c *Config) { c.SMTPPort = 0 }},
 		{"AI key empty", func(c *Config) { c.AIAPIKey = "" }},
 		{"AI provider invalid", func(c *Config) { c.AIProvider = "unknown" }},
-		{"JWTSecret empty", func(c *Config) { c.JWTSecret = "" }},
-		{"JWTSecret short", func(c *Config) { c.JWTSecret = "short" }},
-		{"JWTRefreshSecret empty", func(c *Config) { c.JWTRefreshSecret = "" }},
-		{"JWTRefreshSecret short", func(c *Config) { c.JWTRefreshSecret = "short" }},
-		{"JWT secrets equal", func(c *Config) { c.JWTRefreshSecret = c.JWTSecret }},
+		{"auth code secret empty", func(c *Config) { c.AuthCodeSecret = "" }},
+		{"auth code secret short", func(c *Config) { c.AuthCodeSecret = "short" }},
+		{"session idle too short", func(c *Config) { c.SessionIdleTTL = time.Minute }},
+		{"session absolute shorter than idle", func(c *Config) { c.SessionIdleTTL = time.Hour; c.SessionAbsoluteTTL = 30 * time.Minute }},
 		{"TLS partial cert", func(c *Config) { c.TLSCertFile = "server.pem" }},
 		{"TLS partial key", func(c *Config) { c.TLSKeyFile = "server-key.pem" }},
 	}
@@ -212,6 +216,32 @@ func TestValidate(t *testing.T) {
 		c.RetentionDays = 0
 		if err := c.Validate(); err != nil {
 			t.Errorf("RetentionDays=0 should be valid: %v", err)
+		}
+	})
+
+	t.Run("legacy JWT fallback remains valid during migration", func(t *testing.T) {
+		c := valid
+		c.AuthCodeSecret = ""
+		c.JWTSecret = "0123456789abcdef0123456789abcdef"
+		c.JWTRefreshSecret = "abcdef0123456789abcdef0123456789"
+		if err := c.Validate(); err != nil {
+			t.Fatalf("legacy fallback should pass: %v", err)
+		}
+	})
+
+	t.Run("OIDC mode validates independently of SMTP", func(t *testing.T) {
+		c := valid
+		c.AuthMode = "oidc"
+		c.AuthCodeSecret = ""
+		c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom = "", "", "", ""
+		c.OIDCIssuerURL = "https://id.example.com"
+		c.OIDCClientID = "fanout"
+		c.OIDCClientSecret = "secret"
+		c.OIDCEmailVerification = "required"
+		c.OIDCDefaultRole = "viewer"
+		c.PublicURL = "https://fanout.example.com"
+		if err := c.Validate(); err != nil {
+			t.Fatalf("OIDC config should pass: %v", err)
 		}
 	})
 

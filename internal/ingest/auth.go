@@ -67,10 +67,10 @@ func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
 // admin creation, rotatable from the settings page). Peer IP is not
 // considered — operators decide who reaches the port.
 func (a *ingestAuthorizer) authorize(ctx context.Context) error {
-	if a.cfg.PublicRead {
+	if a.cfg.PublicIngest {
 		// Public demo mode: accept OTLP without a token. The demo's :4317 is
 		// internal-only (Docker network), so this just removes the per-deploy
-		// token friction; never enable PUBLIC_READ where ingest is internet-facing.
+		// token friction; never enable PUBLIC_INGEST where ingest is internet-facing.
 		return nil
 	}
 	if a.settingsStore == nil {

@@ -101,7 +101,7 @@ cmd/fanout/                 process composition and the single entry point
 internal/agent/             providers, AG-UI runtime, MCP tool adapter, history
 internal/alert/             expr-lang alert engine, rule store, webhook delivery
 internal/api/               HTTP routes, auth middleware, settings, alerts, health
-internal/auth/              email-code login, JWT issuance, MCP OAuth store
+internal/auth/              email/OIDC login, browser sessions, MCP OAuth store
 internal/dashboard/         dashboard domain service, validation, and identity
 internal/db/                control SQLite schema, migrations, and sqlc queries
 internal/env/               environment config loading and validation
@@ -165,8 +165,11 @@ Fanout loads `.env`, then `.env.${ENV}` (default `development`). Core settings:
 | `AI_API_KEY` | required | model provider credential |
 | `AI_MODEL` | provider default | optional model override |
 | `AI_BASE_URL` | provider default | optional compatible gateway |
-| `JWT_SECRET` | required | access-token signing key, at least 32 characters |
-| `JWT_REFRESH_SECRET` | required | distinct refresh-token key |
+| `AUTH_MODE` | `local` | browser login mode: `local` or `oidc` |
+| `AUTH_CODE_SECRET` | local mode | email-code HMAC key, at least 32 characters |
+| `SESSION_IDLE_TTL` | `12h` | browser-session idle lifetime |
+| `SESSION_ABSOLUTE_TTL` | `168h` | browser-session absolute lifetime |
+| `METRICS_TOKEN` | optional | bearer credential for `/-/metrics` |
 | `SMTP_HOST/USER/PASS/FROM` | required | email-code login delivery |
 
 The provider defaults are defined in `internal/agent/provider_http.go`. Keep model
@@ -183,11 +186,11 @@ and SDK changes current and verify them against upstream sources before bumping.
 | `GET /api/observability/...` | deterministic typed query API |
 | `/api/dashboards*`, `/api/dashboard` | owner-scoped dashboard CRUD and default dashboard state |
 | `ANY /mcp` | streamable HTTP MCP server |
-| `/api/auth/*` | setup, email login, refresh, logout, and MCP OAuth consent |
+| `/api/auth/*` | setup, email/OIDC login, logout, and MCP OAuth consent |
 | `GET /`, `GET /*` | embedded browser shell and SPA fallback |
 
-Auth middleware is global. Browser access tokens refresh through the HttpOnly
-refresh cookie. Thread IDs are not authorization boundaries; the SQLite store
+Auth middleware is global. Browser authentication uses opaque server-side
+sessions in an HttpOnly cookie. Thread IDs are not authorization boundaries; the SQLite store
 always scopes them to the authenticated owner ID.
 
 ## Persistence

@@ -4,6 +4,12 @@ import (
 	"testing"
 )
 
+func TestSessionWriteTimeoutExceedsBusyTimeout(t *testing.T) {
+	if SessionWriteTimeout < ControlDBBusyTimeout+SessionWriteMargin {
+		t.Fatalf("session write timeout %s must exceed busy timeout %s by margin %s", SessionWriteTimeout, ControlDBBusyTimeout, SessionWriteMargin)
+	}
+}
+
 func TestNewSQLite_InMemory(t *testing.T) {
 	s, err := NewSQLite(":memory:")
 	if err != nil {

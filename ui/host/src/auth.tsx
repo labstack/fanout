@@ -1,19 +1,20 @@
 import { Alert, Button, Center, Code, Container, Group, Loader, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
-import { getToken, oauthReturnTo, refreshAccessToken, saveToken, unauthorizedEvent } from "./auth-session";
+import { clearLegacySession, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 import { BrandLockup } from "./brand";
 
-export { authorizedFetch, clearSession, getToken, logout } from "./auth-session";
+export { authorizedFetch, clearSession, logout } from "./auth-session";
 
-type Status = { setup_required: boolean; public_read: boolean };
-type SetupResult = { access_token: string; ingest_token?: string; ingest_header_name?: string; suggested_endpoint?: string };
+type Status = { setup_required: boolean; public_read: boolean; auth_mode: "local" | "oidc" };
+type SetupResult = { status: string; ingest_token?: string; ingest_header_name?: string; suggested_endpoint?: string };
 
 async function jsonRequest(path: string, body?: unknown) {
   const response = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: "same-origin",
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.message ?? payload.error ?? `Request failed (${response.status})`);
@@ -26,8 +27,8 @@ function AuthSurface({ children, wide = false }: { children: ReactNode; wide?: b
 
 export default function AuthGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null);
-  const [token, setToken] = useState(getToken());
-  const [sessionReady, setSessionReady] = useState(!getToken());
+  const [authenticated, setAuthenticated] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [setupToken, setSetupToken] = useState("");
@@ -40,18 +41,20 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const returnTo = oauthReturnTo();
 
   useEffect(() => {
+    clearLegacySession();
     jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value)));
-    if (getToken()) {
-      refreshAccessToken().then((accessToken) => setToken(accessToken)).catch((cause) => console.warn("Session refresh failed on boot", cause)).finally(() => setSessionReady(true));
-    }
-    const handleUnauthorized = () => setToken("");
+    fetch("/api/auth/me", { credentials: "same-origin" })
+      .then((response) => setAuthenticated(response.ok))
+      .catch(() => setAuthenticated(false))
+      .finally(() => setSessionReady(true));
+    const handleUnauthorized = () => setAuthenticated(false);
     window.addEventListener(unauthorizedEvent, handleUnauthorized);
     return () => window.removeEventListener(unauthorizedEvent, handleUnauthorized);
   }, []);
 
   useEffect(() => {
-    if (token && sessionReady && returnTo) window.location.replace(returnTo);
-  }, [returnTo, sessionReady, token]);
+    if (authenticated && sessionReady && returnTo) window.location.replace(returnTo);
+  }, [authenticated, returnTo, sessionReady]);
 
   async function copyIngestToken() {
     try {
@@ -72,14 +75,25 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       {error && <Alert color="red">{error}</Alert>}
       <Group grow align="stretch">
         <Button variant="default" leftSection={copied ? <Check size={16} weight="bold" /> : <Copy size={16} />} onClick={() => void copyIngestToken()}>{copied ? "Copied" : "Copy token"}</Button>
-        <Button rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setToken(setupResult.access_token); setSetupResult(null); }}>Continue to Fanout</Button>
+        <Button rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setAuthenticated(true); setSetupResult(null); }}>Continue to Fanout</Button>
       </Group>
     </Stack></AuthSurface>;
   }
 
-  if (token && !sessionReady) return <Center mih="100dvh"><Loader size="sm" /></Center>;
-  if (token && returnTo) return null;
-  if (token) return <>{children}</>;
+  if (!sessionReady) return <Center mih="100dvh"><Loader size="sm" /></Center>;
+  if (authenticated && returnTo) return null;
+  if (authenticated) return <>{children}</>;
+
+  if (status && !status.setup_required && status.auth_mode === "oidc") {
+    const target = returnTo ? `/api/auth/oidc/start?return_to=${encodeURIComponent(returnTo)}` : "/api/auth/oidc/start";
+    return <AuthSurface><Stack gap="lg">
+      <BrandLockup />
+      <Title order={1}>Sign in to investigate</Title>
+      <Text c="dimmed">Use your organization&apos;s identity provider to continue.</Text>
+      {error && <Alert color="red">{error}</Alert>}
+      <Button component="a" href={target} size="md" rightSection={<ArrowRight size={17} weight="bold" />}>Continue with SSO</Button>
+    </Stack></AuthSurface>;
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -88,15 +102,13 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     try {
       if (status?.setup_required) {
         const result = await jsonRequest("/api/auth/setup", { email, name, setup_token: setupToken }) as SetupResult;
-        saveToken(result.access_token);
-        if (result.ingest_token) setSetupResult(result); else setToken(result.access_token);
+        if (result.ingest_token) setSetupResult(result); else setAuthenticated(true);
       } else if (!codeSent) {
         await jsonRequest("/api/auth/start", { email });
         setCodeSent(true);
       } else {
-        const result = await jsonRequest("/api/auth/verify", { email, code });
-        saveToken(result.access_token);
-        setToken(result.access_token);
+        await jsonRequest("/api/auth/verify", { email, code });
+        setAuthenticated(true);
       }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));

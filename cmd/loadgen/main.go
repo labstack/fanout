@@ -16,7 +16,7 @@
 //	go run ./cmd/loadgen -rate 2000 -duration 10m -services 50 -attr-cardinality 200 \
 //	  -metrics-url https://demo.fanout.test/-/metrics -report run.json
 //
-// Run fanout locally with PUBLIC_READ=true for tokenless ingest, or pass -token.
+// Run fanout locally with PUBLIC_INGEST=true for tokenless ingest, or pass -token.
 package main
 
 import (

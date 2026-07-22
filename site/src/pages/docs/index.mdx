@@ -18,8 +18,7 @@ Pick whichever path matches how you already deploy. Fanout is a single native ex
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 \
   -v $PWD/data:/var/lib/fanout/data \
-  -e JWT_SECRET=$(openssl rand -hex 32) \
-  -e JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+  -e AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   -e SMTP_HOST=smtp.example.com \
   -e SMTP_USER=fanout@example.com \
   -e SMTP_PASS=<smtp-password> \
@@ -61,7 +60,7 @@ Guidelines, not hard limits. The binary is small; the data is what consumes reso
 
 ## First boot
 
-Fanout refuses to start without JWT secrets, SMTP credentials (for email login codes), and an LLM API key (for the chat investigator). Everything else has a default.
+In local-auth mode Fanout requires an email-code secret, SMTP credentials, and an LLM API key. Everything else has a default.
 
 ### Minimum viable command
 
@@ -69,8 +68,7 @@ Fanout refuses to start without JWT secrets, SMTP credentials (for email login c
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 \
   -v $PWD/data:/var/lib/fanout/data \
-  -e JWT_SECRET=$(openssl rand -hex 32) \
-  -e JWT_REFRESH_SECRET=$(openssl rand -hex 32) \
+  -e AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   -e SMTP_HOST=smtp.example.com \
   -e SMTP_USER=fanout@example.com \
   -e SMTP_PASS=<smtp-password> \
@@ -79,7 +77,7 @@ docker run -d --name fanout \
   ghcr.io/labstack/fanout:latest
 ```
 
-The `JWT_*` secrets must differ and each must be at least 32 characters. Generate fresh ones with `openssl rand -hex 32`.
+`AUTH_CODE_SECRET` must be at least 32 characters. Generate it with `openssl rand -hex 32`.
 
 ### Create the admin
 
@@ -168,7 +166,7 @@ Open `http://<your-host>:7520`, or your production Fanout URL, and sign in.
 - **Interactive results** are five portable domain MCP Apps: health, topology, performance, trace, and logs. They are resources served by `/mcp` and hosted with the official MCP `AppBridge`.
 - **Dashboards** are named, owner-scoped canvases stored in SQLite. Their embedded blocks use the same typed query kernel, shared time and namespace filters, and a draggable 12-column layout. Ask Fanout to create a complete dashboard, or create one from an OAuth-connected MCP client; it appears in the dashboard picker automatically.
 - **Threads** are persisted in the control SQLite database and scoped to the signed-in owner. **New thread** starts a clean investigation.
-- **Session refresh** is automatic across AG-UI, MCP, and history requests. **Sign out** clears both the access token and HttpOnly refresh cookie.
+- **Browser sessions** are opaque, HttpOnly, server-side records. **Sign out** immediately deletes the server record and clears the cookie.
 
 Use portable MCP Apps for rich tool results that should render in other hosts. Use dashboard blocks for persistent, composable operational views inside Fanout; adding a block means registering its validated widget type and renderer, without changing the ingest or query backbone.
 
@@ -333,7 +331,7 @@ Downgrading across a migration is not supported — back up before upgrading if 
 A few common failure modes and what to check first.
 
 - **No services appear after sending telemetry.** Confirm the token header reaches Fanout (some proxies strip custom headers), that the endpoint scheme is explicit (`http://` or `https://`), and that port `4317` is reachable: `nc -vz fanout.example.com 4317`. Data takes up to `FLUSH_SECONDS` to appear — wait ~15 s before debugging.
-- **Startup fails immediately.** Check `docker logs fanout`. The most common cause is missing `JWT_*`, `SMTP_*`, or `AI_API_KEY`. Setting only one of the two TLS files is also fatal by design.
+- **Startup fails immediately.** Check `docker logs fanout`. In local mode, the most common cause is missing `AUTH_CODE_SECRET`, `SMTP_*`, or `AI_API_KEY`. Setting only one of the two TLS files is also fatal by design.
 - **Login codes not arriving.** Verify SMTP credentials and sender domain. Fanout uses STARTTLS on port `587` and `25`, implicit TLS on `465`.
 - **Queries slow.** First check the freshness — rollups update every `ROLLUP_EVERY` seconds (default 60). Raising `DUCKDB_MEMORY` can help larger working sets. For very long time ranges, expect raw scans to take longer than rollup-backed queries.
 
@@ -369,10 +367,14 @@ Fanout is configured entirely through environment variables. A `.env` file next 
 
 | Variable | Description |
 | --- | --- |
-| `JWT_SECRET` | **Required.** HS256 signing key for short-lived access tokens. |
-| `JWT_REFRESH_SECRET` | **Required.** HS256 signing key for refresh tokens. Must differ from `JWT_SECRET`. |
+| `AUTH_MODE` | `local` or `oidc`; defaults to `local`. |
+| `AUTH_CODE_SECRET` | **Required in local mode.** HMAC key for email verification codes; at least 32 characters. |
+| `SESSION_IDLE_TTL` | Browser-session idle lifetime; defaults to `12h`. |
+| `SESSION_ABSOLUTE_TTL` | Browser-session absolute lifetime; defaults to `168h`. |
+| `PUBLIC_URL` | Canonical external HTTPS origin. Set this when a reverse proxy terminates TLS so browser cookies remain `Secure`; required for OIDC callbacks. |
+| `METRICS_TOKEN` | Bearer credential for Prometheus scraping when metrics are not explicitly public. |
 
-Each must be at least 32 characters. Generate with `openssl rand -hex 32`.
+Generate `AUTH_CODE_SECRET` with `openssl rand -hex 32`.
 
 ### Email (required)
 

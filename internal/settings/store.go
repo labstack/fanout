@@ -12,11 +12,12 @@ import (
 )
 
 type Store struct {
-	q *generated.Queries
+	db *sql.DB
+	q  *generated.Queries
 }
 
 func NewStore(db *sql.DB) *Store {
-	return &Store{q: generated.New(db)}
+	return &Store{db: db, q: generated.New(db)}
 }
 
 // Get leaves out unchanged when the row is missing so callers keep their defaults.

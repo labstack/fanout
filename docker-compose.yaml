@@ -39,7 +39,7 @@ services:
       - "80"
 
   # Single Fanout runtime: ingest, query, AG-UI, MCP, and embedded web client.
-  # Secrets (JWT/SMTP/model provider) live in fanout/.env
+  # Secrets (authentication/SMTP/model provider) live in fanout/.env
   # (gitignored); the deploy host must have this file in place before `up`.
   fanout:
     image: ghcr.io/labstack/fanout:${FANOUT_VERSION:?FANOUT_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
@@ -57,6 +57,9 @@ services:
       # OTLP endpoint shown in the UI's collector-config hint. Behind Traefik the
       # browser host differs from the OTLP host, so set it explicitly.
       INGEST_ENDPOINT: https://ingest.fanout.labstack.com
+      # Canonical browser URL. Fanout uses this trusted value to emit Secure
+      # session cookies when TLS terminates at Traefik.
+      PUBLIC_URL: https://fanout.labstack.com
       # Canonical OAuth resource/audience for remote MCP clients.
       MCP_PUBLIC_URL: https://fanout.labstack.com/mcp
       # Allow concurrent read queries; write commits stay serialized by the

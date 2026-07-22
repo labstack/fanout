@@ -148,8 +148,7 @@ export PATH=$PATH:/usr/local/go/bin CGO_ENABLED=1
 mkdir -p /root/fanout && tar -xzf /root/fanout-src.tgz -C /root/fanout && cd /root/fanout
 if [ "$ROLE" = "target" ]; then
   cat > .env <<'ENV'
-JWT_SECRET=0123456789abcdef0123456789abcdef
-JWT_REFRESH_SECRET=abcdef0123456789abcdef0123456789
+AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef
 SMTP_HOST=localhost
 SMTP_USER=x
 SMTP_PASS=x
@@ -186,7 +185,7 @@ boot_fanout() {
 set -e
 cd /root/fanout
 set -a; . ./.env; set +a
-DATA_DIR=/root/fanout/data PUBLIC_READ=true ENV=development \
+DATA_DIR=/root/fanout/data PUBLIC_READ=true PUBLIC_INGEST=true METRICS_PUBLIC=true ENV=development \
   OTLP_GRPC_ADDR=:4317 HTTP_ADDR=:7520 \
   FLUSH_SECONDS=15 ROLLUP_EVERY=60 \
   DUCKLAKE_MERGE_EVERY_SECONDS="$MERGE_SECONDS" DUCKLAKE_MAINTENANCE_EVERY_SECONDS="$MAINT_SECONDS" \

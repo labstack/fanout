@@ -19,14 +19,15 @@ var ErrLastActiveAdmin = errors.New("cannot remove the last active admin")
 
 // User represents an authenticated user.
 type User struct {
-	ID         string `json:"id"`
-	Email      string `json:"email"`
-	Name       string `json:"name,omitempty"`
-	Role       string `json:"role"`
-	Active     bool   `json:"active"`
-	LoggedInAt string `json:"logged_in_at,omitempty"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	Name        string `json:"name,omitempty"`
+	Role        string `json:"role"`
+	Active      bool   `json:"active"`
+	AuthVersion int64  `json:"-"`
+	LoggedInAt  string `json:"logged_in_at,omitempty"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // UserStore provides CRUD operations for users.
@@ -40,36 +41,72 @@ func NewUserStore(db *sql.DB) *UserStore {
 	return &UserStore{db: db, q: generated.New(db)}
 }
 
+func (s *UserStore) DB() *sql.DB { return s.db }
+
 // toUser converts a generated.User to the domain User type.
 func toUser(u generated.User) User {
 	return User{
-		ID:         u.ID,
-		Email:      u.Email,
-		Name:       u.Name.String,
-		Role:       u.Role,
-		Active:     u.Active == 1,
-		LoggedInAt: u.LoggedInAt.String,
-		CreatedAt:  u.CreatedAt,
-		UpdatedAt:  u.UpdatedAt,
+		ID:          u.ID,
+		Email:       u.Email,
+		Name:        u.Name.String,
+		Role:        u.Role,
+		Active:      u.Active == 1,
+		AuthVersion: u.AuthVersion,
+		LoggedInAt:  u.LoggedInAt.String,
+		CreatedAt:   u.CreatedAt,
+		UpdatedAt:   u.UpdatedAt,
 	}
 }
 
 // Create adds a new user.
 func (s *UserStore) Create(email, name, role string) (User, error) {
+	return s.create(email, name, role, nil)
+}
+
+func (s *UserStore) CreateWithAudit(email, name, role string, event AuditEvent) (User, error) {
+	return s.create(email, name, role, &event)
+}
+
+func (s *UserStore) create(email, name, role string, event *AuditEvent) (User, error) {
 	params, err := newCreateUserParams(email, name, role)
 	if err != nil {
 		return User{}, err
 	}
-	u, err := s.q.CreateUser(context.Background(), params)
+	if event == nil {
+		u, err := s.q.CreateUser(context.Background(), params)
+		if err != nil {
+			return User{}, fmt.Errorf("auth: create user: %w", err)
+		}
+		return toUser(u), nil
+	}
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return User{}, fmt.Errorf("auth: begin user create: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	u, err := generated.New(tx).CreateUser(ctx, params)
 	if err != nil {
 		return User{}, fmt.Errorf("auth: create user: %w", err)
+	}
+	event.TargetType = "user"
+	event.TargetID = u.ID
+	if err := recordAudit(ctx, tx, *event); err != nil {
+		return User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return User{}, fmt.Errorf("auth: commit user create: %w", err)
 	}
 	return toUser(u), nil
 }
 
 // GetByID returns a user by ID.
 func (s *UserStore) GetByID(id string) (User, error) {
-	u, err := s.q.GetUserByID(context.Background(), id)
+	return s.GetByIDContext(context.Background(), id)
+}
+
+func (s *UserStore) GetByIDContext(ctx context.Context, id string) (User, error) {
+	u, err := s.q.GetUserByID(ctx, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
@@ -81,7 +118,11 @@ func (s *UserStore) GetByID(id string) (User, error) {
 
 // GetByEmail returns a user by email address.
 func (s *UserStore) GetByEmail(email string) (User, error) {
-	u, err := s.q.GetUserByEmail(context.Background(), email)
+	return s.GetByEmailContext(context.Background(), email)
+}
+
+func (s *UserStore) GetByEmailContext(ctx context.Context, email string) (User, error) {
+	u, err := s.q.GetUserByEmail(ctx, email)
 	if errors.Is(err, sql.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
@@ -106,7 +147,16 @@ func (s *UserStore) List() ([]User, error) {
 
 // Update modifies a user's fields. Nil pointers are skipped.
 func (s *UserStore) Update(id string, email, name, role *string, active *bool) (User, error) {
-	ctx := context.Background()
+	return s.update(id, email, name, role, active, nil)
+}
+
+func (s *UserStore) UpdateWithAudit(id string, email, name, role *string, active *bool, event AuditEvent) (User, error) {
+	return s.update(id, email, name, role, active, &event)
+}
+
+func (s *UserStore) update(id string, email, name, role *string, active *bool, event *AuditEvent) (User, error) {
+	ctx, cancel := sessionWriteContext(context.Background())
+	defer cancel()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return User{}, fmt.Errorf("auth: open user conn: %w", err)
@@ -132,7 +182,8 @@ func (s *UserStore) Update(id string, email, name, role *string, active *bool) (
 		return User{}, fmt.Errorf("auth: get user by id: %w", err)
 	}
 
-	existing := toUser(row)
+	before := toUser(row)
+	existing := before
 	if email != nil {
 		existing.Email = *email
 	}
@@ -171,6 +222,26 @@ func (s *UserStore) Update(id string, email, name, role *string, active *bool) (
 	if err != nil {
 		return User{}, fmt.Errorf("auth: update user: %w", err)
 	}
+	securityChanged := before.Email != existing.Email || before.Role != existing.Role || before.Active != existing.Active
+	if securityChanged {
+		if err := q.IncrementUserAuthVersion(ctx, generated.IncrementUserAuthVersionParams{UpdatedAt: now, ID: id}); err != nil {
+			return User{}, fmt.Errorf("auth: increment auth version: %w", err)
+		}
+		if _, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+			return User{}, fmt.Errorf("auth: revoke user sessions: %w", err)
+		}
+		u, err = q.GetUserByID(ctx, id)
+		if err != nil {
+			return User{}, fmt.Errorf("auth: reload user after revocation: %w", err)
+		}
+	}
+	if event != nil {
+		event.TargetType = "user"
+		event.TargetID = id
+		if err := recordAudit(ctx, conn, *event); err != nil {
+			return User{}, err
+		}
+	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return User{}, fmt.Errorf("auth: commit user update: %w", err)
 	}
@@ -180,7 +251,16 @@ func (s *UserStore) Update(id string, email, name, role *string, active *bool) (
 
 // Delete removes a user by ID.
 func (s *UserStore) Delete(id string) error {
-	ctx := context.Background()
+	return s.delete(id, nil)
+}
+
+func (s *UserStore) DeleteWithAudit(id string, event AuditEvent) error {
+	return s.delete(id, &event)
+}
+
+func (s *UserStore) delete(id string, event *AuditEvent) error {
+	ctx, cancel := sessionWriteContext(context.Background())
+	defer cancel()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("auth: open user conn: %w", err)
@@ -215,6 +295,13 @@ func (s *UserStore) Delete(id string) error {
 		}
 	}
 
+	if event != nil {
+		event.TargetType = "user"
+		event.TargetID = id
+		if err := recordAudit(ctx, conn, *event); err != nil {
+			return err
+		}
+	}
 	res, err := q.DeleteUser(ctx, id)
 	if err != nil {
 		return fmt.Errorf("auth: delete user: %w", err)
@@ -254,9 +341,69 @@ func (s *UserStore) CountActiveAdmins() (int64, error) {
 	return s.q.CountActiveAdmins(context.Background())
 }
 
+// RevokeAllSessions invalidates and removes every browser session for a user.
+func (s *UserStore) RevokeAllSessions(id string) error {
+	return s.revokeAllSessions(id, nil)
+}
+
+func (s *UserStore) RevokeAllSessionsWithAudit(id string, event AuditEvent) error {
+	return s.revokeAllSessions(id, &event)
+}
+
+func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
+	ctx, cancel := sessionWriteContext(context.Background())
+	defer cancel()
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("auth: open session revocation conn: %w", err)
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		return fmt.Errorf("auth: begin session revocation: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+		}
+	}()
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := conn.ExecContext(ctx, `UPDATE users SET auth_version = auth_version + 1, updated_at = ? WHERE id = ?`, now, id)
+	if err != nil {
+		return fmt.Errorf("auth: increment auth version: %w", err)
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return ErrUserNotFound
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
+		return fmt.Errorf("auth: delete user sessions: %w", err)
+	}
+	if event != nil {
+		event.TargetType = "user"
+		event.TargetID = id
+		if err := recordAudit(ctx, conn, *event); err != nil {
+			return err
+		}
+	}
+	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+		return fmt.Errorf("auth: commit session revocation: %w", err)
+	}
+	committed = true
+	return nil
+}
+
 // CreateFirstAdmin atomically creates the first admin user.
 // Returns ErrSetupComplete if users already exist (race-safe).
 func (s *UserStore) CreateFirstAdmin(email, name string) (User, error) {
+	return s.createFirstAdmin(email, name, nil)
+}
+
+func (s *UserStore) CreateFirstAdminWithAudit(email, name string, event AuditEvent) (User, error) {
+	return s.createFirstAdmin(email, name, &event)
+}
+
+func (s *UserStore) createFirstAdmin(email, name string, event *AuditEvent) (User, error) {
 	ctx := context.Background()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -290,6 +437,13 @@ func (s *UserStore) CreateFirstAdmin(email, name string) (User, error) {
 	u, err := q.CreateUser(ctx, params)
 	if err != nil {
 		return User{}, fmt.Errorf("auth: create first admin: %w", err)
+	}
+	if event != nil {
+		event.TargetType = "user"
+		event.TargetID = u.ID
+		if err := recordAudit(ctx, conn, *event); err != nil {
+			return User{}, err
+		}
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
 		return User{}, fmt.Errorf("auth: commit first admin setup: %w", err)

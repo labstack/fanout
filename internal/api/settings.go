@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/settings"
 )
@@ -15,16 +16,19 @@ import (
 type SettingsHandler struct {
 	cfg   env.Config
 	store *settings.Store
+	audit *auth.AuditStore
 }
 
-func RegisterSettingsRoutes(e *echo.Echo, cfg env.Config, store *settings.Store) {
-	h := &SettingsHandler{cfg: cfg, store: store}
-	adminOnly := RequireRole("admin")
-
+func RegisterSettingsRoutes(e *echo.Echo, cfg env.Config, store *settings.Store, audits ...*auth.AuditStore) {
+	var audit *auth.AuditStore
+	if len(audits) > 0 {
+		audit = audits[0]
+	}
+	h := &SettingsHandler{cfg: cfg, store: store, audit: audit}
 	// GET returns non-secret metadata (token_required, endpoint, header name)
 	// used by the home empty state — readable by any authenticated user.
-	e.GET("/api/settings/ingest", h.GetIngest)
-	e.POST("/api/settings/ingest/rotate-token", h.RotateIngestToken, adminOnly)
+	e.GET("/api/settings/ingest", h.GetIngest, RequireCapability(ReadIngestMetadata))
+	e.POST("/api/settings/ingest/rotate-token", h.RotateIngestToken, RequireCapability(ManageIngest))
 }
 
 // GetIngest returns the current ingest config: whether a token is set
@@ -51,10 +55,15 @@ func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 		slog.Error("settings: generate ingest token failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
 	}
-	if err := h.store.SetIngest(c.Request().Context(), settings.Ingest{TokenHash: hash}); err != nil {
+	event := auth.AuditEvent{EventType: "ingest_key.rotated", Outcome: "success", TargetType: "ingest", TargetID: "default", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
+	if user := GetCurrentUser(c); user != nil && user.ID != publicViewerID {
+		event.ActorUserID = user.ID
+	}
+	if err := h.store.SetIngestWithAudit(c.Request().Context(), settings.Ingest{TokenHash: hash}, h.audit, event); err != nil {
 		slog.Error("settings: persist ingest token failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to update ingest config")
 	}
+	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     true,
 		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestEndpoint),
