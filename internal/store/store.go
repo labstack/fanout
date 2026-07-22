@@ -17,12 +17,12 @@ import (
 )
 
 const (
-	// ControlDBBusyTimeout is SQLite's writer-contention retry window. Session
-	// security writes must outlive it so logout and revocation do not fail before
-	// SQLite has exhausted its own retry policy.
+	// ControlDBBusyTimeout is SQLite's writer-contention retry window. Security
+	// and control-plane writes must outlive it so revocation and audited
+	// mutations do not fail before SQLite has exhausted its retry policy.
 	ControlDBBusyTimeout = 5 * time.Second
-	SessionWriteMargin   = 2 * time.Second
-	SessionWriteTimeout  = ControlDBBusyTimeout + SessionWriteMargin
+	ControlWriteMargin   = 2 * time.Second
+	ControlWriteTimeout  = ControlDBBusyTimeout + ControlWriteMargin
 )
 
 // SQLite wraps a database/sql.DB backed by modernc SQLite.

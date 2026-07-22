@@ -19,10 +19,9 @@ type SettingsHandler struct {
 	audit *auth.AuditStore
 }
 
-func RegisterSettingsRoutes(e *echo.Echo, cfg env.Config, store *settings.Store, audits ...*auth.AuditStore) {
-	var audit *auth.AuditStore
-	if len(audits) > 0 {
-		audit = audits[0]
+func RegisterSettingsRoutes(e *echo.Echo, cfg env.Config, store *settings.Store, audit *auth.AuditStore) {
+	if store == nil || audit == nil {
+		panic("api: settings route dependencies are required")
 	}
 	h := &SettingsHandler{cfg: cfg, store: store, audit: audit}
 	// GET returns non-secret metadata (token_required, endpoint, header name)

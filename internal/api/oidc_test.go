@@ -178,3 +178,77 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 		t.Fatalf("authenticated sessions = %d, want 1", sessionCount)
 	}
 }
+
+func TestConfiguredOIDCEmailRejectsFallbackValues(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  map[string]json.RawMessage
+		want string
+		ok   bool
+	}{
+		{name: "string", raw: map[string]json.RawMessage{"trusted_email": json.RawMessage(`"trusted@example.com"`)}, want: "trusted@example.com", ok: true},
+		{name: "missing", raw: map[string]json.RawMessage{"email": json.RawMessage(`"attacker@example.com"`)}},
+		{name: "array", raw: map[string]json.RawMessage{"trusted_email": json.RawMessage(`["attacker@example.com"]`)}},
+		{name: "null", raw: map[string]json.RawMessage{"trusted_email": json.RawMessage(`null`)}},
+		{name: "empty", raw: map[string]json.RawMessage{"trusted_email": json.RawMessage(`""`)}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := configuredOIDCEmail(tc.raw, "trusted_email")
+			if tc.ok && (err != nil || got != tc.want) {
+				t.Fatalf("configuredOIDCEmail = %q, %v", got, err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatalf("configuredOIDCEmail accepted %q", got)
+			}
+		})
+	}
+}
+
+func TestResolveUserRequiresActiveUnlinkedIssuerAllowedUser(t *testing.T) {
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	users := appauth.NewUserStore(db.DB)
+	identities := appauth.NewIdentityStore(db.DB)
+	user, err := users.Create("existing@example.com", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := &OIDCHandler{
+		cfg:   env.Config{OIDCEmailVerification: "issuer", OIDCAllowedGroups: "trusted", OIDCDefaultRole: "viewer"},
+		users: users, identities: identities, audit: appauth.NewAuditStore(db.DB),
+	}
+	verified := true
+	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"untrusted"}}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err == nil {
+		t.Fatal("issuer-mode existing user bypassed allow policy")
+	}
+	if count, err := identities.CountForUser(t.Context(), user.ID); err != nil || count != 0 {
+		t.Fatalf("denied identity links = %d, err %v", count, err)
+	}
+
+	claims.Groups = []string{"trusted"}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err != nil {
+		t.Fatalf("allowed existing user: %v", err)
+	}
+	claims.Subject = "subject-2"
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err == nil {
+		t.Fatal("second identity linked to an already-linked user")
+	}
+
+	inactive, err := users.Create("inactive-oidc@example.com", "", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	active := false
+	if _, err := users.Update(inactive.ID, nil, nil, nil, &active); err != nil {
+		t.Fatal(err)
+	}
+	inactiveClaims := oidcClaims{Subject: "inactive-subject", Email: inactive.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", inactiveClaims); err == nil {
+		t.Fatal("inactive user was linked")
+	}
+}

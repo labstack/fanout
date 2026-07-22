@@ -119,8 +119,9 @@ Exactly one primary browser authentication mode is configured per installation:
 later phase because trusting request headers safely requires explicit proxy
 network configuration and careful deployment documentation.
 
-The first-admin setup token is independent of the selected mode. An installation
-must always have a host-controlled recovery path even if its IdP is unavailable
+The first-admin setup token is independent of the selected mode. Host-controlled
+OIDC recovery codes are not implemented yet; until they are, operators must use
+the documented emergency local-mode procedure below if the IdP is unavailable
 or misconfigured.
 
 ### Local Mode
@@ -509,7 +510,6 @@ const (
     ReadIngestMetadata  Capability = "ingest:read-metadata"
     ManageIngest        Capability = "ingest:manage"
     ManageUsers         Capability = "users:manage"
-    ManageAuth          Capability = "auth:manage"
     ReadOperations      Capability = "operations:read"
 )
 ```
@@ -520,13 +520,11 @@ The initial mapping is compiled into Fanout:
 |---|:---:|:---:|:---:|
 | Read telemetry, traces, and logs | ✓ | ✓ | ✓ |
 | Manage own dashboards | ✓ | ✓ | ✓ |
-| Run read-only investigations | ✓ | ✓ | ✓ |
 | Create/test/update/delete alert rules |  | ✓ | ✓ |
 | Run the agent while it has write-capable tools |  | ✓ | ✓ |
 | Read non-secret ingest connection metadata | ✓ | ✓ | ✓ |
 | Rotate and manage ingest credentials |  |  | ✓ |
 | Manage users and roles |  |  | ✓ |
-| Configure authentication |  |  | ✓ |
 | Read operational metrics/debug data |  |  | ✓ |
 
 If the agent is later split into read-only and write-capable tool sets, viewers
@@ -564,7 +562,6 @@ capability, preventing future viewer features from becoming public by accident.
 | Ingest settings read | `ingest:read-metadata`; real users only |
 | Ingest credential rotation | `ingest:manage` |
 | `/api/users/*` | `users:manage` |
-| Authentication configuration | `auth:manage` |
 | `/-/metrics` | `ServiceCredential(metrics)` with `operations:read` and explicit-public alternatives |
 | `/debug/*` | `operations:read` or private network policy |
 | `/mcp` and `/oauth/*` | Existing MCP OAuth protocol and scopes |
@@ -615,16 +612,15 @@ route is no longer placed on the global public-route bypass. Its
 `ServiceCredential(metrics)` evaluator performs these checks in order:
 
 1. Allow when `METRICS_PUBLIC=true`.
-2. Allow a valid browser session with `operations:read`.
-3. Compare a bearer value with `METRICS_TOKEN` in constant time.
+2. Compare a non-empty bearer value with `METRICS_TOKEN` in constant time.
+3. Allow a valid browser session with `operations:read`; reject an authenticated
+   lower-privilege user with `403`.
 4. Otherwise return `401`.
 
-The metrics bearer must not be handed to the legacy JWT access-token verifier
-during the browser-session compatibility window. Generic middleware dispatches
-by the registered route policy rather than attempting to interpret every
-`Authorization: Bearer` value as a browser JWT. The exhaustive route-policy test
-therefore treats `ServiceCredential(metrics)` as a first-class classification
-and verifies both its accepted alternatives and its denial path.
+The metrics bearer is evaluated only by this service-credential policy and is
+never interpreted as a browser credential. The exhaustive route-policy test
+treats `ServiceCredential(metrics)` as a first-class classification and verifies
+all accepted alternatives and denial paths.
 
 ## Public Demo Mode
 
@@ -633,6 +629,7 @@ Public telemetry reading and unauthenticated ingest are separate settings:
 ```text
 PUBLIC_READ=false
 PUBLIC_INGEST=false
+TRUST_PROXY_HEADERS=false
 ```
 
 `PUBLIC_READ=true` creates the existing synthetic viewer only for explicitly
@@ -677,7 +674,7 @@ protection:
 
 - State-changing browser requests require a same-origin `Origin` header, with a
   `Referer` fallback for supported legacy clients.
-- The SPA sends a fixed custom header such as `X-Fanout-Request: browser` on
+- The SPA sends a fixed custom header such as `X-Fanout-Request: 1` on
   state-changing API requests.
 - `Sec-Fetch-Site: cross-site` is rejected for unsafe methods.
 - `GET`, `HEAD`, and `OPTIONS` never mutate application state.
@@ -713,8 +710,7 @@ The MCP OAuth implementation remains unchanged:
 - OAuth access is restricted by resource and scope.
 - OAuth refresh tokens remain opaque, hashed, rotated, and reuse-detecting.
 
-The consent handler reads the current user from the new SCS browser session
-instead of parsing the old browser refresh JWT. MCP tokens are never accepted as
+The consent handler reads the current user from the SCS browser session. MCP tokens are never accepted as
 browser sessions, and browser cookies are never accepted as MCP bearer tokens.
 
 ## Configuration
@@ -751,6 +747,7 @@ METRICS_TOKEN=
 METRICS_PUBLIC=false
 PUBLIC_READ=false
 PUBLIC_INGEST=false
+TRUST_PROXY_HEADERS=false
 ```
 
 Configuration validation is mode-specific:
@@ -759,9 +756,8 @@ Configuration validation is mode-specific:
   `SESSION_ABSOLUTE_TTL`. The activity checkpoint is derived from the idle TTL;
   it is not a separately configurable constant.
 - `local` requires complete SMTP configuration and an `AUTH_CODE_SECRET` of at
-  least 32 characters. During migration only, a missing `AUTH_CODE_SECRET` falls
-  back to the existing `JWT_SECRET` with a deprecation warning; this preserves
-  the HMAC key used by `CodeStore` until operators set the dedicated secret.
+  least 32 characters. There is no JWT-secret fallback; rotating this secret
+  invalidates outstanding five-minute verification codes.
 - `oidc` requires an HTTPS issuer, client ID, client secret, and a canonical
   external HTTPS URL used to construct an exact callback URI.
 - `OIDC_EMAIL_VERIFICATION` is `required` by default. The only alternative is
@@ -781,17 +777,40 @@ the existing generic invalid/expired-code response and must request a new code.
 
 ## Recovery
 
-An OIDC outage or configuration error must not require database surgery. A
-future `fanout auth recovery-code --email <admin>` command will:
+Host-controlled recovery codes are not implemented in this phase. Until the
+future `fanout auth recovery-code --email <admin>` command exists, an OIDC outage
+uses this explicit emergency procedure:
 
-- Require host/terminal access to the Fanout installation.
-- Work only for an existing active administrator.
-- Print a high-entropy one-time code valid for ten minutes.
-- Create a single browser session after redemption.
-- Record generation and redemption in the security audit log.
+1. Stop Fanout and back up `DATA_DIR/control/fanout.sqlite`.
+2. If no active administrator remains, use `sqlite3` locally to select the
+   intended existing user and set `role = admin`, `active = 1`, increment
+   `auth_version`, and delete that user’s rows from `sessions`. Never create an
+   unknown identity or bypass the final-admin invariant. For example, after
+   replacing the email placeholder and confirming it identifies the intended
+   operator:
 
-It does not create users, change roles, or bypass the last-admin invariant. The
-normal web application does not expose recovery-code generation.
+   ```sql
+   BEGIN IMMEDIATE;
+   UPDATE users
+   SET role = admin, active = 1, auth_version = auth_version + 1,
+       updated_at = strftime(%Y-%m-%dT%H:%M:%fZ, now)
+   WHERE lower(email) = lower(operator@example.com);
+   DELETE FROM sessions
+   WHERE user_id = (SELECT id FROM users
+                    WHERE lower(email) = lower(operator@example.com));
+   COMMIT;
+   ```
+
+3. Restart with `AUTH_MODE=local`, complete SMTP settings, and a dedicated
+   `AUTH_CODE_SECRET`; request a normal email code for that administrator.
+4. Repair OIDC configuration, restore `AUTH_MODE=oidc`, and restart. Review the
+   audit log and rotate credentials if compromise was suspected.
+
+This is an operator-only break-glass procedure and causes a brief maintenance
+window. The planned recovery command will require host access, work only for an
+existing active administrator, issue one ten-minute single-use code, and audit
+both generation and redemption. The normal web application will not expose
+recovery-code generation.
 
 ## Administrative UX
 
@@ -834,8 +853,8 @@ sessions:
 
 1. Add `users.auth_version`, `sessions`, `user_identities`, and
    `auth_audit_events` migrations.
-2. Add `AUTH_CODE_SECRET`; temporarily fall back to the existing `JWT_SECRET`
-   for verification-code HMAC compatibility.
+2. Require a dedicated `AUTH_CODE_SECRET`; rotating it invalidates only the
+   outstanding five-minute verification codes.
 3. Wire SCS and the context-aware SQLite store behind the existing auth
    middleware, including indexed user/activity/absolute-expiry metadata and the
    idle-or-absolute sweep. Session reads honor request cancellation; session
@@ -847,11 +866,9 @@ sessions:
 6. Change MCP consent to read the SCS session.
 7. Add metrics bearer authentication and document the required Prometheus
    configuration before changing the public route default.
-8. Remove browser refresh JWT issuance and refresh handling after a short
-   compatibility window, or invalidate all existing browser sessions at upgrade.
-9. Retain JWT code only if another non-browser client demonstrably requires it;
-   otherwise remove `JWT_SECRET` and `JWT_REFRESH_SECRET` after
-   `AUTH_CODE_SECRET` is active and no code path depends on either JWT secret.
+8. Remove browser access/refresh JWT issuance, verification, cookies, endpoints,
+   and configuration in the same release. Existing browser logins are invalidated
+   at upgrade; MCP OAuth opaque tokens remain intact.
 
 For an early-stage product, forcing one login after upgrade is preferable to a
 dual session system. Existing users, roles, verification codes, dashboards,
@@ -900,9 +917,9 @@ agent threads, ingest tokens, MCP clients, and MCP OAuth tokens remain intact.
 - Namespace/project authorization only if the product introduces a real
   multi-tenant or multi-project boundary.
 
-Basic OIDC remains open source. Appropriate commercial features are automated
-provisioning, multiple IdPs, advanced group policy, audit export/retention, and
-compliance integrations—not charging customers merely to authenticate safely.
+Basic OIDC is included in the standard product. Potential separately packaged
+features are automated provisioning, multiple IdPs, advanced group policy, audit
+export/retention, and compliance integrations—not safe authentication itself.
 This packaging statement is non-normative product policy based on the repository's
 current AGPL-3.0 direction; a future licensing decision may update packaging
 without changing the security architecture in this document.
@@ -978,8 +995,8 @@ without changing the security architecture in this document.
 - Metrics accepts operations access or the dedicated bearer token, rejects an
   invalid token, and is public only with explicit opt-in; debug routes require
   operations access.
-- The metrics bearer is evaluated by `ServiceCredential(metrics)` before legacy
-  JWT/browser bearer parsing during migration.
+- The metrics bearer is evaluated only by `ServiceCredential(metrics)` and is
+  never treated as a browser credential.
 - Authorization failures emit redacted audit events.
 
 ### Integration Tests
@@ -990,7 +1007,7 @@ without changing the security architecture in this document.
 - Deactivate user while browser and MCP sessions exist: browser access stops on
   the next request and MCP refresh is rejected/revoked by its existing logic.
 - Upgrade fixture preserves users and resources while invalidating old browser
-  JWT state cleanly.
+  JWT state cleanly; no JWT endpoint remains after migration.
 
 ## Operational Signals
 

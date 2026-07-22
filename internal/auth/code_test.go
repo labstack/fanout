@@ -1,7 +1,10 @@
 package auth
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	appstore "github.com/labstack/fanout/internal/store"
 )
@@ -88,5 +91,60 @@ func TestCodeStore_MaxAttempts(t *testing.T) {
 	ok, _ := s.Verify("test@example.com", code)
 	if ok {
 		t.Error("should fail after max attempts")
+	}
+}
+
+func TestCodeStoreRecentCountUsesCanonicalTimestamp(t *testing.T) {
+	store := newTestCodeStore(t)
+	if _, err := store.Create("cooldown@example.com"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	count, err := store.RecentCount("cooldown@example.com", time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatalf("RecentCount: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("recent codes = %d, want 1", count)
+	}
+	count, err = store.RecentCount("cooldown@example.com", time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("RecentCount future cutoff: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("future recent codes = %d, want 0", count)
+	}
+}
+
+func TestCodeStoreVerifyIsSingleUseUnderConcurrency(t *testing.T) {
+	store := newTestCodeStore(t)
+	code, err := store.Create("race@example.com")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	var successes atomic.Int32
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ok, verifyErr := store.Verify("race@example.com", code)
+			if verifyErr != nil {
+				errs <- verifyErr
+				return
+			}
+			if ok {
+				successes.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for verifyErr := range errs {
+		t.Errorf("Verify: %v", verifyErr)
+	}
+	if successes.Load() != 1 {
+		t.Fatalf("successful verifications = %d, want 1", successes.Load())
 	}
 }

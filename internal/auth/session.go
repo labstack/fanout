@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -33,12 +34,46 @@ type SessionMetadata struct {
 	AbsoluteExpiresAt time.Time
 }
 
+// sessionErrorResponseWriter suppresses a handler's success response after SCS
+// has already reported a load or commit failure. Without it a failed commit can
+// produce an HTTP 500 followed by the handler's success JSON in the same body.
+type sessionErrorResponseWriter struct {
+	http.ResponseWriter
+	failed bool
+}
+
+func (w *sessionErrorResponseWriter) WriteHeader(status int) {
+	if !w.failed {
+		w.ResponseWriter.WriteHeader(status)
+	}
+}
+
+func (w *sessionErrorResponseWriter) Write(data []byte) (int, error) {
+	if w.failed {
+		return len(data), nil
+	}
+	return w.ResponseWriter.Write(data)
+}
+
+func (w *sessionErrorResponseWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *sessionErrorResponseWriter) fail() {
+	if w.failed {
+		return
+	}
+	w.failed = true
+	w.ResponseWriter.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.ResponseWriter.Header().Set("X-Content-Type-Options", "nosniff")
+	w.ResponseWriter.WriteHeader(http.StatusInternalServerError)
+	_, _ = w.ResponseWriter.Write([]byte("Internal Server Error\n"))
+}
+
 // SessionMetadataMiddleware must wrap SCS LoadAndSave.
 func SessionMetadataMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		metadata := &SessionMetadata{}
 		ctx := context.WithValue(r.Context(), sessionMetadataContextKey{}, metadata)
-		next.ServeHTTP(w, r.WithContext(ctx))
+		next.ServeHTTP(&sessionErrorResponseWriter{ResponseWriter: w}, r.WithContext(ctx))
 	})
 }
 
@@ -97,19 +132,21 @@ func (s *SQLiteSessionStore) Commit(token string, data []byte, expiry time.Time)
 }
 
 func (s *SQLiteSessionStore) CommitCtx(ctx context.Context, token string, data []byte, expiry time.Time) error {
-	writeCtx, cancel := sessionWriteContext(ctx)
+	writeCtx, cancel := DetachedWriteContext(ctx)
 	defer cancel()
 
+	metadata := sessionMetadata(ctx)
+	if metadata == nil {
+		return errors.New("auth: session metadata middleware is not installed")
+	}
 	now := time.Now().UTC()
 	createdAt := now
 	var userID any
-	if metadata := sessionMetadata(ctx); metadata != nil {
-		if !metadata.CreatedAt.IsZero() {
-			createdAt = metadata.CreatedAt
-		}
-		if metadata.UserID != "" {
-			userID = metadata.UserID
-		}
+	if !metadata.CreatedAt.IsZero() {
+		createdAt = metadata.CreatedAt
+	}
+	if metadata.UserID != "" {
+		userID = metadata.UserID
 	}
 	_, err := s.db.ExecContext(writeCtx, `
 		INSERT INTO sessions
@@ -133,7 +170,7 @@ func (s *SQLiteSessionStore) Delete(token string) error {
 }
 
 func (s *SQLiteSessionStore) DeleteCtx(ctx context.Context, token string) error {
-	writeCtx, cancel := sessionWriteContext(ctx)
+	writeCtx, cancel := DetachedWriteContext(ctx)
 	defer cancel()
 	if _, err := s.db.ExecContext(writeCtx, `DELETE FROM sessions WHERE token_hash = ?`, token); err != nil {
 		return fmt.Errorf("auth: delete session: %w", err)
@@ -141,20 +178,26 @@ func (s *SQLiteSessionStore) DeleteCtx(ctx context.Context, token string) error 
 	return nil
 }
 
-func sessionWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.WithoutCancel(ctx), appstore.SessionWriteTimeout)
+// DetachedWriteContext preserves request values but prevents a disconnected
+// client from cancelling a security-critical revocation, session, or audit
+// write. The deadline remains bounded beyond SQLite's busy window.
+func DetachedWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), appstore.ControlWriteTimeout)
 }
+
+type SessionToken string
+type SessionTokenDigest string
 
 // SessionTokenHash matches SCS v2.9 HashTokenInStore. Its compatibility is
 // covered by an integration test so an upstream format change cannot silently
 // orphan activity updates or revocation.
-func SessionTokenHash(token string) string {
+func SessionTokenHash(token SessionToken) SessionTokenDigest {
 	digest := sha256.Sum256([]byte(token))
-	return base64.RawURLEncoding.EncodeToString(digest[:])
+	return SessionTokenDigest(base64.RawURLEncoding.EncodeToString(digest[:]))
 }
 
-func (s *SQLiteSessionStore) Touch(ctx context.Context, rawToken string, before, now time.Time) (bool, error) {
-	writeCtx, cancel := sessionWriteContext(ctx)
+func (s *SQLiteSessionStore) Touch(ctx context.Context, rawToken SessionToken, before, now time.Time) (bool, error) {
+	writeCtx, cancel := DetachedWriteContext(ctx)
 	defer cancel()
 	result, err := s.db.ExecContext(writeCtx, `
 		UPDATE sessions SET last_activity_at = ?
@@ -169,7 +212,7 @@ func (s *SQLiteSessionStore) Touch(ctx context.Context, rawToken string, before,
 }
 
 func (s *SQLiteSessionStore) DeleteUserSessions(ctx context.Context, userID string) error {
-	writeCtx, cancel := sessionWriteContext(ctx)
+	writeCtx, cancel := DetachedWriteContext(ctx)
 	defer cancel()
 	if _, err := s.db.ExecContext(writeCtx, `DELETE FROM sessions WHERE user_id = ?`, userID); err != nil {
 		return fmt.Errorf("auth: delete user sessions: %w", err)
@@ -178,7 +221,7 @@ func (s *SQLiteSessionStore) DeleteUserSessions(ctx context.Context, userID stri
 }
 
 func (s *SQLiteSessionStore) CleanupExpired(ctx context.Context, idleTTL time.Duration, now time.Time) (int64, error) {
-	writeCtx, cancel := sessionWriteContext(ctx)
+	writeCtx, cancel := DetachedWriteContext(ctx)
 	defer cancel()
 	result, err := s.db.ExecContext(writeCtx, `
 		DELETE FROM sessions
@@ -207,8 +250,8 @@ func (s *SQLiteSessionStore) CountStatus(ctx context.Context, idleTTL time.Durat
 
 // BrowserSessions owns every permitted SCS deadline and renewal operation.
 type BrowserSessions struct {
-	Manager            *scs.SessionManager
-	Store              *SQLiteSessionStore
+	manager            *scs.SessionManager
+	store              *SQLiteSessionStore
 	IdleTTL            time.Duration
 	AbsoluteTTL        time.Duration
 	ActivityCheckpoint time.Duration
@@ -231,14 +274,22 @@ func NewBrowserSessions(db *sql.DB, idleTTL, absoluteTTL time.Duration, secure b
 	manager.Cookie.Secure = secure
 	manager.Cookie.SameSite = http.SameSiteLaxMode
 	manager.Cookie.Persist = true
+	manager.ErrorFunc = func(w http.ResponseWriter, _ *http.Request, err error) {
+		slog.Error("browser session middleware failed", "err", err)
+		if guard, ok := w.(*sessionErrorResponseWriter); ok {
+			guard.fail()
+			return
+		}
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+	}
 
 	checkpoint := idleTTL / 10
 	if checkpoint > 5*time.Minute {
 		checkpoint = 5 * time.Minute
 	}
 	return &BrowserSessions{
-		Manager:            manager,
-		Store:              store,
+		manager:            manager,
+		store:              store,
 		IdleTTL:            idleTTL,
 		AbsoluteTTL:        absoluteTTL,
 		ActivityCheckpoint: checkpoint,
@@ -246,18 +297,18 @@ func NewBrowserSessions(db *sql.DB, idleTTL, absoluteTTL time.Duration, secure b
 }
 
 func (s *BrowserSessions) Middleware(next http.Handler) http.Handler {
-	return SessionMetadataMiddleware(s.Manager.LoadAndSave(next))
+	return SessionMetadataMiddleware(s.manager.LoadAndSave(next))
 }
 
 func (s *BrowserSessions) EstablishAuthenticatedSession(ctx context.Context, user User) error {
-	if err := s.Manager.RenewToken(ctx); err != nil {
+	if err := s.manager.RenewToken(ctx); err != nil {
 		return fmt.Errorf("auth: renew authenticated session: %w", err)
 	}
 	now := time.Now().UTC()
-	s.Manager.Put(ctx, sessionUserIDKey, user.ID)
-	s.Manager.Put(ctx, sessionAuthVersionKey, user.AuthVersion)
-	s.Manager.Put(ctx, sessionLastAuthKey, now.Unix())
-	s.Manager.SetDeadline(ctx, now.Add(s.AbsoluteTTL))
+	s.manager.Put(ctx, sessionUserIDKey, user.ID)
+	s.manager.Put(ctx, sessionAuthVersionKey, user.AuthVersion)
+	s.manager.Put(ctx, sessionLastAuthKey, now.Unix())
+	s.manager.SetDeadline(ctx, now.Add(s.AbsoluteTTL))
 	if metadata := sessionMetadata(ctx); metadata != nil {
 		metadata.UserID = user.ID
 		metadata.CreatedAt = now
@@ -267,30 +318,60 @@ func (s *BrowserSessions) EstablishAuthenticatedSession(ctx context.Context, use
 	return nil
 }
 
-func (s *BrowserSessions) BeginPreAuthenticationSession(ctx context.Context, flowTTL, maximum time.Duration) error {
+// BeginOIDCSession creates a short-lived pre-authentication session and stores
+// the single-use values needed to validate the callback.
+func (s *BrowserSessions) BeginOIDCSession(ctx context.Context, flowTTL, maximum time.Duration, state, nonce, verifier, returnTo string) error {
 	if flowTTL <= 0 || flowTTL > maximum {
 		return fmt.Errorf("auth: invalid pre-authentication session lifetime")
 	}
-	s.Manager.SetDeadline(ctx, time.Now().UTC().Add(flowTTL))
+	s.manager.SetDeadline(ctx, time.Now().UTC().Add(flowTTL))
+	s.manager.Put(ctx, "oidc_state", state)
+	s.manager.Put(ctx, "oidc_nonce", nonce)
+	s.manager.Put(ctx, "oidc_pkce_verifier", verifier)
+	if returnTo != "" {
+		s.manager.Put(ctx, "return_to", returnTo)
+	}
 	return nil
 }
 
+func (s *BrowserSessions) OIDCFlow(ctx context.Context) (state, nonce, verifier, returnTo string) {
+	return s.manager.GetString(ctx, "oidc_state"),
+		s.manager.GetString(ctx, "oidc_nonce"),
+		s.manager.GetString(ctx, "oidc_pkce_verifier"),
+		s.manager.GetString(ctx, "return_to")
+}
+
+func (s *BrowserSessions) ClearOIDCFlow(ctx context.Context) {
+	for _, key := range []string{"oidc_state", "oidc_nonce", "oidc_pkce_verifier", "return_to"} {
+		s.manager.Remove(ctx, key)
+	}
+}
+
 func (s *BrowserSessions) UserID(ctx context.Context) string {
-	return s.Manager.GetString(ctx, sessionUserIDKey)
+	return s.manager.GetString(ctx, sessionUserIDKey)
 }
 
 func (s *BrowserSessions) AuthVersion(ctx context.Context) int64 {
-	return s.Manager.GetInt64(ctx, sessionAuthVersionKey)
+	return s.manager.GetInt64(ctx, sessionAuthVersionKey)
 }
 
 func (s *BrowserSessions) Destroy(ctx context.Context) error {
-	return s.Manager.Destroy(ctx)
+	return s.manager.Destroy(ctx)
+}
+
+func (s *BrowserSessions) CountStatus(ctx context.Context, now time.Time) (active, expired int64, err error) {
+	return s.store.CountStatus(ctx, s.IdleTTL, now)
+}
+
+func (s *BrowserSessions) CleanupExpired(ctx context.Context, now time.Time) (int64, error) {
+	return s.store.CleanupExpired(ctx, s.IdleTTL, now)
 }
 
 func (s *BrowserSessions) EnforceActivity(ctx context.Context, now time.Time) error {
 	metadata := sessionMetadata(ctx)
-	if metadata == nil || metadata.CreatedAt.IsZero() {
-		return nil
+	if metadata == nil || metadata.CreatedAt.IsZero() || metadata.LastActivityAt.IsZero() || metadata.AbsoluteExpiresAt.IsZero() {
+		slog.Error("session metadata middleware is missing or incomplete")
+		return ErrSessionExpired
 	}
 	if now.After(metadata.AbsoluteExpiresAt) || now.Sub(metadata.LastActivityAt) > s.IdleTTL {
 		if err := s.Destroy(ctx); err != nil {
@@ -301,11 +382,12 @@ func (s *BrowserSessions) EnforceActivity(ctx context.Context, now time.Time) er
 	if now.Sub(metadata.LastActivityAt) < s.ActivityCheckpoint {
 		return nil
 	}
-	rawToken := s.Manager.Token(ctx)
+	rawToken := SessionToken(s.manager.Token(ctx))
 	if rawToken == "" {
-		return nil
+		slog.Error("loaded session has no raw token")
+		return ErrSessionExpired
 	}
-	_, err := s.Store.Touch(ctx, rawToken, now.Add(-s.ActivityCheckpoint), now)
+	_, err := s.store.Touch(ctx, rawToken, now.Add(-s.ActivityCheckpoint), now)
 	return err
 }
 

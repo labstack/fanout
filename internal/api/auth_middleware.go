@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -32,26 +31,23 @@ const (
 	ReadIngestMetadata  Capability = "ingest:read-metadata"
 	ManageIngest        Capability = "ingest:manage"
 	ManageUsers         Capability = "users:manage"
-	ManageAuth          Capability = "auth:manage"
 	ReadOperations      Capability = "operations:read"
 )
 
-var roleCapabilities = map[string]map[Capability]struct{}{
-	"viewer": {
+var roleCapabilities = map[auth.Role]map[Capability]struct{}{
+	auth.RoleViewer: {
 		ReadTelemetry: {}, ManageOwnDashboards: {}, ReadIngestMetadata: {},
 	},
-	"operator": {
+	auth.RoleOperator: {
 		ReadTelemetry: {}, ManageOwnDashboards: {}, ManageAlerts: {}, RunAgent: {}, ReadIngestMetadata: {},
 	},
-	"admin": {
+	auth.RoleAdmin: {
 		ReadTelemetry: {}, ManageOwnDashboards: {}, ManageAlerts: {}, RunAgent: {}, ReadIngestMetadata: {},
-		ManageIngest: {}, ManageUsers: {}, ManageAuth: {}, ReadOperations: {},
+		ManageIngest: {}, ManageUsers: {}, ReadOperations: {},
 	},
 }
 
-var publicViewer = auth.User{ID: publicViewerID, Email: "public@demo", Role: "viewer", Active: true}
-
-var registeredBrowserSessions sync.Map
+var publicViewer = auth.User{ID: publicViewerID, Email: "public@demo", Role: auth.RoleViewer, Active: true}
 
 type routePolicyKind uint8
 
@@ -68,26 +64,10 @@ type routePolicy struct {
 	capability Capability
 }
 
-func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, args ...any) {
-	var sessions *auth.BrowserSessions
-	var audit *auth.AuditStore
-	var cfg env.Config
-	if len(args) == 3 {
-		sessions, _ = args[0].(*auth.BrowserSessions)
-		audit, _ = args[1].(*auth.AuditStore)
-		cfg, _ = args[2].(env.Config)
-	} else if len(args) == 2 { // browser-JWT compatibility for downstream embedders
-		cfg.JWTSecret, _ = args[0].(string)
-		cfg.PublicRead, _ = args[1].(bool)
-		cfg.SessionIdleTTL = 12 * time.Hour
-		cfg.SessionAbsoluteTTL = 7 * 24 * time.Hour
-		sessions = auth.NewBrowserSessions(users.DB(), cfg.SessionIdleTTL, cfg.SessionAbsoluteTTL, false)
-		audit = auth.NewAuditStore(users.DB())
+func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, sessions *auth.BrowserSessions, audit *auth.AuditStore, cfg env.Config) {
+	if users == nil || sessions == nil || audit == nil {
+		panic("api: auth middleware dependencies are required")
 	}
-	if sessions == nil {
-		panic("api: browser sessions are required")
-	}
-	registeredBrowserSessions.Store(e, sessions)
 	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			c.Set(authAuditKey, audit)
@@ -104,6 +84,9 @@ func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg e
 			path := c.Request().URL.Path
 			policy, classified := classifyRoute(c.Request().Method, path)
 			if !classified {
+				if routePathKnown(path) {
+					return echo.NewHTTPError(http.StatusMethodNotAllowed, "method not allowed")
+				}
 				slog.Error("request reached an unclassified route", "method", c.Request().Method, "path", path)
 				return echo.NewHTTPError(http.StatusInternalServerError, "route security policy is not configured")
 			}
@@ -111,11 +94,14 @@ func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg e
 				return next(c)
 			}
 
-			// Metrics has its own service credential. Resolve it before the legacy
-			// bearer parser so a valid scraper token is never treated as a bad JWT.
+			// Metrics has its own non-interactive credential, with an admin browser
+			// session as an operational fallback.
 			if policy.kind == routePolicyServiceCredential {
 				if cfg.MetricsPublic || constantTimeToken(bearerToken(c.Request().Header.Get("Authorization")), cfg.MetricsToken) {
 					return next(c)
+				}
+				if sessions.UserID(c.Request().Context()) == "" {
+					return echo.NewHTTPError(http.StatusUnauthorized, "metrics authentication required")
 				}
 				user, err := authenticateSession(c, users, sessions)
 				if err != nil {
@@ -129,45 +115,42 @@ func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg e
 				return next(c)
 			}
 
-			if sessions.UserID(c.Request().Context()) != "" {
-				user, err := authenticateSession(c, users, sessions)
-				if err != nil {
-					return err
-				}
-				c.Set(authUserKey, &user)
-				if isUnsafeMethod(c.Request().Method) && !validBrowserMutation(c.Request()) {
-					return echo.NewHTTPError(http.StatusForbidden, "browser request validation failed")
-				}
-				return next(c)
-			}
-
-			// Temporary migration compatibility for non-browser callers. The SPA no
-			// longer creates or stores these tokens.
-			bearer := bearerToken(c.Request().Header.Get("Authorization"))
-			if bearer != "" && cfg.JWTSecret != "" {
-				user, err := authenticateBearer(users, cfg.JWTSecret, bearer)
-				if err != nil {
-					return err
-				}
-				c.Set(authUserKey, &user)
-				return next(c)
-			}
-
-			if cfg.PublicRead && ((policy.capability == ReadTelemetry && isPublicTelemetryRead(c.Request().Method, path)) ||
-				(path == "/api/auth/me" && (c.Request().Method == http.MethodGet || c.Request().Method == http.MethodHead))) {
+			if cfg.PublicRead && sessions.UserID(c.Request().Context()) == "" &&
+				((policy.capability == ReadTelemetry && isPublicTelemetryRead(c.Request().Method, path)) ||
+					(path == "/api/auth/me" && (c.Request().Method == http.MethodGet || c.Request().Method == http.MethodHead))) {
 				viewer := publicViewer
 				c.Set(authUserKey, &viewer)
 				return next(c)
 			}
 
-			count, err := users.CountUsers()
+			if sessions.UserID(c.Request().Context()) == "" {
+				if path == "/api/auth/oauth/authorize" && c.Request().Method == http.MethodGet {
+					returnTo := c.Request().URL.RequestURI()
+					return c.Redirect(http.StatusFound, "/?return_to="+url.QueryEscape(returnTo))
+				}
+				count, err := users.CountUsers()
+				if err != nil {
+					return echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
+				}
+				if count == 0 {
+					return echo.NewHTTPError(http.StatusUnauthorized, "setup required")
+				}
+				return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+			}
+
+			user, err := authenticateSession(c, users, sessions)
 			if err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
+				return err
 			}
-			if count == 0 {
-				return echo.NewHTTPError(http.StatusUnauthorized, "setup required")
+			c.Set(authUserKey, &user)
+			if isUnsafeMethod(c.Request().Method) && !validBrowserMutation(c.Request()) {
+				return echo.NewHTTPError(http.StatusForbidden, "browser request validation failed")
 			}
-			return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+			if policy.kind == routePolicyCapability && !HasCapability(user, policy.capability) {
+				recordAuthorizationDenied(c, user)
+				return echo.NewHTTPError(http.StatusForbidden, "insufficient permissions")
+			}
+			return next(c)
 		}
 	}
 }
@@ -188,13 +171,17 @@ func authenticateSession(c *echo.Context, users *auth.UserStore, sessions *auth.
 	user, err := users.GetByIDContext(ctx, userID)
 	switch {
 	case errors.Is(err, auth.ErrUserNotFound):
-		_ = sessions.Destroy(ctx)
+		if destroyErr := sessions.Destroy(ctx); destroyErr != nil {
+			slog.Error("auth invalid-session destroy failed", "err", destroyErr)
+		}
 		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid session")
 	case err != nil:
 		slog.Error("auth user lookup failed", "user_id", userID, "err", err)
 		return auth.User{}, echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
 	case !user.Active || user.AuthVersion != sessions.AuthVersion(ctx):
-		_ = sessions.Destroy(ctx)
+		if destroyErr := sessions.Destroy(ctx); destroyErr != nil {
+			slog.Error("auth revoked-session destroy failed", "user_id", userID, "err", destroyErr)
+		}
 		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid session")
 	}
 	return user, nil
@@ -204,6 +191,14 @@ func GetCurrentUser(c *echo.Context) *auth.User {
 	value := c.Get(authUserKey)
 	user, _ := value.(*auth.User)
 	return user
+}
+
+func RequestOwner(c *echo.Context) (string, error) {
+	user := GetCurrentUser(c)
+	if user == nil || user.ID == publicViewerID {
+		return "", echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+	}
+	return user.ID, nil
 }
 
 func HasCapability(user auth.User, capability Capability) bool {
@@ -231,46 +226,20 @@ func RequireCapability(capability Capability) echo.MiddlewareFunc {
 }
 
 func recordAuthorizationDenied(c *echo.Context, user auth.User) {
-	if audit, _ := c.Get(authAuditKey).(*auth.AuditStore); audit != nil {
-		if err := audit.Record(c.Request().Context(), auth.AuditEvent{
-			ActorUserID: user.ID, EventType: "authorization.denied", Outcome: "denied",
-			TargetType: "route", TargetID: c.Request().Method + " " + c.Request().URL.Path,
-			RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(),
-		}); err != nil {
-			slog.Error("authorization audit write failed", "err", err)
-		}
+	audit, ok := c.Get(authAuditKey).(*auth.AuditStore)
+	if !ok || audit == nil {
+		slog.Error("authorization audit store is unavailable")
+		return
 	}
-}
-
-// RequireRole remains during the API migration, but maps to a capability and
-// performs no ordinal role comparison.
-func RequireRole(role string) echo.MiddlewareFunc {
-	switch role {
-	case "admin":
-		return RequireCapability(ManageUsers)
-	case "operator":
-		return RequireCapability(ManageAlerts)
-	default:
-		return RequireCapability(ReadTelemetry)
+	ctx, cancel := auth.DetachedWriteContext(c.Request().Context())
+	defer cancel()
+	if err := audit.Record(ctx, auth.AuditEvent{
+		ActorUserID: user.ID, EventType: "authorization.denied", Outcome: "denied",
+		TargetType: "route", TargetID: c.Request().Method + " " + c.Request().URL.Path,
+		RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(),
+	}); err != nil {
+		slog.Error("authorization audit write failed", "err", err)
 	}
-}
-
-func authenticateBearer(users *auth.UserStore, jwtSecret, bearer string) (auth.User, error) {
-	claims, err := auth.VerifyAccess(jwtSecret, bearer)
-	if err != nil {
-		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-	}
-	user, err := users.GetByID(claims.Subject)
-	switch {
-	case errors.Is(err, auth.ErrUserNotFound):
-		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-	case err != nil:
-		slog.Error("auth user lookup failed", "user_id", claims.Subject, "err", err)
-		return auth.User{}, echo.NewHTTPError(http.StatusInternalServerError, "auth check failed")
-	case !user.Active:
-		return auth.User{}, echo.NewHTTPError(http.StatusUnauthorized, "invalid token")
-	}
-	return user, nil
 }
 
 func bearerToken(header string) string {
@@ -296,14 +265,14 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyPublic}, read
 	case path == "/api/auth/status" || path == "/api/auth/oidc/start" || path == "/api/auth/oidc/callback":
 		return routePolicy{kind: routePolicyPublic}, read
-	case path == "/api/auth/setup" || path == "/api/auth/start" || path == "/api/auth/verify" || path == "/api/auth/refresh":
+	case path == "/api/auth/setup" || path == "/api/auth/start" || path == "/api/auth/verify":
 		return routePolicy{kind: routePolicyPublic}, method == http.MethodPost
 	case path == "/api/auth/me":
 		return routePolicy{kind: routePolicyAuthenticated}, read
 	case path == "/api/auth/logout":
 		return routePolicy{kind: routePolicyAuthenticated}, method == http.MethodPost
 	case path == "/api/auth/oauth/authorize":
-		return routePolicy{kind: routePolicyProtocol}, read || method == http.MethodPost
+		return routePolicy{kind: routePolicyAuthenticated}, read || method == http.MethodPost
 	case strings.HasPrefix(path, "/.well-known/"):
 		return routePolicy{kind: routePolicyProtocol}, read
 	case path == "/oauth/register" || path == "/oauth/token":
@@ -342,6 +311,15 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 	return routePolicy{}, false
 }
 
+func routePathKnown(path string) bool {
+	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		if _, ok := classifyRoute(method, path); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func isPublicTelemetryRead(method, path string) bool {
 	return (method == http.MethodGet || method == http.MethodHead) &&
 		(strings.HasPrefix(path, "/api/observability/") || path == "/api/auth/me")
@@ -352,6 +330,9 @@ func isUnsafeMethod(method string) bool {
 }
 
 func validBrowserMutation(r *http.Request) bool {
+	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
+		return false
+	}
 	if r.Header.Get("X-Fanout-Request") == "1" {
 		return true
 	}

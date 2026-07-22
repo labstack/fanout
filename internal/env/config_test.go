@@ -157,19 +157,21 @@ func TestLoadLayering(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	valid := Config{
-		FlushSeconds:   15,
-		FlushBatchSize: 50000,
-		RollupEvery:    60,
-		RetentionDays:  30,
-		AIProvider:     "anthropic",
-		AIAPIKey:       "sk-test",
-		SMTPHost:       "smtp.example.com",
-		SMTPPort:       587,
-		SMTPUser:       "user",
-		SMTPPass:       "pass",
-		SMTPFrom:       "Fanout <noreply@example.com>",
-		AuthMode:       "local",
-		AuthCodeSecret: "0123456789abcdef0123456789abcdef",
+		FlushSeconds:       15,
+		FlushBatchSize:     50000,
+		RollupEvery:        60,
+		RetentionDays:      30,
+		AIProvider:         "anthropic",
+		AIAPIKey:           "sk-test",
+		SMTPHost:           "smtp.example.com",
+		SMTPPort:           587,
+		SMTPUser:           "user",
+		SMTPPass:           "pass",
+		SMTPFrom:           "Fanout <noreply@example.com>",
+		AuthMode:           "local",
+		AuthCodeSecret:     "0123456789abcdef0123456789abcdef",
+		SessionIdleTTL:     12 * time.Hour,
+		SessionAbsoluteTTL: 7 * 24 * time.Hour,
 	}
 	if err := valid.Validate(); err != nil {
 		t.Errorf("valid config should pass: %v", err)
@@ -195,7 +197,9 @@ func TestValidate(t *testing.T) {
 		{"AI provider invalid", func(c *Config) { c.AIProvider = "unknown" }},
 		{"auth code secret empty", func(c *Config) { c.AuthCodeSecret = "" }},
 		{"auth code secret short", func(c *Config) { c.AuthCodeSecret = "short" }},
+		{"session idle zero", func(c *Config) { c.SessionIdleTTL = 0 }},
 		{"session idle too short", func(c *Config) { c.SessionIdleTTL = time.Minute }},
+		{"session absolute zero", func(c *Config) { c.SessionAbsoluteTTL = 0 }},
 		{"session absolute shorter than idle", func(c *Config) { c.SessionIdleTTL = time.Hour; c.SessionAbsoluteTTL = 30 * time.Minute }},
 		{"TLS partial cert", func(c *Config) { c.TLSCertFile = "server.pem" }},
 		{"TLS partial key", func(c *Config) { c.TLSKeyFile = "server-key.pem" }},
@@ -219,16 +223,6 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
-	t.Run("legacy JWT fallback remains valid during migration", func(t *testing.T) {
-		c := valid
-		c.AuthCodeSecret = ""
-		c.JWTSecret = "0123456789abcdef0123456789abcdef"
-		c.JWTRefreshSecret = "abcdef0123456789abcdef0123456789"
-		if err := c.Validate(); err != nil {
-			t.Fatalf("legacy fallback should pass: %v", err)
-		}
-	})
-
 	t.Run("OIDC mode validates independently of SMTP", func(t *testing.T) {
 		c := valid
 		c.AuthMode = "oidc"
@@ -237,6 +231,7 @@ func TestValidate(t *testing.T) {
 		c.OIDCIssuerURL = "https://id.example.com"
 		c.OIDCClientID = "fanout"
 		c.OIDCClientSecret = "secret"
+		c.OIDCEmailClaim = "email"
 		c.OIDCEmailVerification = "required"
 		c.OIDCDefaultRole = "viewer"
 		c.PublicURL = "https://fanout.example.com"
@@ -256,4 +251,24 @@ func TestValidate(t *testing.T) {
 			t.Error("TLSEnabled = false, want true")
 		}
 	})
+}
+
+func TestSecureCookies(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{name: "plain HTTP", cfg: Config{}, want: false},
+		{name: "external HTTPS", cfg: Config{PublicURL: "https://fanout.example.com"}, want: true},
+		{name: "external HTTP", cfg: Config{PublicURL: "http://fanout.example.com"}, want: false},
+		{name: "local TLS", cfg: Config{TLSCertFile: "server.pem", TLSKeyFile: "server-key.pem"}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.SecureCookies(); got != tc.want {
+				t.Fatalf("SecureCookies = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

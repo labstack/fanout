@@ -4,9 +4,9 @@ import (
 	"testing"
 )
 
-func TestSessionWriteTimeoutExceedsBusyTimeout(t *testing.T) {
-	if SessionWriteTimeout < ControlDBBusyTimeout+SessionWriteMargin {
-		t.Fatalf("session write timeout %s must exceed busy timeout %s by margin %s", SessionWriteTimeout, ControlDBBusyTimeout, SessionWriteMargin)
+func TestControlWriteTimeoutExceedsBusyTimeout(t *testing.T) {
+	if ControlWriteTimeout < ControlDBBusyTimeout+ControlWriteMargin {
+		t.Fatalf("control write timeout %s must exceed busy timeout %s by margin %s", ControlWriteTimeout, ControlDBBusyTimeout, ControlWriteMargin)
 	}
 }
 

@@ -30,6 +30,8 @@ services:
       PUBLIC_INGEST: "true"
       # Trusted external origin for Secure browser-session cookies behind Traefik.
       PUBLIC_URL: https://demo.fanout.run
+      # Trust client IP headers only because Traefik is the sole ingress.
+      TRUST_PROXY_HEADERS: "true"
       # Canonical OAuth resource/audience for remote MCP clients.
       MCP_PUBLIC_URL: https://demo.fanout.run/mcp
       # 4x fewer DuckLake snapshots/files per day than the 15s default; the

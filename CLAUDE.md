@@ -167,10 +167,23 @@ Fanout loads `.env`, then `.env.${ENV}` (default `development`). Core settings:
 | `AI_BASE_URL` | provider default | optional compatible gateway |
 | `AUTH_MODE` | `local` | browser login mode: `local` or `oidc` |
 | `AUTH_CODE_SECRET` | local mode | email-code HMAC key, at least 32 characters |
+| `PUBLIC_URL` | none | canonical external HTTPS origin; required for OIDC and Secure cookies behind a TLS-terminating proxy |
 | `SESSION_IDLE_TTL` | `12h` | browser-session idle lifetime |
 | `SESSION_ABSOLUTE_TTL` | `168h` | browser-session absolute lifetime |
-| `METRICS_TOKEN` | optional | bearer credential for `/-/metrics` |
-| `SMTP_HOST/USER/PASS/FROM` | required | email-code login delivery |
+| `PUBLIC_READ` | `false` | anonymous access to explicitly classified telemetry reads only |
+| `PUBLIC_INGEST` | `false` | disable OTLP authentication; demo-only |
+| `METRICS_PUBLIC` | `false` | expose `/-/metrics` without authentication |
+| `METRICS_TOKEN` | optional | bearer credential for `/-/metrics` when it is private |
+| `TRUST_PROXY_HEADERS` | `false` | trust forwarded client IPs; enable only when a trusted proxy is the sole ingress |
+| `OIDC_ISSUER_URL` | OIDC mode | HTTPS issuer used for discovery |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | OIDC mode | relying-party credentials |
+| `OIDC_EMAIL_CLAIM` | `email` | trusted claim containing the login email |
+| `OIDC_EMAIL_VERIFICATION` | `required` | `required` or issuer-policy mode |
+| `OIDC_AUTO_PROVISION` | `false` | allow JIT users that match an allow policy |
+| `OIDC_ALLOWED_GROUPS` / `OIDC_ALLOWED_DOMAINS` | none | JIT and issuer-mode allow policy |
+| `OIDC_DEFAULT_ROLE` | `viewer` | role assigned to an allowed JIT user |
+| `OIDC_OPERATOR_GROUPS` / `OIDC_ADMIN_GROUPS` | none | groups that elevate JIT users above viewer |
+| `SMTP_HOST/USER/PASS/FROM` | local mode | email-code login delivery |
 
 The provider defaults are defined in `internal/agent/provider_http.go`. Keep model
 and SDK changes current and verify them against upstream sources before bumping.

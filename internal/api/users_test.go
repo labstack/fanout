@@ -7,110 +7,69 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/env"
 )
 
-func TestUpdateUser_RejectsDemotingLastActiveAdmin(t *testing.T) {
-	e, users, _, _, secret, _ := newTestAuthServer(t)
-	admin, err := users.Create("admin@example.com", "", "admin")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	RegisterUserRoutes(e, users, auth.SMTPConfig{})
-
-	token, err := auth.SignAccess(secret, admin.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPut, "/api/users/"+admin.ID, strings.NewReader(`{"role":"viewer"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
-	}
+func registerTestUserRoutes(s *testAuthServer) {
+	RegisterUserRoutes(s.e, s.users, auth.SMTPConfig{}, env.Config{AuthMode: "oidc"})
 }
 
-func TestUpdateUser_RejectsDeactivatingLastActiveAdmin(t *testing.T) {
-	e, users, _, _, secret, _ := newTestAuthServer(t)
-	admin, err := users.Create("admin@example.com", "", "admin")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	RegisterUserRoutes(e, users, auth.SMTPConfig{})
-
-	token, err := auth.SignAccess(secret, admin.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPut, "/api/users/"+admin.ID, strings.NewReader(`{"active":false}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
-	}
-}
-
-func TestDeleteUser_RejectsDeletingLastActiveAdmin(t *testing.T) {
-	e, users, _, _, secret, _ := newTestAuthServer(t)
-	admin, err := users.Create("admin@example.com", "", "admin")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	RegisterUserRoutes(e, users, auth.SMTPConfig{})
-
-	token, err := auth.SignAccess(secret, admin.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/users/"+admin.ID, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+func TestUserMutationsProtectLastActiveAdmin(t *testing.T) {
+	for _, tc := range []struct{ name, method, body string }{
+		{"demote", http.MethodPut, `{"role":"viewer"}`},
+		{"deactivate", http.MethodPut, `{"active":false}`},
+		{"delete", http.MethodDelete, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestAuthServer(t)
+			registerTestUserRoutes(s)
+			admin, _ := s.users.Create("admin@example.com", "", "admin")
+			cookie := s.login(t, admin)
+			var body *strings.Reader
+			if tc.body != "" {
+				body = strings.NewReader(tc.body)
+			}
+			req := sessionRequest(tc.method, "/api/users/"+admin.ID, body, cookie)
+			if body != nil {
+				req.Header.Set("Content-Type", "application/json")
+			}
+			rec := httptest.NewRecorder()
+			s.e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("status = %d, want 409", rec.Code)
+			}
+		})
 	}
 }
 
 func TestDeleteUser_AllowsDeletingAdminWhenAnotherActiveAdminExists(t *testing.T) {
-	e, users, _, _, secret, _ := newTestAuthServer(t)
-	admin, err := users.Create("admin@example.com", "", "admin")
-	if err != nil {
-		t.Fatalf("Create admin: %v", err)
-	}
-	otherAdmin, err := users.Create("other-admin@example.com", "", "admin")
-	if err != nil {
-		t.Fatalf("Create other admin: %v", err)
-	}
-	RegisterUserRoutes(e, users, auth.SMTPConfig{})
-
-	token, err := auth.SignAccess(secret, admin.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodDelete, "/api/users/"+otherAdmin.ID, nil)
-	req.Header.Set("Authorization", "Bearer "+token)
+	s := newTestAuthServer(t)
+	registerTestUserRoutes(s)
+	admin, _ := s.users.Create("admin@example.com", "", "admin")
+	other, _ := s.users.Create("other@example.com", "", "admin")
+	cookie := s.login(t, admin)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
+	s.e.ServeHTTP(rec, sessionRequest(http.MethodDelete, "/api/users/"+other.ID, nil, cookie))
 	if rec.Code != http.StatusNoContent {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+		t.Fatalf("status = %d", rec.Code)
 	}
+}
 
-	count, err := users.CountActiveAdmins()
-	if err != nil {
-		t.Fatalf("CountActiveAdmins: %v", err)
+func TestLogoutAllRevokesTargetSessions(t *testing.T) {
+	s := newTestAuthServer(t)
+	registerTestUserRoutes(s)
+	admin, _ := s.users.Create("admin@example.com", "", "admin")
+	target, _ := s.users.Create("target@example.com", "", "operator")
+	adminCookie := s.login(t, admin)
+	targetCookie := s.login(t, target)
+	revoke := httptest.NewRecorder()
+	s.e.ServeHTTP(revoke, sessionRequest(http.MethodPost, "/api/users/"+target.ID+"/logout-all", nil, adminCookie))
+	if revoke.Code != http.StatusOK {
+		t.Fatalf("logout-all = %d %s", revoke.Code, revoke.Body.String())
 	}
-	if count != 1 {
-		t.Fatalf("active admin count = %d, want 1", count)
+	me := httptest.NewRecorder()
+	s.e.ServeHTTP(me, sessionRequest(http.MethodGet, "/api/auth/me", nil, targetCookie))
+	if me.Code != http.StatusUnauthorized {
+		t.Fatalf("target reused session = %d", me.Code)
 	}
 }

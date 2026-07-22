@@ -131,11 +131,7 @@ func (h *DashboardHandler) PutDefault(c *echo.Context) error {
 }
 
 func dashboardOwner(c *echo.Context) (string, error) {
-	user := GetCurrentUser(c)
-	if user == nil || user.ID == publicViewerID {
-		return "", echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
-	}
-	return user.ID, nil
+	return RequestOwner(c)
 }
 
 func decodeDashboard(c *echo.Context, value any) error {

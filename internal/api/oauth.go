@@ -29,22 +29,16 @@ const mcpReadScope = "fanout:read"
 var mcpSupportedScopes = []string{mcpReadScope, dashboard.OAuthScope}
 
 type MCPAuthorization struct {
-	store         *appauth.OAuthStore
-	users         *appauth.UserStore
-	refreshSecret string
-	resource      string
-	issuer        string
-	metadataURL   string
+	store       *appauth.OAuthStore
+	users       *appauth.UserStore
+	resource    string
+	issuer      string
+	metadataURL string
 }
 
-func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, args ...string) (*MCPAuthorization, error) {
-	if len(args) == 0 || len(args) > 2 {
-		return nil, fmt.Errorf("invalid MCP authorization configuration")
-	}
-	publicMCPURL := args[len(args)-1]
-	refreshSecret := ""
-	if len(args) == 2 {
-		refreshSecret = args[0]
+func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, publicMCPURL string) (*MCPAuthorization, error) {
+	if store == nil || users == nil {
+		return nil, fmt.Errorf("MCP authorization dependencies are required")
 	}
 	resource, err := url.Parse(publicMCPURL)
 	if err != nil || resource.Scheme != "https" || resource.Host == "" || resource.Path != "/mcp" {
@@ -52,12 +46,11 @@ func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, ar
 	}
 	issuer := resource.Scheme + "://" + resource.Host
 	return &MCPAuthorization{
-		store:         store,
-		users:         users,
-		refreshSecret: refreshSecret,
-		resource:      resource.String(),
-		issuer:        issuer,
-		metadataURL:   issuer + "/.well-known/oauth-protected-resource/mcp",
+		store:       store,
+		users:       users,
+		resource:    resource.String(),
+		issuer:      issuer,
+		metadataURL: issuer + "/.well-known/oauth-protected-resource/mcp",
 	}, nil
 }
 
@@ -241,8 +234,8 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 
 	user, ok := h.browserUser(c)
 	if !ok {
-		returnTo := c.Request().URL.RequestURI()
-		return c.Redirect(http.StatusFound, "/?return_to="+url.QueryEscape(returnTo))
+		slog.Error("oauth consent reached handler without an authenticated browser user")
+		return oauthJSONError(c, http.StatusUnauthorized, "access_denied", "browser authentication is required")
 	}
 	if c.Request().Method == http.MethodGet {
 		redirectURL, _ := url.Parse(req.RedirectURI)
@@ -260,7 +253,7 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 			"Grants":     consentGrants(grantedScope),
 		})
 	}
-	if GetCurrentUser(c) != nil && !validBrowserMutation(c.Request()) {
+	if !validBrowserMutation(c.Request()) {
 		return oauthJSONError(c, http.StatusForbidden, "access_denied", "browser request validation failed")
 	}
 
@@ -357,22 +350,10 @@ func validMCPScopes(scopes []string) bool {
 
 func (h *MCPAuthorization) browserUser(c *echo.Context) (appauth.User, bool) {
 	user := GetCurrentUser(c)
-	if user != nil && user.ID != publicViewerID && user.Active {
-		return *user, true
-	}
-	if h.refreshSecret == "" {
+	if user == nil || user.ID == publicViewerID || !user.Active {
 		return appauth.User{}, false
 	}
-	cookie, err := c.Cookie("refresh_token")
-	if err != nil || cookie.Value == "" {
-		return appauth.User{}, false
-	}
-	claims, err := appauth.VerifyRefresh(h.refreshSecret, cookie.Value)
-	if err != nil {
-		return appauth.User{}, false
-	}
-	resolved, err := h.users.GetByID(claims.Subject)
-	return resolved, err == nil && resolved.Active
+	return *user, true
 }
 
 func (h *MCPAuthorization) Token(c *echo.Context) error {

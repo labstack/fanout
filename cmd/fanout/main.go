@@ -179,6 +179,10 @@ func main() {
 
 	// Start Echo HTTP API
 	e := echo.New()
+	if cfg.TrustProxyHeaders {
+		e.IPExtractor = echo.ExtractIPFromXFFHeader()
+		slog.Info("trusted proxy IP extraction enabled", "header", "X-Forwarded-For")
+	}
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{
 		LogURI:       true,
@@ -251,7 +255,7 @@ func main() {
 		Pass: cfg.SMTPPass,
 		From: cfg.SMTPFrom,
 	}
-	codeStore := auth.NewCodeStore(sqlite.DB, cfg.EffectiveAuthCodeSecret())
+	codeStore := auth.NewCodeStore(sqlite.DB, cfg.AuthCodeSecret)
 	api.RegisterAuthRoutes(e, userStore, codeStore, setup, settingsStore, browserSessions, auditStore, smtpCfg, cfg)
 	if err := api.RegisterOIDCRoutes(ctx, e, cfg, userStore, identityStore, browserSessions, auditStore); err != nil {
 		slog.Error("OIDC initialization failed", "err", err)
@@ -276,13 +280,13 @@ func main() {
 				slog.Info("oauth cleanup", "deleted", n)
 			}
 			now := time.Now()
-			if active, expired, err := browserSessions.Store.CountStatus(ctx, cfg.SessionIdleTTL, now); err != nil {
+			if active, expired, err := browserSessions.CountStatus(ctx, now); err != nil {
 				slog.Error("browser session count failed", "err", err)
 			} else {
 				appmetrics.BrowserSessions.WithLabelValues("active").Set(float64(active))
 				appmetrics.BrowserSessions.WithLabelValues("expired").Set(float64(expired))
 			}
-			if n, err := browserSessions.Store.CleanupExpired(ctx, cfg.SessionIdleTTL, now); err != nil {
+			if n, err := browserSessions.CleanupExpired(ctx, now); err != nil {
 				slog.Error("browser session cleanup failed", "err", err)
 			} else if n > 0 {
 				slog.Info("browser session cleanup", "deleted", n)

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizedFetch, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { authorizedFetch, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -82,13 +82,23 @@ describe("authorizedFetch", () => {
     window.removeEventListener(unauthorizedEvent, unauthorized);
   });
 
-  it("does not announce logout for authorization or server errors", async () => {
+  it("surfaces authorization errors without announcing logout", async () => {
     const unauthorized = vi.fn();
     window.addEventListener(unauthorizedEvent, unauthorized);
-    fetchMock.mockResolvedValueOnce(new Response("", { status: 403 }));
-    expect((await authorizedFetch("/api/data")).status).toBe(403);
+    fetchMock.mockResolvedValueOnce(json({ message: "insufficient permissions" }, 403));
+    await expect(authorizedFetch("/api/data")).rejects.toThrow("insufficient permissions");
     fetchMock.mockResolvedValueOnce(new Response("", { status: 503 }));
     expect((await authorizedFetch("/api/data")).status).toBe(503);
+    expect(unauthorized).not.toHaveBeenCalled();
+    window.removeEventListener(unauthorizedEvent, unauthorized);
+  });
+
+  it("keeps local state when server-side logout fails", async () => {
+    const unauthorized = vi.fn();
+    window.addEventListener(unauthorizedEvent, unauthorized);
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 500 }));
+    await expect(logout()).rejects.toThrow("Sign-out failed — your session is still active.");
+    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
     expect(unauthorized).not.toHaveBeenCalled();
     window.removeEventListener(unauthorizedEvent, unauthorized);
   });

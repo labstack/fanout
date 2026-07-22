@@ -3,11 +3,19 @@ package agent
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
+	"github.com/labstack/echo/v5"
+
+	"github.com/labstack/fanout/internal/api"
+	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/env"
 
 	controlstore "github.com/labstack/fanout/internal/store"
 )
@@ -111,5 +119,48 @@ func TestStoreFinishRunRecordsTruncation(t *testing.T) {
 	}
 	if status != "truncated" || errorText == "" {
 		t.Errorf("status=%q error=%q, want truncated with a note", status, errorText)
+	}
+}
+
+func TestThreadRouteHidesOtherOwnersThread(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	users := auth.NewUserStore(database.DB)
+	ownerA, err := users.Create("thread-a@example.com", "", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerB, err := users.Create("thread-b@example.com", "", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewStore(database.DB)
+	input := agtypes.RunAgentInput{ThreadID: "private-thread", RunID: "run-1"}
+	if err := store.StartRun(context.Background(), ownerA.ID, input); err != nil {
+		t.Fatal(err)
+	}
+
+	sessions := auth.NewBrowserSessions(database.DB, 12*time.Hour, 7*24*time.Hour, false)
+	login := httptest.NewRecorder()
+	sessions.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := sessions.EstablishAuthenticatedSession(r.Context(), ownerB); err != nil {
+			t.Errorf("create session: %v", err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/login", nil))
+	cookie := login.Result().Cookies()[0]
+
+	e := echo.New()
+	api.RegisterAuthMiddleware(e, users, sessions, auth.NewAuditStore(database.DB), env.Config{})
+	NewRuntime(nil, nil, store).Register(e.Group("/api/agent", api.RequireCapability(api.RunAgent)))
+	request := httptest.NewRequest(http.MethodGet, "/api/agent/threads/private-thread", nil)
+	request.AddCookie(cookie)
+	recorder := httptest.NewRecorder()
+	e.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("cross-owner thread read = %d, want 404", recorder.Code)
 	}
 }

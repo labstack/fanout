@@ -3,6 +3,7 @@ package auth
 import (
 	"errors"
 	"testing"
+	"time"
 
 	appstore "github.com/labstack/fanout/internal/store"
 )
@@ -34,7 +35,7 @@ func TestAuthorizationMutationRollsBackWhenAuditWriteFails(t *testing.T) {
 	if _, err := db.DB.Exec(`ALTER TABLE auth_audit_events RENAME TO auth_audit_events_offline`); err != nil {
 		t.Fatalf("hide audit table: %v", err)
 	}
-	role := "operator"
+	role := RoleOperator
 	if _, err := users.UpdateWithAudit(user.ID, nil, nil, &role, nil, AuditEvent{EventType: "role.changed", Outcome: "success"}); err == nil {
 		t.Fatal("UpdateWithAudit succeeded without audit table")
 	}
@@ -100,7 +101,7 @@ func TestUserStore_Update(t *testing.T) {
 	s := newTestUserStore(t)
 	u, _ := s.Create("up@example.com", "", "viewer")
 
-	newRole := "admin"
+	newRole := RoleAdmin
 	updated, err := s.Update(u.ID, nil, nil, &newRole, nil)
 	if err != nil {
 		t.Fatalf("Update: %v", err)
@@ -137,5 +138,44 @@ func TestUserStore_CreateFirstAdmin(t *testing.T) {
 	_, err = s.CreateFirstAdmin("other@example.com", "Other")
 	if !errors.Is(err, ErrSetupComplete) {
 		t.Fatalf("second CreateFirstAdmin error = %v, want ErrSetupComplete", err)
+	}
+}
+
+func TestUserTimestampsUseOneSortableFormat(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.Create("timestamps@example.com", "", RoleViewer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for label, value := range map[string]string{"created": user.CreatedAt, "updated": user.UpdatedAt} {
+		if _, err := time.Parse(userTimestampLayout, value); err != nil {
+			t.Fatalf("%s timestamp %q: %v", label, value, err)
+		}
+	}
+	loginAt := time.Date(2026, 7, 22, 12, 34, 56, 123456789, time.UTC)
+	if err := users.TouchLoginAt(user.ID, loginAt); err != nil {
+		t.Fatal(err)
+	}
+	touched, err := users.GetByID(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if touched.LoggedInAt != "2026-07-22T12:34:56.123Z" || touched.UpdatedAt != touched.LoggedInAt {
+		t.Fatalf("touch timestamps = logged %q updated %q", touched.LoggedInAt, touched.UpdatedAt)
+	}
+
+	if _, err := sqlite.DB.Exec(`INSERT INTO users(id,email,role,active) VALUES(?,?,?,1)`, "default-time", "default-time@example.com", "viewer"); err != nil {
+		t.Fatal(err)
+	}
+	var created, updated string
+	if err := sqlite.DB.QueryRow(`SELECT created_at, updated_at FROM users WHERE id = ?`, "default-time").Scan(&created, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := time.Parse(userTimestampLayout, created); err != nil {
+		t.Fatalf("schema created timestamp %q: %v", created, err)
+	}
+	if _, err := time.Parse(userTimestampLayout, updated); err != nil {
+		t.Fatalf("schema updated timestamp %q: %v", updated, err)
 	}
 }

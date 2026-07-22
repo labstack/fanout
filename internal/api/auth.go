@@ -23,8 +23,6 @@ type AuthHandler struct {
 	settings      *settings.Store
 	sessions      *auth.BrowserSessions
 	audit         *auth.AuditStore
-	jwtSecret     string
-	refreshSecret string
 	smtp          auth.SMTPConfig
 	cfg           env.Config
 	setupLimiter  *auth.KeyedLimiter
@@ -32,38 +30,9 @@ type AuthHandler struct {
 	verifyLimiter *auth.KeyedLimiter
 }
 
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, args ...any) {
-	var sessions *auth.BrowserSessions
-	var audit *auth.AuditStore
-	var smtp auth.SMTPConfig
-	var cfg env.Config
-	if len(args) != 4 {
-		panic("api: invalid auth route registration")
-	}
-	switch first := args[0].(type) {
-	case *auth.BrowserSessions:
-		sessions = first
-		audit, _ = args[1].(*auth.AuditStore)
-		smtp, _ = args[2].(auth.SMTPConfig)
-		cfg, _ = args[3].(env.Config)
-	case string:
-		// Legacy signature: jwtSecret, refreshSecret, SMTPConfig, env.Config.
-		smtp, _ = args[2].(auth.SMTPConfig)
-		cfg, _ = args[3].(env.Config)
-		cfg.JWTSecret = first
-		cfg.JWTRefreshSecret, _ = args[1].(string)
-		if cfg.AuthMode == "" {
-			cfg.AuthMode = "local"
-		}
-		if registered, ok := registeredBrowserSessions.Load(e); ok {
-			sessions, _ = registered.(*auth.BrowserSessions)
-		}
-		if sessions == nil {
-			sessions = auth.NewBrowserSessions(users.DB(), 12*time.Hour, 7*24*time.Hour, false)
-		}
-		audit = auth.NewAuditStore(users.DB())
-	default:
-		panic("api: invalid auth route registration")
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, sessions *auth.BrowserSessions, audit *auth.AuditStore, smtp auth.SMTPConfig, cfg env.Config) {
+	if users == nil || codes == nil || setup == nil || settingsStore == nil || sessions == nil || audit == nil {
+		panic("api: auth route dependencies are required")
 	}
 	if cfg.AuthMode == "" {
 		cfg.AuthMode = "local"
@@ -75,8 +44,6 @@ func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeSto
 		settings:      settingsStore,
 		sessions:      sessions,
 		audit:         audit,
-		jwtSecret:     cfg.JWTSecret,
-		refreshSecret: cfg.JWTRefreshSecret,
 		smtp:          smtp,
 		cfg:           cfg,
 		setupLimiter:  auth.NewKeyedLimiter(10, 15*time.Minute),
@@ -88,9 +55,6 @@ func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeSto
 	e.POST("/api/auth/setup", h.Setup)
 	e.POST("/api/auth/start", h.Start)
 	e.POST("/api/auth/verify", h.Verify)
-	if h.refreshSecret != "" {
-		e.POST("/api/auth/refresh", h.Refresh)
-	}
 	e.GET("/api/auth/me", h.Me)
 	e.POST("/api/auth/logout", h.Logout)
 }
@@ -110,7 +74,7 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 		"auth_mode":      strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)),
 		// Lets the SPA boot anonymously into read-only mode: when true, an
 		// unauthenticated GET /api/auth/me returns the synthetic viewer, so the
-		// frontend can render dashboards without a login.
+		// frontend can render the explicitly public telemetry views without a login.
 		"public_read": h.cfg.PublicRead,
 	})
 }
@@ -148,12 +112,7 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
 	createEvent := auth.AuditEvent{EventType: "setup.completed", Outcome: "success", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
-	var user auth.User
-	if h.audit != nil {
-		user, err = h.users.CreateFirstAdminWithAudit(email, req.Name, createEvent)
-	} else {
-		user, err = h.users.CreateFirstAdmin(email, req.Name)
-	}
+	user, err := h.users.CreateFirstAdminWithAudit(email, req.Name, createEvent)
 	if errors.Is(err, auth.ErrSetupComplete) {
 		user, err = h.users.GetByEmail(email)
 		if err != nil {
@@ -179,11 +138,6 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	// live collectors may already be using — to rotate deliberately, the admin
 	// uses the Settings page.
 	resp := map[string]string{"status": "authenticated"}
-	if token, err := h.issueLegacyTokens(c, user); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create compatibility token")
-	} else if token != "" {
-		resp["access_token"] = token
-	}
 	current, err := h.settings.GetIngest(c.Request().Context())
 	if err != nil {
 		slog.Error("auth: setup load ingest config failed", "err", err)
@@ -195,7 +149,8 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 			slog.Error("auth: setup generate ingest token failed", "err", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
 		}
-		if err := h.settings.SetIngest(c.Request().Context(), settings.Ingest{TokenHash: ingestHash}); err != nil {
+		ingestEvent := auth.AuditEvent{ActorUserID: user.ID, EventType: "ingest_key.rotated", Outcome: "success", TargetType: "ingest", TargetID: "default", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(), Metadata: map[string]any{"source": "setup"}}
+		if err := h.settings.SetIngestWithAudit(c.Request().Context(), settings.Ingest{TokenHash: ingestHash}, h.audit, ingestEvent); err != nil {
 			slog.Error("auth: setup persist ingest token failed", "err", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist ingest token")
 		}
@@ -266,9 +221,6 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 	if strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)) != "local" {
 		return echo.NewHTTPError(http.StatusNotFound, "local login is disabled")
 	}
-	if !h.verifyLimiter.Allow(c.RealIP()) {
-		return rateLimited(c, 15*time.Minute)
-	}
 	var req struct {
 		Email string `json:"email"`
 		Code  string `json:"code"`
@@ -280,6 +232,9 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 	email, err := auth.NormalizeEmail(req.Email)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	if !h.verifyLimiter.Allow(c.RealIP() + "|" + email) {
+		return rateLimited(c, 15*time.Minute)
 	}
 	ok, err := h.codes.Verify(email, req.Code)
 	if err != nil {
@@ -307,38 +262,8 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
 	h.recordAudit(c, auth.AuditEvent{ActorUserID: user.ID, EventType: "login.succeeded", Outcome: "success", TargetType: "user", TargetID: user.ID})
-	response := map[string]string{"status": "authenticated"}
-	if token, err := h.issueLegacyTokens(c, user); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create compatibility token")
-	} else if token != "" {
-		response["access_token"] = token
-	}
 	c.Response().Header().Set("Cache-Control", "no-store")
-	return c.JSON(200, response)
-}
-
-func (h *AuthHandler) Refresh(c *echo.Context) error {
-	cookie, err := c.Cookie("refresh_token")
-	if err != nil || cookie.Value == "" {
-		return echo.NewHTTPError(http.StatusUnauthorized, "no refresh token")
-	}
-	claims, err := auth.VerifyRefresh(h.refreshSecret, cookie.Value)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid refresh token")
-	}
-	user, err := h.users.GetByID(claims.Subject)
-	if err != nil || !user.Active {
-		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or inactive")
-	}
-	if err := h.sessions.EstablishAuthenticatedSession(c.Request().Context(), user); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
-	}
-	access, err := h.issueLegacyTokens(c, user)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to refresh token")
-	}
-	c.Response().Header().Set("Cache-Control", "no-store")
-	return c.JSON(http.StatusOK, map[string]string{"access_token": access})
+	return c.JSON(200, map[string]string{"status": "authenticated"})
 }
 
 func rateLimited(c *echo.Context, retryAfter time.Duration) error {
@@ -367,17 +292,15 @@ func (h *AuthHandler) Logout(c *echo.Context) error {
 		event.TargetID = user.ID
 	}
 	h.recordAudit(c, event)
-	h.clearRefreshCookie(c)
 	return c.JSON(200, map[string]bool{"ok": true})
 }
 
 func (h *AuthHandler) recordAudit(c *echo.Context, event auth.AuditEvent) {
-	if h.audit == nil {
-		return
-	}
 	event.RemoteIP = c.RealIP()
 	event.UserAgent = c.Request().UserAgent()
-	if err := h.audit.Record(c.Request().Context(), event); err != nil {
+	ctx, cancel := auth.DetachedWriteContext(c.Request().Context())
+	defer cancel()
+	if err := h.audit.Record(ctx, event); err != nil {
 		slog.Error("authentication audit write failed", "event", event.EventType, "err", err)
 	}
 }
@@ -388,25 +311,4 @@ func (h *AuthHandler) establishSession(c *echo.Context, user auth.User) error {
 		return err
 	}
 	return h.sessions.EstablishAuthenticatedSession(c.Request().Context(), user)
-}
-
-func (h *AuthHandler) issueLegacyTokens(c *echo.Context, user auth.User) (string, error) {
-	if h.jwtSecret == "" || h.refreshSecret == "" {
-		return "", nil
-	}
-	now := time.Now().UTC()
-	refresh, err := auth.SignRefresh(h.refreshSecret, user.ID, now)
-	if err != nil {
-		return "", err
-	}
-	access, err := auth.SignAccess(h.jwtSecret, user.ID)
-	if err != nil {
-		return "", err
-	}
-	c.SetCookie(&http.Cookie{Name: "refresh_token", Value: refresh, Path: "/api/auth/", HttpOnly: true, Secure: h.cfg.SecureCookies(), SameSite: http.SameSiteLaxMode, MaxAge: int(auth.RefreshTTL.Seconds()), Expires: now.Add(auth.RefreshTTL)})
-	return access, nil
-}
-
-func (h *AuthHandler) clearRefreshCookie(c *echo.Context) {
-	c.SetCookie(&http.Cookie{Name: "refresh_token", Path: "/api/auth/", HttpOnly: true, Secure: h.cfg.SecureCookies(), SameSite: http.SameSiteLaxMode, MaxAge: -1, Expires: time.Unix(0, 0)})
 }

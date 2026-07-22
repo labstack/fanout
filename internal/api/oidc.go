@@ -42,6 +42,9 @@ func RegisterOIDCRoutes(ctx context.Context, e *echo.Echo, cfg env.Config, users
 	if strings.ToLower(strings.TrimSpace(cfg.AuthMode)) != "oidc" {
 		return nil
 	}
+	if users == nil || identities == nil || sessions == nil || audit == nil {
+		return fmt.Errorf("OIDC dependencies are required")
+	}
 	provider, err := oidc.NewProvider(ctx, cfg.OIDCIssuerURL)
 	if err != nil {
 		return fmt.Errorf("discover OIDC provider: %w", err)
@@ -80,15 +83,9 @@ func (h *OIDCHandler) Start(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
 	}
 	ctx := c.Request().Context()
-	if err := h.sessions.BeginPreAuthenticationSession(ctx, oidcFlowTTL, oidcFlowTTL); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
-	}
-	h.sessions.Manager.Put(ctx, "oidc_state", state)
-	h.sessions.Manager.Put(ctx, "oidc_nonce", nonce)
-	h.sessions.Manager.Put(ctx, "oidc_pkce_verifier", verifier)
 	returnTo := safeReturnTo(c.QueryParam("return_to"))
-	if returnTo != "" {
-		h.sessions.Manager.Put(ctx, "return_to", returnTo)
+	if err := h.sessions.BeginOIDCSession(ctx, oidcFlowTTL, oidcFlowTTL, state, nonce, verifier, returnTo); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
 	}
 	challenge := sha256.Sum256([]byte(verifier))
 	redirect := h.oauth.AuthCodeURL(state,
@@ -109,14 +106,16 @@ type oidcClaims struct {
 
 func (h *OIDCHandler) Callback(c *echo.Context) error {
 	ctx := c.Request().Context()
-	state := h.sessions.Manager.GetString(ctx, "oidc_state")
+	state, expectedNonce, pkceVerifier, returnTo := h.sessions.OIDCFlow(ctx)
 	if state == "" || subtle.ConstantTimeCompare([]byte(state), []byte(c.QueryParam("state"))) != 1 {
 		return h.oidcDenied(c, "invalid state")
 	}
+	// A callback consumes the flow even when the provider or token exchange
+	// fails, preventing state, nonce, and verifier replay.
+	h.sessions.ClearOIDCFlow(ctx)
 	if providerError := c.QueryParam("error"); providerError != "" {
 		return h.oidcDenied(c, "identity provider denied login")
 	}
-	pkceVerifier := h.sessions.Manager.GetString(ctx, "oidc_pkce_verifier")
 	token, err := h.oauth.Exchange(ctx, c.QueryParam("code"), oauth2.VerifierOption(pkceVerifier))
 	if err != nil {
 		return h.oidcDenied(c, "code exchange failed")
@@ -138,13 +137,13 @@ func (h *OIDCHandler) Callback(c *echo.Context) error {
 		if err := idToken.Claims(&dynamic); err != nil {
 			return h.oidcDenied(c, "invalid identity claims")
 		}
-		if raw, ok := dynamic[h.cfg.OIDCEmailClaim]; ok {
-			_ = json.Unmarshal(raw, &claims.Email)
-		} else {
-			claims.Email = ""
+		email, err := configuredOIDCEmail(dynamic, h.cfg.OIDCEmailClaim)
+		if err != nil {
+			slog.Error("OIDC configured email claim rejected", "claim", h.cfg.OIDCEmailClaim, "err", err)
+			return h.oidcDenied(c, err.Error())
 		}
+		claims.Email = email
 	}
-	expectedNonce := h.sessions.Manager.GetString(ctx, "oidc_nonce")
 	if expectedNonce == "" || subtle.ConstantTimeCompare([]byte(expectedNonce), []byte(claims.Nonce)) != 1 {
 		return h.oidcDenied(c, "invalid nonce")
 	}
@@ -160,20 +159,35 @@ func (h *OIDCHandler) Callback(c *echo.Context) error {
 	if err := h.identities.TouchLogin(ctx, identity.ID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
 	}
+	if err := h.users.TouchLogin(user.ID); err != nil {
+		slog.Error("OIDC user login timestamp update failed", "user_id", user.ID, "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
+	}
 	if err := h.sessions.EstablishAuthenticatedSession(ctx, user); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
-	_ = h.users.TouchLogin(user.ID)
-	returnTo := safeReturnTo(h.sessions.Manager.GetString(ctx, "return_to"))
+	returnTo = safeReturnTo(returnTo)
 	if returnTo == "" {
 		returnTo = "/"
 	}
-	if h.audit != nil {
-		if err := h.audit.Record(ctx, appauth.AuditEvent{ActorUserID: user.ID, EventType: "login.succeeded", Outcome: "success", TargetType: "identity", TargetID: identity.ID, RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(), Metadata: map[string]any{"mode": "oidc", "issuer": idToken.Issuer}}); err != nil {
-			slog.Error("OIDC audit write failed", "err", err)
-		}
+	auditCtx, cancel := appauth.DetachedWriteContext(ctx)
+	defer cancel()
+	if err := h.audit.Record(auditCtx, appauth.AuditEvent{ActorUserID: user.ID, EventType: "login.succeeded", Outcome: "success", TargetType: "identity", TargetID: identity.ID, RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(), Metadata: map[string]any{"mode": "oidc", "issuer": idToken.Issuer}}); err != nil {
+		slog.Error("OIDC audit write failed", "err", err)
 	}
 	return c.Redirect(http.StatusFound, returnTo)
+}
+
+func configuredOIDCEmail(claims map[string]json.RawMessage, name string) (string, error) {
+	raw, ok := claims[name]
+	if !ok {
+		return "", errors.New("configured email claim is absent")
+	}
+	var email string
+	if err := json.Unmarshal(raw, &email); err != nil || strings.TrimSpace(email) == "" {
+		return "", errors.New("configured email claim is not a non-empty string")
+	}
+	return email, nil
 }
 
 func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oidcClaims) (appauth.User, appauth.UserIdentity, error) {
@@ -209,9 +223,26 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 	if err != nil {
 		return appauth.User{}, appauth.UserIdentity{}, err
 	}
+	if !user.Active {
+		return appauth.User{}, appauth.UserIdentity{}, errors.New("user is inactive")
+	}
+	if h.cfg.OIDCEmailVerification == "issuer" && !h.provisionAllowed(email, claims.Groups) {
+		return appauth.User{}, appauth.UserIdentity{}, errors.New("identity does not satisfy the issuer-mode allow policy")
+	}
+	linked, err := h.identities.CountForUser(ctx, user.ID)
+	if err != nil {
+		return appauth.User{}, appauth.UserIdentity{}, err
+	}
+	if linked != 0 {
+		return appauth.User{}, appauth.UserIdentity{}, errors.New("user already has a linked identity")
+	}
 	identity, err = h.identities.LinkWithAudit(ctx, user.ID, issuer, claims.Subject, email, h.audit, appauth.AuditEvent{ActorUserID: user.ID, EventType: "identity.linked", Outcome: "success", Metadata: map[string]any{"issuer": issuer}})
 	if err != nil {
-		// Concurrent first login may have created the link. Resolve it once.
+		if !errors.Is(err, appauth.ErrIdentityConflict) {
+			return appauth.User{}, appauth.UserIdentity{}, err
+		}
+		// A concurrent first login may have created the same link. Only that
+		// specific uniqueness race is safe to resolve by reading it back.
 		identity, err = h.identities.Find(ctx, issuer, claims.Subject)
 		if err != nil || identity.UserID != user.ID {
 			return appauth.User{}, appauth.UserIdentity{}, errors.New("identity linking failed")
@@ -228,21 +259,21 @@ func (h *OIDCHandler) provisionAllowed(email string, groups []string) bool {
 	return len(parts) == 2 && slices.Contains(csvValues(h.cfg.OIDCAllowedDomains), strings.ToLower(parts[1]))
 }
 
-func (h *OIDCHandler) provisionRole(groups []string) string {
+func (h *OIDCHandler) provisionRole(groups []string) appauth.Role {
 	if intersects(groups, csvValues(h.cfg.OIDCAdminGroups)) {
-		return "admin"
+		return appauth.RoleAdmin
 	}
 	if intersects(groups, csvValues(h.cfg.OIDCOperatorGroups)) {
-		return "operator"
+		return appauth.RoleOperator
 	}
-	return h.cfg.OIDCDefaultRole
+	return appauth.Role(h.cfg.OIDCDefaultRole)
 }
 
 func (h *OIDCHandler) oidcDenied(c *echo.Context, reason string) error {
-	if h.audit != nil {
-		if err := h.audit.Record(c.Request().Context(), appauth.AuditEvent{EventType: "oidc.denied", Outcome: "denied", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(), Metadata: map[string]any{"reason": reason}}); err != nil {
-			slog.Error("OIDC denial audit write failed", "err", err)
-		}
+	ctx, cancel := appauth.DetachedWriteContext(c.Request().Context())
+	defer cancel()
+	if err := h.audit.Record(ctx, appauth.AuditEvent{EventType: "oidc.denied", Outcome: "denied", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(), Metadata: map[string]any{"reason": reason}}); err != nil {
+		slog.Error("OIDC denial audit write failed", "err", err)
 	}
 	return echo.NewHTTPError(http.StatusUnauthorized, "OIDC login denied")
 }

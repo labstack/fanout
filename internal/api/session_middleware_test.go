@@ -81,4 +81,34 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("invalid metrics credential = %d, want 401", recorder.Code)
 	}
+
+	viewer, err := users.Create("viewer@example.com", "", "viewer")
+	if err != nil {
+		t.Fatalf("Create viewer: %v", err)
+	}
+	viewerMetrics := httptest.NewRequest(http.MethodGet, "/-/metrics", nil)
+	viewerMetrics.AddCookie(authenticatedSessionCookie(t, sessions, viewer))
+	recorder = httptest.NewRecorder()
+	e.ServeHTTP(recorder, viewerMetrics)
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("viewer metrics request = %d, want 403", recorder.Code)
+	}
+
+	noToken := echo.New()
+	RegisterAuthMiddleware(noToken, users, sessions, auth.NewAuditStore(db.DB), env.Config{})
+	noToken.GET("/-/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	recorder = httptest.NewRecorder()
+	noToken.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/-/metrics", nil))
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("empty configured token accepted missing bearer: %d", recorder.Code)
+	}
+
+	publicMetrics := echo.New()
+	RegisterAuthMiddleware(publicMetrics, users, sessions, auth.NewAuditStore(db.DB), env.Config{MetricsPublic: true})
+	publicMetrics.GET("/-/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	recorder = httptest.NewRecorder()
+	publicMetrics.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/-/metrics", nil))
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("public metrics request = %d, want 204", recorder.Code)
+	}
 }

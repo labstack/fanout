@@ -20,10 +20,10 @@ type UserHandler struct {
 }
 
 // RegisterUserRoutes registers user management endpoints.
-func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfig, configs ...env.Config) {
-	mode := "local"
-	if len(configs) > 0 && strings.TrimSpace(configs[0].AuthMode) != "" {
-		mode = strings.ToLower(strings.TrimSpace(configs[0].AuthMode))
+func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfig, cfg env.Config) {
+	mode := strings.ToLower(strings.TrimSpace(cfg.AuthMode))
+	if mode == "" {
+		mode = "local"
 	}
 	h := &UserHandler{users: users, smtp: smtp, mode: mode}
 	adminOnly := RequireCapability(ManageUsers)
@@ -66,11 +66,11 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "email is required")
 	}
-	role := req.Role
+	role := auth.Role(req.Role)
 	if role == "" {
-		role = "operator"
+		role = auth.RoleOperator
 	}
-	if role != "viewer" && role != "operator" && role != "admin" {
+	if !auth.ValidRole(string(role)) {
 		return echo.NewHTTPError(http.StatusBadRequest, "role must be viewer, operator, or admin")
 	}
 
@@ -113,7 +113,7 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
 	}
-	if req.Role != nil && *req.Role != "viewer" && *req.Role != "operator" && *req.Role != "admin" {
+	if req.Role != nil && !auth.ValidRole(*req.Role) {
 		return echo.NewHTTPError(http.StatusBadRequest, "role must be viewer, operator, or admin")
 	}
 	if req.Email != nil {
@@ -124,13 +124,18 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 		req.Email = &email
 	}
 
-	eventType := "user.updated"
+	eventType := auth.AuditEventType("user.updated")
 	if req.Role != nil {
 		eventType = "role.changed"
 	} else if req.Active != nil && !*req.Active {
 		eventType = "user.deactivated"
 	}
-	user, err := h.users.UpdateWithAudit(id, req.Email, req.Name, req.Role, req.Active, userAuditEvent(c, eventType))
+	var role *auth.Role
+	if req.Role != nil {
+		parsed := auth.Role(*req.Role)
+		role = &parsed
+	}
+	user, err := h.users.UpdateWithAudit(id, req.Email, req.Name, role, req.Active, userAuditEvent(c, eventType))
 	if err != nil {
 		if err == auth.ErrLastActiveAdmin {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
@@ -160,7 +165,7 @@ func (h *UserHandler) DeleteUser(c *echo.Context) error {
 	return c.NoContent(204)
 }
 
-func userAuditEvent(c *echo.Context, eventType string) auth.AuditEvent {
+func userAuditEvent(c *echo.Context, eventType auth.AuditEventType) auth.AuditEvent {
 	event := auth.AuditEvent{EventType: eventType, Outcome: "success", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
 	if actor := GetCurrentUser(c); actor != nil && actor.ID != publicViewerID {
 		event.ActorUserID = actor.ID

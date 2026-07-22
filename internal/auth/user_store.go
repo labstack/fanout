@@ -17,12 +17,35 @@ var ErrUserNotFound = errors.New("user not found")
 // ErrLastActiveAdmin is returned when an operation would remove the final active admin.
 var ErrLastActiveAdmin = errors.New("cannot remove the last active admin")
 
+type Role string
+
+const (
+	RoleViewer   Role = "viewer"
+	RoleOperator Role = "operator"
+	RoleAdmin    Role = "admin"
+)
+
+func ValidRole(role string) bool {
+	switch Role(role) {
+	case RoleViewer, RoleOperator, RoleAdmin:
+		return true
+	default:
+		return false
+	}
+}
+
+const userTimestampLayout = "2006-01-02T15:04:05.000Z07:00"
+
+func userTimestamp(at time.Time) string {
+	return at.UTC().Truncate(time.Millisecond).Format(userTimestampLayout)
+}
+
 // User represents an authenticated user.
 type User struct {
 	ID          string `json:"id"`
 	Email       string `json:"email"`
 	Name        string `json:"name,omitempty"`
-	Role        string `json:"role"`
+	Role        Role   `json:"role"`
 	Active      bool   `json:"active"`
 	AuthVersion int64  `json:"-"`
 	LoggedInAt  string `json:"logged_in_at,omitempty"`
@@ -41,15 +64,13 @@ func NewUserStore(db *sql.DB) *UserStore {
 	return &UserStore{db: db, q: generated.New(db)}
 }
 
-func (s *UserStore) DB() *sql.DB { return s.db }
-
 // toUser converts a generated.User to the domain User type.
 func toUser(u generated.User) User {
 	return User{
 		ID:          u.ID,
 		Email:       u.Email,
 		Name:        u.Name.String,
-		Role:        u.Role,
+		Role:        Role(u.Role),
 		Active:      u.Active == 1,
 		AuthVersion: u.AuthVersion,
 		LoggedInAt:  u.LoggedInAt.String,
@@ -59,15 +80,18 @@ func toUser(u generated.User) User {
 }
 
 // Create adds a new user.
-func (s *UserStore) Create(email, name, role string) (User, error) {
+func (s *UserStore) Create(email, name string, role Role) (User, error) {
 	return s.create(email, name, role, nil)
 }
 
-func (s *UserStore) CreateWithAudit(email, name, role string, event AuditEvent) (User, error) {
+func (s *UserStore) CreateWithAudit(email, name string, role Role, event AuditEvent) (User, error) {
 	return s.create(email, name, role, &event)
 }
 
-func (s *UserStore) create(email, name, role string, event *AuditEvent) (User, error) {
+func (s *UserStore) create(email, name string, role Role, event *AuditEvent) (User, error) {
+	if !ValidRole(string(role)) {
+		return User{}, fmt.Errorf("auth: invalid role %q", role)
+	}
 	params, err := newCreateUserParams(email, name, role)
 	if err != nil {
 		return User{}, err
@@ -145,17 +169,17 @@ func (s *UserStore) List() ([]User, error) {
 	return users, nil
 }
 
-// Update modifies a user's fields. Nil pointers are skipped.
-func (s *UserStore) Update(id string, email, name, role *string, active *bool) (User, error) {
+// Update modifies a user's fields. Email, role, or active-state changes revoke every browser session.
+func (s *UserStore) Update(id string, email, name *string, role *Role, active *bool) (User, error) {
 	return s.update(id, email, name, role, active, nil)
 }
 
-func (s *UserStore) UpdateWithAudit(id string, email, name, role *string, active *bool, event AuditEvent) (User, error) {
+func (s *UserStore) UpdateWithAudit(id string, email, name *string, role *Role, active *bool, event AuditEvent) (User, error) {
 	return s.update(id, email, name, role, active, &event)
 }
 
-func (s *UserStore) update(id string, email, name, role *string, active *bool, event *AuditEvent) (User, error) {
-	ctx, cancel := sessionWriteContext(context.Background())
+func (s *UserStore) update(id string, email, name *string, role *Role, active *bool, event *AuditEvent) (User, error) {
+	ctx, cancel := DetachedWriteContext(context.Background())
 	defer cancel()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -191,6 +215,9 @@ func (s *UserStore) update(id string, email, name, role *string, active *bool, e
 		existing.Name = *name
 	}
 	if role != nil {
+		if !ValidRole(string(*role)) {
+			return User{}, fmt.Errorf("auth: invalid role %q", *role)
+		}
 		existing.Role = *role
 	}
 	if active != nil {
@@ -210,11 +237,11 @@ func (s *UserStore) update(id string, email, name, role *string, active *bool, e
 	if existing.Active {
 		activeInt = 1
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := userTimestamp(time.Now())
 	u, err := q.UpdateUser(ctx, generated.UpdateUserParams{
 		Email:     existing.Email,
 		Name:      sql.NullString{String: existing.Name, Valid: existing.Name != ""},
-		Role:      existing.Role,
+		Role:      string(existing.Role),
 		Active:    activeInt,
 		UpdatedAt: now,
 		ID:        id,
@@ -249,7 +276,7 @@ func (s *UserStore) update(id string, email, name, role *string, active *bool, e
 	return toUser(u), nil
 }
 
-// Delete removes a user by ID.
+// Delete removes a user and all of its browser sessions by ID.
 func (s *UserStore) Delete(id string) error {
 	return s.delete(id, nil)
 }
@@ -259,7 +286,7 @@ func (s *UserStore) DeleteWithAudit(id string, event AuditEvent) error {
 }
 
 func (s *UserStore) delete(id string, event *AuditEvent) error {
-	ctx, cancel := sessionWriteContext(context.Background())
+	ctx, cancel := DetachedWriteContext(context.Background())
 	defer cancel()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -306,7 +333,10 @@ func (s *UserStore) delete(id string, event *AuditEvent) error {
 	if err != nil {
 		return fmt.Errorf("auth: delete user: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("auth: count deleted users: %w", err)
+	}
 	if n == 0 {
 		return ErrUserNotFound
 	}
@@ -323,7 +353,7 @@ func (s *UserStore) TouchLogin(id string) error {
 }
 
 func (s *UserStore) TouchLoginAt(id string, at time.Time) error {
-	now := at.UTC().Truncate(TokenTimePrecision).Format(time.RFC3339Nano)
+	now := userTimestamp(at)
 	return s.q.TouchLogin(context.Background(), generated.TouchLoginParams{
 		LoggedInAt: sql.NullString{String: now, Valid: true},
 		UpdatedAt:  now,
@@ -351,7 +381,7 @@ func (s *UserStore) RevokeAllSessionsWithAudit(id string, event AuditEvent) erro
 }
 
 func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
-	ctx, cancel := sessionWriteContext(context.Background())
+	ctx, cancel := DetachedWriteContext(context.Background())
 	defer cancel()
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -367,12 +397,15 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 		}
 	}()
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := userTimestamp(time.Now())
 	result, err := conn.ExecContext(ctx, `UPDATE users SET auth_version = auth_version + 1, updated_at = ? WHERE id = ?`, now, id)
 	if err != nil {
 		return fmt.Errorf("auth: increment auth version: %w", err)
 	}
-	rows, _ := result.RowsAffected()
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("auth: count revoked users: %w", err)
+	}
 	if rows == 0 {
 		return ErrUserNotFound
 	}
@@ -430,7 +463,7 @@ func (s *UserStore) createFirstAdmin(email, name string, event *AuditEvent) (Use
 		return User{}, ErrSetupComplete
 	}
 
-	params, err := newCreateUserParams(email, name, "admin")
+	params, err := newCreateUserParams(email, name, RoleAdmin)
 	if err != nil {
 		return User{}, err
 	}
@@ -455,17 +488,17 @@ func (s *UserStore) createFirstAdmin(email, name string, event *AuditEvent) (Use
 // ErrSetupComplete is returned when setup is attempted but users already exist.
 var ErrSetupComplete = errors.New("setup already complete")
 
-func newCreateUserParams(email, name, role string) (generated.CreateUserParams, error) {
+func newCreateUserParams(email, name string, role Role) (generated.CreateUserParams, error) {
 	id, err := appid.New()
 	if err != nil {
 		return generated.CreateUserParams{}, fmt.Errorf("auth: generate user id: %w", err)
 	}
-	now := time.Now().UTC().Format(time.RFC3339)
+	now := userTimestamp(time.Now())
 	return generated.CreateUserParams{
 		ID:        id,
 		Email:     email,
 		Name:      sql.NullString{String: name, Valid: name != ""},
-		Role:      role,
+		Role:      string(role),
 		CreatedAt: now,
 		UpdatedAt: now,
 	}, nil

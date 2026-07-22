@@ -13,6 +13,8 @@ import (
 
 	envparse "github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
+
+	appauth "github.com/labstack/fanout/internal/auth"
 )
 
 type Config struct {
@@ -119,11 +121,9 @@ type Config struct {
 	OIDCAdminGroups       string        `env:"OIDC_ADMIN_GROUPS"`
 	MetricsToken          string        `env:"METRICS_TOKEN"`
 	MetricsPublic         bool          `env:"METRICS_PUBLIC" envDefault:"false"`
-	// Legacy browser JWT secrets remain optional during the migration window.
-	JWTSecret        string `env:"JWT_SECRET"`
-	JWTRefreshSecret string `env:"JWT_REFRESH_SECRET"`
-	TLSCertFile      string `env:"TLS_CERT_FILE"`
-	TLSKeyFile       string `env:"TLS_KEY_FILE"`
+	TrustProxyHeaders     bool          `env:"TRUST_PROXY_HEADERS" envDefault:"false"`
+	TLSCertFile           string        `env:"TLS_CERT_FILE"`
+	TLSKeyFile            string        `env:"TLS_KEY_FILE"`
 }
 
 // Load reads .env non-destructively (does not overwrite pre-set OS env), then
@@ -164,8 +164,8 @@ func Load() Config {
 		slog.Error("invalid config", "err", err)
 		os.Exit(1)
 	}
-	if strings.TrimSpace(cfg.AuthCodeSecret) == "" && strings.TrimSpace(cfg.JWTSecret) != "" {
-		slog.Warn("AUTH_CODE_SECRET is unset; using deprecated JWT_SECRET fallback for email codes")
+	if !cfg.SecureCookies() {
+		slog.Warn("browser session cookies are not Secure; configure PUBLIC_URL=https://... or local TLS before exposing Fanout")
 	}
 	if cfg.MetricsPublic {
 		slog.Warn("Prometheus metrics are publicly accessible", "path", "/-/metrics")
@@ -257,13 +257,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("AUTH_MODE must be local or oidc")
 	}
 	idleTTL := c.SessionIdleTTL
-	if idleTTL == 0 {
-		idleTTL = 12 * time.Hour
-	}
 	absoluteTTL := c.SessionAbsoluteTTL
-	if absoluteTTL == 0 {
-		absoluteTTL = 7 * 24 * time.Hour
-	}
 	if idleTTL < 5*time.Minute {
 		return fmt.Errorf("SESSION_IDLE_TTL must be at least 5m")
 	}
@@ -277,7 +271,7 @@ func (c Config) Validate() error {
 		if c.SMTPPort <= 0 {
 			return fmt.Errorf("SMTP_PORT must be > 0")
 		}
-		if len(c.EffectiveAuthCodeSecret()) < 32 {
+		if len(strings.TrimSpace(c.AuthCodeSecret)) < 32 {
 			return fmt.Errorf("AUTH_CODE_SECRET must be at least 32 characters")
 		}
 	}
@@ -296,7 +290,13 @@ func (c Config) Validate() error {
 		if c.OIDCEmailVerification != "required" && c.OIDCEmailVerification != "issuer" {
 			return fmt.Errorf("OIDC_EMAIL_VERIFICATION must be required or issuer")
 		}
-		if !validRole(c.OIDCDefaultRole) {
+		if strings.TrimSpace(c.OIDCEmailClaim) == "" {
+			return fmt.Errorf("OIDC_EMAIL_CLAIM must not be empty")
+		}
+		if c.OIDCEmailVerification == "issuer" && strings.TrimSpace(c.OIDCAllowedGroups) == "" && strings.TrimSpace(c.OIDCAllowedDomains) == "" {
+			return fmt.Errorf("OIDC issuer email verification requires OIDC_ALLOWED_GROUPS or OIDC_ALLOWED_DOMAINS")
+		}
+		if !appauth.ValidRole(c.OIDCDefaultRole) {
 			return fmt.Errorf("OIDC_DEFAULT_ROLE must be viewer, operator, or admin")
 		}
 		if c.OIDCAutoProvision && strings.TrimSpace(c.OIDCAllowedGroups) == "" && strings.TrimSpace(c.OIDCAllowedDomains) == "" {
@@ -311,29 +311,10 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("AI_PROVIDER must be anthropic or openai")
 	}
-	if c.JWTSecret != "" && len(c.JWTSecret) < 32 {
-		return fmt.Errorf("JWT_SECRET must be at least 32 characters")
-	}
-	if c.JWTRefreshSecret != "" && len(c.JWTRefreshSecret) < 32 {
-		return fmt.Errorf("JWT_REFRESH_SECRET must be at least 32 characters")
-	}
-	if c.JWTSecret != "" && c.JWTSecret == c.JWTRefreshSecret {
-		return fmt.Errorf("JWT_SECRET and JWT_REFRESH_SECRET must be different")
-	}
-	if (c.JWTSecret == "") != (c.JWTRefreshSecret == "") {
-		return fmt.Errorf("JWT_SECRET and JWT_REFRESH_SECRET must either both be set or both be empty")
-	}
 	if anySet(c.TLSCertFile, c.TLSKeyFile) && !c.TLSEnabled() {
 		return fmt.Errorf("TLS requires TLS_CERT_FILE and TLS_KEY_FILE")
 	}
 	return nil
-}
-
-func (c Config) EffectiveAuthCodeSecret() string {
-	if strings.TrimSpace(c.AuthCodeSecret) != "" {
-		return c.AuthCodeSecret
-	}
-	return c.JWTSecret
 }
 
 func (c Config) SecureCookies() bool {
@@ -342,15 +323,6 @@ func (c Config) SecureCookies() bool {
 	}
 	u, err := url.Parse(strings.TrimSpace(c.PublicURL))
 	return err == nil && u.Scheme == "https" && u.Host != ""
-}
-
-func validRole(role string) bool {
-	switch strings.TrimSpace(role) {
-	case "viewer", "operator", "admin":
-		return true
-	default:
-		return false
-	}
 }
 
 // SMTPConfigured returns true if SMTP is set up for sending email codes.

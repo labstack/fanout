@@ -1,5 +1,28 @@
 ALTER TABLE users ADD COLUMN auth_version INTEGER NOT NULL DEFAULT 1;
 
+-- Normalize legacy SQLite and RFC3339 variants to a single fixed-width format
+-- so lexical ordering remains chronological.
+UPDATE users SET
+  created_at = strftime('%Y-%m-%dT%H:%M:%fZ', created_at),
+  updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', updated_at),
+  logged_in_at = CASE
+    WHEN logged_in_at IS NULL OR logged_in_at = '' THEN logged_in_at
+    ELSE strftime('%Y-%m-%dT%H:%M:%fZ', logged_in_at)
+  END;
+
+-- Older installations retain SQLite datetime defaults that cannot be altered in
+-- place. Normalize any default-generated values after insert; application
+-- writes already use the same fixed-width UTC format directly.
+CREATE TRIGGER users_normalize_timestamps_after_insert
+AFTER INSERT ON users
+WHEN instr(NEW.created_at, ' ') > 0 OR instr(NEW.updated_at, ' ') > 0
+BEGIN
+  UPDATE users SET
+    created_at = strftime('%Y-%m-%dT%H:%M:%fZ', NEW.created_at),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at)
+  WHERE id = NEW.id;
+END;
+
 CREATE TABLE sessions (
   token_hash          TEXT PRIMARY KEY,
   user_id             TEXT REFERENCES users(id) ON DELETE CASCADE,
@@ -24,7 +47,7 @@ CREATE TABLE user_identities (
   UNIQUE (issuer, subject)
 );
 
-CREATE INDEX user_identities_user_idx ON user_identities(user_id);
+CREATE UNIQUE INDEX user_identities_user_unique_idx ON user_identities(user_id);
 
 CREATE TABLE auth_audit_events (
   id            TEXT PRIMARY KEY,

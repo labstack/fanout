@@ -14,12 +14,13 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/env"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
 const testMCPResource = "https://demo.fanout.test/mcp"
 
-func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, string) {
+func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	t.Helper()
 	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {
@@ -27,23 +28,36 @@ func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, string) {
 	}
 	t.Cleanup(func() { _ = sqlite.Close() })
 	users := auth.NewUserStore(sqlite.DB)
-	refreshSecret := "abcdef0123456789abcdef0123456789"
-	handler, err := NewMCPAuthorization(auth.NewOAuthStore(sqlite.DB), users, refreshSecret, testMCPResource)
+	sessions := auth.NewBrowserSessions(sqlite.DB, 12*time.Hour, 7*24*time.Hour, false)
+	audit := auth.NewAuditStore(sqlite.DB)
+	handler, err := NewMCPAuthorization(auth.NewOAuthStore(sqlite.DB), users, testMCPResource)
 	if err != nil {
 		t.Fatalf("NewMCPAuthorization: %v", err)
 	}
 	e := echo.New()
-	RegisterAuthMiddleware(e, users, "0123456789abcdef0123456789abcdef", false)
+	RegisterAuthMiddleware(e, users, sessions, audit, env.Config{})
+	// Test-only login hook: it still creates the cookie through the production
+	// BrowserSessions API and middleware commit path.
+	e.POST("/api/auth/setup", func(c *echo.Context) error {
+		user, err := users.GetByID(c.Request().Header.Get("X-Test-User"))
+		if err != nil {
+			return err
+		}
+		if err := sessions.EstablishAuthenticatedSession(c.Request().Context(), user); err != nil {
+			return err
+		}
+		return c.NoContent(http.StatusNoContent)
+	})
 	handler.Register(e)
 	e.Any("/mcp", echo.WrapHandler(handler.ProtectMCP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))))
 	e.GET("/api/auth/me", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	return e, users, refreshSecret
+	return e, users, sessions
 }
 
 func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
-	e, users, refreshSecret := newOAuthTestServer(t)
+	e, users, _ := newOAuthTestServer(t)
 	user, err := users.Create("owner@example.com", "Owner", "admin")
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
@@ -86,11 +100,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 		"code_challenge_method": {"S256"},
 		"resource":              {testMCPResource},
 	}
-	refreshToken, err := auth.SignRefresh(refreshSecret, user.ID, time.Now())
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-	cookie := &http.Cookie{Name: "refresh_token", Value: refreshToken}
+	cookie := oauthCookieForUser(t, e, user)
 	consent := serve(t, e, http.MethodGet, "/api/auth/oauth/authorize?"+params.Encode(), "", nil, cookie)
 	if consent.Code != http.StatusOK || !strings.Contains(consent.Body.String(), "Allow Codex to access Fanout?") {
 		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
@@ -140,13 +150,11 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	}
 }
 
-func TestMCPOAuthRejectsBrowserJWTAndAdvertisesDiscovery(t *testing.T) {
-	e, users, _ := newOAuthTestServer(t)
-	user, _ := users.Create("jwt@example.com", "", "admin")
-	webJWT, _ := auth.SignAccess("0123456789abcdef0123456789abcdef", user.ID)
-	rec := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer " + webJWT})
+func TestMCPOAuthRejectsUnknownBearerAndAdvertisesDiscovery(t *testing.T) {
+	e, _, _ := newOAuthTestServer(t)
+	rec := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer not-an-mcp-token"})
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("MCP accepted browser JWT: %d", rec.Code)
+		t.Fatalf("MCP accepted unknown bearer: %d", rec.Code)
 	}
 	want := `resource_metadata="https://demo.fanout.test/.well-known/oauth-protected-resource/mcp"`
 	if !strings.Contains(rec.Header().Get("WWW-Authenticate"), want) {
@@ -168,17 +176,22 @@ const testRedirectURI = "http://localhost:4321/callback"
 
 var formHeaders = map[string]string{"Content-Type": "application/x-www-form-urlencoded"}
 
-func oauthSessionCookie(t *testing.T, users *auth.UserStore, refreshSecret, email string) *http.Cookie {
+func oauthCookieForUser(t *testing.T, e *echo.Echo, user auth.User) *http.Cookie {
+	t.Helper()
+	rec := serve(t, e, http.MethodPost, "/api/auth/setup", "", map[string]string{"X-Test-User": user.ID, "X-Fanout-Request": "1"})
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("test login = %d %s", rec.Code, rec.Body.String())
+	}
+	return firstCookie(t, rec, "fanout_session")
+}
+
+func oauthSessionCookie(t *testing.T, e *echo.Echo, users *auth.UserStore, email string) *http.Cookie {
 	t.Helper()
 	user, err := users.Create(email, "", "admin")
 	if err != nil {
 		t.Fatalf("Create user: %v", err)
 	}
-	token, err := auth.SignRefresh(refreshSecret, user.ID, time.Now())
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-	return &http.Cookie{Name: "refresh_token", Value: token}
+	return oauthCookieForUser(t, e, user)
 }
 
 func registerOAuthClient(t *testing.T, e *echo.Echo) auth.OAuthClient {
@@ -266,8 +279,8 @@ func decodeTokens(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 // --- HTTP-layer negative-path and scope tests ---------------------------------
 
 func TestMCPOAuthTokenExchangeRejectsWrongPKCEVerifier(t *testing.T) {
-	e, users, refreshSecret := newOAuthTestServer(t)
-	cookie := oauthSessionCookie(t, users, refreshSecret, "pkce@example.com")
+	e, users, _ := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, e, users, "pkce@example.com")
 	client := registerOAuthClient(t, e)
 	_, challenge := pkcePair()
 	code := approveAndGetCode(t, e, authorizeParams(client.ClientID, mcpReadScope, challenge), cookie)
@@ -279,8 +292,8 @@ func TestMCPOAuthTokenExchangeRejectsWrongPKCEVerifier(t *testing.T) {
 }
 
 func TestMCPOAuthConsentDenyRedirectsAccessDenied(t *testing.T) {
-	e, users, refreshSecret := newOAuthTestServer(t)
-	cookie := oauthSessionCookie(t, users, refreshSecret, "deny@example.com")
+	e, users, _ := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, e, users, "deny@example.com")
 	client := registerOAuthClient(t, e)
 	_, challenge := pkcePair()
 	params := authorizeParams(client.ClientID, mcpReadScope, challenge)
@@ -303,8 +316,8 @@ func TestMCPOAuthConsentDenyRedirectsAccessDenied(t *testing.T) {
 }
 
 func TestMCPOAuthTokenExchangeRejectsRedirectURIMismatch(t *testing.T) {
-	e, users, refreshSecret := newOAuthTestServer(t)
-	cookie := oauthSessionCookie(t, users, refreshSecret, "redirect-mismatch@example.com")
+	e, users, _ := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, e, users, "redirect-mismatch@example.com")
 	client := registerOAuthClient(t, e)
 	verifier, challenge := pkcePair()
 	code := approveAndGetCode(t, e, authorizeParams(client.ClientID, mcpReadScope, challenge), cookie)
@@ -316,8 +329,8 @@ func TestMCPOAuthTokenExchangeRejectsRedirectURIMismatch(t *testing.T) {
 }
 
 func TestMCPOAuthRefreshGrantOverHTTP(t *testing.T) {
-	e, users, refreshSecret := newOAuthTestServer(t)
-	cookie := oauthSessionCookie(t, users, refreshSecret, "refresh-http@example.com")
+	e, users, _ := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, e, users, "refresh-http@example.com")
 	client := registerOAuthClient(t, e)
 	verifier, challenge := pkcePair()
 	code := approveAndGetCode(t, e, authorizeParams(client.ClientID, mcpReadScope, challenge), cookie)
@@ -364,8 +377,8 @@ func TestMCPOAuthRefreshGrantOverHTTP(t *testing.T) {
 // An omitted scope must grant read-only access, and the consent card must say
 // exactly that — never the full supported-scope set.
 func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
-	e, users, refreshSecret := newOAuthTestServer(t)
-	cookie := oauthSessionCookie(t, users, refreshSecret, "default-scope@example.com")
+	e, users, _ := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, e, users, "default-scope@example.com")
 	client := registerOAuthClient(t, e)
 	verifier, challenge := pkcePair()
 	params := authorizeParams(client.ClientID, "", challenge) // no scope
@@ -392,8 +405,8 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 // When dashboard write access is requested, the consent card must say so and
 // must not claim the grant is read-only.
 func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
-	e, users, refreshSecret := newOAuthTestServer(t)
-	cookie := oauthSessionCookie(t, users, refreshSecret, "dashboard-scope@example.com")
+	e, users, _ := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, e, users, "dashboard-scope@example.com")
 	client := registerOAuthClient(t, e)
 	verifier, challenge := pkcePair()
 	scope := mcpReadScope + " fanout:dashboard"
@@ -426,6 +439,9 @@ func serve(t *testing.T, e *echo.Echo, method, target, body string, headers map[
 	}
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
+	}
+	if len(cookies) > 0 && isUnsafeMethod(method) && req.Header.Get("X-Fanout-Request") == "" {
+		req.Header.Set("X-Fanout-Request", "1")
 	}
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)

@@ -23,14 +23,18 @@ export async function authorizedFetch(input: RequestInfo | URL, init: RequestIni
   headers.set("X-Fanout-Request", "1");
   const response = await fetch(input, { ...init, headers, credentials: "same-origin" });
   if (response.status === 401) clearSession();
+  if (response.status === 403) {
+    const payload = await response.clone().json().catch(() => ({})) as { message?: string; error?: string };
+    throw new Error(payload.message ?? payload.error ?? "You do not have permission to perform this action.");
+  }
   return response;
 }
 
 export async function logout() {
-  try {
-    await authorizedFetch("/api/auth/logout", { method: "POST" });
-  } finally {
-    clearSession();
-    window.location.assign("/");
+  const response = await authorizedFetch("/api/auth/logout", { method: "POST" });
+  if (!response.ok) {
+    throw new Error("Sign-out failed — your session is still active.");
   }
+  clearSession();
+  window.location.assign("/");
 }

@@ -372,9 +372,25 @@ Fanout is configured entirely through environment variables. A `.env` file next 
 | `SESSION_IDLE_TTL` | Browser-session idle lifetime; defaults to `12h`. |
 | `SESSION_ABSOLUTE_TTL` | Browser-session absolute lifetime; defaults to `168h`. |
 | `PUBLIC_URL` | Canonical external HTTPS origin. Set this when a reverse proxy terminates TLS so browser cookies remain `Secure`; required for OIDC callbacks. |
-| `METRICS_TOKEN` | Bearer credential for Prometheus scraping when metrics are not explicitly public. |
+| `PUBLIC_READ` | Set to `true` only for an anonymous telemetry-read demo. It does not disable ingest authentication. |
+| `PUBLIC_INGEST` | Set to `true` to disable OTLP authentication. Use only for disposable public demos. |
+| `METRICS_PUBLIC` | Set to `true` to expose `/-/metrics` without a credential; defaults to `false`. |
+| `METRICS_TOKEN` | Bearer credential for Prometheus scraping when `METRICS_PUBLIC=false`. |
+| `TRUST_PROXY_HEADERS` | Trust forwarded client IP headers. Enable only when a trusted reverse proxy is Fanout’s sole ingress. |
 
 Generate `AUTH_CODE_SECRET` with `openssl rand -hex 32`.
+
+
+OIDC mode additionally requires `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`,
+`OIDC_CLIENT_SECRET`, and an HTTPS `PUBLIC_URL`. Configure
+`OIDC_EMAIL_CLAIM`, `OIDC_EMAIL_VERIFICATION`, `OIDC_AUTO_PROVISION`,
+`OIDC_ALLOWED_GROUPS`, `OIDC_ALLOWED_DOMAINS`, `OIDC_DEFAULT_ROLE`,
+`OIDC_OPERATOR_GROUPS`, and `OIDC_ADMIN_GROUPS` to match your provider and
+provisioning policy.
+
+> **Upgrade note:** `/-/metrics` is private by default. Existing Prometheus
+> scrapers must send `Authorization: Bearer <METRICS_TOKEN>`, or an operator
+> must explicitly set `METRICS_PUBLIC=true` for a deliberately public endpoint.
 
 ### Email (required)
 
