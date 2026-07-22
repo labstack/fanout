@@ -2,7 +2,7 @@ import { Alert, Button, Center, Code, Container, Group, Loader, Paper, Stack, Te
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
 import { getToken, oauthReturnTo, refreshAccessToken, saveToken, unauthorizedEvent } from "./auth-session";
-import { BrandMark } from "./brand";
+import { BrandLockup } from "./brand";
 
 export { authorizedFetch, clearSession, getToken, logout } from "./auth-session";
 
@@ -64,7 +64,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
 
   if (setupResult?.ingest_token) {
     return <AuthSurface wide><Stack gap="lg">
-      <BrandMark />
+      <BrandLockup />
       <div><Text c="teal" fw={700} size="xs" tt="uppercase" lts="0.12em">Setup complete</Text><Title order={1} mt="xs">Save your ingest token</Title></div>
       <Text c="dimmed">Fanout shows this token once. Store it with your collector secrets before continuing.</Text>
       <Stack gap="xs"><Text size="sm" fw={600}>OTLP endpoint</Text><Code block>{setupResult.suggested_endpoint ?? `${window.location.hostname}:4317`}</Code></Stack>
@@ -106,8 +106,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }
 
   return <AuthSurface><Stack gap="lg">
-    <BrandMark />
-    <div><Text c="teal" fw={700} size="xs" tt="uppercase" lts="0.12em">Fanout</Text><Title order={1} mt="xs">{status?.setup_required ? "Create the first admin" : "Sign in to investigate"}</Title></div>
+    <BrandLockup />
+    <Title order={1}>{status?.setup_required ? "Create the first admin" : "Sign in to investigate"}</Title>
     <Text c="dimmed">
       {status?.setup_required ? "Use the one-time token printed by the Fanout process." : codeSent ? `Enter the verification code sent to ${email}.` : "Fanout sends a short verification code to your email."}
     </Text>

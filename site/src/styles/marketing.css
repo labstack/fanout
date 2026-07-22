@@ -72,16 +72,17 @@ nav.bar {
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
+  gap: 14px;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: color-mix(in srgb, var(--fg) 92%, transparent);
   transition: color 0.15s;
 }
 .brand:hover { color: var(--fg); }
-.brand svg { color: var(--primary); }
 nav.bar .links {
   display: flex;
   align-items: center;
