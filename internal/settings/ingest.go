@@ -40,19 +40,21 @@ func (s *Store) SetIngestWithAudit(ctx context.Context, ingest Ingest, audit *au
 	if audit == nil {
 		return fmt.Errorf("settings: audit store is required for ingest updates")
 	}
+	writeCtx, cancel := auth.DetachedWriteContext(ctx)
+	defer cancel()
 	payload, err := json.Marshal(ingest)
 	if err != nil {
 		return fmt.Errorf("settings: encode ingest: %w", err)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(writeCtx, nil)
 	if err != nil {
 		return fmt.Errorf("settings: begin ingest update: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := generated.New(tx).UpsertSetting(ctx, generated.UpsertSettingParams{Key: ingestKey, Value: string(payload), UpdatedAt: time.Now().UTC().Format(time.RFC3339)}); err != nil {
+	if _, err := generated.New(tx).UpsertSetting(writeCtx, generated.UpsertSettingParams{Key: ingestKey, Value: string(payload), UpdatedAt: time.Now().UTC().Format(time.RFC3339)}); err != nil {
 		return fmt.Errorf("settings: upsert ingest: %w", err)
 	}
-	if err := audit.RecordTx(ctx, tx, event); err != nil {
+	if err := audit.RecordTx(writeCtx, tx, event); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

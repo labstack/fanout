@@ -72,19 +72,23 @@ func (h *OIDCHandler) Start(c *echo.Context) error {
 	}
 	state, err := randomURLToken(32)
 	if err != nil {
+		slog.Error("OIDC state generation failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
 	}
 	nonce, err := randomURLToken(32)
 	if err != nil {
+		slog.Error("OIDC nonce generation failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
 	}
 	verifier, err := randomURLToken(48)
 	if err != nil {
+		slog.Error("OIDC PKCE verifier generation failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
 	}
 	ctx := c.Request().Context()
 	returnTo := safeReturnTo(c.QueryParam("return_to"))
 	if err := h.sessions.BeginOIDCSession(ctx, oidcFlowTTL, oidcFlowTTL, state, nonce, verifier, returnTo); err != nil {
+		slog.Error("OIDC pre-authentication session creation failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
 	}
 	challenge := sha256.Sum256([]byte(verifier))
@@ -157,6 +161,7 @@ func (h *OIDCHandler) Callback(c *echo.Context) error {
 		return h.oidcDenied(c, "user is inactive")
 	}
 	if err := h.identities.TouchLogin(ctx, identity.ID); err != nil {
+		slog.Error("OIDC identity login timestamp update failed", "identity_id", identity.ID, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
 	}
 	if err := h.users.TouchLogin(user.ID); err != nil {
@@ -164,6 +169,7 @@ func (h *OIDCHandler) Callback(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
 	}
 	if err := h.sessions.EstablishAuthenticatedSession(ctx, user); err != nil {
+		slog.Error("OIDC authenticated session establishment failed", "user_id", user.ID, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
 	returnTo = safeReturnTo(returnTo)

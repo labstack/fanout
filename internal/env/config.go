@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -121,7 +122,7 @@ type Config struct {
 	OIDCAdminGroups       string        `env:"OIDC_ADMIN_GROUPS"`
 	MetricsToken          string        `env:"METRICS_TOKEN"`
 	MetricsPublic         bool          `env:"METRICS_PUBLIC" envDefault:"false"`
-	TrustProxyHeaders     bool          `env:"TRUST_PROXY_HEADERS" envDefault:"false"`
+	TrustedProxyCIDRs     string        `env:"TRUSTED_PROXY_CIDRS"`
 	TLSCertFile           string        `env:"TLS_CERT_FILE"`
 	TLSKeyFile            string        `env:"TLS_KEY_FILE"`
 }
@@ -166,6 +167,9 @@ func Load() Config {
 	}
 	if !cfg.SecureCookies() {
 		slog.Warn("browser session cookies are not Secure; configure PUBLIC_URL=https://... or local TLS before exposing Fanout")
+	}
+	if strings.TrimSpace(cfg.PublicURL) != "" && !cfg.TLSEnabled() && strings.TrimSpace(cfg.TrustedProxyCIDRs) == "" {
+		slog.Warn("reverse-proxy client IPs are not trusted; set TRUSTED_PROXY_CIDRS to the proxy network so audit and rate limits use end-client addresses")
 	}
 	if cfg.MetricsPublic {
 		slog.Warn("Prometheus metrics are publicly accessible", "path", "/-/metrics")
@@ -310,6 +314,15 @@ func (c Config) Validate() error {
 	case "", "anthropic", "openai":
 	default:
 		return fmt.Errorf("AI_PROVIDER must be anthropic or openai")
+	}
+	for _, raw := range strings.Split(c.TrustedProxyCIDRs, ",") {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(value); err != nil {
+			return fmt.Errorf("TRUSTED_PROXY_CIDRS contains invalid CIDR %q", value)
+		}
 	}
 	if anySet(c.TLSCertFile, c.TLSKeyFile) && !c.TLSEnabled() {
 		return fmt.Errorf("TLS requires TLS_CERT_FILE and TLS_KEY_FILE")

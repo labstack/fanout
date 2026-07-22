@@ -60,6 +60,38 @@ func newTestUserStore(t *testing.T) *UserStore {
 	return NewUserStore(newTestSQLite(t).DB)
 }
 
+func TestUserAndIdentityConflictsAreTyped(t *testing.T) {
+	db := newTestSQLite(t)
+	users := NewUserStore(db.DB)
+	user, err := users.Create("conflict@example.com", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.Create("conflict@example.com", "", "viewer"); !errors.Is(err, ErrUserConflict) {
+		t.Fatalf("duplicate user = %v, want ErrUserConflict", err)
+	}
+	identities := NewIdentityStore(db.DB)
+	audit := NewAuditStore(db.DB)
+	event := AuditEvent{EventType: "identity.linked", Outcome: "success"}
+	if _, err := identities.LinkWithAudit(t.Context(), user.ID, "https://issuer.example", "subject", user.Email, audit, event); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := identities.LinkWithAudit(t.Context(), user.ID, "https://issuer.example", "subject", user.Email, audit, event); !errors.Is(err, ErrIdentityConflict) {
+		t.Fatalf("duplicate identity = %v, want ErrIdentityConflict", err)
+	}
+}
+
+func TestUserInfrastructureFailureIsNotConflict(t *testing.T) {
+	db := newTestSQLite(t)
+	users := NewUserStore(db.DB)
+	if _, err := db.DB.Exec("ALTER TABLE users RENAME TO users_offline"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.Create("infra@example.com", "", "viewer"); err == nil || errors.Is(err, ErrUserConflict) {
+		t.Fatalf("infrastructure failure = %v, want non-conflict error", err)
+	}
+}
+
 func TestUserStore_CreateAndGet(t *testing.T) {
 	s := newTestUserStore(t)
 

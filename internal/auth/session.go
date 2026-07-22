@@ -324,7 +324,22 @@ func (s *BrowserSessions) BeginOIDCSession(ctx context.Context, flowTTL, maximum
 	if flowTTL <= 0 || flowTTL > maximum {
 		return fmt.Errorf("auth: invalid pre-authentication session lifetime")
 	}
-	s.manager.SetDeadline(ctx, time.Now().UTC().Add(flowTTL))
+	// Rotate away from any authenticated session before storing pre-auth state.
+	// Clear then prevents identity data from carrying into the new token.
+	if err := s.manager.RenewToken(ctx); err != nil {
+		return fmt.Errorf("auth: renew pre-authentication session: %w", err)
+	}
+	if err := s.manager.Clear(ctx); err != nil {
+		return fmt.Errorf("auth: clear pre-authentication session: %w", err)
+	}
+	now := time.Now().UTC()
+	s.manager.SetDeadline(ctx, now.Add(flowTTL))
+	if metadata := sessionMetadata(ctx); metadata != nil {
+		metadata.UserID = ""
+		metadata.CreatedAt = now
+		metadata.LastActivityAt = now
+		metadata.AbsoluteExpiresAt = now.Add(flowTTL)
+	}
 	s.manager.Put(ctx, "oidc_state", state)
 	s.manager.Put(ctx, "oidc_nonce", nonce)
 	s.manager.Put(ctx, "oidc_pkce_verifier", verifier)

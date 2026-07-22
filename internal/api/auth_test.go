@@ -155,6 +155,28 @@ func TestRoutePolicyClassification(t *testing.T) {
 	}
 }
 
+func TestUnknownProtectedPathsAuthenticateThenReturn404(t *testing.T) {
+	s := newTestAuthServer(t)
+	user, _ := s.users.Create("unknown-path@example.com", "", "admin")
+	anonymous := httptest.NewRecorder()
+	s.e.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/api/not-registered", nil))
+	if anonymous.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous unknown API path = %d, want 401", anonymous.Code)
+	}
+	cookie := s.login(t, user)
+	authenticated := httptest.NewRecorder()
+	s.e.ServeHTTP(authenticated, sessionRequest(http.MethodGet, "/api/not-registered", nil, cookie))
+	if authenticated.Code != http.StatusNotFound {
+		t.Fatalf("authenticated unknown API path = %d, want 404", authenticated.Code)
+	}
+	s.e.GET("/api/new-unreviewed-route", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	unclassified := httptest.NewRecorder()
+	s.e.ServeHTTP(unclassified, sessionRequest(http.MethodGet, "/api/new-unreviewed-route", nil, cookie))
+	if unclassified.Code != http.StatusInternalServerError {
+		t.Fatalf("registered unclassified API route = %d, want 500", unclassified.Code)
+	}
+}
+
 func TestKnownRouteWrongMethodReturns405(t *testing.T) {
 	s := newTestAuthServer(t)
 	s.e.GET("/api/alerts", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })

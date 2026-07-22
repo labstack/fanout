@@ -80,7 +80,7 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 	}
 	user, err := h.users.CreateWithAudit(email, req.Name, role, userAuditEvent(c, "user.created"))
 	if err != nil {
-		if strings.Contains(err.Error(), "UNIQUE") {
+		if errors.Is(err, auth.ErrUserConflict) {
 			return echo.NewHTTPError(http.StatusConflict, "user already exists")
 		}
 		slog.Error("create user failed", "err", err)
@@ -137,10 +137,13 @@ func (h *UserHandler) UpdateUser(c *echo.Context) error {
 	}
 	user, err := h.users.UpdateWithAudit(id, req.Email, req.Name, role, req.Active, userAuditEvent(c, eventType))
 	if err != nil {
+		if errors.Is(err, auth.ErrUserConflict) {
+			return echo.NewHTTPError(http.StatusConflict, "user already exists")
+		}
 		if err == auth.ErrLastActiveAdmin {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, auth.ErrUserNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
 		slog.Error("update user failed", "id", id, "err", err)
@@ -156,7 +159,7 @@ func (h *UserHandler) DeleteUser(c *echo.Context) error {
 		if err == auth.ErrLastActiveAdmin {
 			return echo.NewHTTPError(http.StatusConflict, err.Error())
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, auth.ErrUserNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
 		slog.Error("delete user failed", "id", id, "err", err)

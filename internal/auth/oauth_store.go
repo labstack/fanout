@@ -190,7 +190,7 @@ func (s *OAuthStore) ConsumeAuthorizationCode(ctx context.Context, raw string) (
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			rollbackConn(conn, "OAuth authorization code consumption")
 		}
 	}()
 
@@ -244,7 +244,7 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			rollbackConn(conn, "OAuth refresh token rotation")
 		}
 	}()
 

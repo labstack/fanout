@@ -179,6 +179,129 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 	}
 }
 
+func TestOIDCCallbackRejectsInvalidIdentityTokensAndProvisioning(t *testing.T) {
+	cases := []struct {
+		name       string
+		mutate     func(jwt.MapClaims)
+		badKey     bool
+		knownEmail bool
+	}{
+		{name: "nonce mismatch", knownEmail: true, mutate: func(c jwt.MapClaims) { c["nonce"] = "wrong" }},
+		{name: "wrong audience", knownEmail: true, mutate: func(c jwt.MapClaims) { c["aud"] = "other-client" }},
+		{name: "expired", knownEmail: true, mutate: func(c jwt.MapClaims) { c["exp"] = time.Now().Add(-time.Hour).Unix() }},
+		{name: "bad signature", knownEmail: true, badKey: true},
+		{name: "email unverified", knownEmail: true, mutate: func(c jwt.MapClaims) { c["email_verified"] = false }},
+		{name: "email verification absent", knownEmail: true, mutate: func(c jwt.MapClaims) { delete(c, "email_verified") }},
+		{name: "auto provision disabled", knownEmail: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := runRejectedOIDCCallback(t, tc.mutate, tc.badKey, tc.knownEmail); got != http.StatusUnauthorized {
+				t.Fatalf("callback status = %d, want 401", got)
+			}
+		})
+	}
+}
+
+func runRejectedOIDCCallback(t *testing.T, mutate func(jwt.MapClaims), badKey, knownEmail bool) int {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issuer, issuedNonce string
+	idp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer": issuer, "authorization_endpoint": issuer + "/authorize", "token_endpoint": issuer + "/token",
+				"jwks_uri": issuer + "/keys", "response_types_supported": []string{"code"},
+				"subject_types_supported": []string{"public"}, "id_token_signing_alg_values_supported": []string{"RS256"},
+				"token_endpoint_auth_methods_supported": []string{"client_secret_basic"},
+			})
+		case "/keys":
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]any{{
+				"kty": "RSA", "kid": "test-key", "use": "sig", "alg": "RS256",
+				"n": base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes()),
+				"e": base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.PublicKey.E)).Bytes()),
+			}}})
+		case "/token":
+			claims := jwt.MapClaims{
+				"iss": issuer, "sub": "rejected-subject", "aud": "fanout-client",
+				"exp": time.Now().Add(time.Minute).Unix(), "iat": time.Now().Add(-time.Second).Unix(),
+				"nonce": issuedNonce, "email": "candidate@example.com", "email_verified": true,
+			}
+			if mutate != nil {
+				mutate(claims)
+			}
+			token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
+			token.Header["kid"] = "test-key"
+			signingKey := key
+			if badKey {
+				signingKey = wrongKey
+			}
+			signed, signErr := token.SignedString(signingKey)
+			if signErr != nil {
+				t.Error(signErr)
+				http.Error(w, "signing failed", http.StatusInternalServerError)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "upstream-access", "token_type": "Bearer", "expires_in": 60, "id_token": signed,
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer idp.Close()
+	issuer = idp.URL
+
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	users := appauth.NewUserStore(db.DB)
+	seedEmail := "admin@example.com"
+	if knownEmail {
+		seedEmail = "candidate@example.com"
+	}
+	if _, err := users.Create(seedEmail, "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	sessions := appauth.NewBrowserSessions(db.DB, 12*time.Hour, 7*24*time.Hour, false)
+	e := echo.New()
+	e.Use(echo.WrapMiddleware(sessions.Middleware))
+	cfg := env.Config{
+		AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
+		PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
+		OIDCAutoProvision: false,
+	}
+	if err := RegisterOIDCRoutes(context.Background(), e, cfg, users, appauth.NewIdentityStore(db.DB), sessions, appauth.NewAuditStore(db.DB)); err != nil {
+		t.Fatal(err)
+	}
+	start := httptest.NewRecorder()
+	e.ServeHTTP(start, httptest.NewRequest(http.MethodGet, "/api/auth/oidc/start", nil))
+	if start.Code != http.StatusFound {
+		t.Fatalf("start = %d: %s", start.Code, start.Body.String())
+	}
+	location, err := url.Parse(start.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuedNonce = location.Query().Get("nonce")
+	callback := httptest.NewRequest(http.MethodGet, "/api/auth/oidc/callback?code=code&state="+url.QueryEscape(location.Query().Get("state")), nil)
+	callback.AddCookie(start.Result().Cookies()[0])
+	recorder := httptest.NewRecorder()
+	e.ServeHTTP(recorder, callback)
+	return recorder.Code
+}
+
 func TestConfiguredOIDCEmailRejectsFallbackValues(t *testing.T) {
 	cases := []struct {
 		name string

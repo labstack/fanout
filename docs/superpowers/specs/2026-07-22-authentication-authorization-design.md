@@ -283,8 +283,9 @@ a different `auth_version`.
 ### Revocation
 
 - Logout destroys the current SCS session and expires the cookie.
-- "Log out all sessions" increments `users.auth_version` and deletes that
-  user's session rows.
+- "Log out all sessions" increments `users.auth_version`, deletes that
+  user's browser-session rows, and revokes every MCP OAuth access and refresh
+  token for the user in the same transaction.
 - Account deactivation and security-sensitive identity changes increment
   `auth_version` and delete the affected user's sessions in the same transaction.
 - Every role change, including promotion, increments `auth_version` and deletes
@@ -303,10 +304,11 @@ The session package exposes two explicit operations:
 
 - `EstablishAuthenticatedSession` rotates the token and starts a new configured
   absolute lifetime after successful local, OIDC, or recovery authentication.
-- `BeginPreAuthenticationSession(flowTTL)` creates the session used for local or
-  OIDC login state and calls SCS `SetDeadline` internally with a bounded,
-  flow-specific lifetime. The requested deadline cannot exceed the configured
-  maximum for that flow.
+- `BeginPreAuthenticationSession(flowTTL)` rotates away from any current
+  authenticated session, clears identity data, creates the session used for
+  local or OIDC login state, and calls SCS `SetDeadline` internally with a
+  bounded, flow-specific lifetime. The requested deadline cannot exceed the
+  configured maximum for that flow.
 
 Role changes, deactivation, identity-security changes, and explicit revocation
 delete affected sessions. Only an actual authentication may create a new session
@@ -629,7 +631,7 @@ Public telemetry reading and unauthenticated ingest are separate settings:
 ```text
 PUBLIC_READ=false
 PUBLIC_INGEST=false
-TRUST_PROXY_HEADERS=false
+TRUSTED_PROXY_CIDRS=
 ```
 
 `PUBLIC_READ=true` creates the existing synthetic viewer only for explicitly
@@ -639,7 +641,10 @@ mutation.
 
 `PUBLIC_INGEST=true` is a separate, loudly warned demo-only option. Enabling
 public reads must never disable OTLP authentication. Production documentation
-must recommend leaving both values false on an internet-facing instance.
+must recommend leaving both public values disabled on an internet-facing instance.
+TRUSTED_PROXY_CIDRS is independent: leave it empty for direct traffic, or set
+only the concrete reverse-proxy network. Fanout disables Echo's default trust
+for loopback, link-local, and all RFC1918 addresses before adding these ranges.
 
 ## Login Abuse Controls
 
@@ -653,7 +658,7 @@ Initial defaults:
 |---|---:|---:|
 | Setup attempts | 10 per 15 min | setup-token verification already constant-time |
 | Login-code start | 20 per 15 min | 3 emails per 15 min |
-| Login-code verify | 30 per 15 min | existing maximum 3 attempts per code |
+| Login-code verify | 60 per 15 min | 30 per 15 min per email plus 3 attempts per code |
 | OIDC start | 30 per 15 min | n/a |
 
 Successful login does not immediately erase the source-IP limiter. Responses for
@@ -664,7 +669,11 @@ may additionally mark older rows used for clearer state and earlier cleanup, but
 that is hardening rather than a new authentication behavior.
 
 The first implementation is single-process, so in-memory source-IP throttles are
-acceptable. Email-send cooldown and verification-code attempt counts remain in
+acceptable. Verify uses independent IP-only and normalized-email buckets, so
+attacker-controlled email input cannot reset the source throttle. The bounded
+key map uses constant-time LRU bookkeeping, never evicts a throttled bucket, and
+rejects new keys with a rate-limited saturation warning when all capacity is
+active. Email-send cooldown and verification-code attempt counts remain in
 SQLite so a restart cannot be used to trigger an email burst.
 
 ## CSRF and Browser Request Policy
@@ -747,7 +756,7 @@ METRICS_TOKEN=
 METRICS_PUBLIC=false
 PUBLIC_READ=false
 PUBLIC_INGEST=false
-TRUST_PROXY_HEADERS=false
+TRUSTED_PROXY_CIDRS=
 ```
 
 Configuration validation is mode-specific:

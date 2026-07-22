@@ -32,9 +32,9 @@ export async function authorizedFetch(input: RequestInfo | URL, init: RequestIni
 
 export async function logout() {
   const response = await authorizedFetch("/api/auth/logout", { method: "POST" });
-  if (!response.ok) {
+  if (!response.ok && response.status !== 401) {
     throw new Error("Sign-out failed — your session is still active.");
   }
-  clearSession();
+  if (response.status !== 401) clearSession();
   window.location.assign("/");
 }

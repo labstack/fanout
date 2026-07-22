@@ -318,6 +318,54 @@ func TestEnforceActivityRejectsAbsoluteExpiry(t *testing.T) {
 	}
 }
 
+func TestBeginOIDCSessionReplacesAuthenticatedSession(t *testing.T) {
+	db, sessions := newSessionTestStore(t)
+	users := NewUserStore(db.DB)
+	user, err := users.Create("reauth@example.com", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	login := httptest.NewRecorder()
+	sessions.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := sessions.EstablishAuthenticatedSession(r.Context(), user); err != nil {
+			t.Fatal(err)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(login, httptest.NewRequest(http.MethodPost, "/login", nil))
+	oldCookie := login.Result().Cookies()[0]
+
+	started := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/oidc/start", nil)
+	request.AddCookie(oldCookie)
+	sessions.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := sessions.BeginOIDCSession(r.Context(), time.Minute, time.Minute, "state", "nonce", "verifier", ""); err != nil {
+			t.Fatal(err)
+		}
+		if sessions.UserID(r.Context()) != "" {
+			t.Fatal("authenticated identity survived pre-authentication renewal")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(started, request)
+	newCookie := started.Result().Cookies()[0]
+	if newCookie.Value == oldCookie.Value {
+		t.Fatal("OIDC start reused the authenticated session token")
+	}
+	var oldRows int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM sessions WHERE token_hash = ?`, SessionTokenHash(SessionToken(oldCookie.Value))).Scan(&oldRows); err != nil {
+		t.Fatal(err)
+	}
+	if oldRows != 0 {
+		t.Fatalf("old authenticated session rows = %d, want 0", oldRows)
+	}
+	var linkedUsers int
+	if err := db.DB.QueryRow(`SELECT COUNT(*) FROM sessions WHERE token_hash = ? AND user_id IS NOT NULL`, SessionTokenHash(SessionToken(newCookie.Value))).Scan(&linkedUsers); err != nil {
+		t.Fatal(err)
+	}
+	if linkedUsers != 0 {
+		t.Fatal("pre-authentication session retained user_id metadata")
+	}
+}
+
 func TestOIDCFlowValuesAreSingleUse(t *testing.T) {
 	_, sessions := newSessionTestStore(t)
 	begin := sessions.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

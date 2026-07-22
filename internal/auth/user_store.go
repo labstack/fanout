@@ -9,10 +9,14 @@ import (
 
 	"github.com/labstack/fanout/internal/db/generated"
 	appid "github.com/labstack/fanout/internal/id"
+	appstore "github.com/labstack/fanout/internal/store"
 )
 
 // ErrUserNotFound is returned when a requested user does not exist.
 var ErrUserNotFound = errors.New("user not found")
+
+// ErrUserConflict is returned when an email is already assigned to a user.
+var ErrUserConflict = errors.New("user already exists")
 
 // ErrLastActiveAdmin is returned when an operation would remove the final active admin.
 var ErrLastActiveAdmin = errors.New("cannot remove the last active admin")
@@ -99,6 +103,9 @@ func (s *UserStore) create(email, name string, role Role, event *AuditEvent) (Us
 	if event == nil {
 		u, err := s.q.CreateUser(context.Background(), params)
 		if err != nil {
+			if appstore.IsUniqueConstraint(err) {
+				return User{}, fmt.Errorf("%w: %v", ErrUserConflict, err)
+			}
 			return User{}, fmt.Errorf("auth: create user: %w", err)
 		}
 		return toUser(u), nil
@@ -111,6 +118,9 @@ func (s *UserStore) create(email, name string, role Role, event *AuditEvent) (Us
 	defer func() { _ = tx.Rollback() }()
 	u, err := generated.New(tx).CreateUser(ctx, params)
 	if err != nil {
+		if appstore.IsUniqueConstraint(err) {
+			return User{}, fmt.Errorf("%w: %v", ErrUserConflict, err)
+		}
 		return User{}, fmt.Errorf("auth: create user: %w", err)
 	}
 	event.TargetType = "user"
@@ -193,7 +203,7 @@ func (s *UserStore) update(id string, email, name *string, role *Role, active *b
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			rollbackConn(conn, "user update")
 		}
 	}()
 
@@ -247,6 +257,9 @@ func (s *UserStore) update(id string, email, name *string, role *Role, active *b
 		ID:        id,
 	})
 	if err != nil {
+		if appstore.IsUniqueConstraint(err) {
+			return User{}, fmt.Errorf("%w: %v", ErrUserConflict, err)
+		}
 		return User{}, fmt.Errorf("auth: update user: %w", err)
 	}
 	securityChanged := before.Email != existing.Email || before.Role != existing.Role || before.Active != existing.Active
@@ -300,7 +313,7 @@ func (s *UserStore) delete(id string, event *AuditEvent) error {
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			rollbackConn(conn, "user delete")
 		}
 	}()
 
@@ -394,7 +407,7 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			rollbackConn(conn, "user session and token revocation")
 		}
 	}()
 	now := userTimestamp(time.Now())
@@ -411,6 +424,9 @@ func (s *UserStore) revokeAllSessions(id string, event *AuditEvent) error {
 	}
 	if _, err := conn.ExecContext(ctx, `DELETE FROM sessions WHERE user_id = ?`, id); err != nil {
 		return fmt.Errorf("auth: delete user sessions: %w", err)
+	}
+	if _, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = COALESCE(revoked_at, ?) WHERE user_id = ?`, time.Now().UTC().Unix(), id); err != nil {
+		return fmt.Errorf("auth: revoke user OAuth tokens: %w", err)
 	}
 	if event != nil {
 		event.TargetType = "user"
@@ -450,7 +466,7 @@ func (s *UserStore) createFirstAdmin(email, name string, event *AuditEvent) (Use
 	committed := false
 	defer func() {
 		if !committed {
-			_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
+			rollbackConn(conn, "first administrator setup")
 		}
 	}()
 

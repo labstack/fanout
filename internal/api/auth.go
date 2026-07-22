@@ -17,17 +17,18 @@ import (
 )
 
 type AuthHandler struct {
-	users         *auth.UserStore
-	codes         *auth.CodeStore
-	setup         *auth.Setup
-	settings      *settings.Store
-	sessions      *auth.BrowserSessions
-	audit         *auth.AuditStore
-	smtp          auth.SMTPConfig
-	cfg           env.Config
-	setupLimiter  *auth.KeyedLimiter
-	startLimiter  *auth.KeyedLimiter
-	verifyLimiter *auth.KeyedLimiter
+	users                *auth.UserStore
+	codes                *auth.CodeStore
+	setup                *auth.Setup
+	settings             *settings.Store
+	sessions             *auth.BrowserSessions
+	audit                *auth.AuditStore
+	smtp                 auth.SMTPConfig
+	cfg                  env.Config
+	setupLimiter         *auth.KeyedLimiter
+	startLimiter         *auth.KeyedLimiter
+	verifyIPLimiter      *auth.KeyedLimiter
+	verifyAccountLimiter *auth.KeyedLimiter
 }
 
 func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, sessions *auth.BrowserSessions, audit *auth.AuditStore, smtp auth.SMTPConfig, cfg env.Config) {
@@ -38,17 +39,18 @@ func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeSto
 		cfg.AuthMode = "local"
 	}
 	h := &AuthHandler{
-		users:         users,
-		codes:         codes,
-		setup:         setup,
-		settings:      settingsStore,
-		sessions:      sessions,
-		audit:         audit,
-		smtp:          smtp,
-		cfg:           cfg,
-		setupLimiter:  auth.NewKeyedLimiter(10, 15*time.Minute),
-		startLimiter:  auth.NewKeyedLimiter(20, 15*time.Minute),
-		verifyLimiter: auth.NewKeyedLimiter(30, 15*time.Minute),
+		users:                users,
+		codes:                codes,
+		setup:                setup,
+		settings:             settingsStore,
+		sessions:             sessions,
+		audit:                audit,
+		smtp:                 smtp,
+		cfg:                  cfg,
+		setupLimiter:         auth.NewKeyedLimiter(10, 15*time.Minute),
+		startLimiter:         auth.NewKeyedLimiter(20, 15*time.Minute),
+		verifyIPLimiter:      auth.NewKeyedLimiter(60, 15*time.Minute),
+		verifyAccountLimiter: auth.NewKeyedLimiter(30, 15*time.Minute),
 	}
 
 	e.GET("/api/auth/status", h.Status)
@@ -130,6 +132,7 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	}
 
 	if err := h.establishSession(c, user); err != nil {
+		slog.Error("auth: setup session establishment failed", "user_id", user.ID, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
 
@@ -229,11 +232,14 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "email and code are required")
 	}
 
+	if !h.verifyIPLimiter.Allow(c.RealIP()) {
+		return rateLimited(c, 15*time.Minute)
+	}
 	email, err := auth.NormalizeEmail(req.Email)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	if !h.verifyLimiter.Allow(c.RealIP() + "|" + email) {
+	if !h.verifyAccountLimiter.Allow(email) {
 		return rateLimited(c, 15*time.Minute)
 	}
 	ok, err := h.codes.Verify(email, req.Code)
@@ -259,6 +265,7 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 	}
 
 	if err := h.establishSession(c, user); err != nil {
+		slog.Error("auth: verified session establishment failed", "user_id", user.ID, "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
 	h.recordAudit(c, auth.AuditEvent{ActorUserID: user.ID, EventType: "login.succeeded", Outcome: "success", TargetType: "user", TargetID: user.ID})

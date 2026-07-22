@@ -179,9 +179,12 @@ func main() {
 
 	// Start Echo HTTP API
 	e := echo.New()
-	if cfg.TrustProxyHeaders {
-		e.IPExtractor = echo.ExtractIPFromXFFHeader()
-		slog.Info("trusted proxy IP extraction enabled", "header", "X-Forwarded-For")
+	if err := api.ConfigureClientIP(e, cfg.TrustedProxyCIDRs); err != nil {
+		slog.Error("trusted proxy IP extraction configuration failed", "err", err)
+		os.Exit(1)
+	}
+	if strings.TrimSpace(cfg.TrustedProxyCIDRs) != "" {
+		slog.Info("trusted proxy IP extraction enabled", "header", "X-Forwarded-For", "cidrs", cfg.TrustedProxyCIDRs)
 	}
 	e.Use(middleware.Recover())
 	e.Use(middleware.RequestLoggerWithConfig(middleware.RequestLoggerConfig{

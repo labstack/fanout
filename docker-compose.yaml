@@ -60,8 +60,6 @@ services:
       # Canonical browser URL. Fanout uses this trusted value to emit Secure
       # session cookies when TLS terminates at Traefik.
       PUBLIC_URL: https://fanout.labstack.com
-      # Trust client IP headers only because Traefik is the sole ingress.
-      TRUST_PROXY_HEADERS: "true"
       # Canonical OAuth resource/audience for remote MCP clients.
       MCP_PUBLIC_URL: https://fanout.labstack.com/mcp
       # Allow concurrent read queries; write commits stay serialized by the

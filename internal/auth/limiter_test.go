@@ -37,12 +37,14 @@ func TestKeyedLimiterBoundsAndExpiresKeys(t *testing.T) {
 	now = now.Add(time.Second)
 	limiter.Allow("newer")
 	now = now.Add(time.Second)
-	limiter.Allow("newest")
+	if limiter.Allow("newest") {
+		t.Fatal("new key was accepted by a limiter full of active buckets")
+	}
 	if len(limiter.entries) != 2 {
 		t.Fatalf("entries = %d, want 2", len(limiter.entries))
 	}
-	if _, exists := limiter.entries["oldest"]; exists {
-		t.Fatal("oldest entry was not evicted")
+	if _, exists := limiter.entries["oldest"]; !exists {
+		t.Fatal("active throttled bucket was evicted")
 	}
 
 	now = now.Add(limiter.expiry + time.Second)

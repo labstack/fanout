@@ -16,7 +16,7 @@ var requiredEnvVars = []string{
 	"OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_EMAIL_CLAIM",
 	"OIDC_EMAIL_VERIFICATION", "OIDC_AUTO_PROVISION", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOWED_DOMAINS",
 	"OIDC_DEFAULT_ROLE", "OIDC_OPERATOR_GROUPS", "OIDC_ADMIN_GROUPS", "METRICS_TOKEN", "METRICS_PUBLIC",
-	"PUBLIC_READ", "PUBLIC_INGEST",
+	"PUBLIC_READ", "PUBLIC_INGEST", "TRUSTED_PROXY_CIDRS",
 	"JWT_SECRET", "JWT_REFRESH_SECRET",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
 	"TLS_CERT_FILE", "TLS_KEY_FILE",
@@ -201,6 +201,7 @@ func TestValidate(t *testing.T) {
 		{"session idle too short", func(c *Config) { c.SessionIdleTTL = time.Minute }},
 		{"session absolute zero", func(c *Config) { c.SessionAbsoluteTTL = 0 }},
 		{"session absolute shorter than idle", func(c *Config) { c.SessionIdleTTL = time.Hour; c.SessionAbsoluteTTL = 30 * time.Minute }},
+		{"trusted proxy invalid CIDR", func(c *Config) { c.TrustedProxyCIDRs = "private-network" }},
 		{"TLS partial cert", func(c *Config) { c.TLSCertFile = "server.pem" }},
 		{"TLS partial key", func(c *Config) { c.TLSKeyFile = "server-key.pem" }},
 	}

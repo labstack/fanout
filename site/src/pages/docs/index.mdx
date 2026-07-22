@@ -376,7 +376,7 @@ Fanout is configured entirely through environment variables. A `.env` file next 
 | `PUBLIC_INGEST` | Set to `true` to disable OTLP authentication. Use only for disposable public demos. |
 | `METRICS_PUBLIC` | Set to `true` to expose `/-/metrics` without a credential; defaults to `false`. |
 | `METRICS_TOKEN` | Bearer credential for Prometheus scraping when `METRICS_PUBLIC=false`. |
-| `TRUST_PROXY_HEADERS` | Trust forwarded client IP headers. Enable only when a trusted reverse proxy is Fanout’s sole ingress. |
+| `TRUSTED_PROXY_CIDRS` | Comma-separated CIDRs of reverse proxies allowed to supply forwarded client IP headers. |
 
 Generate `AUTH_CODE_SECRET` with `openssl rand -hex 32`.
 

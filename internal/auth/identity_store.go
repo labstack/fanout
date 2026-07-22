@@ -5,10 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	appid "github.com/labstack/fanout/internal/id"
+	appstore "github.com/labstack/fanout/internal/store"
 )
 
 type UserIdentity struct {
@@ -79,7 +79,7 @@ func (s *IdentityStore) link(ctx context.Context, userID, issuer, subject, email
 		INSERT INTO user_identities (id, user_id, issuer, subject, email_at_link, created_at, last_login_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?)`, id, userID, issuer, subject, email, now, now)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+		if appstore.IsUniqueConstraint(err) {
 			return UserIdentity{}, fmt.Errorf("%w: %v", ErrIdentityConflict, err)
 		}
 		return UserIdentity{}, fmt.Errorf("auth: link identity: %w", err)

@@ -144,6 +144,13 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	if mcp.Code != http.StatusNoContent {
 		t.Fatalf("MCP with OAuth token = %d %s", mcp.Code, mcp.Body.String())
 	}
+	if err := users.RevokeAllSessions(user.ID); err != nil {
+		t.Fatalf("logout everywhere: %v", err)
+	}
+	replayed := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer " + access})
+	if replayed.Code != http.StatusUnauthorized {
+		t.Fatalf("MCP token survived logout everywhere: %d %s", replayed.Code, replayed.Body.String())
+	}
 	web := serve(t, e, http.MethodGet, "/api/auth/me", "", map[string]string{"Authorization": "Bearer " + access})
 	if web.Code != http.StatusUnauthorized {
 		t.Fatalf("web API accepted MCP token: %d", web.Code)

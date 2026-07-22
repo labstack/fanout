@@ -72,6 +72,34 @@ func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {
 	}
 }
 
+func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.Create("incident@example.com", "", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	client, err := store.RegisterClient(t.Context(), "Incident client", "", []string{"http://localhost/callback"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := "https://demo.fanout.test/mcp"
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, "fanout:read", resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := users.RevokeAllSessions(user.ID); err != nil {
+		t.Fatalf("RevokeAllSessions: %v", err)
+	}
+	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
+		t.Fatalf("replayed access token = %v, want invalid token", err)
+	}
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource); !errors.Is(err, ErrOAuthRefreshReuse) {
+		t.Fatalf("replayed refresh token = %v, want reuse detection", err)
+	}
+}
+
 func TestOAuthStoreRejectsWrongAudienceAndInactiveRefresh(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)

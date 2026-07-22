@@ -93,6 +93,17 @@ describe("authorizedFetch", () => {
     window.removeEventListener(unauthorizedEvent, unauthorized);
   });
 
+  it("treats an already-missing server session as a successful logout", async () => {
+    const unauthorized = vi.fn();
+    window.addEventListener(unauthorizedEvent, unauthorized);
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
+    await expect(logout()).resolves.toBeUndefined();
+    expect(localStorage.getItem(tokenKey)).toBeNull();
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+    expect(window.location.pathname).toBe("/");
+    window.removeEventListener(unauthorizedEvent, unauthorized);
+  });
+
   it("keeps local state when server-side logout fails", async () => {
     const unauthorized = vi.fn();
     window.addEventListener(unauthorizedEvent, unauthorized);
