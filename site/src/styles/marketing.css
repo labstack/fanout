@@ -83,7 +83,6 @@ nav.bar {
   transition: color 0.15s;
 }
 .brand:hover { color: var(--fg); }
-.brand svg { color: var(--primary); }
 nav.bar .links {
   display: flex;
   align-items: center;

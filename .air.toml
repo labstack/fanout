@@ -12,7 +12,8 @@ tmp_dir = "tmp"
   follow_symlink = false
   include_dir = ["cmd", "internal"]
   # The browser bundle is embedded by internal/ui/ui.go, so rebuild the Go
-  # binary whenever Vite updates an emitted asset.
+  # binary when Vite output changes. Covers the asset types Vite currently
+  # emits; extend include_ext if the bundle gains new ones (fonts, images).
   include_ext = ["go", "html", "js", "css", "svg"]
   kill_delay = "35s"
   log = "build-errors.log"
