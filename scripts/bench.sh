@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Local ingest benchmark for fanout. Boots a throwaway fanout (tokenless via
-# PUBLIC_READ, isolated ports + temp data dir), drives it with N parallel
+# public read/ingest/metrics, isolated ports + temp data dir), drives it with N parallel
 # cmd/loadgen generators, and reports the SERVER-side accepted-rows rate plus
 # the health signals that matter (drops, file growth, rollup time, RSS).
 #
@@ -23,7 +23,7 @@ GHTTP=:17520
 GGRPC=:14317
 
 command -v go >/dev/null || { echo "go not found" >&2; exit 1; }
-[ -f .env ] || { echo "need a .env (SMTP/AI/JWT) to boot fanout — copy fanout/.env.example" >&2; exit 1; }
+[ -f .env ] || { echo "need a .env (SMTP/AI/auth) to boot fanout — copy fanout/.env.example" >&2; exit 1; }
 
 TMPD=$(mktemp -d)
 FPID=""
@@ -54,7 +54,7 @@ CGO_ENABLED=1 go build -o "$TMPD/fanout" ./cmd/fanout || exit 1
 CGO_ENABLED=1 go build -o "$TMPD/loadgen" ./cmd/loadgen || exit 1
 
 set -a; . ./.env; set +a
-DATA_DIR="$TMPD/data" PUBLIC_READ=true OTLP_GRPC_ADDR="$GGRPC" HTTP_ADDR="$GHTTP" ENV=development \
+DATA_DIR="$TMPD/data" PUBLIC_READ=true PUBLIC_INGEST=true METRICS_PUBLIC=true OTLP_GRPC_ADDR="$GGRPC" HTTP_ADDR="$GHTTP" ENV=development \
   FLUSH_SECONDS=5 ROLLUP_EVERY=15 DUCKDB_MAX_CONNS=4 "$TMPD/fanout" >"$TMPD/fanout.log" 2>&1 &
 FPID=$!
 for _ in $(seq 1 40); do curl -fsS -m2 "localhost${GHTTP}/healthz" >/dev/null 2>&1 && break; sleep 1; done

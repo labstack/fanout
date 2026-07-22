@@ -1,19 +1,20 @@
-import { Alert, Button, Center, Code, Container, Group, Loader, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
+import { Alert, Box, Button, Center, Code, Container, Group, Loader, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
-import { getToken, oauthReturnTo, refreshAccessToken, saveToken, unauthorizedEvent } from "./auth-session";
+import { clearLegacySession, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 import { BrandLockup } from "./brand";
 
-export { authorizedFetch, clearSession, getToken, logout } from "./auth-session";
+export { authorizedFetch, clearSession, logout } from "./auth-session";
 
-type Status = { setup_required: boolean; public_read: boolean };
-type SetupResult = { access_token: string; ingest_token?: string; ingest_header_name?: string; suggested_endpoint?: string };
+type Status = { setup_required: boolean; public_read: boolean; auth_mode: "local" | "oidc" };
+type SetupResult = { status: string; ingest_token?: string; ingest_header_name?: string; suggested_endpoint?: string };
 
 async function jsonRequest(path: string, body?: unknown) {
   const response = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
+    credentials: "same-origin",
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.message ?? payload.error ?? `Request failed (${response.status})`);
@@ -21,13 +22,35 @@ async function jsonRequest(path: string, body?: unknown) {
 }
 
 function AuthSurface({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
-  return <Center mih="100dvh" p="md"><Container size={wide ? 620 : 440} w="100%"><Paper withBorder shadow="xl" radius="xl" p={{ base: "lg", sm: "xl" }}>{children}</Paper></Container></Center>;
+  return <Box
+    mih="100dvh"
+    style={{
+      background: "radial-gradient(circle at 50% -12%, rgba(70, 192, 142, 0.12), transparent 38%), linear-gradient(180deg, var(--mantine-color-gray-0), var(--mantine-color-white) 62%)",
+    }}
+  >
+    <Center mih="100dvh" px="md" py={48}>
+      <Container size={wide ? 680 : 480} w="100%">
+        <Paper
+          radius={28}
+          p={{ base: 24, sm: 40 }}
+          style={{
+            background: "rgba(255, 255, 255, 0.9)",
+            border: "1px solid rgba(31, 41, 55, 0.08)",
+            boxShadow: "0 28px 70px rgba(31, 41, 55, 0.10), 0 3px 10px rgba(31, 41, 55, 0.04)",
+            backdropFilter: "blur(18px)",
+          }}
+        >
+          {children}
+        </Paper>
+      </Container>
+    </Center>
+  </Box>;
 }
 
 export default function AuthGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null);
-  const [token, setToken] = useState(getToken());
-  const [sessionReady, setSessionReady] = useState(!getToken());
+  const [authenticated, setAuthenticated] = useState(false);
+  const [sessionReady, setSessionReady] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [setupToken, setSetupToken] = useState("");
@@ -40,18 +63,20 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const returnTo = oauthReturnTo();
 
   useEffect(() => {
+    clearLegacySession();
     jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value)));
-    if (getToken()) {
-      refreshAccessToken().then((accessToken) => setToken(accessToken)).catch((cause) => console.warn("Session refresh failed on boot", cause)).finally(() => setSessionReady(true));
-    }
-    const handleUnauthorized = () => setToken("");
+    fetch("/api/auth/me", { credentials: "same-origin" })
+      .then((response) => setAuthenticated(response.ok))
+      .catch(() => setAuthenticated(false))
+      .finally(() => setSessionReady(true));
+    const handleUnauthorized = () => setAuthenticated(false);
     window.addEventListener(unauthorizedEvent, handleUnauthorized);
     return () => window.removeEventListener(unauthorizedEvent, handleUnauthorized);
   }, []);
 
   useEffect(() => {
-    if (token && sessionReady && returnTo) window.location.replace(returnTo);
-  }, [returnTo, sessionReady, token]);
+    if (authenticated && sessionReady && returnTo) window.location.replace(returnTo);
+  }, [authenticated, returnTo, sessionReady]);
 
   async function copyIngestToken() {
     try {
@@ -65,21 +90,35 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   if (setupResult?.ingest_token) {
     return <AuthSurface wide><Stack gap="lg">
       <BrandLockup />
-      <div><Text c="teal" fw={700} size="xs" tt="uppercase" lts="0.12em">Setup complete</Text><Title order={1} mt="xs">Save your ingest token</Title></div>
+      <div><Text c="teal" fw={700} size="xs" tt="uppercase" lts="0.12em">Setup complete</Text><Title order={1} mt="xs" fz={{ base: 30, sm: 36 }} fw={650} lh={1.08}>Save your ingest token</Title></div>
       <Text c="dimmed">Fanout shows this token once. Store it with your collector secrets before continuing.</Text>
       <Stack gap="xs"><Text size="sm" fw={600}>OTLP endpoint</Text><Code block>{setupResult.suggested_endpoint ?? `${window.location.hostname}:4317`}</Code></Stack>
       <Stack gap="xs"><Text size="sm" fw={600}>Header</Text><Code block>{setupResult.ingest_header_name ?? "x-fanout-ingest-token"}: {setupResult.ingest_token}</Code></Stack>
-      {error && <Alert color="red">{error}</Alert>}
+      {error && <Alert color="red" radius="md">{error}</Alert>}
       <Group grow align="stretch">
-        <Button variant="default" leftSection={copied ? <Check size={16} weight="bold" /> : <Copy size={16} />} onClick={() => void copyIngestToken()}>{copied ? "Copied" : "Copy token"}</Button>
-        <Button rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setToken(setupResult.access_token); setSetupResult(null); }}>Continue to Fanout</Button>
+        <Button variant="light" radius="md" leftSection={copied ? <Check size={16} weight="bold" /> : <Copy size={16} />} onClick={() => void copyIngestToken()}>{copied ? "Copied" : "Copy token"}</Button>
+        <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setAuthenticated(true); setSetupResult(null); }}>Continue to Fanout</Button>
       </Group>
     </Stack></AuthSurface>;
   }
 
-  if (token && !sessionReady) return <Center mih="100dvh"><Loader size="sm" /></Center>;
-  if (token && returnTo) return null;
-  if (token) return <>{children}</>;
+  if (!sessionReady) return <Center mih="100dvh"><Loader size="sm" /></Center>;
+  if (authenticated && returnTo) return null;
+  if (authenticated) return <>{children}</>;
+
+  if (status && !status.setup_required && status.auth_mode === "oidc") {
+    const target = returnTo ? `/api/auth/oidc/start?return_to=${encodeURIComponent(returnTo)}` : "/api/auth/oidc/start";
+    return <AuthSurface><Stack gap={28}>
+      <BrandLockup />
+      <Stack gap={10}>
+        <Text c="teal.7" fw={700} size="xs" tt="uppercase" lts="0.12em">Secure workspace</Text>
+        <Title order={1} fz={{ base: 30, sm: 36 }} fw={650} lh={1.08}>Sign in to investigate</Title>
+        <Text c="dimmed" size="md" lh={1.6}>Use your organization&apos;s identity provider to continue.</Text>
+      </Stack>
+      {error && <Alert color="red" radius="md">{error}</Alert>}
+      <Button component="a" href={target} size="md" radius="md" rightSection={<ArrowRight size={17} weight="bold" />}>Continue with SSO</Button>
+    </Stack></AuthSurface>;
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -88,15 +127,13 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     try {
       if (status?.setup_required) {
         const result = await jsonRequest("/api/auth/setup", { email, name, setup_token: setupToken }) as SetupResult;
-        saveToken(result.access_token);
-        if (result.ingest_token) setSetupResult(result); else setToken(result.access_token);
+        if (result.ingest_token) setSetupResult(result); else setAuthenticated(true);
       } else if (!codeSent) {
         await jsonRequest("/api/auth/start", { email });
         setCodeSent(true);
       } else {
-        const result = await jsonRequest("/api/auth/verify", { email, code });
-        saveToken(result.access_token);
-        setToken(result.access_token);
+        await jsonRequest("/api/auth/verify", { email, code });
+        setAuthenticated(true);
       }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
@@ -105,19 +142,26 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     }
   }
 
-  return <AuthSurface><Stack gap="lg">
+  return <AuthSurface><Stack gap={28}>
     <BrandLockup />
-    <Title order={1}>{status?.setup_required ? "Create the first admin" : "Sign in to investigate"}</Title>
-    <Text c="dimmed">
-      {status?.setup_required ? "Use the one-time token printed by the Fanout process." : codeSent ? `Enter the verification code sent to ${email}.` : "Fanout sends a short verification code to your email."}
-    </Text>
-    <form onSubmit={submit}><Stack>
-      <TextInput label="Email" type="email" required value={email} onChange={(event) => setEmail(event.currentTarget.value)} disabled={codeSent} />
-      {status?.setup_required && <TextInput label="Name" value={name} onChange={(event) => setName(event.currentTarget.value)} />}
-      {status?.setup_required && <TextInput label="Setup token" required value={setupToken} onChange={(event) => setSetupToken(event.currentTarget.value)} autoComplete="one-time-code" />}
-      {!status?.setup_required && codeSent && <TextInput label="Verification code" required value={code} onChange={(event) => setCode(event.currentTarget.value)} autoComplete="one-time-code" />}
-      {error && <Alert color="red">{error}</Alert>}
-      <Button type="submit" size="md" loading={busy} disabled={!status} leftSection={status?.setup_required ? <UserPlus size={17} weight="bold" /> : undefined} rightSection={!status?.setup_required ? <ArrowRight size={17} weight="bold" /> : undefined}>{status?.setup_required ? "Create admin" : codeSent ? "Verify" : "Send code"}</Button>
+    <Stack gap={10}>
+      <Text c="teal.7" fw={700} size="xs" tt="uppercase" lts="0.12em">
+        {status?.setup_required ? "One-time setup" : "Secure workspace"}
+      </Text>
+      <Title order={1} fz={{ base: 30, sm: 36 }} fw={650} lh={1.08}>
+        {status?.setup_required ? "Create the first admin" : "Sign in to investigate"}
+      </Title>
+      <Text c="dimmed" size="md" lh={1.6} maw={390}>
+        {status?.setup_required ? "Use the one-time token printed by the Fanout process." : codeSent ? `Enter the verification code sent to ${email}.` : "Enter your email and we’ll send a short verification code. No password needed."}
+      </Text>
+    </Stack>
+    <form onSubmit={submit}><Stack gap="md">
+      <TextInput label="Email" placeholder="you@company.com" type="email" required value={email} onChange={(event) => setEmail(event.currentTarget.value)} disabled={codeSent} variant="filled" radius="md" size="md" autoFocus={!codeSent} />
+      {status?.setup_required && <TextInput label="Name" placeholder="Your name" value={name} onChange={(event) => setName(event.currentTarget.value)} variant="filled" radius="md" size="md" />}
+      {status?.setup_required && <TextInput label="Setup token" placeholder="xxxx-xxxx-xxxx" required value={setupToken} onChange={(event) => setSetupToken(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" />}
+      {!status?.setup_required && codeSent && <TextInput label="Verification code" placeholder="000000" required value={code} onChange={(event) => setCode(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" styles={{ input: { letterSpacing: "0.2em", fontVariantNumeric: "tabular-nums" } }} autoFocus />}
+      {error && <Alert color="red" radius="md">{error}</Alert>}
+      <Button type="submit" size="md" radius="md" mt={4} loading={busy} disabled={!status} leftSection={status?.setup_required ? <UserPlus size={17} weight="bold" /> : undefined} rightSection={!status?.setup_required ? <ArrowRight size={17} weight="bold" /> : undefined}>{status?.setup_required ? "Create admin" : codeSent ? "Verify code" : "Send code"}</Button>
     </Stack></form>
   </Stack></AuthSurface>;
 }

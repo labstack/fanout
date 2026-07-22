@@ -99,6 +99,17 @@ var (
 		Help:    "HTTP request duration in seconds",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"method", "path"})
+
+	// Authentication and authorization metrics.
+	BrowserSessions = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "fanout_auth_browser_sessions",
+		Help: "Browser session rows by current lifecycle state",
+	}, []string{"state"})
+
+	AuthAuditWriteFailures = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_auth_audit_write_failures_total",
+		Help: "Security audit events that could not be persisted",
+	})
 )
 
 // RecordIngest records an ingest event

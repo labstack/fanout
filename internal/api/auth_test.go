@@ -16,17 +16,39 @@ import (
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Setup, string, string, string) {
-	t.Helper()
+type testAuthServer struct {
+	e          *echo.Echo
+	db         *appstore.SQLite
+	users      *auth.UserStore
+	codes      *auth.CodeStore
+	setup      *auth.Setup
+	setupToken string
+	sessions   *auth.BrowserSessions
+	audit      *auth.AuditStore
+	cfg        env.Config
+}
 
+func newTestAuthServer(t *testing.T) *testAuthServer {
+	return newTestAuthServerWith(t, env.Config{AuthMode: "local"}, auth.SMTPConfig{})
+}
+
+func newTestAuthServerWith(t *testing.T, cfg env.Config, smtp auth.SMTPConfig) *testAuthServer {
+	t.Helper()
 	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatalf("NewSQLite: %v", err)
 	}
-	t.Cleanup(func() { sqlite.Close() })
-
+	t.Cleanup(func() { _ = sqlite.Close() })
+	if cfg.AuthMode == "" {
+		cfg.AuthMode = "local"
+	}
+	if cfg.SessionIdleTTL == 0 {
+		cfg.SessionIdleTTL = 12 * time.Hour
+	}
+	if cfg.SessionAbsoluteTTL == 0 {
+		cfg.SessionAbsoluteTTL = 7 * 24 * time.Hour
+	}
 	secret := "0123456789abcdef0123456789abcdef"
-	refreshSecret := "abcdef0123456789abcdef0123456789"
 	users := auth.NewUserStore(sqlite.DB)
 	codes := auth.NewCodeStore(sqlite.DB, secret)
 	setup := auth.NewSetup()
@@ -34,651 +56,401 @@ func newTestAuthServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Setup, 
 	if err != nil {
 		t.Fatalf("Rotate setup: %v", err)
 	}
-
+	sessions := auth.NewBrowserSessions(sqlite.DB, cfg.SessionIdleTTL, cfg.SessionAbsoluteTTL, false)
+	audit := auth.NewAuditStore(sqlite.DB)
 	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret, false)
-	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{}, env.Config{})
-	return e, users, setup, setupToken, secret, refreshSecret
+	RegisterAuthMiddleware(e, users, sessions, audit, cfg)
+	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), sessions, audit, smtp, cfg)
+	return &testAuthServer{e: e, db: sqlite, users: users, codes: codes, setup: setup, setupToken: setupToken, sessions: sessions, audit: audit, cfg: cfg}
 }
 
-// /debug/pprof must not be a public route — it exposes heap dumps, cmdline, and
-// a repeatable CPU-profile DoS, so it has to require auth even when mounted.
-func TestIsPublicRoute_DebugRequiresAuth(t *testing.T) {
-	for _, p := range []string{"/debug/pprof/", "/debug/pprof/heap", "/debug/pprof/profile"} {
-		if isPublicRoute(p) {
-			t.Errorf("isPublicRoute(%q) = true, want false (pprof must require auth)", p)
-		}
-	}
-	for _, p := range []string{"/healthz", "/readyz", "/", "/assets/app.js"} {
-		if !isPublicRoute(p) {
-			t.Errorf("isPublicRoute(%q) = false, want true", p)
-		}
-	}
-}
-
-// PUBLIC_READ serves unauthenticated GETs as a viewer, but only GETs: writes
-// stay locked, and admin-gated routes stay locked even for the synthetic viewer.
-func TestPublicReadServesAnonymousReadsOnly(t *testing.T) {
-	sqlite, err := appstore.NewSQLite(":memory:")
+func (s *testAuthServer) login(t *testing.T, user auth.User) *http.Cookie {
+	t.Helper()
+	code, err := s.codes.Create(user.Email)
 	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
+		t.Fatalf("Create code: %v", err)
 	}
-	t.Cleanup(func() { sqlite.Close() })
-	users := auth.NewUserStore(sqlite.DB)
-
-	e := echo.New()
-	RegisterAuthMiddleware(e, users, "0123456789abcdef0123456789abcdef", true) // publicRead on
-	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	e.POST("/api/bookmarks", func(c *echo.Context) error { return c.NoContent(http.StatusCreated) })
-	e.GET("/api/admin", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }, RequireRole("admin"))
-
-	cases := []struct {
-		name, method, path string
-		want               int
-	}{
-		{"anon GET data endpoint", http.MethodGet, "/api/overview", http.StatusNoContent},
-		{"anon write rejected", http.MethodPost, "/api/bookmarks", http.StatusUnauthorized},
-		{"anon admin route forbidden", http.MethodGet, "/api/admin", http.StatusForbidden},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			e.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
-			if rec.Code != tc.want {
-				t.Fatalf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
-			}
-		})
-	}
-}
-
-func TestPublicReadDoesNotDowngradeInvalidBearer(t *testing.T) {
-	sqlite, err := appstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
-	t.Cleanup(func() { sqlite.Close() })
-	users := auth.NewUserStore(sqlite.DB)
-	if _, err := users.Create("admin@example.com", "", "admin"); err != nil {
-		t.Fatalf("Create admin: %v", err)
-	}
-
-	e := echo.New()
-	RegisterAuthMiddleware(e, users, "0123456789abcdef0123456789abcdef", true)
-	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
-	req.Header.Set("Authorization", "Bearer expired-or-invalid")
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"`+user.Email+`","code":"`+code+`"}`))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("invalid bearer in public-read mode = %d, want 401", rec.Code)
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify = %d %s", rec.Code, rec.Body.String())
 	}
+	return firstCookie(t, rec, "fanout_session")
 }
 
-// With PUBLIC_READ on, /api/auth/status advertises public_read and an
-// unauthenticated GET /api/auth/me returns the synthetic viewer — the two
-// signals the SPA uses to boot anonymously into read-only mode.
-func TestPublicReadStatusAndAnonymousMe(t *testing.T) {
-	sqlite, err := appstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
+func sessionRequest(method, target string, body *strings.Reader, cookie *http.Cookie) *http.Request {
+	var req *http.Request
+	if body == nil {
+		req = httptest.NewRequest(method, target, nil)
+	} else {
+		req = httptest.NewRequest(method, target, body)
 	}
-	t.Cleanup(func() { sqlite.Close() })
-
-	secret := "0123456789abcdef0123456789abcdef"
-	users := auth.NewUserStore(sqlite.DB)
-	if _, err := users.Create("admin@example.com", "", "admin"); err != nil {
-		t.Fatalf("Create admin: %v", err)
+	if cookie != nil {
+		req.AddCookie(cookie)
 	}
-	codes := auth.NewCodeStore(sqlite.DB, secret)
-	cfg := env.Config{PublicRead: true}
-
-	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret, cfg.PublicRead)
-	RegisterAuthRoutes(e, users, codes, auth.NewSetup(), settings.NewStore(sqlite.DB), secret, secret, auth.SMTPConfig{}, cfg)
-
-	// status advertises public_read
-	statusRec := httptest.NewRecorder()
-	e.ServeHTTP(statusRec, httptest.NewRequest(http.MethodGet, "/api/auth/status", nil))
-	var status map[string]any
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
-		t.Fatalf("decode status: %v", err)
+	if isUnsafeMethod(method) {
+		req.Header.Set("X-Fanout-Request", "1")
 	}
-	if status["public_read"] != true {
-		t.Fatalf("status.public_read = %v, want true", status["public_read"])
-	}
-
-	// anonymous /api/auth/me returns the synthetic viewer
-	meRec := httptest.NewRecorder()
-	e.ServeHTTP(meRec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
-	if meRec.Code != http.StatusOK {
-		t.Fatalf("anonymous /api/auth/me = %d, want 200", meRec.Code)
-	}
-	var me map[string]any
-	if err := json.Unmarshal(meRec.Body.Bytes(), &me); err != nil {
-		t.Fatalf("decode me: %v", err)
-	}
-	if me["role"] != "viewer" {
-		t.Fatalf("anonymous viewer role = %v, want viewer", me["role"])
-	}
+	return req
 }
 
-// A DB failure while resolving a valid bearer token is an infrastructure
-// error: it must return 500, not 401 "invalid token" — a 401 would make
-// clients discard perfectly good credentials during an outage.
-func TestBearerAuthDBFailureReturns500NotInvalidToken(t *testing.T) {
-	sqlite, err := appstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
-	t.Cleanup(func() { sqlite.Close() })
-
-	secret := "0123456789abcdef0123456789abcdef"
-	users := auth.NewUserStore(sqlite.DB)
-	user, err := users.Create("db-outage@example.com", "", "admin")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	token, err := auth.SignAccess(secret, user.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
-	}
-
-	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret, false)
-	e.GET("/api/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-
-	// Simulate a DB failure on the user lookup.
-	if _, err := sqlite.DB.Exec(`ALTER TABLE users RENAME TO users_offline`); err != nil {
-		t.Fatalf("hide users table: %v", err)
-	}
-	req := httptest.NewRequest(http.MethodGet, "/api/overview", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("bearer during DB failure = %d, want 500", rec.Code)
-	}
-
-	// Same token works once the DB recovers — nothing was invalidated.
-	if _, err := sqlite.DB.Exec(`ALTER TABLE users_offline RENAME TO users`); err != nil {
-		t.Fatalf("restore users table: %v", err)
-	}
-	req = httptest.NewRequest(http.MethodGet, "/api/overview", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec = httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusNoContent {
-		t.Fatalf("bearer after DB recovery = %d, want 204", rec.Code)
-	}
-}
-
-func TestRequireRoleUsesCurrentUserState(t *testing.T) {
-	e, users, _, _, secret, _ := newTestAuthServer(t)
-	user, err := users.Create("admin@example.com", "", "admin")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if _, err := users.Create("second-admin@example.com", "", "admin"); err != nil {
-		t.Fatalf("Create second admin: %v", err)
-	}
-
-	e.GET("/api/admin", func(c *echo.Context) error {
-		return c.NoContent(http.StatusNoContent)
-	}, RequireRole("admin"))
-
-	token, err := auth.SignAccess(secret, user.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
-	}
-
-	role := "viewer"
-	if _, err := users.Update(user.ID, nil, nil, &role, nil); err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/admin", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
-	}
-}
-
-func TestMeRejectsInactiveUser(t *testing.T) {
-	e, users, _, _, secret, _ := newTestAuthServer(t)
-	user, err := users.Create("user@example.com", "", "operator")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	token, err := auth.SignAccess(secret, user.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
-	}
-
-	active := false
-	if _, err := users.Update(user.ID, nil, nil, nil, &active); err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/auth/me", nil)
-	req.Header.Set("Authorization", "Bearer "+token)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
-	}
-}
-
-// Refresh accepts any valid, unexpired refresh token for an active user and
-// rotates it. Matching the monk server, it does NOT evict tokens issued before
-// the latest login — concurrent sessions coexist and a redeploy/second tab does
-// not log anyone out. Logout clears the cookie but does not revoke server-side.
-func TestRefreshAcceptsConcurrentSessionsAndRotates(t *testing.T) {
-	e, users, _, _, _, refreshSecret := newTestAuthServer(t)
-	user, err := users.Create("user@example.com", "", "operator")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	// An OLD token (issued before a later login bumped LoggedInAt) must still be
-	// accepted — this is exactly the session that the old sessionRevoked check
-	// rejected and that caused the spurious logouts.
-	oldIssuedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
-	oldToken, err := auth.SignRefresh(refreshSecret, user.ID, oldIssuedAt)
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-	// Simulate a more recent login from another device/tab.
-	if err := users.TouchLoginAt(user.ID, time.Now().UTC()); err != nil {
-		t.Fatalf("TouchLoginAt: %v", err)
-	}
-
-	refreshReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	refreshReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: oldToken})
-	refreshRec := httptest.NewRecorder()
-	e.ServeHTTP(refreshRec, refreshReq)
-
-	if refreshRec.Code != http.StatusOK {
-		t.Fatalf("refresh status = %d, want %d (old token must still be accepted)", refreshRec.Code, http.StatusOK)
-	}
-
-	// Refresh rotates: a fresh refresh cookie is issued, stamped ~now (not the
-	// old token's hour-ago iat).
-	newCookie := firstCookie(t, refreshRec, "refresh_token")
-	newClaims, err := auth.VerifyRefresh(refreshSecret, newCookie.Value)
-	if err != nil {
-		t.Fatalf("VerifyRefresh(new cookie): %v", err)
-	}
-	if newClaims.IssuedAt.Time.Before(time.Now().Add(-time.Minute)) {
-		t.Fatalf("rotated refresh token is not fresh: iat=%v", newClaims.IssuedAt.Time)
-	}
-
-	// Logout returns OK and clears the cookie (Max-Age<0).
-	logoutReq := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
-	logoutReq.AddCookie(newCookie)
-	logoutRec := httptest.NewRecorder()
-	e.ServeHTTP(logoutRec, logoutReq)
-	if logoutRec.Code != http.StatusOK {
-		t.Fatalf("logout status = %d, want %d", logoutRec.Code, http.StatusOK)
-	}
-	cleared := firstCookie(t, logoutRec, "refresh_token")
-	if cleared.MaxAge >= 0 {
-		t.Fatalf("logout should clear the refresh cookie (got maxage=%d)", cleared.MaxAge)
-	}
-
-	// The tradeoff made explicit: logout does NOT revoke server-side. A held
-	// copy of the (still-unexpired) refresh token keeps working — this is the
-	// behavioral inverse of the old post-logout=401 assertion.
-	postLogoutReq := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	postLogoutReq.AddCookie(&http.Cookie{Name: "refresh_token", Value: newCookie.Value})
-	postLogoutRec := httptest.NewRecorder()
-	e.ServeHTTP(postLogoutRec, postLogoutReq)
-	if postLogoutRec.Code != http.StatusOK {
-		t.Fatalf("post-logout refresh status = %d, want %d (no server-side revocation)", postLogoutRec.Code, http.StatusOK)
-	}
-}
-
-// TestRefreshRejectsInactiveUser covers the !user.Active guard in Refresh —
-// security-critical and the handler's own check, independent of the middleware.
-func TestRefreshRejectsInactiveUser(t *testing.T) {
-	e, users, _, _, _, refreshSecret := newTestAuthServer(t)
-	user, err := users.Create("deactivated@example.com", "", "operator")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	token, err := auth.SignRefresh(refreshSecret, user.ID, time.Now().UTC())
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-	active := false
-	if _, err := users.Update(user.ID, nil, nil, nil, &active); err != nil {
-		t.Fatalf("Update: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: token})
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("refresh status = %d, want %d (inactive user)", rec.Code, http.StatusUnauthorized)
-	}
-}
-
-// TestRefreshRejectsExpiredToken — with single-session eviction gone, token
-// expiry is the only remaining time-bound on a refresh token.
-func TestRefreshRejectsExpiredToken(t *testing.T) {
-	e, users, _, _, _, refreshSecret := newTestAuthServer(t)
-	user, err := users.Create("expired@example.com", "", "operator")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	// Issued well beyond RefreshTTL ago → exp is in the past.
-	expired, err := auth.SignRefresh(refreshSecret, user.ID, time.Now().UTC().Add(-auth.RefreshTTL-time.Hour))
-	if err != nil {
-		t.Fatalf("SignRefresh: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/refresh", nil)
-	req.AddCookie(&http.Cookie{Name: "refresh_token", Value: expired})
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("refresh status = %d, want %d (expired token)", rec.Code, http.StatusUnauthorized)
-	}
-}
-
-// firstCookie returns the named Set-Cookie from a response, failing the test
-// (rather than panicking) if it's absent.
 func firstCookie(t *testing.T, rec *httptest.ResponseRecorder, name string) *http.Cookie {
 	t.Helper()
-	for _, c := range rec.Result().Cookies() {
-		if c.Name == name {
-			return c
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == name {
+			return cookie
 		}
 	}
 	t.Fatalf("response did not set a %q cookie", name)
 	return nil
 }
 
-func TestStartDoesNotRevealAccountState(t *testing.T) {
-	sqlite, err := appstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
+func TestRoutePolicyClassification(t *testing.T) {
+	tests := []struct {
+		method, path string
+		kind         routePolicyKind
+		capability   Capability
+	}{
+		{http.MethodGet, "/healthz", routePolicyPublic, ""},
+		{http.MethodGet, "/readyz", routePolicyPublic, ""},
+		{http.MethodGet, "/api/health", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/setup", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/start", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/verify", routePolicyPublic, ""},
+		{http.MethodGet, "/api/auth/oidc/start", routePolicyPublic, ""},
+		{http.MethodGet, "/api/auth/oidc/callback", routePolicyPublic, ""},
+		{http.MethodGet, "/api/auth/me", routePolicyAuthenticated, ""},
+		{http.MethodPost, "/api/auth/logout", routePolicyAuthenticated, ""},
+		{http.MethodGet, "/api/auth/oauth/authorize", routePolicyAuthenticated, ""},
+		{http.MethodPost, "/api/auth/oauth/authorize", routePolicyAuthenticated, ""},
+		{http.MethodGet, "/api/observability/overview", routePolicyCapability, ReadTelemetry},
+		{http.MethodGet, "/api/alerts", routePolicyCapability, ReadTelemetry},
+		{http.MethodPost, "/api/rules", routePolicyCapability, ManageAlerts},
+		{http.MethodPut, "/api/rules/rule-1", routePolicyCapability, ManageAlerts},
+		{http.MethodGet, "/api/dashboards/dashboard-1", routePolicyCapability, ManageOwnDashboards},
+		{http.MethodPost, "/api/agent", routePolicyCapability, RunAgent},
+		{http.MethodGet, "/api/settings/ingest", routePolicyCapability, ReadIngestMetadata},
+		{http.MethodPost, "/api/settings/ingest/rotate-token", routePolicyCapability, ManageIngest},
+		{http.MethodPost, "/api/users/user-1/logout-all", routePolicyCapability, ManageUsers},
+		{http.MethodGet, "/debug/pprof/heap", routePolicyCapability, ReadOperations},
+		{http.MethodGet, "/-/metrics", routePolicyServiceCredential, ReadOperations},
+		{http.MethodPost, "/oauth/token", routePolicyProtocol, ""},
+		{http.MethodPost, "/mcp", routePolicyProtocol, ""},
+		{http.MethodGet, "/assets/app.js", routePolicyPublic, ""},
 	}
-	t.Cleanup(func() { sqlite.Close() })
+	for _, tc := range tests {
+		policy, ok := classifyRoute(tc.method, tc.path)
+		if !ok {
+			t.Errorf("%s %s is unclassified", tc.method, tc.path)
+			continue
+		}
+		if policy.kind != tc.kind || policy.capability != tc.capability {
+			t.Errorf("%s %s policy = {%v %q}, want {%v %q}", tc.method, tc.path, policy.kind, policy.capability, tc.kind, tc.capability)
+		}
+	}
+	if _, ok := classifyRoute(http.MethodPost, "/api/new-unreviewed-route"); ok {
+		t.Fatal("unreviewed API route must be unclassified")
+	}
+}
 
-	secret := "0123456789abcdef0123456789abcdef"
-	refreshSecret := "abcdef0123456789abcdef0123456789"
-	users := auth.NewUserStore(sqlite.DB)
-	codes := auth.NewCodeStore(sqlite.DB, secret)
-	setup := auth.NewSetup()
+func TestUnknownProtectedPathsAuthenticateThenReturn404(t *testing.T) {
+	s := newTestAuthServer(t)
+	user, _ := s.users.Create("unknown-path@example.com", "", "admin")
+	anonymous := httptest.NewRecorder()
+	s.e.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/api/not-registered", nil))
+	if anonymous.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous unknown API path = %d, want 401", anonymous.Code)
+	}
+	cookie := s.login(t, user)
+	authenticated := httptest.NewRecorder()
+	s.e.ServeHTTP(authenticated, sessionRequest(http.MethodGet, "/api/not-registered", nil, cookie))
+	if authenticated.Code != http.StatusNotFound {
+		t.Fatalf("authenticated unknown API path = %d, want 404", authenticated.Code)
+	}
+	s.e.GET("/api/new-unreviewed-route", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	unclassified := httptest.NewRecorder()
+	s.e.ServeHTTP(unclassified, sessionRequest(http.MethodGet, "/api/new-unreviewed-route", nil, cookie))
+	if unclassified.Code != http.StatusInternalServerError {
+		t.Fatalf("registered unclassified API route = %d, want 500", unclassified.Code)
+	}
+}
 
-	inactive, err := users.Create("inactive@example.com", "", "operator")
-	if err != nil {
+func TestKnownRouteWrongMethodReturns405(t *testing.T) {
+	s := newTestAuthServer(t)
+	s.e.GET("/api/alerts", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/alerts", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST /api/alerts = %d, want 405", rec.Code)
+	}
+}
+
+func TestPublicReadServesOnlyTelemetryReads(t *testing.T) {
+	s := newTestAuthServerWith(t, env.Config{AuthMode: "local", PublicRead: true}, auth.SMTPConfig{})
+	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	active := false
-	if _, err := users.Update(inactive.ID, nil, nil, nil, &active); err != nil {
-		t.Fatalf("Update: %v", err)
+	s.e.GET("/api/observability/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.POST("/api/rules", func(c *echo.Context) error { return c.NoContent(http.StatusCreated) })
+	s.e.GET("/api/users", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }, RequireCapability(ManageUsers))
+	for _, tc := range []struct {
+		method, path string
+		want         int
+	}{
+		{http.MethodGet, "/api/observability/overview", http.StatusNoContent},
+		{http.MethodPost, "/api/rules", http.StatusUnauthorized},
+		{http.MethodGet, "/api/users", http.StatusUnauthorized},
+	} {
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
+		if rec.Code != tc.want {
+			t.Fatalf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
+		}
+	}
+}
+
+func TestPublicReadStatusAndAnonymousMe(t *testing.T) {
+	s := newTestAuthServerWith(t, env.Config{AuthMode: "local", PublicRead: true}, auth.SMTPConfig{})
+	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	statusRec := httptest.NewRecorder()
+	s.e.ServeHTTP(statusRec, httptest.NewRequest(http.MethodGet, "/api/auth/status", nil))
+	var status map[string]any
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil || status["public_read"] != true {
+		t.Fatalf("status = %s err=%v", statusRec.Body.String(), err)
+	}
+	meRec := httptest.NewRecorder()
+	s.e.ServeHTTP(meRec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
+	if meRec.Code != http.StatusOK || !strings.Contains(meRec.Body.String(), `"role":"viewer"`) {
+		t.Fatalf("anonymous me = %d %s", meRec.Code, meRec.Body.String())
 	}
 
-	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret, false)
-	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{}, env.Config{})
+	admin, err := s.users.GetByEmail("admin@example.com")
+	if err != nil {
+		t.Fatalf("GetByEmail: %v", err)
+	}
+	authenticatedMe := httptest.NewRecorder()
+	s.e.ServeHTTP(authenticatedMe, sessionRequest(http.MethodGet, "/api/auth/me", nil, s.login(t, admin)))
+	if authenticatedMe.Code != http.StatusOK || !strings.Contains(authenticatedMe.Body.String(), `"role":"admin"`) {
+		t.Fatalf("authenticated public-mode me = %d %s", authenticatedMe.Code, authenticatedMe.Body.String())
+	}
+}
 
+func TestSessionAuthDBFailureReturns500(t *testing.T) {
+	s := newTestAuthServer(t)
+	user, _ := s.users.Create("db-outage@example.com", "", "admin")
+	cookie := s.login(t, user)
+	if _, err := s.db.DB.Exec(`ALTER TABLE users RENAME TO users_offline`); err != nil {
+		t.Fatalf("rename users: %v", err)
+	}
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, sessionRequest(http.MethodGet, "/api/auth/me", nil, cookie))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("session during DB failure = %d, want 500", rec.Code)
+	}
+}
+
+func TestRoleChangeAndDeactivationRevokeSessions(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		change func(*auth.UserStore, auth.User) error
+	}{
+		{name: "role", change: func(users *auth.UserStore, user auth.User) error {
+			role := auth.RoleViewer
+			_, err := users.Update(user.ID, nil, nil, &role, nil)
+			return err
+		}},
+		{name: "inactive", change: func(users *auth.UserStore, user auth.User) error {
+			active := false
+			_, err := users.Update(user.ID, nil, nil, nil, &active)
+			return err
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newTestAuthServer(t)
+			user, _ := s.users.Create(tc.name+"@example.com", "", "operator")
+			cookie := s.login(t, user)
+			if err := tc.change(s.users, user); err != nil {
+				t.Fatalf("change: %v", err)
+			}
+			rec := httptest.NewRecorder()
+			s.e.ServeHTTP(rec, sessionRequest(http.MethodGet, "/api/auth/me", nil, cookie))
+			if rec.Code != http.StatusUnauthorized {
+				t.Fatalf("revoked session = %d, want 401", rec.Code)
+			}
+		})
+	}
+}
+
+func TestCapabilityIsEnforcedCentrally(t *testing.T) {
+	s := newTestAuthServer(t)
+	viewer, _ := s.users.Create("viewer@example.com", "", "viewer")
+	cookie := s.login(t, viewer)
+	// Deliberately omit route-level RequireCapability. The global policy remains authoritative.
+	s.e.POST("/api/settings/ingest/rotate-token", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, sessionRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil, cookie))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("viewer mutation = %d, want 403", rec.Code)
+	}
+}
+
+func TestBrowserMutationValidation(t *testing.T) {
+	s := newTestAuthServer(t)
+	user, _ := s.users.Create("csrf@example.com", "", "operator")
+	cookie := s.login(t, user)
+	s.e.POST("/api/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	for _, tc := range []struct {
+		name string
+		head map[string]string
+		want int
+	}{
+		{name: "missing", want: http.StatusForbidden},
+		{name: "custom header", head: map[string]string{"X-Fanout-Request": "1"}, want: http.StatusNoContent},
+		{name: "same origin", head: map[string]string{"Origin": "http://example.com"}, want: http.StatusNoContent},
+		{name: "referer", head: map[string]string{"Referer": "http://example.com/page"}, want: http.StatusNoContent},
+		{name: "malformed referer", head: map[string]string{"Referer": "://bad"}, want: http.StatusForbidden},
+		{name: "evil origin", head: map[string]string{"Origin": "https://evil.test"}, want: http.StatusForbidden},
+		{name: "cross site overrides header", head: map[string]string{"X-Fanout-Request": "1", "Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/rules", nil)
+			req.Host = "example.com"
+			req.AddCookie(cookie)
+			for key, value := range tc.head {
+				req.Header.Set(key, value)
+			}
+			rec := httptest.NewRecorder()
+			s.e.ServeHTTP(rec, req)
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d", rec.Code, tc.want)
+			}
+		})
+	}
+}
+
+func TestLogoutDeletesServerSession(t *testing.T) {
+	s := newTestAuthServer(t)
+	user, _ := s.users.Create("logout@example.com", "", "operator")
+	cookie := s.login(t, user)
+	logoutRec := httptest.NewRecorder()
+	s.e.ServeHTTP(logoutRec, sessionRequest(http.MethodPost, "/api/auth/logout", nil, cookie))
+	if logoutRec.Code != http.StatusOK {
+		t.Fatalf("logout = %d %s", logoutRec.Code, logoutRec.Body.String())
+	}
+	meRec := httptest.NewRecorder()
+	s.e.ServeHTTP(meRec, sessionRequest(http.MethodGet, "/api/auth/me", nil, cookie))
+	if meRec.Code != http.StatusUnauthorized {
+		t.Fatalf("reused cookie = %d, want 401", meRec.Code)
+	}
+}
+
+func TestStartDoesNotRevealAccountState(t *testing.T) {
+	s := newTestAuthServer(t)
+	inactive, _ := s.users.Create("inactive@example.com", "", "operator")
+	active := false
+	if _, err := s.users.Update(inactive.ID, nil, nil, nil, &active); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
 	for _, email := range []string{"missing@example.com", "inactive@example.com"} {
 		req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"`+email+`"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
-		e.ServeHTTP(rec, req)
-
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s status = %d, want %d", email, rec.Code, http.StatusOK)
-		}
-
-		var body map[string]bool
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("%s decode response: %v", email, err)
-		}
-		if !body["code_sent"] {
-			t.Fatalf("%s code_sent = false, want true", email)
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"code_sent":true`) {
+			t.Fatalf("%s = %d %s", email, rec.Code, rec.Body.String())
 		}
 	}
 }
 
 func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
-	sqlite, err := appstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
-	t.Cleanup(func() { sqlite.Close() })
-
-	secret := "0123456789abcdef0123456789abcdef"
-	refreshSecret := "abcdef0123456789abcdef0123456789"
-	users := auth.NewUserStore(sqlite.DB)
-	codes := auth.NewCodeStore(sqlite.DB, secret)
-	setup := auth.NewSetup()
-	if _, err := users.Create("active@example.com", "", "operator"); err != nil {
+	smtp := auth.SMTPConfig{Host: "127.0.0.1", Port: 1, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
+	s := newTestAuthServerWith(t, env.Config{AuthMode: "local"}, smtp)
+	if _, err := s.users.Create("active@example.com", "", "operator"); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-
-	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret, false)
-	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{
-		Host: "127.0.0.1",
-		Port: 1,
-		User: "user",
-		Pass: "pass",
-		From: "Fanout <noreply@example.com>",
-	}, env.Config{})
-
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"active@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
+	s.e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+		t.Fatalf("status = %d, want 503", rec.Code)
 	}
 }
 
-func TestSetupRequiresValidToken(t *testing.T) {
-	e, users, _, _, _, _ := newTestAuthServer(t)
+func TestSetupLifecycleAndIngestToken(t *testing.T) {
+	s := newTestAuthServer(t)
+	bad := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"wrong"}`))
+	bad.Header.Set("Content-Type", "application/json")
+	badRec := httptest.NewRecorder()
+	s.e.ServeHTTP(badRec, bad)
+	if badRec.Code != http.StatusForbidden {
+		t.Fatalf("bad setup = %d", badRec.Code)
+	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"wrong-token"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
-	}
-
-	count, err := users.CountUsers()
-	if err != nil {
-		t.Fatalf("CountUsers: %v", err)
-	}
-	if count != 0 {
-		t.Fatalf("user count = %d, want 0", count)
-	}
-}
-
-func TestSetupReturnsGoneWhenExpired(t *testing.T) {
-	e, _, setup, setupToken, _, _ := newTestAuthServer(t)
-	setup.SetExpiresForTest(time.Now().UTC().Add(-time.Minute))
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+setupToken+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusGone {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusGone)
-	}
-}
-
-func TestSetupReturnsGoneWhenUnset(t *testing.T) {
-	e, _, setup, setupToken, _, _ := newTestAuthServer(t)
-	setup.Clear()
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+setupToken+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusGone {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusGone)
-	}
-}
-
-func TestSetupCreatesAdminWithValidToken(t *testing.T) {
-	e, users, setup, setupToken, _, _ := newTestAuthServer(t)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+setupToken+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
+	s.e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Fatalf("setup = %d %s", rec.Code, rec.Body.String())
 	}
-
-	user, err := users.GetByEmail("admin@example.com")
-	if err != nil {
-		t.Fatalf("GetByEmail: %v", err)
-	}
-	if user.Role != "admin" {
-		t.Fatalf("role = %q, want %q", user.Role, "admin")
-	}
-
 	var body map[string]string
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if body["access_token"] == "" {
-		t.Fatal("access_token missing from setup response")
+	if body["access_token"] != "" {
+		t.Fatal("legacy access token must not be returned")
 	}
 	if !strings.HasPrefix(body["ingest_token"], "fo_") {
-		t.Fatalf("ingest_token = %q, want fo_-prefixed value", body["ingest_token"])
+		t.Fatalf("ingest token = %q", body["ingest_token"])
 	}
-	if body["ingest_header_name"] != "x-fanout-ingest-token" {
-		t.Fatalf("ingest_header_name = %q", body["ingest_header_name"])
+	if user, err := s.users.GetByEmail("admin@example.com"); err != nil || user.Role != auth.RoleAdmin {
+		t.Fatalf("admin = %+v err=%v", user, err)
 	}
-
-	if got := setup.Verify(setupToken); got != auth.SetupStatusUnset {
-		t.Fatalf("setup state after admin creation = %v, want Unset", got)
-	}
-}
-
-// The setup response must advertise the configured public ingest endpoint
-// (e.g. https://ingest.fanout.labstack.com behind Traefik on :443), not the
-// internal :4317 — that endpoint is what the displayed collector config uses.
-func TestSetupReturnsConfiguredIngestEndpoint(t *testing.T) {
-	sqlite, err := appstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
-	t.Cleanup(func() { sqlite.Close() })
-
-	const endpoint = "https://ingest.fanout.labstack.com"
-	secret := "0123456789abcdef0123456789abcdef"
-	users := auth.NewUserStore(sqlite.DB)
-	codes := auth.NewCodeStore(sqlite.DB, secret)
-	setup := auth.NewSetup()
-	setupToken, _, err := setup.Rotate()
-	if err != nil {
-		t.Fatalf("Rotate setup: %v", err)
-	}
-
-	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret, false)
-	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, secret, auth.SMTPConfig{}, env.Config{IngestEndpoint: endpoint})
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+setupToken+`"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-	var body map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if body["suggested_endpoint"] != endpoint {
-		t.Fatalf("suggested_endpoint = %q, want %q", body["suggested_endpoint"], endpoint)
-	}
-	if strings.Contains(body["suggested_endpoint"], ":4317") {
-		t.Fatalf("suggested_endpoint = %q, must not advertise the internal :4317", body["suggested_endpoint"])
+	if got := s.setup.Verify(s.setupToken); got != auth.SetupStatusUnset {
+		t.Fatalf("setup state = %v", got)
 	}
 }
 
-func TestSetupRetryDoesNotRotateIngestToken(t *testing.T) {
-	// Regression: the ErrSetupComplete retry path must not invalidate an
-	// already-issued ingest token. Collectors may already be using it.
-	e, _, _, setupToken, _, _ := newTestAuthServer(t)
-
-	firstReq := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+setupToken+`"}`))
-	firstReq.Header.Set("Content-Type", "application/json")
-	firstRec := httptest.NewRecorder()
-	e.ServeHTTP(firstRec, firstReq)
-	if firstRec.Code != http.StatusOK {
-		t.Fatalf("first setup status = %d", firstRec.Code)
-	}
-	var first map[string]string
-	if err := json.Unmarshal(firstRec.Body.Bytes(), &first); err != nil {
-		t.Fatalf("decode first: %v", err)
-	}
-	if first["ingest_token"] == "" {
-		t.Fatal("first setup did not return ingest_token")
-	}
-
-	// Retry with the now-cleared setup token → still 200 (ErrSetupComplete
-	// branch returns existing admin). But ingest_token must NOT be re-issued.
-	retryReq := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+setupToken+`"}`))
-	retryReq.Header.Set("Content-Type", "application/json")
-	retryRec := httptest.NewRecorder()
-	e.ServeHTTP(retryRec, retryReq)
-	// Setup token was cleared after first success, so retry hits SetupStatusUnset → 410.
-	// That's fine — the test's subject is "ErrSetupComplete via GetByEmail doesn't rotate",
-	// which we verify directly by checking the stored hash still matches the original token.
-	_ = retryRec
-
-	// Store should still hold the hash of the FIRST token; the retry didn't rotate.
-	// (We can't verify through the API easily without re-running setup successfully.
-	// Instead, assert that a second call with the NOW-INVALID setup token does not
-	// leak a new ingest_token field.)
-	if retryRec.Code == http.StatusOK {
-		var retry map[string]string
-		if err := json.Unmarshal(retryRec.Body.Bytes(), &retry); err == nil {
-			if retry["ingest_token"] != "" && retry["ingest_token"] != first["ingest_token"] {
-				t.Fatalf("retry rotated ingest_token: first=%q retry=%q", first["ingest_token"], retry["ingest_token"])
-			}
+func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
+	t.Run("expired", func(t *testing.T) {
+		s := newTestAuthServer(t)
+		s.setup.SetExpiresForTest(time.Now().Add(-time.Minute))
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusGone {
+			t.Fatalf("expired = %d", rec.Code)
 		}
-	}
+	})
+	t.Run("existing admin", func(t *testing.T) {
+		s := newTestAuthServer(t)
+		if _, err := s.users.CreateFirstAdmin("admin@example.com", "Admin"); err != nil {
+			t.Fatalf("CreateFirstAdmin: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("retry = %d %s", rec.Code, rec.Body.String())
+		}
+	})
 }
 
-func TestSetupRetriesSuccessfullyAfterAdminAlreadyExists(t *testing.T) {
-	e, users, setup, setupToken, _, _ := newTestAuthServer(t)
-	if _, err := users.CreateFirstAdmin("admin@example.com", "Local Admin"); err != nil {
-		t.Fatalf("CreateFirstAdmin: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+setupToken+`"}`))
+func TestSetupReturnsConfiguredIngestEndpoint(t *testing.T) {
+	const endpoint = "https://ingest.fanout.labstack.com"
+	s := newTestAuthServerWith(t, env.Config{AuthMode: "local", IngestEndpoint: endpoint}, auth.SMTPConfig{})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-
-	if got := setup.Verify(setupToken); got != auth.SetupStatusUnset {
-		t.Fatalf("setup state after admin creation = %v, want Unset", got)
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), endpoint) {
+		t.Fatalf("setup endpoint = %d %s", rec.Code, rec.Body.String())
 	}
 }

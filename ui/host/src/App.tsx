@@ -115,7 +115,7 @@ function Chat() {
           <Group gap={6} mr={4} visibleFrom="md"><Box w={7} h={7} bg="teal.6" style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs" fw={600}>Live</Text></Group>
           <Button variant="subtle" color="gray" size="compact-sm" leftSection={isChat ? <Layout size={16} weight="bold" /> : <ChatCircleText size={16} weight="bold" />} onClick={() => void navigate({ to: isChat ? "/dashboards" : "/" })}>{isChat ? "Dashboard" : "Chat"}</Button>
           {isChat && <Tooltip label="New chat"><ActionIcon variant="subtle" color="gray" aria-label="New chat" onClick={newThread}><Plus size={17} weight="bold" /></ActionIcon></Tooltip>}
-          <Tooltip label="Sign out"><ActionIcon variant="subtle" color="gray" aria-label="Sign out" onClick={() => void logout()}><SignOut size={17} /></ActionIcon></Tooltip>
+          <Tooltip label="Sign out"><ActionIcon variant="subtle" color="gray" aria-label="Sign out" onClick={() => void logout().catch((cause) => setError(cause instanceof Error ? cause.message : "Sign-out failed — your session is still active."))}><SignOut size={17} /></ActionIcon></Tooltip>
         </Group>
       </Group></AppShell.Header>
       <AppShell.Main><Outlet />{isChat && <Composer />}</AppShell.Main>

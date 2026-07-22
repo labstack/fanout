@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 var requiredEnvVars = []string{
@@ -11,6 +12,11 @@ var requiredEnvVars = []string{
 	"FLUSH_BATCH_SIZE", "ROLLUP_EVERY",
 	"RETENTION_DAYS", "DEFAULT_NAMESPACE", "ENV",
 	"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL",
+	"AUTH_MODE", "PUBLIC_URL", "AUTH_CODE_SECRET", "SESSION_IDLE_TTL", "SESSION_ABSOLUTE_TTL",
+	"OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_EMAIL_CLAIM",
+	"OIDC_EMAIL_VERIFICATION", "OIDC_AUTO_PROVISION", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOWED_DOMAINS",
+	"OIDC_DEFAULT_ROLE", "OIDC_OPERATOR_GROUPS", "OIDC_ADMIN_GROUPS", "METRICS_TOKEN", "METRICS_PUBLIC",
+	"PUBLIC_READ", "PUBLIC_INGEST", "TRUSTED_PROXY_CIDRS",
 	"JWT_SECRET", "JWT_REFRESH_SECRET",
 	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
 	"TLS_CERT_FILE", "TLS_KEY_FILE",
@@ -25,8 +31,7 @@ func clearEnv(t *testing.T) {
 
 func seedValidEnv(t *testing.T) {
 	t.Helper()
-	t.Setenv("JWT_SECRET", "0123456789abcdef0123456789abcdef")
-	t.Setenv("JWT_REFRESH_SECRET", "abcdef0123456789abcdef0123456789")
+	t.Setenv("AUTH_CODE_SECRET", "0123456789abcdef0123456789abcdef")
 	t.Setenv("AI_API_KEY", "sk-test")
 	t.Setenv("SMTP_HOST", "smtp.example.com")
 	t.Setenv("SMTP_USER", "user")
@@ -152,19 +157,21 @@ func TestLoadLayering(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	valid := Config{
-		FlushSeconds:     15,
-		FlushBatchSize:   50000,
-		RollupEvery:      60,
-		RetentionDays:    30,
-		AIProvider:       "anthropic",
-		AIAPIKey:         "sk-test",
-		SMTPHost:         "smtp.example.com",
-		SMTPPort:         587,
-		SMTPUser:         "user",
-		SMTPPass:         "pass",
-		SMTPFrom:         "Fanout <noreply@example.com>",
-		JWTSecret:        "0123456789abcdef0123456789abcdef",
-		JWTRefreshSecret: "abcdef0123456789abcdef0123456789",
+		FlushSeconds:       15,
+		FlushBatchSize:     50000,
+		RollupEvery:        60,
+		RetentionDays:      30,
+		AIProvider:         "anthropic",
+		AIAPIKey:           "sk-test",
+		SMTPHost:           "smtp.example.com",
+		SMTPPort:           587,
+		SMTPUser:           "user",
+		SMTPPass:           "pass",
+		SMTPFrom:           "Fanout <noreply@example.com>",
+		AuthMode:           "local",
+		AuthCodeSecret:     "0123456789abcdef0123456789abcdef",
+		SessionIdleTTL:     12 * time.Hour,
+		SessionAbsoluteTTL: 7 * 24 * time.Hour,
 	}
 	if err := valid.Validate(); err != nil {
 		t.Errorf("valid config should pass: %v", err)
@@ -188,11 +195,13 @@ func TestValidate(t *testing.T) {
 		{"SMTP invalid port", func(c *Config) { c.SMTPPort = 0 }},
 		{"AI key empty", func(c *Config) { c.AIAPIKey = "" }},
 		{"AI provider invalid", func(c *Config) { c.AIProvider = "unknown" }},
-		{"JWTSecret empty", func(c *Config) { c.JWTSecret = "" }},
-		{"JWTSecret short", func(c *Config) { c.JWTSecret = "short" }},
-		{"JWTRefreshSecret empty", func(c *Config) { c.JWTRefreshSecret = "" }},
-		{"JWTRefreshSecret short", func(c *Config) { c.JWTRefreshSecret = "short" }},
-		{"JWT secrets equal", func(c *Config) { c.JWTRefreshSecret = c.JWTSecret }},
+		{"auth code secret empty", func(c *Config) { c.AuthCodeSecret = "" }},
+		{"auth code secret short", func(c *Config) { c.AuthCodeSecret = "short" }},
+		{"session idle zero", func(c *Config) { c.SessionIdleTTL = 0 }},
+		{"session idle too short", func(c *Config) { c.SessionIdleTTL = time.Minute }},
+		{"session absolute zero", func(c *Config) { c.SessionAbsoluteTTL = 0 }},
+		{"session absolute shorter than idle", func(c *Config) { c.SessionIdleTTL = time.Hour; c.SessionAbsoluteTTL = 30 * time.Minute }},
+		{"trusted proxy invalid CIDR", func(c *Config) { c.TrustedProxyCIDRs = "private-network" }},
 		{"TLS partial cert", func(c *Config) { c.TLSCertFile = "server.pem" }},
 		{"TLS partial key", func(c *Config) { c.TLSKeyFile = "server-key.pem" }},
 	}
@@ -215,6 +224,23 @@ func TestValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("OIDC mode validates independently of SMTP", func(t *testing.T) {
+		c := valid
+		c.AuthMode = "oidc"
+		c.AuthCodeSecret = ""
+		c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom = "", "", "", ""
+		c.OIDCIssuerURL = "https://id.example.com"
+		c.OIDCClientID = "fanout"
+		c.OIDCClientSecret = "secret"
+		c.OIDCEmailClaim = "email"
+		c.OIDCEmailVerification = "required"
+		c.OIDCDefaultRole = "viewer"
+		c.PublicURL = "https://fanout.example.com"
+		if err := c.Validate(); err != nil {
+			t.Fatalf("OIDC config should pass: %v", err)
+		}
+	})
+
 	t.Run("TLS_valid", func(t *testing.T) {
 		c := valid
 		c.TLSCertFile = "server.pem"
@@ -226,4 +252,24 @@ func TestValidate(t *testing.T) {
 			t.Error("TLSEnabled = false, want true")
 		}
 	})
+}
+
+func TestSecureCookies(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{name: "plain HTTP", cfg: Config{}, want: false},
+		{name: "external HTTPS", cfg: Config{PublicURL: "https://fanout.example.com"}, want: true},
+		{name: "external HTTP", cfg: Config{PublicURL: "http://fanout.example.com"}, want: false},
+		{name: "local TLS", cfg: Config{TLSCertFile: "server.pem", TLSKeyFile: "server-key.pem"}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.SecureCookies(); got != tc.want {
+				t.Fatalf("SecureCookies = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }

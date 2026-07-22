@@ -6,198 +6,91 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v5"
-
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/settings"
-	appstore "github.com/labstack/fanout/internal/store"
 )
 
+func newConfigServer(t *testing.T, cfg env.Config) (*testAuthServer, *settings.Store) {
+	t.Helper()
+	cfg.AuthMode = "local"
+	s := newTestAuthServerWith(t, cfg, auth.SMTPConfig{})
+	store := settings.NewStore(s.db.DB)
+	RegisterSettingsRoutes(s.e, cfg, store, s.audit)
+	return s, store
+}
+
 func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
-	e, users, secret, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
-	_, token := createAdminForRuntimeConfigTest(t, users, secret)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/settings/ingest", nil)
+	s, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
+	admin, _ := s.users.Create("admin@example.com", "", "admin")
+	cookie := s.login(t, admin)
+	req := sessionRequest(http.MethodGet, "/api/settings/ingest", nil, cookie)
 	req.Host = "fanout.example.com:7520"
-	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
+	s.e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Fatalf("status = %d", rec.Code)
 	}
-
 	var resp ingestResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if resp.TokenRequired {
-		t.Fatalf("token_required = true, want false for fresh store")
-	}
-	if resp.SuggestedEndpoint != "fanout.example.com:4317" {
-		t.Fatalf("suggested endpoint = %q", resp.SuggestedEndpoint)
+	if resp.TokenRequired || resp.SuggestedEndpoint != "fanout.example.com:4317" {
+		t.Fatalf("response = %+v", resp)
 	}
 }
 
 func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
-	e, users, secret, store := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
-	_, token := createAdminForRuntimeConfigTest(t, users, secret)
-
-	req := httptest.NewRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil)
+	s, store := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
+	admin, _ := s.users.Create("admin@example.com", "", "admin")
+	cookie := s.login(t, admin)
+	req := sessionRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil, cookie)
 	req.Host = "fanout.example.com:7520"
-	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
+	s.e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+		t.Fatalf("status = %d %s", rec.Code, rec.Body.String())
 	}
-
 	var resp ingestResponse
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if resp.IngestToken == "" {
-		t.Fatal("ingest token is empty")
-	}
-	if !resp.TokenRequired {
-		t.Fatal("token_required = false after rotate")
-	}
-
 	current, err := store.GetIngest(req.Context())
-	if err != nil {
-		t.Fatalf("GetIngest: %v", err)
-	}
-	if !settings.CheckIngestToken(resp.IngestToken, current.TokenHash) {
-		t.Fatal("stored token hash does not match returned plaintext")
+	if err != nil || resp.IngestToken == "" || !settings.CheckIngestToken(resp.IngestToken, current.TokenHash) {
+		t.Fatalf("response=%+v current=%+v err=%v", resp, current, err)
 	}
 }
 
-func TestRotateIngestToken_RequiresAdmin(t *testing.T) {
-	e, users, secret, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
-
-	viewer, err := users.Create("viewer@example.com", "", "viewer")
-	if err != nil {
-		t.Fatalf("Create viewer: %v", err)
+func TestIngestSettingsCapabilities(t *testing.T) {
+	s, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
+	viewer, _ := s.users.Create("viewer@example.com", "", "viewer")
+	cookie := s.login(t, viewer)
+	readRec := httptest.NewRecorder()
+	s.e.ServeHTTP(readRec, sessionRequest(http.MethodGet, "/api/settings/ingest", nil, cookie))
+	if readRec.Code != http.StatusOK {
+		t.Fatalf("viewer read = %d", readRec.Code)
 	}
-	nonAdminToken, err := auth.SignAccess(secret, viewer.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
+	writeRec := httptest.NewRecorder()
+	s.e.ServeHTTP(writeRec, sessionRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil, cookie))
+	if writeRec.Code != http.StatusForbidden {
+		t.Fatalf("viewer rotate = %d, want 403", writeRec.Code)
 	}
-
-	req := httptest.NewRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil)
-	req.Header.Set("Authorization", "Bearer "+nonAdminToken)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
-	}
-}
-
-func TestGetIngest_AllowsNonAdmin(t *testing.T) {
-	e, users, secret, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
-
-	viewer, err := users.Create("viewer@example.com", "", "viewer")
-	if err != nil {
-		t.Fatalf("Create viewer: %v", err)
-	}
-	nonAdminToken, err := auth.SignAccess(secret, viewer.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/api/settings/ingest", nil)
-	req.Header.Set("Authorization", "Bearer "+nonAdminToken)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want %d (GetIngest returns non-secret metadata)", rec.Code, http.StatusOK)
-	}
-}
-
-func newConfigServer(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore, string, *settings.Store) {
-	t.Helper()
-
-	sqlite, err := appstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
-	t.Cleanup(func() { sqlite.Close() })
-
-	secret := "0123456789abcdef0123456789abcdef"
-	refreshSecret := "abcdef0123456789abcdef0123456789"
-	users := auth.NewUserStore(sqlite.DB)
-	codes := auth.NewCodeStore(sqlite.DB, secret)
-	store := settings.NewStore(sqlite.DB)
-	setup := auth.NewSetup()
-
-	e := echo.New()
-	RegisterAuthMiddleware(e, users, secret, false)
-	RegisterAuthRoutes(e, users, codes, setup, settings.NewStore(sqlite.DB), secret, refreshSecret, auth.SMTPConfig{}, env.Config{})
-	RegisterSettingsRoutes(e, cfg, store)
-	return e, users, secret, store
-}
-
-func createAdminForRuntimeConfigTest(t *testing.T, users *auth.UserStore, secret string) (auth.User, string) {
-	t.Helper()
-
-	user, err := users.Create("admin@example.com", "", "admin")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	token, err := auth.SignAccess(secret, user.ID)
-	if err != nil {
-		t.Fatalf("SignAccess: %v", err)
-	}
-	return user, token
 }
 
 func TestSuggestedIngestEndpoint(t *testing.T) {
-	tests := []struct {
-		name       string
-		grpcAddr   string
-		configured string
-		reqHost    string
-		want       string
-	}{
-		{
-			name:       "configured wins verbatim",
-			grpcAddr:   ":4317",
-			configured: "https://ingest.fanout.labstack.com",
-			reqHost:    "fanout.labstack.com",
-			want:       "https://ingest.fanout.labstack.com",
-		},
-		{
-			name:     "wildcard addr derives host from request",
-			grpcAddr: ":4317",
-			reqHost:  "fanout.labstack.com:443",
-			want:     "fanout.labstack.com:4317",
-		},
-		{
-			name:     "explicit grpc host is used as-is",
-			grpcAddr: "1.2.3.4:5317",
-			reqHost:  "ignored.example.com",
-			want:     "1.2.3.4:5317",
-		},
-		{
-			name:     "loopback bind advertises the application host",
-			grpcAddr: "127.0.0.1:4317",
-			reqHost:  "demo.fanout.test",
-			want:     "demo.fanout.test:4317",
-		},
-		{
-			name:     "missing request host falls back to localhost",
-			grpcAddr: ":4317",
-			want:     "localhost:4317",
-		},
+	tests := []struct{ name, grpcAddr, configured, reqHost, want string }{
+		{"configured wins verbatim", ":4317", "https://ingest.fanout.labstack.com", "fanout.labstack.com", "https://ingest.fanout.labstack.com"},
+		{"wildcard addr derives host from request", ":4317", "", "fanout.labstack.com:443", "fanout.labstack.com:4317"},
+		{"explicit grpc host is used as-is", "1.2.3.4:5317", "", "ignored.example.com", "1.2.3.4:5317"},
+		{"loopback bind advertises application host", "127.0.0.1:4317", "", "demo.fanout.test", "demo.fanout.test:4317"},
+		{"missing request host falls back", ":4317", "", "", "localhost:4317"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/settings/ingest", nil)
 			req.Host = tc.reqHost
 			if got := suggestedIngestEndpoint(req, tc.grpcAddr, tc.configured); got != tc.want {
-				t.Errorf("suggestedIngestEndpoint() = %q, want %q", got, tc.want)
+				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})
 	}

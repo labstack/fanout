@@ -65,14 +65,24 @@ func TestAuthorize_RejectsWhenPreSetup(t *testing.T) {
 	}
 }
 
-func TestAuthorize_PublicReadAcceptsWithoutToken(t *testing.T) {
+func TestAuthorize_PublicReadDoesNotDisableIngestAuthentication(t *testing.T) {
+	store := newRuntimeStore(t)
+	authorizer := newIngestAuthorizer(env.Config{PublicRead: true, PublicIngest: false}, store)
+
+	err := authorizer.authorize(context.Background())
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("code = %v, want %v", status.Code(err), codes.Unauthenticated)
+	}
+}
+
+func TestAuthorize_PublicIngestAcceptsWithoutToken(t *testing.T) {
 	// In public demo mode, OTLP is accepted with no token even pre-setup —
 	// the per-deploy token friction is removed entirely.
 	store := newRuntimeStore(t)
-	authorizer := newIngestAuthorizer(env.Config{PublicRead: true}, store)
+	authorizer := newIngestAuthorizer(env.Config{PublicIngest: true}, store)
 
 	if err := authorizer.authorize(context.Background()); err != nil {
-		t.Fatalf("public-read authorize should accept without a token, got: %v", err)
+		t.Fatalf("public-ingest authorize should accept without a token, got: %v", err)
 	}
 }
 

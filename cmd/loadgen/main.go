@@ -14,9 +14,11 @@
 // Example — a 10-minute soak at 2k traces/s across 50 services, with a report:
 //
 //	go run ./cmd/loadgen -rate 2000 -duration 10m -services 50 -attr-cardinality 200 \
-//	  -metrics-url https://demo.fanout.test/-/metrics -report run.json
+//	  -metrics-url https://demo.fanout.test/-/metrics -metrics-token "$METRICS_TOKEN" -report run.json
 //
-// Run fanout locally with PUBLIC_READ=true for tokenless ingest, or pass -token.
+// The metrics endpoint requires -metrics-token unless METRICS_PUBLIC=true.
+//
+// Run fanout locally with PUBLIC_INGEST=true for tokenless ingest, or pass -token.
 package main
 
 import (
@@ -53,20 +55,21 @@ import (
 )
 
 type config struct {
-	endpoint    string
-	token       string
-	rate        float64
-	duration    time.Duration
-	workers     int
-	services    int
-	namespaces  int
-	cardinality int
-	errorRate   float64
-	msgRatio    float64
-	sendLogs    bool
-	sendMetrics bool
-	metricsURL  string
-	reportPath  string
+	endpoint     string
+	token        string
+	rate         float64
+	duration     time.Duration
+	workers      int
+	services     int
+	namespaces   int
+	cardinality  int
+	errorRate    float64
+	msgRatio     float64
+	sendLogs     bool
+	sendMetrics  bool
+	metricsURL   string
+	metricsToken string
+	reportPath   string
 	// Query-under-load: drive the read path concurrently with ingest.
 	queryURL     string
 	queryWorkers int
@@ -85,7 +88,7 @@ type config struct {
 func main() {
 	var cfg config
 	flag.StringVar(&cfg.endpoint, "endpoint", "demo.fanout.test:4317", "OTLP gRPC endpoint")
-	flag.StringVar(&cfg.token, "token", "", "ingest token (x-fanout-ingest-token); omit when fanout runs with PUBLIC_READ=true")
+	flag.StringVar(&cfg.token, "token", "", "ingest token (x-fanout-ingest-token); omit when fanout runs with PUBLIC_INGEST=true")
 	flag.Float64Var(&cfg.rate, "rate", 1000, "target traces per second (aggregate)")
 	flag.DurationVar(&cfg.duration, "duration", time.Minute, "run duration; 0 means run until interrupted")
 	flag.IntVar(&cfg.workers, "workers", 8, "concurrent senders")
@@ -97,6 +100,7 @@ func main() {
 	flag.BoolVar(&cfg.sendLogs, "logs", true, "also emit logs")
 	flag.BoolVar(&cfg.sendMetrics, "metrics", true, "also emit metrics")
 	flag.StringVar(&cfg.metricsURL, "metrics-url", "", "fanout /-/metrics URL to capture server-side deltas (e.g. https://demo.fanout.test/-/metrics)")
+	flag.StringVar(&cfg.metricsToken, "metrics-token", "", "bearer token for a private fanout /-/metrics endpoint")
 	flag.StringVar(&cfg.reportPath, "report", "", "write a JSON performance report to this path")
 	flag.StringVar(&cfg.queryURL, "query-url", "", "fanout HTTP base URL to drive read load under ingest (e.g. https://demo.fanout.test)")
 	flag.IntVar(&cfg.queryWorkers, "query-workers", 0, "concurrent query workers (0 = ingest only)")
@@ -154,7 +158,7 @@ func main() {
 	// Baseline server metrics before load (for end-of-run deltas).
 	var baseline map[string]float64
 	if cfg.metricsURL != "" {
-		if baseline, err = scrapeMetrics(cfg.metricsURL); err != nil {
+		if baseline, err = scrapeMetrics(cfg.metricsURL, cfg.metricsToken); err != nil {
 			fmt.Fprintf(os.Stderr, "  warn: baseline metrics scrape failed: %v\n", err)
 		}
 	}
@@ -229,7 +233,7 @@ func main() {
 		rep.QueryErrors = g.queryErrs.Load()
 	}
 	if cfg.metricsURL != "" {
-		if final, ferr := scrapeMetrics(cfg.metricsURL); ferr != nil {
+		if final, ferr := scrapeMetrics(cfg.metricsURL, cfg.metricsToken); ferr != nil {
 			fmt.Fprintf(os.Stderr, "  warn: final metrics scrape failed: %v\n", ferr)
 		} else {
 			rep.Server = serverDelta(baseline, final)
@@ -686,8 +690,15 @@ func (h *histogram) snapshot() latencyReport {
 
 // scrapeMetrics fetches a Prometheus text endpoint and sums each metric across
 // its label series (good enough for the totals/gauges we report).
-func scrapeMetrics(url string) (map[string]float64, error) {
-	resp, err := http.Get(url) //nolint:noctx // short-lived CLI scrape
+func scrapeMetrics(url, token string) (map[string]float64, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:noctx // short-lived CLI scrape
+	if err != nil {
+		return nil, err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}

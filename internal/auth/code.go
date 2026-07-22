@@ -45,13 +45,26 @@ func VerifyHash(code, hash, secret string) bool {
 
 // CodeStore manages verification codes in SQLite.
 type CodeStore struct {
+	db     *sql.DB
 	q      *generated.Queries
 	secret string
 }
 
 // NewCodeStore creates a CodeStore with the given HMAC secret.
 func NewCodeStore(db *sql.DB, secret string) *CodeStore {
-	return &CodeStore{q: generated.New(db), secret: secret}
+	return &CodeStore{db: db, q: generated.New(db), secret: secret}
+}
+
+func (s *CodeStore) RecentCount(email string, since time.Time) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(context.Background(), `
+		SELECT COUNT(*) FROM verifications WHERE email = ? AND datetime(created_at) >= datetime(?)`,
+		email, since.UTC().Format(time.RFC3339),
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("auth: count recent codes: %w", err)
+	}
+	return count, nil
 }
 
 // Create stores a verification code for the given email. Returns the plaintext code.
@@ -113,9 +126,18 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 		return false, nil
 	}
 
-	// Mark used — must succeed to prevent replay
-	if err := s.q.MarkCodeUsed(ctx, row.ID); err != nil {
+	// Mark used atomically. Two concurrent successful hash checks race here;
+	// exactly one may transition the row from unused to used.
+	result, err := s.db.ExecContext(ctx, `UPDATE verifications SET used = 1 WHERE id = ? AND used = 0`, row.ID)
+	if err != nil {
 		return false, fmt.Errorf("auth: mark code used: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("auth: inspect code use: %w", err)
+	}
+	if changed != 1 {
+		return false, nil
 	}
 	return true, nil
 }

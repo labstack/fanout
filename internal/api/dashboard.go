@@ -14,17 +14,18 @@ type DashboardHandler struct{ dashboards *dashboard.Service }
 
 func RegisterDashboardRoutes(e *echo.Echo, dashboards *dashboard.Service) {
 	h := &DashboardHandler{dashboards: dashboards}
-	e.GET("/api/dashboards", h.List)
-	e.POST("/api/dashboards", h.Create)
-	e.GET("/api/dashboards/:id", h.Get)
-	e.PUT("/api/dashboards/:id", h.Put)
-	e.DELETE("/api/dashboards/:id", h.Delete)
+	own := RequireCapability(ManageOwnDashboards)
+	e.GET("/api/dashboards", h.List, own)
+	e.POST("/api/dashboards", h.Create, own)
+	e.GET("/api/dashboards/:id", h.Get, own)
+	e.PUT("/api/dashboards/:id", h.Put, own)
+	e.DELETE("/api/dashboards/:id", h.Delete, own)
 
 	// Legacy single-canvas endpoints, retained for API clients: they always
 	// address the owner's default dashboard, while the named collection above
 	// addresses dashboards individually.
-	e.GET("/api/dashboard", h.GetDefault)
-	e.PUT("/api/dashboard", h.PutDefault)
+	e.GET("/api/dashboard", h.GetDefault, own)
+	e.PUT("/api/dashboard", h.PutDefault, own)
 }
 
 func (h *DashboardHandler) List(c *echo.Context) error {
@@ -130,11 +131,7 @@ func (h *DashboardHandler) PutDefault(c *echo.Context) error {
 }
 
 func dashboardOwner(c *echo.Context) (string, error) {
-	user := GetCurrentUser(c)
-	if user == nil || user.ID == publicViewerID {
-		return "", echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
-	}
-	return user.ID, nil
+	return RequestOwner(c)
 }
 
 func decodeDashboard(c *echo.Context, value any) error {

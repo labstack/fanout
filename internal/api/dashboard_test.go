@@ -5,29 +5,44 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/dashboard"
-	appstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/fanout/internal/env"
 )
 
 func TestPublicViewerCannotOwnDashboards(t *testing.T) {
-	sqlite, err := appstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatalf("NewSQLite: %v", err)
-	}
-	t.Cleanup(func() { sqlite.Close() })
-	users := auth.NewUserStore(sqlite.DB)
-	if _, err := users.Create("admin@example.com", "", "admin"); err != nil {
+	s := newTestAuthServerWith(t, env.Config{AuthMode: "local", PublicRead: true}, auth.SMTPConfig{})
+	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
 		t.Fatalf("Create admin: %v", err)
 	}
-
-	e := echo.New()
-	RegisterAuthMiddleware(e, users, "0123456789abcdef0123456789abcdef", true)
-	RegisterDashboardRoutes(e, dashboard.New(sqlite.DB))
+	RegisterDashboardRoutes(s.e, dashboard.New(s.db.DB))
 	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/dashboards", nil))
+	s.e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/dashboards", nil))
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous dashboard list = %d, want 401", rec.Code)
+	}
+}
+
+func TestDashboardRoutesHideOtherOwnersResources(t *testing.T) {
+	s := newTestAuthServer(t)
+	ownerA, err := s.users.Create("owner-a@example.com", "", "operator")
+	if err != nil {
+		t.Fatalf("Create owner A: %v", err)
+	}
+	ownerB, err := s.users.Create("owner-b@example.com", "", "operator")
+	if err != nil {
+		t.Fatalf("Create owner B: %v", err)
+	}
+	dashboards := dashboard.New(s.db.DB)
+	item, err := dashboards.Default(t.Context(), ownerA.ID)
+	if err != nil {
+		t.Fatalf("create dashboard: %v", err)
+	}
+	RegisterDashboardRoutes(s.e, dashboards)
+
+	recorder := httptest.NewRecorder()
+	s.e.ServeHTTP(recorder, sessionRequest(http.MethodGet, "/api/dashboards/"+item.ID, nil, s.login(t, ownerB)))
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("cross-owner dashboard read = %d, want 404", recorder.Code)
 	}
 }

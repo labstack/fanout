@@ -53,11 +53,11 @@ func (r *Runtime) Register(group *echo.Group) {
 }
 
 func (r *Runtime) GetThread(c *echo.Context) error {
-	user := api.GetCurrentUser(c)
-	if user == nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+	ownerID, ownerErr := api.RequestOwner(c)
+	if ownerErr != nil {
+		return ownerErr
 	}
-	thread, err := r.store.Thread(c.Request().Context(), user.ID, c.Param("threadID"))
+	thread, err := r.store.Thread(c.Request().Context(), ownerID, c.Param("threadID"))
 	if errors.Is(err, ErrThreadNotFound) {
 		return echo.NewHTTPError(http.StatusNotFound, "thread not found")
 	}
@@ -68,9 +68,9 @@ func (r *Runtime) GetThread(c *echo.Context) error {
 }
 
 func (r *Runtime) Run(c *echo.Context) error {
-	user := api.GetCurrentUser(c)
-	if user == nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+	ownerID, ownerErr := api.RequestOwner(c)
+	if ownerErr != nil {
+		return ownerErr
 	}
 	var input agtypes.RunAgentInput
 	if err := c.Bind(&input); err != nil {
@@ -90,7 +90,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 		}
 		input.RunID = runID
 	}
-	if err := r.store.StartRun(c.Request().Context(), user.ID, input); err != nil {
+	if err := r.store.StartRun(c.Request().Context(), ownerID, input); err != nil {
 		if errors.Is(err, ErrThreadNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "thread not found")
 		}
@@ -104,7 +104,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 	response.WriteHeader(http.StatusOK)
 	emitter := &eventEmitter{ctx: c.Request().Context(), writer: response, sse: sse.NewSSEWriter()}
 	messages := append([]agtypes.Message(nil), input.Messages...)
-	runCtx := dashboard.WithOwner(c.Request().Context(), user.ID)
+	runCtx := dashboard.WithOwner(c.Request().Context(), ownerID)
 	truncated, runErr := r.execute(runCtx, input.ThreadID, input.RunID, &messages, emitter)
 	if runErr != nil {
 		slog.Error("agent run failed", "thread_id", input.ThreadID, "run_id", input.RunID, "err", runErr)
@@ -112,7 +112,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 
 	persistCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request().Context()), 5*time.Second)
 	defer cancel()
-	if err := r.store.FinishRun(persistCtx, user.ID, input.ThreadID, input.RunID, messages, emitter.events, truncated, runErr); err != nil {
+	if err := r.store.FinishRun(persistCtx, ownerID, input.ThreadID, input.RunID, messages, emitter.events, truncated, runErr); err != nil {
 		// A persist failure after a successful stream silently loses the conversation.
 		slog.Error("agent run persist failed", "thread_id", input.ThreadID, "run_id", input.RunID, "err", err)
 	}

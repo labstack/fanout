@@ -5,13 +5,17 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	envparse "github.com/caarlos0/env/v11"
 	"github.com/joho/godotenv"
+
+	appauth "github.com/labstack/fanout/internal/auth"
 )
 
 type Config struct {
@@ -52,17 +56,14 @@ type Config struct {
 	// holds the write lock and starves ingest. Off in normal operation.
 	RollupSkipToLatest bool   `env:"ROLLUP_SKIP_TO_LATEST" envDefault:"false"`
 	DefaultNS          string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
-	// PublicRead turns the instance into a public demo: unauthenticated GET/HEAD
-	// requests are served as a read-only viewer (writes, admin routes, and /mcp
-	// still require OAuth or web auth), and OTLP ingest is accepted
-	// without a token. It exposes ALL telemetry on the instance to anyone who can
-	// reach it — only enable it on an instance whose data is meant to be public
-	// (e.g. the otel-demo showcase). NEVER set it where data is private.
+	// PublicRead exposes only explicitly classified telemetry GET/HEAD routes to
+	// a synthetic read-only principal. It never changes ingest authentication.
 	PublicRead bool `env:"PUBLIC_READ" envDefault:"false"`
+	// PublicIngest is a separate demo-only escape hatch for unauthenticated OTLP.
+	PublicIngest bool `env:"PUBLIC_INGEST" envDefault:"false"`
 	// PprofEnabled exposes Go's net/http/pprof handlers at /debug/pprof/* for
 	// CPU/heap/mutex/goroutine profiling under load. Off by default; the routes
-	// are unauthenticated (non-/api/), so only enable on localhost or a trusted
-	// network (e.g. during a benchmark — see scripts/bench.sh / just bench).
+	// require an admin browser session with operations:read.
 	PprofEnabled bool `env:"PPROF_ENABLED" envDefault:"false"`
 	// The DuckDB knobs below self-size where possible and otherwise default to
 	// values validated on the reference deployment target, a small shared VM
@@ -90,23 +91,40 @@ type Config struct {
 	// the shared write mutex (Duck.WriteLock, wired into the writer via
 	// UseWriteLock in cmd/fanout/main.go, enforced at startup). Without the WAL
 	// mode, pool >1 fails with "database is locked".
-	DuckDBMaxConns    int    `env:"DUCKDB_MAX_CONNS" envDefault:"4"`
-	AlertEnabled      bool   `env:"ALERT_ENABLED" envDefault:"true"`
-	AlertEvalInterval int    `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
-	AlertHistoryDays  int    `env:"ALERT_HISTORY_DAYS" envDefault:"7"`
-	AIProvider        string `env:"AI_PROVIDER" envDefault:"anthropic"`
-	AIAPIKey          string `env:"AI_API_KEY"`
-	AIModel           string `env:"AI_MODEL"`
-	AIBaseURL         string `env:"AI_BASE_URL"`
-	SMTPHost          string `env:"SMTP_HOST"`
-	SMTPPort          int    `env:"SMTP_PORT" envDefault:"587"`
-	SMTPUser          string `env:"SMTP_USER"`
-	SMTPPass          string `env:"SMTP_PASS"`
-	SMTPFrom          string `env:"SMTP_FROM"`
-	JWTSecret         string `env:"JWT_SECRET"`
-	JWTRefreshSecret  string `env:"JWT_REFRESH_SECRET"`
-	TLSCertFile       string `env:"TLS_CERT_FILE"`
-	TLSKeyFile        string `env:"TLS_KEY_FILE"`
+	DuckDBMaxConns        int           `env:"DUCKDB_MAX_CONNS" envDefault:"4"`
+	AlertEnabled          bool          `env:"ALERT_ENABLED" envDefault:"true"`
+	AlertEvalInterval     int           `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
+	AlertHistoryDays      int           `env:"ALERT_HISTORY_DAYS" envDefault:"7"`
+	AIProvider            string        `env:"AI_PROVIDER" envDefault:"anthropic"`
+	AIAPIKey              string        `env:"AI_API_KEY"`
+	AIModel               string        `env:"AI_MODEL"`
+	AIBaseURL             string        `env:"AI_BASE_URL"`
+	SMTPHost              string        `env:"SMTP_HOST"`
+	SMTPPort              int           `env:"SMTP_PORT" envDefault:"587"`
+	SMTPUser              string        `env:"SMTP_USER"`
+	SMTPPass              string        `env:"SMTP_PASS"`
+	SMTPFrom              string        `env:"SMTP_FROM"`
+	AuthMode              string        `env:"AUTH_MODE" envDefault:"local"`
+	PublicURL             string        `env:"PUBLIC_URL"`
+	AuthCodeSecret        string        `env:"AUTH_CODE_SECRET"`
+	SessionIdleTTL        time.Duration `env:"SESSION_IDLE_TTL" envDefault:"12h"`
+	SessionAbsoluteTTL    time.Duration `env:"SESSION_ABSOLUTE_TTL" envDefault:"168h"`
+	OIDCIssuerURL         string        `env:"OIDC_ISSUER_URL"`
+	OIDCClientID          string        `env:"OIDC_CLIENT_ID"`
+	OIDCClientSecret      string        `env:"OIDC_CLIENT_SECRET"`
+	OIDCEmailClaim        string        `env:"OIDC_EMAIL_CLAIM" envDefault:"email"`
+	OIDCEmailVerification string        `env:"OIDC_EMAIL_VERIFICATION" envDefault:"required"`
+	OIDCAutoProvision     bool          `env:"OIDC_AUTO_PROVISION" envDefault:"false"`
+	OIDCAllowedGroups     string        `env:"OIDC_ALLOWED_GROUPS"`
+	OIDCAllowedDomains    string        `env:"OIDC_ALLOWED_DOMAINS"`
+	OIDCDefaultRole       string        `env:"OIDC_DEFAULT_ROLE" envDefault:"viewer"`
+	OIDCOperatorGroups    string        `env:"OIDC_OPERATOR_GROUPS"`
+	OIDCAdminGroups       string        `env:"OIDC_ADMIN_GROUPS"`
+	MetricsToken          string        `env:"METRICS_TOKEN"`
+	MetricsPublic         bool          `env:"METRICS_PUBLIC" envDefault:"false"`
+	TrustedProxyCIDRs     string        `env:"TRUSTED_PROXY_CIDRS"`
+	TLSCertFile           string        `env:"TLS_CERT_FILE"`
+	TLSKeyFile            string        `env:"TLS_KEY_FILE"`
 }
 
 // Load reads .env non-destructively (does not overwrite pre-set OS env), then
@@ -146,6 +164,18 @@ func Load() Config {
 	if err := cfg.Validate(); err != nil {
 		slog.Error("invalid config", "err", err)
 		os.Exit(1)
+	}
+	if !cfg.SecureCookies() {
+		slog.Warn("browser session cookies are not Secure; configure PUBLIC_URL=https://... or local TLS before exposing Fanout")
+	}
+	if strings.TrimSpace(cfg.PublicURL) != "" && !cfg.TLSEnabled() && strings.TrimSpace(cfg.TrustedProxyCIDRs) == "" {
+		slog.Warn("reverse-proxy client IPs are not trusted; set TRUSTED_PROXY_CIDRS to the proxy network so audit and rate limits use end-client addresses")
+	}
+	if cfg.MetricsPublic {
+		slog.Warn("Prometheus metrics are publicly accessible", "path", "/-/metrics")
+	}
+	if cfg.PublicIngest {
+		slog.Warn("OTLP ingest authentication is disabled by PUBLIC_INGEST")
 	}
 	return cfg
 }
@@ -223,11 +253,59 @@ func (c Config) Validate() error {
 			return fmt.Errorf("MCP_PUBLIC_URL must be an HTTPS URL ending in /mcp")
 		}
 	}
-	if !c.SMTPConfigured() {
-		return fmt.Errorf("SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM are required")
+	authMode := strings.ToLower(strings.TrimSpace(c.AuthMode))
+	if authMode == "" {
+		authMode = "local"
 	}
-	if c.SMTPPort <= 0 {
-		return fmt.Errorf("SMTP_PORT must be > 0")
+	if authMode != "local" && authMode != "oidc" {
+		return fmt.Errorf("AUTH_MODE must be local or oidc")
+	}
+	idleTTL := c.SessionIdleTTL
+	absoluteTTL := c.SessionAbsoluteTTL
+	if idleTTL < 5*time.Minute {
+		return fmt.Errorf("SESSION_IDLE_TTL must be at least 5m")
+	}
+	if absoluteTTL <= 0 || idleTTL > absoluteTTL {
+		return fmt.Errorf("SESSION_ABSOLUTE_TTL must be positive and at least SESSION_IDLE_TTL")
+	}
+	if authMode == "local" {
+		if !c.SMTPConfigured() {
+			return fmt.Errorf("SMTP_HOST, SMTP_USER, SMTP_PASS, and SMTP_FROM are required in local auth mode")
+		}
+		if c.SMTPPort <= 0 {
+			return fmt.Errorf("SMTP_PORT must be > 0")
+		}
+		if len(strings.TrimSpace(c.AuthCodeSecret)) < 32 {
+			return fmt.Errorf("AUTH_CODE_SECRET must be at least 32 characters")
+		}
+	}
+	if authMode == "oidc" {
+		issuer, err := url.Parse(strings.TrimSpace(c.OIDCIssuerURL))
+		if err != nil || issuer.Scheme != "https" || issuer.Host == "" {
+			return fmt.Errorf("OIDC_ISSUER_URL must be an HTTPS URL")
+		}
+		if strings.TrimSpace(c.OIDCClientID) == "" || strings.TrimSpace(c.OIDCClientSecret) == "" {
+			return fmt.Errorf("OIDC_CLIENT_ID and OIDC_CLIENT_SECRET are required in oidc mode")
+		}
+		publicURL, err := url.Parse(strings.TrimSpace(c.PublicURL))
+		if err != nil || publicURL.Scheme != "https" || publicURL.Host == "" {
+			return fmt.Errorf("PUBLIC_URL must be an HTTPS URL in oidc mode")
+		}
+		if c.OIDCEmailVerification != "required" && c.OIDCEmailVerification != "issuer" {
+			return fmt.Errorf("OIDC_EMAIL_VERIFICATION must be required or issuer")
+		}
+		if strings.TrimSpace(c.OIDCEmailClaim) == "" {
+			return fmt.Errorf("OIDC_EMAIL_CLAIM must not be empty")
+		}
+		if c.OIDCEmailVerification == "issuer" && strings.TrimSpace(c.OIDCAllowedGroups) == "" && strings.TrimSpace(c.OIDCAllowedDomains) == "" {
+			return fmt.Errorf("OIDC issuer email verification requires OIDC_ALLOWED_GROUPS or OIDC_ALLOWED_DOMAINS")
+		}
+		if !appauth.ValidRole(c.OIDCDefaultRole) {
+			return fmt.Errorf("OIDC_DEFAULT_ROLE must be viewer, operator, or admin")
+		}
+		if c.OIDCAutoProvision && strings.TrimSpace(c.OIDCAllowedGroups) == "" && strings.TrimSpace(c.OIDCAllowedDomains) == "" {
+			return fmt.Errorf("OIDC auto-provisioning requires OIDC_ALLOWED_GROUPS or OIDC_ALLOWED_DOMAINS")
+		}
 	}
 	if strings.TrimSpace(c.AIAPIKey) == "" {
 		return fmt.Errorf("AI_API_KEY is required")
@@ -237,25 +315,27 @@ func (c Config) Validate() error {
 	default:
 		return fmt.Errorf("AI_PROVIDER must be anthropic or openai")
 	}
-	if strings.TrimSpace(c.JWTSecret) == "" {
-		return fmt.Errorf("JWT_SECRET is required")
-	}
-	if len(c.JWTSecret) < 32 {
-		return fmt.Errorf("JWT_SECRET must be at least 32 characters")
-	}
-	if strings.TrimSpace(c.JWTRefreshSecret) == "" {
-		return fmt.Errorf("JWT_REFRESH_SECRET is required")
-	}
-	if len(c.JWTRefreshSecret) < 32 {
-		return fmt.Errorf("JWT_REFRESH_SECRET must be at least 32 characters")
-	}
-	if c.JWTSecret == c.JWTRefreshSecret {
-		return fmt.Errorf("JWT_SECRET and JWT_REFRESH_SECRET must be different")
+	for _, raw := range strings.Split(c.TrustedProxyCIDRs, ",") {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(value); err != nil {
+			return fmt.Errorf("TRUSTED_PROXY_CIDRS contains invalid CIDR %q", value)
+		}
 	}
 	if anySet(c.TLSCertFile, c.TLSKeyFile) && !c.TLSEnabled() {
 		return fmt.Errorf("TLS requires TLS_CERT_FILE and TLS_KEY_FILE")
 	}
 	return nil
+}
+
+func (c Config) SecureCookies() bool {
+	if c.TLSEnabled() {
+		return true
+	}
+	u, err := url.Parse(strings.TrimSpace(c.PublicURL))
+	return err == nil && u.Scheme == "https" && u.Host != ""
 }
 
 // SMTPConfigured returns true if SMTP is set up for sending email codes.

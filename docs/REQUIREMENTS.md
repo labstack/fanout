@@ -52,8 +52,10 @@
 | `FLUSH_SECONDS` | `15` | Batch flush interval |
 | `FLUSH_BATCH_SIZE` | `50000` | Max rows per writer flush |
 | `ROLLUP_EVERY` | `60` | Rollup interval (seconds) |
-| `JWT_SECRET` | - | HS256 signing key for access tokens |
-| `JWT_REFRESH_SECRET` | - | HS256 signing key for refresh tokens |
+| `AUTH_MODE` | `local` | Browser authentication mode (`local` or `oidc`) |
+| `AUTH_CODE_SECRET` | - | Email-code HMAC key for local mode |
+| `SESSION_IDLE_TTL` | `12h` | Browser-session idle lifetime |
+| `SESSION_ABSOLUTE_TTL` | `168h` | Browser-session absolute lifetime |
 | `MCP_ENABLED` | `true` | Enable MCP server |
 | `RETENTION_DAYS` | `30` | Data retention (0 = forever) |
 | `DEFAULT_NAMESPACE` | `default` | Default namespace for services |

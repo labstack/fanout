@@ -23,6 +23,9 @@ UPDATE users SET email = ?, name = ?, role = ?, active = ?, updated_at = ?
 WHERE id = ?
 RETURNING *;
 
+-- name: IncrementUserAuthVersion :exec
+UPDATE users SET auth_version = auth_version + 1, updated_at = ? WHERE id = ?;
+
 -- name: DeleteUser :execresult
 DELETE FROM users WHERE id = ?;
 

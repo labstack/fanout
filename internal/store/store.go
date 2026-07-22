@@ -16,6 +16,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const (
+	// ControlDBBusyTimeout is SQLite's writer-contention retry window. Security
+	// and control-plane writes must outlive it so revocation and audited
+	// mutations do not fail before SQLite has exhausted its retry policy.
+	ControlDBBusyTimeout = 5 * time.Second
+	ControlWriteMargin   = 2 * time.Second
+	ControlWriteTimeout  = ControlDBBusyTimeout + ControlWriteMargin
+)
+
 // SQLite wraps a database/sql.DB backed by modernc SQLite.
 type SQLite struct {
 	DB *sql.DB
@@ -26,9 +35,9 @@ type SQLite struct {
 func NewSQLite(dbPath string) (*SQLite, error) {
 	var dsn string
 	if dbPath == ":memory:" {
-		dsn = "file::memory:?_pragma=foreign_keys(1)"
+		dsn = fmt.Sprintf("file::memory:?_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)", ControlDBBusyTimeout.Milliseconds())
 	} else {
-		dsn = dbPath + "?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+		dsn = fmt.Sprintf("%s?_pragma=journal_mode(wal)&_pragma=busy_timeout(%d)&_pragma=foreign_keys(1)", dbPath, ControlDBBusyTimeout.Milliseconds())
 	}
 
 	db, err := sql.Open("sqlite", dsn)

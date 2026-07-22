@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"net/http"
@@ -16,33 +17,46 @@ import (
 )
 
 type AuthHandler struct {
-	users         *auth.UserStore
-	codes         *auth.CodeStore
-	setup         *auth.Setup
-	settings      *settings.Store
-	jwtSecret     string
-	refreshSecret string
-	smtp          auth.SMTPConfig
-	cfg           env.Config
+	users                *auth.UserStore
+	codes                *auth.CodeStore
+	setup                *auth.Setup
+	settings             *settings.Store
+	sessions             *auth.BrowserSessions
+	audit                *auth.AuditStore
+	smtp                 auth.SMTPConfig
+	cfg                  env.Config
+	setupLimiter         *auth.KeyedLimiter
+	startLimiter         *auth.KeyedLimiter
+	verifyIPLimiter      *auth.KeyedLimiter
+	verifyAccountLimiter *auth.KeyedLimiter
 }
 
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, jwtSecret, refreshSecret string, smtp auth.SMTPConfig, cfg env.Config) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, sessions *auth.BrowserSessions, audit *auth.AuditStore, smtp auth.SMTPConfig, cfg env.Config) {
+	if users == nil || codes == nil || setup == nil || settingsStore == nil || sessions == nil || audit == nil {
+		panic("api: auth route dependencies are required")
+	}
+	if cfg.AuthMode == "" {
+		cfg.AuthMode = "local"
+	}
 	h := &AuthHandler{
-		users:         users,
-		codes:         codes,
-		setup:         setup,
-		settings:      settingsStore,
-		jwtSecret:     jwtSecret,
-		refreshSecret: refreshSecret,
-		smtp:          smtp,
-		cfg:           cfg,
+		users:                users,
+		codes:                codes,
+		setup:                setup,
+		settings:             settingsStore,
+		sessions:             sessions,
+		audit:                audit,
+		smtp:                 smtp,
+		cfg:                  cfg,
+		setupLimiter:         auth.NewKeyedLimiter(10, 15*time.Minute),
+		startLimiter:         auth.NewKeyedLimiter(20, 15*time.Minute),
+		verifyIPLimiter:      auth.NewKeyedLimiter(60, 15*time.Minute),
+		verifyAccountLimiter: auth.NewKeyedLimiter(30, 15*time.Minute),
 	}
 
 	e.GET("/api/auth/status", h.Status)
 	e.POST("/api/auth/setup", h.Setup)
 	e.POST("/api/auth/start", h.Start)
 	e.POST("/api/auth/verify", h.Verify)
-	e.POST("/api/auth/refresh", h.Refresh)
 	e.GET("/api/auth/me", h.Me)
 	e.POST("/api/auth/logout", h.Logout)
 }
@@ -59,14 +73,18 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 	return c.JSON(200, map[string]any{
 		"setup_required": count == 0,
 		"auth_enabled":   true,
+		"auth_mode":      strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)),
 		// Lets the SPA boot anonymously into read-only mode: when true, an
 		// unauthenticated GET /api/auth/me returns the synthetic viewer, so the
-		// frontend can render dashboards without a login.
+		// frontend can render the explicitly public telemetry views without a login.
 		"public_read": h.cfg.PublicRead,
 	})
 }
 
 func (h *AuthHandler) Setup(c *echo.Context) error {
+	if !h.setupLimiter.Allow(c.RealIP()) {
+		return rateLimited(c, 15*time.Minute)
+	}
 	var req struct {
 		Email      string `json:"email"`
 		Name       string `json:"name"`
@@ -95,7 +113,8 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	user, err := h.users.CreateFirstAdmin(email, req.Name)
+	createEvent := auth.AuditEvent{EventType: "setup.completed", Outcome: "success", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
+	user, err := h.users.CreateFirstAdminWithAudit(email, req.Name, createEvent)
 	if errors.Is(err, auth.ErrSetupComplete) {
 		user, err = h.users.GetByEmail(email)
 		if err != nil {
@@ -112,16 +131,16 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create admin")
 	}
 
-	accessToken, err := h.issueTokens(c, user)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
+	if err := h.establishSession(c, user); err != nil {
+		slog.Error("auth: setup session establishment failed", "user_id", user.ID, "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
 
 	// Generate the ingest token only if one doesn't exist yet. A Setup retry
 	// (ErrSetupComplete branch above) must not rotate and invalidate a token
 	// live collectors may already be using — to rotate deliberately, the admin
 	// uses the Settings page.
-	resp := map[string]string{"access_token": accessToken}
+	resp := map[string]string{"status": "authenticated"}
 	current, err := h.settings.GetIngest(c.Request().Context())
 	if err != nil {
 		slog.Error("auth: setup load ingest config failed", "err", err)
@@ -133,7 +152,8 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 			slog.Error("auth: setup generate ingest token failed", "err", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
 		}
-		if err := h.settings.SetIngest(c.Request().Context(), settings.Ingest{TokenHash: ingestHash}); err != nil {
+		ingestEvent := auth.AuditEvent{ActorUserID: user.ID, EventType: "ingest_key.rotated", Outcome: "success", TargetType: "ingest", TargetID: "default", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent(), Metadata: map[string]any{"source": "setup"}}
+		if err := h.settings.SetIngestWithAudit(c.Request().Context(), settings.Ingest{TokenHash: ingestHash}, h.audit, ingestEvent); err != nil {
 			slog.Error("auth: setup persist ingest token failed", "err", err)
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist ingest token")
 		}
@@ -147,10 +167,17 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 
 	slog.Info("auth: first admin setup completed", "email", email)
 	h.setup.Clear()
+	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(200, resp)
 }
 
 func (h *AuthHandler) Start(c *echo.Context) error {
+	if strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)) != "local" {
+		return echo.NewHTTPError(http.StatusNotFound, "local login is disabled")
+	}
+	if !h.startLimiter.Allow(c.RealIP()) {
+		return rateLimited(c, 15*time.Minute)
+	}
 	var req struct {
 		Email string `json:"email"`
 	}
@@ -162,10 +189,13 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	user, err := h.users.GetByEmail(email)
-	if err != nil || !user.Active {
-		jitter()
-		return c.JSON(200, map[string]bool{"code_sent": true})
+	recent, err := h.codes.RecentCount(email, time.Now().Add(-15*time.Minute))
+	if err != nil {
+		slog.Error("auth: check email cooldown", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
+	}
+	if recent >= 3 {
+		return rateLimited(c, 15*time.Minute)
 	}
 
 	code, err := h.codes.Create(email)
@@ -173,15 +203,27 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 		slog.Error("auth: create verification code", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create verification code")
 	}
+	h.recordAudit(c, auth.AuditEvent{EventType: "login.requested", Outcome: "accepted", TargetType: "email"})
+	user, userErr := h.users.GetByEmail(email)
+	if userErr != nil && !errors.Is(userErr, auth.ErrUserNotFound) {
+		slog.Error("auth: login user lookup failed", "err", userErr)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
+	}
+	if errors.Is(userErr, auth.ErrUserNotFound) || !user.Active {
+		jitter()
+		return c.JSON(200, map[string]bool{"code_sent": true})
+	}
 	if err := auth.SendCode(h.smtp, email, code); err != nil {
 		slog.Error("auth: send verification email failed", "email", email, "err", err)
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "email delivery unavailable")
 	}
-
 	return c.JSON(200, map[string]bool{"code_sent": true})
 }
 
 func (h *AuthHandler) Verify(c *echo.Context) error {
+	if strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)) != "local" {
+		return echo.NewHTTPError(http.StatusNotFound, "local login is disabled")
+	}
 	var req struct {
 		Email string `json:"email"`
 		Code  string `json:"code"`
@@ -190,62 +232,50 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "email and code are required")
 	}
 
+	if !h.verifyIPLimiter.Allow(c.RealIP()) {
+		return rateLimited(c, 15*time.Minute)
+	}
 	email, err := auth.NormalizeEmail(req.Email)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
+	if !h.verifyAccountLimiter.Allow(email) {
+		return rateLimited(c, 15*time.Minute)
+	}
 	ok, err := h.codes.Verify(email, req.Code)
 	if err != nil {
 		slog.Error("auth: verify code", "err", err)
-		jitter()
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired code")
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to verify code")
 	}
 	if !ok {
+		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "invalid_credentials"}})
 		jitter()
 		return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired code")
 	}
 
 	user, err := h.users.GetByEmail(email)
-	if err != nil || !user.Active {
+	if err != nil && !errors.Is(err, auth.ErrUserNotFound) {
+		slog.Error("auth: verified user lookup failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
+	}
+	if errors.Is(err, auth.ErrUserNotFound) || !user.Active {
+		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "inactive_or_missing"}})
 		jitter()
 		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or inactive")
 	}
 
-	accessToken, err := h.issueTokens(c, user)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
+	if err := h.establishSession(c, user); err != nil {
+		slog.Error("auth: verified session establishment failed", "user_id", user.ID, "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
-	return c.JSON(200, map[string]string{"access_token": accessToken})
+	h.recordAudit(c, auth.AuditEvent{ActorUserID: user.ID, EventType: "login.succeeded", Outcome: "success", TargetType: "user", TargetID: user.ID})
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return c.JSON(200, map[string]string{"status": "authenticated"})
 }
 
-func (h *AuthHandler) Refresh(c *echo.Context) error {
-	cookie, err := c.Cookie("refresh_token")
-	if err != nil || cookie.Value == "" {
-		return echo.NewHTTPError(http.StatusUnauthorized, "no refresh token")
-	}
-
-	claims, err := auth.VerifyRefresh(h.refreshSecret, cookie.Value)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "invalid refresh token")
-	}
-
-	user, err := h.users.GetByID(claims.Subject)
-	if err != nil || !user.Active {
-		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or inactive")
-	}
-
-	// A valid, unexpired refresh token for an active user is accepted as-is.
-	// We intentionally do NOT reject tokens issued before the user's most recent
-	// login (the old sessionRevoked/LoggedInAt check) — that enforced a single
-	// active session per user and logged people out on a second tab/device or
-	// after a redeploy. The monk server keeps last-login purely for analytics
-	// and never enforces it; fanout now matches. Concurrent sessions coexist;
-	// the tradeoff is no server-side revocation (see Logout).
-	accessToken, err := h.issueTokens(c, user)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create token")
-	}
-	return c.JSON(200, map[string]string{"access_token": accessToken})
+func rateLimited(c *echo.Context, retryAfter time.Duration) error {
+	c.Response().Header().Set("Retry-After", fmt.Sprintf("%d", int(retryAfter.Seconds())))
+	return echo.NewHTTPError(http.StatusTooManyRequests, "too many requests")
 }
 
 func (h *AuthHandler) Me(c *echo.Context) error {
@@ -257,64 +287,35 @@ func (h *AuthHandler) Me(c *echo.Context) error {
 }
 
 func (h *AuthHandler) Logout(c *echo.Context) error {
-	// Clearing the cookie is the whole of logout. Refresh tokens are stateless
-	// (signature + expiry only), matching the monk server's model — there is no
-	// server-side revocation list, so a token can't be invalidated before its
-	// TTL. This is deliberate: it's the cost of not evicting concurrent sessions
-	// (see Refresh). A copy of the refresh token kept outside the browser stays
-	// valid until it expires; add a per-session denylist if that's unacceptable.
-	h.clearRefreshCookie(c)
+	if err := h.sessions.Destroy(c.Request().Context()); err != nil {
+		slog.Error("auth: logout session destroy failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to log out")
+	}
+	user := GetCurrentUser(c)
+	event := auth.AuditEvent{EventType: "logout", Outcome: "success"}
+	if user != nil {
+		event.ActorUserID = user.ID
+		event.TargetType = "user"
+		event.TargetID = user.ID
+	}
+	h.recordAudit(c, event)
 	return c.JSON(200, map[string]bool{"ok": true})
 }
 
-func (h *AuthHandler) issueTokens(c *echo.Context, user auth.User) (string, error) {
+func (h *AuthHandler) recordAudit(c *echo.Context, event auth.AuditEvent) {
+	event.RemoteIP = c.RealIP()
+	event.UserAgent = c.Request().UserAgent()
+	ctx, cancel := auth.DetachedWriteContext(c.Request().Context())
+	defer cancel()
+	if err := h.audit.Record(ctx, event); err != nil {
+		slog.Error("authentication audit write failed", "event", event.EventType, "err", err)
+	}
+}
+
+func (h *AuthHandler) establishSession(c *echo.Context, user auth.User) error {
 	issuedAt := time.Now().UTC()
-	refreshToken, err := auth.SignRefresh(h.refreshSecret, user.ID, issuedAt)
-	if err != nil {
-		return "", err
-	}
-	accessToken, err := auth.SignAccess(h.jwtSecret, user.ID)
-	if err != nil {
-		return "", err
-	}
 	if err := h.users.TouchLoginAt(user.ID, issuedAt); err != nil {
-		return "", err
+		return err
 	}
-	h.setRefreshCookie(c, refreshToken, issuedAt.Add(auth.RefreshTTL))
-	return accessToken, nil
-}
-
-func (h *AuthHandler) setRefreshCookie(c *echo.Context, value string, expiresAt time.Time) {
-	c.SetCookie(&http.Cookie{
-		Name:     "refresh_token",
-		Value:    value,
-		Path:     "/api/auth/",
-		HttpOnly: true,
-		Secure:   isSecureRequest(c),
-		// Lax permits the top-level browser navigation used by OAuth MCP clients
-		// while still withholding the cookie from cross-site subrequests and POSTs.
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(time.Until(expiresAt).Seconds()),
-		Expires:  expiresAt,
-	})
-}
-
-func (h *AuthHandler) clearRefreshCookie(c *echo.Context) {
-	c.SetCookie(&http.Cookie{
-		Name:     "refresh_token",
-		Value:    "",
-		Path:     "/api/auth/",
-		HttpOnly: true,
-		Secure:   isSecureRequest(c),
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   -1,
-		Expires:  time.Unix(0, 0),
-	})
-}
-
-func isSecureRequest(c *echo.Context) bool {
-	if c.Request().TLS != nil {
-		return true
-	}
-	return strings.EqualFold(c.Request().Header.Get("X-Forwarded-Proto"), "https")
+	return h.sessions.EstablishAuthenticatedSession(c.Request().Context(), user)
 }

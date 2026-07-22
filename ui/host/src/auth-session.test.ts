@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizedFetch, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { authorizedFetch, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -59,102 +59,58 @@ describe("authorizedFetch", () => {
     vi.unstubAllGlobals();
   });
 
-  function requestsTo(url: string) {
-    return fetchMock.mock.calls.filter(([input]) => String(input) === url);
-  }
-
-  it("passes non-401 responses through with the stored bearer token", async () => {
+  it("uses same-origin credentials and the browser-mutation header", async () => {
     fetchMock.mockResolvedValueOnce(json({ ok: true }));
     const response = await authorizedFetch("/api/dashboards");
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
-    expect(headers.get("Authorization")).toBe("Bearer stale-token");
+    expect(headers.get("Authorization")).toBeNull();
+    expect(headers.get("X-Fanout-Request")).toBe("1");
+    expect(fetchMock.mock.calls[0][1]?.credentials).toBe("same-origin");
   });
 
-  it("refreshes once and retries after a 401", async () => {
-    fetchMock.mockImplementation(async (input) => {
-      if (String(input) === "/api/auth/refresh") return json({ access_token: "fresh-token" });
-      return requestsTo("/api/data").length === 1 ? new Response("", { status: 401 }) : json({ ok: true });
-    });
-    const response = await authorizedFetch("/api/data");
-    expect(response.status).toBe(200);
-    expect(requestsTo("/api/auth/refresh")).toHaveLength(1);
-    expect(requestsTo("/api/data")).toHaveLength(2);
-    const retryHeaders = new Headers(requestsTo("/api/data")[1][1]?.headers);
-    expect(retryHeaders.get("Authorization")).toBe("Bearer fresh-token");
-    expect(localStorage.getItem(tokenKey)).toBe("fresh-token");
-  });
-
-  it("shares a single refresh between concurrent 401 callers", async () => {
-    let releaseRefresh!: (response: Response) => void;
-    const pendingRefresh = new Promise<Response>((resolve) => { releaseRefresh = resolve; });
-    const firstAttempts = new Set<string>();
-    fetchMock.mockImplementation(async (input) => {
-      const url = String(input);
-      if (url === "/api/auth/refresh") return pendingRefresh;
-      if (!firstAttempts.has(url)) { firstAttempts.add(url); return new Response("", { status: 401 }); }
-      return json({ ok: true });
-    });
-    const inflight = Promise.all([authorizedFetch("/api/a"), authorizedFetch("/api/b")]);
-    await vi.waitFor(() => expect(requestsTo("/api/auth/refresh")).toHaveLength(1));
-    releaseRefresh(json({ access_token: "fresh-token" }));
-    const [a, b] = await inflight;
-    expect(a.status).toBe(200);
-    expect(b.status).toBe(200);
-    expect(requestsTo("/api/auth/refresh")).toHaveLength(1);
-  });
-
-  it("clears the session and returns the 401 when refresh is definitively rejected", async () => {
+  it("clears legacy state and announces a rejected session without retrying", async () => {
     const unauthorized = vi.fn();
     window.addEventListener(unauthorizedEvent, unauthorized);
-    fetchMock.mockImplementation(async (input) => {
-      if (String(input) === "/api/auth/refresh") return new Response("", { status: 401 });
-      return new Response("", { status: 401 });
-    });
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
     const response = await authorizedFetch("/api/data");
     expect(response.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem(tokenKey)).toBeNull();
     expect(unauthorized).toHaveBeenCalledTimes(1);
     window.removeEventListener(unauthorizedEvent, unauthorized);
   });
 
-  it("keeps the session when refresh fails transiently (5xx)", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it("surfaces authorization errors without announcing logout", async () => {
     const unauthorized = vi.fn();
     window.addEventListener(unauthorizedEvent, unauthorized);
-    fetchMock.mockImplementation(async (input) => {
-      if (String(input) === "/api/auth/refresh") return new Response("", { status: 500 });
-      return new Response("", { status: 401 });
-    });
-    const response = await authorizedFetch("/api/data");
-    expect(response.status).toBe(401);
-    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
-    expect(unauthorized).not.toHaveBeenCalled();
-    expect(consoleError).toHaveBeenCalled();
-    window.removeEventListener(unauthorizedEvent, unauthorized);
-    consoleError.mockRestore();
-  });
-
-  it("keeps the session when refresh fails with a network error", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    fetchMock.mockImplementation(async (input) => {
-      if (String(input) === "/api/auth/refresh") throw new TypeError("Failed to fetch");
-      return new Response("", { status: 401 });
-    });
-    const response = await authorizedFetch("/api/data");
-    expect(response.status).toBe(401);
-    expect(localStorage.getItem(tokenKey)).toBe("stale-token");
-    expect(consoleError).toHaveBeenCalled();
-    consoleError.mockRestore();
-  });
-
-  it("does not attempt refresh on non-401 responses (403/503)", async () => {
-    fetchMock.mockResolvedValueOnce(new Response("", { status: 403 }));
-    expect((await authorizedFetch("/api/data")).status).toBe(403);
+    fetchMock.mockResolvedValueOnce(json({ message: "insufficient permissions" }, 403));
+    await expect(authorizedFetch("/api/data")).rejects.toThrow("insufficient permissions");
     fetchMock.mockResolvedValueOnce(new Response("", { status: 503 }));
     expect((await authorizedFetch("/api/data")).status).toBe(503);
-    expect(requestsTo("/api/auth/refresh")).toHaveLength(0);
+    expect(unauthorized).not.toHaveBeenCalled();
+    window.removeEventListener(unauthorizedEvent, unauthorized);
+  });
+
+  it("treats an already-missing server session as a successful logout", async () => {
+    const unauthorized = vi.fn();
+    window.addEventListener(unauthorizedEvent, unauthorized);
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 401 }));
+    await expect(logout()).resolves.toBeUndefined();
+    expect(localStorage.getItem(tokenKey)).toBeNull();
+    expect(unauthorized).toHaveBeenCalledTimes(1);
+    expect(window.location.pathname).toBe("/");
+    window.removeEventListener(unauthorizedEvent, unauthorized);
+  });
+
+  it("keeps local state when server-side logout fails", async () => {
+    const unauthorized = vi.fn();
+    window.addEventListener(unauthorizedEvent, unauthorized);
+    fetchMock.mockResolvedValueOnce(new Response("", { status: 500 }));
+    await expect(logout()).rejects.toThrow("Sign-out failed — your session is still active.");
     expect(localStorage.getItem(tokenKey)).toBe("stale-token");
+    expect(unauthorized).not.toHaveBeenCalled();
+    window.removeEventListener(unauthorizedEvent, unauthorized);
   });
 });
