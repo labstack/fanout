@@ -7,7 +7,7 @@ import { createContext, FormEvent, lazy, Suspense, useContext, useEffect, useMem
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import AuthGate, { authorizedFetch, logout } from "./auth";
-import { BrandMark } from "./brand";
+import { BrandLockup } from "./brand";
 import type { MCPAppContent } from "./mcp-app-frame";
 import { createID } from "./id";
 
@@ -110,7 +110,7 @@ function Chat() {
   return <FanoutAppContext.Provider value={{ messages, ready, running, input, setInput, error, bottomRef, inputRef, send, submit, openChat }}>
     <AppShell header={{ height: 56 }} footer={{ height: 42 }} padding={0}>
       <AppShell.Header><Group h="100%" px={{ base: "sm", sm: "lg" }} justify="space-between" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap"><BrandMark size="small" /><Box><Text fw={700} size="sm" lh={1.1}>Fanout</Text><Text c="dimmed" size="xs" visibleFrom="sm">Operations intelligence</Text></Box></Group>
+        <BrandLockup size="small" />
         <Group gap="xs" wrap="nowrap">
           <Group gap={6} mr={4} visibleFrom="md"><Box w={7} h={7} bg="teal.6" style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs" fw={600}>Live</Text></Group>
           <Button variant="subtle" color="gray" size="compact-sm" leftSection={isChat ? <Layout size={16} weight="bold" /> : <ChatCircleText size={16} weight="bold" />} onClick={() => void navigate({ to: isChat ? "/dashboards" : "/" })}>{isChat ? "Dashboard" : "Chat"}</Button>
@@ -153,7 +153,7 @@ export function ChatPage() {
 function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   const suggestions = ["Summarize system health for the last hour", "Find the source of elevated errors", "Map the current service dependencies"];
   return <Stack align="center" gap="lg" maw={780} mx="auto" mb={56} ta="center">
-    <BrandMark size="large" />
+    <BrandLockup size="large" />
     <Text c="teal" fw={700} size="xs" tt="uppercase" lts="0.14em">Your system, understood</Text>
     <Title order={1} fz={{ base: 40, sm: 56 }} lh={1.05} lts="-0.045em">See what changed.<br />Know what to do next.</Title>
     <Text c="dimmed" maw={620}>Ask about service health, latency, errors, or dependencies. Fanout turns live signals into clear answers and focused views.</Text>
