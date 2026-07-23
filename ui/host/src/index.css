@@ -17,7 +17,7 @@ body,
 
 .chat-composer-field:focus-within {
   border-color: var(--mantine-primary-color-filled);
-  box-shadow: 0 0 0 2px var(--mantine-color-teal-light);
+  box-shadow: 0 0 0 2px var(--mantine-primary-color-light);
 }
 
 .react-grid-item.react-grid-placeholder {

@@ -11,6 +11,11 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const (
+	mcpUIExtension = "io.modelcontextprotocol/ui"
+	mcpAppMIME     = "text/html;profile=mcp-app"
+)
+
 type ToolExecution struct {
 	Content        string
 	Structured     any
@@ -31,7 +36,11 @@ func NewToolRegistry(ctx context.Context, server *mcp.Server) (*ToolRegistry, er
 	if err != nil {
 		return nil, fmt.Errorf("connect internal MCP server: %w", err)
 	}
-	client := mcp.NewClient(&mcp.Implementation{Name: "fanout-agent", Version: "1"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "fanout-agent", Version: "1"}, &mcp.ClientOptions{
+		Capabilities: &mcp.ClientCapabilities{Extensions: map[string]any{
+			mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
+		}},
+	})
 	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
 		serverSession.Close()

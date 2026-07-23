@@ -101,11 +101,11 @@ func filterMCPAppToolMetadata(next mcp.MethodHandler) mcp.MethodHandler {
 		filtered := *listed
 		filtered.Tools = make([]*mcp.Tool, 0, len(listed.Tools))
 		for _, tool := range listed.Tools {
-			copy := *tool
-			copy.Meta = maps.Clone(tool.Meta)
-			delete(copy.Meta, "ui")
-			delete(copy.Meta, "ui/resourceUri")
-			filtered.Tools = append(filtered.Tools, &copy)
+			cloned := *tool
+			cloned.Meta = maps.Clone(tool.Meta)
+			delete(cloned.Meta, "ui")
+			delete(cloned.Meta, "ui/resourceUri")
+			filtered.Tools = append(filtered.Tools, &cloned)
 		}
 		return &filtered, nil
 	}

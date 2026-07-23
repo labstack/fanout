@@ -8,19 +8,19 @@ import { authorizedFetch } from "./auth";
 
 const mcpAppMIME = "text/html;profile=mcp-app";
 const mcpUIExtension = "io.modelcontextprotocol/ui";
+const maxConnectionAcquireAttempts = 3;
+const maxReconnectAttempts = 5;
+const maxAppHeight = 2000;
 
 const appMinimumHeights: Record<string, number> = {
   observability_overview: 620,
-  overview: 620,
   service_topology: 760,
-  topology: 760,
   service_performance: 700,
-  performance: 700,
   trace_detail: 720,
-  trace: 720,
   search_logs: 720,
-  logs: 720,
 };
+
+class InvalidMCPAppResourceError extends Error {}
 
 export type MCPAppContent = {
   resourceUri: string;
@@ -70,26 +70,31 @@ async function createBrowserMCPConnection(): Promise<BrowserMCPConnection> {
 }
 
 async function acquireBrowserMCPConnection(): Promise<BrowserMCPConnection> {
-  if (!sharedConnectionPromise) {
-    const pending = createBrowserMCPConnection();
-    sharedConnectionPromise = pending;
-    pending.then((connection) => {
-      if (sharedConnectionPromise === pending && !connection.closed) sharedConnection = connection;
-    }).catch(() => {
+  for (let attempt = 0; attempt < maxConnectionAcquireAttempts; attempt += 1) {
+    if (!sharedConnectionPromise) {
+      const created = createBrowserMCPConnection();
+      sharedConnectionPromise = created;
+      created.then((connection) => {
+        if (sharedConnectionPromise === created && !connection.closed) sharedConnection = connection;
+      }).catch(() => {
+        if (sharedConnectionPromise === created) sharedConnectionPromise = null;
+      });
+    }
+    const pending = sharedConnectionPromise;
+    if (!pending) continue;
+    const connection = await pending;
+    if (connection.closed) {
       if (sharedConnectionPromise === pending) sharedConnectionPromise = null;
-    });
+      continue;
+    }
+    if (connection.closeTimer) {
+      clearTimeout(connection.closeTimer);
+      connection.closeTimer = undefined;
+    }
+    connection.references += 1;
+    return connection;
   }
-  const connection = await sharedConnectionPromise;
-  if (connection.closed) {
-    if (sharedConnectionPromise) sharedConnectionPromise = null;
-    return acquireBrowserMCPConnection();
-  }
-  if (connection.closeTimer) {
-    clearTimeout(connection.closeTimer);
-    connection.closeTimer = undefined;
-  }
-  connection.references += 1;
-  return connection;
+  throw new Error("MCP connection closed during setup");
 }
 
 function invalidateBrowserMCPConnection(connection: BrowserMCPConnection, closeClient: boolean) {
@@ -137,7 +142,7 @@ function cspSources(value: unknown, schemes: string[]): string[] {
   });
 }
 
-function mcpAppCSP(meta: unknown): string {
+export function mcpAppCSP(meta: unknown): string {
   const csp = record(record(record(meta)?.ui)?.csp) as ResourceCSP | undefined;
   const connect = cspSources(csp?.connectDomains, ["http", "https", "ws", "wss"]);
   const resources = cspSources(csp?.resourceDomains, ["http", "https"]);
@@ -180,13 +185,24 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
   const [height, setHeight] = useState(minimumHeight);
   const [error, setError] = useState("");
   const [connectionGeneration, setConnectionGeneration] = useState(0);
+  const reconnectAttemptRef = useRef(0);
+
+  useEffect(() => { reconnectAttemptRef.current = 0; }, [content.resourceUri]);
 
   useEffect(() => {
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setHTML("");
     setError("");
-    const reconnect = () => setConnectionGeneration((generation) => generation + 1);
+    const scheduleReconnect = () => {
+      const attempt = reconnectAttemptRef.current + 1;
+      if (attempt > maxReconnectAttempts) return;
+      reconnectAttemptRef.current = attempt;
+      const delay = attempt === 1 ? 0 : Math.min(750 * 2 ** (attempt - 2), 6000);
+      if (delay === 0) setConnectionGeneration((generation) => generation + 1);
+      else retryTimer = setTimeout(() => setConnectionGeneration((generation) => generation + 1), delay);
+    };
+    const reconnect = () => scheduleReconnect();
     async function load() {
       try {
         const connection = await acquireBrowserMCPConnection();
@@ -199,20 +215,20 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
         clientRef.current = connection.client;
         const resource = await connection.client.readResource({ uri: content.resourceUri });
         const first = resource.contents[0];
-        if (!first || !("text" in first) || !first.text) throw new Error("MCP App resource has no HTML content");
-        if (first.uri !== content.resourceUri) throw new Error("MCP App resource URI does not match the requested URI");
-        if (first.mimeType !== mcpAppMIME) throw new Error("MCP App resource has an unsupported MIME type");
-        if (!disposed) setHTML(enforceMCPAppCSP(first.text, first._meta));
+        if (!first || !("text" in first) || !first.text) throw new InvalidMCPAppResourceError("MCP App resource has no HTML content");
+        if (first.uri !== content.resourceUri) throw new InvalidMCPAppResourceError("MCP App resource URI does not match the requested URI");
+        if (first.mimeType !== mcpAppMIME) throw new InvalidMCPAppResourceError("MCP App resource has an unsupported MIME type");
+        if (!disposed) {
+          reconnectAttemptRef.current = 0;
+          setHTML(enforceMCPAppCSP(first.text, first._meta));
+        }
       } catch (cause) {
         console.error("MCP app resource load failed", cause);
         if (!disposed) {
           setError("This view could not be loaded. Please try again.");
-          // Once a live connection has died, keep retrying through the short
-          // outage window of a server restart. Initial loads and invalid
-          // resource responses still fail closed without an automatic loop.
-          if (connectionGeneration > 0) {
-            retryTimer = setTimeout(() => setConnectionGeneration((generation) => generation + 1), 1500);
-          }
+          // Retry only a bounded series that began with a live connection
+          // dying. Invalid resources and initial-load failures fail closed.
+          if (reconnectAttemptRef.current > 0 && !(cause instanceof InvalidMCPAppResourceError)) scheduleReconnect();
         }
       }
     }
@@ -250,7 +266,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
       );
       bridgeRef.current = bridge;
       bridge.onsizechange = ({ height: requested }) => {
-        if (requested) setHeight(Math.max(minimumHeight, Math.ceil(requested) + 32));
+        if (requested) setHeight(Math.min(maxAppHeight, Math.max(minimumHeight, Math.ceil(requested) + 32)));
       };
       bridge.onmessage = async ({ content: blocks }) => {
         const text = userText(blocks as Array<Record<string, unknown>>);
@@ -275,5 +291,5 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
 
   if (error) return <Alert color="red" m="md">{error}</Alert>;
   if (!html) return <Center mih={180} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Preparing view…</Text></Center>;
-  return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="no" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height, transition: "height 200ms ease" }} onLoad={() => void connectBridge()} />;
+  return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height, transition: "height 200ms ease" }} onLoad={() => void connectBridge()} />;
 }
