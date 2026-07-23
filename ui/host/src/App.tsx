@@ -138,7 +138,7 @@ function Composer() {
 export function ChatPage() {
   const { messages, ready, running, error, bottomRef, send } = useFanoutApp();
   const visibleMessages = messages.filter((message) => message.role !== "tool");
-  return <Container size={900} px={{ base: "sm", sm: "lg" }} pt={{ base: 36, sm: 64 }} pb={190}>
+  return <Container size={1440} px={{ base: "md", sm: "xl", lg: 72 }} pt={{ base: 36, sm: 64 }} pb={190}>
     {!ready && <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading conversation</Text></Center>}
     {visibleMessages.length === 0 && ready && <Welcome onSelect={send} />}
     <Stack gap="xl" aria-live="polite">
