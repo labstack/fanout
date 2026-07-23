@@ -131,7 +131,6 @@ function Composer() {
       <Paper className="chat-composer-field" radius={10} px="md" py={6} flex={1}><Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is analyzing…" : "Ask about health, errors, or latency…"} disabled={!ready || running} autosize minRows={1} maxRows={6} variant="unstyled" /></Paper>
       <ActionIcon type="submit" variant="filled" size={44} radius={10} disabled={!input.trim() || !ready || running} aria-label="Send message"><PaperPlaneTilt size={18} weight="fill" /></ActionIcon>
     </Group></Box>
-    <Text ta="center" c="dimmed" size="xs" mt={6} visibleFrom="sm">Enter to send · Shift + Enter for a new line</Text>
   </Box>;
 }
 
