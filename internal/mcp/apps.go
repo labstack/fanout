@@ -28,7 +28,9 @@ func (s *Server) registerAppResources() {
 }
 
 func (s *Server) addAppResource(name, uri, path string) {
+	meta := mcp.Meta{"ui": map[string]any{"csp": map[string]any{}}}
 	s.mcp.AddResource(&mcp.Resource{
+		Meta:        meta,
 		Name:        name,
 		Title:       name,
 		URI:         uri,
@@ -40,7 +42,7 @@ func (s *Server) addAppResource(name, uri, path string) {
 			return nil, err
 		}
 		return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{
-			URI: uri, MIMEType: mcpAppMIME, Text: string(html),
+			URI: uri, MIMEType: mcpAppMIME, Text: string(html), Meta: meta,
 		}}}, nil
 	})
 }

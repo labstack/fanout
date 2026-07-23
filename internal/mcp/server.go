@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"time"
@@ -11,6 +12,8 @@ import (
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
+
+const mcpUIExtension = "io.modelcontextprotocol/ui"
 
 type Observability interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
@@ -63,7 +66,14 @@ func New(queries Observability, dashboards *dashboard.Service, version string) *
 			Name:    "fanout",
 			Title:   "Fanout Observability",
 			Version: version,
-		}, nil),
+		}, &mcp.ServerOptions{Capabilities: &mcp.ServerCapabilities{
+			Extensions: map[string]any{
+				mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
+			},
+			// Fanout's tool and resource sets are fixed for the process lifetime.
+			Tools:     &mcp.ToolCapabilities{},
+			Resources: &mcp.ResourceCapabilities{},
+		}}),
 		queries:    queries,
 		dashboards: dashboards,
 		now:        time.Now,
@@ -71,7 +81,64 @@ func New(queries Observability, dashboards *dashboard.Service, version string) *
 	s.registerTools()
 	s.registerDashboardTools()
 	s.registerAppResources()
+	s.mcp.AddReceivingMiddleware(filterMCPAppToolMetadata)
 	return s
+}
+
+// filterMCPAppToolMetadata preserves the same tools and text/structured
+// fallbacks for every MCP client, but advertises their optional UI only to
+// clients that negotiated support for the MCP Apps HTML profile.
+func filterMCPAppToolMetadata(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		result, err := next(ctx, method, req)
+		if err != nil || method != "tools/list" || clientSupportsMCPApps(req) {
+			return result, err
+		}
+		listed, ok := result.(*mcp.ListToolsResult)
+		if !ok {
+			return result, err
+		}
+		filtered := *listed
+		filtered.Tools = make([]*mcp.Tool, 0, len(listed.Tools))
+		for _, tool := range listed.Tools {
+			copy := *tool
+			copy.Meta = maps.Clone(tool.Meta)
+			delete(copy.Meta, "ui")
+			delete(copy.Meta, "ui/resourceUri")
+			filtered.Tools = append(filtered.Tools, &copy)
+		}
+		return &filtered, nil
+	}
+}
+
+func clientSupportsMCPApps(req mcp.Request) bool {
+	session, ok := req.GetSession().(*mcp.ServerSession)
+	if !ok {
+		return false
+	}
+	params := session.InitializeParams()
+	if params == nil || params.Capabilities == nil {
+		return false
+	}
+	settings, ok := params.Capabilities.Extensions[mcpUIExtension].(map[string]any)
+	if !ok {
+		return false
+	}
+	switch mimeTypes := settings["mimeTypes"].(type) {
+	case []any:
+		for _, value := range mimeTypes {
+			if value == mcpAppMIME {
+				return true
+			}
+		}
+	case []string:
+		for _, value := range mimeTypes {
+			if value == mcpAppMIME {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *Server) MCP() *mcp.Server { return s.mcp }

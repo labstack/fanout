@@ -108,7 +108,6 @@ func ProtectBrowserMCP(sessions *appauth.BrowserSessions, next http.Handler) ech
 		}
 		ctx := context.WithValue(c.Request().Context(), browserMCPUserContextKey{}, *user)
 		request := c.Request().Clone(ctx)
-		request.Header = request.Header.Clone()
 		request.Header.Set("Authorization", "Bearer "+browserMCPSessionBearer)
 		protected.ServeHTTP(c.Response(), request)
 		return nil

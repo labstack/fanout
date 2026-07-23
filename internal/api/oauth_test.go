@@ -23,6 +23,10 @@ import (
 const testMCPResource = "https://demo.fanout.test/mcp"
 
 func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
+	return newOAuthTestServerWithConfig(t, env.Config{})
+}
+
+func newOAuthTestServerWithConfig(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	t.Helper()
 	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {
@@ -37,7 +41,7 @@ func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Browse
 		t.Fatalf("NewMCPAuthorization: %v", err)
 	}
 	e := echo.New()
-	RegisterAuthMiddleware(e, users, sessions, audit, env.Config{})
+	RegisterAuthMiddleware(e, users, sessions, audit, cfg)
 	// Test-only login hook: it still creates the cookie through the production
 	// BrowserSessions API and middleware commit path.
 	e.POST("/api/auth/setup", func(c *echo.Context) error {
@@ -194,6 +198,14 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 	}
 
 	cookie := oauthCookieForUser(t, e, user)
+	csrfRequest := httptest.NewRequest(http.MethodPost, "/api/mcp", nil)
+	csrfRequest.AddCookie(cookie)
+	csrfResponse := httptest.NewRecorder()
+	e.ServeHTTP(csrfResponse, csrfRequest)
+	if csrfResponse.Code != http.StatusForbidden {
+		t.Fatalf("browser MCP without CSRF proof = %d %s, want 403", csrfResponse.Code, csrfResponse.Body.String())
+	}
+
 	browser := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{
 		"Authorization":    "Bearer attacker-controlled",
 		"X-Fanout-Request": "1",
@@ -212,6 +224,12 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 	remoteWithSessionOnly := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"X-Fanout-Request": "1"}, cookie)
 	if remoteWithSessionOnly.Code != http.StatusUnauthorized {
 		t.Fatalf("remote MCP accepted browser session: %d", remoteWithSessionOnly.Code)
+	}
+
+	public, _, _ := newOAuthTestServerWithConfig(t, env.Config{PublicRead: true})
+	publicBrowserMCP := serve(t, public, http.MethodGet, "/api/mcp", "", nil)
+	if publicBrowserMCP.Code != http.StatusUnauthorized {
+		t.Fatalf("PUBLIC_READ viewer reached browser MCP: %d %s", publicBrowserMCP.Code, publicBrowserMCP.Body.String())
 	}
 }
 
