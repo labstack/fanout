@@ -13,6 +13,60 @@ export type MCPAppContent = {
   isError?: boolean;
 };
 
+type BrowserMCPConnection = {
+  client: Client;
+  transport: StreamableHTTPClientTransport;
+  references: number;
+  closeTimer?: ReturnType<typeof setTimeout>;
+};
+
+let sharedConnection: BrowserMCPConnection | null = null;
+let sharedConnectionPromise: Promise<BrowserMCPConnection> | null = null;
+
+async function createBrowserMCPConnection(): Promise<BrowserMCPConnection> {
+  const transport = new StreamableHTTPClientTransport(new URL("/api/mcp", location.origin), {
+    fetch: (url, init) => authorizedFetch(url, init),
+  });
+  const client = new Client({ name: "fanout-browser", version: "0.2.0" });
+  try {
+    await client.connect(transport);
+    return { client, transport, references: 0 };
+  } catch (cause) {
+    await transport.close().catch(() => undefined);
+    throw cause;
+  }
+}
+
+async function acquireBrowserMCPConnection(): Promise<BrowserMCPConnection> {
+  if (!sharedConnectionPromise) {
+    const pending = createBrowserMCPConnection();
+    sharedConnectionPromise = pending;
+    pending.then((connection) => { sharedConnection = connection; }).catch(() => {
+      if (sharedConnectionPromise === pending) sharedConnectionPromise = null;
+    });
+  }
+  const connection = await sharedConnectionPromise;
+  if (connection.closeTimer) {
+    clearTimeout(connection.closeTimer);
+    connection.closeTimer = undefined;
+  }
+  connection.references += 1;
+  return connection;
+}
+
+function releaseBrowserMCPConnection(connection: BrowserMCPConnection) {
+  connection.references = Math.max(0, connection.references - 1);
+  if (connection.references || connection.closeTimer) return;
+  connection.closeTimer = setTimeout(() => {
+    connection.closeTimer = undefined;
+    if (connection.references || sharedConnection !== connection) return;
+    sharedConnection = null;
+    sharedConnectionPromise = null;
+    void connection.client.close().catch(() => undefined);
+    void connection.transport.close().catch(() => undefined);
+  }, 0);
+}
+
 function userText(blocks: Array<Record<string, unknown>>): string {
   return blocks.filter((block) => block.type === "text").map((block) => String(block.text ?? "")).join("\n");
 }
@@ -20,7 +74,7 @@ function userText(blocks: Array<Record<string, unknown>>): string {
 export default function MCPAppFrame({ content, onMessage }: { content: MCPAppContent; onMessage: (text: string) => Promise<void> }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const clientRef = useRef<Client | null>(null);
-  const transportRef = useRef<StreamableHTTPClientTransport | null>(null);
+  const connectionRef = useRef<BrowserMCPConnection | null>(null);
   const bridgeRef = useRef<AppBridge | null>(null);
   const [html, setHTML] = useState("");
   const [height, setHeight] = useState(360);
@@ -30,14 +84,14 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
     let disposed = false;
     async function load() {
       try {
-        const transport = new StreamableHTTPClientTransport(new URL("/api/mcp", location.origin), {
-          fetch: (url, init) => authorizedFetch(url, init),
-        });
-        const client = new Client({ name: "fanout-browser", version: "0.2.0" });
-        await client.connect(transport);
-        clientRef.current = client;
-        transportRef.current = transport;
-        const resource = await client.readResource({ uri: content.resourceUri });
+        const connection = await acquireBrowserMCPConnection();
+        if (disposed) {
+          releaseBrowserMCPConnection(connection);
+          return;
+        }
+        connectionRef.current = connection;
+        clientRef.current = connection.client;
+        const resource = await connection.client.readResource({ uri: content.resourceUri });
         const first = resource.contents[0];
         if (!first || !("text" in first) || !first.text) throw new Error("MCP App resource has no HTML content");
         if (!disposed) setHTML(first.text);
@@ -49,12 +103,12 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
     void load();
     return () => {
       disposed = true;
-      void bridgeRef.current?.teardownResource({}).catch(() => undefined);
-      void clientRef.current?.close().catch(() => undefined);
-      void transportRef.current?.close().catch(() => undefined);
+      const teardown = bridgeRef.current?.teardownResource({}).catch(() => undefined) ?? Promise.resolve();
+      const connection = connectionRef.current;
+      if (connection) void teardown.finally(() => releaseBrowserMCPConnection(connection));
       bridgeRef.current = null;
       clientRef.current = null;
-      transportRef.current = null;
+      connectionRef.current = null;
     };
   }, [content.resourceUri]);
 
