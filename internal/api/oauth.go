@@ -26,6 +26,10 @@ import (
 
 const mcpReadScope = "fanout:read"
 
+const browserMCPSessionBearer = "fanout-browser-session"
+
+type browserMCPUserContextKey struct{}
+
 var mcpSupportedScopes = []string{mcpReadScope, dashboard.OAuthScope}
 
 type MCPAuthorization struct {
@@ -69,6 +73,46 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 		ResourceMetadataURL: h.metadataURL,
 		Scopes:              []string{mcpReadScope},
 	})(next)
+}
+
+// ProtectBrowserMCP adapts an already-authenticated browser session to the
+// standard MCP transport identity consumed by the SDK. The public /mcp route
+// remains OAuth bearer-only; this adapter is used only by the same-origin
+// /api/mcp route after AuthMiddleware has validated the session and CSRF
+// header.
+func ProtectBrowserMCP(sessions *appauth.BrowserSessions, next http.Handler) echo.HandlerFunc {
+	if sessions == nil || next == nil {
+		panic("api: browser MCP dependencies are required")
+	}
+	protected := mcpgoauth.RequireBearerToken(func(ctx context.Context, raw string, _ *http.Request) (*mcpgoauth.TokenInfo, error) {
+		user, ok := ctx.Value(browserMCPUserContextKey{}).(appauth.User)
+		if raw != browserMCPSessionBearer || !ok || user.ID == "" || user.ID == publicViewerID {
+			return nil, mcpgoauth.ErrInvalidToken
+		}
+		scopes := []string{mcpReadScope}
+		if HasCapability(user, ManageOwnDashboards) {
+			scopes = append(scopes, dashboard.OAuthScope)
+		}
+		return &mcpgoauth.TokenInfo{
+			Scopes:     scopes,
+			Expiration: sessions.Deadline(ctx),
+			UserID:     user.ID,
+			Extra:      map[string]any{"role": user.Role, "credential": "browser_session"},
+		}, nil
+	}, nil)(next)
+
+	return func(c *echo.Context) error {
+		user := GetCurrentUser(c)
+		if user == nil || user.ID == publicViewerID {
+			return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
+		}
+		ctx := context.WithValue(c.Request().Context(), browserMCPUserContextKey{}, *user)
+		request := c.Request().Clone(ctx)
+		request.Header = request.Header.Clone()
+		request.Header.Set("Authorization", "Bearer "+browserMCPSessionBearer)
+		protected.ServeHTTP(c.Response(), request)
+		return nil
+	}
 }
 
 func (h *MCPAuthorization) verifyMCPToken(ctx context.Context, raw string, _ *http.Request) (*mcpgoauth.TokenInfo, error) {

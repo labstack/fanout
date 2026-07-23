@@ -327,7 +327,9 @@ func main() {
 		}
 		mcpAuthorization.Register(e)
 		e.Any("/mcp", echo.WrapHandler(mcpAuthorization.ProtectMCP(mcpServer.HTTPHandler())))
+		e.Any("/api/mcp", api.ProtectBrowserMCP(browserSessions, mcpServer.HTTPHandler()))
 		slog.Info("MCP server enabled", "path", "/mcp", "auth", "oauth", "resource", cfg.MCPPublicURL)
+		slog.Info("browser MCP server enabled", "path", "/api/mcp", "auth", "session")
 	}
 	provider, err := agent.NewProvider(cfg.AIProvider, cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
 	if err != nil {

@@ -289,6 +289,8 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyProtocol}, method == http.MethodPost
 	case path == "/mcp":
 		return routePolicy{kind: routePolicyProtocol}, true
+	case path == "/api/mcp":
+		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, true
 	case path == "/-/metrics":
 		return routePolicy{kind: routePolicyServiceCredential, capability: ReadOperations}, read
 	case strings.HasPrefix(path, "/debug/pprof"):

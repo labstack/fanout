@@ -138,6 +138,7 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodGet, "/-/metrics", routePolicyServiceCredential, ReadOperations},
 		{http.MethodPost, "/oauth/token", routePolicyProtocol, ""},
 		{http.MethodPost, "/mcp", routePolicyProtocol, ""},
+		{http.MethodPost, "/api/mcp", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/assets/app.js", routePolicyPublic, ""},
 	}
 	for _, tc := range tests {

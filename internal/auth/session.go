@@ -370,6 +370,10 @@ func (s *BrowserSessions) AuthVersion(ctx context.Context) int64 {
 	return s.manager.GetInt64(ctx, sessionAuthVersionKey)
 }
 
+func (s *BrowserSessions) Deadline(ctx context.Context) time.Time {
+	return s.manager.Deadline(ctx)
+}
+
 func (s *BrowserSessions) Destroy(ctx context.Context) error {
 	return s.manager.Destroy(ctx)
 }

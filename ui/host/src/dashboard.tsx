@@ -4,13 +4,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import { authorizedFetch } from "./auth";
+import { compactDashboardLayout, nextDashboardRow, type DashboardLayoutItem } from "./dashboard-layout";
 import { createID } from "./id";
 
 const Grid = WidthProvider(Responsive);
 const dashboardKey = "fanout.dashboard-id";
 type WidgetType = "overview" | "topology" | "activity" | "assistant" | "performance" | "trace" | "logs";
 type Widget = { id: string; type: WidgetType; title: string; config?: Record<string, unknown>; enabled: boolean };
-type LayoutItem = { i: string; x: number; y: number; w: number; h: number; minW?: number; minH?: number };
+type LayoutItem = DashboardLayoutItem;
 type State = { layout: LayoutItem[]; widgets: Widget[]; filters: { window: string; namespace: string } };
 type DashboardRecord = { id: string; name: string; description: string; is_default: boolean; state: State; updated_at: string };
 type DashboardSummary = { id: string; name: string; description: string; is_default: boolean; widget_count: number; updated_at: string };
@@ -78,8 +79,7 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
       const minimum = widgetMinimumRows[widgetType.get(item.i) ?? "overview"];
       return { ...item, h: Math.max(item.h, minimum), minH: Math.max(item.minH ?? 0, minimum) };
     });
-    const compact = (columns: number) => normalized.map((item) => ({ ...item, x: 0, w: columns }));
-    return { lg: normalized, md: normalized, sm: compact(6), xs: compact(2), xxs: compact(1) };
+    return { lg: normalized, md: normalized, sm: compactDashboardLayout(normalized, 6), xs: compactDashboardLayout(normalized, 2), xxs: compactDashboardLayout(normalized, 1) };
   }, [state.layout, state.widgets]);
 
   function choose(id: string, replace = false) { setSelectedID(id); localStorage.setItem(dashboardKey, id); onDashboardChange?.(id, replace); }
@@ -88,7 +88,7 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
     const id = createID();
     const wide = ["topology", "performance", "trace", "logs"].includes(type);
     const minimumRows = widgetMinimumRows[type];
-    update({ ...state, widgets: [...state.widgets, { id, type, title: widgetTitles[type], enabled: true }], layout: [...state.layout, { i: id, x: 0, y: Infinity, w: wide ? 8 : 4, h: minimumRows, minW: 3, minH: minimumRows }] });
+    update({ ...state, widgets: [...state.widgets, { id, type, title: widgetTitles[type], enabled: true }], layout: [...state.layout, { i: id, x: 0, y: nextDashboardRow(state.layout), w: wide ? 8 : 4, h: minimumRows, minW: 3, minH: minimumRows }] });
   }
   function remove(id: string) { update({ ...state, widgets: state.widgets.filter((widget) => widget.id !== id), layout: state.layout.filter((item) => item.i !== id) }); }
 
@@ -120,13 +120,13 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
       </Group>
     </Alert>}
 
-    <Paper withBorder radius="lg" p="lg" mb="lg" role="group" aria-label="Dashboard controls">
+    <Paper withBorder radius="lg" p={{ base: "md", sm: "lg" }} mb="lg" role="group" aria-label="Dashboard controls">
       <Flex align={{ base: "stretch", md: "flex-end" }} justify="space-between" direction={{ base: "column", md: "row" }} gap="md">
         <Group align="flex-end" gap="md" grow wrap="wrap" w={{ base: "100%", md: "auto" }}>
           <Select label="Window" value={state.filters.window} onChange={(window) => window && update({ ...state, filters: { ...state.filters, window } })} data={[{ value: "15m", label: "15 minutes" }, { value: "1h", label: "1 hour" }, { value: "6h", label: "6 hours" }, { value: "24h", label: "24 hours" }]} w={{ base: "100%", xs: 150 }} />
-          <TextInput label="Namespace" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={() => update(state)} placeholder="All namespaces" w={{ base: "100%", xs: 220 }} />
+          <TextInput label="Namespace" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={(event) => update({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} placeholder="All namespaces" w={{ base: "100%", xs: 220 }} />
         </Group>
-        <Flex wrap="nowrap" justify={{ base: "space-between", md: "flex-end" }} align="center" gap="md" w={{ base: "100%", md: "auto" }}>
+        <Flex wrap={{ base: "wrap", sm: "nowrap" }} justify={{ base: "flex-start", md: "flex-end" }} align="center" gap={{ base: "sm", sm: "md" }} w={{ base: "100%", md: "auto" }}>
           <Group gap="xs" wrap="nowrap"><Indicator color={save.isError ? "red" : save.isPending ? "yellow" : "teal"} processing={save.isPending} size={8} /><Text c="dimmed" size="sm" miw={48}>{save.isPending ? "Saving" : save.isError ? "Failed" : "Saved"}</Text></Group>
           <Divider orientation="vertical" h={28} />
           <Menu shadow="md" position="bottom-end" withinPortal>

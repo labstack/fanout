@@ -30,7 +30,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
     let disposed = false;
     async function load() {
       try {
-        const transport = new StreamableHTTPClientTransport(new URL("/mcp", location.origin), {
+        const transport = new StreamableHTTPClientTransport(new URL("/api/mcp", location.origin), {
           fetch: (url, init) => authorizedFetch(url, init),
         });
         const client = new Client({ name: "fanout-browser", version: "0.2.0" });
