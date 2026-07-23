@@ -1,9 +1,9 @@
 import { BarChart } from "echarts/charts";
-import { ActionIcon, Badge, Group, Paper, ScrollArea, SegmentedControl, Table, Text, TextInput, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Group, Paper, SegmentedControl, Table, Text, TextInput, Tooltip } from "@mantine/core";
 import { ArrowSquareOut, ListMagnifyingGlass, MagnifyingGlass } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, ViewHeader, ViewShell, ViewStatus, chartTheme } from "./components";
+import { EmptyState, MetaFooter, PageControls, ViewHeader, ViewShell, ViewStatus, chartTheme, usePagedItems } from "./components";
 import type { LogEntry, Logs, Result } from "./contracts";
 import { EChart, useECharts } from "./echart";
 import { windowLabel } from "./format";
@@ -29,7 +29,7 @@ function LogsApp() {
         <TextInput aria-label="Filter visible logs" type="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} placeholder="Filter visible logs…" leftSection={<MagnifyingGlass size={15} />} w={{ base: "100%", xs: 250 }} />
       </Group>
       <LogList entries={entries} onTrace={(entry) => askAbout(app, `Investigate trace ${entry.trace_id} related to this ${entry.severity} log from ${entry.service}.`)} />
-      <MetaFooter left={windowLabel(result.provenance.window)} right={`${entries.length} shown`} />
+      <MetaFooter left={windowLabel(result.provenance.window)} right={`${entries.length} matching`} />
     </>}
   </ViewShell>;
 }
@@ -46,11 +46,12 @@ function LogHistogram({ data, dark }: { data: Logs; dark: boolean }) {
 }
 
 function LogList({ entries, onTrace }: { entries: LogEntry[]; onTrace: (entry: LogEntry) => void }) {
+  const logs = usePagedItems(entries, 6);
   if (entries.length === 0) return <EmptyState icon={<MagnifyingGlass size={20} weight="duotone" />} title="No visible matches">Adjust the local severity or text filter.</EmptyState>;
-  return <ScrollArea.Autosize mah={420} type="auto"><Table striped highlightOnHover verticalSpacing="xs" miw={680}>
+  return <><Table.ScrollContainer minWidth={680}><Table striped highlightOnHover verticalSpacing="xs">
     <Table.Thead><Table.Tr><Table.Th>Time</Table.Th><Table.Th>Level</Table.Th><Table.Th>Service</Table.Th><Table.Th>Message</Table.Th><Table.Th /></Table.Tr></Table.Thead>
-    <Table.Tbody>{entries.map((entry, index) => <Table.Tr key={`${entry.time}-${index}`}><Table.Td><Text size="xs" ff="monospace">{new Date(entry.time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</Text></Table.Td><Table.Td><Badge size="sm" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td><Table.Td><Text size="sm" fw={600}>{entry.service}</Text></Table.Td><Table.Td><Text size="sm">{entry.body}</Text></Table.Td><Table.Td>{entry.trace_id && <Tooltip label="Investigate trace"><ActionIcon variant="subtle" aria-label={`Investigate trace ${entry.trace_id}`} onClick={() => onTrace(entry)}><ArrowSquareOut size={15} weight="bold" /></ActionIcon></Tooltip>}</Table.Td></Table.Tr>)}</Table.Tbody>
-  </Table></ScrollArea.Autosize>;
+    <Table.Tbody>{logs.pageItems.map((entry, index) => <Table.Tr key={`${entry.time}-${logs.from + index}`}><Table.Td><Text size="xs" ff="monospace">{new Date(entry.time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}</Text></Table.Td><Table.Td><Badge size="sm" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td><Table.Td><Text size="sm" fw={600}>{entry.service}</Text></Table.Td><Table.Td><Text size="sm" lineClamp={2} title={entry.body}>{entry.body}</Text></Table.Td><Table.Td>{entry.trace_id && <Tooltip label="Investigate trace"><ActionIcon variant="subtle" aria-label={`Investigate trace ${entry.trace_id}`} onClick={() => onTrace(entry)}><ArrowSquareOut size={15} weight="bold" /></ActionIcon></Tooltip>}</Table.Td></Table.Tr>)}</Table.Tbody>
+  </Table></Table.ScrollContainer><PageControls {...logs} onChange={logs.setPage} /></>;
 }
 
 function severityColor(value: string) { const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return "red"; if (severity === "WARN" || severity === "WARNING") return "yellow"; if (severity === "INFO") return "teal"; return "blue"; }

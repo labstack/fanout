@@ -17,6 +17,7 @@ const mcp = vi.hoisted(() => ({
   clients: [] as Array<{ onclose?: () => void; onerror?: (error: Error) => void }>,
   clientOptions: [] as unknown[],
   bridgeClients: [] as unknown[],
+  bridges: [] as Array<{ onsizechange?: (size: { height?: number }) => void }>,
 }));
 
 vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
@@ -44,7 +45,8 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
   AppBridge: class {
     oninitialized?: () => Promise<void>;
     oncalltool?: (params: unknown, extra: { signal: AbortSignal }) => Promise<unknown>;
-    constructor(client: unknown) { mcp.bridgeClients.push(client); }
+    onsizechange?: (size: { height?: number }) => void;
+    constructor(client: unknown) { mcp.bridgeClients.push(client); mcp.bridges.push(this); }
     async connect() { await this.oninitialized?.(); }
     async sendToolInput() {}
     async sendToolResult() {}
@@ -61,6 +63,7 @@ describe("MCPAppFrame", () => {
     mcp.clients.length = 0;
     mcp.clientOptions.length = 0;
     mcp.bridgeClients.length = 0;
+    mcp.bridges.length = 0;
   });
 
   it("shares one MCP transport across concurrent visualization blocks", async () => {
@@ -85,9 +88,14 @@ describe("MCPAppFrame", () => {
     for (const frame of container.querySelectorAll("iframe")) {
       expect(frame.getAttribute("srcdoc")).toContain("Content-Security-Policy");
       expect(frame.getAttribute("srcdoc")).toContain("default-src 'none'");
+      expect(frame.getAttribute("scrolling")).toBe("no");
       await act(async () => frame.dispatchEvent(new Event("load")));
     }
     expect(mcp.bridgeClients).toEqual(resources.map(() => null));
+    const firstFrame = container.querySelector("iframe")!;
+    expect(firstFrame.style.height).toBe("620px");
+    await act(async () => mcp.bridges[0].onsizechange?.({ height: 1080 }));
+    expect(firstFrame.style.height).toBe("1112px");
 
     await act(async () => root.unmount());
     await vi.waitFor(() => expect(mcp.closeClient).toHaveBeenCalledTimes(1));

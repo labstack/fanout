@@ -127,10 +127,10 @@ function Chat() {
 function Composer() {
   const { input, setInput, inputRef, submit, send, ready, running } = useFanoutApp();
   return <Box pos="fixed" bottom={42} left={0} right={0} px={{ base: "xs", sm: "md" }} pb="md" pt="xl" style={{ zIndex: 20, background: "linear-gradient(transparent, var(--mantine-color-body) 45%)" }}>
-    <Paper component="form" onSubmit={submit} withBorder shadow="lg" radius="xl" p={8} pl="md" maw={820} mx="auto"><Group align="flex-end" gap="xs" wrap="nowrap">
-      <Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is analyzing…" : "Ask about health, errors, or latency…"} disabled={!ready || running} autosize minRows={1} maxRows={6} variant="unstyled" flex={1} />
-      <ActionIcon type="submit" size={40} radius="md" disabled={!input.trim() || !ready || running} aria-label="Send message"><PaperPlaneTilt size={19} weight="fill" /></ActionIcon>
-    </Group></Paper>
+    <Box component="form" onSubmit={submit} maw={960} mx="auto"><Group align="flex-end" gap="xs" wrap="nowrap">
+      <Paper className="chat-composer-field" radius={10} px="md" py={6} flex={1}><Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is analyzing…" : "Ask about health, errors, or latency…"} disabled={!ready || running} autosize minRows={1} maxRows={6} variant="unstyled" /></Paper>
+      <ActionIcon type="submit" variant="filled" size={44} radius={10} disabled={!input.trim() || !ready || running} aria-label="Send message"><PaperPlaneTilt size={18} weight="fill" /></ActionIcon>
+    </Group></Box>
     <Text ta="center" c="dimmed" size="xs" mt={6} visibleFrom="sm">Enter to send · Shift + Enter for a new line</Text>
   </Box>;
 }

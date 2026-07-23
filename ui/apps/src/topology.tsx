@@ -3,7 +3,7 @@ import { Button, Paper, Stack, Table, Text } from "@mantine/core";
 import { FlowArrow, MagnifyingGlass, ShareNetwork } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme } from "./components";
+import { EmptyState, MetaFooter, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme, usePagedItems } from "./components";
 import type { Edge, Result, Topology } from "./contracts";
 import { EChart, useECharts } from "./echart";
 import { duration, integer, percent, windowLabel } from "./format";
@@ -72,8 +72,9 @@ function MatrixView({ data, dark }: { data: Topology; dark: boolean }) {
 }
 
 function EdgeList({ edges, onSelect }: { edges: Edge[]; onSelect: (id: string) => void }) {
+  const routes = usePagedItems(edges, 4);
   if (edges.length === 0) return null;
-  return <Table.ScrollContainer minWidth={520}><Table striped highlightOnHover verticalSpacing="sm"><Table.Thead><Table.Tr><Table.Th>Route</Table.Th><Table.Th>Calls</Table.Th><Table.Th>Latency</Table.Th><Table.Th>Errors</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{edges.map((edge) => <Table.Tr key={`${edge.caller}-${edge.callee}-${edge.type}`} tabIndex={0} onClick={() => onSelect(edge.caller)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(edge.caller); }} style={{ cursor: "pointer" }}><Table.Td><Text fw={600} size="sm">{edge.caller} → {edge.callee}</Text></Table.Td><Table.Td>{integer.format(edge.calls)}</Table.Td><Table.Td>{duration(edge.average_ms)}</Table.Td><Table.Td>{percent(edge.error_rate)}</Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer>;
+  return <Paper withBorder radius="md" style={{ overflow: "hidden" }}><Table.ScrollContainer minWidth={520}><Table striped highlightOnHover verticalSpacing="sm"><Table.Thead><Table.Tr><Table.Th>Route</Table.Th><Table.Th>Calls</Table.Th><Table.Th>Latency</Table.Th><Table.Th>Errors</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{routes.pageItems.map((edge) => <Table.Tr key={`${edge.caller}-${edge.callee}-${edge.type}`} tabIndex={0} onClick={() => onSelect(edge.caller)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(edge.caller); }} style={{ cursor: "pointer" }}><Table.Td><Text fw={600} size="sm">{edge.caller} → {edge.callee}</Text></Table.Td><Table.Td>{integer.format(edge.calls)}</Table.Td><Table.Td>{duration(edge.average_ms)}</Table.Td><Table.Td>{percent(edge.error_rate)}</Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer><PageControls {...routes} onChange={routes.setPage} /></Paper>;
 }
 
 function healthHex(health: string) { return health === "unhealthy" ? "#fa5252" : health === "degraded" ? "#fab005" : "#12b886"; }

@@ -9,6 +9,19 @@ import { authorizedFetch } from "./auth";
 const mcpAppMIME = "text/html;profile=mcp-app";
 const mcpUIExtension = "io.modelcontextprotocol/ui";
 
+const appMinimumHeights: Record<string, number> = {
+  observability_overview: 620,
+  overview: 620,
+  service_topology: 760,
+  topology: 760,
+  service_performance: 700,
+  performance: 700,
+  trace_detail: 720,
+  trace: 720,
+  search_logs: 720,
+  logs: 720,
+};
+
 export type MCPAppContent = {
   resourceUri: string;
   toolName: string;
@@ -163,7 +176,8 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
   const connectionRef = useRef<BrowserMCPConnection | null>(null);
   const bridgeRef = useRef<AppBridge | null>(null);
   const [html, setHTML] = useState("");
-  const [height, setHeight] = useState(360);
+  const minimumHeight = appMinimumHeights[content.toolName] ?? 620;
+  const [height, setHeight] = useState(minimumHeight);
   const [error, setError] = useState("");
   const [connectionGeneration, setConnectionGeneration] = useState(0);
 
@@ -236,7 +250,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
       );
       bridgeRef.current = bridge;
       bridge.onsizechange = ({ height: requested }) => {
-        if (requested) setHeight(Math.max(180, Math.min(requested, 900)));
+        if (requested) setHeight(Math.max(minimumHeight, Math.ceil(requested) + 32));
       };
       bridge.onmessage = async ({ content: blocks }) => {
         const text = userText(blocks as Array<Record<string, unknown>>);
@@ -261,5 +275,5 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
 
   if (error) return <Alert color="red" m="md">{error}</Alert>;
   if (!html) return <Center mih={180} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Preparing view…</Text></Center>;
-  return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height, transition: "height 200ms ease" }} onLoad={() => void connectBridge()} />;
+  return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="no" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height, transition: "height 200ms ease" }} onLoad={() => void connectBridge()} />;
 }

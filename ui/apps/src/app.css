@@ -3,7 +3,11 @@ html,
 body,
 #root {
   min-width: 280px;
-  min-height: 100%;
+}
+
+html,
+body {
+  overflow: hidden;
 }
 
 body {

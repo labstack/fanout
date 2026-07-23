@@ -10,6 +10,16 @@ body,
   min-height: 420px;
 }
 
+.chat-composer-field {
+  background: var(--mantine-color-default-hover);
+  transition: box-shadow 150ms ease, background-color 150ms ease;
+}
+
+.chat-composer-field:focus-within {
+  background: var(--mantine-color-default);
+  box-shadow: 0 0 0 2px var(--mantine-color-teal-light);
+}
+
 .react-grid-item.react-grid-placeholder {
   border-radius: var(--mantine-radius-lg);
   background: var(--mantine-primary-color-filled);
