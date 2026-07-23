@@ -126,11 +126,11 @@ function Chat() {
 
 function Composer() {
   const { input, setInput, inputRef, submit, send, ready, running } = useFanoutApp();
-  return <Box pos="fixed" bottom={42} left={0} right={0} px={{ base: "xs", sm: "md" }} pb="md" pt="xl" style={{ zIndex: 20, background: "linear-gradient(transparent, var(--mantine-color-body) 45%)" }}>
-    <Box component="form" onSubmit={submit} maw={960} mx="auto"><Group align="flex-end" gap="xs" wrap="nowrap">
-      <Paper className="chat-composer-field" radius={10} px="md" py={6} flex={1}><Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is analyzing…" : "Ask about health, errors, or latency…"} disabled={!ready || running} autosize minRows={1} maxRows={6} variant="unstyled" /></Paper>
-      <ActionIcon type="submit" variant="filled" size={44} radius={10} disabled={!input.trim() || !ready || running} aria-label="Send message"><PaperPlaneTilt size={18} weight="fill" /></ActionIcon>
-    </Group></Box>
+  return <Box pos="fixed" bottom={42} left={0} right={0} pb="md" pt="md" bg="var(--mantine-color-body)" style={{ zIndex: 20 }}>
+    <Box maw={1440} mx="auto" px={{ base: "md", sm: "xl", lg: 72 }}><Paper component="form" onSubmit={submit} className="chat-composer-field" withBorder shadow="sm" radius={28} py={6} pl="lg" pr={6}><Group align="flex-end" gap="xs" wrap="nowrap">
+      <Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is analyzing…" : "Ask about health, errors, or latency…"} disabled={!ready || running} autosize minRows={1} maxRows={6} variant="unstyled" flex={1} />
+      <ActionIcon type="submit" variant="filled" size={40} radius="xl" disabled={!input.trim() || !ready || running} aria-label="Send message"><PaperPlaneTilt size={17} weight="fill" /></ActionIcon>
+    </Group></Paper></Box>
   </Box>;
 }
 

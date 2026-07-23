@@ -11,12 +11,12 @@ body,
 }
 
 .chat-composer-field {
-  background: var(--mantine-color-default-hover);
-  transition: box-shadow 150ms ease, background-color 150ms ease;
+  background: var(--mantine-color-body);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 .chat-composer-field:focus-within {
-  background: var(--mantine-color-default);
+  border-color: var(--mantine-primary-color-filled);
   box-shadow: 0 0 0 2px var(--mantine-color-teal-light);
 }
 
