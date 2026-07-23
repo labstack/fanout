@@ -153,55 +153,89 @@ func TestInvalidWindowIsToolError(t *testing.T) {
 }
 
 func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
-	server := New(&fakeObservability{}, nil, "test")
+	t.Run("negotiated client", func(t *testing.T) {
+		server := New(&fakeObservability{}, nil, "test")
+		session := connectTestClient(t, server, &mcp.ClientCapabilities{Extensions: map[string]any{
+			mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
+		}})
+
+		listed, err := session.ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(listed.Tools) != 5 {
+			t.Fatalf("tool count = %d, want 5", len(listed.Tools))
+		}
+		resources := map[string]bool{}
+		for _, tool := range listed.Tools {
+			ui, ok := tool.Meta["ui"].(map[string]any)
+			if !ok {
+				t.Fatalf("tool %s has no nested ui metadata: %#v", tool.Name, tool.Meta)
+			}
+			uri, _ := ui["resourceUri"].(string)
+			if !strings.HasPrefix(uri, "ui://") {
+				t.Fatalf("tool %s resource URI = %q", tool.Name, uri)
+			}
+			if legacy, _ := tool.Meta["ui/resourceUri"].(string); legacy != uri {
+				t.Fatalf("tool %s legacy resource URI = %q, want %q", tool.Name, legacy, uri)
+			}
+			resources[uri] = true
+		}
+		if len(resources) != 5 {
+			t.Fatalf("resource count = %d, want 5", len(resources))
+		}
+		for uri := range resources {
+			result, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri})
+			if err != nil {
+				t.Fatalf("read %s: %v", uri, err)
+			}
+			if len(result.Contents) != 1 || result.Contents[0].URI != uri || result.Contents[0].MIMEType != mcpAppMIME || !strings.Contains(result.Contents[0].Text, "<html") {
+				t.Fatalf("invalid MCP App resource %s: %#v", uri, result.Contents)
+			}
+			ui, ok := result.Contents[0].Meta["ui"].(map[string]any)
+			if !ok || ui["csp"] == nil {
+				t.Fatalf("MCP App resource %s has no CSP metadata: %#v", uri, result.Contents[0].Meta)
+			}
+		}
+	})
+
+	t.Run("client without extension", func(t *testing.T) {
+		server := New(&fakeObservability{}, nil, "test")
+		session := connectTestClient(t, server, nil)
+		listed, err := session.ListTools(context.Background(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(listed.Tools) != 5 {
+			t.Fatalf("tool count = %d, want 5", len(listed.Tools))
+		}
+		for _, tool := range listed.Tools {
+			if _, ok := tool.Meta["ui"]; ok {
+				t.Fatalf("tool %s advertised unnegotiated nested UI metadata: %#v", tool.Name, tool.Meta)
+			}
+			if _, ok := tool.Meta["ui/resourceUri"]; ok {
+				t.Fatalf("tool %s advertised unnegotiated legacy UI metadata: %#v", tool.Name, tool.Meta)
+			}
+		}
+	})
+}
+
+func connectTestClient(t *testing.T, server *Server, capabilities *mcp.ClientCapabilities) *mcp.ClientSession {
+	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	serverConnected := make(chan error, 1)
 	go func() {
 		_, err := server.MCP().Connect(context.Background(), serverTransport, nil)
 		serverConnected <- err
 	}()
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, &mcp.ClientOptions{Capabilities: capabilities})
 	session, err := client.Connect(context.Background(), clientTransport, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer session.Close()
+	t.Cleanup(func() { _ = session.Close() })
 	if err := <-serverConnected; err != nil {
 		t.Fatal(err)
 	}
-
-	listed, err := session.ListTools(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(listed.Tools) != 5 {
-		t.Fatalf("tool count = %d, want 5", len(listed.Tools))
-	}
-	resources := map[string]bool{}
-	for _, tool := range listed.Tools {
-		ui, ok := tool.Meta["ui"].(map[string]any)
-		if !ok {
-			t.Fatalf("tool %s has no nested ui metadata: %#v", tool.Name, tool.Meta)
-		}
-		uri, _ := ui["resourceUri"].(string)
-		if !strings.HasPrefix(uri, "ui://") {
-			t.Fatalf("tool %s resource URI = %q", tool.Name, uri)
-		}
-		if legacy, _ := tool.Meta["ui/resourceUri"].(string); legacy != uri {
-			t.Fatalf("tool %s legacy resource URI = %q, want %q", tool.Name, legacy, uri)
-		}
-		resources[uri] = true
-	}
-	if len(resources) != 5 {
-		t.Fatalf("resource count = %d, want 5", len(resources))
-	}
-	for uri := range resources {
-		result, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: uri})
-		if err != nil {
-			t.Fatalf("read %s: %v", uri, err)
-		}
-		if len(result.Contents) != 1 || result.Contents[0].MIMEType != mcpAppMIME || !strings.Contains(result.Contents[0].Text, "<html") {
-			t.Fatalf("invalid MCP App resource %s: %#v", uri, result.Contents)
-		}
-	}
+	return session
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,11 +17,16 @@ import (
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/env"
 	appstore "github.com/labstack/fanout/internal/store"
+	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 const testMCPResource = "https://demo.fanout.test/mcp"
 
 func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
+	return newOAuthTestServerWithConfig(t, env.Config{})
+}
+
+func newOAuthTestServerWithConfig(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	t.Helper()
 	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {
@@ -35,7 +41,7 @@ func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Browse
 		t.Fatalf("NewMCPAuthorization: %v", err)
 	}
 	e := echo.New()
-	RegisterAuthMiddleware(e, users, sessions, audit, env.Config{})
+	RegisterAuthMiddleware(e, users, sessions, audit, cfg)
 	// Test-only login hook: it still creates the cookie through the production
 	// BrowserSessions API and middleware commit path.
 	e.POST("/api/auth/setup", func(c *echo.Context) error {
@@ -52,6 +58,16 @@ func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.Browse
 	e.Any("/mcp", echo.WrapHandler(handler.ProtectMCP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	}))))
+	e.Any("/api/mcp", ProtectBrowserMCP(sessions, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		info := mcpgoauth.TokenInfoFromContext(r.Context())
+		if info == nil {
+			http.Error(w, "missing MCP token info", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("X-Test-MCP-User", info.UserID)
+		w.Header().Set("X-Test-MCP-Scopes", strings.Join(info.Scopes, " "))
+		w.WriteHeader(http.StatusNoContent)
+	})))
 	e.GET("/api/auth/me", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	return e, users, sessions
 }
@@ -166,6 +182,54 @@ func TestMCPOAuthRejectsUnknownBearerAndAdvertisesDiscovery(t *testing.T) {
 	want := `resource_metadata="https://demo.fanout.test/.well-known/oauth-protected-resource/mcp"`
 	if !strings.Contains(rec.Header().Get("WWW-Authenticate"), want) {
 		t.Fatalf("WWW-Authenticate = %q, want %s", rec.Header().Get("WWW-Authenticate"), want)
+	}
+}
+
+func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
+	e, users, _ := newOAuthTestServer(t)
+	user, err := users.Create("browser-mcp@example.com", "Browser MCP", "viewer")
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+
+	anonymous := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{"X-Fanout-Request": "1"})
+	if anonymous.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous browser MCP = %d, want 401", anonymous.Code)
+	}
+
+	cookie := oauthCookieForUser(t, e, user)
+	csrfRequest := httptest.NewRequest(http.MethodPost, "/api/mcp", nil)
+	csrfRequest.AddCookie(cookie)
+	csrfResponse := httptest.NewRecorder()
+	e.ServeHTTP(csrfResponse, csrfRequest)
+	if csrfResponse.Code != http.StatusForbidden {
+		t.Fatalf("browser MCP without CSRF proof = %d %s, want 403", csrfResponse.Code, csrfResponse.Body.String())
+	}
+
+	browser := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{
+		"Authorization":    "Bearer attacker-controlled",
+		"X-Fanout-Request": "1",
+	}, cookie)
+	if browser.Code != http.StatusNoContent {
+		t.Fatalf("session browser MCP = %d %s", browser.Code, browser.Body.String())
+	}
+	if got := browser.Header().Get("X-Test-MCP-User"); got != user.ID {
+		t.Fatalf("browser MCP user = %q, want %q", got, user.ID)
+	}
+	scopes := strings.Fields(browser.Header().Get("X-Test-MCP-Scopes"))
+	if !slices.Contains(scopes, mcpReadScope) || !slices.Contains(scopes, "fanout:dashboard") {
+		t.Fatalf("browser MCP scopes = %v, want read and dashboard access", scopes)
+	}
+
+	remoteWithSessionOnly := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"X-Fanout-Request": "1"}, cookie)
+	if remoteWithSessionOnly.Code != http.StatusUnauthorized {
+		t.Fatalf("remote MCP accepted browser session: %d", remoteWithSessionOnly.Code)
+	}
+
+	public, _, _ := newOAuthTestServerWithConfig(t, env.Config{PublicRead: true})
+	publicBrowserMCP := serve(t, public, http.MethodGet, "/api/mcp", "", nil)
+	if publicBrowserMCP.Code != http.StatusUnauthorized {
+		t.Fatalf("PUBLIC_READ viewer reached browser MCP: %d %s", publicBrowserMCP.Code, publicBrowserMCP.Body.String())
 	}
 }
 

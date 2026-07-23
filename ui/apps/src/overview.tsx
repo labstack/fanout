@@ -2,7 +2,7 @@ import { Badge, Box, Group, Progress, SimpleGrid, Table, Text } from "@mantine/c
 import { Pulse } from "@phosphor-icons/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, Metric, ViewHeader, ViewShell, ViewStatus, healthColor } from "./components";
+import { EmptyState, MetaFooter, Metric, PageControls, ViewHeader, ViewShell, ViewStatus, healthColor, usePagedItems } from "./components";
 import type { Overview, Result, ServiceHealth } from "./contracts";
 import { duration, integer, percent, windowLabel } from "./format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
@@ -20,6 +20,7 @@ function OverviewApp() {
 function OverviewBody({ result, onService }: { result: Result<Overview>; onService: (service: string) => void }) {
   const { data } = result;
   const total = Math.max(data.service_count, 1);
+  const services = usePagedItems(data.services, 6);
   return <>
     <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm" px={{ base: "md", sm: "lg" }} pb="md">
       <Metric label="Services" value={integer.format(data.service_count)} />
@@ -34,10 +35,10 @@ function OverviewBody({ result, onService }: { result: Result<Overview>; onServi
       </Progress.Root>
       <Group mt="xs" gap="lg"><Legend color="teal" text={`${data.counts.healthy} healthy`} /><Legend color="yellow" text={`${data.counts.degraded} degraded`} /><Legend color="red" text={`${data.counts.unhealthy} unhealthy`} /></Group>
     </Box>
-    {data.services.length === 0 ? <EmptyState icon={<Pulse size={20} weight="duotone" />} title="No activity in this window">Services will appear as data begins to arrive.</EmptyState> : <Table.ScrollContainer minWidth={560}><Table striped highlightOnHover verticalSpacing="sm">
+    {data.services.length === 0 ? <EmptyState icon={<Pulse size={20} weight="duotone" />} title="No activity in this window">Services will appear as data begins to arrive.</EmptyState> : <><Table.ScrollContainer minWidth={560}><Table striped highlightOnHover verticalSpacing="sm">
       <Table.Thead><Table.Tr><Table.Th>Service</Table.Th><Table.Th>Traffic</Table.Th><Table.Th>P95</Table.Th><Table.Th>Errors</Table.Th></Table.Tr></Table.Thead>
-      <Table.Tbody>{data.services.map((service) => <ServiceRow key={service.service} service={service} onClick={() => onService(service.service)} />)}</Table.Tbody>
-    </Table></Table.ScrollContainer>}
+      <Table.Tbody>{services.pageItems.map((service) => <ServiceRow key={service.service} service={service} onClick={() => onService(service.service)} />)}</Table.Tbody>
+    </Table></Table.ScrollContainer><PageControls {...services} onChange={services.setPage} /></>}
     <MetaFooter left={windowLabel(result.provenance.window)} right={`Updated ${new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`} />
   </>;
 }

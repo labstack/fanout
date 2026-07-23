@@ -1,9 +1,9 @@
 import { HeatmapChart, LineChart } from "echarts/charts";
-import { Badge, Paper, ScrollArea, SimpleGrid, Stack, Table, Text } from "@mantine/core";
+import { Badge, Paper, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { ArrowUpRight, ArrowsLeftRight, GridFour, Pulse } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, Metric, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme, healthColor } from "./components";
+import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme, healthColor, usePagedItems } from "./components";
 import type { Endpoint, Performance, Result } from "./contracts";
 import { EChart, useECharts } from "./echart";
 import { duration, integer, percent, windowLabel } from "./format";
@@ -64,11 +64,12 @@ function HeatmapView({ data, dark }: { data: Performance; dark: boolean }) {
 }
 
 function EndpointsView({ endpoints, onEndpoint }: { endpoints: Endpoint[]; onEndpoint: (endpoint: Endpoint) => void }) {
+  const routes = usePagedItems(endpoints, 8);
   if (endpoints.length === 0) return <EmptyState tall icon={<ArrowUpRight size={20} weight="duotone" />} title="No endpoints detected">HTTP routes and span operations will appear here as traffic arrives.</EmptyState>;
-  return <ScrollArea.Autosize mah={520} type="auto"><Table striped highlightOnHover verticalSpacing="sm" miw={700}>
+  return <><Table.ScrollContainer minWidth={700}><Table striped highlightOnHover verticalSpacing="sm">
     <Table.Thead><Table.Tr><Table.Th>Endpoint</Table.Th><Table.Th>Calls</Table.Th><Table.Th>P50</Table.Th><Table.Th>P95</Table.Th><Table.Th>P99</Table.Th><Table.Th>Errors</Table.Th></Table.Tr></Table.Thead>
-    <Table.Tbody>{endpoints.map((endpoint) => <Table.Tr key={`${endpoint.method}-${endpoint.path}`} tabIndex={0} onClick={() => onEndpoint(endpoint)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEndpoint(endpoint); }} style={{ cursor: "pointer" }}><Table.Td><Badge variant="light" mr="xs">{endpoint.method}</Badge><Text component="code" size="sm">{endpoint.path}</Text></Table.Td><Table.Td>{integer.format(endpoint.calls)}</Table.Td><Table.Td>{duration(endpoint.p50_ms)}</Table.Td><Table.Td>{duration(endpoint.p95_ms)}</Table.Td><Table.Td>{duration(endpoint.p99_ms)}</Table.Td><Table.Td><Text c={`${healthColor(endpoint.health)}.7`}>{percent(endpoint.error_rate)}</Text></Table.Td></Table.Tr>)}</Table.Tbody>
-  </Table></ScrollArea.Autosize>;
+    <Table.Tbody>{routes.pageItems.map((endpoint) => <Table.Tr key={`${endpoint.method}-${endpoint.path}`} tabIndex={0} onClick={() => onEndpoint(endpoint)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEndpoint(endpoint); }} style={{ cursor: "pointer" }}><Table.Td><Badge variant="light" mr="xs">{endpoint.method}</Badge><Text component="code" size="sm">{endpoint.path}</Text></Table.Td><Table.Td>{integer.format(endpoint.calls)}</Table.Td><Table.Td>{duration(endpoint.p50_ms)}</Table.Td><Table.Td>{duration(endpoint.p95_ms)}</Table.Td><Table.Td>{duration(endpoint.p99_ms)}</Table.Td><Table.Td><Text c={`${healthColor(endpoint.health)}.7`}>{percent(endpoint.error_rate)}</Text></Table.Td></Table.Tr>)}</Table.Tbody>
+  </Table></Table.ScrollContainer><PageControls {...routes} onChange={routes.setPage} /></>;
 }
 
 function ComparisonView({ data }: { data: Performance }) {

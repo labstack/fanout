@@ -1,7 +1,7 @@
 import "@mantine/core/styles.css";
-import { Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
+import { Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
 import { ArrowClockwise } from "@phosphor-icons/react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { fanoutThemeConfig } from "../../theme";
 
 const fanoutTheme = createTheme(fanoutThemeConfig);
@@ -41,6 +41,30 @@ export function MetaFooter({ left, right }: { left: ReactNode; right: ReactNode 
 
 export function Metric({ label, value, color }: { label: string; value: ReactNode; color?: string }) {
   return <Paper withBorder radius="md" p="sm"><Text c="dimmed" size="xs">{label}</Text><Text fw={700} fz="xl" c={color} mt={3}>{value}</Text></Paper>;
+}
+
+export function usePagedItems<T>(items: T[], pageSize = 8) {
+  const [page, setPage] = useState(1);
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
+  useEffect(() => { if (page > totalPages) setPage(totalPages); }, [page, totalPages]);
+  const start = (page - 1) * pageSize;
+  return {
+    page,
+    setPage,
+    totalPages,
+    pageItems: items.slice(start, start + pageSize),
+    from: items.length === 0 ? 0 : start + 1,
+    to: Math.min(start + pageSize, items.length),
+    total: items.length,
+  };
+}
+
+export function PageControls({ page, totalPages, from, to, total, onChange }: { page: number; totalPages: number; from: number; to: number; total: number; onChange: (page: number) => void }) {
+  if (totalPages <= 1) return null;
+  return <Group justify="space-between" gap="sm" px={{ base: "md", sm: "lg" }} py="xs" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
+    <Text c="dimmed" size="xs">{from}–{to} of {total}</Text>
+    <Pagination value={page} total={totalPages} onChange={onChange} size="xs" withEdges aria-label="Table pages" />
+  </Group>;
 }
 
 export function healthColor(health: string) {

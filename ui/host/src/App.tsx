@@ -126,19 +126,18 @@ function Chat() {
 
 function Composer() {
   const { input, setInput, inputRef, submit, send, ready, running } = useFanoutApp();
-  return <Box pos="fixed" bottom={42} left={0} right={0} px={{ base: "xs", sm: "md" }} pb="md" pt="xl" style={{ zIndex: 20, background: "linear-gradient(transparent, var(--mantine-color-body) 45%)" }}>
-    <Paper component="form" onSubmit={submit} withBorder shadow="lg" radius="xl" p={8} pl="md" maw={820} mx="auto"><Group align="flex-end" gap="xs" wrap="nowrap">
+  return <Box pos="fixed" bottom={42} left={0} right={0} pb="md" pt="md" bg="var(--mantine-color-body)" style={{ zIndex: 20 }}>
+    <Box maw={1440} mx="auto" px={{ base: "md", sm: "xl", lg: 72 }}><Paper component="form" onSubmit={submit} className="chat-composer-field" withBorder shadow="sm" radius={28} py={6} pl="lg" pr={6}><Group align="flex-end" gap="xs" wrap="nowrap">
       <Textarea ref={inputRef} aria-label="Message Fanout" value={input} onChange={(event) => setInput(event.currentTarget.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(input); } }} placeholder={running ? "Fanout is analyzing…" : "Ask about health, errors, or latency…"} disabled={!ready || running} autosize minRows={1} maxRows={6} variant="unstyled" flex={1} />
-      <ActionIcon type="submit" size={40} radius="md" disabled={!input.trim() || !ready || running} aria-label="Send message"><PaperPlaneTilt size={19} weight="fill" /></ActionIcon>
-    </Group></Paper>
-    <Text ta="center" c="dimmed" size="xs" mt={6} visibleFrom="sm">Enter to send · Shift + Enter for a new line</Text>
+      <ActionIcon type="submit" variant="filled" size={40} radius="xl" disabled={!input.trim() || !ready || running} aria-label="Send message"><PaperPlaneTilt size={17} weight="fill" /></ActionIcon>
+    </Group></Paper></Box>
   </Box>;
 }
 
 export function ChatPage() {
   const { messages, ready, running, error, bottomRef, send } = useFanoutApp();
   const visibleMessages = messages.filter((message) => message.role !== "tool");
-  return <Container size={900} px={{ base: "sm", sm: "lg" }} pt={{ base: 36, sm: 64 }} pb={190}>
+  return <Container size={1440} px={{ base: "md", sm: "xl", lg: 72 }} pt={{ base: 36, sm: 64 }} pb={190}>
     {!ready && <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading conversation</Text></Center>}
     {visibleMessages.length === 0 && ready && <Welcome onSelect={send} />}
     <Stack gap="xl" aria-live="polite">
