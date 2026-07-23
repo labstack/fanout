@@ -1,0 +1,1 @@
+import{t as e}from"./jsx-runtime-BBLGJ_Wb.js";import{t}from"./useNavigate-BxXsTfSC.js";var n=e();function r(){let e=localStorage.getItem(`fanout.thread-id`);return e?(localStorage.removeItem(`fanout.thread-id`),(0,n.jsx)(t,{to:`/chat/$threadId`,params:{threadId:e},replace:!0})):(0,n.jsx)(t,{to:`/chat`,replace:!0})}export{r as component};

@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	agtypes "github.com/ag-ui-protocol/ag-ui/sdks/community/go/pkg/core/types"
 )
@@ -16,6 +18,19 @@ type Thread struct {
 	ThreadID string            `json:"threadId"`
 	Messages []agtypes.Message `json:"messages"`
 	Updated  string            `json:"updatedAt"`
+}
+
+type ThreadSummary struct {
+	ThreadID string `json:"threadId"`
+	Title    string `json:"title"`
+	Updated  string `json:"updatedAt"`
+}
+
+type ThreadListOptions struct {
+	Query         string
+	Limit         int
+	BeforeUpdated string
+	BeforeID      string
 }
 
 type Store struct{ db *sql.DB }
@@ -39,6 +54,117 @@ func (s *Store) Thread(ctx context.Context, ownerID, threadID string) (Thread, e
 		return Thread{}, fmt.Errorf("decode thread messages: %w", err)
 	}
 	return Thread{ThreadID: threadID, Messages: messages, Updated: updated}, nil
+}
+
+func (s *Store) Threads(ctx context.Context, ownerID string, options ThreadListOptions) ([]ThreadSummary, error) {
+	query := strings.TrimSpace(options.Query)
+	like := "%"
+	if query != "" {
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(query)
+		like = "%" + escaped + "%"
+	}
+	rows, err := s.db.QueryContext(ctx, `
+			SELECT thread_id, title_override, messages_json, updated_at
+			FROM agui_threads
+			WHERE owner_id = ?
+			  AND (? = '' OR COALESCE(title_override, '') LIKE ? ESCAPE '\' OR messages_json LIKE ? ESCAPE '\')
+		  AND (
+		    ? = '' OR updated_at < ? OR
+		    (updated_at = ? AND thread_id < ?)
+		  )
+		ORDER BY updated_at DESC, thread_id DESC
+		LIMIT ?`,
+		ownerID,
+		query, like, like,
+		options.BeforeUpdated, options.BeforeUpdated,
+		options.BeforeUpdated, options.BeforeID,
+		options.Limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list threads: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]ThreadSummary, 0, options.Limit)
+	for rows.Next() {
+		var threadID, raw, updated string
+		var titleOverride sql.NullString
+		if err := rows.Scan(&threadID, &titleOverride, &raw, &updated); err != nil {
+			return nil, fmt.Errorf("scan thread summary: %w", err)
+		}
+		var messages []agtypes.Message
+		if err := json.Unmarshal([]byte(raw), &messages); err != nil {
+			return nil, fmt.Errorf("decode thread summary: %w", err)
+		}
+		title := strings.TrimSpace(titleOverride.String)
+		if title == "" {
+			title = threadTitle(messages)
+		}
+		items = append(items, ThreadSummary{
+			ThreadID: threadID,
+			Title:    title,
+			Updated:  updated,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list threads: %w", err)
+	}
+	return items, nil
+}
+
+func (s *Store) RenameThread(ctx context.Context, ownerID, threadID, title string) error {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE agui_threads SET title_override = ? WHERE thread_id = ? AND owner_id = ?`,
+		title, threadID, ownerID,
+	)
+	if err != nil {
+		return fmt.Errorf("rename thread: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("inspect renamed thread: %w", err)
+	} else if rows != 1 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
+func (s *Store) DeleteThread(ctx context.Context, ownerID, threadID string) error {
+	result, err := s.db.ExecContext(ctx,
+		`DELETE FROM agui_threads WHERE thread_id = ? AND owner_id = ?`,
+		threadID, ownerID,
+	)
+	if err != nil {
+		return fmt.Errorf("delete thread: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("inspect deleted thread: %w", err)
+	} else if rows != 1 {
+		return ErrThreadNotFound
+	}
+	return nil
+}
+
+func threadTitle(messages []agtypes.Message) string {
+	for _, message := range messages {
+		if message.Role != agtypes.RoleUser {
+			continue
+		}
+		content, ok := message.Content.(string)
+		if !ok {
+			continue
+		}
+		title := strings.Join(strings.Fields(content), " ")
+		if title == "" {
+			continue
+		}
+		const maxRunes = 72
+		if utf8.RuneCountInString(title) <= maxRunes {
+			return title
+		}
+		runes := []rune(title)
+		return strings.TrimSpace(string(runes[:maxRunes])) + "…"
+	}
+	return "Untitled investigation"
 }
 
 // StartRun creates or updates the caller's thread and records the run as

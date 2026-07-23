@@ -20,6 +20,35 @@ body,
   box-shadow: 0 0 0 2px var(--mantine-primary-color-light);
 }
 
+.chat-history-item {
+  border-radius: var(--mantine-radius-md);
+  transition: background-color 120ms ease;
+}
+
+.chat-history-item:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.chat-history-item[data-active] {
+  background: var(--mantine-primary-color-light);
+}
+
+.chat-history-actions {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-history-item:hover .chat-history-actions,
+.chat-history-item:focus-within .chat-history-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .chat-history-actions {
+    opacity: 1;
+  }
+}
+
 .react-grid-item.react-grid-placeholder {
   border-radius: var(--mantine-radius-lg);
   background: var(--mantine-primary-color-filled);

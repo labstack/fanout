@@ -2,12 +2,14 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,7 +51,61 @@ func NewRuntime(provider Provider, tools toolExecutor, store *Store) *Runtime {
 
 func (r *Runtime) Register(group *echo.Group) {
 	group.POST("", r.Run)
+	group.GET("/threads", r.ListThreads)
 	group.GET("/threads/:threadID", r.GetThread)
+	group.PATCH("/threads/:threadID", r.RenameThread)
+	group.DELETE("/threads/:threadID", r.DeleteThread)
+}
+
+type threadCursor struct {
+	UpdatedAt string `json:"updatedAt"`
+	ThreadID  string `json:"threadId"`
+}
+
+func (r *Runtime) ListThreads(c *echo.Context) error {
+	ownerID, ownerErr := api.RequestOwner(c)
+	if ownerErr != nil {
+		return ownerErr
+	}
+	limit := 30
+	if raw := strings.TrimSpace(c.QueryParam("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 || parsed > 100 {
+			return echo.NewHTTPError(http.StatusBadRequest, "limit must be between 1 and 100")
+		}
+		limit = parsed
+	}
+	query := strings.TrimSpace(c.QueryParam("q"))
+	if len([]rune(query)) > 200 {
+		return echo.NewHTTPError(http.StatusBadRequest, "search query is too long")
+	}
+	var cursor threadCursor
+	if raw := strings.TrimSpace(c.QueryParam("cursor")); raw != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(raw)
+		if err != nil || json.Unmarshal(decoded, &cursor) != nil || cursor.UpdatedAt == "" || cursor.ThreadID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid thread cursor")
+		}
+	}
+	items, err := r.store.Threads(c.Request().Context(), ownerID, ThreadListOptions{
+		Query:         query,
+		Limit:         limit + 1,
+		BeforeUpdated: cursor.UpdatedAt,
+		BeforeID:      cursor.ThreadID,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to list threads").Wrap(err)
+	}
+	nextCursor := ""
+	if len(items) > limit {
+		items = items[:limit]
+		last := items[len(items)-1]
+		encoded, err := json.Marshal(threadCursor{UpdatedAt: last.Updated, ThreadID: last.ThreadID})
+		if err != nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to paginate threads").Wrap(err)
+		}
+		nextCursor = base64.RawURLEncoding.EncodeToString(encoded)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"threads": items, "nextCursor": nextCursor})
 }
 
 func (r *Runtime) GetThread(c *echo.Context) error {
@@ -65,6 +121,42 @@ func (r *Runtime) GetThread(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to load thread").Wrap(err)
 	}
 	return c.JSON(http.StatusOK, thread)
+}
+
+func (r *Runtime) RenameThread(c *echo.Context) error {
+	ownerID, ownerErr := api.RequestOwner(c)
+	if ownerErr != nil {
+		return ownerErr
+	}
+	var input struct {
+		Title string `json:"title"`
+	}
+	if err := c.Bind(&input); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid thread title")
+	}
+	title := strings.TrimSpace(input.Title)
+	if title == "" || len([]rune(title)) > 120 {
+		return echo.NewHTTPError(http.StatusBadRequest, "thread title must be between 1 and 120 characters")
+	}
+	if err := r.store.RenameThread(c.Request().Context(), ownerID, c.Param("threadID"), title); errors.Is(err, ErrThreadNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "thread not found")
+	} else if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to rename thread").Wrap(err)
+	}
+	return c.JSON(http.StatusOK, map[string]string{"title": title})
+}
+
+func (r *Runtime) DeleteThread(c *echo.Context) error {
+	ownerID, ownerErr := api.RequestOwner(c)
+	if ownerErr != nil {
+		return ownerErr
+	}
+	if err := r.store.DeleteThread(c.Request().Context(), ownerID, c.Param("threadID")); errors.Is(err, ErrThreadNotFound) {
+		return echo.NewHTTPError(http.StatusNotFound, "thread not found")
+	} else if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to delete thread").Wrap(err)
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 func (r *Runtime) Run(c *echo.Context) error {
