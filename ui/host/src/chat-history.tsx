@@ -131,7 +131,7 @@ export default function ChatHistoryDrawer({ opened, activeThreadID, onClose, onN
         {history.isError && <Alert color="red" title="History unavailable">Your conversations could not be loaded.</Alert>}
         {!history.isLoading && !history.isError && threads.length === 0 && <Box py="xl" px="sm" ta="center">
           <Text fw={600}>{query ? "No matching investigations" : "No investigations yet"}</Text>
-          <Text c="dimmed" size="sm" mt={4}>{query ? "Try a service name, error, or trace ID." : "Your completed investigations will appear here."}</Text>
+          <Text c="dimmed" size="sm" mt={4}>{query ? "Try words from the opening question." : "Your completed investigations will appear here."}</Text>
         </Box>}
         <Stack gap="lg" pb="md">
           {groups.map((group) => <Stack key={group.label} gap={4}>
