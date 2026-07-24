@@ -170,6 +170,8 @@ CREATE TABLE settings (
 CREATE TABLE agui_threads (
     thread_id     TEXT PRIMARY KEY,
     owner_id      TEXT NOT NULL,
+    title_override TEXT,
+    title_derived TEXT NOT NULL DEFAULT 'Untitled investigation',
     messages_json TEXT NOT NULL DEFAULT '[]',
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
