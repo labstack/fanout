@@ -64,6 +64,7 @@ function Chat() {
   useEffect(() => {
     let active = true;
     setMessages([]);
+    setLoadedThreadID("");
     setRunning(false);
     setError("");
     const loadedThread = authorizedFetch(`/api/agent/threads/${encodeURIComponent(threadID)}`).then(async (response) => {
@@ -75,7 +76,11 @@ function Chat() {
       agent.setMessages(thread.messages ?? []);
       setMessages([...(thread.messages ?? [])]);
       setLoadedThreadID(threadID);
-    }).catch(() => { if (active) { setError("This conversation could not be restored. Start a new chat or try again."); setLoadedThreadID(threadID); } });
+    }).catch(() => {
+      if (!active) return;
+      pendingPromptRef.current = "";
+      setError("This conversation could not be restored. Start a new chat or try again.");
+    });
     const subscription = agent.subscribe({
       onEvent: ({ messages: next }) => setMessages([...next] as Message[]),
       onRunInitialized: () => { setRunning(true); setError(""); },
@@ -115,7 +120,7 @@ function Chat() {
     };
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
-  }, [navigate]);
+  }, [lastThreadID, navigate]);
 
   async function send(text: string) {
     const content = text.trim();

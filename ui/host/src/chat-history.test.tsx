@@ -12,7 +12,7 @@ function page(query = "") {
     threads: [{
       threadId: "thread-checkout",
       title: query ? `Result for ${query}` : "Investigate checkout latency",
-      updatedAt: new Date().toISOString(),
+      updatedAt: "2026-07-22 03:00:00",
     }],
     nextCursor: "",
   }), { status: 200, headers: { "content-type": "application/json" } });
@@ -49,6 +49,7 @@ describe("ChatHistoryDrawer", () => {
     ));
 
     await vi.waitFor(() => expect(document.body.textContent).toContain("Investigate checkout latency"));
+    expect(document.body.textContent).not.toContain("Invalid Date");
     const active = document.querySelector('[aria-current="page"]') as HTMLButtonElement;
     expect(active).not.toBeNull();
     await act(async () => active.click());

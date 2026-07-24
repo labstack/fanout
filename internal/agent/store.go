@@ -14,18 +14,23 @@ import (
 
 var ErrThreadNotFound = errors.New("agent thread not found")
 
+// Thread is a persisted agent conversation owned by one user.
 type Thread struct {
 	ThreadID string            `json:"threadId"`
 	Messages []agtypes.Message `json:"messages"`
 	Updated  string            `json:"updatedAt"`
 }
 
+// ThreadSummary is the compact representation returned by conversation history.
 type ThreadSummary struct {
 	ThreadID string `json:"threadId"`
 	Title    string `json:"title"`
 	Updated  string `json:"updatedAt"`
 }
 
+// ThreadListOptions controls owner-scoped conversation history queries.
+// BeforeUpdated and BeforeID form one compound keyset cursor: callers must
+// provide both or neither. Limit defaults to 30 and is capped at 101.
 type ThreadListOptions struct {
 	Query         string
 	Limit         int
@@ -33,10 +38,13 @@ type ThreadListOptions struct {
 	BeforeID      string
 }
 
+// Store persists agent threads and runs.
 type Store struct{ db *sql.DB }
 
+// NewStore returns an agent store backed by db.
 func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 
+// Thread returns one owner-scoped conversation.
 func (s *Store) Thread(ctx context.Context, ownerID, threadID string) (Thread, error) {
 	var raw, updated string
 	err := s.db.QueryRowContext(ctx,
@@ -56,7 +64,18 @@ func (s *Store) Thread(ctx context.Context, ownerID, threadID string) (Thread, e
 	return Thread{ThreadID: threadID, Messages: messages, Updated: updated}, nil
 }
 
+// Threads returns owner-scoped conversation summaries in reverse update order.
 func (s *Store) Threads(ctx context.Context, ownerID string, options ThreadListOptions) ([]ThreadSummary, error) {
+	if (options.BeforeUpdated == "") != (options.BeforeID == "") {
+		return nil, errors.New("thread cursor requires both updated time and thread ID")
+	}
+	limit := options.Limit
+	if limit < 1 {
+		limit = 30
+	}
+	if limit > 101 {
+		limit = 101
+	}
 	query := strings.TrimSpace(options.Query)
 	like := "%"
 	if query != "" {
@@ -64,41 +83,32 @@ func (s *Store) Threads(ctx context.Context, ownerID string, options ThreadListO
 		like = "%" + escaped + "%"
 	}
 	rows, err := s.db.QueryContext(ctx, `
-			SELECT thread_id, title_override, messages_json, updated_at
-			FROM agui_threads
-			WHERE owner_id = ?
-			  AND (? = '' OR COALESCE(title_override, '') LIKE ? ESCAPE '\' OR messages_json LIKE ? ESCAPE '\')
-		  AND (
-		    ? = '' OR updated_at < ? OR
-		    (updated_at = ? AND thread_id < ?)
-		  )
-		ORDER BY updated_at DESC, thread_id DESC
-		LIMIT ?`,
+				SELECT thread_id, COALESCE(NULLIF(TRIM(title_override), ''), title_derived), updated_at
+				FROM agui_threads
+				WHERE owner_id = ?
+				  AND (? = '' OR COALESCE(title_override, '') LIKE ? ESCAPE '\' OR title_derived LIKE ? ESCAPE '\')
+			  AND (
+			    ? = '' OR updated_at < ? OR
+			    (updated_at = ? AND thread_id < ?)
+			  )
+			ORDER BY updated_at DESC, thread_id DESC
+			LIMIT ?`,
 		ownerID,
 		query, like, like,
 		options.BeforeUpdated, options.BeforeUpdated,
 		options.BeforeUpdated, options.BeforeID,
-		options.Limit,
+		limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list threads: %w", err)
 	}
 	defer rows.Close()
 
-	items := make([]ThreadSummary, 0, options.Limit)
+	items := make([]ThreadSummary, 0, limit)
 	for rows.Next() {
-		var threadID, raw, updated string
-		var titleOverride sql.NullString
-		if err := rows.Scan(&threadID, &titleOverride, &raw, &updated); err != nil {
+		var threadID, title, updated string
+		if err := rows.Scan(&threadID, &title, &updated); err != nil {
 			return nil, fmt.Errorf("scan thread summary: %w", err)
-		}
-		var messages []agtypes.Message
-		if err := json.Unmarshal([]byte(raw), &messages); err != nil {
-			return nil, fmt.Errorf("decode thread summary: %w", err)
-		}
-		title := strings.TrimSpace(titleOverride.String)
-		if title == "" {
-			title = threadTitle(messages)
 		}
 		items = append(items, ThreadSummary{
 			ThreadID: threadID,
@@ -112,6 +122,7 @@ func (s *Store) Threads(ctx context.Context, ownerID string, options ThreadListO
 	return items, nil
 }
 
+// RenameThread replaces the display title for one owner-scoped conversation.
 func (s *Store) RenameThread(ctx context.Context, ownerID, threadID, title string) error {
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE agui_threads SET title_override = ? WHERE thread_id = ? AND owner_id = ?`,
@@ -128,6 +139,7 @@ func (s *Store) RenameThread(ctx context.Context, ownerID, threadID, title strin
 	return nil
 }
 
+// DeleteThread permanently removes one owner-scoped conversation and its runs.
 func (s *Store) DeleteThread(ctx context.Context, ownerID, threadID string) error {
 	result, err := s.db.ExecContext(ctx,
 		`DELETE FROM agui_threads WHERE thread_id = ? AND owner_id = ?`,
@@ -180,6 +192,7 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 	if err != nil {
 		return fmt.Errorf("encode messages: %w", err)
 	}
+	title := threadTitle(input.Messages)
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("open run connection: %w", err)
@@ -200,8 +213,8 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		if _, err := conn.ExecContext(ctx,
-			`INSERT INTO agui_threads (thread_id, owner_id, messages_json) VALUES (?, ?, ?)`,
-			input.ThreadID, ownerID, string(messagesJSON),
+			`INSERT INTO agui_threads (thread_id, owner_id, title_derived, messages_json) VALUES (?, ?, ?, ?)`,
+			input.ThreadID, ownerID, title, string(messagesJSON),
 		); err != nil {
 			return fmt.Errorf("create thread: %w", err)
 		}
@@ -211,8 +224,8 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 		return ErrThreadNotFound
 	default:
 		if _, err := conn.ExecContext(ctx,
-			`UPDATE agui_threads SET messages_json = ?, updated_at = datetime('now') WHERE thread_id = ?`,
-			string(messagesJSON), input.ThreadID,
+			`UPDATE agui_threads SET title_derived = ?, messages_json = ?, updated_at = datetime('now') WHERE thread_id = ?`,
+			title, string(messagesJSON), input.ThreadID,
 		); err != nil {
 			return fmt.Errorf("update thread input: %w", err)
 		}
@@ -253,6 +266,7 @@ func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, 
 	if err != nil {
 		return fmt.Errorf("encode events: %w", err)
 	}
+	title := threadTitle(messages)
 	status, errorText := "completed", ""
 	switch {
 	case runErr != nil:
@@ -266,13 +280,17 @@ func (s *Store) FinishRun(ctx context.Context, ownerID, threadID, runID string, 
 	}
 	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx,
-		`UPDATE agui_threads SET messages_json = ?, updated_at = datetime('now') WHERE thread_id = ? AND owner_id = ?`,
-		string(messagesJSON), threadID, ownerID,
+		`UPDATE agui_threads SET title_derived = ?, messages_json = ?, updated_at = datetime('now') WHERE thread_id = ? AND owner_id = ?`,
+		title, string(messagesJSON), threadID, ownerID,
 	)
 	if err != nil {
 		return fmt.Errorf("save final messages: %w", err)
 	}
-	if rows, _ := result.RowsAffected(); rows != 1 {
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("inspect saved thread: %w", err)
+	}
+	if rows != 1 {
 		return ErrThreadNotFound
 	}
 	if _, err := tx.ExecContext(ctx,

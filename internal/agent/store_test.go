@@ -105,6 +105,23 @@ func TestStoreListsOwnerThreadsWithSearchAndCursor(t *testing.T) {
 	if len(matches) != 1 || matches[0].ThreadID != "thread-payment" {
 		t.Fatalf("search results = %#v", matches)
 	}
+	noisyMatches, err := store.Threads(context.Background(), "owner-1", ThreadListOptions{Query: "user", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(noisyMatches) != 0 {
+		t.Fatalf("message metadata search results = %#v, want none", noisyMatches)
+	}
+	defaultPage, err := store.Threads(context.Background(), "owner-1", ThreadListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(defaultPage) != 2 {
+		t.Fatalf("default-limit page length = %d, want 2", len(defaultPage))
+	}
+	if _, err := store.Threads(context.Background(), "owner-1", ThreadListOptions{BeforeUpdated: first[0].Updated}); err == nil {
+		t.Fatal("half cursor succeeded, want validation error")
+	}
 	if err := store.RenameThread(context.Background(), "owner-1", "thread-payment", "Payment regression"); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +131,16 @@ func TestStoreListsOwnerThreadsWithSearchAndCursor(t *testing.T) {
 	}
 	if len(renamed) != 1 || renamed[0].Title != "Payment regression" {
 		t.Fatalf("renamed search results = %#v", renamed)
+	}
+	if _, err := database.DB.Exec(`UPDATE agui_threads SET messages_json = 'not valid json' WHERE thread_id = 'thread-payment'`); err != nil {
+		t.Fatal(err)
+	}
+	summaries, err := store.Threads(context.Background(), "owner-1", ThreadListOptions{Limit: 10})
+	if err != nil {
+		t.Fatalf("list summaries decoded messages_json: %v", err)
+	}
+	if len(summaries) != 2 {
+		t.Fatalf("summaries after corrupt message payload = %#v", summaries)
 	}
 	if err := store.RenameThread(context.Background(), "owner-2", "thread-payment", "Not allowed"); !errors.Is(err, ErrThreadNotFound) {
 		t.Fatalf("cross-owner rename = %v, want ErrThreadNotFound", err)
@@ -126,6 +153,51 @@ func TestStoreListsOwnerThreadsWithSearchAndCursor(t *testing.T) {
 	}
 	if _, err := store.Thread(context.Background(), "owner-1", "thread-payment"); !errors.Is(err, ErrThreadNotFound) {
 		t.Fatalf("deleted thread load = %v, want ErrThreadNotFound", err)
+	}
+}
+
+func TestThreadTitle(t *testing.T) {
+	t.Parallel()
+	longUnicode := strings.Repeat("界", 73)
+	tests := []struct {
+		name     string
+		messages []agtypes.Message
+		want     string
+	}{
+		{
+			name: "normalizes whitespace",
+			messages: []agtypes.Message{
+				{Role: agtypes.RoleAssistant, Content: "ignore me"},
+				{Role: agtypes.RoleUser, Content: "  Investigate\n checkout\tlatency  "},
+			},
+			want: "Investigate checkout latency",
+		},
+		{
+			name:     "truncates unicode by rune",
+			messages: []agtypes.Message{{Role: agtypes.RoleUser, Content: longUnicode}},
+			want:     strings.Repeat("界", 72) + "…",
+		},
+		{
+			name: "skips structured content",
+			messages: []agtypes.Message{
+				{Role: agtypes.RoleUser, Content: map[string]any{"type": "text", "text": "structured"}},
+				{Role: agtypes.RoleUser, Content: "Plain follow-up"},
+			},
+			want: "Plain follow-up",
+		},
+		{
+			name:     "falls back without a plain user message",
+			messages: []agtypes.Message{{Role: agtypes.RoleAssistant, Content: "assistant only"}},
+			want:     "Untitled investigation",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := threadTitle(tt.messages); got != tt.want {
+				t.Fatalf("threadTitle() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
