@@ -9,6 +9,14 @@ export function oauthReturnTo(): string {
   return `${target.pathname}${target.search}`;
 }
 
+export type BrowserViewer = "none" | "anonymous" | "user";
+
+export function browserViewerFromMe(user: unknown): BrowserViewer {
+  if (!user || typeof user !== "object" || !("id" in user) || !("anonymous" in user)) return "none";
+  if (typeof user.id !== "string" || user.id === "" || typeof user.anonymous !== "boolean") return "none";
+  return user.anonymous ? "anonymous" : "user";
+}
+
 export function clearLegacySession() {
   localStorage.removeItem(legacyTokenKey);
 }

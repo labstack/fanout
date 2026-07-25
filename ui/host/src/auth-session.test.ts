@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizedFetch, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { authorizedFetch, browserViewerFromMe, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -42,6 +42,24 @@ describe("oauthReturnTo", () => {
     expect(oauthReturnTo()).toBe("");
     withReturnTo("/api/auth/oauth/authorize/../../../admin");
     expect(oauthReturnTo()).toBe("");
+  });
+});
+
+describe("browserViewerFromMe", () => {
+  it("classifies a persisted user session", () => {
+    expect(browserViewerFromMe({ id: "user-123", anonymous: false })).toBe("user");
+  });
+
+  it("classifies the server-declared anonymous viewer", () => {
+    expect(browserViewerFromMe({ id: "any-synthetic-id", anonymous: true })).toBe("anonymous");
+  });
+
+  it("fails closed for malformed responses", () => {
+    expect(browserViewerFromMe(null)).toBe("none");
+    expect(browserViewerFromMe({})).toBe("none");
+    expect(browserViewerFromMe({ id: "", anonymous: false })).toBe("none");
+    expect(browserViewerFromMe({ id: "user-123" })).toBe("none");
+    expect(browserViewerFromMe({ id: "user-123", anonymous: "false" })).toBe("none");
   });
 });
 
