@@ -263,9 +263,22 @@ func TestMCPOAuthRegistrationRejectsUnsafeRedirect(t *testing.T) {
 
 func TestMCPOAuthRegistrationRejectsCSPUnsafeRedirectHost(t *testing.T) {
 	e, _, _ := newOAuthTestServer(t)
-	rec := serve(t, e, http.MethodPost, "/oauth/register", `{"client_name":"bad","redirect_uris":["https://example.com';form-action%20*/callback"]}`, map[string]string{"Content-Type": "application/json"})
-	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_redirect_uri") {
+	rec := serve(t, e, http.MethodPost, "/oauth/register", `{"client_name":"bad","redirect_uris":["https://example.com;form-action=*/callback"]}`, map[string]string{"Content-Type": "application/json"})
+	if rec.Code != http.StatusBadRequest ||
+		!strings.Contains(rec.Body.String(), "invalid_redirect_uri") ||
+		!strings.Contains(rec.Body.String(), "ASCII hostname") {
 		t.Fatalf("CSP-unsafe redirect registration = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRedirectURIOriginPreservesIPv4MappedIPv6Host(t *testing.T) {
+	const redirect = "http://[::ffff:127.0.0.1]:5000/callback"
+	origin, err := redirectURIOrigin(redirect)
+	if err != nil {
+		t.Fatalf("redirectURIOrigin(%q): %v", redirect, err)
+	}
+	if want := "http://[::ffff:127.0.0.1]:5000"; origin != want {
+		t.Fatalf("redirectURIOrigin(%q) = %q, want %q", redirect, origin, want)
 	}
 }
 

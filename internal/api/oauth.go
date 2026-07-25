@@ -518,14 +518,17 @@ func redirectURIOrigin(raw string) (string, error) {
 	// syntactically parseable but hostile authority from injecting directives.
 	var originHost string
 	if ip != nil {
-		originHost = ip.String()
+		// Preserve the registered IP spelling. In particular, net.IP.String
+		// collapses IPv4-mapped IPv6 addresses to IPv4, which would make the
+		// CSP source differ from the redirect URI the browser receives.
+		originHost = strings.ToLower(host)
 	} else {
 		originHost = strings.ToLower(host)
 		for _, char := range originHost {
 			if (char < 'a' || char > 'z') &&
 				(char < '0' || char > '9') &&
 				char != '.' && char != '-' {
-				return "", fmt.Errorf("redirect URI host contains unsupported characters")
+				return "", fmt.Errorf("redirect URI host must be an IP address or ASCII hostname (use punycode for internationalized domains)")
 			}
 		}
 	}

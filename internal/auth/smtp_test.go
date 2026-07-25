@@ -61,6 +61,19 @@ func TestMailMessageContainsPlainTextAndHTMLAlternatives(t *testing.T) {
 	}
 }
 
+func TestPlainTextMailBodiesIncludeSafetyNotice(t *testing.T) {
+	for name, body := range map[string]string{
+		"code":   codeMailText("123456"),
+		"invite": inviteMailText,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !strings.Contains(body, plainTextSafetyNotice) {
+				t.Fatalf("plain-text %s email is missing the safety notice:\n%s", name, body)
+			}
+		})
+	}
+}
+
 func TestInviteMailUsesFanoutBrand(t *testing.T) {
 	body, err := renderMail(inviteMailTemplate, mailData{
 		Preheader: "You've been invited to a Fanout workspace.",

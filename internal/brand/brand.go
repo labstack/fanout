@@ -2,9 +2,8 @@
 // surfaces that cannot render the React brand components.
 package brand
 
-// MarkSVG is the server-rendered version of ui/host/src/brand.tsx FanoutMark.
-// Keep the ribbon paths and gradients in sync with that component and the
-// favicon assets.
+// MarkSVG is the server-rendered Fanout mark. Keep its ribbon paths and
+// gradients in sync with the canonical site/public/favicon.svg asset.
 const MarkSVG = `<svg viewBox="35 44 200 200" width="100%" height="100%" aria-hidden="true">
 <defs>
 <linearGradient id="fanout-top" x1="54" y1="52" x2="210" y2="104" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#5FE8CE"/><stop offset=".55" stop-color="#81E4B9"/><stop offset="1" stop-color="#D9F276"/></linearGradient>

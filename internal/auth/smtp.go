@@ -29,8 +29,7 @@ func SendInvite(cfg SMTPConfig, to string) error {
 	if err != nil {
 		return err
 	}
-	const bodyText = "You've been invited to Fanout.\n\nVisit your Fanout instance and sign in with this email address to start investigating your observability data."
-	return send(cfg, to, "You've been invited to Fanout", bodyText, message)
+	return send(cfg, to, "You've been invited to Fanout", inviteMailText, message)
 }
 
 // SendCode sends a verification code email via SMTP.
@@ -43,8 +42,15 @@ func SendCode(cfg SMTPConfig, to, code string) error {
 	if err != nil {
 		return err
 	}
-	bodyText := fmt.Sprintf("Your Fanout verification code is %s.\n\nEnter this code to finish signing in. It expires in 5 minutes.", code)
-	return send(cfg, to, subject, bodyText, message)
+	return send(cfg, to, subject, codeMailText(code), message)
+}
+
+const plainTextSafetyNotice = "If you did not expect this message, you can safely ignore it."
+
+const inviteMailText = "You've been invited to Fanout.\n\nVisit your Fanout instance and sign in with this email address to start investigating your observability data.\n\n" + plainTextSafetyNotice
+
+func codeMailText(code string) string {
+	return fmt.Sprintf("Your Fanout verification code is %s.\n\nEnter this code to finish signing in. It expires in 5 minutes.\n\n%s", code, plainTextSafetyNotice)
 }
 
 func send(cfg SMTPConfig, to, subject, bodyText, bodyHTML string) error {
@@ -58,7 +64,7 @@ func send(cfg SMTPConfig, to, subject, bodyText, bodyHTML string) error {
 		mail.WithTimeout(10 * time.Second),
 		mail.WithUsername(cfg.User),
 		mail.WithPassword(cfg.Pass),
-		mail.WithSMTPAuth(mail.SMTPAuthPlain),
+		mail.WithSMTPAuth(mail.SMTPAuthAutoDiscover),
 	}
 	if cfg.Port == 465 {
 		options = append(options, mail.WithSSL())
