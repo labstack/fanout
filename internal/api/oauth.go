@@ -283,18 +283,18 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 		return oauthJSONError(c, http.StatusUnauthorized, "access_denied", "browser authentication is required")
 	}
 	if c.Request().Method == http.MethodGet {
-		redirectOrigin, err := redirectURIOrigin(req.RedirectURI)
+		redirectOrigin, formActionSource, err := redirectURIOrigin(req.RedirectURI)
 		if err != nil {
 			slog.Error("registered OAuth redirect URI is invalid", "client_id", req.ClientID, "err", err)
 			return oauthJSONError(c, http.StatusInternalServerError, "server_error", "authorization failed")
 		}
-		formActionSource := redirectFormActionSource(req.RedirectURI, redirectOrigin)
 		grantedScope := authorizationScope(req.Scope)
 		c.Response().Header().Set("Cache-Control", "no-store")
 		// Chromium applies form-action across the redirect after this
 		// same-origin form POST. Permit the exact validated callback origin
-		// where CSP can express it. Bracketed IPv6 is not a valid host-source,
-		// so use the callback's scheme as the tightest working fallback.
+		// where CSP can express it. CSP host-source cannot represent bracketed
+		// IPv6 literals, routable or loopback, so use the callback's validated
+		// scheme as the tightest working fallback.
 		c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+formActionSource+"; base-uri 'none'; frame-ancestors 'none'")
 		c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 		return oauthConsentTemplate.Execute(c.Response(), map[string]any{
@@ -494,17 +494,17 @@ func (h *MCPAuthorization) exchangeAuthorizationCode(c *echo.Context, clientID s
 }
 
 func validateRedirectURI(raw string) error {
-	_, err := redirectURIOrigin(raw)
+	_, _, err := redirectURIOrigin(raw)
 	return err
 }
 
-func redirectURIOrigin(raw string) (string, error) {
+func redirectURIOrigin(raw string) (string, string, error) {
 	if len(raw) > 2048 {
-		return "", fmt.Errorf("redirect URI is too long")
+		return "", "", fmt.Errorf("redirect URI is too long")
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" {
-		return "", fmt.Errorf("redirect URI must be an absolute URL without a fragment")
+		return "", "", fmt.Errorf("redirect URI must be an absolute URL without a fragment")
 	}
 	host := u.Hostname()
 	loopback := strings.EqualFold(host, "localhost")
@@ -513,50 +513,44 @@ func redirectURIOrigin(raw string) (string, error) {
 		loopback = loopback || ip.IsLoopback()
 	}
 	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
-		return "", fmt.Errorf("redirect URI must use HTTPS or loopback HTTP")
+		return "", "", fmt.Errorf("redirect URI must use HTTPS or loopback HTTP")
 	}
 
 	// Only emit a canonical host-source accepted by CSP. This also prevents a
 	// syntactically parseable but hostile authority from injecting directives.
-	var originHost string
-	if ip != nil {
-		// Preserve the registered IP spelling. In particular, net.IP.String
-		// collapses IPv4-mapped IPv6 addresses to IPv4, which would make the
-		// CSP source differ from the redirect URI the browser receives.
-		originHost = strings.ToLower(host)
-	} else {
-		originHost = strings.ToLower(host)
+	// Preserve registered IP spelling in the origin shown on the consent card:
+	// net.IP.String would collapse IPv4-mapped IPv6 to IPv4 and misrepresent
+	// the client's registered callback.
+	originHost := strings.ToLower(host)
+	if ip == nil {
 		for _, char := range originHost {
 			if (char < 'a' || char > 'z') &&
 				(char < '0' || char > '9') &&
 				char != '.' && char != '-' {
-				return "", fmt.Errorf("redirect URI host must be an IP address or ASCII hostname (use punycode for internationalized domains)")
+				return "", "", fmt.Errorf("redirect URI host must be an IP address or ASCII hostname (use punycode for internationalized domains)")
 			}
 		}
 	}
 	if originHost == "" {
-		return "", fmt.Errorf("redirect URI must include a host")
+		return "", "", fmt.Errorf("redirect URI must include a host")
 	}
 
 	port := u.Port()
 	if port != "" {
 		value, err := strconv.Atoi(port)
 		if err != nil || value < 1 || value > 65535 {
-			return "", fmt.Errorf("redirect URI port is invalid")
+			return "", "", fmt.Errorf("redirect URI port is invalid")
 		}
 		originHost = net.JoinHostPort(originHost, port)
 	} else if ip != nil && strings.Contains(originHost, ":") {
 		originHost = "[" + originHost + "]"
 	}
-	return u.Scheme + "://" + originHost, nil
-}
-
-func redirectFormActionSource(raw, origin string) string {
-	u, _ := url.Parse(raw) // raw was already validated by redirectURIOrigin
-	if strings.Contains(u.Hostname(), ":") {
-		return u.Scheme + ":"
+	origin := u.Scheme + "://" + originHost
+	formActionSource := origin
+	if strings.Contains(host, ":") {
+		formActionSource = u.Scheme + ":"
 	}
-	return origin
+	return origin, formActionSource, nil
 }
 
 func validS256Challenge(challenge string) bool {

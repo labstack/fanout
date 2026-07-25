@@ -273,29 +273,73 @@ func TestMCPOAuthRegistrationRejectsCSPUnsafeRedirectHost(t *testing.T) {
 
 func TestRedirectURIOriginPreservesIPv4MappedIPv6Host(t *testing.T) {
 	const redirect = "http://[::ffff:127.0.0.1]:5000/callback"
-	origin, err := redirectURIOrigin(redirect)
+	origin, source, err := redirectURIOrigin(redirect)
 	if err != nil {
 		t.Fatalf("redirectURIOrigin(%q): %v", redirect, err)
 	}
 	if want := "http://[::ffff:127.0.0.1]:5000"; origin != want {
 		t.Fatalf("redirectURIOrigin(%q) = %q, want %q", redirect, origin, want)
 	}
-	if source := redirectFormActionSource(redirect, origin); source != "http:" {
-		t.Fatalf("redirectFormActionSource(%q) = %q, want %q", redirect, source, "http:")
+	if source != "http:" {
+		t.Fatalf("redirectURIOrigin(%q) form action = %q, want %q", redirect, source, "http:")
 	}
 }
 
 func TestRedirectFormActionSourceUsesSchemeForIPv6(t *testing.T) {
 	const redirect = "http://[::1]:5000/callback"
-	origin, err := redirectURIOrigin(redirect)
+	origin, source, err := redirectURIOrigin(redirect)
 	if err != nil {
 		t.Fatalf("redirectURIOrigin(%q): %v", redirect, err)
 	}
 	if want := "http://[::1]:5000"; origin != want {
 		t.Fatalf("redirectURIOrigin(%q) = %q, want %q", redirect, origin, want)
 	}
-	if source := redirectFormActionSource(redirect, origin); source != "http:" {
-		t.Fatalf("redirectFormActionSource(%q) = %q, want %q", redirect, source, "http:")
+	if source != "http:" {
+		t.Fatalf("redirectURIOrigin(%q) form action = %q, want %q", redirect, source, "http:")
+	}
+}
+
+func TestMCPOAuthConsentUsesSchemeSourceForIPv6Redirect(t *testing.T) {
+	const redirect = "http://[::1]:5000/callback"
+
+	e, users, _ := newOAuthTestServer(t)
+	user, err := users.Create("ipv6-owner@example.com", "IPv6 Owner", "admin")
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+
+	registration := serve(t, e, http.MethodPost, "/oauth/register",
+		`{"client_name":"IPv6 Client","redirect_uris":["`+redirect+`"]}`,
+		map[string]string{"Content-Type": "application/json"})
+	if registration.Code != http.StatusCreated {
+		t.Fatalf("registration = %d %s", registration.Code, registration.Body.String())
+	}
+	var client auth.OAuthClient
+	if err := json.Unmarshal(registration.Body.Bytes(), &client); err != nil {
+		t.Fatalf("decode registration: %v", err)
+	}
+
+	challenge := base64.RawURLEncoding.EncodeToString(make([]byte, sha256.Size))
+	params := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {client.ClientID},
+		"redirect_uri":          {redirect},
+		"scope":                 {mcpReadScope},
+		"state":                 {"state-ipv6"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"resource":              {testMCPResource},
+	}
+	consent := serve(t, e, http.MethodGet, "/api/auth/oauth/authorize?"+params.Encode(), "", nil, oauthCookieForUser(t, e, user))
+	if consent.Code != http.StatusOK {
+		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
+	}
+	csp := consent.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "form-action 'self' http:;") {
+		t.Fatalf("IPv6 consent CSP = %q, want scheme-source fallback", csp)
+	}
+	if strings.Contains(csp, "http://[::1]") {
+		t.Fatalf("IPv6 consent CSP contains an inexpressible bracketed host-source: %q", csp)
 	}
 }
 
