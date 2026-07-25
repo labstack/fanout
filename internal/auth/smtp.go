@@ -2,14 +2,12 @@ package auth
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"html/template"
-	"net"
-	"net/smtp"
-	"strconv"
 	"time"
 
-	"github.com/labstack/gommon/email"
+	mail "github.com/wneessen/go-mail"
 
 	"github.com/labstack/fanout/internal/brand"
 )
@@ -31,7 +29,8 @@ func SendInvite(cfg SMTPConfig, to string) error {
 	if err != nil {
 		return err
 	}
-	return send(cfg, to, "You've been invited to Fanout", message)
+	const bodyText = "You've been invited to Fanout.\n\nVisit your Fanout instance and sign in with this email address to start investigating your observability data."
+	return send(cfg, to, "You've been invited to Fanout", bodyText, message)
 }
 
 // SendCode sends a verification code email via SMTP.
@@ -44,19 +43,50 @@ func SendCode(cfg SMTPConfig, to, code string) error {
 	if err != nil {
 		return err
 	}
-	return send(cfg, to, subject, message)
+	bodyText := fmt.Sprintf("Your Fanout verification code is %s.\n\nEnter this code to finish signing in. It expires in 5 minutes.", code)
+	return send(cfg, to, subject, bodyText, message)
 }
 
-func send(cfg SMTPConfig, to, subject, bodyHTML string) error {
-	e := email.New(net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port)))
-	e.Auth = smtp.PlainAuth("", cfg.User, cfg.Pass, cfg.Host)
-	e.DialTimeout = 10 * time.Second
-	return e.Send(&email.Message{
-		From:     cfg.From,
-		To:       to,
-		Subject:  subject,
-		BodyHTML: bodyHTML,
-	})
+func send(cfg SMTPConfig, to, subject, bodyText, bodyHTML string) error {
+	message, err := newMailMessage(cfg.From, to, subject, bodyText, bodyHTML)
+	if err != nil {
+		return err
+	}
+
+	options := []mail.Option{
+		mail.WithPort(cfg.Port),
+		mail.WithTimeout(10 * time.Second),
+		mail.WithUsername(cfg.User),
+		mail.WithPassword(cfg.Pass),
+		mail.WithSMTPAuth(mail.SMTPAuthPlain),
+	}
+	if cfg.Port == 465 {
+		options = append(options, mail.WithSSL())
+	} else {
+		options = append(options, mail.WithTLSPolicy(mail.TLSOpportunistic))
+	}
+	client, err := mail.NewClient(cfg.Host, options...)
+	if err != nil {
+		return fmt.Errorf("auth: configure SMTP client: %w", err)
+	}
+	if err := client.DialAndSendWithContext(context.Background(), message); err != nil {
+		return fmt.Errorf("auth: send email: %w", err)
+	}
+	return nil
+}
+
+func newMailMessage(from, to, subject, bodyText, bodyHTML string) (*mail.Msg, error) {
+	message := mail.NewMsg()
+	if err := message.From(from); err != nil {
+		return nil, fmt.Errorf("auth: invalid SMTP sender: %w", err)
+	}
+	if err := message.To(to); err != nil {
+		return nil, fmt.Errorf("auth: invalid email recipient: %w", err)
+	}
+	message.Subject(subject)
+	message.SetBodyString(mail.TypeTextPlain, bodyText)
+	message.AddAlternativeString(mail.TypeTextHTML, bodyHTML)
+	return message, nil
 }
 
 type mailData struct {

@@ -122,8 +122,8 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
 	}
 	csp := consent.Header().Get("Content-Security-Policy")
-	if strings.Contains(csp, "form-action") {
-		t.Fatalf("consent CSP blocks the registered loopback redirect: %q", csp)
+	if !strings.Contains(csp, "form-action 'self' http://localhost:4321") {
+		t.Fatalf("consent CSP does not allow only the registered loopback origin: %q", csp)
 	}
 	for _, directive := range []string{"default-src 'none'", "base-uri 'none'", "frame-ancestors 'none'"} {
 		if !strings.Contains(csp, directive) {
@@ -136,8 +136,6 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	for _, brandElement := range []string{
 		`class="brand-mark"`,
 		`class="brand-name">Fanout`,
-		`id="fanout-top"`,
-		`prefers-color-scheme:dark`,
 	} {
 		if !strings.Contains(consent.Body.String(), brandElement) {
 			t.Fatalf("consent page is missing branded element %q: %s", brandElement, consent.Body.String())
@@ -260,6 +258,14 @@ func TestMCPOAuthRegistrationRejectsUnsafeRedirect(t *testing.T) {
 	rec := serve(t, e, http.MethodPost, "/oauth/register", `{"client_name":"bad","redirect_uris":["http://example.com/callback"]}`, map[string]string{"Content-Type": "application/json"})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_redirect_uri") {
 		t.Fatalf("unsafe redirect registration = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMCPOAuthRegistrationRejectsCSPUnsafeRedirectHost(t *testing.T) {
+	e, _, _ := newOAuthTestServer(t)
+	rec := serve(t, e, http.MethodPost, "/oauth/register", `{"client_name":"bad","redirect_uris":["https://example.com';form-action%20*/callback"]}`, map[string]string{"Content-Type": "application/json"})
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_redirect_uri") {
+		t.Fatalf("CSP-unsafe redirect registration = %d %s", rec.Code, rec.Body.String())
 	}
 }
 

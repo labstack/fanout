@@ -1,8 +1,11 @@
 package auth
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/labstack/fanout/internal/brand"
 )
 
 func TestCodeMailUsesFanoutBrandAndEscapesCode(t *testing.T) {
@@ -18,9 +21,8 @@ func TestCodeMailUsesFanoutBrandAndEscapesCode(t *testing.T) {
 		"Fanout",
 		"Secure sign in",
 		"Your verification code",
-		"background:#70dfc3",
-		"background:#4aaef2",
-		"background:#9a50f4",
+		brand.EmailMarkHTML,
+		"Sign in &lt;now&gt;",
 		"&lt;script&gt;",
 	} {
 		if !strings.Contains(body, want) {
@@ -29,6 +31,33 @@ func TestCodeMailUsesFanoutBrandAndEscapesCode(t *testing.T) {
 	}
 	if strings.Contains(body, `<script>`) {
 		t.Fatalf("code email contains unescaped script markup:\n%s", body)
+	}
+}
+
+func TestMailMessageContainsPlainTextAndHTMLAlternatives(t *testing.T) {
+	message, err := newMailMessage(
+		"Fanout <fanout@labstack.com>",
+		"operator@example.com",
+		"Fanout login code: 123456",
+		"Your Fanout verification code is 123456.",
+		"<strong>Your Fanout verification code is 123456.</strong>",
+	)
+	if err != nil {
+		t.Fatalf("newMailMessage: %v", err)
+	}
+
+	var raw bytes.Buffer
+	if _, err := message.WriteTo(&raw); err != nil {
+		t.Fatalf("WriteTo: %v", err)
+	}
+	for _, want := range []string{
+		"Content-Type: multipart/alternative;",
+		"Content-Type: text/plain;",
+		"Content-Type: text/html;",
+	} {
+		if !strings.Contains(raw.String(), want) {
+			t.Fatalf("serialized email missing %q:\n%s", want, raw.String())
+		}
 	}
 }
 

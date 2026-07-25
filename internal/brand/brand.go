@@ -20,9 +20,9 @@ const MarkSVG = `<svg viewBox="35 44 200 200" width="100%" height="100%" aria-hi
 // markup. Inline SVG is intentionally avoided because major mail clients strip
 // or fail to render it.
 const EmailMarkHTML = `<table role="presentation" aria-hidden="true" cellpadding="0" cellspacing="0" style="border-collapse:separate;width:38px">
-<tr><td style="height:8px;width:38px;border-radius:8px;background:#70dfc3;font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td style="height:8px;width:38px;border-radius:8px;background:#81E4B9;font-size:0;line-height:0">&nbsp;</td></tr>
 <tr><td style="height:5px;font-size:0;line-height:0">&nbsp;</td></tr>
-<tr><td style="height:8px;width:29px;border-radius:8px;background:#4aaef2;font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td style="height:8px;width:29px;border-radius:8px;background:#41B6F8;font-size:0;line-height:0">&nbsp;</td></tr>
 <tr><td style="height:5px;font-size:0;line-height:0">&nbsp;</td></tr>
-<tr><td style="height:8px;width:20px;border-radius:8px;background:#9a50f4;font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td style="height:8px;width:20px;border-radius:8px;background:#9A50F4;font-size:0;line-height:0">&nbsp;</td></tr>
 </table>`

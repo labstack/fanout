@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v5"
@@ -282,19 +283,21 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 		return oauthJSONError(c, http.StatusUnauthorized, "access_denied", "browser authentication is required")
 	}
 	if c.Request().Method == http.MethodGet {
-		redirectURL, _ := url.Parse(req.RedirectURI)
+		redirectOrigin, err := redirectURIOrigin(req.RedirectURI)
+		if err != nil {
+			slog.Error("registered OAuth redirect URI is invalid", "client_id", req.ClientID, "err", err)
+			return oauthJSONError(c, http.StatusInternalServerError, "server_error", "authorization failed")
+		}
 		grantedScope := authorizationScope(req.Scope)
 		c.Response().Header().Set("Cache-Control", "no-store")
-		// form-action is intentionally absent. Chromium applies it across the
-		// redirect after this same-origin form POST, so form-action 'self'
-		// blocks the registered loopback callbacks required by native MCP
-		// clients. The form target below is a literal same-origin path, while
-		// the POST revalidates the exact registered redirect URI before use.
-		c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'")
+		// Chromium applies form-action across the redirect after this
+		// same-origin form POST. Permit only the exact, validated callback
+		// origin required by the registered native MCP client.
+		c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+redirectOrigin+"; base-uri 'none'; frame-ancestors 'none'")
 		c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 		return oauthConsentTemplate.Execute(c.Response(), map[string]any{
 			"ClientName": client.ClientName,
-			"Redirect":   redirectURL.Scheme + "://" + redirectURL.Host,
+			"Redirect":   redirectOrigin,
 			"Email":      user.Email,
 			"Request":    req,
 			"Scope":      grantedScope,
@@ -489,22 +492,58 @@ func (h *MCPAuthorization) exchangeAuthorizationCode(c *echo.Context, clientID s
 }
 
 func validateRedirectURI(raw string) error {
+	_, err := redirectURIOrigin(raw)
+	return err
+}
+
+func redirectURIOrigin(raw string) (string, error) {
 	if len(raw) > 2048 {
-		return fmt.Errorf("redirect URI is too long")
+		return "", fmt.Errorf("redirect URI is too long")
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" {
-		return fmt.Errorf("redirect URI must be an absolute URL without a fragment")
+		return "", fmt.Errorf("redirect URI must be an absolute URL without a fragment")
 	}
 	host := u.Hostname()
 	loopback := strings.EqualFold(host, "localhost")
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		loopback = true
+	ip := net.ParseIP(host)
+	if ip != nil {
+		loopback = loopback || ip.IsLoopback()
 	}
 	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
-		return fmt.Errorf("redirect URI must use HTTPS or loopback HTTP")
+		return "", fmt.Errorf("redirect URI must use HTTPS or loopback HTTP")
 	}
-	return nil
+
+	// Only emit a canonical host-source accepted by CSP. This also prevents a
+	// syntactically parseable but hostile authority from injecting directives.
+	var originHost string
+	if ip != nil {
+		originHost = ip.String()
+	} else {
+		originHost = strings.ToLower(host)
+		for _, char := range originHost {
+			if (char < 'a' || char > 'z') &&
+				(char < '0' || char > '9') &&
+				char != '.' && char != '-' {
+				return "", fmt.Errorf("redirect URI host contains unsupported characters")
+			}
+		}
+	}
+	if originHost == "" {
+		return "", fmt.Errorf("redirect URI must include a host")
+	}
+
+	port := u.Port()
+	if port != "" {
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return "", fmt.Errorf("redirect URI port is invalid")
+		}
+		originHost = net.JoinHostPort(originHost, port)
+	} else if ip != nil && strings.Contains(originHost, ":") {
+		originHost = "[" + originHost + "]"
+	}
+	return u.Scheme + "://" + originHost, nil
 }
 
 func validS256Challenge(challenge string) bool {
