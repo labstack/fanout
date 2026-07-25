@@ -82,4 +82,27 @@ describe("AuthGate OAuth return", () => {
 
     await act(async () => root.unmount());
   });
+
+  it("renders the app for the anonymous viewer outside the OAuth flow", async () => {
+    window.happyDOM.setURL("https://demo.fanout.test/");
+    fetchMock.mockImplementation(async (input) => authResponse(input, {
+      id: "synthetic-viewer",
+      role: "viewer",
+      anonymous: true,
+    }));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(
+      <MantineProvider>
+        <AuthGate><div>Fanout application</div></AuthGate>
+      </MantineProvider>,
+    ));
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
+    expect(document.body.textContent).not.toContain("Sign in to investigate");
+
+    await act(async () => root.unmount());
+  });
 });
