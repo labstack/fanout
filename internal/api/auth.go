@@ -283,7 +283,13 @@ func (h *AuthHandler) Me(c *echo.Context) error {
 	if user == nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
-	return c.JSON(200, user)
+	return c.JSON(200, struct {
+		auth.User
+		Anonymous bool `json:"anonymous"`
+	}{
+		User:      *user,
+		Anonymous: user.ID == publicViewerID,
+	})
 }
 
 func (h *AuthHandler) Logout(c *echo.Context) error {

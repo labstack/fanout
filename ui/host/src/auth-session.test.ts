@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizedFetch, hasAuthenticatedBrowserSession, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { authorizedFetch, browserViewerFromMe, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -45,19 +45,21 @@ describe("oauthReturnTo", () => {
   });
 });
 
-describe("hasAuthenticatedBrowserSession", () => {
-  it("accepts a persisted user session", () => {
-    expect(hasAuthenticatedBrowserSession({ id: "user-123" })).toBe(true);
+describe("browserViewerFromMe", () => {
+  it("classifies a persisted user session", () => {
+    expect(browserViewerFromMe({ id: "user-123", anonymous: false })).toBe("user");
   });
 
-  it("rejects the synthetic public viewer", () => {
-    expect(hasAuthenticatedBrowserSession({ id: "public" })).toBe(false);
+  it("classifies the server-declared anonymous viewer", () => {
+    expect(browserViewerFromMe({ id: "any-synthetic-id", anonymous: true })).toBe("anonymous");
   });
 
   it("fails closed for malformed responses", () => {
-    expect(hasAuthenticatedBrowserSession(null)).toBe(false);
-    expect(hasAuthenticatedBrowserSession({})).toBe(false);
-    expect(hasAuthenticatedBrowserSession({ id: "" })).toBe(false);
+    expect(browserViewerFromMe(null)).toBe("none");
+    expect(browserViewerFromMe({})).toBe("none");
+    expect(browserViewerFromMe({ id: "", anonymous: false })).toBe("none");
+    expect(browserViewerFromMe({ id: "user-123" })).toBe("none");
+    expect(browserViewerFromMe({ id: "user-123", anonymous: "false" })).toBe("none");
   });
 });
 

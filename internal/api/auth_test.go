@@ -225,7 +225,15 @@ func TestPublicReadStatusAndAnonymousMe(t *testing.T) {
 	}
 	meRec := httptest.NewRecorder()
 	s.e.ServeHTTP(meRec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
-	if meRec.Code != http.StatusOK || !strings.Contains(meRec.Body.String(), `"role":"viewer"`) {
+	var anonymousMe struct {
+		ID        string    `json:"id"`
+		Role      auth.Role `json:"role"`
+		Anonymous bool      `json:"anonymous"`
+	}
+	if err := json.Unmarshal(meRec.Body.Bytes(), &anonymousMe); err != nil {
+		t.Fatalf("decode anonymous me: %v", err)
+	}
+	if meRec.Code != http.StatusOK || anonymousMe.ID != publicViewerID || anonymousMe.Role != auth.RoleViewer || !anonymousMe.Anonymous {
 		t.Fatalf("anonymous me = %d %s", meRec.Code, meRec.Body.String())
 	}
 
@@ -235,7 +243,15 @@ func TestPublicReadStatusAndAnonymousMe(t *testing.T) {
 	}
 	authenticatedMe := httptest.NewRecorder()
 	s.e.ServeHTTP(authenticatedMe, sessionRequest(http.MethodGet, "/api/auth/me", nil, s.login(t, admin)))
-	if authenticatedMe.Code != http.StatusOK || !strings.Contains(authenticatedMe.Body.String(), `"role":"admin"`) {
+	var persistedMe struct {
+		ID        string    `json:"id"`
+		Role      auth.Role `json:"role"`
+		Anonymous bool      `json:"anonymous"`
+	}
+	if err := json.Unmarshal(authenticatedMe.Body.Bytes(), &persistedMe); err != nil {
+		t.Fatalf("decode authenticated me: %v", err)
+	}
+	if authenticatedMe.Code != http.StatusOK || persistedMe.ID != admin.ID || persistedMe.Role != auth.RoleAdmin || persistedMe.Anonymous {
 		t.Fatalf("authenticated public-mode me = %d %s", authenticatedMe.Code, authenticatedMe.Body.String())
 	}
 }

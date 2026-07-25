@@ -1,7 +1,7 @@
 import { Alert, Box, Button, Center, Code, Container, Group, Loader, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
-import { clearLegacySession, hasAuthenticatedBrowserSession, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { browserViewerFromMe, BrowserViewer, clearLegacySession, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 import { BrandLockup } from "./brand";
 
 export { authorizedFetch, clearSession, logout } from "./auth-session";
@@ -49,7 +49,7 @@ function AuthSurface({ children, wide = false }: { children: ReactNode; wide?: b
 
 export default function AuthGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null);
-  const [authenticated, setAuthenticated] = useState(false);
+  const [viewer, setViewer] = useState<BrowserViewer>("none");
   const [sessionReady, setSessionReady] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -61,6 +61,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [setupResult, setSetupResult] = useState<SetupResult | null>(null);
   const [copied, setCopied] = useState(false);
   const returnTo = oauthReturnTo();
+  const authenticated = viewer === "user" || (viewer === "anonymous" && !returnTo);
 
   useEffect(() => {
     clearLegacySession();
@@ -68,22 +69,18 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     fetch("/api/auth/me", { credentials: "same-origin" })
       .then(async (response) => {
         if (!response.ok) {
-          setAuthenticated(false);
-          return;
-        }
-        if (!returnTo) {
-          setAuthenticated(true);
+          setViewer("none");
           return;
         }
         const user = await response.json().catch(() => null);
-        setAuthenticated(hasAuthenticatedBrowserSession(user));
+        setViewer(browserViewerFromMe(user));
       })
-      .catch(() => setAuthenticated(false))
+      .catch(() => setViewer("none"))
       .finally(() => setSessionReady(true));
-    const handleUnauthorized = () => setAuthenticated(false);
+    const handleUnauthorized = () => setViewer("none");
     window.addEventListener(unauthorizedEvent, handleUnauthorized);
     return () => window.removeEventListener(unauthorizedEvent, handleUnauthorized);
-  }, [returnTo]);
+  }, []);
 
   useEffect(() => {
     if (authenticated && sessionReady && returnTo) window.location.replace(returnTo);
@@ -108,7 +105,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       {error && <Alert color="red" radius="md">{error}</Alert>}
       <Group grow align="stretch">
         <Button variant="light" radius="md" leftSection={copied ? <Check size={16} weight="bold" /> : <Copy size={16} />} onClick={() => void copyIngestToken()}>{copied ? "Copied" : "Copy token"}</Button>
-        <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setAuthenticated(true); setSetupResult(null); }}>Continue to Fanout</Button>
+        <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setViewer("user"); setSetupResult(null); }}>Continue to Fanout</Button>
       </Group>
     </Stack></AuthSurface>;
   }
@@ -138,13 +135,13 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     try {
       if (status?.setup_required) {
         const result = await jsonRequest("/api/auth/setup", { email, name, setup_token: setupToken }) as SetupResult;
-        if (result.ingest_token) setSetupResult(result); else setAuthenticated(true);
+        if (result.ingest_token) setSetupResult(result); else setViewer("user");
       } else if (!codeSent) {
         await jsonRequest("/api/auth/start", { email });
         setCodeSent(true);
       } else {
         await jsonRequest("/api/auth/verify", { email, code });
-        setAuthenticated(true);
+        setViewer("user");
       }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
