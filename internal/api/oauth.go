@@ -15,12 +15,14 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/dashboard"
 
 	appauth "github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/brand"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
@@ -281,14 +283,23 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 		return oauthJSONError(c, http.StatusUnauthorized, "access_denied", "browser authentication is required")
 	}
 	if c.Request().Method == http.MethodGet {
-		redirectURL, _ := url.Parse(req.RedirectURI)
+		redirectOrigin, formActionSource, err := redirectURIOrigin(req.RedirectURI)
+		if err != nil {
+			slog.Error("registered OAuth redirect URI is invalid", "client_id", req.ClientID, "err", err)
+			return oauthJSONError(c, http.StatusInternalServerError, "server_error", "authorization failed")
+		}
 		grantedScope := authorizationScope(req.Scope)
 		c.Response().Header().Set("Cache-Control", "no-store")
-		c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+		// Chromium applies form-action across the redirect after this
+		// same-origin form POST. Permit the exact validated callback origin
+		// where CSP can express it. CSP host-source cannot represent bracketed
+		// IPv6 literals, routable or loopback, so use the callback's validated
+		// scheme as the tightest working fallback.
+		c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+formActionSource+"; base-uri 'none'; frame-ancestors 'none'")
 		c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 		return oauthConsentTemplate.Execute(c.Response(), map[string]any{
 			"ClientName": client.ClientName,
-			"Redirect":   redirectURL.Scheme + "://" + redirectURL.Host,
+			"Redirect":   redirectOrigin,
 			"Email":      user.Email,
 			"Request":    req,
 			"Scope":      grantedScope,
@@ -483,22 +494,63 @@ func (h *MCPAuthorization) exchangeAuthorizationCode(c *echo.Context, clientID s
 }
 
 func validateRedirectURI(raw string) error {
+	_, _, err := redirectURIOrigin(raw)
+	return err
+}
+
+func redirectURIOrigin(raw string) (string, string, error) {
 	if len(raw) > 2048 {
-		return fmt.Errorf("redirect URI is too long")
+		return "", "", fmt.Errorf("redirect URI is too long")
 	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.User != nil || u.Fragment != "" {
-		return fmt.Errorf("redirect URI must be an absolute URL without a fragment")
+		return "", "", fmt.Errorf("redirect URI must be an absolute URL without a fragment")
 	}
 	host := u.Hostname()
 	loopback := strings.EqualFold(host, "localhost")
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		loopback = true
+	ip := net.ParseIP(host)
+	if ip != nil {
+		loopback = loopback || ip.IsLoopback()
 	}
 	if u.Scheme != "https" && !(u.Scheme == "http" && loopback) {
-		return fmt.Errorf("redirect URI must use HTTPS or loopback HTTP")
+		return "", "", fmt.Errorf("redirect URI must use HTTPS or loopback HTTP")
 	}
-	return nil
+
+	// Only emit a canonical host-source accepted by CSP. This also prevents a
+	// syntactically parseable but hostile authority from injecting directives.
+	// Preserve registered IP spelling in the origin shown on the consent card:
+	// net.IP.String would collapse IPv4-mapped IPv6 to IPv4 and misrepresent
+	// the client's registered callback.
+	originHost := strings.ToLower(host)
+	if ip == nil {
+		for _, char := range originHost {
+			if (char < 'a' || char > 'z') &&
+				(char < '0' || char > '9') &&
+				char != '.' && char != '-' {
+				return "", "", fmt.Errorf("redirect URI host must be an IP address or ASCII hostname (use punycode for internationalized domains)")
+			}
+		}
+	}
+	if originHost == "" {
+		return "", "", fmt.Errorf("redirect URI must include a host")
+	}
+
+	port := u.Port()
+	if port != "" {
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return "", "", fmt.Errorf("redirect URI port is invalid")
+		}
+		originHost = net.JoinHostPort(originHost, port)
+	} else if ip != nil && strings.Contains(originHost, ":") {
+		originHost = "[" + originHost + "]"
+	}
+	origin := u.Scheme + "://" + originHost
+	formActionSource := origin
+	if strings.Contains(host, ":") {
+		formActionSource = u.Scheme + ":"
+	}
+	return origin, formActionSource, nil
 }
 
 func validS256Challenge(challenge string) bool {
@@ -550,16 +602,17 @@ func oauthJSONError(c *echo.Context, status int, code, description string) error
 var oauthConsentTemplate = template.Must(template.New("oauth-consent").Parse(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Authorize access · Fanout</title><style>
-:root{color-scheme:dark;font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:#090d0b;color:#eef4f0}
-*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(circle at 50% 0,#18231d 0,#090d0b 52%)}
-.card{width:min(100%,520px);padding:32px;border:1px solid #2a3931;border-radius:22px;background:#111713;box-shadow:0 28px 80px #0008}
-.mark{display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:#627a47;color:#081008;font-weight:800;font-size:20px}
-.eyebrow{margin:24px 0 8px;color:#8e9d94;font-size:12px;font-weight:700;letter-spacing:.16em;text-transform:uppercase}h1{margin:0;font-size:28px;line-height:1.2;letter-spacing:-.03em}
-.lede{color:#a9b5ae;line-height:1.6}.detail{margin:24px 0;padding:18px;border:1px solid #29372f;border-radius:14px;background:#0d120f}.detail b{display:block;margin-bottom:5px}.detail span{color:#8e9d94;font-size:13px;overflow-wrap:anywhere}
-.access{display:flex;gap:12px;margin:20px 0}.check{display:grid;place-items:center;flex:0 0 26px;height:26px;border-radius:50%;background:#1e392c;color:#71d6a3;font-weight:800}.access p{margin:2px 0;color:#a9b5ae;line-height:1.5}.signed{font-size:13px;color:#7f8c84}
-.actions{display:grid;grid-template-columns:1fr 1.5fr;gap:12px;margin-top:28px}button{border:1px solid #314139;border-radius:12px;padding:13px 16px;background:#151d18;color:#edf3ef;font:inherit;font-weight:700;cursor:pointer}button.primary{border-color:#627a47;background:#627a47;color:#071007}button:hover{filter:brightness(1.08)}
-@media(max-width:520px){.card{padding:24px}.actions{grid-template-columns:1fr}}
-</style></head><body><main class="card"><div class="mark">F</div><p class="eyebrow">Secure connection</p><h1>Allow {{.ClientName}} to access Fanout?</h1>
+:root{color-scheme:light dark;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#fff;color:#1f2923}
+*{box-sizing:border-box}html,body{width:100%}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;overflow-x:hidden;background:radial-gradient(circle at 50% -12%,rgba(70,192,142,.12),transparent 38%),linear-gradient(180deg,#f8faf9,#fff 62%)}
+.card{width:100%;max-width:520px;min-width:0;padding:40px;border:1px solid rgba(31,41,55,.08);border-radius:28px;background:rgba(255,255,255,.92);box-shadow:0 28px 70px rgba(31,41,55,.10),0 3px 10px rgba(31,41,55,.04);backdrop-filter:blur(18px)}
+.brand{display:flex;align-items:center;gap:14px}.brand-mark{display:block;width:46px;height:46px}.brand-name{font-size:18px;font-weight:800;line-height:1;letter-spacing:.17em;text-transform:uppercase}
+.eyebrow{margin:28px 0 8px;color:#087f5b;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}h1{margin:0;font-size:34px;font-weight:650;line-height:1.08;letter-spacing:-.035em}
+.lede{margin:16px 0 0;color:#66736c;line-height:1.6}.detail{display:grid;gap:5px;margin:24px 0;padding:18px;border:1px solid #e1e7e3;border-radius:14px;background:#f7f9f8}.detail b{display:block}.detail span{color:#748078;font-size:13px;overflow-wrap:anywhere}
+.access{display:flex;gap:12px;margin:20px 0}.access>div{min-width:0}.check{display:grid;place-items:center;flex:0 0 26px;height:26px;border-radius:50%;background:#e6fcf5;color:#087f5b;font-weight:800}.access p{margin:2px 0;color:#66736c;line-height:1.5;overflow-wrap:anywhere}.signed{font-size:13px;color:#748078}
+.actions{display:grid;grid-template-columns:1fr 1.5fr;gap:12px;margin-top:28px}button{border:1px solid #d7ddd9;border-radius:12px;padding:13px 16px;background:#fff;color:#26322b;font:inherit;font-weight:700;cursor:pointer}button.primary{border-color:#0ca678;background:#0ca678;color:#fff}button:hover{filter:brightness(.97)}button:focus-visible{outline:3px solid rgba(12,166,120,.25);outline-offset:2px}
+@media(prefers-color-scheme:dark){:root{background:#101512;color:#eef4f0}body{background:radial-gradient(circle at 50% -12%,rgba(70,192,142,.14),transparent 38%),#101512}.card{border-color:#303a35;background:rgba(27,33,30,.94);box-shadow:0 28px 70px #0007}.eyebrow{color:#63e6be}.lede,.access p{color:#aab5af}.detail{border-color:#38443e;background:#151b18}.detail span,.signed{color:#8c9892}.check{background:#153b2e;color:#63e6be}button{border-color:#3b4741;background:#232b27;color:#eef4f0}button.primary{border-color:#20c997;background:#20c997;color:#07140f}}
+@media(max-width:520px){body{display:flex;align-items:center;justify-content:center;padding:16px}.card{width:calc(100vw - 32px);max-width:calc(100vw - 32px);padding:28px 24px}.actions{grid-template-columns:1fr}h1{font-size:30px}}
+</style></head><body><main class="card"><div class="brand"><span class="brand-mark">` + brand.MarkSVG + `</span><span class="brand-name">Fanout</span></div><p class="eyebrow">Secure connection</p><h1>Allow {{.ClientName}} to access Fanout?</h1>
 <p class="lede">{{if .ReadOnly}}This application is requesting read-only access to your observability data through MCP. It cannot change settings, alerts, or dashboards.{{else}}This application is requesting the access listed below through MCP.{{end}}</p>
 <div class="detail"><b>{{.ClientName}}</b><span>Returns to {{.Redirect}}</span><span>Scopes: {{.Scope}}</span></div>
 {{range .Grants}}<div class="access"><span class="check">✓</span><div><b>{{.Title}}</b><p>{{.Detail}}</p></div></div>

@@ -121,6 +121,26 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	if consent.Code != http.StatusOK || !strings.Contains(consent.Body.String(), "Allow Codex to access Fanout?") {
 		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
 	}
+	csp := consent.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "form-action 'self' http://localhost:4321") {
+		t.Fatalf("consent CSP does not allow only the registered loopback origin: %q", csp)
+	}
+	for _, directive := range []string{"default-src 'none'", "base-uri 'none'", "frame-ancestors 'none'"} {
+		if !strings.Contains(csp, directive) {
+			t.Fatalf("consent CSP = %q, missing %q", csp, directive)
+		}
+	}
+	if !strings.Contains(consent.Body.String(), `action="/api/auth/oauth/authorize"`) {
+		t.Fatalf("consent form target is not the fixed same-origin endpoint: %s", consent.Body.String())
+	}
+	for _, brandElement := range []string{
+		`class="brand-mark"`,
+		`class="brand-name">Fanout`,
+	} {
+		if !strings.Contains(consent.Body.String(), brandElement) {
+			t.Fatalf("consent page is missing branded element %q: %s", brandElement, consent.Body.String())
+		}
+	}
 
 	params.Set("decision", "approve")
 	approved := serve(t, e, http.MethodPost, "/api/auth/oauth/authorize", params.Encode(), map[string]string{"Content-Type": "application/x-www-form-urlencoded"}, cookie)
@@ -238,6 +258,88 @@ func TestMCPOAuthRegistrationRejectsUnsafeRedirect(t *testing.T) {
 	rec := serve(t, e, http.MethodPost, "/oauth/register", `{"client_name":"bad","redirect_uris":["http://example.com/callback"]}`, map[string]string{"Content-Type": "application/json"})
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "invalid_redirect_uri") {
 		t.Fatalf("unsafe redirect registration = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestMCPOAuthRegistrationRejectsCSPUnsafeRedirectHost(t *testing.T) {
+	e, _, _ := newOAuthTestServer(t)
+	rec := serve(t, e, http.MethodPost, "/oauth/register", `{"client_name":"bad","redirect_uris":["https://example.com;form-action=*/callback"]}`, map[string]string{"Content-Type": "application/json"})
+	if rec.Code != http.StatusBadRequest ||
+		!strings.Contains(rec.Body.String(), "invalid_redirect_uri") ||
+		!strings.Contains(rec.Body.String(), "ASCII hostname") {
+		t.Fatalf("CSP-unsafe redirect registration = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRedirectURIOriginPreservesIPv4MappedIPv6Host(t *testing.T) {
+	const redirect = "http://[::ffff:127.0.0.1]:5000/callback"
+	origin, source, err := redirectURIOrigin(redirect)
+	if err != nil {
+		t.Fatalf("redirectURIOrigin(%q): %v", redirect, err)
+	}
+	if want := "http://[::ffff:127.0.0.1]:5000"; origin != want {
+		t.Fatalf("redirectURIOrigin(%q) = %q, want %q", redirect, origin, want)
+	}
+	if source != "http:" {
+		t.Fatalf("redirectURIOrigin(%q) form action = %q, want %q", redirect, source, "http:")
+	}
+}
+
+func TestRedirectFormActionSourceUsesSchemeForIPv6(t *testing.T) {
+	const redirect = "http://[::1]:5000/callback"
+	origin, source, err := redirectURIOrigin(redirect)
+	if err != nil {
+		t.Fatalf("redirectURIOrigin(%q): %v", redirect, err)
+	}
+	if want := "http://[::1]:5000"; origin != want {
+		t.Fatalf("redirectURIOrigin(%q) = %q, want %q", redirect, origin, want)
+	}
+	if source != "http:" {
+		t.Fatalf("redirectURIOrigin(%q) form action = %q, want %q", redirect, source, "http:")
+	}
+}
+
+func TestMCPOAuthConsentUsesSchemeSourceForIPv6Redirect(t *testing.T) {
+	const redirect = "http://[::1]:5000/callback"
+
+	e, users, _ := newOAuthTestServer(t)
+	user, err := users.Create("ipv6-owner@example.com", "IPv6 Owner", "admin")
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+
+	registration := serve(t, e, http.MethodPost, "/oauth/register",
+		`{"client_name":"IPv6 Client","redirect_uris":["`+redirect+`"]}`,
+		map[string]string{"Content-Type": "application/json"})
+	if registration.Code != http.StatusCreated {
+		t.Fatalf("registration = %d %s", registration.Code, registration.Body.String())
+	}
+	var client auth.OAuthClient
+	if err := json.Unmarshal(registration.Body.Bytes(), &client); err != nil {
+		t.Fatalf("decode registration: %v", err)
+	}
+
+	challenge := base64.RawURLEncoding.EncodeToString(make([]byte, sha256.Size))
+	params := url.Values{
+		"response_type":         {"code"},
+		"client_id":             {client.ClientID},
+		"redirect_uri":          {redirect},
+		"scope":                 {mcpReadScope},
+		"state":                 {"state-ipv6"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+		"resource":              {testMCPResource},
+	}
+	consent := serve(t, e, http.MethodGet, "/api/auth/oauth/authorize?"+params.Encode(), "", nil, oauthCookieForUser(t, e, user))
+	if consent.Code != http.StatusOK {
+		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
+	}
+	csp := consent.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "form-action 'self' http:;") {
+		t.Fatalf("IPv6 consent CSP = %q, want scheme-source fallback", csp)
+	}
+	if strings.Contains(csp, "http://[::1]") {
+		t.Fatalf("IPv6 consent CSP contains an inexpressible bracketed host-source: %q", csp)
 	}
 }
 
