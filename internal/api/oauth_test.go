@@ -121,6 +121,28 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	if consent.Code != http.StatusOK || !strings.Contains(consent.Body.String(), "Allow Codex to access Fanout?") {
 		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
 	}
+	csp := consent.Header().Get("Content-Security-Policy")
+	if strings.Contains(csp, "form-action") {
+		t.Fatalf("consent CSP blocks the registered loopback redirect: %q", csp)
+	}
+	for _, directive := range []string{"default-src 'none'", "base-uri 'none'", "frame-ancestors 'none'"} {
+		if !strings.Contains(csp, directive) {
+			t.Fatalf("consent CSP = %q, missing %q", csp, directive)
+		}
+	}
+	if !strings.Contains(consent.Body.String(), `action="/api/auth/oauth/authorize"`) {
+		t.Fatalf("consent form target is not the fixed same-origin endpoint: %s", consent.Body.String())
+	}
+	for _, brandElement := range []string{
+		`class="brand-mark"`,
+		`class="brand-name">Fanout`,
+		`id="fanout-top"`,
+		`prefers-color-scheme:dark`,
+	} {
+		if !strings.Contains(consent.Body.String(), brandElement) {
+			t.Fatalf("consent page is missing branded element %q: %s", brandElement, consent.Body.String())
+		}
+	}
 
 	params.Set("decision", "approve")
 	approved := serve(t, e, http.MethodPost, "/api/auth/oauth/authorize", params.Encode(), map[string]string{"Content-Type": "application/x-www-form-urlencoded"}, cookie)
