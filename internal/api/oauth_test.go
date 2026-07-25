@@ -280,6 +280,23 @@ func TestRedirectURIOriginPreservesIPv4MappedIPv6Host(t *testing.T) {
 	if want := "http://[::ffff:127.0.0.1]:5000"; origin != want {
 		t.Fatalf("redirectURIOrigin(%q) = %q, want %q", redirect, origin, want)
 	}
+	if source := redirectFormActionSource(redirect, origin); source != "http:" {
+		t.Fatalf("redirectFormActionSource(%q) = %q, want %q", redirect, source, "http:")
+	}
+}
+
+func TestRedirectFormActionSourceUsesSchemeForIPv6(t *testing.T) {
+	const redirect = "http://[::1]:5000/callback"
+	origin, err := redirectURIOrigin(redirect)
+	if err != nil {
+		t.Fatalf("redirectURIOrigin(%q): %v", redirect, err)
+	}
+	if want := "http://[::1]:5000"; origin != want {
+		t.Fatalf("redirectURIOrigin(%q) = %q, want %q", redirect, origin, want)
+	}
+	if source := redirectFormActionSource(redirect, origin); source != "http:" {
+		t.Fatalf("redirectFormActionSource(%q) = %q, want %q", redirect, source, "http:")
+	}
 }
 
 // --- HTTP-layer flow helpers -------------------------------------------------

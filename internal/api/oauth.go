@@ -288,12 +288,14 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 			slog.Error("registered OAuth redirect URI is invalid", "client_id", req.ClientID, "err", err)
 			return oauthJSONError(c, http.StatusInternalServerError, "server_error", "authorization failed")
 		}
+		formActionSource := redirectFormActionSource(req.RedirectURI, redirectOrigin)
 		grantedScope := authorizationScope(req.Scope)
 		c.Response().Header().Set("Cache-Control", "no-store")
 		// Chromium applies form-action across the redirect after this
-		// same-origin form POST. Permit only the exact, validated callback
-		// origin required by the registered native MCP client.
-		c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+redirectOrigin+"; base-uri 'none'; frame-ancestors 'none'")
+		// same-origin form POST. Permit the exact validated callback origin
+		// where CSP can express it. Bracketed IPv6 is not a valid host-source,
+		// so use the callback's scheme as the tightest working fallback.
+		c.Response().Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' "+formActionSource+"; base-uri 'none'; frame-ancestors 'none'")
 		c.Response().Header().Set("Content-Type", "text/html; charset=utf-8")
 		return oauthConsentTemplate.Execute(c.Response(), map[string]any{
 			"ClientName": client.ClientName,
@@ -547,6 +549,14 @@ func redirectURIOrigin(raw string) (string, error) {
 		originHost = "[" + originHost + "]"
 	}
 	return u.Scheme + "://" + originHost, nil
+}
+
+func redirectFormActionSource(raw, origin string) string {
+	u, _ := url.Parse(raw) // raw was already validated by redirectURIOrigin
+	if strings.Contains(u.Hostname(), ":") {
+		return u.Scheme + ":"
+	}
+	return origin
 }
 
 func validS256Challenge(challenge string) bool {
