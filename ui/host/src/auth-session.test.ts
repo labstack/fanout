@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { authorizedFetch, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { authorizedFetch, hasAuthenticatedBrowserSession, logout, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -42,6 +42,22 @@ describe("oauthReturnTo", () => {
     expect(oauthReturnTo()).toBe("");
     withReturnTo("/api/auth/oauth/authorize/../../../admin");
     expect(oauthReturnTo()).toBe("");
+  });
+});
+
+describe("hasAuthenticatedBrowserSession", () => {
+  it("accepts a persisted user session", () => {
+    expect(hasAuthenticatedBrowserSession({ id: "user-123" })).toBe(true);
+  });
+
+  it("rejects the synthetic public viewer", () => {
+    expect(hasAuthenticatedBrowserSession({ id: "public" })).toBe(false);
+  });
+
+  it("fails closed for malformed responses", () => {
+    expect(hasAuthenticatedBrowserSession(null)).toBe(false);
+    expect(hasAuthenticatedBrowserSession({})).toBe(false);
+    expect(hasAuthenticatedBrowserSession({ id: "" })).toBe(false);
   });
 });
 

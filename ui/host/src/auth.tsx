@@ -1,7 +1,7 @@
 import { Alert, Box, Button, Center, Code, Container, Group, Loader, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { FormEvent, ReactNode, useEffect, useState } from "react";
-import { clearLegacySession, oauthReturnTo, unauthorizedEvent } from "./auth-session";
+import { clearLegacySession, hasAuthenticatedBrowserSession, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 import { BrandLockup } from "./brand";
 
 export { authorizedFetch, clearSession, logout } from "./auth-session";
@@ -66,13 +66,24 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     clearLegacySession();
     jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value)));
     fetch("/api/auth/me", { credentials: "same-origin" })
-      .then((response) => setAuthenticated(response.ok))
+      .then(async (response) => {
+        if (!response.ok) {
+          setAuthenticated(false);
+          return;
+        }
+        if (!returnTo) {
+          setAuthenticated(true);
+          return;
+        }
+        const user = await response.json().catch(() => null);
+        setAuthenticated(hasAuthenticatedBrowserSession(user));
+      })
       .catch(() => setAuthenticated(false))
       .finally(() => setSessionReady(true));
     const handleUnauthorized = () => setAuthenticated(false);
     window.addEventListener(unauthorizedEvent, handleUnauthorized);
     return () => window.removeEventListener(unauthorizedEvent, handleUnauthorized);
-  }, []);
+  }, [returnTo]);
 
   useEffect(() => {
     if (authenticated && sessionReady && returnTo) window.location.replace(returnTo);

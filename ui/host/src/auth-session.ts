@@ -9,6 +9,11 @@ export function oauthReturnTo(): string {
   return `${target.pathname}${target.search}`;
 }
 
+export function hasAuthenticatedBrowserSession(user: unknown): boolean {
+  if (!user || typeof user !== "object" || !("id" in user)) return false;
+  return typeof user.id === "string" && user.id !== "" && user.id !== "public";
+}
+
 export function clearLegacySession() {
   localStorage.removeItem(legacyTokenKey);
 }
