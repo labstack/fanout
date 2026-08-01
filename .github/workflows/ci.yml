@@ -50,6 +50,9 @@ jobs:
       - name: Check
         run: just check
 
+      - name: Validate OpenSpec
+        run: just docs-check
+
       - name: Build site
         run: cd site && bun run build
 

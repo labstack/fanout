@@ -1,127 +1,119 @@
 ---
 title: Docs
-description: Install, configure, send telemetry, and operate a self-hosted Fanout.
+description: Install, configure, send telemetry, and operate a self-hosted Fanout instance.
 layout: ../../layouts/DocsLayout.astro
 ---
 
-Fanout is one binary you run yourself. It accepts OpenTelemetry over gRPC, stores the data on disks you control, and serves an AG-UI investigator, portable MCP Apps, an alert engine, and an MCP server — all from the same process.
+Fanout is one self-hosted binary for OpenTelemetry investigation. The same Go
+process accepts OTLP/gRPC, stores telemetry on disk, runs deterministic queries
+and alerts, serves an AG-UI investigator and dashboards, exposes MCP tools and
+MCP Apps, and hosts the browser client.
 
-This page is everything you need to get from zero to a working install, sending telemetry, and operating it day-to-day. Use **On this page** to jump around.
+The canonical shipped product contract lives in
+[OpenSpec](https://github.com/labstack/fanout/tree/main/openspec/specs). This
+page is the operator runbook.
 
 ## Install
 
-Pick whichever path matches how you already deploy. Fanout is a single native executable with the browser assets embedded; it needs no Node, Bun, or separate web runtime in production.
-
 ### Docker
+
+For a local-only first run, disable remote MCP until you have a canonical HTTPS
+URL for its OAuth resource:
 
 ```sh
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 \
-  -v $PWD/data:/var/lib/fanout/data \
-  -e AUTH_CODE_SECRET=$(openssl rand -hex 32) \
+  -v "$PWD/data:/var/lib/fanout/data" \
+  -e MCP_ENABLED=false \
+  -e AUTH_CODE_SECRET="$(openssl rand -hex 32)" \
   -e SMTP_HOST=smtp.example.com \
   -e SMTP_USER=fanout@example.com \
   -e SMTP_PASS=<smtp-password> \
-  -e SMTP_FROM='"Fanout" <fanout@example.com>' \
+  -e SMTP_FROM='Fanout <fanout@example.com>' \
   -e AI_API_KEY=<anthropic-or-openai-key> \
   ghcr.io/labstack/fanout:latest
 ```
 
-The `-e` variables are required — Fanout refuses to start without them; see
-[First boot](#first-boot) for what each one does.
+| Port or path | Purpose |
+|---|---|
+| `7520` | HTTP browser, API, AG-UI, and optional MCP transport |
+| `4317` | OTLP/gRPC ingest |
+| `./data` | Telemetry, query state, users, sessions, dashboards, alerts, and agent history |
 
-| Port / path | Purpose |
-| --- | --- |
-| `7520` | HTTP — web UI, API, and the MCP endpoint. |
-| `4317` | OTLP gRPC ingest. |
-| `./data` | Persistent storage — telemetry, users/settings, alerts, and agent history. |
+The image binds both listeners on all interfaces. The native binary defaults
+OTLP to `127.0.0.1:4317`.
 
-The container listens on all interfaces by default. For a host-only install, add `-e OTLP_GRPC_ADDR=127.0.0.1:4317`.
+### Native binary
 
-### Pre-built binary
-
-Download the artifact for your platform from the [releases page](https://github.com/labstack/fanout/releases) and run it:
+Download a platform artifact from
+[GitHub Releases](https://github.com/labstack/fanout/releases), make it
+executable, and run it with the same environment variables:
 
 ```sh
 ./fanout
 ```
 
-Defaults: HTTP on `:7520`, OTLP gRPC on `127.0.0.1:4317`, data under `./data`.
-
-### Sizing
-
-Guidelines, not hard limits. The binary is small; the data is what consumes resources.
-
-| Resource | Recommended starting point |
-| --- | --- |
-| CPU | 2 vCPU |
-| Memory | 1 GB (raise via `DUCKDB_MEMORY` for larger workloads) |
-| Disk | 20 GB on fast local storage; budget ~1 GB / day per million spans at default retention |
+The browser listens on `:7520`; persistent state defaults to `./data`.
 
 ## First boot
 
-In local-auth mode Fanout requires an email-code secret, SMTP credentials, and an LLM API key. Everything else has a default.
+Fanout validates configuration before opening listeners. Every instance needs
+an AI provider key because the AG-UI investigator is part of the runtime.
 
-### Minimum viable command
+Local authentication additionally requires:
 
-```sh
-docker run -d --name fanout \
-  -p 7520:7520 -p 4317:4317 \
-  -v $PWD/data:/var/lib/fanout/data \
-  -e AUTH_CODE_SECRET=$(openssl rand -hex 32) \
-  -e SMTP_HOST=smtp.example.com \
-  -e SMTP_USER=fanout@example.com \
-  -e SMTP_PASS=<smtp-password> \
-  -e SMTP_FROM='"Fanout" <fanout@example.com>' \
-  -e AI_API_KEY=<anthropic-or-openai-key> \
-  ghcr.io/labstack/fanout:latest
-```
+- `AUTH_CODE_SECRET` with at least 32 characters;
+- `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, and `SMTP_FROM`;
+- a positive `SMTP_PORT` (default `587`).
 
-`AUTH_CODE_SECRET` must be at least 32 characters. Generate it with `openssl rand -hex 32`.
-
-### Create the admin
-
-On first boot Fanout logs a one-time **setup token** that authorises the admin-creation flow:
+When the control database has no users, Fanout prints a one-time setup token:
 
 ```sh
-docker logs fanout 2>&1 | grep "setup token"
+docker logs fanout 2>&1 | grep -A8 "FANOUT SETUP"
 ```
 
-Open `http://localhost:7520` (or `http://<your-host>:7520`) and fill in the setup form with your name, email, and the token. Fanout creates the admin, signs you in, and **shows the ingest token once** — copy it before continuing. Rotation remains available through `POST /api/settings/ingest/rotate-token` for authenticated admins.
+Open [http://localhost:7520](http://localhost:7520), create the first
+administrator with that token,
+and save the ingest token shown after setup. The setup token expires after one
+hour and is cleared when setup succeeds. The raw ingest token is shown once;
+Fanout stores only its hash.
 
-After this, the setup form is closed for the lifetime of the data directory. User-management APIs can send email invitations; logins use one-time codes delivered via SMTP. No passwords are ever stored.
+Local login has no passwords. Active users receive short-lived email codes.
+OIDC deployments use the provider flow described under
+[Authentication](#authentication).
 
 ## Send telemetry
 
-Fanout speaks **OTLP over gRPC** on port `4317`. Anything that can export OTLP — an SDK, a collector, a sidecar — will work without modification.
+Fanout accepts traces, logs, and metrics through **OTLP/gRPC**. Native
+OTLP/HTTP is not implemented; place an OpenTelemetry Collector in front when an
+HTTP exporter is required.
 
-> HTTP/protobuf and HTTP/JSON OTLP are not yet supported. If you need them, run an OpenTelemetry Collector in front and point its `otlp` exporter at Fanout.
+### Authenticate exporters
 
-### Authentication
+The current ingest token works in either header form:
 
-Every request must carry a valid ingest token. Two header forms are accepted, equivalently:
-
-```
+```text
 x-fanout-ingest-token: fo_<token>
 Authorization: Bearer fo_<token>
 ```
 
-A missing or invalid token returns `Unauthenticated`. The same token works for every signal type.
+Browser cookies and MCP OAuth tokens are not ingest credentials. Missing or
+invalid ingest credentials return gRPC `Unauthenticated`. `PUBLIC_INGEST=true`
+is the only bypass and is intended solely for disposable demos.
 
-### Direct from an SDK
+### Configure an SDK
 
 ```sh
-export OTEL_EXPORTER_OTLP_ENDPOINT=https://fanout.example.com:4317
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 export OTEL_EXPORTER_OTLP_HEADERS=x-fanout-ingest-token=fo_<token>
 export OTEL_SERVICE_NAME=checkout
+export OTEL_RESOURCE_ATTRIBUTES=service.namespace=storefront
 ```
 
-Use `http://` if your endpoint isn't TLS-terminated. The headers env var takes a comma-separated list of `key=value` pairs.
+Use `https://` when Fanout or a reverse proxy terminates TLS.
 
-### Through an OpenTelemetry Collector
-
-If you already run a collector (recommended for production — buffering, batching, sampling, per-tenant routing), add Fanout as another `otlp` exporter:
+### Configure a Collector
 
 ```yaml
 exporters:
@@ -132,309 +124,293 @@ exporters:
 
 service:
   pipelines:
-    traces:  { exporters: [otlp/fanout] }
-    logs:    { exporters: [otlp/fanout] }
-    metrics: { exporters: [otlp/fanout] }
+    traces:
+      exporters: [otlp/fanout]
+    logs:
+      exporters: [otlp/fanout]
+    metrics:
+      exporters: [otlp/fanout]
 ```
 
-You can fan out to Fanout *and* an existing backend during a migration — exporters are list-typed.
-
-### Multi-product / multi-tenant namespaces
-
-If a single Fanout serves more than one product or environment, set `service.namespace` in your OpenTelemetry resource attributes:
-
-```sh
-export OTEL_RESOURCE_ATTRIBUTES=service.namespace=product-a,service.name=checkout
-```
-
-Ask the investigator about a namespace explicitly, or pass `namespace` to an MCP tool. Payloads without a `service.namespace` land in `DEFAULT_NAMESPACE` (`default` unless overridden).
+Fanout reads `service.namespace` from each OTLP resource. Missing values use
+`DEFAULT_NAMESPACE` (`default`). Namespaces scope telemetry queries; they are
+not users, organizations, or authorization boundaries.
 
 ### TLS
 
-Two options — pick one:
+Choose one production pattern:
 
-- **Behind a reverse proxy (recommended).** Caddy, nginx, or Traefik terminates TLS for `fanout.example.com:4317` and proxies plaintext gRPC to Fanout on `127.0.0.1:4317`. Your collector or SDK only ever sees the proxy.
-- **Direct termination.** Set `TLS_CERT_FILE` and `TLS_KEY_FILE`. Both the HTTP and gRPC listeners use the same certificate. TLS 1.3 minimum.
+- Terminate TLS at a trusted reverse proxy and forward HTTP plus gRPC to
+  Fanout's private listeners.
+- Set both `TLS_CERT_FILE` and `TLS_KEY_FILE` for direct TLS on both listeners.
 
-Setting only one of the two TLS variables is a startup error — a guardrail to catch half-configured deployments.
+Direct TLS has a TLS 1.3 minimum and requires HTTP/2 for gRPC. Setting only one
+TLS file is a startup error. Configure `TRUSTED_PROXY_CIDRS` to the actual proxy
+network before trusting forwarded client addresses; do not use broad private
+address ranges.
 
-## Use the UI
+## Use Fanout
 
-Open `http://<your-host>:7520`, or your production Fanout URL, and sign in.
+The shipped browser has two primary areas:
 
-- **Chat** is the primary interface. Ask in plain English; the Go agent runtime calls the standard MCP tools and streams standard AG-UI events back to the browser.
-- **Interactive results** are five portable domain MCP Apps: health, topology, performance, trace, and logs. They are resources served by `/mcp` and hosted with the official MCP `AppBridge`.
-- **Dashboards** are named, owner-scoped canvases stored in SQLite. Their embedded blocks use the same typed query kernel, shared time and namespace filters, and a draggable 12-column layout. Ask Fanout to create a complete dashboard, or create one from an OAuth-connected MCP client; it appears in the dashboard picker automatically.
-- **Threads** are persisted in the control SQLite database and scoped to the signed-in owner. **New thread** starts a clean investigation.
-- **Browser sessions** are opaque, HttpOnly, server-side records. **Sign out** immediately deletes the server record and clears the cookie.
+- **Chat** streams AG-UI investigations, renders rich MCP App activity, and
+  persists owner-scoped threads and runs. Threads can be searched, renamed, and
+  deleted.
+- **Dashboards** stores multiple named, owner-scoped canvases with shared time
+  and namespace filters and a draggable twelve-column layout. The first visit
+  creates a System overview dashboard.
 
-Use portable MCP Apps for rich tool results that should render in other hosts. Use dashboard blocks for persistent, composable operational views inside Fanout; adding a block means registering its validated widget type and renderer, without changing the ingest or query backbone.
+Deterministic telemetry queries do not require a model call. Chat uses the same
+standard MCP tool registry in process, so agent, HTTP, MCP, and dashboard
+results share one typed query contract.
+
+Fanout's five investigation domains are:
+
+| Domain | Result |
+|---|---|
+| Overview | Service traffic, errors, latency, cross-signal counts, and health |
+| Topology | Observed service dependencies and edge health |
+| Performance | Activity, endpoints, heatmap, and period comparison |
+| Trace | Exact or relevant trace, waterfall/flame data, and correlated logs |
+| Logs | Filtered entries, severity histogram, and trace/span links |
+
+Alerts, ingest settings, and user administration are currently HTTP APIs rather
+than browser pages; future browser surfaces require their own product change.
 
 ## Alerts
 
-Rules are written in [expr-lang](https://expr-lang.org), evaluated every `ALERT_EVAL_INTERVAL` seconds (default 30), and delivered by webhook.
+The alert engine is enabled by default and evaluates persisted
+[expr-lang](https://expr-lang.org) rules every `ALERT_EVAL_INTERVAL` seconds.
+Rules can scope a service and namespace and can use current traffic, error rate,
+latency, log count, anomaly/health scores, and baseline deltas.
 
-### Anatomy of a rule
+An alert moves from **pending** to **firing** after `for_seconds`, then to
+**resolved** when its expression becomes false. Cooldown and repeat intervals
+control repeated delivery. Webhooks support custom headers, an optional payload
+template, and optional resolve notifications; the alert records its latest
+delivery status.
 
-| Field | Description |
-| --- | --- |
-| `name` | Shown on the Alerts page and in webhook payloads. |
-| `expression` | An expr-lang boolean evaluated per service per interval. |
-| `for_seconds` | How long the expression must hold before the rule fires. `0` = fire immediately. |
-| `webhook_url` | Where to POST the alert payload. |
-| `webhook_headers` | Extra HTTP headers — typically auth. |
-| `webhook_template` | Override the default JSON payload. |
-| `notify_on_resolve` | Send a follow-up POST when the condition clears. |
+| Endpoint | Capability |
+|---|---|
+| `GET /api/alerts`, `GET /api/alerts/summary` | Read/filter alert state |
+| `GET /api/rules` | List rules |
+| `POST /api/rules` | Create and compile a rule |
+| `PUT /api/rules/:id` | Replace and recompile a rule |
+| `DELETE /api/rules/:id` | Delete a rule and its alerts |
+| `POST /api/rules/:id/test` | Dry-run against current service evidence |
 
-### Available fields
-
-Every rule has these fields in scope.
-
-| Field | Type | Description |
-| --- | --- | --- |
-| `service` | string | Service being evaluated. Useful for `service == "checkout"`. |
-| `error_rate` | float | Error rate in this window, `0.0` – `1.0`. |
-| `p50` / `p95` | float | Latency percentiles, milliseconds. |
-| `throughput` | float | Requests per second over the window. |
-| `log_count` | float | Log entries seen in the window. |
-| `z_score` | float | Anomaly score against the historical baseline. |
-| `health_score` | float | Composite score, lower is worse. |
-| `error_rate_delta` / `p95_delta` / `throughput_delta` | float | Percentage change vs. baseline (e.g. `50` = +50%, `-50` = halved). |
-
-### Example rules
-
-```text
-# Sustained error rate — ignore spikes.
-name:        "error rate > 5% for 5 min"
-expression:  error_rate > 0.05
-for_seconds: 300
-
-# Latency regression — sustained only.
-name:        "p95 latency > 2s for 10 min"
-expression:  p95 > 2000
-for_seconds: 600
-
-# Throughput collapse — ignores naturally low-traffic services.
-name:        "sudden traffic drop"
-expression:  throughput_delta < -50 && throughput > 10
-for_seconds: 120
-
-# Anomaly score — "something looks off".
-name:        "anomaly: z-score > 3"
-expression:  z_score > 3
-for_seconds: 180
-```
-
-### Lifecycle
-
-A rule moves through three states:
-
-- **Pending** — the expression just became true. The engine waits out `for_seconds`.
-- **Firing** — the condition has held long enough and webhook delivery begins.
-- **Resolved** — the expression returned false. If `notify_on_resolve` is set, a final webhook fires.
-
-Resolved alerts stay queryable through the alert REST API for `ALERT_HISTORY_DAYS` (default 7).
-
-### Webhook payload
-
-A firing rule POSTs JSON to `webhook_url`:
-
-```json
-{
-  "rule": "error rate > 5% for 5 min",
-  "service": "checkout",
-  "namespace": "default",
-  "fired_at": "2026-04-20T14:22:08Z",
-  "expression": "error_rate > 0.05",
-  "values": {
-    "error_rate": 0.082,
-    "p50": 94,
-    "p95": 412,
-    "throughput": 1180
-  }
-}
-```
-
-Override the shape with `webhook_template` if your downstream expects a different schema (PagerDuty, Slack, OpsGenie, etc.).
+Viewers can read alert state and rules. Operators and administrators can manage
+and test rules. With `ALERT_ENABLED=false`, reads return empty state and writes
+report that alerts are unavailable. Resolved history is pruned after
+`ALERT_HISTORY_DAYS`.
 
 ## MCP server
 
-Fanout ships a standard MCP server at `/mcp`. Connect Claude Code—or any
-MCP-capable host—and the same typed tools and MCP Apps used by the AG-UI web
-runtime become available there too.
+Fanout can expose a Streamable HTTP MCP server at `/mcp`. Remote MCP requires a
+canonical public HTTPS resource URL ending in `/mcp`:
 
-### Connect Claude Code
+```sh
+MCP_ENABLED=true
+MCP_PUBLIC_URL=https://fanout.example.com/mcp
+PUBLIC_URL=https://fanout.example.com
+```
+
+`MCP_PUBLIC_URL` drives protected-resource discovery and token audience
+binding. It must match the address clients use. A localhost-only deployment
+without trusted HTTPS should leave MCP disabled.
+
+Remote clients use OAuth discovery, dynamic client registration, authorization
+code with PKCE, short-lived audience-bound access tokens, and rotating refresh
+tokens. The browser's same-origin `/api/mcp` adapter uses its validated browser
+session; the public `/mcp` endpoint remains OAuth bearer-only.
 
 ```sh
 claude mcp add fanout --transport http https://fanout.example.com/mcp
 ```
 
-This only works when `MCP_PUBLIC_URL` is set to the same public URL
-(`https://fanout.example.com/mcp` here) — it is the OAuth issuer and token
-audience for `/mcp`, and clients cannot complete the OAuth flow against a
-server whose `MCP_PUBLIC_URL` points elsewhere. See the
-[environment reference](#mcp).
+### MCP tools
 
-The MCP endpoint uses OAuth 2.1 for remote clients. Add your instance's `/mcp` URL to Codex or Claude Code as a Streamable HTTP server, then use the client's MCP authentication flow (`codex mcp login` or `/mcp`). Fanout opens a browser consent screen, uses PKCE, and issues a short-lived audience-bound access token with rotating refresh credentials. The ingest token is for OTLP only and is not accepted by `/mcp`.
+| Tool | Behavior |
+|---|---|
+| `observability_overview` | Read-only system health overview |
+| `service_topology` | Read-only dependency topology |
+| `service_performance` | Read-only service or system performance |
+| `trace_detail` | Read-only exact or relevant trace detail |
+| `search_logs` | Read-only filtered log exploration |
+| `dashboard_list` | List the authenticated owner's dashboards |
+| `dashboard_get` | Read one owned dashboard |
+| `dashboard_create` | Create a complete named dashboard |
+| `dashboard_update` | Replace an explicitly selected dashboard design |
 
-### Tools
+The five observability tools return summary text and structured content in
+every host. Clients that negotiate the MCP Apps profile also receive the
+matching portable React visualization. Dashboard tools require both
+`fanout:read` and `fanout:dashboard`; ownership comes from the verified token,
+never tool input.
 
-| Tool | What it does |
-| --- | --- |
-| `observability_overview` | Typed system health with an interactive overview MCP App. |
-| `service_topology` | Typed dependency graph with an interactive topology MCP App. |
-| `service_performance` | Activity, latency heatmap, endpoint, and period-comparison views. |
-| `trace_detail` | Trace waterfall, flame graph, and correlated-log views. |
-| `search_logs` | Filterable log stream with a severity histogram. |
-| `dashboard_list` | List the signed-in owner's named dashboards. |
-| `dashboard_get` | Read one dashboard's widgets, filters, and 12-column layout. |
-| `dashboard_create` | Add a complete named dashboard without changing existing dashboards. |
-| `dashboard_update` | Replace an explicitly selected dashboard design; advertised as a destructive mutation to MCP clients. |
+## Authentication
 
-The observability tools are read-only, window- and namespace-bounded, return structured
-output with provenance, and remain useful in hosts that cannot render MCP Apps.
-Dashboard tools require the `fanout:dashboard` OAuth scope in addition to
-`fanout:read`; Fanout derives ownership from the verified token, never from tool input.
+### Roles
 
-Ingest credentials and MCP OAuth credentials are deliberately separate: a collector credential cannot query telemetry or open an MCP session.
+| Role | Capabilities |
+|---|---|
+| Viewer | Read telemetry and alert state, manage own dashboards, read ingest metadata |
+| Operator | Viewer capabilities plus agent runs and alert management |
+| Admin | Operator capabilities plus user/ingest management and protected operations |
+
+Changing a user's email, role, or active state revokes their browser sessions.
+Fanout also prevents removal or deactivation of the final active administrator.
+
+### OIDC mode
+
+Set `AUTH_MODE=oidc` plus:
+
+- `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`;
+- canonical HTTPS `PUBLIC_URL`;
+- `OIDC_EMAIL_CLAIM` and `OIDC_EMAIL_VERIFICATION` policy;
+- optional allowed groups/domains and role-mapping groups.
+
+Just-in-time provisioning is off by default. Enabling it requires an explicit
+allowed group or domain policy. Issuer-policy email verification likewise
+requires an allow policy.
+
+### Public demo modes
+
+`PUBLIC_READ=true` creates a synthetic anonymous viewer only for explicitly
+classified read-only routes. It does not authorize agent runs, mutations,
+ingest, MCP consent, user management, or private metrics. `PUBLIC_INGEST` and
+`METRICS_PUBLIC` are separate switches.
 
 ## Operate
 
 ### Data layout
 
-Everything Fanout persists lives under `DATA_DIR` (default `./data`). That's the only directory you need to back up, and the only one you need to move when relocating a host.
+Everything durable lives under `DATA_DIR`:
 
-### Backups
-
-1. Stop the process (`docker stop fanout` or `systemctl stop fanout`).
-2. Copy the whole `DATA_DIR` to your backup target.
-3. Start it back up.
-
-Snapshotting a live directory can capture mid-flush state — safer to stop first. Flushes happen every `FLUSH_SECONDS` (default 15), so downtime for a backup is under a minute for most installs.
-
-To restore on a new host: put the backup at the same `DATA_DIR` path and start Fanout. Ingest tokens, users, alert state, agent threads/runs, and all telemetry come with it.
-
-### Upgrades
-
-Pull the new image (or binary) and restart. Schema migrations apply automatically at boot.
-
-```sh
-docker pull ghcr.io/labstack/fanout:latest
-docker stop fanout && docker rm fanout
-# re-run your original `docker run` command
+```text
+data/
+  telemetry/
+    ducklake.sqlite
+    parquet/
+  query/
+    catalog.duckdb
+    tmp/
+  control/
+    fanout.sqlite
 ```
 
-Downgrading across a migration is not supported — back up before upgrading if you need an escape hatch.
+The control database contains users, sessions, settings, dashboards, alerts,
+OAuth records, and agent history. Back up the complete data root, not selected
+files.
 
-### Troubleshooting
+### Health, metrics, and profiling
 
-A few common failure modes and what to check first.
+| Path | Behavior |
+|---|---|
+| `/healthz` | Process liveness |
+| `/readyz`, `/api/health` | Dependency-aware readiness |
+| `/-/metrics` | Prometheus metrics; bearer-protected unless public |
+| `/debug/pprof/*` | Optional profiling; admin operations capability required |
 
-- **No services appear after sending telemetry.** Confirm the token header reaches Fanout (some proxies strip custom headers), that the endpoint scheme is explicit (`http://` or `https://`), and that port `4317` is reachable: `nc -vz fanout.example.com 4317`. Data takes up to `FLUSH_SECONDS` to appear — wait ~15 s before debugging.
-- **Startup fails immediately.** Check `docker logs fanout`. In local mode, the most common cause is missing `AUTH_CODE_SECRET`, `SMTP_*`, or `AI_API_KEY`. Setting only one of the two TLS files is also fatal by design.
-- **Login codes not arriving.** Verify SMTP credentials and sender domain. Fanout uses STARTTLS on port `587` and `25`, implicit TLS on `465`.
-- **Queries slow.** First check the freshness — rollups update every `ROLLUP_EVERY` seconds (default 60). Raising `DUCKDB_MEMORY` can help larger working sets. For very long time ranges, expect raw scans to take longer than rollup-backed queries.
+Set `METRICS_TOKEN` for private scraping or, only on an appropriate network,
+`METRICS_PUBLIC=true`. Profiling routes do not exist unless
+`PPROF_ENABLED=true`.
+
+### Backup and restore
+
+1. Stop Fanout so no ingest flush or control write is in flight.
+2. Copy the complete `DATA_DIR`.
+3. Start Fanout again.
+
+To restore, stop the target instance, place the backup at its configured data
+root, and start a compatible or newer binary. Control migrations apply at boot.
+Downgrades across migrations are not guaranteed, so back up before upgrading.
+
+### Retention and performance
+
+Fanout flushes accepted rows by interval or batch size, updates minute rollups,
+merges small DuckLake files frequently, and performs full retention/cleanup
+maintenance less often. `RETENTION_DAYS=0` keeps telemetry indefinitely.
+
+DuckDB self-sizes by default. `DUCKDB_MEMORY`, `DUCKDB_THREADS`, and
+`DUCKDB_MAX_CONNS` are constraints for shared or query-heavy hosts, not generic
+performance recommendations. Use the repository's current load/soak tools to
+measure a target deployment rather than relying on dated throughput figures.
 
 ## Environment reference
 
-Fanout is configured entirely through environment variables. A `.env` file next to the binary is loaded first; `.env.${ENV}` overrides it (`ENV` defaults to `development`).
+Fanout loads `.env` without replacing process variables, then loads
+`.env.${ENV}` as an explicit profile override (`ENV=development` by default).
 
-### Network
+### Runtime and storage
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `HTTP_ADDR` | `:7520` | Web UI, API, and MCP endpoint listen address. |
-| `OTLP_GRPC_ADDR` | `127.0.0.1:4317` | OTLP gRPC ingest address. The official Docker image overrides this to `:4317` so off-host traffic is accepted. |
-| `DEFAULT_NAMESPACE` | `default` | Namespace assigned to OTLP payloads without `service.namespace`. |
+| Variable | Default | Purpose |
+|---|---|---|
+| `HTTP_ADDR` | `:7520` | Browser, API, AG-UI, and MCP listener |
+| `OTLP_GRPC_ADDR` | `127.0.0.1:4317` | Native-binary OTLP/gRPC bind address |
+| `INGEST_ENDPOINT` | derived | External collector address shown after setup |
+| `DATA_DIR` | `./data` | Durable instance root |
+| `DEFAULT_NAMESPACE` | `default` | Fallback OTLP resource namespace |
+| `FLUSH_SECONDS` | `15` | Time-based telemetry flush interval |
+| `FLUSH_BATCH_SIZE` | `50000` | Row limit that triggers a flush |
+| `ROLLUP_EVERY` | `60` | Rollup cadence in seconds |
+| `RETENTION_DAYS` | `30` | Telemetry retention; `0` disables expiry |
+| `DUCKLAKE_MAINTENANCE_EVERY_SECONDS` | `3600` | Full expire/cleanup cadence |
+| `DUCKLAKE_MERGE_EVERY_SECONDS` | `60` | Adjacent-file merge cadence; `0` disables |
+| `ROLLUP_SKIP_TO_LATEST` | `false` | Treat restored/preseeded history as already rolled up at boot |
+| `DUCKDB_MEMORY` | self-sized | Optional DuckDB memory cap |
+| `DUCKDB_THREADS` | self-sized | Optional query worker cap |
+| `DUCKDB_MAX_CONNS` | `4` | Query connection-pool cap |
 
-### Storage
+### Agent, MCP, and alerts
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `DATA_DIR` | `./data` | Storage root for telemetry, query cache, and application state. |
-| `DUCKDB_MEMORY` | DuckDB default | Optional in-memory cap for the embedded query engine; unset self-sizes to the host/container. |
-| `RETENTION_DAYS` | `30` | Drop telemetry files older than N days. `0` keeps everything forever. |
+| Variable | Default | Purpose |
+|---|---|---|
+| `AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
+| `AI_API_KEY` | required | Provider credential |
+| `AI_MODEL` | provider default | Optional model override |
+| `AI_BASE_URL` | provider default | Optional compatible gateway |
+| `MCP_ENABLED` | `true` | Serve remote and browser MCP transports |
+| `MCP_PUBLIC_URL` | `https://demo.fanout.test/mcp` | Canonical HTTPS MCP resource/audience |
+| `ALERT_ENABLED` | `true` | Run the alert engine |
+| `ALERT_EVAL_INTERVAL` | `30` | Evaluation cadence in seconds |
+| `ALERT_HISTORY_DAYS` | `7` | Resolved-alert retention |
 
-### Ingest tuning
+### Authentication and network security
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `FLUSH_SECONDS` | `15` | How often pending rows are flushed to disk. Lower = fresher UI; higher = less I/O. |
-| `FLUSH_BATCH_SIZE` | `50000` | Cap on rows per flush, regardless of interval. |
-| `ROLLUP_EVERY` | `60` | How often per-minute rollups are recomputed. |
+| Variable | Default | Purpose |
+|---|---|---|
+| `AUTH_MODE` | `local` | `local` email codes or `oidc` |
+| `AUTH_CODE_SECRET` | local required | Email-code HMAC key, at least 32 characters |
+| `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | local required | Verification-code delivery |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SESSION_IDLE_TTL` | `12h` | Browser-session idle lifetime |
+| `SESSION_ABSOLUTE_TTL` | `168h` | Browser-session absolute lifetime |
+| `PUBLIC_URL` | none | Canonical external HTTPS origin |
+| `PUBLIC_READ` | `false` | Anonymous classified telemetry reads only |
+| `PUBLIC_INGEST` | `false` | Disable OTLP authentication; demo-only |
+| `METRICS_TOKEN` | none | Bearer credential for private metrics |
+| `METRICS_PUBLIC` | `false` | Make Prometheus metrics public |
+| `PPROF_ENABLED` | `false` | Register admin-only profiling routes |
+| `TRUSTED_PROXY_CIDRS` | none | Proxies allowed to set forwarded client IP |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | none | Complete direct-TLS pair |
 
-### Authentication (required)
+OIDC-specific settings are `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`,
+`OIDC_CLIENT_SECRET`, `OIDC_EMAIL_CLAIM`, `OIDC_EMAIL_VERIFICATION`,
+`OIDC_AUTO_PROVISION`, `OIDC_ALLOWED_GROUPS`, `OIDC_ALLOWED_DOMAINS`,
+`OIDC_DEFAULT_ROLE`, `OIDC_OPERATOR_GROUPS`, and `OIDC_ADMIN_GROUPS`.
 
-| Variable | Description |
-| --- | --- |
-| `AUTH_MODE` | `local` or `oidc`; defaults to `local`. |
-| `AUTH_CODE_SECRET` | **Required in local mode.** HMAC key for email verification codes; at least 32 characters. |
-| `SESSION_IDLE_TTL` | Browser-session idle lifetime; defaults to `12h`. |
-| `SESSION_ABSOLUTE_TTL` | Browser-session absolute lifetime; defaults to `168h`. |
-| `PUBLIC_URL` | Canonical external HTTPS origin. Set this when a reverse proxy terminates TLS so browser cookies remain `Secure`; required for OIDC callbacks. |
-| `PUBLIC_READ` | Set to `true` only for an anonymous telemetry-read demo. It does not disable ingest authentication. |
-| `PUBLIC_INGEST` | Set to `true` to disable OTLP authentication. Use only for disposable public demos. |
-| `METRICS_PUBLIC` | Set to `true` to expose `/-/metrics` without a credential; defaults to `false`. |
-| `METRICS_TOKEN` | Bearer credential for Prometheus scraping when `METRICS_PUBLIC=false`. |
-| `TRUSTED_PROXY_CIDRS` | Comma-separated CIDRs of reverse proxies allowed to supply forwarded client IP headers. |
+## Troubleshooting
 
-Generate `AUTH_CODE_SECRET` with `openssl rand -hex 32`.
-
-
-OIDC mode additionally requires `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`,
-`OIDC_CLIENT_SECRET`, and an HTTPS `PUBLIC_URL`. Configure
-`OIDC_EMAIL_CLAIM`, `OIDC_EMAIL_VERIFICATION`, `OIDC_AUTO_PROVISION`,
-`OIDC_ALLOWED_GROUPS`, `OIDC_ALLOWED_DOMAINS`, `OIDC_DEFAULT_ROLE`,
-`OIDC_OPERATOR_GROUPS`, and `OIDC_ADMIN_GROUPS` to match your provider and
-provisioning policy.
-
-> **Upgrade note:** `/-/metrics` is private by default. Existing Prometheus
-> scrapers must send `Authorization: Bearer <METRICS_TOKEN>`, or an operator
-> must explicitly set `METRICS_PUBLIC=true` for a deliberately public endpoint.
-
-### Email (required)
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `SMTP_HOST` | — | **Required.** SMTP server hostname. |
-| `SMTP_PORT` | `587` | `465` uses implicit TLS; `587` and `25` use STARTTLS when offered. |
-| `SMTP_USER` | — | **Required.** SMTP username. |
-| `SMTP_PASS` | — | **Required.** SMTP password or API key. |
-| `SMTP_FROM` | — | **Required.** From header — e.g. `"Fanout" <noreply@example.com>`. |
-
-### Agent runtime (required)
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `AI_PROVIDER` | `anthropic` | `anthropic` or `openai`; executed by the Go runtime. |
-| `AI_API_KEY` | — | **Required.** Provider API key. |
-| `AI_MODEL` | (provider default) | Optional provider model override. |
-| `AI_BASE_URL` | (provider default) | Optional API base URL for compatible gateways. |
-
-The AG-UI endpoint, MCP execution loop, and conversation/run history all live
-inside the Fanout process. History is stored in the existing control SQLite
-database under `DATA_DIR`; no separate web runtime or database is required.
-
-### Alerts
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `ALERT_ENABLED` | `true` | Set to `false` to disable the alert engine entirely. |
-| `ALERT_EVAL_INTERVAL` | `30` | How often (seconds) rules are evaluated against fresh rollups. |
-| `ALERT_HISTORY_DAYS` | `7` | How long resolved alerts stay queryable through the alert API. |
-
-### MCP
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `MCP_ENABLED` | `true` | Expose the MCP server at `/mcp`. Disable if you don't want it reachable. |
-| `MCP_PUBLIC_URL` | `https://demo.fanout.test/mcp` | Canonical public URL of the MCP endpoint — the OAuth issuer and token audience. **Must** be set to your deployment's public URL (HTTPS, ending in `/mcp`) or external MCP clients cannot authenticate; the default is a development placeholder. |
-
-### TLS
-
-| Variable | Default | Description |
-| --- | --- | --- |
-| `TLS_CERT_FILE` | — | Path to the server certificate (PEM). |
-| `TLS_KEY_FILE` | — | Path to the server private key (PEM). |
-
-When both are set, `HTTP_ADDR` and `OTLP_GRPC_ADDR` listen with TLS 1.3. Setting only one is a startup error.
+- **Startup exits immediately:** inspect the first configuration error. Common
+  causes are a missing AI key, incomplete local SMTP fields, a short code
+  secret, an unusable MCP public URL, or half a TLS pair.
+- **No telemetry appears:** verify OTLP/gRPC rather than HTTP, the token header,
+  `service.namespace`, listener reachability, and the flush interval.
+- **Remote MCP authentication loops:** make the client URL and
+  `MCP_PUBLIC_URL` identical, use HTTPS, and configure the reverse proxy and
+  `PUBLIC_URL` consistently.
+- **Email codes do not arrive:** verify SMTP host, port, credentials, sender,
+  and provider TLS requirements.
+- **Queries slow down:** check readiness and rollup freshness, then measure the
+  target host before changing DuckDB memory, threads, or connection limits.
