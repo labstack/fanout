@@ -163,7 +163,7 @@ Fanout loads `.env`, then `.env.${ENV}` (default `development`). Core settings:
 | `INGEST_ENDPOINT` | derived | public collector endpoint shown during setup |
 | `DATA_DIR` | `./data` | telemetry, query state, and control SQLite |
 | `DEFAULT_NAMESPACE` | `default` | fallback OTLP service namespace |
-| `MCP_ENABLED` | `true` | expose `/mcp` to external clients |
+| `MCP_ENABLED` | `true` | expose OAuth-protected `/mcp` and session-protected `/api/mcp` |
 | `MCP_PUBLIC_URL` | `https://demo.fanout.test/mcp` | canonical public MCP URL — the OAuth issuer/resource (audience) for `/mcp`; MUST be set to the deployment's public URL for external MCP clients; HTTPS ending in `/mcp` |
 | `AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
 | `AI_API_KEY` | required | model provider credential |
@@ -177,7 +177,7 @@ Fanout loads `.env`, then `.env.${ENV}` (default `development`). Core settings:
 | `PUBLIC_READ` | `false` | anonymous access to explicitly classified telemetry reads only |
 | `PUBLIC_INGEST` | `false` | disable OTLP authentication; demo-only |
 | `METRICS_PUBLIC` | `false` | expose `/-/metrics` without authentication |
-| `METRICS_TOKEN` | optional | bearer credential for `/-/metrics` when it is private |
+| `METRICS_TOKEN` | optional | non-interactive bearer credential for private `/-/metrics`; admin sessions are also accepted |
 | `TRUSTED_PROXY_CIDRS` | empty | comma-separated proxy CIDRs allowed to supply forwarded client IPs |
 | `OIDC_ISSUER_URL` | OIDC mode | HTTPS issuer used for discovery |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | OIDC mode | relying-party credentials |

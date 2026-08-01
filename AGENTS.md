@@ -17,7 +17,7 @@ and benchmark output as generated runtime output.
 ## Build, Test, and Development Commands
 Use `just` for the normal workflow:
 
-- `just install` installs Air, `process-compose`, Lefthook, and all UI/site dependencies.
+- `just install` installs Air, `process-compose`, Lefthook, the pinned OpenSpec CLI, and all UI/site dependencies.
 - `just up` starts the Go server, UI build watcher, and public site through process-compose.
 - `just build` builds MCP Apps and the browser host, embeds them, then compiles `./cmd/fanout` to `bin/fanout`.
 - `just check` runs `go fmt`, `go vet`, `golangci-lint`, and a full build.

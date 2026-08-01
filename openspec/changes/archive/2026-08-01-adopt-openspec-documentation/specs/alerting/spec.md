@@ -5,7 +5,7 @@ Defines Fanout's persisted expression rules, per-service alert state machine, te
 ## ADDED Requirements
 
 ### Requirement: Alert rules are durable and validated
-Fanout SHALL persist named alert rules with enablement, service and namespace scope, expression, hold duration, cooldown, repeat interval, webhook configuration, and resolve-notification preference. A rule expression MUST compile before creation or activation.
+Fanout SHALL persist named alert rules with enablement, service scope, optional namespace metadata, expression, hold duration, cooldown, repeat interval, webhook configuration, and resolve-notification preference. A rule expression MUST compile before creation or activation. The current evaluator does not apply the stored namespace selector.
 
 #### Scenario: Operator submits an invalid expression
 - **WHEN** the expression cannot be compiled safely
@@ -16,7 +16,7 @@ The alert engine SHALL evaluate enabled rules at the configured interval against
 
 #### Scenario: Rule targets all services
 - **WHEN** a wildcard rule is evaluated
-- **THEN** Fanout evaluates it independently for each service with current evidence in the selected namespace
+- **THEN** Fanout evaluates it independently for each service using instance-wide rollup evidence grouped by service name
 
 ### Requirement: Alerts follow pending, firing, and resolved states
 Fanout SHALL create a pending alert when a condition first becomes true, transition it to firing only after `for_seconds` has elapsed, and mark it resolved when the condition becomes false. Zero hold duration SHALL allow immediate firing.

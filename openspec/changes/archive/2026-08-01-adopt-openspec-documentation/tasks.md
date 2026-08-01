@@ -1,6 +1,6 @@
 ## 1. OpenSpec foundation
 
-- [x] 1.1 Initialize OpenSpec 1.7.0 for Codex, Claude Code, and GitHub Copilot. Evidence: generated integrations under `.codex/`, `.claude/`, and `.github/` from `openspec init`.
+- [x] 1.1 Initialize OpenSpec 1.7.0 for Codex, Claude Code, and GitHub Copilot and make the generated workflows runnable after project setup. Evidence: generated integrations under `.codex/`, `.claude/`, and `.github/` from `openspec init`; `just install` installs the pinned CLI.
 - [x] 1.2 Add Fanout project context, artifact rules, and apply/archive guidance. Evidence: `openspec/config.yaml`.
 
 ## 2. Canonical baseline

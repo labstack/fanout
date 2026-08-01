@@ -26,7 +26,6 @@ placeholders with your values:
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 \
   -v $PWD/data:/var/lib/fanout/data \
-  -e MCP_ENABLED=false \
   -e AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   -e SMTP_HOST=<smtp-host> \
   -e SMTP_USER=<smtp-user> \
@@ -61,7 +60,7 @@ docs/            Documentation index and operator runbooks
 ## Develop
 
 ```sh
-just install   # Go tools, ui/host + ui/apps + site deps, Lefthook
+just install   # Go/OpenSpec tools, UI + site deps, Lefthook
 just up        # Run server + browser build watcher + site
 just check     # Format, vet, lint, type-check, build
 just test      # go test ./...

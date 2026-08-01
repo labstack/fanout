@@ -17,14 +17,14 @@ page is the operator runbook.
 
 ### Docker
 
-For a local-only first run, disable remote MCP until you have a canonical HTTPS
-URL for its OAuth resource:
+The default enables the session-protected browser MCP adapter required by rich
+chat views. The remote `/mcp` endpoint is enabled at the same time and remains
+OAuth-protected:
 
 ```sh
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 \
   -v "$PWD/data:/var/lib/fanout/data" \
-  -e MCP_ENABLED=false \
   -e AUTH_CODE_SECRET="$(openssl rand -hex 32)" \
   -e SMTP_HOST=smtp.example.com \
   -e SMTP_USER=fanout@example.com \
@@ -181,8 +181,10 @@ than browser pages; future browser surfaces require their own product change.
 
 The alert engine is enabled by default and evaluates persisted
 [expr-lang](https://expr-lang.org) rules every `ALERT_EVAL_INTERVAL` seconds.
-Rules can scope a service and namespace and can use current traffic, error rate,
-latency, log count, anomaly/health scores, and baseline deltas.
+Rules can scope a service and can use current traffic, error rate, latency, log
+count, anomaly/health scores, and baseline deltas. A namespace selector is
+stored with each rule, but current evaluation uses instance-wide service
+rollups and does not apply that selector.
 
 An alert moves from **pending** to **firing** after `for_seconds`, then to
 **resolved** when its expression becomes false. Cooldown and repeat intervals
@@ -309,12 +311,13 @@ files.
 |---|---|
 | `/healthz` | Process liveness |
 | `/readyz`, `/api/health` | Dependency-aware readiness |
-| `/-/metrics` | Prometheus metrics; bearer-protected unless public |
+| `/-/metrics` | Prometheus metrics; bearer token or admin session unless public |
 | `/debug/pprof/*` | Optional profiling; admin operations capability required |
 
-Set `METRICS_TOKEN` for private scraping or, only on an appropriate network,
-`METRICS_PUBLIC=true`. Profiling routes do not exist unless
-`PPROF_ENABLED=true`.
+Set `METRICS_TOKEN` for non-interactive private scraping. An authenticated
+administrator can also inspect private metrics through a browser session. Only
+on an appropriate network, `METRICS_PUBLIC=true` removes authentication.
+Profiling routes do not exist unless `PPROF_ENABLED=true`.
 
 ### Backup and restore
 

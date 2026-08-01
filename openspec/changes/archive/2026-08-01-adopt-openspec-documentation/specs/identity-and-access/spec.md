@@ -5,11 +5,15 @@ Defines Fanout's first-admin setup, local and OIDC authentication, server-side s
 ## ADDED Requirements
 
 ### Requirement: First boot creates exactly one initial administrator
-When no users exist, Fanout SHALL print a one-time setup token that expires after one hour. A valid setup request SHALL atomically create the first administrator, establish a browser session, generate the initial ingest token when absent, and close the setup window.
+When no users exist, Fanout SHALL print a one-time setup token that expires after one hour. A valid setup request SHALL atomically create the first administrator with its setup audit event and prevent any concurrent or later request from creating a second initial administrator. Browser-session establishment, initial ingest-token persistence, and setup-token clearing occur as follow-on operations rather than in that database transaction.
 
 #### Scenario: Setup token is reused
 - **WHEN** a setup request succeeds and the same token is presented again
 - **THEN** Fanout does not create another administrator or rotate an existing ingest token
+
+#### Scenario: A post-creation setup step fails
+- **WHEN** the first administrator commits but session or ingest-token setup returns an error
+- **THEN** Fanout retains the committed administrator and a retry does not create a second initial administrator
 
 ### Requirement: Local login uses email verification codes
 In local mode, Fanout SHALL send short-lived, single-use verification codes by configured SMTP, avoid passwords, normalize email identities, rate-limit requests and guesses, and return non-enumerating responses for missing or inactive users.
@@ -68,7 +72,7 @@ Fanout SHALL protect `/mcp` with OAuth 2.1-style discovery, dynamic client regis
 - **THEN** Fanout rejects it because it is not an audience-bound MCP access token
 
 ### Requirement: Security-sensitive actions are audited
-Fanout SHALL persist bounded audit events for setup, login outcomes, logout, user changes, session revocation, identity linking, OAuth consent, and ingest-token rotation without storing raw credentials.
+Fanout SHALL persist bounded audit events for setup, login outcomes, logout, user changes, session revocation, identity linking, and ingest-token rotation without storing raw credentials. MCP OAuth consent approval is currently written to the process log rather than the persisted audit store.
 
 #### Scenario: Administrator rotates ingest credentials
 - **WHEN** the rotation commits

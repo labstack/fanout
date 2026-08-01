@@ -34,19 +34,19 @@ Every deterministic observability query SHALL use one namespace, a positive star
 - **WHEN** a client requests an observability result without namespace, window, or limit
 - **THEN** Fanout queries the default namespace over the previous hour with the domain's safe default limit
 
-### Requirement: Rollups accelerate queries without changing their contract
-Fanout SHALL maintain minute-level service, edge, and endpoint aggregates for repeated investigation queries. When an optimization is not ready or does not cover the full selected range, Fanout MUST use the authoritative raw rows for the uncovered work.
+### Requirement: Rollups accelerate repeated queries
+Fanout SHALL maintain minute-level service, edge, and endpoint aggregates for repeated investigation queries. Overview, topology, and service-level performance summaries SHALL read their respective rollups and MAY omit telemetry newer than the latest completed rollup. Endpoint aggregation MUST fall back to authoritative raw spans when endpoint rollup data is unavailable for the request.
 
 #### Scenario: Endpoint rollup is still warming
 - **WHEN** a performance query arrives before enough endpoint rollup data is ready
 - **THEN** Fanout answers from raw spans rather than returning an incomplete endpoint list
 
 ### Requirement: Query results disclose provenance
-Fanout SHALL include the selected namespace, time bounds, and data source in typed observability results so consumers can distinguish rollup, raw, and mixed answers.
+Fanout SHALL include the selected namespace, time bounds, and selected data source in typed observability results so consumers can distinguish rollup, raw, and mixed answers. Rollup provenance identifies the source used; it does not assert that the rollup includes telemetry newer than its latest completed bucket.
 
-#### Scenario: Performance query combines cached and recent rows
-- **WHEN** an endpoint result uses rollups up to a watermark and raw spans afterward
-- **THEN** the result provenance identifies the mixed source
+#### Scenario: Endpoint query falls back to spans
+- **WHEN** endpoint rollup data is unavailable and the query reads raw spans
+- **THEN** the result provenance identifies the raw source
 
 ### Requirement: Retention and compaction bound telemetry storage
 Fanout SHALL periodically expire telemetry older than `RETENTION_DAYS` and compact small adjacent files. A retention value of zero SHALL preserve telemetry indefinitely.

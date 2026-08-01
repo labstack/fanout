@@ -16,6 +16,7 @@ default:
 install:
     go install github.com/air-verse/air@latest
     brew install process-compose lefthook 2>/dev/null || true
+    npm install --global @fission-ai/openspec@{{openspec_version}}
     cd ui/host && bun install
     cd ui/apps && bun install
     cd site && bun install

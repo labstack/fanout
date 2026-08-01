@@ -35,7 +35,7 @@ Fanout SHALL expose `/healthz` for process liveness and `/readyz` plus `/api/hea
 - **THEN** liveness remains distinguishable from a non-ready service
 
 ### Requirement: Operational metrics are protected by default
-Fanout SHALL expose Prometheus metrics at `/-/metrics` only to a valid metrics bearer token unless `METRICS_PUBLIC=true`. Browser roles and public read MUST NOT silently make metrics public.
+Fanout SHALL expose Prometheus metrics at `/-/metrics` to a valid metrics bearer token or an authenticated administrator with operations-read capability unless `METRICS_PUBLIC=true`. Public read and non-administrator browser roles MUST NOT make metrics public.
 
 #### Scenario: Unauthenticated scraper reaches a private instance
 - **WHEN** metrics are not public and no valid metrics token is supplied
