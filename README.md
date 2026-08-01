@@ -14,6 +14,7 @@ required at runtime.
 - **Docs:** [fanout.run/docs](https://fanout.run/docs/)
 - **Demo:** [demo.fanout.run](https://demo.fanout.run)
 - **Releases:** [github.com/labstack/fanout/releases](https://github.com/labstack/fanout/releases)
+- **Product contract:** [`openspec/specs/`](openspec/specs/)
 
 ## Quick start
 
@@ -34,8 +35,12 @@ docker run -d --name fanout \
   ghcr.io/labstack/fanout:latest
 ```
 
-Open <http://localhost:7520>, complete setup, and copy the ingest token. Point any OTLP collector or SDK at
-`localhost:4317` (or your host's address) with header `x-fanout-ingest-token: fo_<token>`.
+Open <http://localhost:7520>, complete setup, and copy the one-time ingest
+token. Point any OTLP/gRPC collector or SDK at `localhost:4317` (or your host's
+address) with header `x-fanout-ingest-token: fo_<token>`.
+
+Remote MCP needs a canonical public HTTPS `MCP_PUBLIC_URL`; the local command
+disables it until that URL exists.
 
 Full setup walkthrough: [fanout.run/docs#first-boot](https://fanout.run/docs/#first-boot).
 
@@ -47,16 +52,19 @@ internal/        Ingest, query, AG-UI, MCP, auth, and embedded web packages
 ui/host/         Static React AG-UI client (compiled and embedded at build time)
 ui/apps/         Portable React MCP Apps embedded by the MCP server
 site/            Marketing + public docs (Astro)
-docs/            Internal plans, specs, design notes
+openspec/specs/  Canonical shipped behavior by capability
+openspec/changes Proposed work and archived decisions
+docs/            Documentation index and operator runbooks
 ```
 
 ## Develop
 
 ```sh
-just install   # Go tools, bun deps (web + site), Lefthook
+just install   # Go/OpenSpec tools, UI + site deps, Lefthook
 just up        # Run server + browser build watcher + site
 just check     # Format, vet, lint, type-check, build
 just test      # go test ./...
+just docs-check # Strictly validate OpenSpec artifacts
 ```
 
 With the shared local Caddy setup in `../docker`:

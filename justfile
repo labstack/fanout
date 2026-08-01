@@ -7,6 +7,7 @@ export CGO_ENABLED := "1"
 
 bin := "bin/fanout"
 sock := env("SOCK", "/tmp/pc-fanout.sock")
+openspec_version := "1.7.0"
 
 default:
     @just --list
@@ -15,6 +16,7 @@ default:
 install:
     go install github.com/air-verse/air@latest
     brew install process-compose lefthook 2>/dev/null || true
+    npm install --global @fission-ai/openspec@{{openspec_version}}
     cd ui/host && bun install
     cd ui/apps && bun install
     cd site && bun install
@@ -79,6 +81,10 @@ lint:
 # Go format check (CI only — check uses go fmt which auto-fixes)
 fmt-check:
     @if [ -n "$(gofmt -l .)" ]; then gofmt -d .; exit 1; fi
+
+# Strict validation for canonical specs and active/archived changes.
+docs-check:
+    npx --yes @fission-ai/openspec@{{openspec_version}} validate --all --strict --no-interactive
 
 # Run Go tests
 test *ARGS='./...':

@@ -3,6 +3,15 @@
 This file is the working architecture guide for Claude Code and other coding
 agents in this repository.
 
+## Documentation source of truth
+
+Read [`docs/README.md`](docs/README.md) before changing product behavior.
+Canonical shipped behavior lives in `openspec/specs/`; proposed behavior lives
+in a named `openspec/changes/` directory; archived changes preserve rationale.
+Use the generated `/opsx:*` commands and keep code, tests, specs, and public docs
+aligned. Dated files under an OpenSpec archive are historical evidence, not
+current requirements.
+
 ## Product boundary
 
 Fanout is one Go executable for OpenTelemetry investigation. It owns:
@@ -121,11 +130,6 @@ ui/apps/                    portable React MCP Apps (build-time)
 site/                       public site and documentation
 ```
 
-Deleted packages such as `internal/ai`, `internal/render`, and
-`internal/service` belonged to the former orchestrator/block-renderer stack.
-The current `internal/mcp` is a clean standard-protocol implementation, not the
-legacy tool layer.
-
 ## Build and run
 
 ```bash
@@ -159,7 +163,7 @@ Fanout loads `.env`, then `.env.${ENV}` (default `development`). Core settings:
 | `INGEST_ENDPOINT` | derived | public collector endpoint shown during setup |
 | `DATA_DIR` | `./data` | telemetry, query state, and control SQLite |
 | `DEFAULT_NAMESPACE` | `default` | fallback OTLP service namespace |
-| `MCP_ENABLED` | `true` | expose `/mcp` to external clients |
+| `MCP_ENABLED` | `true` | expose OAuth-protected `/mcp` and session-protected `/api/mcp` |
 | `MCP_PUBLIC_URL` | `https://demo.fanout.test/mcp` | canonical public MCP URL — the OAuth issuer/resource (audience) for `/mcp`; MUST be set to the deployment's public URL for external MCP clients; HTTPS ending in `/mcp` |
 | `AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
 | `AI_API_KEY` | required | model provider credential |
@@ -173,7 +177,7 @@ Fanout loads `.env`, then `.env.${ENV}` (default `development`). Core settings:
 | `PUBLIC_READ` | `false` | anonymous access to explicitly classified telemetry reads only |
 | `PUBLIC_INGEST` | `false` | disable OTLP authentication; demo-only |
 | `METRICS_PUBLIC` | `false` | expose `/-/metrics` without authentication |
-| `METRICS_TOKEN` | optional | bearer credential for `/-/metrics` when it is private |
+| `METRICS_TOKEN` | optional | non-interactive bearer credential for private `/-/metrics`; admin sessions are also accepted |
 | `TRUSTED_PROXY_CIDRS` | empty | comma-separated proxy CIDRs allowed to supply forwarded client IPs |
 | `OIDC_ISSUER_URL` | OIDC mode | HTTPS issuer used for discovery |
 | `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | OIDC mode | relying-party credentials |
@@ -221,6 +225,7 @@ separate conversation database is used.
 
 ```bash
 just check
+just docs-check
 go test ./...
 go vet ./...
 docker build --target fanout -t fanout:dev .
@@ -230,5 +235,7 @@ The existing alert webhook tests open a loopback listener, so restricted
 sandboxes may need local-listener permission. Browser assets must be rebuilt
 before Go tests because `internal/ui` embeds the generated `dist` directory.
 
-For manual testing, open `https://demo.fanout.test`; do not document local app flows
-with `localhost` or `127.0.0.1`.
+For manual testing through the shared proxy, open
+`https://demo.fanout.test`. The standalone binary and public quick start may
+use `http://localhost:7520`; reserve `127.0.0.1` for bind addresses,
+reverse-proxy upstreams, and health checks.
