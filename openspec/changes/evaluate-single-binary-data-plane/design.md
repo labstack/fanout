@@ -76,18 +76,20 @@ combined into one acceptance decision.
 1. Add measurement-only instrumentation and verify behavior and measurement
    overhead.
 2. Capture the immutable baseline.
-3. Clarify internal boundaries only where instrumentation or testing requires
-   it.
-4. Measure and, if justified, improve write scheduling.
-5. Experiment with physical layout one variable at a time.
-6. Remove proven allocation or marshaling hot spots.
-7. Extend or tune rollups only for repeated query shapes with measured value.
-8. Run final mixed-load validation and the Linux soak on the retained stack.
+3. Measure and, if justified, improve write scheduling. This is the one
+   optimization the change intends to attempt; the known limit is
+   rollup/maintenance contention on the shared catalog write gate.
+4. Physical layout, allocation/marshaling, and rollup shapes are conditional
+   follow-ups, not planned work. Each starts only if stage 3's profiles
+   attribute material cost to it, and each changes one variable at a time.
+5. Run final mixed-load validation and the Linux soak on whatever was retained.
 
-Instrumentation and boundary work are enabling stages, not performance wins.
-They must preserve results and stay within the five-percent continuous-metric
-guardrail. Each optimization experiment must name exactly one primary target
-before it runs:
+A no-go is a successful outcome at any stage. Concluding that contention is not
+material, and stopping, is cheaper than an unjustified rewrite.
+
+Instrumentation is an enabling stage, not a performance win. It must preserve
+results and stay within the five-percent continuous-metric guardrail. Each
+optimization experiment must name exactly one primary target before it runs:
 
 | Stage | Allowed primary target | Required evidence |
 |---|---|---|
@@ -100,9 +102,15 @@ A candidate is retained only when the median primary target across at least
 three comparable runs improves by 10 percent or more and no continuous
 guardrail median regresses by more than 5 percent. Direction is normalized:
 higher throughput is better; lower latency, CPU, memory, allocation, lag,
-storage growth, file count, and lock time are better. All continuous metrics
-recorded by the harness are guardrails unless the experiment declaration
-explicitly excludes one with a rationale before execution.
+storage growth, file count, and lock time are better. Every continuous metric
+the harness records is a guardrail; excluding one requires a written rationale
+in the evidence before the run.
+
+This comparison is made by reading the three-run medians, not by a program.
+An analyzer that renders a verdict is only worth building once the protocol can
+demonstrably resolve the difference it claims to measure — and the null screen
+below shows it currently cannot. Encoding the rule in code before then would
+dress noise as a decision.
 
 The following are per-run, zero-tolerance correctness/SLO failures and are
 never averaged away:
@@ -125,24 +133,27 @@ soak.
 
 ### 2. Make benchmark runs self-describing
 
-The benchmark driver/reporting path will emit a machine-readable run manifest
-alongside the existing human report. It records:
+The benchmark driver emits a run manifest alongside the human report. It records
+only what the driver can derive or was told about the workload:
 
-- Git commit and dirty-worktree flag;
-- Fanout and benchmark-driver build/version identifiers;
-- OS, architecture, logical CPU count, memory limit, and relevant DuckDB
-  configuration;
+- Git commit and dirty-worktree flag, Go version, and Fanout/bench build
+  identifiers;
+- OS, architecture, logical CPU count, GOMAXPROCS, and cgroup memory limit;
 - workload seed, service/cardinality settings, rate, concurrency, query mix,
-  warm-up, duration, and dataset identity/hash;
-- stage, candidate identifier, primary target, explicit guardrail exclusions,
-  and run ordinal;
-- start/end counters and latency/distribution summaries needed to reproduce the
-  acceptance calculation.
+  and duration, plus a hash of those parameters identifying the dataset.
 
-Manifests must not contain environment variables, tokens, query text containing
-customer data, or other secrets. Decision artifacts contain commands,
-manifests, summarized metrics, profiles, and conclusions; generated lake data
-and raw secrets remain outside version control.
+It deliberately does not record server configuration such as pool size, flush
+cadence, or retention. `bench` cannot observe those, so a manifest field for
+them would only restate what the operator typed and would state it with
+misplaced confidence when the two disagree. Server settings belong in the run
+log next to the evidence.
+
+Manifests must not contain environment variables, endpoints, tokens, query text
+containing customer data, or other secrets; a test asserts this. Decision
+artifacts contain commands, manifests, summarized metrics, profiles, and
+conclusions. Generated lake data, raw run logs, and secrets stay outside version
+control — benchmark output is diagnostic and is not evidence merely because it
+is large.
 
 ### 3. Instrument the existing write gate before changing scheduling
 
@@ -311,6 +322,14 @@ The final release decision requires:
 - **A shared gate can hide starvation.** Measure wait and hold distributions by
   operation, retain the single-writer invariant, and test progress for ingest,
   rollups, merge, and maintenance under contention.
+- **The harness can report changes it cannot measure.** Comparing the same
+  binary against itself on Darwin produced a 19-percent CPU swing and a
+  98 ms → 1055 ms p95 swing. Two causes: a coarse 20-bucket latency ladder that
+  could not resolve anything finer than a doubling (since replaced with a 0.5%
+  geometric ladder), and a shared developer machine. Before trusting any A/B,
+  run the same-binary null comparison on that host and confirm the spread is
+  well inside the effect you intend to detect. A protocol that has not passed
+  its own null test produces numbers, not evidence.
 - **Short benchmarks reward burst behavior.** Use fixed 30-minute decision runs
   and a two-hour soak; report warm-up separately and reject non-steady-state
   comparisons.
