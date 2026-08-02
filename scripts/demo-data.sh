@@ -11,8 +11,8 @@ if [ -f "$marker" ]; then
 fi
 
 mkdir -p "$data_dir"
-if [ ! -x ./bin/loadgen ]; then
-  CGO_ENABLED=1 go build -o ./bin/loadgen ./cmd/loadgen
+if [ ! -x ./bin/bench ]; then
+  CGO_ENABLED=1 go build -o ./bin/bench ./cmd/bench
 fi
 
 args=(
@@ -33,7 +33,7 @@ fi
 
 report="$(mktemp -t fanout-demo-data.XXXXXX)"
 trap 'rm -f "$report"' EXIT
-if ! ./bin/loadgen "${args[@]}" 2>&1 | tee "$report"; then
+if ! ./bin/bench "${args[@]}" 2>&1 | tee "$report"; then
   # A timed load can report a few deadline-exceeded sends while workers stop.
   # The seed is still valid when at least one trace was accepted; a connection
   # or authentication failure reports zero and remains a hard failure.

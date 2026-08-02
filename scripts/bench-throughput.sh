@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Throughput benchmark: provisions a Hetzner private network + two VMs of the
 # SAME type — a fanout-under-test and a separate load driver — ships the current
-# git HEAD, ramps loadgen through rate steps under an SLO gate to find the
+# git HEAD, ramps bench through rate steps under an SLO gate to find the
 # ingest CEILING, then certifies a sustained RATED CAPACITY with a 15-min soak.
 # Both numbers are reported in achieved server-side rows/s. All cloud resources
 # are deleted on exit (trap), including on failure or Ctrl-C.
@@ -158,7 +158,7 @@ AI_PROVIDER=anthropic
 ENV
   go build -o bin/fanout ./cmd/fanout
 else
-  go build -o bin/loadgen ./cmd/loadgen
+  go build -o bin/bench ./cmd/bench
 fi
 echo "  built $ROLE binary"
 REMOTE
@@ -212,7 +212,7 @@ boot_fanout
 # within a day. A same-hour run (no seed) can't exercise this. 0 disables.
 if [ "$SEED_HOURS" -gt 0 ] 2>/dev/null; then
   echo "── pre-seed: ${SEED_HOURS}h backdated data ──"
-  ssh_to "$DRIVER_PUB" "cd /root/fanout && ./bin/loadgen -endpoint $TARGET_PRIV:4317 \
+  ssh_to "$DRIVER_PUB" "cd /root/fanout && ./bin/bench -endpoint $TARGET_PRIV:4317 \
     -rate 60000 -duration 150s -workers $WORKERS -services 50 -attr-cardinality 200 \
     -error-rate 0.05 -messaging-ratio 0.15 -backfill-hours $SEED_HOURS" >/dev/null 2>&1 || true
   echo "  seeded: lake_partitions=$(snap fanout_lake_partitions) rows=$(snap fanout_ingest_rows_total)"
@@ -264,15 +264,15 @@ run_step() {
   local rows0 rows1 drops0 drops1 t0 t1 part rts age rss errs
   rows0=$(snap fanout_ingest_rows_total); drops0=$(snap fanout_rows_dropped_total); t0=$(date +%s)
 
-  # Driver fires loadgen at the target's PRIVATE ip, query-under-load on, query-p95
-  # gate armed. loadgen runs on the driver but its stdout/stderr stream back over
-  # SSH — capture to a LOCAL file so we can grep its verdict locally. loadgen
+  # Driver runs bench against the target's PRIVATE ip, query-under-load on, query-p95
+  # gate armed. Bench runs on the driver but its stdout/stderr stream back over
+  # SSH — capture to a LOCAL file so we can grep its verdict locally. Bench
   # exits non-zero on any SLO/error failure (the `|| true` keeps the harness alive
   # so we can classify it ourselves).
   local steplog="/tmp/$RUN-step-$traces.log"
   ssh_to "$DRIVER_PUB" "bash -s" <<REMOTE >"$steplog" 2>&1 || true
 cd /root/fanout
-./bin/loadgen -endpoint $TARGET_PRIV:4317 -rate $traces -duration ${dur}s -workers $WORKERS \
+./bin/bench -endpoint $TARGET_PRIV:4317 -rate $traces -duration ${dur}s -workers $WORKERS \
   -services 50 -attr-cardinality 200 -error-rate 0.05 -messaging-ratio 0.15 \
   -metrics-url http://$TARGET_PRIV:7520/-/metrics \
   -query-url http://$TARGET_PRIV:7520 -query-workers 4 -query-rate 20 \
@@ -295,7 +295,7 @@ REMOTE
   STEP_ACHIEVED_RPS=$(( (rows1 - rows0) / secs ))
   local target_rps; target_rps=$(awk -v t="$traces" -v r="$ROWS_PER_TRACE" 'BEGIN{printf "%d", t*r}')
 
-  # loadgen prints "FAIL: ..." to stderr (now in the local steplog) on any SLO
+  # bench prints "FAIL: ..." to stderr (now in the local steplog) on any SLO
   # breach, send error, or query error — grep the LOCAL capture, not the driver.
   # grep -c prints "0" AND exits 1 on no-match; a `|| echo 0` would then append a
   # second "0", yielding "0\n0" and breaking the -gt test. Capture the count and
@@ -304,7 +304,7 @@ REMOTE
 
   STEP_VERDICT=pass; STEP_REASON=""
   if [ "$(( drops1 - drops0 ))" -gt 0 ]; then STEP_VERDICT=fail; STEP_REASON="drops=$(( drops1 - drops0 ))"
-  elif [ "$lg_fail" -gt 0 ]; then STEP_VERDICT=fail; STEP_REASON="loadgen SLO/errors (see step log)"
+  elif [ "$lg_fail" -gt 0 ]; then STEP_VERDICT=fail; STEP_REASON="bench SLO/errors (see step log)"
   elif [ "$age" -gt 240 ]; then STEP_VERDICT=fail; STEP_REASON="rollup age ${age}s>240s"
   elif [ "${part:-0}" -gt "$PART_CAP" ]; then STEP_VERDICT=fail; STEP_REASON="partitions ${part}>${PART_CAP}"
   elif [ "${errs:-0}" -gt 0 ]; then STEP_VERDICT=fail; STEP_REASON="ERROR logs=${errs}"

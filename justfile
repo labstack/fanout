@@ -169,14 +169,14 @@ release:
 demo-data:
     ./scripts/demo-data.sh
 
-# Performance suite dispatcher. Logic lives in scripts/ + cmd/loadgen; this just
+# Performance suite dispatcher. Logic lives in scripts/ + cmd/bench; this just
 # routes. Run `just stress` (no args) for the subcommand list.
-#   local   [gens rate dur]    throwaway fanout + parallel loadgens → rows/s
+#   local   [gens rate dur]    throwaway fanout + parallel bench drivers → rows/s
 #                              (gens auto-scales to CPU cores → max utilization)
 #   hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down
 #   throughput [type]          two-VM SLO-gated ceiling + rated capacity (rows/s)
 #   profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots
-#   drive   [loadgen flags]    fire loadgen at an already-running fanout
+#   drive   [bench flags]      run bench against an already-running fanout
 #   watch   [host:port]        tail the incident-relevant metrics
 stress *ARGS:
     #!/usr/bin/env bash
@@ -189,16 +189,16 @@ stress *ARGS:
       hetzner) exec ./scripts/bench-hetzner.sh "$@" ;;
       throughput) exec ./scripts/bench-throughput.sh "$@" ;;
       profile) exec ./scripts/profile.sh "$@" ;;
-      drive)   exec go run ./cmd/loadgen "$@" ;;
+      drive)   exec go run ./cmd/bench "$@" ;;
       watch)   exec ./scripts/stress-watch.sh "$@" ;;
       ""|help|-h|--help)
         echo "just stress <subcommand> [args]"
-        echo "  local   [gens rate dur]    throwaway fanout + parallel loadgens + query load → rows/s (auto-scales to cores)"
+        echo "  local   [gens rate dur]    throwaway fanout + parallel bench drivers + query load → rows/s (auto-scales to cores)"
         echo "  soak    [min rate]         sustained load asserting growth invariants (file count, rollup freshness)"
         echo "  hetzner [type key loc]     provision a Hetzner VM (default cpx32), test, tear down"
         echo "  throughput [type]          two-VM SLO-gated ceiling + rated capacity (rows/s)"
         echo "  profile [cpusec rate gens] capture CPU/heap/alloc/mutex/block → top hotspots"
-        echo "  drive   [loadgen flags]    fire loadgen at an already-running fanout"
+        echo "  drive   [bench flags]      run bench against an already-running fanout"
         echo "  watch   [host:port]        tail the incident-relevant metrics" ;;
       *) echo "unknown subcommand: $sub (run 'just stress' for the list)" >&2; exit 1 ;;
     esac

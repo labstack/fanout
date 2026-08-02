@@ -1,11 +1,11 @@
-// Command loadgen is fanout's local stress/soak generator and benchmark
+// Command bench is fanout's local stress/soak generator and benchmark
 // reporter. It pushes synthetic OTLP (traces, logs, metrics) straight at the
 // gRPC ingest port with knobs for rate, duration, service/namespace count,
 // attribute cardinality, and error rate, then reports OTLP export latency
 // percentiles and — when pointed at fanout's /-/metrics — the server-side
 // deltas that matter (rows accepted/dropped, file growth, rollup/flush time).
 //
-// Unlike telemetrygen (single service per process), loadgen emits cross-service
+// Unlike telemetrygen (single service per process), bench emits cross-service
 // parent/child traces and producer/consumer pairs, so it exercises BOTH rollups
 // — service_rollup and edge_rollup (call + messaging topology) — plus the
 // GROUP BY cardinality cost. It reuses fanout's own vendored OTLP proto, so it
@@ -13,7 +13,7 @@
 //
 // Example — a 10-minute soak at 2k traces/s across 50 services, with a report:
 //
-//	go run ./cmd/loadgen -rate 2000 -duration 10m -services 50 -attr-cardinality 200 \
+//	go run ./cmd/bench -rate 2000 -duration 10m -services 50 -attr-cardinality 200 \
 //	  -metrics-url https://demo.fanout.test/-/metrics -metrics-token "$METRICS_TOKEN" -report run.json
 //
 // The metrics endpoint requires -metrics-token unless METRICS_PUBLIC=true.
@@ -22,7 +22,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -34,7 +33,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -83,7 +82,17 @@ type config struct {
 	// the lake spans several hour partitions — required to exercise within-day
 	// (hour-partition) pruning, which a same-hour run can't.
 	backfillHours float64
+	// seed makes the synthetic workload reproducible: same seed, same services,
+	// endpoints, attributes, and error placement. Two runs are only comparable if
+	// they share it.
+	seed uint64
+	// fanoutVersion is recorded in the report so a stored run.json says which
+	// server build produced it. Report-only; it never changes Fanout config.
+	fanoutVersion string
 }
+
+// version is set at build time via -ldflags "-X main.version=...".
+var version = "dev"
 
 func main() {
 	var cfg config
@@ -108,10 +117,12 @@ func main() {
 	flag.Float64Var(&cfg.maxExportP95, "max-export-p95-ms", 0, "fail (exit 1) if ingest export p95 exceeds this")
 	flag.Float64Var(&cfg.maxQueryP95, "max-query-p95-ms", 0, "fail (exit 1) if query p95 exceeds this")
 	flag.Float64Var(&cfg.backfillHours, "backfill-hours", 0, "spread event timestamps over the last N hours (pre-seed a multi-hour dataset); 0 = use now()")
+	flag.Uint64Var(&cfg.seed, "seed", 1, "deterministic synthetic workload seed")
+	flag.StringVar(&cfg.fanoutVersion, "fanout-version", "unknown", "Fanout build/version identifier under test, recorded in the report")
 	flag.Parse()
 
-	if cfg.services < 2 {
-		log.Fatal("-services must be >= 2 (cross-service edges need a caller and a callee)")
+	if err := validateTrialConfig(cfg); err != nil {
+		log.Fatal(err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -152,14 +163,16 @@ func main() {
 		}(),
 	}
 
-	fmt.Printf("loadgen → %s | rate=%.0f/s workers=%d services=%d namespaces=%d cardinality=%d error-rate=%.2f\n",
+	fmt.Printf("bench → %s | rate=%.0f/s workers=%d services=%d namespaces=%d cardinality=%d error-rate=%.2f\n",
 		cfg.endpoint, cfg.rate, cfg.workers, cfg.services, cfg.namespaces, cfg.cardinality, cfg.errorRate)
 
 	// Baseline server metrics before load (for end-of-run deltas).
-	var baseline map[string]float64
+	var baseline *metricSnapshot
+	var infrastructureFailures []string
 	if cfg.metricsURL != "" {
 		if baseline, err = scrapeMetrics(cfg.metricsURL, cfg.metricsToken); err != nil {
 			fmt.Fprintf(os.Stderr, "  warn: baseline metrics scrape failed: %v\n", err)
+			infrastructureFailures = append(infrastructureFailures, "baseline metrics scrape failed")
 		}
 	}
 
@@ -168,10 +181,12 @@ func main() {
 
 	var wg sync.WaitGroup
 	for w := 0; w < cfg.workers; w++ {
+		worker := w
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			g.run(ctx, interval)
+			rng := rand.New(rand.NewPCG(cfg.seed, uint64(worker)+1))
+			g.run(ctx, interval, rng)
 		}()
 	}
 	if cfg.queryURL != "" && cfg.queryWorkers > 0 {
@@ -209,6 +224,7 @@ func main() {
 	elapsed := time.Since(start).Seconds()
 
 	rep := report{
+		Manifest:        newRunManifest(cfg, start.UTC(), time.Now().UTC()),
 		Endpoint:        cfg.endpoint,
 		DurationSec:     round2(elapsed),
 		TargetRate:      cfg.rate,
@@ -235,11 +251,14 @@ func main() {
 	if cfg.metricsURL != "" {
 		if final, ferr := scrapeMetrics(cfg.metricsURL, cfg.metricsToken); ferr != nil {
 			fmt.Fprintf(os.Stderr, "  warn: final metrics scrape failed: %v\n", ferr)
+			infrastructureFailures = append(infrastructureFailures, "final metrics scrape failed")
 		} else {
-			rep.Server = serverDelta(baseline, final)
+			rep.Server = serverDelta(baseline, final, elapsed)
 		}
 	}
 
+	rep.Failures = evaluateReport(cfg, rep, infrastructureFailures)
+	rep.Passed = len(rep.Failures) == 0
 	printReport(rep)
 	if cfg.reportPath != "" {
 		if err := writeReport(cfg.reportPath, rep); err != nil {
@@ -249,34 +268,8 @@ func main() {
 		}
 	}
 
-	// Pass/fail thresholds → non-zero exit so the harness can gate on it.
-	// Always-on failure signals first: a run that ingested nothing, dropped rows,
-	// or hit send/query errors must FAIL — otherwise p95-of-survivors reads 0 and
-	// a totally broken run looks like a clean pass.
-	var fails []string
-	if rep.ExportLatencyMs.Count == 0 {
-		fails = append(fails, "no OTLP exports succeeded")
-	}
-	if attempted := rep.ExportLatencyMs.Count + rep.SendErrors; rep.SendErrors > 0 && attempted > 0 {
-		if rate := float64(rep.SendErrors) / float64(attempted); rate > maxSendErrorRate {
-			fails = append(fails, fmt.Sprintf("send error rate %.3f%% (%d/%d) > %.1f%%",
-				rate*100, rep.SendErrors, attempted, maxSendErrorRate*100))
-		}
-	}
-	if rep.QueryErrors > 0 {
-		fails = append(fails, fmt.Sprintf("query errors=%d", rep.QueryErrors))
-	}
-	if rep.Server != nil && rep.Server.RowsDroppedDelta > 0 {
-		fails = append(fails, fmt.Sprintf("rows dropped=%.0f", rep.Server.RowsDroppedDelta))
-	}
-	if cfg.maxExportP95 > 0 && rep.ExportLatencyMs.P95Ms > cfg.maxExportP95 {
-		fails = append(fails, fmt.Sprintf("export p95 %.0fms > %.0fms", rep.ExportLatencyMs.P95Ms, cfg.maxExportP95))
-	}
-	if cfg.maxQueryP95 > 0 && rep.QueryLatencyMs != nil && rep.QueryLatencyMs.P95Ms > cfg.maxQueryP95 {
-		fails = append(fails, fmt.Sprintf("query p95 %.0fms > %.0fms", rep.QueryLatencyMs.P95Ms, cfg.maxQueryP95))
-	}
-	if len(fails) > 0 {
-		fmt.Fprintf(os.Stderr, "FAIL: %s\n", strings.Join(fails, "; "))
+	if !rep.Passed {
+		fmt.Fprintf(os.Stderr, "FAIL: %s\n", strings.Join(rep.Failures, "; "))
 		os.Exit(1)
 	}
 }
@@ -306,7 +299,10 @@ type generator struct {
 // queryWindows rotate so the read load hits both small and wide rollup windows,
 // exercising the latency SLOs under ingest. The shared HTTP/MCP observability
 // kernel accepts Go duration strings and caps the window at 24 hours.
-var queryWindows = []string{"15m", "1h", "6h", "12h", "24h"}
+var (
+	queryOperations = []string{"overview", "topology", "performance", "trace", "logs"}
+	queryWindows    = []string{"15m", "1h", "6h", "12h", "24h"}
+)
 
 type queryTarget struct {
 	operation string
@@ -314,13 +310,12 @@ type queryTarget struct {
 }
 
 func queryTargetAt(i int) queryTarget {
-	operations := [...]string{"overview", "topology", "performance", "trace", "logs"}
-	operationIndex := i % len(operations)
-	round := i / len(operations)
+	operationIndex := i % len(queryOperations)
+	round := i / len(queryOperations)
 	// Offset each successive round so every operation exercises every window;
 	// using i for both dimensions locks equal-length lists into fixed pairs.
 	window := queryWindows[(operationIndex+round)%len(queryWindows)]
-	operation := operations[operationIndex]
+	operation := queryOperations[operationIndex]
 	return queryTarget{
 		operation: operation,
 		path:      fmt.Sprintf("/api/observability/%s?window=%s&limit=100", operation, window),
@@ -387,7 +382,7 @@ func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 	}
 }
 
-func (g *generator) run(ctx context.Context, interval time.Duration) {
+func (g *generator) run(ctx context.Context, interval time.Duration, rng *rand.Rand) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -395,12 +390,12 @@ func (g *generator) run(ctx context.Context, interval time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			g.sendTrace(ctx)
+			g.sendTrace(ctx, rng)
 			if g.cfg.sendLogs {
-				g.sendLog(ctx)
+				g.sendLog(ctx, rng)
 			}
 			if g.cfg.sendMetrics {
-				g.sendMetric(ctx)
+				g.sendMetric(ctx, rng)
 			}
 		}
 	}
@@ -434,68 +429,68 @@ func (g *generator) outCtx(ctx context.Context) context.Context {
 // eventTime returns the timestamp for an emitted event: now(), or — when
 // backfillHours>0 — a time spread uniformly over the last N hours so a pre-seed
 // run populates multiple hour partitions (to exercise within-day pruning).
-func (g *generator) eventTime() time.Time {
+func (g *generator) eventTime(rng *rand.Rand) time.Time {
 	if g.cfg.backfillHours <= 0 {
 		return time.Now()
 	}
-	return time.Now().Add(-time.Duration(rand.Float64() * g.cfg.backfillHours * float64(time.Hour)))
+	return time.Now().Add(-time.Duration(rng.Float64() * g.cfg.backfillHours * float64(time.Hour)))
 }
 
-func (g *generator) sendTrace(ctx context.Context) {
-	ns := g.namespace()
-	caller := g.svcNames[rand.IntN(g.cfg.services)]
-	callee := g.svcNames[rand.IntN(g.cfg.services)]
+func (g *generator) sendTrace(ctx context.Context, rng *rand.Rand) {
+	ns := g.namespace(rng)
+	caller := g.svcNames[rng.IntN(g.cfg.services)]
+	callee := g.svcNames[rng.IntN(g.cfg.services)]
 	for callee == caller {
-		callee = g.svcNames[rand.IntN(g.cfg.services)]
+		callee = g.svcNames[rng.IntN(g.cfg.services)]
 	}
 
-	traceID := randBytes(16)
-	parentID := randBytes(8)
-	childID := randBytes(8)
-	now := g.eventTime()
+	traceID := randBytes(rng, 16)
+	parentID := randBytes(rng, 8)
+	childID := randBytes(rng, 8)
+	now := g.eventTime(rng)
 	startNano := uint64(now.UnixNano())
-	parentEnd := uint64(now.Add(time.Duration(20+rand.IntN(400)) * time.Millisecond).UnixNano())
-	childEnd := uint64(now.Add(time.Duration(5+rand.IntN(200)) * time.Millisecond).UnixNano())
+	parentEnd := uint64(now.Add(time.Duration(20+rng.IntN(400)) * time.Millisecond).UnixNano())
+	childEnd := uint64(now.Add(time.Duration(5+rng.IntN(200)) * time.Millisecond).UnixNano())
 
 	resSpans := []*tracepb.ResourceSpans{
 		g.resourceSpans(caller, ns, &tracepb.Span{
 			TraceId: traceID, SpanId: parentID,
-			Name: "GET /" + g.route(), Kind: tracepb.Span_SPAN_KIND_SERVER,
+			Name: "GET /" + g.route(rng), Kind: tracepb.Span_SPAN_KIND_SERVER,
 			StartTimeUnixNano: startNano, EndTimeUnixNano: parentEnd,
-			Attributes: g.spanAttrs(), Status: g.status(),
+			Attributes: g.spanAttrs(rng), Status: g.status(rng),
 		}),
 		g.resourceSpans(callee, ns, &tracepb.Span{
 			TraceId: traceID, SpanId: childID, ParentSpanId: parentID,
-			Name: "rpc." + g.route(), Kind: tracepb.Span_SPAN_KIND_CLIENT,
+			Name: "rpc." + g.route(rng), Kind: tracepb.Span_SPAN_KIND_CLIENT,
 			StartTimeUnixNano: startNano, EndTimeUnixNano: childEnd,
-			Attributes: g.spanAttrs(), Status: g.status(),
+			Attributes: g.spanAttrs(rng), Status: g.status(rng),
 		}),
 	}
 	spans := 2
 
-	if rand.Float64() < g.cfg.msgRatio {
-		dest := fmt.Sprintf("topic-%d", rand.IntN(8))
+	if rng.Float64() < g.cfg.msgRatio {
+		dest := fmt.Sprintf("topic-%d", rng.IntN(8))
 		msgAttrs := []*common.KeyValue{
 			strAttr("messaging.destination.name", dest),
 			strAttr("messaging.system", "kafka"),
 		}
-		producer := g.svcNames[rand.IntN(g.cfg.services)]
-		consumer := g.svcNames[rand.IntN(g.cfg.services)]
+		producer := g.svcNames[rng.IntN(g.cfg.services)]
+		consumer := g.svcNames[rng.IntN(g.cfg.services)]
 		for consumer == producer {
-			consumer = g.svcNames[rand.IntN(g.cfg.services)]
+			consumer = g.svcNames[rng.IntN(g.cfg.services)]
 		}
 		resSpans = append(resSpans,
 			g.resourceSpans(producer, ns, &tracepb.Span{
-				TraceId: randBytes(16), SpanId: randBytes(8),
+				TraceId: randBytes(rng, 16), SpanId: randBytes(rng, 8),
 				Name: dest + " publish", Kind: tracepb.Span_SPAN_KIND_PRODUCER,
 				StartTimeUnixNano: startNano, EndTimeUnixNano: parentEnd,
-				Attributes: msgAttrs, Status: g.status(),
+				Attributes: msgAttrs, Status: g.status(rng),
 			}),
 			g.resourceSpans(consumer, ns, &tracepb.Span{
-				TraceId: randBytes(16), SpanId: randBytes(8),
+				TraceId: randBytes(rng, 16), SpanId: randBytes(rng, 8),
 				Name: dest + " process", Kind: tracepb.Span_SPAN_KIND_CONSUMER,
 				StartTimeUnixNano: startNano, EndTimeUnixNano: childEnd,
-				Attributes: msgAttrs, Status: g.status(),
+				Attributes: msgAttrs, Status: g.status(rng),
 			}),
 		)
 		spans += 2
@@ -519,18 +514,18 @@ func (g *generator) resourceSpans(service, ns string, span *tracepb.Span) *trace
 			strAttr("service.namespace", ns),
 		}},
 		ScopeSpans: []*tracepb.ScopeSpans{{
-			Scope: &common.InstrumentationScope{Name: "loadgen"},
+			Scope: &common.InstrumentationScope{Name: "bench"},
 			Spans: []*tracepb.Span{span},
 		}},
 	}
 }
 
-func (g *generator) sendLog(ctx context.Context) {
-	ns := g.namespace()
-	svc := g.svcNames[rand.IntN(g.cfg.services)]
+func (g *generator) sendLog(ctx context.Context, rng *rand.Rand) {
+	ns := g.namespace(rng)
+	svc := g.svcNames[rng.IntN(g.cfg.services)]
 	sev := "INFO"
 	sevNum := logspb.SeverityNumber_SEVERITY_NUMBER_INFO
-	if rand.Float64() < g.cfg.errorRate {
+	if rng.Float64() < g.cfg.errorRate {
 		sev, sevNum = "ERROR", logspb.SeverityNumber_SEVERITY_NUMBER_ERROR
 	}
 	req := &collectorlogs.ExportLogsServiceRequest{ResourceLogs: []*logspb.ResourceLogs{{
@@ -539,11 +534,11 @@ func (g *generator) sendLog(ctx context.Context) {
 		}},
 		ScopeLogs: []*logspb.ScopeLogs{{
 			LogRecords: []*logspb.LogRecord{{
-				TimeUnixNano:   uint64(g.eventTime().UnixNano()),
+				TimeUnixNano:   uint64(g.eventTime(rng).UnixNano()),
 				SeverityText:   sev,
 				SeverityNumber: sevNum,
-				Body:           &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "request " + g.route()}},
-				Attributes:     g.spanAttrs(),
+				Body:           &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "request " + g.route(rng)}},
+				Attributes:     g.spanAttrs(rng),
 			}},
 		}},
 	}}}
@@ -556,9 +551,9 @@ func (g *generator) sendLog(ctx context.Context) {
 	g.logsSent.Add(1)
 }
 
-func (g *generator) sendMetric(ctx context.Context) {
-	ns := g.namespace()
-	svc := g.svcNames[rand.IntN(g.cfg.services)]
+func (g *generator) sendMetric(ctx context.Context, rng *rand.Rand) {
+	ns := g.namespace(rng)
+	svc := g.svcNames[rng.IntN(g.cfg.services)]
 	req := &collectormetrics.ExportMetricsServiceRequest{ResourceMetrics: []*metricspb.ResourceMetrics{{
 		Resource: &resourcepb.Resource{Attributes: []*common.KeyValue{
 			strAttr("service.name", svc), strAttr("service.namespace", ns),
@@ -569,9 +564,9 @@ func (g *generator) sendMetric(ctx context.Context) {
 				Unit: "ms",
 				Data: &metricspb.Metric_Gauge{Gauge: &metricspb.Gauge{
 					DataPoints: []*metricspb.NumberDataPoint{{
-						TimeUnixNano: uint64(g.eventTime().UnixNano()),
-						Value:        &metricspb.NumberDataPoint_AsDouble{AsDouble: rand.Float64() * 500},
-						Attributes:   g.spanAttrs(),
+						TimeUnixNano: uint64(g.eventTime(rng).UnixNano()),
+						Value:        &metricspb.NumberDataPoint_AsDouble{AsDouble: rng.Float64() * 500},
+						Attributes:   g.spanAttrs(rng),
 					}},
 				}},
 			}},
@@ -586,28 +581,28 @@ func (g *generator) sendMetric(ctx context.Context) {
 	g.metricsSent.Add(1)
 }
 
-func (g *generator) namespace() string {
+func (g *generator) namespace(rng *rand.Rand) string {
 	if g.cfg.namespaces <= 1 {
 		return "default"
 	}
-	return fmt.Sprintf("ns-%02d", rand.IntN(g.cfg.namespaces))
+	return fmt.Sprintf("ns-%02d", rng.IntN(g.cfg.namespaces))
 }
 
-func (g *generator) route() string {
-	return fmt.Sprintf("r%d", rand.IntN(20))
+func (g *generator) route(rng *rand.Rand) string {
+	return fmt.Sprintf("r%d", rng.IntN(20))
 }
 
 // spanAttrs carries a high-cardinality key to stress the rollup GROUP BYs and
 // attribute extraction.
-func (g *generator) spanAttrs() []*common.KeyValue {
+func (g *generator) spanAttrs(rng *rand.Rand) []*common.KeyValue {
 	return []*common.KeyValue{
-		strAttr("http.method", []string{"GET", "POST", "PUT", "DELETE"}[rand.IntN(4)]),
-		strAttr("user.id", fmt.Sprintf("u-%d", rand.IntN(g.cfg.cardinality))),
+		strAttr("http.method", []string{"GET", "POST", "PUT", "DELETE"}[rng.IntN(4)]),
+		strAttr("user.id", fmt.Sprintf("u-%d", rng.IntN(g.cfg.cardinality))),
 	}
 }
 
-func (g *generator) status() *tracepb.Status {
-	if rand.Float64() < g.cfg.errorRate {
+func (g *generator) status(rng *rand.Rand) *tracepb.Status {
+	if rng.Float64() < g.cfg.errorRate {
 		return &tracepb.Status{Code: tracepb.Status_STATUS_CODE_ERROR}
 	}
 	return &tracepb.Status{Code: tracepb.Status_STATUS_CODE_OK}
@@ -617,10 +612,10 @@ func strAttr(k, v string) *common.KeyValue {
 	return &common.KeyValue{Key: k, Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: v}}}
 }
 
-func randBytes(n int) []byte {
+func randBytes(rng *rand.Rand, n int) []byte {
 	b := make([]byte, n)
 	for i := range b {
-		b[i] = byte(rand.IntN(256))
+		b[i] = byte(rng.IntN(256))
 	}
 	return b
 }
@@ -630,7 +625,36 @@ func randBytes(n int) []byte {
 // multi-hour soak. Percentiles are bucket-granular approximations (the upper
 // bound of the bucket the quantile falls in).
 
-var latBoundsMs = []float64{0.5, 1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 1000, 2000, 5000, 10000, 30000}
+// A 0.5% geometric step keeps quantile error an order of magnitude below the
+// smallest change worth acting on, while staying fixed-size and bounded for
+// multi-hour soaks. The old 20-bucket ladder (…610, 1000, 2000, 5000…) could
+// not resolve anything finer than a doubling: two identical runs would report
+// p95 as 1000ms and 2000ms purely from which side of a boundary they landed.
+// Keep the release SLO as an exact boundary so values at or below it cannot
+// round up into a failing bucket.
+var latBoundsMs = buildLatencyBounds()
+
+func buildLatencyBounds() []float64 {
+	const (
+		first = 0.5
+		last  = 30000.0
+		ratio = 1.005
+	)
+	bounds := make([]float64, 0, 2300)
+	for value := first; value < last; value *= ratio {
+		bounds = append(bounds, value)
+	}
+	bounds = append(bounds, mixedQueryP95SLOMs, last)
+	sort.Float64s(bounds)
+
+	unique := bounds[:0]
+	for _, bound := range bounds {
+		if len(unique) == 0 || bound != unique[len(unique)-1] {
+			unique = append(unique, bound)
+		}
+	}
+	return unique
+}
 
 type histogram struct {
 	counts    []atomic.Int64 // counts[i] = samples in (bounds[i-1], bounds[i]]
@@ -645,11 +669,10 @@ func (h *histogram) record(d time.Duration) {
 	h.n.Add(1)
 	h.sumMicros.Add(d.Microseconds())
 	ms := float64(d) / float64(time.Millisecond)
-	for i, b := range latBoundsMs {
-		if ms <= b {
-			h.counts[i].Add(1)
-			return
-		}
+	index := sort.SearchFloat64s(latBoundsMs, ms)
+	if index < len(latBoundsMs) {
+		h.counts[index].Add(1)
+		return
 	}
 	h.over.Add(1)
 }
@@ -690,76 +713,12 @@ func (h *histogram) snapshot() latencyReport {
 
 // scrapeMetrics fetches a Prometheus text endpoint and sums each metric across
 // its label series (good enough for the totals/gauges we report).
-func scrapeMetrics(url, token string) (map[string]float64, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:noctx // short-lived CLI scrape
-	if err != nil {
-		return nil, err
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %d", resp.StatusCode)
-	}
-	out := map[string]float64{}
-	sc := bufio.NewScanner(resp.Body)
-	sc.Buffer(make([]byte, 0, 64*1024), 1<<20) // metric lines can be long with labels
-	for sc.Scan() {
-		line := sc.Text()
-		if line == "" || line[0] == '#' {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		name := fields[0]
-		if i := strings.IndexByte(name, '{'); i >= 0 {
-			name = name[:i]
-		}
-		if v, err := strconv.ParseFloat(fields[1], 64); err == nil {
-			out[name] += v
-		}
-	}
-	return out, sc.Err()
-}
-
-// serverDelta turns baseline+final scrapes into the curated report fields —
-// counter deltas, gauge finals, and histogram-derived averages over the run.
-func serverDelta(base, final map[string]float64) *serverReport {
-	if final == nil {
-		return nil
-	}
-	if base == nil {
-		base = map[string]float64{}
-	}
-	avg := func(sumKey, countKey string) float64 {
-		dc := final[countKey] - base[countKey]
-		if dc <= 0 {
-			return 0
-		}
-		return round2((final[sumKey] - base[sumKey]) / dc * 1000.0) // seconds → ms
-	}
-	return &serverReport{
-		IngestRowsDelta:  final["fanout_ingest_rows_total"] - base["fanout_ingest_rows_total"],
-		RowsDroppedDelta: final["fanout_rows_dropped_total"] - base["fanout_rows_dropped_total"],
-		LakePartitions:   final["fanout_lake_partitions"],
-		LakeSizeBytes:    final["fanout_lake_size_bytes"],
-		IngestQueueDepth: final["fanout_ingest_queue_depth"],
-		AvgRollupMs:      avg("fanout_rollup_duration_seconds_sum", "fanout_rollup_duration_seconds_count"),
-		AvgFlushMs:       avg("fanout_flush_duration_seconds_sum", "fanout_flush_duration_seconds_count"),
-		AvgQueryMs:       avg("fanout_query_duration_seconds_sum", "fanout_query_duration_seconds_count"),
-	}
-}
-
 // ── Report ─────────────────────────────────────────────────────────────────
 
 type report struct {
+	Manifest                runManifest              `json:"manifest"`
+	Passed                  bool                     `json:"passed"`
+	Failures                []string                 `json:"failures,omitempty"`
 	Endpoint                string                   `json:"endpoint"`
 	DurationSec             float64                  `json:"duration_sec"`
 	TargetRate              float64                  `json:"target_rate"`
@@ -789,14 +748,41 @@ type latencyReport struct {
 }
 
 type serverReport struct {
-	IngestRowsDelta  float64 `json:"ingest_rows_delta"`
-	RowsDroppedDelta float64 `json:"rows_dropped_delta"`
-	LakePartitions   float64 `json:"lake_partitions"`
-	LakeSizeBytes    float64 `json:"lake_size_bytes"`
-	IngestQueueDepth float64 `json:"ingest_queue_depth"`
-	AvgRollupMs      float64 `json:"avg_rollup_ms"`
-	AvgFlushMs       float64 `json:"avg_flush_ms"`
-	AvgQueryMs       float64 `json:"avg_query_ms"`
+	BaselineAvailable     bool                                 `json:"baseline_available"`
+	IngestRowsStart       float64                              `json:"ingest_rows_start"`
+	IngestRowsEnd         float64                              `json:"ingest_rows_end"`
+	IngestRowsDelta       float64                              `json:"ingest_rows_delta"`
+	RowsDroppedStart      float64                              `json:"rows_dropped_start"`
+	RowsDroppedEnd        float64                              `json:"rows_dropped_end"`
+	RowsDroppedDelta      float64                              `json:"rows_dropped_delta"`
+	LakePartitionsStart   float64                              `json:"lake_partitions_start"`
+	LakePartitions        float64                              `json:"lake_partitions"`
+	LakePartitionsDelta   float64                              `json:"lake_partitions_delta"`
+	LakeSizeBytesStart    float64                              `json:"lake_size_bytes_start"`
+	LakeSizeBytes         float64                              `json:"lake_size_bytes"`
+	LakeSizeBytesDelta    float64                              `json:"lake_size_bytes_delta"`
+	LakeGrowthBytesPerSec float64                              `json:"lake_growth_bytes_per_sec"`
+	IngestQueueDepth      float64                              `json:"ingest_queue_depth"`
+	AvgRollupMs           float64                              `json:"avg_rollup_ms"`
+	AvgFlushMs            float64                              `json:"avg_flush_ms"`
+	AvgQueryMs            float64                              `json:"avg_query_ms"`
+	CPUSecondsStart       float64                              `json:"cpu_seconds_start"`
+	CPUSecondsEnd         float64                              `json:"cpu_seconds_end"`
+	CPUSecondsDelta       float64                              `json:"cpu_seconds_delta"`
+	CPUCores              float64                              `json:"cpu_cores"`
+	RSSBytes              float64                              `json:"rss_bytes"`
+	HeapAllocBytes        float64                              `json:"heap_alloc_bytes"`
+	AllocBytesStart       float64                              `json:"alloc_bytes_start"`
+	AllocBytesEnd         float64                              `json:"alloc_bytes_end"`
+	AllocBytesDelta       float64                              `json:"alloc_bytes_delta"`
+	AllocBytesPerSec      float64                              `json:"alloc_bytes_per_sec"`
+	GCPauseSecondsStart   float64                              `json:"gc_pause_seconds_start"`
+	GCPauseSecondsEnd     float64                              `json:"gc_pause_seconds_end"`
+	GCPauseSecondsDelta   float64                              `json:"gc_pause_seconds_delta"`
+	WriteGateWaitMs       map[string]distributionReport        `json:"write_gate_wait_ms,omitempty"`
+	WriteGateHoldMs       map[string]distributionReport        `json:"write_gate_hold_ms,omitempty"`
+	DuckLakeOperations    map[string]backgroundOperationReport `json:"ducklake_operations,omitempty"`
+	Rollups               map[string]rollupReport              `json:"rollups,omitempty"`
 }
 
 func printReport(r report) {
@@ -825,6 +811,13 @@ func printReport(r report) {
 		fmt.Printf("  lake_partitions=%.0f  lake_size=%.1fMB  ingest_queue_depth=%.0f\n",
 			s.LakePartitions, s.LakeSizeBytes/(1<<20), s.IngestQueueDepth)
 		fmt.Printf("  avg rollup=%.1fms  flush=%.1fms  query=%.1fms\n", s.AvgRollupMs, s.AvgFlushMs, s.AvgQueryMs)
+		fmt.Printf("  cpu=%.2f core(s)  rss=%.1fMB  alloc=%.1fMB/s  lake_growth=%.1fMB\n",
+			s.CPUCores, s.RSSBytes/(1<<20), s.AllocBytesPerSec/(1<<20), s.LakeSizeBytesDelta/(1<<20))
+	}
+	if r.Passed {
+		fmt.Printf("verdict        PASS\n")
+	} else {
+		fmt.Printf("verdict        FAIL (%s)\n", strings.Join(r.Failures, "; "))
 	}
 	fmt.Printf("────────────────────────────────────────────────────────────\n")
 }
