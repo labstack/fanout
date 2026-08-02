@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-08-01
+skip_specs: true
+goal: Produce reproducible evidence and a decision-ready architecture plan
+  for improving Fanout's existing Go, DuckDB, and DuckLake data plane while
+  preserving its single-binary contracts.
