@@ -1,8 +1,76 @@
 package metrics
 
 import (
+	"math"
+	"time"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+)
+
+// dataPlaneInstrumentation is set to "disabled" only in the benchmark control
+// binary via -ldflags -X. Production builds and normal tests keep measurement
+// enabled. Keeping the switch at link time gives the overhead screen two builds
+// from the exact same source revision without adding an operator-facing setting.
+var dataPlaneInstrumentation = "enabled"
+
+// DataPlaneInstrumentationEnabled reports whether the additive write-gate,
+// rollup-progress, and DuckLake background-work measurements are active.
+func DataPlaneInstrumentationEnabled() bool {
+	return dataPlaneInstrumentation != "disabled"
+}
+
+// DataPlaneTimer avoids even the clock read in the link-time-disabled control
+// build while keeping timing call sites compact and allocation-free.
+type DataPlaneTimer struct {
+	started time.Time
+}
+
+func StartDataPlaneTimer() DataPlaneTimer {
+	if !DataPlaneInstrumentationEnabled() {
+		return DataPlaneTimer{}
+	}
+	return DataPlaneTimer{started: time.Now()}
+}
+
+func (timer DataPlaneTimer) Seconds() float64 {
+	if timer.started.IsZero() {
+		return 0
+	}
+	return time.Since(timer.started).Seconds()
+}
+
+type RollupComponent string
+
+const (
+	RollupService  RollupComponent = "service"
+	RollupEndpoint RollupComponent = "endpoint"
+	RollupEdge     RollupComponent = "edge"
+)
+
+type RollupResult string
+
+const (
+	RollupSuccess  RollupResult = "success"
+	RollupError    RollupResult = "error"
+	RollupNoop     RollupResult = "noop"
+	RollupDisabled RollupResult = "disabled"
+)
+
+type DuckLakeOperation string
+
+const (
+	DuckLakeMerge       DuckLakeOperation = "merge"
+	DuckLakeMaintenance DuckLakeOperation = "maintenance"
+)
+
+type DuckLakeResult string
+
+const (
+	DuckLakeSuccess   DuckLakeResult = "success"
+	DuckLakeError     DuckLakeResult = "error"
+	DuckLakeDisabled  DuckLakeResult = "disabled"
+	DuckLakeThrottled DuckLakeResult = "throttled"
 )
 
 var (
@@ -43,6 +111,18 @@ var (
 		Help: "Total rows dropped due to retry buffer overflow",
 	}, []string{"signal"})
 
+	WriteGateWait = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "fanout_write_gate_wait_seconds",
+		Help:    "Time spent waiting to enter the DuckLake catalog write critical section",
+		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+	}, []string{"operation"})
+
+	WriteGateHold = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "fanout_write_gate_hold_seconds",
+		Help:    "Time spent inside the DuckLake catalog write critical section",
+		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+	}, []string{"operation"})
+
 	// Query metrics
 	QueryTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_query_total",
@@ -76,6 +156,58 @@ var (
 		Name: "fanout_rollup_last_success_timestamp",
 		Help: "Timestamp of last successful rollup",
 	})
+
+	RollupComponentTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_rollup_component_total",
+		Help: "Rollup component executions by bounded outcome",
+	}, []string{"rollup", "result"})
+
+	RollupComponentDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "fanout_rollup_component_duration_seconds",
+		Help:    "Rollup component duration in seconds",
+		Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+	}, []string{"rollup"})
+
+	RollupComponentRows = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_rollup_component_rows_total",
+		Help: "Rows materialized by each rollup component",
+	}, []string{"rollup"})
+
+	RollupEnabled = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "fanout_rollup_enabled",
+		Help: "Whether the rollup component is enabled",
+	}, []string{"rollup"})
+
+	RollupWatermark = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "fanout_rollup_watermark_timestamp_seconds",
+		Help: "Latest completed rollup watermark as a Unix timestamp",
+	}, []string{"rollup"})
+
+	RollupSourceMax = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "fanout_rollup_source_timestamp_seconds",
+		Help: "Latest source ingest timestamp visible to the rollup",
+	}, []string{"rollup"})
+
+	RollupLag = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "fanout_rollup_lag_seconds",
+		Help: "Source ingest time not yet covered by the completed rollup watermark",
+	}, []string{"rollup"})
+
+	RollupBacklogChunks = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "fanout_rollup_backlog_chunks",
+		Help: "Estimated bounded catch-up chunks remaining for the rollup",
+	}, []string{"rollup"})
+
+	DuckLakeOperationTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_ducklake_operation_total",
+		Help: "DuckLake merge and maintenance calls by bounded outcome",
+	}, []string{"operation", "result"})
+
+	DuckLakeOperationDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "fanout_ducklake_operation_duration_seconds",
+		Help:    "Executed DuckLake merge and maintenance duration in seconds",
+		Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300},
+	}, []string{"operation"})
 
 	// Storage metrics
 	LakeSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
@@ -124,18 +256,93 @@ func RecordFlush(signal string, bytes int64, durationSec float64) {
 	FlushDuration.WithLabelValues(signal).Observe(durationSec)
 }
 
+// RecordWriteGate records one complete DuckLake catalog write critical section.
+// Callers constrain operation to the fixed lake.WriteOperation set so this
+// metric cannot grow with tenant or telemetry cardinality.
+func RecordWriteGate(operation string, waitSec, holdSec float64) {
+	if !DataPlaneInstrumentationEnabled() {
+		return
+	}
+	WriteGateWait.WithLabelValues(operation).Observe(waitSec)
+	WriteGateHold.WithLabelValues(operation).Observe(holdSec)
+}
+
 // RecordQuery records a query event
 func RecordQuery(endpoint, status string, durationSec float64) {
 	QueryTotal.WithLabelValues(endpoint, status).Inc()
 	QueryDuration.WithLabelValues(endpoint).Observe(durationSec)
 }
 
-// RecordRollup records a rollup event
-func RecordRollup(rows int, durationSec float64) {
+// RecordRollup records a complete rollup cycle. A partial failure still records
+// throughput and duration but does not advance the last-success gauge.
+func RecordRollup(rows int, durationSec float64, successful bool) {
 	RollupTotal.Inc()
 	RollupDuration.Observe(durationSec)
 	RollupRows.Add(float64(rows))
-	RollupLastSuccess.SetToCurrentTime()
+	if successful {
+		RollupLastSuccess.SetToCurrentTime()
+	}
+}
+
+// RecordRollupComponent records one bounded rollup component outcome.
+func RecordRollupComponent(component RollupComponent, result RollupResult, rows int64, durationSec float64) {
+	validateRollupComponent(component)
+	validateRollupResult(result)
+	if !DataPlaneInstrumentationEnabled() {
+		return
+	}
+	if rows < 0 {
+		rows = 0
+	}
+	RollupComponentTotal.WithLabelValues(string(component), string(result)).Inc()
+	RollupComponentDuration.WithLabelValues(string(component)).Observe(durationSec)
+	RollupComponentRows.WithLabelValues(string(component)).Add(float64(rows))
+}
+
+// UpdateRollupProgress records the committed watermark and the source tip seen
+// by a rollup. backlogChunks is calculated by the query kernel from its bounded
+// catch-up window.
+func UpdateRollupProgress(component RollupComponent, enabled bool, watermarkNanos, sourceNanos int64, backlogChunks int) {
+	validateRollupComponent(component)
+	if !DataPlaneInstrumentationEnabled() {
+		return
+	}
+	if watermarkNanos < 0 {
+		watermarkNanos = 0
+	}
+	if sourceNanos < 0 {
+		sourceNanos = 0
+	}
+	enabledValue := 0.0
+	if enabled {
+		enabledValue = 1
+	}
+	lagNanos := sourceNanos - watermarkNanos
+	if lagNanos < 0 {
+		lagNanos = 0
+	}
+	if backlogChunks < 0 {
+		backlogChunks = 0
+	}
+	RollupEnabled.WithLabelValues(string(component)).Set(enabledValue)
+	RollupWatermark.WithLabelValues(string(component)).Set(float64(watermarkNanos) / 1e9)
+	RollupSourceMax.WithLabelValues(string(component)).Set(float64(sourceNanos) / 1e9)
+	RollupLag.WithLabelValues(string(component)).Set(float64(lagNanos) / 1e9)
+	RollupBacklogChunks.WithLabelValues(string(component)).Set(float64(backlogChunks))
+}
+
+// RecordDuckLakeOperation records an outcome for merge or maintenance. Skipped
+// calls have no duration sample so throttle ticks cannot distort execution p95.
+func RecordDuckLakeOperation(operation DuckLakeOperation, result DuckLakeResult, durationSec float64) {
+	validateDuckLakeOperation(operation)
+	validateDuckLakeResult(result)
+	if !DataPlaneInstrumentationEnabled() {
+		return
+	}
+	DuckLakeOperationTotal.WithLabelValues(string(operation), string(result)).Inc()
+	if result == DuckLakeSuccess || result == DuckLakeError {
+		DuckLakeOperationDuration.WithLabelValues(string(operation)).Observe(math.Max(durationSec, 0))
+	}
 }
 
 // UpdateLakeStats updates lake storage metrics
@@ -147,4 +354,40 @@ func UpdateLakeStats(signal string, bytes int64, partitions int) {
 // UpdateQueueDepth updates queue depth metric
 func UpdateQueueDepth(signal string, depth int) {
 	IngestQueueDepth.WithLabelValues(signal).Set(float64(depth))
+}
+
+func validateRollupComponent(component RollupComponent) {
+	switch component {
+	case RollupService, RollupEndpoint, RollupEdge:
+		return
+	default:
+		panic("metrics: invalid rollup component: " + string(component))
+	}
+}
+
+func validateRollupResult(result RollupResult) {
+	switch result {
+	case RollupSuccess, RollupError, RollupNoop, RollupDisabled:
+		return
+	default:
+		panic("metrics: invalid rollup result: " + string(result))
+	}
+}
+
+func validateDuckLakeOperation(operation DuckLakeOperation) {
+	switch operation {
+	case DuckLakeMerge, DuckLakeMaintenance:
+		return
+	default:
+		panic("metrics: invalid DuckLake operation: " + string(operation))
+	}
+}
+
+func validateDuckLakeResult(result DuckLakeResult) {
+	switch result {
+	case DuckLakeSuccess, DuckLakeError, DuckLakeDisabled, DuckLakeThrottled:
+		return
+	default:
+		panic("metrics: invalid DuckLake result: " + string(result))
+	}
 }

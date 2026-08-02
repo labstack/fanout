@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/lake/writegate"
 )
 
 // catalogJournalMode opens the SQLite catalog at path with the modernc driver
@@ -120,7 +121,7 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 	errCh := make(chan error, workers*iters)
 	start := make(chan struct{}) // released once all goroutines are parked
 
-	// Writers: serialized via the shared write lock, exactly as the ingest path
+	// Writers: serialized via the shared write gate, exactly as the ingest path
 	// holds it around appender flushes.
 	for w := 0; w < workers/2; w++ {
 		wg.Add(1)
@@ -128,11 +129,11 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for i := 0; i < iters; i++ {
-				mu := d.WriteLock()
-				mu.Lock()
-				_, err := d.DB.ExecContext(ctx,
-					"INSERT INTO lake.concurrency_probe VALUES (?, ?)", w*iters+i, "x")
-				mu.Unlock()
+				err := d.WriteGate().With(writegate.WriteIngestSpans, func() error {
+					_, err := d.DB.ExecContext(ctx,
+						"INSERT INTO lake.concurrency_probe VALUES (?, ?)", w*iters+i, "x")
+					return err
+				})
 				if err != nil {
 					errCh <- err
 					return
@@ -140,7 +141,7 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 			}
 		}(w)
 	}
-	// Readers: concurrent, no write lock — must not collide with the writers.
+	// Readers: concurrent, no write gate — must not collide with the writers.
 	for r := 0; r < workers/2; r++ {
 		wg.Add(1)
 		go func() {

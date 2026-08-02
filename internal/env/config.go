@@ -53,7 +53,7 @@ type Config struct {
 	// current max ingested timestamp so existing data is treated as already-rolled-up
 	// instead of aggregated as a backlog. Stands up a large pre-seeded historical
 	// dataset (benchmarks, restores) without a multi-minute first-rollup catch-up that
-	// holds the write lock and starves ingest. Off in normal operation.
+	// holds the write gate and starves ingest. Off in normal operation.
 	RollupSkipToLatest bool   `env:"ROLLUP_SKIP_TO_LATEST" envDefault:"false"`
 	DefaultNS          string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
 	// PublicRead exposes only explicitly classified telemetry GET/HEAD routes to
@@ -88,8 +88,8 @@ type Config struct {
 	// safe: the DuckLake SQLite catalog is opened in WAL mode (enableCatalogWAL),
 	// so readers don't collide with the single writer and a crashed writer can't
 	// leave the catalog permanently locked; and write commits are serialized by
-	// the shared write mutex (Duck.WriteLock, wired into the writer via
-	// UseWriteLock in cmd/fanout/main.go, enforced at startup). Without the WAL
+	// the shared write gate (Duck.WriteGate, wired into the writer via
+	// UseWriteGate in cmd/fanout/main.go, enforced at startup). Without the WAL
 	// mode, pool >1 fails with "database is locked".
 	DuckDBMaxConns        int           `env:"DUCKDB_MAX_CONNS" envDefault:"4"`
 	AlertEnabled          bool          `env:"ALERT_ENABLED" envDefault:"true"`

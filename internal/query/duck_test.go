@@ -10,6 +10,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestLatencyRowStruct(t *testing.T) {
@@ -121,6 +123,7 @@ func TestErrorRouteRowStruct(t *testing.T) {
 }
 
 func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -162,6 +165,9 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 	if d.lastMaintenance.IsZero() {
 		t.Fatal("runMaintenance() did not update lastMaintenance")
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "error")); got != 1 {
+		t.Errorf("maintenance error outcomes = %f, want 1", got)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
@@ -175,6 +181,7 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 // runMerge issues exactly one merge_adjacent_files call when due, and nothing
 // on the next call within the DUCKLAKE_MERGE_EVERY_SECONDS cadence.
 func TestRunMergeExecutesThenThrottles(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -195,10 +202,17 @@ func TestRunMergeExecutesThenThrottles(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("merge", "success")); got != 1 {
+		t.Errorf("merge success outcomes = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("merge", "throttled")); got != 1 {
+		t.Errorf("merge throttled outcomes = %f, want 1", got)
+	}
 }
 
 // MergeEverySeconds <= 0 disables the frequent merge pass entirely.
 func TestRunMergeDisabled(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -212,9 +226,13 @@ func TestRunMergeDisabled(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("disabled runMerge should issue no SQL: %v", err)
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("merge", "disabled")); got != 1 {
+		t.Errorf("merge disabled outcomes = %f, want 1", got)
+	}
 }
 
 func TestRunMaintenanceThrottle(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -229,9 +247,13 @@ func TestRunMaintenanceThrottle(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("throttled runMaintenance should issue no SQL: %v", err)
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "throttled")); got != 1 {
+		t.Errorf("maintenance throttled outcomes = %f, want 1", got)
+	}
 }
 
 func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -258,6 +280,9 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr == nil || !lastOK.IsZero() || lastAt.IsZero() {
 		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want zero lastOK, non-zero lastAt, non-nil lastErr", lastOK, lastAt, lastErr)
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "error")); got != 1 {
+		t.Errorf("maintenance error outcomes = %f, want 1", got)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
@@ -266,6 +291,8 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 // A failing rollup must not skip maintenance: file/snapshot growth is what
 // makes the failing rollup heavier each retry, so compaction has to run anyway.
 func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
+	metrics.RollupComponentTotal.Reset()
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -297,6 +324,14 @@ func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
 	}
 	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr != nil || lastOK.IsZero() || lastAt.IsZero() {
 		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want non-zero lastOK and lastAt, nil lastErr", lastOK, lastAt, lastErr)
+	}
+	for _, component := range []string{"service", "endpoint", "edge"} {
+		if got := testutil.ToFloat64(metrics.RollupComponentTotal.WithLabelValues(component, "error")); got != 1 {
+			t.Errorf("%s rollup error outcomes = %f, want 1", component, got)
+		}
+	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "success")); got != 1 {
+		t.Errorf("maintenance success outcomes = %f, want 1", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

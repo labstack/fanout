@@ -30,7 +30,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 CGO_ENABLED=1 go build -o "$TMPD/fanout" ./cmd/fanout || exit 1
-CGO_ENABLED=1 go build -o "$TMPD/loadgen" ./cmd/loadgen || exit 1
+CGO_ENABLED=1 go build -o "$TMPD/bench" ./cmd/bench || exit 1
 
 set -a; . ./.env; set +a
 DATA_DIR="$TMPD/data" PUBLIC_READ=true OTLP_GRPC_ADDR="$GGRPC" HTTP_ADDR="$GHTTP" ENV=development \
@@ -41,7 +41,7 @@ for _ in $(seq 1 40); do curl -fsS -m2 "localhost${GHTTP}/healthz" >/dev/null 2>
 snap() { curl -s -m3 "localhost${GHTTP}/-/metrics" | awk -v k="$1" '$0 ~ "^"k {s+=$2} END{printf "%d", s+0}'; }
 
 echo "soak: ${DUR_MIN}min @ ${RATE} traces/s | compaction every 60s | partition cap ${PART_CAP}"
-"$TMPD/loadgen" -endpoint "localhost${GGRPC}" -duration "${DUR_SEC}s" -rate "$RATE" -workers 16 \
+"$TMPD/bench" -endpoint "localhost${GGRPC}" -duration "${DUR_SEC}s" -rate "$RATE" -workers 16 \
   -services 50 -messaging-ratio 0.15 >"$TMPD/lg.log" 2>&1 &
 LGPID=$!
 

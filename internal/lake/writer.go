@@ -7,11 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/lake/writegate"
 	"github.com/labstack/fanout/internal/metrics"
 )
 
@@ -109,16 +109,16 @@ type Writer struct {
 	bufLogs    []LogRow
 	bufMetrics []MetricRow
 	done       chan struct{}
-	// writeMu, when set, serializes appender flushes against the query layer's
+	// writeGate, when set, serializes appender flushes against the query layer's
 	// rollup/maintenance commits so two connections never commit to the DuckLake
 	// catalog at once on a multi-connection pool. Nil is fine (single-connection
 	// pools already serialize through one handle).
-	writeMu *sync.Mutex
+	writeGate *writegate.WriteGate
 }
 
-// UseWriteLock shares the query layer's write-serialization mutex with the
+// UseWriteGate shares the query layer's write-serialization gate with the
 // writer. Call before Run when the DuckDB pool may hold more than one connection.
-func (w *Writer) UseWriteLock(mu *sync.Mutex) { w.writeMu = mu }
+func (w *Writer) UseWriteGate(gate *writegate.WriteGate) { w.writeGate = gate }
 
 // flushBatch is a detached set of rows handed to the flush worker. The worker
 // owns the slices once sent.
@@ -147,13 +147,13 @@ func (w *Writer) Wait() {
 func (w *Writer) Run(ctx context.Context) error {
 	defer close(w.done)
 
-	// A multi-connection pool requires the shared write lock so appender flushes
+	// A multi-connection pool requires the shared write gate so appender flushes
 	// don't commit concurrently with rollups. Fail loudly rather than silently
 	// running unserialized writes (which surface only as catalog-lock errors
 	// under load). Single-connection pools serialize through the one handle, so a
-	// nil lock is fine there.
-	if w.cfg.DuckDBMaxConns > 1 && w.writeMu == nil {
-		return fmt.Errorf("lake writer: DUCKDB_MAX_CONNS=%d requires a shared write lock; call UseWriteLock before Run", w.cfg.DuckDBMaxConns)
+	// nil gate is fine there.
+	if w.cfg.DuckDBMaxConns > 1 && w.writeGate == nil {
+		return fmt.Errorf("lake writer: DUCKDB_MAX_CONNS=%d requires a shared write gate; call UseWriteGate before Run", w.cfg.DuckDBMaxConns)
 	}
 
 	// Flushes run on a dedicated worker so a slow database insert never stalls the
@@ -397,7 +397,7 @@ func (w *Writer) retryCap() int {
 func (w *Writer) insertSpans(rows []SpanRow) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return withAppender(ctx, w.db, w.writeMu, "spans", func(a *duckdb.Appender) error {
+	return withAppender(ctx, w.db, w.writeGate, writegate.WriteIngestSpans, "spans", func(a *duckdb.Appender) error {
 		for _, row := range rows {
 			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
@@ -453,7 +453,7 @@ func (w *Writer) insertSpans(rows []SpanRow) error {
 func (w *Writer) insertLogs(rows []LogRow) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return withAppender(ctx, w.db, w.writeMu, "logs", func(a *duckdb.Appender) error {
+	return withAppender(ctx, w.db, w.writeGate, writegate.WriteIngestLogs, "logs", func(a *duckdb.Appender) error {
 		for _, row := range rows {
 			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
@@ -489,7 +489,7 @@ func (w *Writer) insertLogs(rows []LogRow) error {
 func (w *Writer) insertMetrics(rows []MetricRow) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	return withAppender(ctx, w.db, w.writeMu, "metrics", func(a *duckdb.Appender) error {
+	return withAppender(ctx, w.db, w.writeGate, writegate.WriteIngestMetrics, "metrics", func(a *duckdb.Appender) error {
 		for _, row := range rows {
 			namespace := normalizeNamespace(row.Namespace)
 			if err := a.AppendRow(
@@ -571,15 +571,15 @@ func optionalInt64(v int64) any {
 	return v
 }
 
-func withAppender(ctx context.Context, db *sql.DB, mu *sync.Mutex, table string, fn func(a *duckdb.Appender) error) error {
-	// Acquire the write lock before the connection so lock ordering matches the
-	// query layer (writeMu → conn); the two write paths therefore can't deadlock
-	// against each other. (A writer holding writeMu can still wait on a connection
+func withAppender(ctx context.Context, db *sql.DB, gate *writegate.WriteGate, operation writegate.WriteOperation, table string, fn func(a *duckdb.Appender) error) error {
+	// Acquire the write gate before the connection so lock ordering matches the
+	// query layer (write gate → conn); the two write paths therefore can't deadlock
+	// against each other. (A writer holding the gate can still wait on a connection
 	// behind long-running readers on a small pool — that's throughput, not a
-	// deadlock, since readers never take writeMu.)
-	if mu != nil {
-		mu.Lock()
-		defer mu.Unlock()
+	// deadlock, since readers never take the write gate.)
+	if gate != nil {
+		unlock := gate.Lock(operation)
+		defer unlock()
 	}
 	conn, err := db.Conn(ctx)
 	if err != nil {

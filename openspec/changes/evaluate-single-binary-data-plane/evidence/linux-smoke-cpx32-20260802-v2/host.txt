@@ -1,0 +1,10 @@
+server_type=cpx32
+location=fsn1
+os=Linux 6.8.0-117-generic x86_64 GNU/Linux
+cpu=4
+memory_limit_bytes=8121954304
+head_commit=e1ca9e82d20663d4021ba9f0f2530cfe60c0af67
+fanout_source_sha256=1dc63dd20f1cb381b153c71312b669a263839e029b7617c56c90c7e893a9856c
+screen_warmup=5s
+screen_duration=15s
+go version go1.26.5 linux/amd64

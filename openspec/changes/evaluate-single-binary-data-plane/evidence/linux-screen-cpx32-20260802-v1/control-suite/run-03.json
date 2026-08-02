@@ -1,0 +1,226 @@
+{
+  "manifest": {
+    "schema_version": 1,
+    "stage": "linux-overhead-control",
+    "candidate": "control",
+    "screening": true,
+    "guardrail_exclusions": [
+      {
+        "metric": "export_latency_ms.mean_ms",
+        "rationale": "sub-millisecond-screen-jitter-use-quantiles"
+      },
+      {
+        "metric": "query_latency_by_operation.logs.mean_ms",
+        "rationale": "periodic-stall-sensitive-use-quantiles"
+      },
+      {
+        "metric": "query_latency_by_operation.overview.mean_ms",
+        "rationale": "periodic-stall-sensitive-use-quantiles"
+      },
+      {
+        "metric": "query_latency_by_operation.performance.mean_ms",
+        "rationale": "periodic-stall-sensitive-use-quantiles"
+      },
+      {
+        "metric": "query_latency_by_operation.topology.mean_ms",
+        "rationale": "periodic-stall-sensitive-use-quantiles"
+      },
+      {
+        "metric": "query_latency_by_operation.trace.mean_ms",
+        "rationale": "periodic-stall-sensitive-use-quantiles"
+      },
+      {
+        "metric": "server.avg_flush_ms",
+        "rationale": "legacy-low-sample-summary-use-throughput-and-resource-guardrails"
+      },
+      {
+        "metric": "server.avg_rollup_ms",
+        "rationale": "legacy-low-sample-summary-use-query-and-resource-guardrails"
+      },
+      {
+        "metric": "server.gc_pause_seconds_delta",
+        "rationale": "near-zero-screen-total-use-allocation-and-cpu"
+      },
+      {
+        "metric": "server.lake_partitions",
+        "rationale": "compaction-phase-gauge-use-growth-rate"
+      },
+      {
+        "metric": "server.lake_partitions_delta",
+        "rationale": "compaction-phase-gauge-use-growth-rate"
+      }
+    ],
+    "run_ordinal": 3,
+    "started_at": "2026-08-02T04:07:53.061348803Z",
+    "finished_at": "2026-08-02T04:12:54.075474688Z",
+    "build": {
+      "fanout_version": "control-e1ca9e82d20663d4021ba9f0f2530cfe60c0af67-0a255627c8088f61292aa26d9a4a734ed2617dd384f9fa1bd8aee99e5dc7d6ae",
+      "bench_version": "linux-screen-v1",
+      "go_version": "go1.26.5",
+      "git_commit": "unknown",
+      "git_dirty": false,
+      "git_metadata_available": false
+    },
+    "host": {
+      "os": "linux",
+      "architecture": "amd64",
+      "logical_cpus": 4,
+      "gomaxprocs": 4,
+      "memory_limit_bytes": 8121954304
+    },
+    "workload": {
+      "seed": 42,
+      "duration_sec": 300,
+      "warmup_sec": 60,
+      "target_traces_per_sec": 1000,
+      "workers": 8,
+      "services": 30,
+      "namespaces": 1,
+      "attribute_cardinality": 100,
+      "error_rate": 0.05,
+      "messaging_ratio": 0.2,
+      "send_logs": true,
+      "send_metrics": true,
+      "backfill_hours": 0,
+      "query_workers": 2,
+      "target_queries_per_sec": 5,
+      "query_operations": [
+        "overview",
+        "topology",
+        "performance",
+        "trace",
+        "logs"
+      ],
+      "query_windows": [
+        "15m",
+        "1h",
+        "6h",
+        "12h",
+        "24h"
+      ],
+      "query_limit": 100
+    },
+    "dataset": {
+      "id": "linux-overhead-cpx32-v1",
+      "config_sha256": "ed644135bb3b8c23440111c2c238cbff653cfeed8ff12889a3fd11d1a727c346"
+    },
+    "duckdb": {
+      "max_connections": 4,
+      "memory": "6GB",
+      "threads": 4
+    },
+    "server": {
+      "flush_seconds": 15,
+      "flush_batch_size": 50000,
+      "rollup_every_seconds": 60,
+      "merge_every_seconds": 60,
+      "maintenance_every_seconds": 3600,
+      "retention_days": 30,
+      "rollup_skip_to_latest": false
+    }
+  },
+  "passed": true,
+  "endpoint": "127.0.0.1:4317",
+  "duration_sec": 301.01,
+  "target_rate": 1000,
+  "workers": 8,
+  "services": 30,
+  "traces_sent": 299803,
+  "spans_sent": 718902,
+  "logs_sent": 299803,
+  "metrics_sent": 299803,
+  "send_errors": 0,
+  "avg_traces_per_sec": 995.98,
+  "export_latency_ms": {
+    "count": 899409,
+    "mean_ms": 0.45,
+    "p50_ms": 0.5,
+    "p95_ms": 1.0232036971130662,
+    "p99_ms": 3.186103713092991,
+    "over_30s": 0
+  },
+  "queries_run": 1454,
+  "query_latency_ms": {
+    "count": 1454,
+    "mean_ms": 117.03,
+    "p50_ms": 77.02621264439854,
+    "p95_ms": 278.1503076490446,
+    "p99_ms": 1108.7050011991357,
+    "over_30s": 0
+  },
+  "query_latency_by_operation": {
+    "logs": {
+      "count": 290,
+      "mean_ms": 146.24,
+      "p50_ms": 80.9256646595212,
+      "p95_ms": 1081.663415804035,
+      "p99_ms": 1108.7050011991357,
+      "over_30s": 0
+    },
+    "overview": {
+      "count": 291,
+      "mean_ms": 5.59,
+      "p50_ms": 4.392079158544103,
+      "p95_ms": 11.79301292395299,
+      "p99_ms": 14.727857144839133,
+      "over_30s": 0
+    },
+    "performance": {
+      "count": 291,
+      "mean_ms": 157.57,
+      "p50_ms": 108.83602199529356,
+      "p95_ms": 347.3716193024426,
+      "p99_ms": 1108.7050011991357,
+      "over_30s": 0
+    },
+    "topology": {
+      "count": 291,
+      "mean_ms": 11.92,
+      "p50_ms": 11.224759475505525,
+      "p95_ms": 19.80733047919013,
+      "p99_ms": 23.544691558811472,
+      "over_30s": 0
+    },
+    "trace": {
+      "count": 291,
+      "mean_ms": 263.95,
+      "p50_ms": 222.72284016932673,
+      "p95_ms": 383.43327122331607,
+      "p99_ms": 1254.3979440296118,
+      "over_30s": 0
+    }
+  },
+  "server": {
+    "baseline_available": true,
+    "ingest_rows_start": 2898746,
+    "ingest_rows_end": 4217254,
+    "ingest_rows_delta": 1318508,
+    "rows_dropped_start": 0,
+    "rows_dropped_end": 0,
+    "rows_dropped_delta": 0,
+    "lake_partitions_start": 30,
+    "lake_partitions": 30,
+    "lake_partitions_delta": 0,
+    "lake_size_bytes_start": 78869396,
+    "lake_size_bytes": 126215771,
+    "lake_size_bytes_delta": 47346375,
+    "lake_growth_bytes_per_sec": 157289.55,
+    "ingest_queue_depth": 0,
+    "avg_rollup_ms": 1719.03,
+    "avg_flush_ms": 79.62,
+    "avg_query_ms": 45.74,
+    "cpu_seconds_start": 535.83,
+    "cpu_seconds_end": 915.61,
+    "cpu_seconds_delta": 379.78,
+    "cpu_cores": 1.2617,
+    "rss_bytes": 1720840192,
+    "heap_alloc_bytes": 66857960,
+    "alloc_bytes_start": 16559668568,
+    "alloc_bytes_end": 24046480192,
+    "alloc_bytes_delta": 7486811624,
+    "alloc_bytes_per_sec": 24871961.1,
+    "gc_pause_seconds_start": 0.0959,
+    "gc_pause_seconds_end": 0.1607,
+    "gc_pause_seconds_delta": 0.0648
+  }
+}

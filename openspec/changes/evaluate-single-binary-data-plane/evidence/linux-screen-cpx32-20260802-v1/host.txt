@@ -1,0 +1,9 @@
+server_type=cpx32
+location=fsn1
+os=Linux 6.8.0-124-generic x86_64 GNU/Linux
+cpu=4
+memory_limit_bytes=8121954304
+head_commit=e1ca9e82d20663d4021ba9f0f2530cfe60c0af67
+control_source_sha256=0a255627c8088f61292aa26d9a4a734ed2617dd384f9fa1bd8aee99e5dc7d6ae
+instrumented_source_sha256=f170f4d65552223206857c659ed9eda3898697bc7daefaf72acb1cf1fc582b08
+go version go1.26.5 linux/amd64
