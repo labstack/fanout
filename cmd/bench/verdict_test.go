@@ -115,3 +115,57 @@ func TestEvaluateReportAcceptsHealthyRun(t *testing.T) {
 		t.Fatalf("healthy run failed: %s", strings.Join(failures, "; "))
 	}
 }
+
+// Rollup, merge, and maintenance are what this harness exists to measure. If
+// they fail every cycle the run must fail, even though raw-fallback queries stay
+// fast and every other signal looks healthy.
+func TestEvaluateReportFailsOnBackgroundWorkErrors(t *testing.T) {
+	queryLatency := latencyReport{Count: 10, P95Ms: 100}
+	failures := evaluateReport(config{metricsURL: "https://metrics.example.test"}, report{
+		ExportLatencyMs: latencyReport{Count: 100, P95Ms: 20},
+		QueriesRun:      10,
+		QueryLatencyMs:  &queryLatency,
+		Server: &serverReport{
+			BaselineAvailable: true,
+			Rollups: map[string]rollupReport{
+				"service": {Outcomes: map[string]float64{"success": 30}},
+				"edge":    {Outcomes: map[string]float64{"error": 12}},
+			},
+			DuckLakeOperations: map[string]backgroundOperationReport{
+				"maintenance": {Outcomes: map[string]float64{"error": 3}},
+				"merge":       {Outcomes: map[string]float64{"success": 9}},
+			},
+		},
+	}, nil)
+	for _, want := range []string{"edge rollup errors=12", "ducklake maintenance errors=3"} {
+		if !hasFailure(failures, want) {
+			t.Fatalf("failures %q do not contain %q", failures, want)
+		}
+	}
+	if hasFailure(failures, "service rollup") || hasFailure(failures, "ducklake merge") {
+		t.Errorf("healthy components reported as failures: %q", failures)
+	}
+}
+
+// A restart is caught from the process start time. Deltas alone miss it: a
+// server that restarts early can out-count its own baseline, leaving every
+// delta positive while the report describes two different processes.
+func TestEvaluateReportDetectsRestartWithPositiveDeltas(t *testing.T) {
+	queryLatency := latencyReport{Count: 10, P95Ms: 100}
+	failures := evaluateReport(config{metricsURL: "https://metrics.example.test"}, report{
+		ExportLatencyMs: latencyReport{Count: 100, P95Ms: 20},
+		QueriesRun:      10,
+		QueryLatencyMs:  &queryLatency,
+		Server: &serverReport{
+			BaselineAvailable: true,
+			ProcessRestarted:  true,
+			// Every delta is positive — the old sign check sees nothing wrong.
+			IngestRowsDelta: 5000,
+			CPUSecondsDelta: 42,
+			AllocBytesDelta: 1 << 30,
+		},
+	}, nil)
+	if !hasFailure(failures, "fanout restarted mid-run") {
+		t.Fatalf("failures %q do not report the restart", failures)
+	}
+}

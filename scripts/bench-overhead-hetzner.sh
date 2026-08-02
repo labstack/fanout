@@ -23,6 +23,10 @@ NAME="fanout-overhead-$(date -u +%Y%m%d%H%M%S)-$$"
 command -v hcloud >/dev/null || { echo "hcloud CLI required" >&2; exit 1; }
 command -v ssh >/dev/null || { echo "ssh required" >&2; exit 1; }
 command -v scp >/dev/null || { echo "scp required" >&2; exit 1; }
+# jq parses the server ID out of `hcloud server create` below. Without it the ID
+# is empty, so the cleanup trap has nothing to delete and the run silently leaks
+# a billed server. Check before anything is provisioned, not after.
+command -v jq >/dev/null || { echo "jq required (used to read the created server's ID)" >&2; exit 1; }
 hcloud server-type describe "$TYPE" >/dev/null 2>&1 || { echo "unknown server type: $TYPE" >&2; exit 1; }
 if [ -e "$OUTPUT_DIR" ]; then
   echo "output directory already exists: $OUTPUT_DIR" >&2
@@ -32,9 +36,12 @@ fi
 PACKAGE_DIR=$(mktemp -d /tmp/fanout-linux-screen.XXXXXX)
 SERVER_ID=""
 cleanup() {
-  if [ -n "$SERVER_ID" ]; then
+  # Fall back to the unique name when the ID was never captured: a server that
+  # was created but whose ID we failed to parse is still a billed server.
+  target="${SERVER_ID:-$NAME}"
+  if [ -n "$SERVER_ID" ] || hcloud server describe "$NAME" >/dev/null 2>&1; then
     echo "── deleting Hetzner server $NAME ──"
-    hcloud server delete "$SERVER_ID" >/dev/null 2>&1 || echo "WARNING: delete failed for server id $SERVER_ID" >&2
+    hcloud server delete "$target" >/dev/null 2>&1 || echo "WARNING: delete failed for server $target — check the Hetzner console" >&2
   fi
   rm -rf "$PACKAGE_DIR"
 }

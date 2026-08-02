@@ -1,6 +1,18 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"sort"
+)
+
+func sortedMapKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 // mixedQueryP95SLOMs is the shipped release SLO for mixed read queries. It is
 // always enforced; -max-query-p95-ms can only tighten it.
@@ -46,10 +58,31 @@ func evaluateReport(cfg config, report report, infrastructureFailures []string) 
 			if report.Server.RowsDroppedDelta > 0 {
 				fails = append(fails, fmt.Sprintf("rows dropped=%.0f", report.Server.RowsDroppedDelta))
 			}
-			if report.Server.IngestRowsDelta < 0 || report.Server.RowsDroppedDelta < 0 ||
+			// A restart is detected from the process start time, not from a
+			// negative delta: if fanout restarts early enough, the new process
+			// can out-count the old baseline and every delta stays positive
+			// while the report silently describes two different processes.
+			if report.Server.ProcessRestarted {
+				fails = append(fails, "fanout restarted mid-run (process start time changed)")
+			} else if report.Server.IngestRowsDelta < 0 || report.Server.RowsDroppedDelta < 0 ||
 				report.Server.CPUSecondsDelta < 0 || report.Server.AllocBytesDelta < 0 ||
 				report.Server.GCPauseSecondsDelta < 0 {
 				fails = append(fails, "server counter reset mid-run (fanout restarted?)")
+			}
+			// Rollups, merge, and maintenance are what this harness exists to
+			// measure. Left unchecked they can fail every cycle while queries
+			// stay fast on raw fallback and the run reports PASS.
+			// Sorted so the failure list — which is written to the report — does
+			// not vary with Go's map iteration order between runs.
+			for _, name := range sortedMapKeys(report.Server.Rollups) {
+				if errors := report.Server.Rollups[name].Outcomes["error"]; errors > 0 {
+					fails = append(fails, fmt.Sprintf("%s rollup errors=%.0f", name, errors))
+				}
+			}
+			for _, name := range sortedMapKeys(report.Server.DuckLakeOperations) {
+				if errors := report.Server.DuckLakeOperations[name].Outcomes["error"]; errors > 0 {
+					fails = append(fails, fmt.Sprintf("ducklake %s errors=%.0f", name, errors))
+				}
 			}
 		}
 	}

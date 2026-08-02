@@ -260,9 +260,15 @@ func main() {
 	rep.Failures = evaluateReport(cfg, rep, infrastructureFailures)
 	rep.Passed = len(rep.Failures) == 0
 	printReport(rep)
+
+	// A report that was asked for and not written is a failed run, not a warning.
+	// Callers that aggregate trials cannot tell "missing" from "fine" after the
+	// fact, so exiting 0 here turns a lost trial into a silent pass upstream.
+	reportWritten := true
 	if cfg.reportPath != "" {
 		if err := writeReport(cfg.reportPath, rep); err != nil {
-			fmt.Fprintf(os.Stderr, "  warn: write report: %v\n", err)
+			fmt.Fprintf(os.Stderr, "  error: write report: %v\n", err)
+			reportWritten = false
 		} else {
 			fmt.Printf("report written: %s\n", cfg.reportPath)
 		}
@@ -270,6 +276,9 @@ func main() {
 
 	if !rep.Passed {
 		fmt.Fprintf(os.Stderr, "FAIL: %s\n", strings.Join(rep.Failures, "; "))
+		os.Exit(1)
+	}
+	if !reportWritten {
 		os.Exit(1)
 	}
 }
@@ -352,7 +361,17 @@ func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 			url := base + target.path
 			i++
 			t0 := time.Now()
-			resp, err := g.http.Get(url) //nolint:noctx // bounded by client timeout
+			// Bound to the run context so a query issued just before the
+			// deadline is cancelled rather than running on for the client
+			// timeout, which both delays the final scrape and hides its own
+			// failure (ctx.Err() is non-nil by the time it returns).
+			req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			if reqErr != nil {
+				g.queryErrs.Add(1)
+				reportFailure(target.operation, reqErr.Error())
+				continue
+			}
+			resp, err := g.http.Do(req)
 			if err != nil {
 				if ctx.Err() == nil {
 					g.queryErrs.Add(1)
@@ -749,6 +768,8 @@ type latencyReport struct {
 
 type serverReport struct {
 	BaselineAvailable     bool                                 `json:"baseline_available"`
+	ProcessStartTime      float64                              `json:"process_start_time_seconds"`
+	ProcessRestarted      bool                                 `json:"process_restarted"`
 	IngestRowsStart       float64                              `json:"ingest_rows_start"`
 	IngestRowsEnd         float64                              `json:"ingest_rows_end"`
 	IngestRowsDelta       float64                              `json:"ingest_rows_delta"`

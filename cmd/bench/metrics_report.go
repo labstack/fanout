@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type metricSample struct {
@@ -50,8 +52,16 @@ type rollupReport struct {
 
 // scrapeMetrics fetches a Prometheus text endpoint without retaining the URL
 // or bearer token in benchmark evidence.
+// scrapeTimeout bounds both the baseline and final scrape. An endpoint that
+// accepts the connection and then stops responding would otherwise hang the
+// benchmark forever — on a remote runner that surfaces only as the harness
+// deadline expiring with no report at all.
+const scrapeTimeout = 30 * time.Second
+
 func scrapeMetrics(url, token string) (*metricSnapshot, error) {
-	req, err := http.NewRequest(http.MethodGet, url, nil) //nolint:noctx // short-lived CLI scrape
+	ctx, cancel := context.WithTimeout(context.Background(), scrapeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -286,8 +296,15 @@ func serverDelta(base, final *metricSnapshot, durationSeconds float64) *serverRe
 	lakeSizeStart := base.total("fanout_lake_size_bytes")
 	cpuSeconds := delta("process_cpu_seconds_total")
 	allocBytes := delta("go_memstats_alloc_bytes_total")
+	// process_start_time_seconds is constant for the life of a process, so a
+	// change between the two scrapes is a restart — detected even when the new
+	// process out-counts the old baseline and every delta stays positive.
+	startTimeBefore := base.total("process_start_time_seconds")
+	startTimeAfter := final.total("process_start_time_seconds")
 	return &serverReport{
 		BaselineAvailable:     baselineAvailable,
+		ProcessStartTime:      startTimeAfter,
+		ProcessRestarted:      baselineAvailable && startTimeBefore > 0 && startTimeAfter != startTimeBefore,
 		IngestRowsStart:       base.total("fanout_ingest_rows_total"),
 		IngestRowsEnd:         final.total("fanout_ingest_rows_total"),
 		IngestRowsDelta:       delta("fanout_ingest_rows_total"),
