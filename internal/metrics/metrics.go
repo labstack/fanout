@@ -162,9 +162,14 @@ var (
 		Help: "Rollup component executions by bounded outcome",
 	}, []string{"rollup", "result"})
 
+	// Duration is measured end to end and therefore includes time spent waiting
+	// for the catalog write gate. That is deliberate: it is the latency an
+	// operator cares about, and fanout_write_gate_wait_seconds already isolates
+	// the waiting half. Timing only the held section would duplicate
+	// fanout_write_gate_hold_seconds.
 	RollupComponentDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "fanout_rollup_component_duration_seconds",
-		Help:    "Rollup component duration in seconds",
+		Help:    "Rollup component duration in seconds, including write-gate wait",
 		Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 	}, []string{"rollup"})
 
@@ -205,7 +210,7 @@ var (
 
 	DuckLakeOperationDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "fanout_ducklake_operation_duration_seconds",
-		Help:    "Executed DuckLake merge and maintenance duration in seconds",
+		Help:    "Executed DuckLake merge and maintenance duration in seconds, including write-gate wait",
 		Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300},
 	}, []string{"operation"})
 

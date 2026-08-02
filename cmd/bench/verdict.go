@@ -57,7 +57,10 @@ func evaluateReport(cfg config, report report, infrastructureFailures []string) 
 	if cfg.maxExportP95 > 0 && report.ExportLatencyMs.P95Ms > cfg.maxExportP95 {
 		fails = append(fails, fmt.Sprintf("export p95 %.0fms > %.0fms", report.ExportLatencyMs.P95Ms, cfg.maxExportP95))
 	}
-	if cfg.maxQueryP95 > 0 && report.QueryLatencyMs != nil && report.QueryLatencyMs.P95Ms > cfg.maxQueryP95 {
+	// Only report the caller's threshold when it is tighter than the release SLO;
+	// at or above it the SLO check above has already fired for the same number.
+	if cfg.maxQueryP95 > 0 && cfg.maxQueryP95 < mixedQueryP95SLOMs &&
+		report.QueryLatencyMs != nil && report.QueryLatencyMs.P95Ms > cfg.maxQueryP95 {
 		fails = append(fails, fmt.Sprintf("query p95 %.0fms > %.0fms", report.QueryLatencyMs.P95Ms, cfg.maxQueryP95))
 	}
 	return fails

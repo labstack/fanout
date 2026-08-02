@@ -85,7 +85,8 @@ ssh_vm "GO_VERSION='$GO_VERSION' bash -s" <<'REMOTE_SETUP'
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq >/dev/null
-apt-get install -y -qq build-essential curl ca-certificates >/dev/null 2>&1
+apt-get install -y -qq build-essential curl ca-certificates jq >/dev/null 2>&1
+command -v jq >/dev/null || { echo "jq install failed; the run summary needs it" >&2; exit 1; }
 cd /tmp
 curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o go.tgz
 rm -rf /usr/local/go
@@ -212,9 +213,17 @@ status=0
 run_suite /root/bin/fanout-control "measurement-disabled-${SOURCE_SHA}" "$EVIDENCE/control-suite" /root/control-data /root/control.log || status=1
 run_suite /root/bin/fanout-instrumented "measurement-enabled-${SOURCE_SHA}" "$EVIDENCE/instrumented-suite" /root/instrumented-data /root/instrumented.log || status=1
 
-# Median of the three measured trials per side, printed for eyeballing.
+# Median of the three measured trials per side, printed for eyeballing. Refuse
+# to print anything if a trial is missing: .[1] of two runs is the max, not a
+# median, and a silently wrong number here is worse than no number.
 median_of() { # median_of <suite-dir> <jq-path>
-  jq -s "map($2) | sort | .[1]" "$1"/run-*.json 2>/dev/null
+  jq_path="$2"
+  set -- "$1"/run-*.json
+  if [ "$#" -ne 3 ] || [ ! -f "$1" ]; then
+    printf 'n/a'
+    return
+  fi
+  jq -s "map($jq_path) | sort | .[1]" "$@"
 }
 {
   printf '%-28s %14s %14s\n' metric control instrumented

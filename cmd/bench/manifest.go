@@ -23,8 +23,10 @@ type runManifest struct {
 	Build      buildManifest    `json:"build"`
 	Host       hostManifest     `json:"host"`
 	Workload   workloadManifest `json:"workload"`
-	// WorkloadHash identifies the generated dataset: two runs with the same hash
-	// drove the same synthetic telemetry.
+	// WorkloadHash identifies the requested workload: two runs with the same hash
+	// asked for the same synthetic telemetry. It does not certify that they
+	// produced the same data — the event count depends on the rate actually
+	// achieved, which varies with the host.
 	WorkloadHash string `json:"workload_sha256"`
 }
 

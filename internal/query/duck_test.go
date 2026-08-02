@@ -438,3 +438,52 @@ func TestParseDuckBytes(t *testing.T) {
 		}
 	}
 }
+
+// A rollup that fails after reading the source tip must still publish lag.
+// Otherwise fanout_rollup_lag_seconds freezes at its last healthy value during
+// exactly the outage it exists to expose, and a lag alert never fires.
+func TestFailedRollupStillPublishesLag(t *testing.T) {
+	metrics.RollupComponentTotal.Reset()
+	metrics.RollupLag.Reset()
+	metrics.RollupSourceMax.Reset()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	d := &Duck{DB: db, cfg: env.Config{}}
+
+	const (
+		watermarkNanos = int64(1_000 * 1e9)
+		sourceNanos    = int64(1_120 * 1e9) // 120s of uncovered ingest
+	)
+	watermarkRows := func(value int64) *sqlmock.Rows {
+		return sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(value)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupStateKey).
+		WillReturnRows(watermarkRows(watermarkNanos))
+	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupRawMaxKey).
+		WillReturnRows(watermarkRows(watermarkNanos))
+	mock.ExpectQuery("FROM spans").
+		WillReturnRows(sqlmock.NewRows([]string{"v"}).AddRow(sourceNanos))
+	// Everything past this point fails, so the rollup returns an error without
+	// advancing its watermark.
+	mock.ExpectQuery("min_ingested_unix_nano|FROM service_rollup|SELECT").
+		WillReturnError(errors.New("rollup query failed"))
+
+	if _, err := d.refreshServiceRollup(context.Background()); err == nil {
+		t.Fatal("refreshServiceRollup() error = nil, want the injected failure surfaced")
+	}
+	if got := testutil.ToFloat64(metrics.RollupComponentTotal.WithLabelValues("service", "error")); got != 1 {
+		t.Fatalf("service rollup error outcomes = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(metrics.RollupLag.WithLabelValues("service")); got != 120 {
+		t.Errorf("rollup lag = %f seconds, want 120 — a failed rollup must still report how far behind it is", got)
+	}
+	if got := testutil.ToFloat64(metrics.RollupSourceMax.WithLabelValues("service")); got != float64(sourceNanos)/1e9 {
+		t.Errorf("rollup source tip = %f, want %f", got, float64(sourceNanos)/1e9)
+	}
+}

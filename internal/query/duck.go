@@ -503,8 +503,16 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	timer := metrics.StartDataPlaneTimer()
 	result := metrics.RollupError
 	var recordedRows int64
+	// Progress is reported even when the rollup fails. Otherwise the lag gauge
+	// freezes at its last healthy value during exactly the outage it exists to
+	// expose. A zero sourceMax means the failure happened before the source tip
+	// was read, so there is nothing newer to report.
+	var watermark, sourceMax int64
 	defer func() {
 		metrics.RecordRollupComponent(metrics.RollupService, result, recordedRows, timer.Seconds())
+		if result == metrics.RollupError && sourceMax > 0 {
+			updateRollupProgress(metrics.RollupService, true, watermark, sourceMax)
+		}
 	}()
 
 	// Serialize against other writers (edge rollup, maintenance, ingest flushes).
@@ -523,6 +531,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	watermark = lastWatermark
 	lastRawMax, err := rollupWatermark(ctx, tx, serviceRollupRawMaxKey)
 	if err != nil {
 		return 0, err
@@ -532,6 +541,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	sourceMax = rawWatermark
 	if rawWatermark <= lastWatermark {
 		err := tx.Commit()
 		if err == nil {
@@ -613,8 +623,12 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	timer := metrics.StartDataPlaneTimer()
 	result := metrics.RollupError
 	var recordedRows int64
+	var watermark, sourceMax int64 // see refreshServiceRollup
 	defer func() {
 		metrics.RecordRollupComponent(metrics.RollupEndpoint, result, recordedRows, timer.Seconds())
+		if result == metrics.RollupError && sourceMax > 0 {
+			updateRollupProgress(metrics.RollupEndpoint, true, watermark, sourceMax)
+		}
 	}()
 
 	unlock := d.writeGate.Lock(writegate.WriteRollupEndpoint)
@@ -642,6 +656,7 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	watermark = lastWatermark
 	lastRawMax, err := rollupWatermark(ctx, tx, endpointRollupRawMaxKey)
 	if err != nil {
 		return 0, err
@@ -655,6 +670,7 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	sourceMax = rawWatermark
 	if rawWatermark <= lastWatermark {
 		err := tx.Commit()
 		if err == nil {
@@ -727,8 +743,12 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	timer := metrics.StartDataPlaneTimer()
 	result := metrics.RollupError
 	var recordedRows int64
+	var watermark, sourceMax int64 // see refreshServiceRollup
 	defer func() {
 		metrics.RecordRollupComponent(metrics.RollupEdge, result, recordedRows, timer.Seconds())
+		if result == metrics.RollupError && sourceMax > 0 {
+			updateRollupProgress(metrics.RollupEdge, true, watermark, sourceMax)
+		}
 	}()
 
 	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
@@ -744,6 +764,7 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	watermark = lastWatermark
 	lastRawMax, err := rollupWatermark(ctx, tx, edgeRollupRawMaxKey)
 	if err != nil {
 		return 0, err
@@ -753,6 +774,7 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	sourceMax = rawWatermark
 	if rawWatermark <= lastWatermark {
 		err := tx.Commit()
 		if err == nil {
