@@ -1,7 +1,6 @@
 package writegate
 
 import (
-	"sync"
 	"testing"
 	"time"
 
@@ -82,44 +81,58 @@ func TestWriteGateReleasesAfterPanic(t *testing.T) {
 
 // The observation must happen after Unlock. A Prometheus histogram takes its
 // own lock, so observing inside the critical section would serialize every
-// catalog write behind the metrics registry.
+// catalog write behind the metrics registry. Asserting the gate is acquirable
+// from inside the observer is what makes the ordering detectable — timing the
+// release cannot, because a Prometheus write is only microseconds.
 func TestWriteGateObservesOutsideTheCriticalSection(t *testing.T) {
-	t.Parallel()
-
 	var gate WriteGate
-	unlock := gate.Lock(WriteMerge)
 
-	reacquired := make(chan struct{})
-	var once sync.Once
-	go func() {
-		// Blocks until the gate is genuinely free.
-		defer gate.Lock(WriteMaintenance)()
-		once.Do(func() { close(reacquired) })
-	}()
+	var freeDuringObserve bool
+	restore := swapObserver(t, func(string, float64, float64) {
+		if gate.mu.TryLock() {
+			freeDuringObserve = true
+			gate.mu.Unlock()
+		}
+	})
+	defer restore()
 
-	unlock()
-	select {
-	case <-reacquired:
-	case <-time.After(time.Second):
-		t.Fatal("gate was not released before the observation completed")
+	gate.Lock(WriteMerge)()
+
+	if !freeDuringObserve {
+		t.Fatal("gate was still held while the observation ran — move the Unlock above observe()")
 	}
 }
 
-func TestWriteGateRecordsPrometheusHistograms(t *testing.T) {
-	before := histogramCount(t, WriteMerge)
+// Both halves must reach Prometheus: wait time without hold time cannot answer
+// whether ingest is stalling behind rollups, which is the question this
+// instrumentation exists to answer.
+func TestWriteGateRecordsBothWaitAndHoldHistograms(t *testing.T) {
+	beforeWait := histogramCount(t, "fanout_write_gate_wait_seconds", WriteMerge)
+	beforeHold := histogramCount(t, "fanout_write_gate_hold_seconds", WriteMerge)
 
 	var gate WriteGate
-	unlock := gate.Lock(WriteMerge)
-	unlock()
+	gate.Lock(WriteMerge)()
 
-	if after := histogramCount(t, WriteMerge); after != before+1 {
-		t.Fatalf("wait/hold sample count = %d, want %d", after, before+1)
+	if after := histogramCount(t, "fanout_write_gate_wait_seconds", WriteMerge); after != beforeWait+1 {
+		t.Errorf("wait sample count = %d, want %d", after, beforeWait+1)
+	}
+	if after := histogramCount(t, "fanout_write_gate_hold_seconds", WriteMerge); after != beforeHold+1 {
+		t.Errorf("hold sample count = %d, want %d", after, beforeHold+1)
 	}
 }
 
-// histogramCount reports how many fanout_write_gate_wait_seconds samples exist
-// for one operation. Deltas rather than Reset() keep this immune to test order.
-func histogramCount(t *testing.T, operation WriteOperation) uint64 {
+// swapObserver installs a test observer. These tests must not run in parallel
+// with each other: the seam is package-level.
+func swapObserver(t *testing.T, fn func(string, float64, float64)) func() {
+	t.Helper()
+	original := observe
+	observe = fn
+	return func() { observe = original }
+}
+
+// histogramCount reports how many samples one write-gate histogram holds for an
+// operation. Deltas rather than Reset() keep this immune to test order.
+func histogramCount(t *testing.T, name string, operation WriteOperation) uint64 {
 	t.Helper()
 
 	families, err := prometheus.DefaultGatherer.Gather()
@@ -127,7 +140,7 @@ func histogramCount(t *testing.T, operation WriteOperation) uint64 {
 		t.Fatalf("gather: %v", err)
 	}
 	for _, family := range families {
-		if family.GetName() != "fanout_write_gate_wait_seconds" {
+		if family.GetName() != name {
 			continue
 		}
 		for _, metric := range family.GetMetric() {

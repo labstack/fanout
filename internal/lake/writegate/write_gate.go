@@ -33,6 +33,12 @@ type WriteGate struct {
 	mu sync.Mutex
 }
 
+// observe is a package-level seam so a test can prove the observation happens
+// after Unlock. That ordering is load-bearing and is otherwise untestable: a
+// Prometheus write is microseconds, so a test that only times the release
+// cannot tell the two orderings apart.
+var observe = metrics.RecordWriteGate
+
 // Lock acquires the catalog write gate and returns its release function.
 // Callers must defer the returned function before acquiring a database
 // connection, transaction, or appender, and must call it exactly once.
@@ -46,6 +52,6 @@ func (g *WriteGate) Lock(operation WriteOperation) func() {
 		// and holding the process's hottest critical section across that would
 		// be a throughput regression in the code added to detect one.
 		g.mu.Unlock()
-		metrics.RecordWriteGate(string(operation), acquired.Sub(waitStarted).Seconds(), hold.Seconds())
+		observe(string(operation), acquired.Sub(waitStarted).Seconds(), hold.Seconds())
 	}
 }

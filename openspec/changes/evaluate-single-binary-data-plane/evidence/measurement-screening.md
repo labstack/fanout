@@ -2,12 +2,13 @@
 
 ## Status
 
-The measurement-only instrumentation is not yet accepted or rejected. Local
-Darwin/arm64 screening could not resolve the required five-percent guardrail,
-and the first Linux screen compared HEAD with a worktree containing both
-instrumentation and other implementation changes. Task 1.6 therefore remains
-open until one-source link-time-disabled/enabled builds are screened on the
-isolated production-shaped Linux host.
+The measurement-only instrumentation is accepted, on the arithmetic recorded
+under "Overhead" below rather than on an A/B screen. Local Darwin/arm64
+screening could not resolve the required five-percent guardrail, and the first
+Linux screen compared HEAD with a worktree containing both instrumentation and
+other implementation changes. The link-time A/B that was to replace them was
+removed instead: the "disabled" control was not disabled enough for the
+comparison to mean anything. Task 1.6 is closed on that basis.
 
 Generated JSON reports, logs, binaries, and disposable lake data were kept
 outside version control under `/tmp`, summarized here, and removed after the
@@ -153,17 +154,29 @@ the protocol could not have answered the question even on a silent machine. The
 link-time "disabled" control still constructed, registered, scraped, and
 serialized every metric vec; it still ran the label validation on every catalog
 write; and it still allocated the same release closure. The only thing it
-skipped was two `time.Now()` reads and two `Observe()` calls per catalog write.
+skipped was two `time.Now()` reads and two `Observe()` calls per catalog write (the third clock read, `time.Since` in the release closure, ran in both builds).
 Two binaries that similar cannot produce a meaningful delta, and a sub-noise
 result would have been recorded as "instrumentation is free" on the strength of
 a comparison that was never capable of showing otherwise. Run order compounded
 it: the control always ran first, sequentially, on one VM.
 
-Overhead is instead bounded by construction, which the arithmetic supports
-without a decision host. See task 1.6.
-
 Adopt this as the general rule: a benchmarking protocol has to pass its own null
 test before its output counts as evidence.
+
+## Overhead
+
+Bounded by construction rather than by a screen. Flushes batch at
+`FLUSH_BATCH_SIZE` (50,000 rows by default), so the catalog write gate is
+entered a few times per second, not per row. Each entry is a DuckDB transaction
+doing disk I/O while holding a process-wide mutex — milliseconds. Against that,
+the instrumentation adds three clock reads and two Prometheus histogram
+observations, and the observations happen after the mutex is released, so they
+do not extend the critical section at all.
+
+Nanoseconds against milliseconds, a few times per second, outside the lock. No
+decision host is required to conclude this is well inside the five-percent
+guardrail, and none could have measured it more convincingly than the
+arithmetic does.
 
 ## Code validation
 

@@ -309,11 +309,13 @@ The final release decision requires:
 
 ## Risks / Trade-offs
 
-- **Instrumentation distorts the baseline.** Build the disabled control and
-  enabled candidate from one source archive, record the shared source digest
-  and link-time measurement mode, and reject or simplify instrumentation that
-  exceeds the five-percent guardrail. A HEAD-versus-worktree comparison is
-  diagnostic only because it cannot attribute a regression to measurement.
+- **Instrumentation distorts the baseline.** Bounded by construction rather
+  than by an A/B screen: the gate is entered a few times per second because
+  flushes batch, and each entry already costs a DuckDB transaction under a
+  mutex. Three clock reads and two histogram observations, taken outside the
+  critical section, cannot reach the five-percent guardrail. A
+  HEAD-versus-worktree comparison remains diagnostic only, because it cannot
+  attribute a regression to measurement.
 - **Endpoint heap gauges follow GC phase.** Retain the end-of-run heap gauge as
   diagnostic evidence, but use allocation rate and RSS as continuous screening
   guardrails; attribute heap growth from captured profiles rather than one

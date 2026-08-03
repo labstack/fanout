@@ -66,7 +66,7 @@ func TestRunManifestIsDeterministicAndSecretFree(t *testing.T) {
 	}
 }
 
-func TestWriteReportProducesDeterministicJSON(t *testing.T) {
+func TestWriteReportProducesValidNewlineTerminatedJSON(t *testing.T) {
 	report := report{
 		Manifest: runManifest{
 			StartedAt:  time.Date(2026, time.August, 1, 19, 0, 0, 0, time.UTC),
