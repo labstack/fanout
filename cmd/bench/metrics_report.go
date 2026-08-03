@@ -50,14 +50,14 @@ type rollupReport struct {
 	Outcomes                  map[string]float64 `json:"outcomes,omitempty"`
 }
 
-// scrapeMetrics fetches a Prometheus text endpoint without retaining the URL
-// or bearer token in benchmark evidence.
 // scrapeTimeout bounds both the baseline and final scrape. An endpoint that
 // accepts the connection and then stops responding would otherwise hang the
 // benchmark forever — on a remote runner that surfaces only as the harness
 // deadline expiring with no report at all.
 const scrapeTimeout = 30 * time.Second
 
+// scrapeMetrics fetches a Prometheus text endpoint without retaining the URL
+// or bearer token in benchmark evidence.
 func scrapeMetrics(url, token string) (*metricSnapshot, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), scrapeTimeout)
 	defer cancel()
@@ -265,7 +265,7 @@ func (s *metricSnapshot) labelValues(name, label string, filters map[string]stri
 			values[value] = struct{}{}
 		}
 	}
-	return sortedKeys(values)
+	return sortedMapKeys(values)
 }
 
 func hasLabels(actual, required map[string]string) bool {
@@ -503,16 +503,7 @@ func unionStrings(groups ...[]string) []string {
 			values[value] = struct{}{}
 		}
 	}
-	return sortedKeys(values)
-}
-
-func sortedKeys(values map[string]struct{}) []string {
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
+	return sortedMapKeys(values)
 }
 
 func round4(value float64) float64 {

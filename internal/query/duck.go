@@ -612,11 +612,16 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	result = metrics.RollupSuccess
 	updateRollupProgress(metrics.RollupService, true, newWatermark, rawWatermark)
 
-	if rows, err := res.RowsAffected(); err == nil {
-		recordedRows = rows
-		return rows, nil
+	rows, err := res.RowsAffected()
+	if err != nil {
+		// Warn, not Debug: recordedRows feeds fanout_rollup_component_rows_total,
+		// so a silent zero here reads in benchmark evidence as "the rollup ran and
+		// matched nothing" when it actually means "we do not know".
+		slog.Warn("service rollup rows affected unavailable", "err", err)
+		return 0, nil
 	}
-	return 0, nil
+	recordedRows = rows
+	return rows, nil
 }
 
 func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
@@ -732,7 +737,7 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	updateRollupProgress(metrics.RollupEndpoint, true, newWatermark, rawWatermark)
 	rows, err := res.RowsAffected()
 	if err != nil {
-		slog.Debug("endpoint rollup rows affected unavailable", "err", err)
+		slog.Warn("endpoint rollup rows affected unavailable", "err", err)
 		return 0, nil
 	}
 	recordedRows = rows
@@ -839,7 +844,10 @@ WHERE ingested_unix_nano > ?
 			if err != nil {
 				return 0, err
 			}
-			if rows, err := res.RowsAffected(); err == nil {
+			rows, err := res.RowsAffected()
+			if err != nil {
+				slog.Warn("edge rollup rows affected unavailable", "err", err)
+			} else {
 				totalAffected += rows
 			}
 			subLo = subHi

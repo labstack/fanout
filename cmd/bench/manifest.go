@@ -47,42 +47,43 @@ type hostManifest struct {
 }
 
 type workloadManifest struct {
-	Seed            uint64   `json:"seed"`
-	DurationSec     float64  `json:"duration_sec"`
-	TargetRate      float64  `json:"target_traces_per_sec"`
-	Workers         int      `json:"workers"`
-	Services        int      `json:"services"`
-	Namespaces      int      `json:"namespaces"`
-	Cardinality     int      `json:"attribute_cardinality"`
-	ErrorRate       float64  `json:"error_rate"`
-	MessagingRatio  float64  `json:"messaging_ratio"`
-	SendLogs        bool     `json:"send_logs"`
-	SendMetrics     bool     `json:"send_metrics"`
-	BackfillHours   float64  `json:"backfill_hours"`
-	QueryWorkers    int      `json:"query_workers"`
-	TargetQueryRate float64  `json:"target_queries_per_sec"`
-	QueryOperations []string `json:"query_operations"`
-	QueryWindows    []string `json:"query_windows"`
+	Seed uint64 `json:"seed"`
+	// Requested, not achieved: report.duration_sec carries elapsed wall clock.
+	RequestedDurationSec float64  `json:"requested_duration_sec"`
+	TargetRate           float64  `json:"target_traces_per_sec"`
+	Workers              int      `json:"workers"`
+	Services             int      `json:"services"`
+	Namespaces           int      `json:"namespaces"`
+	Cardinality          int      `json:"attribute_cardinality"`
+	ErrorRate            float64  `json:"error_rate"`
+	MessagingRatio       float64  `json:"messaging_ratio"`
+	SendLogs             bool     `json:"send_logs"`
+	SendMetrics          bool     `json:"send_metrics"`
+	BackfillHours        float64  `json:"backfill_hours"`
+	QueryWorkers         int      `json:"query_workers"`
+	TargetQueryRate      float64  `json:"target_queries_per_sec"`
+	QueryOperations      []string `json:"query_operations"`
+	QueryWindows         []string `json:"query_windows"`
 }
 
 func newRunManifest(cfg config, startedAt, finishedAt time.Time) runManifest {
 	workload := workloadManifest{
-		Seed:            cfg.seed,
-		DurationSec:     round2(cfg.duration.Seconds()),
-		TargetRate:      cfg.rate,
-		Workers:         cfg.workers,
-		Services:        cfg.services,
-		Namespaces:      cfg.namespaces,
-		Cardinality:     cfg.cardinality,
-		ErrorRate:       cfg.errorRate,
-		MessagingRatio:  cfg.msgRatio,
-		SendLogs:        cfg.sendLogs,
-		SendMetrics:     cfg.sendMetrics,
-		BackfillHours:   cfg.backfillHours,
-		QueryWorkers:    cfg.queryWorkers,
-		TargetQueryRate: cfg.queryRate,
-		QueryOperations: append([]string(nil), queryOperations...),
-		QueryWindows:    append([]string(nil), queryWindows...),
+		Seed:                 cfg.seed,
+		RequestedDurationSec: round2(cfg.duration.Seconds()),
+		TargetRate:           cfg.rate,
+		Workers:              cfg.workers,
+		Services:             cfg.services,
+		Namespaces:           cfg.namespaces,
+		Cardinality:          cfg.cardinality,
+		ErrorRate:            cfg.errorRate,
+		MessagingRatio:       cfg.msgRatio,
+		SendLogs:             cfg.sendLogs,
+		SendMetrics:          cfg.sendMetrics,
+		BackfillHours:        cfg.backfillHours,
+		QueryWorkers:         cfg.queryWorkers,
+		TargetQueryRate:      cfg.queryRate,
+		QueryOperations:      append([]string(nil), queryOperations...),
+		QueryWindows:         append([]string(nil), queryWindows...),
 	}
 	hashInput, _ := json.Marshal(workload) // fixed value-only struct cannot fail
 	hash := sha256.Sum256(hashInput)

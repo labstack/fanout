@@ -228,8 +228,6 @@ func main() {
 		Endpoint:        cfg.endpoint,
 		DurationSec:     round2(elapsed),
 		TargetRate:      cfg.rate,
-		Workers:         cfg.workers,
-		Services:        cfg.services,
 		TracesSent:      g.tracesSent.Load(),
 		SpansSent:       g.spansSent.Load(),
 		LogsSent:        g.logsSent.Load(),
@@ -440,11 +438,6 @@ func (g *generator) outCtx(ctx context.Context) context.Context {
 	return metadata.AppendToOutgoingContext(ctx, "x-fanout-ingest-token", g.cfg.token)
 }
 
-// sendTrace emits one trace: a SERVER span in the caller service and a CLIENT
-// child span in a different callee service (a call edge), plus — for a fraction
-// of traces — a PRODUCER/CONSUMER pair on a messaging destination (a messaging
-// edge). Each ResourceSpans carries one service.name, matching how fanout keys
-// service_rollup and edge_rollup.
 // eventTime returns the timestamp for an emitted event: now(), or — when
 // backfillHours>0 — a time spread uniformly over the last N hours so a pre-seed
 // run populates multiple hour partitions (to exercise within-day pruning).
@@ -455,6 +448,11 @@ func (g *generator) eventTime(rng *rand.Rand) time.Time {
 	return time.Now().Add(-time.Duration(rng.Float64() * g.cfg.backfillHours * float64(time.Hour)))
 }
 
+// sendTrace emits one trace: a SERVER span in the caller service and a CLIENT
+// child span in a different callee service (a call edge), plus — for a fraction
+// of traces — a PRODUCER/CONSUMER pair on a messaging destination (a messaging
+// edge). Each ResourceSpans carries one service.name, matching how fanout keys
+// service_rollup and edge_rollup.
 func (g *generator) sendTrace(ctx context.Context, rng *rand.Rand) {
 	ns := g.namespace(rng)
 	caller := g.svcNames[rng.IntN(g.cfg.services)]
@@ -728,21 +726,17 @@ func (h *histogram) snapshot() latencyReport {
 	}
 }
 
-// ── Server-metrics scrape ──────────────────────────────────────────────────
-
-// scrapeMetrics fetches a Prometheus text endpoint and sums each metric across
-// its label series (good enough for the totals/gauges we report).
 // ── Report ─────────────────────────────────────────────────────────────────
 
 type report struct {
-	Manifest                runManifest              `json:"manifest"`
-	Passed                  bool                     `json:"passed"`
-	Failures                []string                 `json:"failures,omitempty"`
-	Endpoint                string                   `json:"endpoint"`
+	Manifest runManifest `json:"manifest"`
+	Passed   bool        `json:"passed"`
+	Failures []string    `json:"failures,omitempty"`
+	Endpoint string      `json:"endpoint"`
+	// Elapsed wall clock, as opposed to the requested duration recorded in
+	// Manifest.Workload. Worker/service counts live in the manifest only.
 	DurationSec             float64                  `json:"duration_sec"`
 	TargetRate              float64                  `json:"target_rate"`
-	Workers                 int                      `json:"workers"`
-	Services                int                      `json:"services"`
 	TracesSent              int64                    `json:"traces_sent"`
 	SpansSent               int64                    `json:"spans_sent"`
 	LogsSent                int64                    `json:"logs_sent"`

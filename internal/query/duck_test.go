@@ -442,48 +442,94 @@ func TestParseDuckBytes(t *testing.T) {
 // A rollup that fails after reading the source tip must still publish lag.
 // Otherwise fanout_rollup_lag_seconds freezes at its last healthy value during
 // exactly the outage it exists to expose, and a lag alert never fires.
+// The publish-lag-on-error defer is copy-pasted into all three rollup
+// components, so it is covered for all three. A wrong component constant or a
+// missed sourceMax assignment in one copy freezes fanout_rollup_lag_seconds at
+// its last healthy value during exactly the outage the gauge exists to expose,
+// and the lag alert never fires.
 func TestFailedRollupStillPublishesLag(t *testing.T) {
-	metrics.RollupComponentTotal.Reset()
-	metrics.RollupLag.Reset()
-	metrics.RollupSourceMax.Reset()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	d := &Duck{DB: db, cfg: env.Config{}}
-
 	const (
 		watermarkNanos = int64(1_000 * 1e9)
 		sourceNanos    = int64(1_120 * 1e9) // 120s of uncovered ingest
 	)
-	watermarkRows := func(value int64) *sqlmock.Rows {
-		return sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(value)
-	}
 
-	mock.ExpectBegin()
-	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupStateKey).
-		WillReturnRows(watermarkRows(watermarkNanos))
-	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupRawMaxKey).
-		WillReturnRows(watermarkRows(watermarkNanos))
-	mock.ExpectQuery("FROM spans").
-		WillReturnRows(sqlmock.NewRows([]string{"v"}).AddRow(sourceNanos))
-	// Everything past this point fails, so the rollup returns an error without
-	// advancing its watermark.
-	mock.ExpectQuery("min_ingested_unix_nano|FROM service_rollup|SELECT").
-		WillReturnError(errors.New("rollup query failed"))
+	type stateRead struct {
+		key   string
+		value int64
+	}
+	for _, tc := range []struct {
+		component string
+		// Each component reads a different set of rollup_state keys before it
+		// reaches the source tip, in this order.
+		stateReads []stateRead
+		refresh    func(*Duck, context.Context) (int64, error)
+	}{
+		{
+			component: "service",
+			stateReads: []stateRead{
+				{serviceRollupStateKey, watermarkNanos},
+				{serviceRollupRawMaxKey, watermarkNanos},
+			},
+			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshServiceRollup(ctx) },
+		},
+		{
+			component: "endpoint",
+			stateReads: []stateRead{
+				{EndpointDisabledStateKey, 0},
+				{EndpointRollupStateKey, watermarkNanos},
+				{endpointRollupRawMaxKey, watermarkNanos},
+				{endpointBackfillStateKey, 0},
+			},
+			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshEndpointRollup(ctx) },
+		},
+		{
+			component: "edge",
+			stateReads: []stateRead{
+				{edgeRollupStateKey, watermarkNanos},
+				{edgeRollupRawMaxKey, watermarkNanos},
+			},
+			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshEdgeRollup(ctx) },
+		},
+	} {
+		t.Run(tc.component, func(t *testing.T) {
+			metrics.RollupComponentTotal.Reset()
+			metrics.RollupLag.Reset()
+			metrics.RollupSourceMax.Reset()
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New: %v", err)
+			}
+			defer db.Close()
 
-	if _, err := d.refreshServiceRollup(context.Background()); err == nil {
-		t.Fatal("refreshServiceRollup() error = nil, want the injected failure surfaced")
-	}
-	if got := testutil.ToFloat64(metrics.RollupComponentTotal.WithLabelValues("service", "error")); got != 1 {
-		t.Fatalf("service rollup error outcomes = %f, want 1", got)
-	}
-	if got := testutil.ToFloat64(metrics.RollupLag.WithLabelValues("service")); got != 120 {
-		t.Errorf("rollup lag = %f seconds, want 120 — a failed rollup must still report how far behind it is", got)
-	}
-	if got := testutil.ToFloat64(metrics.RollupSourceMax.WithLabelValues("service")); got != float64(sourceNanos)/1e9 {
-		t.Errorf("rollup source tip = %f, want %f", got, float64(sourceNanos)/1e9)
+			d := &Duck{DB: db, cfg: env.Config{}}
+			watermarkRows := func(value int64) *sqlmock.Rows {
+				return sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(value)
+			}
+
+			mock.ExpectBegin()
+			for _, read := range tc.stateReads {
+				mock.ExpectQuery("FROM rollup_state").WithArgs(read.key).
+					WillReturnRows(watermarkRows(read.value))
+			}
+			mock.ExpectQuery("FROM spans").
+				WillReturnRows(sqlmock.NewRows([]string{"v"}).AddRow(sourceNanos))
+			// Everything past this point fails, so the rollup returns an error
+			// without advancing its watermark.
+			mock.ExpectQuery(".").
+				WillReturnError(errors.New("rollup query failed"))
+
+			if _, err := tc.refresh(d, context.Background()); err == nil {
+				t.Fatalf("refresh %s rollup: error = nil, want the injected failure surfaced", tc.component)
+			}
+			if got := testutil.ToFloat64(metrics.RollupComponentTotal.WithLabelValues(tc.component, "error")); got != 1 {
+				t.Fatalf("%s rollup error outcomes = %f, want 1", tc.component, got)
+			}
+			if got := testutil.ToFloat64(metrics.RollupLag.WithLabelValues(tc.component)); got != 120 {
+				t.Errorf("%s rollup lag = %f seconds, want 120 — a failed rollup must still report how far behind it is", tc.component, got)
+			}
+			if got := testutil.ToFloat64(metrics.RollupSourceMax.WithLabelValues(tc.component)); got != float64(sourceNanos)/1e9 {
+				t.Errorf("%s rollup source tip = %f, want %f", tc.component, got, float64(sourceNanos)/1e9)
+			}
+		})
 	}
 }

@@ -24,7 +24,11 @@ func TestEvaluateReportCollectsEveryFailure(t *testing.T) {
 		maxQueryP95:  1000,
 	}
 	report := report{
+		// 5 send errors against 100 successes is a 4.76% drop rate, far above
+		// the 0.1% guardrail: a run that silently loses that much telemetry
+		// cannot support a throughput comparison.
 		ExportLatencyMs: latencyReport{Count: 100, P95Ms: 150},
+		SendErrors:      5,
 		QueriesRun:      10,
 		QueryErrors:     2,
 		QueryLatencyMs:  &queryLatency,
@@ -42,6 +46,7 @@ func TestEvaluateReportCollectsEveryFailure(t *testing.T) {
 		"rows dropped=1",
 		"export p95 150ms > 100ms",
 		"query p95 1600ms > 1000ms",
+		"send error rate 4.762% (5/105) > 0.1%",
 	} {
 		if !hasFailure(failures, expected) {
 			t.Fatalf("failures %q do not contain %q", failures, expected)
