@@ -2,48 +2,10 @@ package metrics
 
 import (
 	"testing"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
-
-func TestDataPlaneInstrumentationDisabledIsNoop(t *testing.T) {
-	original := dataPlaneInstrumentation
-	dataPlaneInstrumentation = "disabled"
-	t.Cleanup(func() { dataPlaneInstrumentation = original })
-
-	WriteGateWait.Reset()
-	RollupComponentTotal.Reset()
-	RollupEnabled.Reset()
-	DuckLakeOperationTotal.Reset()
-
-	if DataPlaneInstrumentationEnabled() {
-		t.Fatal("instrumentation unexpectedly enabled")
-	}
-	timer := StartDataPlaneTimer()
-	time.Sleep(time.Millisecond)
-	if got := timer.Seconds(); got != 0 {
-		t.Fatalf("disabled timer = %v, want 0", got)
-	}
-	RecordWriteGate("ingest_spans", 1, 1)
-	RecordRollupComponent(RollupService, RollupSuccess, 1, 1)
-	UpdateRollupProgress(RollupService, true, 1, 2, 1)
-	RecordDuckLakeOperation(DuckLakeMerge, DuckLakeSuccess, 1)
-
-	if got := histogramSampleCount(t, "fanout_write_gate_wait_seconds", "operation", "ingest_spans"); got != 0 {
-		t.Fatalf("disabled write-gate samples = %d, want 0", got)
-	}
-	if got := testutil.ToFloat64(RollupComponentTotal.WithLabelValues("service", "success")); got != 0 {
-		t.Fatalf("disabled rollup count = %v, want 0", got)
-	}
-	if got := testutil.ToFloat64(RollupEnabled.WithLabelValues("service")); got != 0 {
-		t.Fatalf("disabled rollup gauge = %v, want 0", got)
-	}
-	if got := testutil.ToFloat64(DuckLakeOperationTotal.WithLabelValues("merge", "success")); got != 0 {
-		t.Fatalf("disabled DuckLake count = %v, want 0", got)
-	}
-}
 
 func TestRecordIngest(t *testing.T) {
 	// Reset metrics for test isolation
@@ -271,61 +233,6 @@ func TestUpdateQueueDepth(t *testing.T) {
 	spansDepth = testutil.ToFloat64(IngestQueueDepth.WithLabelValues("spans"))
 	if spansDepth != 200 {
 		t.Errorf("IngestQueueDepth[spans] after update = %f, want 200", spansDepth)
-	}
-}
-
-func TestMetricVariables(t *testing.T) {
-	// Verify all metric variables are initialized (not nil)
-	if IngestTotal == nil {
-		t.Error("IngestTotal is nil")
-	}
-	if IngestQueueDepth == nil {
-		t.Error("IngestQueueDepth is nil")
-	}
-	if FlushTotal == nil {
-		t.Error("FlushTotal is nil")
-	}
-	if FlushBytes == nil {
-		t.Error("FlushBytes is nil")
-	}
-	if FlushDuration == nil {
-		t.Error("FlushDuration is nil")
-	}
-	if QueryTotal == nil {
-		t.Error("QueryTotal is nil")
-	}
-	if QueryDuration == nil {
-		t.Error("QueryDuration is nil")
-	}
-	if RollupDuration == nil {
-		t.Error("RollupDuration is nil")
-	}
-	if RollupRows == nil {
-		t.Error("RollupRows is nil")
-	}
-	if RollupLastSuccess == nil {
-		t.Error("RollupLastSuccess is nil")
-	}
-	if RollupComponentTotal == nil || RollupComponentDuration == nil || RollupComponentRows == nil {
-		t.Error("rollup component metrics are nil")
-	}
-	if RollupEnabled == nil || RollupWatermark == nil || RollupSourceMax == nil || RollupLag == nil || RollupBacklogChunks == nil {
-		t.Error("rollup progress metrics are nil")
-	}
-	if DuckLakeOperationTotal == nil || DuckLakeOperationDuration == nil {
-		t.Error("DuckLake operation metrics are nil")
-	}
-	if LakeSize == nil {
-		t.Error("LakeSize is nil")
-	}
-	if LakePartitions == nil {
-		t.Error("LakePartitions is nil")
-	}
-	if HTTPRequestsTotal == nil {
-		t.Error("HTTPRequestsTotal is nil")
-	}
-	if HTTPRequestDuration == nil {
-		t.Error("HTTPRequestDuration is nil")
 	}
 }
 

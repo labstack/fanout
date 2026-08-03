@@ -500,7 +500,7 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 }
 
 func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
-	timer := metrics.StartDataPlaneTimer()
+	start := time.Now()
 	result := metrics.RollupError
 	var recordedRows int64
 	// Progress is reported even when the rollup fails. Otherwise the lag gauge
@@ -509,7 +509,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	// was read, so there is nothing newer to report.
 	var watermark, sourceMax int64
 	defer func() {
-		metrics.RecordRollupComponent(metrics.RollupService, result, recordedRows, timer.Seconds())
+		metrics.RecordRollupComponent(metrics.RollupService, result, recordedRows, time.Since(start).Seconds())
 		if result == metrics.RollupError && sourceMax > 0 {
 			updateRollupProgress(metrics.RollupService, true, watermark, sourceMax)
 		}
@@ -620,12 +620,12 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 }
 
 func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
-	timer := metrics.StartDataPlaneTimer()
+	start := time.Now()
 	result := metrics.RollupError
 	var recordedRows int64
 	var watermark, sourceMax int64 // see refreshServiceRollup
 	defer func() {
-		metrics.RecordRollupComponent(metrics.RollupEndpoint, result, recordedRows, timer.Seconds())
+		metrics.RecordRollupComponent(metrics.RollupEndpoint, result, recordedRows, time.Since(start).Seconds())
 		if result == metrics.RollupError && sourceMax > 0 {
 			updateRollupProgress(metrics.RollupEndpoint, true, watermark, sourceMax)
 		}
@@ -740,12 +740,12 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 }
 
 func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
-	timer := metrics.StartDataPlaneTimer()
+	start := time.Now()
 	result := metrics.RollupError
 	var recordedRows int64
 	var watermark, sourceMax int64 // see refreshServiceRollup
 	defer func() {
-		metrics.RecordRollupComponent(metrics.RollupEdge, result, recordedRows, timer.Seconds())
+		metrics.RecordRollupComponent(metrics.RollupEdge, result, recordedRows, time.Since(start).Seconds())
 		if result == metrics.RollupError && sourceMax > 0 {
 			updateRollupProgress(metrics.RollupEdge, true, watermark, sourceMax)
 		}
@@ -1379,7 +1379,7 @@ const snapshotGraceMinutes = 10
 // cadence. Decoupling the two resolves the churn-vs-pileup tension: frequent
 // cheap merge keeps scans fast; rare deletes keep the race and overhead away.
 func (d *Duck) runMerge(ctx context.Context) error {
-	timer := metrics.StartDataPlaneTimer()
+	start := time.Now()
 	every := time.Duration(d.cfg.MergeEverySeconds) * time.Second
 	if every <= 0 {
 		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeDisabled, 0)
@@ -1390,22 +1390,23 @@ func (d *Duck) runMerge(ctx context.Context) error {
 		return nil
 	}
 	// merge commits new files — serialize against other writers like maintenance.
-	err := d.writeGate.With(writegate.WriteMerge, func() error {
+	err := func() error {
+		defer d.writeGate.Lock(writegate.WriteMerge)()
 		_, err := d.DB.ExecContext(ctx, "CALL ducklake_merge_adjacent_files('lake')")
 		return err
-	})
+	}()
 	d.lastMerge = time.Now()
 	if err != nil {
-		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeError, timer.Seconds())
+		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeError, time.Since(start).Seconds())
 		slog.Error("merge_adjacent_files failed", "err", err)
 		return fmt.Errorf("merge_adjacent_files: %w", err)
 	}
-	metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeSuccess, timer.Seconds())
+	metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeSuccess, time.Since(start).Seconds())
 	return nil
 }
 
 func (d *Duck) runMaintenance(ctx context.Context) error {
-	timer := metrics.StartDataPlaneTimer()
+	start := time.Now()
 	every := time.Duration(d.cfg.MaintenanceEverySeconds) * time.Second
 	if every <= 0 {
 		every = time.Hour
@@ -1509,7 +1510,7 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	if err != nil {
 		result = metrics.DuckLakeError
 	}
-	metrics.RecordDuckLakeOperation(metrics.DuckLakeMaintenance, result, timer.Seconds())
+	metrics.RecordDuckLakeOperation(metrics.DuckLakeMaintenance, result, time.Since(start).Seconds())
 	d.maintHealthMu.Lock()
 	d.lastMaintenanceAt = time.Now()
 	if err == nil {

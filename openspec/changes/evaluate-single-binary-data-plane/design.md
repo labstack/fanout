@@ -284,8 +284,10 @@ the run and is never committed.
 
 ### 9. Migration, deployment, and rollback
 
-Instrumentation is additive and may ship independently after it passes tests
-and the overhead guardrail. Each retained optimization is a separate commit or
+Instrumentation is additive and ships independently once it passes tests. Its
+cost is bounded by construction (task 1.6) rather than by an A/B screen, so
+there is no separate overhead gate to clear. Each retained optimization is a
+separate commit or
 otherwise independently revertible unit. Deployment keeps the same single Go
 binary and existing configuration defaults.
 

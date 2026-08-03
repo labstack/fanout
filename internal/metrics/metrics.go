@@ -2,43 +2,10 @@ package metrics
 
 import (
 	"math"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
-
-// dataPlaneInstrumentation is set to "disabled" only in the benchmark control
-// binary via -ldflags -X. Production builds and normal tests keep measurement
-// enabled. Keeping the switch at link time gives the overhead screen two builds
-// from the exact same source revision without adding an operator-facing setting.
-var dataPlaneInstrumentation = "enabled"
-
-// DataPlaneInstrumentationEnabled reports whether the additive write-gate,
-// rollup-progress, and DuckLake background-work measurements are active.
-func DataPlaneInstrumentationEnabled() bool {
-	return dataPlaneInstrumentation != "disabled"
-}
-
-// DataPlaneTimer avoids even the clock read in the link-time-disabled control
-// build while keeping timing call sites compact and allocation-free.
-type DataPlaneTimer struct {
-	started time.Time
-}
-
-func StartDataPlaneTimer() DataPlaneTimer {
-	if !DataPlaneInstrumentationEnabled() {
-		return DataPlaneTimer{}
-	}
-	return DataPlaneTimer{started: time.Now()}
-}
-
-func (timer DataPlaneTimer) Seconds() float64 {
-	if timer.started.IsZero() {
-		return 0
-	}
-	return time.Since(timer.started).Seconds()
-}
 
 type RollupComponent string
 
@@ -262,12 +229,9 @@ func RecordFlush(signal string, bytes int64, durationSec float64) {
 }
 
 // RecordWriteGate records one complete DuckLake catalog write critical section.
-// Callers constrain operation to the fixed lake.WriteOperation set so this
+// Callers constrain operation to the fixed writegate.WriteOperation set so this
 // metric cannot grow with tenant or telemetry cardinality.
 func RecordWriteGate(operation string, waitSec, holdSec float64) {
-	if !DataPlaneInstrumentationEnabled() {
-		return
-	}
 	WriteGateWait.WithLabelValues(operation).Observe(waitSec)
 	WriteGateHold.WithLabelValues(operation).Observe(holdSec)
 }
@@ -293,9 +257,6 @@ func RecordRollup(rows int, durationSec float64, successful bool) {
 func RecordRollupComponent(component RollupComponent, result RollupResult, rows int64, durationSec float64) {
 	validateRollupComponent(component)
 	validateRollupResult(result)
-	if !DataPlaneInstrumentationEnabled() {
-		return
-	}
 	if rows < 0 {
 		rows = 0
 	}
@@ -309,9 +270,6 @@ func RecordRollupComponent(component RollupComponent, result RollupResult, rows 
 // catch-up window.
 func UpdateRollupProgress(component RollupComponent, enabled bool, watermarkNanos, sourceNanos int64, backlogChunks int) {
 	validateRollupComponent(component)
-	if !DataPlaneInstrumentationEnabled() {
-		return
-	}
 	if watermarkNanos < 0 {
 		watermarkNanos = 0
 	}
@@ -341,9 +299,6 @@ func UpdateRollupProgress(component RollupComponent, enabled bool, watermarkNano
 func RecordDuckLakeOperation(operation DuckLakeOperation, result DuckLakeResult, durationSec float64) {
 	validateDuckLakeOperation(operation)
 	validateDuckLakeResult(result)
-	if !DataPlaneInstrumentationEnabled() {
-		return
-	}
 	DuckLakeOperationTotal.WithLabelValues(string(operation), string(result)).Inc()
 	if result == DuckLakeSuccess || result == DuckLakeError {
 		DuckLakeOperationDuration.WithLabelValues(string(operation)).Observe(math.Max(durationSec, 0))

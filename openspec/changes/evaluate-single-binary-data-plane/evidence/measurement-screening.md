@@ -18,15 +18,11 @@ credentials are recorded here.
 
 - The benchmark command is `cmd/bench`; manifests identify the benchmark driver
   and Fanout build independently.
-- The mixed-query histogram includes the exact 1500 ms release-SLO boundary,
-  uses bounded 0.5-percent geometric buckets, and records with binary search.
-  This reduces comparison quantization fivefold without increasing the hot-path
-  search from linear to thousands of bucket checks.
-- The A/B pair is built from one source archive by
-  `scripts/bench-overhead-hetzner.sh`, which hashes the archive and links the
-  control with `-X …metrics.dataPlaneInstrumentation=disabled`. Measurement mode
-  is therefore the only source-level variable by construction, rather than by a
-  manifest field an analyzer checks after the fact.
+- The mixed-query histogram includes the exact 1500 ms release-SLO boundary and
+  uses bounded 0.5-percent geometric buckets. It replaces a 20-bucket ladder
+  whose adjacent 1000/2000 ms boundaries made p95 unresolvable below a doubling.
+  The ladder grew to roughly 2,200 buckets; recording stays cheap because it
+  uses binary search rather than a linear scan.
 - The run manifest records build/VCS identity, host shape, cgroup memory limit,
   and workload parameters. It deliberately omits server configuration such as
   pool size, flush cadence, and retention: `bench` cannot observe those, so
@@ -152,12 +148,19 @@ adjacent boundaries at 1000 ms and 2000 ms, so p95 could only ever land on one
 of them. The 0.5-percent geometric ladder removes that particular artifact. The
 CPU and RSS spread is a shared developer machine and is not fixable in code.
 
-Repeat the screen using the same-source link-time A/B pair on the declared
-isolated Linux decision host, via `scripts/bench-overhead-hetzner.sh`. **Run the
-identical-binary null comparison on that host first.** If its spread is not well
-inside five percent, the host cannot answer the question and no A/B run on it
-means anything. Only then screen disabled versus enabled, and only then complete
-task 1.6 and proceed to baseline capture in 1.7.
+The A/B screen was abandoned rather than repeated on a quieter host, because
+the protocol could not have answered the question even on a silent machine. The
+link-time "disabled" control still constructed, registered, scraped, and
+serialized every metric vec; it still ran the label validation on every catalog
+write; and it still allocated the same release closure. The only thing it
+skipped was two `time.Now()` reads and two `Observe()` calls per catalog write.
+Two binaries that similar cannot produce a meaningful delta, and a sub-noise
+result would have been recorded as "instrumentation is free" on the strength of
+a comparison that was never capable of showing otherwise. Run order compounded
+it: the control always ran first, sequentially, on one VM.
+
+Overhead is instead bounded by construction, which the arithmetic supports
+without a decision host. See task 1.6.
 
 Adopt this as the general rule: a benchmarking protocol has to pass its own null
 test before its output counts as evidence.

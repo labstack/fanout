@@ -26,90 +26,26 @@ const (
 	WriteMaintenance    WriteOperation = "maintenance"
 )
 
-var allWriteOperations = [...]WriteOperation{
-	WriteIngestSpans,
-	WriteIngestLogs,
-	WriteIngestMetrics,
-	WriteRollupSkip,
-	WriteRollupService,
-	WriteRollupEndpoint,
-	WriteRollupEdge,
-	WriteMerge,
-	WriteMaintenance,
-}
-
-var instrumentationEnabled = metrics.DataPlaneInstrumentationEnabled
-
-// WriteGate preserves the existing process-wide sync.Mutex semantics while
-// measuring how long each operation waits for and holds the catalog write
-// critical section.
+// WriteGate preserves the existing process-wide sync.Mutex acquisition
+// semantics while measuring how long each operation waits for and holds the
+// catalog write critical section. The zero value is ready for use.
 type WriteGate struct {
-	mu      sync.Mutex
-	now     func() time.Time
-	observe func(WriteOperation, time.Duration, time.Duration)
+	mu sync.Mutex
 }
 
-// NewWriteGate constructs the shared DuckLake catalog write gate.
-func NewWriteGate() *WriteGate {
-	return &WriteGate{}
-}
-
-func newWriteGate(
-	now func() time.Time,
-	observe func(WriteOperation, time.Duration, time.Duration),
-) *WriteGate {
-	return &WriteGate{now: now, observe: observe}
-}
-
-// Lock acquires the catalog write gate and returns its release function. Callers
-// must defer the returned function before acquiring a database connection,
-// transaction, or appender. The zero value is ready for use.
+// Lock acquires the catalog write gate and returns its release function.
+// Callers must defer the returned function before acquiring a database
+// connection, transaction, or appender, and must call it exactly once.
 func (g *WriteGate) Lock(operation WriteOperation) func() {
-	operation.validate()
-	// Custom observers are used by unit tests and remain authoritative. The
-	// normal link-time-disabled benchmark control preserves the mutex behavior
-	// while bypassing clocks and Prometheus observations entirely.
-	if g.observe == nil && !instrumentationEnabled() {
-		g.mu.Lock()
-		return g.mu.Unlock
-	}
-	now := g.now
-	if now == nil {
-		now = time.Now
-	}
-	observe := g.observe
-	if observe == nil {
-		observe = func(operation WriteOperation, wait, hold time.Duration) {
-			metrics.RecordWriteGate(string(operation), wait.Seconds(), hold.Seconds())
-		}
-	}
-
-	waitStarted := now()
+	waitStarted := time.Now()
 	g.mu.Lock()
-	acquired := now()
+	acquired := time.Now()
 	return func() {
-		hold := now().Sub(acquired)
+		hold := time.Since(acquired)
+		// Unlock before observing: a Prometheus histogram takes its own lock,
+		// and holding the process's hottest critical section across that would
+		// be a throughput regression in the code added to detect one.
 		g.mu.Unlock()
-		observe(operation, acquired.Sub(waitStarted), hold)
+		metrics.RecordWriteGate(string(operation), acquired.Sub(waitStarted).Seconds(), hold.Seconds())
 	}
-}
-
-// With runs fn while holding the catalog write gate. The gate is acquired
-// before fn starts, so callers can acquire a database connection inside fn and
-// preserve the required gate -> connection -> transaction/appender order.
-// The defer releases the gate and records the observation on success, returned
-// error, or panic.
-func (g *WriteGate) With(operation WriteOperation, fn func() error) error {
-	unlock := g.Lock(operation)
-	defer unlock()
-	return fn()
-}
-
-func (operation WriteOperation) validate() {
-	for _, allowed := range allWriteOperations {
-		if operation == allowed {
-			return
-		}
-	}
-	panic("writegate: invalid DuckLake write operation: " + string(operation))
 }

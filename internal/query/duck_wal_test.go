@@ -129,11 +129,12 @@ func TestPoolConcurrentReadsNoLock(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for i := 0; i < iters; i++ {
-				err := d.WriteGate().With(writegate.WriteIngestSpans, func() error {
+				err := func() error {
+					defer d.WriteGate().Lock(writegate.WriteIngestSpans)()
 					_, err := d.DB.ExecContext(ctx,
 						"INSERT INTO lake.concurrency_probe VALUES (?, ?)", w*iters+i, "x")
 					return err
-				})
+				}()
 				if err != nil {
 					errCh <- err
 					return
