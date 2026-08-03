@@ -1,5 +1,6 @@
 import { defineConfig } from "astro/config";
 import mdx from "@astrojs/mdx";
+import { unified } from "@astrojs/markdown-remark";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
@@ -21,10 +22,17 @@ export default defineConfig({
     // the heading in an <a href="#id"> so the TOC can deep-link. The wrap
     // behavior is paired with a `.docs-body h2 > a` style reset in
     // DocsLayout.astro — if you change the behavior here, update that too.
-    rehypePlugins: [
-      rehypeSlug,
-      [rehypeAutolinkHeadings, { behavior: "wrap" }],
-    ],
+    //
+    // `processor` replaced the flat `rehypePlugins` key in Astro 7. The
+    // `@astrojs/markdown-remark` dependency supplying `unified` must be kept
+    // on the same major as `astro` itself; bumping one without the other
+    // breaks this import.
+    processor: unified({
+      rehypePlugins: [
+        rehypeSlug,
+        [rehypeAutolinkHeadings, { behavior: "wrap" }],
+      ],
+    }),
   },
   integrations: [mdx()],
 });
