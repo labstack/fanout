@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Profile fanout under load. Boots a throwaway fanout with PPROF_ENABLED=true,
-# drives it with cmd/loadgen, captures CPU/heap/alloc/mutex/block profiles at
+# drives it with cmd/bench, captures CPU/heap/alloc/mutex/block profiles at
 # steady state, and prints the top nodes of each — the basis for finding
 # allocation hotspots and lock contention.
 #
@@ -25,7 +25,7 @@ cleanup() { [ -n "$FPID" ] && kill "$FPID" 2>/dev/null; rm -rf "$TMPD"; }
 trap cleanup EXIT INT TERM
 
 CGO_ENABLED=1 go build -o "$TMPD/fanout" ./cmd/fanout || exit 1
-CGO_ENABLED=1 go build -o "$TMPD/loadgen" ./cmd/loadgen || exit 1
+CGO_ENABLED=1 go build -o "$TMPD/bench" ./cmd/bench || exit 1
 
 set -a; . ./.env; set +a
 DATA_DIR="$TMPD/data" PUBLIC_READ=true PPROF_ENABLED=true OTLP_GRPC_ADDR="$GGRPC" HTTP_ADDR="$GHTTP" ENV=development \
@@ -35,7 +35,7 @@ for _ in $(seq 1 40); do curl -fsS -m2 "localhost${GHTTP}/healthz" >/dev/null 2>
 
 pids=()
 for n in $(seq 1 "$GENS"); do
-  "$TMPD/loadgen" -endpoint "localhost${GGRPC}" -duration "$((CPUSEC + 20))s" -rate "$RATE" -workers 20 -services 50 >/dev/null 2>&1 &
+  "$TMPD/bench" -endpoint "localhost${GGRPC}" -duration "$((CPUSEC + 20))s" -rate "$RATE" -workers 20 -services 50 >/dev/null 2>&1 &
   pids+=($!)
 done
 sleep 8 # reach steady state

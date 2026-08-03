@@ -70,7 +70,7 @@ SMTP_FROM=fanout@example.com
 AI_API_KEY=dummy
 AI_PROVIDER=anthropic
 ENV
-go build -o bin/fanout ./cmd/fanout && go build -o bin/loadgen ./cmd/loadgen
+go build -o bin/fanout ./cmd/fanout && go build -o bin/bench ./cmd/bench
 REMOTE
 
 echo "── stress test (self-sizing DuckDB defaults) ──"
@@ -84,14 +84,14 @@ DATA_DIR=/root/fanout/data PUBLIC_READ=true PUBLIC_INGEST=true METRICS_PUBLIC=tr
 FPID=$!
 for i in $(seq 1 40); do curl -fsS -m2 localhost:7520/healthz >/dev/null 2>&1 && break; sleep 1; done
 snap(){ curl -s -m3 localhost:7520/-/metrics | awk -v k="$1" '$0 ~ "^"k {s+=$2} END{printf "%d",s+0}'; }
-./bin/loadgen -endpoint localhost:4317 -duration 8s -rate 5000 -workers 8 -services 30 >/dev/null 2>&1
+./bin/bench -endpoint localhost:4317 -duration 8s -rate 5000 -workers 8 -services 30 >/dev/null 2>&1
 # CPU peak sampler (sum of all %cpu; / cores / 100 = utilization)
 echo 0 > /tmp/cpupeak
 ( while :; do tot=$(ps -A -o %cpu= 2>/dev/null | awk '{s+=$1} END{printf "%d",s}'); [ "${tot:-0}" -gt "$(cat /tmp/cpupeak)" ] && echo "$tot" > /tmp/cpupeak; sleep 1; done ) & SAMPLER=$!
 rows0=$(snap fanout_ingest_rows_total); t0=$(date +%s)
 # One generator per core → drive the VM to saturation.
 pids=()
-for n in $(seq 1 "$CORES"); do ./bin/loadgen -endpoint localhost:4317 -duration 30s -rate 50000 -workers 20 -services 50 -messaging-ratio 0.15 >/root/fanout/lg$n.log 2>&1 & pids+=($!); done
+for n in $(seq 1 "$CORES"); do ./bin/bench -endpoint localhost:4317 -duration 30s -rate 50000 -workers 20 -services 50 -messaging-ratio 0.15 >/root/fanout/lg$n.log 2>&1 & pids+=($!); done
 wait "${pids[@]}"
 kill $SAMPLER 2>/dev/null
 t1=$(date +%s); rows1=$(snap fanout_ingest_rows_total); dt=$((t1-t0))

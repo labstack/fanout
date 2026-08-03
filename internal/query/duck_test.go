@@ -10,6 +10,8 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func TestLatencyRowStruct(t *testing.T) {
@@ -121,6 +123,7 @@ func TestErrorRouteRowStruct(t *testing.T) {
 }
 
 func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -162,6 +165,9 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 	if d.lastMaintenance.IsZero() {
 		t.Fatal("runMaintenance() did not update lastMaintenance")
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "error")); got != 1 {
+		t.Errorf("maintenance error outcomes = %f, want 1", got)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
@@ -175,6 +181,7 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 // runMerge issues exactly one merge_adjacent_files call when due, and nothing
 // on the next call within the DUCKLAKE_MERGE_EVERY_SECONDS cadence.
 func TestRunMergeExecutesThenThrottles(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -195,10 +202,17 @@ func TestRunMergeExecutesThenThrottles(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("merge", "success")); got != 1 {
+		t.Errorf("merge success outcomes = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("merge", "throttled")); got != 1 {
+		t.Errorf("merge throttled outcomes = %f, want 1", got)
+	}
 }
 
 // MergeEverySeconds <= 0 disables the frequent merge pass entirely.
 func TestRunMergeDisabled(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -212,9 +226,13 @@ func TestRunMergeDisabled(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("disabled runMerge should issue no SQL: %v", err)
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("merge", "disabled")); got != 1 {
+		t.Errorf("merge disabled outcomes = %f, want 1", got)
+	}
 }
 
 func TestRunMaintenanceThrottle(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -229,9 +247,13 @@ func TestRunMaintenanceThrottle(t *testing.T) {
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("throttled runMaintenance should issue no SQL: %v", err)
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "throttled")); got != 1 {
+		t.Errorf("maintenance throttled outcomes = %f, want 1", got)
+	}
 }
 
 func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -258,6 +280,9 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr == nil || !lastOK.IsZero() || lastAt.IsZero() {
 		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want zero lastOK, non-zero lastAt, non-nil lastErr", lastOK, lastAt, lastErr)
 	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "error")); got != 1 {
+		t.Errorf("maintenance error outcomes = %f, want 1", got)
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
@@ -266,6 +291,8 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 // A failing rollup must not skip maintenance: file/snapshot growth is what
 // makes the failing rollup heavier each retry, so compaction has to run anyway.
 func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
+	metrics.RollupComponentTotal.Reset()
+	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -297,6 +324,14 @@ func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
 	}
 	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr != nil || lastOK.IsZero() || lastAt.IsZero() {
 		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want non-zero lastOK and lastAt, nil lastErr", lastOK, lastAt, lastErr)
+	}
+	for _, component := range []string{"service", "endpoint", "edge"} {
+		if got := testutil.ToFloat64(metrics.RollupComponentTotal.WithLabelValues(component, "error")); got != 1 {
+			t.Errorf("%s rollup error outcomes = %f, want 1", component, got)
+		}
+	}
+	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "success")); got != 1 {
+		t.Errorf("maintenance success outcomes = %f, want 1", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -401,5 +436,100 @@ func TestParseDuckBytes(t *testing.T) {
 		if ok != c.ok || (ok && got != c.want) {
 			t.Errorf("parseDuckBytes(%q) = (%d, %v), want (%d, %v)", c.in, got, ok, c.want, c.ok)
 		}
+	}
+}
+
+// A rollup that fails after reading the source tip must still publish lag.
+// Otherwise fanout_rollup_lag_seconds freezes at its last healthy value during
+// exactly the outage it exists to expose, and a lag alert never fires.
+// The publish-lag-on-error defer is copy-pasted into all three rollup
+// components, so it is covered for all three. A wrong component constant or a
+// missed sourceMax assignment in one copy freezes fanout_rollup_lag_seconds at
+// its last healthy value during exactly the outage the gauge exists to expose,
+// and the lag alert never fires.
+func TestFailedRollupStillPublishesLag(t *testing.T) {
+	const (
+		watermarkNanos = int64(1_000 * 1e9)
+		sourceNanos    = int64(1_120 * 1e9) // 120s of uncovered ingest
+	)
+
+	type stateRead struct {
+		key   string
+		value int64
+	}
+	for _, tc := range []struct {
+		component string
+		// Each component reads a different set of rollup_state keys before it
+		// reaches the source tip, in this order.
+		stateReads []stateRead
+		refresh    func(*Duck, context.Context) (int64, error)
+	}{
+		{
+			component: "service",
+			stateReads: []stateRead{
+				{serviceRollupStateKey, watermarkNanos},
+				{serviceRollupRawMaxKey, watermarkNanos},
+			},
+			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshServiceRollup(ctx) },
+		},
+		{
+			component: "endpoint",
+			stateReads: []stateRead{
+				{EndpointDisabledStateKey, 0},
+				{EndpointRollupStateKey, watermarkNanos},
+				{endpointRollupRawMaxKey, watermarkNanos},
+				{endpointBackfillStateKey, 0},
+			},
+			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshEndpointRollup(ctx) },
+		},
+		{
+			component: "edge",
+			stateReads: []stateRead{
+				{edgeRollupStateKey, watermarkNanos},
+				{edgeRollupRawMaxKey, watermarkNanos},
+			},
+			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshEdgeRollup(ctx) },
+		},
+	} {
+		t.Run(tc.component, func(t *testing.T) {
+			metrics.RollupComponentTotal.Reset()
+			metrics.RollupLag.Reset()
+			metrics.RollupSourceMax.Reset()
+			db, mock, err := sqlmock.New()
+			if err != nil {
+				t.Fatalf("sqlmock.New: %v", err)
+			}
+			defer db.Close()
+
+			d := &Duck{DB: db, cfg: env.Config{}}
+			watermarkRows := func(value int64) *sqlmock.Rows {
+				return sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(value)
+			}
+
+			mock.ExpectBegin()
+			for _, read := range tc.stateReads {
+				mock.ExpectQuery("FROM rollup_state").WithArgs(read.key).
+					WillReturnRows(watermarkRows(read.value))
+			}
+			mock.ExpectQuery("FROM spans").
+				WillReturnRows(sqlmock.NewRows([]string{"v"}).AddRow(sourceNanos))
+			// Everything past this point fails, so the rollup returns an error
+			// without advancing its watermark.
+			mock.ExpectQuery(".").
+				WillReturnError(errors.New("rollup query failed"))
+
+			if _, err := tc.refresh(d, context.Background()); err == nil {
+				t.Fatalf("refresh %s rollup: error = nil, want the injected failure surfaced", tc.component)
+			}
+			if got := testutil.ToFloat64(metrics.RollupComponentTotal.WithLabelValues(tc.component, "error")); got != 1 {
+				t.Fatalf("%s rollup error outcomes = %f, want 1", tc.component, got)
+			}
+			if got := testutil.ToFloat64(metrics.RollupLag.WithLabelValues(tc.component)); got != 120 {
+				t.Errorf("%s rollup lag = %f seconds, want 120 — a failed rollup must still report how far behind it is", tc.component, got)
+			}
+			if got := testutil.ToFloat64(metrics.RollupSourceMax.WithLabelValues(tc.component)); got != float64(sourceNanos)/1e9 {
+				t.Errorf("%s rollup source tip = %f, want %f", tc.component, got, float64(sourceNanos)/1e9)
+			}
+		})
 	}
 }

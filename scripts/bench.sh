@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Local ingest benchmark for fanout. Boots a throwaway fanout (tokenless via
 # public read/ingest/metrics, isolated ports + temp data dir), drives it with N parallel
-# cmd/loadgen generators, and reports the SERVER-side accepted-rows rate plus
+# cmd/bench drivers, and reports the SERVER-side accepted-rows rate plus
 # the health signals that matter (drops, file growth, rollup time, RSS).
 #
 # Usage:  scripts/bench.sh [GENERATORS] [RATE_PER_GEN] [DURATION_SEC]
@@ -12,7 +12,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 # Auto-scale the load to the host: one generator per CPU core saturates the
-# machine (loadgen + fanout share the cores), so the result reflects THIS
+# machine (bench + fanout share the cores), so the result reflects THIS
 # machine's max. Override any of gens/rate/duration positionally.
 detect_cores() { command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4; }
 CORES=$(detect_cores)
@@ -49,9 +49,9 @@ sample_cpu() {
   done
 }
 
-echo "building fanout + loadgen…"
+echo "building fanout + bench…"
 CGO_ENABLED=1 go build -o "$TMPD/fanout" ./cmd/fanout || exit 1
-CGO_ENABLED=1 go build -o "$TMPD/loadgen" ./cmd/loadgen || exit 1
+CGO_ENABLED=1 go build -o "$TMPD/bench" ./cmd/bench || exit 1
 
 set -a; . ./.env; set +a
 DATA_DIR="$TMPD/data" PUBLIC_READ=true PUBLIC_INGEST=true METRICS_PUBLIC=true OTLP_GRPC_ADDR="$GGRPC" HTTP_ADDR="$GHTTP" ENV=development \
@@ -61,7 +61,7 @@ for _ in $(seq 1 40); do curl -fsS -m2 "localhost${GHTTP}/healthz" >/dev/null 2>
 
 snap() { curl -s -m3 "localhost${GHTTP}/-/metrics" | awk -v k="$1" '$0 ~ "^"k {s+=$2} END{printf "%d", s+0}'; }
 
-echo "warmup…"; "$TMPD/loadgen" -endpoint "localhost${GGRPC}" -duration 8s -rate 5000 -workers 12 -services 30 >/dev/null 2>&1
+echo "warmup…"; "$TMPD/bench" -endpoint "localhost${GGRPC}" -duration 8s -rate 5000 -workers 12 -services 30 >/dev/null 2>&1
 
 rows0=$(snap fanout_ingest_rows_total); t0=$(date +%s)
 echo "running: $GENS generators (=${CORES} cores) × $RATE traces/s for ${DUR}s + query-under-load — driving the machine to saturation…"
@@ -72,12 +72,12 @@ for n in $(seq 1 "$GENS"); do
   # JSON report so we can read its query latency percentiles.
   q=()
   [ "$n" = "1" ] && q=(-query-url "http://localhost${GHTTP}" -query-workers 4 -query-rate 40 -report "$TMPD/lg1.json")
-  "$TMPD/loadgen" -endpoint "localhost${GGRPC}" -duration "${DUR}s" -rate "$RATE" -workers 20 \
+  "$TMPD/bench" -endpoint "localhost${GGRPC}" -duration "${DUR}s" -rate "$RATE" -workers 20 \
     -services 50 -messaging-ratio 0.15 "${q[@]}" >"$TMPD/lg$n.log" 2>&1 &
   pids+=($!)
 done
 # Collect each generator's exit code (a bare `wait "${pids[@]}"` discards them).
-# loadgen's own gate catches client-side failures the server-side metric scrape
+# bench's own gate catches client-side failures the server-side metric scrape
 # below cannot see — export RPCs failing while fanout stays healthy (drops=0,
 # no OOM/errors) would otherwise read as PASS.
 genfail=0
@@ -117,9 +117,9 @@ curl -fsS -m3 "localhost${GHTTP}/healthz" >/dev/null 2>&1 || fail="${fail} healt
 # (no successful queries / report not written) — fail, don't skip.
 if [ -z "${qp95:-}" ]; then fail="${fail} query-p95-missing;"; elif [ "${qp95}" -gt 1500 ]; then fail="${fail} query-p95=${qp95}ms>1500;"; fi
 [ "${rps:-0}" -lt "${MIN_ROWS:-0}" ] && fail="${fail} throughput=${rps}<${MIN_ROWS};"
-# A non-zero generator exit means loadgen's own gate tripped (zero successful
+# A non-zero generator exit means bench's own gate tripped (zero successful
 # exports, send/query errors, or server-side drops it observed) — see lg*.log.
-[ "${genfail:-0}" -ne 0 ] && fail="${fail} loadgen-gate-failed(see lg*.log);"
+[ "${genfail:-0}" -ne 0 ] && fail="${fail} bench-gate-failed(see lg*.log);"
 if [ -n "$fail" ]; then
   echo "RESULT          : ✗ FAIL —${fail}"
   echo "────────────────────────────────────────────────────────────"

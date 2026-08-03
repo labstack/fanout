@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`cmd/fanout` composes the single runtime binary; `cmd/loadgen` is the supported
+`cmd/fanout` composes the single runtime binary; `cmd/bench` is the supported
 load generator. Backend code lives under `internal/` by domain: `ingest/` for
 OTLP/gRPC, `lake/` and `query/` for DuckLake/Parquet and DuckDB,
 `observability/` for typed query contracts, `agent/` for AG-UI, `mcp/` for

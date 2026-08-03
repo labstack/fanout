@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/metrics"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 // TestEdgeRollupBacklog is a regression test for the OOM bug in refreshEdgeRollup.
@@ -172,12 +174,33 @@ ON CONFLICT (cache_key) DO UPDATE SET last_ingested_unix_nano = 1, updated_at = 
 		t.Fatalf("skipRollupToLatest: %v", err)
 	}
 	// After skipping, the existing backlog is marked processed → rollupOnce is a no-op.
+	metrics.RollupComponentTotal.Reset()
+	metrics.RollupLag.Reset()
+	metrics.RollupBacklogChunks.Reset()
+	metrics.RollupEnabled.Reset()
 	n, err := d.rollupOnce(ctx)
 	if err != nil {
 		t.Fatalf("rollupOnce: %v", err)
 	}
 	if n != 0 {
 		t.Errorf("rollupOnce processed %d rows after skip-to-latest; want 0 (backlog should be skipped)", n)
+	}
+	for _, component := range []string{"service", "edge"} {
+		if got := testutil.ToFloat64(metrics.RollupComponentTotal.WithLabelValues(component, "noop")); got != 1 {
+			t.Errorf("%s no-op outcomes = %f, want 1", component, got)
+		}
+		if got := testutil.ToFloat64(metrics.RollupLag.WithLabelValues(component)); got != 0 {
+			t.Errorf("%s lag = %f, want 0", component, got)
+		}
+		if got := testutil.ToFloat64(metrics.RollupBacklogChunks.WithLabelValues(component)); got != 0 {
+			t.Errorf("%s backlog chunks = %f, want 0", component, got)
+		}
+	}
+	if got := testutil.ToFloat64(metrics.RollupComponentTotal.WithLabelValues("endpoint", "disabled")); got != 1 {
+		t.Errorf("endpoint disabled outcomes = %f, want 1", got)
+	}
+	if got := testutil.ToFloat64(metrics.RollupEnabled.WithLabelValues("endpoint")); got != 0 {
+		t.Errorf("endpoint enabled = %f, want 0", got)
 	}
 	var endpointRows, endpointReady, endpointDisabled int64
 	if err := d.DB.QueryRowContext(ctx, `SELECT count(*) FROM endpoint_rollup`).Scan(&endpointRows); err != nil {

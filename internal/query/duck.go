@@ -17,6 +17,7 @@ import (
 	_ "modernc.org/sqlite" // SQLite driver used to put the DuckLake catalog in WAL mode
 
 	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/lake/writegate"
 	"github.com/labstack/fanout/internal/metrics"
 )
 
@@ -29,10 +30,9 @@ type Duck struct {
 	// timestamp so late/out-of-order commits aren't skipped. Zero disables the
 	// lag (no trailing window).
 	rollupLagNanos int64
-	// writeMu serializes write commits (rollups, maintenance, and ingest appender
-	// flushes) so that, when the pool holds more than one connection, two
-	// connections never commit to the DuckLake SQLite catalog concurrently.
-	writeMu sync.Mutex
+	// writeGate serializes and measures all DuckLake catalog write commits so
+	// multiple pooled connections never commit to the SQLite catalog concurrently.
+	writeGate writegate.WriteGate
 	// maintHealthMu guards the maintenance health fields below, which the
 	// readiness probe reads while the maintenance pass writes them.
 	maintHealthMu      sync.Mutex
@@ -68,10 +68,10 @@ const (
 	defaultDuckDBPoolSize    = 1
 )
 
-// WriteLock returns the shared write-serialization mutex. The ingest writer must
-// hold it around appender flushes so writes never overlap rollup/maintenance
-// commits on a multi-connection pool.
-func (d *Duck) WriteLock() *sync.Mutex { return &d.writeMu }
+// WriteGate returns the shared catalog write gate. The ingest writer must use it
+// around appender flushes so writes never overlap rollup/maintenance commits on
+// a multi-connection pool.
+func (d *Duck) WriteGate() *writegate.WriteGate { return &d.writeGate }
 
 // duckDBPoolSize is the effective connection-pool size: the configured value,
 // floored at 1.
@@ -246,12 +246,12 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 // skipRollupToLatest advances every rollup watermark to the current max ingested
 // timestamp, so existing data is treated as already-processed rather than
 // aggregated as a backlog. This avoids a multi-minute first-rollup catch-up
-// (a wide-start_time backlog holds writeMu and starves ingest) when standing up
+// (a wide-start_time backlog holds the write gate and starves ingest) when standing up
 // a large pre-seeded historical dataset. Runs once at boot before RunRollups, so
-// taking writeMu here is uncontended.
+// taking the write gate here is uncontended.
 func (d *Duck) skipRollupToLatest(ctx context.Context) error {
-	d.writeMu.Lock()
-	defer d.writeMu.Unlock()
+	unlock := d.writeGate.Lock(writegate.WriteRollupSkip)
+	defer unlock()
 
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -340,7 +340,7 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 	// commits from multiple connections. The default pool of 1 serializes
 	// everything through one handle. Larger pools are allowed (read queries then
 	// run concurrently), but write commits must still be serialized by the
-	// caller's write mutex (Duck.WriteLock) so two connections never commit at
+	// caller's write gate (Duck.WriteGate) so two connections never commit at
 	// once.
 	if maxConns < 1 {
 		maxConns = 1
@@ -406,7 +406,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	// advancing fine behind a failing edge rollup.
 	start := time.Now()
 	rows, err := d.rollupOnce(ctx)
-	metrics.RecordRollup(rows, time.Since(start).Seconds())
+	metrics.RecordRollup(rows, time.Since(start).Seconds(), err == nil)
 	if err != nil {
 		slog.Error("startup rollup failed", "rows", rows, "err", err)
 	} else if rows > 0 {
@@ -421,7 +421,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 		case <-ticker.C:
 			start := time.Now()
 			rows, err := d.rollupOnce(ctx)
-			metrics.RecordRollup(rows, time.Since(start).Seconds())
+			metrics.RecordRollup(rows, time.Since(start).Seconds(), err == nil)
 			if err != nil {
 				slog.Error("rollup failed", "component", "rollup", "rows", rows, "err", err)
 			}
@@ -500,11 +500,26 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 }
 
 func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
+	start := time.Now()
+	result := metrics.RollupError
+	var recordedRows int64
+	// Progress is reported even when the rollup fails. Otherwise the lag gauge
+	// freezes at its last healthy value during exactly the outage it exists to
+	// expose. A zero sourceMax means the failure happened before the source tip
+	// was read, so there is nothing newer to report.
+	var watermark, sourceMax int64
+	defer func() {
+		metrics.RecordRollupComponent(metrics.RollupService, result, recordedRows, time.Since(start).Seconds())
+		if result == metrics.RollupError && sourceMax > 0 {
+			updateRollupProgress(metrics.RollupService, true, watermark, sourceMax)
+		}
+	}()
+
 	// Serialize against other writers (edge rollup, maintenance, ingest flushes).
-	// writeMu is always acquired before a connection to keep lock ordering
+	// The write gate is always acquired before a connection to keep lock ordering
 	// consistent and deadlock-free.
-	d.writeMu.Lock()
-	defer d.writeMu.Unlock()
+	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	defer unlock()
 
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -516,6 +531,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	watermark = lastWatermark
 	lastRawMax, err := rollupWatermark(ctx, tx, serviceRollupRawMaxKey)
 	if err != nil {
 		return 0, err
@@ -525,8 +541,14 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	sourceMax = rawWatermark
 	if rawWatermark <= lastWatermark {
-		return 0, tx.Commit()
+		err := tx.Commit()
+		if err == nil {
+			result = metrics.RollupNoop
+			updateRollupProgress(metrics.RollupService, true, lastWatermark, rawWatermark)
+		}
+		return 0, err
 	}
 
 	minIngested := int64(0)
@@ -587,16 +609,35 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	result = metrics.RollupSuccess
+	updateRollupProgress(metrics.RollupService, true, newWatermark, rawWatermark)
 
-	if rows, err := res.RowsAffected(); err == nil {
-		return rows, nil
+	rows, err := res.RowsAffected()
+	if err != nil {
+		// Warn, not Debug: recordedRows feeds fanout_rollup_component_rows_total,
+		// so a silent zero here reads in benchmark evidence as "the rollup ran and
+		// matched nothing" when it actually means "we do not know".
+		slog.Warn("service rollup rows affected unavailable", "err", err)
+		return 0, nil
 	}
-	return 0, nil
+	recordedRows = rows
+	return rows, nil
 }
 
 func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
-	d.writeMu.Lock()
-	defer d.writeMu.Unlock()
+	start := time.Now()
+	result := metrics.RollupError
+	var recordedRows int64
+	var watermark, sourceMax int64 // see refreshServiceRollup
+	defer func() {
+		metrics.RecordRollupComponent(metrics.RollupEndpoint, result, recordedRows, time.Since(start).Seconds())
+		if result == metrics.RollupError && sourceMax > 0 {
+			updateRollupProgress(metrics.RollupEndpoint, true, watermark, sourceMax)
+		}
+	}()
+
+	unlock := d.writeGate.Lock(writegate.WriteRollupEndpoint)
+	defer unlock()
 
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -609,12 +650,18 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	if disabled != 0 {
-		return 0, tx.Commit()
+		err := tx.Commit()
+		if err == nil {
+			result = metrics.RollupDisabled
+			updateRollupProgress(metrics.RollupEndpoint, false, 0, 0)
+		}
+		return 0, err
 	}
 	lastWatermark, err := rollupWatermark(ctx, tx, EndpointRollupStateKey)
 	if err != nil {
 		return 0, err
 	}
+	watermark = lastWatermark
 	lastRawMax, err := rollupWatermark(ctx, tx, endpointRollupRawMaxKey)
 	if err != nil {
 		return 0, err
@@ -628,8 +675,14 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	sourceMax = rawWatermark
 	if rawWatermark <= lastWatermark {
-		return 0, tx.Commit()
+		err := tx.Commit()
+		if err == nil {
+			result = metrics.RollupNoop
+			updateRollupProgress(metrics.RollupEndpoint, true, lastWatermark, rawWatermark)
+		}
+		return 0, err
 	}
 	minIngested := int64(0)
 	if lastWatermark == 0 {
@@ -680,17 +733,31 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	result = metrics.RollupSuccess
+	updateRollupProgress(metrics.RollupEndpoint, true, newWatermark, rawWatermark)
 	rows, err := res.RowsAffected()
 	if err != nil {
-		slog.Debug("endpoint rollup rows affected unavailable", "err", err)
+		slog.Warn("endpoint rollup rows affected unavailable", "err", err)
 		return 0, nil
 	}
+	recordedRows = rows
 	return rows, nil
 }
 
 func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
-	d.writeMu.Lock()
-	defer d.writeMu.Unlock()
+	start := time.Now()
+	result := metrics.RollupError
+	var recordedRows int64
+	var watermark, sourceMax int64 // see refreshServiceRollup
+	defer func() {
+		metrics.RecordRollupComponent(metrics.RollupEdge, result, recordedRows, time.Since(start).Seconds())
+		if result == metrics.RollupError && sourceMax > 0 {
+			updateRollupProgress(metrics.RollupEdge, true, watermark, sourceMax)
+		}
+	}()
+
+	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
+	defer unlock()
 
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -702,6 +769,7 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	watermark = lastWatermark
 	lastRawMax, err := rollupWatermark(ctx, tx, edgeRollupRawMaxKey)
 	if err != nil {
 		return 0, err
@@ -711,8 +779,14 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	sourceMax = rawWatermark
 	if rawWatermark <= lastWatermark {
-		return 0, tx.Commit()
+		err := tx.Commit()
+		if err == nil {
+			result = metrics.RollupNoop
+			updateRollupProgress(metrics.RollupEdge, true, lastWatermark, rawWatermark)
+		}
+		return 0, err
 	}
 	minIngested := int64(0)
 	if lastWatermark == 0 {
@@ -770,7 +844,10 @@ WHERE ingested_unix_nano > ?
 			if err != nil {
 				return 0, err
 			}
-			if rows, err := res.RowsAffected(); err == nil {
+			rows, err := res.RowsAffected()
+			if err != nil {
+				slog.Warn("edge rollup rows affected unavailable", "err", err)
+			} else {
 				totalAffected += rows
 			}
 			subLo = subHi
@@ -787,6 +864,9 @@ WHERE ingested_unix_nano > ?
 		return 0, err
 	}
 
+	result = metrics.RollupSuccess
+	recordedRows = totalAffected
+	updateRollupProgress(metrics.RollupEdge, true, newWatermark, rawWatermark)
 	return totalAffected, nil
 }
 
@@ -817,6 +897,18 @@ func rollupWindow(lastWatermark, minIngested, rawMax int64) (start, end int64, c
 		chunked = true
 	}
 	return start, end, chunked
+}
+
+func updateRollupProgress(component metrics.RollupComponent, enabled bool, watermark, sourceMax int64) {
+	backlog := sourceMax - watermark
+	backlogChunks := 0
+	if backlog > 0 {
+		backlogChunks = int(backlog / rollupChunkNanos)
+		if backlog%rollupChunkNanos != 0 {
+			backlogChunks++
+		}
+	}
+	metrics.UpdateRollupProgress(component, enabled, watermark, sourceMax, backlogChunks)
 }
 
 func minServiceRollupIngested(ctx context.Context, tx *sql.Tx) (int64, error) {
@@ -1281,7 +1373,7 @@ FROM messaging_edges;`
 // snapshotGraceMinutes is how long a superseded DuckLake snapshot (and the
 // parquet files it references) is kept past compaction before expiry/cleanup
 // may reclaim it. It must exceed the longest read query — reads don't hold
-// writeMu, so a shorter window lets cleanup delete a file mid-scan — while
+// the write gate, so a shorter window lets cleanup delete a file mid-scan — while
 // staying well under the maintenance interval so file/snapshot growth stays
 // bounded. Queries are sub-second to a few seconds; 10 minutes is ample margin.
 const snapshotGraceMinutes = 10
@@ -1295,37 +1387,46 @@ const snapshotGraceMinutes = 10
 // cadence. Decoupling the two resolves the churn-vs-pileup tension: frequent
 // cheap merge keeps scans fast; rare deletes keep the race and overhead away.
 func (d *Duck) runMerge(ctx context.Context) error {
+	start := time.Now()
 	every := time.Duration(d.cfg.MergeEverySeconds) * time.Second
 	if every <= 0 {
+		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeDisabled, 0)
 		return nil // merge pass disabled
 	}
 	if !d.lastMerge.IsZero() && time.Since(d.lastMerge) < every {
+		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeThrottled, 0)
 		return nil
 	}
 	// merge commits new files — serialize against other writers like maintenance.
-	d.writeMu.Lock()
-	_, err := d.DB.ExecContext(ctx, "CALL ducklake_merge_adjacent_files('lake')")
-	d.writeMu.Unlock()
+	err := func() error {
+		defer d.writeGate.Lock(writegate.WriteMerge)()
+		_, err := d.DB.ExecContext(ctx, "CALL ducklake_merge_adjacent_files('lake')")
+		return err
+	}()
 	d.lastMerge = time.Now()
 	if err != nil {
+		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeError, time.Since(start).Seconds())
 		slog.Error("merge_adjacent_files failed", "err", err)
 		return fmt.Errorf("merge_adjacent_files: %w", err)
 	}
+	metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeSuccess, time.Since(start).Seconds())
 	return nil
 }
 
 func (d *Duck) runMaintenance(ctx context.Context) error {
+	start := time.Now()
 	every := time.Duration(d.cfg.MaintenanceEverySeconds) * time.Second
 	if every <= 0 {
 		every = time.Hour
 	}
 	if !d.lastMaintenance.IsZero() && time.Since(d.lastMaintenance) < every {
+		metrics.RecordDuckLakeOperation(metrics.DuckLakeMaintenance, metrics.DuckLakeThrottled, 0)
 		return nil
 	}
 
 	// Retention deletes and the checkpoint are writes — serialize them too.
-	d.writeMu.Lock()
-	defer d.writeMu.Unlock()
+	unlock := d.writeGate.Lock(writegate.WriteMaintenance)
+	defer unlock()
 
 	var errs []error
 	if d.cfg.RetentionDays > 0 {
@@ -1359,7 +1460,7 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	// DuckLake compaction. Every flush commits a snapshot and writes new parquet
 	// files; without merge + expiry both grow without bound until per-file
 	// metadata pins OOM every wide query (prod 2026-06-13: 60k snapshots, 50k
-	// files averaging 21KB, rollups dead at any memory_limit). Holding writeMu
+	// files averaging 21KB, rollups dead at any memory_limit). Holding the write gate
 	// here quiesces the dataset against WRITES, the precondition for these calls.
 	// Order: merge rewrites small files into large ones, expiry releases the
 	// snapshots that referenced the small ones, cleanup deletes the files no live
@@ -1367,7 +1468,7 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	// low-traffic instance (no new commits within the grace) still keeps a
 	// readable one.
 	//
-	// GRACE WINDOW (now() - snapshotGraceMinutes) on EXPIRY: writeMu does NOT
+	// GRACE WINDOW (now() - snapshotGraceMinutes) on EXPIRY: the write gate does NOT
 	// serialize reads, so an Overview/diagnose query can be mid-scan against a
 	// snapshot merge just superseded; expiring + deleting its parquet immediately
 	// yanks the file out from under the reader ("IO Error: Cannot open file …: No
@@ -1413,6 +1514,11 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	d.lastMaintenance = time.Now()
 
 	err := errors.Join(errs...)
+	result := metrics.DuckLakeSuccess
+	if err != nil {
+		result = metrics.DuckLakeError
+	}
+	metrics.RecordDuckLakeOperation(metrics.DuckLakeMaintenance, result, time.Since(start).Seconds())
 	d.maintHealthMu.Lock()
 	d.lastMaintenanceAt = time.Now()
 	if err == nil {
@@ -1438,7 +1544,7 @@ func isTransientLakeIOError(err error) bool {
 }
 
 // QueryContext runs a read query, retrying briefly on the transient DuckLake
-// "file deleted mid-scan" race (reads don't take writeMu, so maintenance can
+// "file deleted mid-scan" race (reads don't take the write gate, so maintenance can
 // unlink a just-merged file underneath them). Cleanup is instantaneous, so a
 // short backoff lets the retry re-plan against fresh files. Use this for every
 // read that scans the lake instead of DB.QueryContext directly.

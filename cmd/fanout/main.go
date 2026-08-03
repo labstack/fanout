@@ -90,10 +90,10 @@ func main() {
 	}
 	defer q.Close()
 
-	// Start Lake Writer. Share the query layer's write lock so appender flushes
+	// Start Lake Writer. Share the query layer's write gate so appender flushes
 	// serialize with rollup/maintenance commits when the pool holds >1 connection.
 	writer := lake.NewWriter(cfg, q.DB, chSpans, chLogs, chMetrics)
-	writer.UseWriteLock(q.WriteLock())
+	writer.UseWriteGate(q.WriteGate())
 	writerResult := make(chan error, 1)
 	go func() {
 		err := writer.Run(ctx)
@@ -225,7 +225,7 @@ func main() {
 	if cfg.PprofEnabled {
 		slog.Warn("pprof enabled at /debug/pprof — do not expose on an untrusted network")
 		// Enable mutex/block sampling so those profiles aren't empty — this is how
-		// writeMu / channel contention shows up under load. Small runtime cost,
+		// write-gate / channel contention shows up under load. Small runtime cost,
 		// acceptable because pprof is opt-in.
 		runtime.SetMutexProfileFraction(5)
 		runtime.SetBlockProfileRate(10_000) // sample a block event ~every 10µs
