@@ -22,6 +22,11 @@ export default defineConfig({
     // the heading in an <a href="#id"> so the TOC can deep-link. The wrap
     // behavior is paired with a `.docs-body h2 > a` style reset in
     // DocsLayout.astro — if you change the behavior here, update that too.
+    //
+    // `processor` replaced the flat `rehypePlugins` key in Astro 7. The
+    // `@astrojs/markdown-remark` dependency supplying `unified` must be kept
+    // on the same major as `astro` itself; bumping one without the other
+    // breaks this import.
     processor: unified({
       rehypePlugins: [
         rehypeSlug,
