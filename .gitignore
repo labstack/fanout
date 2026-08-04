@@ -1,6 +1,5 @@
 # Binaries
 /bin/
-/loadtest
 *.exe
 
 # Data
@@ -15,12 +14,8 @@
 .DS_Store
 
 # Browser assets are committed/generated because go:embed requires them when
-# building directly from a source checkout.
-
-# Site build output
-site/dist/
-site/.astro/
-site/node_modules/
+# building directly from a source checkout. These are the workspace-local
+# outputs, which are not what gets embedded.
 ui/host/node_modules/
 ui/host/dist/
 ui/host/tsconfig.tsbuildinfo
@@ -31,35 +26,26 @@ ui/apps/dist/
 # Root-scoped: a bare `testdata/` would also ignore Go package fixtures, which
 # are source and must be committed (see internal/brand/testdata/favicon.svg).
 /testdata/
-.playwright-mcp/
 *.pid
 tmp/
 .tmp/
-.air.toml
 coverage.out
 coverage.html
 cover.out
 
-# Env — `.env` matches at every depth, so per-service env files
-# (traefik/.env, demo/.env, fanout/.env) are all ignored automatically.
-# Templates live alongside as `<dir>/.env.example` (committed).
+# Env. Matches at every depth; commit `.env.example` templates instead.
 .env
 
-# Screenshots
-*.png
-bench-profiles/
-bench-results/
+# Root-scoped for the same reason as testdata/: a bare `*.png` would silently
+# swallow committed image assets anywhere in the tree.
+/*.png
 
-# Rendered per-deployment Traefik routing. Template: traefik/dynamic.yml.example
-/traefik/dynamic.yml
-
-# Local agent/tooling indexes — machine-specific, never committed.
+# Local agent and editor tooling indexes — machine-specific, never committed.
 .codegraph/
 .serena/
 .superpowers/
+.playwright-mcp/
 
-# Ad-hoc build outputs from `go build` without -o (named after the package).
+# Ad-hoc output from `go build` without -o (named after the package).
 /bench
-/genblocks
-/loadgen
-
+/fanout

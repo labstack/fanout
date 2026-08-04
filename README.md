@@ -51,6 +51,23 @@ lives in a separate SQLite database and never sits on the telemetry write path.
 
 ## Quick start
 
+### Docker
+
+```sh
+docker run -p 7520:7520 -p 4317:4317 \
+  -v fanout-data:/var/lib/fanout/data \
+  -e AUTH_CODE_SECRET=$(openssl rand -hex 32) \
+  -e AI_API_KEY=sk-... \
+  -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=... \
+  ghcr.io/labstack/fanout:latest
+```
+
+The image runs unprivileged as UID 999. A bind-mounted host directory at
+`/var/lib/fanout/data` must be writable by that user; a named volume, as above,
+needs no such handling.
+
+### From source
+
 ```sh
 git clone https://github.com/labstack/fanout.git
 cd fanout
@@ -136,16 +153,35 @@ docs/diagrams/     d2 sources and rendered SVG
 openspec/          canonical specs and active changes
 ```
 
+## Releases
+
+Versions are CalVer — `v{YYYY.MM}.{N}`, numbered from 1 within each month, so
+`v2026.08.2` is the second release of August 2026. Pushing a tag publishes the
+matching image and moves `latest`:
+
+| Image tag | Points at |
+| --- | --- |
+| `ghcr.io/labstack/fanout:latest` | the newest release |
+| `ghcr.io/labstack/fanout:2026.08.1` | that exact release |
+| `ghcr.io/labstack/fanout:main` | the tip of `main` |
+| `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
+
+Images are `linux/amd64`. DuckDB requires cgo and the build has no cross
+toolchain, so other architectures need to build from source.
+
 ## Contributing
 
-Issues and pull requests are welcome. Run `just check` before opening a pull
-request — it is the same gate CI enforces. Diagrams are authored in d2; run
-`just diagrams` after editing a `.d2` source and commit the regenerated SVG.
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Run `just check` before opening a pull request; it is the same gate CI
+enforces. For anything security-related, follow [SECURITY.md](SECURITY.md)
+instead of opening an issue.
 
-## Status
+## Scope
 
-Fanout is being opened up incrementally. Deployment tooling, the marketing
-site, and the demo stack are not part of this repository.
+This repository is Fanout itself, and it builds to a working binary with no
+other repository involved. Not included: LabStack's own deployment
+configuration, uptime monitoring, public demo instance, and marketing site.
+Those describe how we operate Fanout, not what it does.
 
 ## License
 

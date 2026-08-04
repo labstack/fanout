@@ -40,7 +40,7 @@ type Config struct {
 	// MaintenanceEverySeconds throttles the DuckLake maintenance cycle (retention
 	// deletes + compaction). Default 3600 (hourly). Lower it to compact more
 	// aggressively, or for soak tests that need to observe file-count staying
-	// bounded within minutes (see scripts/soak.sh).
+	// bounded within minutes rather than hours.
 	MaintenanceEverySeconds int `env:"DUCKLAKE_MAINTENANCE_EVERY_SECONDS" envDefault:"3600"`
 	// MergeEverySeconds is the cadence for the cheap, frequent DuckLake file
 	// compaction pass (ducklake_merge_adjacent_files only — it consolidates the

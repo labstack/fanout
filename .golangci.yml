@@ -19,7 +19,3 @@ linters:
         text: "QF"
       - linters: [unused]
         path: cmd/
-      - linters: [unused]
-        path: internal/mcp/discovery\.go
-      - linters: [unused]
-        path: internal/api/ui\.go

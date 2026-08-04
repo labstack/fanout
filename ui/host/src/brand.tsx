@@ -27,10 +27,9 @@ export function BrandMark({ size = "regular" }: { size?: BrandSize }) {
 }
 
 // "Flowing F" mark: three rounded ribbons forming an abstract F (no tile).
-// Keep the ribbon paths and gradients in sync with ui/host/public/favicon.svg,
-// site/public/favicon.svg, and the inline mark in
-// site/src/components/site/Nav.astro; the favicons additionally carry a
-// drop-shadow filter that this component omits.
+// Keep the ribbon paths and gradients in sync with ui/host/public/favicon.svg
+// and the server-rendered mark in internal/brand; the favicon additionally
+// carries a drop-shadow filter that this component omits.
 export function FanoutMark() {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const top = `fo-top-${uid}`;
