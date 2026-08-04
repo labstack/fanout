@@ -1,0 +1,63 @@
+# Binaries
+/bin/
+/loadtest
+*.exe
+
+# Data
+/data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Browser assets are committed/generated because go:embed requires them when
+# building directly from a source checkout.
+
+# Site build output
+site/dist/
+site/.astro/
+site/node_modules/
+ui/host/node_modules/
+ui/host/dist/
+ui/host/tsconfig.tsbuildinfo
+ui/apps/node_modules/
+ui/apps/dist/
+
+# Test/temp
+testdata/
+.playwright-mcp/
+*.pid
+tmp/
+.tmp/
+.air.toml
+coverage.out
+coverage.html
+cover.out
+
+# Env — `.env` matches at every depth, so per-service env files
+# (traefik/.env, demo/.env, fanout/.env) are all ignored automatically.
+# Templates live alongside as `<dir>/.env.example` (committed).
+.env
+
+# Screenshots
+*.png
+bench-profiles/
+bench-results/
+
+# Rendered per-deployment Traefik routing. Template: traefik/dynamic.yml.example
+/traefik/dynamic.yml
+
+# Local agent/tooling indexes — machine-specific, never committed.
+.codegraph/
+.serena/
+.superpowers/
+
+# Ad-hoc build outputs from `go build` without -o (named after the package).
+/bench
+/genblocks
+/loadgen
+
