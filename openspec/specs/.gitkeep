@@ -1,0 +1,2 @@
+# Canonical specs live here, one directory per capability, each holding a
+# spec.md that describes shipped behavior. Validate with `just docs-check`.

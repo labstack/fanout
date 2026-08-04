@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # DuckDB is a CGO dependency.
+  CGO_ENABLED: "1"
+
+jobs:
+  # Every step below runs a justfile recipe, named after it. Reproduce any
+  # failure locally with the command in the step name — nothing about the gate
+  # lives only in this file.
+  gate:
+    name: Gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - uses: extractions/setup-just@v4
+
+      # Pinned rather than `latest`: the embedded browser bundles are committed
+      # byte-for-byte and `just ui-check` fails if they drift, so a bun upgrade
+      # must be a deliberate commit rather than a surprise from a CI run.
+      - uses: oven-sh/setup-bun@v2.2.0
+        with:
+          bun-version: 1.3.14
+
+      # `--help` installs the pinned binary without linting; `just check` runs
+      # the real thing, so local and CI share one invocation.
+      - uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.12.2
+          args: --help
+
+      - name: just ui-deps
+        run: just ui-deps
+
+      # fmt-check, lint, ui-check, test, ui-test, spec-check — the same gate
+      # lefthook runs on push.
+      - name: just check
+        run: just check
+
+      # Re-runs the suite under the race detector. Kept out of `check` so the
+      # local pre-push hook stays fast.
+      - name: just test-race
+        run: just test-race
