@@ -1,0 +1,49 @@
+# Fast, staged-scoped checks on commit; the full gate on push.
+# Install with `just install`, or `lefthook install` on its own.
+#
+# Job names mirror the justfile's <subsystem>-<action> convention, so a failing
+# job maps onto the recipe that reproduces it: `ui-host-lint` here is what
+# `just ui-lint` runs for that workspace.
+#
+# The split is deliberate. A UI rebuild plus the Go test suite costs roughly a
+# minute — too slow to pay on every commit, cheap once per push. Nothing here
+# rewrites tracked files except gofmt, whose result is re-staged.
+
+pre-commit:
+  parallel: false
+  jobs:
+    - name: merge-conflict
+      glob: "*"
+      # Minified single-file bundles legitimately contain long runs of `=`, so
+      # the embedded asset trees are excluded rather than scanned.
+      exclude: "(^|/)(node_modules|dist)/|^internal/mcp/apps/"
+      run: |
+        if grep -lE '^(<{7}|={7}|>{7})( |$)' {staged_files} 2>/dev/null; then
+          echo "merge conflict markers found" >&2
+          exit 1
+        fi
+
+    # Named for `just fmt`, which is the mutating form this matches.
+    - name: fmt
+      glob: "*.go"
+      run: gofmt -w {staged_files}
+      stage_fixed: true
+
+    - name: lint
+      glob: "*.go"
+      # ~3s for the whole module, so scoping to changed packages would buy
+      # nothing and risks missing cross-package breakage.
+      run: golangci-lint run
+
+    - name: ui-host-lint
+      glob: "{ui/host/**/*.{ts,tsx},ui/theme.ts}"
+      run: cd ui/host && bun run lint
+
+    - name: ui-apps-lint
+      glob: "{ui/apps/**/*.{ts,tsx},ui/theme.ts}"
+      run: cd ui/apps && bun run lint
+
+pre-push:
+  jobs:
+    - name: check
+      run: just check
