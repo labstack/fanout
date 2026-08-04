@@ -1,6 +1,10 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
+The full layout and the component architecture live in
+[`docs/architecture.md`](docs/architecture.md); this is orientation only, and
+that document wins if the two disagree.
+
 `cmd/fanout` composes the single runtime binary; `cmd/bench` is the supported
 load generator. Backend code lives under `internal/` by domain: `ingest/` for
 OTLP/gRPC, `lake/` and `query/` for DuckLake/Parquet and DuckDB,

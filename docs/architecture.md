@@ -28,14 +28,19 @@ no loopback bearer token, and no second tool registry to keep in sync. A tool
 added for external MCP hosts is immediately available to the built-in agent, and
 vice versa.
 
-Normative version: [`product-foundation`](../openspec/specs/product-foundation/spec.md).
+Normative versions: the one-process boundary is in
+[`product-foundation`](../openspec/specs/product-foundation/spec.md); the
+in-memory transport and the prohibition on an HTTP self-call are in
+[`agent-and-mcp`](../openspec/specs/agent-and-mcp/spec.md).
 
 ## How a request travels
 
 **Telemetry in.** A collector or SDK sends OTLP to `:4317`. The ingest server
-normalizes it and hands it to the lake writer, which buffers and flushes in
-batches (`FLUSH_BATCH_SIZE`, 50,000 rows by default). Flushes append Parquet and
-commit through the write gate. See
+normalizes it and hands it to the lake writer, which buffers and flushes on
+whichever trigger fires first: `FLUSH_BATCH_SIZE` rows (50,000 by default) or
+every `FLUSH_SECONDS` (15 by default). Below roughly 3,300 rows/s the timer is
+the trigger that actually fires. Flushes append Parquet and commit through the
+write gate. See
 [`telemetry-ingestion`](../openspec/specs/telemetry-ingestion/spec.md).
 
 **Questions out.** Browser navigation, dashboards, MCP tools, and the agent all
@@ -61,18 +66,26 @@ Three stores, with different jobs:
 `DATA_DIR/telemetry` holds the DuckLake catalog and partitioned Parquet — the
 telemetry itself. `DATA_DIR/query` holds DuckDB's catalog attachment and temp
 spill. `DATA_DIR/control/fanout.sqlite` holds everything that is *not*
-telemetry: users, identities, sessions, audit events, MCP OAuth clients and
-tokens, dashboards and widgets, AG-UI threads and runs, and alert rules.
+telemetry — 16 tables covering users and identities, login verifications,
+sessions and audit events, MCP OAuth clients/tokens/codes, the settings store
+that holds the hashed ingest token, dashboards with their widgets and state,
+AG-UI threads and runs, and alert rules with fired alerts.
+`internal/db/schema.sql` is the authoritative list.
 
-Every catalog write — ingest flushes, all three rollups, adjacent-file merge,
-and maintenance — passes through one process-wide gate
-(`internal/lake/writegate`). Exactly one catalog write is in flight at a time,
-and the gate is always acquired *before* a database connection or transaction.
+After startup, every catalog write passes through one process-wide gate
+(`internal/lake/writegate`), across nine bounded operations: three ingest
+flushes, the startup rollup skip-to-latest, the three rollups, adjacent-file
+merge, and maintenance. Exactly one catalog write is in flight at a time, and
+the gate is always acquired *before* a database connection or transaction.
+
+Schema creation and DuckLake configuration in `internal/query/views.go` are the
+deliberate exception: they run once at boot, before any concurrent writer
+exists, and are not gated.
 
 This is the system's main contention point, and it is instrumented: the gate
 records wait and hold time per operation, so
-`fanout_write_gate_wait_seconds{operation="ingest_*"}` against
-`fanout_write_gate_hold_seconds{operation="rollup_*"}` shows directly how much
+`fanout_write_gate_wait_seconds{operation=~"ingest_.*"}` against
+`fanout_write_gate_hold_seconds{operation=~"rollup_.*"}` shows directly how much
 ingest is stalling behind background work.
 
 ## Repository layout
@@ -91,12 +104,12 @@ internal/env/               environment config loading and validation
 internal/id/                UUIDv7 identifier generation
 internal/ingest/            OTLP gRPC receiver
 internal/intelligence/      anomaly detection
-internal/lake/              DuckLake/Parquet writer and maintenance
+internal/lake/              DuckLake/Parquet batching writer
 internal/lake/writegate/    the shared catalog write gate and its metrics
 internal/mcp/               MCP tools, server, and embedded MCP App HTML
 internal/metrics/           Prometheus metrics
 internal/observability/     typed query/result domain types
-internal/query/             DuckDB catalog, queries, and rollups
+internal/query/             DuckDB catalog, queries, rollups, merge, maintenance
 internal/settings/          ingest-token and application settings store
 internal/store/             control SQLite bootstrap
 internal/ui/                embedded compiled browser assets only
@@ -111,23 +124,17 @@ tool-result apps live in `ui/apps`.
 
 ## Interfaces
 
-Nine MCP tools, registered in `internal/mcp/`. Five return typed observability
-results paired with an MCP App resource: `observability_overview`,
-`service_topology`, `service_performance`, `trace_detail`, `search_logs`. Four
-manage owner-scoped dashboards: `dashboard_list`, `dashboard_get`,
-`dashboard_create`, `dashboard_update`. Dashboard tools additionally require the
-`fanout:dashboard` scope, and the owner always comes from the verified token or
-the internal agent's request meta — never from tool input.
+Nine MCP tools are registered in `internal/mcp/`: five return typed
+observability results paired with an MCP App resource, and four manage
+owner-scoped dashboards. The tool names, their results, the scopes they
+require, and how tool-call ownership is established are normative in
+[`agent-and-mcp`](../openspec/specs/agent-and-mcp/spec.md) — that spec is the
+list, not this page.
 
-Hosts without MCP Apps still receive useful structured and text results.
-
-Auth middleware is global, and browser sessions are opaque server-side records
-in an HttpOnly cookie. Thread IDs are not an authorization boundary: the store
-scopes them to the authenticated owner. See
+Auth middleware is global, and the session and authorization rules are in
 [`identity-and-access`](../openspec/specs/identity-and-access/spec.md).
-
-Operational surfaces — configuration, health, `/-/metrics`, lifecycle — are
-specified in [`operations`](../openspec/specs/operations/spec.md). Alerting is in
+Operational surfaces — configuration, health, `/-/metrics`, lifecycle — are in
+[`operations`](../openspec/specs/operations/spec.md). Alerting is in
 [`alerting`](../openspec/specs/alerting/spec.md); dashboards in
 [`dashboards`](../openspec/specs/dashboards/spec.md).
 
@@ -151,7 +158,7 @@ already wrong in `CLAUDE.md` before this document existed:
 ```sh
 ls internal/ cmd/                                     # layout table
 grep -rn 'NewInMemoryTransports' internal/agent/      # no HTTP self-call
-grep -rn 'AddTool' internal/mcp/ | wc -l              # tool count
+grep -rn 'AddTool' --include='*.go' internal/mcp/ | grep -vc _test  # tool count
 grep -rn 'writegate' internal/query/ internal/lake/   # every gated write path
 grep -n 'DATA_DIR\|HTTP_ADDR\|OTLP_GRPC_ADDR' internal/env/config.go
 ```

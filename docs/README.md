@@ -61,5 +61,6 @@ the corresponding `/opsx:*` commands. GitHub Copilot prompt files live in
   not redefine them.
 - Archive only OpenSpec change artifacts. Superseded standalone plans, visions,
   requirements, references, and prototypes are deleted after consolidation.
-- Mermaid source lives with its owning requirement or design. Rendered diagrams
-  and prototypes are not a second source of truth.
+- Diagram source lives with what it describes — Mermaid inline, d2 under
+  `docs/diagrams/`. Rendered output is generated, never hand-edited, and is not
+  a second source of truth. Prototypes are not a source of truth at all.

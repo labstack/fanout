@@ -17,14 +17,15 @@
 ## 3. Write the document
 
 - [x] 3.1 Write `docs/architecture.md` covering the runtime shape, the request paths, the persistence split, and the repository layout, embedding the rendered SVG.
-- [x] 3.2 Link each behavioral topic to its capability spec under `openspec/specs/` instead of describing the behavior. Verify no requirement is restated.
+- [x] 3.2 Link each behavioral topic to its capability spec under `openspec/specs/` instead of describing the behavior. Verify no requirement is restated. Review caught a first pass that restated the `fanout:dashboard` scope, tool-call ownership, and session rules; the Interfaces section now points at `agent-and-mcp` and `identity-and-access` rather than enumerating them.
 - [x] 3.3 Record how to re-verify the structural claims, so the document can be checked rather than trusted.
 
 ## 4. Make it discoverable and single-owned
 
 - [x] 4.1 Link the document from `README.md` and from the table in `docs/README.md`.
-- [x] 4.2 Replace the architecture diagram and repository-layout table in `CLAUDE.md` with a link, keeping its agent-specific working rules.
-- [x] 4.3 Fix the drift from 1.6 wherever the layout survives.
+- [x] 4.2 Replace the architecture diagram and repository-layout table in `CLAUDE.md` with a link, keeping its agent-specific working rules. Review found the first pass left the persistence split, UI package naming, and the auth paragraph duplicated while the new text claimed `docs/architecture.md` solely owned them; those now link too.
+- [x] 4.3 Fix the drift from 1.6 wherever the layout survives, including the inherited `internal/lake` entry that credited it with maintenance code living in `internal/query`.
+- [x] 4.4 Point `AGENTS.md` at the architecture document. It is a third copy of the layout and the file non-Claude agents read.
 
 ## 5. Verify
 

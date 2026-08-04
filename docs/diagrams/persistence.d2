@@ -40,7 +40,7 @@ control: "Control SQLite\nDATA_DIR/control/fanout.sqlite" {
   tooltip: Application state. Never on the telemetry write path.
 }
 
-control_tables: "users, user_identities, sessions, auth_audit_events\noauth_clients, oauth_tokens, oauth_authorization_codes\ndashboards, dashboard_widgets, dashboard_state\nagui_threads, agui_runs, alert_rules, alerts" {
+control_tables: "users, user_identities, verifications, sessions, auth_audit_events\noauth_clients, oauth_tokens, oauth_authorization_codes\ndashboards, dashboard_widgets, dashboard_state\nagui_threads, agui_runs, alert_rules, alerts, settings" {
   shape: text
   style.font-size: 13
 }

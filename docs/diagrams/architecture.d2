@@ -29,15 +29,17 @@ fanout: "fanout — one Go process" {
   lake: "Lake writer\nbatched flush"
   query: "Query kernel\nDuckDB + rollups"
   gate: "Write gate\none catalog write in flight" {style.stroke-width: 2}
+  alert: "Alert engine\nrule evaluation + webhooks"
 
   ingest -> lake
-  http -> ui
+  http -> ui: serves embedded assets
   http -> agent: AG-UI stream
   http -> mcp
   mcp -> agent: in-memory transport
   mcp -> obs
-  ui -> obs
+  http -> obs: typed HTTP API
   obs -> query
+  alert -> query: evaluates rollups
   lake -> gate
   query -> gate: "rollups, merge, maintenance"
 }
@@ -57,5 +59,6 @@ clients.ext -> fanout.http: "/mcp — OAuth"
 
 fanout.gate -> store.telemetry
 fanout.query -> store.qstate
-fanout.http -> store.control: "users, sessions, dashboards, threads, alerts"
+fanout.http -> store.control: "users, sessions, settings, dashboards, threads"
+fanout.alert -> store.control: "rules and fired alerts"
 fanout.agent -> model: HTTPS

@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-This file is the working architecture guide for Claude Code and other coding
-agents in this repository.
+Working rules for Claude Code and other coding agents in this repository.
+For how Fanout is put together, read [`docs/architecture.md`](docs/architecture.md).
 
 ## Documentation source of truth
 
@@ -83,11 +83,6 @@ Dashboard tools require the `fanout:dashboard` OAuth scope in addition to
 `fanout:read`; the owner comes from the verified token (or the internal
 agent's request meta), never from tool input.
 
-### UI package naming
-
-`internal/ui` is intentionally small: it embeds and serves the compiled
-browser shell. React source lives in `ui/host`; portable tool-result apps live
-in `ui/apps`. The Go `ui` package is not a renderer registry.
 
 ## Repository layout
 
@@ -170,20 +165,15 @@ and SDK changes current and verify them against upstream sources before bumping.
 | `/api/auth/*` | setup, email/OIDC login, logout, and MCP OAuth consent |
 | `GET /`, `GET /*` | embedded browser shell and SPA fallback |
 
-Auth middleware is global. Browser authentication uses opaque server-side
-sessions in an HttpOnly cookie. Thread IDs are not authorization boundaries; the SQLite store
-always scopes them to the authenticated owner ID.
+Auth middleware is global. Session and authorization rules are normative in
+`openspec/specs/identity-and-access/`.
 
 ## Persistence
 
-- telemetry data: DuckLake catalog plus partitioned Parquet under
-  `DATA_DIR/telemetry`.
-- query catalog/temp data: `DATA_DIR/query`.
-- users, settings, alerts, MCP OAuth clients/codes/tokens, dashboards,
-  AG-UI threads, and runs: `DATA_DIR/control/fanout.sqlite`.
-
-Agent history tables are `agui_threads` and `agui_runs`. No PostgreSQL or
-separate conversation database is used.
+See [`docs/architecture.md`](docs/architecture.md#storage-and-the-one-lock-that-matters)
+for the three stores and the shared write gate. `internal/db/schema.sql` is the
+authoritative control-database schema. No PostgreSQL or separate conversation
+database is used.
 
 ## Verification
 
