@@ -58,7 +58,17 @@ Include the version (`fanout --version`), how Fanout is configured, and what
 you expected instead of what happened. For anything security-related, follow
 [SECURITY.md](SECURITY.md) rather than opening an issue.
 
+## Contributor License Agreement
+
+Before your first pull request can be merged, you need to sign the
+[CLA](CLA.md). A bot comments on the pull request with a sentence to reply
+with; that is the whole process, and it is only needed once.
+
+The CLA grants LabStack the right to relicense contributions. That is what
+keeps future licensing decisions possible — without it, any change would
+require permission from every past contributor individually.
+
 ## License
 
-Fanout is [AGPL-3.0](LICENSE). Contributions are accepted under the same
-license.
+Fanout is [Apache-2.0](LICENSE). Contributions are accepted under the same
+license, subject to the CLA above.

@@ -45,7 +45,7 @@ ARG VERSION=dev
 LABEL org.opencontainers.image.title="Fanout" \
       org.opencontainers.image.description="Single-binary, agent-native OpenTelemetry investigation" \
       org.opencontainers.image.source="https://github.com/labstack/fanout" \
-      org.opencontainers.image.licenses="AGPL-3.0-only" \
+      org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.version="${VERSION}"
 
 # wget is here for HEALTHCHECK below, nothing else.

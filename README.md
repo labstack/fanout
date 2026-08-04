@@ -3,7 +3,7 @@
 **Single-binary, agent-native OpenTelemetry investigation.**
 
 [![CI](https://github.com/labstack/fanout/actions/workflows/ci.yml/badge.svg)](https://github.com/labstack/fanout/actions/workflows/ci.yml)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/labstack/fanout.svg)](https://pkg.go.dev/github.com/labstack/fanout)
 
 Fanout ingests OpenTelemetry data, stores it as Parquet, queries it with DuckDB,
@@ -185,4 +185,4 @@ Those describe how we operate Fanout, not what it does.
 
 ## License
 
-[AGPL-3.0](LICENSE) © LabStack
+[Apache-2.0](LICENSE) © LabStack LLC. See [NOTICE](NOTICE) for attribution.
