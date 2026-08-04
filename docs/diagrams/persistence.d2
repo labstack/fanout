@@ -1,0 +1,53 @@
+# Where Fanout keeps state, and what serializes writes to it.
+# Render with `just diagrams`; commit the generated SVG beside this file.
+
+direction: down
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+    theme-id: 5
+  }
+}
+
+writers: Writers {
+  style.fill: transparent
+  ingest: "Ingest flush\nspans, logs, metrics" {shape: rectangle}
+  rollup: "Rollups\nservice, endpoint, edge" {shape: rectangle}
+  maint: "Merge and maintenance" {shape: rectangle}
+}
+
+gate: "Write gate — internal/lake/writegate\none catalog write in flight at a time" {
+  shape: rectangle
+  style: {
+    stroke-width: 2
+    bold: true
+  }
+}
+
+telemetry: "DuckLake catalog + Parquet\nDATA_DIR/telemetry" {
+  shape: cylinder
+  tooltip: Partitioned telemetry. Written only through the gate.
+}
+
+querystate: "DuckDB query state\nDATA_DIR/query" {
+  shape: cylinder
+  tooltip: Catalog attachment and temp spill. Not the telemetry itself.
+}
+
+control: "Control SQLite\nDATA_DIR/control/fanout.sqlite" {
+  shape: cylinder
+  tooltip: Application state. Never on the telemetry write path.
+}
+
+control_tables: "users, user_identities, verifications, sessions, auth_audit_events\noauth_clients, oauth_tokens, oauth_authorization_codes\ndashboards, dashboard_widgets, dashboard_state\nagui_threads, agui_runs, alert_rules, alerts, settings" {
+  shape: text
+  style.font-size: 13
+}
+
+writers.ingest -> gate
+writers.rollup -> gate
+writers.maint -> gate
+gate -> telemetry: "wait and hold measured per operation"
+telemetry <- querystate: attached
+control -> control_tables: {style.stroke-dash: 3}

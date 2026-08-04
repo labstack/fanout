@@ -139,6 +139,29 @@ ui-check:
     echo "  Run 'just ui' and commit the result." >&2
     exit 1
 
+# ── Diagrams ─────────────────────────────────────────────────────────────────
+
+# Renders docs/diagrams/*.d2 beside each source. Deliberately outside `build`
+# and `check`: the SVG is committed, so only someone editing a diagram needs d2
+# installed at all.
+#
+# The committed SVG was produced by d2 0.7.1. d2's output changes between minor
+# versions, so a different version re-renders every file and produces a large
+# diff that looks like a change but is not — check `d2 --version` before
+# committing one.
+
+# Render every d2 diagram to SVG.
+diagrams:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v d2 >/dev/null; then
+      echo "d2 not found — install with: brew install d2" >&2
+      exit 1
+    fi
+    for src in docs/diagrams/*.d2; do
+      d2 "$src" "${src%.d2}.svg"
+    done
+
 # ── Specs ────────────────────────────────────────────────────────────────────
 
 # Strict validation of the canonical specs and any active change in openspec/.
