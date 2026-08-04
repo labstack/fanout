@@ -1,0 +1,14 @@
+Fanout
+Copyright 2026 LabStack LLC
+
+This product includes software developed at LabStack LLC
+(https://labstack.com/).
+
+Licensed under the Apache License, Version 2.0. See LICENSE for the full
+license text.
+
+This product bundles third-party components. The compiled binary embeds
+browser assets built from the dependencies declared in ui/host/package.json
+and ui/apps/package.json, and links Go modules declared in go.mod. Those
+components remain under their own licenses, which are permissive
+(MIT, BSD, Apache-2.0) or MPL-2.0.
