@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+    # CalVer releases: v{YYYY.MM}.{N}, e.g. v2026.08.1
+    tags: ["v*"]
   pull_request:
     branches: [main]
 
@@ -61,3 +63,54 @@ jobs:
       # local pre-push hook stays fast.
       - name: just test-race
         run: just test-race
+
+  # Publishes ghcr.io/labstack/fanout on main and on CalVer tags. Pull requests
+  # build nothing — they have already been gated above.
+  image:
+    name: Image
+    if: github.event_name == 'push'
+    needs: gate
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v6.2.0
+        with:
+          images: ghcr.io/labstack/fanout
+          # CalVer is not semver — `2026.08.1` parses inconsistently and a
+          # leading zero like `2026.04.1` is mangled outright. Match the tag
+          # literally instead.
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=sha-
+            type=match,pattern=v(.*),group=1
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - uses: docker/setup-buildx-action@v4.2.0
+
+      - uses: docker/login-action@v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # linux/amd64 only: DuckDB needs CGO and the build stage has no cross
+      # toolchain, so another architecture needs a native runner or QEMU rather
+      # than an added platform here.
+      - name: Build and push
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -4,17 +4,19 @@
 
 # Data
 data/
-testdata/
 *.parquet
 
+# Root-scoped, matching .gitignore: a bare `testdata/` would also drop Go
+# package fixtures, which are source.
+/testdata/
+
 # Build
+bin/
 fanout
 ui/host/node_modules/
 ui/host/dist/
 ui/apps/node_modules/
 ui/apps/dist/
-site/node_modules/
-site/dist/
 
 # Dev files
 .env
@@ -22,6 +24,7 @@ site/dist/
 
 # Docs
 *.md
+docs/
 
 # IDE
 .vscode/
