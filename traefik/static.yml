@@ -20,7 +20,7 @@ providers:
 certificatesResolvers:
   le:
     acme:
-      email: v@labstack.com
+      # Supplied via TRAEFIK_CERTIFICATESRESOLVERS_LE_ACME_EMAIL in traefik/.env.
       storage: /letsencrypt/acme.json
       dnsChallenge:
         provider: cloudflare

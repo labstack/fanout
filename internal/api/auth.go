@@ -160,7 +160,7 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		resp["ingest_token"] = ingestToken
 		resp["ingest_header_name"] = "x-fanout-ingest-token"
 		// The endpoint collectors should actually use. Behind a reverse proxy
-		// this is the public TLS host (e.g. https://ingest.fanout.labstack.com),
+		// this is the public TLS host (e.g. https://ingest.example.com),
 		// NOT the internal :4317 — see suggestedIngestEndpoint.
 		resp["suggested_endpoint"] = suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestEndpoint)
 	}

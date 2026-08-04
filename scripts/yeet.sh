@@ -1,14 +1,23 @@
 #!/bin/bash
 set -euo pipefail
 
-# Deploy fanout.run (marketing + docs site), demo.fanout.run (live demo
-# fed by otel-demo), and fanout.labstack.com (own production instance) to
-# the target host. Single Docker Compose project — Traefik at the edge
-# handles TLS for four hostnames (fanout.run, demo.fanout.run,
-# fanout.labstack.com web, ingest.fanout.labstack.com OTLP gRPC) and
-# reverse-proxies to the `site`, `demo`, and `fanout` containers.
+# Deploy the marketing site, the live demo, and a Fanout instance to a target
+# host as one Docker Compose project. Traefik at the edge terminates TLS for
+# the configured hostnames and reverse-proxies to the `site`, `demo`, and
+# `fanout` containers.
+#
+# The target host is deployment-specific: pass it as the first argument, or
+# set FANOUT_DEPLOY_HOST (e.g. root@deploy.example.com). Hostnames themselves
+# are configured in the compose env files — see docker-compose.yaml.
 
-DEFAULT_SERVER="root@fanout.labstack.net"
+DEFAULT_SERVER="${FANOUT_DEPLOY_HOST:-}"
+
+# Public hostnames Traefik terminates TLS for. Override per deployment; the
+# smoke checks and the closing summary use exactly these.
+SITE_HOST="${FANOUT_SITE_HOST:-fanout.run}"
+DEMO_HOST="${FANOUT_DEMO_HOST:-demo.fanout.run}"
+APP_HOST="${FANOUT_APP_HOST:?FANOUT_APP_HOST must be set (public app hostname)}"
+INGEST_HOST="${FANOUT_INGEST_HOST:?FANOUT_INGEST_HOST must be set (OTLP gRPC hostname)}"
 
 SERVER=""
 SITE_VERSION=""
@@ -25,7 +34,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --help)
-      echo "Deploy fanout.run + demo.fanout.run + fanout.labstack.com"
+      echo "Deploy the site, demo, and fanout containers to a host"
       echo ""
       echo "Usage: $0 [user@]server [options]"
       echo ""
@@ -35,9 +44,9 @@ while [[ $# -gt 0 ]]; do
       echo "  --help                       Show this help"
       echo ""
       echo "Examples:"
-      echo "  $0                                                # Auto-resolve both versions from git tags"
+      echo "  $0 root@host.example.com                          # Auto-resolve both versions from git tags"
       echo "  $0 --fanout-version 2026.05.2                     # Pin fanout, auto-resolve site"
-      echo "  $0 root@other.server --site-version 2026.05.1     # Deploy to a different host"
+      echo "  $0 root@other.example.com --site-version 2026.05.1  # Deploy to a different host"
       exit 0
       ;;
     *)
@@ -53,6 +62,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -z "$SERVER" ]] && SERVER="$DEFAULT_SERVER"
+if [[ -z "$SERVER" ]]; then
+  echo "No deploy target. Pass [user@]host as the first argument, or set FANOUT_DEPLOY_HOST." >&2
+  exit 1
+fi
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REMOTE_DIR="/opt/fanout"
@@ -127,6 +140,11 @@ for dir in demo fanout traefik; do
     exit 1
   fi
 done
+if [[ ! -f "$REPO_DIR/traefik/dynamic.yml" ]]; then
+  echo "ERROR: traefik/dynamic.yml not found locally." >&2
+  echo "  Copy traefik/dynamic.yml.example to traefik/dynamic.yml and set your hostnames." >&2
+  exit 1
+fi
 # CF token preflight — file exists, key non-empty. lego (Traefik's bundled
 # ACME client) validates the token + its scope on first ACME run; errors
 # land cleanly in `docker compose logs -f traefik` if anything's wrong.
@@ -148,7 +166,7 @@ echo "Testing SSH..."
 if ! err=$(ssh -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new "$SERVER" true 2>&1 >/dev/null); then
     echo "ERROR: SSH connection to $SERVER failed:" >&2
     printf '%s\n' "$err" | tail -5 >&2
-    echo "  (in CI, a host-key mismatch means DEPLOY_KNOWN_HOSTS is stale — refresh: ssh-keyscan fanout.labstack.net | gh secret set DEPLOY_KNOWN_HOSTS)" >&2
+    echo "  (in CI, a host-key mismatch means DEPLOY_KNOWN_HOSTS is stale — refresh: ssh-keyscan <deploy-host> | gh secret set DEPLOY_KNOWN_HOSTS)" >&2
     exit 1
 fi
 
@@ -166,7 +184,7 @@ if ! command -v docker &> /dev/null; then
     sudo systemctl enable docker
     sudo systemctl start docker
     # usermod -aG docker only matters for non-root deploy users — skip it
-    # when the deploy SSH user is root (current default: root@fanout.labstack.net).
+    # when the deploy SSH user is root.
     if [[ "$(id -un)" != "root" ]]; then
         sudo usermod -aG docker "$(id -un)"
     fi
@@ -187,14 +205,16 @@ scp -r "$REPO_DIR/traefik" "$SERVER:$REMOTE_DIR/"
 scp -r "$REPO_DIR/demo"    "$SERVER:$REMOTE_DIR/"
 scp -r "$REPO_DIR/fanout"  "$SERVER:$REMOTE_DIR/"
 
-# Root .env on the host — image tags for docker-compose.yaml interpolation.
+# Root .env on the host — image tags and public URLs for docker-compose.yaml
+# interpolation, derived from the hostname variables set at the top.
 # Per-service secrets live in <service>/.env (scp'd above) and are loaded
 # via env_file: in compose, not from this root file. SITE_VERSION and
 # FANOUT_VERSION resolve from their own git-tag namespaces (site/v* and
 # fanout/v*); compose enforces non-empty via ${VAR:?...} so a missing one
 # fails parse, not later as a confusing "manifest unknown" pull error.
-printf 'SITE_VERSION=%s\nFANOUT_VERSION=%s\n' \
+printf 'SITE_VERSION=%s\nFANOUT_VERSION=%s\nFANOUT_PUBLIC_URL=%s\nFANOUT_MCP_PUBLIC_URL=%s\nFANOUT_INGEST_ENDPOINT=%s\n' \
     "$SITE_VERSION" "$FANOUT_VERSION" \
+    "https://$APP_HOST" "https://$APP_HOST/mcp" "https://$INGEST_HOST" \
   | ssh "$SERVER" "cat > $REMOTE_DIR/.env && chmod 600 $REMOTE_DIR/.env"
 
 echo "Deploying..."
@@ -262,10 +282,10 @@ tls_smoke() {
 # reporting the first and quitting paints a misleading partial-outage
 # picture exactly when the operator needs the full view.
 failed=0
-smoke https://fanout.run                          || failed=1
-smoke https://demo.fanout.run                     || failed=1
-smoke https://fanout.labstack.com/healthz         || failed=1
-tls_smoke ingest.fanout.labstack.com 443          || failed=1
+smoke "https://$SITE_HOST"           || failed=1
+smoke "https://$DEMO_HOST"           || failed=1
+smoke "https://$APP_HOST/healthz"    || failed=1
+tls_smoke "$INGEST_HOST" 443         || failed=1
 if (( failed )); then
   echo "ERROR: one or more smoke checks failed; inspect 'docker compose logs -f traefik' on the host." >&2
   exit 1
@@ -294,10 +314,10 @@ fi
 
 echo ""
 echo "Deployed:"
-echo "  https://fanout.run"
-echo "  https://demo.fanout.run"
-echo "  https://fanout.labstack.com"
-echo "  https://ingest.fanout.labstack.com  (OTLP gRPC, TLS on 443)"
+echo "  https://$SITE_HOST"
+echo "  https://$DEMO_HOST"
+echo "  https://$APP_HOST"
+echo "  https://$INGEST_HOST  (OTLP gRPC, TLS on 443)"
 echo ""
 echo "Status: ssh $SERVER 'cd $REMOTE_DIR && docker compose ps'"
 echo "Logs:   ssh $SERVER 'cd $REMOTE_DIR && docker compose logs -f traefik'"

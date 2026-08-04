@@ -461,7 +461,7 @@ func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
 }
 
 func TestSetupReturnsConfiguredIngestEndpoint(t *testing.T) {
-	const endpoint = "https://ingest.fanout.labstack.com"
+	const endpoint = "https://ingest.example.com"
 	s := newTestAuthServerWith(t, env.Config{AuthMode: "local", IngestEndpoint: endpoint}, auth.SMTPConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
 	req.Header.Set("Content-Type", "application/json")

@@ -7,7 +7,7 @@ name: Deploy
 # Required repository secrets:
 #   DEPLOY_SSH_KEY      private key authorized on the deploy host (dedicated
 #                       key, not a personal one)
-#   DEPLOY_KNOWN_HOSTS  pinned host key: ssh-keyscan fanout.labstack.net | gh secret set DEPLOY_KNOWN_HOSTS
+#   DEPLOY_KNOWN_HOSTS  pinned host key: ssh-keyscan <deploy-host> | gh secret set DEPLOY_KNOWN_HOSTS
 #   FANOUT_ENV_B64      base64 of fanout/.env
 #   DEMO_ENV_B64        base64 of demo/.env
 #   TRAEFIK_ENV_B64     base64 of traefik/.env

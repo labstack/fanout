@@ -22,7 +22,7 @@ type Config struct {
 	HTTPAddr     string `env:"HTTP_ADDR" envDefault:":7520"`
 	OTLPGRPCAddr string `env:"OTLP_GRPC_ADDR" envDefault:"127.0.0.1:4317"`
 	// IngestEndpoint is the OTLP endpoint the UI advertises in its "collector
-	// configuration" hint (e.g. "https://ingest.fanout.labstack.com"). It may be
+	// configuration" hint (e.g. "https://ingest.example.com"). It may be
 	// public or private — it's just the externally-reachable address, distinct
 	// from OTLPGRPCAddr (the bind/listen address). Empty → derive host:port from
 	// the browser request + OTLPGRPCAddr (best-effort, dev-friendly).

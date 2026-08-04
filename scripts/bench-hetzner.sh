@@ -4,7 +4,7 @@
 # The VM is ALWAYS deleted on exit (trap), including on failure or Ctrl-C.
 #
 # Usage:  scripts/bench-hetzner.sh [SERVER_TYPE] [SSH_KEY] [LOCATION]
-# Example: scripts/bench-hetzner.sh cpx32 v@labstack.com fsn1
+# Example: scripts/bench-hetzner.sh cpx32 my-hcloud-ssh-key fsn1
 #
 # Requires: hcloud CLI with an authenticated context, an uploaded SSH key whose
 # private key is loaded in your agent, and a clean git tree (HEAD is shipped).
@@ -12,7 +12,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 TYPE="${1:-cpx32}"
-SSH_KEY="${2:-v@labstack.com}"
+SSH_KEY="${2:-${HCLOUD_SSH_KEY:?pass an hcloud SSH key name as arg 2 or set HCLOUD_SSH_KEY}}"
 LOC="${3:-fsn1}"
 NAME="fanout-bench-$$"
 GOVER="1.26.4"

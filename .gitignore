@@ -47,3 +47,17 @@ cover.out
 *.png
 bench-profiles/
 bench-results/
+
+# Rendered per-deployment Traefik routing. Template: traefik/dynamic.yml.example
+/traefik/dynamic.yml
+
+# Local agent/tooling indexes — machine-specific, never committed.
+.codegraph/
+.serena/
+.superpowers/
+
+# Ad-hoc build outputs from `go build` without -o (named after the package).
+/bench
+/genblocks
+/loadgen
+

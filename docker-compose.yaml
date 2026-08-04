@@ -56,12 +56,12 @@ services:
       FLUSH_SECONDS: "60"
       # OTLP endpoint shown in the UI's collector-config hint. Behind Traefik the
       # browser host differs from the OTLP host, so set it explicitly.
-      INGEST_ENDPOINT: https://ingest.fanout.labstack.com
+      INGEST_ENDPOINT: ${FANOUT_INGEST_ENDPOINT:?set FANOUT_INGEST_ENDPOINT (e.g. https://ingest.example.com)}
       # Canonical browser URL. Fanout uses this trusted value to emit Secure
       # session cookies when TLS terminates at Traefik.
-      PUBLIC_URL: https://fanout.labstack.com
+      PUBLIC_URL: ${FANOUT_PUBLIC_URL:?set FANOUT_PUBLIC_URL (e.g. https://fanout.example.com)}
       # Canonical OAuth resource/audience for remote MCP clients.
-      MCP_PUBLIC_URL: https://fanout.labstack.com/mcp
+      MCP_PUBLIC_URL: ${FANOUT_PUBLIC_URL:?set FANOUT_PUBLIC_URL (e.g. https://fanout.example.com)}/mcp
       # Allow concurrent read queries; write commits stay serialized by the
       # shared write mutex. Watch logs for SQLITE_BUSY after raising this.
       DUCKDB_MAX_CONNS: "4"

@@ -29,7 +29,21 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Probe public hostnames
+        # Hostnames are deployment-specific. Set them as repository variables
+        # (Settings → Secrets and variables → Actions → Variables). Empty
+        # values fail the step rather than probing "https://" and passing.
+        env:
+          SITE_HOST: ${{ vars.SITE_HOST }}
+          DEMO_HOST: ${{ vars.DEMO_HOST }}
+          APP_HOST: ${{ vars.APP_HOST }}
+          INGEST_HOST: ${{ vars.INGEST_HOST }}
         run: |
+          for v in SITE_HOST DEMO_HOST APP_HOST INGEST_HOST; do
+            if [[ -z "${!v}" ]]; then
+              echo "$v is not set — define it as a repository variable." >&2
+              exit 1
+            fi
+          done
           # -e is inherited from GitHub's default shell (bash -e {0}), so
           # every fallible command below must stay inside an if/|| guard.
           set -uo pipefail
@@ -71,9 +85,9 @@ jobs:
             return 1
           }
           failed=0
-          check https://fanout.run                   || failed=1
-          check https://demo.fanout.run              || failed=1
-          check https://fanout.labstack.com/healthz  || failed=1
-          check https://demo.fanout.run/healthz      || failed=1
-          tls_check ingest.fanout.labstack.com       || failed=1
+          check "https://${SITE_HOST}"        || failed=1
+          check "https://${DEMO_HOST}"        || failed=1
+          check "https://${APP_HOST}/healthz" || failed=1
+          check "https://${DEMO_HOST}/healthz"|| failed=1
+          tls_check "${INGEST_HOST}"          || failed=1
           exit "$failed"

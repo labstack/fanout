@@ -36,7 +36,7 @@ func TestCodeMailUsesFanoutBrandAndEscapesCode(t *testing.T) {
 
 func TestMailMessageContainsPlainTextAndHTMLAlternatives(t *testing.T) {
 	message, err := newMailMessage(
-		"Fanout <fanout@labstack.com>",
+		"Fanout <fanout@example.com>",
 		"operator@example.com",
 		"Fanout login code: 123456",
 		"Your Fanout verification code is 123456.",

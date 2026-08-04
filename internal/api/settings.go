@@ -81,7 +81,7 @@ type ingestResponse struct {
 }
 
 func suggestedIngestEndpoint(req *http.Request, grpcAddr, configured string) string {
-	// An explicit public endpoint (e.g. "https://ingest.fanout.labstack.com")
+	// An explicit public endpoint (e.g. "https://ingest.example.com")
 	// wins — it's the only value that's correct behind a reverse proxy, where
 	// the browser host and the OTLP host differ.
 	if configured != "" {
