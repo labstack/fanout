@@ -1,0 +1,1 @@
+import{c as e,n as t,t as n}from"./jsx-runtime-CfjKz_hj.js";import{t as r}from"./useNavigate-CL-cOwWv.js";import{i}from"./index-BHsQ7fa4.js";var a=e(t()),o=n();function s(){let e=(0,a.useMemo)(()=>i(),[]);return(0,o.jsx)(r,{to:`/chat/$threadId`,params:{threadId:e},replace:!0})}export{s as component};

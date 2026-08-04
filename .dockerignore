@@ -1,0 +1,32 @@
+# Git
+.git/
+.gitignore
+
+# Data
+data/
+testdata/
+*.parquet
+
+# Build
+fanout
+ui/host/node_modules/
+ui/host/dist/
+ui/apps/node_modules/
+ui/apps/dist/
+site/node_modules/
+site/dist/
+
+# Dev files
+.env
+.env.*
+
+# Docs
+*.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
