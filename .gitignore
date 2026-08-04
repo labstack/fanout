@@ -28,7 +28,9 @@ ui/apps/node_modules/
 ui/apps/dist/
 
 # Test/temp
-testdata/
+# Root-scoped: a bare `testdata/` would also ignore Go package fixtures, which
+# are source and must be committed (see internal/brand/testdata/favicon.svg).
+/testdata/
 .playwright-mcp/
 *.pid
 tmp/
