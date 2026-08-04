@@ -14,6 +14,7 @@ required at runtime.
 - **Docs:** [fanout.run/docs](https://fanout.run/docs/)
 - **Demo:** [demo.fanout.run](https://demo.fanout.run)
 - **Releases:** [github.com/labstack/fanout/releases](https://github.com/labstack/fanout/releases)
+- **Architecture:** [`docs/architecture.md`](docs/architecture.md)
 - **Product contract:** [`openspec/specs/`](openspec/specs/)
 
 ## Quick start

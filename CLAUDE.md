@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-This file is the working architecture guide for Claude Code and other coding
-agents in this repository.
+Working rules for Claude Code and other coding agents in this repository.
+For how Fanout is put together, read [`docs/architecture.md`](docs/architecture.md).
 
 ## Documentation source of truth
 
@@ -30,28 +30,14 @@ not present in the release image or required at runtime.
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    OTLP[OTLP gRPC :4317] --> INGEST[Go ingest pipeline]
-    INGEST --> LAKE[(DuckLake + Parquet)]
-    LAKE --> DUCK[Embedded DuckDB]
-    DUCK --> QUERY[Typed observability kernel]
+Read [`docs/architecture.md`](docs/architecture.md) for the component diagram,
+the request paths, the persistence split, and the repository layout. It is the
+single owner of that description — do not restate it here, because the copy that
+used to live in this file drifted out of date.
 
-    QUERY --> HTTP[Deterministic HTTP API]
-    QUERY --> MCP[MCP tools + MCP Apps]
-    MCP --> EXT[External MCP hosts]
-    MCP -->|in-memory transport| AGENT[Go model/tool loop]
-    MODEL[Anthropic or OpenAI] <--> AGENT
-    AGENT --> AGUI[AG-UI stream]
-    AGENT --> SQLITE[(Control SQLite threads/runs)]
-
-    AGUI --> WEB[Embedded React host]
-    MCP --> WEB
-```
-
-The internal agent calls the same MCP tools as external clients. Its connection
-is in-memory, so there is no HTTP self-call, internal bearer token, sidecar, or
-second service.
+The one property to keep in mind while editing: the internal agent calls the
+same MCP tools as external clients over an in-memory transport, so there is no
+HTTP self-call, internal bearer token, sidecar, or second service.
 
 ## Interface contracts
 
@@ -97,38 +83,11 @@ Dashboard tools require the `fanout:dashboard` OAuth scope in addition to
 `fanout:read`; the owner comes from the verified token (or the internal
 agent's request meta), never from tool input.
 
-### UI package naming
-
-`internal/ui` is intentionally small: it embeds and serves the compiled
-browser shell. React source lives in `ui/host`; portable tool-result apps live
-in `ui/apps`. The Go `ui` package is not a renderer registry.
 
 ## Repository layout
 
-```text
-cmd/fanout/                 process composition and the single entry point
-internal/agent/             providers, AG-UI runtime, MCP tool adapter, history
-internal/alert/             expr-lang alert engine, rule store, webhook delivery
-internal/api/               HTTP routes, auth middleware, settings, alerts, health
-internal/auth/              email/OIDC login, browser sessions, MCP OAuth store
-internal/dashboard/         dashboard domain service, validation, and identity
-internal/db/                control SQLite schema, migrations, and sqlc queries
-internal/env/               environment config loading and validation
-internal/id/                UUIDv7 identifier generation
-internal/ingest/            OTLP gRPC receiver
-internal/intelligence/      anomaly detection
-internal/lake/              DuckLake/Parquet writer and maintenance
-internal/mcp/               MCP tools, server, and embedded MCP App HTML
-internal/metrics/           Prometheus metrics
-internal/observability/     typed query/result domain types
-internal/query/             DuckDB catalog, queries, and rollups
-internal/settings/          ingest-token and application settings store
-internal/store/             control SQLite bootstrap
-internal/ui/                embedded compiled browser assets only
-ui/host/                    React AG-UI browser host (build-time)
-ui/apps/                    portable React MCP Apps (build-time)
-site/                       public site and documentation
-```
+See [`docs/architecture.md`](docs/architecture.md#repository-layout). Keeping a
+second copy here is what let the old one fall out of date.
 
 ## Build and run
 
@@ -206,20 +165,15 @@ and SDK changes current and verify them against upstream sources before bumping.
 | `/api/auth/*` | setup, email/OIDC login, logout, and MCP OAuth consent |
 | `GET /`, `GET /*` | embedded browser shell and SPA fallback |
 
-Auth middleware is global. Browser authentication uses opaque server-side
-sessions in an HttpOnly cookie. Thread IDs are not authorization boundaries; the SQLite store
-always scopes them to the authenticated owner ID.
+Auth middleware is global. Session and authorization rules are normative in
+`openspec/specs/identity-and-access/`.
 
 ## Persistence
 
-- telemetry data: DuckLake catalog plus partitioned Parquet under
-  `DATA_DIR/telemetry`.
-- query catalog/temp data: `DATA_DIR/query`.
-- users, settings, alerts, MCP OAuth clients/codes/tokens, dashboards,
-  AG-UI threads, and runs: `DATA_DIR/control/fanout.sqlite`.
-
-Agent history tables are `agui_threads` and `agui_runs`. No PostgreSQL or
-separate conversation database is used.
+See [`docs/architecture.md`](docs/architecture.md#storage-and-the-one-lock-that-matters)
+for the three stores and the shared write gate. `internal/db/schema.sql` is the
+authoritative control-database schema. No PostgreSQL or separate conversation
+database is used.
 
 ## Verification
 

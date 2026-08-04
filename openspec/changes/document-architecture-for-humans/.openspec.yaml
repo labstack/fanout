@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-08-03
+skip_specs: true
+goal: Give a human reader one current, codebase-verified description of how
+  Fanout is put together, in docs/ where OpenSpec's taxonomy has no slot for it,
+  with diagrams authored in d2 and rendered to committed SVG.

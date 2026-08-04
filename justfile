@@ -86,6 +86,26 @@ fmt-check:
 docs-check:
     npx --yes @fission-ai/openspec@{{openspec_version}} validate --all --strict --no-interactive
 
+# Render docs/diagrams/*.d2 to SVG beside each source. Not part of `build` or
+# `check`: the rendered SVG is committed, so only someone editing a diagram
+# needs d2 at all.
+#
+# The committed SVG was produced by d2 0.7.1. d2's output changes between minor
+# versions, so a different version re-renders every file and produces a large
+# diff that looks like a change but is not — check `d2 --version` before
+# committing one. This recipe does not run `d2 fmt`: rendering should not
+# rewrite tracked sources, so `git status` after a render means the SVG was
+# stale, and nothing else.
+diagrams:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v d2 >/dev/null; then
+      echo "d2 not found — install with: brew install d2" >&2; exit 1
+    fi
+    for src in docs/diagrams/*.d2; do
+      d2 "$src" "${src%.d2}.svg"
+    done
+
 # Run Go tests
 test *ARGS='./...':
     go test {{ARGS}}
