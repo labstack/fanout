@@ -86,6 +86,20 @@ fmt-check:
 docs-check:
     npx --yes @fission-ai/openspec@{{openspec_version}} validate --all --strict --no-interactive
 
+# Render docs/diagrams/*.d2 to SVG beside each source. Requires d2 (brew install
+# d2) and is deliberately not part of `build` or `check`: the rendered SVG is
+# committed, so only someone editing a diagram needs the tool.
+diagrams:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v d2 >/dev/null; then
+      echo "d2 not found — install with: brew install d2" >&2; exit 1
+    fi
+    for src in docs/diagrams/*.d2; do
+      d2 fmt "$src"
+      d2 "$src" "${src%.d2}.svg"
+    done
+
 # Run Go tests
 test *ARGS='./...':
     go test {{ARGS}}

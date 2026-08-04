@@ -1,0 +1,61 @@
+# Fanout runtime architecture: what one process owns, and how a request reaches
+# storage. Render with `just diagrams`; commit the SVG beside this file.
+
+vars: {
+  d2-config: {
+    layout-engine: dagre
+    theme-id: 5
+  }
+}
+
+direction: down
+
+clients: Clients {
+  style.fill: transparent
+  collector: "OTLP collector or SDK" {style.stroke-dash: 3}
+  browser: Browser {style.stroke-dash: 3}
+  ext: "External MCP host" {style.stroke-dash: 3}
+}
+
+fanout: "fanout — one Go process" {
+  style.stroke-width: 2
+
+  http: "HTTP :7520\nroutes + auth middleware"
+  ingest: "Ingest\nOTLP gRPC :4317"
+  ui: "Embedded React assets"
+  agent: "Agent runtime\nmodel + tool loop"
+  mcp: "MCP server\n5 typed + 4 dashboard tools"
+  obs: "Typed observability contract"
+  lake: "Lake writer\nbatched flush"
+  query: "Query kernel\nDuckDB + rollups"
+  gate: "Write gate\none catalog write in flight" {style.stroke-width: 2}
+
+  ingest -> lake
+  http -> ui
+  http -> agent: AG-UI stream
+  http -> mcp
+  mcp -> agent: in-memory transport
+  mcp -> obs
+  ui -> obs
+  obs -> query
+  lake -> gate
+  query -> gate: "rollups, merge, maintenance"
+}
+
+store: Storage {
+  style.fill: transparent
+  telemetry: "DuckLake + Parquet\nDATA_DIR/telemetry" {shape: cylinder}
+  qstate: "Query catalog\nDATA_DIR/query" {shape: cylinder}
+  control: "Control SQLite\nDATA_DIR/control" {shape: cylinder}
+}
+
+model: "Anthropic or OpenAI" {style.stroke-dash: 3}
+
+clients.collector -> fanout.ingest: OTLP
+clients.browser -> fanout.http: HTTPS
+clients.ext -> fanout.http: "/mcp — OAuth"
+
+fanout.gate -> store.telemetry
+fanout.query -> store.qstate
+fanout.http -> store.control: "users, sessions, dashboards, threads, alerts"
+fanout.agent -> model: HTTPS

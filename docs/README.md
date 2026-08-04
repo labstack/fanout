@@ -5,6 +5,7 @@ behavior, proposed work, historical decisions, and operator procedure separate.
 
 | Need | Source |
 |---|---|
+| How Fanout is put together | [`architecture.md`](architecture.md) |
 | What Fanout does now | [`openspec/specs/`](../openspec/specs/) |
 | What may change next | [`openspec/changes/`](../openspec/changes/) |
 | Why an approved OpenSpec change was made | [`openspec/changes/archive/`](../openspec/changes/archive/) |
