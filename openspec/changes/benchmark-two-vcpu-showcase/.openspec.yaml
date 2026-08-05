@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-08-04
+skip_specs: true
+goal: Measure what Fanout ingests and queries on two dedicated vCPUs, on
+  hardware anyone can rent, and publish the numbers with the method beside them
+  so a reader can reproduce or dispute them rather than take them on trust.

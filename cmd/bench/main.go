@@ -89,7 +89,15 @@ type config struct {
 	// fanoutVersion is recorded in the report so a stored run.json says which
 	// server build produced it. Report-only; it never changes Fanout config.
 	fanoutVersion string
+	// stepDuration is how long each adaptive step runs. Unused when -rate is
+	// set explicitly, which pins the harness to a single fixed-rate trial.
+	stepDuration time.Duration
 }
+
+// adaptive reports whether this run discovers its own rate. An explicit -rate
+// pins the harness to one trial, which is what a regression gate wants; the
+// default ramps, which is what a capacity question wants.
+func (c config) adaptive() bool { return c.rate <= 0 }
 
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "dev"
@@ -98,9 +106,10 @@ func main() {
 	var cfg config
 	flag.StringVar(&cfg.endpoint, "endpoint", "localhost:4317", "OTLP gRPC endpoint")
 	flag.StringVar(&cfg.token, "token", "", "ingest token (x-fanout-ingest-token); omit when fanout runs with PUBLIC_INGEST=true")
-	flag.Float64Var(&cfg.rate, "rate", 1000, "target traces per second (aggregate)")
-	flag.DurationVar(&cfg.duration, "duration", time.Minute, "run duration; 0 means run until interrupted")
-	flag.IntVar(&cfg.workers, "workers", 8, "concurrent senders")
+	flag.Float64Var(&cfg.rate, "rate", 0, "target traces per second (aggregate); 0 ramps adaptively to find what this server sustains")
+	flag.DurationVar(&cfg.duration, "duration", time.Minute, "run duration for a fixed -rate run; 0 means run until interrupted")
+	flag.IntVar(&cfg.workers, "workers", 0, "concurrent senders; 0 sizes them from the driver's cores")
+	flag.DurationVar(&cfg.stepDuration, "step", 30*time.Second, "duration of each step while ramping adaptively")
 	flag.IntVar(&cfg.services, "services", 20, "number of distinct services")
 	flag.IntVar(&cfg.namespaces, "namespaces", 1, "number of distinct namespaces")
 	flag.IntVar(&cfg.cardinality, "attr-cardinality", 100, "distinct values per high-cardinality attribute")
@@ -121,17 +130,26 @@ func main() {
 	flag.StringVar(&cfg.fanoutVersion, "fanout-version", "unknown", "Fanout build/version identifier under test, recorded in the report")
 	flag.Parse()
 
-	if err := validateTrialConfig(cfg); err != nil {
+	// Self-size before validation: a zero worker count is how the operator asks
+	// for auto-sizing, but every trial downstream needs a concrete number.
+	if cfg.workers <= 0 {
+		cfg.workers = autoWorkers(numCPU())
+	}
+	// The rate is resolved per step in adaptive mode, so validate the trial
+	// config against a placeholder that the ramp will overwrite.
+	if probe := cfg; probe.rate <= 0 {
+		probe.rate = seedRate(numCPU())
+		if err := validateTrialConfig(probe); err != nil {
+			log.Fatal(err)
+		}
+	} else if err := validateTrialConfig(cfg); err != nil {
 		log.Fatal(err)
 	}
 
+	// No global deadline: in adaptive mode the run is a sequence of steps, each
+	// bounded separately. Signals still cut the whole thing short.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if cfg.duration > 0 {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, cfg.duration)
-		defer cancel()
-	}
 
 	conn, err := grpc.NewClient(cfg.endpoint, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
@@ -139,36 +157,62 @@ func main() {
 	}
 	defer conn.Close()
 
-	g := &generator{
-		cfg:      cfg,
-		traces:   collectortrace.NewTraceServiceClient(conn),
-		logs:     collectorlogs.NewLogsServiceClient(conn),
-		metrics:  collectormetrics.NewMetricsServiceClient(conn),
-		lat:      newHistogram(),
-		queryLat: newHistogram(),
-		queryLatByOperation: map[string]*histogram{
-			"overview":    newHistogram(),
-			"topology":    newHistogram(),
-			"performance": newHistogram(),
-			"trace":       newHistogram(),
-			"logs":        newHistogram(),
-		},
-		http: &http.Client{Timeout: 30 * time.Second},
-		svcNames: func() []string {
-			names := make([]string, cfg.services)
-			for i := range names {
-				names[i] = fmt.Sprintf("svc-%02d", i)
-			}
-			return names
-		}(),
-	}
+	fmt.Printf("bench → %s | workers=%d services=%d namespaces=%d cardinality=%d error-rate=%.2f\n",
+		cfg.endpoint, cfg.workers, cfg.services, cfg.namespaces, cfg.cardinality, cfg.errorRate)
 
-	fmt.Printf("bench → %s | rate=%.0f/s workers=%d services=%d namespaces=%d cardinality=%d error-rate=%.2f\n",
-		cfg.endpoint, cfg.rate, cfg.workers, cfg.services, cfg.namespaces, cfg.cardinality, cfg.errorRate)
-
-	// Baseline server metrics before load (for end-of-run deltas).
 	var baseline *metricSnapshot
 	var infrastructureFailures []string
+
+	// Session clock, spanning the ramp and the confirmation pass. Each trial
+	// keeps its own clock for its own rate; the manifest describes the whole run.
+	start := time.Now()
+
+	// Ramp first to find what this server sustains, then confirm at that rate.
+	// The headline numbers therefore describe a rate the machine actually holds,
+	// not the saturated step that ended the ramp.
+	var steps []rampStep
+	var stopReason string
+	if cfg.adaptive() {
+		policy := defaultRampPolicy()
+		fmt.Printf("adaptive: ramping in %s steps (%d max) to find the sustainable rate\n", cfg.stepDuration, policy.MaxSteps)
+		for {
+			decision := decideNextStep(steps, policy)
+			if decision.Stop {
+				stopReason = decision.Reason
+				break
+			}
+			trial := cfg
+			trial.rate = decision.NextRate
+			trial.duration = cfg.stepDuration
+			sg, selapsed := runTrial(ctx, trial, conn, true)
+			step := rampStep{
+				TargetRate:   round2(decision.NextRate),
+				AchievedRate: round2(float64(sg.tracesSent.Load()) / selapsed),
+				ExportP95Ms:  round2(sg.lat.quantile(0.95)),
+			}
+			if trial.queryURL != "" && trial.queryWorkers > 0 {
+				step.QueryP95Ms = round2(sg.queryLat.quantile(0.95))
+			}
+			steps = append(steps, step)
+			fmt.Printf("  step %d: offered %.0f/s → sustained %.0f/s, export p95 %.1fms\n",
+				len(steps), step.TargetRate, step.AchievedRate, step.ExportP95Ms)
+			if ctx.Err() != nil {
+				stopReason = "interrupted"
+				break
+			}
+		}
+		cfg.rate = sustainableRate(steps, policy)
+		if cfg.rate <= 0 {
+			cfg.rate = seedRate(numCPU())
+		}
+		fmt.Printf("adaptive: stopped because %s — sustainable %.0f/s, peak %.0f/s. Confirming at %.0f/s for %s.\n",
+			stopReason, cfg.rate, saturationRate(steps), cfg.rate, cfg.duration)
+	}
+
+	// Baseline immediately before the confirmation pass, not before the ramp.
+	// Every server-side rate is a delta divided by the confirmation pass's
+	// elapsed time, so a baseline taken earlier would fold the entire ramp into
+	// the numerator and report, say, 3.26 busy cores on a two-core machine.
 	if cfg.metricsURL != "" {
 		if baseline, err = scrapeMetrics(cfg.metricsURL, cfg.metricsToken); err != nil {
 			fmt.Fprintf(os.Stderr, "  warn: baseline metrics scrape failed: %v\n", err)
@@ -176,52 +220,7 @@ func main() {
 		}
 	}
 
-	interval := time.Duration(float64(time.Second) * float64(cfg.workers) / cfg.rate)
-	start := time.Now()
-
-	var wg sync.WaitGroup
-	for w := 0; w < cfg.workers; w++ {
-		worker := w
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			rng := rand.New(rand.NewPCG(cfg.seed, uint64(worker)+1))
-			g.run(ctx, interval, rng)
-		}()
-	}
-	if cfg.queryURL != "" && cfg.queryWorkers > 0 {
-		qInterval := time.Duration(float64(time.Second) * float64(cfg.queryWorkers) / cfg.queryRate)
-		fmt.Printf("query load: %d workers @ %.0f q/s → %s/api/observability/{overview,topology,performance,trace,logs}\n", cfg.queryWorkers, cfg.queryRate, strings.TrimRight(cfg.queryURL, "/"))
-		for w := 0; w < cfg.queryWorkers; w++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				g.runQueries(ctx, qInterval)
-			}()
-		}
-	}
-
-	done := make(chan struct{})
-	go func() {
-		t := time.NewTicker(5 * time.Second)
-		defer t.Stop()
-		for {
-			select {
-			case <-ctx.Done():
-				close(done)
-				return
-			case <-t.C:
-				elapsed := time.Since(start).Seconds()
-				sent := g.tracesSent.Load()
-				fmt.Printf("  %5.0fs  traces=%d (%.0f/s)  spans=%d  p95=%.1fms  errors=%d\n",
-					elapsed, sent, float64(sent)/elapsed, g.spansSent.Load(), g.lat.quantile(0.95), g.sendErrs.Load())
-			}
-		}
-	}()
-
-	wg.Wait()
-	<-done
-	elapsed := time.Since(start).Seconds()
+	g, elapsed := runTrial(ctx, cfg, conn, false)
 
 	rep := report{
 		Manifest:        newRunManifest(cfg, start.UTC(), time.Now().UTC()),
@@ -255,6 +254,26 @@ func main() {
 		}
 	}
 
+	if cfg.adaptive() || len(steps) > 0 {
+		policy := defaultRampPolicy()
+		rampEstimate := sustainableRate(steps, policy)
+		confirmed := rep.AvgTracesPerSec
+		sustainable := rampEstimate
+		if confirmed > 0 && confirmed < sustainable {
+			sustainable = confirmed
+		}
+		rep.Capacity = &capacityReport{
+			Steps:                    steps,
+			SustainableTracesPerSec:  round2(sustainable),
+			RampEstimateTracesPerSec: round2(rampEstimate),
+			ConfirmedTracesPerSec:    round2(confirmed),
+			SaturationTracesPerSec:   round2(saturationRate(steps)),
+			StopReason:               stopReason,
+			Workers:                  cfg.workers,
+			DriverLogicalCPUs:        numCPU(),
+		}
+	}
+
 	rep.Failures = evaluateReport(cfg, rep, infrastructureFailures)
 	rep.Passed = len(rep.Failures) == 0
 	printReport(rep)
@@ -279,6 +298,99 @@ func main() {
 	if !reportWritten {
 		os.Exit(1)
 	}
+}
+
+// runTrial executes one fixed-rate trial and returns its generator and the
+// wall-clock seconds it covered. Each trial gets a fresh generator so its
+// histograms describe that rate alone; a shared one would blend every step of
+// a ramp into a single indistinguishable distribution.
+//
+// quiet suppresses per-5s progress lines, which are noise during a ramp and
+// useful during the confirmation pass.
+func runTrial(ctx context.Context, cfg config, conn *grpc.ClientConn, quiet bool) (*generator, float64) {
+	g := &generator{
+		cfg:      cfg,
+		traces:   collectortrace.NewTraceServiceClient(conn),
+		logs:     collectorlogs.NewLogsServiceClient(conn),
+		metrics:  collectormetrics.NewMetricsServiceClient(conn),
+		lat:      newHistogram(),
+		queryLat: newHistogram(),
+		queryLatByOperation: map[string]*histogram{
+			"overview":    newHistogram(),
+			"topology":    newHistogram(),
+			"performance": newHistogram(),
+			"trace":       newHistogram(),
+			"logs":        newHistogram(),
+		},
+		http: &http.Client{Timeout: 30 * time.Second},
+		svcNames: func() []string {
+			names := make([]string, cfg.services)
+			for i := range names {
+				names[i] = fmt.Sprintf("svc-%02d", i)
+			}
+			return names
+		}(),
+	}
+
+	trialCtx := ctx
+	if cfg.duration > 0 {
+		var cancel context.CancelFunc
+		trialCtx, cancel = context.WithTimeout(ctx, cfg.duration)
+		defer cancel()
+	}
+
+	interval := time.Duration(float64(time.Second) * float64(cfg.workers) / cfg.rate)
+	start := time.Now()
+
+	var wg sync.WaitGroup
+	for w := 0; w < cfg.workers; w++ {
+		worker := w
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			rng := rand.New(rand.NewPCG(cfg.seed, uint64(worker)+1))
+			g.run(trialCtx, interval, rng)
+		}()
+	}
+	if cfg.queryURL != "" && cfg.queryWorkers > 0 {
+		qInterval := time.Duration(float64(time.Second) * float64(cfg.queryWorkers) / cfg.queryRate)
+		if !quiet {
+			fmt.Printf("query load: %d workers @ %.0f q/s → %s/api/observability/{overview,topology,performance,trace,logs}\n",
+				cfg.queryWorkers, cfg.queryRate, strings.TrimRight(cfg.queryURL, "/"))
+		}
+		for w := 0; w < cfg.queryWorkers; w++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				g.runQueries(trialCtx, qInterval)
+			}()
+		}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(5 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-trialCtx.Done():
+				close(done)
+				return
+			case <-t.C:
+				if quiet {
+					continue
+				}
+				elapsed := time.Since(start).Seconds()
+				sent := g.tracesSent.Load()
+				fmt.Printf("  %5.0fs  traces=%d (%.0f/s)  spans=%d  p95=%.1fms  errors=%d\n",
+					elapsed, sent, float64(sent)/elapsed, g.spansSent.Load(), g.lat.quantile(0.95), g.sendErrs.Load())
+			}
+		}
+	}()
+
+	wg.Wait()
+	<-done
+	return g, time.Since(start).Seconds()
 }
 
 type generator struct {
@@ -661,7 +773,11 @@ func buildLatencyBounds() []float64 {
 	for value := first; value < last; value *= ratio {
 		bounds = append(bounds, value)
 	}
-	bounds = append(bounds, mixedQueryP95SLOMs, last)
+	// An explicit boundary at 1.5s keeps query latency legible around the point
+	// where a dashboard stops feeling interactive. Histogram resolution, not a
+	// threshold — nothing passes or fails here.
+	const queryLegibilityBoundMs = 1500
+	bounds = append(bounds, queryLegibilityBoundMs, last)
 	sort.Float64s(bounds)
 
 	unique := bounds[:0]
@@ -749,6 +865,34 @@ type report struct {
 	QueryLatencyMs          *latencyReport           `json:"query_latency_ms,omitempty"`
 	QueryLatencyByOperation map[string]latencyReport `json:"query_latency_by_operation,omitempty"`
 	Server                  *serverReport            `json:"server,omitempty"`
+	Capacity                *capacityReport          `json:"capacity,omitempty"`
+}
+
+// capacityReport is what an adaptive run discovered about the machine. Absent
+// from a fixed -rate run, which asserts a rate rather than discovering one.
+type capacityReport struct {
+	Steps []rampStep `json:"steps"`
+	// SustainableTracesPerSec is the rate to quote: the lower of what the ramp
+	// found and what the confirmation pass actually held.
+	//
+	// They diverge when capacity is not stationary. Rollup and merge cost grows
+	// with the stored dataset, so a ramp can measure a machine whose capacity is
+	// falling underneath it and hand back a rate that no longer holds minutes
+	// later. Quoting the confirmed figure keeps the headline number one that was
+	// demonstrated for a full pass at the largest dataset of the run.
+	SustainableTracesPerSec float64 `json:"sustainable_traces_per_sec"`
+	// RampEstimateTracesPerSec is what the ramp concluded before confirmation.
+	RampEstimateTracesPerSec float64 `json:"ramp_estimate_traces_per_sec"`
+	// ConfirmedTracesPerSec is what the confirmation pass held.
+	ConfirmedTracesPerSec float64 `json:"confirmed_traces_per_sec"`
+	// SaturationTracesPerSec is the most throughput seen at any offered rate,
+	// including rates the server could not keep up with.
+	SaturationTracesPerSec float64 `json:"saturation_traces_per_sec"`
+	StopReason             string  `json:"stop_reason"`
+	// Driver-side context: a ramp is only as trustworthy as the machine that
+	// generated it, so record what was doing the sending.
+	Workers           int `json:"driver_workers"`
+	DriverLogicalCPUs int `json:"driver_logical_cpus"`
 }
 
 type latencyReport struct {
@@ -805,6 +949,16 @@ func printReport(r report) {
 	fmt.Printf("duration       %.1fs  (target %.0f traces/s → actual %.0f)\n", r.DurationSec, r.TargetRate, r.AvgTracesPerSec)
 	fmt.Printf("sent           traces=%d spans=%d logs=%d metrics=%d\n", r.TracesSent, r.SpansSent, r.LogsSent, r.MetricsSent)
 	fmt.Printf("send errors    %d\n", r.SendErrors)
+	if c := r.Capacity; c != nil {
+		fmt.Printf("capacity       sustainable=%.0f/s  (ramp estimate=%.0f/s, confirmed=%.0f/s, peak=%.0f/s)\n",
+			c.SustainableTracesPerSec, c.RampEstimateTracesPerSec, c.ConfirmedTracesPerSec, c.SaturationTracesPerSec)
+		// A confirmation well under the ramp's estimate is the signature of
+		// capacity falling as the dataset grows, not of a bad measurement.
+		if c.RampEstimateTracesPerSec > 0 && c.ConfirmedTracesPerSec < c.RampEstimateTracesPerSec*0.9 {
+			fmt.Printf("               note: confirmation held %.0f%% of the ramp estimate — capacity fell as the dataset grew\n",
+				100*c.ConfirmedTracesPerSec/c.RampEstimateTracesPerSec)
+		}
+	}
 	l := r.ExportLatencyMs
 	fmt.Printf("export latency mean=%.1fms  p50≈%.0f  p95≈%.0f  p99≈%.0f  >30s=%d  (n=%d)\n",
 		l.MeanMs, l.P50Ms, l.P95Ms, l.P99Ms, l.Over30s, l.Count)

@@ -37,6 +37,18 @@ write in flight at a time:
 Application state (users, sessions, dashboards, alert rules, agent threads)
 lives in a separate SQLite database and never sits on the telemetry write path.
 
+## Performance
+
+Two dedicated vCPUs sustained **5,138 traces/s — 22,612 rows/s** with zero rows
+dropped and an export p95 of 3 ms. Adding a dashboard read load of 5 queries/s
+cost about half that ingest capacity, with rollup-backed views staying under
+120 ms and raw-span queries taking seconds.
+
+Full method, per-operation query latency, and the operational caveats are in
+[docs/benchmarks/two-vcpu.md](docs/benchmarks/two-vcpu.md). `cmd/bench` takes no
+rate: it sizes itself to the machine, ramps until the server stops keeping up,
+and confirms what it found.
+
 ## Requirements
 
 - **Go** with `CGO_ENABLED=1` — DuckDB is a cgo dependency
