@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -50,6 +52,19 @@ type sizingSource struct {
 	DetectedRAM  uint64
 }
 
+// RuntimeSizing is the safe, non-secret sizing state exposed through runtime
+// diagnostics. It reports the effective values after startup resolution and
+// preserves whether each value came from the machine or the operator.
+type RuntimeSizing struct {
+	DuckDBMemory        string `json:"duckdb_memory"`
+	DuckDBMemoryAuto    bool   `json:"duckdb_memory_auto"`
+	DuckDBMaxConns      int    `json:"duckdb_max_conns"`
+	DuckDBMaxConnsAuto  bool   `json:"duckdb_max_conns_auto"`
+	DuckDBThreads       int    `json:"duckdb_threads"`
+	DetectedMemoryBytes uint64 `json:"detected_memory_bytes"`
+	GOMAXPROCS          int    `json:"gomaxprocs"`
+}
+
 // resolveSizing fills in the values the operator left for the machine to
 // decide. Explicit configuration always wins; this only touches zero values.
 func (c *Config) resolveSizing() sizingSource {
@@ -63,7 +78,22 @@ func (c *Config) resolveSizing() sizingSource {
 		src.MaxConnsAuto = true
 		c.DuckDBMaxConns = resolveDuckDBMaxConns(runtime.GOMAXPROCS(0))
 	}
+	c.resolvedSizing = src
 	return src
+}
+
+// RuntimeSizing returns the effective startup sizing without exposing any
+// credentials or unrelated configuration.
+func (c Config) RuntimeSizing() RuntimeSizing {
+	return RuntimeSizing{
+		DuckDBMemory:        c.DuckDBMemory,
+		DuckDBMemoryAuto:    c.resolvedSizing.MemoryAuto,
+		DuckDBMaxConns:      c.DuckDBMaxConns,
+		DuckDBMaxConnsAuto:  c.resolvedSizing.MaxConnsAuto,
+		DuckDBThreads:       c.DuckDBThreads,
+		DetectedMemoryBytes: c.resolvedSizing.DetectedRAM,
+		GOMAXPROCS:          runtime.GOMAXPROCS(0),
+	}
 }
 
 // logResolvedSizing reports what the process will actually run with.
@@ -124,15 +154,196 @@ func resolveDuckDBMaxConns(cores int) int {
 // is what the kernel enforces, and reading the host's memory from inside a
 // constrained container is precisely the mistake this code exists to fix.
 func detectAvailableMemory() uint64 {
-	for _, path := range []string{
-		"/sys/fs/cgroup/memory.max",                   // cgroup v2
-		"/sys/fs/cgroup/memory/memory.limit_in_bytes", // cgroup v1
-	} {
-		if limit, ok := readCgroupLimit(path); ok {
-			return limit
+	hostMemory := detectHostMemory()
+	cgroupLimit := detectCgroupMemoryLimit("/proc/self/cgroup", "/proc/self/mountinfo")
+
+	// A private cgroup namespace commonly exposes the process cgroup as the
+	// mount root. Keep these fallbacks for minimal containers that omit procfs
+	// metadata but still mount the memory controller.
+	if cgroupLimit == 0 {
+		for _, path := range []string{
+			"/sys/fs/cgroup/memory.max",                   // cgroup v2
+			"/sys/fs/cgroup/memory/memory.limit_in_bytes", // cgroup v1
+		} {
+			if limit, ok := readCgroupLimit(path); ok {
+				cgroupLimit = limit
+				break
+			}
 		}
 	}
-	return readMemTotal("/proc/meminfo")
+
+	// A configured cgroup limit can exceed physical RAM. The process is bound by
+	// whichever ceiling is lower, so never turn an oversized cgroup value into a
+	// DuckDB budget larger than the machine.
+	return minPositive(hostMemory, cgroupLimit)
+}
+
+type cgroupMembership struct {
+	version int
+	path    string
+}
+
+type cgroupMount struct {
+	version    int
+	root       string
+	mountPoint string
+}
+
+// detectCgroupMemoryLimit finds the process's actual memory cgroup from procfs
+// and walks toward the controller mount, taking the tightest finite limit. A
+// service such as systemd's fanout.service normally lives below the mount root;
+// reading only /sys/fs/cgroup/memory.max would inspect the host, not the service.
+func detectCgroupMemoryLimit(cgroupPath, mountInfoPath string) uint64 {
+	memberships := readCgroupMemberships(cgroupPath)
+	mounts := readCgroupMounts(mountInfoPath)
+	limit := uint64(0)
+	for _, membership := range memberships {
+		for _, mount := range mounts {
+			if membership.version != mount.version {
+				continue
+			}
+			dir, ok := cgroupDirectory(mount, membership.path)
+			if !ok {
+				continue
+			}
+			filename := "memory.max"
+			if membership.version == 1 {
+				filename = "memory.limit_in_bytes"
+			}
+			limit = minPositive(limit, readCgroupHierarchyLimit(dir, mount.mountPoint, filename))
+		}
+	}
+	return limit
+}
+
+func readCgroupMemberships(filename string) []cgroupMembership {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return nil
+	}
+	var memberships []cgroupMembership
+	for _, line := range strings.Split(string(raw), "\n") {
+		parts := strings.SplitN(strings.TrimSpace(line), ":", 3)
+		if len(parts) != 3 || parts[2] == "" {
+			continue
+		}
+		if parts[0] == "0" && parts[1] == "" {
+			memberships = append(memberships, cgroupMembership{version: 2, path: parts[2]})
+			continue
+		}
+		for _, controller := range strings.Split(parts[1], ",") {
+			if controller == "memory" {
+				memberships = append(memberships, cgroupMembership{version: 1, path: parts[2]})
+				break
+			}
+		}
+	}
+	return memberships
+}
+
+func readCgroupMounts(filename string) []cgroupMount {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return nil
+	}
+	var mounts []cgroupMount
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		separator := -1
+		for i, field := range fields {
+			if field == "-" {
+				separator = i
+				break
+			}
+		}
+		if separator < 0 || separator+3 >= len(fields) || len(fields) < 5 {
+			continue
+		}
+		fsType := fields[separator+1]
+		version := 0
+		switch fsType {
+		case "cgroup2":
+			version = 2
+		case "cgroup":
+			for _, option := range strings.Split(fields[separator+3], ",") {
+				if option == "memory" {
+					version = 1
+					break
+				}
+			}
+		}
+		if version == 0 {
+			continue
+		}
+		mounts = append(mounts, cgroupMount{
+			version:    version,
+			root:       unescapeMountInfoPath(fields[3]),
+			mountPoint: unescapeMountInfoPath(fields[4]),
+		})
+	}
+	return mounts
+}
+
+func unescapeMountInfoPath(value string) string {
+	return strings.NewReplacer(
+		`\040`, " ",
+		`\011`, "\t",
+		`\012`, "\n",
+		`\134`, `\`,
+	).Replace(value)
+}
+
+func cgroupDirectory(mount cgroupMount, membershipPath string) (string, bool) {
+	root := path.Clean(mount.root)
+	membership := path.Clean(membershipPath)
+	var relative string
+	switch {
+	case root == "/":
+		relative = strings.TrimPrefix(membership, "/")
+	case membership == root:
+		relative = "."
+	case strings.HasPrefix(membership, root+"/"):
+		relative = strings.TrimPrefix(membership, root+"/")
+	default:
+		return "", false
+	}
+
+	mountPoint := filepath.Clean(mount.mountPoint)
+	dir := filepath.Clean(filepath.Join(mountPoint, filepath.FromSlash(relative)))
+	if dir != mountPoint && !strings.HasPrefix(dir, mountPoint+string(os.PathSeparator)) {
+		return "", false
+	}
+	return dir, true
+}
+
+func readCgroupHierarchyLimit(dir, mountPoint, filename string) uint64 {
+	dir = filepath.Clean(dir)
+	mountPoint = filepath.Clean(mountPoint)
+	limit := uint64(0)
+	for {
+		if value, ok := readCgroupLimit(filepath.Join(dir, filename)); ok {
+			limit = minPositive(limit, value)
+		}
+		if dir == mountPoint {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir || (parent != mountPoint && !strings.HasPrefix(parent, mountPoint+string(os.PathSeparator))) {
+			break
+		}
+		dir = parent
+	}
+	return limit
+}
+
+func minPositive(values ...uint64) uint64 {
+	minimum := uint64(0)
+	for _, value := range values {
+		if value > 0 && (minimum == 0 || value < minimum) {
+			minimum = value
+		}
+	}
+	return minimum
 }
 
 // readCgroupLimit reads a cgroup memory limit. It reports ok=false for "max"
@@ -156,27 +367,4 @@ func readCgroupLimit(path string) (uint64, bool) {
 		return 0, false
 	}
 	return limit, true
-}
-
-// readMemTotal reads MemTotal from a /proc/meminfo-formatted file, in bytes.
-func readMemTotal(path string) uint64 {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		if !strings.HasPrefix(line, "MemTotal:") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return 0
-		}
-		kb, err := strconv.ParseUint(fields[1], 10, 64)
-		if err != nil {
-			return 0
-		}
-		return kb << 10
-	}
-	return 0
 }

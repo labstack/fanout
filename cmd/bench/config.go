@@ -5,6 +5,18 @@ import (
 	"strings"
 )
 
+// validateConfig validates the command-level mode before adaptive execution
+// replaces the zero rate with a concrete probe rate.
+func validateConfig(cfg config) error {
+	if cfg.adaptive() {
+		if cfg.stepDuration <= 0 {
+			return errors.New("-step must be positive in adaptive mode")
+		}
+		cfg.rate = 1
+	}
+	return validateTrialConfig(cfg)
+}
+
 func validateTrialConfig(cfg config) error {
 	switch {
 	// Zero is not "unset" here: by the time a trial runs, adaptive mode has

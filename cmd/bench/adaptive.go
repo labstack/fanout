@@ -50,11 +50,13 @@ type rampPolicy struct {
 	RefineTolerance float64
 }
 
-// bracket returns the highest offered rate the server kept up with, and the
-// lowest it did not. A zero upper bound means nothing has missed yet.
-func bracket(history []rampStep, floor float64) (lastGood, firstBad float64) {
+// bracket returns the highest offered rate the server sustained without
+// crossing the latency knee, and the lowest rate that failed either test. A
+// zero upper bound means nothing has missed yet.
+func bracket(history []rampStep, p rampPolicy) (lastGood, firstBad float64) {
+	best := bestExportP95(history)
 	for _, s := range history {
-		if s.held(floor) {
+		if s.held(p.DeliveryFloor) && !kneeExceeded(best, s.ExportP95Ms, p.LatencyKnee) {
 			if s.TargetRate > lastGood {
 				lastGood = s.TargetRate
 			}
@@ -98,11 +100,7 @@ func decideNextStep(history []rampStep, p rampPolicy) rampDecision {
 	}
 
 	last := history[len(history)-1]
-	if best := bestExportP95(history); kneeExceeded(best, last.ExportP95Ms, p.LatencyKnee) {
-		return rampDecision{Stop: true, Reason: "export latency passed the knee"}
-	}
-
-	lastGood, firstBad := bracket(history, p.DeliveryFloor)
+	lastGood, firstBad := bracket(history, p)
 
 	// Nothing has missed yet: keep doubling to find the upper bound quickly.
 	if firstBad == 0 {
