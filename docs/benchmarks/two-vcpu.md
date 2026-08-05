@@ -114,6 +114,12 @@ Set `DUCKDB_MEMORY` to leave room for the Go heap, and give the container a
 memory limit. This run used `DUCKDB_MEMORY=3GB` with a 6 GB container limit and
 peaked at 1.2 GB RSS.
 
+**Since these runs, Fanout resolves this itself.** With `DUCKDB_MEMORY` unset it
+now detects the cgroup limit and reserves headroom for the Go runtime, and logs
+what it chose at startup. On the 6 GB container used here it resolves to
+3686 MB — close to the 3 GB pinned by hand above, which is why the numbers still
+stand. Setting the variable explicitly still overrides it.
+
 ### Capacity falls as the dataset grows
 
 Rollup and merge cost grows with what is stored. In one session the harness

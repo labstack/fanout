@@ -73,10 +73,11 @@ type Config struct {
 	// rather than trusting a number here — as of 2026-06 it handled ~55k rows/s
 	// with 0 drops and ~0.4 GB RSS, but that will drift with the ingest path.
 	//
-	// DuckDBMemory caps DuckDB's memory (e.g. "8GB"). Empty leaves DuckDB's
-	// own default in place — 80% of detected RAM, cgroup-aware in containers —
-	// so the cap scales with the deployment. Set it only to constrain an
-	// instance that shares its host with other memory-hungry services.
+	// DuckDBMemory caps DuckDB's memory (e.g. "8GB"). Empty means Fanout sizes
+	// it from detected memory, reserving headroom for the Go runtime; see
+	// resolveSizing. DuckDB's own default is 80% of detected RAM, which is
+	// calculated as though DuckDB owned the machine and has been observed to
+	// get the process OOM-killed once the Go heap is added on top.
 	DuckDBMemory string `env:"DUCKDB_MEMORY"`
 	// DuckDBThreads caps DuckDB's global query worker pool. Zero leaves
 	// DuckDB's own default in place (one worker per core). Set it to leave
@@ -91,7 +92,10 @@ type Config struct {
 	// the shared write gate (Duck.WriteGate, wired into the writer via
 	// UseWriteGate in cmd/fanout/main.go, enforced at startup). Without the WAL
 	// mode, pool >1 fails with "database is locked".
-	DuckDBMaxConns        int           `env:"DUCKDB_MAX_CONNS" envDefault:"4"`
+	// Zero means "size it from the machine" — the same spelling DuckDBThreads
+	// uses for deferring to a default. Resolution happens in resolveSizing and
+	// is reported in the startup configuration log.
+	DuckDBMaxConns        int           `env:"DUCKDB_MAX_CONNS" envDefault:"0"`
 	AlertEnabled          bool          `env:"ALERT_ENABLED" envDefault:"true"`
 	AlertEvalInterval     int           `env:"ALERT_EVAL_INTERVAL" envDefault:"30"`
 	AlertHistoryDays      int           `env:"ALERT_HISTORY_DAYS" envDefault:"7"`
@@ -161,10 +165,14 @@ func Load() Config {
 		slog.Error("parse env failed", "err", err)
 		os.Exit(1)
 	}
+	// Size before validating: validation should judge the configuration the
+	// process will actually run with, not the holes left for it to fill.
+	resolved := cfg.resolveSizing()
 	if err := cfg.Validate(); err != nil {
 		slog.Error("invalid config", "err", err)
 		os.Exit(1)
 	}
+	cfg.logResolvedSizing(resolved)
 	if !cfg.SecureCookies() {
 		slog.Warn("browser session cookies are not Secure; configure PUBLIC_URL=https://... or local TLS before exposing Fanout")
 	}
