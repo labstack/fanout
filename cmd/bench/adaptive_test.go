@@ -55,6 +55,29 @@ func TestDecideNextStepBisectsInsteadOfStoppingAtTheFirstMiss(t *testing.T) {
 	}
 }
 
+func TestDecideNextStepIgnoresLatencyFromMissedStepWhenBuildingBaseline(t *testing.T) {
+	p := defaultRampPolicy()
+	// The failed step records latency only for successful exports, so its p95
+	// can look better than the sustained lower bound. It must not make that
+	// known-good step appear to have crossed the latency knee.
+	history := []rampStep{
+		{TargetRate: 1000, AchievedRate: 1000, ExportP95Ms: 100},
+		{TargetRate: 2000, AchievedRate: 1500, ExportP95Ms: 1},
+	}
+
+	got := decideNextStep(history, p)
+
+	if got.Stop {
+		t.Fatalf("should refine from the sustained lower bound, stopped: %s", got.Reason)
+	}
+	if got.NextRate != 1500 {
+		t.Fatalf("NextRate = %v, want midpoint 1500", got.NextRate)
+	}
+	if got := sustainableRate(history, p); got != 1000 {
+		t.Fatalf("sustainableRate = %v, want sustained lower bound 1000", got)
+	}
+}
+
 func TestDecideNextStepStopsOnceTheBracketIsTight(t *testing.T) {
 	p := defaultRampPolicy()
 	// 3800 held, 4000 did not: a 5% bracket. Refining further measures noise.

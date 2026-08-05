@@ -56,11 +56,6 @@ type Config struct {
 	// holds the write gate and starves ingest. Off in normal operation.
 	RollupSkipToLatest bool   `env:"ROLLUP_SKIP_TO_LATEST" envDefault:"false"`
 	DefaultNS          string `env:"DEFAULT_NAMESPACE" envDefault:"default"`
-	// PublicRead exposes only explicitly classified telemetry GET/HEAD routes to
-	// a synthetic read-only principal. It never changes ingest authentication.
-	PublicRead bool `env:"PUBLIC_READ" envDefault:"false"`
-	// PublicIngest is a separate demo-only escape hatch for unauthenticated OTLP.
-	PublicIngest bool `env:"PUBLIC_INGEST" envDefault:"false"`
 	// PprofEnabled exposes Go's net/http/pprof handlers at /debug/pprof/* for
 	// CPU/heap/mutex/goroutine profiling under load. Off by default; the routes
 	// require an admin browser session with operations:read.
@@ -183,9 +178,6 @@ func Load() Config {
 	if cfg.MetricsPublic {
 		slog.Warn("Prometheus metrics are publicly accessible", "path", "/-/metrics")
 	}
-	if cfg.PublicIngest {
-		slog.Warn("OTLP ingest authentication is disabled by PUBLIC_INGEST")
-	}
 	return cfg
 }
 
@@ -236,7 +228,7 @@ func (c Config) ControlSQLitePath() string {
 }
 
 // TLSEnabled reports whether a cert/key pair is configured. When true, HTTP
-// serves HTTPS on HTTP_ADDR and OTLP gRPC accepts TLS (required for public ingest).
+// serves HTTPS on HTTP_ADDR and OTLP gRPC accepts TLS.
 func (c Config) TLSEnabled() bool {
 	return strings.TrimSpace(c.TLSCertFile) != "" &&
 		strings.TrimSpace(c.TLSKeyFile) != ""

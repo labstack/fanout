@@ -5,13 +5,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/env"
 )
 
-func TestPublicViewerCannotOwnDashboards(t *testing.T) {
-	s := newTestAuthServerWith(t, env.Config{AuthMode: "local", PublicRead: true}, auth.SMTPConfig{})
+func TestAnonymousCannotOwnDashboards(t *testing.T) {
+	s := newTestAuthServer(t)
 	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
 		t.Fatalf("Create admin: %v", err)
 	}

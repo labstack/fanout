@@ -1,1 +1,0 @@
-import{t as e}from"./jsx-runtime-CfjKz_hj.js";import{n as t}from"./useNavigate-CL-cOwWv.js";import{t as n}from"./dashboard-DN3jAUtq.js";import{r}from"./index-BHsQ7fa4.js";var i=e();function a(){let e=t(),{openChat:a}=r();return(0,i.jsx)(n,{onOpenChat:a,onDashboardChange:t=>void e({to:`/dashboards/$dashboardId`,params:{dashboardId:t},replace:!0})})}export{a as component};

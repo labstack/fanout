@@ -16,9 +16,8 @@ import (
 )
 
 const (
-	authUserKey    = "auth_user"
-	authAuditKey   = "auth_audit_store"
-	publicViewerID = "public"
+	authUserKey  = "auth_user"
+	authAuditKey = "auth_audit_store"
 )
 
 type Capability string
@@ -46,8 +45,6 @@ var roleCapabilities = map[auth.Role]map[Capability]struct{}{
 		ManageIngest: {}, ManageUsers: {}, ReadOperations: {},
 	},
 }
-
-var publicViewer = auth.User{ID: publicViewerID, Email: "public@demo", Role: auth.RoleViewer, Active: true}
 
 type routePolicyKind uint8
 
@@ -119,14 +116,6 @@ func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg e
 					recordAuthorizationDenied(c, user)
 					return echo.NewHTTPError(http.StatusForbidden, "insufficient permissions")
 				}
-				return next(c)
-			}
-
-			if cfg.PublicRead && sessions.UserID(c.Request().Context()) == "" &&
-				((policy.capability == ReadTelemetry && isPublicTelemetryRead(c.Request().Method, path)) ||
-					(path == "/api/auth/me" && (c.Request().Method == http.MethodGet || c.Request().Method == http.MethodHead))) {
-				viewer := publicViewer
-				c.Set(authUserKey, &viewer)
 				return next(c)
 			}
 
@@ -205,16 +194,13 @@ func GetCurrentUser(c *echo.Context) *auth.User {
 
 func RequestOwner(c *echo.Context) (string, error) {
 	user := GetCurrentUser(c)
-	if user == nil || user.ID == publicViewerID {
+	if user == nil {
 		return "", echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
 	return user.ID, nil
 }
 
 func HasCapability(user auth.User, capability Capability) bool {
-	if user.ID == publicViewerID {
-		return capability == ReadTelemetry
-	}
 	_, ok := roleCapabilities[user.Role][capability]
 	return ok
 }
@@ -334,11 +320,6 @@ func routePathKnown(path string) bool {
 		}
 	}
 	return false
-}
-
-func isPublicTelemetryRead(method, path string) bool {
-	return (method == http.MethodGet || method == http.MethodHead) &&
-		(strings.HasPrefix(path, "/api/observability/") || path == "/api/auth/me")
 }
 
 func isUnsafeMethod(method string) bool {

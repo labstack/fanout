@@ -7,9 +7,9 @@ import (
 )
 
 // The user-supplied search filter must compare against the REDACTED body,
-// not the raw column: in PUBLIC_READ demo mode an anonymous caller could
-// otherwise confirm a secret's presence by probing search=<candidate> even
-// though the display shows [REDACTED]. redactedBodySQL replays the exact
+// not the raw column: a telemetry viewer could otherwise confirm a secret's
+// presence by probing search=<candidate> even though the display shows
+// [REDACTED]. redactedBodySQL replays the exact
 // Go-side patterns inside DuckDB (same RE2 engine; parity pinned by
 // TestRedactSQLMatchesGo), and both the row query and the histogram query
 // use it so their counts can never disagree and leak the same signal.

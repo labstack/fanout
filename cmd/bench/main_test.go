@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
@@ -48,6 +49,17 @@ func TestScrapeMetricsSendsBearerToken(t *testing.T) {
 	}
 	if metrics.total("fanout_rows_total") != 42 {
 		t.Fatalf("metrics = %#v", metrics)
+	}
+}
+
+func TestQueryRequestUsesAuthenticatedSession(t *testing.T) {
+	g := generator{cfg: config{querySessionCookie: "fanout_session=session-token"}}
+	req, err := g.newQueryRequest(context.Background(), "https://fanout.example.test/api/observability/overview")
+	if err != nil {
+		t.Fatalf("newQueryRequest: %v", err)
+	}
+	if got := req.Header.Get("Cookie"); got != "fanout_session=session-token" {
+		t.Fatalf("Cookie = %q, want authenticated session", got)
 	}
 }
 

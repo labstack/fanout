@@ -188,71 +188,60 @@ func TestKnownRouteWrongMethodReturns405(t *testing.T) {
 	}
 }
 
-func TestPublicReadServesOnlyTelemetryReads(t *testing.T) {
-	s := newTestAuthServerWith(t, env.Config{AuthMode: "local", PublicRead: true}, auth.SMTPConfig{})
-	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
+func TestTelemetryReadsRequireAuthenticatedAccount(t *testing.T) {
+	s := newTestAuthServer(t)
+	viewer, err := s.users.Create("viewer@example.com", "", "viewer")
+	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	s.e.GET("/api/observability/overview", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	s.e.POST("/api/rules", func(c *echo.Context) error { return c.NoContent(http.StatusCreated) })
-	s.e.GET("/api/users", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) }, RequireCapability(ManageUsers))
-	for _, tc := range []struct {
-		method, path string
-		want         int
-	}{
-		{http.MethodGet, "/api/observability/overview", http.StatusNoContent},
-		{http.MethodPost, "/api/rules", http.StatusUnauthorized},
-		{http.MethodGet, "/api/users", http.StatusUnauthorized},
-	} {
-		rec := httptest.NewRecorder()
-		s.e.ServeHTTP(rec, httptest.NewRequest(tc.method, tc.path, nil))
-		if rec.Code != tc.want {
-			t.Fatalf("%s %s = %d, want %d", tc.method, tc.path, rec.Code, tc.want)
-		}
+
+	unauthenticated := httptest.NewRecorder()
+	s.e.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/observability/overview", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated telemetry read = %d, want 401", unauthenticated.Code)
+	}
+
+	authenticated := httptest.NewRecorder()
+	s.e.ServeHTTP(authenticated, sessionRequest(http.MethodGet, "/api/observability/overview", nil, s.login(t, viewer)))
+	if authenticated.Code != http.StatusNoContent {
+		t.Fatalf("viewer telemetry read = %d, want 204", authenticated.Code)
 	}
 }
 
-func TestPublicReadStatusAndAnonymousMe(t *testing.T) {
-	s := newTestAuthServerWith(t, env.Config{AuthMode: "local", PublicRead: true}, auth.SMTPConfig{})
-	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
+func TestAuthStatusAndMeRequirePersistedAccount(t *testing.T) {
+	s := newTestAuthServer(t)
+	admin, err := s.users.Create("admin@example.com", "", "admin")
+	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	statusRec := httptest.NewRecorder()
 	s.e.ServeHTTP(statusRec, httptest.NewRequest(http.MethodGet, "/api/auth/status", nil))
 	var status map[string]any
-	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil || status["public_read"] != true {
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
 		t.Fatalf("status = %s err=%v", statusRec.Body.String(), err)
 	}
-	meRec := httptest.NewRecorder()
-	s.e.ServeHTTP(meRec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
-	var anonymousMe struct {
-		ID        string    `json:"id"`
-		Role      auth.Role `json:"role"`
-		Anonymous bool      `json:"anonymous"`
-	}
-	if err := json.Unmarshal(meRec.Body.Bytes(), &anonymousMe); err != nil {
-		t.Fatalf("decode anonymous me: %v", err)
-	}
-	if meRec.Code != http.StatusOK || anonymousMe.ID != publicViewerID || anonymousMe.Role != auth.RoleViewer || !anonymousMe.Anonymous {
-		t.Fatalf("anonymous me = %d %s", meRec.Code, meRec.Body.String())
+	if len(status) != 3 {
+		t.Fatalf("unexpected auth status fields: %s", statusRec.Body.String())
 	}
 
-	admin, err := s.users.GetByEmail("admin@example.com")
-	if err != nil {
-		t.Fatalf("GetByEmail: %v", err)
+	meRec := httptest.NewRecorder()
+	s.e.ServeHTTP(meRec, httptest.NewRequest(http.MethodGet, "/api/auth/me", nil))
+	if meRec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated me = %d, want 401", meRec.Code)
 	}
+
 	authenticatedMe := httptest.NewRecorder()
 	s.e.ServeHTTP(authenticatedMe, sessionRequest(http.MethodGet, "/api/auth/me", nil, s.login(t, admin)))
-	var persistedMe struct {
-		ID        string    `json:"id"`
-		Role      auth.Role `json:"role"`
-		Anonymous bool      `json:"anonymous"`
-	}
+	var persistedMe map[string]any
 	if err := json.Unmarshal(authenticatedMe.Body.Bytes(), &persistedMe); err != nil {
 		t.Fatalf("decode authenticated me: %v", err)
 	}
-	if authenticatedMe.Code != http.StatusOK || persistedMe.ID != admin.ID || persistedMe.Role != auth.RoleAdmin || persistedMe.Anonymous {
-		t.Fatalf("authenticated public-mode me = %d %s", authenticatedMe.Code, authenticatedMe.Body.String())
+	if authenticatedMe.Code != http.StatusOK || persistedMe["id"] != admin.ID || persistedMe["role"] != string(auth.RoleAdmin) {
+		t.Fatalf("authenticated me = %d %s", authenticatedMe.Code, authenticatedMe.Body.String())
+	}
+	if _, present := persistedMe["anonymous"]; present {
+		t.Fatalf("authenticated me still contains removed anonymous marker: %s", authenticatedMe.Body.String())
 	}
 }
 

@@ -19,6 +19,8 @@ func validateConfig(cfg config) error {
 
 func validateTrialConfig(cfg config) error {
 	switch {
+	case strings.TrimSpace(cfg.token) == "":
+		return errors.New("-token is required")
 	// Zero is not "unset" here: by the time a trial runs, adaptive mode has
 	// resolved a concrete rate and worker count. A zero reaching this point
 	// means the ramp produced a step it cannot actually execute.
@@ -42,6 +44,8 @@ func validateTrialConfig(cfg config) error {
 		return errors.New("-query-workers cannot be negative")
 	case cfg.queryWorkers > 0 && strings.TrimSpace(cfg.queryURL) == "":
 		return errors.New("-query-url is required when -query-workers is positive")
+	case cfg.queryWorkers > 0 && strings.TrimSpace(cfg.querySessionCookie) == "":
+		return errors.New("-query-session-cookie is required when -query-workers is positive")
 	case cfg.queryWorkers > 0 && cfg.queryRate <= 0:
 		return errors.New("-query-rate must be positive when query load is enabled")
 	case cfg.maxExportP95 < 0 || cfg.maxQueryP95 < 0:
