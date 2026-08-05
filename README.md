@@ -143,8 +143,9 @@ as the last UI build, so `just ui-check` rebuilds both workspaces and fails if
 the committed bytes no longer match. It is part of `just check` and runs in CI.
 
 [Lefthook](https://lefthook.dev) runs formatting and linting on commit and the
-full gate on push; `just install` wires it up. CI runs the same `just check`,
-so a green push means a green build.
+full gate on push; `just install` wires it up. The pre-push hook is a
+convenience and lefthook may skip it when it detects no changed files — CI runs
+the same `just check` unconditionally, and that is what actually enforces it.
 
 ## Specs
 

@@ -46,4 +46,10 @@ pre-commit:
 pre-push:
   jobs:
     - name: check
+      # Observed to skip with "no matching push files" on some pushes: lefthook
+      # filters pre-push jobs by its own changed-file detection and skips when
+      # that set is empty, which is deliberate (`lefthook run --force` overrides
+      # it). Treat this hook as a fast local convenience, not a guarantee — CI
+      # runs the same `just check` unconditionally, and that is the gate that
+      # actually enforces it.
       run: just check
