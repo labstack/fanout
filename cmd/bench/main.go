@@ -135,14 +135,7 @@ func main() {
 	if cfg.workers <= 0 {
 		cfg.workers = autoWorkers(numCPU())
 	}
-	// The rate is resolved per step in adaptive mode, so validate the trial
-	// config against a placeholder that the ramp will overwrite.
-	if probe := cfg; probe.rate <= 0 {
-		probe.rate = seedRate(numCPU())
-		if err := validateTrialConfig(probe); err != nil {
-			log.Fatal(err)
-		}
-	} else if err := validateTrialConfig(cfg); err != nil {
+	if err := validateConfig(cfg); err != nil {
 		log.Fatal(err)
 	}
 

@@ -29,16 +29,18 @@ becomes unfalsifiable. Fanout logs no resolved configuration at startup today,
 so that cost would be paid blind. Logging comes first.
 
 This change affects runtime behavior: every deployment that has not pinned these
-variables will resolve different values than before. It adds no public contract,
-data migration, or security surface.
+variables will resolve different values than before. It adds resolved sizing to
+the existing health response, but adds no data migration or security surface.
 
 ## What Changes
 
 - Log the resolved runtime configuration at startup, so an adaptive default is
-  still one an operator can read back.
+  still one an operator can read back, and expose the same non-secret values in
+  health diagnostics.
 - Size `DUCKDB_MEMORY` from detected memory, reserving headroom for the Go
   runtime, when the operator has not set it. Detection is cgroup-aware, because
-  a container limit — not the host's total — is what the kernel enforces.
+  a container limit — not the host's total — is what the kernel enforces, and
+  uses the native host-memory source on supported non-Linux platforms.
 - Scale `DUCKDB_MAX_CONNS` with available cores, with a floor that keeps the
   write gate's invariant (`> 1`) intact.
 - Leave `FLUSH_BATCH_SIZE` alone. It is a memory, latency, and Parquet
@@ -60,7 +62,8 @@ None. No specs exist for the configuration surface yet.
 
 ## Impact
 
-- **Affected**: `internal/env` (resolution and logging), `cmd/fanout` startup.
+- **Affected**: `internal/env` (resolution and reporting), `internal/api`
+  (additive health diagnostics), `cmd/fanout` startup.
 - **Not affected**: the ingest, query, storage, and auth paths. Nothing changes
   about what Fanout does — only about what it reserves before doing it.
 - **Benchmarks**: `docs/benchmarks/two-vcpu.md` ran with `DUCKDB_MEMORY=3GB` set

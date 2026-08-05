@@ -1,6 +1,6 @@
 # Fanout on two dedicated vCPUs
 
-**2026-08-04** · image `ghcr.io/labstack/fanout@sha256:feebc9cf` · Hetzner `ccx13`
+**2026-08-04** · image `ghcr.io/labstack/fanout@sha256:feebc9cfc09b1aea4c6165f6d700b976489de237a2fd17c37581b2fea8b3864e` · Hetzner `ccx13`
 
 Two dedicated cores and 8 GB of RAM, rented for about €0.07 an hour, sustained
 **5,138 traces/s — 22,612 rows/s** with zero rows dropped and an export p95 of
@@ -103,22 +103,23 @@ the mixed number, not the ingest-only one.
 
 ## Three things worth knowing before you deploy
 
-### Memory must be bounded explicitly
+### Memory needs headroom
 
 An earlier run was **OOM-killed by the kernel** at 7.5 GB RSS on the 7.7 GB
 machine. With `DUCKDB_MEMORY` unset, DuckDB sizes itself to 80% of detected RAM
 — about 6.2 GB here — and the Go runtime's own footprint on top of that exceeds
 the machine. The container had no memory limit, so DuckDB saw the whole host.
 
-Set `DUCKDB_MEMORY` to leave room for the Go heap, and give the container a
-memory limit. This run used `DUCKDB_MEMORY=3GB` with a 6 GB container limit and
-peaked at 1.2 GB RSS.
+This run used `DUCKDB_MEMORY=3GB` with a 6 GB container limit and peaked at
+1.2 GB RSS. That explicit value records the historical benchmark configuration;
+it is not required for a normal current deployment.
 
 **Since these runs, Fanout resolves this itself.** With `DUCKDB_MEMORY` unset it
-now detects the cgroup limit and reserves headroom for the Go runtime, and logs
-what it chose at startup. On the 6 GB container used here it resolves to
-3686 MB — close to the 3 GB pinned by hand above, which is why the numbers still
-stand. Setting the variable explicitly still overrides it.
+now detects the container or host limit, reserves headroom for the Go runtime,
+and logs what it chose at startup. On the 6 GB container used here it resolves
+to 3686 MB — close to the 3 GB pinned by hand above, which is why the numbers
+still stand. Operators normally set the container memory limit and let Fanout
+handle DuckDB; setting the variable explicitly remains an advanced override.
 
 ### Capacity falls as the dataset grows
 
@@ -145,9 +146,11 @@ live telemetry, and should not be sized as if it were.
 # On the machine under test
 docker run -d --name fanout --memory 6g -p 4317:4317 -p 7520:7520 \
   -e PUBLIC_INGEST=true -e PUBLIC_READ=true -e METRICS_TOKEN=... \
-  -e DUCKDB_MEMORY=3GB -e AUTH_CODE_SECRET=... -e AI_API_KEY=... \
+  -e DUCKDB_MEMORY=3GB -e DUCKDB_MAX_CONNS=4 \
+  -e AUTH_CODE_SECRET=... -e AI_API_KEY=... \
   -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=... \
-  -v fanout-data:/var/lib/fanout/data ghcr.io/labstack/fanout:main
+  -v fanout-data:/var/lib/fanout/data \
+  ghcr.io/labstack/fanout@sha256:feebc9cfc09b1aea4c6165f6d700b976489de237a2fd17c37581b2fea8b3864e
 
 # On a separate driver machine
 bench -endpoint <sut>:4317 \

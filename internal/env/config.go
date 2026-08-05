@@ -129,6 +129,7 @@ type Config struct {
 	TrustedProxyCIDRs     string        `env:"TRUSTED_PROXY_CIDRS"`
 	TLSCertFile           string        `env:"TLS_CERT_FILE"`
 	TLSKeyFile            string        `env:"TLS_KEY_FILE"`
+	resolvedSizing        sizingSource
 }
 
 // Load reads .env non-destructively (does not overwrite pre-set OS env), then
