@@ -69,14 +69,19 @@ func TestLoadReturnsDefaults(t *testing.T) {
 	if cfg.DefaultNS != "default" {
 		t.Errorf("DefaultNS = %q, want %q", cfg.DefaultNS, "default")
 	}
-	if cfg.DuckDBMemory != "" {
-		t.Errorf("DuckDBMemory = %q, want empty (DuckDB self-sizes to 80%% of RAM)", cfg.DuckDBMemory)
-	}
+	// DuckDBMemory is no longer asserted to be empty: Load resolves it from
+	// detected memory, and what it resolves to depends on the machine running
+	// the test. On a host where detection declines it stays empty, which is the
+	// documented fallback rather than a failure. The resolution rules
+	// themselves are covered in sizing_test.go.
 	if cfg.DuckDBThreads != 0 {
 		t.Errorf("DuckDBThreads = %d, want 0 (DuckDB self-sizes to core count)", cfg.DuckDBThreads)
 	}
-	if cfg.DuckDBMaxConns != 4 {
-		t.Errorf("DuckDBMaxConns = %d, want 4", cfg.DuckDBMaxConns)
+	// Sized from the machine rather than fixed at 4, so assert the contract:
+	// above the write-gate invariant and within the auto-sizing ceiling.
+	if cfg.DuckDBMaxConns < minDuckDBConns || cfg.DuckDBMaxConns > maxAutoDuckDBConns {
+		t.Errorf("DuckDBMaxConns = %d, want between %d and %d",
+			cfg.DuckDBMaxConns, minDuckDBConns, maxAutoDuckDBConns)
 	}
 }
 
