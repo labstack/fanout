@@ -83,10 +83,11 @@ func TestDecideNextStepStopsWhenEvenTheOpeningRateMisses(t *testing.T) {
 	}
 }
 
-func TestDecideNextStepStopsAtLatencyKnee(t *testing.T) {
+func TestDecideNextStepRefinesTheLatencyKnee(t *testing.T) {
 	p := defaultRampPolicy()
 	// Delivery is fine, but latency has blown out relative to the best step.
-	// Capacity that only exists at 40x the latency is not capacity.
+	// Treat the knee as the upper bracket rather than reporting the previous
+	// doubling as capacity without probing the large gap between them.
 	history := []rampStep{
 		{TargetRate: 1000, AchievedRate: 1000, ExportP95Ms: 2},
 		{TargetRate: 2000, AchievedRate: 1990, ExportP95Ms: 80},
@@ -94,8 +95,25 @@ func TestDecideNextStepStopsAtLatencyKnee(t *testing.T) {
 
 	got := decideNextStep(history, p)
 
+	if got.Stop {
+		t.Fatalf("should refine the latency bracket, stopped: %s", got.Reason)
+	}
+	if got.NextRate != 1500 {
+		t.Fatalf("NextRate = %v, want midpoint 1500", got.NextRate)
+	}
+}
+
+func TestDecideNextStepStopsAfterRefiningTheLatencyKnee(t *testing.T) {
+	p := defaultRampPolicy()
+	history := []rampStep{
+		{TargetRate: 1000, AchievedRate: 1000, ExportP95Ms: 2},
+		{TargetRate: 1100, AchievedRate: 1100, ExportP95Ms: 80},
+	}
+
+	got := decideNextStep(history, p)
+
 	if !got.Stop {
-		t.Fatal("must stop at the latency knee even when delivery holds")
+		t.Fatalf("must stop once the latency bracket is tight, got next rate %v", got.NextRate)
 	}
 }
 

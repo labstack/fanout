@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestValidateTrialConfigRejectsUnusableInputs(t *testing.T) {
 	valid := config{
@@ -31,5 +35,39 @@ func TestValidateTrialConfigRejectsUnusableInputs(t *testing.T) {
 	}
 	if err := validateTrialConfig(valid); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
+	}
+}
+
+func TestValidateConfigRejectsNonPositiveAdaptiveStep(t *testing.T) {
+	cfg := config{
+		workers: 8, services: 20, namespaces: 1, cardinality: 100,
+		errorRate: 0.05, msgRatio: 0.2, stepDuration: 0,
+	}
+
+	err := validateConfig(cfg)
+	if err == nil || !strings.Contains(err.Error(), "-step must be positive") {
+		t.Fatalf("validateConfig error = %v, want a positive-step error", err)
+	}
+}
+
+func TestValidateConfigAllowsPositiveAdaptiveStep(t *testing.T) {
+	cfg := config{
+		workers: 8, services: 20, namespaces: 1, cardinality: 100,
+		errorRate: 0.05, msgRatio: 0.2, stepDuration: time.Second,
+	}
+
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("valid adaptive config rejected: %v", err)
+	}
+}
+
+func TestValidateConfigDoesNotApplyStepToFixedRateRuns(t *testing.T) {
+	cfg := config{
+		rate: 1000, workers: 8, services: 20, namespaces: 1, cardinality: 100,
+		errorRate: 0.05, msgRatio: 0.2, stepDuration: 0,
+	}
+
+	if err := validateConfig(cfg); err != nil {
+		t.Fatalf("fixed-rate config rejected because of unused -step: %v", err)
 	}
 }

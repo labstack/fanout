@@ -100,6 +100,83 @@ func TestParseCgroupMemoryLimitReadsAByteCount(t *testing.T) {
 	}
 }
 
+func TestDetectCgroupV2MemoryLimitUsesTheProcessCgroup(t *testing.T) {
+	mountPoint := t.TempDir()
+	processDir := filepath.Join(mountPoint, "system.slice", "fanout.service")
+	if err := os.MkdirAll(processDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(processDir, "memory.max"), "2147483648\n")
+
+	procDir := t.TempDir()
+	cgroupPath := filepath.Join(procDir, "cgroup")
+	mountInfoPath := filepath.Join(procDir, "mountinfo")
+	writeTestFile(t, cgroupPath, "0::/system.slice/fanout.service\n")
+	writeTestFile(t, mountInfoPath, fmt.Sprintf(
+		"36 25 0:32 / %s rw,nosuid,nodev,noexec,relatime - cgroup2 cgroup rw\n",
+		mountPoint,
+	))
+
+	if got := detectCgroupMemoryLimit(cgroupPath, mountInfoPath); got != 2<<30 {
+		t.Fatalf("detectCgroupMemoryLimit = %d, want %d", got, uint64(2<<30))
+	}
+}
+
+func TestDetectCgroupMemoryLimitUsesTheTightestAncestor(t *testing.T) {
+	mountPoint := t.TempDir()
+	processDir := filepath.Join(mountPoint, "tenant", "fanout")
+	if err := os.MkdirAll(processDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(processDir, "memory.max"), "max\n")
+	writeTestFile(t, filepath.Join(mountPoint, "tenant", "memory.max"), "3221225472\n")
+	writeTestFile(t, filepath.Join(mountPoint, "memory.max"), "8589934592\n")
+
+	procDir := t.TempDir()
+	cgroupPath := filepath.Join(procDir, "cgroup")
+	mountInfoPath := filepath.Join(procDir, "mountinfo")
+	writeTestFile(t, cgroupPath, "0::/tenant/fanout\n")
+	writeTestFile(t, mountInfoPath, fmt.Sprintf(
+		"36 25 0:32 / %s rw - cgroup2 cgroup rw\n",
+		mountPoint,
+	))
+
+	if got := detectCgroupMemoryLimit(cgroupPath, mountInfoPath); got != 3<<30 {
+		t.Fatalf("detectCgroupMemoryLimit = %d, want %d", got, uint64(3<<30))
+	}
+}
+
+func TestDetectCgroupV1MemoryLimitHonorsTheMountRoot(t *testing.T) {
+	mountPoint := t.TempDir()
+	processDir := filepath.Join(mountPoint, "fanout")
+	if err := os.MkdirAll(processDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(processDir, "memory.limit_in_bytes"), "4294967296\n")
+
+	procDir := t.TempDir()
+	cgroupPath := filepath.Join(procDir, "cgroup")
+	mountInfoPath := filepath.Join(procDir, "mountinfo")
+	writeTestFile(t, cgroupPath, "5:cpu,memory:/docker/abc/fanout\n")
+	writeTestFile(t, mountInfoPath, fmt.Sprintf(
+		"29 24 0:26 /docker/abc %s rw - cgroup cgroup rw,memory\n",
+		mountPoint,
+	))
+
+	if got := detectCgroupMemoryLimit(cgroupPath, mountInfoPath); got != 4<<30 {
+		t.Fatalf("detectCgroupMemoryLimit = %d, want %d", got, uint64(4<<30))
+	}
+}
+
+func TestMinPositiveUsesTheLowerFiniteCeiling(t *testing.T) {
+	if got := minPositive(8<<30, 64<<30); got != 8<<30 {
+		t.Fatalf("minPositive = %d, want host memory %d", got, uint64(8<<30))
+	}
+	if got := minPositive(0, 4<<30); got != 4<<30 {
+		t.Fatalf("minPositive with an unknown source = %d, want %d", got, uint64(4<<30))
+	}
+}
+
 func TestResolveLeavesExplicitValuesAlone(t *testing.T) {
 	cfg := Config{DuckDBMemory: "12GB", DuckDBMaxConns: 9}
 
@@ -131,4 +208,11 @@ func parseByteSizeForTest(t *testing.T, value string) uint64 {
 		t.Fatalf("parse %q: %v", value, err)
 	}
 	return mb << 20
+}
+
+func writeTestFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }

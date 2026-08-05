@@ -1,6 +1,6 @@
 # Fanout on two dedicated vCPUs
 
-**2026-08-04** · image `ghcr.io/labstack/fanout@sha256:feebc9cf` · Hetzner `ccx13`
+**2026-08-04** · image `ghcr.io/labstack/fanout@sha256:feebc9cfc09b1aea4c6165f6d700b976489de237a2fd17c37581b2fea8b3864e` · Hetzner `ccx13`
 
 Two dedicated cores and 8 GB of RAM, rented for about €0.07 an hour, sustained
 **5,138 traces/s — 22,612 rows/s** with zero rows dropped and an export p95 of
@@ -145,9 +145,11 @@ live telemetry, and should not be sized as if it were.
 # On the machine under test
 docker run -d --name fanout --memory 6g -p 4317:4317 -p 7520:7520 \
   -e PUBLIC_INGEST=true -e PUBLIC_READ=true -e METRICS_TOKEN=... \
-  -e DUCKDB_MEMORY=3GB -e AUTH_CODE_SECRET=... -e AI_API_KEY=... \
+  -e DUCKDB_MEMORY=3GB -e DUCKDB_MAX_CONNS=4 \
+  -e AUTH_CODE_SECRET=... -e AI_API_KEY=... \
   -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=... \
-  -v fanout-data:/var/lib/fanout/data ghcr.io/labstack/fanout:main
+  -v fanout-data:/var/lib/fanout/data \
+  ghcr.io/labstack/fanout@sha256:feebc9cfc09b1aea4c6165f6d700b976489de237a2fd17c37581b2fea8b3864e
 
 # On a separate driver machine
 bench -endpoint <sut>:4317 \
