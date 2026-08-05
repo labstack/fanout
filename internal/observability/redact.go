@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// Log-body redaction is the only barrier between log-borne secrets and
-// anonymous readers in PUBLIC_READ demo mode, so treat every change in this
+// Log-body redaction is the barrier between log-borne secrets and authenticated
+// viewers who are allowed to inspect telemetry, so treat every change in this
 // file as security-sensitive.
 //
 // Coverage boundary: redaction is applied ONLY to log body fields on the

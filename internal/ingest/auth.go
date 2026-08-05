@@ -19,7 +19,7 @@ import (
 
 func GRPCServerOptions(cfg env.Config, settingsStore *settings.Store) ([]grpc.ServerOption, error) {
 	opts := []grpc.ServerOption{
-		grpc.UnaryInterceptor(newIngestAuthorizer(cfg, settingsStore).Unary()),
+		grpc.UnaryInterceptor(newIngestAuthorizer(settingsStore).Unary()),
 	}
 	if !cfg.TLSEnabled() {
 		return opts, nil
@@ -46,12 +46,11 @@ func tlsServerConfig(cfg env.Config) (*tls.Config, error) {
 }
 
 type ingestAuthorizer struct {
-	cfg           env.Config
 	settingsStore *settings.Store
 }
 
-func newIngestAuthorizer(cfg env.Config, settingsStore *settings.Store) *ingestAuthorizer {
-	return &ingestAuthorizer{cfg: cfg, settingsStore: settingsStore}
+func newIngestAuthorizer(settingsStore *settings.Store) *ingestAuthorizer {
+	return &ingestAuthorizer{settingsStore: settingsStore}
 }
 
 func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
@@ -67,12 +66,6 @@ func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
 // admin creation, rotatable from the settings page). Peer IP is not
 // considered — operators decide who reaches the port.
 func (a *ingestAuthorizer) authorize(ctx context.Context) error {
-	if a.cfg.PublicIngest {
-		// Public demo mode: accept OTLP without a token. The demo's :4317 is
-		// internal-only (Docker network), so this just removes the per-deploy
-		// token friction; never enable PUBLIC_INGEST where ingest is internet-facing.
-		return nil
-	}
 	if a.settingsStore == nil {
 		// Defensive: production always wires a store (cmd/fanout/main.go). Reaching
 		// this path means a mis-wired init; fail closed and log so it surfaces.

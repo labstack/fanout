@@ -88,7 +88,7 @@ func ProtectBrowserMCP(sessions *appauth.BrowserSessions, next http.Handler) ech
 	}
 	protected := mcpgoauth.RequireBearerToken(func(ctx context.Context, raw string, _ *http.Request) (*mcpgoauth.TokenInfo, error) {
 		user, ok := ctx.Value(browserMCPUserContextKey{}).(appauth.User)
-		if raw != browserMCPSessionBearer || !ok || user.ID == "" || user.ID == publicViewerID {
+		if raw != browserMCPSessionBearer || !ok || user.ID == "" {
 			return nil, mcpgoauth.ErrInvalidToken
 		}
 		scopes := []string{mcpReadScope}
@@ -105,7 +105,7 @@ func ProtectBrowserMCP(sessions *appauth.BrowserSessions, next http.Handler) ech
 
 	return func(c *echo.Context) error {
 		user := GetCurrentUser(c)
-		if user == nil || user.ID == publicViewerID {
+		if user == nil {
 			return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 		}
 		ctx := context.WithValue(c.Request().Context(), browserMCPUserContextKey{}, *user)
@@ -404,7 +404,7 @@ func validMCPScopes(scopes []string) bool {
 
 func (h *MCPAuthorization) browserUser(c *echo.Context) (appauth.User, bool) {
 	user := GetCurrentUser(c)
-	if user == nil || user.ID == publicViewerID || !user.Active {
+	if user == nil || !user.Active {
 		return appauth.User{}, false
 	}
 	return *user, true

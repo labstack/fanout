@@ -1,0 +1,6 @@
+schema: spec-driven
+created: 2026-08-05
+skip_specs: true
+goal: Remove anonymous telemetry reads and tokenless OTLP ingest so demos use
+  persisted viewer accounts and scoped ingest credentials through the same
+  authentication paths as production deployments.

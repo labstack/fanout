@@ -170,7 +170,7 @@ func (h *UserHandler) DeleteUser(c *echo.Context) error {
 
 func userAuditEvent(c *echo.Context, eventType auth.AuditEventType) auth.AuditEvent {
 	event := auth.AuditEvent{EventType: eventType, Outcome: "success", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
-	if actor := GetCurrentUser(c); actor != nil && actor.ID != publicViewerID {
+	if actor := GetCurrentUser(c); actor != nil {
 		event.ActorUserID = actor.ID
 	}
 	return event

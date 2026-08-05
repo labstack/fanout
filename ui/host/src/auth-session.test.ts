@@ -47,19 +47,14 @@ describe("oauthReturnTo", () => {
 
 describe("browserViewerFromMe", () => {
   it("classifies a persisted user session", () => {
-    expect(browserViewerFromMe({ id: "user-123", anonymous: false })).toBe("user");
-  });
-
-  it("classifies the server-declared anonymous viewer", () => {
-    expect(browserViewerFromMe({ id: "any-synthetic-id", anonymous: true })).toBe("anonymous");
+    expect(browserViewerFromMe({ id: "user-123" })).toBe("user");
   });
 
   it("fails closed for malformed responses", () => {
     expect(browserViewerFromMe(null)).toBe("none");
     expect(browserViewerFromMe({})).toBe("none");
-    expect(browserViewerFromMe({ id: "", anonymous: false })).toBe("none");
-    expect(browserViewerFromMe({ id: "user-123" })).toBe("none");
-    expect(browserViewerFromMe({ id: "user-123", anonymous: "false" })).toBe("none");
+    expect(browserViewerFromMe({ id: "" })).toBe("none");
+    expect(browserViewerFromMe({ id: 123 })).toBe("none");
   });
 });
 

@@ -28,7 +28,7 @@ rules:
   specs:
     - Describe shipped behavior as normative requirements with observable WHEN/THEN scenarios.
     - Keep implementation detail out unless it is a compatibility, security, persistence, or operational contract.
-    - Separate browser sessions, MCP OAuth credentials, ingest credentials, and public demo modes; never imply they are interchangeable.
+    - Separate browser sessions, MCP OAuth credentials, and ingest credentials; require authentication in demos and never imply those credential classes are interchangeable.
     - Do not present exploratory UI visions, benchmark snapshots, or future capabilities as shipped behavior.
   design:
     - Identify the code, tests, configuration, and data contracts that establish the current baseline.

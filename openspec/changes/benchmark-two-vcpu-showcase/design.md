@@ -52,10 +52,10 @@ cgo dependency and builds static for `linux/amd64` with `CGO_ENABLED=0`, so the
 driver needs no toolchain — only the binary. The server keeps its cgo build,
 because DuckDB requires it.
 
-**Ingest authentication is disabled on the instance under test.**
-`PUBLIC_INGEST=true` removes a credential check from the hot path that would
-otherwise be measured. This is the disposable-demo configuration and the report
-states it, because it is not how a real instance should be run.
+**The historical run did not measure ingest authentication.** The instance used
+a tokenless mode that has since been removed. The report states this because
+the published number omits a credential check that every current deployment,
+including demos, performs.
 
 **The report records the digest, not the tag.** Tags move. A number is only
 reproducible against the exact image that produced it.

@@ -7,8 +7,10 @@ Two dedicated cores and 8 GB of RAM, rented for about €0.07 an hour, sustained
 3 ms. Adding a realistic dashboard read load of 5 queries/s cost roughly half
 that ingest capacity and left interactive queries under 120 ms.
 
-Every number here came from a run whose method is recorded below. Nothing was
-extrapolated, and the raw reports are reproducible with the commands given.
+Every number here came from a run whose method is recorded below, and nothing
+was extrapolated. The historical run omitted ingest authentication; the current
+reproduction commands deliberately use normal credentials, so they exercise a
+slightly stricter path than the published measurement.
 
 ## Setup
 
@@ -31,10 +33,11 @@ cheaper, but a shared core makes run-to-run variance a property of the
 neighbours rather than of Fanout, and a benchmark nobody can reproduce is not
 worth publishing.
 
-Fanout ran with `PUBLIC_INGEST=true`, which removes a credential check from the
-hot path. That is the disposable-demo configuration, not how a real instance
-should be run. `DUCKDB_MEMORY=3GB` was set for reasons explained under
-[Memory](#memory-must-be-bounded-explicitly).
+The historical Fanout instance used a tokenless ingest mode, so the headline
+number does not include credential verification. That mode has since been
+removed: demos and benchmarks now use the same ingest token as production.
+`DUCKDB_MEMORY=3GB` was set for reasons explained under
+[Memory](#memory-needs-headroom).
 
 ## Results
 
@@ -94,8 +97,8 @@ the mixed number, not the ingest-only one.
   them would quantify variance; that was not done.
 - **The agent and MCP paths are unmeasured.** They are dominated by model
   latency and would say more about the provider than about Fanout.
-- **Authentication is off.** `PUBLIC_INGEST=true` removes a check that a real
-  deployment performs on every request.
+- **The historical ingest run omitted authentication.** Current Fanout releases
+  require a token on every OTLP request, including demos and benchmarks.
 - **One vendor, one shape.** These numbers describe this hardware. They are not
   a claim about equivalent core counts elsewhere.
 - **A synthetic workload.** 20 services, 100-value attribute cardinality, 5%
@@ -145,20 +148,27 @@ live telemetry, and should not be sized as if it were.
 ```sh
 # On the machine under test
 docker run -d --name fanout --memory 6g -p 4317:4317 -p 7520:7520 \
-  -e PUBLIC_INGEST=true -e PUBLIC_READ=true -e METRICS_TOKEN=... \
+  -e OTLP_GRPC_ADDR=:4317 -e METRICS_TOKEN=... \
   -e DUCKDB_MEMORY=3GB -e DUCKDB_MAX_CONNS=4 \
   -e AUTH_CODE_SECRET=... -e AI_API_KEY=... \
   -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=... \
   -v fanout-data:/var/lib/fanout/data \
   ghcr.io/labstack/fanout@sha256:feebc9cfc09b1aea4c6165f6d700b976489de237a2fd17c37581b2fea8b3864e
 
+# Complete first-admin setup in the browser using the token printed by
+# `docker logs fanout`, and save the one-time ingest token as INGEST_TOKEN.
+# For mixed read load, create/sign in as a viewer and copy that browser's
+# Cookie header as QUERY_SESSION_COOKIE (for example fanout_session=...).
+
 # On a separate driver machine
 bench -endpoint <sut>:4317 \
+  -token "$INGEST_TOKEN" \
   -metrics-url http://<sut>:7520/-/metrics -metrics-token ... \
   -report ingest.json
 
 # Add read load
 bench -endpoint <sut>:4317 -query-url http://<sut>:7520 \
+  -token "$INGEST_TOKEN" -query-session-cookie "$QUERY_SESSION_COOKIE" \
   -query-workers 4 -query-rate 5 \
   -metrics-url http://<sut>:7520/-/metrics -metrics-token ... \
   -report mixed.json

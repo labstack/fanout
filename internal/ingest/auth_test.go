@@ -57,32 +57,11 @@ func TestAuthorize_RejectsWhenPreSetup(t *testing.T) {
 	// With no token persisted (pre-admin-setup), every request is rejected —
 	// collectors must wait for the operator to complete setup.
 	store := newRuntimeStore(t)
-	authorizer := newIngestAuthorizer(env.Config{}, store)
+	authorizer := newIngestAuthorizer(store)
 
 	err := authorizer.authorize(context.Background())
 	if status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("code = %v, want %v", status.Code(err), codes.Unauthenticated)
-	}
-}
-
-func TestAuthorize_PublicReadDoesNotDisableIngestAuthentication(t *testing.T) {
-	store := newRuntimeStore(t)
-	authorizer := newIngestAuthorizer(env.Config{PublicRead: true, PublicIngest: false}, store)
-
-	err := authorizer.authorize(context.Background())
-	if status.Code(err) != codes.Unauthenticated {
-		t.Fatalf("code = %v, want %v", status.Code(err), codes.Unauthenticated)
-	}
-}
-
-func TestAuthorize_PublicIngestAcceptsWithoutToken(t *testing.T) {
-	// In public demo mode, OTLP is accepted with no token even pre-setup —
-	// the per-deploy token friction is removed entirely.
-	store := newRuntimeStore(t)
-	authorizer := newIngestAuthorizer(env.Config{PublicIngest: true}, store)
-
-	if err := authorizer.authorize(context.Background()); err != nil {
-		t.Fatalf("public-ingest authorize should accept without a token, got: %v", err)
 	}
 }
 
@@ -96,7 +75,7 @@ func TestAuthorize_AcceptsValidToken(t *testing.T) {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
-	authorizer := newIngestAuthorizer(env.Config{}, store)
+	authorizer := newIngestAuthorizer(store)
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", token))
 
 	if err := authorizer.authorize(ctx); err != nil {
@@ -114,7 +93,7 @@ func TestAuthorize_RejectsWrongToken(t *testing.T) {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
-	authorizer := newIngestAuthorizer(env.Config{}, store)
+	authorizer := newIngestAuthorizer(store)
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", "fo_wrong"))
 
 	err = authorizer.authorize(ctx)
@@ -133,7 +112,7 @@ func TestAuthorize_AcceptsBearerAuthorization(t *testing.T) {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
-	authorizer := newIngestAuthorizer(env.Config{}, store)
+	authorizer := newIngestAuthorizer(store)
 	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
 
 	if err := authorizer.authorize(ctx); err != nil {
@@ -151,7 +130,7 @@ func TestAuthorize_RejectsMissingToken(t *testing.T) {
 		t.Fatalf("SetIngest: %v", err)
 	}
 
-	authorizer := newIngestAuthorizer(env.Config{}, store)
+	authorizer := newIngestAuthorizer(store)
 
 	err = authorizer.authorize(context.Background())
 	if status.Code(err) != codes.Unauthenticated {

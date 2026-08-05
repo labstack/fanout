@@ -15,12 +15,12 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-function authResponse(input: RequestInfo | URL, user: unknown) {
+function authResponse(input: RequestInfo | URL, user: unknown, userStatus = 200) {
   const path = String(input);
   if (path === "/api/auth/status") {
-    return json({ setup_required: false, public_read: true, auth_mode: "local" });
+    return json({ setup_required: false, auth_mode: "local" });
   }
-  if (path === "/api/auth/me") return json(user);
+  if (path === "/api/auth/me") return json(user, userStatus);
   throw new Error(`unexpected request: ${path}`);
 }
 
@@ -37,12 +37,8 @@ describe("AuthGate OAuth return", () => {
     window.happyDOM.setURL("https://fanout.example.com/");
   });
 
-  it("shows login instead of redirecting the anonymous public viewer", async () => {
-    fetchMock.mockImplementation(async (input) => authResponse(input, {
-      id: "synthetic-viewer",
-      role: "viewer",
-      anonymous: true,
-    }));
+  it("shows login instead of redirecting without an account session", async () => {
+    fetchMock.mockImplementation(async (input) => authResponse(input, { message: "not authenticated" }, 401));
     const container = document.createElement("div");
     document.body.append(container);
     const root = createRoot(container);
@@ -65,7 +61,6 @@ describe("AuthGate OAuth return", () => {
     fetchMock.mockImplementation(async (input) => authResponse(input, {
       id: "user-123",
       role: "admin",
-      anonymous: false,
     }));
     const container = document.createElement("div");
     document.body.append(container);
@@ -83,12 +78,11 @@ describe("AuthGate OAuth return", () => {
     await act(async () => root.unmount());
   });
 
-  it("renders the app for the anonymous viewer outside the OAuth flow", async () => {
+  it("renders the app for a persisted viewer outside the OAuth flow", async () => {
     window.happyDOM.setURL("https://fanout.example.com/");
     fetchMock.mockImplementation(async (input) => authResponse(input, {
-      id: "synthetic-viewer",
+      id: "viewer-123",
       role: "viewer",
-      anonymous: true,
     }));
     const container = document.createElement("div");
     document.body.append(container);
