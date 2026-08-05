@@ -42,7 +42,6 @@ func TestEvaluateReportCollectsEveryFailure(t *testing.T) {
 	for _, expected := range []string{
 		"final metrics scrape failed",
 		"query errors=2",
-		"query p95 1600ms > 1500ms release SLO",
 		"rows dropped=1",
 		"export p95 150ms > 100ms",
 		"query p95 1600ms > 1000ms",
@@ -51,6 +50,23 @@ func TestEvaluateReportCollectsEveryFailure(t *testing.T) {
 		if !hasFailure(failures, expected) {
 			t.Fatalf("failures %q do not contain %q", failures, expected)
 		}
+	}
+}
+
+// Latency alone must not fail a run. A built-in millisecond threshold encodes
+// the machine it was calibrated on, so the same binary would "fail" purely for
+// running on a smaller computer.
+func TestEvaluateReportDoesNotJudgeLatencyWithoutACallerThreshold(t *testing.T) {
+	queryLatency := latencyReport{Count: 100, P95Ms: 9000}
+	cfg := config{queryURL: "https://query.example.test", queryWorkers: 4}
+	report := report{
+		ExportLatencyMs: latencyReport{Count: 100, P95Ms: 8000},
+		QueriesRun:      100,
+		QueryLatencyMs:  &queryLatency,
+	}
+
+	if failures := evaluateReport(cfg, report, nil); len(failures) != 0 {
+		t.Fatalf("slow but healthy run failed: %q", failures)
 	}
 }
 

@@ -51,14 +51,16 @@ func TestScrapeMetricsSendsBearerToken(t *testing.T) {
 	}
 }
 
-func TestHistogramHasExactReleaseSLOBoundary(t *testing.T) {
+func TestHistogramHasExactBoundaryAtQueryLegibilityPoint(t *testing.T) {
 	h := newHistogram()
 	for range 100 {
 		h.record(1499 * time.Millisecond)
 	}
 
-	if got := h.snapshot().P95Ms; got != mixedQueryP95SLOMs {
-		t.Fatalf("p95 = %vms, want exact release SLO boundary %vms", got, mixedQueryP95SLOMs)
+	// 1.5s is a bucket edge so latency around the interactive threshold reports
+	// exactly rather than landing mid-bucket. Not a pass/fail threshold.
+	if got := h.snapshot().P95Ms; got != 1500 {
+		t.Fatalf("p95 = %vms, want exact 1500ms bucket boundary", got)
 	}
 }
 

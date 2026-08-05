@@ -7,6 +7,9 @@ import (
 
 func validateTrialConfig(cfg config) error {
 	switch {
+	// Zero is not "unset" here: by the time a trial runs, adaptive mode has
+	// resolved a concrete rate and worker count. A zero reaching this point
+	// means the ramp produced a step it cannot actually execute.
 	case cfg.rate <= 0:
 		return errors.New("-rate must be positive")
 	case cfg.workers <= 0:

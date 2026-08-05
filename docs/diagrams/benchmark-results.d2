@@ -1,0 +1,38 @@
+# What two dedicated cores sustained, and what read load costs.
+# Numbers from docs/benchmarks/two-vcpu.md. Render with `just diagrams`.
+
+vars: {
+  d2-config: {
+    layout-engine: dagre
+    theme-id: 5
+  }
+}
+
+direction: down
+
+ingest: "Ingest only" {
+  style.stroke-width: 2
+  rate: "5,138 traces/s\n22,612 rows/s" {style.font-size: 20}
+  lat: "export p95 3 ms\n0 rows dropped"
+  cpu: "1.10 of 2 cores\n1.1 GB RSS"
+}
+
+mixed: "Ingest + 5 queries/s" {
+  style.stroke-width: 2
+  rate: "2,718 traces/s\n11,957 rows/s" {style.font-size: 20}
+  lat: "export p95 6 ms\n0 rows dropped"
+  cpu: "1.86 of 2 cores\n1.2 GB RSS"
+}
+
+ingest -> mixed: "read load costs\n47% of ingest capacity" {style.stroke-width: 2}
+
+queries: "Query latency under that ingest load\n(1.31M rows spread over 2 hours)" {
+  grid-columns: 1
+  fast: "overview   p50 18 ms    p95 38 ms" {style.font-size: 14}
+  fast2: "topology   p50 49 ms    p95 115 ms" {style.font-size: 14}
+  mid: "logs       p50 471 ms   p95 779 ms" {style.font-size: 14}
+  slow: "performance p50 1094 ms  p95 2467 ms" {style.font-size: 14}
+  slow2: "trace      p50 1329 ms  p95 2382 ms" {style.font-size: 14}
+}
+
+mixed -> queries
