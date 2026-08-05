@@ -246,11 +246,6 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 		t.Fatalf("remote MCP accepted browser session: %d", remoteWithSessionOnly.Code)
 	}
 
-	public, _, _ := newOAuthTestServerWithConfig(t, env.Config{PublicRead: true})
-	publicBrowserMCP := serve(t, public, http.MethodGet, "/api/mcp", "", nil)
-	if publicBrowserMCP.Code != http.StatusUnauthorized {
-		t.Fatalf("PUBLIC_READ viewer reached browser MCP: %d %s", publicBrowserMCP.Code, publicBrowserMCP.Body.String())
-	}
 }
 
 func TestMCPOAuthRegistrationRejectsUnsafeRedirect(t *testing.T) {

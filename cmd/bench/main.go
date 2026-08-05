@@ -14,11 +14,10 @@
 // Example — a 10-minute soak at 2k traces/s across 50 services, with a report:
 //
 //	go run ./cmd/bench -rate 2000 -duration 10m -services 50 -attr-cardinality 200 \
+//	  -token "$INGEST_TOKEN" \
 //	  -metrics-url http://localhost:7520/-/metrics -metrics-token "$METRICS_TOKEN" -report run.json
 //
 // The metrics endpoint requires -metrics-token unless METRICS_PUBLIC=true.
-//
-// Run fanout locally with PUBLIC_INGEST=true for tokenless ingest, or pass -token.
 package main
 
 import (
@@ -73,6 +72,9 @@ type config struct {
 	queryURL     string
 	queryWorkers int
 	queryRate    float64
+	// querySessionCookie is the Cookie header from a signed-in Fanout account.
+	// It is deliberately omitted from reports and logs.
+	querySessionCookie string
 	// Pass/fail thresholds (0 = no threshold). Non-zero exit on violation so
 	// the harness can gate CI / releases.
 	maxExportP95 float64
@@ -105,7 +107,7 @@ var version = "dev"
 func main() {
 	var cfg config
 	flag.StringVar(&cfg.endpoint, "endpoint", "localhost:4317", "OTLP gRPC endpoint")
-	flag.StringVar(&cfg.token, "token", "", "ingest token (x-fanout-ingest-token); omit when fanout runs with PUBLIC_INGEST=true")
+	flag.StringVar(&cfg.token, "token", "", "ingest token (x-fanout-ingest-token); required")
 	flag.Float64Var(&cfg.rate, "rate", 0, "target traces per second (aggregate); 0 ramps adaptively to find what this server sustains")
 	flag.DurationVar(&cfg.duration, "duration", time.Minute, "run duration for a fixed -rate run; 0 means run until interrupted")
 	flag.IntVar(&cfg.workers, "workers", 0, "concurrent senders; 0 sizes them from the driver's cores")
@@ -123,6 +125,7 @@ func main() {
 	flag.StringVar(&cfg.queryURL, "query-url", "", "fanout HTTP base URL to drive read load under ingest (e.g. http://localhost:7520)")
 	flag.IntVar(&cfg.queryWorkers, "query-workers", 0, "concurrent query workers (0 = ingest only)")
 	flag.Float64Var(&cfg.queryRate, "query-rate", 50, "target queries/sec (aggregate) when query-workers > 0")
+	flag.StringVar(&cfg.querySessionCookie, "query-session-cookie", "", "Cookie header from an authenticated Fanout account; required when query-workers > 0")
 	flag.Float64Var(&cfg.maxExportP95, "max-export-p95-ms", 0, "fail (exit 1) if ingest export p95 exceeds this")
 	flag.Float64Var(&cfg.maxQueryP95, "max-query-p95-ms", 0, "fail (exit 1) if query p95 exceeds this")
 	flag.Float64Var(&cfg.backfillHours, "backfill-hours", 0, "spread event timestamps over the last N hours (pre-seed a multi-hour dataset); 0 = use now()")
@@ -468,7 +471,7 @@ func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 			// deadline is cancelled rather than running on for the client
 			// timeout, which both delays the final scrape and hides its own
 			// failure (ctx.Err() is non-nil by the time it returns).
-			req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+			req, reqErr := g.newQueryRequest(ctx, url)
 			if reqErr != nil {
 				g.queryErrs.Add(1)
 				reportFailure(target.operation, reqErr.Error())
@@ -502,6 +505,15 @@ func (g *generator) runQueries(ctx context.Context, interval time.Duration) {
 			g.queriesRun.Add(1)
 		}
 	}
+}
+
+func (g *generator) newQueryRequest(ctx context.Context, url string) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Cookie", g.cfg.querySessionCookie)
+	return req, nil
 }
 
 func (g *generator) run(ctx context.Context, interval time.Duration, rng *rand.Rand) {

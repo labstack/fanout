@@ -72,7 +72,7 @@ func TestRedactLogBody(t *testing.T) {
 // TestRedactSQLMatchesGo pins the Go-vs-SQL redaction parity that the search
 // filter depends on (see redactedBodySQL in logs.go): if DuckDB's RE2
 // dialect ever diverges from Go's regexp for these patterns, shipping
-// silently different display-vs-search redaction would let anonymous readers
+// silently different display-vs-search redaction would let telemetry viewers
 // probe secrets via search=<candidate>.
 func TestRedactSQLMatchesGo(t *testing.T) {
 	db, err := sql.Open("duckdb", "")

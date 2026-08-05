@@ -6,7 +6,7 @@ import { BrandLockup } from "./brand";
 
 export { authorizedFetch, clearSession, logout } from "./auth-session";
 
-type Status = { setup_required: boolean; public_read: boolean; auth_mode: "local" | "oidc" };
+type Status = { setup_required: boolean; auth_mode: "local" | "oidc" };
 type SetupResult = { status: string; ingest_token?: string; ingest_header_name?: string; suggested_endpoint?: string };
 
 async function jsonRequest(path: string, body?: unknown) {
@@ -61,7 +61,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [setupResult, setSetupResult] = useState<SetupResult | null>(null);
   const [copied, setCopied] = useState(false);
   const returnTo = oauthReturnTo();
-  const authenticated = viewer === "user" || (viewer === "anonymous" && !returnTo);
+  const authenticated = viewer === "user";
 
   useEffect(() => {
     clearLegacySession();

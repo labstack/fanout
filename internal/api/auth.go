@@ -74,10 +74,6 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 		"setup_required": count == 0,
 		"auth_enabled":   true,
 		"auth_mode":      strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)),
-		// Lets the SPA boot anonymously into read-only mode: when true, an
-		// unauthenticated GET /api/auth/me returns the synthetic viewer, so the
-		// frontend can render the explicitly public telemetry views without a login.
-		"public_read": h.cfg.PublicRead,
 	})
 }
 
@@ -283,13 +279,7 @@ func (h *AuthHandler) Me(c *echo.Context) error {
 	if user == nil {
 		return echo.NewHTTPError(http.StatusUnauthorized, "not authenticated")
 	}
-	return c.JSON(200, struct {
-		auth.User
-		Anonymous bool `json:"anonymous"`
-	}{
-		User:      *user,
-		Anonymous: user.ID == publicViewerID,
-	})
+	return c.JSON(200, user)
 }
 
 func (h *AuthHandler) Logout(c *echo.Context) error {

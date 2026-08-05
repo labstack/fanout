@@ -23,7 +23,7 @@ these areas are especially relevant:
 
 - Authentication and session handling — local email codes, OIDC, MCP OAuth
 - Authorization between roles, and between browser sessions and MCP clients
-- Ingest credentials, and the `PUBLIC_READ` / `PUBLIC_INGEST` overrides
+- Ingest credential generation, storage, rotation, and enforcement
 - Query paths that could read data outside the requesting namespace
 - Anything that turns telemetry content into executable behavior
 
@@ -37,8 +37,8 @@ release is supported. There are no backports to earlier tags.
 
 ## Operating Fanout safely
 
-Fanout terminates no TLS of its own by default and expects to sit behind a
-reverse proxy that does. `PUBLIC_READ` and `PUBLIC_INGEST` disable
-authentication for reads and ingest respectively; both are intended for
-disposable demo instances and should never be enabled on an instance holding
-real telemetry.
+Fanout serves plaintext by default. Configure `TLS_CERT_FILE` and
+`TLS_KEY_FILE`, or place it behind a reverse proxy that terminates TLS. Browser
+and API reads require an authenticated account, and every OTLP request requires
+the separately managed ingest token. Demo instances use the same credential
+paths as production instances.

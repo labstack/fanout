@@ -55,7 +55,7 @@ func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to generate ingest token")
 	}
 	event := auth.AuditEvent{EventType: "ingest_key.rotated", Outcome: "success", TargetType: "ingest", TargetID: "default", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
-	if user := GetCurrentUser(c); user != nil && user.ID != publicViewerID {
+	if user := GetCurrentUser(c); user != nil {
 		event.ActorUserID = user.ID
 	}
 	if err := h.store.SetIngestWithAudit(c.Request().Context(), settings.Ingest{TokenHash: hash}, h.audit, event); err != nil {
