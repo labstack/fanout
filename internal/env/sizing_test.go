@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -177,8 +178,17 @@ func TestMinPositiveUsesTheLowerFiniteCeiling(t *testing.T) {
 	}
 }
 
+func TestDetectHostMemoryFindsSupportedHosts(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("host memory detection is currently supported on Linux and macOS")
+	}
+	if got := detectHostMemory(); got < minDetectableMemory {
+		t.Fatalf("detectHostMemory = %d, want at least %d on %s", got, minDetectableMemory, runtime.GOOS)
+	}
+}
+
 func TestResolveLeavesExplicitValuesAlone(t *testing.T) {
-	cfg := Config{DuckDBMemory: "12GB", DuckDBMaxConns: 9}
+	cfg := Config{DuckDBMemory: "12GB", DuckDBMaxConns: 9, DuckDBThreads: 4}
 
 	cfg.resolveSizing()
 
@@ -187,6 +197,13 @@ func TestResolveLeavesExplicitValuesAlone(t *testing.T) {
 	}
 	if cfg.DuckDBMaxConns != 9 {
 		t.Fatalf("DuckDBMaxConns = %d, want the operator's 9 untouched", cfg.DuckDBMaxConns)
+	}
+	sizing := cfg.RuntimeSizing()
+	if sizing.DuckDBMemoryAuto || sizing.DuckDBMaxConnsAuto {
+		t.Fatalf("explicit values reported as automatic: %+v", sizing)
+	}
+	if sizing.DuckDBMemory != "12GB" || sizing.DuckDBMaxConns != 9 || sizing.DuckDBThreads != 4 {
+		t.Fatalf("runtime sizing does not match effective config: %+v", sizing)
 	}
 }
 
@@ -197,6 +214,13 @@ func TestResolveFillsUnsetValues(t *testing.T) {
 
 	if cfg.DuckDBMaxConns < 2 {
 		t.Fatalf("DuckDBMaxConns = %d, want an auto-sized pool of at least 2", cfg.DuckDBMaxConns)
+	}
+	sizing := cfg.RuntimeSizing()
+	if !sizing.DuckDBMemoryAuto || !sizing.DuckDBMaxConnsAuto {
+		t.Fatalf("resolved values not reported as automatic: %+v", sizing)
+	}
+	if sizing.DetectedMemoryBytes != detectAvailableMemory() {
+		t.Fatalf("DetectedMemoryBytes = %d, want available memory %d", sizing.DetectedMemoryBytes, detectAvailableMemory())
 	}
 }
 

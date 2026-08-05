@@ -94,8 +94,11 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"max", "count", "age_seconds"}).AddRow(time.Now().UTC(), 2, int64(30)))
 
 	h := NewHealthHandler(&query.Duck{DB: db}, env.Config{
-		DataDir:     os.TempDir(),
-		RollupEvery: 60,
+		DataDir:        os.TempDir(),
+		RollupEvery:    60,
+		DuckDBMemory:   "3GB",
+		DuckDBMaxConns: 2,
+		DuckDBThreads:  1,
 	})
 	if err := h.Readiness(c); err != nil {
 		t.Fatalf("Readiness error: %v", err)
@@ -120,6 +123,12 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 		if _, ok := resp.Checks[key]; !ok {
 			t.Fatalf("missing %s check", key)
 		}
+	}
+	if sizing := resp.RuntimeSizing; sizing.DuckDBMemory != "3GB" || sizing.DuckDBMaxConns != 2 || sizing.DuckDBThreads != 1 {
+		t.Fatalf("runtime sizing = %+v, want effective DuckDB configuration", sizing)
+	}
+	if resp.RuntimeSizing.GOMAXPROCS <= 0 {
+		t.Fatalf("runtime sizing GOMAXPROCS = %d, want positive", resp.RuntimeSizing.GOMAXPROCS)
 	}
 	for _, key := range []string{"duckdb", "ducklake", "rollups", "maintenance"} {
 		if got := resp.Checks[key].Status; got != "ok" {

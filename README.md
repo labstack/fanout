@@ -127,6 +127,26 @@ likely to touch:
 | `RETENTION_DAYS` | `30` | Telemetry retention window |
 | `MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
 
+### Advanced DuckDB sizing
+
+Most deployments should not set DuckDB variables. Give the process or
+container the CPU and memory limits it may use; at startup Fanout reserves
+headroom for Go and sizes the DuckDB connection pool from available CPUs. The
+resolved values and whether Fanout chose them are available in the
+`runtime_sizing` block returned by `/readyz` and `/api/health`.
+
+These variables are escape hatches for measured, unusual workloads:
+
+| Variable | Automatic behavior | When to override |
+| --- | --- | --- |
+| `DUCKDB_MEMORY` | 60% of the container or host memory available to Fanout | A measured co-tenant workload needs a different Go/DuckDB split |
+| `DUCKDB_MAX_CONNS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
+| `DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
+
+An explicit value always wins. If Fanout cannot detect available memory, it
+logs a warning instead of inventing a machine size; only that case requires an
+operator to set `DUCKDB_MEMORY` for a guaranteed bound.
+
 ## Development
 
 ```sh

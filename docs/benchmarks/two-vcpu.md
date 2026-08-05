@@ -103,22 +103,23 @@ the mixed number, not the ingest-only one.
 
 ## Three things worth knowing before you deploy
 
-### Memory must be bounded explicitly
+### Memory needs headroom
 
 An earlier run was **OOM-killed by the kernel** at 7.5 GB RSS on the 7.7 GB
 machine. With `DUCKDB_MEMORY` unset, DuckDB sizes itself to 80% of detected RAM
 — about 6.2 GB here — and the Go runtime's own footprint on top of that exceeds
 the machine. The container had no memory limit, so DuckDB saw the whole host.
 
-Set `DUCKDB_MEMORY` to leave room for the Go heap, and give the container a
-memory limit. This run used `DUCKDB_MEMORY=3GB` with a 6 GB container limit and
-peaked at 1.2 GB RSS.
+This run used `DUCKDB_MEMORY=3GB` with a 6 GB container limit and peaked at
+1.2 GB RSS. That explicit value records the historical benchmark configuration;
+it is not required for a normal current deployment.
 
 **Since these runs, Fanout resolves this itself.** With `DUCKDB_MEMORY` unset it
-now detects the cgroup limit and reserves headroom for the Go runtime, and logs
-what it chose at startup. On the 6 GB container used here it resolves to
-3686 MB — close to the 3 GB pinned by hand above, which is why the numbers still
-stand. Setting the variable explicitly still overrides it.
+now detects the container or host limit, reserves headroom for the Go runtime,
+and logs what it chose at startup. On the 6 GB container used here it resolves
+to 3686 MB — close to the 3 GB pinned by hand above, which is why the numbers
+still stand. Operators normally set the container memory limit and let Fanout
+handle DuckDB; setting the variable explicitly remains an advanced override.
 
 ### Capacity falls as the dataset grows
 

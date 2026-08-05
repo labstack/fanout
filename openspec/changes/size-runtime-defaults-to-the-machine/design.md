@@ -18,7 +18,8 @@ that run was roughly 1.3 GB.
 **Goals**
 
 - A default configuration that does not get OOM-killed on a small machine.
-- Resolution that is observable: an operator can read what was chosen.
+- Resolution that is observable: an operator can read what was chosen from
+  startup logs or health diagnostics.
 - Container-correct detection, since a cgroup limit is what actually binds.
 
 **Non-Goals**
@@ -40,9 +41,10 @@ logged, and overridable.
 
 **Detect memory from cgroups first, then the host.** A container limit is what
 the kernel enforces, and reading the host's total inside a limited container is
-exactly the mistake being fixed. Order: cgroup v2 `memory.max`, cgroup v1
-`memory.limit_in_bytes`, then `/proc/meminfo`. A sentinel "max" value means
-unlimited and falls through to the next source.
+exactly the mistake being fixed. Linux resolves the process cgroup from procfs,
+walks its ancestors for the tightest v1/v2 limit, and compares that limit with
+`/proc/meminfo`. macOS reads `hw.memsize`. A sentinel "max" value means
+unlimited and falls through to the host source.
 
 **Do nothing when detection fails.** If no source yields a figure — an
 unrecognized platform, an unreadable cgroup — leave `DUCKDB_MEMORY` empty and
@@ -60,9 +62,10 @@ already uses 0 to mean "leave DuckDB's default", so 0 is the established
 spelling for "decide for me". Checking `os.LookupEnv` instead would make the
 struct tag's stated default a lie.
 
-**Log the resolved values, once, at startup.** Without this, an adaptive default
-is unfalsifiable in support: nobody can say what the machine chose. This is why
-it lands first rather than last.
+**Report the resolved values in logs and health diagnostics.** Without this, an
+adaptive default is unfalsifiable in support: nobody can say what the machine
+chose. Startup emits one structured log; `/readyz` and `/api/health` return a
+non-secret `runtime_sizing` block for later inspection.
 
 ## Risks / Trade-offs
 
@@ -75,8 +78,9 @@ it lands first rather than last.
 - **Published benchmarks were run with the value pinned by hand.** They remain
   valid for what they measured, but their reproduction steps now describe a
   configuration the software would have chosen anyway.
-- **cgroup detection is Linux-shaped.** On other platforms the code falls
-  through to no decision, which is the safe direction.
+- **Container detection is Linux-specific.** macOS can size from physical host
+  memory but has no cgroup concept. Unsupported platforms fall through to no
+  decision, which is the safe direction.
 
 ## Migration Plan
 

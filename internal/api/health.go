@@ -39,8 +39,9 @@ type CheckResult struct {
 
 // HealthResponse represents the full health check response
 type HealthResponse struct {
-	Status string                 `json:"status"`
-	Checks map[string]CheckResult `json:"checks"`
+	Status        string                 `json:"status"`
+	Checks        map[string]CheckResult `json:"checks"`
+	RuntimeSizing env.RuntimeSizing      `json:"runtime_sizing"`
 }
 
 // Liveness returns 200 if process is running (Kubernetes liveness probe)
@@ -51,8 +52,9 @@ func (h *HealthHandler) Liveness(c *echo.Context) error {
 // Readiness checks all dependencies (Kubernetes readiness probe)
 func (h *HealthHandler) Readiness(c *echo.Context) error {
 	resp := HealthResponse{
-		Status: "ready",
-		Checks: make(map[string]CheckResult),
+		Status:        "ready",
+		Checks:        make(map[string]CheckResult),
+		RuntimeSizing: h.cfg.RuntimeSizing(),
 	}
 
 	// Check DuckDB

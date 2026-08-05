@@ -52,6 +52,19 @@ type sizingSource struct {
 	DetectedRAM  uint64
 }
 
+// RuntimeSizing is the safe, non-secret sizing state exposed through runtime
+// diagnostics. It reports the effective values after startup resolution and
+// preserves whether each value came from the machine or the operator.
+type RuntimeSizing struct {
+	DuckDBMemory        string `json:"duckdb_memory"`
+	DuckDBMemoryAuto    bool   `json:"duckdb_memory_auto"`
+	DuckDBMaxConns      int    `json:"duckdb_max_conns"`
+	DuckDBMaxConnsAuto  bool   `json:"duckdb_max_conns_auto"`
+	DuckDBThreads       int    `json:"duckdb_threads"`
+	DetectedMemoryBytes uint64 `json:"detected_memory_bytes"`
+	GOMAXPROCS          int    `json:"gomaxprocs"`
+}
+
 // resolveSizing fills in the values the operator left for the machine to
 // decide. Explicit configuration always wins; this only touches zero values.
 func (c *Config) resolveSizing() sizingSource {
@@ -65,7 +78,22 @@ func (c *Config) resolveSizing() sizingSource {
 		src.MaxConnsAuto = true
 		c.DuckDBMaxConns = resolveDuckDBMaxConns(runtime.GOMAXPROCS(0))
 	}
+	c.resolvedSizing = src
 	return src
+}
+
+// RuntimeSizing returns the effective startup sizing without exposing any
+// credentials or unrelated configuration.
+func (c Config) RuntimeSizing() RuntimeSizing {
+	return RuntimeSizing{
+		DuckDBMemory:        c.DuckDBMemory,
+		DuckDBMemoryAuto:    c.resolvedSizing.MemoryAuto,
+		DuckDBMaxConns:      c.DuckDBMaxConns,
+		DuckDBMaxConnsAuto:  c.resolvedSizing.MaxConnsAuto,
+		DuckDBThreads:       c.DuckDBThreads,
+		DetectedMemoryBytes: c.resolvedSizing.DetectedRAM,
+		GOMAXPROCS:          runtime.GOMAXPROCS(0),
+	}
 }
 
 // logResolvedSizing reports what the process will actually run with.
@@ -126,7 +154,7 @@ func resolveDuckDBMaxConns(cores int) int {
 // is what the kernel enforces, and reading the host's memory from inside a
 // constrained container is precisely the mistake this code exists to fix.
 func detectAvailableMemory() uint64 {
-	hostMemory := readMemTotal("/proc/meminfo")
+	hostMemory := detectHostMemory()
 	cgroupLimit := detectCgroupMemoryLimit("/proc/self/cgroup", "/proc/self/mountinfo")
 
 	// A private cgroup namespace commonly exposes the process cgroup as the
@@ -339,27 +367,4 @@ func readCgroupLimit(path string) (uint64, bool) {
 		return 0, false
 	}
 	return limit, true
-}
-
-// readMemTotal reads MemTotal from a /proc/meminfo-formatted file, in bytes.
-func readMemTotal(path string) uint64 {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		if !strings.HasPrefix(line, "MemTotal:") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			return 0
-		}
-		kb, err := strconv.ParseUint(fields[1], 10, 64)
-		if err != nil {
-			return 0
-		}
-		return kb << 10
-	}
-	return 0
 }
