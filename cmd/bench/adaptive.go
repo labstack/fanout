@@ -54,7 +54,7 @@ type rampPolicy struct {
 // crossing the latency knee, and the lowest rate that failed either test. A
 // zero upper bound means nothing has missed yet.
 func bracket(history []rampStep, p rampPolicy) (lastGood, firstBad float64) {
-	best := bestExportP95(history)
+	best := bestHeldExportP95(history, p.DeliveryFloor)
 	for _, s := range history {
 		if s.held(p.DeliveryFloor) && !kneeExceeded(best, s.ExportP95Ms, p.LatencyKnee) {
 			if s.TargetRate > lastGood {
@@ -120,12 +120,14 @@ func decideNextStep(history []rampStep, p rampPolicy) rampDecision {
 	return rampDecision{NextRate: (lastGood + firstBad) / 2}
 }
 
-// bestExportP95 is the lowest export p95 seen, i.e. the machine's behaviour
-// when it is not under strain. Later steps are judged against it.
-func bestExportP95(history []rampStep) float64 {
+// bestHeldExportP95 is the lowest export p95 from a step that sustained its
+// offered rate, i.e. the machine's behaviour before delivery fell behind.
+// Failed steps only record successful exports, so their latency can look
+// deceptively low and must not redefine the baseline used to judge good steps.
+func bestHeldExportP95(history []rampStep, deliveryFloor float64) float64 {
 	best := 0.0
 	for _, s := range history {
-		if s.ExportP95Ms > 0 && (best == 0 || s.ExportP95Ms < best) {
+		if s.held(deliveryFloor) && s.ExportP95Ms > 0 && (best == 0 || s.ExportP95Ms < best) {
 			best = s.ExportP95Ms
 		}
 	}
@@ -145,7 +147,7 @@ func kneeExceeded(baselineMs, loadedMs, knee float64) bool {
 // sustainableRate is the highest throughput the server both accepted and
 // served without passing the latency knee.
 func sustainableRate(history []rampStep, p rampPolicy) float64 {
-	best := bestExportP95(history)
+	best := bestHeldExportP95(history, p.DeliveryFloor)
 	sustained := 0.0
 	for _, s := range history {
 		if !s.held(p.DeliveryFloor) || kneeExceeded(best, s.ExportP95Ms, p.LatencyKnee) {
