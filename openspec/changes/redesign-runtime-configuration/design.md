@@ -2,12 +2,10 @@
 
 ## Context
 
-See `proposal.md` for motivation. The current `internal/env.Config` combines
-environment names and defaults in struct tags. `env.Load` implicitly reads
-`.env`, overloads it with `.env.${ENV}`, parses process environment with
-`caarlos0/env`, validates, logs warnings, and exits the process on error.
-`cmd/fanout` calls it before opening storage or listeners. README and Docker
-examples expose the unprefixed variables directly.
+See `proposal.md` for motivation. Fanout needs one explicit configuration
+surface across local binaries, supervisors, and containers. Source composition,
+typed decoding, validation, diagnostics, and process exit need clear ownership,
+and working-directory dotenv files must not affect runtime behavior.
 
 The configuration type is consumed throughout ingest, storage, query, auth,
 agent, MCP, and API packages. Those consumers need effective typed values, not
@@ -46,20 +44,19 @@ This is preferred over Viper because provider order is explicit and the API
 surface is smaller. Direct `yaml.v3` plus hand-written pointer overlays would
 avoid a dependency but duplicate presence and merge logic for every field.
 
-### Rename the package to `internal/config`
+### Keep configuration in `internal/config`
 
 The package owns defaults, YAML, environment mapping, sizing, and validation;
-`env` no longer describes it. The rename is internal and mechanical. Runtime
-field names stay stable unless a name itself is misleading, limiting the blast
-radius to imports.
+Runtime field names stay stable unless a name itself is misleading, limiting
+the blast radius for consumers.
 
 ### Make the struct declaration the source of schema metadata
 
 Each exported configuration field declares a dotted `koanf` key, its exact
-`FANOUT_` environment name, retired unprefixed name, and an optional default in
-struct tags. Loader reflection builds the defaults map, typed environment
-mapping, and allowlists from those tags. This avoids maintaining separate maps
-that can drift while retaining a flat struct for consumers.
+`FANOUT_` environment name, and an optional default in struct tags. Loader
+reflection builds the defaults map, typed environment mapping, and allowlists
+from those tags. This avoids maintaining separate maps that can drift while
+retaining a flat struct for consumers.
 
 The YAML document groups keys by operational area (`server`, `ingest`,
 `storage`, `alerts`, `agent`, `smtp`, `auth`, `metrics`, and `mcp`). Environment
@@ -72,12 +69,12 @@ Load the selected YAML into an isolated Koanf instance, compare its flattened
 leaf keys and scalar types with the schema, reject null leaves, then merge it.
 Empty recognized sections are removed before the merge so they preserve
 defaults. Scan environment names before loading, reject unknown `FANOUT_`
-names, report retired names with their replacements, and exempt only the
-well-known service variables injected by Kubernetes and Docker links. Empty
-environment assignments are absent overrides. Decode errors and invariant
-errors identify fields but never serialize the effective map, preventing
-credentials from entering logs. A YAML document that contains credentials must
-not grant group or other access.
+names, ignore variables outside that namespace, and exempt only the well-known
+service variables injected by Kubernetes and Docker link-style networking.
+Empty environment assignments are absent overrides. Decode errors and
+invariant errors identify fields but never serialize the effective map,
+preventing credentials from entering logs. A YAML document that contains
+credentials must not grant group or other access.
 
 `Load` returns `(Config, error)`. After a successful merge it resolves adaptive
 sizing and calls `Validate`; `cmd/fanout` logs the error and exits before its
@@ -89,6 +86,8 @@ Use the standard library flag package to add `--config PATH` and retain
 `--version`/`version`. There are no per-setting flags and no subcommands. The
 container image supplies `--config /etc/fanout/fanout.yaml` as its default
 command so image-specific values do not outrank a mounted operator document.
+Container-specific documents start from that shipped file and retain its
+externally reachable HTTP and OTLP listener addresses.
 
 ## Risks / Trade-offs
 
@@ -101,19 +100,12 @@ command so image-specific values do not outrank a mounted operator document.
 - **Reflection can hide schema mistakes until runtime** → loader tests require
   every exported field to have unique key/environment tags and verify defaults,
   precedence, unknown-key rejection, and type errors.
-- **Breaking names can make an upgrade fail validation** → this is intentional;
-  README and the example document provide the complete replacement contract.
 
-## Migration Plan
+## Deployment Plan
 
-1. Add the example YAML and new `FANOUT_` names in the same release as the
-   loader.
+1. Ship the example YAML and `FANOUT_` environment contract with the loader.
 2. Update the Docker image defaults and all repository commands and docs.
 3. Remove dotenv and environment-parser dependencies after their imports are
    gone.
-4. Deployments either mount a YAML document and pass `--config`, or rename their
-   injected environment variables. No data migration is required.
-
-Rollback requires restoring the previous binary and its previous unprefixed
-environment names; configuration files introduced here are ignored by that
-binary unless separately translated.
+4. Deployments either mount a YAML document and pass `--config`, or inject
+   documented `FANOUT_` variables. No data migration is required.

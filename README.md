@@ -81,12 +81,20 @@ needs no such handling.
 
 The image selects `/etc/fanout/fanout.yaml` by default. That file contains only
 the container listener and data-directory defaults; it does not contain
-credentials. To replace it, mount your document and override the image command:
+credentials. Start a container-specific document from that file so it retains
+the externally reachable HTTP and OTLP bind addresses:
 
 ```sh
-docker run -v ./fanout.yaml:/etc/fanout/custom.yaml:ro \
-  ghcr.io/labstack/fanout:latest --config /etc/fanout/custom.yaml
+cp fanout.docker.yaml fanout.yaml
+# Add the remaining settings, then mount it over the image document:
+docker run -v ./fanout.yaml:/etc/fanout/fanout.yaml:ro \
+  ghcr.io/labstack/fanout:latest
 ```
+
+A replacement document must set `server.http_addr: ":7520"` and
+`ingest.otlp_grpc_addr: ":4317"`; omitting the latter restores the secure
+loopback-only built-in default, which is unreachable through a published
+container port.
 
 ### From source
 
@@ -137,8 +145,9 @@ Environment variables override the corresponding YAML values and are useful
 for container injection and secrets. An empty environment value means "no
 override"; use YAML for an explicit empty string. Unknown YAML keys and unknown
 `FANOUT_` variables are startup errors, except for the service-discovery names
-Kubernetes and legacy Docker links inject for a Service named `fanout`. Retired
-unprefixed Fanout variables fail startup with the exact `FANOUT_` replacement.
+Kubernetes and Docker link-style networking inject for a Service named
+`fanout`. All environment variables outside the `FANOUT_` namespace are
+ignored.
 
 YAML null values are rejected. Boolean values must use YAML 1.2 `true` or
 `false` (not `yes`, `no`, `on`, or `off`). If a YAML document contains a

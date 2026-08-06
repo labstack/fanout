@@ -19,9 +19,8 @@ data or telemetry/API schemas.
 
 ## What Changes
 
-- **BREAKING**: Replace the existing unprefixed environment-variable contract
-  with one coherent `FANOUT_` namespace. Old variable names are removed rather
-  than retained as aliases.
+- Establish one coherent `FANOUT_` environment-variable namespace as the only
+  process-environment configuration surface.
 - **BREAKING**: Stop discovering or loading `.env` and `.env.${ENV}` files.
   Fanout will never derive production behavior from its current working
   directory.
@@ -42,8 +41,7 @@ data or telemetry/API schemas.
 
 ## Non-Goals
 
-- No compatibility aliases, deprecation window, or automatic translation from
-  the old environment variables.
+- No alternate environment-variable aliases or automatic name translation.
 - No automatic config-file search path, per-environment filename convention,
   or implicit dotenv loading.
 - No hot reload. Configuration is resolved once at process startup.
@@ -70,8 +68,8 @@ no existing requirement set to modify; this change introduces the first one.
 
 ## Impact
 
-- **Affected code**: `cmd/fanout`, the current `internal/env` package and its
-  callers, configuration tests, and startup diagnostics.
+- **Affected code**: `cmd/fanout`, `internal/config` and its callers,
+  configuration tests, and startup diagnostics.
 - **Affected dependencies**: introduce a layered Go configuration library and
   YAML parser; remove the current environment and dotenv loaders if they are no
   longer used elsewhere.

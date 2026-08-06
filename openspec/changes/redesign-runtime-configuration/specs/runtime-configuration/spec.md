@@ -44,10 +44,11 @@ working directory.
 - **THEN** its contents do not affect runtime configuration
 
 ### Requirement: Namespaced environment contract
-Only documented `FANOUT_` environment variables SHALL configure Fanout. The
-previous unprefixed names SHALL NOT act as aliases, and unknown variables within
-the `FANOUT_` namespace SHALL be startup errors except for standard
-service-discovery variables injected by Kubernetes and legacy Docker links.
+Only documented `FANOUT_` environment variables SHALL configure Fanout. Other
+process environment variables SHALL be ignored. Unknown variables within the
+`FANOUT_` namespace SHALL be startup errors except for standard
+service-discovery variables injected by Kubernetes and Docker link-style
+networking.
 
 #### Scenario: Recognized override
 - **WHEN** a documented `FANOUT_` variable is present with a valid value
@@ -58,12 +59,12 @@ service-discovery variables injected by Kubernetes and legacy Docker links.
 - **THEN** Fanout exits unsuccessfully and identifies the unknown variable by name
 
 #### Scenario: Platform-injected service variables
-- **WHEN** Kubernetes or legacy Docker links inject their standard service-discovery variables for a Service named `fanout`
+- **WHEN** Kubernetes or Docker link-style networking injects standard service-discovery variables for a Service named `fanout`
 - **THEN** Fanout ignores those platform-owned variables rather than treating them as configuration typos
 
-#### Scenario: Legacy variable remains present
-- **WHEN** a previous unprefixed Fanout environment variable is present
-- **THEN** Fanout exits unsuccessfully and identifies its exact `FANOUT_` replacement
+#### Scenario: Environment variable outside the namespace
+- **WHEN** a process environment variable does not begin with `FANOUT_`
+- **THEN** it does not affect Fanout configuration or startup
 
 ### Requirement: Strict typed validation
 Fanout SHALL reject unknown YAML keys, values that cannot be converted to the
@@ -93,6 +94,10 @@ Validation SHALL complete before Fanout opens data files or network listeners.
 #### Scenario: Invalid merged configuration
 - **WHEN** individually parsed settings produce an invalid combination after precedence is applied
 - **THEN** Fanout exits unsuccessfully with a validation error before startup side effects
+
+#### Scenario: Explicit empty authentication mode
+- **WHEN** YAML explicitly sets `auth.mode` to an empty string
+- **THEN** Fanout rejects it instead of silently selecting an authentication mechanism
 
 ### Requirement: Secret-safe diagnostics
 Fanout SHALL NOT include configured credential values in startup logs or

@@ -26,7 +26,6 @@ type LoadOptions struct {
 type fieldSpec struct {
 	key          string
 	env          string
-	legacyEnv    string
 	typ          reflect.Type
 	defaultValue any
 	hasDefault   bool
@@ -43,12 +42,10 @@ func Load(options LoadOptions) (Config, error) {
 
 	specByKey := make(map[string]fieldSpec, len(specs))
 	specByEnv := make(map[string]fieldSpec, len(specs))
-	legacyEnv := make(map[string]string, len(specs))
 	defaults := make(map[string]any)
 	for _, spec := range specs {
 		specByKey[spec.key] = spec
 		specByEnv[spec.env] = spec
-		legacyEnv[spec.legacyEnv] = spec.env
 		if spec.hasDefault {
 			defaults[spec.key] = spec.defaultValue
 		}
@@ -86,7 +83,7 @@ func Load(options LoadOptions) (Config, error) {
 	if environ == nil {
 		environ = os.Environ()
 	}
-	overrides, err := environmentOverrides(environ, specByEnv, legacyEnv)
+	overrides, err := environmentOverrides(environ, specByEnv)
 	if err != nil {
 		return Config{}, err
 	}
@@ -128,7 +125,6 @@ func fieldSpecs(typ reflect.Type) ([]fieldSpec, error) {
 	specs := make([]fieldSpec, 0, typ.NumField())
 	keys := make(map[string]string, typ.NumField())
 	envs := make(map[string]string, typ.NumField())
-	legacyEnvs := make(map[string]string, typ.NumField())
 	for index := 0; index < typ.NumField(); index++ {
 		field := typ.Field(index)
 		if !field.IsExported() {
@@ -136,18 +132,14 @@ func fieldSpecs(typ reflect.Type) ([]fieldSpec, error) {
 		}
 		key := field.Tag.Get("koanf")
 		envName := field.Tag.Get("env")
-		legacyName := field.Tag.Get("legacy")
-		if key == "" || envName == "" || legacyName == "" {
-			return nil, fmt.Errorf("configuration field %s must declare koanf, env, and legacy tags", field.Name)
+		if key == "" || envName == "" {
+			return nil, fmt.Errorf("configuration field %s must declare koanf and env tags", field.Name)
 		}
 		if previous, exists := keys[key]; exists {
 			return nil, fmt.Errorf("configuration fields %s and %s share key %q", previous, field.Name, key)
 		}
 		if previous, exists := envs[envName]; exists {
 			return nil, fmt.Errorf("configuration fields %s and %s share environment variable %q", previous, field.Name, envName)
-		}
-		if previous, exists := legacyEnvs[legacyName]; exists {
-			return nil, fmt.Errorf("configuration fields %s and %s share legacy environment variable %q", previous, field.Name, legacyName)
 		}
 		if !strings.HasPrefix(envName, "FANOUT_") {
 			return nil, fmt.Errorf("configuration field %s environment variable %q lacks FANOUT_ prefix", field.Name, envName)
@@ -164,7 +156,6 @@ func fieldSpecs(typ reflect.Type) ([]fieldSpec, error) {
 		specs = append(specs, fieldSpec{
 			key:          key,
 			env:          envName,
-			legacyEnv:    legacyName,
 			typ:          field.Type,
 			defaultValue: defaultValue,
 			hasDefault:   hasDefault,
@@ -172,7 +163,6 @@ func fieldSpecs(typ reflect.Type) ([]fieldSpec, error) {
 		})
 		keys[key] = field.Name
 		envs[envName] = field.Name
-		legacyEnvs[legacyName] = field.Name
 	}
 	return specs, nil
 }
@@ -273,22 +263,16 @@ func containsSecretValues(k *koanf.Koanf, specs []fieldSpec) bool {
 	return false
 }
 
-func environmentOverrides(environ []string, known map[string]fieldSpec, legacy map[string]string) (map[string]any, error) {
+func environmentOverrides(environ []string, known map[string]fieldSpec) (map[string]any, error) {
 	overrides := make(map[string]any)
 	var unknown []string
-	var retired []string
 	for _, assignment := range environ {
 		name, value, found := strings.Cut(assignment, "=")
 		_, isKnown := known[name]
-		_, isLegacy := legacy[name]
 		if !found {
-			if isKnown || isLegacy || strings.HasPrefix(name, "FANOUT_") {
+			if isKnown || strings.HasPrefix(name, "FANOUT_") {
 				return nil, fmt.Errorf("environment entry %s must use NAME=value form", name)
 			}
-			continue
-		}
-		if replacement, exists := legacy[name]; exists {
-			retired = append(retired, fmt.Sprintf("%s (use %s)", name, replacement))
 			continue
 		}
 		if !strings.HasPrefix(name, "FANOUT_") {
@@ -302,9 +286,8 @@ func environmentOverrides(environ []string, known map[string]fieldSpec, legacy m
 			unknown = append(unknown, name)
 			continue
 		}
-		// Preserve the previous and container-friendly behavior: an explicitly
-		// empty environment value means "no override", so it cannot erase a safe
-		// default or silently disable a feature.
+		// An explicitly empty environment value means "no override", so it cannot
+		// erase a safe default or silently disable a feature.
 		if value == "" {
 			continue
 		}
@@ -313,10 +296,6 @@ func environmentOverrides(environ []string, known map[string]fieldSpec, legacy m
 			return nil, fmt.Errorf("environment variable %s has an invalid value for %s: %w", name, spec.key, err)
 		}
 		overrides[spec.key] = parsed
-	}
-	if len(retired) > 0 {
-		sort.Strings(retired)
-		return nil, fmt.Errorf("legacy Fanout environment variables are no longer supported: %s", strings.Join(retired, ", "))
 	}
 	if len(unknown) > 0 {
 		sort.Strings(unknown)

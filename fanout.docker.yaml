@@ -1,6 +1,7 @@
 # Container-specific listener and storage defaults. Runtime environment
-# variables still override these values. To replace this document wholesale,
-# pass: --config /path/to/mounted/fanout.yaml
+# variables still override these values. Start replacement container configs
+# from this file: omitting ingest.otlp_grpc_addr restores the loopback-only
+# built-in default, which is unreachable through a published container port.
 server:
   http_addr: ":7520"
 

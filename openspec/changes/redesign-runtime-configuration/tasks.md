@@ -1,13 +1,13 @@
 ## 1. Build the configuration loader
 
-- [x] 1.1 Rename `internal/env` to `internal/config` and make the typed config declaration the source of YAML keys, `FANOUT_` names, and defaults. Evidence: `internal/config/config.go` tags and package imports across runtime consumers.
+- [x] 1.1 Consolidate configuration in `internal/config` and make the typed config declaration the source of YAML keys, `FANOUT_` names, and defaults. Evidence: `internal/config/config.go` tags and package imports across runtime consumers.
 - [x] 1.2 Compose defaults, an optional explicit YAML document, and process environment in the specified order using Koanf. Evidence: `internal/config/loader.go` and `TestLoadLayering`.
 - [x] 1.3 Reject unknown/null/weakly typed YAML values and unknown namespaced environment variables, return secret-safe errors, then resolve sizing and validate the effective config. Evidence: loader allowlists plus `TestLoadRejectsUnknownInputs`, `TestLoadRejectsYAMLNullValues`, `TestLoadRejectsInvalidFilesAndValues`, and `TestLoadErrorsDoNotContainSecrets`.
 - [x] 1.4 Add `--config` with the standard flag package and keep process exit and startup logging in `cmd/fanout`. Evidence: `parseCommandLine`, `Config.LogStartup`, and `cmd/fanout/main_test.go`.
 
 ## 2. Cover the public contract
 
-- [x] 2.1 Test defaults, typed values from YAML and environment, precedence, empty overrides, absent config, missing/invalid files, empty sections, unknown keys and variables, legacy-variable diagnostics, type errors, secret-file permissions, and invariant failures. Evidence: `internal/config/config_test.go`.
+- [x] 2.1 Test defaults, typed values from YAML and environment, precedence, empty overrides, absent config, missing/invalid files, empty sections, unknown keys and namespaced variables, type errors, secret-file permissions, and invariant failures. Evidence: `internal/config/config_test.go`.
 - [x] 2.2 Preserve and update sizing, security warning, and runtime consumer tests after the package rename. Evidence: `internal/config/sizing_test.go` and the green full Go suite.
 
 ## 3. Align operator documentation

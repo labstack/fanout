@@ -232,6 +232,14 @@ func TestLoadIgnoresKubernetesServiceEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadIgnoresEnvironmentOutsideNamespace(t *testing.T) {
+	if _, err := Load(LoadOptions{Environ: append(validEnvironment(),
+		"OTHER_APP_SETTING=value",
+	)}); err != nil {
+		t.Fatalf("Load with unrelated environment variable: %v", err)
+	}
+}
+
 func TestLoadAllowsEmptyYAMLSections(t *testing.T) {
 	for _, document := range []string{
 		"metrics:\n",
@@ -304,6 +312,17 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 		}
 	})
 
+	t.Run("explicit empty auth mode", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "fanout.yaml")
+		if err := os.WriteFile(path, []byte("auth:\n  mode: \"\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+		if err == nil || !strings.Contains(err.Error(), "auth.mode must not be empty") {
+			t.Fatalf("error = %v, want explicit empty auth-mode rejection", err)
+		}
+	})
+
 	for _, test := range []struct {
 		name, assignment, key string
 	}{
@@ -335,26 +354,6 @@ func TestLoadIgnoresDotenvInputs(t *testing.T) {
 	}
 	if cfg.HTTPAddr != ":7520" {
 		t.Fatalf("HTTPAddr = %q, want default", cfg.HTTPAddr)
-	}
-}
-
-func TestLoadRejectsLegacyEnvironment(t *testing.T) {
-	_, err := Load(LoadOptions{Environ: append(validEnvironment(),
-		"HTTP_ADDR=:8888",
-		"SMTP_USER=old-user",
-		"ALERT_EVAL_INTERVAL=5",
-	)})
-	if err == nil {
-		t.Fatal("expected legacy environment error")
-	}
-	for _, text := range []string{
-		"HTTP_ADDR (use FANOUT_HTTP_ADDR)",
-		"SMTP_USER (use FANOUT_SMTP_USERNAME)",
-		"ALERT_EVAL_INTERVAL (use FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS)",
-	} {
-		if !strings.Contains(err.Error(), text) {
-			t.Errorf("error %q does not contain %q", err, text)
-		}
 	}
 }
 
@@ -436,6 +435,7 @@ func TestValidate(t *testing.T) {
 		{"DuckDBMaxConns=0", func(c *Config) { c.DuckDBMaxConns = 0 }},
 		{"AlertEvalInterval=0", func(c *Config) { c.AlertEvalInterval = 0 }},
 		{"AlertHistoryDays=-1", func(c *Config) { c.AlertHistoryDays = -1 }},
+		{"AuthMode empty", func(c *Config) { c.AuthMode = "" }},
 		{"SMTP missing host", func(c *Config) { c.SMTPHost = "" }},
 		{"SMTP missing user", func(c *Config) { c.SMTPUser = "" }},
 		{"SMTP missing pass", func(c *Config) { c.SMTPPass = "" }},
@@ -511,30 +511,30 @@ func TestFieldSpecsRejectInvalidSchemas(t *testing.T) {
 		{
 			name: "duplicate key",
 			typ: reflect.TypeOf(struct {
-				A string `koanf:"same" env:"FANOUT_A" legacy:"A"`
-				B string `koanf:"same" env:"FANOUT_B" legacy:"B"`
+				A string `koanf:"same" env:"FANOUT_A"`
+				B string `koanf:"same" env:"FANOUT_B"`
 			}{}),
 			want: "share key",
 		},
 		{
 			name: "duplicate environment",
 			typ: reflect.TypeOf(struct {
-				A string `koanf:"a" env:"FANOUT_SAME" legacy:"A"`
-				B string `koanf:"b" env:"FANOUT_SAME" legacy:"B"`
+				A string `koanf:"a" env:"FANOUT_SAME"`
+				B string `koanf:"b" env:"FANOUT_SAME"`
 			}{}),
 			want: "share environment variable",
 		},
 		{
 			name: "missing tag",
 			typ: reflect.TypeOf(struct {
-				A string `koanf:"a" env:"FANOUT_A"`
+				A string `koanf:"a"`
 			}{}),
 			want: "must declare",
 		},
 		{
 			name: "missing prefix",
 			typ: reflect.TypeOf(struct {
-				A string `koanf:"a" env:"A" legacy:"OLD_A"`
+				A string `koanf:"a" env:"A"`
 			}{}),
 			want: "lacks FANOUT_ prefix",
 		},
