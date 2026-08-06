@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/settings"
 )
 
-func newConfigServer(t *testing.T, cfg env.Config) (*testAuthServer, *settings.Store) {
+func newConfigServer(t *testing.T, cfg config.Config) (*testAuthServer, *settings.Store) {
 	t.Helper()
 	cfg.AuthMode = "local"
 	s := newTestAuthServerWith(t, cfg, auth.SMTPConfig{})
@@ -21,7 +21,7 @@ func newConfigServer(t *testing.T, cfg env.Config) (*testAuthServer, *settings.S
 }
 
 func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
-	s, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
+	s, _ := newConfigServer(t, config.Config{OTLPGRPCAddr: ":4317"})
 	admin, _ := s.users.Create("admin@example.com", "", "admin")
 	cookie := s.login(t, admin)
 	req := sessionRequest(http.MethodGet, "/api/settings/ingest", nil, cookie)
@@ -41,7 +41,7 @@ func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 }
 
 func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
-	s, store := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
+	s, store := newConfigServer(t, config.Config{OTLPGRPCAddr: ":4317"})
 	admin, _ := s.users.Create("admin@example.com", "", "admin")
 	cookie := s.login(t, admin)
 	req := sessionRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil, cookie)
@@ -62,7 +62,7 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 }
 
 func TestIngestSettingsCapabilities(t *testing.T) {
-	s, _ := newConfigServer(t, env.Config{OTLPGRPCAddr: ":4317"})
+	s, _ := newConfigServer(t, config.Config{OTLPGRPCAddr: ":4317"})
 	viewer, _ := s.users.Create("viewer@example.com", "", "viewer")
 	cookie := s.login(t, viewer)
 	readRec := httptest.NewRecorder()

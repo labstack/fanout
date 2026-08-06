@@ -46,9 +46,9 @@ fanout: "fanout — one Go process" {
 
 store: Storage {
   style.fill: transparent
-  telemetry: "DuckLake + Parquet\nDATA_DIR/telemetry" {shape: cylinder}
-  qstate: "Query catalog\nDATA_DIR/query" {shape: cylinder}
-  control: "Control SQLite\nDATA_DIR/control" {shape: cylinder}
+  telemetry: "DuckLake + Parquet\nstorage.data_dir/telemetry" {shape: cylinder}
+  qstate: "Query catalog\nstorage.data_dir/query" {shape: cylinder}
+  control: "Control SQLite\nstorage.data_dir/control" {shape: cylinder}
 }
 
 model: "Anthropic or OpenAI" {style.stroke-dash: 3}

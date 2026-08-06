@@ -264,3 +264,8 @@ func TestEngine_RunOnce(t *testing.T) {
 		t.Errorf("State = %q, want %q", a.State, "firing")
 	}
 }
+
+func TestEngineRunReturnsForNonPositiveInterval(t *testing.T) {
+	engine := NewEngine(nil, nil, nil, 0, 0)
+	engine.Run(context.Background())
+}

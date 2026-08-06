@@ -1,0 +1,5 @@
+schema: spec-driven
+created: 2026-08-05
+goal: Replace Fanout's implicit environment-only startup configuration with an
+  explicit, typed, layered configuration contract that is safe for self-hosted
+  deployments and cleanly documented for a breaking release.

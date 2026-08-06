@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -132,7 +132,7 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 
 	d := &Duck{
 		DB:  db,
-		cfg: env.Config{RetentionDays: 7},
+		cfg: config.Config{RetentionDays: 7},
 	}
 
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.spans WHERE COALESCE(start_time, ingested_at) < now() - INTERVAL 7 DAY")).
@@ -175,11 +175,11 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 
 // A merge failure must not stop snapshot expiry, file cleanup, or the
 // checkpoint — each compaction step degrades independently.
-// Within DUCKLAKE_MAINTENANCE_EVERY_SECONDS of the last pass, runMaintenance
+// Within storage.maintenance_every_seconds of the last pass, runMaintenance
 // must short-circuit before issuing ANY SQL — the throttle that keeps the
 // retention+compaction cycle off every rollup tick.
 // runMerge issues exactly one merge_adjacent_files call when due, and nothing
-// on the next call within the DUCKLAKE_MERGE_EVERY_SECONDS cadence.
+// on the next call within the storage.merge_every_seconds cadence.
 func TestRunMergeExecutesThenThrottles(t *testing.T) {
 	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
@@ -188,7 +188,7 @@ func TestRunMergeExecutesThenThrottles(t *testing.T) {
 	}
 	defer db.Close()
 
-	d := &Duck{DB: db, cfg: env.Config{MergeEverySeconds: 60}}
+	d := &Duck{DB: db, cfg: config.Config{MergeEverySeconds: 60}}
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
@@ -219,7 +219,7 @@ func TestRunMergeDisabled(t *testing.T) {
 	}
 	defer db.Close()
 
-	d := &Duck{DB: db, cfg: env.Config{MergeEverySeconds: 0}}
+	d := &Duck{DB: db, cfg: config.Config{MergeEverySeconds: 0}}
 	if err := d.runMerge(context.Background()); err != nil {
 		t.Fatalf("disabled runMerge() = %v, want nil", err)
 	}
@@ -239,7 +239,7 @@ func TestRunMaintenanceThrottle(t *testing.T) {
 	}
 	defer db.Close()
 
-	d := &Duck{DB: db, cfg: env.Config{MaintenanceEverySeconds: 3600}, lastMaintenance: time.Now()}
+	d := &Duck{DB: db, cfg: config.Config{MaintenanceEverySeconds: 3600}, lastMaintenance: time.Now()}
 	if err := d.runMaintenance(context.Background()); err != nil {
 		t.Fatalf("throttled runMaintenance() = %v, want nil", err)
 	}
@@ -260,7 +260,7 @@ func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
 	}
 	defer db.Close()
 
-	d := &Duck{DB: db, cfg: env.Config{}}
+	d := &Duck{DB: db, cfg: config.Config{}}
 
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnError(errors.New("merge failed"))
@@ -299,7 +299,7 @@ func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
 	}
 	defer db.Close()
 
-	d := &Duck{DB: db, cfg: env.Config{}}
+	d := &Duck{DB: db, cfg: config.Config{}}
 
 	// All rollup transactions fail at BeginTx.
 	mock.ExpectBegin().WillReturnError(errors.New("service tx failed"))
@@ -342,7 +342,7 @@ func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	cfg := env.Config{
+	cfg := config.Config{
 		DataDir:      t.TempDir(),
 		RollupEvery:  60,
 		DuckDBMemory: "128MB",
@@ -401,16 +401,16 @@ func TestDuckDSN(t *testing.T) {
 }
 
 func TestDuckDBPoolSizeConfigurable(t *testing.T) {
-	if got := duckDBPoolSize(env.Config{}); got != 1 {
+	if got := duckDBPoolSize(config.Config{}); got != 1 {
 		t.Errorf("default pool size = %d, want 1", got)
 	}
-	if got := duckDBPoolSize(env.Config{DuckDBMaxConns: 0}); got != 1 {
+	if got := duckDBPoolSize(config.Config{DuckDBMaxConns: 0}); got != 1 {
 		t.Errorf("zero pool size = %d, want floored to 1", got)
 	}
-	if got := duckDBPoolSize(env.Config{DuckDBMaxConns: -5}); got != 1 {
+	if got := duckDBPoolSize(config.Config{DuckDBMaxConns: -5}); got != 1 {
 		t.Errorf("negative pool size = %d, want floored to 1", got)
 	}
-	if got := duckDBPoolSize(env.Config{DuckDBMaxConns: 8}); got != 8 {
+	if got := duckDBPoolSize(config.Config{DuckDBMaxConns: 8}); got != 8 {
 		t.Errorf("configured pool size = %d, want 8", got)
 	}
 }
@@ -501,7 +501,7 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 			}
 			defer db.Close()
 
-			d := &Duck{DB: db, cfg: env.Config{}}
+			d := &Duck{DB: db, cfg: config.Config{}}
 			watermarkRows := func(value int64) *sqlmock.Rows {
 				return sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(value)
 			}

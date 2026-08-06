@@ -21,13 +21,13 @@ import (
 	"golang.org/x/oauth2"
 
 	appauth "github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 )
 
 const oidcFlowTTL = 10 * time.Minute
 
 type OIDCHandler struct {
-	cfg        env.Config
+	cfg        config.Config
 	provider   *oidc.Provider
 	verifier   *oidc.IDTokenVerifier
 	oauth      oauth2.Config
@@ -38,7 +38,7 @@ type OIDCHandler struct {
 	limiter    *appauth.KeyedLimiter
 }
 
-func RegisterOIDCRoutes(ctx context.Context, e *echo.Echo, cfg env.Config, users *appauth.UserStore, identities *appauth.IdentityStore, sessions *appauth.BrowserSessions, audit *appauth.AuditStore) error {
+func RegisterOIDCRoutes(ctx context.Context, e *echo.Echo, cfg config.Config, users *appauth.UserStore, identities *appauth.IdentityStore, sessions *appauth.BrowserSessions, audit *appauth.AuditStore) error {
 	if strings.ToLower(strings.TrimSpace(cfg.AuthMode)) != "oidc" {
 		return nil
 	}

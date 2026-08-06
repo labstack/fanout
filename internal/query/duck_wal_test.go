@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/lake/writegate"
 )
 
@@ -72,7 +72,7 @@ func newTestDuck(t *testing.T, maxConns int) *Duck {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	cfg := env.Config{
+	cfg := config.Config{
 		DataDir:        t.TempDir(),
 		RollupEvery:    60,
 		DuckDBMemory:   "128MB",
@@ -184,7 +184,7 @@ func TestTempDirectorySetOnce(t *testing.T) {
 	// Threads pinned low to keep the per-thread pinned working set inside the
 	// tiny cap — with one worker per core (the default) the sort OOMs on
 	// many-core machines before it can spill.
-	cfg := env.Config{
+	cfg := config.Config{
 		DataDir:        t.TempDir(),
 		RollupEvery:    60,
 		DuckDBMemory:   "64MB",

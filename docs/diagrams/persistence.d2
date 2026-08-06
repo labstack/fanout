@@ -25,17 +25,17 @@ gate: "Write gate — internal/lake/writegate\none catalog write in flight at a 
   }
 }
 
-telemetry: "DuckLake catalog + Parquet\nDATA_DIR/telemetry" {
+telemetry: "DuckLake catalog + Parquet\nstorage.data_dir/telemetry" {
   shape: cylinder
   tooltip: Partitioned telemetry. Written only through the gate.
 }
 
-querystate: "DuckDB query state\nDATA_DIR/query" {
+querystate: "DuckDB query state\nstorage.data_dir/query" {
   shape: cylinder
   tooltip: Catalog attachment and temp spill. Not the telemetry itself.
 }
 
-control: "Control SQLite\nDATA_DIR/control/fanout.sqlite" {
+control: "Control SQLite\nstorage.data_dir/control/fanout.sqlite" {
   shape: cylinder
   tooltip: Application state. Never on the telemetry write path.
 }

@@ -1,6 +1,6 @@
 //go:build darwin
 
-package env
+package config
 
 import "golang.org/x/sys/unix"
 

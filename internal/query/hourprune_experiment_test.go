@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 )
 
 // TestHourPartitionPrunesRecentWindow is the within-day-pruning gate experiment
@@ -20,7 +20,7 @@ func TestHourPartitionPrunesRecentWindow(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	d, err := NewDuck(ctx, env.Config{DataDir: t.TempDir(), DuckDBMemory: "512MB"})
+	d, err := NewDuck(ctx, config.Config{DataDir: t.TempDir(), DuckDBMemory: "512MB"})
 	if err != nil {
 		if strings.Contains(err.Error(), "ducklake") || strings.Contains(err.Error(), "ATTACH") {
 			t.Skipf("DuckLake unavailable: %v", err)

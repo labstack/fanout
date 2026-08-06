@@ -11,7 +11,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
 )
 
@@ -21,7 +21,7 @@ func TestLiveness(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	h := &HealthHandler{cfg: env.Config{DataDir: os.TempDir()}}
+	h := &HealthHandler{cfg: config.Config{DataDir: os.TempDir()}}
 	err := h.Liveness(c)
 	if err != nil {
 		t.Fatalf("Liveness error: %v", err)
@@ -43,7 +43,7 @@ func TestReadiness_NilDuck(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	h := NewHealthHandler(nil, env.Config{DataDir: os.TempDir()})
+	h := NewHealthHandler(nil, config.Config{DataDir: os.TempDir()})
 	err := h.Readiness(c)
 	if err != nil {
 		t.Fatalf("Readiness error: %v", err)
@@ -74,6 +74,43 @@ func TestReadiness_NilDuck(t *testing.T) {
 	}
 }
 
+func TestReadinessReportsSizingResolvedByLoader(t *testing.T) {
+	environ := []string{
+		"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
+		"FANOUT_AI_API_KEY=sk-test",
+		"FANOUT_SMTP_HOST=smtp.example.com",
+		"FANOUT_SMTP_USERNAME=user",
+		"FANOUT_SMTP_PASSWORD=pass",
+		"FANOUT_SMTP_FROM=noreply@example.com",
+		"FANOUT_DATA_DIR=" + t.TempDir(),
+	}
+	cfg, err := config.Load(config.LoadOptions{Environ: environ})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	if err := NewHealthHandler(nil, cfg).Readiness(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Readiness: %v", err)
+	}
+
+	var resp HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp.RuntimeSizing.DuckDBMemoryAuto || !resp.RuntimeSizing.DuckDBMaxConnsAuto {
+		t.Fatalf("loader-selected sizing lost auto provenance: %+v", resp.RuntimeSizing)
+	}
+	if resp.RuntimeSizing.DuckDBMaxConns < 2 {
+		t.Fatalf("reported max connections = %d, want resolved value", resp.RuntimeSizing.DuckDBMaxConns)
+	}
+	if resp.RuntimeSizing.MemorySource == "" {
+		t.Fatalf("reported sizing has no memory source: %+v", resp.RuntimeSizing)
+	}
+}
+
 func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -93,7 +130,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	mock.ExpectQuery("SELECT\\s+MAX\\(updated_at\\),\\s+COUNT\\(\\*\\),\\s+COALESCE\\(date_diff\\('second', MAX\\(updated_at\\), now\\(\\)\\), 0\\)").
 		WillReturnRows(sqlmock.NewRows([]string{"max", "count", "age_seconds"}).AddRow(time.Now().UTC(), 2, int64(30)))
 
-	h := NewHealthHandler(&query.Duck{DB: db}, env.Config{
+	h := NewHealthHandler(&query.Duck{DB: db}, config.Config{
 		DataDir:        os.TempDir(),
 		RollupEvery:    60,
 		DuckDBMemory:   "3GB",
@@ -150,7 +187,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 func TestCheckMaintenance_DegradedWhenNeverRanPastGrace(t *testing.T) {
 	h := &HealthHandler{
 		duck:    &query.Duck{},
-		cfg:     env.Config{RollupEvery: 60},
+		cfg:     config.Config{RollupEvery: 60},
 		started: time.Now().Add(-10 * time.Minute),
 	}
 
@@ -165,7 +202,7 @@ func TestCheckMaintenance_DegradedWhenNeverRanPastGrace(t *testing.T) {
 
 func TestRegisterHealthRoutes_RegistersAPIHealth(t *testing.T) {
 	e := echo.New()
-	RegisterHealthRoutes(e, nil, env.Config{DataDir: os.TempDir()})
+	RegisterHealthRoutes(e, nil, config.Config{DataDir: os.TempDir()})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
 	rec := httptest.NewRecorder()

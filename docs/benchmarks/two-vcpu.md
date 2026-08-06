@@ -36,7 +36,7 @@ worth publishing.
 The historical Fanout instance used a tokenless ingest mode, so the headline
 number does not include credential verification. That mode has since been
 removed: demos and benchmarks now use the same ingest token as production.
-`DUCKDB_MEMORY=3GB` was set for reasons explained under
+`DUCKDB_MEMORY=3GB` (the pinned release's variable name) was set for reasons explained under
 [Memory](#memory-needs-headroom).
 
 ## Results
@@ -109,20 +109,21 @@ the mixed number, not the ingest-only one.
 ### Memory needs headroom
 
 An earlier run was **OOM-killed by the kernel** at 7.5 GB RSS on the 7.7 GB
-machine. With `DUCKDB_MEMORY` unset, DuckDB sizes itself to 80% of detected RAM
+machine. With the pinned release's `DUCKDB_MEMORY` unset, DuckDB sizes itself to 80% of detected RAM
 — about 6.2 GB here — and the Go runtime's own footprint on top of that exceeds
 the machine. The container had no memory limit, so DuckDB saw the whole host.
 
-This run used `DUCKDB_MEMORY=3GB` with a 6 GB container limit and peaked at
+This run used the historical `DUCKDB_MEMORY=3GB` spelling with a 6 GB container limit and peaked at
 1.2 GB RSS. That explicit value records the historical benchmark configuration;
 it is not required for a normal current deployment.
 
-**Since these runs, Fanout resolves this itself.** With `DUCKDB_MEMORY` unset it
-now detects the container or host limit, reserves headroom for the Go runtime,
-and logs what it chose at startup. On the 6 GB container used here it resolves
-to 3686 MB — close to the 3 GB pinned by hand above, which is why the numbers
-still stand. Operators normally set the container memory limit and let Fanout
-handle DuckDB; setting the variable explicitly remains an advanced override.
+**Since these runs, Fanout resolves this itself.** With
+`storage.duckdb.memory` / `FANOUT_DUCKDB_MEMORY` unset it now detects the
+container or host limit, reserves headroom for the Go runtime, and logs what it
+chose at startup. On the 6 GB container used here it resolves to 3686 MB — close
+to the 3 GB pinned by hand above, which is why the numbers still stand.
+Operators normally set the container memory limit and let Fanout handle DuckDB;
+setting the value explicitly remains an advanced override.
 
 ### Capacity falls as the dataset grows
 
@@ -147,6 +148,8 @@ live telemetry, and should not be sized as if it were.
 
 ```sh
 # On the machine under test
+# This digest predates the FANOUT_ namespace; these legacy names are
+# intentionally the contract understood by the pinned benchmark image.
 docker run -d --name fanout --memory 6g -p 4317:4317 -p 7520:7520 \
   -e OTLP_GRPC_ADDR=:4317 -e METRICS_TOKEN=... \
   -e DUCKDB_MEMORY=3GB -e DUCKDB_MAX_CONNS=4 \

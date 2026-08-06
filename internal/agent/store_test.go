@@ -17,7 +17,7 @@ import (
 
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 
 	controlstore "github.com/labstack/fanout/internal/store"
 )
@@ -316,7 +316,7 @@ func TestThreadRouteHidesOtherOwnersThread(t *testing.T) {
 	cookie := login.Result().Cookies()[0]
 
 	e := echo.New()
-	api.RegisterAuthMiddleware(e, users, sessions, auth.NewAuditStore(database.DB), env.Config{})
+	api.RegisterAuthMiddleware(e, users, sessions, auth.NewAuditStore(database.DB), config.Config{})
 	NewRuntime(nil, nil, store).Register(e.Group("/api/agent", api.RequireCapability(api.RunAgent)))
 	request := httptest.NewRequest(http.MethodGet, "/api/agent/threads/private-thread", nil)
 	request.AddCookie(cookie)

@@ -1,6 +1,6 @@
 //go:build linux
 
-package env
+package config
 
 import (
 	"os"

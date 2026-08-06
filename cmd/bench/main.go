@@ -15,9 +15,9 @@
 //
 //	go run ./cmd/bench -rate 2000 -duration 10m -services 50 -attr-cardinality 200 \
 //	  -token "$INGEST_TOKEN" \
-//	  -metrics-url http://localhost:7520/-/metrics -metrics-token "$METRICS_TOKEN" -report run.json
+//	  -metrics-url http://localhost:7520/-/metrics -metrics-token "$FANOUT_METRICS_TOKEN" -report run.json
 //
-// The metrics endpoint requires -metrics-token unless METRICS_PUBLIC=true.
+// The metrics endpoint requires -metrics-token unless FANOUT_METRICS_PUBLIC=true.
 package main
 
 import (

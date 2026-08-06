@@ -12,7 +12,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/settings"
 )
 
@@ -24,14 +24,14 @@ type AuthHandler struct {
 	sessions             *auth.BrowserSessions
 	audit                *auth.AuditStore
 	smtp                 auth.SMTPConfig
-	cfg                  env.Config
+	cfg                  config.Config
 	setupLimiter         *auth.KeyedLimiter
 	startLimiter         *auth.KeyedLimiter
 	verifyIPLimiter      *auth.KeyedLimiter
 	verifyAccountLimiter *auth.KeyedLimiter
 }
 
-func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, sessions *auth.BrowserSessions, audit *auth.AuditStore, smtp auth.SMTPConfig, cfg env.Config) {
+func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeStore, setup *auth.Setup, settingsStore *settings.Store, sessions *auth.BrowserSessions, audit *auth.AuditStore, smtp auth.SMTPConfig, cfg config.Config) {
 	if users == nil || codes == nil || setup == nil || settingsStore == nil || sessions == nil || audit == nil {
 		panic("api: auth route dependencies are required")
 	}
