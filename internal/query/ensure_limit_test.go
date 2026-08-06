@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 )
 
 func TestEnsureLimit_WrapsWithoutClobberingInnerLimits(t *testing.T) {
@@ -94,7 +94,7 @@ func TestRollupLagFromConfig(t *testing.T) {
 		{0, 30 * sec},  // floored to 30s
 	}
 	for _, c := range cases {
-		if got := rollupLagFromConfig(env.Config{FlushSeconds: c.flushSeconds}); got != c.wantNanos {
+		if got := rollupLagFromConfig(config.Config{FlushSeconds: c.flushSeconds}); got != c.wantNanos {
 			t.Errorf("rollupLagFromConfig(FlushSeconds=%d) = %d, want %d", c.flushSeconds, got, c.wantNanos)
 		}
 	}

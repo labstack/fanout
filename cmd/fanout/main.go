@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
@@ -27,8 +29,8 @@ import (
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/api"
 	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
-	"github.com/labstack/fanout/internal/env"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/lake"
@@ -47,17 +49,27 @@ var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 var version = "dev"
 
 func main() {
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "-v", "-version", "--version", "version":
-			fmt.Println(version)
-			return
-		}
+	configPath, showVersion, err := parseCommandLine(os.Args[1:])
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if showVersion {
+		fmt.Println(version)
+		return
 	}
 
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))
 
-	cfg := env.Load()
+	cfg, err := config.Load(config.LoadOptions{Path: configPath})
+	if err != nil {
+		slog.Error("invalid configuration", "err", err)
+		os.Exit(1)
+	}
+	cfg.LogStartup()
 
 	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
 		slog.Error("create data dir failed", "err", err)
@@ -393,6 +405,24 @@ func main() {
 		slog.Error("lake writer stopped with unwritten telemetry", "err", err)
 	}
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
+}
+
+func parseCommandLine(args []string) (configPath string, showVersion bool, err error) {
+	if len(args) == 1 && args[0] == "version" {
+		return "", true, nil
+	}
+
+	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
+	flags.StringVar(&configPath, "config", "", "path to a Fanout YAML configuration file")
+	flags.BoolVar(&showVersion, "version", false, "print the Fanout version")
+	flags.BoolVar(&showVersion, "v", false, "print the Fanout version")
+	if err := flags.Parse(args); err != nil {
+		return "", false, err
+	}
+	if flags.NArg() != 0 {
+		return "", false, fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
+	}
+	return configPath, showVersion, nil
 }
 
 func printSetupBanner(httpAddr, token string) {

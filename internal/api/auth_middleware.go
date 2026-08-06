@@ -12,7 +12,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 )
 
 const (
@@ -61,7 +61,7 @@ type routePolicy struct {
 	capability Capability
 }
 
-func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, sessions *auth.BrowserSessions, audit *auth.AuditStore, cfg env.Config) {
+func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, sessions *auth.BrowserSessions, audit *auth.AuditStore, cfg config.Config) {
 	if users == nil || sessions == nil || audit == nil {
 		panic("api: auth middleware dependencies are required")
 	}
@@ -75,7 +75,7 @@ func RegisterAuthMiddleware(e *echo.Echo, users *auth.UserStore, sessions *auth.
 	e.Use(AuthMiddleware(users, sessions, cfg))
 }
 
-func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg env.Config) echo.MiddlewareFunc {
+func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg config.Config) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			path := c.Request().URL.Path

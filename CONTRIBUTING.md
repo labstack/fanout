@@ -43,6 +43,11 @@ and produces a large diff that is not a real change.
 shipped behavior belong in an OpenSpec change under `openspec/changes/` rather
 than only in code. Run `just spec-check` to validate.
 
+**Runtime configuration is strict.** [`fanout.example.yaml`](fanout.example.yaml)
+is the complete schema. New settings need a YAML key, a `FANOUT_` environment
+name, a test, and matching documentation; unknown names deliberately fail
+startup.
+
 ## Commits and pull requests
 
 Write commit messages that explain why the change is needed, not only what it

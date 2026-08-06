@@ -1,4 +1,4 @@
-package env
+package config
 
 import (
 	"fmt"
@@ -53,7 +53,7 @@ func TestResolveDuckDBMemoryDeclinesForAbsurdlySmallMachines(t *testing.T) {
 }
 
 func TestResolveDuckDBMaxConnsKeepsTheWriteGateInvariant(t *testing.T) {
-	// internal/lake refuses to start when DUCKDB_MAX_CONNS > 1 without a write
+	// internal/lake refuses to start when max_connections > 1 without a write
 	// gate; at or below 1 it serializes everything through one handle. The
 	// floor is an invariant, not a preference.
 	for _, cores := range []int{0, 1, 2} {

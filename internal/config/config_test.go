@@ -1,49 +1,30 @@
-package env
+package config
 
 import (
 	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
 
-var requiredEnvVars = []string{
-	"HTTP_ADDR", "OTLP_GRPC_ADDR", "DATA_DIR", "FLUSH_SECONDS",
-	"FLUSH_BATCH_SIZE", "ROLLUP_EVERY",
-	"RETENTION_DAYS", "DEFAULT_NAMESPACE", "ENV",
-	"AI_PROVIDER", "AI_API_KEY", "AI_MODEL", "AI_BASE_URL",
-	"AUTH_MODE", "PUBLIC_URL", "AUTH_CODE_SECRET", "SESSION_IDLE_TTL", "SESSION_ABSOLUTE_TTL",
-	"OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET", "OIDC_EMAIL_CLAIM",
-	"OIDC_EMAIL_VERIFICATION", "OIDC_AUTO_PROVISION", "OIDC_ALLOWED_GROUPS", "OIDC_ALLOWED_DOMAINS",
-	"OIDC_DEFAULT_ROLE", "OIDC_OPERATOR_GROUPS", "OIDC_ADMIN_GROUPS", "METRICS_TOKEN", "METRICS_PUBLIC",
-	"TRUSTED_PROXY_CIDRS",
-	"JWT_SECRET", "JWT_REFRESH_SECRET",
-	"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM",
-	"TLS_CERT_FILE", "TLS_KEY_FILE",
-}
-
-func clearEnv(t *testing.T) {
-	t.Helper()
-	for _, v := range requiredEnvVars {
-		os.Unsetenv(v)
+func validEnvironment() []string {
+	return []string{
+		"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
+		"FANOUT_AI_API_KEY=sk-test",
+		"FANOUT_SMTP_HOST=smtp.example.com",
+		"FANOUT_SMTP_USERNAME=user",
+		"FANOUT_SMTP_PASSWORD=pass",
+		"FANOUT_SMTP_FROM=Fanout <noreply@example.com>",
 	}
 }
 
-func seedValidEnv(t *testing.T) {
-	t.Helper()
-	t.Setenv("AUTH_CODE_SECRET", "0123456789abcdef0123456789abcdef")
-	t.Setenv("AI_API_KEY", "sk-test")
-	t.Setenv("SMTP_HOST", "smtp.example.com")
-	t.Setenv("SMTP_USER", "user")
-	t.Setenv("SMTP_PASS", "pass")
-	t.Setenv("SMTP_FROM", "Fanout <noreply@example.com>")
-}
-
 func TestLoadReturnsDefaults(t *testing.T) {
-	clearEnv(t)
-	seedValidEnv(t)
-
-	cfg := Load()
+	cfg, err := Load(LoadOptions{Environ: validEnvironment()})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
 
 	if cfg.HTTPAddr != ":7520" {
 		t.Errorf("HTTPAddr = %q, want %q", cfg.HTTPAddr, ":7520")
@@ -85,78 +66,138 @@ func TestLoadReturnsDefaults(t *testing.T) {
 	}
 }
 
-// TestLoadLayering exercises the precedence contract: .env.{ENV} > OS env > .env > defaults.
-// Uses t.Chdir so loadIfPresent/overloadIfPresent look at the temp dir.
 func TestLoadLayering(t *testing.T) {
-	cases := []struct {
-		name     string
-		envFile  string
-		profFile string
-		profile  string
-		osEnv    map[string]string
-		wantAddr string
-	}{
-		{
-			name:     "default wins when no files and no OS env",
-			profile:  "development",
-			wantAddr: ":7520",
-		},
-		{
-			name:     ".env sets value when OS env is unset",
-			envFile:  "HTTP_ADDR=:1111\n",
-			profile:  "development",
-			wantAddr: ":1111",
-		},
-		{
-			name:     "OS env beats .env",
-			envFile:  "HTTP_ADDR=:1111\n",
-			osEnv:    map[string]string{"HTTP_ADDR": ":2222"},
-			profile:  "development",
-			wantAddr: ":2222",
-		},
-		{
-			name:     ".env.{ENV} overrides everything",
-			envFile:  "HTTP_ADDR=:1111\n",
-			profFile: "HTTP_ADDR=:3333\n",
-			osEnv:    map[string]string{"HTTP_ADDR": ":2222"},
-			profile:  "production",
-			wantAddr: ":3333",
-		},
-		{
-			name:     "profile file selection respects ENV",
-			profFile: "HTTP_ADDR=:4444\n",
-			profile:  "staging",
-			wantAddr: ":4444",
-		},
+	path := filepath.Join(t.TempDir(), "fanout.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  http_addr: ':1111'\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
 	}
 
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			clearEnv(t)
-			seedValidEnv(t)
+	cfg, err := Load(LoadOptions{
+		Path:    path,
+		Environ: append(validEnvironment(), "FANOUT_HTTP_ADDR=:2222"),
+	})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.HTTPAddr != ":2222" {
+		t.Fatalf("HTTPAddr = %q, want environment override", cfg.HTTPAddr)
+	}
+}
 
-			dir := t.TempDir()
-			if tc.envFile != "" {
-				if err := os.WriteFile(filepath.Join(dir, ".env"), []byte(tc.envFile), 0o644); err != nil {
-					t.Fatalf("write .env: %v", err)
-				}
-			}
-			if tc.profFile != "" {
-				if err := os.WriteFile(filepath.Join(dir, ".env."+tc.profile), []byte(tc.profFile), 0o644); err != nil {
-					t.Fatalf("write .env.%s: %v", tc.profile, err)
-				}
-			}
-			t.Chdir(dir)
-			t.Setenv("ENV", tc.profile)
-			for k, v := range tc.osEnv {
-				t.Setenv(k, v)
-			}
+func TestExampleConfigurationMatchesSchema(t *testing.T) {
+	path := filepath.Join("..", "..", "fanout.example.yaml")
+	cfg, err := Load(LoadOptions{
+		Path:    path,
+		Environ: validEnvironment(),
+	})
+	if err != nil {
+		t.Fatalf("Load example: %v", err)
+	}
+	if cfg.HTTPAddr != ":7520" || cfg.DataDir != "./data" {
+		t.Fatalf("example defaults = HTTP %q data %q", cfg.HTTPAddr, cfg.DataDir)
+	}
+	defaults, err := Load(LoadOptions{Environ: validEnvironment()})
+	if err != nil {
+		t.Fatalf("Load defaults: %v", err)
+	}
+	if !reflect.DeepEqual(cfg, defaults) {
+		t.Error("example values do not match built-in defaults")
+	}
 
-			cfg := Load()
-			if cfg.HTTPAddr != tc.wantAddr {
-				t.Errorf("HTTPAddr = %q, want %q", cfg.HTTPAddr, tc.wantAddr)
-			}
-		})
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read example: %v", err)
+	}
+	specs, err := configFieldSpecs()
+	if err != nil {
+		t.Fatalf("field specs: %v", err)
+	}
+	for _, spec := range specs {
+		if !strings.Contains(string(raw), spec.env) {
+			t.Errorf("example does not document %s", spec.env)
+		}
+	}
+}
+
+func TestLoadRejectsUnknownInputs(t *testing.T) {
+	t.Run("YAML key", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "fanout.yaml")
+		if err := os.WriteFile(path, []byte("server:\n  htpp_addr: ':1111'\n"), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+		if err == nil || !strings.Contains(err.Error(), "server.htpp_addr") {
+			t.Fatalf("error = %v, want unknown YAML key", err)
+		}
+	})
+
+	t.Run("environment variable", func(t *testing.T) {
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_HTPP_ADDR=:1111")})
+		if err == nil || !strings.Contains(err.Error(), "FANOUT_HTPP_ADDR") {
+			t.Fatalf("error = %v, want unknown environment variable", err)
+		}
+	})
+}
+
+func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
+	t.Run("missing file", func(t *testing.T) {
+		_, err := Load(LoadOptions{Path: filepath.Join(t.TempDir(), "missing.yaml"), Environ: validEnvironment()})
+		if err == nil {
+			t.Fatal("expected missing file error")
+		}
+	})
+
+	t.Run("invalid type", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "fanout.yaml")
+		if err := os.WriteFile(path, []byte("ingest:\n  flush_seconds: never\n"), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+		if err == nil {
+			t.Fatal("expected type error")
+		}
+	})
+
+	t.Run("invalid merged config", func(t *testing.T) {
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_FLUSH_SECONDS=0")})
+		if err == nil || !strings.Contains(err.Error(), "flush") {
+			t.Fatalf("error = %v, want validation error", err)
+		}
+	})
+}
+
+func TestLoadIgnoresLegacyAndDotenvInputs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FANOUT_HTTP_ADDR=:9999\n"), 0o600); err != nil {
+		t.Fatalf("write .env: %v", err)
+	}
+	t.Chdir(dir)
+
+	environ := append(validEnvironment(), "HTTP_ADDR=:8888")
+	cfg, err := Load(LoadOptions{Environ: environ})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.HTTPAddr != ":7520" {
+		t.Fatalf("HTTPAddr = %q, want default", cfg.HTTPAddr)
+	}
+}
+
+func TestLoadErrorsDoNotContainSecrets(t *testing.T) {
+	const secret = "do-not-print-this-password"
+	environ := []string{
+		"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
+		"FANOUT_AI_API_KEY=sk-test",
+		"FANOUT_SMTP_PASSWORD=" + secret,
+		"FANOUT_SMTP_USERNAME=user",
+		"FANOUT_SMTP_FROM=noreply@example.com",
+	}
+	_, err := Load(LoadOptions{Environ: environ})
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("error leaked secret: %v", err)
 	}
 }
 

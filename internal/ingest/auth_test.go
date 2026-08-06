@@ -18,14 +18,14 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/settings"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
 func TestGRPCServerOptions_NoTLS(t *testing.T) {
 	store := newRuntimeStore(t)
-	opts, err := GRPCServerOptions(env.Config{}, store)
+	opts, err := GRPCServerOptions(config.Config{}, store)
 	if err != nil {
 		t.Fatalf("GRPCServerOptions: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestTLSConfig(t *testing.T) {
 	dir := t.TempDir()
 	certFile, keyFile := writeServerTLSFiles(t, dir)
 
-	tlsConfig, err := tlsServerConfig(env.Config{
+	tlsConfig, err := tlsServerConfig(config.Config{
 		TLSCertFile: certFile,
 		TLSKeyFile:  keyFile,
 	})

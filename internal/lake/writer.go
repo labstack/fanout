@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/lake/writegate"
 	"github.com/labstack/fanout/internal/metrics"
 )
@@ -97,7 +97,7 @@ type MetricRow struct {
 const flushQueueDepth = 4
 
 type Writer struct {
-	cfg       env.Config
+	cfg       config.Config
 	db        *sql.DB
 	chSpans   <-chan SpanRow
 	chLogs    <-chan LogRow
@@ -128,7 +128,7 @@ type flushBatch struct {
 	metrics []MetricRow
 }
 
-func NewWriter(cfg env.Config, db *sql.DB, spans <-chan SpanRow, logs <-chan LogRow, metricsCh <-chan MetricRow) *Writer {
+func NewWriter(cfg config.Config, db *sql.DB, spans <-chan SpanRow, logs <-chan LogRow, metricsCh <-chan MetricRow) *Writer {
 	return &Writer{
 		cfg:       cfg,
 		db:        db,
@@ -153,7 +153,7 @@ func (w *Writer) Run(ctx context.Context) error {
 	// under load). Single-connection pools serialize through the one handle, so a
 	// nil gate is fine there.
 	if w.cfg.DuckDBMaxConns > 1 && w.writeGate == nil {
-		return fmt.Errorf("lake writer: DUCKDB_MAX_CONNS=%d requires a shared write gate; call UseWriteGate before Run", w.cfg.DuckDBMaxConns)
+		return fmt.Errorf("lake writer: storage.duckdb.max_connections=%d requires a shared write gate; call UseWriteGate before Run", w.cfg.DuckDBMaxConns)
 	}
 
 	// Flushes run on a dedicated worker so a slow database insert never stalls the

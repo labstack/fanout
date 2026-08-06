@@ -24,7 +24,7 @@ sut: "System under test\nHetzner ccx13 — 2 DEDICATED vCPU, 8 GB" {
   fanout: "ghcr.io/labstack/fanout\nsha256:feebc9cf" {
     style.stroke-width: 2
   }
-  store: "DuckLake + Parquet\nDUCKDB_MEMORY=3GB" {shape: cylinder}
+  store: "DuckLake + Parquet\nstorage.duckdb.memory=3GB" {shape: cylinder}
   fanout -> store
 }
 

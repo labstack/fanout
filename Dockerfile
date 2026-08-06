@@ -65,9 +65,9 @@ USER fanout
 WORKDIR /var/lib/fanout
 
 EXPOSE 7520 4317
-ENV DATA_DIR=/var/lib/fanout/data \
-    HTTP_ADDR=:7520 \
-    OTLP_GRPC_ADDR=:4317
+ENV FANOUT_DATA_DIR=/var/lib/fanout/data \
+    FANOUT_HTTP_ADDR=:7520 \
+    FANOUT_OTLP_GRPC_ADDR=:4317
 
 # Startup does DuckDB catalog attachment and maintenance, so the grace period
 # is generous relative to the check interval.

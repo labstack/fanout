@@ -12,19 +12,19 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
 )
 
 // HealthHandler handles health check endpoints
 type HealthHandler struct {
 	duck    *query.Duck
-	cfg     env.Config
+	cfg     config.Config
 	started time.Time
 }
 
 // NewHealthHandler creates a new health handler
-func NewHealthHandler(duck *query.Duck, cfg env.Config) *HealthHandler {
+func NewHealthHandler(duck *query.Duck, cfg config.Config) *HealthHandler {
 	return &HealthHandler{duck: duck, cfg: cfg, started: time.Now()}
 }
 
@@ -41,7 +41,7 @@ type CheckResult struct {
 type HealthResponse struct {
 	Status        string                 `json:"status"`
 	Checks        map[string]CheckResult `json:"checks"`
-	RuntimeSizing env.RuntimeSizing      `json:"runtime_sizing"`
+	RuntimeSizing config.RuntimeSizing   `json:"runtime_sizing"`
 }
 
 // Liveness returns 200 if process is running (Kubernetes liveness probe)
@@ -333,7 +333,7 @@ FROM rollup_state`).Scan(&updatedAt, &cacheCount, &ageSeconds)
 }
 
 // RegisterHealthRoutes registers health check endpoints
-func RegisterHealthRoutes(e *echo.Echo, duck *query.Duck, cfg env.Config) {
+func RegisterHealthRoutes(e *echo.Echo, duck *query.Duck, cfg config.Config) {
 	h := NewHealthHandler(duck, cfg)
 	e.GET("/healthz", h.Liveness)
 	e.GET("/readyz", h.Readiness)

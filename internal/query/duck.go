@@ -16,14 +16,14 @@ import (
 	"github.com/duckdb/duckdb-go/v2"
 	_ "modernc.org/sqlite" // SQLite driver used to put the DuckLake catalog in WAL mode
 
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/lake/writegate"
 	"github.com/labstack/fanout/internal/metrics"
 )
 
 type Duck struct {
 	DB              *sql.DB
-	cfg             env.Config
+	cfg             config.Config
 	lastMaintenance time.Time
 	lastMerge       time.Time // cadence for the frequent merge-only compaction pass
 	// rollupLagNanos holds the rollup watermark back from the max ingested
@@ -75,7 +75,7 @@ func (d *Duck) WriteGate() *writegate.WriteGate { return &d.writeGate }
 
 // duckDBPoolSize is the effective connection-pool size: the configured value,
 // floored at 1.
-func duckDBPoolSize(cfg env.Config) int {
+func duckDBPoolSize(cfg config.Config) int {
 	if cfg.DuckDBMaxConns < 1 {
 		return 1
 	}
@@ -88,7 +88,7 @@ func duckDBPoolSize(cfg env.Config) int {
 // of a constant that's wrong everywhere but the box it was tuned for.
 func duckDSN(dbPath, mem string, threads int) (string, error) {
 	if strings.ContainsAny(mem, "&?'\"\\; ") {
-		return "", fmt.Errorf("invalid DUCKDB_MEMORY value: %q", mem)
+		return "", fmt.Errorf("invalid storage.duckdb.memory value: %q", mem)
 	}
 	params := make([]string, 0, 2)
 	if threads > 0 {
@@ -172,7 +172,7 @@ func parseDuckBytes(s string) (int64, bool) {
 	}
 }
 
-func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
+func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 	if err := os.MkdirAll(cfg.QueryDir(), 0o755); err != nil {
 		return nil, fmt.Errorf("create query dir: %w", err)
 	}
@@ -217,7 +217,7 @@ func NewDuck(ctx context.Context, cfg env.Config) (*Duck, error) {
 
 	d := &Duck{DB: db, cfg: cfg, rollupLagNanos: rollupLagFromConfig(cfg)}
 	if cfg.DuckDBMemory == "" {
-		// Only when the operator hasn't pinned DUCKDB_MEMORY: keep DuckDB's
+		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
 		// small ones, so the kernel doesn't OOM-kill the whole process.
 		if err := applyMemoryHeadroom(ctx, db); err != nil {
@@ -965,7 +965,7 @@ func (d *Duck) rollupSafetyLagNanos() int64 {
 
 // rollupLagFromConfig derives the watermark safety lag from the flush interval:
 // two flush cycles, with a 30s floor.
-func rollupLagFromConfig(cfg env.Config) int64 {
+func rollupLagFromConfig(cfg config.Config) int64 {
 	lag := 2 * time.Duration(cfg.FlushSeconds) * time.Second
 	if lag < 30*time.Second {
 		lag = 30 * time.Second
@@ -1379,7 +1379,7 @@ FROM messaging_edges;`
 const snapshotGraceMinutes = 10
 
 // runMerge runs ONLY ducklake_merge_adjacent_files on a short cadence
-// (DUCKLAKE_MERGE_EVERY_SECONDS, default 60s). Merge consolidates the newest
+// (storage.merge_every_seconds, default 60s). Merge consolidates the newest
 // small parquet files and deletes nothing, so it's cheap and safe to run often —
 // keeping the queryable file count continuously low is what bounds rollup/query
 // scan latency. The deletions (expire_snapshots + cleanup_old_files), which
@@ -1474,7 +1474,7 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	// yanks the file out from under the reader ("IO Error: Cannot open file …: No
 	// such file or directory"). Sparing recently-superseded snapshots keeps their
 	// files referenced (so cleanup won't delete them) until any in-flight reader
-	// has finished; they're reclaimed a cycle later. At FLUSH_SECONDS=15 the grace
+	// has finished; they're reclaimed a cycle later. At ingest.flush_seconds=15 the grace
 	// retains ~40 snapshots (4/min × 10min) — bounded, nowhere near the 60k OOM,
 	// and far below the (default 1h) maintenance cycle.
 	//

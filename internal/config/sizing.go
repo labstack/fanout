@@ -1,4 +1,4 @@
-package env
+package config
 
 import (
 	"fmt"
@@ -37,7 +37,7 @@ const (
 	maxAutoDuckDBConns = 16
 
 	// minDuckDBConns preserves an invariant rather than a preference:
-	// internal/lake rejects DUCKDB_MAX_CONNS > 1 without a shared write gate,
+	// internal/lake rejects max_connections > 1 without a shared write gate,
 	// and a pool of 1 serializes reads behind writes.
 	minDuckDBConns = 2
 )
@@ -114,7 +114,7 @@ func (c Config) logResolvedSizing(src sizingSource) {
 		"gomaxprocs", runtime.GOMAXPROCS(0),
 	)
 	if src.MemoryAuto && c.DuckDBMemory == "" {
-		slog.Warn("could not detect available memory; DuckDB will size itself to 80% of RAM, which can exceed the machine once the Go runtime is added — set DUCKDB_MEMORY explicitly")
+		slog.Warn("could not detect available memory; DuckDB will size itself to 80% of RAM, which can exceed the machine once the Go runtime is added — configure storage.duckdb.memory explicitly")
 	}
 }
 

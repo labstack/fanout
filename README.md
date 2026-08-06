@@ -68,9 +68,10 @@ and confirms what it found.
 ```sh
 docker run -p 7520:7520 -p 4317:4317 \
   -v fanout-data:/var/lib/fanout/data \
-  -e AUTH_CODE_SECRET=$(openssl rand -hex 32) \
-  -e AI_API_KEY=sk-... \
-  -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=... \
+  -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
+  -e FANOUT_AI_API_KEY=sk-... \
+  -e FANOUT_SMTP_HOST=... -e FANOUT_SMTP_USERNAME=... \
+  -e FANOUT_SMTP_PASSWORD=... -e FANOUT_SMTP_FROM=... \
   ghcr.io/labstack/fanout:latest
 ```
 
@@ -90,10 +91,11 @@ just build     # browser assets, then the binaries
 Run it with the minimum configuration:
 
 ```sh
-export AUTH_CODE_SECRET=$(openssl rand -hex 32)   # must be 32+ characters
-export AI_API_KEY=sk-...                          # Anthropic by default
-export SMTP_HOST=localhost SMTP_PORT=1025
-export SMTP_USER=dev SMTP_PASS=dev SMTP_FROM=fanout@example.com
+export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) # must be 32+ characters
+export FANOUT_AI_API_KEY=sk-...                        # Anthropic by default
+export FANOUT_SMTP_HOST=localhost FANOUT_SMTP_PORT=1025
+export FANOUT_SMTP_USERNAME=dev FANOUT_SMTP_PASSWORD=dev
+export FANOUT_SMTP_FROM=fanout@example.com
 
 ./bin/fanout
 ```
@@ -110,22 +112,35 @@ with the bundled benchmark driver:
 
 ## Configuration
 
-Configuration is entirely environment variables, read once at startup and
-validated before anything binds a port. The full set lives in
-[`internal/env/config.go`](internal/env/config.go); the ones you are most
-likely to touch:
+Configuration is resolved once at startup and validated before Fanout opens
+data files or listeners. Sources apply in this order: built-in defaults, an
+optional YAML document selected with `--config`, then `FANOUT_` environment
+variables. Fanout does not search for configuration or load `.env` files.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `HTTP_ADDR` | `:7520` | UI, API, and MCP listener |
-| `OTLP_GRPC_ADDR` | `127.0.0.1:4317` | OTLP ingest listener |
-| `DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
-| `AUTH_MODE` | `local` | `local` (SMTP) or `oidc` |
-| `AUTH_CODE_SECRET` | — | Required in `local` mode, 32+ characters |
-| `AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
-| `AI_API_KEY` | — | Required |
-| `RETENTION_DAYS` | `30` | Telemetry retention window |
-| `MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
+[`fanout.example.yaml`](fanout.example.yaml) is the complete commented schema:
+
+```sh
+cp fanout.example.yaml fanout.yaml
+./bin/fanout --config ./fanout.yaml
+```
+
+Environment variables override the corresponding YAML values and are useful
+for container injection and secrets. Unknown YAML keys and unknown `FANOUT_`
+variables are startup errors. The definitions live in
+[`internal/config/config.go`](internal/config/config.go); the settings most
+operators touch are:
+
+| YAML key | Environment override | Default | Purpose |
+| --- | --- | --- | --- |
+| `server.http_addr` | `FANOUT_HTTP_ADDR` | `:7520` | UI, API, and MCP listener |
+| `ingest.otlp_grpc_addr` | `FANOUT_OTLP_GRPC_ADDR` | `127.0.0.1:4317` | OTLP ingest listener |
+| `storage.data_dir` | `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
+| `auth.mode` | `FANOUT_AUTH_MODE` | `local` | `local` (SMTP) or `oidc` |
+| `auth.code_secret` | `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
+| `agent.provider` | `FANOUT_AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
+| `agent.api_key` | `FANOUT_AI_API_KEY` | — | Required |
+| `storage.retention_days` | `FANOUT_RETENTION_DAYS` | `30` | Telemetry retention window |
+| `mcp.enabled` | `FANOUT_MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
 
 ### Advanced DuckDB sizing
 
@@ -139,13 +154,14 @@ These variables are escape hatches for measured, unusual workloads:
 
 | Variable | Automatic behavior | When to override |
 | --- | --- | --- |
-| `DUCKDB_MEMORY` | 60% of the container or host memory available to Fanout | A measured co-tenant workload needs a different Go/DuckDB split |
-| `DUCKDB_MAX_CONNS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
-| `DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
+| `storage.duckdb.memory` / `FANOUT_DUCKDB_MEMORY` | 60% of the container or host memory available to Fanout | A measured co-tenant workload needs a different Go/DuckDB split |
+| `storage.duckdb.max_connections` / `FANOUT_DUCKDB_MAX_CONNECTIONS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
+| `storage.duckdb.threads` / `FANOUT_DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
 
 An explicit value always wins. If Fanout cannot detect available memory, it
 logs a warning instead of inventing a machine size; only that case requires an
-operator to set `DUCKDB_MEMORY` for a guaranteed bound.
+operator to set `storage.duckdb.memory` or `FANOUT_DUCKDB_MEMORY` for a
+guaranteed bound.
 
 ## Development
 

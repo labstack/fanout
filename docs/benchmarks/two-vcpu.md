@@ -117,12 +117,13 @@ This run used `DUCKDB_MEMORY=3GB` with a 6 GB container limit and peaked at
 1.2 GB RSS. That explicit value records the historical benchmark configuration;
 it is not required for a normal current deployment.
 
-**Since these runs, Fanout resolves this itself.** With `DUCKDB_MEMORY` unset it
-now detects the container or host limit, reserves headroom for the Go runtime,
-and logs what it chose at startup. On the 6 GB container used here it resolves
-to 3686 MB — close to the 3 GB pinned by hand above, which is why the numbers
-still stand. Operators normally set the container memory limit and let Fanout
-handle DuckDB; setting the variable explicitly remains an advanced override.
+**Since these runs, Fanout resolves this itself.** With
+`storage.duckdb.memory` / `FANOUT_DUCKDB_MEMORY` unset it now detects the
+container or host limit, reserves headroom for the Go runtime, and logs what it
+chose at startup. On the 6 GB container used here it resolves to 3686 MB — close
+to the 3 GB pinned by hand above, which is why the numbers still stand.
+Operators normally set the container memory limit and let Fanout handle DuckDB;
+setting the value explicitly remains an advanced override.
 
 ### Capacity falls as the dataset grows
 
@@ -148,12 +149,13 @@ live telemetry, and should not be sized as if it were.
 ```sh
 # On the machine under test
 docker run -d --name fanout --memory 6g -p 4317:4317 -p 7520:7520 \
-  -e OTLP_GRPC_ADDR=:4317 -e METRICS_TOKEN=... \
-  -e DUCKDB_MEMORY=3GB -e DUCKDB_MAX_CONNS=4 \
-  -e AUTH_CODE_SECRET=... -e AI_API_KEY=... \
-  -e SMTP_HOST=... -e SMTP_USER=... -e SMTP_PASS=... -e SMTP_FROM=... \
+  -e FANOUT_OTLP_GRPC_ADDR=:4317 -e FANOUT_METRICS_TOKEN=... \
+  -e FANOUT_DUCKDB_MEMORY=3GB -e FANOUT_DUCKDB_MAX_CONNECTIONS=4 \
+  -e FANOUT_AUTH_CODE_SECRET=... -e FANOUT_AI_API_KEY=... \
+  -e FANOUT_SMTP_HOST=... -e FANOUT_SMTP_USERNAME=... \
+  -e FANOUT_SMTP_PASSWORD=... -e FANOUT_SMTP_FROM=... \
   -v fanout-data:/var/lib/fanout/data \
-  ghcr.io/labstack/fanout@sha256:feebc9cfc09b1aea4c6165f6d700b976489de237a2fd17c37581b2fea8b3864e
+  ghcr.io/labstack/fanout:latest
 
 # Complete first-admin setup in the browser using the token printed by
 # `docker logs fanout`, and save the one-time ingest token as INGEST_TOKEN.

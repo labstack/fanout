@@ -9,17 +9,17 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/settings"
 )
 
 type SettingsHandler struct {
-	cfg   env.Config
+	cfg   config.Config
 	store *settings.Store
 	audit *auth.AuditStore
 }
 
-func RegisterSettingsRoutes(e *echo.Echo, cfg env.Config, store *settings.Store, audit *auth.AuditStore) {
+func RegisterSettingsRoutes(e *echo.Echo, cfg config.Config, store *settings.Store, audit *auth.AuditStore) {
 	if store == nil || audit == nil {
 		panic("api: settings route dependencies are required")
 	}
