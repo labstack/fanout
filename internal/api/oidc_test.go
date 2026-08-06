@@ -17,12 +17,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v5"
 	appauth "github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
 func TestOIDCProvisionPolicy(t *testing.T) {
-	h := &OIDCHandler{cfg: env.Config{
+	h := &OIDCHandler{cfg: config.Config{
 		OIDCAllowedGroups:  "fanout-users, sre",
 		OIDCAllowedDomains: "example.com",
 		OIDCDefaultRole:    "viewer",
@@ -128,7 +128,7 @@ func TestOIDCFlowValidatesPKCENonceAndCreatesSession(t *testing.T) {
 	sessions := appauth.NewBrowserSessions(db.DB, 12*time.Hour, 7*24*time.Hour, false)
 	e := echo.New()
 	e.Use(echo.WrapMiddleware(sessions.Middleware))
-	cfg := env.Config{
+	cfg := config.Config{
 		AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
 		PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
 	}
@@ -277,7 +277,7 @@ func runRejectedOIDCCallback(t *testing.T, mutate func(jwt.MapClaims), badKey, k
 	sessions := appauth.NewBrowserSessions(db.DB, 12*time.Hour, 7*24*time.Hour, false)
 	e := echo.New()
 	e.Use(echo.WrapMiddleware(sessions.Middleware))
-	cfg := env.Config{
+	cfg := config.Config{
 		AuthMode: "oidc", OIDCIssuerURL: issuer, OIDCClientID: "fanout-client", OIDCClientSecret: "client-secret",
 		PublicURL: "https://fanout.example.com", OIDCEmailVerification: "required", OIDCDefaultRole: "viewer",
 		OIDCAutoProvision: false,
@@ -341,7 +341,7 @@ func TestResolveUserRequiresActiveUnlinkedIssuerAllowedUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := &OIDCHandler{
-		cfg:   env.Config{OIDCEmailVerification: "issuer", OIDCAllowedGroups: "trusted", OIDCDefaultRole: "viewer"},
+		cfg:   config.Config{OIDCEmailVerification: "issuer", OIDCAllowedGroups: "trusted", OIDCDefaultRole: "viewer"},
 		users: users, identities: identities, audit: appauth.NewAuditStore(db.DB),
 	}
 	verified := true

@@ -33,7 +33,8 @@ coverage.out
 coverage.html
 cover.out
 
-# Env. Matches at every depth; commit `.env.example` templates instead.
+# Local environment scratch files. Fanout runtime configuration uses explicit
+# YAML documents and process environment; it does not load dotenv files.
 .env
 
 # Root-scoped for the same reason as testdata/: a bare `*.png` would silently

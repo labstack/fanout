@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 )
 
 func registerTestUserRoutes(s *testAuthServer) {
-	RegisterUserRoutes(s.e, s.users, auth.SMTPConfig{}, env.Config{AuthMode: "oidc"})
+	RegisterUserRoutes(s.e, s.users, auth.SMTPConfig{}, config.Config{AuthMode: "oidc"})
 }
 
 func TestUserMutationsProtectLastActiveAdmin(t *testing.T) {

@@ -15,7 +15,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	appstore "github.com/labstack/fanout/internal/store"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
@@ -23,10 +23,10 @@ import (
 const testMCPResource = "https://fanout.example.com/mcp"
 
 func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
-	return newOAuthTestServerWithConfig(t, env.Config{})
+	return newOAuthTestServerWithConfig(t, config.Config{})
 }
 
-func newOAuthTestServerWithConfig(t *testing.T, cfg env.Config) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
+func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	t.Helper()
 	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {

@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	appstore "github.com/labstack/fanout/internal/store"
 )
 
@@ -42,7 +42,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	sessions := auth.NewBrowserSessions(db.DB, 12*time.Hour, 7*24*time.Hour, false)
-	cfg := env.Config{MetricsToken: "metrics-secret"}
+	cfg := config.Config{MetricsToken: "metrics-secret"}
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, sessions, auth.NewAuditStore(db.DB), cfg)
 	e.POST("/api/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
@@ -95,7 +95,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 	}
 
 	noToken := echo.New()
-	RegisterAuthMiddleware(noToken, users, sessions, auth.NewAuditStore(db.DB), env.Config{})
+	RegisterAuthMiddleware(noToken, users, sessions, auth.NewAuditStore(db.DB), config.Config{})
 	noToken.GET("/-/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	recorder = httptest.NewRecorder()
 	noToken.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/-/metrics", nil))
@@ -104,7 +104,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 	}
 
 	publicMetrics := echo.New()
-	RegisterAuthMiddleware(publicMetrics, users, sessions, auth.NewAuditStore(db.DB), env.Config{MetricsPublic: true})
+	RegisterAuthMiddleware(publicMetrics, users, sessions, auth.NewAuditStore(db.DB), config.Config{MetricsPublic: true})
 	publicMetrics.GET("/-/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	recorder = httptest.NewRecorder()
 	publicMetrics.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/-/metrics", nil))

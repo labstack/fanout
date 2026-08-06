@@ -9,7 +9,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 )
 
 // UserHandler handles admin user management endpoints.
@@ -20,7 +20,7 @@ type UserHandler struct {
 }
 
 // RegisterUserRoutes registers user management endpoints.
-func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfig, cfg env.Config) {
+func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfig, cfg config.Config) {
 	mode := strings.ToLower(strings.TrimSpace(cfg.AuthMode))
 	if mode == "" {
 		mode = "local"

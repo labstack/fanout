@@ -11,7 +11,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/labstack/fanout/internal/auth"
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/settings"
 	appstore "github.com/labstack/fanout/internal/store"
 )
@@ -25,14 +25,14 @@ type testAuthServer struct {
 	setupToken string
 	sessions   *auth.BrowserSessions
 	audit      *auth.AuditStore
-	cfg        env.Config
+	cfg        config.Config
 }
 
 func newTestAuthServer(t *testing.T) *testAuthServer {
-	return newTestAuthServerWith(t, env.Config{AuthMode: "local"}, auth.SMTPConfig{})
+	return newTestAuthServerWith(t, config.Config{AuthMode: "local"}, auth.SMTPConfig{})
 }
 
-func newTestAuthServerWith(t *testing.T, cfg env.Config, smtp auth.SMTPConfig) *testAuthServer {
+func newTestAuthServerWith(t *testing.T, cfg config.Config, smtp auth.SMTPConfig) *testAuthServer {
 	t.Helper()
 	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {
@@ -374,7 +374,7 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 
 func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 	smtp := auth.SMTPConfig{Host: "127.0.0.1", Port: 1, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
-	s := newTestAuthServerWith(t, env.Config{AuthMode: "local"}, smtp)
+	s := newTestAuthServerWith(t, config.Config{AuthMode: "local"}, smtp)
 	if _, err := s.users.Create("active@example.com", "", "operator"); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -451,7 +451,7 @@ func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
 
 func TestSetupReturnsConfiguredIngestEndpoint(t *testing.T) {
 	const endpoint = "https://ingest.example.com"
-	s := newTestAuthServerWith(t, env.Config{AuthMode: "local", IngestEndpoint: endpoint}, auth.SMTPConfig{})
+	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", IngestEndpoint: endpoint}, auth.SMTPConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

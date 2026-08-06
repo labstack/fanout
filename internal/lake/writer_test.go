@@ -8,7 +8,7 @@ import (
 
 	_ "github.com/duckdb/duckdb-go/v2"
 
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/query"
 )
 
@@ -35,7 +35,7 @@ func TestWriterFlushBatchSize(t *testing.T) {
 	chLogs := make(chan LogRow, 10)
 	chMetrics := make(chan MetricRow, 10)
 
-	w := NewWriter(env.Config{
+	w := NewWriter(config.Config{
 		FlushSeconds:   60,
 		FlushBatchSize: 2,
 		DefaultNS:      "default",
@@ -79,7 +79,7 @@ func TestWriterFlushesRemainderOnShutdown(t *testing.T) {
 	chLogs := make(chan LogRow, 10)
 	chMetrics := make(chan MetricRow, 10)
 
-	w := NewWriter(env.Config{
+	w := NewWriter(config.Config{
 		FlushSeconds:   3600, // long, so only shutdown triggers the flush
 		FlushBatchSize: 1000, // large, so the single row never hits a size flush
 		DefaultNS:      "default",
@@ -141,7 +141,7 @@ func TestFlushWorkerReportsUnwrittenFinalCarry(t *testing.T) {
 		t.Fatalf("close duckdb: %v", err)
 	}
 
-	w := &Writer{db: db, cfg: env.Config{FlushBatchSize: 10}}
+	w := &Writer{db: db, cfg: config.Config{FlushBatchSize: 10}}
 	flushCh := make(chan flushBatch, 1)
 	done := make(chan error, 1)
 	flushCh <- flushBatch{spans: []SpanRow{{TraceID: "t", SpanID: "s"}}}

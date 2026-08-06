@@ -1,0 +1,86 @@
+# Fanout runtime configuration.
+#
+# Start with: fanout --config /path/to/fanout.yaml
+# Every value can be overridden by its documented FANOUT_ environment variable.
+# Secrets are intentionally omitted below; inject them through the environment
+# or add them to a suitably protected copy of this file.
+# Use YAML 1.2 true/false for booleans; yes/no/on/off are strings and rejected.
+# Null values (a key with nothing after the colon) are rejected.
+
+server:
+  http_addr: ":7520" # FANOUT_HTTP_ADDR
+  public_url: "" # FANOUT_PUBLIC_URL
+  trusted_proxy_cidrs: "" # FANOUT_TRUSTED_PROXY_CIDRS
+  pprof_enabled: false # FANOUT_PPROF_ENABLED
+  tls:
+    cert_file: "" # FANOUT_TLS_CERT_FILE
+    key_file: "" # FANOUT_TLS_KEY_FILE
+
+ingest:
+  otlp_grpc_addr: "127.0.0.1:4317" # FANOUT_OTLP_GRPC_ADDR
+  public_endpoint: "" # FANOUT_INGEST_ENDPOINT
+  default_namespace: default # FANOUT_DEFAULT_NAMESPACE
+  flush_seconds: 15 # FANOUT_FLUSH_SECONDS
+  flush_batch_size: 50000 # FANOUT_FLUSH_BATCH_SIZE
+
+storage:
+  data_dir: ./data # FANOUT_DATA_DIR
+  retention_days: 30 # FANOUT_RETENTION_DAYS
+  rollup_every_seconds: 60 # FANOUT_ROLLUP_EVERY_SECONDS
+  rollup_skip_to_latest: false # FANOUT_ROLLUP_SKIP_TO_LATEST
+  maintenance_every_seconds: 3600 # FANOUT_MAINTENANCE_EVERY_SECONDS
+  merge_every_seconds: 60 # FANOUT_MERGE_EVERY_SECONDS
+  duckdb:
+    # Empty/zero values let Fanout size these from the machine.
+    memory: "" # FANOUT_DUCKDB_MEMORY
+    threads: 0 # FANOUT_DUCKDB_THREADS
+    max_connections: 0 # FANOUT_DUCKDB_MAX_CONNECTIONS
+
+alerts:
+  enabled: true # FANOUT_ALERTS_ENABLED
+  evaluation_interval_seconds: 30 # FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS
+  history_days: 7 # FANOUT_ALERTS_HISTORY_DAYS
+
+agent:
+  provider: anthropic # FANOUT_AI_PROVIDER
+  model: "" # FANOUT_AI_MODEL
+  base_url: "" # FANOUT_AI_BASE_URL
+  # Required: FANOUT_AI_API_KEY
+  # api_key: ""
+
+smtp:
+  host: "" # FANOUT_SMTP_HOST
+  port: 587 # FANOUT_SMTP_PORT
+  username: "" # FANOUT_SMTP_USERNAME
+  from: "" # FANOUT_SMTP_FROM
+  # Required in local auth mode: FANOUT_SMTP_PASSWORD
+  # password: ""
+
+auth:
+  mode: local # FANOUT_AUTH_MODE
+  session_idle_ttl: 12h # FANOUT_SESSION_IDLE_TTL
+  session_absolute_ttl: 168h # FANOUT_SESSION_ABSOLUTE_TTL
+  # Required in local auth mode: FANOUT_AUTH_CODE_SECRET (32+ characters)
+  # code_secret: ""
+  oidc:
+    issuer_url: "" # FANOUT_OIDC_ISSUER_URL
+    client_id: "" # FANOUT_OIDC_CLIENT_ID
+    email_claim: email # FANOUT_OIDC_EMAIL_CLAIM
+    email_verification: required # FANOUT_OIDC_EMAIL_VERIFICATION
+    auto_provision: false # FANOUT_OIDC_AUTO_PROVISION
+    allowed_groups: "" # FANOUT_OIDC_ALLOWED_GROUPS
+    allowed_domains: "" # FANOUT_OIDC_ALLOWED_DOMAINS
+    default_role: viewer # FANOUT_OIDC_DEFAULT_ROLE
+    operator_groups: "" # FANOUT_OIDC_OPERATOR_GROUPS
+    admin_groups: "" # FANOUT_OIDC_ADMIN_GROUPS
+    # Required in OIDC mode: FANOUT_OIDC_CLIENT_SECRET
+    # client_secret: ""
+
+metrics:
+  public: false # FANOUT_METRICS_PUBLIC
+  # Optional bearer token: FANOUT_METRICS_TOKEN
+  # token: ""
+
+mcp:
+  enabled: true # FANOUT_MCP_ENABLED
+  public_url: https://localhost:7520/mcp # FANOUT_MCP_PUBLIC_URL

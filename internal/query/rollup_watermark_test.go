@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 )
 
 // TestRollupWatermarkPicksUpLateLowIngestedRow reproduces the silent-data-loss
@@ -24,7 +24,7 @@ func TestRollupWatermarkPicksUpLateLowIngestedRow(t *testing.T) {
 	const lag = 2 * time.Second
 	d := &Duck{
 		DB:              db,
-		cfg:             env.Config{RetentionDays: 30},
+		cfg:             config.Config{RetentionDays: 30},
 		lastMaintenance: time.Now(),
 		rollupLagNanos:  lag.Nanoseconds(),
 	}
@@ -90,7 +90,7 @@ func TestRollupWatermarkLagSurvivesChunkedCatchUp(t *testing.T) {
 	const lag = 2 * time.Second
 	d := &Duck{
 		DB:              db,
-		cfg:             env.Config{RetentionDays: 30},
+		cfg:             config.Config{RetentionDays: 30},
 		lastMaintenance: time.Now(),
 		rollupLagNanos:  lag.Nanoseconds(),
 	}
@@ -153,7 +153,7 @@ func TestEdgeRollupWatermarkPicksUpLateChild(t *testing.T) {
 	const lag = 2 * time.Second
 	d := &Duck{
 		DB:              db,
-		cfg:             env.Config{RetentionDays: 30},
+		cfg:             config.Config{RetentionDays: 30},
 		lastMaintenance: time.Now(),
 		rollupLagNanos:  lag.Nanoseconds(),
 	}

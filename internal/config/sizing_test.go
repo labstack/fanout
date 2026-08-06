@@ -1,4 +1,4 @@
-package env
+package config
 
 import (
 	"fmt"
@@ -53,7 +53,7 @@ func TestResolveDuckDBMemoryDeclinesForAbsurdlySmallMachines(t *testing.T) {
 }
 
 func TestResolveDuckDBMaxConnsKeepsTheWriteGateInvariant(t *testing.T) {
-	// internal/lake refuses to start when DUCKDB_MAX_CONNS > 1 without a write
+	// internal/lake refuses to start when max_connections > 1 without a write
 	// gate; at or below 1 it serializes everything through one handle. The
 	// floor is an invariant, not a preference.
 	for _, cores := range []int{0, 1, 2} {
@@ -98,6 +98,26 @@ func TestParseCgroupMemoryLimitReadsAByteCount(t *testing.T) {
 	got, ok := readCgroupLimit(path)
 	if !ok || got != 6442450944 {
 		t.Fatalf("readCgroupLimit = (%d, %v), want (6442450944, true)", got, ok)
+	}
+}
+
+func TestParseCgroupMemoryLimitReportsMalformedData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.max")
+	writeTestFile(t, path, "not-a-limit\n")
+
+	limit, exists, err := readCgroupLimitDetailed(path)
+	if !exists || err == nil || limit != 0 {
+		t.Fatalf("readCgroupLimitDetailed = (%d, %v, %v), want present malformed data", limit, exists, err)
+	}
+}
+
+func TestDetailedCgroupDetectionReportsUnreadableMetadata(t *testing.T) {
+	_, conclusive, err := detectCgroupMemoryLimitDetailed(
+		filepath.Join(t.TempDir(), "missing-cgroup"),
+		filepath.Join(t.TempDir(), "missing-mountinfo"),
+	)
+	if conclusive || err == nil {
+		t.Fatalf("detectCgroupMemoryLimitDetailed = conclusive %v, err %v", conclusive, err)
 	}
 }
 
@@ -221,6 +241,9 @@ func TestResolveFillsUnsetValues(t *testing.T) {
 	}
 	if sizing.DetectedMemoryBytes != detectAvailableMemory() {
 		t.Fatalf("DetectedMemoryBytes = %d, want available memory %d", sizing.DetectedMemoryBytes, detectAvailableMemory())
+	}
+	if sizing.MemorySource == "" {
+		t.Fatal("automatic sizing did not record its memory source")
 	}
 }
 

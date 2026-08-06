@@ -1,6 +1,6 @@
 //go:build !linux && !darwin
 
-package env
+package config
 
 func detectHostMemory() uint64 {
 	return 0

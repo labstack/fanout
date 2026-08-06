@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/labstack/fanout/internal/env"
+	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -27,7 +27,7 @@ func TestEdgeRollupBacklog(t *testing.T) {
 
 	d := &Duck{
 		DB:              db,
-		cfg:             env.Config{RetentionDays: 30, DuckDBMemory: "1GB"},
+		cfg:             config.Config{RetentionDays: 30, DuckDBMemory: "1GB"},
 		lastMaintenance: time.Now(),
 	}
 	ctx := context.Background()
@@ -136,7 +136,7 @@ FROM lake.spans`).Scan(&spanBuckets); err != nil {
 func TestSkipRollupToLatest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	d, err := NewDuck(ctx, env.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", RetentionDays: 30})
+	d, err := NewDuck(ctx, config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", RetentionDays: 30})
 	if err != nil {
 		if strings.Contains(err.Error(), "ducklake") || strings.Contains(err.Error(), "ATTACH") {
 			t.Skipf("DuckLake unavailable: %v", err)
