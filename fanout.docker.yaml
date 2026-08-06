@@ -1,0 +1,11 @@
+# Container-specific listener and storage defaults. Runtime environment
+# variables still override these values. To replace this document wholesale,
+# pass: --config /path/to/mounted/fanout.yaml
+server:
+  http_addr: ":7520"
+
+ingest:
+  otlp_grpc_addr: ":4317"
+
+storage:
+  data_dir: /var/lib/fanout/data

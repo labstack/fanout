@@ -68,7 +68,17 @@ func TestLoadReturnsDefaults(t *testing.T) {
 
 func TestLoadLayering(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fanout.yaml")
-	if err := os.WriteFile(path, []byte("server:\n  http_addr: ':1111'\n"), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(`server:
+  http_addr: ":1111"
+storage:
+  merge_every_seconds: 75
+mcp:
+  enabled: false
+metrics:
+  public: true
+auth:
+  session_idle_ttl: 10h
+`), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -81,6 +91,51 @@ func TestLoadLayering(t *testing.T) {
 	}
 	if cfg.HTTPAddr != ":2222" {
 		t.Fatalf("HTTPAddr = %q, want environment override", cfg.HTTPAddr)
+	}
+	if cfg.MergeEverySeconds != 75 || cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour {
+		t.Fatalf("YAML values were not merged: %+v", cfg)
+	}
+}
+
+func TestLoadTypedEnvironmentValues(t *testing.T) {
+	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
+		"FANOUT_MCP_ENABLED=false",
+		"FANOUT_METRICS_PUBLIC=true",
+		"FANOUT_MERGE_EVERY_SECONDS=75",
+		"FANOUT_SESSION_IDLE_TTL=10h",
+	)})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.MergeEverySeconds != 75 || cfg.SessionIdleTTL != 10*time.Hour {
+		t.Fatalf("environment values were not decoded: %+v", cfg)
+	}
+}
+
+func TestLoadTreatsEmptyEnvironmentValuesAsAbsent(t *testing.T) {
+	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
+		"FANOUT_HTTP_ADDR=",
+		"FANOUT_OTLP_GRPC_ADDR=",
+		"FANOUT_MCP_ENABLED=",
+		"FANOUT_RETENTION_DAYS=",
+	)})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.HTTPAddr != ":7520" || cfg.OTLPGRPCAddr != "127.0.0.1:4317" || !cfg.MCPEnabled || cfg.RetentionDays != 30 {
+		t.Fatalf("empty environment values erased defaults: %+v", cfg)
+	}
+}
+
+func TestLoadNormalizesMCPPublicURL(t *testing.T) {
+	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
+		"FANOUT_MCP_PUBLIC_URL=  https://fanout.example.com/mcp  ",
+	)})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MCPPublicURL != "https://fanout.example.com/mcp" {
+		t.Fatalf("MCPPublicURL = %q, want normalized URL", cfg.MCPPublicURL)
 	}
 }
 
@@ -119,6 +174,17 @@ func TestExampleConfigurationMatchesSchema(t *testing.T) {
 	}
 }
 
+func TestDockerConfigurationMatchesSchema(t *testing.T) {
+	path := filepath.Join("..", "..", "fanout.docker.yaml")
+	cfg, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+	if err != nil {
+		t.Fatalf("Load Docker config: %v", err)
+	}
+	if cfg.HTTPAddr != ":7520" || cfg.OTLPGRPCAddr != ":4317" || cfg.DataDir != "/var/lib/fanout/data" {
+		t.Fatalf("Docker config values = HTTP %q OTLP %q data %q", cfg.HTTPAddr, cfg.OTLPGRPCAddr, cfg.DataDir)
+	}
+}
+
 func TestLoadRejectsUnknownInputs(t *testing.T) {
 	t.Run("YAML key", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "fanout.yaml")
@@ -137,6 +203,70 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 			t.Fatalf("error = %v, want unknown environment variable", err)
 		}
 	})
+
+	t.Run("near platform variable", func(t *testing.T) {
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_SERVICE_PORTAL=7520")})
+		if err == nil || !strings.Contains(err.Error(), "FANOUT_SERVICE_PORTAL") {
+			t.Fatalf("error = %v, want unknown environment variable", err)
+		}
+	})
+
+	t.Run("malformed environment entry", func(t *testing.T) {
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_HTTP_ADDR")})
+		if err == nil || !strings.Contains(err.Error(), "NAME=value") {
+			t.Fatalf("error = %v, want malformed environment error", err)
+		}
+	})
+}
+
+func TestLoadIgnoresKubernetesServiceEnvironment(t *testing.T) {
+	environ := append(validEnvironment(),
+		"FANOUT_SERVICE_HOST=10.0.0.1",
+		"FANOUT_SERVICE_PORT=7520",
+		"FANOUT_SERVICE_PORT_HTTP=7520",
+		"FANOUT_PORT=tcp://10.0.0.1:7520",
+		"FANOUT_PORT_7520_TCP_ADDR=10.0.0.1",
+	)
+	if _, err := Load(LoadOptions{Environ: environ}); err != nil {
+		t.Fatalf("Load with Kubernetes service variables: %v", err)
+	}
+}
+
+func TestLoadAllowsEmptyYAMLSections(t *testing.T) {
+	for _, document := range []string{
+		"metrics:\n",
+		"auth:\n  oidc:\n    # client_id: fanout\n",
+		"server: {}\n",
+	} {
+		path := filepath.Join(t.TempDir(), "fanout.yaml")
+		if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(LoadOptions{Path: path, Environ: validEnvironment()}); err != nil {
+			t.Fatalf("Load %q: %v", document, err)
+		}
+	}
+}
+
+func TestLoadRejectsYAMLNullValues(t *testing.T) {
+	for _, key := range []struct {
+		name, document string
+	}{
+		{"HTTP address", "server:\n  http_addr:\n"},
+		{"MCP enabled", "mcp:\n  enabled:\n"},
+		{"retention", "storage:\n  retention_days:\n"},
+	} {
+		t.Run(key.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "fanout.yaml")
+			if err := os.WriteFile(path, []byte(key.document), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+			if err == nil || !strings.Contains(err.Error(), "must not be null") {
+				t.Fatalf("error = %v, want null rejection", err)
+			}
+		})
+	}
 }
 
 func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
@@ -147,16 +277,25 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid type", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "fanout.yaml")
-		if err := os.WriteFile(path, []byte("ingest:\n  flush_seconds: never\n"), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
-		_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-		if err == nil {
-			t.Fatal("expected type error")
-		}
-	})
+	for _, test := range []struct {
+		name, document string
+	}{
+		{"string as integer", "ingest:\n  flush_seconds: never\n"},
+		{"fractional integer", "smtp:\n  port: 25.9\n"},
+		{"integer as boolean", "mcp:\n  enabled: 2\n"},
+		{"YAML keyword as boolean", "alerts:\n  enabled: off\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "fanout.yaml")
+			if err := os.WriteFile(path, []byte(test.document), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+			if err == nil {
+				t.Fatal("expected type error")
+			}
+		})
+	}
 
 	t.Run("invalid merged config", func(t *testing.T) {
 		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_FLUSH_SECONDS=0")})
@@ -164,17 +303,33 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 			t.Fatalf("error = %v, want validation error", err)
 		}
 	})
+
+	for _, test := range []struct {
+		name, assignment, key string
+	}{
+		{"negative max connections is not auto", "FANOUT_DUCKDB_MAX_CONNECTIONS=-3", "max_connections"},
+		{"zero alert interval", "FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS=0", "evaluation_interval_seconds"},
+		{"negative merge interval", "FANOUT_MERGE_EVERY_SECONDS=-5", "merge_every_seconds"},
+		{"negative maintenance interval", "FANOUT_MAINTENANCE_EVERY_SECONDS=-5", "maintenance_every_seconds"},
+		{"negative DuckDB threads", "FANOUT_DUCKDB_THREADS=-4", "duckdb.threads"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Load(LoadOptions{Environ: append(validEnvironment(), test.assignment)})
+			if err == nil || !strings.Contains(err.Error(), test.key) {
+				t.Fatalf("error = %v, want validation error for %s", err, test.key)
+			}
+		})
+	}
 }
 
-func TestLoadIgnoresLegacyAndDotenvInputs(t *testing.T) {
+func TestLoadIgnoresDotenvInputs(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FANOUT_HTTP_ADDR=:9999\n"), 0o600); err != nil {
 		t.Fatalf("write .env: %v", err)
 	}
 	t.Chdir(dir)
 
-	environ := append(validEnvironment(), "HTTP_ADDR=:8888")
-	cfg, err := Load(LoadOptions{Environ: environ})
+	cfg, err := Load(LoadOptions{Environ: validEnvironment()})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -183,41 +338,78 @@ func TestLoadIgnoresLegacyAndDotenvInputs(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsLegacyEnvironment(t *testing.T) {
+	_, err := Load(LoadOptions{Environ: append(validEnvironment(),
+		"HTTP_ADDR=:8888",
+		"SMTP_USER=old-user",
+		"ALERT_EVAL_INTERVAL=5",
+	)})
+	if err == nil {
+		t.Fatal("expected legacy environment error")
+	}
+	for _, text := range []string{
+		"HTTP_ADDR (use FANOUT_HTTP_ADDR)",
+		"SMTP_USER (use FANOUT_SMTP_USERNAME)",
+		"ALERT_EVAL_INTERVAL (use FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS)",
+	} {
+		if !strings.Contains(err.Error(), text) {
+			t.Errorf("error %q does not contain %q", err, text)
+		}
+	}
+}
+
 func TestLoadErrorsDoNotContainSecrets(t *testing.T) {
 	const secret = "do-not-print-this-password"
-	environ := []string{
-		"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
-		"FANOUT_AI_API_KEY=sk-test",
-		"FANOUT_SMTP_PASSWORD=" + secret,
-		"FANOUT_SMTP_USERNAME=user",
-		"FANOUT_SMTP_FROM=noreply@example.com",
+	path := filepath.Join(t.TempDir(), "fanout.yaml")
+	document := "smtp:\n  password: " + secret + "\n  port: 25.9\n"
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	_, err := Load(LoadOptions{Environ: environ})
+	_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
 	if err == nil {
-		t.Fatal("expected validation error")
+		t.Fatal("expected decode error")
 	}
 	if strings.Contains(err.Error(), secret) {
 		t.Fatalf("error leaked secret: %v", err)
 	}
 }
 
+func TestLoadRequiresPrivatePermissionsForConfigSecrets(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "fanout.yaml")
+	if err := os.WriteFile(path, []byte("agent:\n  api_key: secret-from-file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+	if err == nil || !strings.Contains(err.Error(), "must not be accessible by group or others") {
+		t.Fatalf("error = %v, want file permission rejection", err)
+	}
+}
+
 func TestValidate(t *testing.T) {
 	valid := Config{
-		FlushSeconds:       15,
-		FlushBatchSize:     50000,
-		RollupEvery:        60,
-		RetentionDays:      30,
-		AIProvider:         "anthropic",
-		AIAPIKey:           "sk-test",
-		SMTPHost:           "smtp.example.com",
-		SMTPPort:           587,
-		SMTPUser:           "user",
-		SMTPPass:           "pass",
-		SMTPFrom:           "Fanout <noreply@example.com>",
-		AuthMode:           "local",
-		AuthCodeSecret:     "0123456789abcdef0123456789abcdef",
-		SessionIdleTTL:     12 * time.Hour,
-		SessionAbsoluteTTL: 7 * 24 * time.Hour,
+		HTTPAddr:                ":7520",
+		OTLPGRPCAddr:            "127.0.0.1:4317",
+		DataDir:                 "./data",
+		FlushSeconds:            15,
+		FlushBatchSize:          50000,
+		RollupEvery:             60,
+		RetentionDays:           30,
+		MaintenanceEverySeconds: 3600,
+		MergeEverySeconds:       60,
+		DuckDBMaxConns:          4,
+		AlertEvalInterval:       30,
+		AlertHistoryDays:        7,
+		AIProvider:              "anthropic",
+		AIAPIKey:                "sk-test",
+		SMTPHost:                "smtp.example.com",
+		SMTPPort:                587,
+		SMTPUser:                "user",
+		SMTPPass:                "pass",
+		SMTPFrom:                "Fanout <noreply@example.com>",
+		AuthMode:                "local",
+		AuthCodeSecret:          "0123456789abcdef0123456789abcdef",
+		SessionIdleTTL:          12 * time.Hour,
+		SessionAbsoluteTTL:      7 * 24 * time.Hour,
 	}
 	if err := valid.Validate(); err != nil {
 		t.Errorf("valid config should pass: %v", err)
@@ -234,6 +426,16 @@ func TestValidate(t *testing.T) {
 		{"RollupEvery=0", func(c *Config) { c.RollupEvery = 0 }},
 		{"RollupEvery=-1", func(c *Config) { c.RollupEvery = -1 }},
 		{"RetentionDays=-1", func(c *Config) { c.RetentionDays = -1 }},
+		{"HTTPAddr empty", func(c *Config) { c.HTTPAddr = "" }},
+		{"OTLPGRPCAddr empty", func(c *Config) { c.OTLPGRPCAddr = "" }},
+		{"DataDir empty", func(c *Config) { c.DataDir = "" }},
+		{"MaintenanceEverySeconds=0", func(c *Config) { c.MaintenanceEverySeconds = 0 }},
+		{"MaintenanceEverySeconds=-1", func(c *Config) { c.MaintenanceEverySeconds = -1 }},
+		{"MergeEverySeconds=-1", func(c *Config) { c.MergeEverySeconds = -1 }},
+		{"DuckDBThreads=-1", func(c *Config) { c.DuckDBThreads = -1 }},
+		{"DuckDBMaxConns=0", func(c *Config) { c.DuckDBMaxConns = 0 }},
+		{"AlertEvalInterval=0", func(c *Config) { c.AlertEvalInterval = 0 }},
+		{"AlertHistoryDays=-1", func(c *Config) { c.AlertHistoryDays = -1 }},
 		{"SMTP missing host", func(c *Config) { c.SMTPHost = "" }},
 		{"SMTP missing user", func(c *Config) { c.SMTPUser = "" }},
 		{"SMTP missing pass", func(c *Config) { c.SMTPPass = "" }},
@@ -298,6 +500,53 @@ func TestValidate(t *testing.T) {
 			t.Error("TLSEnabled = false, want true")
 		}
 	})
+}
+
+func TestFieldSpecsRejectInvalidSchemas(t *testing.T) {
+	tests := []struct {
+		name string
+		typ  reflect.Type
+		want string
+	}{
+		{
+			name: "duplicate key",
+			typ: reflect.TypeOf(struct {
+				A string `koanf:"same" env:"FANOUT_A" legacy:"A"`
+				B string `koanf:"same" env:"FANOUT_B" legacy:"B"`
+			}{}),
+			want: "share key",
+		},
+		{
+			name: "duplicate environment",
+			typ: reflect.TypeOf(struct {
+				A string `koanf:"a" env:"FANOUT_SAME" legacy:"A"`
+				B string `koanf:"b" env:"FANOUT_SAME" legacy:"B"`
+			}{}),
+			want: "share environment variable",
+		},
+		{
+			name: "missing tag",
+			typ: reflect.TypeOf(struct {
+				A string `koanf:"a" env:"FANOUT_A"`
+			}{}),
+			want: "must declare",
+		},
+		{
+			name: "missing prefix",
+			typ: reflect.TypeOf(struct {
+				A string `koanf:"a" env:"A" legacy:"OLD_A"`
+			}{}),
+			want: "lacks FANOUT_ prefix",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := fieldSpecs(test.typ)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want %q", err, test.want)
+			}
+		})
+	}
 }
 
 func TestSecureCookies(t *testing.T) {

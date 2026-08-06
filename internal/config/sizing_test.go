@@ -101,6 +101,26 @@ func TestParseCgroupMemoryLimitReadsAByteCount(t *testing.T) {
 	}
 }
 
+func TestParseCgroupMemoryLimitReportsMalformedData(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "memory.max")
+	writeTestFile(t, path, "not-a-limit\n")
+
+	limit, exists, err := readCgroupLimitDetailed(path)
+	if !exists || err == nil || limit != 0 {
+		t.Fatalf("readCgroupLimitDetailed = (%d, %v, %v), want present malformed data", limit, exists, err)
+	}
+}
+
+func TestDetailedCgroupDetectionReportsUnreadableMetadata(t *testing.T) {
+	_, conclusive, err := detectCgroupMemoryLimitDetailed(
+		filepath.Join(t.TempDir(), "missing-cgroup"),
+		filepath.Join(t.TempDir(), "missing-mountinfo"),
+	)
+	if conclusive || err == nil {
+		t.Fatalf("detectCgroupMemoryLimitDetailed = conclusive %v, err %v", conclusive, err)
+	}
+}
+
 func TestDetectCgroupV2MemoryLimitUsesTheProcessCgroup(t *testing.T) {
 	mountPoint := t.TempDir()
 	processDir := filepath.Join(mountPoint, "system.slice", "fanout.service")
@@ -221,6 +241,9 @@ func TestResolveFillsUnsetValues(t *testing.T) {
 	}
 	if sizing.DetectedMemoryBytes != detectAvailableMemory() {
 		t.Fatalf("DetectedMemoryBytes = %d, want available memory %d", sizing.DetectedMemoryBytes, detectAvailableMemory())
+	}
+	if sizing.MemorySource == "" {
+		t.Fatal("automatic sizing did not record its memory source")
 	}
 }
 

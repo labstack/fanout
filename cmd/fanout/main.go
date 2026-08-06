@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -49,12 +50,11 @@ var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 var version = "dev"
 
 func main() {
-	configPath, showVersion, err := parseCommandLine(os.Args[1:])
+	configPath, showVersion, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 	if showVersion {
@@ -407,12 +407,13 @@ func main() {
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 
-func parseCommandLine(args []string) (configPath string, showVersion bool, err error) {
+func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, err error) {
 	if len(args) == 1 && args[0] == "version" {
 		return "", true, nil
 	}
 
 	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
+	flags.SetOutput(output)
 	flags.StringVar(&configPath, "config", "", "path to a Fanout YAML configuration file")
 	flags.BoolVar(&showVersion, "version", false, "print the Fanout version")
 	flags.BoolVar(&showVersion, "v", false, "print the Fanout version")
@@ -420,7 +421,10 @@ func parseCommandLine(args []string) (configPath string, showVersion bool, err e
 		return "", false, err
 	}
 	if flags.NArg() != 0 {
-		return "", false, fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
+		err := fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
+		fmt.Fprintln(output, err)
+		flags.Usage()
+		return "", false, err
 	}
 	return configPath, showVersion, nil
 }

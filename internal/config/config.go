@@ -13,47 +13,47 @@ import (
 )
 
 type Config struct {
-	HTTPAddr     string `koanf:"server.http_addr" env:"FANOUT_HTTP_ADDR" default:":7520"`
-	OTLPGRPCAddr string `koanf:"ingest.otlp_grpc_addr" env:"FANOUT_OTLP_GRPC_ADDR" default:"127.0.0.1:4317"`
+	HTTPAddr     string `koanf:"server.http_addr" env:"FANOUT_HTTP_ADDR" legacy:"HTTP_ADDR" default:":7520"`
+	OTLPGRPCAddr string `koanf:"ingest.otlp_grpc_addr" env:"FANOUT_OTLP_GRPC_ADDR" legacy:"OTLP_GRPC_ADDR" default:"127.0.0.1:4317"`
 	// IngestEndpoint is the OTLP endpoint the UI advertises in its "collector
 	// configuration" hint (e.g. "https://ingest.example.com"). It may be
 	// public or private — it's just the externally-reachable address, distinct
 	// from OTLPGRPCAddr (the bind/listen address). Empty → derive host:port from
 	// the browser request + OTLPGRPCAddr (best-effort, dev-friendly).
-	IngestEndpoint string `koanf:"ingest.public_endpoint" env:"FANOUT_INGEST_ENDPOINT"`
-	DataDir        string `koanf:"storage.data_dir" env:"FANOUT_DATA_DIR" default:"./data"`
-	FlushSeconds   int    `koanf:"ingest.flush_seconds" env:"FANOUT_FLUSH_SECONDS" default:"15"`
-	FlushBatchSize int    `koanf:"ingest.flush_batch_size" env:"FANOUT_FLUSH_BATCH_SIZE" default:"50000"`
-	RollupEvery    int    `koanf:"storage.rollup_every_seconds" env:"FANOUT_ROLLUP_EVERY_SECONDS" default:"60"`
-	MCPEnabled     bool   `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" default:"true"`
+	IngestEndpoint string `koanf:"ingest.public_endpoint" env:"FANOUT_INGEST_ENDPOINT" legacy:"INGEST_ENDPOINT"`
+	DataDir        string `koanf:"storage.data_dir" env:"FANOUT_DATA_DIR" legacy:"DATA_DIR" default:"./data"`
+	FlushSeconds   int    `koanf:"ingest.flush_seconds" env:"FANOUT_FLUSH_SECONDS" legacy:"FLUSH_SECONDS" default:"15"`
+	FlushBatchSize int    `koanf:"ingest.flush_batch_size" env:"FANOUT_FLUSH_BATCH_SIZE" legacy:"FLUSH_BATCH_SIZE" default:"50000"`
+	RollupEvery    int    `koanf:"storage.rollup_every_seconds" env:"FANOUT_ROLLUP_EVERY_SECONDS" legacy:"ROLLUP_EVERY" default:"60"`
+	MCPEnabled     bool   `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" legacy:"MCP_ENABLED" default:"true"`
 	// MCPPublicURL is the canonical externally reachable MCP resource URI used
 	// for OAuth discovery and token audience binding. It must be stable across
 	// restarts and include the /mcp path.
-	MCPPublicURL  string `koanf:"mcp.public_url" env:"FANOUT_MCP_PUBLIC_URL" default:"https://localhost:7520/mcp"`
-	RetentionDays int    `koanf:"storage.retention_days" env:"FANOUT_RETENTION_DAYS" default:"30"`
+	MCPPublicURL  string `koanf:"mcp.public_url" env:"FANOUT_MCP_PUBLIC_URL" legacy:"MCP_PUBLIC_URL" default:"https://localhost:7520/mcp"`
+	RetentionDays int    `koanf:"storage.retention_days" env:"FANOUT_RETENTION_DAYS" legacy:"RETENTION_DAYS" default:"30"`
 	// MaintenanceEverySeconds throttles the DuckLake maintenance cycle (retention
 	// deletes + compaction). Default 3600 (hourly). Lower it to compact more
 	// aggressively, or for soak tests that need to observe file-count staying
 	// bounded within minutes rather than hours.
-	MaintenanceEverySeconds int `koanf:"storage.maintenance_every_seconds" env:"FANOUT_MAINTENANCE_EVERY_SECONDS" default:"3600"`
+	MaintenanceEverySeconds int `koanf:"storage.maintenance_every_seconds" env:"FANOUT_MAINTENANCE_EVERY_SECONDS" legacy:"DUCKLAKE_MAINTENANCE_EVERY_SECONDS" default:"3600"`
 	// MergeEverySeconds is the cadence for the cheap, frequent DuckLake file
 	// compaction pass (ducklake_merge_adjacent_files only — it consolidates the
 	// newest small parquet files and deletes nothing). Run often (default 60s) it
 	// keeps the queryable file count continuously low, which is what bounds
 	// rollup/query scan latency — WITHOUT the churn, deletion race, or catalog
 	// cost of the full hourly maintenance pass (expire + cleanup). 0 disables it.
-	MergeEverySeconds int `koanf:"storage.merge_every_seconds" env:"FANOUT_MERGE_EVERY_SECONDS" default:"60"`
+	MergeEverySeconds int `koanf:"storage.merge_every_seconds" env:"FANOUT_MERGE_EVERY_SECONDS" legacy:"DUCKLAKE_MERGE_EVERY_SECONDS" default:"60"`
 	// RollupSkipToLatest, set once at boot, advances every rollup watermark to the
 	// current max ingested timestamp so existing data is treated as already-rolled-up
 	// instead of aggregated as a backlog. Stands up a large pre-seeded historical
 	// dataset (benchmarks, restores) without a multi-minute first-rollup catch-up that
 	// holds the write gate and starves ingest. Off in normal operation.
-	RollupSkipToLatest bool   `koanf:"storage.rollup_skip_to_latest" env:"FANOUT_ROLLUP_SKIP_TO_LATEST" default:"false"`
-	DefaultNS          string `koanf:"ingest.default_namespace" env:"FANOUT_DEFAULT_NAMESPACE" default:"default"`
+	RollupSkipToLatest bool   `koanf:"storage.rollup_skip_to_latest" env:"FANOUT_ROLLUP_SKIP_TO_LATEST" legacy:"ROLLUP_SKIP_TO_LATEST" default:"false"`
+	DefaultNS          string `koanf:"ingest.default_namespace" env:"FANOUT_DEFAULT_NAMESPACE" legacy:"DEFAULT_NAMESPACE" default:"default"`
 	// PprofEnabled exposes Go's net/http/pprof handlers at /debug/pprof/* for
 	// CPU/heap/mutex/goroutine profiling under load. Off by default; the routes
 	// require an admin browser session with operations:read.
-	PprofEnabled bool `koanf:"server.pprof_enabled" env:"FANOUT_PPROF_ENABLED" default:"false"`
+	PprofEnabled bool `koanf:"server.pprof_enabled" env:"FANOUT_PPROF_ENABLED" legacy:"PPROF_ENABLED" default:"false"`
 	// The DuckDB knobs below self-size where possible and otherwise default to
 	// values validated on the reference deployment target, a small shared VM
 	// (Hetzner CPX32: 4 vCPU, 8 GB RAM, 160 GB disk). There the self-sizing
@@ -67,14 +67,14 @@ type Config struct {
 	// resolveSizing. DuckDB's own default is 80% of detected RAM, which is
 	// calculated as though DuckDB owned the machine and has been observed to
 	// get the process OOM-killed once the Go heap is added on top.
-	DuckDBMemory string `koanf:"storage.duckdb.memory" env:"FANOUT_DUCKDB_MEMORY"`
+	DuckDBMemory string `koanf:"storage.duckdb.memory" env:"FANOUT_DUCKDB_MEMORY" legacy:"DUCKDB_MEMORY"`
 	// DuckDBThreads caps DuckDB's global query worker pool. Zero leaves
 	// DuckDB's own default in place (one worker per core). Set it to leave
 	// cores free for ingest on a query-heavy co-tenant host.
-	DuckDBThreads int `koanf:"storage.duckdb.threads" env:"FANOUT_DUCKDB_THREADS"`
+	DuckDBThreads int `koanf:"storage.duckdb.threads" env:"FANOUT_DUCKDB_THREADS" legacy:"DUCKDB_THREADS"`
 	// DuckDBMaxConns caps the DuckDB connection pool. A value of 1 serializes
-	// everything through one handle; the default of 4 lets read queries run
-	// concurrently with each other and with ingest flushes. Two things make >1
+	// everything through one handle; the machine-sized default lets read queries
+	// run concurrently with each other and with ingest flushes. Two things make >1
 	// safe: the DuckLake SQLite catalog is opened in WAL mode (enableCatalogWAL),
 	// so readers don't collide with the single writer and a crashed writer can't
 	// leave the catalog permanently locked; and write commits are serialized by
@@ -84,40 +84,40 @@ type Config struct {
 	// Zero means "size it from the machine" — the same spelling DuckDBThreads
 	// uses for deferring to a default. Resolution happens in resolveSizing and
 	// is reported in the startup configuration log.
-	DuckDBMaxConns        int           `koanf:"storage.duckdb.max_connections" env:"FANOUT_DUCKDB_MAX_CONNECTIONS" default:"0"`
-	AlertEnabled          bool          `koanf:"alerts.enabled" env:"FANOUT_ALERTS_ENABLED" default:"true"`
-	AlertEvalInterval     int           `koanf:"alerts.evaluation_interval_seconds" env:"FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS" default:"30"`
-	AlertHistoryDays      int           `koanf:"alerts.history_days" env:"FANOUT_ALERTS_HISTORY_DAYS" default:"7"`
-	AIProvider            string        `koanf:"agent.provider" env:"FANOUT_AI_PROVIDER" default:"anthropic"`
-	AIAPIKey              string        `koanf:"agent.api_key" env:"FANOUT_AI_API_KEY"`
-	AIModel               string        `koanf:"agent.model" env:"FANOUT_AI_MODEL"`
-	AIBaseURL             string        `koanf:"agent.base_url" env:"FANOUT_AI_BASE_URL"`
-	SMTPHost              string        `koanf:"smtp.host" env:"FANOUT_SMTP_HOST"`
-	SMTPPort              int           `koanf:"smtp.port" env:"FANOUT_SMTP_PORT" default:"587"`
-	SMTPUser              string        `koanf:"smtp.username" env:"FANOUT_SMTP_USERNAME"`
-	SMTPPass              string        `koanf:"smtp.password" env:"FANOUT_SMTP_PASSWORD"`
-	SMTPFrom              string        `koanf:"smtp.from" env:"FANOUT_SMTP_FROM"`
-	AuthMode              string        `koanf:"auth.mode" env:"FANOUT_AUTH_MODE" default:"local"`
-	PublicURL             string        `koanf:"server.public_url" env:"FANOUT_PUBLIC_URL"`
-	AuthCodeSecret        string        `koanf:"auth.code_secret" env:"FANOUT_AUTH_CODE_SECRET"`
-	SessionIdleTTL        time.Duration `koanf:"auth.session_idle_ttl" env:"FANOUT_SESSION_IDLE_TTL" default:"12h"`
-	SessionAbsoluteTTL    time.Duration `koanf:"auth.session_absolute_ttl" env:"FANOUT_SESSION_ABSOLUTE_TTL" default:"168h"`
-	OIDCIssuerURL         string        `koanf:"auth.oidc.issuer_url" env:"FANOUT_OIDC_ISSUER_URL"`
-	OIDCClientID          string        `koanf:"auth.oidc.client_id" env:"FANOUT_OIDC_CLIENT_ID"`
-	OIDCClientSecret      string        `koanf:"auth.oidc.client_secret" env:"FANOUT_OIDC_CLIENT_SECRET"`
-	OIDCEmailClaim        string        `koanf:"auth.oidc.email_claim" env:"FANOUT_OIDC_EMAIL_CLAIM" default:"email"`
-	OIDCEmailVerification string        `koanf:"auth.oidc.email_verification" env:"FANOUT_OIDC_EMAIL_VERIFICATION" default:"required"`
-	OIDCAutoProvision     bool          `koanf:"auth.oidc.auto_provision" env:"FANOUT_OIDC_AUTO_PROVISION" default:"false"`
-	OIDCAllowedGroups     string        `koanf:"auth.oidc.allowed_groups" env:"FANOUT_OIDC_ALLOWED_GROUPS"`
-	OIDCAllowedDomains    string        `koanf:"auth.oidc.allowed_domains" env:"FANOUT_OIDC_ALLOWED_DOMAINS"`
-	OIDCDefaultRole       string        `koanf:"auth.oidc.default_role" env:"FANOUT_OIDC_DEFAULT_ROLE" default:"viewer"`
-	OIDCOperatorGroups    string        `koanf:"auth.oidc.operator_groups" env:"FANOUT_OIDC_OPERATOR_GROUPS"`
-	OIDCAdminGroups       string        `koanf:"auth.oidc.admin_groups" env:"FANOUT_OIDC_ADMIN_GROUPS"`
-	MetricsToken          string        `koanf:"metrics.token" env:"FANOUT_METRICS_TOKEN"`
-	MetricsPublic         bool          `koanf:"metrics.public" env:"FANOUT_METRICS_PUBLIC" default:"false"`
-	TrustedProxyCIDRs     string        `koanf:"server.trusted_proxy_cidrs" env:"FANOUT_TRUSTED_PROXY_CIDRS"`
-	TLSCertFile           string        `koanf:"server.tls.cert_file" env:"FANOUT_TLS_CERT_FILE"`
-	TLSKeyFile            string        `koanf:"server.tls.key_file" env:"FANOUT_TLS_KEY_FILE"`
+	DuckDBMaxConns        int           `koanf:"storage.duckdb.max_connections" env:"FANOUT_DUCKDB_MAX_CONNECTIONS" legacy:"DUCKDB_MAX_CONNS" default:"0"`
+	AlertEnabled          bool          `koanf:"alerts.enabled" env:"FANOUT_ALERTS_ENABLED" legacy:"ALERT_ENABLED" default:"true"`
+	AlertEvalInterval     int           `koanf:"alerts.evaluation_interval_seconds" env:"FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS" legacy:"ALERT_EVAL_INTERVAL" default:"30"`
+	AlertHistoryDays      int           `koanf:"alerts.history_days" env:"FANOUT_ALERTS_HISTORY_DAYS" legacy:"ALERT_HISTORY_DAYS" default:"7"`
+	AIProvider            string        `koanf:"agent.provider" env:"FANOUT_AI_PROVIDER" legacy:"AI_PROVIDER" default:"anthropic"`
+	AIAPIKey              string        `koanf:"agent.api_key" env:"FANOUT_AI_API_KEY" legacy:"AI_API_KEY" secret:"true"`
+	AIModel               string        `koanf:"agent.model" env:"FANOUT_AI_MODEL" legacy:"AI_MODEL"`
+	AIBaseURL             string        `koanf:"agent.base_url" env:"FANOUT_AI_BASE_URL" legacy:"AI_BASE_URL"`
+	SMTPHost              string        `koanf:"smtp.host" env:"FANOUT_SMTP_HOST" legacy:"SMTP_HOST"`
+	SMTPPort              int           `koanf:"smtp.port" env:"FANOUT_SMTP_PORT" legacy:"SMTP_PORT" default:"587"`
+	SMTPUser              string        `koanf:"smtp.username" env:"FANOUT_SMTP_USERNAME" legacy:"SMTP_USER"`
+	SMTPPass              string        `koanf:"smtp.password" env:"FANOUT_SMTP_PASSWORD" legacy:"SMTP_PASS" secret:"true"`
+	SMTPFrom              string        `koanf:"smtp.from" env:"FANOUT_SMTP_FROM" legacy:"SMTP_FROM"`
+	AuthMode              string        `koanf:"auth.mode" env:"FANOUT_AUTH_MODE" legacy:"AUTH_MODE" default:"local"`
+	PublicURL             string        `koanf:"server.public_url" env:"FANOUT_PUBLIC_URL" legacy:"PUBLIC_URL"`
+	AuthCodeSecret        string        `koanf:"auth.code_secret" env:"FANOUT_AUTH_CODE_SECRET" legacy:"AUTH_CODE_SECRET" secret:"true"`
+	SessionIdleTTL        time.Duration `koanf:"auth.session_idle_ttl" env:"FANOUT_SESSION_IDLE_TTL" legacy:"SESSION_IDLE_TTL" default:"12h"`
+	SessionAbsoluteTTL    time.Duration `koanf:"auth.session_absolute_ttl" env:"FANOUT_SESSION_ABSOLUTE_TTL" legacy:"SESSION_ABSOLUTE_TTL" default:"168h"`
+	OIDCIssuerURL         string        `koanf:"auth.oidc.issuer_url" env:"FANOUT_OIDC_ISSUER_URL" legacy:"OIDC_ISSUER_URL"`
+	OIDCClientID          string        `koanf:"auth.oidc.client_id" env:"FANOUT_OIDC_CLIENT_ID" legacy:"OIDC_CLIENT_ID"`
+	OIDCClientSecret      string        `koanf:"auth.oidc.client_secret" env:"FANOUT_OIDC_CLIENT_SECRET" legacy:"OIDC_CLIENT_SECRET" secret:"true"`
+	OIDCEmailClaim        string        `koanf:"auth.oidc.email_claim" env:"FANOUT_OIDC_EMAIL_CLAIM" legacy:"OIDC_EMAIL_CLAIM" default:"email"`
+	OIDCEmailVerification string        `koanf:"auth.oidc.email_verification" env:"FANOUT_OIDC_EMAIL_VERIFICATION" legacy:"OIDC_EMAIL_VERIFICATION" default:"required"`
+	OIDCAutoProvision     bool          `koanf:"auth.oidc.auto_provision" env:"FANOUT_OIDC_AUTO_PROVISION" legacy:"OIDC_AUTO_PROVISION" default:"false"`
+	OIDCAllowedGroups     string        `koanf:"auth.oidc.allowed_groups" env:"FANOUT_OIDC_ALLOWED_GROUPS" legacy:"OIDC_ALLOWED_GROUPS"`
+	OIDCAllowedDomains    string        `koanf:"auth.oidc.allowed_domains" env:"FANOUT_OIDC_ALLOWED_DOMAINS" legacy:"OIDC_ALLOWED_DOMAINS"`
+	OIDCDefaultRole       string        `koanf:"auth.oidc.default_role" env:"FANOUT_OIDC_DEFAULT_ROLE" legacy:"OIDC_DEFAULT_ROLE" default:"viewer"`
+	OIDCOperatorGroups    string        `koanf:"auth.oidc.operator_groups" env:"FANOUT_OIDC_OPERATOR_GROUPS" legacy:"OIDC_OPERATOR_GROUPS"`
+	OIDCAdminGroups       string        `koanf:"auth.oidc.admin_groups" env:"FANOUT_OIDC_ADMIN_GROUPS" legacy:"OIDC_ADMIN_GROUPS"`
+	MetricsToken          string        `koanf:"metrics.token" env:"FANOUT_METRICS_TOKEN" legacy:"METRICS_TOKEN" secret:"true"`
+	MetricsPublic         bool          `koanf:"metrics.public" env:"FANOUT_METRICS_PUBLIC" legacy:"METRICS_PUBLIC" default:"false"`
+	TrustedProxyCIDRs     string        `koanf:"server.trusted_proxy_cidrs" env:"FANOUT_TRUSTED_PROXY_CIDRS" legacy:"TRUSTED_PROXY_CIDRS"`
+	TLSCertFile           string        `koanf:"server.tls.cert_file" env:"FANOUT_TLS_CERT_FILE" legacy:"TLS_CERT_FILE"`
+	TLSKeyFile            string        `koanf:"server.tls.key_file" env:"FANOUT_TLS_KEY_FILE" legacy:"TLS_KEY_FILE"`
 	resolvedSizing        sizingSource
 }
 
@@ -177,6 +177,15 @@ func (c Config) TLSEnabled() bool {
 
 // Validate checks that config values are sane.
 func (c Config) Validate() error {
+	if strings.TrimSpace(c.HTTPAddr) == "" {
+		return fmt.Errorf("server.http_addr must not be empty")
+	}
+	if strings.TrimSpace(c.OTLPGRPCAddr) == "" {
+		return fmt.Errorf("ingest.otlp_grpc_addr must not be empty")
+	}
+	if strings.TrimSpace(c.DataDir) == "" {
+		return fmt.Errorf("storage.data_dir must not be empty")
+	}
 	if c.FlushSeconds <= 0 {
 		return fmt.Errorf("ingest.flush_seconds must be > 0, got %d", c.FlushSeconds)
 	}
@@ -188,6 +197,24 @@ func (c Config) Validate() error {
 	}
 	if c.RetentionDays < 0 {
 		return fmt.Errorf("storage.retention_days must be >= 0, got %d", c.RetentionDays)
+	}
+	if c.MaintenanceEverySeconds <= 0 {
+		return fmt.Errorf("storage.maintenance_every_seconds must be > 0, got %d", c.MaintenanceEverySeconds)
+	}
+	if c.MergeEverySeconds < 0 {
+		return fmt.Errorf("storage.merge_every_seconds must be >= 0, got %d", c.MergeEverySeconds)
+	}
+	if c.DuckDBThreads < 0 {
+		return fmt.Errorf("storage.duckdb.threads must be >= 0, got %d", c.DuckDBThreads)
+	}
+	if c.DuckDBMaxConns <= 0 {
+		return fmt.Errorf("storage.duckdb.max_connections must resolve to > 0, got %d", c.DuckDBMaxConns)
+	}
+	if c.AlertEvalInterval <= 0 {
+		return fmt.Errorf("alerts.evaluation_interval_seconds must be > 0, got %d", c.AlertEvalInterval)
+	}
+	if c.AlertHistoryDays < 0 {
+		return fmt.Errorf("alerts.history_days must be >= 0, got %d", c.AlertHistoryDays)
 	}
 	if c.MCPEnabled {
 		u, err := url.Parse(strings.TrimSpace(c.MCPPublicURL))

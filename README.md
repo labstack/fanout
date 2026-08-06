@@ -79,6 +79,15 @@ The image runs unprivileged as UID 999. A bind-mounted host directory at
 `/var/lib/fanout/data` must be writable by that user; a named volume, as above,
 needs no such handling.
 
+The image selects `/etc/fanout/fanout.yaml` by default. That file contains only
+the container listener and data-directory defaults; it does not contain
+credentials. To replace it, mount your document and override the image command:
+
+```sh
+docker run -v ./fanout.yaml:/etc/fanout/custom.yaml:ro \
+  ghcr.io/labstack/fanout:latest --config /etc/fanout/custom.yaml
+```
+
 ### From source
 
 ```sh
@@ -125,8 +134,16 @@ cp fanout.example.yaml fanout.yaml
 ```
 
 Environment variables override the corresponding YAML values and are useful
-for container injection and secrets. Unknown YAML keys and unknown `FANOUT_`
-variables are startup errors. The definitions live in
+for container injection and secrets. An empty environment value means "no
+override"; use YAML for an explicit empty string. Unknown YAML keys and unknown
+`FANOUT_` variables are startup errors, except for the service-discovery names
+Kubernetes and legacy Docker links inject for a Service named `fanout`. Retired
+unprefixed Fanout variables fail startup with the exact `FANOUT_` replacement.
+
+YAML null values are rejected. Boolean values must use YAML 1.2 `true` or
+`false` (not `yes`, `no`, `on`, or `off`). If a YAML document contains a
+credential, Fanout requires that the file not be accessible by group or others
+(for example, mode `0600`). The definitions live in
 [`internal/config/config.go`](internal/config/config.go); the settings most
 operators touch are:
 
@@ -158,10 +175,10 @@ These variables are escape hatches for measured, unusual workloads:
 | `storage.duckdb.max_connections` / `FANOUT_DUCKDB_MAX_CONNECTIONS` | Available Go CPUs, bounded to 2–16 connections | Query concurrency has been benchmarked for this machine |
 | `storage.duckdb.threads` / `FANOUT_DUCKDB_THREADS` | DuckDB chooses its own query worker count | Query-heavy work must leave specific cores free for ingest |
 
-An explicit value always wins. If Fanout cannot detect available memory, it
-logs a warning instead of inventing a machine size; only that case requires an
-operator to set `storage.duckdb.memory` or `FANOUT_DUCKDB_MEMORY` for a
-guaranteed bound.
+An explicit value always wins. Startup logs and `/readyz` report the detected
+host and cgroup limits, the selected source, and whether detection was
+incomplete. If Fanout cannot conclusively inspect a container limit, it warns;
+set `storage.duckdb.memory` or `FANOUT_DUCKDB_MEMORY` for a guaranteed bound.
 
 ## Development
 

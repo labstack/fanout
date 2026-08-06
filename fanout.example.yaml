@@ -4,6 +4,8 @@
 # Every value can be overridden by its documented FANOUT_ environment variable.
 # Secrets are intentionally omitted below; inject them through the environment
 # or add them to a suitably protected copy of this file.
+# Use YAML 1.2 true/false for booleans; yes/no/on/off are strings and rejected.
+# Null values (a key with nothing after the colon) are rejected.
 
 server:
   http_addr: ":7520" # FANOUT_HTTP_ADDR

@@ -53,10 +53,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system fanout \
     && useradd --system --gid fanout --home-dir /var/lib/fanout fanout \
-    && mkdir -p /var/lib/fanout/data \
+    && mkdir -p /var/lib/fanout/data /etc/fanout \
     && chown -R fanout:fanout /var/lib/fanout
 
 COPY --from=build /app/fanout /usr/local/bin/fanout
+COPY fanout.docker.yaml /etc/fanout/fanout.yaml
 
 # Runs unprivileged. A host directory bind-mounted at /var/lib/fanout/data must
 # be writable by UID/GID of the `fanout` user, or the process cannot open its
@@ -65,9 +66,6 @@ USER fanout
 WORKDIR /var/lib/fanout
 
 EXPOSE 7520 4317
-ENV FANOUT_DATA_DIR=/var/lib/fanout/data \
-    FANOUT_HTTP_ADDR=:7520 \
-    FANOUT_OTLP_GRPC_ADDR=:4317
 
 # Startup does DuckDB catalog attachment and maintenance, so the grace period
 # is generous relative to the check interval.
@@ -78,3 +76,4 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
     CMD wget --quiet --tries=1 --output-document=- http://127.0.0.1:7520/healthz >/dev/null || exit 1
 
 ENTRYPOINT ["fanout"]
+CMD ["--config", "/etc/fanout/fanout.yaml"]

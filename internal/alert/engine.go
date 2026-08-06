@@ -73,6 +73,10 @@ func (e *Engine) RemoveRule(ruleID string) {
 
 // Run starts the evaluation ticker. It blocks until ctx is cancelled.
 func (e *Engine) Run(ctx context.Context) {
+	if e.interval <= 0 {
+		slog.Error("alert: evaluation interval must be positive", "interval", e.interval)
+		return
+	}
 	ticker := time.NewTicker(e.interval)
 	defer ticker.Stop()
 

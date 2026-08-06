@@ -35,10 +35,12 @@ knowledge of where a value originated.
 
 ### Use Koanf for ordered composition
 
-Use Koanf v2 with its map, file, YAML, and environment providers. Defaults load
-first, the selected document second, and environment last. The final map is
-unmarshaled once into the existing flat runtime `Config` using dotted Koanf
-tags, so application packages do not acquire nested source-layer types.
+Use Koanf v2 with its map, file, and YAML providers. Defaults load first, the
+selected document second, and environment last. Environment assignments are
+parsed against the reflected Go field type before entering Koanf; the final map
+is unmarshaled with weak conversions disabled into the existing flat runtime
+`Config` using dotted Koanf tags, so application packages do not acquire nested
+source-layer types.
 
 This is preferred over Viper because provider order is explicit and the API
 surface is smaller. Direct `yaml.v3` plus hand-written pointer overlays would
@@ -54,10 +56,10 @@ radius to imports.
 ### Make the struct declaration the source of schema metadata
 
 Each exported configuration field declares a dotted `koanf` key, its exact
-`FANOUT_` environment name, and an optional default in struct tags. Loader
-reflection builds the defaults map and the allowlists from those tags. This
-avoids maintaining separate maps that can drift while retaining a flat struct
-for consumers.
+`FANOUT_` environment name, retired unprefixed name, and an optional default in
+struct tags. Loader reflection builds the defaults map, typed environment
+mapping, and allowlists from those tags. This avoids maintaining separate maps
+that can drift while retaining a flat struct for consumers.
 
 The YAML document groups keys by operational area (`server`, `ingest`,
 `storage`, `alerts`, `agent`, `smtp`, `auth`, `metrics`, and `mcp`). Environment
@@ -67,10 +69,15 @@ do not mechanically derive from YAML paths.
 ### Validate each boundary without printing values
 
 Load the selected YAML into an isolated Koanf instance, compare its flattened
-leaf keys with the schema allowlist, then merge it. Scan environment names
-before loading and reject unknown `FANOUT_` names. Decode errors and invariant
+leaf keys and scalar types with the schema, reject null leaves, then merge it.
+Empty recognized sections are removed before the merge so they preserve
+defaults. Scan environment names before loading, reject unknown `FANOUT_`
+names, report retired names with their replacements, and exempt only the
+well-known service variables injected by Kubernetes and Docker links. Empty
+environment assignments are absent overrides. Decode errors and invariant
 errors identify fields but never serialize the effective map, preventing
-credentials from entering logs.
+credentials from entering logs. A YAML document that contains credentials must
+not grant group or other access.
 
 `Load` returns `(Config, error)`. After a successful merge it resolves adaptive
 sizing and calls `Validate`; `cmd/fanout` logs the error and exits before its
@@ -80,16 +87,17 @@ existing directory creation and listener setup.
 
 Use the standard library flag package to add `--config PATH` and retain
 `--version`/`version`. There are no per-setting flags and no subcommands. The
-container entrypoint continues to start the server with no arguments.
+container image supplies `--config /etc/fanout/fanout.yaml` as its default
+command so image-specific values do not outrank a mounted operator document.
 
 ## Risks / Trade-offs
 
 - **Strict `FANOUT_` validation makes manifests version-coupled** → document
   that deployments must use settings supported by the selected image version;
-  unprefixed platform variables remain outside Fanout's namespace and ignored.
+  ignore only standard platform service-discovery collisions.
 - **YAML can contain secrets** → examples inject secrets through environment,
-  errors never dump the merged map, and operators remain responsible for file
-  permissions.
+  errors never dump the merged map, and the loader rejects group/world-readable
+  documents that contain credential fields.
 - **Reflection can hide schema mistakes until runtime** → loader tests require
   every exported field to have unique key/environment tags and verify defaults,
   precedence, unknown-key rejection, and type errors.

@@ -5,11 +5,13 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
+	"github.com/go-viper/mapstructure/v2"
 	"github.com/knadh/koanf/parsers/yaml"
 	"github.com/knadh/koanf/providers/confmap"
-	koanfenv "github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 )
@@ -24,8 +26,11 @@ type LoadOptions struct {
 type fieldSpec struct {
 	key          string
 	env          string
-	defaultValue string
+	legacyEnv    string
+	typ          reflect.Type
+	defaultValue any
 	hasDefault   bool
+	secret       bool
 }
 
 // Load resolves defaults, an optional YAML document, and process environment
@@ -36,12 +41,14 @@ func Load(options LoadOptions) (Config, error) {
 		return Config{}, err
 	}
 
-	knownKeys := make(map[string]struct{}, len(specs))
-	keyByEnv := make(map[string]string, len(specs))
+	specByKey := make(map[string]fieldSpec, len(specs))
+	specByEnv := make(map[string]fieldSpec, len(specs))
+	legacyEnv := make(map[string]string, len(specs))
 	defaults := make(map[string]any)
 	for _, spec := range specs {
-		knownKeys[spec.key] = struct{}{}
-		keyByEnv[spec.env] = spec.key
+		specByKey[spec.key] = spec
+		specByEnv[spec.env] = spec
+		legacyEnv[spec.legacyEnv] = spec.env
 		if spec.hasDefault {
 			defaults[spec.key] = spec.defaultValue
 		}
@@ -53,12 +60,22 @@ func Load(options LoadOptions) (Config, error) {
 	}
 
 	if options.Path != "" {
+		info, statErr := os.Stat(options.Path)
+		if statErr != nil {
+			return Config{}, fmt.Errorf("load config %q: %w", options.Path, statErr)
+		}
+		if !info.Mode().IsRegular() {
+			return Config{}, fmt.Errorf("load config %q: not a regular file", options.Path)
+		}
 		fromFile := koanf.New(".")
 		if err := fromFile.Load(file.Provider(options.Path), yaml.Parser()); err != nil {
 			return Config{}, fmt.Errorf("load config %q: %w", options.Path, err)
 		}
-		if unknown := unknownKeys(fromFile.Keys(), knownKeys); len(unknown) > 0 {
-			return Config{}, fmt.Errorf("config %q contains unknown keys: %s", options.Path, strings.Join(unknown, ", "))
+		if err := validateYAMLKeys(fromFile, specByKey); err != nil {
+			return Config{}, fmt.Errorf("config %q: %w", options.Path, err)
+		}
+		if containsSecretValues(fromFile, specs) && info.Mode().Perm()&0o077 != 0 {
+			return Config{}, fmt.Errorf("config %q contains secrets and must not be accessible by group or others (mode is %04o)", options.Path, info.Mode().Perm())
 		}
 		if err := k.Merge(fromFile); err != nil {
 			return Config{}, fmt.Errorf("merge config %q: %w", options.Path, err)
@@ -69,25 +86,27 @@ func Load(options LoadOptions) (Config, error) {
 	if environ == nil {
 		environ = os.Environ()
 	}
-	if unknown := unknownEnvironment(environ, keyByEnv); len(unknown) > 0 {
-		return Config{}, fmt.Errorf("unknown Fanout environment variables: %s", strings.Join(unknown, ", "))
+	overrides, err := environmentOverrides(environ, specByEnv, legacyEnv)
+	if err != nil {
+		return Config{}, err
 	}
-	if err := k.Load(koanfenv.Provider(".", koanfenv.Opt{
-		Prefix: "FANOUT_",
-		EnvironFunc: func() []string {
-			return environ
-		},
-		TransformFunc: func(name, value string) (string, any) {
-			return keyByEnv[name], value
-		},
-	}), nil); err != nil {
+	if err := k.Load(confmap.Provider(overrides, "."), nil); err != nil {
 		return Config{}, fmt.Errorf("load environment configuration: %w", err)
 	}
 
 	var cfg Config
-	if err := k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{Tag: "koanf", FlatPaths: true}); err != nil {
+	if err := k.UnmarshalWithConf("", &cfg, koanf.UnmarshalConf{
+		Tag:       "koanf",
+		FlatPaths: true,
+		DecoderConfig: &mapstructure.DecoderConfig{
+			DecodeHook:       mapstructure.StringToTimeDurationHookFunc(),
+			ErrorUnused:      true,
+			WeaklyTypedInput: false,
+		},
+	}); err != nil {
 		return Config{}, fmt.Errorf("decode configuration: %w", err)
 	}
+	cfg.MCPPublicURL = strings.TrimSpace(cfg.MCPPublicURL)
 
 	// Size before validating: validation should judge the configuration the
 	// process will actually run with, not the holes left for it to fill.
@@ -99,10 +118,17 @@ func Load(options LoadOptions) (Config, error) {
 }
 
 func configFieldSpecs() ([]fieldSpec, error) {
-	typ := reflect.TypeOf(Config{})
+	return fieldSpecs(reflect.TypeOf(Config{}))
+}
+
+func fieldSpecs(typ reflect.Type) ([]fieldSpec, error) {
+	if typ.Kind() != reflect.Struct {
+		return nil, fmt.Errorf("configuration schema must be a struct, got %s", typ)
+	}
 	specs := make([]fieldSpec, 0, typ.NumField())
 	keys := make(map[string]string, typ.NumField())
 	envs := make(map[string]string, typ.NumField())
+	legacyEnvs := make(map[string]string, typ.NumField())
 	for index := 0; index < typ.NumField(); index++ {
 		field := typ.Field(index)
 		if !field.IsExported() {
@@ -110,8 +136,9 @@ func configFieldSpecs() ([]fieldSpec, error) {
 		}
 		key := field.Tag.Get("koanf")
 		envName := field.Tag.Get("env")
-		if key == "" || envName == "" {
-			return nil, fmt.Errorf("configuration field %s must declare koanf and env tags", field.Name)
+		legacyName := field.Tag.Get("legacy")
+		if key == "" || envName == "" || legacyName == "" {
+			return nil, fmt.Errorf("configuration field %s must declare koanf, env, and legacy tags", field.Name)
 		}
 		if previous, exists := keys[key]; exists {
 			return nil, fmt.Errorf("configuration fields %s and %s share key %q", previous, field.Name, key)
@@ -119,39 +146,219 @@ func configFieldSpecs() ([]fieldSpec, error) {
 		if previous, exists := envs[envName]; exists {
 			return nil, fmt.Errorf("configuration fields %s and %s share environment variable %q", previous, field.Name, envName)
 		}
+		if previous, exists := legacyEnvs[legacyName]; exists {
+			return nil, fmt.Errorf("configuration fields %s and %s share legacy environment variable %q", previous, field.Name, legacyName)
+		}
 		if !strings.HasPrefix(envName, "FANOUT_") {
 			return nil, fmt.Errorf("configuration field %s environment variable %q lacks FANOUT_ prefix", field.Name, envName)
 		}
-		defaultValue, hasDefault := field.Tag.Lookup("default")
-		specs = append(specs, fieldSpec{key: key, env: envName, defaultValue: defaultValue, hasDefault: hasDefault})
+		defaultText, hasDefault := field.Tag.Lookup("default")
+		var defaultValue any
+		if hasDefault {
+			var err error
+			defaultValue, err = parseTextValue(defaultText, field.Type)
+			if err != nil {
+				return nil, fmt.Errorf("configuration field %s has invalid default: %w", field.Name, err)
+			}
+		}
+		specs = append(specs, fieldSpec{
+			key:          key,
+			env:          envName,
+			legacyEnv:    legacyName,
+			typ:          field.Type,
+			defaultValue: defaultValue,
+			hasDefault:   hasDefault,
+			secret:       field.Tag.Get("secret") == "true",
+		})
 		keys[key] = field.Name
 		envs[envName] = field.Name
+		legacyEnvs[legacyName] = field.Name
 	}
 	return specs, nil
 }
 
-func unknownKeys(keys []string, known map[string]struct{}) []string {
+func validateYAMLKeys(k *koanf.Koanf, known map[string]fieldSpec) error {
 	var unknown []string
-	for _, key := range keys {
-		if _, exists := known[key]; !exists {
-			unknown = append(unknown, key)
+	var emptyContainers []string
+	for _, key := range k.Keys() {
+		value := k.Get(key)
+		if spec, exists := known[key]; exists {
+			if value == nil {
+				return fmt.Errorf("key %s must not be null", key)
+			}
+			if err := validateYAMLValue(value, spec.typ); err != nil {
+				return fmt.Errorf("key %s %w", key, err)
+			}
+			continue
 		}
+		if isSchemaContainer(key, known) && isEmptyContainer(value) {
+			emptyContainers = append(emptyContainers, key)
+			continue
+		}
+		unknown = append(unknown, key)
+	}
+	if len(unknown) == 0 {
+		for _, key := range emptyContainers {
+			k.Delete(key)
+		}
+		return nil
 	}
 	sort.Strings(unknown)
-	return unknown
+	return fmt.Errorf("contains unknown keys: %s", strings.Join(unknown, ", "))
 }
 
-func unknownEnvironment(environ []string, known map[string]string) []string {
+func isSchemaContainer(key string, known map[string]fieldSpec) bool {
+	prefix := key + "."
+	for candidate := range known {
+		if strings.HasPrefix(candidate, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func validateYAMLValue(value any, typ reflect.Type) error {
+	if typ == reflect.TypeOf(time.Duration(0)) {
+		text, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("must be a duration string")
+		}
+		if _, err := time.ParseDuration(text); err != nil {
+			return fmt.Errorf("must be a Go duration: %w", err)
+		}
+		return nil
+	}
+	kind := reflect.TypeOf(value).Kind()
+	switch typ.Kind() {
+	case reflect.String:
+		if kind != reflect.String {
+			return fmt.Errorf("must be a string")
+		}
+	case reflect.Bool:
+		if kind != reflect.Bool {
+			return fmt.Errorf("must be true or false")
+		}
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		if kind < reflect.Int || kind > reflect.Int64 {
+			return fmt.Errorf("must be an integer")
+		}
+	default:
+		return fmt.Errorf("uses unsupported configuration type %s", typ)
+	}
+	return nil
+}
+
+func isEmptyContainer(value any) bool {
+	if value == nil {
+		return true
+	}
+	rv := reflect.ValueOf(value)
+	return (rv.Kind() == reflect.Map || rv.Kind() == reflect.Slice) && rv.Len() == 0
+}
+
+func containsSecretValues(k *koanf.Koanf, specs []fieldSpec) bool {
+	for _, spec := range specs {
+		if !spec.secret {
+			continue
+		}
+		value := k.Get(spec.key)
+		if value == nil {
+			continue
+		}
+		if text, ok := value.(string); ok && strings.TrimSpace(text) == "" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func environmentOverrides(environ []string, known map[string]fieldSpec, legacy map[string]string) (map[string]any, error) {
+	overrides := make(map[string]any)
 	var unknown []string
+	var retired []string
 	for _, assignment := range environ {
-		name, _, _ := strings.Cut(assignment, "=")
+		name, value, found := strings.Cut(assignment, "=")
+		_, isKnown := known[name]
+		_, isLegacy := legacy[name]
+		if !found {
+			if isKnown || isLegacy || strings.HasPrefix(name, "FANOUT_") {
+				return nil, fmt.Errorf("environment entry %s must use NAME=value form", name)
+			}
+			continue
+		}
+		if replacement, exists := legacy[name]; exists {
+			retired = append(retired, fmt.Sprintf("%s (use %s)", name, replacement))
+			continue
+		}
 		if !strings.HasPrefix(name, "FANOUT_") {
 			continue
 		}
-		if _, exists := known[name]; !exists {
+		spec, exists := known[name]
+		if !exists {
+			if isPlatformInjectedEnvironment(name) {
+				continue
+			}
 			unknown = append(unknown, name)
+			continue
 		}
+		// Preserve the previous and container-friendly behavior: an explicitly
+		// empty environment value means "no override", so it cannot erase a safe
+		// default or silently disable a feature.
+		if value == "" {
+			continue
+		}
+		parsed, err := parseTextValue(value, spec.typ)
+		if err != nil {
+			return nil, fmt.Errorf("environment variable %s has an invalid value for %s: %w", name, spec.key, err)
+		}
+		overrides[spec.key] = parsed
 	}
-	sort.Strings(unknown)
-	return unknown
+	if len(retired) > 0 {
+		sort.Strings(retired)
+		return nil, fmt.Errorf("legacy Fanout environment variables are no longer supported: %s", strings.Join(retired, ", "))
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return nil, fmt.Errorf("unknown Fanout environment variables: %s", strings.Join(unknown, ", "))
+	}
+	return overrides, nil
+}
+
+func isPlatformInjectedEnvironment(name string) bool {
+	return name == "FANOUT_SERVICE_HOST" ||
+		name == "FANOUT_SERVICE_PORT" ||
+		strings.HasPrefix(name, "FANOUT_SERVICE_PORT_") ||
+		name == "FANOUT_PORT" ||
+		strings.HasPrefix(name, "FANOUT_PORT_")
+}
+
+func parseTextValue(value string, typ reflect.Type) (any, error) {
+	if typ == reflect.TypeOf(time.Duration(0)) {
+		parsed, err := time.ParseDuration(value)
+		if err != nil {
+			return nil, fmt.Errorf("must be a Go duration: %w", err)
+		}
+		return parsed, nil
+	}
+	switch typ.Kind() {
+	case reflect.String:
+		return value, nil
+	case reflect.Bool:
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return nil, fmt.Errorf("must be true or false: %w", err)
+		}
+		return parsed, nil
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		parsed, err := strconv.ParseInt(value, 10, typ.Bits())
+		if err != nil {
+			return nil, fmt.Errorf("must be an integer: %w", err)
+		}
+		result := reflect.New(typ).Elem()
+		result.SetInt(parsed)
+		return result.Interface(), nil
+	default:
+		return nil, fmt.Errorf("unsupported configuration type %s", typ)
+	}
 }

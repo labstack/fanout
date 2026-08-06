@@ -74,6 +74,43 @@ func TestReadiness_NilDuck(t *testing.T) {
 	}
 }
 
+func TestReadinessReportsSizingResolvedByLoader(t *testing.T) {
+	environ := []string{
+		"FANOUT_AUTH_CODE_SECRET=0123456789abcdef0123456789abcdef",
+		"FANOUT_AI_API_KEY=sk-test",
+		"FANOUT_SMTP_HOST=smtp.example.com",
+		"FANOUT_SMTP_USERNAME=user",
+		"FANOUT_SMTP_PASSWORD=pass",
+		"FANOUT_SMTP_FROM=noreply@example.com",
+		"FANOUT_DATA_DIR=" + t.TempDir(),
+	}
+	cfg, err := config.Load(config.LoadOptions{Environ: environ})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+	if err := NewHealthHandler(nil, cfg).Readiness(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Readiness: %v", err)
+	}
+
+	var resp HealthResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if !resp.RuntimeSizing.DuckDBMemoryAuto || !resp.RuntimeSizing.DuckDBMaxConnsAuto {
+		t.Fatalf("loader-selected sizing lost auto provenance: %+v", resp.RuntimeSizing)
+	}
+	if resp.RuntimeSizing.DuckDBMaxConns < 2 {
+		t.Fatalf("reported max connections = %d, want resolved value", resp.RuntimeSizing.DuckDBMaxConns)
+	}
+	if resp.RuntimeSizing.MemorySource == "" {
+		t.Fatalf("reported sizing has no memory source: %+v", resp.RuntimeSizing)
+	}
+}
+
 func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
