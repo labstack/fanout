@@ -117,6 +117,16 @@ body:has(.fo-hero) header.header .sl-flex {
   line-height: 1.7;
 }
 
+/* Starlight's Card sets its own title in the body face. A card title is a
+   heading, and headings on this site are mono — without this the landing page
+   states the rule in its own hierarchy and then breaks it in the first grid a
+   reader meets. */
+.card > .title {
+  font-family: var(--fo-font-display);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+
 /* Reference-table headers remain technical labels; descriptive cells use the
    body face so dense field documentation stays compact. Inline code still
    inherits Starlight's mono token. */
