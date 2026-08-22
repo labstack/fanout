@@ -20,16 +20,16 @@ ingest:
   otlp_grpc_addr: "127.0.0.1:4317" # FANOUT_OTLP_GRPC_ADDR
   advertised_endpoint: "" # FANOUT_INGEST_ADVERTISED_ENDPOINT
   default_namespace: default # FANOUT_DEFAULT_NAMESPACE
-  flush_seconds: 15 # FANOUT_FLUSH_SECONDS
+  flush_interval: 15s # FANOUT_FLUSH_INTERVAL
   flush_batch_size: 50000 # FANOUT_FLUSH_BATCH_SIZE
 
 storage:
   data_dir: ./data # FANOUT_DATA_DIR
   retention_days: 30 # FANOUT_RETENTION_DAYS
-  rollup_every_seconds: 60 # FANOUT_ROLLUP_EVERY_SECONDS
+  rollup_interval: 1m # FANOUT_ROLLUP_INTERVAL
   rollup_skip_to_latest: false # FANOUT_ROLLUP_SKIP_TO_LATEST
-  maintenance_every_seconds: 3600 # FANOUT_MAINTENANCE_EVERY_SECONDS
-  merge_every_seconds: 60 # FANOUT_MERGE_EVERY_SECONDS
+  maintenance_interval: 1h # FANOUT_MAINTENANCE_INTERVAL
+  merge_interval: 1m # FANOUT_MERGE_INTERVAL
   duckdb:
     # Empty/zero values let Fanout size these from the machine.
     memory: "" # FANOUT_DUCKDB_MEMORY
@@ -38,10 +38,10 @@ storage:
 
 alerts:
   enabled: true # FANOUT_ALERTS_ENABLED
-  evaluation_interval_seconds: 30 # FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS
+  evaluation_interval: 30s # FANOUT_ALERTS_EVALUATION_INTERVAL
   history_days: 7 # FANOUT_ALERTS_HISTORY_DAYS
 
-agent:
+ai:
   provider: anthropic # FANOUT_AI_PROVIDER
   model: "" # FANOUT_AI_MODEL
   base_url: "" # FANOUT_AI_BASE_URL
