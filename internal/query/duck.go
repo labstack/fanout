@@ -414,7 +414,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	}
 	d.updateLakeStats(ctx)
 
-	ticker := time.NewTicker(time.Duration(d.cfg.RollupEvery) * time.Second)
+	ticker := time.NewTicker(d.cfg.RollupInterval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -966,7 +966,7 @@ func (d *Duck) rollupSafetyLagNanos() int64 {
 // rollupLagFromConfig derives the watermark safety lag from the flush interval:
 // two flush cycles, with a 30s floor.
 func rollupLagFromConfig(cfg config.Config) int64 {
-	lag := 2 * time.Duration(cfg.FlushSeconds) * time.Second
+	lag := 2 * cfg.FlushInterval
 	if lag < 30*time.Second {
 		lag = 30 * time.Second
 	}
@@ -1379,7 +1379,7 @@ FROM messaging_edges;`
 const snapshotGraceMinutes = 10
 
 // runMerge runs ONLY ducklake_merge_adjacent_files on a short cadence
-// (storage.merge_every_seconds, default 60s). Merge consolidates the newest
+// (storage.merge_interval, default 1m). Merge consolidates the newest
 // small parquet files and deletes nothing, so it's cheap and safe to run often —
 // keeping the queryable file count continuously low is what bounds rollup/query
 // scan latency. The deletions (expire_snapshots + cleanup_old_files), which
@@ -1388,7 +1388,7 @@ const snapshotGraceMinutes = 10
 // cheap merge keeps scans fast; rare deletes keep the race and overhead away.
 func (d *Duck) runMerge(ctx context.Context) error {
 	start := time.Now()
-	every := time.Duration(d.cfg.MergeEverySeconds) * time.Second
+	every := d.cfg.MergeInterval
 	if every <= 0 {
 		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeDisabled, 0)
 		return nil // merge pass disabled
@@ -1415,7 +1415,7 @@ func (d *Duck) runMerge(ctx context.Context) error {
 
 func (d *Duck) runMaintenance(ctx context.Context) error {
 	start := time.Now()
-	every := time.Duration(d.cfg.MaintenanceEverySeconds) * time.Second
+	every := d.cfg.MaintenanceInterval
 	if every <= 0 {
 		every = time.Hour
 	}
@@ -1474,7 +1474,7 @@ func (d *Duck) runMaintenance(ctx context.Context) error {
 	// yanks the file out from under the reader ("IO Error: Cannot open file …: No
 	// such file or directory"). Sparing recently-superseded snapshots keeps their
 	// files referenced (so cleanup won't delete them) until any in-flight reader
-	// has finished; they're reclaimed a cycle later. At ingest.flush_seconds=15 the grace
+	// has finished; they're reclaimed a cycle later. At ingest.flush_interval=15s the grace
 	// retains ~40 snapshots (4/min × 10min) — bounded, nowhere near the 60k OOM,
 	// and far below the (default 1h) maintenance cycle.
 	//

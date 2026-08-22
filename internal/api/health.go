@@ -168,7 +168,7 @@ func diskSpaceResult(freeBytes, totalBytes uint64) CheckResult {
 
 // maintenanceStaleThreshold is how long after the last executed maintenance pass
 // the loop is considered stalled. Maintenance executes every
-// MaintenanceEverySeconds; 2× that (floored at 1h) with no pass means it wedged.
+// MaintenanceInterval; 2× that (floored at 1h) with no pass means it wedged.
 func maintenanceStaleThreshold(maintEvery time.Duration) time.Duration {
 	stale := 2 * maintEvery
 	if stale < time.Hour {
@@ -228,8 +228,8 @@ func (h *HealthHandler) checkMaintenance() CheckResult {
 
 	lastOK, lastAt, lastErr := h.duck.MaintenanceHealth()
 	return maintenanceResult(lastOK, lastAt, lastErr, h.started,
-		time.Duration(h.cfg.RollupEvery)*time.Second,
-		time.Duration(h.cfg.MaintenanceEverySeconds)*time.Second,
+		h.cfg.RollupInterval,
+		h.cfg.MaintenanceInterval,
 		time.Now())
 }
 
@@ -264,7 +264,7 @@ func maintenanceResult(lastOK, lastAt time.Time, lastErr error, started time.Tim
 		// Caught a clean pass before, but the loop may have wedged since:
 		// lastAt stops advancing while maintenance should keep executing. Mirror
 		// runMaintenance's flooring of a 0/unset interval to 1h so staleness is
-		// still monitored at MaintenanceEverySeconds=0 (where the loop keeps
+		// still monitored at MaintenanceInterval=0 (where the loop keeps
 		// running hourly) instead of being silently skipped.
 		if maintEvery <= 0 {
 			maintEvery = time.Hour
@@ -317,7 +317,7 @@ FROM rollup_state`).Scan(&updatedAt, &cacheCount, &ageSeconds)
 
 	res.UpdatedAt = updatedAt.Time.UTC().Format(time.RFC3339)
 	age := time.Duration(ageSeconds) * time.Second
-	threshold := time.Duration(h.cfg.RollupEvery*3) * time.Second
+	threshold := 3 * h.cfg.RollupInterval
 	if threshold < 2*time.Minute {
 		threshold = 2 * time.Minute
 	}

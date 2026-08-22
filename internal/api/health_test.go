@@ -132,7 +132,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 
 	h := NewHealthHandler(&query.Duck{DB: db}, config.Config{
 		DataDir:        os.TempDir(),
-		RollupEvery:    60,
+		RollupInterval: time.Minute,
 		DuckDBMemory:   "3GB",
 		DuckDBMaxConns: 2,
 		DuckDBThreads:  1,
@@ -187,7 +187,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 func TestCheckMaintenance_DegradedWhenNeverRanPastGrace(t *testing.T) {
 	h := &HealthHandler{
 		duck:    &query.Duck{},
-		cfg:     config.Config{RollupEvery: 60},
+		cfg:     config.Config{RollupInterval: time.Minute},
 		started: time.Now().Add(-10 * time.Minute),
 	}
 

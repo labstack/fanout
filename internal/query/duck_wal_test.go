@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/lake/writegate"
@@ -74,7 +75,7 @@ func newTestDuck(t *testing.T, maxConns int) *Duck {
 
 	cfg := config.Config{
 		DataDir:        t.TempDir(),
-		RollupEvery:    60,
+		RollupInterval: time.Minute,
 		DuckDBMemory:   "128MB",
 		DuckDBMaxConns: maxConns,
 	}
@@ -186,7 +187,7 @@ func TestTempDirectorySetOnce(t *testing.T) {
 	// many-core machines before it can spill.
 	cfg := config.Config{
 		DataDir:        t.TempDir(),
-		RollupEvery:    60,
+		RollupInterval: time.Minute,
 		DuckDBMemory:   "64MB",
 		DuckDBThreads:  2,
 		DuckDBMaxConns: 4,

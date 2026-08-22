@@ -164,7 +164,7 @@ func (w *Writer) Run(ctx context.Context) error {
 	workerDone := make(chan error, 1)
 	go w.flushWorker(flushCh, workerDone)
 
-	ticker := time.NewTicker(time.Duration(w.cfg.FlushSeconds) * time.Second)
+	ticker := time.NewTicker(w.cfg.FlushInterval)
 	defer ticker.Stop()
 
 	spansCh := w.chSpans

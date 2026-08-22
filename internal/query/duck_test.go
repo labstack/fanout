@@ -175,11 +175,11 @@ func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
 
 // A merge failure must not stop snapshot expiry, file cleanup, or the
 // checkpoint — each compaction step degrades independently.
-// Within storage.maintenance_every_seconds of the last pass, runMaintenance
+// Within storage.maintenance_interval of the last pass, runMaintenance
 // must short-circuit before issuing ANY SQL — the throttle that keeps the
 // retention+compaction cycle off every rollup tick.
 // runMerge issues exactly one merge_adjacent_files call when due, and nothing
-// on the next call within the storage.merge_every_seconds cadence.
+// on the next call within the storage.merge_interval cadence.
 func TestRunMergeExecutesThenThrottles(t *testing.T) {
 	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
@@ -188,7 +188,7 @@ func TestRunMergeExecutesThenThrottles(t *testing.T) {
 	}
 	defer db.Close()
 
-	d := &Duck{DB: db, cfg: config.Config{MergeEverySeconds: 60}}
+	d := &Duck{DB: db, cfg: config.Config{MergeInterval: time.Minute}}
 	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 
@@ -210,7 +210,7 @@ func TestRunMergeExecutesThenThrottles(t *testing.T) {
 	}
 }
 
-// MergeEverySeconds <= 0 disables the frequent merge pass entirely.
+// MergeInterval=0 disables the frequent merge pass entirely.
 func TestRunMergeDisabled(t *testing.T) {
 	metrics.DuckLakeOperationTotal.Reset()
 	db, mock, err := sqlmock.New()
@@ -219,7 +219,7 @@ func TestRunMergeDisabled(t *testing.T) {
 	}
 	defer db.Close()
 
-	d := &Duck{DB: db, cfg: config.Config{MergeEverySeconds: 0}}
+	d := &Duck{DB: db, cfg: config.Config{MergeInterval: 0}}
 	if err := d.runMerge(context.Background()); err != nil {
 		t.Fatalf("disabled runMerge() = %v, want nil", err)
 	}
@@ -239,7 +239,7 @@ func TestRunMaintenanceThrottle(t *testing.T) {
 	}
 	defer db.Close()
 
-	d := &Duck{DB: db, cfg: config.Config{MaintenanceEverySeconds: 3600}, lastMaintenance: time.Now()}
+	d := &Duck{DB: db, cfg: config.Config{MaintenanceInterval: time.Hour}, lastMaintenance: time.Now()}
 	if err := d.runMaintenance(context.Background()); err != nil {
 		t.Fatalf("throttled runMaintenance() = %v, want nil", err)
 	}
@@ -343,9 +343,9 @@ func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 	defer cancel()
 
 	cfg := config.Config{
-		DataDir:      t.TempDir(),
-		RollupEvery:  60,
-		DuckDBMemory: "128MB",
+		DataDir:        t.TempDir(),
+		RollupInterval: time.Minute,
+		DuckDBMemory:   "128MB",
 	}
 
 	d, err := NewDuck(ctx, cfg)

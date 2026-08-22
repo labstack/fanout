@@ -69,7 +69,7 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 		svc := getServiceName(rs.Resource)
 		namespace := getServiceNamespace(rs.Resource)
 		if namespace == "" {
-			namespace = cfg.DefaultNS
+			namespace = cfg.DefaultNamespace
 		}
 		for _, ss := range rs.ScopeSpans {
 			scopeName, scopeVer := scopeInfo(ss.Scope)
@@ -133,7 +133,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 		svc := getServiceName(rl.Resource)
 		namespace := getServiceNamespace(rl.Resource)
 		if namespace == "" {
-			namespace = cfg.DefaultNS
+			namespace = cfg.DefaultNamespace
 		}
 		for _, sl := range rl.ScopeLogs {
 			scopeName, scopeVer := scopeInfo(sl.Scope)
@@ -179,7 +179,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 		svc := getServiceName(rm.Resource)
 		namespace := getServiceNamespace(rm.Resource)
 		if namespace == "" {
-			namespace = cfg.DefaultNS
+			namespace = cfg.DefaultNamespace
 		}
 		for _, sm := range rm.ScopeMetrics {
 			scopeName, scopeVer := scopeInfo(sm.Scope)

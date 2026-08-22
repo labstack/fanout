@@ -36,9 +36,9 @@ func TestWriterFlushBatchSize(t *testing.T) {
 	chMetrics := make(chan MetricRow, 10)
 
 	w := NewWriter(config.Config{
-		FlushSeconds:   60,
-		FlushBatchSize: 2,
-		DefaultNS:      "default",
+		FlushInterval:    time.Minute,
+		FlushBatchSize:   2,
+		DefaultNamespace: "default",
 	}, db, chSpans, chLogs, chMetrics)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -80,9 +80,9 @@ func TestWriterFlushesRemainderOnShutdown(t *testing.T) {
 	chMetrics := make(chan MetricRow, 10)
 
 	w := NewWriter(config.Config{
-		FlushSeconds:   3600, // long, so only shutdown triggers the flush
-		FlushBatchSize: 1000, // large, so the single row never hits a size flush
-		DefaultNS:      "default",
+		FlushInterval:    time.Hour, // long, so only shutdown triggers the flush
+		FlushBatchSize:   1000,      // large, so the single row never hits a size flush
+		DefaultNamespace: "default",
 	}, db, chSpans, chLogs, chMetrics)
 
 	ctx, cancel := context.WithCancel(context.Background())
