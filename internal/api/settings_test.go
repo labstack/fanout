@@ -78,8 +78,8 @@ func TestIngestSettingsCapabilities(t *testing.T) {
 }
 
 func TestSuggestedIngestEndpoint(t *testing.T) {
-	tests := []struct{ name, grpcAddr, configured, reqHost, want string }{
-		{"configured wins verbatim", ":4317", "https://ingest.example.com", "fanout.example.com", "https://ingest.example.com"},
+	tests := []struct{ name, grpcAddr, advertised, reqHost, want string }{
+		{"advertised endpoint wins verbatim", ":4317", "https://ingest.example.com", "fanout.example.com", "https://ingest.example.com"},
 		{"wildcard addr derives host from request", ":4317", "", "fanout.example.com:443", "fanout.example.com:4317"},
 		{"explicit grpc host is used as-is", "1.2.3.4:5317", "", "ignored.example.com", "1.2.3.4:5317"},
 		{"loopback bind advertises application host", "127.0.0.1:4317", "", "fanout.example.com", "fanout.example.com:4317"},
@@ -89,7 +89,7 @@ func TestSuggestedIngestEndpoint(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/settings/ingest", nil)
 			req.Host = tc.reqHost
-			if got := suggestedIngestEndpoint(req, tc.grpcAddr, tc.configured); got != tc.want {
+			if got := suggestedIngestEndpoint(req, tc.grpcAddr, tc.advertised); got != tc.want {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})

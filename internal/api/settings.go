@@ -40,7 +40,7 @@ func (h *SettingsHandler) GetIngest(c *echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     current.TokenHash != "",
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestEndpoint),
+		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestAdvertisedEndpoint),
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "x-fanout-ingest-token",
 	})
@@ -65,7 +65,7 @@ func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     true,
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestEndpoint),
+		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestAdvertisedEndpoint),
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "x-fanout-ingest-token",
 		IngestToken:       token,
@@ -80,12 +80,12 @@ type ingestResponse struct {
 	IngestToken       string `json:"ingest_token,omitempty"`
 }
 
-func suggestedIngestEndpoint(req *http.Request, grpcAddr, configured string) string {
-	// An explicit public endpoint (e.g. "https://ingest.example.com")
+func suggestedIngestEndpoint(req *http.Request, grpcAddr, advertised string) string {
+	// An explicit advertised endpoint (e.g. "https://ingest.example.com")
 	// wins — it's the only value that's correct behind a reverse proxy, where
 	// the browser host and the OTLP host differ.
-	if configured != "" {
-		return configured
+	if advertised != "" {
+		return advertised
 	}
 	host, port := splitHostPort(grpcAddr)
 	bindIP := net.ParseIP(strings.Trim(host, "[]"))

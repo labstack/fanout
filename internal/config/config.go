@@ -15,17 +15,17 @@ import (
 type Config struct {
 	HTTPAddr     string `koanf:"server.http_addr" env:"FANOUT_HTTP_ADDR" default:":7520"`
 	OTLPGRPCAddr string `koanf:"ingest.otlp_grpc_addr" env:"FANOUT_OTLP_GRPC_ADDR" default:"127.0.0.1:4317"`
-	// IngestEndpoint is the OTLP endpoint the UI advertises in its "collector
-	// configuration" hint (e.g. "https://ingest.example.com"). It may be
-	// public or private — it's just the externally-reachable address, distinct
-	// from OTLPGRPCAddr (the bind/listen address). Empty → derive host:port from
-	// the browser request + OTLPGRPCAddr (best-effort, dev-friendly).
-	IngestEndpoint string `koanf:"ingest.public_endpoint" env:"FANOUT_INGEST_ENDPOINT"`
-	DataDir        string `koanf:"storage.data_dir" env:"FANOUT_DATA_DIR" default:"./data"`
-	FlushSeconds   int    `koanf:"ingest.flush_seconds" env:"FANOUT_FLUSH_SECONDS" default:"15"`
-	FlushBatchSize int    `koanf:"ingest.flush_batch_size" env:"FANOUT_FLUSH_BATCH_SIZE" default:"50000"`
-	RollupEvery    int    `koanf:"storage.rollup_every_seconds" env:"FANOUT_ROLLUP_EVERY_SECONDS" default:"60"`
-	MCPEnabled     bool   `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" default:"true"`
+	// IngestAdvertisedEndpoint is the OTLP endpoint shown in collector setup
+	// guidance (e.g. "https://ingest.example.com"). It may be internet-facing
+	// or private;
+	// unlike OTLPGRPCAddr, it does not control the bind/listen address. Empty means
+	// derive host:port from the browser request and OTLPGRPCAddr as a best effort.
+	IngestAdvertisedEndpoint string `koanf:"ingest.advertised_endpoint" env:"FANOUT_INGEST_ADVERTISED_ENDPOINT"`
+	DataDir                  string `koanf:"storage.data_dir" env:"FANOUT_DATA_DIR" default:"./data"`
+	FlushSeconds             int    `koanf:"ingest.flush_seconds" env:"FANOUT_FLUSH_SECONDS" default:"15"`
+	FlushBatchSize           int    `koanf:"ingest.flush_batch_size" env:"FANOUT_FLUSH_BATCH_SIZE" default:"50000"`
+	RollupEvery              int    `koanf:"storage.rollup_every_seconds" env:"FANOUT_ROLLUP_EVERY_SECONDS" default:"60"`
+	MCPEnabled               bool   `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" default:"true"`
 	// MCPPublicURL is the canonical externally reachable MCP resource URI used
 	// for OAuth discovery and token audience binding. It must be stable across
 	// restarts and include the /mcp path.
