@@ -1,0 +1,363 @@
+---
+/* The landing page's hero, registered as Starlight's `Hero` override.
+ *
+ * Starlight renders this component instead of a page title whenever a page
+ * declares `hero` in its frontmatter. Only the landing page does, so the
+ * override is effectively page-scoped — but it is a global registration, and a
+ * second splash page with a hero would get this layout too.
+ *
+ * The headline, tagline and actions stay in frontmatter so the copy is edited
+ * where the rest of the site's copy lives. The transcript is here instead,
+ * because it is structure rather than copy: the argument of the page is that
+ * you ask Fanout a question in the words you would use to a colleague, and the
+ * hero has to show one being asked and answered rather than describe it.
+ *
+ * The transcript is illustrative, not a recording. The numbers are the ones the
+ * demo instance produces, and they are here to show the shape of an answer —
+ * a claim, then the evidence it rests on, then the thing to do about it.
+ */
+const { data } = Astro.locals.starlightRoute.entry;
+const { title = data.title, tagline, actions = [] } = data.hero ?? {};
+---
+
+<div class="fo-hero">
+  <div class="fo-hero-copy">
+    <h1 id="_top">{title}</h1>
+    {tagline && <p class="fo-hero-tagline" set:html={tagline} />}
+    {
+      actions.length > 0 && (
+        <div class="fo-hero-actions">
+          {actions.map((action, i) => (
+            <a
+              href={action.link}
+              class={i === 0 ? "fo-action fo-action-primary" : "fo-action"}
+              {...action.attrs}
+            >
+              {action.text}
+            </a>
+          ))}
+        </div>
+      )
+    }
+    <p class="fo-hero-note">
+      One Go process: OTLP in over gRPC or HTTP, Parquet on disk, DuckDB for
+      queries. No collector to deploy alongside it and no database to operate.
+    </p>
+  </div>
+
+  <div class="fo-term" data-fo-transcript aria-label="An example investigation">
+    <div class="fo-term-bar">
+      <span>ask → evidence → cause</span>
+      <span>checkout · last 1h</span>
+    </div>
+    <pre tabindex="0"><code><span class="ln"><b>&rsaquo;</b> why is checkout slow right now?</span>
+<span class="ln"> </span>
+<span class="ln dim">looking at the last hour…</span>
+<span class="ln mut">• checkout p95 jumped from 187ms to 412ms at 14:22</span>
+<span class="ln mut">• error rate climbed to 2.4%</span>
+<span class="ln mut">• 88% of slow spans are blocked on db-orders</span>
+<span class="ln warn">• db-orders shows a slow query on orders.user_id</span>
+<span class="ln"> </span>
+<span class="ln add">✓ root cause: missing index on orders(user_id)</span>
+<span class="ln dim">  want me to draft the migration?<span class="fo-caret"></span></span></code></pre>
+  </div>
+</div>
+
+<style>
+  .fo-hero {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2rem;
+    padding: 1.5rem 0 4.5rem;
+    font-family: var(--fo-font-display);
+  }
+
+  @media (min-width: 62rem) {
+    .fo-hero {
+      grid-template-columns: minmax(0, 0.86fr) minmax(31rem, 1.14fr);
+      gap: clamp(3rem, 5vw, 5.5rem);
+      align-items: center;
+      padding-top: 3rem;
+    }
+  }
+
+  /* The id is Starlight's own — it is what the skip link targets, and
+     fanout.css already styles `h1#_top` for every other page. An id selector
+     outranks any number of classes, so the landing headline has to be named the
+     same way to set its own tracking. */
+  .fo-hero-copy h1#_top {
+    font-family: var(--fo-font-display);
+    font-size: clamp(2.5rem, 4.6vw, 3.9rem);
+    line-height: 1.04;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+    margin: 0 0 1.5rem;
+    color: var(--sl-color-white);
+    text-wrap: balance;
+    max-width: 15ch;
+  }
+
+  .fo-hero-tagline {
+    font-family: var(--fo-font-body);
+    color: var(--sl-color-gray-2);
+    font-size: 1.05rem;
+    line-height: 1.7;
+    margin: 0 0 1.8rem;
+    max-width: 42rem;
+  }
+
+  .fo-hero-tagline code {
+    font-family: var(--sl-font-mono);
+    font-size: 0.9em;
+    background: none;
+    border: 0;
+    color: var(--sl-color-white);
+    padding: 0;
+  }
+
+  .fo-hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+
+  /* The filled white button is the CTA's whole job. Nothing else on the page
+     may use a filled light surface — that is what keeps one button reading as
+     the single thing to press. */
+  .fo-action {
+    display: inline-block;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 7px;
+    padding: 0.78rem 1.25rem;
+    font-family: var(--fo-font-display);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--sl-color-white);
+    text-decoration: none;
+  }
+
+  .fo-action:hover {
+    border-color: var(--sl-color-gray-4);
+    background: var(--sl-color-gray-6);
+  }
+
+  .fo-action:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 2px;
+  }
+
+  .fo-action-primary {
+    background: var(--sl-color-white);
+    border-color: var(--sl-color-white);
+    color: var(--sl-color-black);
+  }
+
+  .fo-action-primary:hover {
+    background: var(--sl-color-gray-1);
+    border-color: var(--sl-color-gray-1);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .fo-action {
+      transition:
+        border-color 0.15s ease,
+        background-color 0.15s ease;
+    }
+  }
+
+  .fo-hero-note {
+    font-family: var(--fo-font-body);
+    margin: 1.5rem 0 0;
+    font-size: 0.88rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-3);
+    max-width: 54ch;
+  }
+
+  .fo-term {
+    --term-bg: #0f131c;
+    --term-surface: #151a26;
+    --term-border: #232c3d;
+    --term-text: #bfbdb6;
+    --term-muted: #737681;
+    --term-good: #7fd962;
+    --term-warn: #ffb454;
+    border: 1px solid var(--term-border);
+    border-radius: 8px;
+    background: var(--term-bg);
+    overflow: hidden;
+    box-shadow: 0 22px 55px rgba(11, 14, 20, 0.22);
+  }
+
+  /* The transcript keeps the product's dark surfaces in both site themes. It is
+     a screenshot of a terminal-shaped thing, and a light-mode reader is not
+     expecting the product's own chrome to invert with the page around it. */
+  :global(:root[data-theme="light"]) .fo-term {
+    box-shadow: 0 22px 55px rgba(11, 14, 20, 0.16);
+  }
+
+  .fo-term-bar {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.55rem 0.9rem;
+    border-bottom: 1px solid var(--term-border);
+    background: var(--term-surface);
+    font-size: 0.68rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--term-muted);
+  }
+
+  /* The transcript is wider than a phone and scrolls inside its own box, so it
+     carries tabindex="0" and a focus ring — the same requirement the reference
+     tables meet in fanout.css, for the same reason: an overflow a keyboard
+     cannot reach is an overflow a keyboard user cannot read. */
+  .fo-term pre {
+    margin: 0;
+    padding: 1rem 1.1rem;
+    overflow-x: auto;
+    background: none;
+    border: 0;
+  }
+
+  .fo-term pre:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: -2px;
+  }
+
+  .fo-term code {
+    font-size: 0.76rem;
+    line-height: 1.95;
+    background: none;
+    padding: 0;
+    color: var(--term-text);
+  }
+
+  /* Deliberately not display:block. The spans sit inside a <pre>, so the
+     newlines between them in the source are already the line breaks; making
+     each span a block as well produces a blank line after every line. */
+  .fo-term .ln {
+    display: inline;
+  }
+
+  /* Set by script only, so a page with JS disabled shows the whole transcript
+     rather than an empty box. */
+  .fo-term .ln[data-pending] {
+    opacity: 0;
+  }
+
+  .fo-term b {
+    color: var(--sl-color-accent-high);
+    font-weight: 400;
+  }
+
+  .fo-term .dim {
+    color: var(--term-muted);
+  }
+
+  .fo-term .mut {
+    color: var(--term-text);
+  }
+
+  .fo-term .add {
+    color: var(--term-good);
+  }
+
+  .fo-term .warn {
+    color: var(--term-warn);
+  }
+
+  .fo-caret {
+    display: inline-block;
+    width: 0.5em;
+    height: 0.95em;
+    margin-left: 0.15em;
+    vertical-align: -0.12em;
+    background: var(--term-good);
+    animation: fo-blink 1.05s steps(1) infinite;
+  }
+
+  @keyframes fo-blink {
+    50% {
+      opacity: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .fo-caret {
+      animation: none;
+    }
+  }
+
+  @media (max-width: 38rem) {
+    .fo-hero {
+      padding-top: 0.75rem;
+      padding-bottom: 3.5rem;
+    }
+
+    .fo-hero-copy h1#_top {
+      font-size: clamp(2.2rem, 10vw, 2.9rem);
+    }
+
+    .fo-term-bar span:last-child {
+      display: none;
+    }
+
+    .fo-term code {
+      font-size: 0.69rem;
+      line-height: 1.85;
+    }
+  }
+</style>
+
+<script>
+  /* Reveal the transcript a line at a time once it is on screen.
+   *
+   * The pacing is the point rather than decoration: the page claims Fanout
+   * answers a question by working through evidence, so the hero makes you watch
+   * it work. Anyone who has asked not to see motion, or who arrives without JS,
+   * gets the finished transcript immediately instead.
+   */
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const term = document.querySelector<HTMLElement>("[data-fo-transcript]");
+
+  if (term && !reduced) {
+    const lines = Array.from(term.querySelectorAll<HTMLElement>(".ln"));
+    lines.forEach((line) => line.setAttribute("data-pending", ""));
+
+    let started = false;
+    const play = () => {
+      if (started) return;
+      started = true;
+      let i = 0;
+      const step = () => {
+        if (i >= lines.length) return;
+        lines[i]?.removeAttribute("data-pending");
+        i += 1;
+        // Fast enough that the hero is not a blank box on arrival — the whole
+        // transcript lands in about a second — but still paced, because the
+        // point is that an answer is reached rather than asserted.
+        window.setTimeout(step, i < 4 ? 90 : 120);
+      };
+      step();
+    };
+
+    if ("IntersectionObserver" in window) {
+      const observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) {
+              play();
+              observer.disconnect();
+            }
+          }
+        },
+        { threshold: 0.2 },
+      );
+      observer.observe(term);
+    } else {
+      play();
+    }
+  }
+</script>

@@ -1,0 +1,76 @@
+---
+title: First boot
+description: What Fanout checks before it opens a listener, and how to claim the first administrator account.
+summary: Configuration validation, the one-time setup URL, and the ingest token you are shown once.
+read_when:
+  - The process refuses to start and you want to know what it validated.
+  - You have a running instance and need to create the first administrator.
+---
+
+Fanout validates its entire configuration before it opens any listener. A
+setting it will not accept stops the process at startup rather than failing
+later under load, so a Fanout that is running is one whose configuration was
+acceptable.
+
+## What it checks
+
+Every duration and size has a floor, and the auth settings are checked as a
+group rather than individually:
+
+- Addresses and the data directory must not be empty.
+- `FANOUT_FLUSH_INTERVAL` and `FANOUT_ROLLUP_INTERVAL` must be at least `1s`;
+  `FANOUT_MERGE_INTERVAL` must be `0s` or at least `1s`.
+- `FANOUT_AUTH_MODE` must be `local` or `oidc`.
+- `FANOUT_SESSION_IDLE_TTL` must be at least `5m`, and the absolute TTL must be
+  positive and no shorter than the idle one.
+- `FANOUT_AUTH_CODE_SECRET`, when set, must be at least 32 characters.
+- SMTP is all-or-nothing: set `FANOUT_SMTP_HOST`, `FANOUT_SMTP_USERNAME`,
+  `FANOUT_SMTP_PASSWORD` and `FANOUT_SMTP_FROM` together, or none of them.
+- In `oidc` mode the issuer URL and `FANOUT_PUBLIC_URL` must both be HTTPS, and
+  a client ID and secret are required.
+
+An unrecognised `FANOUT_`-prefixed variable is an error too. A typo in a setting
+name is otherwise indistinguishable from a setting you never made, and the
+failure surfaces months later as a default nobody chose.
+
+## Claiming the first administrator
+
+When the control database holds no users, Fanout prints a one-time setup URL to
+standard error:
+
+```text
+============================================================
+ FANOUT SETUP
+
+ Open:  http://127.0.0.1:7520/login?setup_token=…
+ Valid: one-time use, expires in 1 hour
+ Note:  this URL disappears after the first admin is created
+ Warn:  it contains an administrator credential — this output may
+        persist in container logs, log aggregators, and scrollback
+============================================================
+```
+
+Under Docker, read it back with:
+
+```sh
+docker logs fanout 2>&1 | grep -A8 "FANOUT SETUP"
+```
+
+Open the URL, create the administrator, and **save the ingest token shown after
+setup**. The raw token is displayed once; Fanout stores only its hash and cannot
+show it again.
+
+The warning in the banner is not boilerplate. The URL carries a credential that
+creates an administrator, and container logs are routinely shipped somewhere
+else. Treat a leaked setup URL as an unclaimed admin account and restart with a
+fresh data directory if you cannot account for who has seen it.
+
+## Signing in afterwards
+
+Local mode has no passwords. Once SMTP is configured, active users receive
+short-lived codes by email. OIDC deployments use the provider's flow instead.
+
+## Next
+
+An instance with no data is a blank browser client. [Send your first
+telemetry](/start/send-telemetry) points an exporter at it.

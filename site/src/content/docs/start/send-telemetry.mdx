@@ -1,0 +1,97 @@
+---
+title: Send your first telemetry
+description: Authenticate an exporter and point an OpenTelemetry SDK or Collector at a Fanout instance.
+summary: The ingest token, the two OTLP endpoints, and a working SDK and Collector configuration.
+read_when:
+  - You have a running instance and nothing in it yet.
+  - An exporter is being rejected and you need to know which credential it wants.
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+Fanout accepts traces, logs and metrics over OTLP on two listeners: gRPC on
+`4317` and HTTP on `4318`. Both want the same credential.
+
+## The ingest token
+
+The raw ingest token is shown once, immediately after you create the first
+administrator. It is `fo_`-prefixed, and Fanout stores only its hash.
+
+Send it in either header:
+
+```text
+x-fanout-ingest-token: fo_<token>
+Authorization: Bearer fo_<token>
+```
+
+Two things are worth knowing before you debug a rejection:
+
+- **Browser sessions and MCP tokens are not ingest credentials.** They are
+  different credentials for different surfaces, and an exporter presenting one
+  is rejected like any other unauthenticated caller.
+- **Before setup completes, ingest rejects everything.** With no administrator
+  there is no token to check against, so a collector started ahead of setup
+  fails until you have finished it. That is the intended order: the instance
+  does not accept telemetry it cannot attribute.
+
+## Configure an SDK
+
+```sh
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
+export OTEL_EXPORTER_OTLP_HEADERS=x-fanout-ingest-token=fo_<token>
+export OTEL_SERVICE_NAME=checkout
+export OTEL_RESOURCE_ATTRIBUTES=service.namespace=storefront
+```
+
+For the HTTP listener, use port `4318` and
+`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. Use `https://` when Fanout or a
+proxy in front of it terminates TLS.
+
+## Configure a Collector
+
+```yaml
+exporters:
+  otlp/fanout:
+    endpoint: fanout.example.com:4317
+    headers:
+      x-fanout-ingest-token: fo_<token>
+
+service:
+  pipelines:
+    traces:
+      exporters: [otlp/fanout]
+    logs:
+      exporters: [otlp/fanout]
+    metrics:
+      exporters: [otlp/fanout]
+```
+
+A Collector is optional. Fanout speaks the same protocol your SDKs already
+export, so it can sit directly behind them — but if you already run a Collector
+for sampling, enrichment or fan-out to a second backend, Fanout is just another
+exporter in the pipeline.
+
+## Namespaces
+
+Fanout reads `service.namespace` from each OTLP resource, falling back to
+`FANOUT_DEFAULT_NAMESPACE` (`default`) when it is absent. Namespaces scope
+queries so one instance can hold several services' telemetry without them
+running together.
+
+They are not an authorisation boundary. A namespace is not a user, an
+organisation or a tenant, and anyone who can query the instance can query every
+namespace in it. An instance is the trust domain.
+
+## Opening the listeners to other hosts
+
+The native binary binds both ingest ports to loopback. Once you have a token and
+know how TLS is terminated, set the addresses explicitly:
+
+```sh
+FANOUT_OTLP_GRPC_ADDR=:4317
+FANOUT_OTLP_HTTP_ADDR=:4318
+```
+
+The container image already binds all interfaces, which is why its ports are
+publishable as shipped.

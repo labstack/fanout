@@ -1,0 +1,54 @@
+---
+title: Fanout
+description: One binary that ingests OpenTelemetry, stores it, and answers questions about it.
+summary: The landing page — what Fanout is, and the shape of an investigation.
+template: splash
+hero:
+  title: Observability that runs anywhere you can run a binary
+  tagline: Point your traces, logs and metrics at one process over OpenTelemetry. Get a fast browser client, a chat investigator that works through the evidence, and alerts — without standing up a stack to hold them.
+  actions:
+    - text: Install Fanout
+      link: /start/install
+    - text: See the live demo
+      link: https://demo.fanout.run
+---
+
+import { CardGrid, Card } from "@astrojs/starlight/components";
+
+## What you get, in one process
+
+<CardGrid>
+  <Card title="Speaks OpenTelemetry">
+    Point any OTel SDK or Collector at it. Traces, logs and metrics arrive over
+    OTLP on gRPC or HTTP — the standard wire format, no bespoke ingest API to
+    write against.
+  </Card>
+  <Card title="Stores its own data">
+    Telemetry lands on disk as Parquet and is queried with DuckDB in the same
+    process. There is no external database to provision, tune or back up
+    separately.
+  </Card>
+  <Card title="Answers questions">
+    A chat investigator is built into the binary. It works from the same typed
+    query tools the browser and the API use, so what it tells you is what the
+    dashboards would show.
+  </Card>
+  <Card title="Runs on your own network">
+    Self-hosted by design. No per-host fees, no telemetry tax, and no agent
+    shipping your data somewhere else.
+  </Card>
+</CardGrid>
+
+## Three commands and you are observable
+
+Install the binary, point an exporter at it, open the browser client. The
+[install guide](/start/install) is the short version; [first
+boot](/start/first-boot) covers what the process needs before it will open its
+listeners, and [send your first telemetry](/start/send-telemetry) covers getting
+data in.
+
+## Where this is in its life
+
+Fanout is pre-release. It is used in earnest and it changes without migration
+paths — the [capabilities page](/status/capabilities) is the honest account of
+what ships today, what runs but may still move, and what is only designed.

@@ -1,0 +1,127 @@
+---
+/* The site's own footer band, below the content rather than inside it.
+ *
+ * Starlight's page footer renders inside the content column, so a copyright
+ * placed there lines up with the prose, drifts upward on short pages, and reads
+ * as the last paragraph of the article rather than as the end of the site. This
+ * is the counterpart to the header: a full-width band with a rule across it,
+ * pinned to the bottom of the viewport when the page is short.
+ *
+ * The links are here rather than authored in Markdown because a site footer is
+ * chrome. PageFrame renders it only on splash pages; putting it in page source
+ * would leak it into the Markdown alternate.
+ *
+ * It holds two things: who owns this and under what licence, and where the
+ * organisation is. Nothing else, on purpose. Documentation pages already have
+ * sidebar navigation, page metadata and previous/next links, so this band would
+ * only restate their chrome. Security, the trademark policy, contributing and
+ * llms.txt are all real and all deliberately absent: a reader who wants them
+ * reaches them from the repository or from the head of the page, and four more
+ * links here would turn the band into a link farm nobody arrived looking for.
+ *
+ * The bar for adding anything: it is something a stranger needs, the sidebar
+ * cannot hold it, and they would not otherwise find it.
+ */
+import { Icon } from "@astrojs/starlight/components";
+
+const year = new Date().getFullYear();
+---
+
+<footer class="fo-sitefooter">
+  <div class="fo-sitefooter-in">
+    <p class="fo-colophon">
+      <span>&copy; {year} <a href="/">Fanout</a> by <a href="https://labstack.com">LabStack LLC</a></span>
+      <span class="sep" aria-hidden="true">·</span>
+      <span><a href="https://github.com/labstack/fanout/blob/main/LICENSE">AGPL-3.0</a></span>
+    </p>
+    <nav class="fo-sitefooter-links" aria-label="LabStack">
+      <a class="fo-icon" href="https://x.com/labstack" aria-label="LabStack on X">
+        <Icon name="x.com" size="1.05rem" />
+      </a>
+      <a class="fo-icon" href="https://github.com/labstack" aria-label="LabStack on GitHub">
+        <Icon name="github" size="1.05rem" />
+      </a>
+    </nav>
+  </div>
+</footer>
+
+<style>
+  /* No background of its own: the rule is enough to end the page, and a tinted
+     band down there competed with the header for the eye on every scroll. */
+  .fo-sitefooter {
+    border-top: 1px solid var(--sl-color-hairline-shade);
+    /* Inset the way the main frame is. A truly full-bleed band would run under
+       the fixed sidebar, which covers the left column from the nav bar down. */
+    padding-inline-start: var(--sl-content-inline-start);
+  }
+
+  .fo-sitefooter-in {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem 2rem;
+    padding: 1.15rem var(--sl-nav-pad-x);
+  }
+
+  .fo-colophon {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.5ch;
+    margin: 0;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+
+  .fo-sitefooter-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    font-size: var(--sl-text-sm);
+  }
+
+  .fo-sitefooter a {
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+  }
+
+  .fo-sitefooter a:hover {
+    color: var(--sl-color-white);
+    text-decoration: underline;
+  }
+
+  .fo-sitefooter a:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 2px;
+  }
+
+  .fo-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 0.35rem;
+  }
+
+  .fo-icon:hover {
+    background: var(--sl-color-gray-6);
+    text-decoration: none;
+  }
+
+  /* The line is 42 characters and a phone is narrower. Stacked, the separator
+     has nothing to separate. */
+  @media (max-width: 30rem) {
+    .fo-colophon {
+      display: block;
+    }
+
+    .fo-colophon > span {
+      display: block;
+    }
+
+    .fo-colophon > .sep {
+      display: none;
+    }
+  }
+</style>

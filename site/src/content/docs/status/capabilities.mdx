@@ -1,0 +1,50 @@
+---
+title: Shipped vs planned
+description: What the current Fanout binary does, what runs but may still change shape, and what is only designed.
+summary: The honest account of where each capability stands, marked page by page across the documentation.
+read_when:
+  - You are deciding whether to build something durable on a Fanout capability.
+  - A page describes something and you want to know whether it executes today.
+status: preview
+---
+
+Fanout is pre-release. It is used in earnest, and it changes without migration
+paths. This page is the account of what that means per capability, so a reader
+does not have to infer it from how confidently a page is written.
+
+Every documentation page carries one of three markers in its frontmatter, and
+the vocabulary is closed — a fourth value fails the build rather than quietly
+introducing a fourth kind of claim:
+
+| Marker | What it means |
+|---|---|
+| `shipped` | The binary on the current tag does this, and the shape is settled. |
+| `preview` | It runs today, and its shape may still change without a migration path. |
+| `planned` | Designed and written down. Nothing executes it yet. |
+
+The marker reaches an agent too: `llms.txt` annotates every non-shipped page
+inline, so something reading the index knows before it fetches the page.
+
+## Where each capability stands
+
+| Capability | Status | Notes |
+|---|---|---|
+| OTLP ingest over gRPC and HTTP | shipped | Both listeners, one ingest token. |
+| Parquet storage and DuckDB queries | shipped | Local data directory; no external database. |
+| Browser client | preview | Ships in the binary; surfaces still moving. |
+| Chat investigator | preview | Requires an AI provider key; disabled and logged without one. |
+| MCP tools | preview | Served at `/mcp`; the tool set is not frozen. |
+| Alerts | preview | Rules evaluate on an interval against rollups. |
+| Local email sign-in | shipped | Codes by email; no passwords. |
+| OIDC sign-in | shipped | Provider flow, with group and domain mapping. |
+| Generated settings reference | planned | `cmd/fanout-docgen` and its drift gate are not built yet. |
+
+## What "no migration path" means in practice
+
+It means what it says. A storage-format change may require starting from an
+empty data directory, and a renamed setting is renamed rather than aliased. The
+configuration loader rejects unrecognised `FANOUT_`-prefixed variables, so a
+setting that has moved surfaces as a refusal to start rather than as a silently
+ignored value — which is the one guarantee that makes the rest survivable.
+
+Do not run a Fanout instance as the only copy of data you need to keep.
