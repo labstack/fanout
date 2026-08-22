@@ -19,13 +19,18 @@ optional — see [README](README.md#requirements).
 
 ## Before you open a pull request
 
-Run `just check` and `just test-race`. Together they match the CI gate: formatting,
-linting, embedded-asset freshness, Go and browser tests, then the Go suite under
-the race detector.
+Run `just check` and `just test-race`. Together they match the CI gate:
+formatting, linting, browser dependency audits, embedded-asset freshness, Go
+and browser tests, then the Go suite under the race detector.
 
 `just install` also installs [Lefthook](https://lefthook.dev), which runs
 formatting and linting on commit and the full gate on push. That is the fastest
 way to avoid a red CI run.
+
+Both browser workspaces use `package.json` overrides for transitive security
+fixes that their direct dependencies have not locked yet. Keep those overrides
+until the upstream ranges resolve to patched versions; `just ui-audit` accepts
+no advisory exceptions.
 
 ## Things that surprise people
 
