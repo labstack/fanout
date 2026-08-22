@@ -28,7 +28,10 @@ ui/apps/dist/
 site/node_modules/
 site/dist/
 site/.astro/
-site/public/og.png
+site-legacy/node_modules/
+site-legacy/dist/
+site-legacy/.astro/
+site-legacy/public/og.png
 
 # Test/temp
 # Root-scoped: a bare `testdata/` would also ignore Go package fixtures, which
