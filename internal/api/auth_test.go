@@ -443,8 +443,13 @@ func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		s.e.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("retry = %d %s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("retry = %d %s, want 403: one setup credential must not establish a second session", rec.Code, rec.Body.String())
+		}
+		for _, cookie := range rec.Result().Cookies() {
+			if cookie.Name == "fanout_session" && cookie.Value != "" {
+				t.Fatal("denied setup retry established a browser session")
+			}
 		}
 	})
 }
@@ -458,5 +463,27 @@ func TestSetupReturnsConfiguredIngestEndpoint(t *testing.T) {
 	s.e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), endpoint) {
 		t.Fatalf("setup endpoint = %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestSetupConsumesTokenBeforeFalliblePostSetupWork(t *testing.T) {
+	s := newTestAuthServer(t)
+	// Break the post-admin settings work so the request fails after the first
+	// administrator is committed.
+	if _, err := s.db.DB.Exec(`DROP TABLE settings`); err != nil {
+		t.Fatalf("drop settings: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code == http.StatusOK {
+		t.Fatalf("setup unexpectedly succeeded: %s", rec.Body.String())
+	}
+	if _, err := s.users.GetByEmail("admin@example.com"); err != nil {
+		t.Fatalf("first administrator was not committed: %v", err)
+	}
+	if got := s.setup.Verify(s.setupToken); got != auth.SetupStatusUnset {
+		t.Fatalf("setup token state = %v, want unset: a committed administrator must not leave a live setup credential", got)
 	}
 }

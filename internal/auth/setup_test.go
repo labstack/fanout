@@ -1,13 +1,16 @@
 package auth
 
 import (
+	"encoding/base64"
 	"regexp"
 	"sync"
 	"testing"
 	"time"
 )
 
-var tokenShape = regexp.MustCompile(`^[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}$`)
+// The setup credential is delivered inside a URL, so it is URL-safe and
+// unpunctuated rather than grouped for typing.
+var tokenShape = regexp.MustCompile(`^[A-Za-z0-9_-]{22,}$`)
 
 func TestSetupVerifyAcceptsFreshToken(t *testing.T) {
 	s := NewSetup()
@@ -16,7 +19,7 @@ func TestSetupVerifyAcceptsFreshToken(t *testing.T) {
 		t.Fatalf("Rotate: %v", err)
 	}
 	if !tokenShape.MatchString(token) {
-		t.Fatalf("token = %q, want 3 hex-4 groups separated by dashes", token)
+		t.Fatalf("token = %q, want unpadded URL-safe base64", token)
 	}
 	if time.Until(expires) <= 0 || time.Until(expires) > SetupTTL {
 		t.Fatalf("expires %v outside TTL", expires)
@@ -108,4 +111,19 @@ func TestSetupConcurrentAccess(t *testing.T) {
 		go func() { defer wg.Done(); s.Clear() }()
 	}
 	wg.Wait()
+}
+
+func TestSetupTokenCarriesAtLeast128BitsOfEntropy(t *testing.T) {
+	s := NewSetup()
+	token, _, err := s.Rotate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		t.Fatalf("setup token %q is not raw base64url: %v", token, err)
+	}
+	if len(decoded) < 16 {
+		t.Fatalf("setup token carries %d bits, want at least 128: a credential that creates an administrator needs a conservative entropy floor", len(decoded)*8)
+	}
 }

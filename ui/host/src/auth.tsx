@@ -47,13 +47,27 @@ function AuthSurface({ children, wide = false }: { children: ReactNode; wide?: b
   </Box>;
 }
 
+// The setup credential is delivered in the URL printed at first boot. Read it
+// once and strip it from the address bar so it does not linger in history,
+// screenshots, or a shared screen.
+function consumeSetupTokenFromURL(): string {
+  if (typeof window === "undefined") return "";
+  const url = new URL(window.location.href);
+  const token = url.searchParams.get("setup_token") ?? "";
+  if (token) {
+    url.searchParams.delete("setup_token");
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }
+  return token;
+}
+
 export default function AuthGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [viewer, setViewer] = useState<BrowserViewer>("none");
   const [sessionReady, setSessionReady] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [setupToken, setSetupToken] = useState("");
+  const [setupToken, setSetupToken] = useState(consumeSetupTokenFromURL);
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -166,7 +180,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     <form onSubmit={submit}><Stack gap="md">
       <TextInput label="Email" placeholder="you@company.com" type="email" required value={email} onChange={(event) => setEmail(event.currentTarget.value)} disabled={codeSent} variant="filled" radius="md" size="md" autoFocus={!codeSent} />
       {status?.setup_required && <TextInput label="Name" placeholder="Your name" value={name} onChange={(event) => setName(event.currentTarget.value)} variant="filled" radius="md" size="md" />}
-      {status?.setup_required && <TextInput label="Setup token" placeholder="xxxx-xxxx-xxxx" required value={setupToken} onChange={(event) => setSetupToken(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" />}
+      {status?.setup_required && <TextInput label="Setup token" placeholder="from the setup URL printed at startup" required value={setupToken} onChange={(event) => setSetupToken(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" />}
       {!status?.setup_required && codeSent && <TextInput label="Verification code" placeholder="000000" required value={code} onChange={(event) => setCode(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" styles={{ input: { letterSpacing: "0.2em", fontVariantNumeric: "tabular-nums" } }} autoFocus />}
       {error && <Alert color="red" radius="md">{error}</Alert>}
       <Button type="submit" size="md" radius="md" mt={4} loading={busy} disabled={!status} leftSection={status?.setup_required ? <UserPlus size={17} weight="bold" /> : undefined} rightSection={!status?.setup_required ? <ArrowRight size={17} weight="bold" /> : undefined}>{status?.setup_required ? "Create admin" : codeSent ? "Verify code" : "Send code"}</Button>

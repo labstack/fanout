@@ -3,9 +3,8 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
+	"encoding/base64"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 )
@@ -96,20 +95,15 @@ func (s *Setup) SetExpiresForTest(expires time.Time) {
 	s.mu.Unlock()
 }
 
+// setupTokenBytes is the entropy floor for a credential that creates an
+// administrator. The token is delivered inside the setup URL rather than typed,
+// so length costs nothing in usability.
+const setupTokenBytes = 16
+
 func generateSetupToken() (string, error) {
-	buf := make([]byte, 6)
+	buf := make([]byte, setupTokenBytes)
 	if _, err := rand.Read(buf); err != nil {
 		return "", fmt.Errorf("generate setup token: %w", err)
 	}
-	raw := hex.EncodeToString(buf)
-	parts := make([]string, 0, (len(raw)+3)/4)
-	for len(raw) > 0 {
-		end := 4
-		if end > len(raw) {
-			end = len(raw)
-		}
-		parts = append(parts, raw[:end])
-		raw = raw[end:]
-	}
-	return strings.Join(parts, "-"), nil
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
