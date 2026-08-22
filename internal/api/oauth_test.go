@@ -615,3 +615,41 @@ func serve(t *testing.T, e *echo.Echo, method, target, body string, headers map[
 	e.ServeHTTP(rec, req)
 	return rec
 }
+
+func TestMCPOAuthRegistrationIsRateLimited(t *testing.T) {
+	e, _, _ := newOAuthTestServer(t)
+	body := `{"client_name":"burst","redirect_uris":["https://client.example.com/callback"]}`
+	limited := false
+	for i := 0; i < 200 && !limited; i++ {
+		rec := serve(t, e, http.MethodPost, "/oauth/register", body, map[string]string{"Content-Type": "application/json"})
+		switch rec.Code {
+		case http.StatusCreated:
+		case http.StatusTooManyRequests:
+			limited = true
+		default:
+			t.Fatalf("registration %d = %d %s", i, rec.Code, rec.Body.String())
+		}
+	}
+	if !limited {
+		t.Fatal("200 unauthenticated registrations from one source were all accepted")
+	}
+}
+
+func TestMCPOAuthConsentMarksDynamicClientUnverified(t *testing.T) {
+	e, users, _ := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, e, users, "consent-provenance@example.com")
+	client := registerOAuthClient(t, e)
+	_, challenge := pkcePair()
+	params := authorizeParams(client.ClientID, mcpReadScope, challenge)
+
+	consent := serve(t, e, http.MethodGet, "/api/auth/oauth/authorize?"+params.Encode(), "", nil, cookie)
+	if consent.Code != http.StatusOK {
+		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
+	}
+	page := consent.Body.String()
+	// Registration is unauthenticated, so the client name is attacker-chosen.
+	// The screen must show provenance the name cannot forge.
+	if !strings.Contains(strings.ToLower(page), "unverified") {
+		t.Fatalf("consent screen presents an attacker-chosen client name with no provenance warning: %s", page)
+	}
+}

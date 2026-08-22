@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/dashboard"
@@ -35,11 +36,12 @@ type browserMCPUserContextKey struct{}
 var mcpSupportedScopes = []string{mcpReadScope, dashboard.OAuthScope}
 
 type MCPAuthorization struct {
-	store       *appauth.OAuthStore
-	users       *appauth.UserStore
-	resource    string
-	issuer      string
-	metadataURL string
+	store           *appauth.OAuthStore
+	users           *appauth.UserStore
+	resource        string
+	issuer          string
+	metadataURL     string
+	registerLimiter *appauth.KeyedLimiter
 }
 
 func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, publicMCPURL string) (*MCPAuthorization, error) {
@@ -57,6 +59,10 @@ func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, pu
 		resource:    resource.String(),
 		issuer:      issuer,
 		metadataURL: issuer + "/.well-known/oauth-protected-resource/mcp",
+		// Registration is unauthenticated by design (RFC 7591 dynamic
+		// registration). Bound how many clients one source can create before
+		// the janitor collects the abandoned ones.
+		registerLimiter: appauth.NewKeyedLimiter(20, 15*time.Minute),
 	}, nil
 }
 
@@ -191,6 +197,10 @@ type oauthRegistrationRequest struct {
 }
 
 func (h *MCPAuthorization) RegisterClient(c *echo.Context) error {
+	if !h.registerLimiter.Allow(c.RealIP()) {
+		c.Response().Header().Set("Retry-After", "900")
+		return oauthJSONError(c, http.StatusTooManyRequests, "temporarily_unavailable", "too many client registrations")
+	}
 	var req oauthRegistrationRequest
 	decoder := json.NewDecoder(io.LimitReader(c.Request().Body, 64<<10))
 	if err := decoder.Decode(&req); err != nil {
@@ -607,14 +617,14 @@ var oauthConsentTemplate = template.Must(template.New("oauth-consent").Parse(`<!
 .card{width:100%;max-width:520px;min-width:0;padding:40px;border:1px solid rgba(31,41,55,.08);border-radius:28px;background:rgba(255,255,255,.92);box-shadow:0 28px 70px rgba(31,41,55,.10),0 3px 10px rgba(31,41,55,.04);backdrop-filter:blur(18px)}
 .brand{display:flex;align-items:center;gap:14px}.brand-mark{display:block;width:46px;height:46px}.brand-name{font-size:18px;font-weight:800;line-height:1;letter-spacing:.17em;text-transform:uppercase}
 .eyebrow{margin:28px 0 8px;color:#087f5b;font-size:12px;font-weight:700;letter-spacing:.12em;text-transform:uppercase}h1{margin:0;font-size:34px;font-weight:650;line-height:1.08;letter-spacing:-.035em}
-.lede{margin:16px 0 0;color:#66736c;line-height:1.6}.detail{display:grid;gap:5px;margin:24px 0;padding:18px;border:1px solid #e1e7e3;border-radius:14px;background:#f7f9f8}.detail b{display:block}.detail span{color:#748078;font-size:13px;overflow-wrap:anywhere}
+.lede{margin:16px 0 0;color:#66736c;line-height:1.6}.detail{display:grid;gap:5px;margin:24px 0;padding:18px;border:1px solid #e1e7e3;border-radius:14px;background:#f7f9f8}.detail b{display:block}.detail span{color:#748078;font-size:13px;overflow-wrap:anywhere}.detail .warn{color:#b8621b;font-weight:600}
 .access{display:flex;gap:12px;margin:20px 0}.access>div{min-width:0}.check{display:grid;place-items:center;flex:0 0 26px;height:26px;border-radius:50%;background:#e6fcf5;color:#087f5b;font-weight:800}.access p{margin:2px 0;color:#66736c;line-height:1.5;overflow-wrap:anywhere}.signed{font-size:13px;color:#748078}
 .actions{display:grid;grid-template-columns:1fr 1.5fr;gap:12px;margin-top:28px}button{border:1px solid #d7ddd9;border-radius:12px;padding:13px 16px;background:#fff;color:#26322b;font:inherit;font-weight:700;cursor:pointer}button.primary{border-color:#0ca678;background:#0ca678;color:#fff}button:hover{filter:brightness(.97)}button:focus-visible{outline:3px solid rgba(12,166,120,.25);outline-offset:2px}
-@media(prefers-color-scheme:dark){:root{background:#101512;color:#eef4f0}body{background:radial-gradient(circle at 50% -12%,rgba(70,192,142,.14),transparent 38%),#101512}.card{border-color:#303a35;background:rgba(27,33,30,.94);box-shadow:0 28px 70px #0007}.eyebrow{color:#63e6be}.lede,.access p{color:#aab5af}.detail{border-color:#38443e;background:#151b18}.detail span,.signed{color:#8c9892}.check{background:#153b2e;color:#63e6be}button{border-color:#3b4741;background:#232b27;color:#eef4f0}button.primary{border-color:#20c997;background:#20c997;color:#07140f}}
+@media(prefers-color-scheme:dark){:root{background:#101512;color:#eef4f0}body{background:radial-gradient(circle at 50% -12%,rgba(70,192,142,.14),transparent 38%),#101512}.card{border-color:#303a35;background:rgba(27,33,30,.94);box-shadow:0 28px 70px #0007}.eyebrow{color:#63e6be}.lede,.access p{color:#aab5af}.detail{border-color:#38443e;background:#151b18}.detail span,.signed{color:#8c9892}.detail .warn{color:#f0a868}.check{background:#153b2e;color:#63e6be}button{border-color:#3b4741;background:#232b27;color:#eef4f0}button.primary{border-color:#20c997;background:#20c997;color:#07140f}}
 @media(max-width:520px){body{display:flex;align-items:center;justify-content:center;padding:16px}.card{width:calc(100vw - 32px);max-width:calc(100vw - 32px);padding:28px 24px}.actions{grid-template-columns:1fr}h1{font-size:30px}}
 </style></head><body><main class="card"><div class="brand"><span class="brand-mark">` + brand.MarkSVG + `</span><span class="brand-name">Fanout</span></div><p class="eyebrow">Secure connection</p><h1>Allow {{.ClientName}} to access Fanout?</h1>
 <p class="lede">{{if .ReadOnly}}This application is requesting read-only access to your observability data through MCP. It cannot change settings, alerts, or dashboards.{{else}}This application is requesting the access listed below through MCP.{{end}}</p>
-<div class="detail"><b>{{.ClientName}}</b><span>Returns to {{.Redirect}}</span><span>Scopes: {{.Scope}}</span></div>
+<div class="detail"><b>{{.ClientName}}</b><span class="warn">Unverified client — this name was chosen by whoever registered it</span><span>Returns to <b>{{.Redirect}}</b></span><span>Scopes: {{.Scope}}</span></div>
 {{range .Grants}}<div class="access"><span class="check">✓</span><div><b>{{.Title}}</b><p>{{.Detail}}</p></div></div>
 {{end}}<p class="signed">Signed in as {{.Email}}</p>
 <form method="post" action="/api/auth/oauth/authorize">
