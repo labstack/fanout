@@ -173,8 +173,8 @@ operators touch are:
 | `storage.data_dir` | `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
 | `auth.mode` | `FANOUT_AUTH_MODE` | `local` | `local` (login link or SMTP) or `oidc` |
 | `auth.code_secret` | `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
-| `agent.provider` | `FANOUT_AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
-| `agent.api_key` | `FANOUT_AI_API_KEY` | — | Enables AI investigation chat |
+| `ai.provider` | `FANOUT_AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
+| `ai.api_key` | `FANOUT_AI_API_KEY` | — | Enables AI investigation chat |
 | `storage.retention_days` | `FANOUT_RETENTION_DAYS` | `30` | Telemetry retention window |
 | `mcp.enabled` | `FANOUT_MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
 

@@ -147,11 +147,11 @@ func main() {
 		alertStore = alert.NewStore(sqlite.DB)
 		alertEngine = alert.NewEngine(
 			alertStore, q, detector,
-			time.Duration(cfg.AlertEvalInterval)*time.Second,
+			cfg.AlertEvaluationInterval,
 			cfg.AlertHistoryDays,
 		)
 		go alertEngine.Run(ctx)
-		slog.Info("alert engine enabled", "interval", cfg.AlertEvalInterval)
+		slog.Info("alert engine enabled", "interval", cfg.AlertEvaluationInterval)
 	}
 
 	settingsStore := settings.NewStore(sqlite.DB)
@@ -262,7 +262,7 @@ func main() {
 	// typed query kernel through deterministic HTTP or standard MCP tools.
 	// Route both HTTP and MCP reads through Duck's retrying adapter. Passing the
 	// raw *sql.DB here bypassed the DuckLake maintenance-race protection.
-	queries := observability.New(q, cfg.DefaultNS)
+	queries := observability.New(q, cfg.DefaultNamespace)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
 	dashboards := dashboard.New(sqlite.DB)
 	api.RegisterDashboardRoutes(e, dashboards)
@@ -366,7 +366,7 @@ func main() {
 		agent.NewRuntime(provider, toolRegistry, agent.NewStore(sqlite.DB)).Register(e.Group("/api/agent", api.RequireCapability(api.RunAgent)))
 		slog.Info("AG-UI agent enabled", "path", "/api/agent", "provider", cfg.AIProvider)
 	} else {
-		slog.Info("AG-UI agent disabled", "reason", "agent.api_key is not configured")
+		slog.Info("AG-UI agent disabled", "reason", "ai.api_key is not configured")
 	}
 
 	// The compiled browser client is an embedded asset, not a second runtime.

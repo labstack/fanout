@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/labstack/fanout/internal/config"
 )
@@ -94,8 +95,8 @@ func TestRollupLagFromConfig(t *testing.T) {
 		{0, 30 * sec},  // floored to 30s
 	}
 	for _, c := range cases {
-		if got := rollupLagFromConfig(config.Config{FlushSeconds: c.flushSeconds}); got != c.wantNanos {
-			t.Errorf("rollupLagFromConfig(FlushSeconds=%d) = %d, want %d", c.flushSeconds, got, c.wantNanos)
+		if got := rollupLagFromConfig(config.Config{FlushInterval: time.Duration(c.flushSeconds) * time.Second}); got != c.wantNanos {
+			t.Errorf("rollupLagFromConfig(FlushInterval=%ds) = %d, want %d", c.flushSeconds, got, c.wantNanos)
 		}
 	}
 }

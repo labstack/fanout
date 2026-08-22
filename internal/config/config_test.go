@@ -7,6 +7,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/v2"
 )
 
 func validEnvironment() []string {
@@ -35,20 +39,20 @@ func TestLoadReturnsDefaults(t *testing.T) {
 	if cfg.DataDir != "./data" {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, "./data")
 	}
-	if cfg.FlushSeconds != 15 {
-		t.Errorf("FlushSeconds = %d, want %d", cfg.FlushSeconds, 15)
+	if cfg.FlushInterval != 15*time.Second {
+		t.Errorf("FlushInterval = %s, want %s", cfg.FlushInterval, 15*time.Second)
 	}
 	if cfg.FlushBatchSize != 50000 {
 		t.Errorf("FlushBatchSize = %d, want %d", cfg.FlushBatchSize, 50000)
 	}
-	if cfg.RollupEvery != 60 {
-		t.Errorf("RollupEvery = %d, want %d", cfg.RollupEvery, 60)
+	if cfg.RollupInterval != time.Minute {
+		t.Errorf("RollupInterval = %s, want %s", cfg.RollupInterval, time.Minute)
 	}
 	if cfg.RetentionDays != 30 {
 		t.Errorf("RetentionDays = %d, want %d", cfg.RetentionDays, 30)
 	}
-	if cfg.DefaultNS != "default" {
-		t.Errorf("DefaultNS = %q, want %q", cfg.DefaultNS, "default")
+	if cfg.DefaultNamespace != "default" {
+		t.Errorf("DefaultNamespace = %q, want %q", cfg.DefaultNamespace, "default")
 	}
 	// DuckDBMemory is no longer asserted to be empty: Load resolves it from
 	// detected memory, and what it resolves to depends on the machine running
@@ -71,7 +75,7 @@ func TestLoadLayering(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`server:
   http_addr: ":1111"
 storage:
-  merge_every_seconds: 75
+  merge_interval: 75s
 mcp:
   enabled: false
 metrics:
@@ -92,7 +96,7 @@ auth:
 	if cfg.HTTPAddr != ":2222" {
 		t.Fatalf("HTTPAddr = %q, want environment override", cfg.HTTPAddr)
 	}
-	if cfg.MergeEverySeconds != 75 || cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour {
+	if cfg.MergeInterval != 75*time.Second || cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour {
 		t.Fatalf("YAML values were not merged: %+v", cfg)
 	}
 }
@@ -101,13 +105,13 @@ func TestLoadTypedEnvironmentValues(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
 		"FANOUT_MCP_ENABLED=false",
 		"FANOUT_METRICS_PUBLIC=true",
-		"FANOUT_MERGE_EVERY_SECONDS=75",
+		"FANOUT_MERGE_INTERVAL=75s",
 		"FANOUT_SESSION_IDLE_TTL=10h",
 	)})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.MergeEverySeconds != 75 || cfg.SessionIdleTTL != 10*time.Hour {
+	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.MergeInterval != 75*time.Second || cfg.SessionIdleTTL != 10*time.Hour {
 		t.Fatalf("environment values were not decoded: %+v", cfg)
 	}
 }
@@ -193,15 +197,118 @@ func TestExampleConfigurationMatchesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read example: %v", err)
 	}
+	example := koanf.New(".")
+	if err := example.Load(file.Provider(path), yaml.Parser()); err != nil {
+		t.Fatalf("parse example: %v", err)
+	}
+	active := make(map[string]bool, len(example.Keys()))
+	for _, key := range example.Keys() {
+		active[key] = true
+	}
+
 	specs, err := configFieldSpecs()
 	if err != nil {
 		t.Fatalf("field specs: %v", err)
 	}
+	wantSecrets := map[string]bool{
+		"ai.api_key":              true,
+		"smtp.password":           true,
+		"auth.code_secret":        true,
+		"auth.oidc.client_secret": true,
+		"metrics.token":           true,
+	}
+	foundSecrets := make(map[string]bool, len(wantSecrets))
+	rawText := string(raw)
 	for _, spec := range specs {
-		if !strings.Contains(string(raw), spec.env) {
+		if !strings.Contains(rawText, spec.env) {
 			t.Errorf("example does not document %s", spec.env)
 		}
+		if spec.secret != wantSecrets[spec.key] {
+			t.Errorf("secret classification for %s = %t, want %t", spec.key, spec.secret, wantSecrets[spec.key])
+		}
+		if spec.secret {
+			foundSecrets[spec.key] = true
+		}
+		if spec.secret && active[spec.key] {
+			t.Errorf("secret key %s must be documented but inactive in the example", spec.key)
+		}
+		if spec.secret {
+			leaf := spec.key[strings.LastIndex(spec.key, ".")+1:]
+			if !strings.Contains(rawText, "# "+leaf+":") {
+				t.Errorf("secret key %s is not documented as a commented YAML key", spec.key)
+			}
+		}
+		if !spec.secret && !active[spec.key] {
+			t.Errorf("non-secret key %s must be active in the example", spec.key)
+		}
 	}
+	if !reflect.DeepEqual(foundSecrets, wantSecrets) {
+		t.Errorf("secret settings = %v, want exactly %v", foundSecrets, wantSecrets)
+	}
+}
+
+func TestConfigurationSchemaUsesUnitBearingDurations(t *testing.T) {
+	specs, err := configFieldSpecs()
+	if err != nil {
+		t.Fatalf("field specs: %v", err)
+	}
+	durationType := reflect.TypeOf(time.Duration(0))
+	for _, spec := range specs {
+		key := strings.ToLower(spec.key)
+		env := strings.ToLower(spec.env)
+		if strings.Contains(key, "_seconds") || strings.Contains(key, "_ms") ||
+			strings.Contains(env, "_seconds") || strings.Contains(env, "_ms") {
+			t.Errorf("elapsed-time setting uses a unit suffix: %s / %s", spec.key, spec.env)
+		}
+		if spec.typ == durationType && !strings.HasSuffix(key, "_interval") && !strings.HasSuffix(key, "_ttl") {
+			t.Errorf("duration setting %s must end in _interval or _ttl", spec.key)
+		}
+	}
+}
+
+func TestLoadDurationIntervals(t *testing.T) {
+	t.Run("YAML", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "fanout.yaml")
+		document := `ingest:
+  flush_interval: 30s
+storage:
+  rollup_interval: 5m
+  merge_interval: 0s
+  maintenance_interval: 1h
+alerts:
+  evaluation_interval: 45s
+`
+		if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		cfg, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.FlushInterval != 30*time.Second || cfg.RollupInterval != 5*time.Minute ||
+			cfg.MergeInterval != 0 || cfg.MaintenanceInterval != time.Hour ||
+			cfg.AlertEvaluationInterval != 45*time.Second {
+			t.Fatalf("duration values were not decoded: %+v", cfg)
+		}
+	})
+
+	t.Run("environment", func(t *testing.T) {
+		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
+			"FANOUT_FLUSH_INTERVAL=30s",
+			"FANOUT_ROLLUP_INTERVAL=5m",
+			"FANOUT_MERGE_INTERVAL=0s",
+			"FANOUT_MAINTENANCE_INTERVAL=1h",
+			"FANOUT_ALERTS_EVALUATION_INTERVAL=45s",
+		)})
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.FlushInterval != 30*time.Second || cfg.RollupInterval != 5*time.Minute ||
+			cfg.MergeInterval != 0 || cfg.MaintenanceInterval != time.Hour ||
+			cfg.AlertEvaluationInterval != 45*time.Second {
+			t.Fatalf("duration values were not decoded: %+v", cfg)
+		}
+	})
 }
 
 func TestDockerConfigurationMatchesSchema(t *testing.T) {
@@ -249,6 +356,50 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_INGEST_ENDPOINT=https://ingest.example.com")})
 		if err == nil || !strings.Contains(err.Error(), "FANOUT_INGEST_ENDPOINT") {
 			t.Fatalf("error = %v, want removed environment variable rejected", err)
+		}
+	})
+
+	t.Run("removed YAML keys", func(t *testing.T) {
+		for _, test := range []struct {
+			key, document string
+		}{
+			{"agent.provider", "agent:\n  provider: anthropic\n"},
+			{"agent.api_key", "agent:\n  api_key: secret\n"},
+			{"agent.model", "agent:\n  model: test\n"},
+			{"agent.base_url", "agent:\n  base_url: https://ai.example.com\n"},
+			{"ingest.flush_seconds", "ingest:\n  flush_seconds: 15\n"},
+			{"storage.rollup_every_seconds", "storage:\n  rollup_every_seconds: 60\n"},
+			{"storage.merge_every_seconds", "storage:\n  merge_every_seconds: 60\n"},
+			{"storage.maintenance_every_seconds", "storage:\n  maintenance_every_seconds: 3600\n"},
+			{"alerts.evaluation_interval_seconds", "alerts:\n  evaluation_interval_seconds: 30\n"},
+		} {
+			t.Run(test.key, func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), "fanout.yaml")
+				if err := os.WriteFile(path, []byte(test.document), 0o600); err != nil {
+					t.Fatalf("write config: %v", err)
+				}
+				_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+				if err == nil || !strings.Contains(err.Error(), test.key) {
+					t.Fatalf("error = %v, want removed key %s rejected", err, test.key)
+				}
+			})
+		}
+	})
+
+	t.Run("removed environment variables", func(t *testing.T) {
+		for _, name := range []string{
+			"FANOUT_FLUSH_SECONDS",
+			"FANOUT_ROLLUP_EVERY_SECONDS",
+			"FANOUT_MERGE_EVERY_SECONDS",
+			"FANOUT_MAINTENANCE_EVERY_SECONDS",
+			"FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS",
+		} {
+			t.Run(name, func(t *testing.T) {
+				_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"=1")})
+				if err == nil || !strings.Contains(err.Error(), name) {
+					t.Fatalf("error = %v, want removed environment variable %s rejected", err, name)
+				}
+			})
 		}
 	})
 
@@ -336,7 +487,7 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 	for _, test := range []struct {
 		name, document string
 	}{
-		{"string as integer", "ingest:\n  flush_seconds: never\n"},
+		{"invalid duration", "ingest:\n  flush_interval: never\n"},
 		{"fractional integer", "smtp:\n  port: 25.9\n"},
 		{"integer as boolean", "mcp:\n  enabled: 2\n"},
 		{"YAML keyword as boolean", "alerts:\n  enabled: off\n"},
@@ -354,7 +505,7 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 	}
 
 	t.Run("invalid merged config", func(t *testing.T) {
-		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_FLUSH_SECONDS=0")})
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_FLUSH_INTERVAL=0s")})
 		if err == nil || !strings.Contains(err.Error(), "flush") {
 			t.Fatalf("error = %v, want validation error", err)
 		}
@@ -375,15 +526,32 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 		name, assignment, key string
 	}{
 		{"negative max connections is not auto", "FANOUT_DUCKDB_MAX_CONNECTIONS=-3", "max_connections"},
-		{"zero alert interval", "FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS=0", "evaluation_interval_seconds"},
-		{"negative merge interval", "FANOUT_MERGE_EVERY_SECONDS=-5", "merge_every_seconds"},
-		{"negative maintenance interval", "FANOUT_MAINTENANCE_EVERY_SECONDS=-5", "maintenance_every_seconds"},
+		{"zero alert interval", "FANOUT_ALERTS_EVALUATION_INTERVAL=0s", "evaluation_interval"},
+		{"negative merge interval", "FANOUT_MERGE_INTERVAL=-5s", "merge_interval"},
+		{"negative maintenance interval", "FANOUT_MAINTENANCE_INTERVAL=-5s", "maintenance_interval"},
 		{"negative DuckDB threads", "FANOUT_DUCKDB_THREADS=-4", "duckdb.threads"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := Load(LoadOptions{Environ: append(validEnvironment(), test.assignment)})
 			if err == nil || !strings.Contains(err.Error(), test.key) {
 				t.Fatalf("error = %v, want validation error for %s", err, test.key)
+			}
+		})
+	}
+
+	for _, test := range []struct {
+		name, assignment, key string
+	}{
+		{"subsecond flush interval", "FANOUT_FLUSH_INTERVAL=999ms", "flush_interval"},
+		{"subsecond rollup interval", "FANOUT_ROLLUP_INTERVAL=999ms", "rollup_interval"},
+		{"subsecond merge interval", "FANOUT_MERGE_INTERVAL=1ns", "merge_interval"},
+		{"subsecond maintenance interval", "FANOUT_MAINTENANCE_INTERVAL=500ms", "maintenance_interval"},
+		{"subsecond alert interval", "FANOUT_ALERTS_EVALUATION_INTERVAL=999ms", "evaluation_interval"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := Load(LoadOptions{Environ: append(validEnvironment(), test.assignment)})
+			if err == nil || !strings.Contains(err.Error(), test.key) {
+				t.Fatalf("error = %v, want lower-bound validation for %s", err, test.key)
 			}
 		})
 	}
@@ -423,7 +591,7 @@ func TestLoadErrorsDoNotContainSecrets(t *testing.T) {
 
 func TestLoadRequiresPrivatePermissionsForConfigSecrets(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fanout.yaml")
-	if err := os.WriteFile(path, []byte("agent:\n  api_key: secret-from-file\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("ai:\n  api_key: secret-from-file\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
@@ -437,14 +605,14 @@ func TestValidate(t *testing.T) {
 		HTTPAddr:                ":7520",
 		OTLPGRPCAddr:            "127.0.0.1:4317",
 		DataDir:                 "./data",
-		FlushSeconds:            15,
+		FlushInterval:           15 * time.Second,
 		FlushBatchSize:          50000,
-		RollupEvery:             60,
+		RollupInterval:          time.Minute,
 		RetentionDays:           30,
-		MaintenanceEverySeconds: 3600,
-		MergeEverySeconds:       60,
+		MaintenanceInterval:     time.Hour,
+		MergeInterval:           time.Minute,
 		DuckDBMaxConns:          4,
-		AlertEvalInterval:       30,
+		AlertEvaluationInterval: 30 * time.Second,
 		AlertHistoryDays:        7,
 		AIProvider:              "anthropic",
 		AIAPIKey:                "sk-test",
@@ -466,22 +634,24 @@ func TestValidate(t *testing.T) {
 		name   string
 		modify func(*Config)
 	}{
-		{"FlushSeconds=0", func(c *Config) { c.FlushSeconds = 0 }},
-		{"FlushSeconds=-1", func(c *Config) { c.FlushSeconds = -1 }},
+		{"FlushInterval=0", func(c *Config) { c.FlushInterval = 0 }},
+		{"FlushInterval=999ms", func(c *Config) { c.FlushInterval = 999 * time.Millisecond }},
 		{"FlushBatchSize=0", func(c *Config) { c.FlushBatchSize = 0 }},
 		{"FlushBatchSize=-1", func(c *Config) { c.FlushBatchSize = -1 }},
-		{"RollupEvery=0", func(c *Config) { c.RollupEvery = 0 }},
-		{"RollupEvery=-1", func(c *Config) { c.RollupEvery = -1 }},
+		{"RollupInterval=0", func(c *Config) { c.RollupInterval = 0 }},
+		{"RollupInterval=999ms", func(c *Config) { c.RollupInterval = 999 * time.Millisecond }},
 		{"RetentionDays=-1", func(c *Config) { c.RetentionDays = -1 }},
 		{"HTTPAddr empty", func(c *Config) { c.HTTPAddr = "" }},
 		{"OTLPGRPCAddr empty", func(c *Config) { c.OTLPGRPCAddr = "" }},
 		{"DataDir empty", func(c *Config) { c.DataDir = "" }},
-		{"MaintenanceEverySeconds=0", func(c *Config) { c.MaintenanceEverySeconds = 0 }},
-		{"MaintenanceEverySeconds=-1", func(c *Config) { c.MaintenanceEverySeconds = -1 }},
-		{"MergeEverySeconds=-1", func(c *Config) { c.MergeEverySeconds = -1 }},
+		{"MaintenanceInterval=0", func(c *Config) { c.MaintenanceInterval = 0 }},
+		{"MaintenanceInterval=999ms", func(c *Config) { c.MaintenanceInterval = 999 * time.Millisecond }},
+		{"MergeInterval=-1s", func(c *Config) { c.MergeInterval = -time.Second }},
+		{"MergeInterval=1ns", func(c *Config) { c.MergeInterval = time.Nanosecond }},
 		{"DuckDBThreads=-1", func(c *Config) { c.DuckDBThreads = -1 }},
 		{"DuckDBMaxConns=0", func(c *Config) { c.DuckDBMaxConns = 0 }},
-		{"AlertEvalInterval=0", func(c *Config) { c.AlertEvalInterval = 0 }},
+		{"AlertEvaluationInterval=0", func(c *Config) { c.AlertEvaluationInterval = 0 }},
+		{"AlertEvaluationInterval=999ms", func(c *Config) { c.AlertEvaluationInterval = 999 * time.Millisecond }},
 		{"AlertHistoryDays=-1", func(c *Config) { c.AlertHistoryDays = -1 }},
 		{"AuthMode empty", func(c *Config) { c.AuthMode = "" }},
 		{"SMTP missing host", func(c *Config) { c.SMTPHost = "" }},
@@ -516,6 +686,14 @@ func TestValidate(t *testing.T) {
 		c.RetentionDays = 0
 		if err := c.Validate(); err != nil {
 			t.Errorf("RetentionDays=0 should be valid: %v", err)
+		}
+	})
+
+	t.Run("MergeInterval=0_valid", func(t *testing.T) {
+		c := valid
+		c.MergeInterval = 0
+		if err := c.Validate(); err != nil {
+			t.Errorf("MergeInterval=0 should disable the merge pass: %v", err)
 		}
 	})
 
