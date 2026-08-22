@@ -347,7 +347,7 @@ func TestResolveUserRequiresActiveUnlinkedIssuerAllowedUser(t *testing.T) {
 	}
 	verified := true
 	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"untrusted"}}
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err == nil {
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err == nil {
 		t.Fatal("issuer-mode existing user bypassed allow policy")
 	}
 	if count, err := identities.CountForUser(t.Context(), user.ID); err != nil || count != 0 {
@@ -355,11 +355,11 @@ func TestResolveUserRequiresActiveUnlinkedIssuerAllowedUser(t *testing.T) {
 	}
 
 	claims.Groups = []string{"trusted"}
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err != nil {
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err != nil {
 		t.Fatalf("allowed existing user: %v", err)
 	}
 	claims.Subject = "subject-2"
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err == nil {
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err == nil {
 		t.Fatal("second identity linked to an already-linked user")
 	}
 
@@ -372,7 +372,7 @@ func TestResolveUserRequiresActiveUnlinkedIssuerAllowedUser(t *testing.T) {
 		t.Fatal(err)
 	}
 	inactiveClaims := oidcClaims{Subject: "inactive-subject", Email: inactive.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", inactiveClaims); err == nil {
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", inactiveClaims, requestSource{}); err == nil {
 		t.Fatal("inactive user was linked")
 	}
 }
@@ -395,7 +395,7 @@ func linkedOIDCFixture(t *testing.T, cfg config.Config, role appauth.Role, linkG
 	handler := &OIDCHandler{cfg: cfg, users: users, identities: identities, audit: appauth.NewAuditStore(db.DB)}
 	verified := true
 	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: linkGroups}
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err != nil {
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err != nil {
 		t.Fatalf("link identity: %v", err)
 	}
 	return handler, users, user
@@ -407,7 +407,7 @@ func TestResolveUserDeniesLinkedIdentityRemovedFromAllowedGroups(t *testing.T) {
 
 	verified := true
 	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"unrelated"}}
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err == nil {
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err == nil {
 		t.Fatal("linked identity removed from the allowed group was still admitted")
 	}
 }
@@ -418,7 +418,7 @@ func TestResolveUserPreservesLinkedIdentityWhenNoAllowPolicyConfigured(t *testin
 
 	verified := true
 	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"anything"}}
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err != nil {
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err != nil {
 		t.Fatalf("locally managed user denied by an unconfigured policy: %v", err)
 	}
 }
@@ -438,7 +438,7 @@ func TestResolveUserDowngradesRoleWhenIdPAdminGroupRemoved(t *testing.T) {
 
 	verified := true
 	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
-	got, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims)
+	got, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{})
 	if err != nil {
 		t.Fatalf("resolve after admin group removal: %v", err)
 	}
@@ -476,7 +476,7 @@ func TestResolveUserDeniesGroupOverageWhenGroupPolicyConfigured(t *testing.T) {
 		EmailVerified: &verified,
 		ClaimNames:    map[string]json.RawMessage{"groups": json.RawMessage(`"src1"`)},
 	}
-	_, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims)
+	_, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{})
 	if err == nil {
 		t.Fatal("unreadable group membership was treated as satisfying the allow policy")
 	}
@@ -503,7 +503,7 @@ func TestResolveUserIgnoresGroupOverageWhenNoGroupPolicyConfigured(t *testing.T)
 		EmailVerified: &verified,
 		ClaimNames:    map[string]json.RawMessage{"groups": json.RawMessage(`"src1"`)},
 	}
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err != nil {
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err != nil {
 		t.Fatalf("domain-only policy denied a login over an irrelevant group claim: %v", err)
 	}
 }
@@ -526,7 +526,7 @@ func TestResolveUserAppliesAllowPolicyWhenLinkingExistingUser(t *testing.T) {
 	}
 	verified := true
 	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified}
-	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err == nil {
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err == nil {
 		t.Fatal("linking login bypassed the allow policy that every later login enforces")
 	}
 	if count, err := identities.CountForUser(t.Context(), user.ID); err != nil || count != 0 {
@@ -540,7 +540,7 @@ func TestResolveUserReportsUnusableEmailClaimDistinctly(t *testing.T) {
 
 	verified := true
 	claims := oidcClaims{Subject: "subject-1", Email: "", EmailVerified: &verified}
-	_, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims)
+	_, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{})
 	if err == nil {
 		t.Fatalf("login for %s proceeded with no evaluable email claim", user.Email)
 	}
@@ -567,7 +567,7 @@ func TestResolveUserSkipsRoleReconciliationForInactiveUser(t *testing.T) {
 
 	verified := true
 	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
-	_, _, _ = handler.resolveUser(t.Context(), "https://issuer.example", claims)
+	_, _, _ = handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{})
 
 	stored, err := users.GetByID(user.ID)
 	if err != nil {
@@ -601,5 +601,116 @@ func TestOIDCClaimsDetectGroupOverageWithoutBreakingOnProviderShapes(t *testing.
 	}
 	if plain.groupsUnreadable() {
 		t.Fatal("an enumerable group set was treated as unreadable")
+	}
+}
+
+func TestResolveUserReconcilesRoleOnTheLinkingLogin(t *testing.T) {
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	users := appauth.NewUserStore(db.DB)
+	identities := appauth.NewIdentityStore(db.DB)
+	user, err := users.Create("promoted@example.com", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	handler := &OIDCHandler{
+		cfg: config.Config{
+			OIDCEmailVerification: "required",
+			OIDCAllowedDomains:    "example.com",
+			OIDCAdminGroups:       "fanout-admins",
+			OIDCDefaultRole:       "viewer",
+		},
+		users: users, identities: identities, audit: appauth.NewAuditStore(db.DB),
+	}
+	verified := true
+	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified}
+	got, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{})
+	if err != nil {
+		t.Fatalf("linking login: %v", err)
+	}
+	if got.Role != appauth.RoleViewer {
+		t.Fatalf("role on the linking login = %q, want viewer: the IdP owns the role from the first login, not the second", got.Role)
+	}
+}
+
+func TestResolveUserDoesNotProvisionWhenGroupsAreUnreadable(t *testing.T) {
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	users := appauth.NewUserStore(db.DB)
+	if _, err := users.Create("seed-admin@example.com", "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	handler := &OIDCHandler{
+		cfg: config.Config{
+			OIDCEmailVerification: "required",
+			OIDCAutoProvision:     true,
+			OIDCAllowedDomains:    "example.com",
+			OIDCAllowedGroups:     "trusted",
+			OIDCDefaultRole:       "viewer",
+		},
+		users: users, identities: appauth.NewIdentityStore(db.DB), audit: appauth.NewAuditStore(db.DB),
+	}
+	verified := true
+	claims := oidcClaims{
+		Subject:       "subject-new",
+		Email:         "newcomer@example.com",
+		EmailVerified: &verified,
+		ClaimNames:    map[string]json.RawMessage{"groups": json.RawMessage(`"src1"`)},
+	}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err == nil {
+		t.Fatal("unreadable groups provisioned a new user")
+	}
+	if _, err := users.GetByEmail("newcomer@example.com"); err == nil {
+		t.Fatal("a denied login left a persisted user behind")
+	}
+}
+
+func TestReconciledRoleChangeIsAttributableToItsSource(t *testing.T) {
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	users := appauth.NewUserStore(db.DB)
+	identities := appauth.NewIdentityStore(db.DB)
+	user, err := users.Create("attributed@example.com", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	handler := &OIDCHandler{
+		cfg: config.Config{
+			OIDCEmailVerification: "required",
+			OIDCAllowedGroups:     "trusted",
+			OIDCAdminGroups:       "fanout-admins",
+			OIDCDefaultRole:       "viewer",
+		},
+		users: users, identities: identities, audit: appauth.NewAuditStore(db.DB),
+	}
+	verified := true
+	source := requestSource{IP: "203.0.113.7", UserAgent: "smoke/1.0"}
+	linking := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", linking, source); err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+
+	var ip, agent string
+	row := db.DB.QueryRow(`SELECT COALESCE(remote_ip, ''), COALESCE(user_agent, '') FROM auth_audit_events WHERE event_type = 'role.changed'`)
+	if err := row.Scan(&ip, &agent); err != nil {
+		t.Fatalf("read role.changed audit event: %v", err)
+	}
+	if ip != source.IP || agent != source.UserAgent {
+		t.Fatalf("role.changed recorded ip=%q agent=%q, want %q and %q: the handler's most security-relevant event must be correlatable", ip, agent, source.IP, source.UserAgent)
 	}
 }

@@ -175,7 +175,8 @@ func (h *OIDCHandler) Callback(c *echo.Context) error {
 		return h.oidcDenied(c, "invalid nonce")
 	}
 
-	user, identity, err := h.resolveUser(ctx, idToken.Issuer, claims)
+	source := requestSource{IP: c.RealIP(), UserAgent: c.Request().UserAgent()}
+	user, identity, err := h.resolveUser(ctx, idToken.Issuer, claims, source)
 	if err != nil {
 		slog.Warn("OIDC login denied", "issuer", idToken.Issuer, "subject", claims.Subject, "err", err)
 		return h.oidcDenied(c, err.Error())
@@ -219,7 +220,14 @@ func configuredOIDCEmail(claims map[string]json.RawMessage, name string) (string
 	return email, nil
 }
 
-func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oidcClaims) (appauth.User, appauth.UserIdentity, error) {
+// requestSource carries the browser attribution that audit events written
+// during login must record.
+type requestSource struct {
+	IP        string
+	UserAgent string
+}
+
+func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oidcClaims, source requestSource) (appauth.User, appauth.UserIdentity, error) {
 	identity, err := h.identities.Find(ctx, issuer, claims.Subject)
 	if err == nil {
 		user, userErr := h.users.GetByIDContext(ctx, identity.UserID)
@@ -229,7 +237,7 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 		if err := h.reconcileEligibility(claims); err != nil {
 			return appauth.User{}, appauth.UserIdentity{}, err
 		}
-		user, err = h.reconcileRole(ctx, user, claims)
+		user, err = h.reconcileRole(ctx, user, claims, source)
 		if err != nil {
 			return appauth.User{}, appauth.UserIdentity{}, err
 		}
@@ -244,6 +252,12 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 	}
 	if h.cfg.OIDCEmailVerification == "required" && (claims.EmailVerified == nil || !*claims.EmailVerified) {
 		return appauth.User{}, appauth.UserIdentity{}, errors.New("OIDC email is not verified")
+	}
+	// Eligibility decides before anything is created or linked. Checking after
+	// provisioning would leave a persisted user and a successful
+	// user.provisioned audit event behind a denied login.
+	if err := h.reconcileEligibility(claims); err != nil {
+		return appauth.User{}, appauth.UserIdentity{}, err
 	}
 	user, err := h.users.GetByEmailContext(ctx, email)
 	if errors.Is(err, appauth.ErrUserNotFound) {
@@ -265,11 +279,6 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 	if !user.Active {
 		return appauth.User{}, appauth.UserIdentity{}, errors.New("user is inactive")
 	}
-	// The allow policy gates the linking login too. Enforcing it only on later
-	// logins would let an identity link once and then be denied forever.
-	if err := h.reconcileEligibility(claims); err != nil {
-		return appauth.User{}, appauth.UserIdentity{}, err
-	}
 	linked, err := h.identities.CountForUser(ctx, user.ID)
 	if err != nil {
 		return appauth.User{}, appauth.UserIdentity{}, err
@@ -288,6 +297,11 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 		if err != nil || identity.UserID != user.ID {
 			return appauth.User{}, appauth.UserIdentity{}, errors.New("identity linking failed")
 		}
+	}
+	// The IdP owns the mapped role from the first login, not the second.
+	user, err = h.reconcileRole(ctx, user, claims, source)
+	if err != nil {
+		return appauth.User{}, appauth.UserIdentity{}, err
 	}
 	return user, identity, nil
 }
@@ -347,7 +361,7 @@ func (h *OIDCHandler) roleMappingConfigured() bool {
 // reconcileRole applies the configured IdP group-to-role mapping on every
 // login. The role change, auth version increment, session revocation, and audit
 // event are one transaction inside UpdateWithAudit.
-func (h *OIDCHandler) reconcileRole(ctx context.Context, user appauth.User, claims oidcClaims) (appauth.User, error) {
+func (h *OIDCHandler) reconcileRole(ctx context.Context, user appauth.User, claims oidcClaims, source requestSource) (appauth.User, error) {
 	// A deactivated account is denied by the caller. Reconciling it anyway
 	// would rewrite its role, revoke sessions, and write an audit event on
 	// every rejected login attempt.
@@ -358,10 +372,25 @@ func (h *OIDCHandler) reconcileRole(ctx context.Context, user appauth.User, clai
 	if !appauth.ValidRole(string(mapped)) || mapped == user.Role {
 		return user, nil
 	}
+	if user.Role == appauth.RoleAdmin {
+		// Ask before writing. Letting UpdateWithAudit discover the invariant
+		// would open a write transaction and log a warning on every login for
+		// a condition only an operator can change.
+		admins, err := h.users.CountActiveAdmins()
+		if err != nil {
+			return appauth.User{}, fmt.Errorf("count active admins: %w", err)
+		}
+		if admins <= 1 {
+			slog.Debug("OIDC role reconciliation skipped for the last active administrator", "user_id", user.ID, "mapped_role", mapped)
+			return user, nil
+		}
+	}
 	event := appauth.AuditEvent{
 		ActorUserID: user.ID,
 		EventType:   "role.changed",
 		Outcome:     "success",
+		RemoteIP:    source.IP,
+		UserAgent:   source.UserAgent,
 		Metadata:    map[string]any{"mode": "oidc", "from": string(user.Role), "to": string(mapped)},
 	}
 	updated, err := h.users.UpdateWithAudit(user.ID, nil, nil, &mapped, nil, event)
