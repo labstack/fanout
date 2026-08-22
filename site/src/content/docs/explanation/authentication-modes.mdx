@@ -1,0 +1,65 @@
+---
+title: Authentication modes
+description: Why Fanout has two sign-in modes, what each one owns, and where the boundary between them sits.
+summary: Local codes versus an identity provider — who owns roles in each, and what happens on every login.
+read_when:
+  - You are choosing between local sign-in and OIDC.
+  - You expect a provider group change to take effect and want to know when it does.
+---
+
+Fanout signs people in one of two ways, set by `FANOUT_AUTH_MODE`. The choice is
+not only about convenience — it decides who owns a user's role.
+
+## Local
+
+There are no passwords. Active users receive short-lived codes by email, which
+is why SMTP exists as a setting at all.
+
+SMTP is optional, and that has a consequence worth understanding rather than
+discovering. Creating a user without it succeeds, and reports that it could not
+deliver an invitation. The account is real; nobody can reach it until an
+operator with shell access mints a link with `fanout login-link`. That is the
+designed path, not a workaround — see
+[troubleshooting](/guides/troubleshoot).
+
+In local mode, roles are managed inside Fanout.
+
+## OIDC
+
+An identity provider handles sign-in. Two behaviours are worth knowing before
+you rely on it.
+
+### Eligibility is checked on every login
+
+`FANOUT_OIDC_ALLOWED_GROUPS` and `FANOUT_OIDC_ALLOWED_DOMAINS` are evaluated at
+every login, including by an identity that is already linked. Removing someone
+from an allowed group at the provider blocks their next login. It does not wait
+for a provisioning cycle, and there is no window in which a removed user
+continues to be admitted.
+
+If neither list is set there is no allow policy, and membership is managed
+locally instead.
+
+### The provider can own roles, or not
+
+If `FANOUT_OIDC_ADMIN_GROUPS` or `FANOUT_OIDC_OPERATOR_GROUPS` is set, the
+provider owns each linked user's role. The mapped role is applied on every
+login; anyone in no mapped group falls back to `FANOUT_OIDC_DEFAULT_ROLE`. A
+role change increments the user's auth version, revokes their browser sessions,
+and writes a `role.changed` audit event — in one transaction, so a demotion
+cannot half-apply and leave live sessions at the old level.
+
+If neither group list is set, roles are managed locally and logins never change
+them.
+
+:::caution[The last administrator is never demoted]
+Role reconciliation refuses to demote the last active administrator, because an
+installation that cannot administer itself has no way back. If you expect the
+mapping to apply to your first admin, promote a second one first.
+:::
+
+## What neither mode is
+
+Neither is a tenancy boundary. Namespaces scope telemetry queries, but anyone
+who can query the instance can query every namespace in it. An instance is one
+trust domain; separate trust domains want separate instances.

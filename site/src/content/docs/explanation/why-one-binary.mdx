@@ -1,0 +1,60 @@
+---
+title: Why one binary
+description: The reasoning behind packaging ingest, storage, query, alerts and the UI in a single process.
+summary: What collapsing an observability stack into one process buys, and what it costs.
+read_when:
+  - You are evaluating Fanout against an assembled stack.
+  - You want to know where the single-process design stops being an advantage.
+---
+
+A conventional self-hosted observability setup is a collector, a storage
+backend, a query layer, a dashboard service and an alertmanager. Five processes,
+five configurations, five upgrade cadences, and a set of failure modes that only
+exist between them.
+
+Fanout is one process. That is the whole design decision, and everything else on
+this page is a consequence of it.
+
+## What it buys
+
+**One thing to operate.** One binary to pin, one data directory to back up, one
+process to restart. The [backup guide](/guides/back-up-and-restore) is short
+because the unit of backup is a directory.
+
+**No integration surface.** The query layer does not talk to storage over a
+network. The alert engine reads the same rollups the browser does. The chat
+investigator calls the same typed query tools the API exposes, which is why what
+it tells you matches what the dashboards show — there is no second
+implementation to disagree.
+
+**Configuration in one place.** Every setting is one `FANOUT_` variable,
+[generated into one reference](/reference/configuration) from the type the
+loader binds.
+
+## What it costs
+
+**The parts scale together.** Ingest, query and maintenance share a process and
+a machine. There is no scaling the query layer without also scaling ingest,
+because they are the same thing.
+
+**They contend.** Maintenance and rollups serialise against ingest through one
+write gate. On a busy instance, compacting harder is not free — it is traded
+against ingest headroom. [Tuning retention](/guides/tune-retention) is mostly
+about managing that trade.
+
+**One process is one failure domain.** Nothing degrades independently. A process
+that dies takes ingest, query, alerting and the UI with it.
+
+## Where the line is
+
+Fanout is built for one instance holding one team's telemetry, on hardware that
+team controls, at a volume a single machine can hold. The reference deployment
+target is a small VM.
+
+It is not built to be a multi-tenant platform, and namespaces are not the
+mechanism for pretending otherwise: they scope queries, not access. Separate
+trust domains want separate instances.
+
+If your volume needs horizontal ingest, or your organisation needs one system
+serving mutually distrustful tenants, the single-process design is working
+against you rather than for you, and you want something else.

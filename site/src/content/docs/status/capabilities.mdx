@@ -37,7 +37,8 @@ inline, so something reading the index knows before it fetches the page.
 | Alerts | preview | Rules evaluate on an interval against rollups. |
 | Local email sign-in | shipped | Codes by email; no passwords. |
 | OIDC sign-in | shipped | Provider flow, with group and domain mapping. |
-| Generated settings reference | planned | `cmd/fanout-docgen` and its drift gate are not built yet. |
+| Generated settings reference | shipped | `cmd/fanout-docgen` writes it; `just check` fails when it drifts from the type. |
+| Guides for every operational task | planned | Alerts and MCP have settings but no guide yet. |
 
 ## What "no migration path" means in practice
 

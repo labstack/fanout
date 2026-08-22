@@ -1,0 +1,70 @@
+---
+title: How storage works
+description: What Fanout writes to disk, how it is queried, and why the data directory is one unit.
+summary: Parquet under a DuckLake catalog, queried by DuckDB in-process, with SQLite holding application state.
+read_when:
+  - You are sizing disk, or deciding what to back up.
+  - You want to know why a rollup lags the raw telemetry.
+---
+
+Telemetry lands on disk as Parquet. A DuckLake catalog tracks those files, and
+DuckDB queries them in the same process that wrote them. Application state —
+users, sessions, dashboards, alert rules, agent history — lives in a separate
+SQLite database.
+
+Under the data directory:
+
+| Path | Holds |
+|---|---|
+| `telemetry/parquet` | The telemetry itself |
+| `telemetry/ducklake.sqlite` | The catalog tracking those files |
+| `query/catalog.duckdb` | Query-side state |
+| `control/fanout.sqlite` | Users, sessions, dashboards, alerts, agent history |
+
+These reference each other, which is why [backup](/guides/back-up-and-restore)
+takes the whole directory. A copy of `telemetry/parquet` without its catalog is
+a directory of files nothing can find.
+
+## Why two databases
+
+They have different shapes. Telemetry is append-heavy, queried analytically over
+wide time ranges, and never updated — which is what Parquet and DuckDB are good
+at. Application state is small, transactional, and updated constantly, which
+they are not. Using one engine for both would make one of the two jobs worse.
+
+## Writes are batched
+
+Incoming telemetry is buffered and flushed on `FANOUT_FLUSH_INTERVAL` or when
+`FANOUT_FLUSH_BATCH_SIZE` rows accumulate. Nothing is queryable until it is
+flushed, so the flush interval is the floor on how quickly new telemetry becomes
+visible — and the amount of data at risk if the process dies uncleanly.
+
+## Small files are the thing to manage
+
+Frequent flushes produce many small Parquet files, and scan cost tracks file
+count as much as it tracks bytes. Two passes address it: a frequent merge that
+consolidates the newest small files and deletes nothing, and an hourly
+maintenance cycle that also applies retention. [Tuning
+retention](/guides/tune-retention) covers both.
+
+## Rollups lag, on purpose
+
+The overview and the alert engine read pre-aggregated rollups rather than raw
+telemetry, recomputed on `FANOUT_ROLLUP_INTERVAL`. A rollup deliberately trails
+the newest data by a safety margin, because telemetry arrives out of order —
+aggregating right up to the current instant would produce numbers that change
+after the fact as late spans land.
+
+The practical consequence: the newest few seconds are queryable as raw
+telemetry before they appear in an overview or fire an alert. That is a
+correctness choice, not lag to be tuned away.
+
+## Everything serialises through one write gate
+
+Flushes, rollups and maintenance all commit through a shared gate, so DuckDB's
+single writer is never contended. Reads run concurrently — the catalog is opened
+in WAL mode, which is what makes a connection pool larger than one safe.
+
+This is the mechanism behind the trade in [why one
+binary](/explanation/why-one-binary): maintenance that runs harder takes gate
+time that ingest is not getting.

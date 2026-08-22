@@ -63,7 +63,7 @@ export const GET: APIRoute = async ({ site }) => {
     "",
     "## Operating Fanout from an agent",
     "",
-    "- Fanout is a server, not a CLI. An agent operates it over HTTP or over MCP, not by running subcommands.",
+    "- Fanout is a server. Its whole command line is three forms: `fanout [flags]` to run it, `fanout version`, and `fanout [--config path] login-link <email>` — a local-auth-mode recovery path that needs shell access on the host. Everything else is done over HTTP or MCP; there are no operational subcommands to script.",
     "- MCP is the intended agent interface. The server exposes its tools at `/mcp`.",
     "- MCP and the HTTP API authenticate with an API key, which is not the same credential as the ingest token. Both are `fo_`-prefixed; the routes tell them apart by prefix.",
     "- Telemetry goes in over OTLP only: gRPC on port 4317 and HTTP on port 4318, each its own listener. There is no bespoke ingest API to script against.",

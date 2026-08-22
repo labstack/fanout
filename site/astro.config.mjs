@@ -76,6 +76,15 @@ export default defineConfig({
           ],
         },
         {
+          label: "Guides",
+          items: [
+            { label: "Terminate TLS", slug: "guides/terminate-tls" },
+            { label: "Back up and restore", slug: "guides/back-up-and-restore" },
+            { label: "Tune retention", slug: "guides/tune-retention" },
+            { label: "Troubleshoot", slug: "guides/troubleshoot" },
+          ],
+        },
+        {
           label: "Reference",
           items: [
             { label: "Configuration", slug: "reference/configuration" },
@@ -89,11 +98,17 @@ export default defineConfig({
             },
           ],
         },
-        // Guides and the explanation section land in later passes. A sidebar
-        // entry for a page that does not exist fails the build, so this list
-        // grows with the tree rather than ahead of it — an empty section is a
-        // promise, and a promise in a sidebar is indistinguishable from a
-        // broken link.
+        {
+          label: "Explanation",
+          items: [
+            { label: "Why one binary", slug: "explanation/why-one-binary" },
+            { label: "How storage works", slug: "explanation/storage-model" },
+            { label: "Authentication modes", slug: "explanation/authentication-modes" },
+          ],
+        },
+        // This list grows with the tree rather than ahead of it: a sidebar entry
+        // for a page that does not exist fails the build, and an empty section
+        // is a promise indistinguishable from a broken link.
         {
           label: "Status",
           items: [{ label: "Shipped vs planned", slug: "status/capabilities" }],
