@@ -28,6 +28,11 @@ type testAuthServer struct {
 	cfg        config.Config
 }
 
+type expiredSetupCredential struct{}
+
+func (expiredSetupCredential) Verify(string) auth.SetupStatus { return auth.SetupStatusExpired }
+func (expiredSetupCredential) Clear()                         {}
+
 func newTestAuthServer(t *testing.T) *testAuthServer {
 	return newTestAuthServerWith(t, config.Config{AuthMode: "local"}, auth.SMTPConfig{})
 }
@@ -473,12 +478,13 @@ func TestSetupLifecycleAndIngestToken(t *testing.T) {
 
 func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
 	t.Run("expired", func(t *testing.T) {
-		s := newTestAuthServer(t)
-		s.setup.SetExpiresForTest(time.Now().Add(-time.Minute))
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
+		e := echo.New()
+		h := &AuthHandler{setup: expiredSetupCredential{}, setupLimiter: auth.NewKeyedLimiter(10, 15*time.Minute)}
+		e.POST("/api/auth/setup", h.Setup)
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"expired"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
-		s.e.ServeHTTP(rec, req)
+		e.ServeHTTP(rec, req)
 		if rec.Code != http.StatusGone {
 			t.Fatalf("expired = %d", rec.Code)
 		}
