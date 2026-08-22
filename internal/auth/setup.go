@@ -87,14 +87,6 @@ func (s *Setup) Clear() {
 	s.mu.Unlock()
 }
 
-// SetExpiresForTest overrides the expiry to drive the Expired path in tests.
-// Do not call from production code — no compiler gate enforces this because the helper lives in a non-test file.
-func (s *Setup) SetExpiresForTest(expires time.Time) {
-	s.mu.Lock()
-	s.expires = expires
-	s.mu.Unlock()
-}
-
 // setupTokenBytes is the entropy floor for a credential that creates an
 // administrator. The token is delivered inside the setup URL rather than typed,
 // so length costs nothing in usability.

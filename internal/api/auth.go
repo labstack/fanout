@@ -16,10 +16,15 @@ import (
 	"github.com/labstack/fanout/internal/settings"
 )
 
+type setupCredential interface {
+	Verify(string) auth.SetupStatus
+	Clear()
+}
+
 type AuthHandler struct {
 	users                *auth.UserStore
 	codes                *auth.CodeStore
-	setup                *auth.Setup
+	setup                setupCredential
 	settings             *settings.Store
 	sessions             *auth.BrowserSessions
 	audit                *auth.AuditStore
