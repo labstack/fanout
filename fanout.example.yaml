@@ -18,7 +18,7 @@ server:
 
 ingest:
   otlp_grpc_addr: "127.0.0.1:4317" # FANOUT_OTLP_GRPC_ADDR
-  public_endpoint: "" # FANOUT_INGEST_ENDPOINT
+  advertised_endpoint: "" # FANOUT_INGEST_ADVERTISED_ENDPOINT
   default_namespace: default # FANOUT_DEFAULT_NAMESPACE
   flush_seconds: 15 # FANOUT_FLUSH_SECONDS
   flush_batch_size: 50000 # FANOUT_FLUSH_BATCH_SIZE
