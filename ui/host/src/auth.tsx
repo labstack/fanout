@@ -47,18 +47,21 @@ function AuthSurface({ children, wide = false }: { children: ReactNode; wide?: b
   </Box>;
 }
 
-// The setup credential is delivered in the URL printed at first boot. Read it
-// once and strip it from the address bar so it does not linger in history,
+// The setup credential is delivered in the URL printed at first boot. Reading
+// it stays pure so a re-invoked state initializer cannot lose it; stripping it
+// from the address bar happens in an effect, so it does not linger in history,
 // screenshots, or a shared screen.
-function consumeSetupTokenFromURL(): string {
+function readSetupTokenFromURL(): string {
   if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("setup_token") ?? "";
+}
+
+function stripSetupTokenFromURL(): void {
+  if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
-  const token = url.searchParams.get("setup_token") ?? "";
-  if (token) {
-    url.searchParams.delete("setup_token");
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
-  }
-  return token;
+  if (!url.searchParams.has("setup_token")) return;
+  url.searchParams.delete("setup_token");
+  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
 }
 
 export default function AuthGate({ children }: { children: ReactNode }) {
@@ -67,7 +70,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [sessionReady, setSessionReady] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
-  const [setupToken, setSetupToken] = useState(consumeSetupTokenFromURL);
+  const [setupToken, setSetupToken] = useState(readSetupTokenFromURL);
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -76,6 +79,10 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [copied, setCopied] = useState(false);
   const returnTo = oauthReturnTo();
   const authenticated = viewer === "user";
+
+  useEffect(() => {
+    stripSetupTokenFromURL();
+  }, []);
 
   useEffect(() => {
     clearLegacySession();

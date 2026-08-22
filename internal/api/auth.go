@@ -136,10 +136,9 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
 	}
 
-	// Generate the ingest token only if one doesn't exist yet. A Setup retry
-	// (ErrSetupComplete branch above) must not rotate and invalidate a token
-	// live collectors may already be using — to rotate deliberately, the admin
-	// uses the Settings page.
+	// Generate the ingest token only if one doesn't exist yet, so a database
+	// that already carries one is never rotated out from under live collectors
+	// — to rotate deliberately, the admin uses the Settings page.
 	resp := map[string]string{"status": "authenticated"}
 	current, err := h.settings.GetIngest(c.Request().Context())
 	if err != nil {
