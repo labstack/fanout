@@ -191,10 +191,42 @@ diagrams:
       d2 "$src" "${src%.d2}.svg"
     done
 
+# ── Documentation site ───────────────────────────────────────────────────────
+
+# Rewrite the generated settings reference from internal/config.
+docs-generate:
+    go run ./cmd/fanout-docgen
+
+# Fail when a committed settings page is behind the configuration type.
+docs-generate-check:
+    go run ./cmd/fanout-docgen --check
+
+# Install the documentation site's dependencies.
+site-install:
+    cd site && npm install --no-audit --no-fund
+
+# Serve the documentation site locally with live reload.
+site: docs-generate
+    cd site && npm run dev
+
+# Build the documentation site into site/dist.
+#
+# Depends on the *checking* recipe, not the writing one: `check` is a gate, and
+# a gate that rewrites the tree it is inspecting cannot tell you whether the
+# tree was already right. Use `just site` for the writing path during
+# development.
+site-build: docs-generate-check
+    cd site && npm run build
+
 # ── Gate ─────────────────────────────────────────────────────────────────────
 
 # lefthook's pre-push hook and CI both run this.
-check: fmt-check lint ui-audit ui-check notices-check test ui-test
+#
+# docs-generate-check comes before the site build for the same reason it exists:
+# a settings page that no longer matches the type the loader binds is a
+# documented setting the binary would reject, and it should fail here rather
+# than be published.
+check: fmt-check lint ui-audit ui-check notices-check test ui-test docs-generate-check site-build
     @echo "All checks passed"
 
 clean:
