@@ -61,8 +61,11 @@ func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, pu
 		metadataURL: issuer + "/.well-known/oauth-protected-resource/mcp",
 		// Registration is unauthenticated by design (RFC 7591 dynamic
 		// registration). Bound how many clients one source can create before
-		// the janitor collects the abandoned ones.
-		registerLimiter: appauth.NewKeyedLimiter(20, 15*time.Minute),
+		// the janitor collects the abandoned ones. The budget is per client
+		// IP, which collapses to one bucket when Fanout sits behind a proxy
+		// and server.trusted_proxy_cidrs is unset, so it is set well above a
+		// plausible team rollout rather than at the tightest defensible value.
+		registerLimiter: appauth.NewKeyedLimiter(60, 15*time.Minute),
 	}, nil
 }
 
