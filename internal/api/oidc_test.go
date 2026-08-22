@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -373,5 +374,136 @@ func TestResolveUserRequiresActiveUnlinkedIssuerAllowedUser(t *testing.T) {
 	inactiveClaims := oidcClaims{Subject: "inactive-subject", Email: inactive.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
 	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", inactiveClaims); err == nil {
 		t.Fatal("inactive user was linked")
+	}
+}
+
+// linkedOIDCFixture creates a user with one linked identity and returns the
+// handler, stores, and user so reconciliation tests can vary later logins.
+func linkedOIDCFixture(t *testing.T, cfg config.Config, role appauth.Role, linkGroups []string) (*OIDCHandler, *appauth.UserStore, appauth.User) {
+	t.Helper()
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	users := appauth.NewUserStore(db.DB)
+	identities := appauth.NewIdentityStore(db.DB)
+	user, err := users.Create("person@example.com", "", role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := &OIDCHandler{cfg: cfg, users: users, identities: identities, audit: appauth.NewAuditStore(db.DB)}
+	verified := true
+	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: linkGroups}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err != nil {
+		t.Fatalf("link identity: %v", err)
+	}
+	return handler, users, user
+}
+
+func TestResolveUserDeniesLinkedIdentityRemovedFromAllowedGroups(t *testing.T) {
+	cfg := config.Config{OIDCEmailVerification: "required", OIDCAllowedGroups: "trusted", OIDCDefaultRole: "viewer"}
+	handler, _, user := linkedOIDCFixture(t, cfg, "viewer", []string{"trusted"})
+
+	verified := true
+	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"unrelated"}}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err == nil {
+		t.Fatal("linked identity removed from the allowed group was still admitted")
+	}
+}
+
+func TestResolveUserPreservesLinkedIdentityWhenNoAllowPolicyConfigured(t *testing.T) {
+	cfg := config.Config{OIDCEmailVerification: "required", OIDCDefaultRole: "viewer"}
+	handler, _, user := linkedOIDCFixture(t, cfg, "viewer", nil)
+
+	verified := true
+	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"anything"}}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err != nil {
+		t.Fatalf("locally managed user denied by an unconfigured policy: %v", err)
+	}
+}
+
+func TestResolveUserDowngradesRoleWhenIdPAdminGroupRemoved(t *testing.T) {
+	cfg := config.Config{
+		OIDCEmailVerification: "required",
+		OIDCAllowedGroups:     "trusted",
+		OIDCAdminGroups:       "fanout-admins",
+		OIDCDefaultRole:       "viewer",
+	}
+	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "fanout-admins"})
+	// A second admin keeps the last-active-admin invariant from blocking the downgrade.
+	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+
+	verified := true
+	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
+	got, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims)
+	if err != nil {
+		t.Fatalf("resolve after admin group removal: %v", err)
+	}
+	if got.Role != appauth.RoleViewer {
+		t.Fatalf("role after admin group removal = %q, want viewer", got.Role)
+	}
+	stored, err := users.GetByID(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Role != appauth.RoleViewer {
+		t.Fatalf("persisted role = %q, want viewer", stored.Role)
+	}
+	if stored.AuthVersion <= user.AuthVersion {
+		t.Fatalf("auth version = %d, want greater than %d so existing sessions are revoked", stored.AuthVersion, user.AuthVersion)
+	}
+}
+
+func TestResolveUserDeniesGroupOverageWhenGroupPolicyConfigured(t *testing.T) {
+	cfg := config.Config{
+		OIDCEmailVerification: "required",
+		OIDCAllowedGroups:     "trusted",
+		OIDCAdminGroups:       "fanout-admins",
+		OIDCDefaultRole:       "viewer",
+	}
+	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "fanout-admins"})
+	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+
+	verified := true
+	claims := oidcClaims{
+		Subject:       "subject-1",
+		Email:         user.Email,
+		EmailVerified: &verified,
+		ClaimNames:    map[string]string{"groups": "src1"},
+	}
+	_, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims)
+	if err == nil {
+		t.Fatal("unreadable group membership was treated as satisfying the allow policy")
+	}
+	if !strings.Contains(err.Error(), "group") {
+		t.Fatalf("denial reason = %q, want it to name the group claim so operators can fix the IdP", err)
+	}
+	stored, err := users.GetByID(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Role != appauth.RoleAdmin {
+		t.Fatalf("role = %q, want admin: unreadable groups must never be read as an empty group set", stored.Role)
+	}
+}
+
+func TestResolveUserIgnoresGroupOverageWhenNoGroupPolicyConfigured(t *testing.T) {
+	cfg := config.Config{OIDCEmailVerification: "required", OIDCAllowedDomains: "example.com", OIDCDefaultRole: "viewer"}
+	handler, _, user := linkedOIDCFixture(t, cfg, "viewer", nil)
+
+	verified := true
+	claims := oidcClaims{
+		Subject:       "subject-1",
+		Email:         user.Email,
+		EmailVerified: &verified,
+		ClaimNames:    map[string]string{"groups": "src1"},
+	}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err != nil {
+		t.Fatalf("domain-only policy denied a login over an irrelevant group claim: %v", err)
 	}
 }

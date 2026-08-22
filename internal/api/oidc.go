@@ -106,6 +106,19 @@ type oidcClaims struct {
 	EmailVerified *bool    `json:"email_verified"`
 	Nonce         string   `json:"nonce"`
 	Groups        []string `json:"groups"`
+	// ClaimNames carries the OpenID Connect aggregated/distributed claim
+	// index. Entra ID uses it to signal group overage: past roughly 200
+	// memberships the groups claim is omitted entirely and a Graph API
+	// source is named here instead. An omitted groups claim therefore does
+	// not mean the user is in no groups.
+	ClaimNames map[string]string `json:"_claim_names"`
+}
+
+// groupsUnreadable reports whether the identity provider declined to enumerate
+// group membership in the token rather than reporting an empty membership.
+func (c oidcClaims) groupsUnreadable() bool {
+	_, overage := c.ClaimNames["groups"]
+	return overage
 }
 
 func (h *OIDCHandler) Callback(c *echo.Context) error {
@@ -200,7 +213,17 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 	identity, err := h.identities.Find(ctx, issuer, claims.Subject)
 	if err == nil {
 		user, userErr := h.users.GetByIDContext(ctx, identity.UserID)
-		return user, identity, userErr
+		if userErr != nil {
+			return appauth.User{}, appauth.UserIdentity{}, userErr
+		}
+		if err := h.reconcileEligibility(claims); err != nil {
+			return appauth.User{}, appauth.UserIdentity{}, err
+		}
+		user, err = h.reconcileRole(ctx, user, claims)
+		if err != nil {
+			return appauth.User{}, appauth.UserIdentity{}, err
+		}
+		return user, identity, nil
 	}
 	if !errors.Is(err, appauth.ErrUserNotFound) {
 		return appauth.User{}, appauth.UserIdentity{}, err
@@ -255,6 +278,81 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 		}
 	}
 	return user, identity, nil
+}
+
+// eligibilityConfigured reports whether an allow policy exists to enforce. With
+// no allowed groups or domains configured, membership is managed locally and a
+// linked identity must not be denied for failing a policy that was never set.
+func (h *OIDCHandler) eligibilityConfigured() bool {
+	return len(csvValues(h.cfg.OIDCAllowedGroups)) != 0 || len(csvValues(h.cfg.OIDCAllowedDomains)) != 0
+}
+
+// reconcileEligibility re-evaluates the configured allow policy on every login,
+// including logins by an already-linked identity. Without this, allowed groups
+// and domains would only ever be first-login provisioning policy: removing a
+// user from an allowed IdP group would not prevent their next login.
+func (h *OIDCHandler) reconcileEligibility(claims oidcClaims) error {
+	if h.groupPolicyConfigured() && claims.groupsUnreadable() {
+		// Failing closed is the only safe reading: treating an unreadable
+		// group set as an empty one would demote or lock out every member of
+		// a large directory at once.
+		return errors.New("identity provider omitted group claims; configure it to emit only application-assigned groups")
+	}
+	if !h.eligibilityConfigured() {
+		return nil
+	}
+	// Domain eligibility is judged on the claims presented now, not on the
+	// email recorded when the identity was first linked.
+	email, err := appauth.NormalizeEmail(claims.Email)
+	if err != nil {
+		email = ""
+	}
+	if !h.provisionAllowed(email, claims.Groups) {
+		return errors.New("identity no longer satisfies the allow policy")
+	}
+	return nil
+}
+
+// groupPolicyConfigured reports whether any decision depends on group claims.
+func (h *OIDCHandler) groupPolicyConfigured() bool {
+	return len(csvValues(h.cfg.OIDCAllowedGroups)) != 0 || h.roleMappingConfigured()
+}
+
+// roleMappingConfigured reports whether the IdP owns the fixed role. Without a
+// group-to-role mapping the role is managed locally and must be left alone.
+func (h *OIDCHandler) roleMappingConfigured() bool {
+	return len(csvValues(h.cfg.OIDCAdminGroups)) != 0 || len(csvValues(h.cfg.OIDCOperatorGroups)) != 0
+}
+
+// reconcileRole applies the configured IdP group-to-role mapping on every
+// login. The role change, auth version increment, session revocation, and audit
+// event are one transaction inside UpdateWithAudit.
+func (h *OIDCHandler) reconcileRole(ctx context.Context, user appauth.User, claims oidcClaims) (appauth.User, error) {
+	if !h.roleMappingConfigured() {
+		return user, nil
+	}
+	mapped := h.provisionRole(claims.Groups)
+	if !appauth.ValidRole(string(mapped)) || mapped == user.Role {
+		return user, nil
+	}
+	event := appauth.AuditEvent{
+		ActorUserID: user.ID,
+		EventType:   "role.changed",
+		Outcome:     "success",
+		Metadata:    map[string]any{"mode": "oidc", "from": string(user.Role), "to": string(mapped)},
+	}
+	updated, err := h.users.UpdateWithAudit(user.ID, nil, nil, &mapped, nil, event)
+	if errors.Is(err, appauth.ErrLastActiveAdmin) {
+		// The last active administrator keeps the role rather than locking the
+		// installation out of its own administration. Operators must promote a
+		// second administrator before the IdP mapping can take effect here.
+		slog.Warn("OIDC role reconciliation skipped for the last active administrator", "user_id", user.ID, "mapped_role", mapped)
+		return user, nil
+	}
+	if err != nil {
+		return appauth.User{}, fmt.Errorf("reconcile OIDC role: %w", err)
+	}
+	return updated, nil
 }
 
 func (h *OIDCHandler) provisionAllowed(email string, groups []string) bool {
