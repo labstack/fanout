@@ -52,7 +52,8 @@ jobs:
       - name: just ui-deps
         run: just ui-deps
 
-      # fmt-check, lint, UI asset freshness, and backend/frontend tests.
+      # fmt-check, lint, dependency audit, UI asset freshness, and
+      # backend/frontend tests.
       # lefthook runs on push.
       - name: just check
         run: just check

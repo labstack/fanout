@@ -149,6 +149,12 @@ ui-lint:
 ui-test:
     cd ui/host && bun run test
 
+# Audit both independent browser dependency graphs. Security overrides live in
+# each package.json so installs, local checks, and CI all resolve the same fixes.
+ui-audit:
+    cd ui/apps && bun audit
+    cd ui/host && bun audit
+
 # Uses git as the backup, which is sound only because these outputs are
 # committed: the check refuses to run when they are already dirty, and always
 # restores them afterwards, so it never mutates the working tree.
@@ -202,7 +208,7 @@ diagrams:
 # ── Gate ─────────────────────────────────────────────────────────────────────
 
 # lefthook's pre-push hook and CI both run this.
-check: fmt-check lint ui-check test ui-test
+check: fmt-check lint ui-audit ui-check test ui-test
     @echo "All checks passed"
 
 clean:
