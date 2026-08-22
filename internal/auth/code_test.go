@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,6 +27,16 @@ func TestGenerateCode_SixDigits(t *testing.T) {
 	}
 	if len(code) != 6 {
 		t.Errorf("code = %q, want 6 digits", code)
+	}
+}
+
+func TestGenerateLoginLinkTokenHas128BitsOfEntropy(t *testing.T) {
+	token, err := GenerateLoginLinkToken()
+	if err != nil {
+		t.Fatalf("GenerateLoginLinkToken: %v", err)
+	}
+	if len(token) != 2*loginLinkTokenBytes {
+		t.Fatalf("token length = %d, want %d hex characters", len(token), 2*loginLinkTokenBytes)
 	}
 }
 
@@ -67,6 +78,74 @@ func TestCodeStore_CreateAndVerify(t *testing.T) {
 	ok, _ = s.Verify("test@example.com", code)
 	if ok {
 		t.Error("used code should not verify again")
+	}
+}
+
+func TestLoginLinkIsSingleUseAndPurposeBound(t *testing.T) {
+	s := newTestCodeStore(t)
+	token, err := s.CreateLoginLink("admin@example.com")
+	if err != nil {
+		t.Fatalf("CreateLoginLink: %v", err)
+	}
+	var storedHash, purpose, expiresAt string
+	if err := s.db.QueryRow(`SELECT code_hash, purpose, expires_at FROM verifications WHERE email = ?`, "admin@example.com").Scan(&storedHash, &purpose, &expiresAt); err != nil {
+		t.Fatalf("read stored login link: %v", err)
+	}
+	if storedHash == token || strings.Contains(storedHash, token) || purpose != purposeLoginLink {
+		t.Fatalf("stored login link = hash %q purpose %q", storedHash, purpose)
+	}
+	expires, err := time.Parse(time.RFC3339, expiresAt)
+	if err != nil {
+		t.Fatalf("parse expiry: %v", err)
+	}
+	remaining := time.Until(expires)
+	if remaining < loginLinkTTL-time.Minute || remaining > loginLinkTTL+time.Minute {
+		t.Fatalf("login link lifetime = %v, want %v", remaining, loginLinkTTL)
+	}
+	if ok, err := s.Verify("admin@example.com", token); err != nil || ok {
+		t.Fatalf("Verify(email code with login token) = (%v, %v), want (false, nil)", ok, err)
+	}
+	email, ok, err := s.VerifyLoginLink(token)
+	if err != nil || !ok || email != "admin@example.com" {
+		t.Fatalf("VerifyLoginLink = (%q, %v, %v)", email, ok, err)
+	}
+	if _, ok, err := s.VerifyLoginLink(token); err != nil || ok {
+		t.Fatalf("second VerifyLoginLink = (%v, %v), want (false, nil)", ok, err)
+	}
+
+	code, err := s.Create("admin@example.com")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, ok, err := s.VerifyLoginLink(code); err != nil || ok {
+		t.Fatalf("VerifyLoginLink(email code) = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
+func TestLoginLinkIsSingleUseUnderConcurrency(t *testing.T) {
+	s := newTestCodeStore(t)
+	token, err := s.CreateLoginLink("race-link@example.com")
+	if err != nil {
+		t.Fatalf("CreateLoginLink: %v", err)
+	}
+	var successes atomic.Int32
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, ok, verifyErr := s.VerifyLoginLink(token)
+			if verifyErr != nil {
+				t.Errorf("VerifyLoginLink: %v", verifyErr)
+			}
+			if ok {
+				successes.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if successes.Load() != 1 {
+		t.Fatalf("successful login link redemptions = %d, want 1", successes.Load())
 	}
 }
 

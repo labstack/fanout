@@ -6,7 +6,7 @@ import { Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-
 import { createContext, FormEvent, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import AuthGate, { authorizedFetch, logout } from "./auth";
+import AuthGate, { authorizedFetch, logout, useRuntimeStatus } from "./auth";
 import { BrandLockup } from "./brand";
 import ChatHistoryDrawer, { threadHistoryQueryKey } from "./chat-history";
 import type { MCPAppContent } from "./mcp-app-frame";
@@ -15,6 +15,7 @@ import { createID } from "./id";
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
 
 type FanoutAppContextValue = {
+  agentAvailable: boolean;
   messages: Message[];
   ready: boolean;
   running: boolean;
@@ -37,6 +38,7 @@ export function useFanoutApp() {
 }
 
 function Chat() {
+  const { agent_available: agentAvailable } = useRuntimeStatus();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -55,7 +57,7 @@ function Chat() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const agent = useMemo(() => new HttpAgent({ url: "/api/agent", threadId: threadID, fetch: (url, init) => authorizedFetch(url, init) }), [threadID]);
-  const ready = loadedThreadID === threadID;
+  const ready = !agentAvailable || loadedThreadID === threadID;
 
   useEffect(() => {
     if (routeThreadID) setLastThreadID(routeThreadID);
@@ -67,6 +69,10 @@ function Chat() {
     setLoadedThreadID("");
     setRunning(false);
     setError("");
+    if (!agentAvailable) {
+      setLoadedThreadID(threadID);
+      return;
+    }
     const loadedThread = authorizedFetch(`/api/agent/threads/${encodeURIComponent(threadID)}`).then(async (response) => {
       if (response.status === 404) return { messages: [] };
       return response.ok ? response.json() : Promise.reject(new Error(`Unable to load thread (${response.status})`));
@@ -97,11 +103,12 @@ function Chat() {
       },
     });
     return () => { active = false; subscription.unsubscribe(); agent.abortRun(); };
-  }, [agent, queryClient, threadID]);
+  }, [agent, agentAvailable, queryClient, threadID]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, running]);
 
   useEffect(() => {
+    if (!agentAvailable) return;
     const shortcuts = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       const editing = target?.matches("input, textarea, [contenteditable='true']");
@@ -120,11 +127,11 @@ function Chat() {
     };
     window.addEventListener("keydown", shortcuts);
     return () => window.removeEventListener("keydown", shortcuts);
-  }, [lastThreadID, navigate]);
+  }, [agentAvailable, lastThreadID, navigate]);
 
   async function send(text: string) {
     const content = text.trim();
-    if (!content || running || !ready) return;
+    if (!agentAvailable || !content || running || !ready) return;
     const message = { id: createID(), role: "user", content } as Message;
     agent.addMessage(message);
     setMessages([...agent.messages]);
@@ -143,6 +150,7 @@ function Chat() {
 
   function submit(event: FormEvent) { event.preventDefault(); void send(input); }
   function openChat(prompt?: string) {
+    if (!agentAvailable) return;
     const nextThreadID = createID();
     pendingPromptRef.current = prompt ?? "";
     setHistoryOpen(false);
@@ -163,27 +171,27 @@ function Chat() {
     void navigate({ to: "/chat/$threadId", params: { threadId: selectedThreadID } });
   }
 
-  return <FanoutAppContext.Provider value={{ messages, ready, running, input, setInput, error, bottomRef, inputRef, send, submit, openChat }}>
-    <ChatHistoryDrawer
+  return <FanoutAppContext.Provider value={{ agentAvailable, messages, ready, running, input, setInput, error, bottomRef, inputRef, send, submit, openChat }}>
+    {agentAvailable && <ChatHistoryDrawer
       opened={historyOpen}
       activeThreadID={isChat ? threadID : undefined}
       onClose={() => setHistoryOpen(false)}
       onNewChat={newThread}
       onSelect={selectThread}
       onDeleted={(deletedThreadID) => { if (deletedThreadID === threadID) newThread(); }}
-    />
+    />}
     <AppShell header={{ height: 56 }} footer={{ height: 42 }} padding={0}>
       <AppShell.Header><Group h="100%" px={{ base: "sm", sm: "lg" }} justify="space-between" wrap="nowrap">
         <BrandLockup size="small" />
         <Group gap="xs" wrap="nowrap">
           <Group gap={6} mr={4} visibleFrom="md"><Box w={7} h={7} bg="teal.6" style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs" fw={600}>Live</Text></Group>
-          <Button variant="subtle" color="gray" size="compact-sm" leftSection={isChat ? <Layout size={16} weight="bold" /> : <ChatCircleText size={16} weight="bold" />} onClick={() => isChat ? void navigate({ to: "/dashboards" }) : showChat()}>{isChat ? "Dashboard" : "Chat"}</Button>
-          <Tooltip label="Conversation history"><ActionIcon variant="subtle" color="gray" aria-label="Conversation history" onClick={() => setHistoryOpen(true)}><ClockCounterClockwise size={17} weight="bold" /></ActionIcon></Tooltip>
-          {isChat && <Tooltip label="New chat"><ActionIcon variant="subtle" color="gray" aria-label="New chat" onClick={newThread}><Plus size={17} weight="bold" /></ActionIcon></Tooltip>}
+          {(agentAvailable || isChat) && <Button variant="subtle" color="gray" size="compact-sm" leftSection={isChat ? <Layout size={16} weight="bold" /> : <ChatCircleText size={16} weight="bold" />} onClick={() => isChat ? void navigate({ to: "/dashboards" }) : showChat()}>{isChat ? "Dashboard" : "Chat"}</Button>}
+          {agentAvailable && <Tooltip label="Conversation history"><ActionIcon variant="subtle" color="gray" aria-label="Conversation history" onClick={() => setHistoryOpen(true)}><ClockCounterClockwise size={17} weight="bold" /></ActionIcon></Tooltip>}
+          {agentAvailable && isChat && <Tooltip label="New chat"><ActionIcon variant="subtle" color="gray" aria-label="New chat" onClick={newThread}><Plus size={17} weight="bold" /></ActionIcon></Tooltip>}
           <Tooltip label="Sign out"><ActionIcon variant="subtle" color="gray" aria-label="Sign out" onClick={() => void logout().catch((cause) => setError(cause instanceof Error ? cause.message : "Sign-out failed — your session is still active."))}><SignOut size={17} /></ActionIcon></Tooltip>
         </Group>
       </Group></AppShell.Header>
-      <AppShell.Main><Outlet />{isChat && <Composer />}</AppShell.Main>
+      <AppShell.Main><Outlet />{agentAvailable && isChat && <Composer />}</AppShell.Main>
       <ProductFooter />
     </AppShell>
   </FanoutAppContext.Provider>;
@@ -200,7 +208,8 @@ function Composer() {
 }
 
 export function ChatPage() {
-  const { messages, ready, running, error, bottomRef, send } = useFanoutApp();
+  const { agentAvailable, messages, ready, running, error, bottomRef, send } = useFanoutApp();
+  if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="xl" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="teal.7" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable investigation chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const visibleMessages = messages.filter((message) => message.role !== "tool");
   if (!ready) return <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading conversation</Text></Center>;
   return <Container size={1440} px={{ base: "md", sm: "xl", lg: 72 }} pt={{ base: 36, sm: 64 }} pb={190}>

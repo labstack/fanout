@@ -5,8 +5,14 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/labstack/fanout/internal/auth"
+	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/store"
 )
 
 func TestParseCommandLine(t *testing.T) {
@@ -15,6 +21,7 @@ func TestParseCommandLine(t *testing.T) {
 		args        []string
 		wantPath    string
 		wantVersion bool
+		wantEmail   string
 		wantErr     bool
 	}{
 		{name: "server defaults", args: nil},
@@ -22,24 +29,27 @@ func TestParseCommandLine(t *testing.T) {
 		{name: "version command", args: []string{"version"}, wantVersion: true},
 		{name: "version flag", args: []string{"--version"}, wantVersion: true},
 		{name: "short version flag", args: []string{"-v"}, wantVersion: true},
+		{name: "login link", args: []string{"login-link", "admin@example.com"}, wantEmail: "admin@example.com"},
+		{name: "login link with config", args: []string{"--config", "/etc/fanout.yaml", "login-link", "admin@example.com"}, wantPath: "/etc/fanout.yaml", wantEmail: "admin@example.com"},
+		{name: "login link missing email", args: []string{"login-link"}, wantErr: true},
 		{name: "unexpected argument", args: []string{"serve"}, wantErr: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			path, showVersion, err := parseCommandLine(test.args, io.Discard)
+			path, showVersion, email, err := parseCommandLine(test.args, io.Discard)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
 			}
-			if path != test.wantPath || showVersion != test.wantVersion {
-				t.Fatalf("result = (%q, %v), want (%q, %v)", path, showVersion, test.wantPath, test.wantVersion)
+			if path != test.wantPath || showVersion != test.wantVersion || email != test.wantEmail {
+				t.Fatalf("result = (%q, %v, %q), want (%q, %v, %q)", path, showVersion, email, test.wantPath, test.wantVersion, test.wantEmail)
 			}
 		})
 	}
 }
 
 func TestParseCommandLineHelp(t *testing.T) {
-	_, _, err := parseCommandLine([]string{"--help"}, io.Discard)
+	_, _, _, err := parseCommandLine([]string{"--help"}, io.Discard)
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("error = %v, want flag.ErrHelp", err)
 	}
@@ -47,7 +57,7 @@ func TestParseCommandLineHelp(t *testing.T) {
 
 func TestParseCommandLinePrintsOneErrorAndUsage(t *testing.T) {
 	var output bytes.Buffer
-	_, _, err := parseCommandLine([]string{"serve"}, &output)
+	_, _, _, err := parseCommandLine([]string{"serve"}, &output)
 	if err == nil {
 		t.Fatal("expected unexpected-argument error")
 	}
@@ -56,5 +66,62 @@ func TestParseCommandLinePrintsOneErrorAndUsage(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "Usage of fanout") {
 		t.Fatalf("output does not include usage: %q", output.String())
+	}
+	if !strings.Contains(output.String(), "login-link <email>") {
+		t.Fatalf("output does not include login-link command: %q", output.String())
+	}
+}
+
+func TestCreateLoginLink(t *testing.T) {
+	cfg := config.Config{
+		AuthMode:       "local",
+		AuthCodeSecret: "0123456789abcdef0123456789abcdef",
+		DataDir:        t.TempDir(),
+		HTTPAddr:       ":7520",
+		PublicURL:      "https://fanout.example.com/base",
+	}
+	if err := os.MkdirAll(cfg.ControlDir(), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	sqlite, err := store.NewSQLite(cfg.ControlSQLitePath())
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	user, err := auth.NewUserStore(sqlite.DB).Create("admin@example.com", "Admin", "admin")
+	if err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+	if err := sqlite.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	var output bytes.Buffer
+	if err := createLoginLink(cfg, " ADMIN@example.com ", &output); err != nil {
+		t.Fatalf("createLoginLink: %v", err)
+	}
+	line := strings.TrimSpace(strings.Split(output.String(), "\n")[1])
+	loginURL, err := url.Parse(line)
+	if err != nil {
+		t.Fatalf("parse URL: %v", err)
+	}
+	if loginURL.Scheme != "https" || loginURL.Host != "fanout.example.com" || loginURL.Path != "/login" {
+		t.Fatalf("login URL = %s", loginURL)
+	}
+
+	sqlite, err = store.NewSQLite(cfg.ControlSQLitePath())
+	if err != nil {
+		t.Fatalf("reopen SQLite: %v", err)
+	}
+	defer sqlite.Close()
+	email, ok, err := auth.NewCodeStore(sqlite.DB, cfg.AuthCodeSecret).VerifyLoginLink(loginURL.Query().Get("login_token"))
+	if err != nil || !ok || email != user.Email {
+		t.Fatalf("VerifyLoginLink = (%q, %v, %v), want (%q, true, nil)", email, ok, err, user.Email)
+	}
+	var events int
+	if err := sqlite.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'login_link.issued' AND target_id = ?`, user.ID).Scan(&events); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if events != 1 {
+		t.Fatalf("issued audit events = %d, want 1", events)
 	}
 }

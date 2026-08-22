@@ -48,6 +48,7 @@ func newTestAuthServerWith(t *testing.T, cfg config.Config, smtp auth.SMTPConfig
 	if cfg.SessionAbsoluteTTL == 0 {
 		cfg.SessionAbsoluteTTL = 7 * 24 * time.Hour
 	}
+	cfg.SMTPHost, cfg.SMTPPort, cfg.SMTPUser, cfg.SMTPPass, cfg.SMTPFrom = smtp.Host, smtp.Port, smtp.User, smtp.Pass, smtp.From
 	secret := "0123456789abcdef0123456789abcdef"
 	users := auth.NewUserStore(sqlite.DB)
 	codes := auth.NewCodeStore(sqlite.DB, secret)
@@ -119,6 +120,7 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodPost, "/api/auth/setup", routePolicyPublic, ""},
 		{http.MethodPost, "/api/auth/start", routePolicyPublic, ""},
 		{http.MethodPost, "/api/auth/verify", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/login-link", routePolicyPublic, ""},
 		{http.MethodGet, "/api/auth/oidc/start", routePolicyPublic, ""},
 		{http.MethodGet, "/api/auth/oidc/callback", routePolicyPublic, ""},
 		{http.MethodGet, "/api/auth/me", routePolicyAuthenticated, ""},
@@ -221,7 +223,7 @@ func TestAuthStatusAndMeRequirePersistedAccount(t *testing.T) {
 	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
 		t.Fatalf("status = %s err=%v", statusRec.Body.String(), err)
 	}
-	if len(status) != 3 {
+	if len(status) != 5 || status["agent_available"] != false || status["smtp_configured"] != false {
 		t.Fatalf("unexpected auth status fields: %s", statusRec.Body.String())
 	}
 
@@ -355,7 +357,8 @@ func TestLogoutDeletesServerSession(t *testing.T) {
 }
 
 func TestStartDoesNotRevealAccountState(t *testing.T) {
-	s := newTestAuthServer(t)
+	smtp := auth.SMTPConfig{Host: "smtp.example.com", Port: 587, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
+	s := newTestAuthServerWith(t, config.Config{AuthMode: "local"}, smtp)
 	inactive, _ := s.users.Create("inactive@example.com", "", "operator")
 	active := false
 	if _, err := s.users.Update(inactive.ID, nil, nil, nil, &active); err != nil {
@@ -369,6 +372,52 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 		if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"code_sent":true`) {
 			t.Fatalf("%s = %d %s", email, rec.Code, rec.Body.String())
 		}
+	}
+}
+
+func TestStartExplainsWhenSMTPIsNotConfigured(t *testing.T) {
+	s := newTestAuthServer(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"active@example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable || !strings.Contains(rec.Body.String(), "login link") {
+		t.Fatalf("status = %d body=%s, want 503 with login-link guidance", rec.Code, rec.Body.String())
+	}
+}
+
+func TestLoginLinkAuthenticatesExactlyOnce(t *testing.T) {
+	s := newTestAuthServer(t)
+	user, err := s.users.Create("link@example.com", "", "admin")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	token, err := s.codes.CreateLoginLink(user.Email)
+	if err != nil {
+		t.Fatalf("CreateLoginLink: %v", err)
+	}
+	body := `{"token":"` + token + `"}`
+	first := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login-link", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.e.ServeHTTP(first, req)
+	if first.Code != http.StatusOK || firstCookie(t, first, "fanout_session") == nil {
+		t.Fatalf("first redemption = %d %s", first.Code, first.Body.String())
+	}
+
+	second := httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/login-link", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	s.e.ServeHTTP(second, req)
+	if second.Code != http.StatusUnauthorized {
+		t.Fatalf("second redemption = %d %s, want 401", second.Code, second.Body.String())
+	}
+	var events int
+	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'login_link.redeemed' AND actor_user_id = ?`, user.ID).Scan(&events); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if events != 1 {
+		t.Fatalf("redeemed audit events = %d, want 1", events)
 	}
 }
 

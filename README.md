@@ -54,12 +54,12 @@ and confirms what it found.
 - **Go** with `CGO_ENABLED=1` — DuckDB is a cgo dependency
 - **[Bun](https://bun.sh)** — compiles the browser assets
 - **[just](https://just.systems)** — task runner
-- An **SMTP server** and an **AI provider key** (see below)
+- A 32-character **authentication code secret**
 
-> **Fanout does not run unconfigured.** Sign-in requires either SMTP (`local`
-> auth mode, the default) or an OIDC provider, and the agent requires an API
-> key. There is no anonymous or offline mode. For local development, any SMTP
-> catcher — [Mailpit](https://mailpit.axllent.org), MailHog — is enough.
+SMTP and an AI provider are optional. Without SMTP, an operator can mint a
+short-lived login link from the local Fanout binary. Without an AI key, ingest,
+dashboards, traces, logs, metrics, and MCP continue to work; only investigation
+chat and AI-assisted controls are hidden.
 
 ## Quick start
 
@@ -69,11 +69,21 @@ and confirms what it found.
 docker run -p 7520:7520 -p 4317:4317 \
   -v fanout-data:/var/lib/fanout/data \
   -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
-  -e FANOUT_AI_API_KEY=sk-... \
-  -e FANOUT_SMTP_HOST=... -e FANOUT_SMTP_USERNAME=... \
-  -e FANOUT_SMTP_PASSWORD=... -e FANOUT_SMTP_FROM=... \
   ghcr.io/labstack/fanout:latest
 ```
+
+Open the one-time setup URL printed by the container and create the first
+administrator. For later sign-in without SMTP, mint a 15-minute, single-use
+link against the running container's control database:
+
+```sh
+docker exec <container> fanout --config /etc/fanout/fanout.yaml \
+  login-link admin@example.com
+```
+
+Add `FANOUT_AI_API_KEY` to enable chat. Configure all four SMTP settings
+(`FANOUT_SMTP_HOST`, `FANOUT_SMTP_USERNAME`, `FANOUT_SMTP_PASSWORD`, and
+`FANOUT_SMTP_FROM`) to enable email-code login.
 
 The image runs unprivileged as UID 999. A bind-mounted host directory at
 `/var/lib/fanout/data` must be writable by that user; a named volume, as above,
@@ -109,13 +119,13 @@ Run it with the minimum configuration:
 
 ```sh
 export FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) # must be 32+ characters
-export FANOUT_AI_API_KEY=sk-...                        # Anthropic by default
-export FANOUT_SMTP_HOST=localhost FANOUT_SMTP_PORT=1025
-export FANOUT_SMTP_USERNAME=dev FANOUT_SMTP_PASSWORD=dev
-export FANOUT_SMTP_FROM=fanout@example.com
 
 ./bin/fanout
 ```
+
+Optionally set `FANOUT_AI_API_KEY` for chat and the SMTP variables shown above
+for email-code login. Without SMTP, run `./bin/fanout login-link
+admin@example.com` from the same configuration and data directory.
 
 Fanout serves the UI on <http://localhost:7520> and accepts OTLP/gRPC on
 `127.0.0.1:4317`. The first account created becomes the administrator.
@@ -161,10 +171,10 @@ operators touch are:
 | `server.http_addr` | `FANOUT_HTTP_ADDR` | `:7520` | UI, API, and MCP listener |
 | `ingest.otlp_grpc_addr` | `FANOUT_OTLP_GRPC_ADDR` | `127.0.0.1:4317` | OTLP ingest listener |
 | `storage.data_dir` | `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
-| `auth.mode` | `FANOUT_AUTH_MODE` | `local` | `local` (SMTP) or `oidc` |
+| `auth.mode` | `FANOUT_AUTH_MODE` | `local` | `local` (login link or SMTP) or `oidc` |
 | `auth.code_secret` | `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
 | `agent.provider` | `FANOUT_AI_PROVIDER` | `anthropic` | `anthropic` or `openai` |
-| `agent.api_key` | `FANOUT_AI_API_KEY` | — | Required |
+| `agent.api_key` | `FANOUT_AI_API_KEY` | — | Enables AI investigation chat |
 | `storage.retention_days` | `FANOUT_RETENTION_DAYS` | `30` | Telemetry retention window |
 | `mcp.enabled` | `FANOUT_MCP_ENABLED` | `true` | Serve the MCP endpoint at `/mcp` |
 

@@ -42,33 +42,45 @@ Properties worth knowing:
 
 ### Before you complete setup
 
-After the first administrator exists, access uses the normal login path, so
-confirm that path works before the setup credential is consumed.
+Local mode requires only a 32-character `FANOUT_AUTH_CODE_SECRET`. SMTP is
+optional: when all SMTP settings are present, users can request email codes;
+without them, an operator with access to the control database can mint a login
+link. OIDC mode instead requires an HTTPS issuer, a client, and an HTTPS
+`FANOUT_PUBLIC_URL`.
 
-Fanout refuses to start without one configured: `local` mode requires
-`FANOUT_SMTP_HOST`, `FANOUT_SMTP_PORT`, `FANOUT_SMTP_USERNAME`,
-`FANOUT_SMTP_PASSWORD`, `FANOUT_SMTP_FROM`, and a 32-character
-`FANOUT_AUTH_CODE_SECRET`; `oidc` mode requires an HTTPS issuer, a client, and
-an HTTPS `FANOUT_PUBLIC_URL`.
-
-Configuration being present is not the same as delivery working. Credentials
-can be wrong, the relay can refuse the sender, and mail can land in spam. Send
-yourself a code and confirm it arrives before you finish setup — a login path
-that is configured but broken is the case the recovery section below exists
-for.
+If you configure SMTP, send yourself a code and confirm it arrives. Credentials
+can be wrong, the relay can refuse the sender, and mail can land in spam. A
+login link remains available when delivery fails.
 
 ### Recovery
 
-If you are locked out — the first administrator exists, but no login path works
-— work through these in order. Copy the database file before any of them.
+If you are locked out in local mode, run the command with the same configuration
+and data directory as the server:
 
-**1. Fix the login path.** Configure SMTP (`local` mode) or OIDC and restart.
-This resolves the common case, where setup completed before mail delivery was
-configured.
+```sh
+fanout --config /etc/fanout/fanout.yaml login-link admin@example.com
+```
 
-**2. Repoint the administrator account.** If the administrator's address is one
-you cannot receive mail at, change it. Stop Fanout, then against the SQLite
-database:
+For a container using the bundled configuration:
+
+```sh
+docker exec <container> fanout --config /etc/fanout/fanout.yaml \
+  login-link admin@example.com
+```
+
+The command refuses missing or inactive users and a missing control database.
+It writes a hashed credential and a `login_link.issued` audit event, then prints
+one URL to stderr. The URL expires after 15 minutes, works once, and writes a
+distinct `login_link.redeemed` audit event when used. Running it while Fanout is
+online is supported by the control database's WAL and busy-timeout settings.
+
+Fix SMTP after regaining access if email-code login is expected. OIDC-mode
+recovery remains at the identity provider or OIDC configuration layer; local
+login links are deliberately unavailable in that mode.
+
+If the local account is inactive or its address is no longer usable, the
+command refuses to mint a credential. Stop Fanout, copy the control database,
+and repair that account without deleting it or its owned data:
 
 ```sql
 SELECT id, email, role, active FROM users;
@@ -78,21 +90,9 @@ UPDATE users
  WHERE id = '<the administrator id>';
 ```
 
-Restart and log in normally. Nothing is lost.
-
-**3. Reopen first-run setup.** Only if the account itself is unrecoverable:
-
-```sql
-DELETE FROM users;
-```
-
-Restart Fanout. With zero users it prints a fresh setup banner.
-
-> [!CAUTION]
-> Step 3 cascades. Deleting users also deletes their browser sessions, MCP
-> OAuth grants and tokens, and **every dashboard they own**. Audit history and
-> telemetry survive — audit rows keep the event with the actor set to null —
-> and the ingest token is unaffected. Prefer step 2.
+Restart Fanout, mint a login link for the repaired address, and sign in. Never
+recover by deleting the user: user deletion cascades to its sessions, OAuth
+grants, and dashboards.
 
 ## Reverse proxies and client IP
 
@@ -171,6 +171,7 @@ it only with a provider you administer.
 | Credential | Purpose | Rotation |
 |---|---|---|
 | Setup URL | Creates the first administrator | One-time, expires in 1 hour |
+| Login URL | Authenticates one existing active local user | One-time, expires in 15 minutes; mint with `fanout login-link` |
 | Browser session | Interactive access | Idle and absolute TTL; revoked on role, email, or status change |
 | Ingest token | OTLP ingest | Settings page |
 | Metrics token | `/metrics` scrape | `FANOUT_METRICS_TOKEN` |

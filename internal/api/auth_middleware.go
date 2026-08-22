@@ -261,7 +261,7 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyPublic}, read
 	case path == "/api/auth/status" || path == "/api/auth/oidc/start" || path == "/api/auth/oidc/callback":
 		return routePolicy{kind: routePolicyPublic}, read
-	case path == "/api/auth/setup" || path == "/api/auth/start" || path == "/api/auth/verify":
+	case path == "/api/auth/setup" || path == "/api/auth/start" || path == "/api/auth/verify" || path == "/api/auth/login-link":
 		return routePolicy{kind: routePolicyPublic}, method == http.MethodPost
 	case path == "/api/auth/me":
 		return routePolicy{kind: routePolicyAuthenticated}, read
