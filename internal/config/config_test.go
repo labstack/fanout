@@ -112,6 +112,36 @@ func TestLoadTypedEnvironmentValues(t *testing.T) {
 	}
 }
 
+func TestLoadAdvertisedIngestEndpoint(t *testing.T) {
+	const endpoint = "https://ingest.example.com"
+
+	t.Run("environment", func(t *testing.T) {
+		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
+			"FANOUT_INGEST_ADVERTISED_ENDPOINT="+endpoint,
+		)})
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.IngestAdvertisedEndpoint != endpoint {
+			t.Fatalf("IngestAdvertisedEndpoint = %q, want %q", cfg.IngestAdvertisedEndpoint, endpoint)
+		}
+	})
+
+	t.Run("YAML", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "fanout.yaml")
+		if err := os.WriteFile(path, []byte("ingest:\n  advertised_endpoint: "+endpoint+"\n"), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		cfg, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.IngestAdvertisedEndpoint != endpoint {
+			t.Fatalf("IngestAdvertisedEndpoint = %q, want %q", cfg.IngestAdvertisedEndpoint, endpoint)
+		}
+	})
+}
+
 func TestLoadTreatsEmptyEnvironmentValuesAsAbsent(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
 		"FANOUT_HTTP_ADDR=",
@@ -201,6 +231,24 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_HTPP_ADDR=:1111")})
 		if err == nil || !strings.Contains(err.Error(), "FANOUT_HTPP_ADDR") {
 			t.Fatalf("error = %v, want unknown environment variable", err)
+		}
+	})
+
+	t.Run("removed ingest YAML key", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "fanout.yaml")
+		if err := os.WriteFile(path, []byte("ingest:\n  public_endpoint: https://ingest.example.com\n"), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		_, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
+		if err == nil || !strings.Contains(err.Error(), "ingest.public_endpoint") {
+			t.Fatalf("error = %v, want removed YAML key rejected", err)
+		}
+	})
+
+	t.Run("removed ingest environment variable", func(t *testing.T) {
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_INGEST_ENDPOINT=https://ingest.example.com")})
+		if err == nil || !strings.Contains(err.Error(), "FANOUT_INGEST_ENDPOINT") {
+			t.Fatalf("error = %v, want removed environment variable rejected", err)
 		}
 	})
 
