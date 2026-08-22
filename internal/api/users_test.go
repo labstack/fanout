@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -71,5 +72,30 @@ func TestLogoutAllRevokesTargetSessions(t *testing.T) {
 	s.e.ServeHTTP(me, sessionRequest(http.MethodGet, "/api/auth/me", nil, targetCookie))
 	if me.Code != http.StatusUnauthorized {
 		t.Fatalf("target reused session = %d", me.Code)
+	}
+}
+
+func TestCreateUserWithoutSMTPReturnsLoginLinkInstruction(t *testing.T) {
+	s := newTestAuthServer(t)
+	RegisterUserRoutes(s.e, s.users, auth.SMTPConfig{}, config.Config{AuthMode: "local"})
+	admin, _ := s.users.Create("admin@example.com", "", "admin")
+	cookie := s.login(t, admin)
+	req := sessionRequest(http.MethodPost, "/api/users", strings.NewReader(`{"email":"new@example.com","role":"viewer"}`), cookie)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Email             string `json:"email"`
+		InviteDelivery    string `json:"invite_delivery"`
+		LoginLinkRequired bool   `json:"login_link_required"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Email != "new@example.com" || body.InviteDelivery != "not_configured" || !body.LoginLinkRequired {
+		t.Fatalf("response = %+v", body)
 	}
 }

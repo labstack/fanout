@@ -1,7 +1,0 @@
-schema: spec-driven
-created: 2026-08-04
-skip_specs: true
-goal: Stop shipping a default configuration that can be killed by the kernel on
-  a small machine, by sizing DuckDB's memory budget against detected memory with
-  headroom for the Go runtime, scaling the connection pool with cores, and
-  logging every resolved value so an adaptive default is still an observable one.

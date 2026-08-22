@@ -100,7 +100,7 @@ func main() {
 	query.InitQueryCache(ctx)
 
 	// Error channel for goroutine failures
-	errCh := make(chan error, 3)
+	errCh := make(chan error, 4)
 
 	// Start DuckDB + rollups
 	q, err := query.NewDuck(ctx, cfg)
@@ -189,11 +189,34 @@ func main() {
 	grpcSrv := grpc.NewServer(grpcOpts...)
 	ing := ingest.NewServer(cfg, chSpans, chLogs, chMetrics)
 	ingest.RegisterOTLP(grpcSrv, ing)
+	otlpHTTPLis, err := net.Listen("tcp", cfg.OTLPHTTPAddr)
+	if err != nil {
+		slog.Error("listen OTLP HTTP failed", "err", err)
+		os.Exit(1)
+	}
+	otlpHTTPSrv := &http.Server{
+		Handler:           ingest.NewHTTPHandler(ing, settingsStore),
+		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13},
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       2 * time.Minute,
+	}
 
 	go func() {
 		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr, "tls", cfg.TLSEnabled())
 		if err := grpcSrv.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
 			errCh <- fmt.Errorf("gRPC server: %w", err)
+		}
+	}()
+	go func() {
+		slog.Info("HTTP OTLP listening", "addr", cfg.OTLPHTTPAddr, "tls", cfg.TLSEnabled())
+		var serveErr error
+		if cfg.TLSEnabled() {
+			serveErr = otlpHTTPSrv.ServeTLS(otlpHTTPLis, cfg.TLSCertFile, cfg.TLSKeyFile)
+		} else {
+			serveErr = otlpHTTPSrv.Serve(otlpHTTPLis)
+		}
+		if serveErr != nil && serveErr != http.ErrServerClosed {
+			errCh <- fmt.Errorf("OTLP HTTP server: %w", serveErr)
 		}
 	}()
 
@@ -410,6 +433,12 @@ func main() {
 	// Stop accepting OTLP and let in-flight exporters finish while the writer is
 	// still draining. Cancelling the writer first could strand a handler on a full
 	// channel or accept rows after its final drain.
+	otlpShutdownCtx, otlpShutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := otlpHTTPSrv.Shutdown(otlpShutdownCtx); err != nil {
+		slog.Error("OTLP HTTP graceful shutdown failed", "err", err)
+		_ = otlpHTTPSrv.Close()
+	}
+	otlpShutdownCancel()
 	grpcSrv.GracefulStop()
 	cancel()
 	writer.Wait()

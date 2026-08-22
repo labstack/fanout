@@ -62,7 +62,11 @@ func RegisterOTLP(s grpc.ServiceRegistrar, srv *Server) {
 // ---- Trace ingest ----
 
 func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTraceServiceRequest) (*collectortrace.ExportTraceServiceResponse, error) {
-	cfg := ts.srv.cfg
+	return ts.srv.exportTraces(ctx, req)
+}
+
+func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTraceServiceRequest) (*collectortrace.ExportTraceServiceResponse, error) {
+	cfg := s.cfg
 	now := time.Now().UnixNano()
 	for _, rs := range req.ResourceSpans {
 		resourceJSON := resourceAttrsJSON(rs.Resource)
@@ -113,7 +117,7 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 				row.ExceptionMessage = excMsg
 				// Partial ingest is acceptable: OTLP clients retry the full batch on error.
 				select {
-				case ts.srv.outSpans <- row:
+				case s.outSpans <- row:
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				}
@@ -126,7 +130,11 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 // ---- Logs ingest ----
 
 func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogsServiceRequest) (*collectorlogs.ExportLogsServiceResponse, error) {
-	cfg := ls.srv.cfg
+	return ls.srv.exportLogs(ctx, req)
+}
+
+func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsServiceRequest) (*collectorlogs.ExportLogsServiceResponse, error) {
+	cfg := s.cfg
 	now := time.Now().UnixNano()
 	for _, rl := range req.ResourceLogs {
 		resourceJSON := resourceAttrsJSON(rl.Resource)
@@ -159,7 +167,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 					IngestedAt:        now,
 				}
 				select {
-				case ls.srv.outLogs <- row:
+				case s.outLogs <- row:
 				case <-ctx.Done():
 					return nil, ctx.Err()
 				}
@@ -172,7 +180,11 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 // ---- Metrics ingest ----
 
 func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.ExportMetricsServiceRequest) (*collectormetrics.ExportMetricsServiceResponse, error) {
-	cfg := ms.srv.cfg
+	return ms.srv.exportMetrics(ctx, req)
+}
+
+func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.ExportMetricsServiceRequest) (*collectormetrics.ExportMetricsServiceResponse, error) {
+	cfg := s.cfg
 	now := time.Now().UnixNano()
 	for _, rm := range req.ResourceMetrics {
 		resourceJSON := resourceAttrsJSON(rm.Resource)
@@ -204,7 +216,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-						case ms.srv.outMetrics <- row:
+						case s.outMetrics <- row:
 						case <-ctx.Done():
 							return nil, ctx.Err()
 						}
@@ -232,7 +244,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-						case ms.srv.outMetrics <- row:
+						case s.outMetrics <- row:
 						case <-ctx.Done():
 							return nil, ctx.Err()
 						}
@@ -263,7 +275,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-						case ms.srv.outMetrics <- row:
+						case s.outMetrics <- row:
 						case <-ctx.Done():
 							return nil, ctx.Err()
 						}
@@ -294,7 +306,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-						case ms.srv.outMetrics <- row:
+						case s.outMetrics <- row:
 						case <-ctx.Done():
 							return nil, ctx.Err()
 						}
@@ -320,7 +332,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 							IngestedAt:     now,
 						}
 						select {
-						case ms.srv.outMetrics <- row:
+						case s.outMetrics <- row:
 						case <-ctx.Done():
 							return nil, ctx.Err()
 						}
