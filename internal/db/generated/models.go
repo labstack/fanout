@@ -21,11 +21,13 @@ type AguiRun struct {
 }
 
 type AguiThread struct {
-	ThreadID     string `json:"thread_id"`
-	OwnerID      string `json:"owner_id"`
-	MessagesJson string `json:"messages_json"`
-	CreatedAt    string `json:"created_at"`
-	UpdatedAt    string `json:"updated_at"`
+	ThreadID      string         `json:"thread_id"`
+	OwnerID       string         `json:"owner_id"`
+	TitleOverride sql.NullString `json:"title_override"`
+	TitleDerived  string         `json:"title_derived"`
+	MessagesJson  string         `json:"messages_json"`
+	CreatedAt     string         `json:"created_at"`
+	UpdatedAt     string         `json:"updated_at"`
 }
 
 type Alert struct {
@@ -186,6 +188,7 @@ type Verification struct {
 	ID        string `json:"id"`
 	Email     string `json:"email"`
 	CodeHash  string `json:"code_hash"`
+	Purpose   string `json:"purpose"`
 	Attempts  int64  `json:"attempts"`
 	Used      int64  `json:"used"`
 	ExpiresAt string `json:"expires_at"`

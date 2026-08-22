@@ -45,7 +45,7 @@ agent:
   provider: anthropic # FANOUT_AI_PROVIDER
   model: "" # FANOUT_AI_MODEL
   base_url: "" # FANOUT_AI_BASE_URL
-  # Required: FANOUT_AI_API_KEY
+  # Optional; enables investigation chat: FANOUT_AI_API_KEY
   # api_key: ""
 
 smtp:
@@ -53,7 +53,7 @@ smtp:
   port: 587 # FANOUT_SMTP_PORT
   username: "" # FANOUT_SMTP_USERNAME
   from: "" # FANOUT_SMTP_FROM
-  # Required in local auth mode: FANOUT_SMTP_PASSWORD
+  # Optional with the other SMTP fields; enables email-code login: FANOUT_SMTP_PASSWORD
   # password: ""
 
 auth:

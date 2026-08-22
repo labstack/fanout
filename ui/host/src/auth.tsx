@@ -1,13 +1,26 @@
 import { Alert, Box, Button, Center, Code, Container, Group, Loader, Paper, Stack, Text, TextInput, Title } from "@mantine/core";
 import { ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
+import { createContext, FormEvent, ReactNode, useContext, useEffect, useState } from "react";
 import { browserViewerFromMe, BrowserViewer, clearLegacySession, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 import { BrandLockup } from "./brand";
 
 export { authorizedFetch, clearSession, logout } from "./auth-session";
 
-type Status = { setup_required: boolean; auth_mode: "local" | "oidc" };
+export type Status = {
+  setup_required: boolean;
+  auth_mode: "local" | "oidc";
+  agent_available: boolean;
+  smtp_configured: boolean;
+};
 type SetupResult = { status: string; ingest_token?: string; ingest_header_name?: string; suggested_endpoint?: string };
+const RuntimeStatusContext = createContext<Status | null>(null);
+
+export function useRuntimeStatus(): Status {
+  const status = useContext(RuntimeStatusContext);
+  if (!status) throw new Error("Fanout runtime status is unavailable");
+  return status;
+}
 
 async function jsonRequest(path: string, body?: unknown) {
   const response = await fetch(path, {
@@ -56,21 +69,21 @@ function readSetupTokenFromURL(): string {
   return new URLSearchParams(window.location.search).get("setup_token") ?? "";
 }
 
-function stripSetupTokenFromURL(): void {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  if (!url.searchParams.has("setup_token")) return;
-  url.searchParams.delete("setup_token");
-  window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+function readLoginTokenFromURL(): string {
+  if (typeof window === "undefined") return "";
+  return new URLSearchParams(window.location.search).get("login_token") ?? "";
 }
 
 export default function AuthGate({ children }: { children: ReactNode }) {
+  const navigate = useNavigate();
   const [status, setStatus] = useState<Status | null>(null);
+  const [statusReady, setStatusReady] = useState(false);
   const [viewer, setViewer] = useState<BrowserViewer>("none");
   const [sessionReady, setSessionReady] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [setupToken, setSetupToken] = useState(readSetupTokenFromURL);
+  const [loginToken, setLoginToken] = useState(readLoginTokenFromURL);
   const [code, setCode] = useState("");
   const [codeSent, setCodeSent] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -81,12 +94,16 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const authenticated = viewer === "user";
 
   useEffect(() => {
-    stripSetupTokenFromURL();
-  }, []);
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("setup_token") && !url.searchParams.has("login_token")) return;
+    url.searchParams.delete("setup_token");
+    url.searchParams.delete("login_token");
+    void navigate({ href: url.pathname + url.search + url.hash, replace: true });
+  }, [navigate]);
 
   useEffect(() => {
     clearLegacySession();
-    jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value)));
+    jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value))).finally(() => setStatusReady(true));
     fetch("/api/auth/me", { credentials: "same-origin" })
       .then(async (response) => {
         if (!response.ok) {
@@ -102,6 +119,16 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     window.addEventListener(unauthorizedEvent, handleUnauthorized);
     return () => window.removeEventListener(unauthorizedEvent, handleUnauthorized);
   }, []);
+
+  useEffect(() => {
+    if (!sessionReady || viewer !== "none" || !loginToken) return;
+    setBusy(true);
+    setError("");
+    jsonRequest("/api/auth/login-link", { token: loginToken })
+      .then(() => setViewer("user"))
+      .catch((value) => setError(value instanceof Error ? value.message : String(value)))
+      .finally(() => { setLoginToken(""); setBusy(false); });
+  }, [loginToken, sessionReady, viewer]);
 
   useEffect(() => {
     if (authenticated && sessionReady && returnTo) window.location.replace(returnTo);
@@ -131,9 +158,10 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     </Stack></AuthSurface>;
   }
 
-  if (!sessionReady) return <Center mih="100dvh"><Loader size="sm" /></Center>;
+  if (!sessionReady || !statusReady || loginToken) return <Center mih="100dvh"><Loader size="sm" /></Center>;
+  if (!status) return <AuthSurface><Stack gap="lg"><BrandLockup /><Title order={1}>Fanout is unavailable</Title><Alert color="red" radius="md">{error || "Authentication status could not be loaded."}</Alert></Stack></AuthSurface>;
   if (authenticated && returnTo) return null;
-  if (authenticated) return <>{children}</>;
+  if (authenticated) return <RuntimeStatusContext.Provider value={status}>{children}</RuntimeStatusContext.Provider>;
 
   if (status && !status.setup_required && status.auth_mode === "oidc") {
     const target = returnTo ? `/api/auth/oidc/start?return_to=${encodeURIComponent(returnTo)}` : "/api/auth/oidc/start";
@@ -181,7 +209,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         {status?.setup_required ? "Create the first admin" : "Sign in to investigate"}
       </Title>
       <Text c="dimmed" size="md" lh={1.6} maw={390}>
-        {status?.setup_required ? "Use the one-time token printed by the Fanout process." : codeSent ? `Enter the verification code sent to ${email}.` : "Enter your email and we’ll send a short verification code. No password needed."}
+        {status?.setup_required ? "Use the one-time token printed by the Fanout process." : !status?.smtp_configured ? "Email delivery is not configured. Ask the operator to run fanout login-link with your email address." : codeSent ? `Enter the verification code sent to ${email}.` : "Enter your email and we’ll send a short verification code. No password needed."}
       </Text>
     </Stack>
     <form onSubmit={submit}><Stack gap="md">
@@ -190,7 +218,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       {status?.setup_required && <TextInput label="Setup token" placeholder="from the setup URL printed at startup" required value={setupToken} onChange={(event) => setSetupToken(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" />}
       {!status?.setup_required && codeSent && <TextInput label="Verification code" placeholder="000000" required value={code} onChange={(event) => setCode(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" styles={{ input: { letterSpacing: "0.2em", fontVariantNumeric: "tabular-nums" } }} autoFocus />}
       {error && <Alert color="red" radius="md">{error}</Alert>}
-      <Button type="submit" size="md" radius="md" mt={4} loading={busy} disabled={!status} leftSection={status?.setup_required ? <UserPlus size={17} weight="bold" /> : undefined} rightSection={!status?.setup_required ? <ArrowRight size={17} weight="bold" /> : undefined}>{status?.setup_required ? "Create admin" : codeSent ? "Verify code" : "Send code"}</Button>
+      <Button type="submit" size="md" radius="md" mt={4} loading={busy} disabled={!status || (!status.setup_required && !status.smtp_configured)} leftSection={status?.setup_required ? <UserPlus size={17} weight="bold" /> : undefined} rightSection={!status?.setup_required ? <ArrowRight size={17} weight="bold" /> : undefined}>{status?.setup_required ? "Create admin" : codeSent ? "Verify code" : "Send code"}</Button>
     </Stack></form>
   </Stack></AuthSurface>;
 }

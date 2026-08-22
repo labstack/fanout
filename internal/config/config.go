@@ -238,14 +238,16 @@ func (c Config) Validate() error {
 		return fmt.Errorf("auth.session_absolute_ttl must be positive and at least auth.session_idle_ttl")
 	}
 	if authMode == "local" {
+		if len(strings.TrimSpace(c.AuthCodeSecret)) < 32 {
+			return fmt.Errorf("auth.code_secret must be at least 32 characters")
+		}
+	}
+	if anySet(c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom) {
 		if !c.SMTPConfigured() {
-			return fmt.Errorf("smtp.host, smtp.username, smtp.password, and smtp.from are required in local auth mode")
+			return fmt.Errorf("smtp.host, smtp.username, smtp.password, and smtp.from must all be set when SMTP is configured")
 		}
 		if c.SMTPPort <= 0 {
 			return fmt.Errorf("smtp.port must be > 0")
-		}
-		if len(strings.TrimSpace(c.AuthCodeSecret)) < 32 {
-			return fmt.Errorf("auth.code_secret must be at least 32 characters")
 		}
 	}
 	if authMode == "oidc" {
@@ -276,13 +278,12 @@ func (c Config) Validate() error {
 			return fmt.Errorf("OIDC auto-provisioning requires auth.oidc.allowed_groups or auth.oidc.allowed_domains")
 		}
 	}
-	if strings.TrimSpace(c.AIAPIKey) == "" {
-		return fmt.Errorf("agent.api_key is required")
-	}
-	switch strings.ToLower(strings.TrimSpace(c.AIProvider)) {
-	case "", "anthropic", "openai":
-	default:
-		return fmt.Errorf("agent.provider must be anthropic or openai")
+	if c.AgentConfigured() {
+		switch strings.ToLower(strings.TrimSpace(c.AIProvider)) {
+		case "", "anthropic", "openai":
+		default:
+			return fmt.Errorf("agent.provider must be anthropic or openai")
+		}
 	}
 	for _, raw := range strings.Split(c.TrustedProxyCIDRs, ",") {
 		value := strings.TrimSpace(raw)
@@ -313,6 +314,11 @@ func (c Config) SMTPConfigured() bool {
 		strings.TrimSpace(c.SMTPUser) != "" &&
 		strings.TrimSpace(c.SMTPPass) != "" &&
 		strings.TrimSpace(c.SMTPFrom) != ""
+}
+
+// AgentConfigured reports whether the in-process AI agent should be started.
+func (c Config) AgentConfigured() bool {
+	return strings.TrimSpace(c.AIAPIKey) != ""
 }
 
 func anySet(values ...string) bool {

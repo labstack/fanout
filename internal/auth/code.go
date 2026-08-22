@@ -17,8 +17,12 @@ import (
 )
 
 const (
-	codeTTL     = 5 * time.Minute
-	maxAttempts = 3
+	codeTTL             = 5 * time.Minute
+	loginLinkTTL        = 15 * time.Minute
+	loginLinkTokenBytes = 16
+	maxAttempts         = 3
+	purposeEmailCode    = "email_code"
+	purposeLoginLink    = "login_link"
 )
 
 // GenerateCode returns a random 6-digit code.
@@ -28,6 +32,15 @@ func GenerateCode() (string, error) {
 		return "", fmt.Errorf("auth: generate code: %w", err)
 	}
 	return fmt.Sprintf("%06d", n.Int64()), nil
+}
+
+// GenerateLoginLinkToken returns a credential with 128 bits of entropy.
+func GenerateLoginLinkToken() (string, error) {
+	buf := make([]byte, loginLinkTokenBytes)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("auth: generate login link token: %w", err)
+	}
+	return hex.EncodeToString(buf), nil
 }
 
 // HashCode produces an HMAC-SHA256 hex digest of the code.
@@ -58,8 +71,8 @@ func NewCodeStore(db *sql.DB, secret string) *CodeStore {
 func (s *CodeStore) RecentCount(email string, since time.Time) (int, error) {
 	var count int
 	err := s.db.QueryRowContext(context.Background(), `
-		SELECT COUNT(*) FROM verifications WHERE email = ? AND datetime(created_at) >= datetime(?)`,
-		email, since.UTC().Format(time.RFC3339),
+		SELECT COUNT(*) FROM verifications WHERE email = ? AND purpose = ? AND datetime(created_at) >= datetime(?)`,
+		email, purposeEmailCode, since.UTC().Format(time.RFC3339),
 	).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("auth: count recent codes: %w", err)
@@ -73,30 +86,50 @@ func (s *CodeStore) Create(email string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	hash := HashCode(code, s.secret)
+	if err := s.create(email, code, purposeEmailCode, codeTTL); err != nil {
+		return "", err
+	}
+	return code, nil
+}
+
+// CreateLoginLink stores a short-lived, single-use login link credential.
+func (s *CodeStore) CreateLoginLink(email string) (string, error) {
+	token, err := GenerateLoginLinkToken()
+	if err != nil {
+		return "", err
+	}
+	if err := s.create(email, token, purposeLoginLink, loginLinkTTL); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func (s *CodeStore) create(email, credential, purpose string, ttl time.Duration) error {
+	hash := HashCode(credential, s.secret)
 	id, err := appid.New()
 	if err != nil {
-		return "", fmt.Errorf("auth: generate code id: %w", err)
+		return fmt.Errorf("auth: generate verification id: %w", err)
 	}
-	expiresAt := time.Now().Add(codeTTL).UTC().Format(time.RFC3339)
+	expiresAt := time.Now().Add(ttl).UTC().Format(time.RFC3339)
 
 	err = s.q.CreateVerificationCode(context.Background(), generated.CreateVerificationCodeParams{
 		ID:        id,
 		Email:     email,
 		CodeHash:  hash,
+		Purpose:   purpose,
 		ExpiresAt: expiresAt,
 	})
 	if err != nil {
-		return "", fmt.Errorf("auth: create code: %w", err)
+		return fmt.Errorf("auth: create verification: %w", err)
 	}
-	return code, nil
+	return nil
 }
 
 // Verify checks the code for the given email. Returns true if valid.
 func (s *CodeStore) Verify(email, code string) (bool, error) {
 	ctx := context.Background()
 
-	row, err := s.q.GetLatestUnusedCode(ctx, email)
+	row, err := s.q.GetLatestUnusedCode(ctx, generated.GetLatestUnusedCodeParams{Email: email, Purpose: purposeEmailCode})
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -151,7 +184,40 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 	return true, nil
 }
 
-// Cleanup deletes expired codes older than 1 hour.
+// VerifyLoginLink atomically consumes a valid login-link token and returns the
+// email it was issued for. Login links are purpose-bound and cannot be used as
+// ordinary email verification codes.
+func (s *CodeStore) VerifyLoginLink(token string) (string, bool, error) {
+	ctx := context.Background()
+	row, err := s.q.GetUnusedLoginLink(ctx, HashCode(token, s.secret))
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("auth: query login link: %w", err)
+	}
+	expiresAt, err := time.Parse(time.RFC3339, row.ExpiresAt)
+	if err != nil {
+		return "", false, fmt.Errorf("auth: corrupt login link expiry: %w", err)
+	}
+	if time.Now().After(expiresAt) {
+		return "", false, nil
+	}
+	result, err := s.db.ExecContext(ctx, `UPDATE verifications SET used = 1 WHERE id = ? AND purpose = ? AND used = 0`, row.ID, purposeLoginLink)
+	if err != nil {
+		return "", false, fmt.Errorf("auth: mark login link used: %w", err)
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return "", false, fmt.Errorf("auth: inspect login link use: %w", err)
+	}
+	if changed != 1 {
+		return "", false, nil
+	}
+	return row.Email, true, nil
+}
+
+// Cleanup deletes expired verification credentials older than 1 hour.
 func (s *CodeStore) Cleanup() error {
 	cutoff := time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
 	if err := s.q.CleanupExpiredCodes(context.Background(), cutoff); err != nil {

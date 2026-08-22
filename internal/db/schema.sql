@@ -67,13 +67,15 @@ CREATE TABLE verifications (
     id         TEXT PRIMARY KEY,
     email      TEXT NOT NULL,
     code_hash  TEXT NOT NULL,
+    purpose    TEXT NOT NULL DEFAULT 'email_code',
     attempts   INTEGER NOT NULL DEFAULT 0,
     used       INTEGER NOT NULL DEFAULT 0,
     expires_at TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE INDEX idx_verifications_email ON verifications(email);
+CREATE INDEX idx_verifications_email_purpose ON verifications(email, purpose, created_at DESC);
+CREATE INDEX idx_verifications_purpose_hash ON verifications(purpose, code_hash);
 
 CREATE TABLE sessions (
     token_hash          TEXT PRIMARY KEY,

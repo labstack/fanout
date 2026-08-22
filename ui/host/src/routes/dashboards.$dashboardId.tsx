@@ -9,6 +9,6 @@ export const Route = createFileRoute("/dashboards/$dashboardId")({
 function DashboardDetail() {
   const { dashboardId } = Route.useParams();
   const navigate = useNavigate();
-  const { openChat } = useFanoutApp();
-  return <Dashboard dashboardID={dashboardId} onOpenChat={openChat} onDashboardChange={(nextID, replace) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: nextID }, replace })} />;
+  const { agentAvailable, openChat } = useFanoutApp();
+  return <Dashboard dashboardID={dashboardId} agentAvailable={agentAvailable} onOpenChat={openChat} onDashboardChange={(nextID, replace) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: nextID }, replace })} />;
 }

@@ -57,6 +57,7 @@ func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeSto
 	e.POST("/api/auth/setup", h.Setup)
 	e.POST("/api/auth/start", h.Start)
 	e.POST("/api/auth/verify", h.Verify)
+	e.POST("/api/auth/login-link", h.LoginLink)
 	e.GET("/api/auth/me", h.Me)
 	e.POST("/api/auth/logout", h.Logout)
 }
@@ -71,9 +72,11 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to check auth status")
 	}
 	return c.JSON(200, map[string]any{
-		"setup_required": count == 0,
-		"auth_enabled":   true,
-		"auth_mode":      strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)),
+		"setup_required":  count == 0,
+		"auth_enabled":    true,
+		"auth_mode":       strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)),
+		"agent_available": h.cfg.AgentConfigured(),
+		"smtp_configured": h.cfg.SMTPConfigured(),
 	})
 }
 
@@ -176,6 +179,9 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 	if !h.startLimiter.Allow(c.RealIP()) {
 		return rateLimited(c, 15*time.Minute)
 	}
+	if !h.cfg.SMTPConfigured() {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "email login is not configured; ask the operator for a login link")
+	}
 	var req struct {
 		Email string `json:"email"`
 	}
@@ -269,6 +275,50 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 	h.recordAudit(c, auth.AuditEvent{ActorUserID: user.ID, EventType: "login.succeeded", Outcome: "success", TargetType: "user", TargetID: user.ID})
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(200, map[string]string{"status": "authenticated"})
+}
+
+func (h *AuthHandler) LoginLink(c *echo.Context) error {
+	if strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)) != "local" {
+		return echo.NewHTTPError(http.StatusNotFound, "local login is disabled")
+	}
+	if !h.verifyIPLimiter.Allow(c.RealIP()) {
+		return rateLimited(c, 15*time.Minute)
+	}
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := c.Bind(&req); err != nil || strings.TrimSpace(req.Token) == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "login token is required")
+	}
+
+	email, ok, err := h.codes.VerifyLoginLink(strings.TrimSpace(req.Token))
+	if err != nil {
+		slog.Error("auth: verify login link", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to verify login link")
+	}
+	if !ok {
+		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "invalid_login_link"}})
+		jitter()
+		return echo.NewHTTPError(http.StatusUnauthorized, "invalid or expired login link")
+	}
+
+	user, err := h.users.GetByEmail(email)
+	if err != nil && !errors.Is(err, auth.ErrUserNotFound) {
+		slog.Error("auth: login link user lookup failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
+	}
+	if errors.Is(err, auth.ErrUserNotFound) || !user.Active {
+		h.recordAudit(c, auth.AuditEvent{EventType: "login.failed", Outcome: "denied", TargetType: "email", Metadata: map[string]any{"reason": "inactive_or_missing_login_link_user"}})
+		jitter()
+		return echo.NewHTTPError(http.StatusUnauthorized, "user not found or inactive")
+	}
+	if err := h.establishSession(c, user); err != nil {
+		slog.Error("auth: login link session establishment failed", "user_id", user.ID, "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create session")
+	}
+	h.recordAudit(c, auth.AuditEvent{ActorUserID: user.ID, EventType: "login_link.redeemed", Outcome: "success", TargetType: "user", TargetID: user.ID})
+	c.Response().Header().Set("Cache-Control", "no-store")
+	return c.JSON(http.StatusOK, map[string]string{"status": "authenticated"})
 }
 
 func rateLimited(c *echo.Context, retryAfter time.Duration) error {

@@ -51,7 +51,7 @@ var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 var version = "dev"
 
 func main() {
-	configPath, showVersion, err := parseCommandLine(os.Args[1:], os.Stderr)
+	configPath, showVersion, loginEmail, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
 	}
@@ -69,6 +69,13 @@ func main() {
 	if err != nil {
 		slog.Error("invalid configuration", "err", err)
 		os.Exit(1)
+	}
+	if loginEmail != "" {
+		if err := createLoginLink(cfg, loginEmail, os.Stderr); err != nil {
+			slog.Error("create login link failed", "err", err)
+			os.Exit(1)
+		}
+		return
 	}
 	cfg.LogStartup()
 
@@ -344,19 +351,23 @@ func main() {
 		slog.Info("MCP server enabled", "path", "/mcp", "auth", "oauth", "resource", cfg.MCPPublicURL)
 		slog.Info("browser MCP server enabled", "path", "/api/mcp", "auth", "session")
 	}
-	provider, err := agent.NewProvider(cfg.AIProvider, cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
-	if err != nil {
-		slog.Error("agent provider init failed", "err", err)
-		os.Exit(1)
+	if cfg.AgentConfigured() {
+		provider, err := agent.NewProvider(cfg.AIProvider, cfg.AIAPIKey, cfg.AIModel, cfg.AIBaseURL)
+		if err != nil {
+			slog.Error("agent provider init failed", "err", err)
+			os.Exit(1)
+		}
+		toolRegistry, err := agent.NewToolRegistry(ctx, mcpServer.MCP())
+		if err != nil {
+			slog.Error("agent MCP registry init failed", "err", err)
+			os.Exit(1)
+		}
+		defer toolRegistry.Close()
+		agent.NewRuntime(provider, toolRegistry, agent.NewStore(sqlite.DB)).Register(e.Group("/api/agent", api.RequireCapability(api.RunAgent)))
+		slog.Info("AG-UI agent enabled", "path", "/api/agent", "provider", cfg.AIProvider)
+	} else {
+		slog.Info("AG-UI agent disabled", "reason", "agent.api_key is not configured")
 	}
-	toolRegistry, err := agent.NewToolRegistry(ctx, mcpServer.MCP())
-	if err != nil {
-		slog.Error("agent MCP registry init failed", "err", err)
-		os.Exit(1)
-	}
-	defer toolRegistry.Close()
-	agent.NewRuntime(provider, toolRegistry, agent.NewStore(sqlite.DB)).Register(e.Group("/api/agent", api.RequireCapability(api.RunAgent)))
-	slog.Info("AG-UI agent enabled", "path", "/api/agent", "provider", cfg.AIProvider)
 
 	// The compiled browser client is an embedded asset, not a second runtime.
 	spa := echo.WrapHandler(ui.Handler())
@@ -408,26 +419,94 @@ func main() {
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 
-func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, err error) {
+func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, loginEmail string, err error) {
 	if len(args) == 1 && args[0] == "version" {
-		return "", true, nil
+		return "", true, "", nil
 	}
 
 	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
 	flags.SetOutput(output)
+	flags.Usage = func() {
+		fmt.Fprintln(output, "Usage of fanout:")
+		fmt.Fprintln(output, "  fanout [flags]")
+		fmt.Fprintln(output, "  fanout [--config path] login-link <email>")
+		fmt.Fprintln(output, "  fanout version")
+		fmt.Fprintln(output, "Flags:")
+		flags.PrintDefaults()
+	}
 	flags.StringVar(&configPath, "config", "", "path to a Fanout YAML configuration file")
 	flags.BoolVar(&showVersion, "version", false, "print the Fanout version")
 	flags.BoolVar(&showVersion, "v", false, "print the Fanout version")
 	if err := flags.Parse(args); err != nil {
-		return "", false, err
+		return "", false, "", err
+	}
+	if flags.NArg() == 2 && flags.Arg(0) == "login-link" {
+		return configPath, false, flags.Arg(1), nil
 	}
 	if flags.NArg() != 0 {
 		err := fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
 		fmt.Fprintln(output, err)
 		flags.Usage()
-		return "", false, err
+		return "", false, "", err
 	}
-	return configPath, showVersion, nil
+	return configPath, showVersion, "", nil
+}
+
+func createLoginLink(cfg config.Config, rawEmail string, output io.Writer) error {
+	if strings.ToLower(strings.TrimSpace(cfg.AuthMode)) != "local" {
+		return fmt.Errorf("login links are available only in local auth mode")
+	}
+	email, err := auth.NormalizeEmail(rawEmail)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(cfg.ControlSQLitePath()); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("control database does not exist at %s", cfg.ControlSQLitePath())
+		}
+		return fmt.Errorf("inspect control database: %w", err)
+	}
+	sqlite, err := store.NewSQLite(cfg.ControlSQLitePath())
+	if err != nil {
+		return err
+	}
+	defer sqlite.Close()
+	user, err := auth.NewUserStore(sqlite.DB).GetByEmail(email)
+	if err != nil {
+		return err
+	}
+	if !user.Active {
+		return fmt.Errorf("user %s is inactive", email)
+	}
+	token, err := auth.NewCodeStore(sqlite.DB, cfg.AuthCodeSecret).CreateLoginLink(email)
+	if err != nil {
+		return err
+	}
+	if err := auth.NewAuditStore(sqlite.DB).Record(context.Background(), auth.AuditEvent{
+		EventType:  "login_link.issued",
+		Outcome:    "success",
+		TargetType: "user",
+		TargetID:   user.ID,
+	}); err != nil {
+		return err
+	}
+	loginURL := browserLoginURL(cfg)
+	query := loginURL.Query()
+	query.Set("login_token", token)
+	loginURL.RawQuery = query.Encode()
+	fmt.Fprintf(output, "fanout: login link for %s (valid 15 minutes, single use)\n  %s\n", email, loginURL.String())
+	return nil
+}
+
+func browserLoginURL(cfg config.Config) *url.URL {
+	if publicURL, err := url.Parse(strings.TrimSpace(cfg.PublicURL)); err == nil && publicURL.Scheme != "" && publicURL.Host != "" {
+		publicURL.Path = "/login"
+		publicURL.RawQuery = ""
+		publicURL.Fragment = ""
+		return publicURL
+	}
+	loginURL, _ := url.Parse(setupLoginURL(cfg.HTTPAddr))
+	return loginURL
 }
 
 func printSetupBanner(httpAddr, token string) {

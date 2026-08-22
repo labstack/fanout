@@ -30,7 +30,7 @@ const emptyState: State = { layout: [], widgets: [], filters: { window: "1h", na
 const widgetTitles: Record<WidgetType, string> = { overview: "System health", topology: "Service map", activity: "Recent activity", assistant: "Ask Fanout", performance: "Performance", trace: "Trace focus", logs: "Logs" };
 const widgetMinimumRows: Record<WidgetType, number> = { overview: 4, topology: 4, activity: 4, assistant: 3, performance: 4, trace: 4, logs: 4 };
 
-export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardChange }: { dashboardID?: string; onOpenChat: (prompt?: string) => void; onDashboardChange?: (id: string, replace?: boolean) => void }) {
+export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat, onDashboardChange }: { dashboardID?: string; agentAvailable: boolean; onOpenChat: (prompt?: string) => void; onDashboardChange?: (id: string, replace?: boolean) => void }) {
   const queryClient = useQueryClient();
   const dashboards = useQuery({ queryKey: ["dashboards"], queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 3000 });
   const [selectedID, setSelectedID] = useState(() => dashboardID || localStorage.getItem(dashboardKey) || "");
@@ -108,7 +108,7 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
         <Text c="dimmed" mt={4}>{item.description || "A focused view of the signals that matter now."}</Text>
       </Box>
       <Group wrap="nowrap" w={{ base: "100%", md: "auto" }}>
-        <Button variant="default" leftSection={<Sparkle size={16} weight="fill" />} flex={{ base: 1, md: "initial" }} onClick={() => onOpenChat("Create a new dashboard for me. First ask what I want to monitor, then design it when you have enough context.")}>Create with AI</Button>
+        {agentAvailable && <Button variant="default" leftSection={<Sparkle size={16} weight="fill" />} flex={{ base: 1, md: "initial" }} onClick={() => onOpenChat("Create a new dashboard for me. First ask what I want to monitor, then design it when you have enough context.")}>Create with AI</Button>}
         <Button leftSection={selected.isFetching ? <Loader size={15} color="white" /> : <ArrowClockwise size={16} weight="bold" />} onClick={() => void queryClient.invalidateQueries()}>{selected.isFetching ? "Refreshing" : "Refresh"}</Button>
       </Group>
     </Flex>
@@ -131,15 +131,15 @@ export default function Dashboard({ dashboardID = "", onOpenChat, onDashboardCha
           <Divider orientation="vertical" h={28} />
           <Menu shadow="md" position="bottom-end" withinPortal>
             <Menu.Target><Button variant="default" leftSection={<Plus size={16} weight="bold" />} rightSection={<CaretDown size={14} weight="bold" />}>Add view</Button></Menu.Target>
-            <Menu.Dropdown><Menu.Label>Dashboard views</Menu.Label>{Object.entries(widgetTitles).map(([value, label]) => <Menu.Item key={value} onClick={() => add(value as WidgetType)}>{label}</Menu.Item>)}</Menu.Dropdown>
+            <Menu.Dropdown><Menu.Label>Dashboard views</Menu.Label>{Object.entries(widgetTitles).filter(([value]) => agentAvailable || value !== "assistant").map(([value, label]) => <Menu.Item key={value} onClick={() => add(value as WidgetType)}>{label}</Menu.Item>)}</Menu.Dropdown>
           </Menu>
-          <Button variant="subtle" color="gray" rightSection={<ArrowUpRight size={16} weight="bold" />} onClick={() => onOpenChat()}>Ask Fanout</Button>
+          {agentAvailable && <Button variant="subtle" color="gray" rightSection={<ArrowUpRight size={16} weight="bold" />} onClick={() => onOpenChat()}>Ask Fanout</Button>}
         </Flex>
       </Flex>
     </Paper>
 
     <Grid className="dashboard-grid" layouts={layouts} breakpoints={{ lg: 1100, md: 800, sm: 600, xs: 420, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 2, xxs: 1 }} rowHeight={76} margin={[16, 16]} containerPadding={[0, 0]} compactType="vertical" draggableCancel="button,input,select,textarea,a,label,[role=menu]" onBreakpointChange={setBreakpoint} onDragStop={(layout: readonly LayoutItem[]) => { if (breakpoint === "lg") update({ ...state, layout: [...layout] }); }} onResizeStop={(layout: readonly LayoutItem[]) => { if (breakpoint === "lg") update({ ...state, layout: [...layout] }); }}>
-      {state.widgets.map((widget) => <div key={widget.id}><WidgetCard widget={widget} filters={state.filters} onRemove={() => remove(widget.id)} onOpenChat={onOpenChat} /></div>)}
+      {state.widgets.map((widget) => <div key={widget.id}><WidgetCard widget={widget} filters={state.filters} agentAvailable={agentAvailable} onRemove={() => remove(widget.id)} onOpenChat={onOpenChat} /></div>)}
     </Grid>
   </Box>;
 }
@@ -148,7 +148,7 @@ function LoadingState({ label }: { label: string }) {
   return <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">{label}</Text></Center>;
 }
 
-function WidgetCard({ widget, filters, onRemove, onOpenChat }: { widget: Widget; filters: State["filters"]; onRemove: () => void; onOpenChat: (prompt?: string) => void }) {
+function WidgetCard({ widget, filters, agentAvailable, onRemove, onOpenChat }: { widget: Widget; filters: State["filters"]; agentAvailable: boolean; onRemove: () => void; onOpenChat: (prompt?: string) => void }) {
   const base = new URLSearchParams({ window: filters.window, limit: "40" });
   if (filters.namespace) base.set("namespace", filters.namespace);
   const service = typeof widget.config?.service === "string" ? widget.config.service : "";
@@ -174,7 +174,7 @@ function WidgetCard({ widget, filters, onRemove, onOpenChat }: { widget: Widget;
       {!failed && widget.type === "performance" && <DataTable rows={(performance.data?.data?.endpoints ?? []).slice(0, 5).map((endpoint: any) => [<Text key="path" fw={600} size="sm" truncate>{endpoint.method} {endpoint.path}</Text>, `${endpoint.calls?.toLocaleString?.()} calls`, `${endpoint.p95_ms?.toFixed?.(1)} ms p95`])} empty="No endpoint activity in this window" />}
       {!failed && widget.type === "logs" && <DataTable rows={(logs.data?.data?.entries ?? []).slice(0, 5).map((entry: any) => [<Badge key="severity" color={severityColor(entry.severity)} variant="light">{entry.severity}</Badge>, entry.service, entry.body])} empty="No matching logs in this window" />}
       {!failed && widget.type === "trace" && <Stack><SimpleGrid cols={2} spacing="sm"><Metric label="Duration" value={trace.data?.data ? `${trace.data.data.duration_ms.toFixed?.(1)} ms` : "—"} /><Metric label="Spans" value={trace.data?.data?.spans?.length ?? "—"} /><Metric label="Services" value={trace.data?.data?.services?.length ?? "—"} /><Metric label="Status" value={trace.data?.data ? trace.data.data.has_error ? "Error" : "Healthy" : "—"} /></SimpleGrid><Text c="dimmed" size="xs" ff="monospace" truncate>{trace.data?.data?.trace_id ? `Trace ${trace.data.data.trace_id}` : "Most relevant recent trace"}</Text></Stack>}
-      {!failed && widget.type === "assistant" && <Stack align="flex-start"><Text c="dimmed">Ask a focused question about health, latency, errors, or dependencies.</Text><Button leftSection={<Sparkle size={16} weight="fill" />} onClick={() => onOpenChat("Summarize the most important system changes in the selected window")}>Start a conversation</Button></Stack>}
+      {!failed && widget.type === "assistant" && (agentAvailable ? <Stack align="flex-start"><Text c="dimmed">Ask a focused question about health, latency, errors, or dependencies.</Text><Button leftSection={<Sparkle size={16} weight="fill" />} onClick={() => onOpenChat("Summarize the most important system changes in the selected window")}>Start a conversation</Button></Stack> : <Text c="dimmed">Configure an AI provider to enable this view. The rest of this dashboard remains available.</Text>)}
     </ScrollArea>
   </Stack></Paper>;
 }

@@ -54,6 +54,7 @@ func recordAudit(ctx context.Context, executor auditExecutor, event AuditEvent) 
 	if !validAuditValue(event.EventType, map[AuditEventType]struct{}{
 		"authorization.denied": {}, "identity.linked": {}, "ingest_key.rotated": {},
 		"login.failed": {}, "login.requested": {}, "login.succeeded": {}, "logout": {},
+		"login_link.issued": {}, "login_link.redeemed": {},
 		"oidc.denied": {}, "role.changed": {}, "session.revoked": {}, "setup.completed": {},
 		"user.created": {}, "user.deactivated": {}, "user.deleted": {}, "user.provisioned": {}, "user.updated": {},
 	}) {

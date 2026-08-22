@@ -441,7 +441,6 @@ func TestValidate(t *testing.T) {
 		{"SMTP missing pass", func(c *Config) { c.SMTPPass = "" }},
 		{"SMTP missing from", func(c *Config) { c.SMTPFrom = "" }},
 		{"SMTP invalid port", func(c *Config) { c.SMTPPort = 0 }},
-		{"AI key empty", func(c *Config) { c.AIAPIKey = "" }},
 		{"AI provider invalid", func(c *Config) { c.AIProvider = "unknown" }},
 		{"auth code secret empty", func(c *Config) { c.AuthCodeSecret = "" }},
 		{"auth code secret short", func(c *Config) { c.AuthCodeSecret = "short" }},
@@ -469,6 +468,19 @@ func TestValidate(t *testing.T) {
 		c.RetentionDays = 0
 		if err := c.Validate(); err != nil {
 			t.Errorf("RetentionDays=0 should be valid: %v", err)
+		}
+	})
+
+	t.Run("local mode allows absent SMTP and agent", func(t *testing.T) {
+		c := valid
+		c.SMTPHost, c.SMTPUser, c.SMTPPass, c.SMTPFrom = "", "", "", ""
+		c.AIAPIKey = ""
+		c.AIProvider = "ignored-without-a-key"
+		if err := c.Validate(); err != nil {
+			t.Fatalf("minimal local config should pass: %v", err)
+		}
+		if c.SMTPConfigured() || c.AgentConfigured() {
+			t.Fatal("absent optional services reported as configured")
 		}
 	})
 
