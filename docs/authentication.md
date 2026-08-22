@@ -42,15 +42,20 @@ Properties worth knowing:
 
 ### Before you complete setup
 
-Configure a way back in **before** the setup credential is consumed. After the
-first administrator exists, access uses the normal login path:
+After the first administrator exists, access uses the normal login path, so
+confirm that path works before the setup credential is consumed.
 
-- `local` mode requires working SMTP. Set `FANOUT_SMTP_HOST`, `FANOUT_SMTP_PORT`,
-  `FANOUT_SMTP_USERNAME`, `FANOUT_SMTP_PASSWORD`, and `FANOUT_SMTP_FROM`.
-- `oidc` mode requires a reachable issuer and a configured client.
+Fanout refuses to start without one configured: `local` mode requires
+`FANOUT_SMTP_HOST`, `FANOUT_SMTP_PORT`, `FANOUT_SMTP_USERNAME`,
+`FANOUT_SMTP_PASSWORD`, `FANOUT_SMTP_FROM`, and a 32-character
+`FANOUT_AUTH_CODE_SECRET`; `oidc` mode requires an HTTPS issuer, a client, and
+an HTTPS `FANOUT_PUBLIC_URL`.
 
-An installation with neither a working mail path nor OIDC has no route back in
-once setup completes.
+Configuration being present is not the same as delivery working. Credentials
+can be wrong, the relay can refuse the sender, and mail can land in spam. Send
+yourself a code and confirm it arrives before you finish setup — a login path
+that is configured but broken is the case the recovery section below exists
+for.
 
 ### Recovery
 
