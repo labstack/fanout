@@ -1,5 +1,17 @@
 // Generates site/public/og.png (1200x630) from an SVG template.
 // Wired as a `prebuild` script so the OG image is always fresh on `bun run build`.
+//
+// Every face here is the display one: a share card is chrome and a wordmark,
+// never sustained prose, so the split that governs the site itself resolves to
+// mono throughout.
+//
+// Caveat worth knowing before trusting the output: sharp rasterises SVG text
+// with the fonts fontconfig can find on the machine, not the ones this
+// repository installs into node_modules. Neither IBM Plex nor the DM Sans and
+// Fragment Mono named here before it is present on a stock CI runner, so the
+// card has always rendered in a fallback face. The stacks below are therefore
+// written to degrade to a generic monospace deliberately rather than to a
+// proportional default, which is what the previous sans-led stacks did.
 
 import sharp from "sharp";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -51,26 +63,26 @@ const svg = `
       <path d="M25.2 10.8c4.6 4.6 4.6 12.2 0 16.9"/>
       <path d="M31.1 4.9C39 12.8 39 25.2 31.1 33.1"/>
     </g>
-    <text x="60" y="28" font-family="DM Sans, ui-sans-serif, system-ui, sans-serif" font-size="22" font-weight="700" letter-spacing="3" fill="#e4e4e7">FANOUT</text>
+    <text x="60" y="28" font-family="IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="22" font-weight="700" letter-spacing="3" fill="#e4e4e7">FANOUT</text>
   </g>
 
   <!-- headline -->
-  <text x="80" y="310" font-family="DM Sans, ui-sans-serif, system-ui, sans-serif" font-size="78" font-weight="700" letter-spacing="-2" fill="url(#gradText)">Observability that</text>
-  <text x="80" y="400" font-family="DM Sans, ui-sans-serif, system-ui, sans-serif" font-size="78" font-weight="700" letter-spacing="-2">
+  <text x="80" y="310" font-family="IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="78" font-weight="700" letter-spacing="0" fill="url(#gradText)">Observability that</text>
+  <text x="80" y="400" font-family="IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="78" font-weight="700" letter-spacing="0">
     <tspan fill="#60a5fa">runs anywhere</tspan>
     <tspan fill="url(#gradText)"> you can</tspan>
   </text>
-  <text x="80" y="490" font-family="DM Sans, ui-sans-serif, system-ui, sans-serif" font-size="78" font-weight="700" letter-spacing="-2" fill="url(#gradText)">run a binary.</text>
+  <text x="80" y="490" font-family="IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="78" font-weight="700" letter-spacing="0" fill="url(#gradText)">run a binary.</text>
 
   <!-- tag -->
   <g transform="translate(80 540)">
     <rect x="0" y="0" width="330" height="42" rx="21" fill="#60a5fa" fill-opacity="0.06" stroke="#60a5fa" stroke-opacity="0.3"/>
     <circle cx="22" cy="21" r="5" fill="#34d399"/>
-    <text x="38" y="28" font-family="Fragment Mono, ui-monospace, monospace" font-size="16" letter-spacing="2" fill="#60a5fa">SELF-HOSTED · SINGLE BINARY</text>
+    <text x="38" y="28" font-family="IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="16" letter-spacing="2" fill="#60a5fa">SELF-HOSTED · SINGLE BINARY</text>
   </g>
 
   <!-- footer url -->
-  <text x="1120" y="570" text-anchor="end" font-family="Fragment Mono, ui-monospace, monospace" font-size="18" fill="#71717a">fanout.run</text>
+  <text x="1120" y="570" text-anchor="end" font-family="IBM Plex Mono, ui-monospace, SFMono-Regular, Menlo, monospace" font-size="18" fill="#71717a">fanout.run</text>
 </svg>
 `.trim();
 

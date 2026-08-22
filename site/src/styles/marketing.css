@@ -1,6 +1,35 @@
-/* Marketing site styles — matches ui/host/src/index.css product theme (Ayu Mono).
-   Used by src/pages/index.astro via MarketingLayout. Loaded by docs too via
-   DocsLayout extending MarketingLayout. Keep tokens in sync with product. */
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+@import "@fontsource/ibm-plex-mono/latin-700.css";
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-400-italic.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+
+/* Marketing site styles. Used by src/pages/index.astro via MarketingLayout,
+   and by the documentation through DocsLayout, which extends it.
+ *
+ * The palette is Ayu Mono — Ayu Dark surfaces under a white interactive
+ * primary. It is the site's own identity and is not shared with the product,
+ * which moved to Mantine (Inter, teal) and no longer defines these tokens;
+ * an earlier version of this comment asked for a sync that has nothing left
+ * to sync against.
+ *
+ * Typography follows onebox.run: one superfamily, two members, split by role
+ * rather than by taste. IBM Plex Mono owns the brand, navigation, headings and
+ * technical artifacts — Fanout is a single binary you point a collector at, and
+ * the face says so before a word is read. Because both faces are Plex, the role
+ * change reads as hierarchy rather than as a second visual identity.
+ *
+ * This file is mono end to end, prose included. The landing page's paragraphs
+ * run two or three lines each, which is not far enough for a proportional face
+ * to repay giving up the identity the mono one carries. IBM Plex Sans is
+ * declared here but used only by DocsLayout, where the reading is sustained and
+ * the trade reverses.
+ *
+ * Only the weights actually used are imported, per subset. Plex tops out at
+ * 700, so nothing here may ask for more.
+ */
 
 :root {
   /* Ayu Mono palette — surfaces from Ayu Dark, white interactive primary. */
@@ -20,15 +49,18 @@
   --tinted: color-mix(in srgb, var(--primary) 10%, transparent);
   --tinted-strong: color-mix(in srgb, var(--primary) 22%, transparent);
   --glow: 0 4px 16px -4px rgba(255, 255, 255, 0.18);
-  --sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --mono: "Fragment Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  /* Named for the role each face plays, not for the shape it happens to have:
+     a rule that reaches for --mono starts describing its own styling instead
+     of the thing being styled, and the two drift apart the moment one changes. */
+  --fo-font-display: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --fo-font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body {
   background: var(--bg);
   color: var(--fg);
-  font-family: var(--mono);
+  font-family: var(--fo-font-display);
   font-size: 15px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
@@ -53,7 +85,13 @@ body::after {
   opacity: 0.012;
 }
 a { color: inherit; text-decoration: none; }
-h1, h2, h3 { font-family: var(--sans); letter-spacing: -0.015em; }
+h1, h2, h3 { font-family: var(--fo-font-display); letter-spacing: -0.015em; }
+
+/* The landing page stays mono-led, including its prose. Nothing here runs
+   longer than a few lines, and the face is the first thing that says what this
+   is; breaking into a proportional one for a two-line paragraph would trade
+   that for legibility this page never needed. The body face earns its place in
+   DocsLayout, where the reading is sustained. */
 
 /* NAV */
 nav.bar {
@@ -73,9 +111,11 @@ nav.bar {
   display: flex;
   align-items: center;
   gap: 14px;
-  font-family: var(--sans);
+  font-family: var(--fo-font-display);
   font-size: 15px;
-  font-weight: 800;
+  /* Plex Mono stops at 700. The wordmark reads as heavy at this size because
+     it is uppercase and widely tracked, not because of the weight. */
+  font-weight: 700;
   line-height: 1;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -125,11 +165,14 @@ main.site {
   background: var(--healthy);
   box-shadow: 0 0 8px var(--healthy);
 }
+/* Display sizes carry less negative tracking than they did under a
+   proportional face: mono glyphs are already set on a fixed advance, so the
+   tightening that closed gaps in DM Sans collides here instead. */
 .hero h1 {
-  font-size: clamp(48px, 7vw, 88px);
+  font-size: clamp(44px, 6.4vw, 78px);
   font-weight: 700;
-  line-height: 1.02;
-  letter-spacing: -0.03em;
+  line-height: 1.06;
+  letter-spacing: -0.02em;
   margin-bottom: 28px;
   background: linear-gradient(180deg, #fafafa 0%, #a1a1aa 130%);
   -webkit-background-clip: text;
@@ -142,9 +185,8 @@ main.site {
   background: none;
 }
 .hero p.lead {
-  font-family: var(--mono);
-  font-size: 18px;
-  line-height: 1.65;
+  font-size: 17px;
+  line-height: 1.7;
   color: var(--muted);
   max-width: 660px;
   margin-bottom: 44px;
@@ -158,7 +200,7 @@ main.site {
   border-radius: 9px;
   font-size: 14.5px;
   font-weight: 600;
-  font-family: var(--sans);
+  font-family: var(--fo-font-display);
   transition: all 0.15s ease;
   cursor: pointer;
   border: 1px solid transparent;
@@ -216,7 +258,7 @@ main.site {
   font-size: 12px;
   color: var(--muted);
   margin-left: 12px;
-  font-family: var(--mono);
+  font-family: var(--fo-font-display);
 }
 .preview .url .seg { color: var(--fg); }
 .preview-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 14px; }
@@ -276,7 +318,7 @@ main.site {
   color: var(--muted);
 }
 .kpi .value {
-  font-family: var(--sans);
+  font-family: var(--fo-font-display);
   font-size: 22px;
   font-weight: 600;
   color: var(--fg);
@@ -290,7 +332,7 @@ section.site-section {
   border-top: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
 }
 .section-eyebrow {
-  font-family: var(--mono);
+  font-family: var(--fo-font-display);
   font-size: 11.5px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -298,11 +340,11 @@ section.site-section {
   margin-bottom: 16px;
 }
 .section-h2 {
-  font-size: clamp(34px, 4.5vw, 56px);
+  font-size: clamp(30px, 4vw, 48px);
   font-weight: 700;
   max-width: 820px;
-  line-height: 1.05;
-  letter-spacing: -0.025em;
+  line-height: 1.12;
+  letter-spacing: -0.015em;
   margin-bottom: 18px;
   background: linear-gradient(180deg, #fafafa 0%, #a1a1aa 140%);
   -webkit-background-clip: text;
@@ -336,7 +378,7 @@ section.site-section {
   box-shadow: var(--glow);
 }
 .card .cap {
-  font-family: var(--mono);
+  font-family: var(--fo-font-display);
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -356,12 +398,15 @@ section.site-section {
   background: color-mix(in srgb, var(--primary) 12%, transparent);
   border: 1px solid var(--tinted);
   color: var(--primary);
-  font-family: var(--mono);
+  font-family: var(--fo-font-display);
   font-size: 11px;
 }
+/* Card and step titles sit in narrow columns, and mono sets every glyph on the
+   same advance — the sizes that fitted a proportional face here now wrap a word
+   early. Both drop a step rather than the columns widening. */
 .card h3 {
-  font-family: var(--sans);
-  font-size: 20px;
+  font-family: var(--fo-font-display);
+  font-size: 17px;
   font-weight: 600;
   margin-bottom: 10px;
   letter-spacing: -0.01em;
@@ -388,7 +433,7 @@ section.site-section {
   border-radius: 14px;
   padding: 24px 26px;
   box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.04);
-  font-family: var(--mono);
+  font-family: var(--fo-font-display);
   font-size: 13.5px;
   line-height: 1.85;
 }
@@ -437,7 +482,7 @@ section.site-section {
 }
 .step-card:hover { border-color: var(--tinted-strong); }
 .step-card .n {
-  font-family: var(--sans);
+  font-family: var(--fo-font-display);
   font-size: 40px;
   font-weight: 700;
   color: color-mix(in srgb, var(--primary) 50%, transparent);
@@ -446,8 +491,8 @@ section.site-section {
   letter-spacing: -0.04em;
 }
 .step-card h4 {
-  font-family: var(--sans);
-  font-size: 18px;
+  font-family: var(--fo-font-display);
+  font-size: 16px;
   margin-bottom: 8px;
   font-weight: 600;
 }
@@ -457,7 +502,7 @@ section.site-section {
   line-height: 1.55;
 }
 .step-card code {
-  font-family: var(--mono);
+  font-family: var(--fo-font-display);
   font-size: 13px;
   color: var(--primary);
   background: color-mix(in srgb, var(--primary) 8%, transparent);
