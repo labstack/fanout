@@ -188,9 +188,28 @@ h1#_top {
 
 /* Without a minimum, a four-column reference table compresses to fit a phone
    and every column becomes a ribbon of wrapped text. The minimum makes it
-   overflow instead, which is what the scroll container is there to absorb. */
+   overflow instead, which is what the scroll container is there to absorb.
+
+   The overflow reset is not cosmetic. Starlight makes tables scroll on their
+   own, so inside the wrapper there were two nested scrollers and two stacked
+   scrollbars for one table, each moving a different amount. The wrapper is the
+   element that should scroll; the table stops.
+
+   Both axes have to be named. `overflow-x: visible` alone is computed back to
+   `auto` whenever the other axis is not visible, which is the rule that makes a
+   single-axis reset silently do nothing here. */
 .sl-markdown-content .table-wrap > table {
   min-width: 34rem;
+  overflow: visible;
+}
+
+/* Code inside a heading is set smaller than the heading's own size.
+   The generated settings reference titles every note with a setting key, and a
+   key is one long unbreakable token: at Starlight's h3 size,
+   `storage.duckdb.max_connections` is wider than the content column and breaks
+   mid-identifier, rendering as "max_connection" above a lone "s". */
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) code {
+  font-size: 0.78em;
 }
 
 /* Previous/next links at the foot of a page. Starlight sizes their titles at
