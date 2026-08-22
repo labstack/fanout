@@ -1,0 +1,90 @@
+# Routers + services for the four edge entries:
+#   site            fanout.run, www.fanout.run   → site:80         (marketing)
+#   demo            demo.fanout.run              → demo:7520       (single binary)
+#   fanout          fanout.labstack.com          → fanout:7520     (single binary)
+#   fanout-ingest   ingest.fanout.labstack.com   → h2c://fanout:4317 (OTLP gRPC ingest, on 443)
+#
+# Cert strategy: ONE wildcard cert under fanout.run covers `site` + `demo` + apex.
+# The `demo` router carries the `tls.domains` block that orders `*.fanout.run` +
+# `fanout.run` (SAN). `site` intentionally omits `tls.domains` so Traefik picks
+# that same cert from the resolver store by SNI at request time (`*.fanout.run`
+# matches `www.fanout.run`; the `fanout.run` SAN matches the apex). DO NOT add
+# `tls.domains` to `site` — that triggers a second redundant LE order.
+#
+# The two labstack hostnames (fanout + ingest) get their own LE certs via
+# auto-resolution from each router's Host rule. OTLP gRPC ingest shares the
+# `websecure` (:443) entrypoint with the web UI — Traefik separates them by
+# Host (gRPC is just HTTP/2 over TLS), so the public endpoint is a clean
+# `ingest.fanout.labstack.com` (443, no custom port). `ingest.fanout.labstack.com`
+# MUST stay DNS-only at Cloudflare (gray cloud) — CF's free plan doesn't proxy
+# OTLP gRPC; clients must reach the origin directly.
+
+http:
+  routers:
+    site:
+      rule: "Host(`fanout.run`) || Host(`www.fanout.run`)"
+      entryPoints: [websecure]
+      service: site
+      middlewares: [compress]
+      tls:
+        certResolver: le
+
+    demo:
+      rule: "Host(`demo.fanout.run`)"
+      entryPoints: [websecure]
+      service: demo
+      middlewares: [compress]
+      tls:
+        certResolver: le
+        domains:
+          - main: "*.fanout.run"
+            sans:
+              - fanout.run
+
+    fanout:
+      rule: "Host(`fanout.labstack.com`)"
+      entryPoints: [websecure]
+      service: fanout
+      middlewares: [compress]
+      tls:
+        certResolver: le
+
+    # NOTE: fanout-ingest deliberately does NOT use `compress`. OTLP/gRPC carries
+    # its own per-message compression negotiated by the OTEL exporter (gzip on
+    # the wire by default); a transport-level second pass would just burn CPU.
+    fanout-ingest:
+      rule: "Host(`ingest.fanout.labstack.com`)"
+      entryPoints: [websecure]
+      service: fanout-ingest
+      tls:
+        certResolver: le
+
+  middlewares:
+    # Gzip web assets and JSON, but never buffer AG-UI event streams.
+    compress:
+      compress:
+        excludedContentTypes:
+          - text/event-stream
+
+  services:
+    site:
+      loadBalancer:
+        servers:
+          - url: "http://site:80"
+
+    demo:
+      loadBalancer:
+        servers:
+          - url: "http://demo:7520"
+
+    fanout:
+      loadBalancer:
+        servers:
+          - url: "http://fanout:7520"
+
+    fanout-ingest:
+      loadBalancer:
+        servers:
+          # h2c (HTTP/2 cleartext) — required for gRPC over an in-cluster non-TLS
+          # hop. Do not change to http://; OTLP/gRPC needs HTTP/2.
+          - url: "h2c://fanout:4317"

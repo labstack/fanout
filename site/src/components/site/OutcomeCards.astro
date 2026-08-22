@@ -1,0 +1,47 @@
+---
+const cards = [
+  {
+    n: "01",
+    cap: "Drop-in",
+    h: "Speaks OpenTelemetry, day one.",
+    p: "Point any OTel SDK or collector at it. Traces, logs, metrics — all on the standard wire format.",
+  },
+  {
+    n: "02",
+    cap: "Fast",
+    h: "Sub-second over months of data.",
+    p: "Designed to keep up with high-volume telemetry without an external database, cluster, or sidecar.",
+  },
+  {
+    n: "03",
+    cap: "Conversational",
+    h: 'Just ask: "why is checkout slow?"',
+    p: "A chat investigator built into the binary. Connects to Claude Code over MCP for hands-on triage.",
+  },
+  {
+    n: "04",
+    cap: "Yours",
+    h: "Self-hosted by design.",
+    p: "Your data stays on your network. No per-host fees, no telemetry tax, no agents shipping data offsite.",
+  },
+];
+---
+
+<section class="site-section">
+  <div class="section-eyebrow">What you get</div>
+  <h2 class="section-h2">Everything you'd build yourself, in one process.</h2>
+  <p class="section-sub">
+    No collector to deploy. No database to operate. No SaaS to budget for. Just a
+    binary that does the work.
+  </p>
+
+  <div class="cards">
+    {cards.map((c) => (
+      <div class="card">
+        <div class="cap"><span class="n">{c.n}</span>{c.cap}</div>
+        <h3>{c.h}</h3>
+        <p>{c.p}</p>
+      </div>
+    ))}
+  </div>
+</section>

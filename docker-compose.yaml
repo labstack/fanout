@@ -1,0 +1,83 @@
+include:
+  - path: demo/docker-compose.yaml
+    env_file: demo/.env
+
+services:
+  traefik:
+    # Stock image; lego (with Cloudflare DNS provider) is built in.
+    # CF_DNS_API_TOKEN lives in traefik/.env (gitignored).
+    image: traefik:v3.7
+    container_name: traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"   # web UI + OTLP/gRPC ingest (routed by Host, TLS by Traefik)
+    env_file:
+      - traefik/.env
+    volumes:
+      - ./traefik/static.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - /data/traefik/letsencrypt:/letsencrypt
+    healthcheck:
+      # `traefik healthcheck` hits the /ping endpoint enabled in static.yml.
+      # No `--ping` flag — that's the static-config switch (already set),
+      # not a subcommand argument.
+      test: ["CMD", "traefik", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Marketing site at fanout.run + www.fanout.run. Image still published as
+  # `ghcr.io/labstack/fanout-site` (registry coordinate is permanent); the
+  # local service/container is just `site`.
+  site:
+    image: ghcr.io/labstack/fanout-site:${SITE_VERSION:?SITE_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
+    container_name: site
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  # Single Fanout runtime: ingest, query, AG-UI, MCP, and embedded web client.
+  # Secrets (authentication/SMTP/model provider) live in fanout/.env
+  # (gitignored); the deploy host must have this file in place before `up`.
+  fanout:
+    image: ghcr.io/labstack/fanout:${FANOUT_VERSION:?FANOUT_VERSION must be set (use scripts/yeet.sh, which resolves from git tags)}
+    container_name: fanout
+    restart: unless-stopped
+    env_file:
+      - fanout/.env
+    environment:
+      DATA_DIR: /var/lib/fanout/data
+      HTTP_ADDR: :7520
+      OTLP_GRPC_ADDR: :4317
+      # 4x fewer DuckLake snapshots/files per day than the 15s default; the
+      # in-binary hourly compaction keeps the residue bounded either way.
+      FLUSH_SECONDS: "60"
+      # OTLP endpoint shown in the UI's collector-config hint. Behind Traefik the
+      # browser host differs from the OTLP host, so set it explicitly.
+      INGEST_ENDPOINT: https://ingest.fanout.labstack.com
+      # Canonical browser URL. Fanout uses this trusted value to emit Secure
+      # session cookies when TLS terminates at Traefik.
+      PUBLIC_URL: https://fanout.labstack.com
+      # Canonical OAuth resource/audience for remote MCP clients.
+      MCP_PUBLIC_URL: https://fanout.labstack.com/mcp
+      # Allow concurrent read queries; write commits stay serialized by the
+      # shared write mutex. Watch logs for SQLITE_BUSY after raising this.
+      DUCKDB_MAX_CONNS: "4"
+      # Explicit caps: fanout and demo share this 20-core/64GB host with the
+      # otel-demo stack and no cgroup limits, so the self-sizing defaults
+      # (80% of RAM, one thread per core) would let each instance claim 80%
+      # of the whole box and run 20-way queries whose pinned blocks blow the
+      # memory cap (seen on the post-outage rollup backfill).
+      DUCKDB_MEMORY: "16GB"
+      DUCKDB_THREADS: "4"
+    expose:
+      - "7520"
+    volumes:
+      - /data/fanout:/var/lib/fanout
+    healthcheck:
+      test: ["CMD", "wget", "-qO/dev/null", "http://127.0.0.1:7520/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
