@@ -21,7 +21,7 @@ fanout: "fanout — one Go process" {
   style.stroke-width: 2
 
   http: "HTTP :7520\nroutes + auth middleware"
-  ingest: "Ingest\nOTLP gRPC :4317"
+  ingest: "Ingest\nOTLP gRPC :4317 + HTTP :4318"
   ui: "Embedded React assets"
   agent: "Agent runtime\nmodel + tool loop"
   mcp: "MCP server\n5 typed + 4 dashboard tools"
@@ -53,7 +53,7 @@ store: Storage {
 
 model: "Anthropic or OpenAI" {style.stroke-dash: 3}
 
-clients.collector -> fanout.ingest: OTLP
+clients.collector -> fanout.ingest: "OTLP/gRPC or OTLP/HTTP"
 clients.browser -> fanout.http: HTTPS
 clients.ext -> fanout.http: "/mcp — OAuth"
 

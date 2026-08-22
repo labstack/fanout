@@ -65,7 +65,7 @@ COPY fanout.docker.yaml /etc/fanout/fanout.yaml
 USER fanout
 WORKDIR /var/lib/fanout
 
-EXPOSE 7520 4317
+EXPOSE 7520 4317 4318
 
 # Startup does DuckDB catalog attachment and maintenance, so the grace period
 # is generous relative to the check interval.

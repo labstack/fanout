@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -49,6 +50,12 @@ type ingestAuthorizer struct {
 	settingsStore *settings.Store
 }
 
+var (
+	errIngestAuthUnavailable = errors.New("ingest auth unavailable")
+	errIngestNotInitialized  = errors.New("fanout not initialized")
+	errInvalidIngestToken    = errors.New("invalid ingest token")
+)
+
 func newIngestAuthorizer(settingsStore *settings.Store) *ingestAuthorizer {
 	return &ingestAuthorizer{settingsStore: settingsStore}
 }
@@ -66,27 +73,42 @@ func (a *ingestAuthorizer) Unary() grpc.UnaryServerInterceptor {
 // admin creation, rotatable from the settings page). Peer IP is not
 // considered — operators decide who reaches the port.
 func (a *ingestAuthorizer) authorize(ctx context.Context) error {
+	err := a.authorizeToken(ctx, ingestTokenFromContext(ctx))
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errIngestNotInitialized):
+		return status.Error(codes.Unauthenticated, "fanout not initialized")
+	case errors.Is(err, errInvalidIngestToken):
+		return status.Error(codes.Unauthenticated, "invalid ingest token")
+	default:
+		return status.Error(codes.Internal, "ingest auth unavailable")
+	}
+}
+
+// authorizeToken owns the transport-neutral credential policy. gRPC and HTTP
+// extract tokens from their respective headers, then share this verification.
+func (a *ingestAuthorizer) authorizeToken(ctx context.Context, token string) error {
 	if a.settingsStore == nil {
 		// Defensive: production always wires a store (cmd/fanout/main.go). Reaching
 		// this path means a mis-wired init; fail closed and log so it surfaces.
 		slog.Error("ingest: settings store not wired; rejecting request")
-		return status.Error(codes.Internal, "ingest auth unavailable")
+		return errIngestAuthUnavailable
 	}
 	ingestCfg, err := a.settingsStore.GetIngest(ctx)
 	if err != nil {
 		// Don't leak the wrapped error to the client — log it server-side.
 		slog.Error("ingest: load config failed", "err", err)
-		return status.Error(codes.Internal, "ingest auth unavailable")
+		return fmt.Errorf("%w: %v", errIngestAuthUnavailable, err)
 	}
 	if ingestCfg.TokenHash == "" {
 		// Pre-setup (no admin yet) — no token exists to check against. Reject
 		// all requests until setup completes; collectors must wait.
 		slog.Warn("ingest: rejecting request — no ingest token configured (setup not complete)")
-		return status.Error(codes.Unauthenticated, "fanout not initialized")
+		return errIngestNotInitialized
 	}
-	token := ingestTokenFromContext(ctx)
 	if token == "" || !settings.CheckIngestToken(token, ingestCfg.TokenHash) {
-		return status.Error(codes.Unauthenticated, "invalid ingest token")
+		return errInvalidIngestToken
 	}
 	return nil
 }

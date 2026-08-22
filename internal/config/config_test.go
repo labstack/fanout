@@ -36,6 +36,9 @@ func TestLoadReturnsDefaults(t *testing.T) {
 	if cfg.OTLPGRPCAddr != "127.0.0.1:4317" {
 		t.Errorf("OTLPGRPCAddr = %q, want %q", cfg.OTLPGRPCAddr, "127.0.0.1:4317")
 	}
+	if cfg.OTLPHTTPAddr != "127.0.0.1:4318" {
+		t.Errorf("OTLPHTTPAddr = %q, want %q", cfg.OTLPHTTPAddr, "127.0.0.1:4318")
+	}
 	if cfg.DataDir != "./data" {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, "./data")
 	}
@@ -150,13 +153,14 @@ func TestLoadTreatsEmptyEnvironmentValuesAsAbsent(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
 		"FANOUT_HTTP_ADDR=",
 		"FANOUT_OTLP_GRPC_ADDR=",
+		"FANOUT_OTLP_HTTP_ADDR=",
 		"FANOUT_MCP_ENABLED=",
 		"FANOUT_RETENTION_DAYS=",
 	)})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.HTTPAddr != ":7520" || cfg.OTLPGRPCAddr != "127.0.0.1:4317" || !cfg.MCPEnabled || cfg.RetentionDays != 30 {
+	if cfg.HTTPAddr != ":7520" || cfg.OTLPGRPCAddr != "127.0.0.1:4317" || cfg.OTLPHTTPAddr != "127.0.0.1:4318" || !cfg.MCPEnabled || cfg.RetentionDays != 30 {
 		t.Fatalf("empty environment values erased defaults: %+v", cfg)
 	}
 }
@@ -317,8 +321,8 @@ func TestDockerConfigurationMatchesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load Docker config: %v", err)
 	}
-	if cfg.HTTPAddr != ":7520" || cfg.OTLPGRPCAddr != ":4317" || cfg.DataDir != "/var/lib/fanout/data" {
-		t.Fatalf("Docker config values = HTTP %q OTLP %q data %q", cfg.HTTPAddr, cfg.OTLPGRPCAddr, cfg.DataDir)
+	if cfg.HTTPAddr != ":7520" || cfg.OTLPGRPCAddr != ":4317" || cfg.OTLPHTTPAddr != ":4318" || cfg.DataDir != "/var/lib/fanout/data" {
+		t.Fatalf("Docker config values = HTTP %q OTLP/gRPC %q OTLP/HTTP %q data %q", cfg.HTTPAddr, cfg.OTLPGRPCAddr, cfg.OTLPHTTPAddr, cfg.DataDir)
 	}
 }
 
@@ -604,6 +608,7 @@ func TestValidate(t *testing.T) {
 	valid := Config{
 		HTTPAddr:                ":7520",
 		OTLPGRPCAddr:            "127.0.0.1:4317",
+		OTLPHTTPAddr:            "127.0.0.1:4318",
 		DataDir:                 "./data",
 		FlushInterval:           15 * time.Second,
 		FlushBatchSize:          50000,
@@ -643,6 +648,7 @@ func TestValidate(t *testing.T) {
 		{"RetentionDays=-1", func(c *Config) { c.RetentionDays = -1 }},
 		{"HTTPAddr empty", func(c *Config) { c.HTTPAddr = "" }},
 		{"OTLPGRPCAddr empty", func(c *Config) { c.OTLPGRPCAddr = "" }},
+		{"OTLPHTTPAddr empty", func(c *Config) { c.OTLPHTTPAddr = "" }},
 		{"DataDir empty", func(c *Config) { c.DataDir = "" }},
 		{"MaintenanceInterval=0", func(c *Config) { c.MaintenanceInterval = 0 }},
 		{"MaintenanceInterval=999ms", func(c *Config) { c.MaintenanceInterval = 999 * time.Millisecond }},

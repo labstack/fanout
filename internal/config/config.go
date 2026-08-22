@@ -19,9 +19,10 @@ import (
 type Config struct {
 	HTTPAddr     string `koanf:"server.http_addr" env:"FANOUT_HTTP_ADDR" default:":7520"`
 	OTLPGRPCAddr string `koanf:"ingest.otlp_grpc_addr" env:"FANOUT_OTLP_GRPC_ADDR" default:"127.0.0.1:4317"`
+	OTLPHTTPAddr string `koanf:"ingest.otlp_http_addr" env:"FANOUT_OTLP_HTTP_ADDR" default:"127.0.0.1:4318"`
 	// IngestAdvertisedEndpoint is the OTLP endpoint shown in collector setup
-	// guidance (e.g. "https://ingest.example.com"). It may be internet-facing
-	// or private;
+	// guidance (e.g. "https://ingest.example.com"). It is an operator hint for
+	// trusted services and collectors, not a public-client or mobile endpoint;
 	// unlike OTLPGRPCAddr, it does not control the bind/listen address. Empty means
 	// derive host:port from the browser request and OTLPGRPCAddr as a best effort.
 	IngestAdvertisedEndpoint string        `koanf:"ingest.advertised_endpoint" env:"FANOUT_INGEST_ADVERTISED_ENDPOINT"`
@@ -186,6 +187,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.OTLPGRPCAddr) == "" {
 		return fmt.Errorf("ingest.otlp_grpc_addr must not be empty")
+	}
+	if strings.TrimSpace(c.OTLPHTTPAddr) == "" {
+		return fmt.Errorf("ingest.otlp_http_addr must not be empty")
 	}
 	if strings.TrimSpace(c.DataDir) == "" {
 		return fmt.Errorf("storage.data_dir must not be empty")

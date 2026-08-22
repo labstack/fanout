@@ -3,8 +3,6 @@ name: CI
 on:
   push:
     branches: [main]
-    # CalVer releases: v{YYYY.MM}.{N}, e.g. v2026.08.1
-    tags: ["v*"]
   pull_request:
     branches: [main]
 
@@ -27,26 +25,26 @@ jobs:
     name: Gate
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache: true
           cache-dependency-path: go.sum
 
-      - uses: extractions/setup-just@v4
+      - uses: extractions/setup-just@53165ef7e734c5c07cb06b3c8e7b647c5aa16db3 # v4
 
       # Pinned rather than `latest`: the embedded browser bundles are committed
       # byte-for-byte and `just ui-check` fails if they drift, so a bun upgrade
       # must be a deliberate commit rather than a surprise from a CI run.
-      - uses: oven-sh/setup-bun@v2.2.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
 
       # `--help` installs the pinned binary without linting; `just check` runs
       # the real thing, so local and CI share one invocation.
-      - uses: golangci/golangci-lint-action@v9.3.0
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.12.2
           args: --help
@@ -54,7 +52,7 @@ jobs:
       - name: just ui-deps
         run: just ui-deps
 
-      # fmt-check, lint, ui-check, test, ui-test, spec-check — the same gate
+      # fmt-check, lint, UI asset freshness, and backend/frontend tests.
       # lefthook runs on push.
       - name: just check
         run: just check
@@ -64,8 +62,8 @@ jobs:
       - name: just test-race
         run: just test-race
 
-  # Publishes ghcr.io/labstack/fanout on main and on CalVer tags. Pull requests
-  # build nothing — they have already been gated above.
+  # Publishes the moving main and commit tags. CalVer images are built natively
+  # for both architectures by release.yml; pull requests publish nothing.
   image:
     name: Image
     if: github.event_name == 'push'
@@ -75,25 +73,20 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v6.2.0
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ghcr.io/labstack/fanout
-          # CalVer is not semver — `2026.08.1` parses inconsistently and a
-          # leading zero like `2026.04.1` is mangled outright. Match the tag
-          # literally instead.
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-
-            type=match,pattern=v(.*),group=1
-            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
 
-      - uses: docker/setup-buildx-action@v4.2.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
-      - uses: docker/login-action@v4.6.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -103,7 +96,7 @@ jobs:
       # toolchain, so another architecture needs a native runner or QEMU rather
       # than an added platform here.
       - name: Build and push
-        uses: docker/build-push-action@v7.3.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           platforms: linux/amd64

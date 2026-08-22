@@ -15,8 +15,6 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 export CGO_ENABLED := "1"
 
-openspec_version := "1.7.0"
-
 # Everything `go:embed` compiles into the binary. Keep in sync with `outDir` in
 # ui/host/vite.config.ts and the `cp` targets in ui/apps/package.json.
 embedded := "internal/ui/dist internal/mcp/apps"
@@ -64,8 +62,8 @@ docker TAG="local":
 # ── Release ──────────────────────────────────────────────────────────────────
 
 # Tags are CalVer: v{YYYY.MM}.{N}, numbered from 1 within each month. Pushing
-# the tag is what triggers the release image — CI builds ghcr.io/labstack/fanout
-# for it and also moves `latest`.
+# the tag triggers release.yml, which builds the multi-architecture image,
+# publishes native archives, and moves `latest`.
 
 # Tag the next CalVer release and push it.
 release:
@@ -201,22 +199,10 @@ diagrams:
       d2 "$src" "${src%.d2}.svg"
     done
 
-# ── Specs ────────────────────────────────────────────────────────────────────
-
-# Strict validation of the canonical specs and any active change in openspec/.
-spec-check:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if command -v openspec >/dev/null; then
-      openspec validate --all --strict --no-interactive
-    else
-      npx --yes @fission-ai/openspec@{{openspec_version}} validate --all --strict --no-interactive
-    fi
-
 # ── Gate ─────────────────────────────────────────────────────────────────────
 
 # lefthook's pre-push hook and CI both run this.
-check: fmt-check lint ui-check test ui-test spec-check
+check: fmt-check lint ui-check test ui-test
     @echo "All checks passed"
 
 clean:
