@@ -10,16 +10,18 @@ just build     # browser assets, then the binaries
 just check     # the full gate
 ```
 
-You need Go with `CGO_ENABLED=1` (DuckDB is a cgo dependency),
-[Bun](https://bun.sh), and [just](https://just.systems). Running the server
-additionally needs SMTP credentials and an AI provider key — see
-[README](README.md#requirements).
+You need Go and a C compiler with `CGO_ENABLED=1` (DuckDB is a cgo dependency),
+[Bun](https://bun.sh), [just](https://just.systems),
+[golangci-lint](https://golangci-lint.run/), and
+[Lefthook](https://github.com/evilmartians/lefthook). Running in local auth mode
+also requires a 32-character authentication code secret; SMTP and an AI key are
+optional — see [README](README.md#requirements).
 
 ## Before you open a pull request
 
-Run `just check`. It is exactly what CI runs, so a green local gate means a
-green build. It covers formatting, linting, embedded-asset freshness, Go and
-browser tests, and spec validation.
+Run `just check` and `just test-race`. Together they match the CI gate: formatting,
+linting, embedded-asset freshness, Go and browser tests, then the Go suite under
+the race detector.
 
 `just install` also installs [Lefthook](https://lefthook.dev), which runs
 formatting and linting on commit and the full gate on push. That is the fastest
@@ -38,10 +40,6 @@ CI catches this, but it is friendlier to catch it yourself.
 source beside it. Edit the `.d2`, run `just diagrams`, and commit both. The
 committed SVG comes from d2 0.7.1; a different version re-renders every file
 and produces a large diff that is not a real change.
-
-**Behavior is specified.** Product behavior lives in `openspec/`. Changes to
-shipped behavior belong in an OpenSpec change under `openspec/changes/` rather
-than only in code. Run `just spec-check` to validate.
 
 **Runtime configuration is strict.** [`fanout.example.yaml`](fanout.example.yaml)
 is the complete schema. New settings need a YAML key, a `FANOUT_` environment

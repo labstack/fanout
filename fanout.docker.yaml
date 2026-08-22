@@ -1,12 +1,13 @@
 # Container-specific listener and storage defaults. Runtime environment
 # variables still override these values. Start replacement container configs
-# from this file: omitting ingest.otlp_grpc_addr restores the loopback-only
+# from this file: omitting either ingest address restores its loopback-only
 # built-in default, which is unreachable through a published container port.
 server:
   http_addr: ":7520"
 
 ingest:
   otlp_grpc_addr: ":4317"
+  otlp_http_addr: ":4318"
 
 storage:
   data_dir: /var/lib/fanout/data

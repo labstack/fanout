@@ -14,9 +14,10 @@ import (
 
 // UserHandler handles admin user management endpoints.
 type UserHandler struct {
-	users *auth.UserStore
-	smtp  auth.SMTPConfig
-	mode  string
+	users          *auth.UserStore
+	smtp           auth.SMTPConfig
+	mode           string
+	smtpConfigured bool
 }
 
 // RegisterUserRoutes registers user management endpoints.
@@ -25,7 +26,7 @@ func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfi
 	if mode == "" {
 		mode = "local"
 	}
-	h := &UserHandler{users: users, smtp: smtp, mode: mode}
+	h := &UserHandler{users: users, smtp: smtp, mode: mode, smtpConfigured: cfg.SMTPConfigured()}
 	adminOnly := RequireCapability(ManageUsers)
 
 	e.GET("/api/users", h.ListUsers, adminOnly)
@@ -87,18 +88,31 @@ func (h *UserHandler) CreateUser(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create user")
 	}
 
-	// Local mode sends an invitation synchronously so the admin sees an accurate
-	// result: a 201 must mean the invite was actually delivered to the
-	// MTA. OIDC users are pre-provisioned and enter through the configured IdP.
-	// On mail failure, the user row stays so the admin can retry later.
+	resp := struct {
+		auth.User
+		InviteDelivery    string `json:"invite_delivery,omitempty"`
+		LoginLinkRequired bool   `json:"login_link_required,omitempty"`
+	}{User: user}
+
+	// SMTP is optional in local mode. When it is absent, creating a user remains
+	// a successful operation and the response tells the operator to mint the
+	// existing audited, single-use login link. A configured relay is different:
+	// failure to deliver is surfaced so an apparent success never claims mail was
+	// sent. The user row stays in either case so the operator can retry safely.
 	if h.mode == "local" {
+		if !h.smtpConfigured {
+			resp.InviteDelivery = "not_configured"
+			resp.LoginLinkRequired = true
+			return c.JSON(http.StatusCreated, resp)
+		}
 		if err := auth.SendInvite(h.smtp, email); err != nil {
 			slog.Error("auth: send invitation email failed", "email", email, "err", err)
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "user created but invite email delivery failed")
 		}
+		resp.InviteDelivery = "email"
 	}
 
-	return c.JSON(201, user)
+	return c.JSON(http.StatusCreated, resp)
 }
 
 // UpdateUser modifies a user's fields (admin only).

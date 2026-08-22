@@ -78,6 +78,15 @@ Fix SMTP after regaining access if email-code login is expected. OIDC-mode
 recovery remains at the identity provider or OIDC configuration layer; local
 login links are deliberately unavailable in that mode.
 
+### Adding local users without SMTP
+
+User creation remains available when SMTP is not configured. The API returns
+`201` with `invite_delivery: "not_configured"` and
+`login_link_required: true`; mint the new active user a login link with the
+same command shown above and deliver it through a trusted channel. When SMTP is
+configured, Fanout sends the invitation synchronously and reports relay
+failure rather than claiming it was delivered.
+
 If the local account is inactive or its address is no longer usable, the
 command refuses to mint a credential. Stop Fanout, copy the control database,
 and repair that account without deleting it or its owned data:

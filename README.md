@@ -22,11 +22,11 @@ executable, including the React client.
 
 ![Fanout architecture](docs/diagrams/architecture.svg)
 
-Telemetry lands over OTLP/gRPC, is batched into DuckLake/Parquet, and is read
-back through a DuckDB query kernel that also maintains service, endpoint, and
-edge rollups. The browser client, an in-process agent, and any external MCP
-host all reach the same typed observability contract rather than issuing raw
-SQL.
+Telemetry lands over OTLP/gRPC or OTLP/HTTP, is batched into DuckLake/Parquet,
+and is read back through a DuckDB query kernel that also maintains service,
+endpoint, and edge rollups. The browser client, an in-process agent, and any
+external MCP host all reach the same typed observability contract rather than
+issuing raw SQL.
 
 Every write to the telemetry catalog — ingest flush, rollups, and background
 maintenance alike — passes through a single write gate that holds one catalog
@@ -51,7 +51,7 @@ and confirms what it found.
 
 ## Requirements
 
-- **Go** with `CGO_ENABLED=1` — DuckDB is a cgo dependency
+- **Go and a C compiler** with `CGO_ENABLED=1` — DuckDB is a cgo dependency
 - **[Bun](https://bun.sh)** — compiles the browser assets
 - **[just](https://just.systems)** — task runner
 - A 32-character **authentication code secret**
@@ -63,21 +63,63 @@ chat and AI-assisted controls are hidden.
 
 ## Quick start
 
+### Native binary
+
+Release archives support Linux and macOS on amd64 and arm64. The installer
+verifies the selected archive against the release checksum before extracting:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/labstack/fanout/main/scripts/install.sh | sh
+```
+
+Set `FANOUT_VERSION=v{YYYY.MM}.{N}` to pin a release and `FANOUT_PREFIX` to
+choose the installation directory.
+
 ### Docker
 
 ```sh
-docker run -p 7520:7520 -p 4317:4317 \
+docker run --name fanout -p 7520:7520 -p 4317:4317 -p 4318:4318 \
   -v fanout-data:/var/lib/fanout/data \
   -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   ghcr.io/labstack/fanout:latest
 ```
 
 Open the one-time setup URL printed by the container and create the first
-administrator. For later sign-in without SMTP, mint a 15-minute, single-use
-link against the running container's control database:
+administrator. Fanout displays the ingest token exactly once; save it with
+your collector secrets. A standard OTLP/HTTP exporter can then use:
 
 ```sh
-docker exec <container> fanout --config /etc/fanout/fanout.yaml \
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_EXPORTER_OTLP_HEADERS="x-fanout-ingest-token=$INGEST_TOKEN"
+```
+
+For a Collector on the same private container network, the forwarding side is:
+
+```yaml
+exporters:
+  otlp_http/fanout:
+    endpoint: http://fanout:4318
+    headers:
+      x-fanout-ingest-token: ${env:INGEST_TOKEN}
+
+service:
+  pipelines:
+    traces:  { receivers: [otlp], exporters: [otlp_http/fanout] }
+    metrics: { receivers: [otlp], exporters: [otlp_http/fanout] }
+    logs:    { receivers: [otlp], exporters: [otlp_http/fanout] }
+```
+
+This assumes the Collector's existing `otlp` receiver and an environment
+variable containing the one-time token. Replace `fanout` with the private
+hostname reachable from that Collector.
+
+The equivalent OTLP/gRPC endpoint is `localhost:4317`. For later sign-in
+without SMTP, mint a 15-minute, single-use link against the running
+container's control database:
+
+```sh
+docker exec fanout fanout --config /etc/fanout/fanout.yaml \
   login-link admin@example.com
 ```
 
@@ -101,10 +143,10 @@ docker run -v ./fanout.yaml:/etc/fanout/fanout.yaml:ro \
   ghcr.io/labstack/fanout:latest
 ```
 
-A replacement document must set `server.http_addr: ":7520"` and
-`ingest.otlp_grpc_addr: ":4317"`; omitting the latter restores the secure
-loopback-only built-in default, which is unreachable through a published
-container port.
+A replacement document must set `server.http_addr: ":7520"`,
+`ingest.otlp_grpc_addr: ":4317"`, and `ingest.otlp_http_addr: ":4318"`;
+omitting either ingest address restores its secure loopback-only built-in
+default, which is unreachable through a published container port.
 
 ### From source
 
@@ -127,14 +169,15 @@ Optionally set `FANOUT_AI_API_KEY` for chat and the SMTP variables shown above
 for email-code login. Without SMTP, run `./bin/fanout login-link
 admin@example.com` from the same configuration and data directory.
 
-Fanout serves the UI on <http://localhost:7520> and accepts OTLP/gRPC on
-`127.0.0.1:4317`. The first account created becomes the administrator.
+Fanout serves the UI on <http://localhost:7520>, accepts OTLP/gRPC on
+`127.0.0.1:4317`, and accepts OTLP/HTTP on `127.0.0.1:4318`. The first account
+created becomes the administrator and receives the ingest token once.
 
-Point any OpenTelemetry collector or SDK at `127.0.0.1:4317`, or generate load
-with the bundled benchmark driver:
+Point any OpenTelemetry collector or SDK at either OTLP endpoint with the
+ingest token, or generate load with the bundled gRPC benchmark driver:
 
 ```sh
-./bin/bench -endpoint localhost:4317
+./bin/bench -endpoint localhost:4317 -token "$INGEST_TOKEN"
 ```
 
 ## Configuration
@@ -169,7 +212,8 @@ operators touch are:
 | YAML key | Environment override | Default | Purpose |
 | --- | --- | --- | --- |
 | `server.http_addr` | `FANOUT_HTTP_ADDR` | `:7520` | UI, API, and MCP listener |
-| `ingest.otlp_grpc_addr` | `FANOUT_OTLP_GRPC_ADDR` | `127.0.0.1:4317` | OTLP ingest listener |
+| `ingest.otlp_grpc_addr` | `FANOUT_OTLP_GRPC_ADDR` | `127.0.0.1:4317` | OTLP/gRPC ingest listener |
+| `ingest.otlp_http_addr` | `FANOUT_OTLP_HTTP_ADDR` | `127.0.0.1:4318` | OTLP/HTTP ingest listener |
 | `storage.data_dir` | `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
 | `auth.mode` | `FANOUT_AUTH_MODE` | `local` | `local` (login link or SMTP) or `oidc` |
 | `auth.code_secret` | `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |
@@ -199,11 +243,14 @@ host and cgroup limits, the selected source, and whether detection was
 incomplete. If Fanout cannot conclusively inspect a container limit, it warns;
 set `storage.duckdb.memory` or `FANOUT_DUCKDB_MEMORY` for a guaranteed bound.
 
+For TLS and reverse proxies, health checks, backups and restores, upgrades,
+retention, and recovery, see the [operator runbook](docs/operations.md).
+
 ## Development
 
 ```sh
 just            # list every recipe
-just check      # the full gate: format, lint, asset freshness, tests, specs
+just check      # the full gate: format, lint, asset freshness, and tests
 just test       # Go tests
 just ui         # rebuild the embedded browser assets
 ```
@@ -219,13 +266,6 @@ full gate on push; `just install` wires it up. The pre-push hook is a
 convenience and lefthook may skip it when it detects no changed files — CI runs
 the same `just check` unconditionally, and that is what actually enforces it.
 
-## Specs
-
-Product behavior is specified under [`openspec/`](openspec/), managed with
-[OpenSpec](https://github.com/fission-ai/openspec). Canonical specs in
-`openspec/specs/` describe shipped behavior; proposed behavior belongs in a
-change under `openspec/changes/`. Validate with `just spec-check`.
-
 ## Project layout
 
 ```text
@@ -235,7 +275,6 @@ internal/          ingest, storage, query, agent, MCP, auth, alerts
 ui/host/           React AG-UI browser host (build-time)
 ui/apps/           portable React MCP Apps (build-time)
 docs/diagrams/     d2 sources and rendered SVG
-openspec/          canonical specs and active changes
 ```
 
 ## Releases
@@ -251,14 +290,15 @@ matching image and moves `latest`:
 | `ghcr.io/labstack/fanout:main` | the tip of `main` |
 | `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
 
-Images are `linux/amd64`. DuckDB requires cgo and the build has no cross
-toolchain, so other architectures need to build from source.
+Release images are multi-architecture for `linux/amd64` and `linux/arm64`.
+Release archives provide Linux and macOS binaries for amd64 and arm64; every
+artifact is built on a native runner because DuckDB requires cgo.
 
 ## Contributing
 
 Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
-Run `just check` before opening a pull request; it is the same gate CI
-enforces. For anything security-related, follow [SECURITY.md](SECURITY.md)
+Run `just check` and `just test-race` before opening a pull request; together
+they match CI. For anything security-related, follow [SECURITY.md](SECURITY.md)
 instead of opening an issue.
 
 ## Scope
@@ -270,4 +310,4 @@ Those describe how we operate Fanout, not what it does.
 
 ## License
 
-[Apache-2.0](LICENSE) © LabStack LLC. See [NOTICE](NOTICE) for attribution.
+[Apache-2.0](LICENSE) © LabStack LLC. See [NOTICE](NOTICE) for attribution and [TRADEMARK](TRADEMARK.md) for use of the Fanout name and logo.
