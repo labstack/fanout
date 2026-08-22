@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -106,19 +107,28 @@ type oidcClaims struct {
 	EmailVerified *bool    `json:"email_verified"`
 	Nonce         string   `json:"nonce"`
 	Groups        []string `json:"groups"`
-	// ClaimNames carries the OpenID Connect aggregated/distributed claim
-	// index. Entra ID uses it to signal group overage: past roughly 200
-	// memberships the groups claim is omitted entirely and a Graph API
-	// source is named here instead. An omitted groups claim therefore does
-	// not mean the user is in no groups.
-	ClaimNames map[string]string `json:"_claim_names"`
+	// ClaimNames and HasGroups carry the two shapes Entra ID uses to signal
+	// group overage: past roughly 200 memberships the groups claim is
+	// omitted entirely, and either an aggregated-claim source is named here
+	// or hasgroups is set. An omitted groups claim therefore does not mean
+	// the user is in no groups. Both are decoded as raw JSON so an
+	// unexpected provider shape cannot fail the whole token unmarshal and
+	// break every login.
+	ClaimNames map[string]json.RawMessage `json:"_claim_names"`
+	HasGroups  json.RawMessage            `json:"hasgroups"`
 }
 
 // groupsUnreadable reports whether the identity provider declined to enumerate
 // group membership in the token rather than reporting an empty membership.
 func (c oidcClaims) groupsUnreadable() bool {
-	_, overage := c.ClaimNames["groups"]
-	return overage
+	if _, aggregated := c.ClaimNames["groups"]; aggregated {
+		return true
+	}
+	switch string(bytes.TrimSpace(c.HasGroups)) {
+	case "true", `"true"`:
+		return true
+	}
+	return false
 }
 
 func (h *OIDCHandler) Callback(c *echo.Context) error {
@@ -255,8 +265,10 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 	if !user.Active {
 		return appauth.User{}, appauth.UserIdentity{}, errors.New("user is inactive")
 	}
-	if h.cfg.OIDCEmailVerification == "issuer" && !h.provisionAllowed(email, claims.Groups) {
-		return appauth.User{}, appauth.UserIdentity{}, errors.New("identity does not satisfy the issuer-mode allow policy")
+	// The allow policy gates the linking login too. Enforcing it only on later
+	// logins would let an identity link once and then be denied forever.
+	if err := h.reconcileEligibility(claims); err != nil {
+		return appauth.User{}, appauth.UserIdentity{}, err
 	}
 	linked, err := h.identities.CountForUser(ctx, user.ID)
 	if err != nil {
@@ -301,13 +313,21 @@ func (h *OIDCHandler) reconcileEligibility(claims oidcClaims) error {
 	if !h.eligibilityConfigured() {
 		return nil
 	}
+	if h.groupAllowed(claims.Groups) {
+		return nil
+	}
+	if len(csvValues(h.cfg.OIDCAllowedDomains)) == 0 {
+		return errors.New("identity no longer satisfies the allow policy")
+	}
 	// Domain eligibility is judged on the claims presented now, not on the
-	// email recorded when the identity was first linked.
+	// email recorded when the identity was first linked. An unusable email is
+	// reported as such: silently treating it as a policy violation would deny
+	// every user at once and name the wrong cause.
 	email, err := appauth.NormalizeEmail(claims.Email)
 	if err != nil {
-		email = ""
+		return errors.New("OIDC provider did not supply a usable email to evaluate the domain allow policy")
 	}
-	if !h.provisionAllowed(email, claims.Groups) {
+	if !h.domainAllowed(email) {
 		return errors.New("identity no longer satisfies the allow policy")
 	}
 	return nil
@@ -328,7 +348,10 @@ func (h *OIDCHandler) roleMappingConfigured() bool {
 // login. The role change, auth version increment, session revocation, and audit
 // event are one transaction inside UpdateWithAudit.
 func (h *OIDCHandler) reconcileRole(ctx context.Context, user appauth.User, claims oidcClaims) (appauth.User, error) {
-	if !h.roleMappingConfigured() {
+	// A deactivated account is denied by the caller. Reconciling it anyway
+	// would rewrite its role, revoke sessions, and write an audit event on
+	// every rejected login attempt.
+	if !h.roleMappingConfigured() || !user.Active {
 		return user, nil
 	}
 	mapped := h.provisionRole(claims.Groups)
@@ -356,9 +379,14 @@ func (h *OIDCHandler) reconcileRole(ctx context.Context, user appauth.User, clai
 }
 
 func (h *OIDCHandler) provisionAllowed(email string, groups []string) bool {
-	if intersects(groups, csvValues(h.cfg.OIDCAllowedGroups)) {
-		return true
-	}
+	return h.groupAllowed(groups) || h.domainAllowed(email)
+}
+
+func (h *OIDCHandler) groupAllowed(groups []string) bool {
+	return intersects(groups, csvValues(h.cfg.OIDCAllowedGroups))
+}
+
+func (h *OIDCHandler) domainAllowed(email string) bool {
 	parts := strings.Split(email, "@")
 	return len(parts) == 2 && slices.Contains(csvValues(h.cfg.OIDCAllowedDomains), strings.ToLower(parts[1]))
 }

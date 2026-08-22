@@ -474,7 +474,7 @@ func TestResolveUserDeniesGroupOverageWhenGroupPolicyConfigured(t *testing.T) {
 		Subject:       "subject-1",
 		Email:         user.Email,
 		EmailVerified: &verified,
-		ClaimNames:    map[string]string{"groups": "src1"},
+		ClaimNames:    map[string]json.RawMessage{"groups": json.RawMessage(`"src1"`)},
 	}
 	_, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims)
 	if err == nil {
@@ -501,9 +501,105 @@ func TestResolveUserIgnoresGroupOverageWhenNoGroupPolicyConfigured(t *testing.T)
 		Subject:       "subject-1",
 		Email:         user.Email,
 		EmailVerified: &verified,
-		ClaimNames:    map[string]string{"groups": "src1"},
+		ClaimNames:    map[string]json.RawMessage{"groups": json.RawMessage(`"src1"`)},
 	}
 	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err != nil {
 		t.Fatalf("domain-only policy denied a login over an irrelevant group claim: %v", err)
+	}
+}
+
+func TestResolveUserAppliesAllowPolicyWhenLinkingExistingUser(t *testing.T) {
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	users := appauth.NewUserStore(db.DB)
+	identities := appauth.NewIdentityStore(db.DB)
+	user, err := users.Create("contractor@other.test", "", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := &OIDCHandler{
+		cfg:   config.Config{OIDCEmailVerification: "required", OIDCAllowedDomains: "example.com", OIDCDefaultRole: "viewer"},
+		users: users, identities: identities, audit: appauth.NewAuditStore(db.DB),
+	}
+	verified := true
+	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims); err == nil {
+		t.Fatal("linking login bypassed the allow policy that every later login enforces")
+	}
+	if count, err := identities.CountForUser(t.Context(), user.ID); err != nil || count != 0 {
+		t.Fatalf("ineligible identity links = %d, err %v", count, err)
+	}
+}
+
+func TestResolveUserReportsUnusableEmailClaimDistinctly(t *testing.T) {
+	cfg := config.Config{OIDCEmailVerification: "required", OIDCAllowedDomains: "example.com", OIDCDefaultRole: "viewer"}
+	handler, _, user := linkedOIDCFixture(t, cfg, "viewer", nil)
+
+	verified := true
+	claims := oidcClaims{Subject: "subject-1", Email: "", EmailVerified: &verified}
+	_, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims)
+	if err == nil {
+		t.Fatalf("login for %s proceeded with no evaluable email claim", user.Email)
+	}
+	if !strings.Contains(err.Error(), "email") {
+		t.Fatalf("denial reason = %q, want it to name the missing email claim rather than blame the allow policy", err)
+	}
+}
+
+func TestResolveUserSkipsRoleReconciliationForInactiveUser(t *testing.T) {
+	cfg := config.Config{
+		OIDCEmailVerification: "required",
+		OIDCAllowedGroups:     "trusted",
+		OIDCAdminGroups:       "fanout-admins",
+		OIDCDefaultRole:       "viewer",
+	}
+	handler, users, user := linkedOIDCFixture(t, cfg, "admin", []string{"trusted", "fanout-admins"})
+	if _, err := users.Create("other-admin@example.com", "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	inactive := false
+	if _, err := users.Update(user.ID, nil, nil, nil, &inactive); err != nil {
+		t.Fatal(err)
+	}
+
+	verified := true
+	claims := oidcClaims{Subject: "subject-1", Email: user.Email, EmailVerified: &verified, Groups: []string{"trusted"}}
+	_, _, _ = handler.resolveUser(t.Context(), "https://issuer.example", claims)
+
+	stored, err := users.GetByID(user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Role != appauth.RoleAdmin {
+		t.Fatalf("role = %q, want admin: a denied login by a deactivated account must not rewrite its role", stored.Role)
+	}
+}
+
+func TestOIDCClaimsDetectGroupOverageWithoutBreakingOnProviderShapes(t *testing.T) {
+	for name, raw := range map[string]string{
+		"claim names":        `{"sub":"s","_claim_names":{"groups":"src1"}}`,
+		"claim names object": `{"sub":"s","_claim_names":{"groups":{"endpoint":"https://graph"}}}`,
+		"has groups bool":    `{"sub":"s","hasgroups":true}`,
+		"has groups string":  `{"sub":"s","hasgroups":"true"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			var claims oidcClaims
+			if err := json.Unmarshal([]byte(raw), &claims); err != nil {
+				t.Fatalf("provider claim shape broke every login: %v", err)
+			}
+			if !claims.groupsUnreadable() {
+				t.Fatal("group overage was read as an empty group set")
+			}
+		})
+	}
+	var plain oidcClaims
+	if err := json.Unmarshal([]byte(`{"sub":"s","groups":["a"]}`), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if plain.groupsUnreadable() {
+		t.Fatal("an enumerable group set was treated as unreadable")
 	}
 }
