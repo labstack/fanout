@@ -113,16 +113,25 @@ func (s *CodeStore) Verify(email, code string) (bool, error) {
 		return false, nil
 	}
 
-	// Check max attempts
-	if row.Attempts >= maxAttempts {
+	// Reserve this guess before comparing it. Reading the counter and
+	// incrementing it separately lets concurrent requests all observe a count
+	// below the limit and evaluate more guesses than maxAttempts allows.
+	reserved, err := s.db.ExecContext(ctx,
+		`UPDATE verifications SET attempts = attempts + 1 WHERE id = ? AND used = 0 AND attempts < ?`,
+		row.ID, maxAttempts)
+	if err != nil {
+		return false, fmt.Errorf("auth: reserve code attempt: %w", err)
+	}
+	claimed, err := reserved.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("auth: inspect code attempt: %w", err)
+	}
+	if claimed != 1 {
 		return false, nil
 	}
 
 	// Verify
 	if !VerifyHash(code, row.CodeHash, s.secret) {
-		if err := s.q.IncrementCodeAttempts(ctx, row.ID); err != nil {
-			return false, fmt.Errorf("auth: increment attempts: %w", err)
-		}
 		return false, nil
 	}
 

@@ -148,3 +148,36 @@ func TestCodeStoreVerifyIsSingleUseUnderConcurrency(t *testing.T) {
 		t.Fatalf("successful verifications = %d, want 1", successes.Load())
 	}
 }
+
+func TestVerifyCapsConcurrentWrongAttempts(t *testing.T) {
+	s := newTestCodeStore(t)
+	const email = "person@example.com"
+	code, err := s.Create(email)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	wrong := "000000"
+	if wrong == code {
+		wrong = "111111"
+	}
+
+	var wg sync.WaitGroup
+	for range 32 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if ok, err := s.Verify(email, wrong); ok || err != nil {
+				t.Errorf("Verify(wrong) = %v, %v", ok, err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	var attempts int
+	if err := s.db.QueryRow(`SELECT attempts FROM verifications WHERE email = ?`, email).Scan(&attempts); err != nil {
+		t.Fatalf("read attempts: %v", err)
+	}
+	if attempts > maxAttempts {
+		t.Fatalf("attempts = %d, want at most %d: each guess must reserve its attempt before the code is compared", attempts, maxAttempts)
+	}
+}
