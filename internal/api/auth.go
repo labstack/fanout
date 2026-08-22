@@ -112,20 +112,24 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	createEvent := auth.AuditEvent{EventType: "setup.completed", Outcome: "success", RemoteIP: c.RealIP(), UserAgent: c.Request().UserAgent()}
 	user, err := h.users.CreateFirstAdminWithAudit(email, req.Name, createEvent)
 	if errors.Is(err, auth.ErrSetupComplete) {
-		user, err = h.users.GetByEmail(email)
-		if err != nil {
-			slog.Error("auth: setup retry lookup failed", "email", email, "err", err)
-			return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
-		}
-		if !user.Active || user.Role != "admin" {
-			slog.Warn("auth: setup retry user not eligible", "email", email, "active", user.Active, "role", user.Role)
-			return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
-		}
+		// The setup credential creates exactly one administrator. Establishing
+		// a session for an existing admin here would let one token mint
+		// several sessions. Recovery from a failed first login uses the
+		// configured login path; docs/authentication.md documents the
+		// escape hatch for an installation with no working login path.
+		slog.Warn("auth: setup rejected", "reason", "already complete")
+		h.setup.Clear()
+		jitter()
+		return echo.NewHTTPError(http.StatusForbidden, "setup already complete")
 	}
 	if err != nil {
 		slog.Error("auth: setup create admin failed", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to create admin")
 	}
+	// Consume the credential the moment the first administrator exists, before
+	// any fallible post-setup work. Anything that fails after this point is
+	// recoverable through normal login; a live setup token is not.
+	h.setup.Clear()
 
 	if err := h.establishSession(c, user); err != nil {
 		slog.Error("auth: setup session establishment failed", "user_id", user.ID, "err", err)
@@ -162,7 +166,6 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 	}
 
 	slog.Info("auth: first admin setup completed", "email", email)
-	h.setup.Clear()
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(200, resp)
 }

@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"net/url"
 	"os"
 	"os/signal"
 	"regexp"
@@ -434,10 +435,11 @@ func printSetupBanner(httpAddr, token string) {
 		"============================================================",
 		" FANOUT SETUP",
 		"",
-		" Open:  " + setupLoginURL(httpAddr),
-		" Token: " + token,
+		" Open:  " + setupLoginURL(httpAddr) + "?setup_token=" + url.QueryEscape(token),
 		" Valid: one-time use, expires in 1 hour",
-		" Note:  this token disappears after the first admin is created",
+		" Note:  this URL disappears after the first admin is created",
+		" Warn:  it contains an administrator credential — this output may",
+		"        persist in container logs, log aggregators, and scrollback",
 		"============================================================",
 	}
 	fmt.Fprintln(os.Stderr, strings.Join(lines, "\n"))
