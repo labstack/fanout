@@ -112,7 +112,7 @@ func TestSecretSettingsCarryTheirWarning(t *testing.T) {
 	}
 
 	for group := range secretGroups {
-		body := string(pages[group+".mdx"])
+		body := string(pages["settings/"+group+".mdx"])
 		if !strings.Contains(body, "· secret") {
 			t.Errorf("%s.mdx: holds a secret setting but does not mark it in the table", group)
 		}
@@ -134,21 +134,41 @@ func TestFlowDropsTheGodocFieldNamePrefix(t *testing.T) {
 	}
 }
 
-func TestOrphanedFindsPagesNoLongerGenerated(t *testing.T) {
+func TestOrphanedFindsGeneratedPagesOnly(t *testing.T) {
 	dir := t.TempDir()
-	keep := filepath.Join(dir, "server.mdx")
-	drop := filepath.Join(dir, "removed-group.mdx")
-	for _, path := range []string{keep, drop} {
-		if err := os.WriteFile(path, []byte("x"), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(dir, "settings"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	generated := "---\ntitle: x\ngenerated: true\n---\n"
+	authored := "---\ntitle: x\n---\n"
+
+	files := map[string]string{
+		"settings/server.mdx": generated, // still generated, keep
+		"settings/gone.mdx":   generated, // no longer generated, remove
+		"roles.mdx":           authored,  // hand-written, never touch
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	got, err := orphaned(dir, map[string][]byte{"server.mdx": nil})
+	got, err := orphaned(dir, map[string][]byte{"settings/server.mdx": nil})
 	if err != nil {
 		t.Fatalf("orphaned: %v", err)
 	}
-	if len(got) != 1 || got[0] != drop {
-		t.Fatalf("orphaned = %v, want just %q", got, drop)
+
+	want := filepath.Join(dir, "settings/gone.mdx")
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("orphaned = %v, want just %q", got, want)
+	}
+
+	// The one that matters: generated pages now sit beside authored ones, and
+	// orphan detection deletes. An authored page must never be a candidate.
+	for _, path := range got {
+		if strings.HasSuffix(path, "roles.mdx") {
+			t.Error("orphaned would delete a hand-written page")
+		}
 	}
 }

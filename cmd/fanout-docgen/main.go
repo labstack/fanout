@@ -28,6 +28,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -43,18 +44,19 @@ func main() {
 	var (
 		source = flag.String("source", "internal/config/config.go", "path to the file declaring config.Config")
 		alerts = flag.String("alert-source", "internal/alert/types.go", "path to the file declaring alert.AlertEnv")
-		outDir = flag.String("out", "site/src/content/docs/reference/settings", "directory to write the settings pages into")
+		apiDir = flag.String("api-dir", "internal/api", "directory whose files register HTTP routes")
+		outDir = flag.String("out", "site/src/content/docs/reference", "reference root to write generated pages into")
 		check  = flag.Bool("check", false, "exit non-zero when a written page differs from the one on disk")
 	)
 	flag.Parse()
 
-	if err := run(*source, *alerts, *outDir, *check); err != nil {
+	if err := run(*source, *alerts, *apiDir, *outDir, *check); err != nil {
 		fmt.Fprintf(os.Stderr, "fanout-docgen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(source, alertSource, outDir string, check bool) error {
+func run(source, alertSource, apiDir, outDir string, check bool) error {
 	fields, err := collect(source)
 	if err != nil {
 		return err
@@ -74,6 +76,15 @@ func run(source, alertSource, outDir string, check bool) error {
 		return err
 	}
 	pages["alert-expressions.mdx"] = renderAlertEnv(vars)
+
+	// The HTTP surface. The paths come from the registrations; the authorization
+	// requirement for each comes from the middleware's own decision function,
+	// not from reading the switch that implements it.
+	routes, err := collectRoutes(apiDir)
+	if err != nil {
+		return err
+	}
+	pages["http-routes.mdx"] = renderRoutes(routes)
 
 	var stale []string
 	for name, body := range pages {
@@ -123,8 +134,8 @@ func run(source, alertSource, outDir string, check bool) error {
 		}
 	}
 	fmt.Printf(
-		"fanout-docgen: wrote %d page(s) covering %d setting(s) and %d alert variable(s)\n",
-		len(pages), len(fields), len(alertEnvCount),
+		"fanout-docgen: wrote %d page(s) covering %d setting(s), %d alert variable(s) and %d route(s)\n",
+		len(pages), len(fields), len(alertEnvCount), len(routeCount),
 	)
 	return nil
 }
@@ -469,7 +480,7 @@ func render(fields []field) (map[string][]byte, error) {
 				name,
 			)
 		}
-		pages[name+".mdx"] = renderPage(name, page, group)
+		pages["settings/"+name+".mdx"] = renderPage(name, page, group)
 	}
 	return pages, nil
 }
@@ -546,7 +557,20 @@ func hasSecret(fields []field) bool {
 
 // orphaned lists generated pages on disk that this run would not write.
 func orphaned(outDir string, pages map[string][]byte) ([]string, error) {
-	entries, err := os.ReadDir(outDir)
+	var entries []string
+	err := filepath.WalkDir(outDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".mdx") {
+			rel, relErr := filepath.Rel(outDir, path)
+			if relErr != nil {
+				return relErr
+			}
+			entries = append(entries, filepath.ToSlash(rel))
+		}
+		return nil
+	})
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -555,12 +579,21 @@ func orphaned(outDir string, pages map[string][]byte) ([]string, error) {
 	}
 	var out []string
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".mdx") {
+		if _, ok := pages[entry]; ok {
 			continue
 		}
-		if _, ok := pages[entry.Name()]; !ok {
-			out = append(out, filepath.Join(outDir, entry.Name()))
+		// Only ever a page this generator wrote. Orphan detection deletes on
+		// the writing path, and generated pages now sit beside authored ones —
+		// without the marker check, adding a hand-written page to this
+		// directory would silently delete it on the next run.
+		body, err := os.ReadFile(filepath.Join(outDir, entry))
+		if err != nil {
+			return nil, err
 		}
+		if !bytes.Contains(body, []byte("generated: true")) {
+			continue
+		}
+		out = append(out, filepath.Join(outDir, entry))
 	}
 	sort.Strings(out)
 	return out, nil

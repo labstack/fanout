@@ -106,7 +106,9 @@ export default defineConfig({
               // sidebar without this file being edited to match.
               items: [{ autogenerate: { directory: "reference/settings" } }],
             },
+            { label: "HTTP routes", slug: "reference/http-routes" },
             { label: "MCP tools", slug: "reference/mcp-tools" },
+            { label: "Alert expressions", slug: "reference/alert-expressions" },
             { label: "Roles", slug: "reference/roles" },
             { label: "Endpoints", slug: "reference/endpoints" },
             { label: "Data layout", slug: "reference/data-layout" },
