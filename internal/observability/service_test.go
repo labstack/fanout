@@ -18,7 +18,7 @@ func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock) {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	svc := New(db, "default")
+	svc := New(db)
 	svc.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
 	return svc, mock
 }
@@ -29,8 +29,8 @@ func TestNormalizeScopeDefaultsAndBounds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalizeScope: %v", err)
 	}
-	if scope.Namespace != "default" {
-		t.Fatalf("namespace = %q, want default", scope.Namespace)
+	if scope.Namespace != "" {
+		t.Fatalf("namespace = %q, want all namespaces", scope.Namespace)
 	}
 	if got := scope.End.Sub(scope.Start); got != time.Hour {
 		t.Fatalf("window = %s, want 1h", got)

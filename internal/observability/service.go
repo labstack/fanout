@@ -31,14 +31,13 @@ type DB interface {
 }
 
 type Service struct {
-	db               DB
-	defaultNamespace string
-	now              func() time.Time
-	endpointMature   atomic.Bool
+	db             DB
+	now            func() time.Time
+	endpointMature atomic.Bool
 }
 
-func New(db DB, defaultNamespace string) *Service {
-	return &Service{db: db, defaultNamespace: defaultNamespace, now: time.Now}
+func New(db DB) *Service {
+	return &Service{db: db, now: time.Now}
 }
 
 func (s *Service) normalizeScope(scope Scope) (Scope, error) {
@@ -53,9 +52,6 @@ func (s *Service) normalizeScope(scope Scope) (Scope, error) {
 	scope.End = scope.End.UTC()
 	if !scope.Start.Before(scope.End) || scope.End.Sub(scope.Start) > maxWindow {
 		return Scope{}, fmt.Errorf("%w: window must be positive and at most %s", ErrInvalidScope, maxWindow)
-	}
-	if strings.TrimSpace(scope.Namespace) == "" {
-		scope.Namespace = s.defaultNamespace
 	}
 	scope.Namespace = strings.TrimSpace(scope.Namespace)
 	return scope, nil
