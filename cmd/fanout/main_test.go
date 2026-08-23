@@ -5,6 +5,8 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"os"
 	"strings"
@@ -22,6 +24,7 @@ func TestParseCommandLine(t *testing.T) {
 		wantPath    string
 		wantVersion bool
 		wantEmail   string
+		wantHealth  string
 		wantErr     bool
 	}{
 		{name: "server defaults", args: nil},
@@ -31,25 +34,27 @@ func TestParseCommandLine(t *testing.T) {
 		{name: "short version flag", args: []string{"-v"}, wantVersion: true},
 		{name: "login link", args: []string{"login-link", "admin@example.com"}, wantEmail: "admin@example.com"},
 		{name: "login link with config", args: []string{"--config", "/etc/fanout.yaml", "login-link", "admin@example.com"}, wantPath: "/etc/fanout.yaml", wantEmail: "admin@example.com"},
+		{name: "default healthcheck", args: []string{"healthcheck"}, wantHealth: "http://127.0.0.1:7520/healthz"},
+		{name: "custom healthcheck", args: []string{"healthcheck", "http://fanout:8080/healthz"}, wantHealth: "http://fanout:8080/healthz"},
 		{name: "login link missing email", args: []string{"login-link"}, wantErr: true},
 		{name: "unexpected argument", args: []string{"serve"}, wantErr: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			path, showVersion, email, err := parseCommandLine(test.args, io.Discard)
+			path, showVersion, email, healthURL, err := parseCommandLine(test.args, io.Discard)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
 			}
-			if path != test.wantPath || showVersion != test.wantVersion || email != test.wantEmail {
-				t.Fatalf("result = (%q, %v, %q), want (%q, %v, %q)", path, showVersion, email, test.wantPath, test.wantVersion, test.wantEmail)
+			if path != test.wantPath || showVersion != test.wantVersion || email != test.wantEmail || healthURL != test.wantHealth {
+				t.Fatalf("result = (%q, %v, %q, %q), want (%q, %v, %q, %q)", path, showVersion, email, healthURL, test.wantPath, test.wantVersion, test.wantEmail, test.wantHealth)
 			}
 		})
 	}
 }
 
 func TestParseCommandLineHelp(t *testing.T) {
-	_, _, _, err := parseCommandLine([]string{"--help"}, io.Discard)
+	_, _, _, _, err := parseCommandLine([]string{"--help"}, io.Discard)
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("error = %v, want flag.ErrHelp", err)
 	}
@@ -57,7 +62,7 @@ func TestParseCommandLineHelp(t *testing.T) {
 
 func TestParseCommandLinePrintsOneErrorAndUsage(t *testing.T) {
 	var output bytes.Buffer
-	_, _, _, err := parseCommandLine([]string{"serve"}, &output)
+	_, _, _, _, err := parseCommandLine([]string{"serve"}, &output)
 	if err == nil {
 		t.Fatal("expected unexpected-argument error")
 	}
@@ -69,6 +74,31 @@ func TestParseCommandLinePrintsOneErrorAndUsage(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "login-link <email>") {
 		t.Fatalf("output does not include login-link command: %q", output.String())
+	}
+	if !strings.Contains(output.String(), "healthcheck [url]") {
+		t.Fatalf("output does not include healthcheck command: %q", output.String())
+	}
+}
+
+func TestCheckHealth(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		wantErr    bool
+	}{
+		{name: "healthy", statusCode: http.StatusOK},
+		{name: "not ready", statusCode: http.StatusServiceUnavailable, wantErr: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+				writer.WriteHeader(test.statusCode)
+			}))
+			defer server.Close()
+			if err := checkHealth(server.URL); (err != nil) != test.wantErr {
+				t.Fatalf("checkHealth() error = %v, wantErr %v", err, test.wantErr)
+			}
+		})
 	}
 }
 

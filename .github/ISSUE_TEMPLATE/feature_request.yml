@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose a broadly useful Fanout OSS improvement
+title: "feat: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem exists today? Describe the outcome, not just a solution.
+    validations:
+      required: true
+  - type: textarea
+    id: users
+    attributes:
+      label: Who benefits?
+      description: Explain why this is useful to typical self-hosted Fanout users.
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Smallest useful approach
+      description: Include alternatives and compatibility concerns if known.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: OSS scope
+      description: Does this improve the secure, usable single-installation baseline, or is it organization-specific governance/compliance?
+    validations:
+      required: true

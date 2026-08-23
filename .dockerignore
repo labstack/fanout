@@ -25,6 +25,8 @@ ui/apps/dist/
 # Docs
 *.md
 docs/
+!README.md
+!TRADEMARK.md
 
 # IDE
 .vscode/

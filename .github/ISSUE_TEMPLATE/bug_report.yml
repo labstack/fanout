@@ -1,0 +1,49 @@
+name: Bug report
+description: Report a reproducible problem in Fanout OSS
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, telemetry from real users, or private host details.
+  - type: input
+    id: version
+    attributes:
+      label: Fanout version
+      description: Release tag, image digest, or commit SHA.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Minimal configuration and exact steps, with all secrets replaced.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include a small, redacted log excerpt if useful.
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options: [Docker, Native binary, Source build]
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety check
+      options:
+        - label: I removed tokens, login links, cookies, keys, SMTP credentials, telemetry payloads, and private host details.
+          required: true
