@@ -15,6 +15,7 @@ permissions:
 env:
   GO_VERSION: "1.26"
   IMAGE: ghcr.io/labstack/fanout
+  DOCKERHUB_IMAGE: docker.io/labstack/fanout
 
 jobs:
   verify:
@@ -189,7 +190,7 @@ jobs:
           docker buildx imagetools inspect "${IMAGE}:${version}"
 
   anonymous-image:
-    name: anonymous image pull
+    name: anonymous GHCR pull
     needs: manifest
     runs-on: ubuntu-24.04
     steps:
@@ -206,9 +207,53 @@ jobs:
           echo "release image is not anonymously pullable" >&2
           exit 1
 
+  dockerhub:
+    name: mirror image to Docker Hub
+    needs: manifest
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Copy the accepted multi-architecture manifest
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          docker buildx imagetools create \
+            --tag "${DOCKERHUB_IMAGE}:${version}" \
+            --tag "${DOCKERHUB_IMAGE}:latest" \
+            "${IMAGE}:${version}"
+          source_digest="$(docker buildx imagetools inspect "${IMAGE}:${version}" --format '{{.Manifest.Digest}}')"
+          mirror_digest="$(docker buildx imagetools inspect "${DOCKERHUB_IMAGE}:${version}" --format '{{.Manifest.Digest}}')"
+          [ "${mirror_digest}" = "${source_digest}" ] || {
+            echo "Docker Hub digest ${mirror_digest} does not match GHCR ${source_digest}" >&2
+            exit 1
+          }
+
+  anonymous-dockerhub:
+    name: anonymous Docker Hub pull
+    needs: dockerhub
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Verify the public mirror
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3 4 5; do
+            if docker pull "${DOCKERHUB_IMAGE}:${version}"; then
+              exit 0
+            fi
+            echo "anonymous Docker Hub pull attempt ${attempt} failed; retrying" >&2
+            sleep 10
+          done
+          echo "Docker Hub release image is not anonymously pullable" >&2
+          exit 1
+
   release:
     name: publish release
-    needs: [binaries, manifest, anonymous-image]
+    needs: [binaries, manifest, anonymous-image, anonymous-dockerhub]
     runs-on: ubuntu-24.04
     permissions:
       attestations: write
