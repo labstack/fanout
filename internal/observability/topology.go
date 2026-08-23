@@ -14,7 +14,7 @@ SELECT
   COALESCE(SUM(avg_ms * calls) / NULLIF(SUM(calls), 0), 0) AS average_ms,
   COALESCE(SUM(error_rate * calls) / NULLIF(SUM(calls), 0), 0) AS error_rate
 FROM edge_rollup
-WHERE bucket >= ? AND bucket < ? AND namespace = ?
+WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?)
 GROUP BY caller, callee, edge_type
 ORDER BY calls DESC, caller ASC, callee ASC
 LIMIT ?`
@@ -33,7 +33,7 @@ func (s *Service) Topology(ctx context.Context, scope Scope, limit int) (Result[
 	if err != nil {
 		return Result[Topology]{}, err
 	}
-	rows, err := s.db.QueryContext(ctx, topologyEdgesQuery, scope.Start, scope.End, scope.Namespace, limit)
+	rows, err := s.db.QueryContext(ctx, topologyEdgesQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, limit)
 	if err != nil {
 		return Result[Topology]{}, fmt.Errorf("query topology edges: %w", err)
 	}
