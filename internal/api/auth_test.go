@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -228,7 +229,7 @@ func TestAuthStatusAndMeRequirePersistedAccount(t *testing.T) {
 	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
 		t.Fatalf("status = %s err=%v", statusRec.Body.String(), err)
 	}
-	if len(status) != 5 || status["agent_available"] != false || status["smtp_configured"] != false {
+	if len(status) != 6 || status["agent_available"] != false || status["smtp_configured"] != false || status["self_signup"] != false {
 		t.Fatalf("unexpected auth status fields: %s", statusRec.Body.String())
 	}
 
@@ -448,16 +449,124 @@ func TestLoginLinkAuthenticatesExactlyOnce(t *testing.T) {
 
 func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 	smtp := auth.SMTPConfig{Host: "127.0.0.1", Port: 1, User: "user", Pass: "pass", From: "Fanout <noreply@example.com>"}
-	s := newTestAuthServerWith(t, config.Config{AuthMode: "local"}, smtp)
-	if _, err := s.users.Create("active@example.com", "", "operator"); err != nil {
+	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", SelfSignup: true}, smtp)
+	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"active@example.com"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"new-viewer@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if _, err := s.users.GetByEmail("new-viewer@example.com"); !errors.Is(err, auth.ErrUserNotFound) {
+		t.Fatalf("unverified address created a user: %v", err)
+	}
+}
+
+func TestLocalSelfSignupCreatesVerifiedViewer(t *testing.T) {
+	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", SelfSignup: true}, auth.SMTPConfig{})
+	if _, err := s.users.Create("admin@example.com", "", auth.RoleAdmin); err != nil {
+		t.Fatalf("Create admin: %v", err)
+	}
+	code, err := s.codes.Create("new-viewer@example.com")
+	if err != nil {
+		t.Fatalf("Create code: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"NEW-viewer@example.com","code":"`+code+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "self-signup-test")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("verify = %d %s", rec.Code, rec.Body.String())
+	}
+	user, err := s.users.GetByEmail("new-viewer@example.com")
+	if err != nil {
+		t.Fatalf("GetByEmail: %v", err)
+	}
+	if user.Role != auth.RoleViewer || !user.Active {
+		t.Fatalf("self-signup user = %#v, want active viewer", user)
+	}
+	firstCookie(t, rec, "fanout_session")
+	var provisioned int
+	if err := s.db.DB.QueryRow(`SELECT COUNT(*) FROM auth_audit_events WHERE event_type = 'user.provisioned' AND target_id = ?`, user.ID).Scan(&provisioned); err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if provisioned != 1 {
+		t.Fatalf("provision audit events = %d, want 1", provisioned)
+	}
+}
+
+func TestLocalSelfSignupCannotPreemptFirstAdminOrReactivateUser(t *testing.T) {
+	t.Run("first admin", func(t *testing.T) {
+		s := newTestAuthServerWith(t, config.Config{AuthMode: "local", SelfSignup: true}, auth.SMTPConfig{})
+		code, err := s.codes.Create("visitor@example.com")
+		if err != nil {
+			t.Fatalf("Create code: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"visitor@example.com","code":"`+code+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("verify before setup = %d %s, want 401", rec.Code, rec.Body.String())
+		}
+		if _, err := s.users.GetByEmail("visitor@example.com"); !errors.Is(err, auth.ErrUserNotFound) {
+			t.Fatalf("visitor preempted first admin: %v", err)
+		}
+	})
+
+	t.Run("inactive user", func(t *testing.T) {
+		s := newTestAuthServerWith(t, config.Config{AuthMode: "local", SelfSignup: true}, auth.SMTPConfig{})
+		if _, err := s.users.Create("admin@example.com", "", auth.RoleAdmin); err != nil {
+			t.Fatalf("Create admin: %v", err)
+		}
+		viewer, err := s.users.Create("inactive@example.com", "", auth.RoleViewer)
+		if err != nil {
+			t.Fatalf("Create viewer: %v", err)
+		}
+		active := false
+		if _, err := s.users.Update(viewer.ID, nil, nil, nil, &active); err != nil {
+			t.Fatalf("deactivate: %v", err)
+		}
+		code, err := s.codes.Create(viewer.Email)
+		if err != nil {
+			t.Fatalf("Create code: %v", err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"inactive@example.com","code":"`+code+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("inactive verify = %d %s, want 401", rec.Code, rec.Body.String())
+		}
+		got, err := s.users.GetByEmail(viewer.Email)
+		if err != nil || got.Active {
+			t.Fatalf("inactive user was reactivated: user=%#v err=%v", got, err)
+		}
+	})
+}
+
+func TestLocalSelfSignupDisabledRejectsUnknownVerifiedAddress(t *testing.T) {
+	s := newTestAuthServer(t)
+	if _, err := s.users.Create("admin@example.com", "", auth.RoleAdmin); err != nil {
+		t.Fatalf("Create admin: %v", err)
+	}
+	code, err := s.codes.Create("visitor@example.com")
+	if err != nil {
+		t.Fatalf("Create code: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"visitor@example.com","code":"`+code+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("verify = %d %s, want 401", rec.Code, rec.Body.String())
+	}
+	if _, err := s.users.GetByEmail("visitor@example.com"); !errors.Is(err, auth.ErrUserNotFound) {
+		t.Fatalf("disabled self-signup created user: %v", err)
 	}
 }
 

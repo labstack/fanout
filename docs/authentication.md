@@ -52,6 +52,20 @@ If you configure SMTP, send yourself a code and confirm it arrives. Credentials
 can be wrong, the relay can refuse the sender, and mail can land in spam. A
 login link remains available when delivery fails.
 
+### Local self-signup
+
+Local accounts are invitation-only by default. To let any verified email
+address create an account, enable `auth.self_signup` or
+`FANOUT_SELF_SIGNUP=true`. Fanout sends the existing email code and
+creates an active `viewer` only after that code is successfully verified. The
+role is fixed: self-signup can never create an operator or administrator.
+The setting requires complete SMTP configuration and local auth mode.
+
+Self-signup remains unavailable until the first administrator completes setup.
+Inactive accounts are not recreated or reactivated. Public installations
+should enforce traffic and AI-budget limits at the deployment edge; Fanout also
+retains its per-IP, per-address, expiry, and attempt limits described below.
+
 ### Recovery
 
 If you are locked out in local mode, run the command with the same configuration

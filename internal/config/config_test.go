@@ -85,6 +85,7 @@ metrics:
   public: true
 auth:
   session_idle_ttl: 10h
+  self_signup: true
 `), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
@@ -99,7 +100,7 @@ auth:
 	if cfg.HTTPAddr != ":2222" {
 		t.Fatalf("HTTPAddr = %q, want environment override", cfg.HTTPAddr)
 	}
-	if cfg.MergeInterval != 75*time.Second || cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour {
+	if cfg.MergeInterval != 75*time.Second || cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup {
 		t.Fatalf("YAML values were not merged: %+v", cfg)
 	}
 }
@@ -110,11 +111,12 @@ func TestLoadTypedEnvironmentValues(t *testing.T) {
 		"FANOUT_METRICS_PUBLIC=true",
 		"FANOUT_MERGE_INTERVAL=75s",
 		"FANOUT_SESSION_IDLE_TTL=10h",
+		"FANOUT_SELF_SIGNUP=true",
 	)})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.MergeInterval != 75*time.Second || cfg.SessionIdleTTL != 10*time.Hour {
+	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.MergeInterval != 75*time.Second || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup {
 		t.Fatalf("environment values were not decoded: %+v", cfg)
 	}
 }
@@ -678,6 +680,15 @@ func TestValidate(t *testing.T) {
 		{"AI provider invalid", func(c *Config) { c.AIProvider = "unknown" }},
 		{"auth code secret empty", func(c *Config) { c.AuthCodeSecret = "" }},
 		{"auth code secret short", func(c *Config) { c.AuthCodeSecret = "short" }},
+		{"self-signup without SMTP", func(c *Config) { c.SelfSignup = true; c.SMTPHost = "" }},
+		{"local self-signup in OIDC mode", func(c *Config) {
+			c.SelfSignup = true
+			c.AuthMode = "oidc"
+			c.OIDCIssuerURL = "https://id.example.com"
+			c.OIDCClientID = "client"
+			c.OIDCClientSecret = "secret"
+			c.PublicURL = "https://fanout.example.com"
+		}},
 		{"session idle zero", func(c *Config) { c.SessionIdleTTL = 0 }},
 		{"session idle too short", func(c *Config) { c.SessionIdleTTL = time.Minute }},
 		{"session absolute zero", func(c *Config) { c.SessionAbsoluteTTL = 0 }},
