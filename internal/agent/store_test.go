@@ -347,7 +347,7 @@ func TestThreadRouteHidesOtherOwnersThread(t *testing.T) {
 	mutation := func(method, path, body string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(method, path, strings.NewReader(body))
 		request.Header.Set("Content-Type", "application/json")
-		request.Header.Set("X-Fanout-Request", "1")
+		request.Header.Set("Fanout-Request", "1")
 		request.AddCookie(cookie)
 		recorder := httptest.NewRecorder()
 		e.ServeHTTP(recorder, request)

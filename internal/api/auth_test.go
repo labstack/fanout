@@ -97,7 +97,7 @@ func sessionRequest(method, target string, body *strings.Reader, cookie *http.Co
 		req.AddCookie(cookie)
 	}
 	if isUnsafeMethod(method) {
-		req.Header.Set("X-Fanout-Request", "1")
+		req.Header.Set("Fanout-Request", "1")
 	}
 	return req
 }
@@ -322,12 +322,12 @@ func TestBrowserMutationValidation(t *testing.T) {
 		want int
 	}{
 		{name: "missing", want: http.StatusForbidden},
-		{name: "custom header", head: map[string]string{"X-Fanout-Request": "1"}, want: http.StatusNoContent},
+		{name: "custom header", head: map[string]string{"Fanout-Request": "1"}, want: http.StatusNoContent},
 		{name: "same origin", head: map[string]string{"Origin": "http://example.com"}, want: http.StatusNoContent},
 		{name: "referer", head: map[string]string{"Referer": "http://example.com/page"}, want: http.StatusNoContent},
 		{name: "malformed referer", head: map[string]string{"Referer": "://bad"}, want: http.StatusForbidden},
 		{name: "evil origin", head: map[string]string{"Origin": "https://evil.test"}, want: http.StatusForbidden},
-		{name: "cross site overrides header", head: map[string]string{"X-Fanout-Request": "1", "Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden},
+		{name: "cross site overrides header", head: map[string]string{"Fanout-Request": "1", "Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodPost, "/api/rules", nil)
@@ -467,6 +467,9 @@ func TestSetupLifecycleAndIngestToken(t *testing.T) {
 	}
 	if !strings.HasPrefix(body["ingest_token"], "fo_") {
 		t.Fatalf("ingest token = %q", body["ingest_token"])
+	}
+	if body["ingest_header_name"] != "Authorization" {
+		t.Fatalf("ingest header name = %q", body["ingest_header_name"])
 	}
 	if user, err := s.users.GetByEmail("admin@example.com"); err != nil || user.Role != auth.RoleAdmin {
 		t.Fatalf("admin = %+v err=%v", user, err)

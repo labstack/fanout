@@ -86,7 +86,7 @@ your collector secrets. A standard OTLP/HTTP exporter can then use:
 ```sh
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-export OTEL_EXPORTER_OTLP_HEADERS="x-fanout-ingest-token=$INGEST_TOKEN"
+export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20$INGEST_TOKEN"
 ```
 
 For a Collector on the same private container network, the forwarding side is:
@@ -96,7 +96,7 @@ exporters:
   otlp_http/fanout:
     endpoint: http://fanout:4318
     headers:
-      x-fanout-ingest-token: ${env:INGEST_TOKEN}
+      Authorization: "Bearer ${env:INGEST_TOKEN}"
 
 service:
   pipelines:

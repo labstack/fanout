@@ -65,7 +65,7 @@ func TestAuthorize_RejectsWhenPreSetup(t *testing.T) {
 	}
 }
 
-func TestAuthorize_AcceptsValidToken(t *testing.T) {
+func TestAuthorize_AcceptsBearerAuthorization(t *testing.T) {
 	store := newRuntimeStore(t)
 	token, hash, err := settings.GenerateIngestToken()
 	if err != nil {
@@ -76,7 +76,7 @@ func TestAuthorize_AcceptsValidToken(t *testing.T) {
 	}
 
 	authorizer := newIngestAuthorizer(store)
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", token))
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
 
 	if err := authorizer.authorize(ctx); err != nil {
 		t.Fatalf("authorize with valid token: %v", err)
@@ -94,7 +94,7 @@ func TestAuthorize_RejectsWrongToken(t *testing.T) {
 	}
 
 	authorizer := newIngestAuthorizer(store)
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", "fo_wrong"))
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer fo_wrong"))
 
 	err = authorizer.authorize(ctx)
 	if status.Code(err) != codes.Unauthenticated {
@@ -102,7 +102,7 @@ func TestAuthorize_RejectsWrongToken(t *testing.T) {
 	}
 }
 
-func TestAuthorize_AcceptsBearerAuthorization(t *testing.T) {
+func TestAuthorize_AcceptsCaseInsensitiveBearerScheme(t *testing.T) {
 	store := newRuntimeStore(t)
 	token, hash, err := settings.GenerateIngestToken()
 	if err != nil {
@@ -113,10 +113,29 @@ func TestAuthorize_AcceptsBearerAuthorization(t *testing.T) {
 	}
 
 	authorizer := newIngestAuthorizer(store)
-	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "Bearer "+token))
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("authorization", "bearer "+token))
 
 	if err := authorizer.authorize(ctx); err != nil {
 		t.Fatalf("authorize with Bearer header: %v", err)
+	}
+}
+
+func TestAuthorize_RejectsLegacyFanoutHeader(t *testing.T) {
+	store := newRuntimeStore(t)
+	token, hash, err := settings.GenerateIngestToken()
+	if err != nil {
+		t.Fatalf("GenerateIngestToken: %v", err)
+	}
+	if err := store.SetIngest(context.Background(), settings.Ingest{TokenHash: hash}); err != nil {
+		t.Fatalf("SetIngest: %v", err)
+	}
+
+	authorizer := newIngestAuthorizer(store)
+	ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs("x-fanout-ingest-token", token))
+
+	err = authorizer.authorize(ctx)
+	if status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("code = %v, want %v", status.Code(err), codes.Unauthenticated)
 	}
 }
 

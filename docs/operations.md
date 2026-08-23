@@ -20,9 +20,10 @@ application; put a customer-controlled Collector or gateway in front of Fanout
 when public clients are involved.
 
 For OTLP/HTTP, set the exporter protocol to `http/protobuf`, use the base
-endpoint `http://fanout:4318`, and supply either `x-fanout-ingest-token` or an
-`Authorization: Bearer` header. Exporters derive the standard `/v1/traces`,
-`/v1/metrics`, and `/v1/logs` paths from the base endpoint.
+endpoint `http://fanout:4318`, and supply the ingest token as
+`Authorization: Bearer <token>`. Exporters derive the standard `/v1/traces`,
+`/v1/metrics`, and `/v1/logs` paths from the base endpoint. OTLP/gRPC uses the
+same authorization value as gRPC metadata on port `4317`.
 
 ## Mobile boundary
 

@@ -165,7 +165,7 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 			return echo.NewHTTPError(http.StatusInternalServerError, "failed to persist ingest token")
 		}
 		resp["ingest_token"] = ingestToken
-		resp["ingest_header_name"] = "x-fanout-ingest-token"
+		resp["ingest_header_name"] = "Authorization"
 		// The endpoint collectors should actually use. Behind a reverse proxy
 		// this is the advertised TLS endpoint (e.g. https://ingest.example.com),
 		// not the internal :4317 — see suggestedIngestEndpoint.
