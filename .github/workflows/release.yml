@@ -265,8 +265,10 @@ jobs:
           done
           sha256sum -c SHA256SUMS
           for archive in fanout_*.tar.gz; do
+            listing="${archive}.contents"
+            tar -tzf "${archive}" > "${listing}"
             for document in LICENSE NOTICE README.md THIRD_PARTY_NOTICES TRADEMARK.md; do
-              tar -tzf "${archive}" | grep -Eq "(^|/)${document}$" || {
+              grep -Eq "(^|/)${document}$" "${listing}" || {
                 echo "${archive} does not contain ${document}" >&2
                 exit 1
               }
