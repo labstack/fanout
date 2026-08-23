@@ -72,6 +72,27 @@ func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, 
 	return e, users, sessions
 }
 
+func TestMCPRejectsUnexpectedHostBeforeAuthentication(t *testing.T) {
+	sqlite, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sqlite.Close()
+	handler, err := NewMCPAuthorization(auth.NewOAuthStore(sqlite.DB), auth.NewUserStore(sqlite.DB), testMCPResource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "https://attacker.example/mcp", nil)
+	req.Host = "attacker.example"
+	rec := httptest.NewRecorder()
+	handler.ProtectMCP(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("unexpected host reached MCP protocol handler")
+	})).ServeHTTP(rec, req)
+	if rec.Code != http.StatusMisdirectedRequest {
+		t.Fatalf("unexpected host = %d, want 421", rec.Code)
+	}
+}
+
 func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	e, users, _ := newOAuthTestServer(t)
 	user, err := users.Create("owner@example.com", "Owner", "admin")
@@ -602,6 +623,7 @@ func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
 func serve(t *testing.T, e *echo.Echo, method, target, body string, headers map[string]string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	req.Host = "fanout.example.com"
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}

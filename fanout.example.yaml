@@ -70,6 +70,7 @@ auth:
     email_verification: required # FANOUT_OIDC_EMAIL_VERIFICATION
     auto_provision: false # FANOUT_OIDC_AUTO_PROVISION
     allowed_groups: "" # FANOUT_OIDC_ALLOWED_GROUPS
+    # Use "*" only with email_verification: required to admit any verified identity.
     allowed_domains: "" # FANOUT_OIDC_ALLOWED_DOMAINS
     default_role: viewer # FANOUT_OIDC_DEFAULT_ROLE
     operator_groups: "" # FANOUT_OIDC_OPERATOR_GROUPS
@@ -84,4 +85,3 @@ metrics:
 
 mcp:
   enabled: true # FANOUT_MCP_ENABLED
-  public_url: https://localhost:7520/mcp # FANOUT_MCP_PUBLIC_URL

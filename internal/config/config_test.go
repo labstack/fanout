@@ -165,15 +165,23 @@ func TestLoadTreatsEmptyEnvironmentValuesAsAbsent(t *testing.T) {
 	}
 }
 
-func TestLoadNormalizesMCPPublicURL(t *testing.T) {
-	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
-		"FANOUT_MCP_PUBLIC_URL=  https://fanout.example.com/mcp  ",
-	)})
-	if err != nil {
-		t.Fatalf("Load: %v", err)
+func TestMCPResourceURL(t *testing.T) {
+	tests := []struct {
+		name      string
+		publicURL string
+		want      string
+	}{
+		{name: "local default", want: "https://localhost:7520/mcp"},
+		{name: "public origin", publicURL: "https://fanout.example.com", want: "https://fanout.example.com/mcp"},
+		{name: "trimmed origin", publicURL: "  https://fanout.example.com/  ", want: "https://fanout.example.com/mcp"},
 	}
-	if cfg.MCPPublicURL != "https://fanout.example.com/mcp" {
-		t.Fatalf("MCPPublicURL = %q, want normalized URL", cfg.MCPPublicURL)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{PublicURL: tc.publicURL}
+			if got := cfg.MCPResourceURL(); got != tc.want {
+				t.Fatalf("MCPResourceURL() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -376,6 +384,7 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 			{"storage.merge_every_seconds", "storage:\n  merge_every_seconds: 60\n"},
 			{"storage.maintenance_every_seconds", "storage:\n  maintenance_every_seconds: 3600\n"},
 			{"alerts.evaluation_interval_seconds", "alerts:\n  evaluation_interval_seconds: 30\n"},
+			{"mcp.public_url", "mcp:\n  public_url: https://fanout.example.com/mcp\n"},
 		} {
 			t.Run(test.key, func(t *testing.T) {
 				path := filepath.Join(t.TempDir(), "fanout.yaml")
@@ -397,6 +406,7 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 			"FANOUT_MERGE_EVERY_SECONDS",
 			"FANOUT_MAINTENANCE_EVERY_SECONDS",
 			"FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS",
+			"FANOUT_MCP_PUBLIC_URL",
 		} {
 			t.Run(name, func(t *testing.T) {
 				_, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"=1")})
@@ -730,6 +740,53 @@ func TestValidate(t *testing.T) {
 		c.PublicURL = "https://fanout.example.com"
 		if err := c.Validate(); err != nil {
 			t.Fatalf("OIDC config should pass: %v", err)
+		}
+	})
+
+	t.Run("OIDC verified email wildcard is explicit and valid", func(t *testing.T) {
+		c := valid
+		c.AuthMode = "oidc"
+		c.AuthCodeSecret = ""
+		c.OIDCIssuerURL = "https://id.example.com"
+		c.OIDCClientID = "fanout"
+		c.OIDCClientSecret = "secret"
+		c.OIDCEmailClaim = "email"
+		c.OIDCEmailVerification = "required"
+		c.OIDCAutoProvision = true
+		c.OIDCAllowedDomains = "*"
+		c.OIDCDefaultRole = "viewer"
+		c.PublicURL = "https://fanout.example.com"
+		if err := c.Validate(); err != nil {
+			t.Fatalf("verified email wildcard should pass: %v", err)
+		}
+
+		c.OIDCEmailVerification = "issuer"
+		if err := c.Validate(); err == nil {
+			t.Fatal("issuer-trusted email wildcard should be rejected")
+		}
+	})
+
+	t.Run("MCP derives its HTTPS resource from the public origin", func(t *testing.T) {
+		c := valid
+		c.MCPEnabled = true
+		c.PublicURL = "https://fanout.example.com"
+		if err := c.Validate(); err != nil {
+			t.Fatalf("HTTPS public origin should pass: %v", err)
+		}
+		if got := c.MCPResourceURL(); got != "https://fanout.example.com/mcp" {
+			t.Fatalf("MCPResourceURL() = %q", got)
+		}
+
+		for _, invalid := range []string{
+			"http://fanout.example.com",
+			"https://user@fanout.example.com",
+			"https://fanout.example.com/base",
+			"https://fanout.example.com?tenant=one",
+		} {
+			c.PublicURL = invalid
+			if err := c.Validate(); err == nil {
+				t.Errorf("server.public_url %q should be rejected with MCP enabled", invalid)
+			}
 		}
 	})
 

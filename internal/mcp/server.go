@@ -15,6 +15,10 @@ import (
 
 const mcpUIExtension = "io.modelcontextprotocol/ui"
 
+const staticCatalogTTLMs = 5 * 60 * 1000
+
+const serverInstructions = "Start with observability_overview for system health, service_topology for dependencies, service_performance for latency and errors, trace_detail for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user: list or get a dashboard before changing it, create only when asked, and replace an existing dashboard only with explicit user intent."
+
 type Observability interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
 	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
@@ -66,7 +70,7 @@ func New(queries Observability, dashboards *dashboard.Service, version string) *
 			Name:    "fanout",
 			Title:   "Fanout Observability",
 			Version: version,
-		}, &mcp.ServerOptions{Capabilities: &mcp.ServerCapabilities{
+		}, &mcp.ServerOptions{Instructions: serverInstructions, Capabilities: &mcp.ServerCapabilities{
 			Extensions: map[string]any{
 				mcpUIExtension: map[string]any{"mimeTypes": []string{mcpAppMIME}},
 			},
@@ -81,8 +85,32 @@ func New(queries Observability, dashboards *dashboard.Service, version string) *
 	s.registerTools()
 	s.registerDashboardTools()
 	s.registerAppResources()
-	s.mcp.AddReceivingMiddleware(filterMCPAppToolMetadata)
+	s.mcp.AddReceivingMiddleware(addStaticCacheHints, filterMCPAppToolMetadata)
 	return s
+}
+
+// addStaticCacheHints lets clients reuse catalogs and embedded MCP Apps between
+// reconnects. They are identical for every principal and cannot change until
+// the process is replaced, so a short public TTL is both safe and bounded by a
+// deployment rather than runtime state.
+func addStaticCacheHints(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		result, err := next(ctx, method, req)
+		if err != nil {
+			return result, err
+		}
+		switch value := result.(type) {
+		case *mcp.ListToolsResult:
+			value.TTLMs = staticCatalogTTLMs
+		case *mcp.ListResourcesResult:
+			value.TTLMs = staticCatalogTTLMs
+		case *mcp.ListResourceTemplatesResult:
+			value.TTLMs = staticCatalogTTLMs
+		case *mcp.ReadResourceResult:
+			value.TTLMs = staticCatalogTTLMs
+		}
+		return result, nil
+	}
 }
 
 // filterMCPAppToolMetadata preserves the same tools and text/structured

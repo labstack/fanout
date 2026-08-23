@@ -47,8 +47,10 @@ private network or terminate their protocols separately.
 
 Set `FANOUT_PUBLIC_URL` to the externally reachable HTTPS browser origin. When
 using forwarded client addresses, set `FANOUT_TRUSTED_PROXY_CIDRS` to only the
-proxy networks; never use `0.0.0.0/0`. External MCP clients also need
-`FANOUT_MCP_PUBLIC_URL` set to the stable HTTPS resource URL ending in `/mcp`.
+proxy networks; never use `0.0.0.0/0`. The MCP resource URL is the same origin
+with `/mcp` appended. Fanout accepts public MCP transport requests only when
+their HTTP `Host` matches that origin, so the reverse proxy must preserve the
+original host.
 
 ## Health and monitoring
 
