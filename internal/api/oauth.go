@@ -41,16 +41,17 @@ type MCPAuthorization struct {
 	resource        string
 	issuer          string
 	metadataURL     string
+	allowedHost     string
 	registerLimiter *appauth.KeyedLimiter
 }
 
-func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, publicMCPURL string) (*MCPAuthorization, error) {
+func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, resourceURL string) (*MCPAuthorization, error) {
 	if store == nil || users == nil {
 		return nil, fmt.Errorf("MCP authorization dependencies are required")
 	}
-	resource, err := url.Parse(publicMCPURL)
+	resource, err := url.Parse(resourceURL)
 	if err != nil || resource.Scheme != "https" || resource.Host == "" || resource.Path != "/mcp" {
-		return nil, fmt.Errorf("invalid public MCP URL")
+		return nil, fmt.Errorf("invalid MCP resource URL")
 	}
 	issuer := resource.Scheme + "://" + resource.Host
 	return &MCPAuthorization{
@@ -59,6 +60,7 @@ func NewMCPAuthorization(store *appauth.OAuthStore, users *appauth.UserStore, pu
 		resource:    resource.String(),
 		issuer:      issuer,
 		metadataURL: issuer + "/.well-known/oauth-protected-resource/mcp",
+		allowedHost: resource.Host,
 		// Registration is unauthenticated by design (RFC 7591 dynamic
 		// registration). Bound how many clients one source can create before
 		// the janitor collects the abandoned ones. The budget is per client
@@ -80,10 +82,17 @@ func (h *MCPAuthorization) Register(e *echo.Echo) {
 }
 
 func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
-	return mcpgoauth.RequireBearerToken(h.verifyMCPToken, &mcpgoauth.RequireBearerTokenOptions{
+	protected := mcpgoauth.RequireBearerToken(h.verifyMCPToken, &mcpgoauth.RequireBearerTokenOptions{
 		ResourceMetadataURL: h.metadataURL,
 		Scopes:              []string{mcpReadScope},
 	})(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.EqualFold(strings.TrimSpace(r.Host), h.allowedHost) {
+			http.Error(w, "MCP request host does not match the configured public URL", http.StatusMisdirectedRequest)
+			return
+		}
+		protected.ServeHTTP(w, r)
+	})
 }
 
 // ProtectBrowserMCP adapts an already-authenticated browser session to the

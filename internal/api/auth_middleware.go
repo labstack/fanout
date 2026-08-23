@@ -35,7 +35,7 @@ const (
 
 var roleCapabilities = map[auth.Role]map[Capability]struct{}{
 	auth.RoleViewer: {
-		ReadTelemetry: {}, ManageOwnDashboards: {}, ReadIngestMetadata: {},
+		ReadTelemetry: {}, ManageOwnDashboards: {}, RunAgent: {}, ReadIngestMetadata: {},
 	},
 	auth.RoleOperator: {
 		ReadTelemetry: {}, ManageOwnDashboards: {}, ManageAlerts: {}, RunAgent: {}, ReadIngestMetadata: {},

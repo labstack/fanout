@@ -103,8 +103,6 @@ func Load(options LoadOptions) (Config, error) {
 	}); err != nil {
 		return Config{}, fmt.Errorf("decode configuration: %w", err)
 	}
-	cfg.MCPPublicURL = strings.TrimSpace(cfg.MCPPublicURL)
-
 	// Size before validating: validation should judge the configuration the
 	// process will actually run with, not the holes left for it to fill.
 	cfg.resolveSizing()

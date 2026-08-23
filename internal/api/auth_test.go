@@ -311,6 +311,26 @@ func TestCapabilityIsEnforcedCentrally(t *testing.T) {
 	}
 }
 
+func TestViewerCanRunAgentWithoutOperatorPrivileges(t *testing.T) {
+	s := newTestAuthServer(t)
+	viewer, _ := s.users.Create("viewer-agent@example.com", "", "viewer")
+	cookie := s.login(t, viewer)
+	s.e.POST("/api/agent", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.POST("/api/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+
+	agentRec := httptest.NewRecorder()
+	s.e.ServeHTTP(agentRec, sessionRequest(http.MethodPost, "/api/agent", nil, cookie))
+	if agentRec.Code != http.StatusNoContent {
+		t.Fatalf("viewer agent request = %d, want 204", agentRec.Code)
+	}
+
+	alertRec := httptest.NewRecorder()
+	s.e.ServeHTTP(alertRec, sessionRequest(http.MethodPost, "/api/rules", nil, cookie))
+	if alertRec.Code != http.StatusForbidden {
+		t.Fatalf("viewer alert mutation = %d, want 403", alertRec.Code)
+	}
+}
+
 func TestBrowserMutationValidation(t *testing.T) {
 	s := newTestAuthServer(t)
 	user, _ := s.users.Create("csrf@example.com", "", "operator")

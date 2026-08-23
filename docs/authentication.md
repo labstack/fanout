@@ -124,6 +124,36 @@ session cookies are issued with `Secure`.
 
 ## OIDC
 
+### Public and community access
+
+OIDC can provision a separate viewer account for every visitor whose provider
+asserts a verified email. This keeps sessions, conversations, dashboards, and
+audit attribution isolated without shared credentials or an anonymous
+authorization bypass:
+
+```yaml
+auth:
+  mode: oidc
+  oidc:
+    email_verification: required
+    auto_provision: true
+    allowed_domains: "*"
+    default_role: viewer
+```
+
+The wildcard is deliberately explicit and is rejected with
+`email_verification: issuer`. Use a specific domain or group allowlist for a
+private installation. A wildcard makes the installation available to every
+identity accepted by the configured provider, so rate-limit public traffic and
+budget AI usage at the deployment edge.
+
+Fanout's roles remain installation-wide rather than deployment-specific:
+
+- `viewer` reads telemetry, uses chat and MCP tools within viewer permissions,
+  and manages its own dashboards.
+- `operator` additionally manages alert rules.
+- `admin` additionally manages users, ingest credentials, and operations.
+
 ### Eligibility is enforced on every login
 
 `FANOUT_OIDC_ALLOWED_GROUPS` and `FANOUT_OIDC_ALLOWED_DOMAINS` are evaluated on

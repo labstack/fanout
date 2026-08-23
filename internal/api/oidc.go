@@ -228,6 +228,12 @@ type requestSource struct {
 }
 
 func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oidcClaims, source requestSource) (appauth.User, appauth.UserIdentity, error) {
+	// Verification is a login policy, not only a first-link policy. Enforce it
+	// before looking up an existing identity so a provider cannot keep an account
+	// eligible after its asserted email becomes unverified.
+	if h.cfg.OIDCEmailVerification == "required" && (claims.EmailVerified == nil || !*claims.EmailVerified) {
+		return appauth.User{}, appauth.UserIdentity{}, errors.New("OIDC email is not verified")
+	}
 	identity, err := h.identities.Find(ctx, issuer, claims.Subject)
 	if err == nil {
 		user, userErr := h.users.GetByIDContext(ctx, identity.UserID)
@@ -249,9 +255,6 @@ func (h *OIDCHandler) resolveUser(ctx context.Context, issuer string, claims oid
 	email, err := appauth.NormalizeEmail(claims.Email)
 	if err != nil {
 		return appauth.User{}, appauth.UserIdentity{}, errors.New("OIDC provider did not supply a usable email")
-	}
-	if h.cfg.OIDCEmailVerification == "required" && (claims.EmailVerified == nil || !*claims.EmailVerified) {
-		return appauth.User{}, appauth.UserIdentity{}, errors.New("OIDC email is not verified")
 	}
 	// Eligibility decides before anything is created or linked. Checking after
 	// provisioning would leave a persisted user and a successful
@@ -417,7 +420,14 @@ func (h *OIDCHandler) groupAllowed(groups []string) bool {
 
 func (h *OIDCHandler) domainAllowed(email string) bool {
 	parts := strings.Split(email, "@")
-	return len(parts) == 2 && slices.Contains(csvValues(h.cfg.OIDCAllowedDomains), strings.ToLower(parts[1]))
+	if len(parts) != 2 {
+		return false
+	}
+	allowed := csvValues(h.cfg.OIDCAllowedDomains)
+	if slices.Contains(allowed, "*") {
+		return h.cfg.OIDCEmailVerification == "required"
+	}
+	return slices.Contains(allowed, strings.ToLower(parts[1]))
 }
 
 func (h *OIDCHandler) provisionRole(groups []string) appauth.Role {

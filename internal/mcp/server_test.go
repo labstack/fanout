@@ -220,6 +220,64 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 	})
 }
 
+func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
+	server := New(&fakeObservability{}, nil, "test")
+	session := connectTestClient(t, server, nil)
+	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "observability_overview") || !strings.Contains(instructions, "authenticated user") {
+		t.Fatalf("server instructions = %q", instructions)
+	}
+
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tools.TTLMs != staticCatalogTTLMs || tools.CacheScope != "public" {
+		t.Fatalf("tools cache hints = %d %q", tools.TTLMs, tools.CacheScope)
+	}
+	for _, tool := range tools.Tools {
+		if tool.OutputSchema == nil {
+			t.Fatalf("tool %s has no structured output schema", tool.Name)
+		}
+	}
+	called, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "observability_overview",
+		Arguments: map[string]any{
+			"window": "15m",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if called.IsError || called.StructuredContent == nil || len(called.Content) == 0 {
+		t.Fatalf("overview lacks portable text and structured fallbacks: %#v", called)
+	}
+
+	resources, err := session.ListResources(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resources.TTLMs != staticCatalogTTLMs || resources.CacheScope != "public" {
+		t.Fatalf("resources cache hints = %d %q", resources.TTLMs, resources.CacheScope)
+	}
+	if len(resources.Resources) == 0 {
+		t.Fatal("server advertised no MCP App resources")
+	}
+	read, err := session.ReadResource(context.Background(), &mcp.ReadResourceParams{URI: resources.Resources[0].URI})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.TTLMs != staticCatalogTTLMs || read.CacheScope != "public" {
+		t.Fatalf("resource read cache hints = %d %q", read.TTLMs, read.CacheScope)
+	}
+	templates, err := session.ListResourceTemplates(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if templates.TTLMs != staticCatalogTTLMs || templates.CacheScope != "public" {
+		t.Fatalf("resource templates cache hints = %d %q", templates.TTLMs, templates.CacheScope)
+	}
+}
+
 func connectTestClient(t *testing.T, server *Server, capabilities *mcp.ClientCapabilities) *mcp.ClientSession {
 	t.Helper()
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
