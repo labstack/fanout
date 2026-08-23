@@ -83,7 +83,7 @@ fetch "${base}/SHA256SUMS" "${tmp}/SHA256SUMS" || die "could not download SHA256
 	fi
 ) || die "checksum verification failed for ${archive}"
 
-tar -xzf "${tmp}/${archive}" -C "$tmp" "$BIN" || die "archive did not contain ${BIN}"
+tar -xzf "${tmp}/${archive}" -C "$tmp" "./${BIN}" || die "archive did not contain ${BIN}"
 chmod +x "${tmp}/${BIN}"
 
 prefix="${FANOUT_PREFIX:-}"
