@@ -4,7 +4,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/labstack/fanout/main/scripts/install.sh | sh
 #
 # Environment:
-#   FANOUT_VERSION  install this tag instead of the latest release (e.g. v2026.08.1)
+#   FANOUT_VERSION  install this tag instead of the latest release (e.g. v2026.8.0)
 #   FANOUT_PREFIX   install into this directory instead of the default
 set -eu
 

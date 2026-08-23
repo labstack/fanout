@@ -51,7 +51,7 @@ var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 var version = "dev"
 
 func main() {
-	configPath, showVersion, loginEmail, err := parseCommandLine(os.Args[1:], os.Stderr)
+	configPath, showVersion, loginEmail, healthURL, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
 	}
@@ -60,6 +60,13 @@ func main() {
 	}
 	if showVersion {
 		fmt.Println(version)
+		return
+	}
+	if healthURL != "" {
+		if err := checkHealth(healthURL); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -448,9 +455,15 @@ func main() {
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 
-func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, loginEmail string, err error) {
+func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, loginEmail, healthURL string, err error) {
 	if len(args) == 1 && args[0] == "version" {
-		return "", true, "", nil
+		return "", true, "", "", nil
+	}
+	if len(args) >= 1 && len(args) <= 2 && args[0] == "healthcheck" {
+		if len(args) == 2 {
+			return "", false, "", args[1], nil
+		}
+		return "", false, "", "http://127.0.0.1:7520/healthz", nil
 	}
 
 	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
@@ -459,6 +472,7 @@ func parseCommandLine(args []string, output io.Writer) (configPath string, showV
 		fmt.Fprintln(output, "Usage of fanout:")
 		fmt.Fprintln(output, "  fanout [flags]")
 		fmt.Fprintln(output, "  fanout [--config path] login-link <email>")
+		fmt.Fprintln(output, "  fanout healthcheck [url]")
 		fmt.Fprintln(output, "  fanout version")
 		fmt.Fprintln(output, "Flags:")
 		flags.PrintDefaults()
@@ -467,18 +481,32 @@ func parseCommandLine(args []string, output io.Writer) (configPath string, showV
 	flags.BoolVar(&showVersion, "version", false, "print the Fanout version")
 	flags.BoolVar(&showVersion, "v", false, "print the Fanout version")
 	if err := flags.Parse(args); err != nil {
-		return "", false, "", err
+		return "", false, "", "", err
 	}
 	if flags.NArg() == 2 && flags.Arg(0) == "login-link" {
-		return configPath, false, flags.Arg(1), nil
+		return configPath, false, flags.Arg(1), "", nil
 	}
 	if flags.NArg() != 0 {
 		err := fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
 		fmt.Fprintln(output, err)
 		flags.Usage()
-		return "", false, "", err
+		return "", false, "", "", err
 	}
-	return configPath, showVersion, "", nil
+	return configPath, showVersion, "", "", nil
+}
+
+func checkHealth(healthURL string) error {
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(healthURL)
+	if err != nil {
+		return fmt.Errorf("healthcheck: %w", err)
+	}
+	defer response.Body.Close()
+	_, _ = io.Copy(io.Discard, response.Body)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("healthcheck: %s returned %s", healthURL, response.Status)
+	}
+	return nil
 }
 
 func createLoginLink(cfg config.Config, rawEmail string, output io.Writer) error {
