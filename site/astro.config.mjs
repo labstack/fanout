@@ -13,19 +13,14 @@ export default defineConfig({
   site: SITE,
   trailingSlash: "never",
   build: { format: "file" },
-  // 7521 sits directly beside the runtime's own 7520: a Fanout instance serves
-  // the browser client on :7520, so the site documenting it takes the next port
-  // up. Nothing depends on the number — if it is busy, Astro takes the next
-  // free port and prints it.
-  //
-  // Loopback only, which is Astro's default and all this needs: the site is
-  // read at http://localhost:7521 and nothing proxies to it. Serving it behind
-  // a reverse proxy would need `host: true` so the proxy can reach a non-
-  // loopback address, and the proxied hostname listed in `allowedHosts` or Vite
-  // answers it with a bare 403.
-  //
-  // `server` covers `astro preview` as well as `astro dev`.
+  // Reserved local-development port, beside the runtime's own 7520; no reverse
+  // proxy is used.
   server: { port: 7521 },
+  // strictPort belongs to Vite, not to Astro's `server` — Astro's ServerConfig
+  // has no such key and `astro check` fails the build on it. Passed through so
+  // a busy port is an error rather than the site silently moving to 7522, where
+  // nobody is looking for it.
+  vite: { server: { strictPort: true } },
   markdown: { rehypePlugins: [rehypeTableWrap] },
   integrations: [
     starlight({

@@ -1,0 +1,75 @@
+---
+/* The shared shell every landing section sits in.
+ *
+ * Only the eyebrow is a prop. The heading and the prose are Markdown children,
+ * because `<path>.md` and llms.txt are generated from this page's source with
+ * component tags stripped — copy passed as a prop renders for a person and
+ * vanishes for an agent. That failure is not visible in the browser, which is
+ * why the .md route refuses to serve a body-less page rather than trusting
+ * anyone to notice.
+ *
+ * Slotted Markdown means the heading is not in this component's scope, so the
+ * type rules below are :global(), reached through .fo-sec rather than applied
+ * to the whole page.
+ */
+interface Props {
+  eyebrow: string;
+}
+
+const { eyebrow } = Astro.props;
+---
+
+<section class="fo-sec">
+  <p class="fo-eyebrow">{eyebrow}</p>
+  <slot />
+</section>
+
+<style>
+  /* Padding only. Setting the same clamp on both margin-top and padding-top
+     doubled the gap above every rule, which read as the page having lost its
+     place rather than as breathing room. */
+  .fo-sec {
+    padding: clamp(3rem, 5vw, 4.5rem) 0 0;
+    border-top: 1px solid var(--sl-color-hairline-shade);
+    margin-top: clamp(3rem, 5vw, 4.5rem);
+  }
+
+  /* The last child of a section carries no trailing gap of its own — the next
+     section's padding is the gap. */
+  .fo-sec > :global(:last-child) {
+    margin-bottom: 0;
+  }
+
+  .fo-eyebrow {
+    font-family: var(--fo-font-display);
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--sl-color-accent-high);
+    margin: 0 0 0.9rem;
+  }
+
+  .fo-sec :global(h2) {
+    font-family: var(--fo-font-display);
+    font-size: clamp(1.5rem, 2.6vw, 2.1rem);
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    font-weight: 500;
+    margin: 0;
+    color: var(--sl-color-white);
+    max-width: 26ch;
+    text-wrap: balance;
+    /* Same rule as the hero headline: a display line never breaks inside a
+       word, because mono gives the break no hyphen to soften it. */
+    overflow-wrap: normal;
+  }
+
+  .fo-sec :global(p) {
+    font-family: var(--fo-font-body);
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--sl-color-gray-2);
+    margin: 1rem 0 0;
+    max-width: 62ch;
+  }
+</style>

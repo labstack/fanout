@@ -1,0 +1,67 @@
+---
+/* What Fanout does not do, on the front page rather than buried.
+ *
+ * A landing page that only lists capabilities makes a reader work out the
+ * limits from silence, and these are the limits that decide whether Fanout fits
+ * at all. Someone who needs multi-tenancy should learn it in thirty seconds
+ * here, not in an hour from a failed evaluation.
+ *
+ * The content is a Markdown list passed as children, not data in this file.
+ * That is the same rule the section headings follow — copy held in a component
+ * renders for a person and vanishes from `<path>.md` and llms.txt, and here it
+ * would have meant the page's limits being the one thing an agent could not
+ * read. An earlier version of this component held the list itself and the page
+ * repeated it in Markdown alongside, which rendered every refusal twice.
+ *
+ * Each item is `**claim** — detail`, so the styling below leans on <strong> to
+ * find the claim rather than asking the author for a second structure.
+ */
+---
+
+<div class="fo-refusals">
+  <slot />
+</div>
+
+<style>
+  .fo-refusals {
+    margin-top: 1.75rem;
+  }
+
+  .fo-refusals :global(ul) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+
+  @media (min-width: 52rem) {
+    .fo-refusals :global(ul) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1rem;
+    }
+  }
+
+  .fo-refusals :global(li) {
+    margin: 0;
+    padding: 1.1rem 1.2rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 10px;
+    font-family: var(--fo-font-body);
+    font-size: 0.86rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-3);
+  }
+
+  /* The claim is the mono half; the explanation after the dash stays in the
+     body face, so a reader scanning only the bold text still gets the list. */
+  .fo-refusals :global(li strong) {
+    display: block;
+    margin-bottom: 0.3rem;
+    font-family: var(--fo-font-display);
+    font-size: 0.92rem;
+    font-weight: 500;
+    color: var(--sl-color-white);
+  }
+</style>

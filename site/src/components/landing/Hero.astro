@@ -74,8 +74,13 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
 
   @media (min-width: 62rem) {
     .fo-hero {
-      grid-template-columns: minmax(0, 0.86fr) minmax(31rem, 1.14fr);
-      gap: clamp(3rem, 5vw, 5.5rem);
+      /* The left column has to hold "Observability" on one line at the display
+         size below. It was 0.86fr against a 31rem minimum on the right, which
+         left 428px for a word that measures 487px — and Starlight sets
+         `overflow-wrap: break-word`, so it snapped mid-word to "Observabili /
+         ty" rather than overflowing visibly. */
+      grid-template-columns: minmax(0, 1fr) minmax(27rem, 1fr);
+      gap: clamp(2.5rem, 4vw, 4.5rem);
       align-items: center;
       padding-top: 3rem;
     }
@@ -87,14 +92,21 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
      same way to set its own tracking. */
   .fo-hero-copy h1#_top {
     font-family: var(--fo-font-display);
-    font-size: clamp(2.5rem, 4.6vw, 3.9rem);
-    line-height: 1.04;
+    font-size: clamp(2.1rem, 3.2vw, 3.1rem);
+    line-height: 1.08;
     letter-spacing: -0.02em;
     font-weight: 600;
     margin: 0 0 1.5rem;
     color: var(--sl-color-white);
     text-wrap: balance;
-    max-width: 15ch;
+    max-width: 17ch;
+    /* A headline never breaks inside a word. Starlight's break-word is right
+       for prose and wrong here: mono has no hyphenation to soften it, so the
+       result reads as a typo rather than as a wrap. Sized above so the longest
+       word fits the column; if a future headline does not, it should overflow
+       loudly and be rewritten. */
+    overflow-wrap: normal;
+    word-break: normal;
   }
 
   .fo-hero-tagline {

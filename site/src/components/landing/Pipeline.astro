@@ -1,0 +1,111 @@
+---
+/* The path a span takes, end to end, inside one process.
+ *
+ * A diagram rather than a paragraph because the claim is spatial: everything
+ * after the wire happens in one box, and a list of steps does not show the box.
+ *
+ * Inline SVG, no external asset, and it inherits the theme through
+ * currentColor and the Starlight tokens — a raster image would need two of
+ * itself to survive the light/dark toggle.
+ */
+const stages = [
+  { label: "SDK / Collector", note: "your services" },
+  { label: "OTLP", note: "gRPC 4317 · HTTP 4318" },
+  { label: "Parquet", note: "local disk" },
+  { label: "DuckDB", note: "in-process query" },
+  { label: "Answer", note: "browser, API, agent" },
+];
+---
+
+<div class="fo-pipe" role="img" aria-label="A span arrives over OTLP, is written to Parquet on local disk, queried with DuckDB in the same process, and answered to the browser, the API or an agent.">
+  <ol>
+    {
+      stages.map((stage, i) => (
+        <li class={i === 0 ? "fo-stage fo-stage-outside" : "fo-stage"}>
+          <span class="fo-stage-label">{stage.label}</span>
+          <span class="fo-stage-note">{stage.note}</span>
+        </li>
+      ))
+    }
+  </ol>
+  <p class="fo-pipe-caption">
+    Everything from the second box rightwards is the same operating-system
+    process. Nothing crosses a network, and nothing else has to be running.
+  </p>
+</div>
+
+<style>
+  .fo-pipe {
+    margin-top: 2rem;
+  }
+
+  .fo-pipe ol {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.6rem;
+  }
+
+  @media (min-width: 52rem) {
+    .fo-pipe ol {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 0.5rem;
+      align-items: stretch;
+    }
+  }
+
+  .fo-stage {
+    position: relative;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 8px;
+    padding: 0.85rem 0.9rem;
+    background: var(--sl-color-gray-6);
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  /* The first stage is not Fanout. Dashed, so the boundary of what the binary
+     contains is visible without a label saying so. */
+  .fo-stage-outside {
+    border-style: dashed;
+    background: none;
+  }
+
+  /* The connector between stages. Horizontal on a wide screen, vertical when
+     the row stacks, and absent before the first box. */
+  @media (min-width: 52rem) {
+    .fo-stage + .fo-stage::before {
+      content: "";
+      position: absolute;
+      inset-inline-start: -0.5rem;
+      inset-block-start: 50%;
+      width: 0.5rem;
+      border-top: 1px solid var(--sl-color-gray-4);
+    }
+  }
+
+  .fo-stage-label {
+    font-family: var(--fo-font-display);
+    font-size: 0.85rem;
+    color: var(--sl-color-white);
+  }
+
+  .fo-stage-note {
+    font-family: var(--fo-font-body);
+    font-size: 0.76rem;
+    line-height: 1.45;
+    color: var(--sl-color-gray-3);
+  }
+
+  .fo-pipe-caption {
+    font-family: var(--fo-font-body);
+    font-size: 0.84rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-3);
+    margin: 1.25rem 0 0;
+    max-width: 62ch;
+  }
+</style>

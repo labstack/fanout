@@ -1,7 +1,7 @@
 ---
 title: Fanout
 description: One binary that ingests OpenTelemetry, stores it, and answers questions about it.
-summary: The landing page — what Fanout is, and the shape of an investigation.
+summary: The landing page — what Fanout is, what it replaces, and what it refuses to do.
 template: splash
 hero:
   title: Observability that runs anywhere you can run a binary
@@ -13,42 +13,54 @@ hero:
       link: https://demo.fanout.run
 ---
 
-import { CardGrid, Card } from "@astrojs/starlight/components";
+import Section from "../../components/landing/Section.astro";
+import Pipeline from "../../components/landing/Pipeline.astro";
+import Contrast from "../../components/landing/Contrast.astro";
+import Refusals from "../../components/landing/Refusals.astro";
+import CtaBar from "../../components/landing/CtaBar.astro";
 
-## What you get, in one process
+{/* Prose below is Markdown inside each component, never a prop: `<path>.md` and llms.txt are generated from this source with component tags stripped, so a prop would render for a person and vanish for an agent. Keep MDX comments on one line — toPlainMarkdown only strips single-line ones, and a wrapped comment leaks into the alternate. */}
 
-<CardGrid>
-  <Card title="Speaks OpenTelemetry">
-    Point any OTel SDK or Collector at it. Traces, logs and metrics arrive over
-    OTLP on gRPC or HTTP — the standard wire format, no bespoke ingest API to
-    write against.
-  </Card>
-  <Card title="Stores its own data">
-    Telemetry lands on disk as Parquet and is queried with DuckDB in the same
-    process. There is no external database to provision, tune or back up
-    separately.
-  </Card>
-  <Card title="Answers questions">
-    A chat investigator is built into the binary. It works from the same typed
-    query tools the browser and the API use, so what it tells you is what the
-    dashboards would show.
-  </Card>
-  <Card title="Runs on your own network">
-    Self-hosted by design. No per-host fees, no telemetry tax, and no agent
-    shipping your data somewhere else.
-  </Card>
-</CardGrid>
+<Section eyebrow="The path a span takes">
 
-## Three commands and you are observable
+## Arrives on the wire, answered from the same process.
 
-Install the binary, point an exporter at it, open the browser client. The
-[install guide](/start/install) is the short version; [first
-boot](/start/first-boot) covers what the process needs before it will open its
-listeners, and [send your first telemetry](/start/send-telemetry) covers getting
-data in.
+Fanout is where your telemetry lands, not something you put in front of the
+thing it lands in. An SDK or a Collector exports to it over standard OTLP, and
+everything after that happens inside one binary.
 
-## Where this is in its life
+<Pipeline />
 
-Fanout is pre-release. It is used in earnest and it changes without migration
-paths — the [capabilities page](/status/capabilities) is the honest account of
-what ships today, what runs but may still move, and what is only designed.
+</Section>
+
+<Section eyebrow="What it replaces">
+
+## Five services, or one process.
+
+This is the whole argument. Every other claim on this page follows from it — the
+short backup procedure, the single configuration, and the absence of an
+integration layer to debug at three in the morning.
+
+<Contrast />
+
+</Section>
+
+<Section eyebrow="Limits">
+
+## What Fanout will not do.
+
+These decide whether Fanout fits, so they are here rather than three pages in.
+None of them is a roadmap item phrased as a virtue.
+
+<Refusals>
+
+- **Not multi-tenant:** namespaces scope queries, not access. Anyone who can query the instance can query every namespace in it; an instance is one trust domain.
+- **No horizontal scale:** ingest, query and maintenance share a process and a machine. There is no scaling one without the others, because they are the same thing.
+- **No published throughput figure:** the previous benchmark was withdrawn because its raw reports and driver commit were not retained. [Measure your own hardware](/explanation/performance) instead.
+- **No migration paths:** Fanout is pre-release. A renamed setting is renamed, not aliased, which is why an unknown variable stops the process rather than being ignored.
+
+</Refusals>
+
+</Section>
+
+<CtaBar />
