@@ -1,0 +1,279 @@
+---
+/* What the product actually looks like.
+ *
+ * An observability tool's landing page has to show telemetry. Everything else
+ * here argues about architecture, which matters to whoever operates it and not
+ * at all to whoever has to look at it every day — this is the half of the pitch
+ * that says the thing is pleasant to read.
+ *
+ * Markup rather than a screenshot, for the same reasons the diagram is inline
+ * SVG: it themes with the page, stays sharp at any density, needs no second
+ * copy for light mode, and cannot go stale in the way an image of a UI does the
+ * moment the UI changes.
+ *
+ * The numbers are illustrative and internally consistent — checkout is the
+ * service the hero transcript investigates, with the same p95 and error rate,
+ * so a reader who looks twice finds one story rather than two.
+ */
+const services: { name: string; health: "ok" | "warn" | "bad"; p95: string; delta: string | null; errors: string; rps: string }[] = [
+  { name: "checkout", health: "bad", p95: "412 ms", delta: "+38%", errors: "2.4%", rps: "1.2k" },
+  { name: "cart", health: "warn", p95: "187 ms", delta: null, errors: "0.6%", rps: "2.1k" },
+  { name: "catalog", health: "ok", p95: "42 ms", delta: null, errors: "0.0%", rps: "3.8k" },
+  { name: "payment", health: "ok", p95: "94 ms", delta: null, errors: "0.1%", rps: "980" },
+  { name: "auth", health: "ok", p95: "28 ms", delta: null, errors: "0.0%", rps: "5.4k" },
+];
+
+const state = { ok: "healthy", warn: "degraded", bad: "unhealthy" };
+
+// A throughput line with a visible dip where checkout degrades, so the chart
+// agrees with the table beside it.
+const spark = "M0,30 L12,26 L24,28 L36,20 L48,24 L60,16 L72,19 L84,12 L96,15 L108,9 L120,13 L132,22 L144,31 L156,27 L168,18 L180,13 L192,9 L200,7";
+---
+
+<div class="fo-preview">
+  <div class="fo-chrome">
+    <span class="fo-dots"><i></i><i></i><i></i></span>
+    <span class="fo-url">demo.fanout.run<span> · Overview</span></span>
+    <span class="fo-live">last 1h</span>
+  </div>
+
+  <div class="fo-panes">
+    <section class="fo-panel">
+      <h3>Services</h3>
+      {/* The scroll container is explicit here because the rehype plugin only
+          wraps tables that came from Markdown — a table authored inside a
+          component reaches the page unwrapped, and check-tables fails the
+          build on it rather than letting it clip on a phone. */}
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Service health, scrollable">
+      <table>
+        <thead>
+          <tr><th>Service</th><th>Health</th><th>p95</th><th>Errors</th><th>Rps</th></tr>
+        </thead>
+        <tbody>
+          {
+            services.map((s) => (
+              <tr>
+                <td class="fo-name">{s.name}</td>
+                <td>
+                  <span class={`fo-state fo-${s.health}`}><i></i>{state[s.health]}</span>
+                </td>
+                <td class="fo-num">
+                  {s.p95}
+                  {s.delta && <span class="fo-delta">{s.delta}</span>}
+                </td>
+                <td class="fo-num">{s.errors}</td>
+                <td class="fo-num">{s.rps}</td>
+              </tr>
+            ))
+          }
+        </tbody>
+      </table>
+      </div>
+    </section>
+
+    <section class="fo-panel">
+      <h3>Health</h3>
+      <div class="fo-kpis">
+        <div class="fo-kpi"><span>Score</span><b>86</b><em>+2 vs 1h</em></div>
+        <div class="fo-kpi"><span>Spans/min</span><b>2.1M</b><em>stable</em></div>
+        <div class="fo-kpi"><span>Errors</span><b class="fo-hot">0.4%</b><em>+0.2</em></div>
+        <div class="fo-kpi"><span>Services</span><b>47</b><em>2 alerting</em></div>
+      </div>
+
+      <h3 class="fo-spark-title">Throughput</h3>
+      <svg class="fo-spark" viewBox="0 0 200 38" preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="fo-spark-fill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stop-color="var(--sl-color-accent)" stop-opacity="0.35"></stop>
+            <stop offset="1" stop-color="var(--sl-color-accent)" stop-opacity="0"></stop>
+          </linearGradient>
+        </defs>
+        <path d={`${spark} L200,38 L0,38 Z`} fill="url(#fo-spark-fill)"></path>
+        <path d={spark} fill="none" stroke="var(--sl-color-accent)" stroke-width="1.5"
+          stroke-linecap="round" stroke-linejoin="round"></path>
+      </svg>
+    </section>
+  </div>
+</div>
+
+<style>
+  .fo-preview {
+    margin-top: 2rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--sl-color-gray-6);
+    /* Lifts the panel off the page without a coloured glow — the palette keeps
+       colour for meaning, and a tinted shadow here would be decoration. */
+    box-shadow: 0 24px 60px -30px rgba(0, 0, 0, 0.6);
+  }
+
+  .fo-chrome {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-black);
+    font-family: var(--fo-font-display);
+    font-size: 0.72rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  .fo-dots {
+    display: inline-flex;
+    gap: 5px;
+  }
+
+  .fo-dots i {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--sl-color-gray-5);
+  }
+
+  .fo-url span {
+    color: var(--sl-color-white);
+  }
+
+  .fo-live {
+    margin-inline-start: auto;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    font-size: 0.66rem;
+  }
+
+  .fo-panes {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1px;
+    background: var(--sl-color-gray-5);
+  }
+
+  @media (min-width: 52rem) {
+    .fo-panes {
+      grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
+    }
+  }
+
+  .fo-panel {
+    padding: 1rem 1.1rem 1.2rem;
+    background: var(--sl-color-gray-6);
+  }
+
+  .fo-panel h3 {
+    font-family: var(--fo-font-display);
+    font-size: 0.66rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+    margin: 0 0 0.85rem;
+  }
+
+  .fo-spark-title {
+    margin-top: 1.25rem;
+  }
+
+  .fo-panel table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--fo-font-display);
+    font-size: 0.76rem;
+  }
+
+  .fo-panel th {
+    font-weight: 500;
+    font-size: 0.64rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-4);
+    text-align: left;
+    padding: 0 0.5rem 0.5rem 0;
+  }
+
+  .fo-panel td {
+    padding: 0.42rem 0.5rem 0.42rem 0;
+    border-top: 1px solid var(--sl-color-hairline-shade);
+    color: var(--sl-color-gray-2);
+    white-space: nowrap;
+  }
+
+  .fo-name {
+    color: var(--sl-color-white);
+  }
+
+  .fo-num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .fo-delta {
+    margin-inline-start: 0.4rem;
+    color: #f26d78;
+  }
+
+  /* The three status hues are the palette's load-bearing ones: they mean the
+     same thing here as they do inside the product. */
+  .fo-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .fo-state i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+  }
+
+  .fo-ok i { background: #7fd962; }
+  .fo-warn i { background: #ffb454; }
+  .fo-bad i { background: #f26d78; }
+
+  .fo-kpis {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+
+  .fo-kpi {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.6rem 0.7rem;
+    border: 1px solid var(--sl-color-hairline-shade);
+    border-radius: 8px;
+    background: var(--sl-color-black);
+  }
+
+  .fo-kpi span {
+    font-family: var(--fo-font-display);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-4);
+  }
+
+  .fo-kpi b {
+    font-family: var(--fo-font-display);
+    font-size: 1.15rem;
+    font-weight: 500;
+    color: var(--sl-color-white);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .fo-hot { color: #f26d78 !important; }
+
+  .fo-kpi em {
+    font-family: var(--fo-font-body);
+    font-style: normal;
+    font-size: 0.66rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  .fo-spark {
+    display: block;
+    width: 100%;
+    height: 48px;
+  }
+</style>

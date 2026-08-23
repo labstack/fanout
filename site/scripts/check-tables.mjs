@@ -35,7 +35,18 @@ function unwrappedTables(html) {
     const at = html.indexOf("<table", from);
     if (at === -1) return count;
     const before = html.slice(Math.max(0, at - 200), at);
-    const opensWrapper = before.lastIndexOf('class="table-wrap"');
+    // Match the class token rather than the whole attribute. A wrapper emitted
+    // by the rehype plugin carries exactly `class="table-wrap"`, but one
+    // authored inside an Astro component gets the component's scoped class
+    // appended — `class="table-wrap astro-xxxxxx"` — and an exact-string test
+    // reports it as unwrapped. The bug was silent in the other direction too:
+    // it would have passed anything containing that literal anywhere nearby.
+    const wrapperMatches = [...before.matchAll(/class="([^"]*)"/g)].filter(
+      (m) => m[1].split(/\s+/).includes("table-wrap"),
+    );
+    const opensWrapper = wrapperMatches.length
+      ? wrapperMatches[wrapperMatches.length - 1].index
+      : -1;
     const closesDiv = before.lastIndexOf("</div>");
     if (opensWrapper === -1 || closesDiv > opensWrapper) count += 1;
     from = at + 6;

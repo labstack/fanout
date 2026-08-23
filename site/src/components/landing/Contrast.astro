@@ -10,20 +10,22 @@
  * component of a working self-hosted stack, named the way its own project names
  * it, because an unfair comparison is one a reader corrects instead of reading.
  */
+import Icon from "../Icon.astro";
+
 const assembled = [
-  { part: "Collector", job: "Receive OTLP, batch, forward" },
-  { part: "Storage backend", job: "Persist telemetry, expire it" },
-  { part: "Query layer", job: "Answer questions over that store" },
-  { part: "Dashboard service", job: "Render it for people" },
-  { part: "Alertmanager", job: "Evaluate rules, deliver notifications" },
+  { icon: "plugs-connected", part: "Collector", job: "Receive OTLP, batch, forward" },
+  { icon: "database", part: "Storage backend", job: "Persist telemetry, expire it" },
+  { icon: "magnifying-glass", part: "Query layer", job: "Answer questions over that store" },
+  { icon: "chart-line", part: "Dashboard service", job: "Render it for people" },
+  { icon: "bell", part: "Alertmanager", job: "Evaluate rules, deliver notifications" },
 ];
 
 const single = [
-  "OTLP in over gRPC and HTTP",
-  "Parquet on local disk",
-  "DuckDB, in the same process",
-  "The browser client, served by the binary",
-  "The alert engine, on a fixed interval",
+  { icon: "plugs-connected", part: "OTLP in over gRPC and HTTP" },
+  { icon: "hard-drives", part: "Parquet on local disk" },
+  { icon: "magnifying-glass", part: "DuckDB, in the same process" },
+  { icon: "chart-line", part: "The browser client, served by the binary" },
+  { icon: "bell", part: "The alert engine, on a fixed interval" },
 ];
 ---
 
@@ -34,7 +36,7 @@ const single = [
       {
         assembled.map((row) => (
           <li>
-            <span class="fo-part">{row.part}</span>
+            <span class="fo-part"><Icon name={row.icon} /> {row.part}</span>
             <span class="fo-job">{row.job}</span>
           </li>
         ))
@@ -49,7 +51,9 @@ const single = [
   <div class="fo-pane fo-pane-one">
     <p class="fo-pane-label">Fanout</p>
     <ul>
-      {single.map((row) => <li><span class="fo-part">{row}</span></li>)}
+      {single.map((row) => (
+        <li><span class="fo-part"><Icon name={row.icon} /> {row.part}</span></li>
+      ))}
     </ul>
     <p class="fo-pane-foot">
       One binary to pin, one directory to back up, one process to restart.
@@ -117,12 +121,27 @@ const single = [
   }
 
   .fo-part {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     font-family: var(--fo-font-display);
     font-size: 0.88rem;
     color: var(--sl-color-white);
   }
 
+  /* The icons are the same Phosphor set the product's browser client draws
+     with. On the left they are dimmed: those five are the things you would
+     otherwise operate, and colouring them equally would suggest parity. */
+  .fo-pane-many .fo-part :global(svg) {
+    color: var(--sl-color-gray-4);
+  }
+
+  .fo-pane-one .fo-part :global(svg) {
+    color: var(--sl-color-accent);
+  }
+
   .fo-job {
+    margin-inline-start: 1.5rem;
     font-family: var(--fo-font-body);
     font-size: 0.82rem;
     line-height: 1.5;

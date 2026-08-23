@@ -16,6 +16,13 @@
  * demo instance produces, and they are here to show the shape of an answer —
  * a claim, then the evidence it rests on, then the thing to do about it.
  */
+import Icon from "../Icon.astro";
+
+// A flat hour with a step change two thirds through: the shape of a regression
+// rather than of noise, which is what makes the annotation worth drawing.
+const series =
+  "M0,92 L20,89 L40,94 L60,90 L80,93 L100,88 L120,92 L140,90 L160,94 L180,89 L200,92 L220,88 L240,84 L252,52 L272,44 L296,48 L320,44 L344,49 L372,45 L400,47";
+
 const { data } = Astro.locals.starlightRoute.entry;
 const { title = data.title, tagline, actions = [] } = data.hero ?? {};
 ---
@@ -45,21 +52,49 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
     </p>
   </div>
 
-  <div class="fo-term" data-fo-transcript aria-label="An example investigation">
-    <div class="fo-term-bar">
-      <span>ask → evidence → cause</span>
-      <span>checkout · last 1h</span>
+  <div class="fo-scope" data-fo-scope>
+    <div class="fo-scope-head">
+      <span class="fo-scope-service">checkout</span>
+      <span class="fo-scope-metric">p95 latency · last 1h</span>
     </div>
-    <pre tabindex="0"><code><span class="ln"><b>&rsaquo;</b> why is checkout slow right now?</span>
-<span class="ln"> </span>
-<span class="ln dim">looking at the last hour…</span>
-<span class="ln mut">• checkout p95 jumped from 187ms to 412ms at 14:22</span>
-<span class="ln mut">• error rate climbed to 2.4%</span>
-<span class="ln mut">• 88% of slow spans are blocked on db-orders</span>
-<span class="ln warn">• db-orders shows a slow query on orders.user_id</span>
-<span class="ln"> </span>
-<span class="ln add">✓ root cause: missing index on orders(user_id)</span>
-<span class="ln dim">  want me to draft the migration?<span class="fo-caret"></span></span></code></pre>
+
+    <svg class="fo-scope-chart" viewBox="0 0 400 120" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="fo-scope-fill" x1="0" x2="0" y1="0" y2="1">
+          <stop offset="0" stop-color="#f26d78" stop-opacity="0.28"></stop>
+          <stop offset="1" stop-color="#f26d78" stop-opacity="0"></stop>
+        </linearGradient>
+      </defs>
+      <path class="fo-scope-area" d={`${series} L400,120 L0,120 Z`} fill="url(#fo-scope-fill)"></path>
+      <path class="fo-scope-line" d={series} fill="none" stroke="#f26d78" stroke-width="2"
+        stroke-linecap="round" stroke-linejoin="round"></path>
+      <line class="fo-scope-mark" x1="252" y1="8" x2="252" y2="120"
+        stroke="var(--sl-color-gray-4)" stroke-width="1" stroke-dasharray="3 3"></line>
+      <circle class="fo-scope-dot" cx="252" cy="52" r="4.5" fill="#f26d78"></circle>
+    </svg>
+
+    <div class="fo-scope-axis">
+      <span>13:20</span><span class="fo-scope-at">14:22</span><span>now</span>
+    </div>
+
+    <div class="fo-scope-readout">
+      <div class="fo-scope-stat">
+        <span>p95</span><b>412<i>ms</i></b><em class="fo-up">+38%</em>
+      </div>
+      <div class="fo-scope-stat">
+        <span>errors</span><b>2.4<i>%</i></b><em class="fo-up">+0.2</em>
+      </div>
+      <div class="fo-scope-stat">
+        <span>rps</span><b>1.2<i>k</i></b><em>stable</em>
+      </div>
+    </div>
+
+    <p class="fo-scope-ask">why is checkout slow right now?</p>
+
+    <p class="fo-scope-found">
+      <Icon name="check-circle" weight="fill" />
+      <span>missing index on <code>orders(user_id)</code> — 88% of slow spans block on db-orders</span>
+    </p>
   </div>
 </div>
 
@@ -186,120 +221,173 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
     max-width: 54ch;
   }
 
-  .fo-term {
-    --term-bg: #0f131c;
-    --term-surface: #151a26;
-    --term-border: #232c3d;
-    --term-text: #bfbdb6;
-    --term-muted: #737681;
-    --term-good: #7fd962;
-    --term-warn: #ffb454;
-    border: 1px solid var(--term-border);
-    border-radius: 8px;
-    background: var(--term-bg);
-    overflow: hidden;
-    box-shadow: 0 22px 55px rgba(11, 14, 20, 0.22);
+  /* The instrument, not a terminal. Fanout is read as charts and health
+     states, so the hero shows one degrading service the way the product would
+     — the question and the finding sit under the evidence rather than instead
+     of it. */
+  .fo-scope {
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 12px;
+    background: var(--sl-color-gray-6);
+    padding: 1rem 1.1rem 1.15rem;
+    box-shadow: 0 24px 60px -32px rgba(0, 0, 0, 0.65);
   }
 
-  /* The transcript keeps the product's dark surfaces in both site themes. It is
-     a screenshot of a terminal-shaped thing, and a light-mode reader is not
-     expecting the product's own chrome to invert with the page around it. */
-  :global(:root[data-theme="light"]) .fo-term {
-    box-shadow: 0 22px 55px rgba(11, 14, 20, 0.16);
-  }
-
-  .fo-term-bar {
+  .fo-scope-head {
     display: flex;
-    justify-content: space-between;
-    gap: 1rem;
-    padding: 0.55rem 0.9rem;
-    border-bottom: 1px solid var(--term-border);
-    background: var(--term-surface);
-    font-size: 0.68rem;
+    align-items: baseline;
+    gap: 0.6rem;
+    margin-bottom: 0.9rem;
+  }
+
+  .fo-scope-service {
+    font-size: 0.9rem;
+    color: var(--sl-color-white);
+  }
+
+  .fo-scope-metric {
+    font-size: 0.7rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: var(--term-muted);
+    color: var(--sl-color-gray-3);
+    margin-inline-start: auto;
   }
 
-  /* The transcript is wider than a phone and scrolls inside its own box, so it
-     carries tabindex="0" and a focus ring — the same requirement the reference
-     tables meet in fanout.css, for the same reason: an overflow a keyboard
-     cannot reach is an overflow a keyboard user cannot read. */
-  .fo-term pre {
-    margin: 0;
-    padding: 1rem 1.1rem;
-    overflow-x: auto;
+  .fo-scope-chart {
+    display: block;
+    width: 100%;
+    height: 104px;
+    overflow: visible;
+  }
+
+  .fo-scope-axis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.35rem;
+    font-size: 0.64rem;
+    color: var(--sl-color-gray-4);
+  }
+
+  .fo-scope-at {
+    color: #f26d78;
+  }
+
+  .fo-scope-readout {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+    margin-top: 0.9rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--sl-color-hairline-shade);
+  }
+
+  .fo-scope-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .fo-scope-stat span {
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-4);
+  }
+
+  .fo-scope-stat b {
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--sl-color-white);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .fo-scope-stat b i {
+    font-style: normal;
+    font-size: 0.7rem;
+    color: var(--sl-color-gray-3);
+    margin-inline-start: 0.1rem;
+  }
+
+  .fo-scope-stat em {
+    font-family: var(--fo-font-body);
+    font-style: normal;
+    font-size: 0.66rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  .fo-up {
+    color: #f26d78 !important;
+  }
+
+  /* The question, in the words a person would use. Set as a quotation rather
+     than a prompt: there is no shell here, and a `>` would imply one. */
+  .fo-scope-ask {
+    margin: 1rem 0 0;
+    padding-inline-start: 0.75rem;
+    border-inline-start: 2px solid var(--sl-color-accent);
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--sl-color-gray-2);
+  }
+
+  .fo-scope-found {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin: 0.7rem 0 0;
+    font-family: var(--fo-font-body);
+    font-size: 0.83rem;
+    line-height: 1.55;
+    color: var(--sl-color-gray-2);
+  }
+
+  .fo-scope-found :global(svg) {
+    color: #7fd962;
+    margin-top: 0.15rem;
+  }
+
+  .fo-scope-found code {
+    font-family: var(--fo-font-display);
+    font-size: 0.94em;
+    color: var(--sl-color-white);
     background: none;
+    padding: 0;
     border: 0;
   }
 
-  .fo-term pre:focus-visible {
-    outline: 2px solid var(--sl-color-accent);
-    outline-offset: -2px;
-  }
+  /* The line draws itself once, on arrival. A chart that appears fully formed
+     is a picture; one that draws is an instrument reporting. Everything after
+     the line fades in behind it, and anyone who asked for less motion gets the
+     finished state immediately. */
+  @media (prefers-reduced-motion: no-preference) {
+    .fo-scope[data-pending] .fo-scope-line {
+      stroke-dasharray: 620;
+      stroke-dashoffset: 620;
+      animation: fo-draw 1.1s ease-out forwards;
+    }
 
-  .fo-term code {
-    font-size: 0.76rem;
-    line-height: 1.95;
-    background: none;
-    padding: 0;
-    color: var(--term-text);
-  }
-
-  /* Deliberately not display:block. The spans sit inside a <pre>, so the
-     newlines between them in the source are already the line breaks; making
-     each span a block as well produces a blank line after every line. */
-  .fo-term .ln {
-    display: inline;
-  }
-
-  /* Set by script only, so a page with JS disabled shows the whole transcript
-     rather than an empty box. */
-  .fo-term .ln[data-pending] {
-    opacity: 0;
-  }
-
-  .fo-term b {
-    color: var(--sl-color-accent-high);
-    font-weight: 400;
-  }
-
-  .fo-term .dim {
-    color: var(--term-muted);
-  }
-
-  .fo-term .mut {
-    color: var(--term-text);
-  }
-
-  .fo-term .add {
-    color: var(--term-good);
-  }
-
-  .fo-term .warn {
-    color: var(--term-warn);
-  }
-
-  .fo-caret {
-    display: inline-block;
-    width: 0.5em;
-    height: 0.95em;
-    margin-left: 0.15em;
-    vertical-align: -0.12em;
-    background: var(--term-good);
-    animation: fo-blink 1.05s steps(1) infinite;
-  }
-
-  @keyframes fo-blink {
-    50% {
+    .fo-scope[data-pending] .fo-scope-area,
+    .fo-scope[data-pending] .fo-scope-mark,
+    .fo-scope[data-pending] .fo-scope-dot,
+    .fo-scope[data-pending] .fo-scope-ask,
+    .fo-scope[data-pending] .fo-scope-found {
       opacity: 0;
+      animation: fo-fade 0.5s ease-out forwards;
     }
+
+    .fo-scope[data-pending] .fo-scope-area { animation-delay: 0.5s; }
+    .fo-scope[data-pending] .fo-scope-mark { animation-delay: 0.9s; }
+    .fo-scope[data-pending] .fo-scope-dot { animation-delay: 1s; }
+    .fo-scope[data-pending] .fo-scope-ask { animation-delay: 1.2s; }
+    .fo-scope[data-pending] .fo-scope-found { animation-delay: 1.5s; }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .fo-caret {
-      animation: none;
-    }
+  @keyframes fo-draw {
+    to { stroke-dashoffset: 0; }
+  }
+
+  @keyframes fo-fade {
+    to { opacity: 1; }
   }
 
   @media (max-width: 38rem) {
@@ -312,64 +400,32 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
       font-size: clamp(2.2rem, 10vw, 2.9rem);
     }
 
-    .fo-term-bar span:last-child {
+    .fo-scope-metric {
       display: none;
-    }
-
-    .fo-term code {
-      font-size: 0.69rem;
-      line-height: 1.85;
     }
   }
 </style>
 
 <script>
-  /* Reveal the transcript a line at a time once it is on screen.
-   *
-   * The pacing is the point rather than decoration: the page claims Fanout
-   * answers a question by working through evidence, so the hero makes you watch
-   * it work. Anyone who has asked not to see motion, or who arrives without JS,
-   * gets the finished transcript immediately instead.
-   */
+  /* Arm the draw-in only when the panel is on screen, and only for readers who
+     have not asked for reduced motion. The attribute is set by script rather
+     than authored, so a page without JS shows the finished chart instead of an
+     empty box waiting for an animation that will never run. */
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const term = document.querySelector<HTMLElement>("[data-fo-transcript]");
+  const scope = document.querySelector<HTMLElement>("[data-fo-scope]");
 
-  if (term && !reduced) {
-    const lines = Array.from(term.querySelectorAll<HTMLElement>(".ln"));
-    lines.forEach((line) => line.setAttribute("data-pending", ""));
-
-    let started = false;
-    const play = () => {
-      if (started) return;
-      started = true;
-      let i = 0;
-      const step = () => {
-        if (i >= lines.length) return;
-        lines[i]?.removeAttribute("data-pending");
-        i += 1;
-        // Fast enough that the hero is not a blank box on arrival — the whole
-        // transcript lands in about a second — but still paced, because the
-        // point is that an answer is reached rather than asserted.
-        window.setTimeout(step, i < 4 ? 90 : 120);
-      };
-      step();
-    };
-
-    if ("IntersectionObserver" in window) {
-      const observer = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (entry.isIntersecting) {
-              play();
-              observer.disconnect();
-            }
+  if (scope && !reduced && "IntersectionObserver" in window) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            scope.setAttribute("data-pending", "");
+            observer.disconnect();
           }
-        },
-        { threshold: 0.2 },
-      );
-      observer.observe(term);
-    } else {
-      play();
-    }
+        }
+      },
+      { threshold: 0.25 },
+    );
+    observer.observe(scope);
   }
 </script>

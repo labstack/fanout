@@ -14,6 +14,7 @@ hero:
 ---
 
 import Section from "../../components/landing/Section.astro";
+import Preview from "../../components/landing/Preview.astro";
 import Pipeline from "../../components/landing/Pipeline.astro";
 import Contrast from "../../components/landing/Contrast.astro";
 import Refusals from "../../components/landing/Refusals.astro";
@@ -21,15 +22,34 @@ import CtaBar from "../../components/landing/CtaBar.astro";
 
 {/* Prose below is Markdown inside each component, never a prop: `<path>.md` and llms.txt are generated from this source with component tags stripped, so a prop would render for a person and vanish for an agent. Keep MDX comments on one line — toPlainMarkdown only strips single-line ones, and a wrapped comment leaks into the alternate. */}
 
-<Section eyebrow="The path a span takes">
+<Section eyebrow="What you look at">
 
-## Arrives on the wire, answered from the same process.
+## Every service, one screen, no query language.
+
+Health, latency, error rate and throughput for everything reporting — with the
+slow one already at the top. The chat investigator works from the same typed
+queries this view does, so what it tells you and what you are looking at cannot
+disagree.
+
+<Preview />
+
+</Section>
+
+<Section eyebrow="The shape of it">
+
+## Three signals in, one process, answers back out.
 
 Fanout is where your telemetry lands, not something you put in front of the
-thing it lands in. An SDK or a Collector exports to it over standard OTLP, and
-everything after that happens inside one binary.
+thing it lands in. Traces, logs and metrics arrive over standard OTLP from SDKs
+or a Collector you already run, and everything after that happens inside one
+binary.
 
-<Pipeline />
+<Pipeline>
+
+Nothing in the middle crosses a network, and nothing else has to be running for
+it to answer. The data directory it writes is the whole of its state.
+
+</Pipeline>
 
 </Section>
 
