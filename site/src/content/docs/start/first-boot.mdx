@@ -23,7 +23,9 @@ group rather than individually:
 - `FANOUT_AUTH_MODE` must be `local` or `oidc`.
 - `FANOUT_SESSION_IDLE_TTL` must be at least `5m`, and the absolute TTL must be
   positive and no shorter than the idle one.
-- `FANOUT_AUTH_CODE_SECRET`, when set, must be at least 32 characters.
+- `FANOUT_AUTH_CODE_SECRET` is **required** in the default `local` auth mode,
+  and must be at least 32 characters. It is the one setting a first-time
+  instance is most likely to be missing.
 - SMTP is all-or-nothing: set `FANOUT_SMTP_HOST`, `FANOUT_SMTP_USERNAME`,
   `FANOUT_SMTP_PASSWORD` and `FANOUT_SMTP_FROM` together, or none of them.
 - In `oidc` mode the issuer URL and `FANOUT_PUBLIC_URL` must both be HTTPS, and

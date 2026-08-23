@@ -104,6 +104,7 @@ export default defineConfig({
             { label: "Why one binary", slug: "explanation/why-one-binary" },
             { label: "How storage works", slug: "explanation/storage-model" },
             { label: "Authentication modes", slug: "explanation/authentication-modes" },
+            { label: "Performance", slug: "explanation/performance" },
           ],
         },
         // This list grows with the tree rather than ahead of it: a sidebar entry

@@ -19,14 +19,24 @@ collector to place first.
 ```sh
 docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 -p 4318:4318 \
-  -v "$PWD/data:/var/lib/fanout/data" \
-  -e FANOUT_DATA_DIR=/var/lib/fanout/data \
+  -v fanout-data:/var/lib/fanout/data \
+  -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   ghcr.io/labstack/fanout:latest
 ```
 
-Nothing above is required beyond the data directory. Add
-`FANOUT_AI_API_KEY` to enable the chat investigator — without it the process
-starts normally and logs that the agent is disabled.
+`FANOUT_AUTH_CODE_SECRET` is required in the default `local` auth mode and must
+be at least 32 characters — the container refuses to start without it. It is the
+only setting the command above adds; the image ships listener and data-directory
+defaults of its own. Add `FANOUT_AI_API_KEY` to enable the chat investigator,
+which is optional: without a key the process starts normally and logs that the
+agent is disabled.
+
+:::caution[Use a named volume, or fix the ownership yourself]
+The image is distroless and runs unprivileged as UID/GID 65532. A **named
+volume**, as above, is set up correctly for you. A bind-mounted host directory
+is not: `-v "$PWD/data:/var/lib/fanout/data"` fails to open its data directory
+unless that directory is already writable by 65532.
+:::
 
 The image binds every listener on all interfaces so the published ports work.
 The native binary does not — see the table below.
@@ -38,10 +48,13 @@ The native binary does not — see the table below.
 curl -fsSL https://raw.githubusercontent.com/labstack/fanout/main/scripts/install.sh | sh
 ```
 
-It resolves the latest release, verifies the platform, and installs to
-`/usr/local/bin` when that is writable or `~/.local/bin` otherwise. Set
-`FANOUT_PREFIX` to choose the directory, or `FANOUT_VERSION` to pin a tag
-instead of taking the latest.
+It resolves the latest release, downloads `SHA256SUMS`, **verifies the archive
+against it before extracting**, and installs to `/usr/local/bin` when that is
+writable or `~/.local/bin` otherwise. Set `FANOUT_PREFIX` to choose the
+directory, or `FANOUT_VERSION` to pin a tag instead of taking the latest.
+
+Versions are CalVer — `v{YYYY.M}.{N}`, numbered from 0 within each month, so
+`v2026.8.1` is the second release of August 2026.
 
   </TabItem>
   <TabItem label="Native binary">
@@ -57,6 +70,38 @@ chmod +x fanout
 
   </TabItem>
 </Tabs>
+
+## Verify what you downloaded
+
+The install script checks the archive for you. If you took one from the releases
+page by hand, check it yourself — both the checksum and the build provenance:
+
+```sh
+sha256sum -c SHA256SUMS
+gh attestation verify fanout_v2026.8.0_linux_amd64.tar.gz \
+  --repo labstack/fanout
+```
+
+For containers, record or pin the digest the registry returns rather than
+trusting a moving tag:
+
+```sh
+docker buildx imagetools inspect ghcr.io/labstack/fanout:2026.8.0
+```
+
+Release images are multi-architecture for `linux/amd64` and `linux/arm64`, and
+archives cover Linux and macOS on both. Every artifact is built on a native
+runner, because DuckDB needs cgo.
+
+| Image tag | Points at |
+|---|---|
+| `ghcr.io/labstack/fanout:latest` | the newest release |
+| `ghcr.io/labstack/fanout:2026.8.0` | that exact release |
+| `ghcr.io/labstack/fanout:main` | the tip of `main` |
+| `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
+
+Standalone signatures and SBOMs are deliberately not published yet — the
+reasoning is in the repository's release contract.
 
 ## What an instance opens
 
