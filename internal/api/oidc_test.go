@@ -47,6 +47,77 @@ func TestOIDCProvisionPolicy(t *testing.T) {
 	}
 }
 
+func TestOIDCWildcardDomainAllowsVerifiedViewerProvisioning(t *testing.T) {
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	users := appauth.NewUserStore(db.DB)
+	if _, err := users.Create("seed-admin@example.com", "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	handler := &OIDCHandler{
+		cfg: config.Config{
+			OIDCEmailVerification: "required",
+			OIDCAutoProvision:     true,
+			OIDCAllowedDomains:    "*",
+			OIDCDefaultRole:       "viewer",
+		},
+		users: users, identities: appauth.NewIdentityStore(db.DB), audit: appauth.NewAuditStore(db.DB),
+	}
+	if handler.provisionAllowed("not-an-email", nil) {
+		t.Fatal("wildcard domain accepted an unusable email")
+	}
+	handler.cfg.OIDCEmailVerification = "issuer"
+	if handler.provisionAllowed("visitor@anywhere.example", nil) {
+		t.Fatal("wildcard domain accepted an issuer-trusted email")
+	}
+	handler.cfg.OIDCEmailVerification = "required"
+	verified := true
+	claims := oidcClaims{Subject: "public-visitor", Email: "visitor@anywhere.example", EmailVerified: &verified}
+	user, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{})
+	if err != nil {
+		t.Fatalf("verified visitor was not provisioned: %v", err)
+	}
+	if user.Role != appauth.RoleViewer {
+		t.Fatalf("provisioned role = %q, want viewer", user.Role)
+	}
+	claims.EmailVerified = new(bool)
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err == nil {
+		t.Fatal("linked visitor authenticated after its email became unverified")
+	}
+}
+
+func TestOIDCWildcardDomainRejectsUnverifiedEmail(t *testing.T) {
+	db, err := appstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	users := appauth.NewUserStore(db.DB)
+	if _, err := users.Create("seed-admin@example.com", "", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	handler := &OIDCHandler{
+		cfg: config.Config{
+			OIDCEmailVerification: "required",
+			OIDCAutoProvision:     true,
+			OIDCAllowedDomains:    "*",
+			OIDCDefaultRole:       "viewer",
+		},
+		users: users, identities: appauth.NewIdentityStore(db.DB), audit: appauth.NewAuditStore(db.DB),
+	}
+	verified := false
+	claims := oidcClaims{Subject: "unverified-visitor", Email: "visitor@anywhere.example", EmailVerified: &verified}
+	if _, _, err := handler.resolveUser(t.Context(), "https://issuer.example", claims, requestSource{}); err == nil {
+		t.Fatal("wildcard policy provisioned an unverified email")
+	}
+	if _, err := users.GetByEmail("visitor@anywhere.example"); err == nil {
+		t.Fatal("denied visitor left a persisted user behind")
+	}
+}
+
 func TestSafeReturnTo(t *testing.T) {
 	for _, accepted := range []string{"/", "/dashboards", "/api/auth/oauth/authorize?client_id=x"} {
 		if got := safeReturnTo(accepted); got != accepted {

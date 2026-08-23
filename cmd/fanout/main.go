@@ -368,8 +368,9 @@ func main() {
 	// self-call, shared secret, or sidecar runtime.
 	mcpServer := mcp.New(queries, dashboards, version)
 	if cfg.MCPEnabled {
+		mcpResourceURL := cfg.MCPResourceURL()
 		mcpAuthorization, err := api.NewMCPAuthorization(
-			oauthStore, userStore, cfg.MCPPublicURL,
+			oauthStore, userStore, mcpResourceURL,
 		)
 		if err != nil {
 			slog.Error("MCP OAuth init failed", "err", err)
@@ -378,7 +379,7 @@ func main() {
 		mcpAuthorization.Register(e)
 		e.Any("/mcp", echo.WrapHandler(mcpAuthorization.ProtectMCP(mcpServer.HTTPHandler())))
 		e.Any("/api/mcp", api.ProtectBrowserMCP(browserSessions, mcpServer.HTTPHandler()))
-		slog.Info("MCP server enabled", "path", "/mcp", "auth", "oauth", "resource", cfg.MCPPublicURL)
+		slog.Info("MCP server enabled", "path", "/mcp", "auth", "oauth", "resource", mcpResourceURL)
 		slog.Info("browser MCP server enabled", "path", "/api/mcp", "auth", "session")
 	}
 	if cfg.AgentConfigured() {

@@ -31,11 +31,7 @@ type Config struct {
 	FlushBatchSize           int           `koanf:"ingest.flush_batch_size" env:"FANOUT_FLUSH_BATCH_SIZE" default:"50000"`
 	RollupInterval           time.Duration `koanf:"storage.rollup_interval" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
 	MCPEnabled               bool          `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" default:"true"`
-	// MCPPublicURL is the canonical externally reachable MCP resource URI used
-	// for OAuth discovery and token audience binding. It must be stable across
-	// restarts and include the /mcp path.
-	MCPPublicURL  string `koanf:"mcp.public_url" env:"FANOUT_MCP_PUBLIC_URL" default:"https://localhost:7520/mcp"`
-	RetentionDays int    `koanf:"storage.retention_days" env:"FANOUT_RETENTION_DAYS" default:"30"`
+	RetentionDays            int           `koanf:"storage.retention_days" env:"FANOUT_RETENTION_DAYS" default:"30"`
 	// MaintenanceInterval throttles the DuckLake maintenance cycle (retention
 	// deletes + compaction). Default 1h. Lower it to compact more
 	// aggressively, or for soak tests that need to observe file-count staying
@@ -225,9 +221,9 @@ func (c Config) Validate() error {
 		return fmt.Errorf("alerts.history_days must be >= 0, got %d", c.AlertHistoryDays)
 	}
 	if c.MCPEnabled {
-		u, err := url.Parse(strings.TrimSpace(c.MCPPublicURL))
-		if err != nil || u.Scheme != "https" || u.Host == "" || u.Path != "/mcp" || u.RawQuery != "" || u.Fragment != "" {
-			return fmt.Errorf("mcp.public_url must be an HTTPS URL ending in /mcp")
+		u, err := url.Parse(c.MCPResourceURL())
+		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "/mcp" || u.RawQuery != "" || u.Fragment != "" {
+			return fmt.Errorf("server.public_url must be an HTTPS origin when MCP is enabled")
 		}
 	}
 	authMode := strings.ToLower(strings.TrimSpace(c.AuthMode))
@@ -273,6 +269,9 @@ func (c Config) Validate() error {
 		if c.OIDCEmailVerification != "required" && c.OIDCEmailVerification != "issuer" {
 			return fmt.Errorf("auth.oidc.email_verification must be required or issuer")
 		}
+		if c.OIDCEmailVerification != "required" && csvContains(c.OIDCAllowedDomains, "*") {
+			return fmt.Errorf("auth.oidc.allowed_domains wildcard requires auth.oidc.email_verification=required")
+		}
 		if strings.TrimSpace(c.OIDCEmailClaim) == "" {
 			return fmt.Errorf("auth.oidc.email_claim must not be empty")
 		}
@@ -316,6 +315,18 @@ func (c Config) SecureCookies() bool {
 	return err == nil && u.Scheme == "https" && u.Host != ""
 }
 
+// MCPResourceURL returns the canonical OAuth resource URI for the MCP route.
+// MCP is served by the main HTTP server, so it always shares server.public_url.
+// The localhost value preserves zero-configuration development when no public
+// origin is configured.
+func (c Config) MCPResourceURL() string {
+	publicURL := strings.TrimRight(strings.TrimSpace(c.PublicURL), "/")
+	if publicURL == "" {
+		return "https://localhost:7520/mcp"
+	}
+	return publicURL + "/mcp"
+}
+
 // SMTPConfigured returns true if SMTP is set up for sending email codes.
 func (c Config) SMTPConfigured() bool {
 	return strings.TrimSpace(c.SMTPHost) != "" &&
@@ -327,6 +338,15 @@ func (c Config) SMTPConfigured() bool {
 // AgentConfigured reports whether the in-process AI agent should be started.
 func (c Config) AgentConfigured() bool {
 	return strings.TrimSpace(c.AIAPIKey) != ""
+}
+
+func csvContains(value, target string) bool {
+	for _, item := range strings.Split(value, ",") {
+		if strings.EqualFold(strings.TrimSpace(item), target) {
+			return true
+		}
+	}
+	return false
 }
 
 func anySet(values ...string) bool {
