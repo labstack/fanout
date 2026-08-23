@@ -1,10 +1,11 @@
 ---
 title: "HTTP routes"
-description: "Every HTTP route a Fanout instance serves, and the credential each one requires."
-summary: "The complete HTTP surface with its authorization requirement, taken from the middleware that enforces it."
+description: "Every HTTP route a Fanout instance serves and what guards it. Mostly the browser client's backend rather than a public API."
+summary: "The complete HTTP surface with its authorization requirement, for auditing what an instance exposes. The supported programmatic interface is MCP."
 read_when:
-  - "You are calling the API and need to know what a route requires."
+  - "You are auditing what an instance exposes and what guards each route."
   - "A request came back 401 or 403 and you want to know which capability it wanted."
+status: preview
 generated: true
 ---
 
@@ -13,6 +14,21 @@ generated: true
 Every route below is served on `FANOUT_HTTP_ADDR` (`:7520` by default).
 Telemetry does not arrive here — OTLP has its own two listeners, described in
 [send your first telemetry](/start/send-telemetry).
+
+:::caution[Most of this is not a public API]
+The `/api/*` routes are the browser client's own backend. They are listed here
+so an operator can see the whole surface and what guards it — not as an
+interface to build against. They change with the client, without notice and
+without migration paths.
+
+The supported programmatic interface is **MCP**, at `/mcp` — see
+[MCP tools](/reference/mcp-tools). The stable non-MCP surfaces are OTLP
+ingest, and the operational endpoints in [endpoints](/reference/endpoints).
+
+Two exceptions worth knowing, because HTTP is currently the only way to reach
+them: alert rules (`/api/rules`, `/api/alerts`) and ingest-token rotation
+(`/api/settings/ingest`). Neither has a browser page yet.
+:::
 
 The **Requires** column is not a description of the rule. It is the answer the
 authorization middleware gives for that exact method and path, so a route
