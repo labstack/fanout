@@ -18,25 +18,14 @@ export default defineConfig({
   // up. Nothing depends on the number — if it is busy, Astro takes the next
   // free port and prints it.
   //
-  // `host: true` binds every interface rather than loopback alone. Localhost
-  // still works and is all a contributor needs; the binding exists because a
-  // reverse proxy running in a container reaches this machine through
-  // host.docker.internal, which is not loopback and so cannot connect to a
-  // loopback-bound server at all. Same setting, and the same reason, as onebox.
-  //
-  // allowedHosts is the other half, and it is not optional if anything proxies
-  // to this. Vite answers localhost and bare IP addresses whatever happens, but
-  // rejects an unlisted Host header with a bare 403 — so a reverse proxy
-  // forwarding `fanout.labstack.me` gets Forbidden rather than the site, with
-  // nothing in the response saying why. Listing the name costs a contributor
-  // nothing: localhost is unaffected.
+  // Loopback only, which is Astro's default and all this needs: the site is
+  // read at http://localhost:7521 and nothing proxies to it. Serving it behind
+  // a reverse proxy would need `host: true` so the proxy can reach a non-
+  // loopback address, and the proxied hostname listed in `allowedHosts` or Vite
+  // answers it with a bare 403.
   //
   // `server` covers `astro preview` as well as `astro dev`.
-  server: {
-    host: true,
-    port: 7521,
-    allowedHosts: ["fanout.labstack.me"],
-  },
+  server: { port: 7521 },
   markdown: { rehypePlugins: [rehypeTableWrap] },
   integrations: [
     starlight({
