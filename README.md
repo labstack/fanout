@@ -76,7 +76,7 @@ choose the installation directory.
 docker run --name fanout -p 7520:7520 -p 4317:4317 -p 4318:4318 \
   -v fanout-data:/var/lib/fanout/data \
   -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
-  ghcr.io/labstack/fanout:latest
+  labstack/fanout:latest
 ```
 
 Open the one-time setup URL printed by the container and create the first
@@ -135,7 +135,7 @@ the externally reachable HTTP and OTLP bind addresses:
 cp fanout.docker.yaml fanout.yaml
 # Add the remaining settings, then mount it over the image document:
 docker run -v ./fanout.yaml:/etc/fanout/fanout.yaml:ro \
-  ghcr.io/labstack/fanout:latest
+  labstack/fanout:latest
 ```
 
 A replacement document must set `server.http_addr: ":7520"`,
@@ -276,10 +276,13 @@ docs/diagrams/     d2 sources and rendered SVG
 
 Versions are CalVer — `v{YYYY.M}.{N}`, numbered from 0 within each month, so
 `v2026.8.1` is the second release of August 2026. Pushing a tag publishes the
-matching image and moves `latest`:
+same release manifest to Docker Hub and GHCR and moves both `latest` tags.
+GHCR remains the canonical registry and also carries development images:
 
 | Image tag | Points at |
 | --- | --- |
+| `labstack/fanout:latest` | the newest release, mirrored on Docker Hub |
+| `labstack/fanout:2026.8.0` | that exact release, mirrored on Docker Hub |
 | `ghcr.io/labstack/fanout:latest` | the newest release |
 | `ghcr.io/labstack/fanout:2026.8.0` | that exact release |
 | `ghcr.io/labstack/fanout:main` | the tip of `main` |

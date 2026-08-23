@@ -63,7 +63,7 @@ docker TAG="local":
 
 # Tags are CalVer: v{YYYY.M}.{N}, numbered from 0 within each month. Pushing
 # the tag triggers release.yml, which builds the multi-architecture image,
-# publishes native archives, and moves `latest`.
+# mirrors it to Docker Hub, publishes native archives, and moves `latest`.
 
 # Tag the next CalVer release and push it.
 release:
