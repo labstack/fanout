@@ -305,8 +305,16 @@ instead of opening an issue.
 
 This repository is Fanout itself, and it builds to a working binary with no
 other repository involved. Not included: LabStack's own deployment
-configuration, uptime monitoring, public demo instance, and marketing site.
-Those describe how we operate Fanout, not what it does.
+configuration, uptime monitoring, and public demo instance. Those describe how
+we operate Fanout, not what it does.
+
+The documentation site in [`site/`](site) is included, and is the exception that
+proves the rule: it is not marketing copy but the product's own reference, and
+part of it is generated. `cmd/fanout-docgen` writes every settings page from the
+same `internal/config` type the loader binds, and `just check` fails when a
+committed page no longer matches it. Documentation that can drift from the
+binary is documentation that eventually lies about it, and the only place that
+check can run is next to the code it checks.
 
 ## License
 
