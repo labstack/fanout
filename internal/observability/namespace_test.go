@@ -38,7 +38,7 @@ CREATE TABLE service_rollup (
 		t.Fatalf("insert service rollups: %v", err)
 	}
 
-	svc := New(db, "")
+	svc := New(db)
 	result, err := svc.Overview(context.Background(), Scope{Start: stamp.Add(-time.Minute), End: stamp.Add(time.Minute)}, 100)
 	if err != nil {
 		t.Fatalf("Overview: %v", err)
