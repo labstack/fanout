@@ -82,6 +82,7 @@ func (h *AuthHandler) Status(c *echo.Context) error {
 		"auth_mode":       strings.ToLower(strings.TrimSpace(h.cfg.AuthMode)),
 		"agent_available": h.cfg.AgentConfigured(),
 		"smtp_configured": h.cfg.SMTPConfigured(),
+		"self_signup":     h.cfg.SelfSignup,
 	})
 }
 
@@ -218,9 +219,24 @@ func (h *AuthHandler) Start(c *echo.Context) error {
 		slog.Error("auth: login user lookup failed", "err", userErr)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
 	}
-	if errors.Is(userErr, auth.ErrUserNotFound) || !user.Active {
+	if !errors.Is(userErr, auth.ErrUserNotFound) && !user.Active {
 		jitter()
 		return c.JSON(200, map[string]bool{"code_sent": true})
+	}
+	if errors.Is(userErr, auth.ErrUserNotFound) {
+		if !h.cfg.SelfSignup {
+			jitter()
+			return c.JSON(200, map[string]bool{"code_sent": true})
+		}
+		count, countErr := h.users.CountUsers()
+		if countErr != nil {
+			slog.Error("auth: check setup before self-signup", "err", countErr)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to start login")
+		}
+		if count == 0 {
+			jitter()
+			return c.JSON(200, map[string]bool{"code_sent": true})
+		}
 	}
 	if err := auth.SendCode(h.smtp, email, code); err != nil {
 		slog.Error("auth: send verification email failed", "email", email, "err", err)
@@ -265,6 +281,31 @@ func (h *AuthHandler) Verify(c *echo.Context) error {
 	user, err := h.users.GetByEmail(email)
 	if err != nil && !errors.Is(err, auth.ErrUserNotFound) {
 		slog.Error("auth: verified user lookup failed", "err", err)
+		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
+	}
+	if errors.Is(err, auth.ErrUserNotFound) && h.cfg.SelfSignup {
+		count, countErr := h.users.CountUsers()
+		if countErr != nil {
+			slog.Error("auth: check setup before self-signup", "err", countErr)
+			return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
+		}
+		if count > 0 {
+			user, err = h.users.CreateWithAudit(email, "", auth.RoleViewer, auth.AuditEvent{
+				EventType: "user.provisioned",
+				Outcome:   "success",
+				RemoteIP:  c.RealIP(),
+				UserAgent: c.Request().UserAgent(),
+				Metadata:  map[string]any{"mode": "local"},
+			})
+			if errors.Is(err, auth.ErrUserConflict) {
+				// An administrator may have created this address after the
+				// challenge was issued. The verified address can use that account.
+				user, err = h.users.GetByEmail(email)
+			}
+		}
+	}
+	if err != nil && !errors.Is(err, auth.ErrUserNotFound) {
+		slog.Error("auth: complete verified self-signup", "err", err)
 		return echo.NewHTTPError(http.StatusInternalServerError, "failed to complete login")
 	}
 	if errors.Is(err, auth.ErrUserNotFound) || !user.Active {

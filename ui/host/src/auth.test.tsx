@@ -19,7 +19,7 @@ function json(body: unknown, status = 200) {
 function authResponse(input: RequestInfo | URL, user: unknown, userStatus = 200) {
   const path = String(input);
   if (path === "/api/auth/status") {
-    return json({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true });
+    return json({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: false });
   }
   if (path === "/api/auth/me") return json(user, userStatus);
   throw new Error(`unexpected request: ${path}`);
@@ -55,6 +55,29 @@ describe("AuthGate OAuth return", () => {
     expect(window.location.search).toContain("return_to=");
     expect(document.body.textContent).not.toContain("Fanout application");
 
+    await act(async () => root.unmount());
+  });
+
+  it("explains viewer account creation when local self-signup is enabled", async () => {
+    window.happyDOM.setURL("https://fanout.example.com/");
+    fetchMock.mockImplementation(async (input) => {
+      const path = String(input);
+      if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: true });
+      if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
+      throw new Error(`unexpected request: ${path}`);
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(
+      <MantineProvider>
+        <AuthGate><div>Fanout application</div></AuthGate>
+      </MantineProvider>,
+    ));
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in or create an account"));
+    expect(document.body.textContent).toContain("create a viewer account");
     await act(async () => root.unmount());
   });
 
@@ -127,7 +150,7 @@ describe("AuthGate OAuth return", () => {
     window.happyDOM.setURL("https://fanout.example.com/login?login_token=one-time-secret");
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);
-      if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: false, smtp_configured: false });
+      if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: false, smtp_configured: false, self_signup: false });
       if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
       if (path === "/api/auth/login-link" && init?.method === "POST") {
         expect(JSON.parse(String(init.body))).toEqual({ token: "one-time-secret" });
