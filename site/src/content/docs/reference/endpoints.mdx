@@ -1,0 +1,66 @@
+---
+title: Endpoints
+description: The operational HTTP endpoints a Fanout instance exposes, and what each one requires.
+summary: Health, readiness, metrics, profiling and the protocol endpoints — with the credential each expects.
+read_when:
+  - You are configuring a load balancer, a probe or a Prometheus scrape.
+  - You need to know which endpoints are reachable without authentication.
+---
+
+Everything below is served by the same HTTP listener as the browser client, on
+`FANOUT_HTTP_ADDR` (`:7520` by default).
+
+## Health
+
+| Path | Requires | Reports |
+|---|---|---|
+| `/healthz` | nothing | Liveness — the process is up |
+| `/readyz` | nothing | Readiness — storage is attached, plus resolved runtime sizing |
+
+Both are deliberately unauthenticated: a probe that needs a credential is a
+probe that fails for the wrong reason during an outage. Use `/healthz` for
+restart decisions and `/readyz` for traffic decisions — an instance can be alive
+while its storage is still coming up.
+
+## Operations
+
+| Path | Requires |
+|---|---|
+| `/-/metrics` | `operations:read`, or a service credential |
+| `/debug/pprof/*` | `operations:read` |
+
+`/-/metrics` is Prometheus exposition. It accepts a service credential as well
+as an admin session, which is how a scraper reaches it without a browser login —
+set `FANOUT_METRICS_TOKEN`. `FANOUT_METRICS_PUBLIC=true` removes the requirement
+entirely, and Fanout logs a warning at startup when you do, because metrics
+describe your traffic shape to anyone who asks.
+
+`/debug/pprof/*` is off unless `FANOUT_PPROF_ENABLED=true`, and is admin-only
+even then. Profiling output can contain memory contents, which is why it sits
+behind `operations:read` rather than `telemetry:read`.
+
+## Protocol
+
+| Path | Purpose |
+|---|---|
+| `/mcp` | The MCP endpoint external agents connect to |
+| `/.well-known/*` | OAuth discovery for MCP clients |
+| `/oauth/register`, `/oauth/token` | OAuth client registration and token issue |
+
+## Ingest
+
+Telemetry does not arrive on this listener. OTLP has its own two:
+`FANOUT_OTLP_GRPC_ADDR` (`:4317`) and `FANOUT_OTLP_HTTP_ADDR` (`:4318`), both
+requiring the ingest token. See [send your first
+telemetry](/start/send-telemetry).
+
+For OTLP/HTTP, exporters derive `/v1/traces`, `/v1/metrics` and `/v1/logs` from
+the base endpoint themselves — give the exporter `http://host:4318`, not a
+signal path.
+
+## What to alert on
+
+The endpoints tell you the instance is up; the metrics tell you whether it is
+coping. Watch repeated restarts, readiness failures, ingest authentication
+failures, telemetry drops, sustained query latency, and free disk space.
+[Troubleshooting](/guides/troubleshoot) covers what each one usually means.

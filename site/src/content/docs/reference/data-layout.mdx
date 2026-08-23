@@ -1,0 +1,60 @@
+---
+title: Data layout
+description: Every path under a Fanout data directory and what it holds.
+summary: The exact contents of FANOUT_DATA_DIR, and why the directory is one unit.
+read_when:
+  - You are sizing disk or deciding what to back up.
+  - You are inspecting an instance's files and want to know what you are looking at.
+---
+
+Everything Fanout persists lives under `FANOUT_DATA_DIR` (`./data` by default,
+`/var/lib/fanout/data` in the container).
+
+| Path | Holds |
+|---|---|
+| `telemetry/parquet/` | The telemetry itself, as Parquet files |
+| `telemetry/ducklake.sqlite` | The DuckLake catalog tracking those files |
+| `query/catalog.duckdb` | Query-side DuckDB state |
+| `query/tmp/` | Spill space for queries that exceed the memory cap |
+| `control/fanout.sqlite` | Users, sessions, dashboards, alert rules, agent history |
+
+## Why it is one unit
+
+The catalog records which Parquet files exist and what they contain. Separated
+from it, `telemetry/parquet/` is a directory of files nothing can locate, and
+the catalog alone is an index of files that are not there.
+
+`control/fanout.sqlite` is independent of both in format but not in meaning: it
+holds the dashboards and alert rules that refer to the telemetry, and the
+accounts that own them.
+
+So the unit of backup is the whole directory. [Back up and
+restore](/guides/back-up-and-restore) covers doing that safely, which mostly
+means doing it while the process is stopped.
+
+## Two databases, on purpose
+
+Telemetry is append-heavy, queried analytically over wide ranges, and never
+updated. Application state is small, transactional and updated constantly. One
+engine would serve one of those two badly — [how storage
+works](/explanation/storage-model) covers the reasoning and the write path.
+
+## `query/tmp/`
+
+DuckDB spills here when a query needs more memory than `FANOUT_DUCKDB_MEMORY`
+allows. It is regenerated as needed and holds nothing durable, but it does need
+space: a query against a wide time range can spill substantially, and a full
+disk fails the query rather than degrading it.
+
+## Sizing
+
+Retention is the main lever — `FANOUT_RETENTION_DAYS`, with expiry applied on
+the maintenance cycle rather than the moment you change it. File count matters
+as much as byte count for query latency, which is what the merge pass exists to
+bound. [Tune retention](/guides/tune-retention) covers both.
+
+:::caution[Do not edit these files]
+Fanout owns this directory. Editing the SQLite databases directly — deleting a
+user row, for instance — cascades in ways the application would have handled and
+a manual edit will not.
+:::

@@ -1,0 +1,69 @@
+---
+title: Roles
+description: The three Fanout roles and the capabilities each one carries.
+summary: viewer, operator and admin, and exactly what each is permitted to do.
+read_when:
+  - You are deciding which role to give someone.
+  - You are mapping identity-provider groups onto Fanout roles.
+  - A request came back 403 and you want to know which capability it needed.
+---
+
+Fanout has three roles. They are fixed — there is no custom role builder, and a
+user holds exactly one.
+
+| Role | Intended for |
+|---|---|
+| `viewer` | Reading telemetry and keeping personal dashboards |
+| `operator` | The above, plus running the agent and managing alerts |
+| `admin` | The above, plus ingest, users and operational endpoints |
+
+## Capabilities
+
+Every protected route names a capability rather than a role, and roles are
+defined as sets of capabilities. This is the whole mapping:
+
+| Capability | viewer | operator | admin |
+|---|---|---|---|
+| `telemetry:read` | ✓ | ✓ | ✓ |
+| `dashboards:manage-own` | ✓ | ✓ | ✓ |
+| `ingest:read-metadata` | ✓ | ✓ | ✓ |
+| `alerts:manage` | — | ✓ | ✓ |
+| `agent:run` | — | ✓ | ✓ |
+| `ingest:manage` | — | — | ✓ |
+| `users:manage` | — | — | ✓ |
+| `operations:read` | — | — | ✓ |
+
+Two consequences worth drawing out:
+
+- **`viewer` cannot use the chat investigator.** `agent:run` starts at
+  `operator`, because a run costs money at a model provider and acts on the
+  instance's behalf.
+- **`dashboards:manage-own` is scoped to the owner.** Every role can create and
+  edit its own dashboards; none of them, including `admin`, gets an edit
+  affordance over someone else's through this capability.
+
+## Where operational endpoints sit
+
+`operations:read` is the admin-only capability behind `/-/metrics` and
+`/debug/pprof/*`. It is separate from `telemetry:read` on purpose: reading the
+telemetry an instance has collected and reading the instance's own internals are
+different privileges, and profiling endpoints can expose memory contents.
+
+`/-/metrics` additionally accepts a service credential, so a scraper does not
+need an admin browser session. See [endpoints](/reference/endpoints).
+
+## Who assigns roles
+
+In `local` auth mode, roles are managed inside Fanout by an admin.
+
+In `oidc` mode it depends on configuration. If `FANOUT_OIDC_ADMIN_GROUPS` or
+`FANOUT_OIDC_OPERATOR_GROUPS` is set, the provider owns every linked user's
+role and reapplies it on each login; otherwise roles stay local.
+[Authentication modes](/explanation/authentication-modes) covers the details,
+including why the last active administrator is never demoted.
+
+:::caution[A role is not a data boundary]
+Roles gate capabilities, not rows. Every role that can read telemetry can read
+all of it — namespaces scope queries, not access. An instance is one trust
+domain.
+:::
