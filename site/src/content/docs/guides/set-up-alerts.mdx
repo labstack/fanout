@@ -1,0 +1,101 @@
+---
+title: Set up alerts
+description: Write alert rules as expressions over service metrics, and deliver them by webhook.
+summary: The rule model, the variables available to an expression, the pending/firing/resolved lifecycle, and webhook delivery.
+read_when:
+  - You want to be told when a service degrades.
+  - A rule is not firing when you expect it to.
+status: preview
+---
+
+The alert engine runs inside the binary and is on by default. It evaluates
+persisted rules every `FANOUT_ALERTS_EVALUATION_INTERVAL` (30s) against service
+rollups, and delivers by webhook.
+
+Rules are managed over HTTP. There is no browser page for them yet — see
+[capabilities](/status/capabilities).
+
+| Endpoint | Does |
+|---|---|
+| `GET /api/alerts` | Current alert state |
+| `GET /api/alerts/summary` | Counts by state |
+| `GET /api/rules` | List rules |
+| `POST /api/rules` | Create and compile a rule |
+| `PUT /api/rules/:id` | Replace and recompile a rule |
+
+Reading takes `telemetry:read`; creating and replacing takes `alerts:manage`,
+which starts at the `operator` role. See [roles](/reference/roles).
+
+## What a rule contains
+
+An expression, an optional service to scope it to, timing, and delivery:
+
+| Field | Means |
+|---|---|
+| `expression` | The condition, in [expr-lang](https://expr-lang.org) |
+| `service` | Evaluate only for this service; omit for all |
+| `for_seconds` | How long the condition must hold before firing |
+| `cooldown_s` | Minimum quiet period after resolving before firing again |
+| `repeat_interval_s` | How often to re-deliver while still firing |
+| `webhook_url` | Where to deliver |
+| `webhook_headers` | Extra headers, for a shared secret or routing key |
+| `webhook_template` | Custom payload body; omit for the default |
+| `notify_on_resolve` | Also deliver when the alert clears |
+
+## Variables available to an expression
+
+| Variable | Is |
+|---|---|
+| `error_rate` | Errors as a proportion of requests |
+| `p50`, `p95` | Latency percentiles |
+| `throughput` | Requests per second |
+| `log_count` | Log volume |
+| `z_score` | Deviation from the service's own baseline |
+| `health_score` | Composite health |
+| `error_rate_delta`, `p95_delta`, `throughput_delta` | Change against baseline |
+| `service` | The service name, as a string |
+
+So a rule body reads like the thing it means:
+
+```text
+error_rate > 0.02 and throughput > 10
+```
+
+The throughput clause matters more than it looks. A service handling two
+requests a minute reaches a 50% error rate on one failure, and without a floor
+every quiet service pages you.
+
+## The lifecycle
+
+An alert moves through three states:
+
+- **pending** — the condition is true but has not held for `for_seconds` yet.
+  With `for_seconds: 0` a rule skips this and fires immediately.
+- **firing** — it has held. The webhook is delivered, and re-delivered every
+  `repeat_interval_s` while it stays true.
+- **resolved** — the expression went false. If `notify_on_resolve` is set, that
+  is delivered too.
+
+`cooldown_s` then holds the rule quiet for that long after resolving, which is
+what stops a metric hovering at the threshold from delivering repeatedly.
+
+Each alert records its last delivery status and timestamp, so a webhook endpoint
+that started rejecting is visible in `GET /api/alerts` rather than silent.
+
+:::caution[The namespace field on a rule is not applied]
+A rule carries a `namespace` selector and it is stored, but evaluation reads
+instance-wide service rollups and does not filter on it. A rule you believe is
+scoped to one namespace is evaluating across all of them.
+
+Scope with `service` instead, which is applied. This is a real gap rather than a
+subtlety — it is marked here because the field's presence implies otherwise.
+:::
+
+## Why alerts lag the raw data
+
+Evaluation reads rollups, not raw telemetry, and rollups deliberately trail the
+newest data by a safety margin because telemetry arrives out of order. An alert
+therefore fires seconds after the condition is visible in a raw query. That is a
+correctness choice — [how storage works](/explanation/storage-model) explains
+the margin — and it means `for_seconds` should not be set below the rollup
+interval expecting finer resolution than the data has.

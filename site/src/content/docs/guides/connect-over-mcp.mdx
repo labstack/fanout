@@ -1,0 +1,87 @@
+---
+title: Connect an agent over MCP
+description: Point an MCP client at a Fanout instance, and configure the instance so tokens bind correctly.
+summary: The OAuth flow an MCP client uses, the two scopes, and the one setting that has to be right before any of it works.
+read_when:
+  - You are connecting Claude Code or another MCP client to an instance.
+  - A client registers but its tokens are rejected.
+status: preview
+---
+
+Fanout serves MCP at `/mcp`. It is the intended way for an agent to read an
+instance: the [nine tools](/reference/mcp-tools) return the same typed results
+the browser client and the HTTP API use, so what an agent tells you matches what
+the dashboards show.
+
+## Set the resource URI first
+
+```sh
+FANOUT_MCP_PUBLIC_URL=https://fanout.example.com/mcp
+```
+
+This is the canonical, externally reachable URI clients are issued tokens
+against. It must be HTTPS, must end in `/mcp`, and must stay **stable across
+restarts** — tokens carry it as their audience, so changing it invalidates every
+one already issued.
+
+Getting this wrong is the most common failure: a client discovers, registers and
+receives a token, and then every call is rejected because the audience does not
+match the resource it is calling. Set it before connecting anything.
+
+`FANOUT_MCP_ENABLED` (default `true`) turns the endpoint off entirely.
+
+## What the client does
+
+Fanout implements the standard remote-MCP OAuth flow, so a compliant client
+needs only the URL:
+
+1. Discovers the endpoints from
+   `/.well-known/oauth-protected-resource` and
+   `/.well-known/oauth-authorization-server`.
+2. Registers itself at `/oauth/register` — dynamic client registration, so
+   nothing is pre-provisioned by hand.
+3. Obtains a token from `/oauth/token`, bound to the resource URI above.
+
+You authorize it in the browser as yourself, which is what ties the agent to
+your account and your role.
+
+## Scopes
+
+| Scope | Grants |
+|---|---|
+| `fanout:read` | The read-only observability tools |
+| `fanout:dashboard` | The dashboard tools |
+
+An agent holding only `fanout:read` can investigate but cannot create or replace
+a dashboard.
+
+## What the agent can and cannot do
+
+It acts as **you**. Its reach is your role's capabilities and no more — see
+[roles](/reference/roles). Two consequences:
+
+- Dashboard tools are owner-scoped. An agent can manage your dashboards and
+  cannot touch anyone else's.
+- `agent:run` is not involved here. That capability gates Fanout's *own* chat
+  investigator; an external MCP client is a separate path.
+
+There is no tool that writes telemetry, edits configuration, manages users or
+changes alert rules. That is the whole envelope, deliberately.
+
+## Behind a proxy
+
+If TLS terminates at a reverse proxy, `FANOUT_MCP_PUBLIC_URL` must be the
+externally visible HTTPS URL rather than the internal one Fanout is listening
+on. [Terminate TLS](/guides/terminate-tls) covers the rest of that setup.
+
+## Checking it
+
+`/.well-known/oauth-protected-resource` is unauthenticated, so a plain fetch
+tells you whether discovery is answering and what resource it advertises:
+
+```sh
+curl -s https://fanout.example.com/.well-known/oauth-protected-resource
+```
+
+If the resource in that document is not the URL your client is calling, fix
+`FANOUT_MCP_PUBLIC_URL` before debugging anything else.

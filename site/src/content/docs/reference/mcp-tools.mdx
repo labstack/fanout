@@ -1,0 +1,71 @@
+---
+title: MCP tools
+description: Every tool a Fanout instance exposes over MCP, with its inputs and whether it mutates.
+summary: Five read-only observability tools and four dashboard tools, with the shared window/namespace/limit inputs.
+read_when:
+  - You are connecting an agent and want to know what it can call.
+  - You need to know which tools mutate state and which cannot.
+status: preview
+---
+
+A Fanout instance serves MCP at `/mcp`. Nine tools, in two groups.
+
+## Observability
+
+All five are read-only and closed-world — they read the telemetry this instance
+holds and reach nothing else.
+
+| Tool | Returns |
+|---|---|
+| `observability_overview` | Service health for a bounded window. The triage starting point. |
+| `service_topology` | Services and observed dependency edges, with health, traffic, latency and errors. |
+| `service_performance` | Activity, errors, latency, endpoints, cross-signal correlation and change over time, for one service or all. |
+| `trace_detail` | One exact trace, or the most relevant recent error or slow trace — spans, waterfall, flame graph and correlated logs. |
+| `search_logs` | Filtered logs with a severity timeline and links back to correlated traces. |
+
+### Shared inputs
+
+Every observability tool takes the same scope, and every field is optional:
+
+| Input | Means |
+|---|---|
+| `window` | Time window such as `15m`, `1h`, `24h`. Defaults to `1h`. |
+| `namespace` | OpenTelemetry service namespace. Defaults to the server's. |
+| `limit` | Maximum services, edges or endpoints to return, 1–500. |
+
+`service_performance` and `trace_detail` additionally accept `service`, an exact
+OpenTelemetry service name — omit it for the whole system.
+
+## Dashboards
+
+These act on the **authenticated user's own** dashboards, and two of them
+mutate:
+
+| Tool | Effect |
+|---|---|
+| `dashboard_list` | Read — named dashboards and widget counts |
+| `dashboard_get` | Read — one dashboard, with widgets, filters and 12-column layout |
+| `dashboard_create` | **Additive** — creates a new dashboard, alters no existing one |
+| `dashboard_update` | **Replacing** — overwrites a dashboard's name, widgets, filters and layout |
+
+`dashboard_update` replaces rather than merges. Its own description tells a
+calling agent to use it only after the user has explicitly asked to change that
+dashboard, which is the behaviour to expect from a well-behaved client — but
+it is guidance to the model, not a permission check. The capability boundary is
+`dashboards:manage-own`: an agent acts as the user whose credential it holds and
+cannot reach anyone else's dashboards.
+
+## Authentication
+
+MCP uses OAuth, not a static key, and **not the ingest token** — an agent
+presenting the ingest token is rejected. A client discovers the endpoints,
+registers itself, and is issued a token bound to this instance's resource URI.
+[Connect an agent](/guides/connect-over-mcp) covers the flow and the two scopes.
+
+## What is not here
+
+There is no tool that writes telemetry, changes configuration, manages users, or
+edits alert rules. Ingest is OTLP only, and the rest is HTTP API surface — see
+[endpoints](/reference/endpoints). An agent connected over MCP can read
+everything the instance knows and manage its own dashboards, and that is the
+whole envelope.

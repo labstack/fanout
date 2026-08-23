@@ -92,6 +92,8 @@ export default defineConfig({
           label: "Guides",
           items: [
             { label: "Terminate TLS", slug: "guides/terminate-tls" },
+            { label: "Set up alerts", slug: "guides/set-up-alerts" },
+            { label: "Connect an agent over MCP", slug: "guides/connect-over-mcp" },
             { label: "Back up and restore", slug: "guides/back-up-and-restore" },
             { label: "Tune retention", slug: "guides/tune-retention" },
             { label: "Troubleshoot", slug: "guides/troubleshoot" },
@@ -109,6 +111,7 @@ export default defineConfig({
               // sidebar without this file being edited to match.
               items: [{ autogenerate: { directory: "reference/settings" } }],
             },
+            { label: "MCP tools", slug: "reference/mcp-tools" },
             { label: "Roles", slug: "reference/roles" },
             { label: "Endpoints", slug: "reference/endpoints" },
             { label: "Data layout", slug: "reference/data-layout" },
