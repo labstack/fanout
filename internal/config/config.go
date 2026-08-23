@@ -101,6 +101,7 @@ type Config struct {
 	AuthMode                string        `koanf:"auth.mode" env:"FANOUT_AUTH_MODE" default:"local"`
 	PublicURL               string        `koanf:"server.public_url" env:"FANOUT_PUBLIC_URL"`
 	AuthCodeSecret          string        `koanf:"auth.code_secret" env:"FANOUT_AUTH_CODE_SECRET" secret:"true"`
+	SelfSignup              bool          `koanf:"auth.self_signup" env:"FANOUT_SELF_SIGNUP" default:"false"`
 	SessionIdleTTL          time.Duration `koanf:"auth.session_idle_ttl" env:"FANOUT_SESSION_IDLE_TTL" default:"12h"`
 	SessionAbsoluteTTL      time.Duration `koanf:"auth.session_absolute_ttl" env:"FANOUT_SESSION_ABSOLUTE_TTL" default:"168h"`
 	OIDCIssuerURL           string        `koanf:"auth.oidc.issuer_url" env:"FANOUT_OIDC_ISSUER_URL"`
@@ -134,6 +135,9 @@ func (c Config) LogStartup() {
 	}
 	if c.MetricsPublic {
 		slog.Warn("Prometheus metrics are publicly accessible", "path", "/-/metrics")
+	}
+	if c.SelfSignup {
+		slog.Info("self-signup is enabled", "role", appauth.RoleViewer)
 	}
 }
 
@@ -252,6 +256,14 @@ func (c Config) Validate() error {
 		}
 		if c.SMTPPort <= 0 {
 			return fmt.Errorf("smtp.port must be > 0")
+		}
+	}
+	if c.SelfSignup {
+		if authMode != "local" {
+			return fmt.Errorf("auth.self_signup requires auth.mode=local")
+		}
+		if !c.SMTPConfigured() {
+			return fmt.Errorf("auth.self_signup requires SMTP")
 		}
 	}
 	if authMode == "oidc" {

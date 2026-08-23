@@ -63,6 +63,8 @@ auth:
   session_absolute_ttl: 168h # FANOUT_SESSION_ABSOLUTE_TTL
   # Required in local auth mode: FANOUT_AUTH_CODE_SECRET (32+ characters)
   # code_secret: ""
+  # Allow verified email addresses to create viewer accounts.
+  self_signup: false # FANOUT_SELF_SIGNUP
   oidc:
     issuer_url: "" # FANOUT_OIDC_ISSUER_URL
     client_id: "" # FANOUT_OIDC_CLIENT_ID

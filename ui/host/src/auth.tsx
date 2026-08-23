@@ -12,6 +12,7 @@ export type Status = {
   auth_mode: "local" | "oidc";
   agent_available: boolean;
   smtp_configured: boolean;
+  self_signup: boolean;
 };
 type SetupResult = { status: string; ingest_token?: string; ingest_header_name?: string; suggested_endpoint?: string };
 const RuntimeStatusContext = createContext<Status | null>(null);
@@ -206,10 +207,10 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         {status?.setup_required ? "One-time setup" : "Secure workspace"}
       </Text>
       <Title order={1} fz={{ base: 30, sm: 36 }} fw={650} lh={1.08}>
-        {status?.setup_required ? "Create the first admin" : "Sign in to investigate"}
+        {status?.setup_required ? "Create the first admin" : status?.self_signup ? "Sign in or create an account" : "Sign in to investigate"}
       </Title>
       <Text c="dimmed" size="md" lh={1.6} maw={390}>
-        {status?.setup_required ? "Use the one-time token printed by the Fanout process." : !status?.smtp_configured ? "Email delivery is not configured. Ask the operator to run fanout login-link with your email address." : codeSent ? `Enter the verification code sent to ${email}.` : "Enter your email and we’ll send a short verification code. No password needed."}
+        {status?.setup_required ? "Use the one-time token printed by the Fanout process." : !status?.smtp_configured ? "Email delivery is not configured. Ask the operator to run fanout login-link with your email address." : codeSent ? `Enter the verification code sent to ${email}.` : status?.self_signup ? "Enter your email to sign in or create a viewer account. No password needed." : "Enter your email and we’ll send a short verification code. No password needed."}
       </Text>
     </Stack>
     <form onSubmit={submit}><Stack gap="md">
