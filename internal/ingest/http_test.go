@@ -130,6 +130,21 @@ func TestHTTPIngestAuthentication(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)
 		assertOTLPHTTPStatus(t, f.handler, http.MethodPost, "/v1/traces", testTraceRequest(), "fo_wrong", http.StatusUnauthorized)
 	})
+	t.Run("legacy Fanout header", func(t *testing.T) {
+		f := newHTTPIngestFixture(t, true)
+		payload, err := proto.Marshal(testTraceRequest())
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/v1/traces", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", otlpProtobufContentType)
+		req.Header.Set("x-fanout-ingest-token", f.token)
+		rec := httptest.NewRecorder()
+		f.handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401: %s", rec.Code, rec.Body.String())
+		}
+	})
 	t.Run("rotation invalidates old token", func(t *testing.T) {
 		f := newHTTPIngestFixture(t, true)
 		oldToken := f.token
@@ -159,7 +174,7 @@ func TestHTTPIngestRejectsInvalidRequests(t *testing.T) {
 		payload, _ := proto.Marshal(testTraceRequest())
 		req := httptest.NewRequest(http.MethodPost, "/v1/traces", bytes.NewReader(payload))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("x-fanout-ingest-token", f.token)
+		req.Header.Set("Authorization", "Bearer "+f.token)
 		rec := httptest.NewRecorder()
 		f.handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnsupportedMediaType {
@@ -171,7 +186,7 @@ func TestHTTPIngestRejectsInvalidRequests(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/traces", bytes.NewReader(payload))
 		req.Header.Set("Content-Type", otlpProtobufContentType)
 		req.Header.Set("Content-Encoding", "br")
-		req.Header.Set("x-fanout-ingest-token", f.token)
+		req.Header.Set("Authorization", "Bearer "+f.token)
 		rec := httptest.NewRecorder()
 		f.handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusUnsupportedMediaType {
@@ -181,7 +196,7 @@ func TestHTTPIngestRejectsInvalidRequests(t *testing.T) {
 	t.Run("malformed protobuf", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/traces", bytes.NewReader([]byte{0xff}))
 		req.Header.Set("Content-Type", otlpProtobufContentType)
-		req.Header.Set("x-fanout-ingest-token", f.token)
+		req.Header.Set("Authorization", "Bearer "+f.token)
 		rec := httptest.NewRecorder()
 		f.handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
@@ -192,7 +207,7 @@ func TestHTTPIngestRejectsInvalidRequests(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/traces", bytes.NewReader([]byte("not gzip")))
 		req.Header.Set("Content-Type", otlpProtobufContentType)
 		req.Header.Set("Content-Encoding", "gzip")
-		req.Header.Set("x-fanout-ingest-token", f.token)
+		req.Header.Set("Authorization", "Bearer "+f.token)
 		rec := httptest.NewRecorder()
 		f.handler.ServeHTTP(rec, req)
 		if rec.Code != http.StatusBadRequest {
@@ -215,7 +230,7 @@ func TestHTTPIngestRejectsInvalidRequests(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				req := httptest.NewRequest(http.MethodPost, "/v1/traces", tc.body)
 				req.Header.Set("Content-Type", otlpProtobufContentType)
-				req.Header.Set("x-fanout-ingest-token", f.token)
+				req.Header.Set("Authorization", "Bearer "+f.token)
 				if tc.encoding != "" {
 					req.Header.Set("Content-Encoding", tc.encoding)
 				}
@@ -310,7 +325,7 @@ func assertOTLPHTTPSuccess(t *testing.T, handler http.Handler, path string, requ
 	}
 	req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", otlpProtobufContentType)
-	req.Header.Set("x-fanout-ingest-token", token)
+	req.Header.Set("Authorization", "Bearer "+token)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -330,7 +345,7 @@ func assertOTLPHTTPStatus(t *testing.T, handler http.Handler, method, path strin
 	req := httptest.NewRequest(method, path, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", otlpProtobufContentType)
 	if token != "" {
-		req.Header.Set("x-fanout-ingest-token", token)
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)

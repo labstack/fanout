@@ -79,7 +79,7 @@ describe("authorizedFetch", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
     expect(headers.get("Authorization")).toBeNull();
-    expect(headers.get("X-Fanout-Request")).toBe("1");
+    expect(headers.get("Fanout-Request")).toBe("1");
     expect(fetchMock.mock.calls[0][1]?.credentials).toBe("same-origin");
   });
 

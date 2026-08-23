@@ -42,7 +42,7 @@ func (h *SettingsHandler) GetIngest(c *echo.Context) error {
 		TokenRequired:     current.TokenHash != "",
 		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestAdvertisedEndpoint),
 		TLSConfigured:     h.cfg.TLSEnabled(),
-		HeaderName:        "x-fanout-ingest-token",
+		HeaderName:        "Authorization",
 	})
 }
 
@@ -67,7 +67,7 @@ func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 		TokenRequired:     true,
 		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestAdvertisedEndpoint),
 		TLSConfigured:     h.cfg.TLSEnabled(),
-		HeaderName:        "x-fanout-ingest-token",
+		HeaderName:        "Authorization",
 		IngestToken:       token,
 	})
 }

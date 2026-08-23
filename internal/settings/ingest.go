@@ -15,7 +15,7 @@ const ingestKey = "ingest"
 // Ingest holds the ingest-auth configuration. TokenHash is set during
 // first-admin setup and rotatable from the Settings page; when unset
 // (pre-setup), the authorizer rejects all OTLP requests. Collectors
-// present the token via `x-fanout-ingest-token` or `Authorization: Bearer`.
+// present the token via `Authorization: Bearer`.
 type Ingest struct {
 	TokenHash string `json:"token_hash"`
 }

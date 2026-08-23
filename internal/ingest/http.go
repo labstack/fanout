@@ -151,13 +151,5 @@ func readOTLPHTTPBody(r *http.Request, limit int64) ([]byte, error) {
 }
 
 func ingestTokenFromHTTP(header http.Header) string {
-	if token := strings.TrimSpace(header.Get("x-fanout-ingest-token")); token != "" {
-		return token
-	}
-	authorization := strings.TrimSpace(header.Get("Authorization"))
-	const bearer = "Bearer "
-	if len(authorization) >= len(bearer) && strings.EqualFold(authorization[:len(bearer)], bearer) {
-		return strings.TrimSpace(authorization[len(bearer):])
-	}
-	return ""
+	return ingestTokenFromAuthorization(header.Get("Authorization"))
 }
