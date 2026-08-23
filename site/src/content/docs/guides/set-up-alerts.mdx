@@ -44,16 +44,11 @@ An expression, an optional service to scope it to, timing, and delivery:
 
 ## Variables available to an expression
 
-| Variable | Is |
-|---|---|
-| `error_rate` | Errors as a proportion of requests |
-| `p50`, `p95` | Latency percentiles |
-| `throughput` | Requests per second |
-| `log_count` | Log volume |
-| `z_score` | Deviation from the service's own baseline |
-| `health_score` | Composite health |
-| `error_rate_delta`, `p95_delta`, `throughput_delta` | Change against baseline |
-| `service` | The service name, as a string |
+An expression reads one service's rollup for the current window. The full list —
+`error_rate`, `p95`, `throughput`, the baseline deltas and the rest — is
+[generated from the evaluation environment
+itself](/reference/settings/alert-expressions), so it cannot drift from what the
+evaluator actually binds.
 
 So a rule body reads like the thing it means:
 
