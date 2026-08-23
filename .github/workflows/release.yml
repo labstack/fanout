@@ -275,7 +275,7 @@ jobs:
             done
           done
           mkdir native
-          tar -xzf "fanout_${VERSION}_linux_amd64.tar.gz" -C native fanout
+          tar -xzf "fanout_${VERSION}_linux_amd64.tar.gz" -C native ./fanout
           [ "$(native/fanout -version)" = "${VERSION}" ]
       - name: Verify the public installer
         env:
