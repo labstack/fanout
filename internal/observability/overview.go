@@ -15,7 +15,7 @@ SELECT
   CAST(SUM(log_count) AS BIGINT) AS log_count,
   CAST(SUM(metric_count) AS BIGINT) AS metric_count
 FROM service_rollup
-WHERE bucket >= ? AND bucket < ? AND namespace = ?
+WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?)
 GROUP BY service
 ORDER BY error_rate DESC, p95_ms DESC, spans DESC, service ASC
 LIMIT ?`
@@ -63,7 +63,7 @@ func (s *Service) Overview(ctx context.Context, scope Scope, limit int) (Result[
 }
 
 func (s *Service) serviceHealth(ctx context.Context, scope Scope, limit int) ([]ServiceHealth, error) {
-	rows, err := s.db.QueryContext(ctx, overviewQuery, scope.Start, scope.End, scope.Namespace, limit)
+	rows, err := s.db.QueryContext(ctx, overviewQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, limit)
 	if err != nil {
 		return nil, fmt.Errorf("query service health: %w", err)
 	}

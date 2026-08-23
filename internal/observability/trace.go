@@ -11,7 +11,7 @@ import (
 const recentTraceQuery = `
 SELECT trace_id
 FROM spans
-WHERE start_time >= ? AND start_time < ? AND namespace = ? AND trace_id <> '' AND (? = '' OR service = ?)
+WHERE start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?) AND trace_id <> '' AND (? = '' OR service = ?)
 GROUP BY trace_id
 ORDER BY MAX(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1 ELSE 0 END) DESC,
          MAX(end_time) - MIN(start_time) DESC
@@ -21,7 +21,7 @@ const traceSpansQuery = `
 SELECT span_id, COALESCE(parent_span_id, ''), service, operation, kind, start_time,
        duration_ms, COALESCE(status, ''), COALESCE(status_message, '')
 FROM spans
-WHERE start_time >= ? AND start_time < ? AND namespace = ? AND trace_id = ?
+WHERE start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?) AND trace_id = ?
 ORDER BY start_time ASC, duration_ms DESC
 LIMIT ?`
 
@@ -29,7 +29,7 @@ const traceLogsQuery = `
 SELECT time, COALESCE(severity, ''), COALESCE(service, ''), COALESCE(body, ''),
        COALESCE(trace_id, ''), COALESCE(span_id, '')
 FROM logs
-WHERE time >= ? AND time < ? AND namespace = ? AND trace_id = ?
+WHERE time >= ? AND time < ? AND (? = '' OR namespace = ?) AND trace_id = ?
 ORDER BY time ASC
 LIMIT ?`
 
@@ -45,7 +45,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	traceID = strings.TrimSpace(traceID)
 	service = strings.TrimSpace(service)
 	if traceID == "" {
-		rows, queryErr := s.db.QueryContext(ctx, recentTraceQuery, scope.Start, scope.End, scope.Namespace, service, service)
+		rows, queryErr := s.db.QueryContext(ctx, recentTraceQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service)
 		if queryErr != nil {
 			return Result[TraceDetail]{}, fmt.Errorf("query recent trace: %w", queryErr)
 		}
@@ -64,7 +64,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
 	if traceID != "" {
-		rows, queryErr := s.db.QueryContext(ctx, traceSpansQuery, scope.Start, scope.End, scope.Namespace, traceID, limit)
+		rows, queryErr := s.db.QueryContext(ctx, traceSpansQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, traceID, limit)
 		if queryErr != nil {
 			return Result[TraceDetail]{}, fmt.Errorf("query trace spans: %w", queryErr)
 		}
@@ -105,7 +105,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		}
 		sort.Strings(data.Services)
 
-		rows, queryErr = s.db.QueryContext(ctx, traceLogsQuery, scope.Start, scope.End, scope.Namespace, traceID, limit)
+		rows, queryErr = s.db.QueryContext(ctx, traceLogsQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, traceID, limit)
 		if queryErr != nil {
 			return Result[TraceDetail]{}, fmt.Errorf("query trace logs: %w", queryErr)
 		}

@@ -19,7 +19,7 @@ var logsEntriesQuery = `
 SELECT time, COALESCE(severity, ''), COALESCE(service, ''), COALESCE(body, ''),
        COALESCE(trace_id, ''), COALESCE(span_id, '')
 FROM logs
-WHERE time >= ? AND time < ? AND namespace = ?
+WHERE time >= ? AND time < ? AND (? = '' OR namespace = ?)
   AND (? = '' OR service = ?)
   AND (? = '' OR upper(severity) = upper(?))
   AND (? = '' OR ` + redactedBodySQL + ` ILIKE ?)
@@ -30,7 +30,7 @@ var logsBucketsQuery = `
 SELECT time_bucket(INTERVAL '5 minutes', time) AS point_time,
        COALESCE(NULLIF(upper(severity), ''), 'UNSPECIFIED'), CAST(COUNT(*) AS BIGINT)
 FROM logs
-WHERE time >= ? AND time < ? AND namespace = ?
+WHERE time >= ? AND time < ? AND (? = '' OR namespace = ?)
   AND (? = '' OR service = ?)
   AND (? = '' OR upper(severity) = upper(?))
   AND (? = '' OR ` + redactedBodySQL + ` ILIKE ?)
@@ -55,7 +55,7 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 	}
 
 	data := Logs{Entries: []LogEntry{}, Buckets: []LogBucket{}}
-	rows, err := s.db.QueryContext(ctx, logsEntriesQuery, scope.Start, scope.End, scope.Namespace, service, service, severity, severity, search, pattern, limit)
+	rows, err := s.db.QueryContext(ctx, logsEntriesQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, severity, severity, search, pattern, limit)
 	if err != nil {
 		return Result[Logs]{}, fmt.Errorf("query logs: %w", err)
 	}
@@ -74,7 +74,7 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 	}
 	rows.Close()
 
-	rows, err = s.db.QueryContext(ctx, logsBucketsQuery, scope.Start, scope.End, scope.Namespace, service, service, severity, severity, search, pattern)
+	rows, err = s.db.QueryContext(ctx, logsBucketsQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, severity, severity, search, pattern)
 	if err != nil {
 		return Result[Logs]{}, fmt.Errorf("query log histogram: %w", err)
 	}

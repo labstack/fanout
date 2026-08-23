@@ -21,7 +21,7 @@ SELECT
   CAST(SUM(log_count) AS BIGINT),
   CAST(SUM(metric_count) AS BIGINT)
 FROM service_rollup
-WHERE bucket >= ? AND bucket < ? AND namespace = ? AND (? = '' OR service = ?)
+WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)
 GROUP BY point_time
 ORDER BY point_time ASC`
 
@@ -35,7 +35,7 @@ SELECT
   COALESCE(approx_quantile(duration_ms, 0.99), 0) AS p99_ms,
   COALESCE(AVG(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate
 FROM spans
-WHERE start_time >= ? AND start_time < ? AND namespace = ? AND (? = '' OR service = ?)
+WHERE start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)
 GROUP BY method, path
 ORDER BY calls DESC, p95_ms DESC
 LIMIT ?`
@@ -78,7 +78,7 @@ rollup_source AS (
   FROM endpoint_rollup e, bounds b
   WHERE e.bucket >= b.interior_start
     AND e.bucket < b.interior_end
-    AND e.namespace = b.namespace
+    AND (b.namespace = '' OR e.namespace = b.namespace)
     AND (b.service = '' OR e.service = b.service)
 ),
 boundary_source AS (
@@ -111,7 +111,7 @@ boundary_source AS (
   WHERE s.start_time >= b.start_time
     AND s.start_time < b.end_time
     AND (s.start_time < b.interior_start OR s.start_time >= b.interior_end)
-    AND s.namespace = b.namespace
+    AND (b.namespace = '' OR s.namespace = b.namespace)
     AND (b.service = '' OR COALESCE(s.service, '') = b.service)
   GROUP BY method, path
 ),
@@ -192,10 +192,10 @@ LIMIT ?`
 const performanceHeatmapQuery = `
 SELECT time_bucket(INTERVAL '5 minutes', bucket) AS point_time, service, COALESCE(MAX(p95_ms), 0)
 FROM service_rollup
-WHERE bucket >= ? AND bucket < ? AND namespace = ?
+WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?)
   AND service IN (
     SELECT service FROM service_rollup
-    WHERE bucket >= ? AND bucket < ? AND namespace = ?
+    WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?)
     GROUP BY service ORDER BY SUM(spans) DESC LIMIT 12
   )
 GROUP BY point_time, service
@@ -208,7 +208,7 @@ SELECT
   COALESCE(SUM(p50_ms * spans) / NULLIF(SUM(spans), 0), 0),
   COALESCE(MAX(p95_ms), 0)
 FROM service_rollup
-WHERE bucket >= ? AND bucket < ? AND namespace = ? AND (? = '' OR service = ?)`
+WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)`
 
 func (s *Service) Performance(ctx context.Context, scope Scope, service string, limit int) (Result[Performance], error) {
 	scope, err := s.normalizeScope(scope)
@@ -222,7 +222,7 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 	service = strings.TrimSpace(service)
 
 	data := Performance{Service: service, Points: []PerformancePoint{}, Endpoints: []Endpoint{}, Heatmap: []HeatmapPoint{}, Comparison: []ComparisonMetric{}}
-	rows, err := s.db.QueryContext(ctx, performancePointsQuery, scope.Start, scope.End, scope.Namespace, service, service)
+	rows, err := s.db.QueryContext(ctx, performancePointsQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service)
 	if err != nil {
 		return Result[Performance]{}, fmt.Errorf("query performance points: %w", err)
 	}
@@ -246,7 +246,7 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 	}
 	data.Endpoints = endpoints
 
-	rows, err = s.db.QueryContext(ctx, performanceHeatmapQuery, scope.Start, scope.End, scope.Namespace, scope.Start, scope.End, scope.Namespace)
+	rows, err = s.db.QueryContext(ctx, performanceHeatmapQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, scope.Start, scope.End, scope.Namespace, scope.Namespace)
 	if err != nil {
 		return Result[Performance]{}, fmt.Errorf("query latency heatmap: %w", err)
 	}
@@ -302,7 +302,7 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 	}
 
 	query := rawEndpointsQuery
-	args := []any{scope.Start, scope.End, scope.Namespace, service, service, limit}
+	args := []any{scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, limit}
 	source := "spans"
 	if ready {
 		query = endpointRollupQuery
@@ -387,7 +387,7 @@ type performanceAggregate struct {
 }
 
 func (s *Service) performanceAggregate(ctx context.Context, scope Scope, service string) (performanceAggregate, error) {
-	rows, err := s.db.QueryContext(ctx, performanceAggregateQuery, scope.Start, scope.End, scope.Namespace, service, service)
+	rows, err := s.db.QueryContext(ctx, performanceAggregateQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service)
 	if err != nil {
 		return performanceAggregate{}, fmt.Errorf("query performance comparison: %w", err)
 	}
