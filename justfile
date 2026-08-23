@@ -61,35 +61,21 @@ docker TAG="local":
 
 # ── Release ──────────────────────────────────────────────────────────────────
 
-# Tags are CalVer: v{YYYY.MM}.{N}, numbered from 1 within each month. Pushing
+# Tags are CalVer: v{YYYY.M}.{N}, numbered from 0 within each month. Pushing
 # the tag triggers release.yml, which builds the multi-architecture image,
 # publishes native archives, and moves `latest`.
 
 # Tag the next CalVer release and push it.
 release:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
-      echo "release must run from main." >&2; exit 1
-    fi
-    if [ -n "$(git status --porcelain)" ]; then
-      echo "release requires a clean worktree." >&2; exit 1
-    fi
-    git fetch origin --tags main
-    if [ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]; then
-      echo "release must run from an up-to-date main." >&2; exit 1
-    fi
-    MONTH=$(date +%Y.%m)
-    # Filter to a numeric suffix so a stray pre-release tag cannot break the
-    # arithmetic. `|| true` swallows only grep's no-match exit.
-    LAST=$(git tag --list "v${MONTH}.*" --sort=-v:refname \
-      | { grep -E "^v${MONTH}\.[0-9]+$" || true; } | head -1)
-    if [ -z "$LAST" ]; then NUM=1; else NUM=$(( ${LAST##*.} + 1 )); fi
-    TAG="v${MONTH}.${NUM}"
-    echo "${LAST:-<first release this month>} → ${TAG}"
-    git tag "$TAG"
-    # Drop the local tag if the push fails, so the next run does not skip a number.
-    git push origin "$TAG" || { git tag -d "$TAG" >/dev/null; exit 1; }
+    ./scripts/release.sh
+
+# Regenerate the legal inventory for every shipped Go target and browser app.
+notices:
+    go run ./internal/cmd/notices -root .
+
+# Fail if THIRD_PARTY_NOTICES does not match the release dependency graph.
+notices-check:
+    go run ./internal/cmd/notices -root . -check
 
 # ── Database ─────────────────────────────────────────────────────────────────
 
@@ -208,7 +194,7 @@ diagrams:
 # ── Gate ─────────────────────────────────────────────────────────────────────
 
 # lefthook's pre-push hook and CI both run this.
-check: fmt-check lint ui-audit ui-check test ui-test
+check: fmt-check lint ui-audit ui-check notices-check test ui-test
     @echo "All checks passed"
 
 clean:

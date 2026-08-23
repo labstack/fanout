@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup and deployment questions
+    url: https://github.com/labstack/fanout/discussions
+    about: Ask the community before filing a product defect.
+  - name: Security vulnerability
+    url: https://github.com/labstack/fanout/security/advisories/new
+    about: Report vulnerabilities privately; never put secrets in an issue.

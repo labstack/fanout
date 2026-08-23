@@ -63,6 +63,36 @@ jobs:
       - name: just test-race
         run: just test-race
 
+  # Build the exact runtime image on pull requests and reject high/critical OS,
+  # Go-binary, or embedded-secret findings before merge.
+  container-scan:
+    name: Container scan
+    if: github.event_name == 'pull_request'
+    needs: gate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build the runtime image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          load: true
+          push: false
+          tags: fanout:ci
+          build-args: VERSION=sha-${{ github.event.pull_request.head.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan the runtime image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: fanout:ci
+          version: v0.74.0
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          exit-code: 1
+          format: table
+
   # Publishes the moving main and commit tags. CalVer images are built natively
   # for both architectures by release.yml; pull requests publish nothing.
   image:

@@ -39,15 +39,10 @@ lives in a separate SQLite database and never sits on the telemetry write path.
 
 ## Performance
 
-Two dedicated vCPUs sustained **5,138 traces/s — 22,612 rows/s** with zero rows
-dropped and an export p95 of 3 ms. Adding a dashboard read load of 5 queries/s
-cost about half that ingest capacity, with rollup-backed views staying under
-120 ms and raw-span queries taking seconds.
-
-Full method, per-operation query latency, and the operational caveats are in
-[docs/benchmarks/two-vcpu.md](docs/benchmarks/two-vcpu.md). `cmd/bench` takes no
-rate: it sizes itself to the machine, ramps until the server stops keeping up,
-and confirms what it found.
+The bundled [`cmd/bench`](cmd/bench) driver measures authenticated ingest and
+optional dashboard read load against your hardware. Fanout does not publish a
+throughput headline until the raw reports and exact driver revision can ship
+with it; see [the benchmark publication standard](docs/benchmarking.md).
 
 ## Requirements
 
@@ -72,7 +67,7 @@ verifies the selected archive against the release checksum before extracting:
 curl -fsSL https://raw.githubusercontent.com/labstack/fanout/main/scripts/install.sh | sh
 ```
 
-Set `FANOUT_VERSION=v{YYYY.MM}.{N}` to pin a release and `FANOUT_PREFIX` to
+Set `FANOUT_VERSION=v{YYYY.M}.{N}` to pin a release and `FANOUT_PREFIX` to
 choose the installation directory.
 
 ### Docker
@@ -127,7 +122,7 @@ Add `FANOUT_AI_API_KEY` to enable chat. Configure all four SMTP settings
 (`FANOUT_SMTP_HOST`, `FANOUT_SMTP_USERNAME`, `FANOUT_SMTP_PASSWORD`, and
 `FANOUT_SMTP_FROM`) to enable email-code login.
 
-The image runs unprivileged as UID 999. A bind-mounted host directory at
+The distroless image runs unprivileged as UID 65532. A bind-mounted host directory at
 `/var/lib/fanout/data` must be writable by that user; a named volume, as above,
 needs no such handling.
 
@@ -279,20 +274,22 @@ docs/diagrams/     d2 sources and rendered SVG
 
 ## Releases
 
-Versions are CalVer — `v{YYYY.MM}.{N}`, numbered from 1 within each month, so
-`v2026.08.2` is the second release of August 2026. Pushing a tag publishes the
+Versions are CalVer — `v{YYYY.M}.{N}`, numbered from 0 within each month, so
+`v2026.8.1` is the second release of August 2026. Pushing a tag publishes the
 matching image and moves `latest`:
 
 | Image tag | Points at |
 | --- | --- |
 | `ghcr.io/labstack/fanout:latest` | the newest release |
-| `ghcr.io/labstack/fanout:2026.08.1` | that exact release |
+| `ghcr.io/labstack/fanout:2026.8.0` | that exact release |
 | `ghcr.io/labstack/fanout:main` | the tip of `main` |
 | `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
 
 Release images are multi-architecture for `linux/amd64` and `linux/arm64`.
 Release archives provide Linux and macOS binaries for amd64 and arm64; every
 artifact is built on a native runner because DuckDB requires cgo.
+The complete release and verification contract is in
+[docs/release.md](docs/release.md).
 
 ## Contributing
 
@@ -310,4 +307,6 @@ Those describe how we operate Fanout, not what it does.
 
 ## License
 
-[Apache-2.0](LICENSE) © LabStack LLC. See [NOTICE](NOTICE) for attribution and [TRADEMARK](TRADEMARK.md) for use of the Fanout name and logo.
+[Apache-2.0](LICENSE) © LabStack LLC. See [NOTICE](NOTICE) and
+[THIRD_PARTY_NOTICES](THIRD_PARTY_NOTICES) for attribution, and
+[TRADEMARK](TRADEMARK.md) for use of the Fanout name and logo.

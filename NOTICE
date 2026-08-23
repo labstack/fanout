@@ -7,8 +7,6 @@ This product includes software developed at LabStack LLC
 Licensed under the Apache License, Version 2.0. See LICENSE for the full
 license text.
 
-This product bundles third-party components. The compiled binary embeds
-browser assets built from the dependencies declared in ui/host/package.json
-and ui/apps/package.json, and links Go modules declared in go.mod. Those
-components remain under their own licenses, which are permissive
-(MIT, BSD, Apache-2.0) or MPL-2.0.
+This product bundles third-party components. Their identities, applicable
+license and notice texts, and the reproducible generation method are recorded
+in THIRD_PARTY_NOTICES. Those components remain under their own terms.

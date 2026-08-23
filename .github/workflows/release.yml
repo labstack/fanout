@@ -3,7 +3,11 @@ name: release
 on:
   push:
     tags:
-      - "v*"
+      - "v*.*.*"
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -18,10 +22,23 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Validate CalVer tag
+        with:
+          fetch-depth: 0
+      - name: Validate CalVer tag and lineage
         run: |
-          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]{4}\.(0[1-9]|1[0-2])\.[1-9][0-9]*$ ]] || {
-            echo "release tag must match v{YYYY}.{MM}.{N}" >&2
+          set -euo pipefail
+          [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]{4}\.([1-9]|1[0-2])\.([0-9]|[1-9][0-9]*)$ ]] || {
+            echo "release tag must match v{YYYY}.{M}.{N}" >&2
+            exit 1
+          }
+          git fetch origin main --tags
+          git merge-base --is-ancestor "${GITHUB_SHA}" origin/main || {
+            echo "release tag is not on main" >&2
+            exit 1
+          }
+          newest="$(git tag --list 'v*.*.*' --sort=-v:refname | head -1)"
+          [ "${newest}" = "${GITHUB_REF_NAME}" ] || {
+            echo "${GITHUB_REF_NAME} is not the newest release tag (${newest})" >&2
             exit 1
           }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -70,7 +87,7 @@ jobs:
           version="${GITHUB_REF_NAME}"
           mkdir -p stage
           go build -trimpath -ldflags "-s -w -X main.version=${version}" -o stage/fanout ./cmd/fanout
-          for doc in LICENSE NOTICE README.md TRADEMARK.md; do
+          for doc in LICENSE NOTICE README.md THIRD_PARTY_NOTICES TRADEMARK.md; do
             if [ -f "${doc}" ]; then cp "${doc}" stage/; fi
           done
           tar -czf "fanout_${version}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" -C stage .
@@ -117,6 +134,15 @@ jobs:
           build-args: VERSION=${{ github.ref_name }}
           provenance: false
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      - name: Scan the native image
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          version: v0.74.0
+          scanners: vuln,secret
+          severity: HIGH,CRITICAL
+          exit-code: 1
+          format: table
       - name: Record the digest
         run: |
           set -euo pipefail
@@ -185,12 +211,15 @@ jobs:
     needs: [binaries, manifest, anonymous-image]
     runs-on: ubuntu-24.04
     permissions:
+      attestations: write
       contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
+          pattern: fanout_*
           merge-multiple: true
       - name: Checksum every archive
         run: |
@@ -199,6 +228,10 @@ jobs:
           ls -1 fanout_*.tar.gz
           sha256sum fanout_*.tar.gz > SHA256SUMS
           cat SHA256SUMS
+      - name: Attest archives and checksum manifest
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: artifacts/*
       - name: Publish
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -207,4 +240,63 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
+            --verify-tag \
             artifacts/fanout_*.tar.gz artifacts/SHA256SUMS
+
+  verify-release:
+    name: verify public release
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Download and verify every public asset anonymously
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "${tmp}"' EXIT
+          cd "${tmp}"
+          base="https://github.com/labstack/fanout/releases/download/${VERSION}"
+          curl -fsSLO "${base}/SHA256SUMS"
+          for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+            curl -fsSLO "${base}/fanout_${VERSION}_${target}.tar.gz"
+          done
+          sha256sum -c SHA256SUMS
+          for archive in fanout_*.tar.gz; do
+            for document in LICENSE NOTICE README.md THIRD_PARTY_NOTICES TRADEMARK.md; do
+              tar -tzf "${archive}" | grep -Eq "(^|/)${document}$" || {
+                echo "${archive} does not contain ${document}" >&2
+                exit 1
+              }
+            done
+          done
+          mkdir native
+          tar -xzf "fanout_${VERSION}_linux_amd64.tar.gz" -C native fanout
+          [ "$(native/fanout -version)" = "${VERSION}" ]
+      - name: Verify the public installer
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "${tmp}"' EXIT
+          curl -fsSL "https://raw.githubusercontent.com/labstack/fanout/${VERSION}/scripts/install.sh" -o "${tmp}/install.sh"
+          FANOUT_VERSION="${VERSION}" FANOUT_PREFIX="${tmp}/bin" sh "${tmp}/install.sh"
+          [ "$("${tmp}/bin/fanout" -version)" = "${VERSION}" ]
+      - name: Verify GitHub build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "${tmp}"' EXIT
+          cd "${tmp}"
+          base="https://github.com/labstack/fanout/releases/download/${VERSION}"
+          for target in linux_amd64 linux_arm64 darwin_amd64 darwin_arm64; do
+            archive="fanout_${VERSION}_${target}.tar.gz"
+            curl -fsSLO "${base}/${archive}"
+            gh attestation verify "${archive}" --repo labstack/fanout
+          done
