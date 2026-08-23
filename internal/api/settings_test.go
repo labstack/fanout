@@ -35,7 +35,7 @@ func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if resp.TokenRequired || resp.SuggestedEndpoint != "fanout.example.com:4317" {
+	if resp.TokenRequired || resp.SuggestedEndpoint != "fanout.example.com:4317" || resp.HeaderName != "Authorization" {
 		t.Fatalf("response = %+v", resp)
 	}
 }
@@ -56,7 +56,7 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 	current, err := store.GetIngest(req.Context())
-	if err != nil || resp.IngestToken == "" || !settings.CheckIngestToken(resp.IngestToken, current.TokenHash) {
+	if err != nil || resp.IngestToken == "" || resp.HeaderName != "Authorization" || !settings.CheckIngestToken(resp.IngestToken, current.TokenHash) {
 		t.Fatalf("response=%+v current=%+v err=%v", resp, current, err)
 	}
 }

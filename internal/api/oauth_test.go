@@ -212,7 +212,7 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 		t.Fatalf("Create user: %v", err)
 	}
 
-	anonymous := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{"X-Fanout-Request": "1"})
+	anonymous := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{"Fanout-Request": "1"})
 	if anonymous.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous browser MCP = %d, want 401", anonymous.Code)
 	}
@@ -227,8 +227,8 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 	}
 
 	browser := serve(t, e, http.MethodPost, "/api/mcp", "", map[string]string{
-		"Authorization":    "Bearer attacker-controlled",
-		"X-Fanout-Request": "1",
+		"Authorization":  "Bearer attacker-controlled",
+		"Fanout-Request": "1",
 	}, cookie)
 	if browser.Code != http.StatusNoContent {
 		t.Fatalf("session browser MCP = %d %s", browser.Code, browser.Body.String())
@@ -241,7 +241,7 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 		t.Fatalf("browser MCP scopes = %v, want read and dashboard access", scopes)
 	}
 
-	remoteWithSessionOnly := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"X-Fanout-Request": "1"}, cookie)
+	remoteWithSessionOnly := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Fanout-Request": "1"}, cookie)
 	if remoteWithSessionOnly.Code != http.StatusUnauthorized {
 		t.Fatalf("remote MCP accepted browser session: %d", remoteWithSessionOnly.Code)
 	}
@@ -346,7 +346,7 @@ var formHeaders = map[string]string{"Content-Type": "application/x-www-form-urle
 
 func oauthCookieForUser(t *testing.T, e *echo.Echo, user auth.User) *http.Cookie {
 	t.Helper()
-	rec := serve(t, e, http.MethodPost, "/api/auth/setup", "", map[string]string{"X-Test-User": user.ID, "X-Fanout-Request": "1"})
+	rec := serve(t, e, http.MethodPost, "/api/auth/setup", "", map[string]string{"X-Test-User": user.ID, "Fanout-Request": "1"})
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("test login = %d %s", rec.Code, rec.Body.String())
 	}
@@ -608,8 +608,8 @@ func serve(t *testing.T, e *echo.Echo, method, target, body string, headers map[
 	for _, cookie := range cookies {
 		req.AddCookie(cookie)
 	}
-	if len(cookies) > 0 && isUnsafeMethod(method) && req.Header.Get("X-Fanout-Request") == "" {
-		req.Header.Set("X-Fanout-Request", "1")
+	if len(cookies) > 0 && isUnsafeMethod(method) && req.Header.Get("Fanout-Request") == "" {
+		req.Header.Set("Fanout-Request", "1")
 	}
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)

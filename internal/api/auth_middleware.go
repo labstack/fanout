@@ -330,7 +330,7 @@ func validBrowserMutation(r *http.Request) bool {
 	if strings.EqualFold(strings.TrimSpace(r.Header.Get("Sec-Fetch-Site")), "cross-site") {
 		return false
 	}
-	if r.Header.Get("X-Fanout-Request") == "1" {
+	if r.Header.Get("Fanout-Request") == "1" {
 		return true
 	}
 	for _, raw := range []string{r.Header.Get("Origin"), r.Header.Get("Referer")} {

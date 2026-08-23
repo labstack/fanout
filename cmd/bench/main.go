@@ -107,7 +107,7 @@ var version = "dev"
 func main() {
 	var cfg config
 	flag.StringVar(&cfg.endpoint, "endpoint", "localhost:4317", "OTLP gRPC endpoint")
-	flag.StringVar(&cfg.token, "token", "", "ingest token (x-fanout-ingest-token); required")
+	flag.StringVar(&cfg.token, "token", "", "ingest bearer token; required")
 	flag.Float64Var(&cfg.rate, "rate", 0, "target traces per second (aggregate); 0 ramps adaptively to find what this server sustains")
 	flag.DurationVar(&cfg.duration, "duration", time.Minute, "run duration for a fixed -rate run; 0 means run until interrupted")
 	flag.IntVar(&cfg.workers, "workers", 0, "concurrent senders; 0 sizes them from the driver's cores")
@@ -552,7 +552,7 @@ func (g *generator) outCtx(ctx context.Context) context.Context {
 	if g.cfg.token == "" {
 		return ctx
 	}
-	return metadata.AppendToOutgoingContext(ctx, "x-fanout-ingest-token", g.cfg.token)
+	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+g.cfg.token)
 }
 
 // eventTime returns the timestamp for an emitted event: now(), or — when

@@ -118,14 +118,17 @@ func ingestTokenFromContext(ctx context.Context) string {
 	if !ok {
 		return ""
 	}
-	if values := md.Get("x-fanout-ingest-token"); len(values) > 0 {
-		return strings.TrimSpace(values[0])
-	}
 	if values := md.Get("authorization"); len(values) > 0 {
-		const prefix = "Bearer "
-		if strings.HasPrefix(values[0], prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(values[0], prefix))
-		}
+		return ingestTokenFromAuthorization(values[0])
+	}
+	return ""
+}
+
+func ingestTokenFromAuthorization(authorization string) string {
+	authorization = strings.TrimSpace(authorization)
+	const bearer = "Bearer "
+	if len(authorization) >= len(bearer) && strings.EqualFold(authorization[:len(bearer)], bearer) {
+		return strings.TrimSpace(authorization[len(bearer):])
 	}
 	return ""
 }

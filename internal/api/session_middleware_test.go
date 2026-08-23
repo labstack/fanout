@@ -59,7 +59,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 
 	withHeader := httptest.NewRequest(http.MethodPost, "/api/rules", nil)
 	withHeader.AddCookie(cookie)
-	withHeader.Header.Set("X-Fanout-Request", "1")
+	withHeader.Header.Set("Fanout-Request", "1")
 	recorder = httptest.NewRecorder()
 	e.ServeHTTP(recorder, withHeader)
 	if recorder.Code != http.StatusNoContent {

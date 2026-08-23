@@ -1,1 +1,0 @@
-import{a as e,n as t}from"./useNavigate-DyHkI5qo.js";import{t as n}from"./dashboard-B3L0QweY.js";import{r}from"./index-BRwupI0k.js";var i=e();function a(){let e=t(),{agentAvailable:a,openChat:o}=r();return(0,i.jsx)(n,{agentAvailable:a,onOpenChat:o,onDashboardChange:t=>void e({to:`/dashboards/$dashboardId`,params:{dashboardId:t},replace:!0})})}export{a as component};

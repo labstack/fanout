@@ -89,7 +89,7 @@ func (h *DashboardHandler) Delete(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	if c.Request().Header.Get("X-Fanout-Confirm-Delete") != c.Param("id") {
+	if c.Request().Header.Get("Fanout-Confirm-Delete") != c.Param("id") {
 		return echo.NewHTTPError(http.StatusPreconditionRequired, "dashboard deletion requires confirmation")
 	}
 	if err := h.dashboards.Delete(c.Request().Context(), owner, c.Param("id")); err != nil {
