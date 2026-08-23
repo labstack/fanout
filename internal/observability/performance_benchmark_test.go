@@ -112,7 +112,7 @@ GROUP BY
 	}
 	b.Run("raw-spans", func(b *testing.B) {
 		b.ReportMetric(5000000, "dataset_spans")
-		bench(b, rawEndpointsQuery, start, end, "prod", "", "", 100)
+		bench(b, rawEndpointsQuery, start, end, "prod", "prod", "", "", 100)
 	})
 	b.Run("endpoint-rollup", func(b *testing.B) {
 		b.ReportMetric(5000000, "dataset_spans")

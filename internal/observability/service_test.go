@@ -50,7 +50,7 @@ func TestOverviewReturnsCanonicalEnvelope(t *testing.T) {
 		AddRow("checkout", int64(1000), 0.08, 80.0, 2200.0, int64(20), int64(10)).
 		AddRow("catalog", int64(500), 0.0, 25.0, 100.0, int64(4), int64(2))
 	mock.ExpectQuery(regexp.QuoteMeta(overviewQuery)).
-		WithArgs(start, end, "prod", 100).
+		WithArgs(start, end, "prod", "prod", 100).
 		WillReturnRows(rows)
 
 	result, err := svc.Overview(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, 0)
@@ -79,12 +79,12 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(overviewQuery)).
-		WithArgs(start, end, "prod", 50).
+		WithArgs(start, end, "prod", "prod", 50).
 		WillReturnRows(sqlmock.NewRows([]string{"service", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}).
 			AddRow("checkout", int64(10), 0.0, 20.0, 40.0, int64(1), int64(1)).
 			AddRow("postgres", int64(10), 0.0, 10.0, 20.0, int64(0), int64(0)))
 	mock.ExpectQuery(regexp.QuoteMeta(topologyEdgesQuery)).
-		WithArgs(start, end, "prod", 50).
+		WithArgs(start, end, "prod", "prod", 50).
 		WillReturnRows(sqlmock.NewRows([]string{"caller", "callee", "edge_type", "calls", "average_ms", "error_rate"}).
 			AddRow("checkout", "postgres", "call", int64(10), 12.5, 0.0))
 
@@ -111,7 +111,7 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	midpoint := start.Add(30 * time.Minute)
 
 	mock.ExpectQuery(regexp.QuoteMeta(performancePointsQuery)).
-		WithArgs(start, end, "prod", "checkout", "checkout").
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}).
 			AddRow(start, int64(120), 0.10, 80.0, 220.0, int64(30), int64(8)))
 	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupStatusQuery)).
@@ -121,14 +121,14 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
 			AddRow("GET", "/pay", int64(50), 75.0, 210.0, 350.0, 0.08))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceHeatmapQuery)).
-		WithArgs(start, end, "prod", start, end, "prod").
+		WithArgs(start, end, "prod", "prod", start, end, "prod", "prod").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "service", "p95_ms"}).
 			AddRow(start, "checkout", 220.0))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceAggregateQuery)).
-		WithArgs(start, midpoint, "prod", "checkout", "checkout").
+		WithArgs(start, midpoint, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(50.0, 0.12, 90.0, 240.0))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceAggregateQuery)).
-		WithArgs(midpoint, end, "prod", "checkout", "checkout").
+		WithArgs(midpoint, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(70.0, 0.06, 70.0, 180.0))
 
 	result, err := svc.Performance(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", 25)
@@ -157,7 +157,7 @@ func TestQueryEndpointsFallsBackToRawUntilBackfillReady(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupStatusQuery)).
 		WillReturnRows(sqlmock.NewRows([]string{"ready", "watermark"}).AddRow(false, int64(0)))
 	mock.ExpectQuery(regexp.QuoteMeta(rawEndpointsQuery)).
-		WithArgs(start, end, "prod", "checkout", "checkout", 25).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", 25).
 		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
 			AddRow("GET", "/pay", int64(2), 10.0, 20.0, 25.0, 0.0))
 
@@ -181,7 +181,7 @@ func TestQueryEndpointsFallsBackToRawWhenRollupProbeFails(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupStatusQuery)).
 		WillReturnError(errors.New("rollup state temporarily unavailable"))
 	mock.ExpectQuery(regexp.QuoteMeta(rawEndpointsQuery)).
-		WithArgs(start, end, "prod", "checkout", "checkout", 25).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", 25).
 		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
 			AddRow("GET", "/pay", int64(2), 10.0, 20.0, 25.0, 0.0))
 
@@ -202,15 +202,15 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(recentTraceQuery)).
-		WithArgs(start, end, "prod", "checkout", "checkout").
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"trace_id"}).AddRow("trace-1"))
 	mock.ExpectQuery(regexp.QuoteMeta(traceSpansQuery)).
-		WithArgs(start, end, "prod", "trace-1", 20).
+		WithArgs(start, end, "prod", "prod", "trace-1", 20).
 		WillReturnRows(sqlmock.NewRows([]string{"span_id", "parent_span_id", "service", "operation", "kind", "start_time", "duration_ms", "status", "status_message"}).
 			AddRow("root", "", "checkout", "POST /pay", "SERVER", start, 200.0, "ERROR", "declined").
 			AddRow("child", "root", "payments", "charge", "CLIENT", start.Add(20*time.Millisecond), 80.0, "OK", ""))
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs(start, end, "prod", "trace-1", 20).
+		WithArgs(start, end, "prod", "prod", "trace-1", 20).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start.Add(150*time.Millisecond), "ERROR", "checkout", "payment declined", "trace-1", "root").
 			AddRow(start.Add(160*time.Millisecond), "ERROR", "payments", `charge failed: token=abc123 {"client_secret":"cs_live_9"}`, "trace-1", "child"))
@@ -238,13 +238,13 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(logsEntriesQuery)).
-		WithArgs(start, end, "prod", "checkout", "checkout", "error", "error", "declined", "%declined%", 10).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "%declined%", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root").
 			AddRow(start, "ERROR", "checkout", "card declined: token=abc123", "trace-2", "root2").
 			AddRow(start, "ERROR", "checkout", `auth declined: {"password":"hunter2"}`, "trace-3", "root3"))
 	mock.ExpectQuery(regexp.QuoteMeta(logsBucketsQuery)).
-		WithArgs(start, end, "prod", "checkout", "checkout", "error", "error", "declined", "%declined%").
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "%declined%").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
 			AddRow(start, "ERROR", int64(3)))
 
