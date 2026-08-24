@@ -1,15 +1,19 @@
 // The GitHub social preview card.
 //
-// Render it with Inter on a font path. The face is not installed system-wide,
-// so without the path the card silently falls back to a substitute and stops
-// looking like the product:
-//
-//   typst compile --font-path <dir-with-Inter> --ppi 96 --format png \
-//     docs/media/social-card.typ docs/media/social-card.png
+// Render it with `just social-card`, which pins the typst version, requires
+// Inter on a font path, and fails when the face is missing. Running typst by
+// hand does not: it warns about an unknown font family, exits 0, and writes a
+// card set in whatever it found instead. The recipe also passes `--root .`,
+// without which typst refuses to read the mark below — it sits outside this
+// file's directory, and typst sandboxes an input to its own root.
 //
 // The page is 960pt x 480pt, which is exactly 1280 x 640 pixels at 96 ppi: the
 // size GitHub expects for a social preview, and large enough that a link unfurl
 // does not resample it.
+//
+// The mark is read from ui/host/public/favicon.svg — the canonical asset that
+// internal/brand tracks — rather than copied here, so a revised mark reaches
+// the card the next time it is rendered.
 #set page(width: 960pt, height: 480pt, margin: (x: 60pt, top: 44pt, bottom: 34pt), fill: rgb("#0b0f14"))
 #set text(font: "Inter", fill: rgb("#f2f5f8"))
 
