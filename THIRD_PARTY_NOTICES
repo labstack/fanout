@@ -83,10 +83,10 @@ COMPONENT INVENTORY
 - Go: modernc.org/mathutil v1.7.1
 - Go: modernc.org/memory v1.11.0
 - Go: modernc.org/sqlite v1.55.0
-- npm: @ag-ui/client 0.0.57
-- npm: @ag-ui/core 0.0.57
-- npm: @ag-ui/encoder 0.0.57
-- npm: @ag-ui/proto 0.0.57
+- npm: @ag-ui/client 0.0.58 (declared license: MIT)
+- npm: @ag-ui/core 0.0.58 (declared license: MIT)
+- npm: @ag-ui/encoder 0.0.58 (declared license: MIT)
+- npm: @ag-ui/proto 0.0.58 (declared license: MIT)
 - npm: @bufbuild/protobuf 2.12.1 (declared license: (Apache-2.0 AND BSD-3-Clause))
 - npm: @floating-ui/core 1.8.0 (declared license: MIT)
 - npm: @floating-ui/dom 1.8.0 (declared license: MIT)
@@ -96,19 +96,19 @@ COMPONENT INVENTORY
 - npm: @fontsource/ibm-plex-mono 5.3.0 (declared license: OFL-1.1)
 - npm: @fontsource/ibm-plex-sans 5.3.0 (declared license: OFL-1.1)
 - npm: @hono/node-server 1.19.15 (declared license: MIT)
-- npm: @mantine/core 9.5.1 (declared license: MIT)
-- npm: @mantine/hooks 9.5.1 (declared license: MIT)
+- npm: @mantine/core 9.5.2 (declared license: MIT)
+- npm: @mantine/hooks 9.5.2 (declared license: MIT)
 - npm: @modelcontextprotocol/ext-apps 1.7.5 (declared license: MIT)
 - npm: @modelcontextprotocol/sdk 1.30.0 (declared license: MIT)
 - npm: @phosphor-icons/react 2.1.10 (declared license: MIT)
 - npm: @protobuf-ts/protoc 2.11.1 (declared license: Apache-2.0)
 - npm: @standard-schema/spec 1.1.0 (declared license: MIT)
-- npm: @tanstack/history 1.162.0 (declared license: MIT)
-- npm: @tanstack/query-core 5.101.4 (declared license: MIT)
-- npm: @tanstack/react-query 5.101.4 (declared license: MIT)
-- npm: @tanstack/react-router 1.170.18 (declared license: MIT)
+- npm: @tanstack/history 1.162.1 (declared license: MIT)
+- npm: @tanstack/query-core 5.102.2 (declared license: MIT)
+- npm: @tanstack/react-query 5.102.2 (declared license: MIT)
+- npm: @tanstack/react-router 1.170.32 (declared license: MIT)
 - npm: @tanstack/react-store 0.9.3 (declared license: MIT)
-- npm: @tanstack/router-core 1.171.15 (declared license: MIT)
+- npm: @tanstack/router-core 1.171.27 (declared license: MIT)
 - npm: @tanstack/store 0.9.3 (declared license: MIT)
 - npm: @types/debug 4.1.13 (declared license: MIT)
 - npm: @types/estree 1.0.9 (declared license: MIT)
@@ -294,8 +294,8 @@ COMPONENT INVENTORY
 - npm: safer-buffer 2.1.2 (declared license: MIT)
 - npm: scheduler 0.27.0 (declared license: MIT)
 - npm: send 1.2.1 (declared license: MIT)
-- npm: seroval 1.5.6 (declared license: MIT)
-- npm: seroval-plugins 1.5.6 (declared license: MIT)
+- npm: seroval 1.6.3 (declared license: MIT)
+- npm: seroval-plugins 1.6.3 (declared license: MIT)
 - npm: serve-static 2.2.1 (declared license: MIT)
 - npm: setprototypeof 1.2.0 (declared license: ISC)
 - npm: shebang-command 2.0.0 (declared license: MIT)
@@ -330,7 +330,7 @@ COMPONENT INVENTORY
 - npm: use-sidecar 1.1.3 (declared license: MIT)
 - npm: use-sync-external-store 1.6.0 (declared license: MIT)
 - npm: uuid 11.1.1 (declared license: MIT)
-- npm: uuid 14.0.1 (declared license: MIT)
+- npm: uuid 14.0.2 (declared license: MIT)
 - npm: vary 1.1.2 (declared license: MIT)
 - npm: vfile 6.0.3 (declared license: MIT)
 - npm: vfile-message 4.0.3 (declared license: MIT)
@@ -567,10 +567,10 @@ Apache License
 
 --- Applies to -------------------------------------------------------------
 - Go: github.com/ag-ui-protocol/ag-ui/sdks/community/go v0.0.0-20260730140106-bb1c2afddb48 / LICENSE
-- npm: @ag-ui/client 0.0.57 / LICENSE
-- npm: @ag-ui/core 0.0.57 / LICENSE
-- npm: @ag-ui/encoder 0.0.57 / LICENSE
-- npm: @ag-ui/proto 0.0.57 / LICENSE
+- npm: @ag-ui/client 0.0.58 / LICENSE
+- npm: @ag-ui/core 0.0.58 / LICENSE
+- npm: @ag-ui/encoder 0.0.58 / LICENSE
+- npm: @ag-ui/proto 0.0.58 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
@@ -3567,8 +3567,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: @mantine/core 9.5.1 / LICENSE
-- npm: @mantine/hooks 9.5.1 / LICENSE
+- npm: @mantine/core 9.5.2 / LICENSE
+- npm: @mantine/hooks 9.5.2 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
@@ -3893,11 +3893,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: @tanstack/history 1.162.0 / LICENSE
-- npm: @tanstack/query-core 5.101.4 / LICENSE
-- npm: @tanstack/react-query 5.101.4 / LICENSE
-- npm: @tanstack/react-router 1.170.18 / LICENSE
-- npm: @tanstack/router-core 1.171.15 / LICENSE
+- npm: @tanstack/history 1.162.1 / LICENSE
+- npm: @tanstack/query-core 5.102.2 / LICENSE
+- npm: @tanstack/react-query 5.102.2 / LICENSE
+- npm: @tanstack/react-router 1.170.32 / LICENSE
+- npm: @tanstack/router-core 1.171.27 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
@@ -7124,8 +7124,8 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: seroval 1.5.6 / LICENSE
-- npm: seroval-plugins 1.5.6 / LICENSE
+- npm: seroval 1.6.3 / LICENSE
+- npm: seroval-plugins 1.6.3 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License Copyright (c) 2025 Alexis Munsayac <alexis.munsayac@gmail.com>
@@ -7637,7 +7637,7 @@ SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
 - npm: uuid 11.1.1 / LICENSE.md
-- npm: uuid 14.0.1 / LICENSE.md
+- npm: uuid 14.0.2 / LICENSE.md
 ----------------------------------------------------------------------------
 
 The MIT License (MIT)
