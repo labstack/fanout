@@ -3,13 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f6f5f1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fcfcfc" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e14" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Fanout</title>
-    <script type="module" crossorigin src="/assets/index-BCWAnY2u.js"></script>
+    <!-- Mantine's ColorSchemeScript, inlined. Rendered from React it runs at the
+         same time as the app and cannot beat the first paint, so a reader who
+         chose dark gets a white flash on every reload. Here it sets the
+         attribute before the document paints, and the rule in index.css paints
+         the matching ground. Keep the key in step with MantineProvider's. -->
+    <script>
+      try {
+        var stored = window.localStorage.getItem("mantine-color-scheme-value");
+        var scheme = stored === "light" || stored === "dark" || stored === "auto" ? stored : "auto";
+        var computed = scheme !== "auto" ? scheme : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-mantine-color-scheme", computed);
+      } catch (e) {}
+    </script>
+    <script type="module" crossorigin src="/assets/index-BtOLla1t.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/useNavigate-DyHkI5qo.js">
-    <link rel="modulepreload" crossorigin href="/assets/auth-yGyQH6NZ.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-BbOYseT5.css">
+    <link rel="modulepreload" crossorigin href="/assets/auth-C4PUlevI.js">
+    <link rel="stylesheet" crossorigin href="/assets/index-BR1I2Za9.css">
   </head>
   <body>
     <div id="root"></div>

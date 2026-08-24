@@ -1,6 +1,6 @@
 import { HttpAgent, type Message } from "@ag-ui/client";
-import { ActionIcon, Alert, AppShell, Avatar, Box, Button, Center, Container, Group, Loader, Paper, SimpleGrid, Stack, Text, Textarea, Title, Tooltip, Typography, UnstyledButton } from "@mantine/core";
-import { ArrowUpRight, ChatCircleText, ClockCounterClockwise, GithubLogo, GlobeHemisphereWest, Layout, PaperPlaneTilt, Plus, SignOut } from "@phosphor-icons/react";
+import { ActionIcon, Alert, AppShell, Avatar, Box, Button, Center, Container, Group, Loader, Paper, SimpleGrid, Stack, Text, Textarea, Title, Tooltip, Typography, UnstyledButton, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
+import { ArrowUpRight, ChatCircleText, ClockCounterClockwise, GithubLogo, GlobeHemisphereWest, Layout, Moon, PaperPlaneTilt, Plus, SignOut, Sun } from "@phosphor-icons/react";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { createContext, FormEvent, lazy, Suspense, useContext, useEffect, useMemo, useRef, useState, type RefObject } from "react";
@@ -184,10 +184,11 @@ function Chat() {
       <AppShell.Header><Group h="100%" px={{ base: "sm", sm: "lg" }} justify="space-between" wrap="nowrap">
         <BrandLockup size="small" />
         <Group gap="xs" wrap="nowrap">
-          <Group gap={6} mr={4} visibleFrom="md"><Box w={7} h={7} bg="teal.6" style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs" fw={600}>Live</Text></Group>
+          <Group gap={6} mr={4} visibleFrom="md"><Box w={7} h={7} bg="ok" style={{ borderRadius: "50%" }} /><Text c="dimmed" size="xs" fw={600}>Live</Text></Group>
           {(agentAvailable || isChat) && <Button variant="subtle" color="gray" size="compact-sm" leftSection={isChat ? <Layout size={16} weight="bold" /> : <ChatCircleText size={16} weight="bold" />} onClick={() => isChat ? void navigate({ to: "/dashboards" }) : showChat()}>{isChat ? "Dashboard" : "Chat"}</Button>}
           {agentAvailable && <Tooltip label="Conversation history"><ActionIcon variant="subtle" color="gray" aria-label="Conversation history" onClick={() => setHistoryOpen(true)}><ClockCounterClockwise size={17} weight="bold" /></ActionIcon></Tooltip>}
           {agentAvailable && isChat && <Tooltip label="New chat"><ActionIcon variant="subtle" color="gray" aria-label="New chat" onClick={newThread}><Plus size={17} weight="bold" /></ActionIcon></Tooltip>}
+          <ColorSchemeToggle />
           <Tooltip label="Sign out"><ActionIcon variant="subtle" color="gray" aria-label="Sign out" onClick={() => void logout().catch((cause) => setError(cause instanceof Error ? cause.message : "Sign-out failed — your session is still active."))}><SignOut size={17} /></ActionIcon></Tooltip>
         </Group>
       </Group></AppShell.Header>
@@ -195,6 +196,19 @@ function Chat() {
       <ProductFooter />
     </AppShell>
   </FanoutAppContext.Provider>;
+}
+
+function ColorSchemeToggle() {
+  const { setColorScheme } = useMantineColorScheme();
+  // Reading the computed scheme rather than the stored one means the button
+  // offers the opposite of what is on screen even while the setting is "auto".
+  const scheme = useComputedColorScheme("light", { getInitialValueInEffect: true });
+  const next = scheme === "dark" ? "light" : "dark";
+  return <Tooltip label={`Switch to ${next} theme`}>
+    <ActionIcon variant="subtle" color="gray" aria-label={`Switch to ${next} theme`} onClick={() => setColorScheme(next)}>
+      {scheme === "dark" ? <Sun size={17} weight="bold" /> : <Moon size={17} weight="bold" />}
+    </ActionIcon>
+  </Tooltip>;
 }
 
 function Composer() {
@@ -209,7 +223,7 @@ function Composer() {
 
 export function ChatPage() {
   const { agentAvailable, messages, ready, running, error, bottomRef, send } = useFanoutApp();
-  if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="xl" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="teal.7" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable investigation chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
+  if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="xl" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable investigation chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const visibleMessages = messages.filter((message) => message.role !== "tool");
   if (!ready) return <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading conversation</Text></Center>;
   return <Container size={1440} px={{ base: "md", sm: "xl", lg: 72 }} pt={{ base: 36, sm: 64 }} pb={190}>
@@ -217,7 +231,7 @@ export function ChatPage() {
     <Stack gap="xl" aria-live="polite">
       {visibleMessages.map((message) => <ChatMessage key={message.id} message={message} send={send} />)}
       {running && <Group gap="xs"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">Analyzing your system</Text></Group>}
-      {error && <Alert color="red" title="Something went wrong">{error}</Alert>}
+      {error && <Alert color="bad" title="Something went wrong">{error}</Alert>}
       <div ref={bottomRef} />
     </Stack>
   </Container>;
@@ -227,7 +241,7 @@ function Welcome({ onSelect }: { onSelect: (text: string) => Promise<void> }) {
   const suggestions = ["Summarize system health for the last hour", "Find the source of elevated errors", "Map the current service dependencies"];
   return <Stack align="center" gap="lg" maw={780} mx="auto" mb={56} ta="center">
     <BrandLockup size="large" />
-    <Text c="teal" fw={700} size="xs" tt="uppercase" lts="0.14em">Your system, understood</Text>
+    <Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.14em">Your system, understood</Text>
     <Title order={1} fz={{ base: 40, sm: 56 }} lh={1.05} lts="-0.045em">See what changed.<br />Know what to do next.</Title>
     <Text c="dimmed" maw={620}>Ask about service health, latency, errors, or dependencies. Fanout turns live signals into clear answers and focused views.</Text>
     <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="sm" w="100%" mt="md">
@@ -253,8 +267,8 @@ function ChatMessage({ message, send }: { message: Message; send: (text: string)
   if (!content && message.role === "assistant") return null;
   const user = message.role === "user";
   return <Stack gap="xs" align={user ? "flex-end" : "stretch"} maw={user ? "min(92%, 650px)" : 780} ml={user ? "auto" : undefined}>
-    <Group gap="xs" justify={user ? "flex-end" : "flex-start"}><Avatar size={22} radius="sm" color={user ? "gray" : "teal"}>{user ? "Y" : "F"}</Avatar><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.08em">{user ? "You" : "Fanout"}</Text></Group>
-    {user ? <Paper withBorder radius="lg" p="sm" bg="teal.0"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper> : <Typography><Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown></Typography>}
+    <Group gap="xs" justify={user ? "flex-end" : "flex-start"}><Avatar size={22} radius="sm" color={user ? "gray" : "brand"}>{user ? "Y" : "F"}</Avatar><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.08em">{user ? "You" : "Fanout"}</Text></Group>
+    {user ? <Paper withBorder radius="lg" p="sm" bg="var(--mantine-color-brand-light)"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper> : <Typography><Markdown remarkPlugins={[remarkGfm]}>{content}</Markdown></Typography>}
   </Stack>;
 }
 

@@ -1,13 +1,21 @@
 import "@mantine/core/styles.css";
+// Four faces rather than the host app's eight: every byte here is base64'd
+// into all five single-file bundles, so this is the smallest set that still
+// puts the product's own typography inside an embedded view.
+import "@fontsource/ibm-plex-sans/latin-400.css";
+import "@fontsource/ibm-plex-sans/latin-600.css";
+import "@fontsource/ibm-plex-sans/latin-700.css";
+import "@fontsource/ibm-plex-mono/latin-500.css";
 import { Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
-import { fanoutThemeConfig } from "../../theme";
+import { fanoutCssVariables, fanoutThemeConfig } from "../../theme";
+import { bad, chart, info, ok, series, warn } from "../../tokens";
 
 const fanoutTheme = createTheme(fanoutThemeConfig);
 
 export function ViewShell({ dark, children }: { dark: boolean; children: ReactNode }) {
-  return <MantineProvider theme={fanoutTheme} forceColorScheme={dark ? "dark" : "light"}><Paper withBorder radius="lg" style={{ overflow: "hidden" }}>{children}</Paper></MantineProvider>;
+  return <MantineProvider theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} forceColorScheme={dark ? "dark" : "light"}><Paper withBorder radius="lg" style={{ overflow: "hidden" }}>{children}</Paper></MantineProvider>;
 }
 
 export function ViewHeader({ eyebrow, title, summary, onRefresh, disabled }: { eyebrow: string; title: string; summary?: string; onRefresh: () => void | Promise<unknown>; disabled?: boolean }) {
@@ -18,7 +26,7 @@ export function ViewHeader({ eyebrow, title, summary, onRefresh, disabled }: { e
 }
 
 export function ViewStatus({ error, loading }: { error?: string | null; loading?: string }) {
-  if (error) return <Alert color="red" m="md">{error}</Alert>;
+  if (error) return <Alert color="bad" m="md">{error}</Alert>;
   if (loading) return <Center mih={160} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">{loading}</Text></Center>;
   return null;
 }
@@ -68,11 +76,29 @@ export function PageControls({ page, totalPages, from, to, total, onChange }: { 
 }
 
 export function healthColor(health: string) {
-  return health === "healthy" ? "teal" : health === "degraded" ? "yellow" : "red";
+  return health === "healthy" ? "ok" : health === "degraded" ? "warn" : "bad";
 }
 
+/* A chart is drawn into a canvas, which cannot read CSS custom properties, so
+   everything below hands ECharts resolved values from the same ramps Mantine
+   gets. The shade differs by scheme for the same reason the accent does: the
+   palette's own hue reads on Ayu, a darker stop is needed on white. */
+
 export function chartTheme(dark: boolean) {
-  return dark
-    ? { text: "#c1c9c5", muted: "#8c9892", grid: "#303a35", surface: "#1b211e", border: "#38443e" }
-    : { text: "#344039", muted: "#748078", grid: "#e5e9e6", surface: "#ffffff", border: "#d7ddd9" };
+  return chart[dark ? "dark" : "light"];
+}
+
+export function statusHex(dark: boolean) {
+  const shade = dark ? 5 : 7;
+  return { ok: ok[shade], warn: warn[shade], bad: bad[shade], info: info[shade] };
+}
+
+/** One color per service or metric, where the color identifies rather than
+ *  grades. Hashed so a service keeps its color between renders, and drawn from
+ *  a palette with no health hue in it. */
+export function seriesColor(name: string, dark: boolean) {
+  const palette = series[dark ? "dark" : "light"];
+  let hash = 0;
+  for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) | 0;
+  return palette[Math.abs(hash) % palette.length];
 }

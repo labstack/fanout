@@ -1,4 +1,31 @@
-/* Third-party integration boundaries only. Product components are styled by Mantine. */
+/* Third-party integration boundaries, plus the two rules Mantine has no token
+   for. Everything else is styled by the theme in ui/theme.ts. */
+
+/* The ground for the first paint, before the app's own variables exist. The
+   attribute is set by the inline script in index.html; Mantine's CSS supplies
+   its default palette at that moment, not this one, so the ground is stated
+   literally here. The two values are `ground` in ui/tokens.ts — CSS cannot
+   import them, so changing one means changing both.
+
+   `light-dark()` cannot do this job: Mantine's own stylesheet sets
+   `color-scheme` on `:root`, which outranks `html`, to a variable that is not
+   defined until MantineProvider runs — so the function would resolve to its
+   light argument every time. */
+html {
+  background: #fcfcfc;
+}
+
+html[data-mantine-color-scheme="dark"] {
+  background: #0b0e14;
+}
+
+/* Headings are set in the mono display face, which puts every glyph on the same
+   advance, so a title needs pulling in to read as a precise label rather than
+   as spaced-out text. Same -0.015em the site uses. :where() keeps specificity
+   at zero, so a component's own lts prop still wins. */
+:where(.mantine-Title-root, h1, h2, h3, h4, h5, h6) {
+  letter-spacing: -0.015em;
+}
 html,
 body,
 #root {

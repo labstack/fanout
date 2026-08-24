@@ -20,6 +20,10 @@ const stripTrailingWhitespace = () => ({
 export default defineConfig({
   plugins: [react(), viteSingleFile(), stripTrailingWhitespace()],
   build: {
+    // Every asset has to end up inside the single HTML file, and the default
+    // 4 kB ceiling would leave the typeface as five loose .woff2 files that the
+    // build never copies into internal/mcp/apps.
+    assetsInlineLimit: 100_000,
     cssMinify: true,
     minify: true,
     outDir: "dist",

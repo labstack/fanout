@@ -128,7 +128,7 @@ export default function ChatHistoryDrawer({ opened, activeThreadID, onClose, onN
       <Divider />
       <ScrollArea type="auto" offsetScrollbars flex={1}>
         {history.isLoading && <Center py="xl"><Loader size="sm" /></Center>}
-        {history.isError && <Alert color="red" title="History unavailable">Your conversations could not be loaded.</Alert>}
+        {history.isError && <Alert color="bad" title="History unavailable">Your conversations could not be loaded.</Alert>}
         {!history.isLoading && !history.isError && threads.length === 0 && <Box py="xl" px="sm" ta="center">
           <Text fw={600}>{query ? "No matching investigations" : "No investigations yet"}</Text>
           <Text c="dimmed" size="sm" mt={4}>{query ? "Try words from the opening question." : "Your completed investigations will appear here."}</Text>
@@ -160,7 +160,7 @@ export default function ChatHistoryDrawer({ opened, activeThreadID, onClose, onN
                     </Menu.Target>
                     <Menu.Dropdown>
                       <Menu.Item leftSection={<PencilSimple size={15} />} onClick={() => beginRename(thread)}>Rename</Menu.Item>
-                      <Menu.Item color="red" leftSection={<Trash size={15} />} onClick={() => { setMutationError(""); setDeleting(thread); }}>Delete</Menu.Item>
+                      <Menu.Item color="bad" leftSection={<Trash size={15} />} onClick={() => { setMutationError(""); setDeleting(thread); }}>Delete</Menu.Item>
                     </Menu.Dropdown>
                   </Menu>
                 </Group>
@@ -176,7 +176,7 @@ export default function ChatHistoryDrawer({ opened, activeThreadID, onClose, onN
       <form onSubmit={(event) => { event.preventDefault(); void renameThread(); }}>
         <Stack>
           <TextInput label="Name" value={renameTitle} onChange={(event) => setRenameTitle(event.currentTarget.value)} maxLength={120} autoFocus />
-          {mutationError && <Alert color="red">{mutationError}</Alert>}
+          {mutationError && <Alert color="bad">{mutationError}</Alert>}
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setRenaming(null)} disabled={busy}>Cancel</Button>
             <Button type="submit" loading={busy} disabled={!renameTitle.trim()}>Save</Button>
@@ -187,10 +187,10 @@ export default function ChatHistoryDrawer({ opened, activeThreadID, onClose, onN
     <Modal opened={deleting !== null} onClose={() => !busy && setDeleting(null)} title="Delete investigation?" centered>
       <Stack>
         <Text size="sm">This permanently removes <Text span fw={650}>{deleting?.title}</Text> and its saved conversation.</Text>
-        {mutationError && <Alert color="red">{mutationError}</Alert>}
+        {mutationError && <Alert color="bad">{mutationError}</Alert>}
         <Group justify="flex-end">
           <Button variant="default" onClick={() => setDeleting(null)} disabled={busy}>Cancel</Button>
-          <Button color="red" loading={busy} onClick={() => void deleteThread()}>Delete</Button>
+          <Button color="bad" loading={busy} onClick={() => void deleteThread()}>Delete</Button>
         </Group>
       </Stack>
     </Modal>
