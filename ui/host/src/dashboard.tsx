@@ -109,14 +109,14 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
       </Box>
       <Group wrap="nowrap" w={{ base: "100%", md: "auto" }}>
         {agentAvailable && <Button variant="default" leftSection={<Sparkle size={16} weight="fill" />} flex={{ base: 1, md: "initial" }} onClick={() => onOpenChat("Create a new dashboard for me. First ask what I want to monitor, then design it when you have enough context.")}>Create with AI</Button>}
-        <Button leftSection={selected.isFetching ? <Loader size={15} color="white" /> : <ArrowClockwise size={16} weight="bold" />} onClick={() => void queryClient.invalidateQueries()}>{selected.isFetching ? "Refreshing" : "Refresh"}</Button>
+        <Button leftSection={selected.isFetching ? <Loader size={15} color="var(--mantine-primary-color-contrast)" /> : <ArrowClockwise size={16} weight="bold" />} onClick={() => void queryClient.invalidateQueries()}>{selected.isFetching ? "Refreshing" : "Refresh"}</Button>
       </Group>
     </Flex>
 
-    {save.isError && <Alert color="red" radius="lg" mb="lg" icon={<WarningCircle size={18} weight="fill" />} title="Dashboard changes not saved">
+    {save.isError && <Alert color="bad" radius="lg" mb="lg" icon={<WarningCircle size={18} weight="fill" />} title="Dashboard changes not saved">
       <Group justify="space-between" gap="sm">
         <Text size="sm">Your latest edits are kept on this screen but Fanout could not store them.</Text>
-        <Button size="compact-sm" color="red" variant="light" onClick={() => save.mutate(state)}>Retry save</Button>
+        <Button size="compact-sm" color="bad" variant="light" onClick={() => save.mutate(state)}>Retry save</Button>
       </Group>
     </Alert>}
 
@@ -127,7 +127,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
           <TextInput label="Namespace" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={(event) => update({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} placeholder="All namespaces" w={{ base: "100%", xs: 220 }} />
         </Group>
         <Flex wrap={{ base: "wrap", sm: "nowrap" }} justify={{ base: "flex-start", md: "flex-end" }} align="center" gap={{ base: "sm", sm: "md" }} w={{ base: "100%", md: "auto" }}>
-          <Group gap="xs" wrap="nowrap"><Indicator color={save.isError ? "red" : save.isPending ? "yellow" : "teal"} processing={save.isPending} size={8} /><Text c="dimmed" size="sm" miw={48}>{save.isPending ? "Saving" : save.isError ? "Failed" : "Saved"}</Text></Group>
+          <Group gap="xs" wrap="nowrap"><Indicator color={save.isError ? "bad" : save.isPending ? "warn" : "ok"} processing={save.isPending} size={8} /><Text c="dimmed" size="sm" miw={48}>{save.isPending ? "Saving" : save.isError ? "Failed" : "Saved"}</Text></Group>
           <Divider orientation="vertical" h={28} />
           <Menu shadow="md" position="bottom-end" withinPortal>
             <Menu.Target><Button variant="default" leftSection={<Plus size={16} weight="bold" />} rightSection={<CaretDown size={14} weight="bold" />}>Add view</Button></Menu.Target>
@@ -165,7 +165,7 @@ function WidgetCard({ widget, filters, agentAvailable, onRemove, onOpenChat }: {
   const failed = sources[widget.type]?.isError ?? false;
 
   return <Paper withBorder shadow="xs" radius="lg" p="lg" h="100%" style={{ overflow: "hidden" }}><Stack h="100%" gap="sm">
-    <Group justify="space-between" align="flex-start" wrap="nowrap"><Box><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.1em">{widget.type === "assistant" ? "Guidance" : widget.type}</Text><Title order={2} fz="lg" mt={2}>{widget.title}</Title></Box><Tooltip label={`Remove ${widget.title}`}><ActionIcon variant="subtle" color="red" aria-label={`Remove ${widget.title}`} onClick={onRemove}><X size={16} weight="bold" /></ActionIcon></Tooltip></Group>
+    <Group justify="space-between" align="flex-start" wrap="nowrap"><Box><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.1em">{widget.type === "assistant" ? "Guidance" : widget.type}</Text><Title order={2} fz="lg" mt={2}>{widget.title}</Title></Box><Tooltip label={`Remove ${widget.title}`}><ActionIcon variant="subtle" color="bad" aria-label={`Remove ${widget.title}`} onClick={onRemove}><X size={16} weight="bold" /></ActionIcon></Tooltip></Group>
     <ScrollArea type="auto" offsetScrollbars flex={1}>
       {failed && <WidgetError />}
       {!failed && widget.type === "overview" && <SimpleGrid cols={2} spacing="sm"><Metric label="Health" value={health?.health ?? "—"} /><Metric label="Services" value={health?.service_count ?? "—"} /><Metric label="Spans" value={health?.total_spans?.toLocaleString?.() ?? "—"} /><Metric label="Error rate" value={health ? `${(health.error_rate * 100).toFixed(2)}%` : "—"} /></SimpleGrid>}
@@ -185,16 +185,16 @@ function DataTable({ rows, empty }: { rows: React.ReactNode[][]; empty: string }
 }
 
 function HealthBadge({ health, label }: { health: string; label: string }) {
-  return <Badge color={health === "healthy" ? "teal" : health === "degraded" ? "yellow" : "red"} variant="light" tt="none">{label}</Badge>;
+  return <Badge color={health === "healthy" ? "ok" : health === "degraded" ? "warn" : "bad"} variant="light" tt="none">{label}</Badge>;
 }
 
 function severityColor(severity: string) {
   const value = String(severity).toUpperCase();
-  return value === "ERROR" || value === "FATAL" ? "red" : value === "WARN" || value === "WARNING" ? "yellow" : value === "INFO" ? "teal" : "blue";
+  return value === "ERROR" || value === "FATAL" ? "bad" : value === "WARN" || value === "WARNING" ? "warn" : value === "INFO" ? "info" : "gray";
 }
 
 function Metric({ label, value }: { label: string; value: string | number }) {
-  return <Paper withBorder radius="md" p="sm" bg="gray.0"><Text c="dimmed" size="xs">{label}</Text><Text fw={700} fz="xl" mt={4} tt="capitalize">{value}</Text></Paper>;
+  return <Paper withBorder radius="md" p="sm" bg="var(--mantine-color-default)"><Text c="dimmed" size="xs">{label}</Text><Text fw={700} fz="xl" mt={4} tt="capitalize">{value}</Text></Paper>;
 }
 
 function Empty({ text }: { text: string }) {
@@ -202,5 +202,5 @@ function Empty({ text }: { text: string }) {
 }
 
 function WidgetError() {
-  return <Center py="xl"><WarningCircle size={20} weight="fill" color="var(--mantine-color-red-6)" /><Text c="red.7" fw={500} size="sm" ml="xs">Couldn't load this view — retrying automatically</Text></Center>;
+  return <Center py="xl"><WarningCircle size={20} weight="fill" color="var(--mantine-color-bad-filled)" /><Text c="bad" fw={500} size="sm" ml="xs">Couldn't load this view — retrying automatically</Text></Center>;
 }
