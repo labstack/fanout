@@ -1,0 +1,68 @@
+# Dependency updates.
+#
+# The actions are pinned to commit SHAs rather than tags, which is what makes
+# this file worth having: a pinned SHA never moves on its own, so without
+# something proposing new ones the pins quietly rot. Dependabot resolves each
+# new SHA and says which release it belongs to, one reviewable pull request at
+# a time — the thing a human should never do by hand.
+#
+# Everything is grouped by ecosystem so a week of patch drift arrives as one
+# pull request instead of a dozen. Major versions are deliberately left out of
+# the groups: they arrive on their own, because they are the ones that need a
+# person to read the migration notes.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions:
+        update-types: [minor, patch]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      go:
+        update-types: [minor, patch]
+
+  # The two browser workspaces are separate dependency graphs on purpose, and
+  # each carries its own `overrides` block pinning security fixes, so they are
+  # listed separately rather than as one glob.
+  - package-ecosystem: bun
+    directory: /ui/host
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      host:
+        update-types: [minor, patch]
+
+  - package-ecosystem: bun
+    directory: /ui/apps
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      apps:
+        update-types: [minor, patch]
+
+  # The documentation site is npm, not bun.
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      site:
+        update-types: [minor, patch]
