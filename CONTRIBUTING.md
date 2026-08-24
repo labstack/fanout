@@ -46,6 +46,14 @@ source beside it. Edit the `.d2`, run `just diagrams`, and commit both. The
 committed SVG comes from d2 0.7.1; a different version re-renders every file
 and produces a large diff that is not a real change.
 
+**The social preview card is generated.** `docs/media/social-card.png` is
+rendered from the `.typ` beside it by `just social-card`, which needs Inter on a
+font path — set `FANOUT_FONT_PATH` to a directory holding it. CI has no such
+directory, so nothing re-renders the card to compare it; if you edit the source,
+run the recipe and commit the PNG in the same change. The recipe fails when the
+font is missing rather than shipping a card in a substitute face, which typst
+would otherwise do without complaint.
+
 **Runtime configuration is strict.** [`fanout.example.yaml`](fanout.example.yaml)
 is the complete schema. New settings need a YAML key, a `FANOUT_` environment
 name, a test, and matching documentation; unknown names deliberately fail

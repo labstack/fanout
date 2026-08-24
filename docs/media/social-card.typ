@@ -20,7 +20,7 @@
   columns: (86pt, 1fr),
   column-gutter: 16pt,
   align: horizon,
-  image("social-card-mark.svg", width: 84pt),
+  image("../../ui/host/public/favicon.svg", width: 84pt),
   text(size: 56pt, weight: 700, "Fanout"),
 )
 
@@ -36,11 +36,15 @@
   and ask an agent about it. One Go process.
 ]
 
-#place(bottom + left, dy: 0pt, block(width: 840pt)[
-  #line(length: 100%, stroke: 0.75pt + rgb("#1b2430"))
-  #v(12pt)
-  #grid(columns: (1fr, auto),
-    text(size: 19pt, fill: rgb("#8a94a6"))[No collector fleet. No object store. One data directory.],
-    text(size: 19pt, fill: rgb("#8a94a6"))[github.com/labstack/fanout],
-  )
-])
+// The footer is pushed down by flexible space rather than placed at the bottom
+// out of flow. Placed, it drew at a fixed offset regardless of how tall the
+// text above had grown, so one extra headline line put the divider through the
+// body copy and typst still exited 0. In flow, the same overflow spills onto a
+// second page, and a two-page render fails the PNG export outright.
+#v(1fr)
+#line(length: 100%, stroke: 0.75pt + rgb("#1b2430"))
+#v(12pt)
+#grid(columns: (1fr, auto),
+  text(size: 19pt, fill: rgb("#8a94a6"))[No collector fleet. No object store. One data directory.],
+  text(size: 19pt, fill: rgb("#8a94a6"))[github.com/labstack/fanout],
+)
