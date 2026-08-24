@@ -2,7 +2,7 @@ import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
-import { Alert, Box, Center, Loader, Text } from "@mantine/core";
+import { Alert, Box, Center, Loader, Text, useComputedColorScheme } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { authorizedFetch } from "./auth";
 
@@ -186,6 +186,16 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
   const [error, setError] = useState("");
   const [connectionGeneration, setConnectionGeneration] = useState(0);
   const reconnectAttemptRef = useRef(0);
+  // An embedded view cannot see the host's stylesheet, so the scheme travels to
+  // it as host context. The ref is what a bridge reads at connect time; the
+  // effect below pushes every later change to a bridge already open.
+  const colorScheme = useComputedColorScheme("light");
+  const colorSchemeRef = useRef(colorScheme);
+  colorSchemeRef.current = colorScheme;
+
+  useEffect(() => {
+    bridgeRef.current?.setHostContext({ theme: colorScheme, displayMode: "inline" });
+  }, [colorScheme]);
 
   useEffect(() => { reconnectAttemptRef.current = 0; }, [content.resourceUri]);
 
@@ -257,7 +267,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
         null,
         { name: "Fanout", version: "0.2.0" },
         { openLinks: {}, serverTools: {}, logging: {} },
-        { hostContext: { theme: "light", displayMode: "inline" } },
+        { hostContext: { theme: colorSchemeRef.current, displayMode: "inline" } },
       );
       bridge.oncalltool = (params, extra) => mcpClient.request(
         { method: "tools/call", params },
@@ -289,7 +299,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
     }
   }
 
-  if (error) return <Alert color="red" m="md">{error}</Alert>;
+  if (error) return <Alert color="bad" m="md">{error}</Alert>;
   if (!html) return <Center mih={180} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Preparing view…</Text></Center>;
   return <Box component="iframe" ref={iframeRef} title="Fanout analysis view" sandbox="allow-scripts" scrolling="auto" srcDoc={html} w="100%" bd={0} bg="var(--mantine-color-body)" style={{ display: "block", height, transition: "height 200ms ease" }} onLoad={() => void connectBridge()} />;
 }

@@ -3,7 +3,7 @@ import { ActionIcon, Badge, Group, Paper, SegmentedControl, Table, Text, TextInp
 import { ArrowSquareOut, ListMagnifyingGlass, MagnifyingGlass } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, PageControls, ViewHeader, ViewShell, ViewStatus, chartTheme, usePagedItems } from "./components";
+import { EmptyState, MetaFooter, PageControls, ViewHeader, ViewShell, ViewStatus, chartTheme, statusHex, usePagedItems } from "./components";
 import type { LogEntry, Logs, Result } from "./contracts";
 import { EChart, useECharts } from "./echart";
 import { windowLabel } from "./format";
@@ -40,7 +40,7 @@ function LogHistogram({ data, dark }: { data: Logs; dark: boolean }) {
     const times = [...new Set(data.buckets.map((bucket) => bucket.time))];
     const severities = [...new Set(data.buckets.map((bucket) => bucket.severity))];
     const values = new Map(data.buckets.map((bucket) => [`${bucket.time}\u0000${bucket.severity}`, bucket.count]));
-    return { color: severities.map(severityHex), grid: { left: 42, right: 18, top: 30, bottom: 28 }, tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } }, legend: { top: 0, right: 0, textStyle: { color: colors.muted, fontSize: 9 }, itemWidth: 7, itemHeight: 7, icon: "circle" }, xAxis: { type: "category", data: times.map((time) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })), axisLabel: { color: colors.muted, fontSize: 8, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: 8 } }, series: severities.map((severity) => ({ name: severity, type: "bar", stack: "logs", barMaxWidth: 22, data: times.map((time) => values.get(`${time}\u0000${severity}`) ?? 0), itemStyle: { borderRadius: [2, 2, 0, 0] } })) };
+    return { color: severities.map((severity) => severityHex(severity, dark)), grid: { left: 42, right: 18, top: 30, bottom: 28 }, tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } }, legend: { top: 0, right: 0, textStyle: { color: colors.muted, fontSize: 9 }, itemWidth: 7, itemHeight: 7, icon: "circle" }, xAxis: { type: "category", data: times.map((time) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })), axisLabel: { color: colors.muted, fontSize: 8, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: 8 } }, series: severities.map((severity) => ({ name: severity, type: "bar", stack: "logs", barMaxWidth: 22, data: times.map((time) => values.get(`${time}\u0000${severity}`) ?? 0), itemStyle: { borderRadius: [2, 2, 0, 0] } })) };
   }, [dark, data.buckets]);
   return <Paper withBorder radius="md" mx={{ base: "md", sm: "lg" }} p="xs"><EChart option={option} height={190} label="Log volume by severity over time" /></Paper>;
 }
@@ -54,7 +54,7 @@ function LogList({ entries, onTrace }: { entries: LogEntry[]; onTrace: (entry: L
   </Table></Table.ScrollContainer><PageControls {...logs} onChange={logs.setPage} /></>;
 }
 
-function severityColor(value: string) { const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return "red"; if (severity === "WARN" || severity === "WARNING") return "yellow"; if (severity === "INFO") return "teal"; return "blue"; }
-function severityHex(value: string) { const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return "#fa5252"; if (severity === "WARN" || severity === "WARNING") return "#fab005"; if (severity === "INFO") return "#12b886"; return "#228be6"; }
+function severityColor(value: string) { const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return "bad"; if (severity === "WARN" || severity === "WARNING") return "warn"; if (severity === "INFO") return "info"; return "gray"; }
+function severityHex(value: string, dark: boolean) { const status = statusHex(dark); const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return status.bad; if (severity === "WARN" || severity === "WARNING") return status.warn; if (severity === "INFO") return status.info; return chartTheme(dark).muted; }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><LogsApp /></StrictMode>);

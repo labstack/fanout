@@ -3,9 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f6f5f1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#fcfcfc" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0b0e14" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Fanout</title>
+    <!-- Mantine's ColorSchemeScript, inlined. Rendered from React it runs at the
+         same time as the app and cannot beat the first paint, so a reader who
+         chose dark gets a white flash on every reload. Here it sets the
+         attribute before the document paints, and the rule in index.css paints
+         the matching ground. Keep the key in step with MantineProvider's. -->
+    <script>
+      try {
+        var stored = window.localStorage.getItem("mantine-color-scheme-value");
+        var scheme = stored === "light" || stored === "dark" || stored === "auto" ? stored : "auto";
+        var computed = scheme !== "auto" ? scheme : window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        document.documentElement.setAttribute("data-mantine-color-scheme", computed);
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="root"></div>
