@@ -72,6 +72,23 @@ func renderMCPTools() ([]byte, error) {
 	b.WriteString("Every tool is **closed-world**: it reads or writes what this instance holds\n")
 	b.WriteString("and reaches nothing else.\n\n")
 
+	// Each row links to the tool's own section, whose heading is the tool name.
+	// That only works while the name is already what a slugger would produce
+	// from it: a name with an uppercase letter or a dot slugs to something else
+	// and every row link on the page goes dead. Nothing downstream catches a
+	// dead in-page anchor, so the assumption is checked where it is made.
+	for _, tool := range tools {
+		if !anchorSafe(tool.Name) {
+			return nil, fmt.Errorf(
+				"tool name %q is not usable as a heading anchor, so the summary table's "+
+					"link to its section would not resolve; either keep tool names to "+
+					"lowercase letters, digits and underscores, or slug the anchor in "+
+					"cmd/fanout-docgen/mcptools.go",
+				tool.Name,
+			)
+		}
+	}
+
 	b.WriteString("| Tool | Changes state |\n")
 	b.WriteString("|---|---|\n")
 	for _, tool := range tools {
@@ -200,4 +217,22 @@ func mdx(value string) string {
 // not that their rows have the right shape.
 func cell(value string) string {
 	return strings.ReplaceAll(mdx(value), "|", "\\|")
+}
+
+// anchorSafe reports whether a name is already what a heading slugger would
+// produce from it, so `## name` and `](#name)` agree.
+func anchorSafe(name string) bool {
+	if name == "" {
+		return false
+	}
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '_' || r == '-':
+		default:
+			return false
+		}
+	}
+	return true
 }

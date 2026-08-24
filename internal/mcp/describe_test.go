@@ -95,6 +95,12 @@ func TestDescribeToolsReportsCompleteMetadata(t *testing.T) {
 			if input.Type == "" {
 				t.Errorf("%s input %q has no type", doc.Name, input.Name)
 			}
+			// `any` would read as a deliberate "accepts anything" rather than
+			// "the generator could not tell", so it is refused upstream. Asserted
+			// here too, because the difference matters to whoever calls the tool.
+			if input.Type == "any" {
+				t.Errorf("%s input %q published as `any`", doc.Name, input.Name)
+			}
 		}
 	}
 }
@@ -140,5 +146,41 @@ func TestDescribeToolsReportsTheSharedObservabilityScope(t *testing.T) {
 				t.Errorf("%s input %q is %q, want %q", name, input, got[input], typ)
 			}
 		}
+	}
+}
+
+// A schema the generator cannot reduce to a type must fail rather than publish
+// `any`. The SDK emits $ref, anyOf or a bare enum for shapes like a pointer or
+// an interface, and --check would not catch the result: a page carrying a wrong
+// type is self-consistent with the generator that wrote it.
+func TestSchemaTypeRefusesAnUntypedProperty(t *testing.T) {
+	for name, property := range map[string]map[string]any{
+		"a $ref":        {"$ref": "#/$defs/State"},
+		"an anyOf":      {"anyOf": []any{map[string]any{"type": "string"}}},
+		"a bare enum":   {"enum": []any{"a", "b"}},
+		"only null":     {"type": []any{"null"}},
+		"an empty type": {"type": ""},
+	} {
+		if got, err := schemaType(property); err == nil {
+			t.Errorf("%s was accepted and published as %q", name, got)
+		}
+	}
+}
+
+func TestSchemaTypeRendersUnionsWithoutNull(t *testing.T) {
+	got, err := schemaType(map[string]any{"type": []any{"null", "array"}})
+	if err != nil {
+		t.Fatalf("nullable array refused: %v", err)
+	}
+	if got != "array" {
+		t.Errorf("nullable array rendered %q, want array", got)
+	}
+
+	got, err = schemaType(map[string]any{"type": []any{"string", "integer"}})
+	if err != nil {
+		t.Fatalf("union refused: %v", err)
+	}
+	if got != "string or integer" {
+		t.Errorf("union rendered %q, want \"string or integer\"", got)
 	}
 }

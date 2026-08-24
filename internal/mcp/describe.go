@@ -221,9 +221,13 @@ func toolInputs(toolName string, raw any) ([]ToolInput, error) {
 			)
 		}
 		description, _ := property["description"].(string)
+		typ, err := schemaType(property)
+		if err != nil {
+			return nil, fmt.Errorf("tool %s: input %q: %w", toolName, name, err)
+		}
 		inputs = append(inputs, ToolInput{
 			Name:        name,
-			Type:        schemaType(property),
+			Type:        typ,
 			Description: description,
 			Required:    required[name],
 		})
@@ -247,10 +251,19 @@ func toolInputs(toolName string, raw any) ([]ToolInput, error) {
 // is dropped because every optional input is nullable and saying so in every row
 // carries no information; what remains is rendered as a union rather than
 // letting the first member silently win.
-func schemaType(property map[string]any) string {
+//
+// A property with no determinable type is an error rather than a cell reading
+// `any`. The SDK emits `$ref`, `anyOf` or a bare `enum` for shapes it cannot
+// reduce to one type — making an input a pointer or an interface is enough — and
+// `any` would publish as a deliberate statement that the tool accepts anything.
+// Nothing downstream would catch it: --check compares the generator's output to
+// itself, so a wrong type is self-consistent.
+func schemaType(property map[string]any) (string, error) {
 	switch t := property["type"].(type) {
 	case string:
-		return t
+		if t != "" {
+			return t, nil
+		}
 	case []any:
 		out := make([]string, 0, len(t))
 		for _, entry := range t {
@@ -261,8 +274,19 @@ func schemaType(property map[string]any) string {
 			out = append(out, name)
 		}
 		if len(out) > 0 {
-			return strings.Join(out, " or ")
+			return strings.Join(out, " or "), nil
 		}
 	}
-	return "any"
+
+	// Name what the schema does carry, so the message points at the cause.
+	keys := make([]string, 0, len(property))
+	for key := range property {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return "", fmt.Errorf(
+		"the schema names no type (it carries %s); the reference would publish it as "+
+			"`any`, which reads as \"accepts anything\" rather than \"not determined\"",
+		strings.Join(keys, ", "),
+	)
 }
