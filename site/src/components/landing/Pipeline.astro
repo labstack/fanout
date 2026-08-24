@@ -1,0 +1,168 @@
+---
+/* The shape of the product, which happens to be its name.
+ *
+ * Three signals fan in over one protocol, one process holds them, and the
+ * answers fan back out to whoever asked — a browser, the API, an agent. Drawing
+ * it as a convergence and a divergence says more than a left-to-right rail
+ * does, because the argument is not that the steps are ordered. It is that the
+ * middle is a single box, and that everything on both sides speaks to it
+ * through interfaces you already have.
+ *
+ * Inline SVG so it themes with the page through Starlight's tokens; a raster
+ * image would need a second copy of itself for light mode. The <title> carries
+ * the same content for anyone who cannot see the drawing, and the caption below
+ * carries the argument on its own for anyone on a narrow screen where the
+ * labels would collide.
+ */
+const inputs = [
+  { label: "traces", y: 44 },
+  { label: "logs", y: 110 },
+  { label: "metrics", y: 176 },
+];
+
+const outputs = [
+  { label: "browser", y: 44 },
+  { label: "API", y: 110 },
+  { label: "agent · MCP", y: 176 },
+];
+
+// Fan-in curves flatten as they approach the box, so the three streams read as
+// merging rather than as three arrows that happen to end near each other.
+const inPath = (y: number) =>
+  y === 110 ? "M112 110 H300" : `M112 ${y} C 200 ${y}, 214 110, 300 110`;
+
+const outPath = (y: number) =>
+  y === 110 ? "M500 110 H688" : `M500 110 C 586 110, 600 ${y}, 688 ${y}`;
+---
+
+<figure class="fo-fan">
+  <svg viewBox="0 0 800 220" role="img" aria-labelledby="fo-fan-title">
+    <title id="fo-fan-title">
+      Traces, logs and metrics arrive over OTLP into a single Fanout process
+      that writes Parquet and queries it with DuckDB, and the answers leave to a
+      browser, the HTTP API, or an agent over MCP.
+    </title>
+
+    <defs>
+      <linearGradient id="fo-fan-in" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0" stop-color="var(--sl-color-gray-4)" stop-opacity="0.35"></stop>
+        <stop offset="1" stop-color="var(--sl-color-accent)"></stop>
+      </linearGradient>
+      <linearGradient id="fo-fan-out" x1="0" x2="1" y1="0" y2="0">
+        <stop offset="0" stop-color="var(--sl-color-accent)"></stop>
+        <stop offset="1" stop-color="var(--sl-color-gray-4)" stop-opacity="0.35"></stop>
+      </linearGradient>
+    </defs>
+
+    {
+      inputs.map((row) => (
+        <>
+          <path d={inPath(row.y)} fill="none" stroke="url(#fo-fan-in)" stroke-width="1.75" />
+          <circle cx="104" cy={row.y} r="5" fill="var(--sl-color-gray-4)" />
+          <text class="fo-fan-side" x="88" y={row.y + 4}>{row.label}</text>
+        </>
+      ))
+    }
+
+    {
+      outputs.map((row) => (
+        <>
+          <path d={outPath(row.y)} fill="none" stroke="url(#fo-fan-out)" stroke-width="1.75" />
+          <circle cx="696" cy={row.y} r="5" fill="var(--sl-color-gray-4)" />
+          <text class="fo-fan-side fo-fan-out-label" x="712" y={row.y + 4}>{row.label}</text>
+        </>
+      ))
+    }
+
+    {/* The whole point of the drawing: one box in the middle. */}
+    <rect
+      x="300" y="66" width="200" height="88" rx="12"
+      fill="var(--sl-color-gray-6)"
+      stroke="var(--sl-color-accent)"
+      stroke-width="1.5"
+    ></rect>
+    <text class="fo-fan-box-title" x="400" y="92">one process</text>
+    <text class="fo-fan-box-line" x="400" y="112">Parquet on disk</text>
+    <text class="fo-fan-box-line" x="400" y="130">DuckDB in-process</text>
+
+    <text class="fo-fan-proto" x="206" y="98">OTLP</text>
+  </svg>
+
+  <figcaption><slot /></figcaption>
+</figure>
+
+<style>
+  .fo-fan {
+    margin: 2.25rem 0 0;
+  }
+
+  .fo-fan svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    max-height: 260px;
+    overflow: visible;
+  }
+
+  /* SVG text does not pick up the page font through the cascade in every
+     browser, so every class names it. */
+  .fo-fan text {
+    font-family: var(--fo-font-display);
+  }
+
+  .fo-fan-side {
+    font-size: 13px;
+    text-anchor: end;
+    fill: var(--sl-color-gray-2);
+  }
+
+  .fo-fan-out-label {
+    text-anchor: start;
+  }
+
+  .fo-fan-box-title {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    text-anchor: middle;
+    fill: var(--sl-color-gray-3);
+  }
+
+  .fo-fan-box-line {
+    font-size: 13px;
+    text-anchor: middle;
+    fill: var(--sl-color-white);
+  }
+
+  .fo-fan-proto {
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-anchor: middle;
+    fill: var(--sl-color-accent-high);
+  }
+
+  :global(:root[data-theme="light"]) .fo-fan-proto {
+    fill: var(--sl-color-accent);
+  }
+
+  .fo-fan figcaption {
+    margin-top: 1.5rem;
+  }
+
+  .fo-fan figcaption :global(p) {
+    font-family: var(--fo-font-body);
+    font-size: 0.88rem;
+    line-height: 1.65;
+    color: var(--sl-color-gray-3);
+    margin: 0;
+    max-width: 62ch;
+  }
+
+  /* Below this the side labels collide with the box. The caption is written to
+     stand alone, so the drawing steps aside rather than shrinking to unreadable. */
+  @media (max-width: 46rem) {
+    .fo-fan svg {
+      display: none;
+    }
+  }
+</style>

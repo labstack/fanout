@@ -63,6 +63,11 @@ type Config struct {
 	// rather than trusting a number here — as of 2026-06 it handled ~55k rows/s
 	// with 0 drops and ~0.4 GB RSS, but that will drift with the ingest path.
 	//
+	// Kept free-floating, separated from the field below by a blank line, so it
+	// stays context for the group rather than becoming DuckDBMemory's own doc
+	// comment: cmd/fanout-docgen publishes each field's comment as that
+	// setting's note, and this paragraph describes three of them.
+
 	// DuckDBMemory caps DuckDB's memory (e.g. "8GB"). Empty means Fanout sizes
 	// it from detected memory, reserving headroom for the Go runtime; see
 	// resolveSizing. DuckDB's own default is 80% of detected RAM, which is

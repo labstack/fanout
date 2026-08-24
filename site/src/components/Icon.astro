@@ -1,0 +1,84 @@
+---
+/* Phosphor icons, inlined from the same set the product's browser client uses.
+ *
+ * `@phosphor-icons/react` is what ui/host and ui/apps import. Pulling React
+ * into a static site to draw a 16px glyph would be absurd, so this reads the
+ * raw SVG from `@phosphor-icons/core` at build time and inlines it. Same
+ * geometry, same set, no runtime.
+ *
+ * Inlined rather than an <img> because an inlined path takes `currentColor`,
+ * which is the whole reason to use icons here: they sit in text and take the
+ * colour of what they sit in, including across the light/dark toggle.
+ *
+ * Weight defaults to bold, which is what the product uses in 20 of its 26
+ * weighted call sites — a regular-weight glyph beside IBM Plex Mono reads as
+ * thinner than the type around it.
+ *
+ * A missing icon fails the build. The alternative is a page that silently drops
+ * a glyph, and a typo in an icon name is exactly the sort of thing nobody sees
+ * in review.
+ */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+interface Props {
+  name: string;
+  weight?: "bold" | "regular" | "fill" | "duotone" | "light" | "thin";
+  size?: string;
+  class?: string;
+}
+
+const { name, weight = "bold", size = "1em", class: className } = Astro.props;
+
+// Resolved from the project root, not relative to this file and not through
+// require.resolve. At build time this component is bundled into dist/, so
+// `import.meta.url` no longer points anywhere near src/; and the package's
+// `exports` map does not expose its own package.json, so require.resolve on it
+// throws. Every entry point runs from site/ — the npm scripts and `just site`
+// both do — so the root is the one stable anchor.
+const assets = join(
+  process.cwd(),
+  "node_modules/@phosphor-icons/core/assets",
+);
+
+const suffix = weight === "regular" ? "" : `-${weight}`;
+const path = join(assets, weight, `${name}${suffix}.svg`);
+
+let raw: string;
+try {
+  raw = readFileSync(path, "utf8");
+} catch {
+  throw new Error(
+    `Icon "${name}" (${weight}) is not in @phosphor-icons/core. ` +
+      `Check the name at https://phosphoricons.com — it is kebab-case there.`,
+  );
+}
+
+// Strip the file's own sizing and colour so the caller's font-size and
+// currentColor apply, and drop the XML declaration a build tool would otherwise
+// emit into the middle of the document.
+const body = raw
+  .replace(/<\?xml[^>]*\?>/, "")
+  .replace(/<svg[^>]*>/, "")
+  .replace(/<\/svg>/, "")
+  .replace(/#000000|#000/g, "currentColor");
+---
+
+<svg
+  class={className}
+  width={size}
+  height={size}
+  viewBox="0 0 256 256"
+  fill="currentColor"
+  aria-hidden="true"
+  focusable="false"
+  set:html={body}
+/>
+
+<style>
+  svg {
+    display: inline-block;
+    vertical-align: -0.125em;
+    flex: 0 0 auto;
+  }
+</style>

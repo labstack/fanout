@@ -1,0 +1,70 @@
+---
+title: Performance
+description: Why Fanout publishes no throughput headline, and how to measure your own hardware instead.
+summary: There is no official throughput number. The bundled driver measures your hardware, and the standard a published result would have to meet.
+read_when:
+  - You are looking for a benchmark figure and cannot find one.
+  - You need to size an instance for your own load.
+status: preview
+---
+
+Fanout does not publish a throughput headline. That is a decision, not an
+omission, and it is worth stating plainly because the absence otherwise reads as
+something to be embarrassed about.
+
+## The number that used to be here
+
+An earlier two-vCPU report quoted specific ingest and query figures. It was
+withdrawn before the first public release, for reasons that had nothing to do
+with the numbers being unflattering:
+
+- Its raw JSON reports and the exact benchmark-driver commit were not retained.
+- Its ingest run predated mandatory ingest authentication, so it measured a path
+  the current release does not have.
+
+The prose was detailed. Detail is not provenance — a result nobody can reproduce
+from the artifacts that produced it is an anecdote with decimal places.
+
+## What a published result would have to carry
+
+Before any figure goes back on this page, it has to ship with:
+
+- the Fanout image digest and the benchmark-driver commit;
+- complete machine, network, container and Fanout configuration;
+- the raw `ingest.json` and `mixed.json` reports from that same run;
+- an authenticated OTLP path matching the current release;
+- repeated runs, or an explicit note that it is a single run;
+- separate ingest-only and mixed read/write results.
+
+## Measure your own instead
+
+`cmd/bench` is the supported load generator. It sends traces, metrics and logs,
+ramps to find the ingest boundary, and confirms the result at the rate it found.
+It can add authenticated dashboard reads on top, which is the part that matters:
+ingest and query contend for the same write gate, so an ingest-only number
+overstates what an instance does while anyone is looking at it.
+
+Build it, create an ingest token through first-admin setup, then:
+
+```sh
+./bin/bench \
+  -endpoint localhost:4317 \
+  -token "$INGEST_TOKEN" \
+  -report ingest.json
+```
+
+`./bin/bench -help` covers fixed-rate, query-load and metrics options.
+
+:::caution[A result describes the machine it ran on]
+Benchmark output describes the hardware and dataset you tested, not an
+equivalent vCPU count at another provider. Two machines advertised with the same
+core count differ in memory bandwidth, disk latency and noisy neighbours, and
+Fanout is sensitive to all three — [storage](/explanation/storage-model)
+explains why.
+:::
+
+## What to watch instead of a headline
+
+For capacity, the useful signals are the ones an instance emits about itself:
+telemetry drops, sustained query latency, readiness failures, and free disk.
+[Troubleshooting](/guides/troubleshoot) lists where they are.

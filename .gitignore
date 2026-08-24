@@ -22,6 +22,11 @@ ui/host/tsconfig.tsbuildinfo
 ui/apps/node_modules/
 ui/apps/dist/
 
+# Documentation site workspace outputs.
+site/node_modules/
+site/dist/
+site/.astro/
+
 # Test/temp
 # Root-scoped: a bare `testdata/` would also ignore Go package fixtures, which
 # are source and must be committed (see internal/brand/testdata/favicon.svg).
@@ -50,3 +55,4 @@ cover.out
 # Ad-hoc output from `go build` without -o (named after the package).
 /bench
 /fanout
+/fanout-docgen

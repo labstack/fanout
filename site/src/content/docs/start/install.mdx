@@ -1,0 +1,134 @@
+---
+title: Install
+description: Install Fanout as a container, as a native binary from the release page, or with the install script.
+summary: The three ways to get the binary onto a machine, and the ports and paths each one opens.
+read_when:
+  - You are putting Fanout on a machine for the first time.
+  - You need to know which ports and paths an instance uses.
+status: shipped
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+Fanout ships as a single binary and as a multi-architecture container image.
+Neither needs anything else installed: there is no runtime, no database and no
+collector to place first.
+
+<Tabs>
+  <TabItem label="Docker">
+
+```sh
+docker run -d --name fanout \
+  -p 7520:7520 -p 4317:4317 -p 4318:4318 \
+  -v fanout-data:/var/lib/fanout/data \
+  -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
+  labstack/fanout:latest
+```
+
+Images are published to Docker Hub as `labstack/fanout` and mirrored to GitHub
+Container Registry as `ghcr.io/labstack/fanout`. The two carry the same digests;
+pick whichever registry your hosts already pull from.
+
+`FANOUT_AUTH_CODE_SECRET` is required in the default `local` auth mode and must
+be at least 32 characters — the container refuses to start without it. It is the
+only setting the command above adds; the image ships listener and data-directory
+defaults of its own. Add `FANOUT_AI_API_KEY` to enable the chat investigator,
+which is optional: without a key the process starts normally and logs that the
+agent is disabled.
+
+:::caution[Use a named volume, or fix the ownership yourself]
+The image is distroless and runs unprivileged as UID/GID 65532. A **named
+volume**, as above, is set up correctly for you. A bind-mounted host directory
+is not: `-v "$PWD/data:/var/lib/fanout/data"` fails to open its data directory
+unless that directory is already writable by 65532.
+:::
+
+The image binds every listener on all interfaces so the published ports work.
+The native binary does not — see the table below.
+
+  </TabItem>
+  <TabItem label="Install script">
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/labstack/fanout/main/scripts/install.sh | sh
+```
+
+It resolves the latest release, downloads `SHA256SUMS`, **verifies the archive
+against it before extracting**, and installs to `/usr/local/bin` when that is
+writable or `~/.local/bin` otherwise. Set `FANOUT_PREFIX` to choose the
+directory, or `FANOUT_VERSION` to pin a tag instead of taking the latest.
+
+Versions are CalVer — `v{YYYY.M}.{N}`, numbered from 0 within each month, so
+`v2026.8.1` is the second release of August 2026.
+
+  </TabItem>
+  <TabItem label="Native binary">
+
+Download the artifact for your platform from [GitHub
+Releases](https://github.com/labstack/fanout/releases), make it executable, and
+run it:
+
+```sh
+chmod +x fanout
+./fanout
+```
+
+  </TabItem>
+</Tabs>
+
+## Verify what you downloaded
+
+The install script checks the archive for you. If you took one from the releases
+page by hand, check it yourself — both the checksum and the build provenance:
+
+```sh
+sha256sum -c SHA256SUMS
+gh attestation verify fanout_v2026.8.0_linux_amd64.tar.gz \
+  --repo labstack/fanout
+```
+
+For containers, record or pin the digest the registry returns rather than
+trusting a moving tag:
+
+```sh
+docker buildx imagetools inspect labstack/fanout:2026.8.0
+```
+
+Release images are multi-architecture for `linux/amd64` and `linux/arm64`, and
+archives cover Linux and macOS on both. Every artifact is built on a native
+runner, because DuckDB needs cgo.
+
+| Image tag | Points at |
+|---|---|
+| `labstack/fanout:latest` | the newest release |
+| `labstack/fanout:2026.8.0` | that exact release |
+| `labstack/fanout:main` | the tip of `main` |
+| `labstack/fanout:sha-<commit>` | one specific commit |
+
+Every tag above also exists under `ghcr.io/labstack/fanout`.
+
+Standalone signatures and SBOMs are deliberately not published yet — the
+reasoning is in the repository's release contract.
+
+## What an instance opens
+
+| Port or path | Purpose | Native default |
+|---|---|---|
+| `7520` | Browser client, HTTP API, chat, and MCP | `:7520`, all interfaces |
+| `4317` | OTLP ingest over gRPC | `127.0.0.1:4317`, loopback only |
+| `4318` | OTLP ingest over HTTP | `127.0.0.1:4318`, loopback only |
+| `./data` | Telemetry, query state, users, sessions, dashboards, alerts and agent history | `./data` |
+
+The two ingest listeners bind to loopback by default in the native binary. That
+is deliberate: an ingest port reachable from the network before you have set a
+token is worse than one you have to open on purpose. Set
+`FANOUT_OTLP_GRPC_ADDR` and `FANOUT_OTLP_HTTP_ADDR` when you are ready to accept
+telemetry from other hosts, and read [authenticate
+exporters](/start/send-telemetry) first.
+
+## Next
+
+The process validates its whole configuration before it opens any listener, so a
+setting it will not accept is a refusal to start rather than a failure later.
+[First boot](/start/first-boot) covers what it checks, and what it prints once
+it is running.

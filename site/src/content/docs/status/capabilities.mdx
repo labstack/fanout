@@ -1,0 +1,70 @@
+---
+title: Shipped vs planned
+description: What the current Fanout binary does, what runs but may still change shape, and what is only designed.
+summary: The honest account of where each capability stands, marked page by page across the documentation.
+read_when:
+  - You are deciding whether to build something durable on a Fanout capability.
+  - A page describes something and you want to know whether it executes today.
+status: preview
+---
+
+Fanout is pre-release. It is used in earnest, and it changes without migration
+paths. This page is the account of what that means per capability, so a reader
+does not have to infer it from how confidently a page is written.
+
+Every documentation page carries one of three markers in its frontmatter, and
+the vocabulary is closed — a fourth value fails the build rather than quietly
+introducing a fourth kind of claim:
+
+| Marker | What it means |
+|---|---|
+| `shipped` | The binary on the current tag does this, and the shape is settled. |
+| `preview` | It runs today, and its shape may still change without a migration path. |
+| `planned` | Designed and written down. Nothing executes it yet. |
+
+The marker reaches an agent too: `llms.txt` annotates every non-shipped page
+inline, so something reading the index knows before it fetches the page.
+
+Every page states its status explicitly rather than relying on the default.
+That is deliberate: `shipped` is the schema's default, so a page that says
+nothing asserts stability by silence — which is the opposite of what a
+pre-release product should do. Most pages here are `preview`, and the reasons
+are concrete rather than cautious. In the week this documentation was written,
+the ingest header was replaced, `FANOUT_MCP_PUBLIC_URL` was removed outright,
+namespace query scoping inverted, and `viewer` gained the ability to run the
+agent. Pages describing those surfaces are marked accordingly.
+
+`shipped` is reserved for what has not moved and is not expected to: what
+Fanout is, the release and install mechanics, and backing up the data
+directory.
+
+## Where each capability stands
+
+| Capability | Status | Notes |
+|---|---|---|
+| OTLP ingest over gRPC and HTTP | shipped | Both listeners, one ingest token. |
+| Parquet storage and DuckDB queries | shipped | Local data directory; no external database. |
+| Browser client | preview | Ships in the binary; surfaces still moving. |
+| Chat investigator | preview | Requires an AI provider key; disabled and logged without one. |
+| MCP tools | preview | Served at `/mcp`; the tool set is not frozen. |
+| Alerts | preview | Rules evaluate on an interval against rollups. |
+| Local email sign-in | shipped | Codes by email; no passwords. |
+| Local self-signup | preview | `FANOUT_SELF_SIGNUP`, off by default. Provisions viewers after code verification only. |
+| OIDC viewer auto-provisioning | preview | Verified identities admitted as viewers without a shared credential. |
+| OIDC sign-in | shipped | Provider flow, with group and domain mapping. |
+| Generated settings reference | shipped | `cmd/fanout-docgen` writes it; `just check` fails when it drifts from the type. |
+| Release checksums and provenance | shipped | `SHA256SUMS` plus GitHub build attestations on every archive. |
+| Published throughput figure | planned | Withdrawn before release; the standard a new one must meet is on [Performance](/explanation/performance). |
+| Signatures and SBOM | planned | Deliberately deferred until something consumes them. |
+| Guides for every operational task | preview | The query surface — what the browser client actually shows — has no page yet. |
+| Namespace scoping on alert rules | planned | The field is stored but evaluation ignores it; scope with `service`. |
+
+## What "no migration path" means in practice
+
+It means what it says. A storage-format change may require starting from an
+empty data directory, and a renamed setting is renamed rather than aliased. The
+configuration loader rejects unrecognised `FANOUT_`-prefixed variables, so a
+setting that has moved surfaces as a refusal to start rather than as a silently
+ignored value — which is the one guarantee that makes the rest survivable.
+
+Do not run a Fanout instance as the only copy of data you need to keep.

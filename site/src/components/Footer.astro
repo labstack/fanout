@@ -1,0 +1,78 @@
+---
+/* Starlight's page footer: the edit link, the last-updated date and the
+ * pagination that sit at the end of an article.
+ *
+ * The site's copyright is not here. It is chrome rather than the end of a page,
+ * so it lives in SiteFooter.astro, which PageFrame renders below the content
+ * column entirely.
+ *
+ * Overriding the component means restating the layout it came with: a
+ * component override replaces Starlight's scoped styles along with its markup,
+ * so the footer and meta rules below are its own, kept as they were. The
+ * `credits` kudos link is not carried over — the site does not enable it, and
+ * reproducing it would mean importing an icon from inside Starlight's internals
+ * to render something that has never appeared.
+ *
+ * The three parts are imported from `@astrojs/starlight/components/*`, the
+ * published path, rather than the `virtual:starlight/components/*` specifiers
+ * Starlight's own footer uses: those are typed in a declaration file the site's
+ * tsconfig does not see, and `astro check` fails on all three. The difference
+ * that buys Starlight is indirection — a `virtual:` import resolves through any
+ * override configured for that component. Nothing here overrides the edit link,
+ * the last-updated date or the pagination, so this renders the same thing; a
+ * future override of one of them would need this file changed to match.
+ */
+import EditLink from "@astrojs/starlight/components/EditLink.astro";
+import LastUpdated from "@astrojs/starlight/components/LastUpdated.astro";
+import Pagination from "@astrojs/starlight/components/Pagination.astro";
+
+/* The edit link and the last-updated date are documentation affordances, and
+ * the landing page is not documentation. "Edit page" invites a contributor to
+ * change a marketing page, and a date only ever works against a front page: a
+ * quiet month reads as an abandoned project to the one visitor least equipped
+ * to judge that. Both stay on every other page, where "is this current?" is a
+ * question a reader genuinely has.
+ *
+ * Keyed on the splash template rather than the page id, so a second splash page
+ * inherits the same treatment. Pagination already renders nothing here — the
+ * landing page is in no sidebar group, so it has no neighbours.
+ *
+ * The copyright is no longer part of this component. It is chrome, not the end
+ * of an article, so it lives in SiteFooter.astro, which PageFrame puts below
+ * the content column entirely.
+ */
+const isSplash = Astro.locals.starlightRoute.entry.data.template === "splash";
+---
+
+<footer class="sl-flex">
+  {
+    !isSplash && (
+      <div class="meta sl-flex">
+        <EditLink />
+        <LastUpdated />
+      </div>
+    )
+  }
+  <Pagination />
+</footer>
+
+<style>
+  footer {
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .meta {
+    gap: 0.75rem 3rem;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    margin-top: 3rem;
+    font-size: var(--sl-text-sm);
+    color: var(--sl-color-gray-3);
+  }
+
+  .meta > :global(p:only-child) {
+    margin-inline-start: auto;
+  }
+
+</style>
