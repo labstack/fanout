@@ -226,6 +226,64 @@ site: docs-generate
 site-build: docs-generate-check site-deps
     cd site && npm run build
 
+# Renders the social preview card from docs/media/social-card.typ into
+# site/public, where GitHub takes it as the repository preview and the site
+# serves it as its og:image.
+#
+# Outside `build` and `check` for the same reason as the diagrams above: the PNG
+# is committed, and CI has no font path to re-render it with. `site-build`
+# asserts the committed PNG is present and correctly sized, which is the part a
+# gate can honestly do.
+#
+# The card needs Inter, which is not vendored here — the browser bundle carries
+# its own copy for the UI, and a second copy in the tree to draw one image is a
+# poor trade. Typst warns about an unknown font family and still exits 0, so a
+# missing face does not fail the render; it quietly produces a card set in
+# whatever typst found instead. This reads the warning back and fails on it.
+#
+# The version is pinned for the same reason d2 is: typst re-lays out text
+# between releases, so a different one rewrites every glyph position and
+# produces a diff that is not a real change.
+#
+# The mark comes from ui/host/public/favicon.svg, the canonical asset that
+# internal/brand tracks, so the card cannot drift from the product logo.
+social-card:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    want_typst="0.15.1"
+    if ! command -v typst >/dev/null; then
+      echo "typst not found — install with: brew install typst" >&2
+      exit 1
+    fi
+    have_typst=$(typst --version | awk '{print $2}')
+    if [ "$have_typst" != "$want_typst" ]; then
+      echo "typst $have_typst is installed; the committed card was rendered with $want_typst" >&2
+      echo "another version re-lays out every glyph, so the diff would not be a real change" >&2
+      exit 1
+    fi
+    if [ -z "${FANOUT_FONT_PATH:-}" ]; then
+      echo "set FANOUT_FONT_PATH to a directory holding Inter" >&2
+      echo "the OFL original is at https://github.com/google/fonts/tree/main/ofl/inter" >&2
+      exit 1
+    fi
+    # Rendered aside and moved into place only once it is known good, so a run
+    # that fell back to a substitute face cannot leave that card in the tree.
+    # A directory, not `mktemp -t <name>`: that reserves a name without the .png
+    # suffix typst needs, so appending one both leaves the reserved file behind
+    # and writes to a path nothing reserved.
+    staged_dir=$(mktemp -d)
+    trap 'rm -rf "$staged_dir"' EXIT
+    staged="$staged_dir/social-card.png"
+    render=$(typst compile --root . --font-path "$FANOUT_FONT_PATH" --ppi 96 --format png \
+      docs/media/social-card.typ "$staged" 2>&1)
+    if [ -n "$render" ]; then echo "$render"; fi
+    if echo "$render" | grep -qi "unknown font family"; then
+      echo "typst could not find a font it was asked for — the card above is set in a fallback face" >&2
+      exit 1
+    fi
+    mv "$staged" site/public/social-card.png
+    echo "rendered site/public/social-card.png"
+
 # ── Gate ─────────────────────────────────────────────────────────────────────
 
 # lefthook's pre-push hook and CI both run this.
