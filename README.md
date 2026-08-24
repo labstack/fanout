@@ -44,6 +44,25 @@ optional dashboard read load against your hardware. Fanout does not publish a
 throughput headline until the raw reports and exact driver revision can ship
 with it; see [the benchmark publication standard](docs/benchmarking.md).
 
+## How it compares
+
+Fanout is a single node holding traces, logs, and metrics for a system you can
+reason about from one place. That premise, rather than any single feature, is
+what separates it from its neighbours.
+
+| If you use | Where Fanout differs |
+| --- | --- |
+| **Grafana with Loki, Tempo, and Mimir** | That stack keeps a service and a query language per signal, plus object storage underneath. Fanout keeps one process, one data directory, and one typed contract across all three signals, at the cost of the horizontal scale those components are built for. |
+| **SigNoz** | Both are OTLP-native and self-hosted. SigNoz composes a collector, ClickHouse, and query services; Fanout compiles ingest, storage, query, alerting, and the browser client into one binary, with DuckLake/Parquet on local disk instead of a database cluster. |
+| **Jaeger** | Jaeger covers traces and expects a storage backend you run separately. Fanout ingests traces, logs, and metrics into the same store, with nothing else to deploy. |
+| **Prometheus with Grafana** | Prometheus pulls metrics and is excellent at them. Fanout accepts pushed OTLP for all three signals and is built around investigating a specific incident rather than maintaining long-range metric series. |
+| **Datadog**, **Honeycomb**, **Grafana Cloud** | Those are managed services with the operational burden removed and per-gigabyte pricing attached, and your telemetry leaves your network. Fanout is a binary you run, on data that stays on your disk. |
+| **An OpenTelemetry Collector piped into ClickHouse** | The same shape, assembled by hand: collector, database, dashboards, and the glue between them. Fanout is that assembly as one program, with an agent and an MCP server already wired to the same query contract. |
+
+Fanout is a single node. It has no clustering, no replication, and no object
+tier; a deployment that outgrows one machine's disk and CPU has outgrown
+Fanout.
+
 ## Requirements
 
 - **Go and a C compiler** with `CGO_ENABLED=1` — DuckDB is a cgo dependency
