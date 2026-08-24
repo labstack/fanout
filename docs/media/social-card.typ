@@ -1,4 +1,5 @@
-// The GitHub social preview card.
+// The GitHub social preview card, which the documentation site also serves as
+// its og:image at /social-card.png.
 //
 // Render it with `just social-card`, which pins the typst version, requires
 // Inter on a font path, and fails when the face is missing. Running typst by

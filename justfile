@@ -226,9 +226,14 @@ site: docs-generate
 site-build: docs-generate-check site-deps
     cd site && npm run build
 
-# Renders the GitHub social preview card from docs/media/social-card.typ.
+# Renders the social preview card from docs/media/social-card.typ into
+# site/public, where GitHub takes it as the repository preview and the site
+# serves it as its og:image.
+#
 # Outside `build` and `check` for the same reason as the diagrams above: the PNG
-# is committed, and CI has no font path to re-render it with.
+# is committed, and CI has no font path to re-render it with. `site-build`
+# asserts the committed PNG is present and correctly sized, which is the part a
+# gate can honestly do.
 #
 # The card needs Inter, which is not vendored here — the browser bundle carries
 # its own copy for the UI, and a second copy in the tree to draw one image is a
@@ -276,8 +281,8 @@ social-card:
       echo "typst could not find a font it was asked for — the card above is set in a fallback face" >&2
       exit 1
     fi
-    mv "$staged" docs/media/social-card.png
-    echo "rendered docs/media/social-card.png"
+    mv "$staged" site/public/social-card.png
+    echo "rendered site/public/social-card.png"
 
 # ── Gate ─────────────────────────────────────────────────────────────────────
 
