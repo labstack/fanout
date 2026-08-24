@@ -46,19 +46,24 @@ func main() {
 	var (
 		source = flag.String("source", "internal/config/config.go", "path to the file declaring config.Config")
 		alerts = flag.String("alert-source", "internal/alert/types.go", "path to the file declaring alert.AlertEnv")
-		apiDir = flag.String("api-dir", "internal/api", "directory whose files register HTTP routes")
+		// Every directory that registers routes. cmd/fanout carries the
+		// operational, protocol and SPA routes; internal/agent the investigator.
+		// A directory listed here that registers nothing is an error, so this
+		// list going stale is loud rather than a quietly shorter table.
+		routeDirs = flag.String("route-dirs", "internal/api,internal/agent,cmd/fanout",
+			"comma-separated directories whose files register HTTP routes")
 		outDir = flag.String("out", "site/src/content/docs/reference", "reference root to write generated pages into")
 		check  = flag.Bool("check", false, "exit non-zero when a written page differs from the one on disk")
 	)
 	flag.Parse()
 
-	if err := run(*source, *alerts, *apiDir, *outDir, *check); err != nil {
+	if err := run(*source, *alerts, *routeDirs, *outDir, *check); err != nil {
 		fmt.Fprintf(os.Stderr, "fanout-docgen: %v\n", err)
 		os.Exit(1)
 	}
 }
 
-func run(source, alertSource, apiDir, outDir string, check bool) error {
+func run(source, alertSource, routeDirs, outDir string, check bool) error {
 	fields, err := collect(source)
 	if err != nil {
 		return err
@@ -82,7 +87,14 @@ func run(source, alertSource, apiDir, outDir string, check bool) error {
 	// The HTTP surface. The paths come from the registrations; the authorization
 	// requirement for each comes from the middleware's own decision function,
 	// not from reading the switch that implements it.
-	routes, err := collectRoutes(apiDir)
+	dirs := strings.Split(routeDirs, ",")
+	for i, dir := range dirs {
+		dirs[i] = strings.TrimSpace(dir)
+		if dirs[i] == "" {
+			return fmt.Errorf("--route-dirs contains an empty entry: %q", routeDirs)
+		}
+	}
+	routes, err := collectRoutes(dirs)
 	if err != nil {
 		return err
 	}
