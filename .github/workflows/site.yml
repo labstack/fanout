@@ -16,13 +16,21 @@ name: Site
 on:
   push:
     branches: [main]
-    # The whole site is one build, but only these inputs can change it. The
-    # configuration type is in the list because the settings pages are generated
-    # from it: a change there with a regenerated page is a documentation change
-    # whether or not anything under site/ was touched by hand.
+    # The whole site is one build, but only these inputs can change it. Every
+    # source the generator reads is listed, because a change there with a
+    # regenerated page is a documentation change whether or not anything under
+    # site/ was touched by hand: settings come from internal/config, alert
+    # variables from internal/alert, the roles matrix and route table from
+    # internal/api plus internal/agent and cmd/fanout, and the MCP tools from
+    # internal/mcp.
     paths:
       - "site/**"
       - "internal/config/**"
+      - "internal/alert/**"
+      - "internal/api/**"
+      - "internal/agent/**"
+      - "internal/mcp/**"
+      - "cmd/fanout/**"
       - "cmd/fanout-docgen/**"
       - ".github/workflows/site.yml"
   # Publishing the current main on demand, without an empty commit.
