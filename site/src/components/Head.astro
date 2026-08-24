@@ -16,9 +16,29 @@ const id = Astro.locals.starlightRoute.entry.id;
 const markdownHref = ids.has(id)
   ? new URL(`/${id}.md`, Astro.site ?? Astro.url).href
   : null;
+
+// Starlight emits `twitter:card: summary_large_image` but never an image to go
+// with it, so every link to the site unfurled as an empty large card. One image
+// for the whole site rather than a card per page: a per-page render would make
+// the build depend on a font the site only loads in the browser, and the card
+// is the same one GitHub shows for the repository.
+//
+// Absolute URLs are required here: Open Graph consumers do not resolve relative
+// hrefs. `astro.config.mjs` always sets `site`, so the fallback is not a
+// configuration this repository ships — Astro types `Astro.site` as optional
+// regardless, and the line above resolves its URL the same way.
+const socialCardHref = new URL("/social-card.png", Astro.site ?? Astro.url).href;
 ---
 
 <Default><slot /></Default>
+<meta property="og:image" content={socialCardHref} />
+<meta property="og:image:width" content="1280" />
+<meta property="og:image:height" content="640" />
+<meta
+  property="og:image:alt"
+  content="Fanout: single-binary, agent-native OpenTelemetry investigation."
+/>
+<meta name="twitter:image" content={socialCardHref} />
 {
   markdownHref && (
     <>
