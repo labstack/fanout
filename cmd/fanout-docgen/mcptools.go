@@ -32,8 +32,8 @@ func renderMCPTools() ([]byte, error) {
 	b.WriteString("title: \"MCP tools\"\n")
 	b.WriteString("description: \"Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything.\"\n")
 	fmt.Fprintf(&b,
-		"summary: \"The %d tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer.\"\n",
-		len(tools),
+		"summary: \"%s served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer.\"\n",
+		count(len(tools), "tool"),
 	)
 	b.WriteString("read_when:\n")
 	b.WriteString("  - \"You are connecting an agent and want to know what it can call.\"\n")
@@ -51,6 +51,24 @@ func renderMCPTools() ([]byte, error) {
 		count(len(tools), "tool"),
 	)
 
+	// The closed-world sentence below is a safety claim a reader acts on. It is
+	// asserted in prose, so it has to be checked against the annotations rather
+	// than trusted: a tool registered without an openWorldHint defaults to
+	// open-world per the spec, and would otherwise be republished under a
+	// blanket promise that it reaches nothing else. --check cannot catch this,
+	// because a regenerated page carrying the same false claim is
+	// self-consistent.
+	for _, tool := range tools {
+		if tool.OpenWorld {
+			return nil, fmt.Errorf(
+				"tool %s is open-world (it may reach beyond this instance), but the page "+
+					"states that every tool is closed-world; either annotate it "+
+					"OpenWorldHint:false in internal/mcp or stop making the claim for all tools",
+				tool.Name,
+			)
+		}
+	}
+
 	b.WriteString("Every tool is **closed-world**: it reads or writes what this instance holds\n")
 	b.WriteString("and reaches nothing else.\n\n")
 
@@ -63,7 +81,7 @@ func renderMCPTools() ([]byte, error) {
 
 	for _, tool := range tools {
 		fmt.Fprintf(&b, "## %s\n\n", tool.Name)
-		fmt.Fprintf(&b, "**%s** — %s\n\n", tool.Title, tool.Description)
+		fmt.Fprintf(&b, "**%s** — %s\n\n", mdx(tool.Title), mdx(tool.Description))
 		fmt.Fprintf(&b, "%s\n\n", effectProse(tool))
 
 		if len(tool.Inputs) == 0 {
@@ -83,7 +101,7 @@ func renderMCPTools() ([]byte, error) {
 				description = "—"
 			}
 			fmt.Fprintf(&b, "| `%s` | `%s` | %s | %s |\n",
-				input.Name, input.Type, required, description)
+				input.Name, input.Type, required, cell(description))
 		}
 		b.WriteString("\n")
 	}
@@ -153,4 +171,33 @@ func count(n int, noun string) string {
 		return words[n] + " " + plural
 	}
 	return fmt.Sprintf("%d %s", n, plural)
+}
+
+// mdx escapes a value interpolated into MDX prose.
+//
+// Tool titles and descriptions are authored in Go string literals and reach this
+// page verbatim. A description containing `<` or `{` would break the MDX build,
+// and a backslash would be eaten — so the characters MDX treats as syntax are
+// escaped rather than left to chance. Newlines are collapsed because a hard
+// break inside a table cell ends the row.
+func mdx(value string) string {
+	replacer := strings.NewReplacer(
+		"\\", "\\\\",
+		"<", "\\<",
+		"{", "\\{",
+		"\r\n", " ",
+		"\n", " ",
+		"\r", " ",
+	)
+	return strings.TrimSpace(replacer.Replace(value))
+}
+
+// cell escapes a value for a Markdown table cell.
+//
+// On top of mdx's escaping, a literal pipe has to be escaped or it splits the
+// row into phantom columns — output that is wrong rather than broken, so nothing
+// downstream would catch it: check-tables.mjs asserts that tables are wrapped,
+// not that their rows have the right shape.
+func cell(value string) string {
+	return strings.ReplaceAll(mdx(value), "|", "\\|")
 }

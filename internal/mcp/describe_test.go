@@ -107,18 +107,37 @@ func TestDescribeToolsReportsTheSharedObservabilityScope(t *testing.T) {
 		t.Fatalf("DescribeTools: %v", err)
 	}
 
+	// Compared exactly, not as a subset: a field added to QueryInput would
+	// otherwise pass while the page's claim that these two share one scope went
+	// stale. And each tool must actually be seen — filtering by name and
+	// asserting nothing when the filter matches nothing is a test that renaming
+	// a tool would silently switch off.
 	want := map[string]string{"window": "string", "namespace": "string", "limit": "integer"}
-	for _, doc := range docs {
-		if doc.Name != "observability_overview" && doc.Name != "service_topology" {
+
+	for _, name := range []string{"observability_overview", "service_topology"} {
+		var doc ToolDoc
+		var found bool
+		for _, candidate := range docs {
+			if candidate.Name == name {
+				doc, found = candidate, true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s is not among the served tools; was it renamed?", name)
 			continue
 		}
+
 		got := map[string]string{}
 		for _, input := range doc.Inputs {
 			got[input.Name] = input.Type
 		}
-		for name, typ := range want {
-			if got[name] != typ {
-				t.Errorf("%s input %q is %q, want %q", doc.Name, name, got[name], typ)
+		if len(got) != len(want) {
+			t.Errorf("%s takes %d inputs (%v), want exactly %v", name, len(got), got, want)
+		}
+		for input, typ := range want {
+			if got[input] != typ {
+				t.Errorf("%s input %q is %q, want %q", name, input, got[input], typ)
 			}
 		}
 	}

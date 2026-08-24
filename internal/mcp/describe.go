@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -66,6 +67,12 @@ type ToolInput struct {
 // no dashboard tools at all, so one is supplied — otherwise this would quietly
 // document a smaller surface than an instance serves.
 func DescribeTools(ctx context.Context) ([]ToolDoc, error) {
+	// Bounded so a handshake that never completes fails the build instead of
+	// hanging it. The transport is in-memory and this should take microseconds;
+	// the timeout is a backstop, not a budget.
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	server := New(nil, dashboard.New(nil), "docgen")
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
@@ -84,17 +91,25 @@ func DescribeTools(ctx context.Context) ([]ToolDoc, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "fanout-docgen", Version: "docgen"}, nil)
 	session, err := client.Connect(ctx, clientTransport, nil)
 	if err != nil {
+		// The goroutine may still have produced a session. Closing it here is the
+		// same leak the deferred close below exists to prevent — this path is just
+		// the one that returns before reaching it.
+		if served := <-connected; served.session != nil {
+			_ = served.session.Close()
+		}
 		return nil, fmt.Errorf("connecting to the MCP server: %w", err)
 	}
 	defer func() { _ = session.Close() }()
 
 	served := <-connected
+	if served.session != nil {
+		// Closed explicitly rather than left to the client's close: this is called
+		// repeatedly by tests, and a server session per call would accumulate.
+		defer func() { _ = served.session.Close() }()
+	}
 	if served.err != nil {
 		return nil, fmt.Errorf("serving the in-memory MCP transport: %w", served.err)
 	}
-	// Closed explicitly rather than left to the client's close: this is called
-	// repeatedly by tests, and a server session per call would accumulate.
-	defer func() { _ = served.session.Close() }()
 
 	listed, err := session.ListTools(ctx, nil)
 	if err != nil {
@@ -131,6 +146,15 @@ func DescribeTools(ctx context.Context) ([]ToolDoc, error) {
 			return nil, fmt.Errorf(
 				"tool %s has no description; a calling model chooses tools by description, "+
 					"so an empty one is a bug rather than a blank cell",
+				tool.Name,
+			)
+		}
+		if doc.Title == "" {
+			// The reference renders the title as `**%s** — description`, so an
+			// empty one publishes a heading line starting with a bare `****`.
+			return nil, fmt.Errorf(
+				"tool %s has no title; the reference renders one for every tool and an "+
+					"empty one is published as stray emphasis",
 				tool.Name,
 			)
 		}
