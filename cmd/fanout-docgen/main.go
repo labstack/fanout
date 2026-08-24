@@ -213,6 +213,7 @@ func renderAlertEnv(vars []field) []byte {
 	b.WriteString("read_when:\n")
 	b.WriteString(`  - "You are writing an alert rule and need the variable names."` + "\n")
 	b.WriteString(`  - "A rule compiles but never fires, and you want to check what it is reading."` + "\n")
+	b.WriteString("status: preview\n")
 	b.WriteString("generated: true\n")
 	b.WriteString("---\n\n")
 
@@ -516,6 +517,7 @@ func renderPage(name string, page groupPage, fields []field) []byte {
 			fmt.Fprintf(&b, "  - %q\n", when)
 		}
 	}
+	b.WriteString("status: preview\n")
 	b.WriteString("generated: true\n")
 	b.WriteString("---\n\n")
 

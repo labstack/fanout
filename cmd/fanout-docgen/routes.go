@@ -152,8 +152,8 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 
 	b.WriteString("---\n")
 	b.WriteString("title: \"HTTP routes\"\n")
-	b.WriteString("description: \"Every HTTP route a Fanout instance serves and what guards it. Mostly the browser client's backend rather than a public API.\"\n")
-	b.WriteString("summary: \"The complete HTTP surface with its authorization requirement, for auditing what an instance exposes. The supported programmatic interface is MCP.\"\n")
+	b.WriteString("description: \"The HTTP routes registered in internal/api and what guards each one. Mostly the browser client's backend rather than a public API.\"\n")
+	b.WriteString("summary: \"The application routes and their authorization requirements, taken from the middleware that enforces them. Does not yet cover the operational and protocol routes registered outside internal/api.\"\n")
 	b.WriteString("read_when:\n")
 	b.WriteString("  - \"You are auditing what an instance exposes and what guards each route.\"\n")
 	b.WriteString("  - \"A request came back 401 or 403 and you want to know which capability it wanted.\"\n")
@@ -166,6 +166,14 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	b.WriteString("Every route below is served on `FANOUT_HTTP_ADDR` (`:7520` by default).\n")
 	b.WriteString("Telemetry does not arrive here — OTLP has its own two listeners, described in\n")
 	b.WriteString("[send your first telemetry](/start/send-telemetry).\n\n")
+
+	b.WriteString(":::note[Not the whole surface yet]\n")
+	b.WriteString("This covers the routes registered in `internal/api`. The operational and\n")
+	b.WriteString("protocol routes — `/-/metrics`, `/debug/pprof/*`, `/mcp` and `/api/mcp` — are\n")
+	b.WriteString("registered elsewhere and are not in this table yet; they are described in\n")
+	b.WriteString("[endpoints](/reference/endpoints). Tracked in\n")
+	b.WriteString("[#188](https://github.com/labstack/fanout/issues/188).\n")
+	b.WriteString(":::\n\n")
 
 	b.WriteString(":::caution[Most of this is not a public API]\n")
 	b.WriteString("The `/api/*` routes are the browser client's own backend. They are listed here\n")

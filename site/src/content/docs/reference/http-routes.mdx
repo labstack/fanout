@@ -1,7 +1,7 @@
 ---
 title: "HTTP routes"
-description: "Every HTTP route a Fanout instance serves and what guards it. Mostly the browser client's backend rather than a public API."
-summary: "The complete HTTP surface with its authorization requirement, for auditing what an instance exposes. The supported programmatic interface is MCP."
+description: "The HTTP routes registered in internal/api and what guards each one. Mostly the browser client's backend rather than a public API."
+summary: "The application routes and their authorization requirements, taken from the middleware that enforces them. Does not yet cover the operational and protocol routes registered outside internal/api."
 read_when:
   - "You are auditing what an instance exposes and what guards each route."
   - "A request came back 401 or 403 and you want to know which capability it wanted."
@@ -14,6 +14,14 @@ generated: true
 Every route below is served on `FANOUT_HTTP_ADDR` (`:7520` by default).
 Telemetry does not arrive here — OTLP has its own two listeners, described in
 [send your first telemetry](/start/send-telemetry).
+
+:::note[Not the whole surface yet]
+This covers the routes registered in `internal/api`. The operational and
+protocol routes — `/-/metrics`, `/debug/pprof/*`, `/mcp` and `/api/mcp` — are
+registered elsewhere and are not in this table yet; they are described in
+[endpoints](/reference/endpoints). Tracked in
+[#188](https://github.com/labstack/fanout/issues/188).
+:::
 
 :::caution[Most of this is not a public API]
 The `/api/*` routes are the browser client's own backend. They are listed here

@@ -80,6 +80,7 @@ func renderRoles() ([]byte, error) {
 	b.WriteString("  - \"You are deciding which role to give someone.\"\n")
 	b.WriteString("  - \"You are mapping identity-provider groups onto Fanout roles.\"\n")
 	b.WriteString("  - \"A request came back 403 and you want to know which capability it needed.\"\n")
+	b.WriteString("status: preview\n")
 	b.WriteString("generated: true\n")
 	b.WriteString("---\n\n")
 

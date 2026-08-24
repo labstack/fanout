@@ -25,6 +25,19 @@ introducing a fourth kind of claim:
 The marker reaches an agent too: `llms.txt` annotates every non-shipped page
 inline, so something reading the index knows before it fetches the page.
 
+Every page states its status explicitly rather than relying on the default.
+That is deliberate: `shipped` is the schema's default, so a page that says
+nothing asserts stability by silence — which is the opposite of what a
+pre-release product should do. Most pages here are `preview`, and the reasons
+are concrete rather than cautious. In the week this documentation was written,
+the ingest header was replaced, `FANOUT_MCP_PUBLIC_URL` was removed outright,
+namespace query scoping inverted, and `viewer` gained the ability to run the
+agent. Pages describing those surfaces are marked accordingly.
+
+`shipped` is reserved for what has not moved and is not expected to: what
+Fanout is, the release and install mechanics, and backing up the data
+directory.
+
 ## Where each capability stands
 
 | Capability | Status | Notes |
