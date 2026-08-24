@@ -201,7 +201,15 @@ docs-generate:
 docs-generate-check:
     go run ./cmd/fanout-docgen --check
 
-# Install the documentation site's dependencies.
+# Install the documentation site's dependencies from the lockfile.
+#
+# Named to match `ui-deps`, and used by CI for the same reason: `check` ends with
+# site-build, which fails as a bare exit 127 when node_modules is absent.
+site-deps:
+    cd site && npm ci --no-audit --no-fund
+
+# Add or update a site dependency. `site-deps` is the reproducible install;
+# this is the one that may change the lockfile.
 site-install:
     cd site && npm install --no-audit --no-fund
 
