@@ -109,6 +109,14 @@ func run(source, alertSource, routeDirs, outDir string, check bool) error {
 	}
 	pages["roles.mdx"] = rolesPage
 
+	// The MCP tool surface, from the server's own tools/list answer rather than
+	// from its registration calls — the same question a connecting agent asks.
+	toolsPage, err := renderMCPTools()
+	if err != nil {
+		return err
+	}
+	pages["mcp-tools.mdx"] = toolsPage
+
 	var stale []string
 	for name, body := range pages {
 		path := filepath.Join(outDir, name)
@@ -157,8 +165,8 @@ func run(source, alertSource, routeDirs, outDir string, check bool) error {
 		}
 	}
 	fmt.Printf(
-		"fanout-docgen: wrote %d page(s) covering %d setting(s), %d alert variable(s) and %d route(s)\n",
-		len(pages), len(fields), len(alertEnvCount), len(routeCount),
+		"fanout-docgen: wrote %d page(s) covering %d setting(s), %d alert variable(s), %d route(s) and %d MCP tool(s)\n",
+		len(pages), len(fields), len(alertEnvCount), len(routeCount), len(toolCount),
 	)
 	return nil
 }
