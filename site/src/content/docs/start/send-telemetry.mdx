@@ -17,12 +17,17 @@ Fanout accepts traces, logs and metrics over OTLP on two listeners: gRPC on
 The raw ingest token is shown once, immediately after you create the first
 administrator. It is `fo_`-prefixed, and Fanout stores only its hash.
 
-Send it in either header:
+Send it as a bearer token:
 
 ```text
-x-fanout-ingest-token: fo_<token>
 Authorization: Bearer fo_<token>
 ```
+
+:::caution[The `x-fanout-ingest-token` header was removed]
+Earlier builds also accepted `x-fanout-ingest-token`. That header is no longer
+accepted on either listener — an exporter still sending it is rejected as
+unauthenticated. `Authorization: Bearer` is the only form.
+:::
 
 Two things are worth knowing before you debug a rejection:
 
@@ -39,7 +44,7 @@ Two things are worth knowing before you debug a rejection:
 ```sh
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-export OTEL_EXPORTER_OTLP_HEADERS=x-fanout-ingest-token=fo_<token>
+export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20fo_<token>"
 export OTEL_SERVICE_NAME=checkout
 export OTEL_RESOURCE_ATTRIBUTES=service.namespace=storefront
 ```
@@ -55,7 +60,7 @@ exporters:
   otlp/fanout:
     endpoint: fanout.example.com:4317
     headers:
-      x-fanout-ingest-token: fo_<token>
+      Authorization: "Bearer ${env:INGEST_TOKEN}"
 
 service:
   pipelines:
@@ -75,9 +80,12 @@ exporter in the pipeline.
 ## Namespaces
 
 Fanout reads `service.namespace` from each OTLP resource, falling back to
-`FANOUT_DEFAULT_NAMESPACE` (`default`) when it is absent. Namespaces scope
-queries so one instance can hold several services' telemetry without them
-running together.
+`FANOUT_DEFAULT_NAMESPACE` (`default`) when it is absent. Namespaces let one
+instance hold several services' telemetry without them running together.
+
+A query with no namespace set now spans **all** of them. Scoping is opt-in: you
+narrow to one namespace deliberately, rather than being silently confined to one
+and wondering where the rest of your telemetry went.
 
 They are not an authorisation boundary. A namespace is not a user, an
 organisation or a tenant, and anyone who can query the instance can query every

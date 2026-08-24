@@ -55,12 +55,10 @@ prevent.
 
 ## External MCP clients
 
-An agent connecting from outside also needs the resource URI it will be issued
-tokens against:
+`FANOUT_PUBLIC_URL` above does double duty: Fanout derives the MCP resource URI
+from it, and that derived resource is what tokens are bound to as their
+audience. So it must be HTTPS and stable across restarts — changing it
+invalidates every token already issued.
 
-```sh
-FANOUT_MCP_PUBLIC_URL=https://fanout.example.com/mcp
-```
-
-It must be HTTPS, must end in `/mcp`, and must stay stable across restarts —
-tokens are bound to it as their audience, so changing it invalidates them.
+Earlier builds had a separate `FANOUT_MCP_PUBLIC_URL` for this. It was removed,
+and an instance still setting it fails at startup rather than ignoring it.

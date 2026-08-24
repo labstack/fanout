@@ -13,20 +13,28 @@ instance: the [nine tools](/reference/mcp-tools) return the same typed results
 the browser client and the HTTP API use, so what an agent tells you matches what
 the dashboards show.
 
-## Set the resource URI first
+## Set the public URL first
 
 ```sh
-FANOUT_MCP_PUBLIC_URL=https://fanout.example.com/mcp
+FANOUT_PUBLIC_URL=https://fanout.example.com
 ```
 
-This is the canonical, externally reachable URI clients are issued tokens
-against. It must be HTTPS, must end in `/mcp`, and must stay **stable across
-restarts** — tokens carry it as their audience, so changing it invalidates every
-one already issued.
+Fanout derives the MCP resource URI from this — the canonical, externally
+reachable origin that clients are issued tokens against. It must be HTTPS, and
+it must stay **stable across restarts**: tokens carry the derived resource as
+their audience, so changing it invalidates every one already issued.
 
-Getting this wrong is the most common failure: a client discovers, registers and
+Getting this wrong is the most common failure. A client discovers, registers and
 receives a token, and then every call is rejected because the audience does not
 match the resource it is calling. Set it before connecting anything.
+
+:::caution[`FANOUT_MCP_PUBLIC_URL` was removed]
+Earlier builds took the MCP resource URI from its own setting, ending in
+`/mcp`. That setting is gone; the resource is derived from `FANOUT_PUBLIC_URL`.
+An instance still setting the old variable fails at startup, because an
+unrecognised `FANOUT_`-prefixed variable is a configuration error rather than
+something ignored.
+:::
 
 `FANOUT_MCP_ENABLED` (default `true`) turns the endpoint off entirely.
 
@@ -70,9 +78,8 @@ changes alert rules. That is the whole envelope, deliberately.
 
 ## Behind a proxy
 
-If TLS terminates at a reverse proxy, `FANOUT_MCP_PUBLIC_URL` must be the
-externally visible HTTPS URL rather than the internal one Fanout is listening
-on. [Terminate TLS](/guides/terminate-tls) covers the rest of that setup.
+If TLS terminates at a reverse proxy, `FANOUT_PUBLIC_URL` must be the externally
+visible HTTPS origin rather than the internal address Fanout is listening on. [Terminate TLS](/guides/terminate-tls) covers the rest of that setup.
 
 ## Checking it
 
@@ -84,4 +91,4 @@ curl -s https://fanout.example.com/.well-known/oauth-protected-resource
 ```
 
 If the resource in that document is not the URL your client is calling, fix
-`FANOUT_MCP_PUBLIC_URL` before debugging anything else.
+`FANOUT_PUBLIC_URL` before debugging anything else.

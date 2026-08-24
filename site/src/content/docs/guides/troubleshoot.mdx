@@ -25,9 +25,11 @@ Work down this list in order:
 1. **Has setup finished?** Before the first administrator exists there is no
    ingest token to check against, and ingest rejects everything. A collector
    started ahead of setup fails until you complete it.
-2. **Is it the right credential?** Browser sessions and MCP tokens are not
-   ingest credentials. The ingest token is `fo_`-prefixed and goes in
-   `x-fanout-ingest-token` or `Authorization: Bearer`.
+2. **Is it the right credential, in the right header?** The ingest token is
+   `fo_`-prefixed and goes in `Authorization: Bearer`. The older
+   `x-fanout-ingest-token` header was removed and is no longer accepted, so an
+   exporter that worked against an earlier build now fails as unauthenticated.
+   Browser sessions and MCP tokens are not ingest credentials either.
 3. **Is the listener reachable?** The native binary binds ingest to loopback.
    From another host, that is a connection failure rather than an auth one.
 4. **Right port for the protocol?** gRPC on `4317`, HTTP on `4318`. An HTTP
@@ -64,8 +66,12 @@ The login-link path exists so that nobody has to.
 ## Telemetry arrives but queries look empty
 
 Check the namespace. Fanout reads `service.namespace` from the OTLP resource and
-falls back to `FANOUT_DEFAULT_NAMESPACE`. Telemetry exported without one lands
-in `default`, and a query scoped to a different namespace will not see it.
+falls back to `FANOUT_DEFAULT_NAMESPACE`, so telemetry exported without one
+lands in `default`.
+
+An unscoped query spans every namespace, so this is only a problem when
+something has scoped the query — a dashboard filter, or an MCP call passing
+`namespace`. Clear the scope before concluding the data is missing.
 
 Rollups also lag ingest by design — the alert engine and the overview read
 aggregates, so the newest few seconds of data are not immediately reflected in

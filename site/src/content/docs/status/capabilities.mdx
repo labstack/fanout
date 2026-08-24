@@ -36,6 +36,8 @@ inline, so something reading the index knows before it fetches the page.
 | MCP tools | preview | Served at `/mcp`; the tool set is not frozen. |
 | Alerts | preview | Rules evaluate on an interval against rollups. |
 | Local email sign-in | shipped | Codes by email; no passwords. |
+| Local self-signup | preview | `FANOUT_SELF_SIGNUP`, off by default. Provisions viewers after code verification only. |
+| OIDC viewer auto-provisioning | preview | Verified identities admitted as viewers without a shared credential. |
 | OIDC sign-in | shipped | Provider flow, with group and domain mapping. |
 | Generated settings reference | shipped | `cmd/fanout-docgen` writes it; `just check` fails when it drifts from the type. |
 | Release checksums and provenance | shipped | `SHA256SUMS` plus GitHub build attestations on every archive. |

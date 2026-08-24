@@ -30,7 +30,7 @@ Every observability tool takes the same scope, and every field is optional:
 | Input | Means |
 |---|---|
 | `window` | Time window such as `15m`, `1h`, `24h`. Defaults to `1h`. |
-| `namespace` | OpenTelemetry service namespace. Defaults to the server's. |
+| `namespace` | OpenTelemetry service namespace. Omit it to span every namespace. |
 | `limit` | Maximum services, edges or endpoints to return, 1–500. |
 
 `service_performance` and `trace_detail` additionally accept `service`, an exact

@@ -21,8 +21,12 @@ docker run -d --name fanout \
   -p 7520:7520 -p 4317:4317 -p 4318:4318 \
   -v fanout-data:/var/lib/fanout/data \
   -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
-  ghcr.io/labstack/fanout:latest
+  labstack/fanout:latest
 ```
+
+Images are published to Docker Hub as `labstack/fanout` and mirrored to GitHub
+Container Registry as `ghcr.io/labstack/fanout`. The two carry the same digests;
+pick whichever registry your hosts already pull from.
 
 `FANOUT_AUTH_CODE_SECRET` is required in the default `local` auth mode and must
 be at least 32 characters — the container refuses to start without it. It is the
@@ -86,7 +90,7 @@ For containers, record or pin the digest the registry returns rather than
 trusting a moving tag:
 
 ```sh
-docker buildx imagetools inspect ghcr.io/labstack/fanout:2026.8.0
+docker buildx imagetools inspect labstack/fanout:2026.8.0
 ```
 
 Release images are multi-architecture for `linux/amd64` and `linux/arm64`, and
@@ -95,10 +99,12 @@ runner, because DuckDB needs cgo.
 
 | Image tag | Points at |
 |---|---|
-| `ghcr.io/labstack/fanout:latest` | the newest release |
-| `ghcr.io/labstack/fanout:2026.8.0` | that exact release |
-| `ghcr.io/labstack/fanout:main` | the tip of `main` |
-| `ghcr.io/labstack/fanout:sha-<commit>` | one specific commit |
+| `labstack/fanout:latest` | the newest release |
+| `labstack/fanout:2026.8.0` | that exact release |
+| `labstack/fanout:main` | the tip of `main` |
+| `labstack/fanout:sha-<commit>` | one specific commit |
+
+Every tag above also exists under `ghcr.io/labstack/fanout`.
 
 Standalone signatures and SBOMs are deliberately not published yet — the
 reasoning is in the repository's release contract.
