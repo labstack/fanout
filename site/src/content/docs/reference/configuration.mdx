@@ -1,0 +1,55 @@
+---
+title: Configuration
+description: How Fanout is configured, where settings come from, and how the reference stays true to the binary.
+summary: The rules that govern every setting — precedence, naming, secrets, and what happens to a name that changes.
+read_when:
+  - You are configuring an instance and want the rules before the list.
+  - A setting you set appears to have been ignored.
+status: preview
+---
+
+Fanout is configured from the environment, or from a YAML file using the same
+keys. Every setting is listed under [Settings](/reference/settings/server),
+grouped by the part of the product it belongs to.
+
+Those pages are generated from `internal/config` by `cmd/fanout-docgen`, and
+`just check` fails when a committed page no longer matches the type the loader
+binds. That is the whole point of generating them: the reference cannot describe
+a setting the binary does not accept, and cannot omit one it does.
+
+## Where a value comes from
+
+An environment variable wins over the YAML file, and the file wins over the
+built-in default. A setting with no default and no value is empty, which for
+most settings means the feature it configures is off.
+
+## Naming
+
+Every environment variable is `FANOUT_`-prefixed. The YAML key is the dotted
+path in the first column of each settings table — `storage.duckdb.memory` is
+`FANOUT_DUCKDB_MEMORY`, and the two are the same setting.
+
+## An unknown variable is an error
+
+Fanout rejects an unrecognised `FANOUT_`-prefixed variable at startup rather
+than ignoring it. This matters more than it looks: Fanout is pre-release and
+settings get renamed without aliases, so the alternative is a variable you
+believe is in effect, silently replaced by a default nobody chose, discovered
+months later. A refusal to start is the version of that failure you can act on.
+
+The consequence is that upgrading can require a configuration change, and the
+process tells you which one at the first boot after the upgrade.
+
+## Secrets
+
+Settings marked `secret` are redacted from the startup configuration log. They
+are ordinary environment variables otherwise: anything that can read the process
+environment can read them. Fanout does not encrypt them at rest and does not
+integrate with a secret manager — mount them the way you would for any other
+process.
+
+## Validation
+
+The whole configuration is validated before any listener opens, so a value the
+binary will not accept stops it at startup. [First boot](/start/first-boot)
+lists what is checked.

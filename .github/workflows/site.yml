@@ -1,0 +1,105 @@
+# Publishing the documentation site.
+#
+# The reference under site/src/content/docs/reference/settings is generated from
+# internal/config and committed, and `just check` fails a change that edits one
+# without regenerating. That gate is worth nothing if the published site is not
+# the gated tree, so publication is something the repository does rather than
+# something someone remembers to do.
+#
+# It deploys from main rather than from a release tag. The generated reference
+# is regenerated from the configuration type at HEAD and committed alongside it,
+# so main is where the documentation and the code it describes agree; pinning
+# publication to tags would republish whatever the last tag happened to carry
+# and reopen the same gap on a slower clock.
+name: Site
+
+on:
+  push:
+    branches: [main]
+    # The whole site is one build, but only these inputs can change it. The
+    # configuration type is in the list because the settings pages are generated
+    # from it: a change there with a regenerated page is a documentation change
+    # whether or not anything under site/ was touched by hand.
+    paths:
+      - "site/**"
+      - "internal/config/**"
+      - "cmd/fanout-docgen/**"
+      - ".github/workflows/site.yml"
+  # Publishing the current main on demand, without an empty commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # One publication at a time, and a superseded one is cancelled rather than
+  # queued: the newer build already contains everything the older one had.
+  group: site
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Pinned like every other action here. An earlier version of this
+      # workflow asserted the runner's preinstalled Node instead, to avoid
+      # adding a supply-chain dependency without a SHA to pin it to; the SHA is
+      # the same one ci.yml uses, so the objection no longer applies.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.18.0
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      # The reference pages are generated from internal/config, internal/alert
+      # and internal/api, and committed. This workflow triggers on those paths
+      # precisely because they regenerate it — so publishing without checking
+      # would ship a settings page describing a setting the binary rejects,
+      # which is the gap this file's header says it exists to close. Restored
+      # after an edit to the Node setup removed it.
+      - name: Refuse a reference that is behind the code
+        env:
+          CGO_ENABLED: "1"
+        run: go run ./cmd/fanout-docgen --check
+
+      - name: Install dependencies
+        working-directory: site
+        run: npm ci
+
+      # The same build the gate runs: `astro check`, the build itself, and
+      # check-tables.mjs. A page that would ship a table outside its scroll
+      # container fails here too, rather than being published because this
+      # workflow was in a hurry.
+      - name: Build
+        working-directory: site
+        env:
+          SITE_URL: https://fanout.run
+        run: npm run build
+
+      # A branch name reaches Cloudflare as the deployment's branch, and the
+      # project treats one branch as production. main is what this workflow runs
+      # on, so the deployment is a production one by construction rather than by
+      # a flag somebody could forget.
+      - name: Publish
+        working-directory: site
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          # An account id is an identifier, not a credential — it is what sits in
+          # a committed wrangler.toml on every project that has one. Keeping it
+          # here rather than in a secret leaves exactly one secret to install,
+          # and makes it obvious which account this publishes to.
+          CLOUDFLARE_ACCOUNT_ID: e6379d37f788129207ab5f566abfb4ff
+        run: |
+          npx --yes wrangler@4.123.0 pages deploy dist \
+            --project-name fanout \
+            --branch main \
+            --commit-hash "${GITHUB_SHA}"

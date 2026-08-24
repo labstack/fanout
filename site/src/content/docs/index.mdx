@@ -1,0 +1,87 @@
+---
+title: Fanout
+description: One binary that ingests OpenTelemetry, stores it, and answers questions about it.
+summary: The landing page — what Fanout is, what it replaces, and what it refuses to do.
+template: splash
+hero:
+  title: Observability that runs anywhere you can run a binary
+  tagline: Point your traces, logs and metrics at one process over OpenTelemetry. Get a fast browser client, a chat investigator that works through the evidence, and alerts — without standing up a stack to hold them.
+  actions:
+    - text: Install Fanout
+      link: /start/install
+    - text: See the live demo
+      link: https://demo.fanout.run
+status: shipped
+---
+
+import Section from "../../components/landing/Section.astro";
+import Preview from "../../components/landing/Preview.astro";
+import Pipeline from "../../components/landing/Pipeline.astro";
+import Contrast from "../../components/landing/Contrast.astro";
+import Refusals from "../../components/landing/Refusals.astro";
+import CtaBar from "../../components/landing/CtaBar.astro";
+
+{/* Prose below is Markdown inside each component, never a prop: `<path>.md` and llms.txt are generated from this source with component tags stripped, so a prop would render for a person and vanish for an agent. Keep MDX comments on one line — toPlainMarkdown only strips single-line ones, and a wrapped comment leaks into the alternate. */}
+
+<Section eyebrow="What you look at">
+
+## Every service, one screen, no query language.
+
+Health, latency, error rate and throughput for everything reporting — with the
+slow one already at the top. The chat investigator works from the same typed
+queries this view does, so what it tells you and what you are looking at cannot
+disagree.
+
+<Preview />
+
+</Section>
+
+<Section eyebrow="The shape of it">
+
+## Three signals in, one process, answers back out.
+
+Fanout is where your telemetry lands, not something you put in front of the
+thing it lands in. Traces, logs and metrics arrive over standard OTLP from SDKs
+or a Collector you already run, and everything after that happens inside one
+binary.
+
+<Pipeline>
+
+Nothing in the middle crosses a network, and nothing else has to be running for
+it to answer. The data directory it writes is the whole of its state.
+
+</Pipeline>
+
+</Section>
+
+<Section eyebrow="What it replaces">
+
+## Five services, or one process.
+
+This is the whole argument. Every other claim on this page follows from it — the
+short backup procedure, the single configuration, and the absence of an
+integration layer to debug at three in the morning.
+
+<Contrast />
+
+</Section>
+
+<Section eyebrow="Limits">
+
+## What Fanout will not do.
+
+These decide whether Fanout fits, so they are here rather than three pages in.
+None of them is a roadmap item phrased as a virtue.
+
+<Refusals>
+
+- **Not multi-tenant:** namespaces scope queries, not access. Anyone who can query the instance can query every namespace in it; an instance is one trust domain.
+- **No horizontal scale:** ingest, query and maintenance share a process and a machine. There is no scaling one without the others, because they are the same thing.
+- **No published throughput figure:** the previous benchmark was withdrawn because its raw reports and driver commit were not retained. [Measure your own hardware](/explanation/performance) instead.
+- **No migration paths:** Fanout is pre-release. A renamed setting is renamed, not aliased, which is why an unknown variable stops the process rather than being ignored.
+
+</Refusals>
+
+</Section>
+
+<CtaBar />

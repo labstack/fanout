@@ -1,0 +1,64 @@
+---
+title: Back up and restore
+description: Take a cold backup of a Fanout data directory, and restore one without corrupting an installation.
+summary: The whole data directory is the unit of backup. Copying part of it does not produce a recoverable instance.
+read_when:
+  - You are putting an instance into production.
+  - You are restoring after a host loss, or moving an instance between machines.
+status: shipped
+---
+
+Fanout is one process and one persistent data directory. Back up the directory
+as a unit.
+
+That is not a simplification. The directory holds the telemetry catalog and its
+Parquet files, query state, and the control SQLite database, and they reference
+each other. Copying one subdirectory produces something that looks like a backup
+and does not restore.
+
+## Take a cold backup
+
+1. Record the running version and configuration, keeping secrets out of ordinary
+   logs and tickets.
+2. Stop Fanout cleanly and wait for the process to exit. Shutdown closes both
+   OTLP listeners before draining the lake writer, so a clean exit is what makes
+   the files on disk consistent.
+3. Copy or snapshot the complete data directory, preserving ownership and
+   permissions.
+4. Start Fanout and confirm `/readyz`.
+5. Periodically restore a backup into an isolated directory. An untested backup
+   is not a recovery plan.
+
+:::caution[Not while it is running]
+Do not take a recursive copy of a live data directory. A storage-level snapshot
+is acceptable only if it gives a crash-consistent point-in-time view of the
+whole directory at once — a copy that walks the tree while the writer moves
+through it captures a catalog and Parquet files from different moments.
+:::
+
+## Restore
+
+1. Stop the destination process.
+2. Move any existing data directory aside. Do not merge a backup into one.
+3. Restore the complete directory with its original ownership and permissions.
+4. Start **the same version that created the backup**, then verify `/readyz`,
+   sign-in, and a known telemetry query.
+5. Upgrade separately, once the restored instance is known healthy.
+
+## Upgrading
+
+1. Read the release notes and pin the target tag.
+2. Take a backup, and verify it.
+3. Stop Fanout, replace only the binary or image, keep the data directory.
+4. Start, then check `/readyz`, sign-in, both OTLP transports, and a few
+   representative queries.
+
+Migrations run forward at startup. A rollback to the previous binary after they
+have run is not assumed safe — restore the pre-upgrade backup with the previous
+version instead.
+
+## Never delete an account from the control database
+
+Removing a user row cascades to sessions, OAuth grants and owned dashboards. To
+get someone back in, use the login-link path in
+[troubleshooting](/guides/troubleshoot) instead.

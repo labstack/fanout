@@ -1,0 +1,160 @@
+---
+/* The page's central argument, shown rather than asserted.
+ *
+ * Every other claim on this landing page follows from this one: an
+ * observability backend is normally five services, and Fanout is one process.
+ * Two panes side by side is the form that makes the difference immediate —
+ * the left is a list you have to operate, the right is a list you do not.
+ *
+ * The left column is deliberately not a straw man. Each entry is a real
+ * component of a working self-hosted stack, named the way its own project names
+ * it, because an unfair comparison is one a reader corrects instead of reading.
+ */
+import Icon from "../Icon.astro";
+
+const assembled = [
+  { icon: "plugs-connected", part: "Collector", job: "Receive OTLP, batch, forward" },
+  { icon: "database", part: "Storage backend", job: "Persist telemetry, expire it" },
+  { icon: "magnifying-glass", part: "Query layer", job: "Answer questions over that store" },
+  { icon: "chart-line", part: "Dashboard service", job: "Render it for people" },
+  { icon: "bell", part: "Alertmanager", job: "Evaluate rules, deliver notifications" },
+];
+
+const single = [
+  { icon: "plugs-connected", part: "OTLP in over gRPC and HTTP" },
+  { icon: "hard-drives", part: "Parquet on local disk" },
+  { icon: "magnifying-glass", part: "DuckDB, in the same process" },
+  { icon: "chart-line", part: "The browser client, served by the binary" },
+  { icon: "bell", part: "The alert engine, on a fixed interval" },
+];
+---
+
+<div class="fo-contrast">
+  <div class="fo-pane fo-pane-many">
+    <p class="fo-pane-label">The usual arrangement</p>
+    <ul>
+      {
+        assembled.map((row) => (
+          <li>
+            <span class="fo-part"><Icon name={row.icon} /> {row.part}</span>
+            <span class="fo-job">{row.job}</span>
+          </li>
+        ))
+      }
+    </ul>
+    <p class="fo-pane-foot">
+      Five deployments, five configurations, five upgrade cadences — and the
+      failure modes that exist only between them.
+    </p>
+  </div>
+
+  <div class="fo-pane fo-pane-one">
+    <p class="fo-pane-label">Fanout</p>
+    <ul>
+      {single.map((row) => (
+        <li><span class="fo-part"><Icon name={row.icon} /> {row.part}</span></li>
+      ))}
+    </ul>
+    <p class="fo-pane-foot">
+      One binary to pin, one directory to back up, one process to restart.
+    </p>
+  </div>
+</div>
+
+<style>
+  .fo-contrast {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+    margin-top: 2rem;
+  }
+
+  @media (min-width: 52rem) {
+    .fo-contrast {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1.25rem;
+    }
+  }
+
+  .fo-pane {
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 10px;
+    padding: 1.35rem 1.4rem 1.2rem;
+    background: var(--sl-color-gray-6);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* The right pane is the answer, so it carries the weight. Not a filled accent
+     surface — that is reserved for the one button on the page. */
+  .fo-pane-one {
+    border-color: var(--sl-color-gray-4);
+  }
+
+  .fo-pane-label {
+    font-family: var(--fo-font-display);
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-3);
+    margin: 0 0 1.1rem;
+  }
+
+  .fo-pane-one .fo-pane-label {
+    color: var(--sl-color-white);
+  }
+
+  .fo-pane ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    flex: 1;
+  }
+
+  .fo-pane li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+
+  .fo-part {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--fo-font-display);
+    font-size: 0.88rem;
+    color: var(--sl-color-white);
+  }
+
+  /* The icons are the same Phosphor set the product's browser client draws
+     with. On the left they are dimmed: those five are the things you would
+     otherwise operate, and colouring them equally would suggest parity. */
+  .fo-pane-many .fo-part :global(svg) {
+    color: var(--sl-color-gray-4);
+  }
+
+  .fo-pane-one .fo-part :global(svg) {
+    color: var(--sl-color-accent);
+  }
+
+  .fo-job {
+    margin-inline-start: 1.5rem;
+    font-family: var(--fo-font-body);
+    font-size: 0.82rem;
+    line-height: 1.5;
+    color: var(--sl-color-gray-3);
+  }
+
+  .fo-pane-foot {
+    font-family: var(--fo-font-body);
+    font-size: 0.84rem;
+    line-height: 1.6;
+    color: var(--sl-color-gray-3);
+    margin: 1.25rem 0 0;
+    padding-top: 1rem;
+    border-top: 1px solid var(--sl-color-hairline-shade);
+  }
+</style>

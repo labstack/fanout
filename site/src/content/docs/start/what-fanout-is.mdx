@@ -1,0 +1,55 @@
+---
+title: What Fanout is
+description: One Go process that ingests OpenTelemetry, stores it as Parquet, queries it with DuckDB, and answers questions about it.
+summary: The scope of the product in one page — what the binary contains, what it deliberately does not, and who it is for.
+read_when:
+  - You are deciding whether Fanout fits before installing anything.
+  - You want to know what Fanout replaces in an existing observability stack.
+status: preview
+---
+
+Fanout is a single self-hosted binary for OpenTelemetry. One Go process accepts
+OTLP over gRPC and HTTP, writes telemetry to disk as Parquet, answers queries
+with DuckDB, evaluates alert rules, serves a chat investigator and MCP tools,
+and hosts the browser client.
+
+The point of that list is that it is one list. A conventional deployment of the
+same capability is a collector, a storage backend, a query layer, a dashboard
+service and an alertmanager, each with its own configuration, failure modes and
+upgrade cadence. Fanout is one process with one configuration and one thing to
+restart.
+
+## What it contains
+
+| Part | What it does |
+|---|---|
+| OTLP ingest | Accepts traces, logs and metrics on gRPC and HTTP |
+| Storage | Writes Parquet to a local data directory; no external database |
+| Query | DuckDB in-process, over the Parquet it wrote |
+| Alerts | Evaluates persisted rules on a fixed interval against rollups |
+| Investigator | A chat agent working from the same typed query tools |
+| MCP server | Exposes those tools to an external agent |
+| Browser client | Served by the same process, from the same binary |
+
+## What it is not
+
+Fanout is not a hosted service, and it is not a collector. It sits where the
+backend sits: your SDKs or your existing Collector export to it.
+
+It is also not a multi-tenant platform. Namespaces scope telemetry queries so
+one instance can hold several services' data without them running together, but
+a namespace is not a user, an organisation or an authorisation boundary. An
+instance is a trust domain.
+
+## Who it is for
+
+Teams that want their telemetry on their own hardware, with a small enough
+operational surface that observability does not become its own on-call rotation.
+The reference deployment target is a single small VM.
+
+## Where it is in its life
+
+Fanout is pre-release. It changes without migration paths, and the shape of
+things that already run may still move. The [capabilities
+page](/status/capabilities) is the account of what is settled and what is not;
+it is worth reading before building anything durable on top.

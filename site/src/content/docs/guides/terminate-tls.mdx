@@ -1,0 +1,65 @@
+---
+title: Terminate TLS
+description: Serve Fanout over TLS directly, or behind a reverse proxy, without leaving an ingest listener in the clear.
+summary: The two supported TLS patterns, and the proxy-trust setting that has to accompany the second one.
+read_when:
+  - You are exposing an instance beyond a trusted network.
+  - Browser session cookies are not coming back Secure.
+status: preview
+---
+
+There are two supported patterns. The mistake both exist to prevent is the same
+one: terminating TLS for the browser and forgetting that ingest is a separate
+listener.
+
+## Direct TLS
+
+Set both files. Setting one without the other is a startup error rather than a
+half-configured listener:
+
+```sh
+FANOUT_TLS_CERT_FILE=/etc/fanout/tls/cert.pem
+FANOUT_TLS_KEY_FILE=/etc/fanout/tls/key.pem
+```
+
+That enables TLS 1.3 on all three listeners at once — the browser listener, OTLP
+gRPC and OTLP HTTP.
+
+## Behind a reverse proxy
+
+Terminate at the proxy and forward to Fanout's listeners. Two settings have to
+come with it:
+
+```sh
+FANOUT_PUBLIC_URL=https://fanout.example.com
+FANOUT_TRUSTED_PROXY_CIDRS=10.0.1.0/24
+```
+
+`FANOUT_PUBLIC_URL` is the externally reachable HTTPS origin. Fanout uses it as
+a trusted signal that TLS is terminated somewhere in front, which is what lets
+it mark session cookies `Secure`. Without it, an instance behind a proxy issues
+cookies that are not — and it warns about exactly that at startup.
+
+`FANOUT_TRUSTED_PROXY_CIDRS` is the list of networks whose forwarded client
+addresses Fanout will believe. Set it to the proxy network and nothing wider.
+Never `0.0.0.0/0`: audit records and rate limits both key on client address, and
+trusting every source means any caller can claim to be any address. Fanout warns
+when a public URL is set, TLS is not terminated locally, and this is empty.
+
+:::caution[The proxy usually only covers the browser]
+A reverse proxy is normally configured for the HTTP listener alone. That leaves
+OTLP gRPC and OTLP HTTP exactly as they were. Either keep both on a trusted
+private network, or terminate their protocols at the proxy too — an ingest
+listener carrying a bearer token in the clear is the failure this page exists to
+prevent.
+:::
+
+## External MCP clients
+
+`FANOUT_PUBLIC_URL` above does double duty: Fanout derives the MCP resource URI
+from it, and that derived resource is what tokens are bound to as their
+audience. So it must be HTTPS and stable across restarts — changing it
+invalidates every token already issued.
+
+Earlier builds had a separate `FANOUT_MCP_PUBLIC_URL` for this. It was removed,
+and an instance still setting it fails at startup rather than ignoring it.

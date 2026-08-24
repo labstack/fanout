@@ -1,0 +1,89 @@
+---
+title: Troubleshoot
+description: The failures a Fanout instance actually produces, and what each one means.
+summary: Startup refusals, rejected exporters, locked-out users, and where to look when telemetry is not arriving.
+read_when:
+  - The process will not start, or an exporter is being rejected.
+  - Someone cannot sign in and SMTP is not configured.
+status: preview
+---
+
+## The process will not start
+
+Fanout validates its whole configuration before opening any listener, so a
+startup refusal is a configuration message rather than a crash. Read the error:
+it names the setting.
+
+The one that surprises people is an unrecognised variable. Fanout rejects any
+`FANOUT_`-prefixed name it does not know, so a typo — or a setting renamed in a
+release — stops the process instead of being ignored. That is deliberate; see
+[configuration](/reference/configuration).
+
+## An exporter is rejected
+
+Work down this list in order:
+
+1. **Has setup finished?** Before the first administrator exists there is no
+   ingest token to check against, and ingest rejects everything. A collector
+   started ahead of setup fails until you complete it.
+2. **Is it the right credential, in the right header?** The ingest token is
+   `fo_`-prefixed and goes in `Authorization: Bearer`. The older
+   `x-fanout-ingest-token` header was removed and is no longer accepted, so an
+   exporter that worked against an earlier build now fails as unauthenticated.
+   Browser sessions and MCP tokens are not ingest credentials either.
+3. **Is the listener reachable?** The native binary binds ingest to loopback.
+   From another host, that is a connection failure rather than an auth one.
+4. **Right port for the protocol?** gRPC on `4317`, HTTP on `4318`. An HTTP
+   exporter pointed at the gRPC port fails in a way that does not obviously say
+   so.
+
+For OTLP/HTTP, set the exporter protocol to `http/protobuf` and give it the base
+endpoint — `http://fanout:4318`. Exporters derive `/v1/traces`, `/v1/metrics`
+and `/v1/logs` from it themselves.
+
+## Someone cannot sign in and SMTP is not configured
+
+SMTP is optional. Creating a local user without it succeeds and reports
+`invite_delivery: "not_configured"` with `login_link_required: true`. An
+operator with shell access to the same configuration and data directory then
+mints a link directly:
+
+```sh
+fanout --config /etc/fanout/fanout.yaml login-link user@example.com
+```
+
+The link expires after 15 minutes, works once, and is recorded in the
+authentication audit history. It is available in `local` auth mode only.
+
+A configured SMTP relay that fails delivery is reported as an error rather than
+silently claiming an invitation arrived — so "no error" and "not configured" are
+distinguishable.
+
+:::caution[Do not fix this in the database]
+Deleting a user row cascades to sessions, OAuth grants and owned dashboards.
+The login-link path exists so that nobody has to.
+:::
+
+## Telemetry arrives but queries look empty
+
+Check the namespace. Fanout reads `service.namespace` from the OTLP resource and
+falls back to `FANOUT_DEFAULT_NAMESPACE`, so telemetry exported without one
+lands in `default`.
+
+An unscoped query spans every namespace, so this is only a problem when
+something has scoped the query — a dashboard filter, or an MCP call passing
+`namespace`. Clear the scope before concluding the data is missing.
+
+Rollups also lag ingest by design — the alert engine and the overview read
+aggregates, so the newest few seconds of data are not immediately reflected in
+them even though the raw telemetry is queryable.
+
+## What to watch in production
+
+- `/healthz` — liveness.
+- `/readyz` — storage readiness and resolved runtime sizing.
+- `/-/metrics` — Prometheus metrics. Keep it private or set
+  `FANOUT_METRICS_TOKEN`. Do not make it public merely to simplify scraping.
+
+Alert on repeated restarts, readiness failures, ingest authentication failures,
+telemetry drops, sustained query latency, and free disk space.

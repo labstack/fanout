@@ -1,0 +1,272 @@
+@import "@fontsource/ibm-plex-mono/latin-400.css";
+@import "@fontsource/ibm-plex-mono/latin-400-italic.css";
+@import "@fontsource/ibm-plex-mono/latin-500.css";
+@import "@fontsource/ibm-plex-mono/latin-600.css";
+@import "@fontsource/ibm-plex-sans/latin-400.css";
+@import "@fontsource/ibm-plex-sans/latin-400-italic.css";
+@import "@fontsource/ibm-plex-sans/latin-600.css";
+
+/* Fanout docs theme — Ayu Mono.
+ *
+ * The palette is the product's own: Ayu Dark surfaces under IBM Plex. Fanout is
+ * one binary you point a collector at and then read telemetry out of, and both
+ * halves of that are on the page — the surfaces are the ones the product's own
+ * UI uses, so the documentation and the thing it documents do not look like
+ * different products.
+ *
+ * The accent is violet, and that is a decision worth stating because the
+ * obvious alternative is wrong. Three hues on this site are load-bearing:
+ * green, amber and red mean healthy, degraded and unhealthy inside Fanout
+ * itself, and they appear in the landing page's own service table. Tinting a
+ * link green would put "green means healthy" in conflict with "green means
+ * interactive" on the same scroll. Violet is the one accent in the product
+ * palette that carries no status, so it is the one free to mean "you can click
+ * this".
+ *
+ * White is not available for that job either, despite being the product's
+ * interactive primary: headings are already white, so a white link is
+ * indistinguishable from the text around it. White stays what it is here — the
+ * strongest text, and the fill of a primary button.
+ *
+ * What is deliberately NOT tinted is the asides. Those keep Starlight's
+ * semantic amber, blue and red, because a caution marking something the binary
+ * does not yet do has to read as a warning rather than as more site chrome.
+ *
+ * Typography is the same superfamily split onebox.run uses. IBM Plex Mono owns
+ * the brand, navigation, headings and technical artifacts; IBM Plex Sans is
+ * confined to sustained prose, which on this site means the documentation body
+ * and the landing page's longer paragraphs. Because both are Plex, the role
+ * change reads as hierarchy rather than as a second visual identity.
+ *
+ * Starlight's tokens are overridden rather than fought with, so component
+ * updates keep working.
+ */
+
+:root {
+  --fo-font-display: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --fo-font-body: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* Mono owns the brand, navigation, headings and technical artifacts. Sans is
+     opted into by prose, below. */
+  --sl-font: var(--fo-font-display);
+  --sl-font-mono: var(--fo-font-display);
+
+  /* Dark (Starlight's default state). Ayu Dark surfaces, unchanged from the
+     product's own theme — a "corrected" neutral grey would undo the slight blue
+     cast that makes these read as Ayu rather than as any dark theme. */
+  --sl-color-accent-low: #2a2141;
+  --sl-color-accent: #a97ce0;
+  --sl-color-accent-high: #d2a6ff;
+  --sl-color-white: #fafafa;
+  --sl-color-gray-1: #e6e4de;
+  --sl-color-gray-2: #bfbdb6;
+  --sl-color-gray-3: #8b8e99;
+  --sl-color-gray-4: #565b69;
+  --sl-color-gray-5: #1d2433;
+  --sl-color-gray-6: #131721;
+  --sl-color-black: #0b0e14;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #ece3fb;
+  --sl-color-accent: #7c4dcc;
+  --sl-color-accent-high: #5b32a3;
+  --sl-color-white: #171b24;
+  --sl-color-gray-1: #2b3038;
+  --sl-color-gray-2: #4a5058;
+  --sl-color-gray-3: #6b7280;
+  --sl-color-gray-4: #a4abb4;
+  --sl-color-gray-5: #d6d9dd;
+  --sl-color-gray-6: #eceef0;
+  --sl-color-gray-7: #f3f4f5;
+  --sl-color-black: #fcfcfc;
+}
+
+/* The favicon is the product mark, not only browser chrome. Pair it with the
+   name in the header so the same identity carries across the landing page and
+   the documentation without asking a first-time visitor to decode an icon
+   alone. */
+.site-title {
+  gap: 0.55rem;
+}
+
+.site-title::before {
+  content: "";
+  width: 1.35rem;
+  height: 1.35rem;
+  flex: 0 0 auto;
+  background: url("/favicon.svg") center / contain no-repeat;
+}
+
+/* The landing page stays mono-led; the proportional face is reserved for the
+   long-form documentation where it materially improves reading. */
+body:has(.fo-hero) site-search {
+  display: none;
+}
+
+body:has(.fo-hero) header.header .sl-flex {
+  justify-content: space-between;
+}
+
+/* Prose uses the productive member of the same Plex family. The mono identity
+   remains in every heading and piece of chrome, while paragraphs and lists get
+   the denser word shapes and calmer rhythm of a proportional text face. */
+.sl-markdown-content p,
+.sl-markdown-content li {
+  font-family: var(--fo-font-body);
+  line-height: 1.7;
+}
+
+/* Starlight's Card sets its own title in the body face. A card title is a
+   heading, and headings on this site are mono — without this the landing page
+   states the rule in its own hierarchy and then breaks it in the first grid a
+   reader meets. */
+.card > .title {
+  font-family: var(--fo-font-display);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+
+/* Reference-table headers remain technical labels; descriptive cells use the
+   body face so dense field documentation stays compact. Inline code still
+   inherits Starlight's mono token. */
+.sl-markdown-content td {
+  font-family: var(--fo-font-body);
+  line-height: 1.5;
+}
+
+.sl-markdown-content th {
+  line-height: 1.45;
+}
+
+/* The mono headings carry the product identity against the proportional prose:
+   500 rather than bold, pulled slightly tighter, so each reads as a precise
+   label rather than as shouting. The page title sits outside
+   .sl-markdown-content, so it is named separately rather than assumed to be
+   inside it. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.content-panel h1,
+h1#_top {
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+
+.sl-markdown-content table {
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.sl-markdown-content th {
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+  font-weight: 600;
+}
+
+/* An environment variable is a single token and should never be hyphenated
+   across two lines in the column that names it. */
+.sl-markdown-content td:first-child code {
+  white-space: nowrap;
+}
+
+/* Wide reference tables scroll inside their own box; the page never does.
+   The wrapper is focusable so the overflow is reachable by keyboard, which is
+   the accessibility requirement that comes with any scroll container. */
+.sl-markdown-content .table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+  margin: 1rem 0;
+}
+
+.sl-markdown-content .table-wrap:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 2px;
+}
+
+/* Without a minimum, a four-column reference table compresses to fit a phone
+   and every column becomes a ribbon of wrapped text. The minimum makes it
+   overflow instead, which is what the scroll container is there to absorb.
+
+   The overflow reset is not cosmetic. Starlight makes tables scroll on their
+   own, so inside the wrapper there were two nested scrollers and two stacked
+   scrollbars for one table, each moving a different amount. The wrapper is the
+   element that should scroll; the table stops.
+
+   Both axes have to be named. `overflow-x: visible` alone is computed back to
+   `auto` whenever the other axis is not visible, which is the rule that makes a
+   single-axis reset silently do nothing here. */
+.sl-markdown-content .table-wrap > table {
+  min-width: 34rem;
+  overflow: visible;
+}
+
+/* Code inside a heading is set smaller than the heading's own size.
+   The generated settings reference titles every note with a setting key, and a
+   key is one long unbreakable token: at Starlight's h3 size,
+   `storage.duckdb.max_connections` is wider than the content column and breaks
+   mid-identifier, rendering as "max_connection" above a lone "s". */
+.sl-markdown-content :is(h1, h2, h3, h4, h5, h6) code {
+  font-size: 0.78em;
+}
+
+/* Previous/next links at the foot of a page. Starlight sizes their titles at
+   1.5rem, which is right for the proportional face it ships with and too large
+   in this one — mono sets every glyph on the same advance, so a title that fits
+   in a card there wraps here. The label above it moves the other way: Starlight
+   leaves "Previous" and "Next" at body size, so it reads as loudly as the prose
+   it follows, while every other piece of chrome sits at --sl-text-sm.
+
+   The label is a bare text node with no element of its own, so it is styled on
+   the link's span and the title resets what it should not inherit. */
+.pagination-links a > span {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+}
+
+.pagination-links a .link-title {
+  font-size: 1rem;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--sl-color-white);
+}
+
+.pagination-links a svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+/* Print.
+ *
+ * Starlight ships a print stylesheet that forces the light palette, but both it
+ * and these tokens are unlayered, and the built HTML links it first — so source
+ * order hands the win to this file and the override never fires. A reader with
+ * dark mode on prints low-contrast grey on white paper.
+ *
+ * Wrapping the tokens in a layer would fix the ordering and lose the theme:
+ * Starlight's own defaults are unlayered too, so they would then win. Restating
+ * the light palette here is the version that only affects print.
+ */
+@media print {
+  :root,
+  :root[data-theme="dark"],
+  :root[data-theme="light"] {
+    --sl-color-accent-low: #ece3fb;
+    --sl-color-accent: #7c4dcc;
+    --sl-color-accent-high: #5b32a3;
+    --sl-color-white: #171b24;
+    --sl-color-gray-1: #2b3038;
+    --sl-color-gray-2: #4a5058;
+    --sl-color-gray-3: #6b7280;
+    --sl-color-gray-4: #a4abb4;
+    --sl-color-gray-5: #d6d9dd;
+    --sl-color-gray-6: #eceef0;
+    --sl-color-gray-7: #f3f4f5;
+    --sl-color-black: #ffffff;
+  }
+}
