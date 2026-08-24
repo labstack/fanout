@@ -49,6 +49,13 @@ func collectRoutes(apiDir string) ([]api.RouteDoc, error) {
 			return nil, fmt.Errorf("parsing %s: %w", entry.Name(), err)
 		}
 
+		// Identifiers that are an *echo.Group parameter, mapped to the prefix
+		// that group is mounted at, so a relative path can be completed.
+		groupReceivers, err := groupParams(file, entry.Name())
+		if err != nil {
+			return nil, err
+		}
+
 		ast.Inspect(file, func(n ast.Node) bool {
 			call, ok := n.(*ast.CallExpr)
 			if !ok || len(call.Args) == 0 {
@@ -70,6 +77,14 @@ func collectRoutes(apiDir string) ([]api.RouteDoc, error) {
 			path, err := strconv.Unquote(lit.Value)
 			if err != nil || !strings.HasPrefix(path, "/") {
 				return true
+			}
+			// Complete a group-relative path. groupParams has already refused
+			// any group this generator cannot name, so an unresolved receiver
+			// here is the root Echo and the path is already absolute.
+			if recv, ok := sel.X.(*ast.Ident); ok {
+				if prefix, isGroup := groupReceivers[recv.Name]; isGroup {
+					path = prefix + path
+				}
 			}
 			r := reg{method: sel.Sel.Name, path: path}
 			if !seen[r] {

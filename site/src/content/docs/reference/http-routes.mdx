@@ -61,6 +61,11 @@ Capabilities map to roles in [roles](/reference/roles).
 | `GET` | `/api/dashboards/:id` | `dashboards:manage-own` |
 | `PUT` | `/api/dashboards/:id` | `dashboards:manage-own` |
 | `GET` | `/api/health` | none |
+| `GET` | `/api/observability/logs` | `telemetry:read` |
+| `GET` | `/api/observability/overview` | `telemetry:read` |
+| `GET` | `/api/observability/performance` | `telemetry:read` |
+| `GET` | `/api/observability/topology` | `telemetry:read` |
+| `GET` | `/api/observability/trace` | `telemetry:read` |
 | `GET` | `/api/rules` | `telemetry:read` |
 | `POST` | `/api/rules` | `alerts:manage` |
 | `DELETE` | `/api/rules/:id` | `alerts:manage` |
@@ -74,14 +79,9 @@ Capabilities map to roles in [roles](/reference/roles).
 | `PUT` | `/api/users/:id` | `users:manage` |
 | `POST` | `/api/users/:id/logout-all` | `users:manage` |
 | `GET` | `/healthz` | none |
-| `GET` | `/logs` | none |
 | `POST` | `/oauth/register` | protocol handshake |
 | `POST` | `/oauth/token` | protocol handshake |
-| `GET` | `/overview` | none |
-| `GET` | `/performance` | none |
 | `GET` | `/readyz` | none |
-| `GET` | `/topology` | none |
-| `GET` | `/trace` | none |
 
 ## What the requirements mean
 

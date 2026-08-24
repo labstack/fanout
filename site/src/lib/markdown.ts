@@ -19,7 +19,21 @@ export function toPlainMarkdown(source: string): string {
 
   for (const line of source.split("\n")) {
     const fence = line.trimStart().startsWith("```");
+    const wasInFence = inFence;
     if (fence) inFence = !inFence;
+
+    // A fenced block inside a `:::` directive still belongs to that directive.
+    // Testing the post-toggle state skipped the directive branch for every line
+    // from the opening fence onward, so the code escaped the blockquote and
+    // split it in the .md alternate. No page does this today; install.mdx is
+    // one edit away from it.
+    if (inDirective && (wasInFence || inFence)) {
+      const content = line.startsWith(directiveIndent)
+        ? line.slice(directiveIndent.length)
+        : line;
+      out.push(content.trim() === "" ? `${directiveIndent}>` : `${directiveIndent}> ${content}`);
+      continue;
+    }
 
     if (!inFence) {
       // ESM imports at the top of an MDX file.

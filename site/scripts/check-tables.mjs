@@ -12,8 +12,12 @@
 // emitted HTML is the only vantage point from which that is visible.
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const dist = new URL("../dist/", import.meta.url).pathname;
+// fileURLToPath, not .pathname: a URL keeps percent-escapes, so a checkout
+// under a path containing a space fails to read its own build output and
+// reports "run `npm run build` first" immediately after a successful build.
+const dist = fileURLToPath(new URL("../dist/", import.meta.url));
 
 async function htmlFiles(dir) {
   const found = [];

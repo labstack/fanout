@@ -3,9 +3,66 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/labstack/fanout/internal/api"
 )
 
 const apiDir = "../../internal/api"
+
+// The bug this guards: routes registered on an *echo.Group carry relative
+// paths, and classifyRoute's SPA catch-all reports any non-/api/ path as
+// public — so five telemetry endpoints were published as requiring no
+// credential, on a page whose prose promises that cannot happen.
+func TestCollectRoutesResolvesGroupPrefixes(t *testing.T) {
+	routes, err := collectRoutes(apiDir)
+	if err != nil {
+		t.Fatalf("collectRoutes: %v", err)
+	}
+
+	relative := map[string]bool{
+		"/overview": true, "/topology": true, "/logs": true,
+		"/trace": true, "/performance": true,
+	}
+	for _, r := range routes {
+		if relative[r.Path] {
+			t.Errorf("%s %s: group-relative path published without its prefix", r.Method, r.Path)
+		}
+	}
+
+	var found bool
+	for _, r := range routes {
+		if r.Path == "/api/observability/overview" {
+			found = true
+			if r.Capability != "telemetry:read" {
+				t.Errorf("observability overview requires %q, want telemetry:read", r.Capability)
+			}
+		}
+	}
+	if !found {
+		t.Error("the observability group's routes are missing from the reference entirely")
+	}
+}
+
+// The roles matrix must agree with the middleware, which is why it is generated
+// at all: the hand-written one claimed viewer could not run the agent.
+func TestRenderRolesMatchesTheMiddleware(t *testing.T) {
+	body, err := renderRoles()
+	if err != nil {
+		t.Fatalf("renderRoles: %v", err)
+	}
+	text := string(body)
+
+	for role, caps := range api.RoleCapabilities() {
+		for _, capability := range caps {
+			if !strings.Contains(text, "`"+capability+"`") {
+				t.Errorf("%s holds %q but the page never names it", role, capability)
+			}
+		}
+	}
+	if !strings.Contains(text, "generated: true") {
+		t.Error("missing the generated marker")
+	}
+}
 
 // The route reference's whole value is that the Requires column is the
 // middleware's own answer rather than a description of it. So the test that

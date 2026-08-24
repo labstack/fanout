@@ -35,6 +35,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/alert"
 	"github.com/labstack/fanout/internal/config"
@@ -85,6 +87,15 @@ func run(source, alertSource, apiDir, outDir string, check bool) error {
 		return err
 	}
 	pages["http-routes.mdx"] = renderRoutes(routes)
+
+	// The role/capability matrix, from the same map the middleware consults.
+	// It was hand-written until a review found it claiming `viewer` could not
+	// run the agent while the middleware granted exactly that.
+	rolesPage, err := renderRoles()
+	if err != nil {
+		return err
+	}
+	pages["roles.mdx"] = rolesPage
 
 	var stale []string
 	for name, body := range pages {
@@ -354,7 +365,14 @@ func flow(text, goName string) string {
 	joined := strings.Join(strings.Fields(text), " ")
 	for _, prefix := range []string{goName + " is ", goName + " reports ", goName + " "} {
 		if rest, ok := strings.CutPrefix(joined, prefix); ok {
-			return strings.ToUpper(rest[:1]) + rest[1:]
+			// Decode a rune rather than slicing a byte. These comments contain
+			// typographic quotes and dashes, and slicing one byte off a
+			// multi-byte rune publishes U+FFFD into the reference.
+			first, width := utf8.DecodeRuneInString(rest)
+			if first == utf8.RuneError {
+				return rest
+			}
+			return string(unicode.ToUpper(first)) + rest[width:]
 		}
 	}
 	return joined

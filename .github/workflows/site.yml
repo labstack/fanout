@@ -60,6 +60,17 @@ jobs:
           cache: npm
           cache-dependency-path: site/package-lock.json
 
+      # The reference pages are generated from internal/config, internal/alert
+      # and internal/api, and committed. This workflow triggers on those paths
+      # precisely because they regenerate it — so publishing without checking
+      # would ship a settings page describing a setting the binary rejects,
+      # which is the gap this file's header says it exists to close. Restored
+      # after an edit to the Node setup removed it.
+      - name: Refuse a reference that is behind the code
+        env:
+          CGO_ENABLED: "1"
+        run: go run ./cmd/fanout-docgen --check
+
       - name: Install dependencies
         working-directory: site
         run: npm ci

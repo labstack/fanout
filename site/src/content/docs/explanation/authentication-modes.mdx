@@ -39,9 +39,15 @@ Two conditions guard it, and both matter:
   no users, so the first account is always the administrator you create
   deliberately — a race for the setup URL cannot hand someone else the instance.
 
-Self-provisioned users are `viewer`, which is the point: they can read telemetry
-and keep their own dashboards, and cannot run the agent or change anything. See
-[roles](/reference/roles).
+Self-provisioned users are `viewer`. Be clear about what that grants before
+turning this on: a viewer can read **all** telemetry the instance holds, keep
+their own dashboards, and **run the chat investigator** — which calls your model
+provider and spends money. What it cannot do is change anything: no alert rules,
+no ingest token, no user administration.
+
+If that is more than you want to hand to anyone who can receive an email, leave
+self-signup off and create accounts deliberately. The full matrix is in
+[roles](/reference/roles), generated from the authorization table itself.
 
 ## OIDC
 

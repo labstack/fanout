@@ -223,7 +223,7 @@ site: docs-generate
 # a gate that rewrites the tree it is inspecting cannot tell you whether the
 # tree was already right. Use `just site` for the writing path during
 # development.
-site-build: docs-generate-check
+site-build: docs-generate-check site-deps
     cd site && npm run build
 
 # ── Gate ─────────────────────────────────────────────────────────────────────
