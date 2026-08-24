@@ -56,7 +56,7 @@ what separates it from its neighbours.
 | **SigNoz** | Both are OTLP-native and self-hosted. SigNoz composes a collector, ClickHouse, and query services; Fanout compiles ingest, storage, query, alerting, and the browser client into one binary, with DuckLake/Parquet on local disk instead of a database cluster. |
 | **Jaeger** | Jaeger covers traces and expects a storage backend you run separately. Fanout ingests traces, logs, and metrics into the same store, with nothing else to deploy. |
 | **Prometheus with Grafana** | Prometheus pulls metrics and is excellent at them. Fanout accepts pushed OTLP for all three signals and is built around investigating a specific incident rather than maintaining long-range metric series. |
-| **Datadog**, **Honeycomb**, **Grafana Cloud** | Those are managed services with the operational burden removed and per-gigabyte pricing attached, and your telemetry leaves your network. Fanout is a binary you run, on data that stays on your disk. |
+| **Datadog**, **Honeycomb**, **Grafana Cloud** | Those are managed services: someone else runs the storage, the scaling, and the upgrades, and your telemetry leaves your network to get there. Fanout is a binary you run, on data that stays on your disk. |
 | **An OpenTelemetry Collector piped into ClickHouse** | The same shape, assembled by hand: collector, database, dashboards, and the glue between them. Fanout is that assembly as one program, with an agent and an MCP server already wired to the same query contract. |
 
 Fanout is a single node. It has no clustering, no replication, and no object
