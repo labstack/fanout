@@ -21,6 +21,7 @@ import (
 // registration is an error, never a guess.
 var groupPrefixes = map[string]string{
 	"ObservabilityHandler.Register": "/api/observability",
+	"Runtime.Register":              "/api/agent",
 }
 
 // groupParams finds every `*echo.Group` parameter in a file and returns the
@@ -51,7 +52,7 @@ func groupParams(file *ast.File, filename string) (map[string]string, error) {
 				failure = fmt.Errorf(
 					"%s: %s registers routes on an *echo.Group, whose paths are relative to a "+
 						"prefix declared at its call site in another package. Add %q to "+
-						"groupPrefixes in cmd/fanout-docgen/routes.go with the prefix it is "+
+						"groupPrefixes in cmd/fanout-docgen/groups.go with the prefix it is "+
 						"mounted at — without it those routes publish as requiring no credential",
 					filename, name, name,
 				)
