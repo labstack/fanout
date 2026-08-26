@@ -1,6 +1,7 @@
 ---
 import Default from "@astrojs/starlight/components/Head.astro";
 import { getCollection } from "astro:content";
+import Analytics from "./Analytics.astro";
 
 // Every documentation page advertises its Markdown alternate in the head, so an
 // agent that reads the head never has to parse the rendered body.
@@ -31,6 +32,7 @@ const socialCardHref = new URL("/social-card.png", Astro.site ?? Astro.url).href
 ---
 
 <Default><slot /></Default>
+<Analytics />
 <meta property="og:image" content={socialCardHref} />
 <meta property="og:image:width" content="1280" />
 <meta property="og:image:height" content="640" />
