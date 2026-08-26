@@ -358,7 +358,7 @@ func (s *Store) PruneBefore(cutoff int64) (int, error) {
 		return 0, nil
 	}
 	next := current
-	next.Files = next.Files[:0]
+	next.Files = make([]string, 0, len(kept))
 	for _, seg := range kept {
 		next.Files = append(next.Files, filepath.Base(seg.path))
 	}

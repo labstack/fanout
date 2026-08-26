@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/duckdb/duckdb-go/v2"
@@ -95,6 +96,39 @@ func TestRepositoryReplaysDurableWAL(t *testing.T) {
 	}
 }
 
+func TestRepositoryRejectsLegacyDuckLakeCatalog(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "ducklake.sqlite"), []byte("legacy"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Open(dir)
+	if err == nil || !strings.Contains(err.Error(), "clean storage.data_dir") {
+		t.Fatalf("Open error = %v, want explicit clean-data-dir failure", err)
+	}
+}
+
+func TestRepositoryQuarantinesCorruptWAL(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "wal", "poison.wal"), []byte("not-zstd"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	recovered, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open with poison WAL: %v", err)
+	}
+	defer recovered.Close()
+	if _, err := os.Stat(filepath.Join(dir, "wal", "poison.wal.corrupt")); err != nil {
+		t.Fatalf("quarantined WAL missing: %v", err)
+	}
+}
+
 func TestRepositoryPrunesOnlyCompleteExpiredParquetBatches(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)
@@ -151,7 +185,7 @@ func TestRepositoryCompactsParquetBatchesWithoutChangingRows(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	compacted, err := repository.CompactParquet(context.Background(), db, 64)
+	compacted, err := repository.CompactParquet(context.Background(), db, 64, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,5 +206,37 @@ func TestRepositoryCompactsParquetBatchesWithoutChangingRows(t *testing.T) {
 	}
 	if rows != 8 {
 		t.Fatalf("compacted rows = %d, want 8", rows)
+	}
+}
+
+func TestRepositoryCompactionDrainsBacklog(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	for i := range 72 {
+		batch := testBatch()
+		batch.ID = fmt.Sprintf("backlog-%d", i)
+		batch.Spans[0].SpanID = fmt.Sprintf("span-%d", i)
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	compacted, err := repository.CompactParquetBacklog(context.Background(), db, 64, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compacted <= 64 {
+		t.Fatalf("compacted batches = %d, want multiple groups", compacted)
+	}
+	if len(repository.manifest.Batches) != 1 {
+		t.Fatalf("manifest batches = %d, want 1", len(repository.manifest.Batches))
 	}
 }

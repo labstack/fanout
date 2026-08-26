@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,17 +21,20 @@ type compactionMarker struct {
 
 // CompactParquet combines the oldest small atomic batches into larger files.
 // A durable marker makes the multi-signal swap recoverable after a crash.
-func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches int) (int, error) {
+func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches int, publishLock sync.Locker) (int, error) {
 	if db == nil || maxBatches < 2 {
 		return 0, nil
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.compactionMu.Lock()
+	defer r.compactionMu.Unlock()
+	r.mu.RLock()
 	if len(r.manifest.Batches) < 8 {
+		r.mu.RUnlock()
 		return 0, nil
 	}
 	count := min(maxBatches, len(r.manifest.Batches))
 	selected := append([]batchMetadata(nil), r.manifest.Batches[:count]...)
+	r.mu.RUnlock()
 	marker := compactionMarker{ID: fmt.Sprintf("compact-%d", time.Now().UnixNano())}
 	for _, batch := range selected {
 		marker.Inputs = append(marker.Inputs, batch.ID)
@@ -40,6 +44,12 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 	if err := os.Mkdir(stageDir, 0o755); err != nil {
 		return 0, err
 	}
+	recoverable := false
+	defer func() {
+		if !recoverable {
+			_ = os.RemoveAll(stageDir)
+		}
+	}()
 	for _, signal := range []string{"spans", "logs", "metrics"} {
 		var inputs []string
 		for _, id := range marker.Inputs {
@@ -62,6 +72,9 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 		if _, err := db.ExecContext(ctx, stmt); err != nil {
 			return 0, fmt.Errorf("compact %s parquet: %w", signal, err)
 		}
+		if err := syncFile(output); err != nil {
+			return 0, fmt.Errorf("sync compacted %s parquet: %w", signal, err)
+		}
 	}
 	data, err := json.Marshal(marker)
 	if err != nil {
@@ -73,10 +86,42 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 	if err := syncDirectory(r.root); err != nil {
 		return 0, err
 	}
+	recoverable = true
+	if publishLock != nil {
+		publishLock.Lock()
+		defer publishLock.Unlock()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if err := r.completeCompaction(marker); err != nil {
 		return 0, err
 	}
 	return count, nil
+}
+
+// CompactParquetBacklog drains every currently eligible compaction group so a
+// maintenance interval cannot create files faster than it retires them.
+func (r *Repository) CompactParquetBacklog(ctx context.Context, db *sql.DB, maxBatches int, publishLock sync.Locker) (int, error) {
+	total := 0
+	for {
+		compacted, err := r.CompactParquet(ctx, db, maxBatches, publishLock)
+		total += compacted
+		if err != nil || compacted == 0 {
+			return total, err
+		}
+	}
+}
+
+func syncFile(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func (r *Repository) recoverCompaction() error {

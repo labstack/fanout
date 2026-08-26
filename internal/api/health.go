@@ -117,8 +117,8 @@ func (h *HealthHandler) checkDuckDB() CheckResult {
 }
 
 // diskDegradedPct is the free-space fraction below which the data dir reports
-// degraded. A full disk silently fails Parquet flushes (the writer drops rows
-// once its retry buffer overflows), so we surface pressure before that point.
+// degraded. A full disk fails Parquet flushes and stops ingest, so we surface
+// pressure before that point.
 const diskDegradedPct = 10.0
 
 func (h *HealthHandler) checkDataDir() CheckResult {
@@ -161,7 +161,7 @@ func diskSpaceResult(freeBytes, totalBytes uint64) CheckResult {
 	}
 	if freePct < diskDegradedPct {
 		res.Status = "degraded"
-		res.Error = fmt.Sprintf("low disk space: %.1f%% free — ingest flushes drop rows when the disk fills", freePct)
+		res.Error = fmt.Sprintf("low disk space: %.1f%% free — ingest stops when telemetry cannot commit", freePct)
 	}
 	return res
 }
@@ -190,7 +190,7 @@ func (h *HealthHandler) checkTelemetry() CheckResult {
 	defer cancel()
 
 	var one int
-	err := h.duck.DB.QueryRowContext(ctx, "SELECT 1 FROM lake.spans LIMIT 1").Scan(&one)
+	err := h.duck.QueryRowScan(ctx, []any{&one}, "SELECT 1 FROM lake.spans LIMIT 1")
 	if err != nil && err != sql.ErrNoRows {
 		return CheckResult{
 			Status:    "unhealthy",

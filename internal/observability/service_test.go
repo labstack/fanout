@@ -274,4 +274,69 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 	}
 }
 
+func TestLogsRetainsOnlyNewestLimit(t *testing.T) {
+	svc, _ := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	logs := make([]telemetry.Log, 100)
+	for i := range logs {
+		logs[i] = telemetry.Log{Namespace: "prod", TimeUnixNanos: start.Add(time.Duration(i) * time.Millisecond).UnixNano(), Severity: "INFO", Body: "entry"}
+	}
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "bounded-logs", Logs: logs}); err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "", "", "", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Entries) != 5 || !result.Data.Entries[0].Time.Equal(start.Add(99*time.Millisecond)) || !result.Data.Entries[4].Time.Equal(start.Add(95*time.Millisecond)) {
+		t.Fatalf("newest bounded entries = %#v", result.Data.Entries)
+	}
+}
+
+func TestTraceLogsUseEarliestEventTimeAcrossBatches(t *testing.T) {
+	svc, _ := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	batches := []telemetrystore.Batch{
+		{ID: "trace-latest", Spans: []telemetry.Span{{Namespace: "prod", TraceID: "trace-order", SpanID: "root", StartUnixNanos: start.UnixNano(), DurationMS: 1}}, Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(30 * time.Millisecond).UnixNano(), Body: "latest"}}},
+		{ID: "trace-earliest", Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(10 * time.Millisecond).UnixNano(), Body: "earliest"}}},
+		{ID: "trace-middle", Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(20 * time.Millisecond).UnixNano(), Body: "middle"}}},
+	}
+	for _, batch := range batches {
+		if err := svc.repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "trace-order", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Logs) != 2 || result.Data.Logs[0].Body != "earliest" || result.Data.Logs[1].Body != "middle" {
+		t.Fatalf("trace logs = %#v", result.Data.Logs)
+	}
+}
+
+func TestTraceFallsBackToParquetWhenHotSegmentsMiss(t *testing.T) {
+	svc, mock := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	mock.ExpectQuery(regexp.QuoteMeta(traceSpansQuery)).
+		WithArgs("cold-trace", start, end, "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"span_id", "parent_span_id", "service", "operation", "kind", "start_time", "duration_ms", "status", "status_message"}).
+			AddRow("root", "", "checkout", "pay", "SERVER", start, 25.0, "ERROR", "declined"))
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("cold-trace", start, end, "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "token=secret", "cold-trace", "root"))
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "cold-trace", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Spans) != 1 || len(result.Data.Logs) != 1 || !result.Data.HasError {
+		t.Fatalf("cold trace detail = %#v", result.Data)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 var _ DB = (*sql.DB)(nil)

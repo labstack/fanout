@@ -418,14 +418,14 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	var pruneErr error
 	if d.repository != nil {
 		_, pruneErr = d.repository.PruneHot(cutoff)
-		d.parquetMu.Lock()
 		var parquetErr error
 		if d.cfg.RetentionDays > 0 {
+			d.parquetMu.Lock()
 			_, parquetErr = d.repository.PruneParquet(time.Now().Add(-time.Duration(d.cfg.RetentionDays) * 24 * time.Hour).UnixNano())
+			d.parquetMu.Unlock()
 		}
 		compactStart := time.Now()
-		compacted, compactErr := d.repository.CompactParquet(ctx, d.DB, 64)
-		d.parquetMu.Unlock()
+		compacted, compactErr := d.repository.CompactParquetBacklog(ctx, d.DB, 64, &d.parquetMu)
 		compactResult := metrics.TelemetryNoop
 		if compactErr != nil {
 			compactResult = metrics.TelemetryError

@@ -76,7 +76,7 @@ var (
 
 	RowsDropped = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_rows_dropped_total",
-		Help: "Total rows dropped due to retry buffer overflow",
+		Help: "Total rows left uncommitted after a permanent flush failure",
 	}, []string{"signal"})
 
 	WriteGateWait = promauto.NewHistogramVec(prometheus.HistogramOpts{

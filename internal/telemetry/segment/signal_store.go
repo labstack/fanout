@@ -256,42 +256,54 @@ func (s *SignalStore[T]) writeSegment(path, id string, rows []T) (signalSegment,
 
 // Scan visits rows in [start,end), using segment and block time pruning.
 func (s *SignalStore[T]) Scan(start, end int64, visit func(T) bool) error {
+	type openedSegment struct {
+		segment signalSegment
+		file    *os.File
+	}
+	var opened []openedSegment
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	dec := s.decoders.Get().(*zstd.Decoder)
-	defer s.decoders.Put(dec)
 	for _, seg := range s.segments {
 		if seg.max < start || seg.min >= end {
 			continue
 		}
 		f, err := os.Open(seg.path)
 		if err != nil {
+			s.mu.RUnlock()
+			for _, item := range opened {
+				_ = item.file.Close()
+			}
 			return err
 		}
+		opened = append(opened, openedSegment{segment: seg, file: f})
+	}
+	s.mu.RUnlock()
+	defer func() {
+		for _, item := range opened {
+			_ = item.file.Close()
+		}
+	}()
+	dec := s.decoders.Get().(*zstd.Decoder)
+	defer s.decoders.Put(dec)
+	for _, item := range opened {
+		seg, f := item.segment, item.file
 		for _, block := range seg.blocks {
 			if block.max < start || block.min >= end {
 				continue
 			}
 			data := make([]byte, block.length)
 			if _, err := f.ReadAt(data, int64(block.offset)); err != nil {
-				_ = f.Close()
 				return err
 			}
 			rows, err := s.codec.decodeBlock(dec, data, int(block.rows))
 			if err != nil {
-				_ = f.Close()
 				return fmt.Errorf("decode %s: %w", filepath.Base(seg.path), err)
 			}
 			for _, row := range rows {
 				ts := reflect.ValueOf(row).Field(s.timeField).Int()
 				if ts >= start && ts < end && !visit(row) {
-					_ = f.Close()
 					return nil
 				}
 			}
-		}
-		if err := f.Close(); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -333,7 +345,7 @@ func (s *SignalStore[T]) PruneBefore(cutoff int64) (int, error) {
 		return 0, nil
 	}
 	next := current
-	next.Files = next.Files[:0]
+	next.Files = make([]string, 0, len(kept))
 	for _, seg := range kept {
 		next.Files = append(next.Files, filepath.Base(seg.path))
 	}

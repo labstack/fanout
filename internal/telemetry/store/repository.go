@@ -9,11 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -38,17 +40,24 @@ type repositoryManifest struct {
 }
 
 type Repository struct {
-	mu       sync.RWMutex
-	root     string
-	walDir   string
-	Spans    *segment.Store
-	Logs     *segment.SignalStore[telemetry.Log]
-	Metrics  *segment.SignalStore[telemetry.Metric]
-	Parquet  *telemetry.ParquetStore
-	manifest repositoryManifest
+	mu           sync.RWMutex
+	compactionMu sync.Mutex
+	root         string
+	walDir       string
+	Spans        *segment.Store
+	Logs         *segment.SignalStore[telemetry.Log]
+	Metrics      *segment.SignalStore[telemetry.Metric]
+	Parquet      *telemetry.ParquetStore
+	manifest     repositoryManifest
 }
 
 func Open(root string) (*Repository, error) {
+	legacyCatalog := filepath.Join(root, "ducklake.sqlite")
+	if _, err := os.Stat(legacyCatalog); err == nil {
+		return nil, fmt.Errorf("legacy DuckLake catalog %s is unsupported; start Fanout with a clean storage.data_dir", legacyCatalog)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect legacy DuckLake catalog: %w", err)
+	}
 	walDir := filepath.Join(root, "wal")
 	for _, dir := range []string{root, walDir, filepath.Join(root, "hot", "spans"), filepath.Join(root, "hot", "logs"), filepath.Join(root, "hot", "metrics")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -266,11 +275,17 @@ func (r *Repository) recover() error {
 		}
 		plain, err := dec.DecodeAll(data, nil)
 		if err != nil {
-			return fmt.Errorf("decode %s: %w", name, err)
+			if quarantineErr := quarantineWAL(r.walDir, name, err); quarantineErr != nil {
+				return quarantineErr
+			}
+			continue
 		}
 		var batch Batch
 		if err := gob.NewDecoder(bytes.NewReader(plain)).Decode(&batch); err != nil {
-			return fmt.Errorf("read %s: %w", name, err)
+			if quarantineErr := quarantineWAL(r.walDir, name, err); quarantineErr != nil {
+				return quarantineErr
+			}
+			continue
 		}
 		if err := r.apply(batch); err != nil {
 			return fmt.Errorf("replay %s: %w", name, err)
@@ -283,6 +298,24 @@ func (r *Repository) recover() error {
 		}
 	}
 	return syncDirectory(r.walDir)
+}
+
+func quarantineWAL(dir, name string, cause error) error {
+	source := filepath.Join(dir, name)
+	target := source + ".corrupt"
+	if _, err := os.Stat(target); err == nil {
+		target = fmt.Sprintf("%s.%d", target, time.Now().UnixNano())
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect WAL quarantine target: %w", err)
+	}
+	if err := os.Rename(source, target); err != nil {
+		return fmt.Errorf("quarantine corrupt WAL %s: %w", name, err)
+	}
+	if err := syncDirectory(dir); err != nil {
+		return fmt.Errorf("sync WAL quarantine: %w", err)
+	}
+	slog.Error("quarantined corrupt telemetry WAL", "file", filepath.Base(target), "error", cause)
+	return nil
 }
 
 func (r *Repository) loadManifest() error {
