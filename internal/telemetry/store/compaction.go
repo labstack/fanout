@@ -17,12 +17,15 @@ import (
 type compactionMarker struct {
 	ID         string   `json:"id"`
 	Inputs     []string `json:"inputs"`
+	Signals    []string `json:"signals"`
 	MinNanos   int64    `json:"min_nanos"`
 	MaxNanos   int64    `json:"max_nanos"`
 	Generation uint32   `json:"generation"`
 }
 
 const minCompactionInputs = 8
+
+var parquetSignals = [...]string{"spans", "logs", "metrics"}
 
 // CompactParquet combines the oldest small atomic batches into larger files.
 // A durable marker makes the multi-signal swap recoverable after a crash.
@@ -59,7 +62,7 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 			_ = os.RemoveAll(stageDir)
 		}
 	}()
-	for _, signal := range []string{"spans", "logs", "metrics"} {
+	for _, signal := range parquetSignals {
 		var inputs []string
 		for _, id := range marker.Inputs {
 			path := filepath.Join(r.Parquet.Dir(), signal, id+".parquet")
@@ -72,6 +75,7 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 		if len(inputs) == 0 {
 			continue
 		}
+		marker.Signals = append(marker.Signals, signal)
 		quoted := make([]string, len(inputs))
 		for i, path := range inputs {
 			quoted[i] = sqlQuote(path)
@@ -84,6 +88,12 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 		if err := syncFile(output); err != nil {
 			return 0, fmt.Errorf("sync compacted %s parquet: %w", signal, err)
 		}
+	}
+	if len(marker.Signals) == 0 {
+		return 0, errors.New("compaction selected batches without parquet inputs")
+	}
+	if err := syncDirectory(stageDir); err != nil {
+		return 0, fmt.Errorf("sync compaction staging directory: %w", err)
 	}
 	data, err := json.Marshal(marker)
 	if err != nil {
@@ -198,7 +208,10 @@ func (r *Repository) recoverCompaction() error {
 
 func (r *Repository) completeCompaction(marker compactionMarker) error {
 	stageDir := filepath.Join(r.root, marker.ID)
-	for _, signal := range []string{"spans", "logs", "metrics"} {
+	if err := r.validateCompactionOutputs(marker, stageDir); err != nil {
+		return errors.Join(err, r.restoreCompactionInputs(marker))
+	}
+	for _, signal := range marker.Signals {
 		dir := filepath.Join(r.Parquet.Dir(), signal)
 		for _, id := range marker.Inputs {
 			input := filepath.Join(dir, id+".parquet")
@@ -207,6 +220,8 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 				if err := os.Rename(input, retired); err != nil {
 					return err
 				}
+			} else if !errors.Is(err, os.ErrNotExist) {
+				return err
 			}
 		}
 		stage := filepath.Join(stageDir, signal+".parquet")
@@ -236,7 +251,7 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 		return err
 	}
 	r.manifest = next
-	for _, signal := range []string{"spans", "logs", "metrics"} {
+	for _, signal := range marker.Signals {
 		for _, id := range marker.Inputs {
 			_ = os.Remove(filepath.Join(r.Parquet.Dir(), signal, id+".parquet.retired-"+marker.ID))
 		}
@@ -246,6 +261,71 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 		return err
 	}
 	return syncDirectory(r.root)
+}
+
+func (r *Repository) validateCompactionOutputs(marker compactionMarker, stageDir string) error {
+	if len(marker.Signals) == 0 {
+		return errors.New("compaction marker has no required signals")
+	}
+	for _, signal := range marker.Signals {
+		stage := filepath.Join(stageDir, signal+".parquet")
+		final := filepath.Join(r.Parquet.Dir(), signal, marker.ID+".parquet")
+		stageExists, err := pathExists(stage)
+		if err != nil {
+			return fmt.Errorf("inspect staged %s output: %w", signal, err)
+		}
+		finalExists, err := pathExists(final)
+		if err != nil {
+			return fmt.Errorf("inspect final %s output: %w", signal, err)
+		}
+		if !stageExists && !finalExists {
+			return fmt.Errorf("compaction %s is missing required %s output", marker.ID, signal)
+		}
+	}
+	return nil
+}
+
+func (r *Repository) restoreCompactionInputs(marker compactionMarker) error {
+	var restoreErr error
+	for _, signal := range marker.Signals {
+		dir := filepath.Join(r.Parquet.Dir(), signal)
+		for _, id := range marker.Inputs {
+			input := filepath.Join(dir, id+".parquet")
+			retired := input + ".retired-" + marker.ID
+			retiredExists, err := pathExists(retired)
+			if err != nil {
+				restoreErr = errors.Join(restoreErr, fmt.Errorf("inspect retired %s input %s: %w", signal, id, err))
+				continue
+			}
+			if !retiredExists {
+				continue
+			}
+			inputExists, err := pathExists(input)
+			if err != nil {
+				restoreErr = errors.Join(restoreErr, fmt.Errorf("inspect active %s input %s: %w", signal, id, err))
+				continue
+			}
+			if inputExists {
+				restoreErr = errors.Join(restoreErr, fmt.Errorf("restore retired %s input %s: active input already exists", signal, id))
+				continue
+			}
+			if err := os.Rename(retired, input); err != nil {
+				restoreErr = errors.Join(restoreErr, fmt.Errorf("restore retired %s input %s: %w", signal, id, err))
+			}
+		}
+	}
+	return errors.Join(restoreErr, syncParquetDirectories(r.Parquet.Dir()))
+}
+
+func pathExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func writeDurableFile(path string, data []byte) error {
@@ -272,7 +352,7 @@ func sqlQuote(value string) string { return "'" + strings.ReplaceAll(value, "'",
 
 func syncParquetDirectories(root string) error {
 	var err error
-	for _, signal := range []string{"spans", "logs", "metrics"} {
+	for _, signal := range parquetSignals {
 		err = errors.Join(err, syncDirectory(filepath.Join(root, signal)))
 	}
 	return err

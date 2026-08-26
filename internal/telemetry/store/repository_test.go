@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -342,6 +343,78 @@ func TestRepositoryCompactionPreservesRetentionPartitions(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, "parquet", signal, newID+".parquet")); err != nil {
 			t.Fatalf("current compacted %s file missing: %v", signal, err)
 		}
+	}
+}
+
+func TestRepositoryCompactionRecoveryRestoresRetiredInputsWhenStageMissing(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	marker := compactionMarker{
+		ID:         "compact-recovery",
+		Inputs:     []string{"recovery-a", "recovery-b"},
+		Signals:    parquetSignals[:],
+		MinNanos:   100,
+		MaxNanos:   120,
+		Generation: 1,
+	}
+	for _, id := range marker.Inputs {
+		batch := testBatch()
+		batch.ID = id
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stageDir := filepath.Join(dir, marker.ID)
+	if err := os.Mkdir(stageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, signal := range marker.Signals {
+		if signal != "spans" {
+			data, err := os.ReadFile(filepath.Join(dir, "parquet", signal, marker.Inputs[0]+".parquet"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(stageDir, signal+".parquet"), data, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, id := range marker.Inputs {
+			input := filepath.Join(dir, "parquet", signal, id+".parquet")
+			if err := os.Rename(input, input+".retired-"+marker.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	data, err := json.Marshal(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDurableFile(filepath.Join(dir, "COMPACTION.json"), data); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.recoverCompaction(); err == nil || !strings.Contains(err.Error(), "missing required spans output") {
+		t.Fatalf("recover compaction error = %v, want missing spans output", err)
+	}
+	for _, signal := range marker.Signals {
+		for _, id := range marker.Inputs {
+			input := filepath.Join(dir, "parquet", signal, id+".parquet")
+			if _, err := os.Stat(input); err != nil {
+				t.Fatalf("restored %s input %s: %v", signal, id, err)
+			}
+			if _, err := os.Stat(input + ".retired-" + marker.ID); !os.IsNotExist(err) {
+				t.Fatalf("retired %s input %s remains: %v", signal, id, err)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(dir, "parquet", signal, marker.ID+".parquet")); !os.IsNotExist(err) {
+			t.Fatalf("unexpected compacted %s output: %v", signal, err)
+		}
+	}
+	if len(repository.manifest.Batches) != len(marker.Inputs) {
+		t.Fatalf("manifest batches = %d, want original %d", len(repository.manifest.Batches), len(marker.Inputs))
 	}
 }
 
