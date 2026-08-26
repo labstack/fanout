@@ -75,6 +75,10 @@ docker TAG="local":
 release:
     ./scripts/release.sh
 
+# Exercise reserved-tag retries without creating remote refs.
+release-test:
+    bash ./scripts/release_test.sh
+
 # Regenerate the legal inventory for every shipped Go target and browser app.
 notices:
     go run ./internal/cmd/notices -root .
@@ -298,7 +302,7 @@ social-card:
 # a settings page that no longer matches the type the loader binds is a
 # documented setting the binary would reject, and it should fail here rather
 # than be published.
-check: fmt-check lint ui-audit ui-check notices-check test ui-test docs-generate-check site-build
+check: fmt-check lint release-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
     @echo "All checks passed"
 
 clean:
