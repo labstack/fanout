@@ -15,6 +15,12 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 export CGO_ENABLED := "1"
 
+# Keep every local Go recipe on the same exact toolchain as CI and release
+# builds. This is especially important for generated dependency inventories,
+# which can change when a newer Go version selects a different module graph.
+go_version := `awk '$1 == "go" { print $2; exit }' go.mod`
+export GOTOOLCHAIN := "go" + go_version
+
 # Everything `go:embed` compiles into the binary. Keep in sync with `outDir` in
 # ui/host/vite.config.ts and the `cp` targets in ui/apps/package.json.
 embedded := "internal/ui/dist internal/mcp/apps"

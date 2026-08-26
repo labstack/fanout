@@ -40,14 +40,14 @@ jobs:
       # must be a deliberate commit rather than a surprise from a CI run.
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: 1.3.14
+          bun-version: 1.4.0
 
       # The documentation site is npm rather than bun: Astro and Starlight are
       # exercised on npm upstream, and the lockfile is what `just site-build`
       # installs from.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 24.18.0
+          node-version: 24.19.0
           cache: npm
           cache-dependency-path: site/package-lock.json
 
@@ -55,7 +55,7 @@ jobs:
       # the real thing, so local and CI share one invocation.
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: v2.12.2
+          version: v2.13.1
           args: --help
 
       - name: just ui-deps

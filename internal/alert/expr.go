@@ -5,8 +5,8 @@ import (
 	"log/slog"
 	"runtime/debug"
 
-	"github.com/google/cel-go/cel"
-	"github.com/google/cel-go/common/types"
+	"cel.dev/cel-go/cel"
+	"cel.dev/cel-go/common/types"
 )
 
 // Program is a compiled, ready-to-evaluate alert expression. Aliasing cel.Program
