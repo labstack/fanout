@@ -34,7 +34,7 @@ export default defineConfig({
       // supply its own hero tagline; index.mdx supplies one, so today this has
       // no output. It is kept in step anyway, because the day a second splash
       // page exists is not the day to discover the tagline drifted.
-      tagline: "Observability that runs anywhere you can run a binary.",
+      tagline: "OpenTelemetry observability in one binary.",
       social: [
         {
           icon: "github",

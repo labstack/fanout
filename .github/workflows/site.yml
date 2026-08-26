@@ -91,6 +91,10 @@ jobs:
         working-directory: site
         env:
           SITE_URL: https://fanout.run
+          # A GA4 measurement id is public in the delivered page, so this is a
+          # repository variable rather than a secret. When absent, the site
+          # build emits no analytics script or request.
+          PUBLIC_GA_MEASUREMENT_ID: ${{ vars.PUBLIC_GA_MEASUREMENT_ID }}
         run: npm run build
 
       # A branch name reaches Cloudflare as the deployment's branch, and the

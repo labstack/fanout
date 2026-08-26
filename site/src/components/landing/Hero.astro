@@ -38,6 +38,9 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
             <a
               href={action.link}
               class={i === 0 ? "fo-action fo-action-primary" : "fo-action"}
+              data-analytics-event="cta_click"
+              data-analytics-action={action.link.includes("demo") ? "live_demo" : "install"}
+              data-analytics-location="hero"
               {...action.attrs}
             >
               {action.text}

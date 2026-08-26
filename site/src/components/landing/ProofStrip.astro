@@ -1,0 +1,73 @@
+---
+/* Operational facts immediately below the hero.
+ *
+ * Fanout does not yet have adoption numbers worth turning into marketing
+ * theatre. The useful proof is what the shipped binary actually does, where it
+ * runs, and what it does not require. Authored as a Markdown list so the same
+ * evidence survives in the Markdown and llms.txt versions of the page.
+ */
+---
+
+<div class="fo-proof"><slot /></div>
+
+<style>
+  .fo-proof :global(ul) {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    border-block: 1px solid var(--sl-color-gray-5);
+    font-family: var(--fo-font-display);
+  }
+
+  .fo-proof :global(li) {
+    margin: 0;
+    padding: 1.1rem 1rem;
+    border-inline-start: 1px solid var(--sl-color-gray-5);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--sl-color-gray-3);
+  }
+
+  .fo-proof :global(li:first-child) {
+    border-inline-start: 0;
+  }
+
+  .fo-proof :global(li > p) {
+    margin: 0;
+  }
+
+  .fo-proof :global(li strong) {
+    display: block;
+    margin-bottom: 0.15rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--sl-color-white);
+  }
+
+  /* Switch before five useful columns stop fitting. `auto-fit` looked simpler,
+     but in this interval it produced a 4+1 wrap with no rule above the orphan. */
+  @media (max-width: 48rem) {
+    .fo-proof :global(ul) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .fo-proof :global(li) {
+      border-top: 1px solid var(--sl-color-gray-5);
+    }
+
+    .fo-proof :global(li:nth-child(-n + 2)) {
+      border-top: 0;
+    }
+
+    .fo-proof :global(li:nth-child(odd)) {
+      border-inline-start: 0;
+    }
+
+    .fo-proof :global(li:last-child) {
+      grid-column: 1 / -1;
+    }
+  }
+</style>

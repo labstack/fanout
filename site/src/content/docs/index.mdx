@@ -3,8 +3,28 @@ title: Fanout
 description: One binary that ingests OpenTelemetry, stores it, and answers questions about it.
 summary: The landing page — what Fanout is, what it replaces, and what it refuses to do.
 template: splash
+# The landing page's content title is also the site title, so Starlight's
+# default would be "Fanout · Fanout". A frontmatter title replaces that default
+# instead of adding a second <title>; the same override gives social cards a
+# useful proposition. The canonical stays at the public root even though the
+# static file produced by Astro is named index.html.
+head:
+  - tag: title
+    content: "Fanout · OpenTelemetry observability in one binary."
+  - tag: link
+    attrs:
+      rel: canonical
+      href: "https://fanout.run/"
+  - tag: meta
+    attrs:
+      property: og:title
+      content: "Fanout · OpenTelemetry observability in one binary."
+  - tag: meta
+    attrs:
+      property: og:url
+      content: "https://fanout.run/"
 hero:
-  title: Observability that runs anywhere you can run a binary
+  title: See what broke without operating an observability stack.
   tagline: Point your traces, logs and metrics at one process over OpenTelemetry. Get a fast browser client, a chat investigator that works through the evidence, and alerts — without standing up a stack to hold them.
   actions:
     - text: Install Fanout
@@ -15,6 +35,7 @@ status: shipped
 ---
 
 import Section from "../../components/landing/Section.astro";
+import ProofStrip from "../../components/landing/ProofStrip.astro";
 import Preview from "../../components/landing/Preview.astro";
 import Pipeline from "../../components/landing/Pipeline.astro";
 import Contrast from "../../components/landing/Contrast.astro";
@@ -22,6 +43,20 @@ import Refusals from "../../components/landing/Refusals.astro";
 import CtaBar from "../../components/landing/CtaBar.astro";
 
 {/* Prose below is Markdown inside each component, never a prop: `<path>.md` and llms.txt are generated from this source with component tags stripped, so a prop would render for a person and vanish for an agent. Keep MDX comments on one line — toPlainMarkdown only strips single-line ones, and a wrapped comment leaks into the alternate. */}
+
+<ProofStrip>
+
+- **Self-hosted** on your hardware
+
+- **OTLP native** traces, logs and metrics
+
+- **No external database** Parquet and DuckDB in-process
+
+- **One small VM** reference deployment target
+
+- **Apache-2.0** open source
+
+</ProofStrip>
 
 <Section eyebrow="What you look at">
 
