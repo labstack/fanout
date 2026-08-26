@@ -59,6 +59,17 @@ func retainEarliest(entries *earliestLogHeap, entry LogEntry, limit int) {
 	}
 }
 
+var coldLogsQuery = `
+SELECT time, severity, coalesce(service, ''), ` + redactLogBodySQL("body") + `,
+       coalesce(trace_id, ''), coalesce(span_id, '')
+FROM logs
+WHERE time >= ? AND time < ?
+  AND (? = '' OR namespace = ?)
+  AND (? = '' OR service = ?)
+  AND (? = '' OR lower(severity) = lower(?))
+  AND (? = '' OR contains(lower(` + redactLogBodySQL("body") + `), lower(?)))
+ORDER BY time ASC`
+
 func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, search string, limit int) (Result[Logs], error) {
 	scope, err := s.normalizeScope(scope)
 	if err != nil {
@@ -78,32 +89,68 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 	buckets := make(map[bucketKey]int64)
 	entries := newestLogHeap{}
 	matched := 0
-	err = s.repository.Logs.Scan(scope.Start.UnixNano(), scope.End.UnixNano(), func(row telemetry.Log) bool {
-		select {
-		case <-ctx.Done():
-			return false
-		default:
-		}
-		if (scope.Namespace != "" && row.Namespace != scope.Namespace) || (service != "" && row.ServiceName != service) || (severity != "" && !strings.EqualFold(row.Severity, severity)) {
-			return true
-		}
-		body := redactLogBody(row.Body)
-		if search != "" && !strings.Contains(strings.ToLower(body), search) {
-			return true
-		}
-		entryTime := time.Unix(0, row.EventUnixNanos).UTC()
+	accumulate := func(entry LogEntry) {
 		matched++
-		retainNewest(&entries, LogEntry{Time: entryTime, Severity: row.Severity, Service: row.ServiceName, Body: body, TraceID: row.TraceID, SpanID: row.SpanID}, limit)
-		bucketSeverity := strings.ToUpper(row.Severity)
+		retainNewest(&entries, entry, limit)
+		bucketSeverity := strings.ToUpper(entry.Severity)
 		if bucketSeverity == "" {
 			bucketSeverity = "UNSPECIFIED"
 		}
-		bucketNanos := entryTime.Truncate(5 * time.Minute).UnixNano()
+		bucketNanos := entry.Time.Truncate(5 * time.Minute).UnixNano()
 		buckets[bucketKey{time: bucketNanos, severity: bucketSeverity}]++
-		return true
-	})
-	if err != nil {
-		return Result[Logs]{}, fmt.Errorf("read log segments: %w", err)
+	}
+	startNanos, endNanos := scope.Start.UnixNano(), scope.End.UnixNano()
+	hotStart, coldEnd := startNanos, startNanos
+	oldestHot, _, hasHot := s.repository.Logs.Bounds()
+	if !hasHot {
+		coldEnd, hotStart = endNanos, endNanos
+	} else if oldestHot > startNanos {
+		coldEnd = min(oldestHot, endNanos)
+		hotStart = coldEnd
+	}
+	usedCold := coldEnd > startNanos
+	if usedCold {
+		rows, queryErr := s.db.QueryContext(ctx, coldLogsQuery,
+			scope.Start, time.Unix(0, coldEnd).UTC(),
+			scope.Namespace, scope.Namespace, service, service, severity, severity, search, search)
+		if queryErr != nil {
+			return Result[Logs]{}, fmt.Errorf("query cold logs: %w", queryErr)
+		}
+		for rows.Next() {
+			var entry LogEntry
+			if err := rows.Scan(&entry.Time, &entry.Severity, &entry.Service, &entry.Body, &entry.TraceID, &entry.SpanID); err != nil {
+				rows.Close()
+				return Result[Logs]{}, fmt.Errorf("scan cold log: %w", err)
+			}
+			accumulate(entry)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return Result[Logs]{}, fmt.Errorf("iterate cold logs: %w", err)
+		}
+		rows.Close()
+	}
+	if hotStart < endNanos {
+		err = s.repository.Logs.Scan(hotStart, endNanos, func(row telemetry.Log) bool {
+			select {
+			case <-ctx.Done():
+				return false
+			default:
+			}
+			if (scope.Namespace != "" && row.Namespace != scope.Namespace) || (service != "" && row.ServiceName != service) || (severity != "" && !strings.EqualFold(row.Severity, severity)) {
+				return true
+			}
+			body := redactLogBody(row.Body)
+			if search != "" && !strings.Contains(strings.ToLower(body), search) {
+				return true
+			}
+			entryTime := time.Unix(0, row.EventUnixNanos).UTC()
+			accumulate(LogEntry{Time: entryTime, Severity: row.Severity, Service: row.ServiceName, Body: body, TraceID: row.TraceID, SpanID: row.SpanID})
+			return true
+		})
+		if err != nil {
+			return Result[Logs]{}, fmt.Errorf("read log segments: %w", err)
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return Result[Logs]{}, err
@@ -119,8 +166,14 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 		}
 		return data.Buckets[i].Time.Before(data.Buckets[j].Time)
 	})
+	dataSource := "fanout_segments"
+	if usedCold && hotStart < endNanos {
+		dataSource = "fanout_segments+parquet"
+	} else if usedCold {
+		dataSource = "parquet"
+	}
 	return Result[Logs]{
 		Schema: LogsSchema, Summary: fmt.Sprintf("%d logs matched the selected telemetry window", matched),
-		Data: data, Provenance: s.provenanceFor(scope, "fanout_segments"),
+		Data: data, Provenance: s.provenanceFor(scope, dataSource),
 	}, nil
 }

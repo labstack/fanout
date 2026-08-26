@@ -10,24 +10,29 @@ import (
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-const flushQueueDepth = 4
+const (
+	flushQueueDepth     = 4
+	commitRetryLimit    = 8
+	writerShutdownGrace = 5 * time.Second
+)
 
 type batchCommitter interface {
 	Commit(Batch) error
 }
 
 type Writer struct {
-	repository batchCommitter
-	interval   time.Duration
-	batchSize  int
-	spans      <-chan telemetry.Span
-	logs       <-chan telemetry.Log
-	metricRows <-chan telemetry.Metric
-	bufSpans   []telemetry.Span
-	bufLogs    []telemetry.Log
-	bufMetrics []telemetry.Metric
-	retryDelay func(int) time.Duration
-	done       chan struct{}
+	repository    batchCommitter
+	interval      time.Duration
+	batchSize     int
+	spans         <-chan telemetry.Span
+	logs          <-chan telemetry.Log
+	metricRows    <-chan telemetry.Metric
+	bufSpans      []telemetry.Span
+	bufLogs       []telemetry.Log
+	bufMetrics    []telemetry.Metric
+	retryDelay    func(int) time.Duration
+	shutdownGrace time.Duration
+	done          chan struct{}
 }
 
 func NewWriter(repository *Repository, interval time.Duration, batchSize int, spans <-chan telemetry.Span, logs <-chan telemetry.Log, metricRows <-chan telemetry.Metric) *Writer {
@@ -40,7 +45,9 @@ func (w *Writer) Run(ctx context.Context) error {
 	defer close(w.done)
 	flushes := make(chan Batch, flushQueueDepth)
 	workerDone := make(chan error, 1)
-	go w.flushWorker(flushes, workerDone)
+	workerCtx, cancelWorker := context.WithCancel(context.Background())
+	defer cancelWorker()
+	go w.flushWorker(workerCtx, flushes, workerDone)
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 	spans, logs, metricRows := w.spans, w.logs, w.metricRows
@@ -51,6 +58,15 @@ func (w *Writer) Run(ctx context.Context) error {
 		}
 		close(flushes)
 		return <-workerDone
+	}
+	finishBounded := func() error {
+		grace := w.shutdownGrace
+		if grace <= 0 {
+			grace = writerShutdownGrace
+		}
+		timer := time.AfterFunc(grace, cancelWorker)
+		defer timer.Stop()
+		return finish()
 	}
 	for {
 		select {
@@ -80,7 +96,7 @@ func (w *Writer) Run(ctx context.Context) error {
 				return err
 			}
 		case <-ctx.Done():
-			return finish()
+			return finishBounded()
 		case err := <-workerDone:
 			return err
 		}
@@ -111,18 +127,32 @@ func (w *Writer) flush(out chan<- Batch, workerDone <-chan error) error {
 	}
 }
 
-func (w *Writer) flushWorker(in <-chan Batch, done chan<- error) {
-	for batch := range in {
-		for attempt := 0; ; attempt++ {
+func (w *Writer) flushWorker(ctx context.Context, in <-chan Batch, done chan<- error) {
+	for {
+		var batch Batch
+		select {
+		case <-ctx.Done():
+			done <- ctx.Err()
+			return
+		case next, ok := <-in:
+			if !ok {
+				done <- nil
+				return
+			}
+			batch = next
+		}
+		committed := false
+		var lastErr error
+		for attempt := 0; attempt < commitRetryLimit; attempt++ {
 			err := w.repository.Commit(batch)
 			if err == nil {
+				committed = true
 				break
 			}
+			lastErr = err
 			metrics.FlushErrors.WithLabelValues("batch").Inc()
 			// Log immediately and then at powers of two so a persistent storage
-			// outage stays visible without producing an unbounded log storm. The
-			// batch remains at the head of this bounded worker queue, applying
-			// backpressure until the same durable transaction commits.
+			// outage stays visible without producing an unbounded log storm.
 			if attempt == 0 || attempt&(attempt-1) == 0 {
 				slog.Warn("telemetry batch commit failed; retrying", "batch_id", batch.ID, "attempt", attempt+1, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", err)
 			}
@@ -130,12 +160,36 @@ func (w *Writer) flushWorker(in <-chan Batch, done chan<- error) {
 			if w.retryDelay != nil {
 				delay = w.retryDelay(attempt)
 			}
+			if attempt+1 == commitRetryLimit {
+				break
+			}
 			if delay > 0 {
-				time.Sleep(delay)
+				timer := time.NewTimer(delay)
+				select {
+				case <-ctx.Done():
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					done <- ctx.Err()
+					return
+				case <-timer.C:
+				}
 			}
 		}
+		if !committed {
+			recordDroppedBatch(batch)
+			slog.Error("telemetry batch permanently failed; dropping after bounded retries", "batch_id", batch.ID, "attempts", commitRetryLimit, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", lastErr)
+		}
 	}
-	done <- nil
+}
+
+func recordDroppedBatch(batch Batch) {
+	metrics.RowsDropped.WithLabelValues("spans").Add(float64(len(batch.Spans)))
+	metrics.RowsDropped.WithLabelValues("logs").Add(float64(len(batch.Logs)))
+	metrics.RowsDropped.WithLabelValues("metrics").Add(float64(len(batch.Metrics)))
 }
 
 func defaultCommitRetryDelay(attempt int) time.Duration {

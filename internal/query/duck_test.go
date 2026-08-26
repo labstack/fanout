@@ -9,6 +9,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/query/writegate"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -185,6 +186,60 @@ func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
 	case <-lockAcquired:
 	case <-time.After(time.Second):
 		t.Fatal("Parquet write lock remained blocked after row iteration completed")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
+	d := &Duck{}
+	d.parquetMu.Lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := d.QueryRowScan(ctx, []any{new(int)}, "SELECT 1")
+	d.parquetMu.Unlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("QueryRowScan error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("QueryRowScan ignored lock deadline for %s", elapsed)
+	}
+}
+
+func TestRollupReadLockHonorsContext(t *testing.T) {
+	d := &Duck{}
+	d.parquetMu.Lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, err := d.refreshServiceRollup(ctx)
+	d.parquetMu.Unlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("refreshServiceRollup error = %v, want deadline exceeded", err)
+	}
+}
+
+func TestRepositoryMaintenanceSerializesDuckDBWrites(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	d := &Duck{DB: db, cfg: config.Config{MaintenanceInterval: time.Nanosecond}}
+	release := d.writeGate.Lock(writegate.WriteRollupService)
+	done := make(chan error, 1)
+	go func() { done <- d.runRepositoryMaintenance(context.Background()) }()
+	select {
+	case err := <-done:
+		release()
+		t.Fatalf("maintenance bypassed write gate: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -35,6 +35,10 @@ type batchMetadata struct {
 	MinNanos   int64  `json:"min_nanos"`
 	MaxNanos   int64  `json:"max_nanos"`
 	Generation uint32 `json:"generation"`
+	// Sources retains the original ingest batch IDs folded into a compacted
+	// output. It is a retention-bounded replay ledger: a stale WAL can never
+	// resurrect rows already present in this output.
+	Sources []string `json:"sources,omitempty"`
 }
 
 type repositoryManifest struct {
@@ -123,6 +127,8 @@ func (r *Repository) PruneHot(cutoff int64) (int, error) {
 // straddles the boundary is retained intact, so retention never removes newer
 // telemetry from another signal in the same atomic commit.
 func (r *Repository) PruneParquet(cutoff int64) (int, error) {
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	kept := make([]batchMetadata, 0, len(r.manifest.Batches))
@@ -168,14 +174,18 @@ func (r *Repository) Commit(batch Batch) error {
 		return errors.New("telemetry batch requires a safe ID")
 	}
 	normalizeBatch(&batch)
-	if err := r.writeWAL(batch); err != nil {
-		return err
-	}
 	// Commits are serialized, but their segment and Parquet fsyncs do not hold
 	// the repository metadata lock. Each projection has its own atomic publish
 	// protocol; the WAL keeps a partially applied transaction replayable.
 	r.commitMu.Lock()
 	defer r.commitMu.Unlock()
+	consumed := r.batchConsumedLocked(batch.ID)
+	if consumed {
+		return r.removeWAL(batch.ID)
+	}
+	if err := r.writeWAL(batch); err != nil {
+		return err
+	}
 	err := r.apply(batch)
 	if err == nil {
 		r.mu.Lock()
@@ -185,10 +195,7 @@ func (r *Repository) Commit(batch Batch) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(r.walDir, batch.ID+".wal")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove committed telemetry WAL: %w", err)
-	}
-	return syncDirectory(r.walDir)
+	return r.removeWAL(batch.ID)
 }
 
 func (r *Repository) apply(batch Batch) error {
@@ -289,6 +296,12 @@ func (r *Repository) recover() error {
 			}
 			continue
 		}
+		if r.batchConsumed(batch.ID) {
+			if err := r.removeWAL(batch.ID); err != nil {
+				return fmt.Errorf("remove consumed replay %s: %w", name, err)
+			}
+			continue
+		}
 		if err := r.apply(batch); err != nil {
 			return fmt.Errorf("replay %s: %w", name, err)
 		}
@@ -344,6 +357,11 @@ func (r *Repository) recordBatch(batch Batch) error {
 		if existing.ID == batch.ID {
 			return nil
 		}
+		for _, source := range existing.Sources {
+			if source == batch.ID {
+				return nil
+			}
+		}
 	}
 	next := r.manifest
 	next.Batches = append(append([]batchMetadata(nil), r.manifest.Batches...), batchMetadata{ID: batch.ID, MinNanos: batchMinNanos(batch), MaxNanos: batchMaxNanos(batch)})
@@ -352,6 +370,30 @@ func (r *Repository) recordBatch(batch Batch) error {
 	}
 	r.manifest = next
 	return nil
+}
+
+func (r *Repository) batchConsumed(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.batchConsumedLocked(id)
+}
+
+func (r *Repository) batchConsumedLocked(id string) bool {
+	for _, batch := range r.manifest.Batches {
+		for _, source := range batch.Sources {
+			if source == id {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (r *Repository) removeWAL(id string) error {
+	if err := os.Remove(filepath.Join(r.walDir, id+".wal")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove committed telemetry WAL: %w", err)
+	}
+	return syncDirectory(r.walDir)
 }
 
 func batchMaxNanos(batch Batch) int64 {

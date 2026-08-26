@@ -344,6 +344,22 @@ func (s *SignalStore[T]) RowCount() uint64 {
 	return total
 }
 
+// Bounds returns the oldest and newest event timestamps currently covered by
+// the hot acceleration tier.
+func (s *SignalStore[T]) Bounds() (int64, int64, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.segments) == 0 {
+		return 0, 0, false
+	}
+	minTime, maxTime := s.segments[0].min, s.segments[0].max
+	for _, segment := range s.segments[1:] {
+		minTime = min(minTime, segment.min)
+		maxTime = max(maxTime, segment.max)
+	}
+	return minTime, maxTime, true
+}
+
 func (s *SignalStore[T]) SegmentCount() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

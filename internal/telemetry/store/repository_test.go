@@ -247,6 +247,63 @@ func TestRepositoryCompactsParquetBatchesWithoutChangingRows(t *testing.T) {
 	}
 }
 
+func TestRepositorySkipsStaleWALForCompactedBatch(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stale Batch
+	for i := range 8 {
+		batch := testBatch()
+		batch.ID = fmt.Sprintf("replay-source-%d", i)
+		batch.Spans[0].SpanID = fmt.Sprintf("span-%d", i)
+		if i == 0 {
+			stale = batch
+		}
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CompactParquet(context.Background(), db, 64, nil); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := repository.writeWAL(stale); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	recovered, err := Open(dir)
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	defer recovered.Close()
+	defer db.Close()
+	if _, err := os.Stat(filepath.Join(dir, "wal", stale.ID+".wal")); !os.IsNotExist(err) {
+		t.Fatalf("consumed WAL remains after recovery: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "parquet", "spans", stale.ID+".parquet")); !os.IsNotExist(err) {
+		t.Fatalf("consumed source parquet was resurrected: %v", err)
+	}
+	pattern := filepath.ToSlash(filepath.Join(dir, "parquet", "spans", "*.parquet"))
+	var rows int
+	if err := db.QueryRow("SELECT count(*) FROM read_parquet(?)", pattern).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 8 {
+		t.Fatalf("rows after stale WAL recovery = %d, want 8", rows)
+	}
+}
+
 func TestRepositoryCompactionDrainsBacklog(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)

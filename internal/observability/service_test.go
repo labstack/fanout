@@ -293,6 +293,35 @@ func TestLogsRetainsOnlyNewestLimit(t *testing.T) {
 	}
 }
 
+func TestLogsFallsBackToParquetOutsideHotRetention(t *testing.T) {
+	svc, mock := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "cold-logs", Logs: []telemetry.Log{{
+		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
+		ServiceName: "checkout", Body: "token=secret", TraceID: "trace-cold",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.repository.PruneHot(end.Add(time.Hour).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(coldLogsQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "").
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(time.Minute), "ERROR", "checkout", "token=[REDACTED]", "trace-cold", ""))
+	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", "error", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Entries) != 1 || result.Data.Entries[0].Body != "token=[REDACTED]" || result.Provenance.DataSource != "parquet" {
+		t.Fatalf("cold logs result = %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTraceLogsUseEarliestEventTimeAcrossBatches(t *testing.T) {
 	svc, _ := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
@@ -300,17 +329,18 @@ func TestTraceLogsUseEarliestEventTimeAcrossBatches(t *testing.T) {
 		{ID: "trace-latest", Spans: []telemetry.Span{{Namespace: "prod", TraceID: "trace-order", SpanID: "root", StartUnixNanos: start.UnixNano(), DurationMS: 1}}, Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(30 * time.Millisecond).UnixNano(), Body: "latest"}}},
 		{ID: "trace-earliest", Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(10 * time.Millisecond).UnixNano(), Body: "earliest"}}},
 		{ID: "trace-middle", Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(20 * time.Millisecond).UnixNano(), Body: "middle"}}},
+		{ID: "trace-outside-span", Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(2 * time.Minute).UnixNano(), Body: "unrelated later event"}}},
 	}
 	for _, batch := range batches {
 		if err := svc.repository.Commit(batch); err != nil {
 			t.Fatal(err)
 		}
 	}
-	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "trace-order", "", 2)
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "trace-order", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data.Logs) != 2 || result.Data.Logs[0].Body != "earliest" || result.Data.Logs[1].Body != "middle" {
+	if len(result.Data.Logs) != 3 || result.Data.Logs[0].Body != "earliest" || result.Data.Logs[1].Body != "middle" || result.Data.Logs[2].Body != "latest" {
 		t.Fatalf("trace logs = %#v", result.Data.Logs)
 	}
 }

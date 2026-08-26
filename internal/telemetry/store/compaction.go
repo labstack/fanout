@@ -21,6 +21,7 @@ type compactionMarker struct {
 	MinNanos   int64    `json:"min_nanos"`
 	MaxNanos   int64    `json:"max_nanos"`
 	Generation uint32   `json:"generation"`
+	Sources    []string `json:"sources"`
 }
 
 const minCompactionInputs = 8
@@ -44,6 +45,11 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 	marker := compactionMarker{ID: fmt.Sprintf("compact-%d", time.Now().UnixNano()), MinNanos: math.MaxInt64, Generation: selected[0].Generation + 1}
 	for _, batch := range selected {
 		marker.Inputs = append(marker.Inputs, batch.ID)
+		if len(batch.Sources) == 0 {
+			marker.Sources = append(marker.Sources, batch.ID)
+		} else {
+			marker.Sources = append(marker.Sources, batch.Sources...)
+		}
 		if batch.MinNanos > 0 {
 			marker.MinNanos = min(marker.MinNanos, batch.MinNanos)
 		}
@@ -110,8 +116,6 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 		publishLock.Lock()
 		defer publishLock.Unlock()
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if err := r.completeCompaction(marker); err != nil {
 		return 0, err
 	}
@@ -207,6 +211,10 @@ func (r *Repository) recoverCompaction() error {
 }
 
 func (r *Repository) completeCompaction(marker compactionMarker) error {
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	stageDir := filepath.Join(r.root, marker.ID)
 	if err := r.validateCompactionOutputs(marker, stageDir); err != nil {
 		return errors.Join(err, r.restoreCompactionInputs(marker))
@@ -235,6 +243,14 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 	if err := syncParquetDirectories(r.Parquet.Dir()); err != nil {
 		return err
 	}
+	for _, source := range marker.Sources {
+		if err := os.Remove(filepath.Join(r.walDir, source+".wal")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("remove compacted input WAL %s: %w", source, err)
+		}
+	}
+	if err := syncDirectory(r.walDir); err != nil {
+		return fmt.Errorf("sync compacted input WAL removals: %w", err)
+	}
 	inputSet := make(map[string]struct{}, len(marker.Inputs))
 	for _, id := range marker.Inputs {
 		inputSet[id] = struct{}{}
@@ -245,7 +261,7 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 			kept = append(kept, batch)
 		}
 	}
-	kept = append(kept, batchMetadata{ID: marker.ID, MinNanos: marker.MinNanos, MaxNanos: marker.MaxNanos, Generation: marker.Generation})
+	kept = append(kept, batchMetadata{ID: marker.ID, MinNanos: marker.MinNanos, MaxNanos: marker.MaxNanos, Generation: marker.Generation, Sources: append([]string(nil), marker.Sources...)})
 	next := repositoryManifest{Version: 1, Batches: kept}
 	if err := writeRepositoryManifest(r.root, next); err != nil {
 		return err

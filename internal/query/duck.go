@@ -463,6 +463,7 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		pruneErr = errors.Join(pruneErr, parquetErr, compactErr)
 	}
 	var cacheErr error
+	unlockMaintenance := d.writeGate.Lock(writegate.WriteMaintenance)
 	if d.cfg.RetentionDays > 0 {
 		for _, table := range []string{"service_rollup", "endpoint_rollup", "edge_rollup"} {
 			if _, err := d.DB.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY", table, d.cfg.RetentionDays)); err != nil {
@@ -471,6 +472,7 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		}
 	}
 	_, checkpointErr := d.DB.ExecContext(ctx, "CHECKPOINT")
+	unlockMaintenance()
 	err := errors.Join(pruneErr, cacheErr, checkpointErr)
 	maintenanceResult := metrics.TelemetrySuccess
 	if err != nil {
@@ -506,6 +508,10 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 			updateRollupProgress(metrics.RollupService, true, watermark, sourceMax)
 		}
 	}()
+	if err := d.lockParquetRead(ctx); err != nil {
+		return 0, err
+	}
+	defer d.parquetMu.RUnlock()
 
 	// Serialize against other writers (edge rollup, maintenance, ingest flushes).
 	// The write gate is always acquired before a connection to keep lock ordering
@@ -627,6 +633,10 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 			updateRollupProgress(metrics.RollupEndpoint, true, watermark, sourceMax)
 		}
 	}()
+	if err := d.lockParquetRead(ctx); err != nil {
+		return 0, err
+	}
+	defer d.parquetMu.RUnlock()
 
 	unlock := d.writeGate.Lock(writegate.WriteRollupEndpoint)
 	defer unlock()
@@ -747,6 +757,10 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 			updateRollupProgress(metrics.RollupEdge, true, watermark, sourceMax)
 		}
 	}()
+	if err := d.lockParquetRead(ctx); err != nil {
+		return 0, err
+	}
+	defer d.parquetMu.RUnlock()
 
 	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
 	defer unlock()
@@ -1367,7 +1381,9 @@ FROM messaging_edges;`
 // QueryContext executes a read against immutable Parquet files and DuckDB's
 // local rollup cache.
 func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
-	d.parquetMu.RLock()
+	if err := d.lockParquetRead(ctx); err != nil {
+		return nil, err
+	}
 	rows, err := d.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		d.parquetMu.RUnlock()
@@ -1401,9 +1417,31 @@ func (r *lockedRows) release() { r.unlockOnce.Do(r.unlock) }
 // QueryRowScan executes a single-row query against immutable Parquet files and
 // DuckDB's local rollup cache.
 func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
-	d.parquetMu.RLock()
+	if err := d.lockParquetRead(ctx); err != nil {
+		return err
+	}
 	defer d.parquetMu.RUnlock()
 	return d.DB.QueryRowContext(ctx, query, args...).Scan(dest...)
+}
+
+func (d *Duck) lockParquetRead(ctx context.Context) error {
+	for {
+		if d.parquetMu.TryRLock() {
+			return nil
+		}
+		timer := time.NewTimer(time.Millisecond)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 // ---- Queries for API ----

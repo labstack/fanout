@@ -112,7 +112,13 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		sort.Strings(data.Services)
 
 		traceLogs := earliestLogHeap{}
-		readErr = s.repository.Logs.Scan(startNanos, endNanos, func(row telemetry.Log) bool {
+		logStart, logEnd := startNanos, endNanos
+		if !first.IsZero() {
+			const correlationMargin = time.Second
+			logStart = max(logStart, first.Add(-correlationMargin).UnixNano())
+			logEnd = min(logEnd, last.Add(correlationMargin).UnixNano())
+		}
+		readErr = s.repository.Logs.Scan(logStart, logEnd, func(row telemetry.Log) bool {
 			select {
 			case <-ctx.Done():
 				return false
