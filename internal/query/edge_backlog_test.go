@@ -37,9 +37,13 @@ func TestEdgeRollupBacklog(t *testing.T) {
 	// burst/catch-up ingest), but start_time is spread across 180 minutes.
 	// child.parent_span_id = parent.span_id, different services, same trace_id.
 	const n = 400_000
-	ingestedNano := time.Now().UnixNano()
+	// Both inserts must share one minute boundary: they are large enough for the
+	// wall clock to cross into the next minute between them on a loaded runner.
+	baseTime := time.Now().UTC().Truncate(time.Minute)
+	ingestedNano := baseTime.UnixNano()
 
 	_, err := db.ExecContext(ctx, `
+WITH input AS (SELECT CAST(? AS TIMESTAMP) AS base_time)
 INSERT INTO lake.spans (
   namespace, trace_id, span_id, parent_span_id,
   service, operation, kind,
@@ -54,21 +58,22 @@ SELECT
   'svc-a',
   'op',
   'SPAN_KIND_SERVER',
-  now() - ((i % 180) * INTERVAL '1' MINUTE),
-  now() - ((i % 180) * INTERVAL '1' MINUTE) + INTERVAL '10' MILLISECOND,
-  epoch_ns(now() - ((i % 180) * INTERVAL '1' MINUTE)),
-  epoch_ns(now() - ((i % 180) * INTERVAL '1' MINUTE)) + 10000000,
+  base_time - ((i % 180) * INTERVAL '1' MINUTE),
+  base_time - ((i % 180) * INTERVAL '1' MINUTE) + INTERVAL '10' MILLISECOND,
+  epoch_ns(base_time - ((i % 180) * INTERVAL '1' MINUTE)),
+  epoch_ns(base_time - ((i % 180) * INTERVAL '1' MINUTE)) + 10000000,
   10.0,
   'STATUS_CODE_OK',
-  now(),
+  base_time,
   ?
-FROM range(?, ?) t(i)`,
-		ingestedNano, 0, n)
+FROM range(?, ?) t(i), input`,
+		baseTime, ingestedNano, 0, n)
 	if err != nil {
 		t.Fatalf("insert parents: %v", err)
 	}
 
 	_, err = db.ExecContext(ctx, `
+WITH input AS (SELECT CAST(? AS TIMESTAMP) AS base_time)
 INSERT INTO lake.spans (
   namespace, trace_id, span_id, parent_span_id,
   service, operation, kind,
@@ -83,16 +88,16 @@ SELECT
   'svc-b',
   'op',
   'SPAN_KIND_CLIENT',
-  now() - ((i % 180) * INTERVAL '1' MINUTE) + INTERVAL '1' MILLISECOND,
-  now() - ((i % 180) * INTERVAL '1' MINUTE) + INTERVAL '5' MILLISECOND,
-  epoch_ns(now() - ((i % 180) * INTERVAL '1' MINUTE)) + 1000000,
-  epoch_ns(now() - ((i % 180) * INTERVAL '1' MINUTE)) + 5000000,
+  base_time - ((i % 180) * INTERVAL '1' MINUTE) + INTERVAL '1' MILLISECOND,
+  base_time - ((i % 180) * INTERVAL '1' MINUTE) + INTERVAL '5' MILLISECOND,
+  epoch_ns(base_time - ((i % 180) * INTERVAL '1' MINUTE)) + 1000000,
+  epoch_ns(base_time - ((i % 180) * INTERVAL '1' MINUTE)) + 5000000,
   4.0,
   'STATUS_CODE_OK',
-  now(),
+  base_time,
   ?
-FROM range(?, ?) t(i)`,
-		ingestedNano, 0, n)
+FROM range(?, ?) t(i), input`,
+		baseTime, ingestedNano, 0, n)
 	if err != nil {
 		t.Fatalf("insert children: %v", err)
 	}
@@ -125,6 +130,9 @@ FROM range(?, ?) t(i)`,
 SELECT count(DISTINCT date_trunc('minute', start_time))
 FROM lake.spans`).Scan(&spanBuckets); err != nil {
 		t.Fatalf("count distinct span minute buckets: %v", err)
+	}
+	if spanBuckets != 180 {
+		t.Fatalf("spans have %d distinct minute buckets, want 180", spanBuckets)
 	}
 	if edgeBuckets != spanBuckets {
 		t.Errorf("edge_rollup has %d distinct buckets, spans have %d distinct minute buckets — sub-windowing dropped or duplicated buckets",

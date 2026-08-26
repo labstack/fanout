@@ -84,7 +84,7 @@ func main() {
 			fatal(fmt.Errorf("read %s: %w", outputPath, err))
 		}
 		if !bytes.Equal(current, generated) {
-			fatal(errors.New("THIRD_PARTY_NOTICES is stale; run `just notices`"))
+			fatal(errors.New("THIRD_PARTY_NOTICES is stale; run `just notices` using the Go version declared in go.mod (a different toolchain can select a different dependency graph)"))
 		}
 		fmt.Println("THIRD_PARTY_NOTICES matches the release dependency graph")
 		return

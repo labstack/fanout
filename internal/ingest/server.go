@@ -521,7 +521,7 @@ func appendJSONString(buf *bytes.Buffer, s string) {
 			if start < i {
 				buf.WriteString(s[start:i])
 			}
-			buf.WriteString(`\ufffd`)
+			buf.WriteRune(utf8.RuneError)
 			i += size
 			start = i
 			continue
