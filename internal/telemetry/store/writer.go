@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -27,6 +26,7 @@ type Writer struct {
 	bufSpans   []telemetry.Span
 	bufLogs    []telemetry.Log
 	bufMetrics []telemetry.Metric
+	retryDelay func(int) time.Duration
 	done       chan struct{}
 }
 
@@ -113,26 +113,34 @@ func (w *Writer) flush(out chan<- Batch, workerDone <-chan error) error {
 
 func (w *Writer) flushWorker(in <-chan Batch, done chan<- error) {
 	for batch := range in {
-		var err error
-		for attempt := 0; attempt < 3; attempt++ {
-			err = w.repository.Commit(batch)
+		for attempt := 0; ; attempt++ {
+			err := w.repository.Commit(batch)
 			if err == nil {
 				break
 			}
-			time.Sleep(time.Duration(attempt+1) * 100 * time.Millisecond)
-		}
-		if err != nil {
-			commitErr := fmt.Errorf("commit batch %s: %w", batch.ID, err)
 			metrics.FlushErrors.WithLabelValues("batch").Inc()
-			metrics.RowsDropped.WithLabelValues("spans").Add(float64(len(batch.Spans)))
-			metrics.RowsDropped.WithLabelValues("logs").Add(float64(len(batch.Logs)))
-			metrics.RowsDropped.WithLabelValues("metrics").Add(float64(len(batch.Metrics)))
-			slog.Error("telemetry batch commit failed permanently", "batch_id", batch.ID, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", err)
-			done <- commitErr
-			return
+			// Log immediately and then at powers of two so a persistent storage
+			// outage stays visible without producing an unbounded log storm. The
+			// batch remains at the head of this bounded worker queue, applying
+			// backpressure until the same durable transaction commits.
+			if attempt == 0 || attempt&(attempt-1) == 0 {
+				slog.Warn("telemetry batch commit failed; retrying", "batch_id", batch.ID, "attempt", attempt+1, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", err)
+			}
+			delay := defaultCommitRetryDelay(attempt)
+			if w.retryDelay != nil {
+				delay = w.retryDelay(attempt)
+			}
+			if delay > 0 {
+				time.Sleep(delay)
+			}
 		}
 	}
 	done <- nil
+}
+
+func defaultCommitRetryDelay(attempt int) time.Duration {
+	shift := min(attempt, 6)
+	return min(100*time.Millisecond*time.Duration(1<<shift), 5*time.Second)
 }
 
 func (w *Writer) drain(spans *<-chan telemetry.Span, logs *<-chan telemetry.Log, metricRows *<-chan telemetry.Metric) {

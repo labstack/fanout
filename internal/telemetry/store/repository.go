@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -30,8 +31,10 @@ type Batch struct {
 }
 
 type batchMetadata struct {
-	ID       string `json:"id"`
-	MaxNanos int64  `json:"max_nanos"`
+	ID         string `json:"id"`
+	MinNanos   int64  `json:"min_nanos"`
+	MaxNanos   int64  `json:"max_nanos"`
+	Generation uint32 `json:"generation"`
 }
 
 type repositoryManifest struct {
@@ -41,6 +44,7 @@ type repositoryManifest struct {
 
 type Repository struct {
 	mu           sync.RWMutex
+	commitMu     sync.Mutex
 	compactionMu sync.Mutex
 	root         string
 	walDir       string
@@ -106,16 +110,9 @@ func (r *Repository) Close() error {
 	return errors.Join(r.Spans.Close(), r.Logs.Close(), r.Metrics.Close())
 }
 
-func (r *Repository) ReadLock() func() {
-	r.mu.RLock()
-	return r.mu.RUnlock
-}
-
 // PruneHot removes acceleration segments older than cutoff. Parquet remains
 // authoritative for longer retention and SQL queries.
 func (r *Repository) PruneHot(cutoff int64) (int, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	spans, spanErr := r.Spans.PruneBefore(cutoff)
 	logs, logErr := r.Logs.PruneBefore(cutoff)
 	metricRows, metricErr := r.Metrics.PruneBefore(cutoff)
@@ -174,12 +171,17 @@ func (r *Repository) Commit(batch Batch) error {
 	if err := r.writeWAL(batch); err != nil {
 		return err
 	}
-	r.mu.Lock()
+	// Commits are serialized, but their segment and Parquet fsyncs do not hold
+	// the repository metadata lock. Each projection has its own atomic publish
+	// protocol; the WAL keeps a partially applied transaction replayable.
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
 	err := r.apply(batch)
 	if err == nil {
+		r.mu.Lock()
 		err = r.recordBatch(batch)
+		r.mu.Unlock()
 	}
-	r.mu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -344,7 +346,7 @@ func (r *Repository) recordBatch(batch Batch) error {
 		}
 	}
 	next := r.manifest
-	next.Batches = append(append([]batchMetadata(nil), r.manifest.Batches...), batchMetadata{ID: batch.ID, MaxNanos: batchMaxNanos(batch)})
+	next.Batches = append(append([]batchMetadata(nil), r.manifest.Batches...), batchMetadata{ID: batch.ID, MinNanos: batchMinNanos(batch), MaxNanos: batchMaxNanos(batch)})
 	if err := writeRepositoryManifest(r.root, next); err != nil {
 		return err
 	}
@@ -364,6 +366,31 @@ func batchMaxNanos(batch Batch) int64 {
 		maxNanos = max(maxNanos, max(row.EventUnixNanos, row.IngestedAt))
 	}
 	return maxNanos
+}
+
+func batchMinNanos(batch Batch) int64 {
+	minNanos := int64(math.MaxInt64)
+	include := func(value int64) {
+		if value > 0 {
+			minNanos = min(minNanos, value)
+		}
+	}
+	for _, row := range batch.Spans {
+		include(row.StartUnixNanos)
+		include(row.IngestedAt)
+	}
+	for _, row := range batch.Logs {
+		include(row.EventUnixNanos)
+		include(row.IngestedAt)
+	}
+	for _, row := range batch.Metrics {
+		include(row.EventUnixNanos)
+		include(row.IngestedAt)
+	}
+	if minNanos == math.MaxInt64 {
+		return 0
+	}
+	return minNanos
 }
 
 func writeRepositoryManifest(root string, manifest repositoryManifest) error {

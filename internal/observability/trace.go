@@ -65,13 +65,10 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	dataSource := "fanout_segments"
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
 	if traceID != "" {
-		unlock := s.repository.ReadLock()
 		storedSpans, readErr := s.repository.Spans.Trace(traceID)
 		if readErr != nil {
-			unlock()
 			return Result[TraceDetail]{}, fmt.Errorf("read trace segments: %w", readErr)
 		}
-		unlock()
 		startNanos, endNanos := scope.Start.UnixNano(), scope.End.UnixNano()
 		for _, row := range storedSpans {
 			if row.StartUnixNanos < startNanos || row.StartUnixNanos >= endNanos ||

@@ -51,6 +51,11 @@ type signalManifest struct {
 	Files   []string `json:"files"`
 }
 
+type signalFile interface {
+	ReadAt([]byte, int64) (int, error)
+	Close() error
+}
+
 // SignalStore persists one telemetry signal as immutable, independently
 // compressed columns. T must be a struct containing only string, []byte,
 // int32, uint32, int64, and float64 fields.
@@ -64,6 +69,7 @@ type SignalStore[T any] struct {
 	segments  []signalSegment
 	encoder   *zstd.Encoder
 	decoders  sync.Pool
+	openFile  func(string) (signalFile, error)
 }
 
 func OpenSignalStore[T any](dir, timeField string) (*SignalStore[T], error) {
@@ -82,7 +88,7 @@ func OpenSignalStore[T any](dir, timeField string) (*SignalStore[T], error) {
 	if err != nil {
 		return nil, fmt.Errorf("create signal encoder: %w", err)
 	}
-	s := &SignalStore[T]{dir: dir, timeField: field.Index[0], codec: codec, encoder: enc}
+	s := &SignalStore[T]{dir: dir, timeField: field.Index[0], codec: codec, encoder: enc, openFile: func(path string) (signalFile, error) { return os.Open(path) }}
 	s.decoders.New = func() any {
 		dec, decErr := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
 		if decErr != nil {
@@ -256,54 +262,73 @@ func (s *SignalStore[T]) writeSegment(path, id string, rows []T) (signalSegment,
 
 // Scan visits rows in [start,end), using segment and block time pruning.
 func (s *SignalStore[T]) Scan(start, end int64, visit func(T) bool) error {
-	type openedSegment struct {
-		segment signalSegment
-		file    *os.File
-	}
-	var opened []openedSegment
 	s.mu.RLock()
+	segments := make([]signalSegment, 0, len(s.segments))
 	for _, seg := range s.segments {
 		if seg.max < start || seg.min >= end {
 			continue
 		}
-		f, err := os.Open(seg.path)
-		if err != nil {
-			s.mu.RUnlock()
-			for _, item := range opened {
-				_ = item.file.Close()
-			}
-			return err
-		}
-		opened = append(opened, openedSegment{segment: seg, file: f})
+		segments = append(segments, seg)
 	}
 	s.mu.RUnlock()
-	defer func() {
-		for _, item := range opened {
-			_ = item.file.Close()
-		}
-	}()
 	dec := s.decoders.Get().(*zstd.Decoder)
 	defer s.decoders.Put(dec)
-	for _, item := range opened {
-		seg, f := item.segment, item.file
+	for _, seg := range segments {
+		// Revalidate and open while holding the metadata read lock. Pruning must
+		// acquire the write lock before unlinking a retired segment, so once this
+		// descriptor is open the scan can safely release the lock and decode it.
+		s.mu.RLock()
+		active := false
+		for _, current := range s.segments {
+			if current.path == seg.path {
+				active = true
+				break
+			}
+		}
+		if !active {
+			s.mu.RUnlock()
+			continue
+		}
+		openFile := s.openFile
+		if openFile == nil {
+			openFile = func(path string) (signalFile, error) { return os.Open(path) }
+		}
+		f, err := openFile(seg.path)
+		s.mu.RUnlock()
+		if err != nil {
+			return err
+		}
+		stop := false
 		for _, block := range seg.blocks {
 			if block.max < start || block.min >= end {
 				continue
 			}
 			data := make([]byte, block.length)
 			if _, err := f.ReadAt(data, int64(block.offset)); err != nil {
+				_ = f.Close()
 				return err
 			}
 			rows, err := s.codec.decodeBlock(dec, data, int(block.rows))
 			if err != nil {
+				_ = f.Close()
 				return fmt.Errorf("decode %s: %w", filepath.Base(seg.path), err)
 			}
 			for _, row := range rows {
 				ts := reflect.ValueOf(row).Field(s.timeField).Int()
 				if ts >= start && ts < end && !visit(row) {
-					return nil
+					stop = true
+					break
 				}
 			}
+			if stop {
+				break
+			}
+		}
+		if err := f.Close(); err != nil {
+			return err
+		}
+		if stop {
+			return nil
 		}
 	}
 	return nil

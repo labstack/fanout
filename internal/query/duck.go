@@ -18,6 +18,7 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/query/writegate"
+	"github.com/labstack/fanout/internal/queryrows"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
@@ -344,6 +345,12 @@ func (d *Duck) RunRollups(ctx context.Context) {
 		slog.Info("startup rollup complete", "rows", rows, "duration", time.Since(start))
 	}
 	d.updateParquetStats()
+	maintenanceDone := make(chan struct{})
+	go func() {
+		defer close(maintenanceDone)
+		d.runMaintenanceLoop(ctx)
+	}()
+	defer func() { <-maintenanceDone }()
 
 	ticker := time.NewTicker(d.cfg.RollupInterval)
 	defer ticker.Stop()
@@ -397,11 +404,31 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 		affected += n
 	}
 
-	if err := d.runRepositoryMaintenance(ctx); err != nil {
-		slog.Warn("telemetry maintenance failed", "err", err)
-	}
-
 	return int(affected), errors.Join(errs...)
+}
+
+func (d *Duck) runMaintenanceLoop(ctx context.Context) {
+	every := d.cfg.MaintenanceInterval
+	if every <= 0 {
+		every = time.Hour
+	}
+	run := func() {
+		if err := d.runRepositoryMaintenance(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("telemetry maintenance failed", "err", err)
+		}
+		d.updateParquetStats()
+	}
+	run()
+	ticker := time.NewTicker(every)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			run()
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
@@ -1339,12 +1366,37 @@ FROM messaging_edges;`
 
 // QueryContext executes a read against immutable Parquet files and DuckDB's
 // local rollup cache.
-func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
+func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
 	d.parquetMu.RLock()
 	rows, err := d.DB.QueryContext(ctx, query, args...)
-	d.parquetMu.RUnlock()
-	return rows, err
+	if err != nil {
+		d.parquetMu.RUnlock()
+		return nil, err
+	}
+	return &lockedRows{Rows: rows, unlock: d.parquetMu.RUnlock}, nil
 }
+
+type lockedRows struct {
+	*sql.Rows
+	unlockOnce sync.Once
+	unlock     func()
+}
+
+func (r *lockedRows) Close() error {
+	err := r.Rows.Close()
+	r.release()
+	return err
+}
+
+func (r *lockedRows) Next() bool {
+	ok := r.Rows.Next()
+	if !ok {
+		r.release()
+	}
+	return ok
+}
+
+func (r *lockedRows) release() { r.unlockOnce.Do(r.unlock) }
 
 // QueryRowScan executes a single-row query against immutable Parquet files and
 // DuckDB's local rollup cache.
@@ -1379,7 +1431,7 @@ HAVING SUM(spans) > 0
 ORDER BY p95_ms DESC
 LIMIT 100;
 `, windowMinutes)
-	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
+	rows, err := d.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -1417,7 +1469,7 @@ WHERE time >= now() - INTERVAL %d MINUTE
 ORDER BY time DESC
 LIMIT %d;
 `, windowMinutes, limit)
-	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace, pattern)
+	rows, err := d.QueryContext(ctx, q, namespace, namespace, pattern)
 	if err != nil {
 		return nil, err
 	}
@@ -1449,7 +1501,7 @@ WHERE bucket >= now() - INTERVAL %d MINUTE
 GROUP BY bucket
 ORDER BY bucket ASC;
 `, windowMinutes)
-	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
+	rows, err := d.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -1481,7 +1533,7 @@ GROUP BY service
 ORDER BY spans_per_minute DESC
 LIMIT 20;
 `, windowMinutes, windowMinutes)
-	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
+	rows, err := d.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -1514,7 +1566,7 @@ GROUP BY body
 ORDER BY count DESC
 LIMIT %d;
 `, windowMinutes, limit)
-	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
+	rows, err := d.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}
@@ -1556,7 +1608,7 @@ HAVING errors > 0
 ORDER BY errors DESC
 LIMIT %d;
 `, windowMinutes, limit)
-	rows, err := d.DB.QueryContext(ctx, q, namespace, namespace)
+	rows, err := d.QueryContext(ctx, q, namespace, namespace)
 	if err != nil {
 		return nil, err
 	}

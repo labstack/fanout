@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -62,6 +63,42 @@ func TestRepositoryCommitIsIdempotentAndQueryable(t *testing.T) {
 		if count != 1 {
 			t.Fatalf("%s parquet rows = %d", signal, count)
 		}
+	}
+}
+
+func TestRepositoryCommitIODoesNotHoldMetadataLock(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	batch := testBatch()
+	batch.ID = "lock-scope-batch"
+	repository.mu.Lock()
+	committed := make(chan error, 1)
+	go func() { committed <- repository.Commit(batch) }()
+	parquet := filepath.Join(dir, "parquet", "spans", batch.ID+".parquet")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(parquet); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			repository.mu.Unlock()
+			t.Fatal("commit projection I/O remained blocked by repository metadata lock")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case err := <-committed:
+		repository.mu.Unlock()
+		t.Fatalf("Commit returned before metadata publication lock was released: %v", err)
+	default:
+	}
+	repository.mu.Unlock()
+	if err := <-committed; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -236,7 +273,88 @@ func TestRepositoryCompactionDrainsBacklog(t *testing.T) {
 	if compacted <= 64 {
 		t.Fatalf("compacted batches = %d, want multiple groups", compacted)
 	}
-	if len(repository.manifest.Batches) != 1 {
-		t.Fatalf("manifest batches = %d, want 1", len(repository.manifest.Batches))
+	if len(repository.manifest.Batches) != 2 {
+		t.Fatalf("manifest batches = %d, want 2 bounded level-1 outputs", len(repository.manifest.Batches))
 	}
+	for _, batch := range repository.manifest.Batches {
+		if batch.Generation != 1 {
+			t.Fatalf("batch %s generation = %d, want 1", batch.ID, batch.Generation)
+		}
+	}
+	again, err := repository.CompactParquet(context.Background(), db, 64, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != 0 {
+		t.Fatalf("second compaction rewrote %d already-compacted inputs, want 0", again)
+	}
+}
+
+func TestRepositoryCompactionPreservesRetentionPartitions(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	oldTime := time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC).UnixNano()
+	newTime := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC).UnixNano()
+	for day, timestamp := range []int64{oldTime, newTime} {
+		for i := range 8 {
+			batch := testBatchAt(timestamp)
+			batch.ID = fmt.Sprintf("day-%d-batch-%d", day, i)
+			if err := repository.Commit(batch); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := repository.CompactParquetBacklog(context.Background(), db, 64, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(repository.manifest.Batches) != 2 {
+		t.Fatalf("manifest batches = %d, want one output per day", len(repository.manifest.Batches))
+	}
+	var oldID, newID string
+	for _, batch := range repository.manifest.Batches {
+		switch batch.MaxNanos {
+		case oldTime:
+			oldID = batch.ID
+		case newTime:
+			newID = batch.ID
+		}
+	}
+	removed, err := repository.PruneParquet(time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC).UnixNano())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 || oldID == "" || newID == "" {
+		t.Fatalf("removed=%d oldID=%q newID=%q, want exactly the old partition", removed, oldID, newID)
+	}
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		if _, err := os.Stat(filepath.Join(dir, "parquet", signal, oldID+".parquet")); !os.IsNotExist(err) {
+			t.Fatalf("expired compacted %s file remains: %v", signal, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "parquet", signal, newID+".parquet")); err != nil {
+			t.Fatalf("current compacted %s file missing: %v", signal, err)
+		}
+	}
+}
+
+func testBatchAt(timestamp int64) Batch {
+	batch := testBatch()
+	batch.Spans[0].StartUnixNanos = timestamp
+	batch.Spans[0].EndUnixNanos = timestamp + 1
+	batch.Spans[0].IngestedAt = timestamp
+	batch.Logs[0].TimeUnixNanos = timestamp
+	batch.Logs[0].EventUnixNanos = timestamp
+	batch.Logs[0].IngestedAt = timestamp
+	batch.Metrics[0].TimeUnixNanos = timestamp
+	batch.Metrics[0].EventUnixNanos = timestamp
+	batch.Metrics[0].IngestedAt = timestamp
+	return batch
 }

@@ -2,13 +2,13 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"regexp"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
@@ -30,7 +30,7 @@ func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock) {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	svc := New(db, newTestRepository(t))
+	svc := New(SQLDB(db), newTestRepository(t))
 	svc.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
 	return svc, mock
 }
@@ -339,4 +339,4 @@ func TestTraceFallsBackToParquetWhenHotSegmentsMiss(t *testing.T) {
 	}
 }
 
-var _ DB = (*sql.DB)(nil)
+var _ DB = queryrows.SQLAdapter{}

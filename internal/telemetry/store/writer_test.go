@@ -3,18 +3,32 @@ package store
 import (
 	"context"
 	"errors"
-	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/telemetry"
 )
 
-type failingCommitter struct{}
+type recoveringCommitter struct {
+	mu       sync.Mutex
+	failures int
+	calls    int
+	batches  []Batch
+}
 
-func (failingCommitter) Commit(Batch) error { return errors.New("disk full") }
+func (c *recoveringCommitter) Commit(batch Batch) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	if c.calls <= c.failures {
+		return errors.New("disk temporarily unavailable")
+	}
+	c.batches = append(c.batches, batch)
+	return nil
+}
 
-func TestWriterSurfacesPermanentCommitFailure(t *testing.T) {
+func TestWriterRetainsBatchAcrossCommitFailures(t *testing.T) {
 	spans := make(chan telemetry.Span, 1)
 	logs := make(chan telemetry.Log)
 	metricRows := make(chan telemetry.Metric)
@@ -22,16 +36,19 @@ func TestWriterSurfacesPermanentCommitFailure(t *testing.T) {
 	close(spans)
 	close(logs)
 	close(metricRows)
+	committer := &recoveringCommitter{failures: 6}
 	w := &Writer{
-		repository: failingCommitter{}, interval: time.Hour, batchSize: 1,
+		repository: committer, interval: time.Hour, batchSize: 1,
 		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
+		retryDelay: func(int) time.Duration { return 0 },
 	}
-	start := time.Now()
-	err := w.Run(context.Background())
-	if err == nil || !strings.Contains(err.Error(), "disk full") {
-		t.Fatalf("Run error = %v, want permanent commit failure", err)
+	if err := w.Run(context.Background()); err != nil {
+		t.Fatalf("Run error = %v", err)
 	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("commit failure surfaced after %s", elapsed)
+	if committer.calls != 7 {
+		t.Fatalf("Commit calls = %d, want 7", committer.calls)
+	}
+	if len(committer.batches) != 1 || len(committer.batches[0].Spans) != 1 {
+		t.Fatalf("committed batches = %#v, want original batch exactly once", committer.batches)
 	}
 }

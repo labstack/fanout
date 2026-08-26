@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,10 +15,14 @@ import (
 )
 
 type compactionMarker struct {
-	ID       string   `json:"id"`
-	Inputs   []string `json:"inputs"`
-	MaxNanos int64    `json:"max_nanos"`
+	ID         string   `json:"id"`
+	Inputs     []string `json:"inputs"`
+	MinNanos   int64    `json:"min_nanos"`
+	MaxNanos   int64    `json:"max_nanos"`
+	Generation uint32   `json:"generation"`
 }
+
+const minCompactionInputs = 8
 
 // CompactParquet combines the oldest small atomic batches into larger files.
 // A durable marker makes the multi-signal swap recoverable after a crash.
@@ -28,17 +33,21 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
 	r.mu.RLock()
-	if len(r.manifest.Batches) < 8 {
-		r.mu.RUnlock()
+	selected := selectCompactionBatches(r.manifest.Batches, maxBatches)
+	r.mu.RUnlock()
+	if len(selected) < minCompactionInputs {
 		return 0, nil
 	}
-	count := min(maxBatches, len(r.manifest.Batches))
-	selected := append([]batchMetadata(nil), r.manifest.Batches[:count]...)
-	r.mu.RUnlock()
-	marker := compactionMarker{ID: fmt.Sprintf("compact-%d", time.Now().UnixNano())}
+	marker := compactionMarker{ID: fmt.Sprintf("compact-%d", time.Now().UnixNano()), MinNanos: math.MaxInt64, Generation: selected[0].Generation + 1}
 	for _, batch := range selected {
 		marker.Inputs = append(marker.Inputs, batch.ID)
+		if batch.MinNanos > 0 {
+			marker.MinNanos = min(marker.MinNanos, batch.MinNanos)
+		}
 		marker.MaxNanos = max(marker.MaxNanos, batch.MaxNanos)
+	}
+	if marker.MinNanos == math.MaxInt64 {
+		marker.MinNanos = 0
 	}
 	stageDir := filepath.Join(r.root, marker.ID)
 	if err := os.Mkdir(stageDir, 0o755); err != nil {
@@ -96,7 +105,55 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 	if err := r.completeCompaction(marker); err != nil {
 		return 0, err
 	}
-	return count, nil
+	return len(selected), nil
+}
+
+type compactionKey struct {
+	day        int64
+	generation uint32
+}
+
+// selectCompactionBatches implements a leveled, day-partitioned compaction
+// policy. An output can only be merged with peers from the same day and
+// generation, so maintenance never folds the complete retained corpus into
+// one perpetually young file. At most minCompactionInputs-1 files remain at
+// each level for a day.
+func selectCompactionBatches(batches []batchMetadata, maxBatches int) []batchMetadata {
+	if maxBatches < minCompactionInputs {
+		return nil
+	}
+	counts := make(map[compactionKey]int)
+	for _, batch := range batches {
+		if batch.MaxNanos <= 0 {
+			continue
+		}
+		key := compactionKey{day: batch.MaxNanos / int64(24*time.Hour), generation: batch.Generation}
+		counts[key]++
+	}
+	var chosen compactionKey
+	found := false
+	for key, count := range counts {
+		if count < minCompactionInputs {
+			continue
+		}
+		if !found || key.day < chosen.day || (key.day == chosen.day && key.generation < chosen.generation) {
+			chosen, found = key, true
+		}
+	}
+	if !found {
+		return nil
+	}
+	selected := make([]batchMetadata, 0, min(maxBatches, counts[chosen]))
+	for _, batch := range batches {
+		key := compactionKey{day: batch.MaxNanos / int64(24*time.Hour), generation: batch.Generation}
+		if batch.MaxNanos > 0 && key == chosen {
+			selected = append(selected, batch)
+			if len(selected) == maxBatches {
+				break
+			}
+		}
+	}
+	return selected
 }
 
 // CompactParquetBacklog drains every currently eligible compaction group so a
@@ -173,7 +230,7 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 			kept = append(kept, batch)
 		}
 	}
-	kept = append(kept, batchMetadata{ID: marker.ID, MaxNanos: marker.MaxNanos})
+	kept = append(kept, batchMetadata{ID: marker.ID, MinNanos: marker.MinNanos, MaxNanos: marker.MaxNanos, Generation: marker.Generation})
 	next := repositoryManifest{Version: 1, Batches: kept}
 	if err := writeRepositoryManifest(r.root, next); err != nil {
 		return err

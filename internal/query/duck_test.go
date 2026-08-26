@@ -148,6 +148,49 @@ func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 	}
 }
 
+func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
+	d := &Duck{DB: db}
+	rows, err := d.QueryContext(context.Background(), "SELECT 1")
+	if err != nil {
+		t.Fatalf("QueryContext: %v", err)
+	}
+	lockAcquired := make(chan struct{})
+	go func() {
+		d.parquetMu.Lock()
+		close(lockAcquired)
+		d.parquetMu.Unlock()
+	}()
+	select {
+	case <-lockAcquired:
+		t.Fatal("Parquet write lock acquired while query rows were still open")
+	case <-time.After(25 * time.Millisecond):
+	}
+	if !rows.Next() {
+		t.Fatalf("rows.Next() = false: %v", rows.Err())
+	}
+	var value int
+	if err := rows.Scan(&value); err != nil {
+		t.Fatalf("rows.Scan: %v", err)
+	}
+	if rows.Next() {
+		t.Fatal("rows.Next() returned an unexpected second row")
+	}
+	select {
+	case <-lockAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("Parquet write lock remained blocked after row iteration completed")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDuckDSN(t *testing.T) {
 	tests := []struct {
 		name    string
