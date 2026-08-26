@@ -4,11 +4,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/labstack/fanout/internal/intelligence"
 	fanoutmcp "github.com/labstack/fanout/internal/mcp"
 	"github.com/labstack/fanout/internal/observability"
 )
 
 type registryQueries struct{}
+
+type registryIntelligence struct{}
+
+func (registryIntelligence) LatestSnapshot() *intelligence.IntelligenceSnapshot {
+	return &intelligence.IntelligenceSnapshot{Summary: "healthy", HealthScore: 100}
+}
 
 func (registryQueries) Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error) {
 	return observability.Result[observability.Overview]{}, nil
@@ -31,7 +38,7 @@ func (registryQueries) Logs(context.Context, observability.Scope, string, string
 }
 
 func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
-	server := fanoutmcp.New(registryQueries{}, nil, "test")
+	server := fanoutmcp.NewWithIntelligence(registryQueries{}, nil, registryIntelligence{}, "test")
 	registry, err := NewToolRegistry(context.Background(), server.MCP())
 	if err != nil {
 		t.Fatalf("NewToolRegistry: %v", err)
@@ -56,5 +63,15 @@ func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
 		if got := registry.apps[tool]; got != resourceURI {
 			t.Errorf("app URI for %s = %q, want %q", tool, got, resourceURI)
 		}
+	}
+	foundIntelligence := false
+	for _, definition := range registry.Definitions() {
+		if definition.Name == "intelligence_snapshot" {
+			foundIntelligence = true
+			break
+		}
+	}
+	if !foundIntelligence {
+		t.Fatal("intelligence_snapshot was not registered for the agent")
 	}
 }

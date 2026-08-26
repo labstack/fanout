@@ -134,6 +134,7 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodGet, "/api/auth/oauth/authorize", routePolicyAuthenticated, ""},
 		{http.MethodPost, "/api/auth/oauth/authorize", routePolicyAuthenticated, ""},
 		{http.MethodGet, "/api/observability/overview", routePolicyCapability, ReadTelemetry},
+		{http.MethodGet, "/api/intelligence", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/alerts", routePolicyCapability, ReadTelemetry},
 		{http.MethodPost, "/api/rules", routePolicyCapability, ManageAlerts},
 		{http.MethodPut, "/api/rules/rule-1", routePolicyCapability, ManageAlerts},

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/observability"
 	controlstore "github.com/labstack/fanout/internal/store"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
@@ -15,6 +16,14 @@ import (
 
 type fakeObservability struct {
 	scope observability.Scope
+}
+
+type fakeIntelligence struct {
+	snapshot *intelligence.IntelligenceSnapshot
+}
+
+func (f fakeIntelligence) LatestSnapshot() *intelligence.IntelligenceSnapshot {
+	return f.snapshot
 }
 
 func TestDashboardToolsUseAuthenticatedOwner(t *testing.T) {
@@ -149,6 +158,37 @@ func TestInvalidWindowIsToolError(t *testing.T) {
 	s := New(&fakeObservability{}, nil, "test")
 	if _, _, err := s.topology(context.Background(), nil, QueryInput{Window: "later"}); err == nil {
 		t.Fatal("expected invalid window error")
+	}
+}
+
+func TestIntelligenceSnapshotReturnsStructuredOutput(t *testing.T) {
+	want := &intelligence.IntelligenceSnapshot{
+		GeneratedAt: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC),
+		Timeframe:   "last_15m",
+		Summary:     "One anomaly requires attention.",
+		HealthScore: 75,
+		Anomalies: []intelligence.Anomaly{{
+			Type:        intelligence.AnomalyLatencyDegradation,
+			ServiceName: "checkout",
+		}},
+	}
+	s := NewWithIntelligence(&fakeObservability{}, nil, fakeIntelligence{snapshot: want}, "test")
+	result, output, err := s.intelligenceSnapshot(context.Background(), nil, struct{}{})
+	if err != nil {
+		t.Fatalf("intelligence snapshot: %v", err)
+	}
+	if output.GeneratedAt != want.GeneratedAt || output.HealthScore != want.HealthScore || len(output.Anomalies) != 1 {
+		t.Fatalf("output = %#v, want %#v", output, *want)
+	}
+	if len(result.Content) != 1 {
+		t.Fatalf("content = %#v", result.Content)
+	}
+}
+
+func TestIntelligenceSnapshotReportsNotReady(t *testing.T) {
+	s := NewWithIntelligence(&fakeObservability{}, nil, fakeIntelligence{}, "test")
+	if _, _, err := s.intelligenceSnapshot(context.Background(), nil, struct{}{}); err == nil {
+		t.Fatal("expected not-ready error")
 	}
 }
 

@@ -283,6 +283,8 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyCapability, capability: ReadOperations}, read || method == http.MethodPost
 	case strings.HasPrefix(path, "/api/observability/"):
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
+	case path == "/api/intelligence":
+		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
 	case path == "/api/alerts" || path == "/api/alerts/summary" || path == "/api/rules":
 		if read {
 			return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, true

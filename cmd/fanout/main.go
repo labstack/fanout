@@ -294,6 +294,7 @@ func main() {
 	// raw *sql.DB here bypassed the DuckLake maintenance-race protection.
 	queries := observability.New(q)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
+	api.RegisterIntelligenceRoutes(e, detector)
 	dashboards := dashboard.New(sqlite.DB)
 	api.RegisterDashboardRoutes(e, dashboards)
 
@@ -366,7 +367,7 @@ func main() {
 	// The model executes the same standard MCP tools exposed to external clients.
 	// The internal connection is in-memory, so the single binary has no HTTP
 	// self-call, shared secret, or sidecar runtime.
-	mcpServer := mcp.New(queries, dashboards, version)
+	mcpServer := mcp.NewWithIntelligence(queries, dashboards, detector, version)
 	if cfg.MCPEnabled {
 		mcpResourceURL := cfg.MCPResourceURL()
 		mcpAuthorization, err := api.NewMCPAuthorization(

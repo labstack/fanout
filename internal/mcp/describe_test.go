@@ -15,7 +15,7 @@ func TestDescribeToolsMatchesWhatAClientIsServed(t *testing.T) {
 		t.Fatalf("DescribeTools: %v", err)
 	}
 
-	server := New(nil, dashboard.New(nil), "test")
+	server := NewWithIntelligence(nil, dashboard.New(nil), describeIntelligence{}, "test")
 	session := connectTestClient(t, server, nil)
 	listed, err := session.ListTools(context.Background(), nil)
 	if err != nil {
@@ -74,6 +74,22 @@ func TestDescribeToolsIncludesTheDashboardTools(t *testing.T) {
 	if !update.Destructive {
 		t.Error("dashboard_update reported non-destructive; it replaces a dashboard's design")
 	}
+}
+
+func TestDescribeToolsIncludesIntelligenceSnapshot(t *testing.T) {
+	docs, err := DescribeTools(context.Background())
+	if err != nil {
+		t.Fatalf("DescribeTools: %v", err)
+	}
+	for _, doc := range docs {
+		if doc.Name == "intelligence_snapshot" {
+			if !doc.ReadOnly || doc.OpenWorld {
+				t.Fatalf("intelligence_snapshot annotations = %+v", doc)
+			}
+			return
+		}
+	}
+	t.Fatal("intelligence_snapshot is registered but absent from DescribeTools")
 }
 
 // Every tool must arrive with the facts the page is built from. A blank cell
