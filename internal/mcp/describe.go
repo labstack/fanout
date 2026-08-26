@@ -10,6 +10,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/intelligence"
 )
 
 // This file exists so the MCP reference can be generated from the server itself
@@ -58,6 +59,10 @@ type ToolInput struct {
 	Required    bool
 }
 
+type describeIntelligence struct{}
+
+func (describeIntelligence) LatestSnapshot() *intelligence.IntelligenceSnapshot { return nil }
+
 // DescribeTools reports every tool this server exposes, as the server itself
 // reports them over MCP.
 //
@@ -73,7 +78,7 @@ func DescribeTools(ctx context.Context) ([]ToolDoc, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	server := New(nil, dashboard.New(nil), "docgen")
+	server := NewWithIntelligence(nil, dashboard.New(nil), describeIntelligence{}, "docgen")
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 

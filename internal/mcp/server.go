@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -17,7 +18,7 @@ const mcpUIExtension = "io.modelcontextprotocol/ui"
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
-const serverInstructions = "Start with observability_overview for system health, service_topology for dependencies, service_performance for latency and errors, trace_detail for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user: list or get a dashboard before changing it, create only when asked, and replace an existing dashboard only with explicit user intent."
+const serverInstructions = "Start with observability_overview for system health, use intelligence_snapshot for the latest precomputed anomalies and log patterns, service_topology for dependencies, service_performance for latency and errors, trace_detail for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user: list or get a dashboard before changing it, create only when asked, and replace an existing dashboard only with explicit user intent."
 
 type Observability interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
@@ -25,6 +26,10 @@ type Observability interface {
 	Performance(context.Context, observability.Scope, string, int) (observability.Result[observability.Performance], error)
 	Trace(context.Context, observability.Scope, string, string, int) (observability.Result[observability.TraceDetail], error)
 	Logs(context.Context, observability.Scope, string, string, string, int) (observability.Result[observability.Logs], error)
+}
+
+type IntelligenceSnapshots interface {
+	LatestSnapshot() *intelligence.IntelligenceSnapshot
 }
 
 type QueryInput struct {
@@ -58,13 +63,22 @@ type LogsInput struct {
 }
 
 type Server struct {
-	mcp        *mcp.Server
-	queries    Observability
-	dashboards *dashboard.Service
-	now        func() time.Time
+	mcp          *mcp.Server
+	queries      Observability
+	intelligence IntelligenceSnapshots
+	dashboards   *dashboard.Service
+	now          func() time.Time
 }
 
 func New(queries Observability, dashboards *dashboard.Service, version string) *Server {
+	return newServer(queries, dashboards, nil, version)
+}
+
+func NewWithIntelligence(queries Observability, dashboards *dashboard.Service, snapshots IntelligenceSnapshots, version string) *Server {
+	return newServer(queries, dashboards, snapshots, version)
+}
+
+func newServer(queries Observability, dashboards *dashboard.Service, snapshots IntelligenceSnapshots, version string) *Server {
 	s := &Server{
 		mcp: mcp.NewServer(&mcp.Implementation{
 			Name:    "fanout",
@@ -78,9 +92,10 @@ func New(queries Observability, dashboards *dashboard.Service, version string) *
 			Tools:     &mcp.ToolCapabilities{},
 			Resources: &mcp.ResourceCapabilities{},
 		}}),
-		queries:    queries,
-		dashboards: dashboards,
-		now:        time.Now,
+		queries:      queries,
+		intelligence: snapshots,
+		dashboards:   dashboards,
+		now:          time.Now,
 	}
 	s.registerTools()
 	s.registerDashboardTools()
@@ -225,6 +240,22 @@ func (s *Server) registerTools() {
 		Annotations: readOnly,
 		Meta:        appToolMeta(logsAppURI),
 	}, s.logs)
+	if s.intelligence != nil {
+		mcp.AddTool(s.mcp, &mcp.Tool{
+			Name:        "intelligence_snapshot",
+			Title:       "Latest detected anomalies",
+			Description: "Return the latest precomputed health score, anomalies, insights, and recurring warning or error log patterns.",
+			Annotations: readOnly,
+		}, s.intelligenceSnapshot)
+	}
+}
+
+func (s *Server) intelligenceSnapshot(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, intelligence.IntelligenceSnapshot, error) {
+	snapshot := s.intelligence.LatestSnapshot()
+	if snapshot == nil {
+		return nil, intelligence.IntelligenceSnapshot{}, fmt.Errorf("intelligence snapshot is not ready")
+	}
+	return summary(snapshot.Summary), *snapshot, nil
 }
 
 func (s *Server) overview(ctx context.Context, _ *mcp.CallToolRequest, input QueryInput) (*mcp.CallToolResult, observability.Result[observability.Overview], error) {

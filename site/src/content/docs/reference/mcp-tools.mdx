@@ -1,7 +1,7 @@
 ---
 title: "MCP tools"
 description: "Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything."
-summary: "Nine tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
+summary: "Ten tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
 read_when:
   - "You are connecting an agent and want to know what it can call."
   - "You need to know which tools mutate state and which cannot."
@@ -13,7 +13,7 @@ generated: true
     tool list rather than reading the registrations. Edit the generator, not
     this page. */}
 
-A Fanout instance serves MCP at `/mcp`. Nine tools, listed below exactly as the
+A Fanout instance serves MCP at `/mcp`. Ten tools, listed below exactly as the
 server reports them to a connecting client.
 
 Every tool is **closed-world**: it reads or writes what this instance holds
@@ -25,6 +25,7 @@ and reaches nothing else.
 | [`dashboard_get`](#dashboard_get) | No — read-only |
 | [`dashboard_list`](#dashboard_list) | No — read-only |
 | [`dashboard_update`](#dashboard_update) | **Yes — replaces existing state** |
+| [`intelligence_snapshot`](#intelligence_snapshot) | No — read-only |
 | [`observability_overview`](#observability_overview) | No — read-only |
 | [`search_logs`](#search_logs) | No — read-only |
 | [`service_performance`](#service_performance) | No — read-only |
@@ -73,6 +74,14 @@ Takes no arguments.
 | `name` | `string` | **yes** | Short, unique dashboard name |
 | `state` | `object` | **yes** | Complete replacement widget registry, 12-column layout, and shared filters |
 | `description` | `string` | no | Concise purpose of this dashboard |
+
+## intelligence_snapshot
+
+**Latest detected anomalies** — Return the latest precomputed health score, anomalies, insights, and recurring warning or error log patterns.
+
+Read-only. Calling it changes nothing.
+
+Takes no arguments.
 
 ## observability_overview
 
