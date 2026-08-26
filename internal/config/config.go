@@ -32,18 +32,12 @@ type Config struct {
 	RollupInterval           time.Duration `koanf:"storage.rollup_interval" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
 	MCPEnabled               bool          `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" default:"true"`
 	RetentionDays            int           `koanf:"storage.retention_days" env:"FANOUT_RETENTION_DAYS" default:"30"`
-	// MaintenanceInterval throttles the DuckLake maintenance cycle (retention
-	// deletes + compaction). Default 1h. Lower it to compact more
-	// aggressively, or for soak tests that need to observe file-count staying
-	// bounded within minutes rather than hours.
+	// HotRetention controls how long the custom indexed segments are retained.
+	// Older telemetry remains queryable in Parquet through DuckDB.
+	HotRetention time.Duration `koanf:"storage.hot_retention" env:"FANOUT_HOT_RETENTION" default:"24h"`
+	// MaintenanceInterval controls hot-segment pruning, Parquet retention and
+	// compaction, and query-cache checkpointing.
 	MaintenanceInterval time.Duration `koanf:"storage.maintenance_interval" env:"FANOUT_MAINTENANCE_INTERVAL" default:"1h"`
-	// MergeInterval is the cadence for the cheap, frequent DuckLake file
-	// compaction pass (ducklake_merge_adjacent_files only — it consolidates the
-	// newest small parquet files and deletes nothing). Run often (default 1m) it
-	// keeps the queryable file count continuously low, which is what bounds
-	// rollup/query scan latency — WITHOUT the churn, deletion race, or catalog
-	// cost of the full hourly maintenance pass (expire + cleanup). 0 disables it.
-	MergeInterval time.Duration `koanf:"storage.merge_interval" env:"FANOUT_MERGE_INTERVAL" default:"1m"`
 	// RollupSkipToLatest, set once at boot, advances every rollup watermark to the
 	// current max ingested timestamp so existing data is treated as already-rolled-up
 	// instead of aggregated as a backlog. Stands up a large pre-seeded historical
@@ -78,15 +72,8 @@ type Config struct {
 	// DuckDB's own default in place (one worker per core). Set it to leave
 	// cores free for ingest on a query-heavy co-tenant host.
 	DuckDBThreads int `koanf:"storage.duckdb.threads" env:"FANOUT_DUCKDB_THREADS"`
-	// DuckDBMaxConns caps the DuckDB connection pool. A value of 1 serializes
-	// everything through one handle; the machine-sized default lets read queries
-	// run concurrently with each other and with ingest flushes. Two things make >1
-	// safe: the DuckLake SQLite catalog is opened in WAL mode (enableCatalogWAL),
-	// so readers don't collide with the single writer and a crashed writer can't
-	// leave the catalog permanently locked; and write commits are serialized by
-	// the shared write gate (Duck.WriteGate, wired into the writer via
-	// UseWriteGate in cmd/fanout/main.go, enforced at startup). Without the WAL
-	// mode, pool >1 fails with "database is locked".
+	// DuckDBMaxConns caps the DuckDB connection pool. Reads scan immutable Parquet
+	// concurrently; rollup-cache writes are serialized by the query write gate.
 	// Zero means "size it from the machine" — the same spelling DuckDBThreads
 	// uses for deferring to a default. Resolution happens in resolveSizing and
 	// is reported in the startup configuration log.
@@ -154,10 +141,6 @@ func (c Config) TelemetryParquetDir() string {
 	return filepath.Join(c.TelemetryDir(), "parquet")
 }
 
-func (c Config) TelemetryDuckLakePath() string {
-	return filepath.Join(c.TelemetryDir(), "ducklake.sqlite")
-}
-
 func (c Config) QueryDir() string {
 	return filepath.Join(c.DataDir, "query")
 }
@@ -211,11 +194,11 @@ func (c Config) Validate() error {
 	if c.RetentionDays < 0 {
 		return fmt.Errorf("storage.retention_days must be >= 0, got %d", c.RetentionDays)
 	}
+	if c.HotRetention < 24*time.Hour {
+		return fmt.Errorf("storage.hot_retention must be at least 24h, got %s", c.HotRetention)
+	}
 	if c.MaintenanceInterval < time.Second {
 		return fmt.Errorf("storage.maintenance_interval must be at least 1s, got %s", c.MaintenanceInterval)
-	}
-	if c.MergeInterval < 0 || (c.MergeInterval > 0 && c.MergeInterval < time.Second) {
-		return fmt.Errorf("storage.merge_interval must be 0s or at least 1s, got %s", c.MergeInterval)
 	}
 	if c.DuckDBThreads < 0 {
 		return fmt.Errorf("storage.duckdb.threads must be >= 0, got %d", c.DuckDBThreads)

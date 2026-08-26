@@ -292,8 +292,8 @@ func serverDelta(base, final *metricSnapshot, durationSeconds float64) *serverRe
 		}
 		return round2(value / durationSeconds)
 	}
-	lakePartitionsStart := base.total("fanout_lake_partitions")
-	lakeSizeStart := base.total("fanout_lake_size_bytes")
+	lakePartitionsStart := base.total("fanout_parquet_files")
+	lakeSizeStart := base.total("fanout_parquet_size_bytes")
 	cpuSeconds := delta("process_cpu_seconds_total")
 	allocBytes := delta("go_memstats_alloc_bytes_total")
 	// process_start_time_seconds is constant for the life of a process, so a
@@ -302,43 +302,43 @@ func serverDelta(base, final *metricSnapshot, durationSeconds float64) *serverRe
 	startTimeBefore := base.total("process_start_time_seconds")
 	startTimeAfter := final.total("process_start_time_seconds")
 	return &serverReport{
-		BaselineAvailable:     baselineAvailable,
-		ProcessStartTime:      startTimeAfter,
-		ProcessRestarted:      baselineAvailable && startTimeBefore > 0 && startTimeAfter != startTimeBefore,
-		IngestRowsStart:       base.total("fanout_ingest_rows_total"),
-		IngestRowsEnd:         final.total("fanout_ingest_rows_total"),
-		IngestRowsDelta:       delta("fanout_ingest_rows_total"),
-		RowsDroppedStart:      base.total("fanout_rows_dropped_total"),
-		RowsDroppedEnd:        final.total("fanout_rows_dropped_total"),
-		RowsDroppedDelta:      delta("fanout_rows_dropped_total"),
-		LakePartitionsStart:   lakePartitionsStart,
-		LakePartitions:        final.total("fanout_lake_partitions"),
-		LakePartitionsDelta:   final.total("fanout_lake_partitions") - lakePartitionsStart,
-		LakeSizeBytesStart:    lakeSizeStart,
-		LakeSizeBytes:         final.total("fanout_lake_size_bytes"),
-		LakeSizeBytesDelta:    final.total("fanout_lake_size_bytes") - lakeSizeStart,
-		LakeGrowthBytesPerSec: rate(final.total("fanout_lake_size_bytes") - lakeSizeStart),
-		IngestQueueDepth:      final.total("fanout_ingest_queue_depth"),
-		AvgRollupMs:           averageDurationMs(base, final, "fanout_rollup_duration_seconds"),
-		AvgFlushMs:            averageDurationMs(base, final, "fanout_flush_duration_seconds"),
-		AvgQueryMs:            averageDurationMs(base, final, "fanout_query_duration_seconds"),
-		CPUSecondsStart:       round4(base.total("process_cpu_seconds_total")),
-		CPUSecondsEnd:         round4(final.total("process_cpu_seconds_total")),
-		CPUSecondsDelta:       round4(cpuSeconds),
-		CPUCores:              perSecond(cpuSeconds, durationSeconds),
-		RSSBytes:              final.total("process_resident_memory_bytes"),
-		HeapAllocBytes:        final.total("go_memstats_heap_alloc_bytes"),
-		AllocBytesStart:       base.total("go_memstats_alloc_bytes_total"),
-		AllocBytesEnd:         final.total("go_memstats_alloc_bytes_total"),
-		AllocBytesDelta:       allocBytes,
-		AllocBytesPerSec:      rate(allocBytes),
-		GCPauseSecondsStart:   round4(base.total("go_gc_duration_seconds_sum")),
-		GCPauseSecondsEnd:     round4(final.total("go_gc_duration_seconds_sum")),
-		GCPauseSecondsDelta:   round4(delta("go_gc_duration_seconds_sum")),
-		WriteGateWaitMs:       histogramReports(base, final, "fanout_write_gate_wait_seconds", "operation"),
-		WriteGateHoldMs:       histogramReports(base, final, "fanout_write_gate_hold_seconds", "operation"),
-		DuckLakeOperations:    backgroundReports(base, final),
-		Rollups:               rollupReports(base, final),
+		BaselineAvailable:        baselineAvailable,
+		ProcessStartTime:         startTimeAfter,
+		ProcessRestarted:         baselineAvailable && startTimeBefore > 0 && startTimeAfter != startTimeBefore,
+		IngestRowsStart:          base.total("fanout_ingest_rows_total"),
+		IngestRowsEnd:            final.total("fanout_ingest_rows_total"),
+		IngestRowsDelta:          delta("fanout_ingest_rows_total"),
+		RowsDroppedStart:         base.total("fanout_rows_dropped_total"),
+		RowsDroppedEnd:           final.total("fanout_rows_dropped_total"),
+		RowsDroppedDelta:         delta("fanout_rows_dropped_total"),
+		ParquetFilesStart:        lakePartitionsStart,
+		ParquetFiles:             final.total("fanout_parquet_files"),
+		ParquetFilesDelta:        final.total("fanout_parquet_files") - lakePartitionsStart,
+		ParquetSizeBytesStart:    lakeSizeStart,
+		ParquetSizeBytes:         final.total("fanout_parquet_size_bytes"),
+		ParquetSizeBytesDelta:    final.total("fanout_parquet_size_bytes") - lakeSizeStart,
+		ParquetGrowthBytesPerSec: rate(final.total("fanout_parquet_size_bytes") - lakeSizeStart),
+		IngestQueueDepth:         final.total("fanout_ingest_queue_depth"),
+		AvgRollupMs:              averageDurationMs(base, final, "fanout_rollup_duration_seconds"),
+		AvgFlushMs:               averageDurationMs(base, final, "fanout_flush_duration_seconds"),
+		AvgQueryMs:               averageDurationMs(base, final, "fanout_query_duration_seconds"),
+		CPUSecondsStart:          round4(base.total("process_cpu_seconds_total")),
+		CPUSecondsEnd:            round4(final.total("process_cpu_seconds_total")),
+		CPUSecondsDelta:          round4(cpuSeconds),
+		CPUCores:                 perSecond(cpuSeconds, durationSeconds),
+		RSSBytes:                 final.total("process_resident_memory_bytes"),
+		HeapAllocBytes:           final.total("go_memstats_heap_alloc_bytes"),
+		AllocBytesStart:          base.total("go_memstats_alloc_bytes_total"),
+		AllocBytesEnd:            final.total("go_memstats_alloc_bytes_total"),
+		AllocBytesDelta:          allocBytes,
+		AllocBytesPerSec:         rate(allocBytes),
+		GCPauseSecondsStart:      round4(base.total("go_gc_duration_seconds_sum")),
+		GCPauseSecondsEnd:        round4(final.total("go_gc_duration_seconds_sum")),
+		GCPauseSecondsDelta:      round4(delta("go_gc_duration_seconds_sum")),
+		WriteGateWaitMs:          histogramReports(base, final, "fanout_write_gate_wait_seconds", "operation"),
+		WriteGateHoldMs:          histogramReports(base, final, "fanout_write_gate_hold_seconds", "operation"),
+		TelemetryOperations:      backgroundReports(base, final),
+		Rollups:                  rollupReports(base, final),
 	}
 }
 
@@ -425,10 +425,10 @@ func histogramDelta(base, final *metricSnapshot, name string, filters map[string
 
 func backgroundReports(base, final *metricSnapshot) map[string]backgroundOperationReport {
 	operations := unionStrings(
-		base.labelValues("fanout_ducklake_operation_total", "operation", nil),
-		final.labelValues("fanout_ducklake_operation_total", "operation", nil),
-		base.labelValues("fanout_ducklake_operation_duration_seconds_count", "operation", nil),
-		final.labelValues("fanout_ducklake_operation_duration_seconds_count", "operation", nil),
+		base.labelValues("fanout_telemetry_operation_total", "operation", nil),
+		final.labelValues("fanout_telemetry_operation_total", "operation", nil),
+		base.labelValues("fanout_telemetry_operation_duration_seconds_count", "operation", nil),
+		final.labelValues("fanout_telemetry_operation_duration_seconds_count", "operation", nil),
 	)
 	if len(operations) == 0 {
 		return nil
@@ -437,8 +437,8 @@ func backgroundReports(base, final *metricSnapshot) map[string]backgroundOperati
 	for _, operation := range operations {
 		filters := map[string]string{"operation": operation}
 		reports[operation] = backgroundOperationReport{
-			DurationMs: histogramDelta(base, final, "fanout_ducklake_operation_duration_seconds", filters),
-			Outcomes:   counterOutcomes(base, final, "fanout_ducklake_operation_total", "result", filters),
+			DurationMs: histogramDelta(base, final, "fanout_telemetry_operation_duration_seconds", filters),
+			Outcomes:   counterOutcomes(base, final, "fanout_telemetry_operation_total", "result", filters),
 		}
 	}
 	return reports

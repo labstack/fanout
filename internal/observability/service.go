@@ -10,6 +10,7 @@ import (
 	"time"
 
 	appid "github.com/labstack/fanout/internal/id"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 const (
@@ -32,12 +33,16 @@ type DB interface {
 
 type Service struct {
 	db             DB
+	repository     *telemetrystore.Repository
 	now            func() time.Time
 	endpointMature atomic.Bool
 }
 
-func New(db DB) *Service {
-	return &Service{db: db, now: time.Now}
+func New(db DB, repository *telemetrystore.Repository) *Service {
+	if db == nil || repository == nil {
+		panic("observability requires query engine and telemetry repository")
+	}
+	return &Service{db: db, repository: repository, now: time.Now}
 }
 
 func (s *Service) normalizeScope(scope Scope) (Scope, error) {

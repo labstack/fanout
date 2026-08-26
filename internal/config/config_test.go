@@ -77,8 +77,6 @@ func TestLoadLayering(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fanout.yaml")
 	if err := os.WriteFile(path, []byte(`server:
   http_addr: ":1111"
-storage:
-  merge_interval: 75s
 mcp:
   enabled: false
 metrics:
@@ -100,7 +98,7 @@ auth:
 	if cfg.HTTPAddr != ":2222" {
 		t.Fatalf("HTTPAddr = %q, want environment override", cfg.HTTPAddr)
 	}
-	if cfg.MergeInterval != 75*time.Second || cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup {
+	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup {
 		t.Fatalf("YAML values were not merged: %+v", cfg)
 	}
 }
@@ -109,14 +107,13 @@ func TestLoadTypedEnvironmentValues(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
 		"FANOUT_MCP_ENABLED=false",
 		"FANOUT_METRICS_PUBLIC=true",
-		"FANOUT_MERGE_INTERVAL=75s",
 		"FANOUT_SESSION_IDLE_TTL=10h",
 		"FANOUT_SELF_SIGNUP=true",
 	)})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.MergeInterval != 75*time.Second || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup {
+	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup {
 		t.Fatalf("environment values were not decoded: %+v", cfg)
 	}
 }
@@ -274,7 +271,7 @@ func TestConfigurationSchemaUsesUnitBearingDurations(t *testing.T) {
 			strings.Contains(env, "_seconds") || strings.Contains(env, "_ms") {
 			t.Errorf("elapsed-time setting uses a unit suffix: %s / %s", spec.key, spec.env)
 		}
-		if spec.typ == durationType && !strings.HasSuffix(key, "_interval") && !strings.HasSuffix(key, "_ttl") {
+		if spec.typ == durationType && !strings.HasSuffix(key, "_interval") && !strings.HasSuffix(key, "_ttl") && !strings.HasSuffix(key, "_retention") {
 			t.Errorf("duration setting %s must end in _interval or _ttl", spec.key)
 		}
 	}
@@ -287,7 +284,6 @@ func TestLoadDurationIntervals(t *testing.T) {
   flush_interval: 30s
 storage:
   rollup_interval: 5m
-  merge_interval: 0s
   maintenance_interval: 1h
 alerts:
   evaluation_interval: 45s
@@ -300,7 +296,7 @@ alerts:
 			t.Fatalf("Load: %v", err)
 		}
 		if cfg.FlushInterval != 30*time.Second || cfg.RollupInterval != 5*time.Minute ||
-			cfg.MergeInterval != 0 || cfg.MaintenanceInterval != time.Hour ||
+			cfg.MaintenanceInterval != time.Hour ||
 			cfg.AlertEvaluationInterval != 45*time.Second {
 			t.Fatalf("duration values were not decoded: %+v", cfg)
 		}
@@ -310,7 +306,6 @@ alerts:
 		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
 			"FANOUT_FLUSH_INTERVAL=30s",
 			"FANOUT_ROLLUP_INTERVAL=5m",
-			"FANOUT_MERGE_INTERVAL=0s",
 			"FANOUT_MAINTENANCE_INTERVAL=1h",
 			"FANOUT_ALERTS_EVALUATION_INTERVAL=45s",
 		)})
@@ -318,7 +313,7 @@ alerts:
 			t.Fatalf("Load: %v", err)
 		}
 		if cfg.FlushInterval != 30*time.Second || cfg.RollupInterval != 5*time.Minute ||
-			cfg.MergeInterval != 0 || cfg.MaintenanceInterval != time.Hour ||
+			cfg.MaintenanceInterval != time.Hour ||
 			cfg.AlertEvaluationInterval != 45*time.Second {
 			t.Fatalf("duration values were not decoded: %+v", cfg)
 		}
@@ -406,6 +401,7 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 			"FANOUT_FLUSH_SECONDS",
 			"FANOUT_ROLLUP_EVERY_SECONDS",
 			"FANOUT_MERGE_EVERY_SECONDS",
+			"FANOUT_MERGE_INTERVAL",
 			"FANOUT_MAINTENANCE_EVERY_SECONDS",
 			"FANOUT_ALERTS_EVALUATION_INTERVAL_SECONDS",
 			"FANOUT_MCP_PUBLIC_URL",
@@ -543,7 +539,6 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 	}{
 		{"negative max connections is not auto", "FANOUT_DUCKDB_MAX_CONNECTIONS=-3", "max_connections"},
 		{"zero alert interval", "FANOUT_ALERTS_EVALUATION_INTERVAL=0s", "evaluation_interval"},
-		{"negative merge interval", "FANOUT_MERGE_INTERVAL=-5s", "merge_interval"},
 		{"negative maintenance interval", "FANOUT_MAINTENANCE_INTERVAL=-5s", "maintenance_interval"},
 		{"negative DuckDB threads", "FANOUT_DUCKDB_THREADS=-4", "duckdb.threads"},
 	} {
@@ -560,7 +555,6 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 	}{
 		{"subsecond flush interval", "FANOUT_FLUSH_INTERVAL=999ms", "flush_interval"},
 		{"subsecond rollup interval", "FANOUT_ROLLUP_INTERVAL=999ms", "rollup_interval"},
-		{"subsecond merge interval", "FANOUT_MERGE_INTERVAL=1ns", "merge_interval"},
 		{"subsecond maintenance interval", "FANOUT_MAINTENANCE_INTERVAL=500ms", "maintenance_interval"},
 		{"subsecond alert interval", "FANOUT_ALERTS_EVALUATION_INTERVAL=999ms", "evaluation_interval"},
 	} {
@@ -626,8 +620,8 @@ func TestValidate(t *testing.T) {
 		FlushBatchSize:          50000,
 		RollupInterval:          time.Minute,
 		RetentionDays:           30,
+		HotRetention:            24 * time.Hour,
 		MaintenanceInterval:     time.Hour,
-		MergeInterval:           time.Minute,
 		DuckDBMaxConns:          4,
 		AlertEvaluationInterval: 30 * time.Second,
 		AlertHistoryDays:        7,
@@ -664,8 +658,6 @@ func TestValidate(t *testing.T) {
 		{"DataDir empty", func(c *Config) { c.DataDir = "" }},
 		{"MaintenanceInterval=0", func(c *Config) { c.MaintenanceInterval = 0 }},
 		{"MaintenanceInterval=999ms", func(c *Config) { c.MaintenanceInterval = 999 * time.Millisecond }},
-		{"MergeInterval=-1s", func(c *Config) { c.MergeInterval = -time.Second }},
-		{"MergeInterval=1ns", func(c *Config) { c.MergeInterval = time.Nanosecond }},
 		{"DuckDBThreads=-1", func(c *Config) { c.DuckDBThreads = -1 }},
 		{"DuckDBMaxConns=0", func(c *Config) { c.DuckDBMaxConns = 0 }},
 		{"AlertEvaluationInterval=0", func(c *Config) { c.AlertEvaluationInterval = 0 }},
@@ -713,14 +705,6 @@ func TestValidate(t *testing.T) {
 		c.RetentionDays = 0
 		if err := c.Validate(); err != nil {
 			t.Errorf("RetentionDays=0 should be valid: %v", err)
-		}
-	})
-
-	t.Run("MergeInterval=0_valid", func(t *testing.T) {
-		c := valid
-		c.MergeInterval = 0
-		if err := c.Validate(); err != nil {
-			t.Errorf("MergeInterval=0 should disable the merge pass: %v", err)
 		}
 	})
 

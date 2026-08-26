@@ -24,14 +24,14 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/lake"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 type Server struct {
 	cfg        config.Config
-	outSpans   chan<- lake.SpanRow
-	outLogs    chan<- lake.LogRow
-	outMetrics chan<- lake.MetricRow
+	outSpans   chan<- telemetry.Span
+	outLogs    chan<- telemetry.Log
+	outMetrics chan<- telemetry.Metric
 }
 
 type traceService struct {
@@ -49,7 +49,7 @@ type metricsService struct {
 	srv *Server
 }
 
-func NewServer(cfg config.Config, spans chan<- lake.SpanRow, logs chan<- lake.LogRow, metrics chan<- lake.MetricRow) *Server {
+func NewServer(cfg config.Config, spans chan<- telemetry.Span, logs chan<- telemetry.Log, metrics chan<- telemetry.Metric) *Server {
 	return &Server{cfg: cfg, outSpans: spans, outLogs: logs, outMetrics: metrics}
 }
 
@@ -78,7 +78,7 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 		for _, ss := range rs.ScopeSpans {
 			scopeName, scopeVer := scopeInfo(ss.Scope)
 			for _, sp := range ss.Spans {
-				row := lake.SpanRow{
+				row := telemetry.Span{
 					Namespace:      namespace,
 					TraceID:        fmt.Sprintf("%x", sp.TraceId),
 					SpanID:         fmt.Sprintf("%x", sp.SpanId),
@@ -88,7 +88,7 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					Kind:           sp.Kind.String(),
 					StartUnixNanos: int64(sp.StartTimeUnixNano),
 					EndUnixNanos:   int64(sp.EndTimeUnixNano),
-					DurationMs:     spanDurationMs(sp.StartTimeUnixNano, sp.EndTimeUnixNano),
+					DurationMS:     spanDurationMS(sp.StartTimeUnixNano, sp.EndTimeUnixNano),
 					StatusCode:     sp.Status.Code.String(),
 					StatusMsg:      sp.Status.Message,
 					ResourceJSON:   resourceJSON,
@@ -148,7 +148,7 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 			for _, lr := range sl.LogRecords {
 				body := bodyString(lr.Body)
 				tmpl := safeNormalizeTemplate(body)
-				row := lake.LogRow{
+				row := telemetry.Log{
 					Namespace:         namespace,
 					TimeUnixNanos:     int64(lr.TimeUnixNano),
 					ObservedTimeNanos: int64(lr.ObservedTimeUnixNano),
@@ -199,13 +199,13 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 				switch d := m.Data.(type) {
 				case *metricspb.Metric_Gauge:
 					for _, dp := range d.Gauge.DataPoints {
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          "gauge",
+							Type:           "gauge",
 							ServiceName:    svc,
 							Value:          number(dp.Value),
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
@@ -227,13 +227,13 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 						kind = "sum_delta"
 					}
 					for _, dp := range d.Sum.DataPoints {
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          kind,
+							Type:           kind,
 							ServiceName:    svc,
 							Value:          number(dp.Value),
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
@@ -255,13 +255,13 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 						if dp.Sum != nil {
 							histSum = *dp.Sum
 						}
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          "histogram",
+							Type:           "histogram",
 							ServiceName:    svc,
 							HistBoundsJSON: toJSON(dp.ExplicitBounds),
 							HistCountsJSON: toJSON(dp.BucketCounts),
@@ -286,13 +286,13 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 						if dp.Sum != nil {
 							histSum = *dp.Sum
 						}
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          "exp_histogram",
+							Type:           "exp_histogram",
 							ServiceName:    svc,
 							HistBoundsJSON: toJSON(expHistBuckets(dp)),
 							HistCountsJSON: toJSON(expHistCounts(dp)),
@@ -313,13 +313,13 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 					}
 				case *metricspb.Metric_Summary:
 					for _, dp := range d.Summary.DataPoints {
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          "summary",
+							Type:           "summary",
 							ServiceName:    svc,
 							HistBoundsJSON: toJSON(summaryQuantiles(dp)),
 							HistCountsJSON: toJSON(summaryValues(dp)),
@@ -346,11 +346,11 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 
 // ---- helpers ----
 
-// spanDurationMs computes a span's duration in milliseconds, guarding against
+// spanDurationMS computes a span's duration in milliseconds, guarding against
 // the unsigned underflow that a malformed span (end before start) would produce:
 // uint64 subtraction wraps to a huge positive value, which would otherwise be
 // stored as a multi-century duration. Such spans are clamped to 0.
-func spanDurationMs(startNano, endNano uint64) float64 {
+func spanDurationMS(startNano, endNano uint64) float64 {
 	if endNano < startNano {
 		return 0
 	}

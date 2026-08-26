@@ -21,9 +21,6 @@ func TestEndpointRollupQueryMergesBucketsAndExactBoundaries(t *testing.T) {
 	if _, err := db.Exec(`SET TimeZone='UTC'`); err != nil {
 		t.Fatalf("set timezone: %v", err)
 	}
-	if _, err := db.Exec(`ATTACH ':memory:' AS lake`); err != nil {
-		t.Fatalf("attach lake catalog: %v", err)
-	}
 	if err := query.CreateTables(db); err != nil {
 		t.Fatalf("CreateTables: %v", err)
 	}
@@ -93,7 +90,7 @@ FROM (VALUES ` + seed.values + `) t(ms)`
 		t.Fatalf("seed endpoint rollup state: %v", err)
 	}
 
-	svc := New(db)
+	svc := New(db, newTestRepository(t))
 	svc.endpointMature.Store(true)
 	var cachedCalls, totalCachedCalls int64
 	var minBucket, maxBucket time.Time

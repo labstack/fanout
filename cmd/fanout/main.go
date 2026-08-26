@@ -35,13 +35,14 @@ import (
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
-	"github.com/labstack/fanout/internal/lake"
 	"github.com/labstack/fanout/internal/mcp"
 	appmetrics "github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/labstack/fanout/internal/ui"
 )
 
@@ -95,10 +96,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Channels for ingest → lake writer
-	chSpans := make(chan lake.SpanRow, 10000)
-	chLogs := make(chan lake.LogRow, 10000)
-	chMetrics := make(chan lake.MetricRow, 10000)
+	// Channels for OTLP decoding → the single authoritative telemetry writer.
+	chSpans := make(chan telemetry.Span, 10000)
+	chLogs := make(chan telemetry.Log, 10000)
+	chMetrics := make(chan telemetry.Metric, 10000)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -109,18 +110,23 @@ func main() {
 	// Error channel for goroutine failures
 	errCh := make(chan error, 4)
 
-	// Start DuckDB + rollups
-	q, err := query.NewDuck(ctx, cfg)
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		slog.Error("telemetry store init failed", "err", err)
+		os.Exit(1)
+	}
+	defer repository.Close()
+
+	// DuckDB is the SQL engine over open Parquet; hot indexed reads use the same
+	// repository directly through the typed observability kernel.
+	q, err := query.NewDuck(ctx, cfg, repository)
 	if err != nil {
 		slog.Error("duckdb init failed", "err", err)
 		os.Exit(1)
 	}
 	defer q.Close()
 
-	// Start Lake Writer. Share the query layer's write gate so appender flushes
-	// serialize with rollup/maintenance commits when the pool holds >1 connection.
-	writer := lake.NewWriter(cfg, q.DB, chSpans, chLogs, chMetrics)
-	writer.UseWriteGate(q.WriteGate())
+	writer := telemetrystore.NewWriter(repository, cfg.FlushInterval, cfg.FlushBatchSize, chSpans, chLogs, chMetrics)
 	writerResult := make(chan error, 1)
 	go func() {
 		err := writer.Run(ctx)
@@ -129,7 +135,7 @@ func main() {
 		// failure cannot be lost in the close(done) -> goroutine-send scheduling gap.
 		writerResult <- err
 		if err != nil {
-			errCh <- fmt.Errorf("lake writer: %w", err)
+			errCh <- fmt.Errorf("telemetry writer: %w", err)
 		}
 	}()
 
@@ -291,8 +297,8 @@ func main() {
 	// Fanout owns telemetry semantics; agents and web clients consume this one
 	// typed query kernel through deterministic HTTP or standard MCP tools.
 	// Route both HTTP and MCP reads through Duck's retrying adapter. Passing the
-	// raw *sql.DB here bypassed the DuckLake maintenance-race protection.
-	queries := observability.New(q)
+	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
+	queries := observability.New(q, repository)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
 	api.RegisterIntelligenceRoutes(e, detector)
 	dashboards := dashboard.New(sqlite.DB)
@@ -452,7 +458,7 @@ func main() {
 	cancel()
 	writer.Wait()
 	if err := <-writerResult; err != nil {
-		slog.Error("lake writer stopped with unwritten telemetry", "err", err)
+		slog.Error("telemetry writer stopped with unwritten telemetry", "err", err)
 	}
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }

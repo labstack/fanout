@@ -3,39 +3,12 @@ package observability
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
+
+	"github.com/labstack/fanout/internal/telemetry"
 )
-
-// The user-supplied search filter must compare against the REDACTED body,
-// not the raw column: a telemetry viewer could otherwise confirm a secret's
-// presence by probing search=<candidate> even though the display shows
-// [REDACTED]. redactedBodySQL replays the exact
-// Go-side patterns inside DuckDB (same RE2 engine; parity pinned by
-// TestRedactSQLMatchesGo), and both the row query and the histogram query
-// use it so their counts can never disagree and leak the same signal.
-var redactedBodySQL = redactLogBodySQL("COALESCE(body, '')")
-
-var logsEntriesQuery = `
-SELECT time, COALESCE(severity, ''), COALESCE(service, ''), COALESCE(body, ''),
-       COALESCE(trace_id, ''), COALESCE(span_id, '')
-FROM logs
-WHERE time >= ? AND time < ? AND (? = '' OR namespace = ?)
-  AND (? = '' OR service = ?)
-  AND (? = '' OR upper(severity) = upper(?))
-  AND (? = '' OR ` + redactedBodySQL + ` ILIKE ?)
-ORDER BY time DESC
-LIMIT ?`
-
-var logsBucketsQuery = `
-SELECT time_bucket(INTERVAL '5 minutes', time) AS point_time,
-       COALESCE(NULLIF(upper(severity), ''), 'UNSPECIFIED'), CAST(COUNT(*) AS BIGINT)
-FROM logs
-WHERE time >= ? AND time < ? AND (? = '' OR namespace = ?)
-  AND (? = '' OR service = ?)
-  AND (? = '' OR upper(severity) = upper(?))
-  AND (? = '' OR ` + redactedBodySQL + ` ILIKE ?)
-GROUP BY point_time, severity
-ORDER BY point_time ASC, severity ASC`
 
 func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, search string, limit int) (Result[Logs], error) {
 	scope, err := s.normalizeScope(scope)
@@ -46,56 +19,60 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 	if err != nil {
 		return Result[Logs]{}, err
 	}
-	service = strings.TrimSpace(service)
-	severity = strings.TrimSpace(severity)
-	search = strings.TrimSpace(search)
-	pattern := search
-	if pattern != "" {
-		pattern = "%" + pattern + "%"
-	}
-
+	service, severity, search = strings.TrimSpace(service), strings.TrimSpace(severity), strings.TrimSpace(search)
+	search = strings.ToLower(search)
 	data := Logs{Entries: []LogEntry{}, Buckets: []LogBucket{}}
-	rows, err := s.db.QueryContext(ctx, logsEntriesQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, severity, severity, search, pattern, limit)
-	if err != nil {
-		return Result[Logs]{}, fmt.Errorf("query logs: %w", err)
+	type bucketKey struct {
+		time     int64
+		severity string
 	}
-	for rows.Next() {
-		var entry LogEntry
-		if err := rows.Scan(&entry.Time, &entry.Severity, &entry.Service, &entry.Body, &entry.TraceID, &entry.SpanID); err != nil {
-			rows.Close()
-			return Result[Logs]{}, fmt.Errorf("scan log: %w", err)
+	buckets := make(map[bucketKey]int64)
+	unlock := s.repository.ReadLock()
+	err = s.repository.Logs.Scan(scope.Start.UnixNano(), scope.End.UnixNano(), func(row telemetry.Log) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
 		}
-		entry.Body = redactLogBody(entry.Body)
-		data.Entries = append(data.Entries, entry)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return Result[Logs]{}, fmt.Errorf("iterate logs: %w", err)
-	}
-	rows.Close()
-
-	rows, err = s.db.QueryContext(ctx, logsBucketsQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, severity, severity, search, pattern)
-	if err != nil {
-		return Result[Logs]{}, fmt.Errorf("query log histogram: %w", err)
-	}
-	for rows.Next() {
-		var bucket LogBucket
-		if err := rows.Scan(&bucket.Time, &bucket.Severity, &bucket.Count); err != nil {
-			rows.Close()
-			return Result[Logs]{}, fmt.Errorf("scan log histogram: %w", err)
+		if (scope.Namespace != "" && row.Namespace != scope.Namespace) || (service != "" && row.ServiceName != service) || (severity != "" && !strings.EqualFold(row.Severity, severity)) {
+			return true
 		}
-		data.Buckets = append(data.Buckets, bucket)
+		body := redactLogBody(row.Body)
+		if search != "" && !strings.Contains(strings.ToLower(body), search) {
+			return true
+		}
+		entryTime := time.Unix(0, row.EventUnixNanos).UTC()
+		data.Entries = append(data.Entries, LogEntry{Time: entryTime, Severity: row.Severity, Service: row.ServiceName, Body: body, TraceID: row.TraceID, SpanID: row.SpanID})
+		bucketSeverity := strings.ToUpper(row.Severity)
+		if bucketSeverity == "" {
+			bucketSeverity = "UNSPECIFIED"
+		}
+		bucketNanos := entryTime.Truncate(5 * time.Minute).UnixNano()
+		buckets[bucketKey{time: bucketNanos, severity: bucketSeverity}]++
+		return true
+	})
+	unlock()
+	if err != nil {
+		return Result[Logs]{}, fmt.Errorf("read log segments: %w", err)
 	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return Result[Logs]{}, fmt.Errorf("iterate log histogram: %w", err)
+	if err := ctx.Err(); err != nil {
+		return Result[Logs]{}, err
 	}
-	rows.Close()
-
+	sort.Slice(data.Entries, func(i, j int) bool { return data.Entries[i].Time.After(data.Entries[j].Time) })
+	if len(data.Entries) > limit {
+		data.Entries = data.Entries[:limit]
+	}
+	for key, count := range buckets {
+		data.Buckets = append(data.Buckets, LogBucket{Time: time.Unix(0, key.time).UTC(), Severity: key.severity, Count: count})
+	}
+	sort.Slice(data.Buckets, func(i, j int) bool {
+		if data.Buckets[i].Time.Equal(data.Buckets[j].Time) {
+			return data.Buckets[i].Severity < data.Buckets[j].Severity
+		}
+		return data.Buckets[i].Time.Before(data.Buckets[j].Time)
+	})
 	return Result[Logs]{
-		Schema:     LogsSchema,
-		Summary:    fmt.Sprintf("%d logs matched the selected telemetry window", len(data.Entries)),
-		Data:       data,
-		Provenance: s.provenanceFor(scope, "logs"),
+		Schema: LogsSchema, Summary: fmt.Sprintf("%d logs matched the selected telemetry window", len(data.Entries)),
+		Data: data, Provenance: s.provenanceFor(scope, "fanout_segments"),
 	}, nil
 }

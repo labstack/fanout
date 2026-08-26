@@ -59,7 +59,7 @@ func (h *HealthHandler) Readiness(c *echo.Context) error {
 
 	// Check DuckDB
 	resp.Checks["duckdb"] = h.checkDuckDB()
-	resp.Checks["ducklake"] = h.checkDuckLake()
+	resp.Checks["telemetry"] = h.checkTelemetry()
 
 	// Check data directory
 	resp.Checks["data"] = h.checkDataDir()
@@ -177,7 +177,7 @@ func maintenanceStaleThreshold(maintEvery time.Duration) time.Duration {
 	return stale
 }
 
-func (h *HealthHandler) checkDuckLake() CheckResult {
+func (h *HealthHandler) checkTelemetry() CheckResult {
 	if h.duck == nil {
 		return CheckResult{
 			Status: "unhealthy",
@@ -204,13 +204,14 @@ func (h *HealthHandler) checkDuckLake() CheckResult {
 		LatencyMs: time.Since(start).Milliseconds(),
 	}
 	if err == sql.ErrNoRows {
-		res.Detail = "telemetry attached, no spans yet"
+		res.Detail = "telemetry repository ready, no spans yet"
 	}
 	return res
 }
 
-// checkMaintenance surfaces the maintenance loop's own health (retention +
-// DuckLake compaction). A failing pass reports "degraded", not "unhealthy":
+// checkMaintenance surfaces the maintenance loop's own health (retention,
+// compaction, and cache checkpointing). A failing pass reports "degraded", not
+// "unhealthy":
 // ingest and queries still work while maintenance fails, and a restart
 // wouldn't fix it — pulling the instance from rotation would only hide the
 // signal that storage growth is no longer being reclaimed. A maintenance pass

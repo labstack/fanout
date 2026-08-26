@@ -14,9 +14,6 @@ func openTestDuck(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
-	if _, err := db.Exec(`ATTACH ':memory:' AS lake`); err != nil {
-		t.Fatalf("attach lake catalog: %v", err)
-	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }

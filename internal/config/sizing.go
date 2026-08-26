@@ -37,9 +37,7 @@ const (
 	// exceed available parallelism they add contention rather than concurrency.
 	maxAutoDuckDBConns = 16
 
-	// minDuckDBConns preserves an invariant rather than a preference:
-	// internal/lake rejects max_connections > 1 without a shared write gate,
-	// and a pool of 1 serializes reads behind writes.
+	// minDuckDBConns keeps one long scan from serializing all other reads.
 	minDuckDBConns = 2
 )
 

@@ -27,10 +27,10 @@ ingest:
 storage:
   data_dir: ./data # FANOUT_DATA_DIR
   retention_days: 30 # FANOUT_RETENTION_DAYS
+  hot_retention: 24h # FANOUT_HOT_RETENTION
   rollup_interval: 1m # FANOUT_ROLLUP_INTERVAL
   rollup_skip_to_latest: false # FANOUT_ROLLUP_SKIP_TO_LATEST
   maintenance_interval: 1h # FANOUT_MAINTENANCE_INTERVAL
-  merge_interval: 1m # FANOUT_MERGE_INTERVAL
   duckdb:
     # Empty/zero values let Fanout size these from the machine.
     memory: "" # FANOUT_DUCKDB_MEMORY

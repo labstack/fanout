@@ -152,18 +152,18 @@ func TestEvaluateReportFailsOnBackgroundWorkErrors(t *testing.T) {
 				"service": {Outcomes: map[string]float64{"success": 30}},
 				"edge":    {Outcomes: map[string]float64{"error": 12}},
 			},
-			DuckLakeOperations: map[string]backgroundOperationReport{
+			TelemetryOperations: map[string]backgroundOperationReport{
 				"maintenance": {Outcomes: map[string]float64{"error": 3}},
-				"merge":       {Outcomes: map[string]float64{"success": 9}},
+				"compaction":  {Outcomes: map[string]float64{"success": 9}},
 			},
 		},
 	}, nil)
-	for _, want := range []string{"edge rollup errors=12", "ducklake maintenance errors=3"} {
+	for _, want := range []string{"edge rollup errors=12", "telemetry maintenance errors=3"} {
 		if !hasFailure(failures, want) {
 			t.Fatalf("failures %q do not contain %q", failures, want)
 		}
 	}
-	if hasFailure(failures, "service rollup") || hasFailure(failures, "ducklake merge") {
+	if hasFailure(failures, "service rollup") || hasFailure(failures, "telemetry merge") {
 		t.Errorf("healthy components reported as failures: %q", failures)
 	}
 }

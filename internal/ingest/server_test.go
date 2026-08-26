@@ -12,7 +12,7 @@ import (
 	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/lake"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 func TestToJSON(t *testing.T) {
@@ -507,9 +507,9 @@ func TestExtractException(t *testing.T) {
 
 func TestTraceExportContextCancellation(t *testing.T) {
 	// Use an unbuffered channel so the send blocks
-	spans := make(chan lake.SpanRow)
-	logs := make(chan lake.LogRow, 1)
-	metrics := make(chan lake.MetricRow, 1)
+	spans := make(chan telemetry.Span)
+	logs := make(chan telemetry.Log, 1)
+	metrics := make(chan telemetry.Metric, 1)
 
 	srv := NewServer(config.Config{}, spans, logs, metrics)
 	ts := &traceService{srv: srv}

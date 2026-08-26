@@ -1,5 +1,5 @@
-// Package writegate serializes and measures DuckLake catalog writes shared by
-// the query kernel and telemetry writer.
+// Package writegate serializes and measures writes to DuckDB's rebuildable
+// rollup cache.
 package writegate
 
 import (
@@ -9,20 +9,16 @@ import (
 	"github.com/labstack/fanout/internal/metrics"
 )
 
-// WriteOperation is a bounded metric label for a DuckLake catalog write.
+// WriteOperation is a bounded metric label for a rollup-cache write.
 // Keep this list exhaustive: arbitrary strings would create an unbounded
 // Prometheus label surface.
 type WriteOperation string
 
 const (
-	WriteIngestSpans    WriteOperation = "ingest_spans"
-	WriteIngestLogs     WriteOperation = "ingest_logs"
-	WriteIngestMetrics  WriteOperation = "ingest_metrics"
 	WriteRollupSkip     WriteOperation = "rollup_skip_to_latest"
 	WriteRollupService  WriteOperation = "rollup_service"
 	WriteRollupEndpoint WriteOperation = "rollup_endpoint"
 	WriteRollupEdge     WriteOperation = "rollup_edge"
-	WriteMerge          WriteOperation = "merge"
 	WriteMaintenance    WriteOperation = "maintenance"
 )
 
@@ -39,7 +35,7 @@ type WriteGate struct {
 // cannot tell the two orderings apart.
 var observe = metrics.RecordWriteGate
 
-// Lock acquires the catalog write gate and returns its release function.
+// Lock acquires the cache write gate and returns its release function.
 // Callers must defer the returned function before acquiring a database
 // connection, transaction, or appender, and must call it exactly once.
 func (g *WriteGate) Lock(operation WriteOperation) func() {

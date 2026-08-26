@@ -910,43 +910,43 @@ type latencyReport struct {
 }
 
 type serverReport struct {
-	BaselineAvailable     bool                                 `json:"baseline_available"`
-	ProcessStartTime      float64                              `json:"process_start_time_seconds"`
-	ProcessRestarted      bool                                 `json:"process_restarted"`
-	IngestRowsStart       float64                              `json:"ingest_rows_start"`
-	IngestRowsEnd         float64                              `json:"ingest_rows_end"`
-	IngestRowsDelta       float64                              `json:"ingest_rows_delta"`
-	RowsDroppedStart      float64                              `json:"rows_dropped_start"`
-	RowsDroppedEnd        float64                              `json:"rows_dropped_end"`
-	RowsDroppedDelta      float64                              `json:"rows_dropped_delta"`
-	LakePartitionsStart   float64                              `json:"lake_partitions_start"`
-	LakePartitions        float64                              `json:"lake_partitions"`
-	LakePartitionsDelta   float64                              `json:"lake_partitions_delta"`
-	LakeSizeBytesStart    float64                              `json:"lake_size_bytes_start"`
-	LakeSizeBytes         float64                              `json:"lake_size_bytes"`
-	LakeSizeBytesDelta    float64                              `json:"lake_size_bytes_delta"`
-	LakeGrowthBytesPerSec float64                              `json:"lake_growth_bytes_per_sec"`
-	IngestQueueDepth      float64                              `json:"ingest_queue_depth"`
-	AvgRollupMs           float64                              `json:"avg_rollup_ms"`
-	AvgFlushMs            float64                              `json:"avg_flush_ms"`
-	AvgQueryMs            float64                              `json:"avg_query_ms"`
-	CPUSecondsStart       float64                              `json:"cpu_seconds_start"`
-	CPUSecondsEnd         float64                              `json:"cpu_seconds_end"`
-	CPUSecondsDelta       float64                              `json:"cpu_seconds_delta"`
-	CPUCores              float64                              `json:"cpu_cores"`
-	RSSBytes              float64                              `json:"rss_bytes"`
-	HeapAllocBytes        float64                              `json:"heap_alloc_bytes"`
-	AllocBytesStart       float64                              `json:"alloc_bytes_start"`
-	AllocBytesEnd         float64                              `json:"alloc_bytes_end"`
-	AllocBytesDelta       float64                              `json:"alloc_bytes_delta"`
-	AllocBytesPerSec      float64                              `json:"alloc_bytes_per_sec"`
-	GCPauseSecondsStart   float64                              `json:"gc_pause_seconds_start"`
-	GCPauseSecondsEnd     float64                              `json:"gc_pause_seconds_end"`
-	GCPauseSecondsDelta   float64                              `json:"gc_pause_seconds_delta"`
-	WriteGateWaitMs       map[string]distributionReport        `json:"write_gate_wait_ms,omitempty"`
-	WriteGateHoldMs       map[string]distributionReport        `json:"write_gate_hold_ms,omitempty"`
-	DuckLakeOperations    map[string]backgroundOperationReport `json:"ducklake_operations,omitempty"`
-	Rollups               map[string]rollupReport              `json:"rollups,omitempty"`
+	BaselineAvailable        bool                                 `json:"baseline_available"`
+	ProcessStartTime         float64                              `json:"process_start_time_seconds"`
+	ProcessRestarted         bool                                 `json:"process_restarted"`
+	IngestRowsStart          float64                              `json:"ingest_rows_start"`
+	IngestRowsEnd            float64                              `json:"ingest_rows_end"`
+	IngestRowsDelta          float64                              `json:"ingest_rows_delta"`
+	RowsDroppedStart         float64                              `json:"rows_dropped_start"`
+	RowsDroppedEnd           float64                              `json:"rows_dropped_end"`
+	RowsDroppedDelta         float64                              `json:"rows_dropped_delta"`
+	ParquetFilesStart        float64                              `json:"parquet_partitions_start"`
+	ParquetFiles             float64                              `json:"parquet_partitions"`
+	ParquetFilesDelta        float64                              `json:"parquet_partitions_delta"`
+	ParquetSizeBytesStart    float64                              `json:"parquet_size_bytes_start"`
+	ParquetSizeBytes         float64                              `json:"parquet_size_bytes"`
+	ParquetSizeBytesDelta    float64                              `json:"parquet_size_bytes_delta"`
+	ParquetGrowthBytesPerSec float64                              `json:"parquet_growth_bytes_per_sec"`
+	IngestQueueDepth         float64                              `json:"ingest_queue_depth"`
+	AvgRollupMs              float64                              `json:"avg_rollup_ms"`
+	AvgFlushMs               float64                              `json:"avg_flush_ms"`
+	AvgQueryMs               float64                              `json:"avg_query_ms"`
+	CPUSecondsStart          float64                              `json:"cpu_seconds_start"`
+	CPUSecondsEnd            float64                              `json:"cpu_seconds_end"`
+	CPUSecondsDelta          float64                              `json:"cpu_seconds_delta"`
+	CPUCores                 float64                              `json:"cpu_cores"`
+	RSSBytes                 float64                              `json:"rss_bytes"`
+	HeapAllocBytes           float64                              `json:"heap_alloc_bytes"`
+	AllocBytesStart          float64                              `json:"alloc_bytes_start"`
+	AllocBytesEnd            float64                              `json:"alloc_bytes_end"`
+	AllocBytesDelta          float64                              `json:"alloc_bytes_delta"`
+	AllocBytesPerSec         float64                              `json:"alloc_bytes_per_sec"`
+	GCPauseSecondsStart      float64                              `json:"gc_pause_seconds_start"`
+	GCPauseSecondsEnd        float64                              `json:"gc_pause_seconds_end"`
+	GCPauseSecondsDelta      float64                              `json:"gc_pause_seconds_delta"`
+	WriteGateWaitMs          map[string]distributionReport        `json:"write_gate_wait_ms,omitempty"`
+	WriteGateHoldMs          map[string]distributionReport        `json:"write_gate_hold_ms,omitempty"`
+	TelemetryOperations      map[string]backgroundOperationReport `json:"telemetry_operations,omitempty"`
+	Rollups                  map[string]rollupReport              `json:"rollups,omitempty"`
 }
 
 func printReport(r report) {
@@ -982,11 +982,11 @@ func printReport(r report) {
 		s := r.Server
 		fmt.Printf("server (Δ over run):\n")
 		fmt.Printf("  rows accepted=%.0f  dropped=%.0f\n", s.IngestRowsDelta, s.RowsDroppedDelta)
-		fmt.Printf("  lake_partitions=%.0f  lake_size=%.1fMB  ingest_queue_depth=%.0f\n",
-			s.LakePartitions, s.LakeSizeBytes/(1<<20), s.IngestQueueDepth)
+		fmt.Printf("  parquet_partitions=%.0f  parquet_size=%.1fMB  ingest_queue_depth=%.0f\n",
+			s.ParquetFiles, s.ParquetSizeBytes/(1<<20), s.IngestQueueDepth)
 		fmt.Printf("  avg rollup=%.1fms  flush=%.1fms  query=%.1fms\n", s.AvgRollupMs, s.AvgFlushMs, s.AvgQueryMs)
-		fmt.Printf("  cpu=%.2f core(s)  rss=%.1fMB  alloc=%.1fMB/s  lake_growth=%.1fMB\n",
-			s.CPUCores, s.RSSBytes/(1<<20), s.AllocBytesPerSec/(1<<20), s.LakeSizeBytesDelta/(1<<20))
+		fmt.Printf("  cpu=%.2f core(s)  rss=%.1fMB  alloc=%.1fMB/s  parquet_growth=%.1fMB\n",
+			s.CPUCores, s.RSSBytes/(1<<20), s.AllocBytesPerSec/(1<<20), s.ParquetSizeBytesDelta/(1<<20))
 	}
 	if r.Passed {
 		fmt.Printf("verdict        PASS\n")

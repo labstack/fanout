@@ -14,25 +14,27 @@ import (
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
-	_ "modernc.org/sqlite" // SQLite driver used to put the DuckLake catalog in WAL mode
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/lake/writegate"
 	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/query/writegate"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 type Duck struct {
 	DB              *sql.DB
 	cfg             config.Config
 	lastMaintenance time.Time
-	lastMerge       time.Time // cadence for the frequent merge-only compaction pass
+	repository      *telemetrystore.Repository
 	// rollupLagNanos holds the rollup watermark back from the max ingested
 	// timestamp so late/out-of-order commits aren't skipped. Zero disables the
 	// lag (no trailing window).
 	rollupLagNanos int64
-	// writeGate serializes and measures all DuckLake catalog write commits so
-	// multiple pooled connections never commit to the SQLite catalog concurrently.
+	// writeGate serializes writes to the rebuildable DuckDB rollup cache.
 	writeGate writegate.WriteGate
+	// parquetMu prevents retention from unlinking a file while DuckDB is opening
+	// the immutable files selected for a new query.
+	parquetMu sync.RWMutex
 	// maintHealthMu guards the maintenance health fields below, which the
 	// readiness probe reads while the maintenance pass writes them.
 	maintHealthMu      sync.Mutex
@@ -68,9 +70,8 @@ const (
 	defaultDuckDBPoolSize    = 1
 )
 
-// WriteGate returns the shared catalog write gate. The ingest writer must use it
-// around appender flushes so writes never overlap rollup/maintenance commits on
-// a multi-connection pool.
+// WriteGate returns the gate that serializes writes to DuckDB's rebuildable
+// rollup cache.
 func (d *Duck) WriteGate() *writegate.WriteGate { return &d.writeGate }
 
 // duckDBPoolSize is the effective connection-pool size: the configured value,
@@ -172,7 +173,10 @@ func parseDuckBytes(s string) (int64, bool) {
 	}
 }
 
-func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
+func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.Repository) (*Duck, error) {
+	if repository == nil {
+		return nil, errors.New("telemetry repository is required")
+	}
 	if err := os.MkdirAll(cfg.QueryDir(), 0o755); err != nil {
 		return nil, fmt.Errorf("create query dir: %w", err)
 	}
@@ -182,40 +186,20 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 
 	dbPath := cfg.QueryDuckDBPath()
 	tempDir := cfg.QueryTempDir()
-	metadataPath := cfg.TelemetryDuckLakePath()
-	dataPath := cfg.TelemetryParquetDir()
 	if err := os.MkdirAll(tempDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
-	if err := os.MkdirAll(dataPath, 0o755); err != nil {
-		return nil, fmt.Errorf("create telemetry parquet dir: %w", err)
-	}
-
-	// Put the DuckLake SQLite catalog in WAL mode before DuckDB attaches it, so
-	// read queries run concurrently with the single writer instead of failing
-	// with "database is locked" (rollback-journal mode), and a crashed writer
-	// can't leave the catalog permanently locked. Must run before openDuckDB.
-	if err := enableCatalogWAL(metadataPath); err != nil {
-		return nil, fmt.Errorf("enable WAL on DuckLake catalog: %w", err)
-	}
-
 	dsn, err := duckDSN(dbPath, cfg.DuckDBMemory, cfg.DuckDBThreads)
 	if err != nil {
 		return nil, err
 	}
 
-	db, err := openDuckDB(ctx, dsn, tempDir, metadataPath, dataPath, duckDBPoolSize(cfg))
+	db, err := openDuckDB(ctx, dsn, tempDir, duckDBPoolSize(cfg))
 	if err != nil {
-		return nil, fmt.Errorf(
-			"open duckdb catalog: %w (if the local cache catalog is corrupted, remove %s and %s; DuckLake data remains in %s)",
-			err,
-			dbPath,
-			dbPath+".wal",
-			dataPath,
-		)
+		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
 
-	d := &Duck{DB: db, cfg: cfg, rollupLagNanos: rollupLagFromConfig(cfg)}
+	d := &Duck{DB: db, cfg: cfg, repository: repository, rollupLagNanos: rollupLagFromConfig(cfg)}
 	if cfg.DuckDBMemory == "" {
 		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
@@ -224,7 +208,11 @@ func NewDuck(ctx context.Context, cfg config.Config) (*Duck, error) {
 			slog.Warn("apply memory headroom failed; using DuckDB default memory_limit", "err", err)
 		}
 	}
-	if err := CreateTables(db); err != nil {
+	if err := CreateCacheTables(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	if err := CreateParquetViews(db, repository.Parquet.Dir()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -293,16 +281,7 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	return tx.Commit()
 }
 
-func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string, maxConns int) (*sql.DB, error) {
-	// AUTOMATIC_MIGRATION upgrades an older on-disk DuckLake catalog to the format
-	// the loaded extension requires. Without it, a fanout build that bundles a
-	// newer DuckLake (e.g. the DuckDB 1.5.3 bump, which needs catalog v1.0) fails
-	// to attach an existing v0.4 catalog and the server can't boot. Migration is
-	// in place and forward-only.
-	attach := fmt.Sprintf("ATTACH IF NOT EXISTS %s AS lake (DATA_PATH %s, AUTOMATIC_MIGRATION true)",
-		sqlLiteral("ducklake:sqlite:"+metadataPath),
-		sqlLiteral(dataPath))
-
+func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB, error) {
 	// temp_directory is an instance-global setting: re-setting it after the temp
 	// dir has already been used fails with "Cannot switch temporary directory
 	// after the current one has been used". The boot hook runs once per pooled
@@ -312,11 +291,6 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 	var tempDirErr error
 
 	connector, err := duckdb.NewConnector(dsn, func(execer driver.ExecerContext) error {
-		for _, stmt := range []string{"LOAD ducklake", "LOAD sqlite"} {
-			if _, err := execer.ExecContext(ctx, stmt, nil); err != nil {
-				return err
-			}
-		}
 		tempDirOnce.Do(func() {
 			_, tempDirErr = execer.ExecContext(ctx, "SET temp_directory="+sqlLiteral(tempDir), nil)
 		})
@@ -326,9 +300,6 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 		if tempDirErr != nil {
 			return fmt.Errorf("set temp_directory: %w", tempDirErr)
 		}
-		if _, err := execer.ExecContext(ctx, attach, nil); err != nil {
-			return err
-		}
 		return nil
 	})
 	if err != nil {
@@ -336,12 +307,8 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 	}
 
 	db := sql.OpenDB(connector)
-	// DuckLake metadata lives in a SQLite catalog that locks under *concurrent*
-	// commits from multiple connections. The default pool of 1 serializes
-	// everything through one handle. Larger pools are allowed (read queries then
-	// run concurrently), but write commits must still be serialized by the
-	// caller's write gate (Duck.WriteGate) so two connections never commit at
-	// once.
+	// The on-disk DuckDB file contains only rebuildable rollups and views; Parquet
+	// scans may run concurrently across the machine-sized pool.
 	if maxConns < 1 {
 		maxConns = 1
 	}
@@ -350,49 +317,13 @@ func openDuckDB(ctx context.Context, dsn, tempDir, metadataPath, dataPath string
 	return db, nil
 }
 
-// enableCatalogWAL switches the DuckLake SQLite catalog at metadataPath to WAL
-// journal mode before DuckDB attaches it. The default rollback-journal mode
-// makes a committing writer take an exclusive lock that fails concurrent readers
-// with "database is locked", and a crashed or stuck writer can leave a hot
-// journal that locks the catalog until every connection is dropped (observed in
-// prod as a multi-day write+query outage). In WAL mode readers run concurrently
-// with the single writer, and the next connection to open the catalog recovers
-// the WAL automatically after a crash instead of leaving a lock-holding hot
-// journal. journal_mode is persisted in the database header, so this is
-// effectively a one-time migration, but it is cheap and idempotent to assert on
-// every boot. WAL is the only lever available: the DuckDB sqlite extension
-// exposes no busy_timeout knob, so DuckDB's own catalog connections have no
-// lock-retry timeout — WAL is what prevents the reader/writer collisions.
-func enableCatalogWAL(metadataPath string) (err error) {
-	db, err := sql.Open("sqlite", metadataPath+"?_pragma=journal_mode(wal)")
-	if err != nil {
-		return fmt.Errorf("open catalog: %w", err)
-	}
-	defer func() {
-		// Closing the last connection checkpoints the WAL; surface a failure here
-		// (e.g. the filesystem can't maintain the -wal/-shm sidecars) instead of
-		// discovering it later as a mysterious lock.
-		if cerr := db.Close(); cerr != nil && err == nil {
-			err = fmt.Errorf("close catalog bootstrap conn: %w", cerr)
-		}
-	}()
-	db.SetMaxOpenConns(1)
-
-	var mode string
-	if scanErr := db.QueryRow("PRAGMA journal_mode").Scan(&mode); scanErr != nil {
-		return fmt.Errorf("read journal_mode: %w", scanErr)
-	}
-	if !strings.EqualFold(mode, "wal") {
-		return fmt.Errorf("catalog journal_mode = %q, want wal", mode)
-	}
-	return nil
-}
-
 func sqlLiteral(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
-func (d *Duck) Close() error { return d.DB.Close() }
+func (d *Duck) Close() error {
+	return d.DB.Close()
+}
 
 // DefaultNamespace returns empty string so queries search all namespaces.
 func (d *Duck) DefaultNamespace() string {
@@ -412,7 +343,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	} else if rows > 0 {
 		slog.Info("startup rollup complete", "rows", rows, "duration", time.Since(start))
 	}
-	d.updateLakeStats(ctx)
+	d.updateParquetStats()
 
 	ticker := time.NewTicker(d.cfg.RollupInterval)
 	defer ticker.Stop()
@@ -425,41 +356,22 @@ func (d *Duck) RunRollups(ctx context.Context) {
 			if err != nil {
 				slog.Error("rollup failed", "component", "rollup", "rows", rows, "err", err)
 			}
-			d.updateLakeStats(ctx)
+			d.updateParquetStats()
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-// updateLakeStats refreshes the per-signal file-count and byte-size gauges
-// (fanout_lake_partitions / fanout_lake_size_bytes) from the DuckLake catalog.
-// This is the signal that surfaces unbounded file/snapshot growth — the failure
-// mode that previously OOM'd the rollup engine — so an operator or soak test can
-// watch it climb. It's a cheap read; a failure here must not disturb rollups.
-func (d *Duck) updateLakeStats(ctx context.Context) {
-	// Bound the catalog read so a degraded/bloated DuckLake can't stall the
-	// rollup loop (this runs inline after rollupOnce in RunRollups).
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	rows, err := d.DB.QueryContext(ctx, `SELECT table_name, file_count, file_size_bytes FROM ducklake_table_info('lake')`)
+// updateParquetStats refreshes the per-signal file-count and byte-size gauges.
+func (d *Duck) updateParquetStats() {
+	stats, err := d.repository.Parquet.Stats()
 	if err != nil {
-		slog.Warn("lake stats query failed", "err", err)
+		slog.Warn("parquet stats failed", "err", err)
 		return
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var table string
-		var fileCount, sizeBytes int64
-		if err := rows.Scan(&table, &fileCount, &sizeBytes); err != nil {
-			slog.Warn("lake stats scan failed", "err", err)
-			return
-		}
-		// DuckLake table names (spans/logs/metrics) are the metric signal labels.
-		metrics.UpdateLakeStats(table, sizeBytes, int(fileCount))
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("lake stats iteration failed", "err", err)
+	for signal, stat := range stats {
+		metrics.UpdateParquetStats(signal, stat.Bytes, stat.Files)
 	}
 }
 
@@ -485,18 +397,71 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 		affected += n
 	}
 
-	// Compaction must run even when a rollup fails: a failing rollup is exactly
-	// when compaction matters most, since file/snapshot growth makes every
-	// retried pass heavier. The frequent merge pass keeps the file count low; the
-	// hourly maintenance pass handles retention + snapshot expiry + cleanup.
-	if err := d.runMerge(ctx); err != nil {
-		slog.Warn("ducklake merge failed", "err", err)
-	}
-	if err := d.runMaintenance(ctx); err != nil {
-		slog.Warn("ducklake maintenance failed", "err", err)
+	if err := d.runRepositoryMaintenance(ctx); err != nil {
+		slog.Warn("telemetry maintenance failed", "err", err)
 	}
 
 	return int(affected), errors.Join(errs...)
+}
+
+func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
+	every := d.cfg.MaintenanceInterval
+	if every <= 0 {
+		every = time.Hour
+	}
+	if !d.lastMaintenance.IsZero() && time.Since(d.lastMaintenance) < every {
+		metrics.RecordTelemetryOperation(metrics.TelemetryMaintenance, metrics.TelemetryThrottled, 0)
+		return nil
+	}
+	start := time.Now()
+	cutoff := time.Now().Add(-d.cfg.HotRetention).UnixNano()
+	var pruneErr error
+	if d.repository != nil {
+		_, pruneErr = d.repository.PruneHot(cutoff)
+		d.parquetMu.Lock()
+		var parquetErr error
+		if d.cfg.RetentionDays > 0 {
+			_, parquetErr = d.repository.PruneParquet(time.Now().Add(-time.Duration(d.cfg.RetentionDays) * 24 * time.Hour).UnixNano())
+		}
+		compactStart := time.Now()
+		compacted, compactErr := d.repository.CompactParquet(ctx, d.DB, 64)
+		d.parquetMu.Unlock()
+		compactResult := metrics.TelemetryNoop
+		if compactErr != nil {
+			compactResult = metrics.TelemetryError
+		} else if compacted > 0 {
+			compactResult = metrics.TelemetrySuccess
+		}
+		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, compactResult, time.Since(compactStart).Seconds())
+		pruneErr = errors.Join(pruneErr, parquetErr, compactErr)
+	}
+	var cacheErr error
+	if d.cfg.RetentionDays > 0 {
+		for _, table := range []string{"service_rollup", "endpoint_rollup", "edge_rollup"} {
+			if _, err := d.DB.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY", table, d.cfg.RetentionDays)); err != nil {
+				cacheErr = errors.Join(cacheErr, fmt.Errorf("prune %s: %w", table, err))
+			}
+		}
+	}
+	_, checkpointErr := d.DB.ExecContext(ctx, "CHECKPOINT")
+	err := errors.Join(pruneErr, cacheErr, checkpointErr)
+	maintenanceResult := metrics.TelemetrySuccess
+	if err != nil {
+		maintenanceResult = metrics.TelemetryError
+	}
+	metrics.RecordTelemetryOperation(metrics.TelemetryMaintenance, maintenanceResult, time.Since(start).Seconds())
+	d.lastMaintenance = time.Now()
+	d.maintHealthMu.Lock()
+	d.lastMaintenanceAt = d.lastMaintenance
+	if err == nil {
+		d.lastMaintenanceOK = d.lastMaintenance
+	}
+	d.lastMaintenanceErr = err
+	d.maintHealthMu.Unlock()
+	if err == nil {
+		slog.Info("telemetry maintenance complete", "duration", time.Since(start))
+	}
+	return err
 }
 
 func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
@@ -1070,7 +1035,7 @@ span_agg AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
    AND a.service = s.service
-  -- Bound the scan to the affected bucket range so DuckLake prunes parquet by
+  -- Bound the scan to the affected bucket range so Telemetry prunes parquet by
   -- start_time stats instead of scanning all history (the join on a computed
   -- date_trunc bucket alone does not prune). The range is a provable superset
   -- of the affected buckets — every row in an affected bucket has start_time in
@@ -1370,225 +1335,23 @@ UNION ALL
 SELECT namespace, bucket, caller, callee, calls, avg_ms, error_rate, edge_type
 FROM messaging_edges;`
 
-// snapshotGraceMinutes is how long a superseded DuckLake snapshot (and the
-// parquet files it references) is kept past compaction before expiry/cleanup
-// may reclaim it. It must exceed the longest read query — reads don't hold
-// the write gate, so a shorter window lets cleanup delete a file mid-scan — while
-// staying well under the maintenance interval so file/snapshot growth stays
-// bounded. Queries are sub-second to a few seconds; 10 minutes is ample margin.
-const snapshotGraceMinutes = 10
-
-// runMerge runs ONLY ducklake_merge_adjacent_files on a short cadence
-// (storage.merge_interval, default 1m). Merge consolidates the newest
-// small parquet files and deletes nothing, so it's cheap and safe to run often —
-// keeping the queryable file count continuously low is what bounds rollup/query
-// scan latency. The deletions (expire_snapshots + cleanup_old_files), which
-// carry the read race and catalog cost, stay on the hourly runMaintenance
-// cadence. Decoupling the two resolves the churn-vs-pileup tension: frequent
-// cheap merge keeps scans fast; rare deletes keep the race and overhead away.
-func (d *Duck) runMerge(ctx context.Context) error {
-	start := time.Now()
-	every := d.cfg.MergeInterval
-	if every <= 0 {
-		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeDisabled, 0)
-		return nil // merge pass disabled
-	}
-	if !d.lastMerge.IsZero() && time.Since(d.lastMerge) < every {
-		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeThrottled, 0)
-		return nil
-	}
-	// merge commits new files — serialize against other writers like maintenance.
-	err := func() error {
-		defer d.writeGate.Lock(writegate.WriteMerge)()
-		_, err := d.DB.ExecContext(ctx, "CALL ducklake_merge_adjacent_files('lake')")
-		return err
-	}()
-	d.lastMerge = time.Now()
-	if err != nil {
-		metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeError, time.Since(start).Seconds())
-		slog.Error("merge_adjacent_files failed", "err", err)
-		return fmt.Errorf("merge_adjacent_files: %w", err)
-	}
-	metrics.RecordDuckLakeOperation(metrics.DuckLakeMerge, metrics.DuckLakeSuccess, time.Since(start).Seconds())
-	return nil
-}
-
-func (d *Duck) runMaintenance(ctx context.Context) error {
-	start := time.Now()
-	every := d.cfg.MaintenanceInterval
-	if every <= 0 {
-		every = time.Hour
-	}
-	if !d.lastMaintenance.IsZero() && time.Since(d.lastMaintenance) < every {
-		metrics.RecordDuckLakeOperation(metrics.DuckLakeMaintenance, metrics.DuckLakeThrottled, 0)
-		return nil
-	}
-
-	// Retention deletes and the checkpoint are writes — serialize them too.
-	unlock := d.writeGate.Lock(writegate.WriteMaintenance)
-	defer unlock()
-
-	var errs []error
-	if d.cfg.RetentionDays > 0 {
-		stmts := []struct {
-			name string
-			sql  string
-		}{
-			{name: "lake.spans", sql: fmt.Sprintf("DELETE FROM lake.spans WHERE COALESCE(start_time, ingested_at) < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
-			{name: "lake.logs", sql: fmt.Sprintf("DELETE FROM lake.logs WHERE COALESCE(log_time, observed_time, ingested_at) < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
-			{name: "lake.metrics", sql: fmt.Sprintf("DELETE FROM lake.metrics WHERE COALESCE(metric_time, ingested_at) < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
-			{name: "service_rollup", sql: fmt.Sprintf("DELETE FROM service_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
-			{name: "endpoint_rollup", sql: fmt.Sprintf("DELETE FROM endpoint_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
-			{name: "edge_rollup", sql: fmt.Sprintf("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL %d DAY", d.cfg.RetentionDays)},
-		}
-		for _, stmt := range stmts {
-			res, err := d.DB.ExecContext(ctx, stmt.sql)
-			if err != nil {
-				slog.Error("maintenance delete failed", "table", stmt.name, "err", err)
-				errs = append(errs, fmt.Errorf("%s retention delete: %w", stmt.name, err))
-				continue
-			}
-			rows, rowsErr := res.RowsAffected()
-			if rowsErr != nil {
-				slog.Info("maintenance delete complete", "table", stmt.name)
-				continue
-			}
-			slog.Info("maintenance delete complete", "table", stmt.name, "rows", rows)
-		}
-	}
-
-	// DuckLake compaction. Every flush commits a snapshot and writes new parquet
-	// files; without merge + expiry both grow without bound until per-file
-	// metadata pins OOM every wide query (prod 2026-06-13: 60k snapshots, 50k
-	// files averaging 21KB, rollups dead at any memory_limit). Holding the write gate
-	// here quiesces the dataset against WRITES, the precondition for these calls.
-	// Order: merge rewrites small files into large ones, expiry releases the
-	// snapshots that referenced the small ones, cleanup deletes the files no live
-	// snapshot references. DuckLake never expires the newest snapshot, so a
-	// low-traffic instance (no new commits within the grace) still keeps a
-	// readable one.
-	//
-	// GRACE WINDOW (now() - snapshotGraceMinutes) on EXPIRY: the write gate does NOT
-	// serialize reads, so an Overview/diagnose query can be mid-scan against a
-	// snapshot merge just superseded; expiring + deleting its parquet immediately
-	// yanks the file out from under the reader ("IO Error: Cannot open file …: No
-	// such file or directory"). Sparing recently-superseded snapshots keeps their
-	// files referenced (so cleanup won't delete them) until any in-flight reader
-	// has finished; they're reclaimed a cycle later. At ingest.flush_interval=15s the grace
-	// retains ~40 snapshots (4/min × 10min) — bounded, nowhere near the 60k OOM,
-	// and far below the (default 1h) maintenance cycle.
-	//
-	// cleanup stays cleanup_all => true: the bundled DuckLake's
-	// ducklake_cleanup_old_files does NOT accept an older_than grace (verified by
-	// benchmark — the call errored every cycle), and it isn't needed: expiry's
-	// grace already prevents within-grace files from being scheduled for deletion,
-	// so cleanup_all only unlinks files no live snapshot references.
-	expireSQL := fmt.Sprintf(
-		"CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL %d MINUTE)",
-		snapshotGraceMinutes)
-	for _, stmt := range []struct {
-		name string
-		sql  string
-	}{
-		{name: "merge_adjacent_files", sql: "CALL ducklake_merge_adjacent_files('lake')"},
-		// DuckLake deletes are merge-on-read. Rewriting materializes the retention
-		// deletes into Parquet so expired rows stop consuming scan and disk budget.
-		{name: "rewrite_data_files", sql: "CALL ducklake_rewrite_data_files('lake')"},
-		{name: "expire_snapshots", sql: expireSQL},
-		{name: "cleanup_old_files", sql: "CALL ducklake_cleanup_old_files('lake', cleanup_all => true)"},
-	} {
-		if _, err := d.DB.ExecContext(ctx, stmt.sql); err != nil {
-			slog.Error("maintenance compaction failed", "step", stmt.name, "err", err)
-			errs = append(errs, fmt.Errorf("compaction %s: %w", stmt.name, err))
-		}
-	}
-
-	// DuckLake's catalog CHECKPOINT (as opposed to the compaction calls above)
-	// currently trips an internal error on live datasets with nullable string
-	// fields, which invalidates the whole database connection. Checkpoint only
-	// the main local cache until the upstream checkpoint path is stable.
-	if _, err := d.DB.ExecContext(ctx, "CHECKPOINT"); err != nil {
-		slog.Error("maintenance checkpoint failed", "target", "main", "err", err)
-		errs = append(errs, fmt.Errorf("checkpoint main: %w", err))
-	}
-	d.lastMaintenance = time.Now()
-
-	err := errors.Join(errs...)
-	result := metrics.DuckLakeSuccess
-	if err != nil {
-		result = metrics.DuckLakeError
-	}
-	metrics.RecordDuckLakeOperation(metrics.DuckLakeMaintenance, result, time.Since(start).Seconds())
-	d.maintHealthMu.Lock()
-	d.lastMaintenanceAt = time.Now()
-	if err == nil {
-		d.lastMaintenanceOK = d.lastMaintenanceAt
-	}
-	d.lastMaintenanceErr = err
-	d.maintHealthMu.Unlock()
-	return err
-}
-
 // ---- Read query helpers ----
 
-// isTransientLakeIOError reports whether err is a DuckLake compaction race: a
-// concurrent maintenance pass (merge + cleanup, which runs without blocking
-// reads) unlinked a parquet file this read had planned against. Re-running the
-// query re-plans against the current snapshot (the merged file), which succeeds.
-func isTransientLakeIOError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "IO Error") && strings.Contains(msg, "No such file or directory")
-}
-
-// QueryContext runs a read query, retrying briefly on the transient DuckLake
-// "file deleted mid-scan" race (reads don't take the write gate, so maintenance can
-// unlink a just-merged file underneath them). Cleanup is instantaneous, so a
-// short backoff lets the retry re-plan against fresh files. Use this for every
-// read that scans the lake instead of DB.QueryContext directly.
+// QueryContext executes a read against immutable Parquet files and DuckDB's
+// local rollup cache.
 func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error) {
-	const maxAttempts = 3
-	var rows *sql.Rows
-	var err error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		rows, err = d.DB.QueryContext(ctx, query, args...)
-		if err == nil || attempt == maxAttempts || !isTransientLakeIOError(err) {
-			return rows, err
-		}
-		if rows != nil {
-			_ = rows.Close()
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(time.Duration(attempt) * 25 * time.Millisecond):
-		}
-	}
+	d.parquetMu.RLock()
+	rows, err := d.DB.QueryContext(ctx, query, args...)
+	d.parquetMu.RUnlock()
 	return rows, err
 }
 
-// QueryRowScan is the single-row analogue of QueryContext: it retries the same
-// transient DuckLake "file deleted mid-scan" race. For a single-row read the IO
-// error surfaces at Scan (not at QueryRowContext), so the retry wraps
-// QueryRowContext+Scan together. Use it for lake-scanning single-row reads
-// (`*Duck.QueryContext` covers the multi-row ones).
+// QueryRowScan executes a single-row query against immutable Parquet files and
+// DuckDB's local rollup cache.
 func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
-	const maxAttempts = 3
-	var err error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		err = d.DB.QueryRowContext(ctx, query, args...).Scan(dest...)
-		if err == nil || attempt == maxAttempts || !isTransientLakeIOError(err) {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(time.Duration(attempt) * 25 * time.Millisecond):
-		}
-	}
-	return err
+	d.parquetMu.RLock()
+	defer d.parquetMu.RUnlock()
+	return d.DB.QueryRowContext(ctx, query, args...).Scan(dest...)
 }
 
 // ---- Queries for API ----

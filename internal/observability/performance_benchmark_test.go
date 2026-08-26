@@ -19,9 +19,6 @@ func BenchmarkEndpointQueries24Hours(b *testing.B) {
 	if _, err := db.Exec(`SET TimeZone='UTC'; SET threads=4`); err != nil {
 		b.Fatal(err)
 	}
-	if _, err := db.Exec(`ATTACH ':memory:' AS lake`); err != nil {
-		b.Fatal(err)
-	}
 	if err := query.CreateTables(db); err != nil {
 		b.Fatal(err)
 	}

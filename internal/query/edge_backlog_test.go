@@ -2,12 +2,13 @@ package query
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -144,22 +145,25 @@ FROM lake.spans`).Scan(&spanBuckets); err != nil {
 func TestSkipRollupToLatest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	d, err := NewDuck(ctx, config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", RetentionDays: 30})
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", RetentionDays: 30, HotRetention: 24 * time.Hour}
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
-		if strings.Contains(err.Error(), "ducklake") || strings.Contains(err.Error(), "ATTACH") {
-			t.Skipf("DuckLake unavailable: %v", err)
-		}
+		t.Fatalf("open telemetry repository: %v", err)
+	}
+	defer repository.Close()
+	now := time.Now().UnixNano()
+	spans := make([]telemetry.Span, 100)
+	for i := range spans {
+		spans[i] = telemetry.Span{Namespace: "default", TraceID: "backlog", SpanID: string(rune(i + 1)), ServiceName: "svc", Kind: "SPAN_KIND_CLIENT", StartUnixNanos: now - int64(i)*int64(time.Minute), DurationMS: 10, StatusCode: "STATUS_CODE_OK", IngestedAt: now}
+	}
+	if err := repository.Commit(telemetrystore.Batch{ID: "skip-backlog", Spans: spans}); err != nil {
+		t.Fatalf("commit backlog: %v", err)
+	}
+	d, err := NewDuck(ctx, cfg, repository)
+	if err != nil {
 		t.Fatalf("NewDuck: %v", err)
 	}
 	defer d.Close()
-
-	if _, err := d.DB.ExecContext(ctx, `
-INSERT INTO lake.spans (namespace, trace_id, span_id, parent_span_id, service, kind, start_time, duration_ms, status, ingested_unix_nano)
-SELECT 'default', 'tr-'||i, 'c-'||i, 'p-'||i, 'svc-'||(i%5), 'SPAN_KIND_CLIENT',
-       now() - ((i % 120) * INTERVAL 1 MINUTE), 10.0, 'STATUS_CODE_OK', epoch_ns(now())
-FROM range(5000) t(i)`); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
 	if _, err := d.DB.ExecContext(ctx, `
 INSERT INTO endpoint_rollup (
   namespace, bucket, service, method, path, calls, error_count, duration_count, duration_buckets
@@ -227,12 +231,9 @@ ON CONFLICT (cache_key) DO UPDATE SET last_ingested_unix_nano = 1, updated_at = 
 	// Insert one fresh live span (ingested_unix_nano = now) and verify that
 	// rollupOnce picks it up — proves the watermark didn't over-advance and
 	// swallow data that arrived after the skip.
-	if _, err := d.DB.ExecContext(ctx, `
-INSERT INTO lake.spans (namespace, trace_id, span_id, parent_span_id, service, kind,
-                        start_time, duration_ms, status, ingested_unix_nano)
-VALUES ('default', 'tr-live-1', 'sp-live-1', '', 'svc-live', 'SPAN_KIND_SERVER',
-        now(), 5.0, 'STATUS_CODE_OK', epoch_ns(now()))`); err != nil {
-		t.Fatalf("insert live span: %v", err)
+	liveTime := time.Now().Add(time.Millisecond).UnixNano()
+	if err := repository.Commit(telemetrystore.Batch{ID: "skip-live", Spans: []telemetry.Span{{Namespace: "default", TraceID: "tr-live-1", SpanID: "sp-live-1", ServiceName: "svc-live", Kind: "SPAN_KIND_SERVER", StartUnixNanos: liveTime, DurationMS: 5, StatusCode: "STATUS_CODE_OK", IngestedAt: liveTime}}}); err != nil {
+		t.Fatalf("commit live span: %v", err)
 	}
 
 	n2, err := d.rollupOnce(ctx)

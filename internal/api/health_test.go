@@ -111,7 +111,7 @@ func TestReadinessReportsSizingResolvedByLoader(t *testing.T) {
 	}
 }
 
-func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
+func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -151,12 +151,12 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	}
 
 	// The "data" check reads real host free space, which can legitimately be
-	// degraded on a low-disk CI/dev box. This test is about ducklake+rollups, so
+	// degraded on a low-disk CI/dev box. This test is about telemetry+rollups, so
 	// tolerate a data-only degradation but require the actual subjects to be ok.
 	if resp.Status != "ready" && resp.Status != "degraded" {
 		t.Fatalf("status = %q, want ready or degraded", resp.Status)
 	}
-	for _, key := range []string{"duckdb", "ducklake", "data", "rollups", "maintenance"} {
+	for _, key := range []string{"duckdb", "telemetry", "data", "rollups", "maintenance"} {
 		if _, ok := resp.Checks[key]; !ok {
 			t.Fatalf("missing %s check", key)
 		}
@@ -167,7 +167,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	if resp.RuntimeSizing.GOMAXPROCS <= 0 {
 		t.Fatalf("runtime sizing GOMAXPROCS = %d, want positive", resp.RuntimeSizing.GOMAXPROCS)
 	}
-	for _, key := range []string{"duckdb", "ducklake", "rollups", "maintenance"} {
+	for _, key := range []string{"duckdb", "telemetry", "rollups", "maintenance"} {
 		if got := resp.Checks[key].Status; got != "ok" {
 			t.Fatalf("%s check = %q, want ok", key, got)
 		}

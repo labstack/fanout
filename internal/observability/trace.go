@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 const recentTraceQuery = `
@@ -17,22 +19,6 @@ ORDER BY MAX(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1 EL
          MAX(end_time) - MIN(start_time) DESC
 LIMIT 1`
 
-const traceSpansQuery = `
-SELECT span_id, COALESCE(parent_span_id, ''), service, operation, kind, start_time,
-       duration_ms, COALESCE(status, ''), COALESCE(status_message, '')
-FROM spans
-WHERE start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?) AND trace_id = ?
-ORDER BY start_time ASC, duration_ms DESC
-LIMIT ?`
-
-const traceLogsQuery = `
-SELECT time, COALESCE(severity, ''), COALESCE(service, ''), COALESCE(body, ''),
-       COALESCE(trace_id, ''), COALESCE(span_id, '')
-FROM logs
-WHERE time >= ? AND time < ? AND (? = '' OR namespace = ?) AND trace_id = ?
-ORDER BY time ASC
-LIMIT ?`
-
 func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service string, limit int) (Result[TraceDetail], error) {
 	scope, err := s.normalizeScope(scope)
 	if err != nil {
@@ -42,8 +28,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	if err != nil {
 		return Result[TraceDetail]{}, err
 	}
-	traceID = strings.TrimSpace(traceID)
-	service = strings.TrimSpace(service)
+	traceID, service = strings.TrimSpace(traceID), strings.TrimSpace(service)
 	if traceID == "" {
 		rows, queryErr := s.db.QueryContext(ctx, recentTraceQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service)
 		if queryErr != nil {
@@ -64,70 +49,71 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
 	if traceID != "" {
-		rows, queryErr := s.db.QueryContext(ctx, traceSpansQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, traceID, limit)
-		if queryErr != nil {
-			return Result[TraceDetail]{}, fmt.Errorf("query trace spans: %w", queryErr)
+		unlock := s.repository.ReadLock()
+		storedSpans, readErr := s.repository.Spans.Trace(traceID)
+		if readErr != nil {
+			unlock()
+			return Result[TraceDetail]{}, fmt.Errorf("read trace segments: %w", readErr)
 		}
-		serviceSet := map[string]struct{}{}
-		var first time.Time
-		var last time.Time
-		for rows.Next() {
-			var span TraceSpan
-			if err := rows.Scan(&span.SpanID, &span.ParentSpanID, &span.Service, &span.Operation, &span.Kind, &span.Start, &span.DurationMS, &span.Status, &span.StatusMessage); err != nil {
-				rows.Close()
-				return Result[TraceDetail]{}, fmt.Errorf("scan trace span: %w", err)
+		startNanos, endNanos := scope.Start.UnixNano(), scope.End.UnixNano()
+		for _, row := range storedSpans {
+			if row.StartUnixNanos < startNanos || row.StartUnixNanos >= endNanos ||
+				(scope.Namespace != "" && row.Namespace != scope.Namespace) {
+				continue
 			}
+			data.Spans = append(data.Spans, TraceSpan{SpanID: row.SpanID, ParentSpanID: row.ParentSpanID, Service: row.ServiceName, Operation: row.Name, Kind: row.Kind, Start: time.Unix(0, row.StartUnixNanos).UTC(), DurationMS: row.DurationMS, Status: row.StatusCode, StatusMessage: row.StatusMsg})
+		}
+		sort.Slice(data.Spans, func(i, j int) bool {
+			if data.Spans[i].Start.Equal(data.Spans[j].Start) {
+				return data.Spans[i].DurationMS > data.Spans[j].DurationMS
+			}
+			return data.Spans[i].Start.Before(data.Spans[j].Start)
+		})
+		if len(data.Spans) > limit {
+			data.Spans = data.Spans[:limit]
+		}
+
+		serviceSet := make(map[string]struct{})
+		var first, last time.Time
+		for _, span := range data.Spans {
 			if first.IsZero() || span.Start.Before(first) {
 				first = span.Start
 			}
-			end := span.Start.Add(time.Duration(span.DurationMS * float64(time.Millisecond)))
-			if end.After(last) {
+			if end := span.Start.Add(time.Duration(span.DurationMS * float64(time.Millisecond))); end.After(last) {
 				last = end
 			}
 			if strings.Contains(strings.ToUpper(span.Status), "ERROR") {
 				data.HasError = true
 			}
-			serviceSet[span.Service] = struct{}{}
-			data.Spans = append(data.Spans, span)
+			if span.Service != "" {
+				serviceSet[span.Service] = struct{}{}
+			}
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return Result[TraceDetail]{}, fmt.Errorf("iterate trace spans: %w", err)
-		}
-		rows.Close()
 		if !first.IsZero() {
 			data.DurationMS = last.Sub(first).Seconds() * 1000
 		}
 		for name := range serviceSet {
-			if name != "" {
-				data.Services = append(data.Services, name)
-			}
+			data.Services = append(data.Services, name)
 		}
 		sort.Strings(data.Services)
 
-		rows, queryErr = s.db.QueryContext(ctx, traceLogsQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, traceID, limit)
-		if queryErr != nil {
-			return Result[TraceDetail]{}, fmt.Errorf("query trace logs: %w", queryErr)
-		}
-		for rows.Next() {
-			var entry LogEntry
-			if err := rows.Scan(&entry.Time, &entry.Severity, &entry.Service, &entry.Body, &entry.TraceID, &entry.SpanID); err != nil {
-				rows.Close()
-				return Result[TraceDetail]{}, fmt.Errorf("scan trace log: %w", err)
+		readErr = s.repository.Logs.Scan(startNanos, endNanos, func(row telemetry.Log) bool {
+			if row.TraceID != traceID || (scope.Namespace != "" && row.Namespace != scope.Namespace) {
+				return true
 			}
-			entry.Body = redactLogBody(entry.Body)
-			data.Logs = append(data.Logs, entry)
+			data.Logs = append(data.Logs, LogEntry{Time: time.Unix(0, row.EventUnixNanos).UTC(), Severity: row.Severity, Service: row.ServiceName, Body: redactLogBody(row.Body), TraceID: row.TraceID, SpanID: row.SpanID})
+			return len(data.Logs) < limit
+		})
+		unlock()
+		if readErr != nil {
+			return Result[TraceDetail]{}, fmt.Errorf("read trace logs: %w", readErr)
 		}
-		if err := rows.Err(); err != nil {
-			rows.Close()
-			return Result[TraceDetail]{}, fmt.Errorf("iterate trace logs: %w", err)
-		}
-		rows.Close()
+		sort.Slice(data.Logs, func(i, j int) bool { return data.Logs[i].Time.Before(data.Logs[j].Time) })
 	}
 
 	summary := "No traces found in this telemetry window"
 	if traceID != "" {
 		summary = fmt.Sprintf("Trace %s contains %d spans across %d services", traceID, len(data.Spans), len(data.Services))
 	}
-	return Result[TraceDetail]{Schema: TraceSchema, Summary: summary, Data: data, Provenance: s.provenanceFor(scope, "spans + logs")}, nil
+	return Result[TraceDetail]{Schema: TraceSchema, Summary: summary, Data: data, Provenance: s.provenanceFor(scope, "fanout_segments")}, nil
 }

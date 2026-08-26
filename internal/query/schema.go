@@ -10,8 +10,9 @@ func GetSchema(dataDir string) string {
 const schemaTemplate = `
 ## Fanout Data Schema
 
-Fanout stores telemetry in DuckLake tables attached under the lake catalog.
-The local metadata catalog, query cache, and product state live under {DATA_DIR}.
+Fanout stores telemetry in indexed hot segments and open Parquet files. DuckDB
+exposes the Parquet files through the read-only lake schema. The rebuildable
+query cache and product state live under {DATA_DIR}.
 
 Primary query surfaces:
 - spans view: clean span columns for most queries
@@ -22,7 +23,7 @@ Primary query surfaces:
 - endpoint_rollup table: minute endpoint counts, errors, and mergeable latency histograms
 
 ### 1. Spans
-Base table: lake.spans
+Parquet relation: lake.spans
 Preferred query surface: spans
 
 Important columns:

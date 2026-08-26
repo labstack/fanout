@@ -9,7 +9,19 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
+
+func newTestRepository(t *testing.T) *telemetrystore.Repository {
+	t.Helper()
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open telemetry repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	return repository
+}
 
 func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock) {
 	t.Helper()
@@ -18,7 +30,7 @@ func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock) {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	svc := New(db)
+	svc := New(db, newTestRepository(t))
 	svc.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
 	return svc, mock
 }
@@ -204,16 +216,15 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(recentTraceQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"trace_id"}).AddRow("trace-1"))
-	mock.ExpectQuery(regexp.QuoteMeta(traceSpansQuery)).
-		WithArgs(start, end, "prod", "prod", "trace-1", 20).
-		WillReturnRows(sqlmock.NewRows([]string{"span_id", "parent_span_id", "service", "operation", "kind", "start_time", "duration_ms", "status", "status_message"}).
-			AddRow("root", "", "checkout", "POST /pay", "SERVER", start, 200.0, "ERROR", "declined").
-			AddRow("child", "root", "payments", "charge", "CLIENT", start.Add(20*time.Millisecond), 80.0, "OK", ""))
-	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs(start, end, "prod", "prod", "trace-1", 20).
-		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(150*time.Millisecond), "ERROR", "checkout", "payment declined", "trace-1", "root").
-			AddRow(start.Add(160*time.Millisecond), "ERROR", "payments", `charge failed: token=abc123 {"client_secret":"cs_live_9"}`, "trace-1", "child"))
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-fixture", Spans: []telemetry.Span{
+		{Namespace: "prod", TraceID: "trace-1", SpanID: "root", ServiceName: "checkout", Name: "POST /pay", Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 200, StatusCode: "ERROR", StatusMsg: "declined"},
+		{Namespace: "prod", TraceID: "trace-1", SpanID: "child", ParentSpanID: "root", ServiceName: "payments", Name: "charge", Kind: "CLIENT", StartUnixNanos: start.Add(20 * time.Millisecond).UnixNano(), DurationMS: 80, StatusCode: "OK"},
+	}, Logs: []telemetry.Log{
+		{Namespace: "prod", TimeUnixNanos: start.Add(150 * time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "payment declined", TraceID: "trace-1", SpanID: "root"},
+		{Namespace: "prod", TimeUnixNanos: start.Add(160 * time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "payments", Body: `charge failed: token=abc123 {"client_secret":"cs_live_9"}`, TraceID: "trace-1", SpanID: "child"},
+	}}); err != nil {
+		t.Fatalf("commit trace fixture: %v", err)
+	}
 
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "checkout", 20)
 	if err != nil {
@@ -237,16 +248,13 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	mock.ExpectQuery(regexp.QuoteMeta(logsEntriesQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "%declined%", 10).
-		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root").
-			AddRow(start, "ERROR", "checkout", "card declined: token=abc123", "trace-2", "root2").
-			AddRow(start, "ERROR", "checkout", `auth declined: {"password":"hunter2"}`, "trace-3", "root3"))
-	mock.ExpectQuery(regexp.QuoteMeta(logsBucketsQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "%declined%").
-		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
-			AddRow(start, "ERROR", int64(3)))
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "logs-fixture", Logs: []telemetry.Log{
+		{Namespace: "prod", TimeUnixNanos: start.UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "payment declined", TraceID: "trace-1", SpanID: "root"},
+		{Namespace: "prod", TimeUnixNanos: start.Add(time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "card declined: token=abc123", TraceID: "trace-2", SpanID: "root2"},
+		{Namespace: "prod", TimeUnixNanos: start.Add(2 * time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: `auth declined: {"password":"hunter2"}`, TraceID: "trace-3", SpanID: "root3"},
+	}}); err != nil {
+		t.Fatalf("commit logs fixture: %v", err)
+	}
 
 	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", "error", "declined", 10)
 	if err != nil {
@@ -258,8 +266,8 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 	if want := "card declined: token=[REDACTED]"; result.Data.Entries[1].Body != want {
 		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[1].Body, want)
 	}
-	if want := `auth declined: {"password":"[REDACTED]"}`; result.Data.Entries[2].Body != want {
-		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[2].Body, want)
+	if want := `auth declined: {"password":"[REDACTED]"}`; result.Data.Entries[0].Body != want {
+		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[0].Body, want)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
