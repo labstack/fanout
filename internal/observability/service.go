@@ -1,6 +1,7 @@
 package observability
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,7 +10,7 @@ import (
 
 	appid "github.com/labstack/fanout/internal/id"
 	"github.com/labstack/fanout/internal/queryrows"
-	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 const (
@@ -26,16 +27,20 @@ var (
 
 type DB = queryrows.Queryer
 
+type traceReader interface {
+	Trace(context.Context, telemetry.TraceQuery) ([]telemetry.IndexedSpan, error)
+}
+
 type Service struct {
 	db             DB
-	repository     *telemetrystore.Repository
+	repository     traceReader
 	now            func() time.Time
 	endpointMature atomic.Bool
 }
 
-func New(db DB, repository *telemetrystore.Repository) *Service {
+func New(db DB, repository traceReader) *Service {
 	if db == nil || repository == nil {
-		panic("observability requires query engine and telemetry repository")
+		panic("observability requires query engine and indexed trace reader")
 	}
 	return &Service{db: db, repository: repository, now: time.Now}
 }

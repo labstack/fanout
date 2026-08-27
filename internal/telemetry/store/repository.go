@@ -21,8 +21,6 @@ type Batch struct {
 	Metrics []telemetry.Metric
 }
 
-const maxBatchRows = 50_000
-
 // Repository publishes self-contained Parquet batch directories. The
 // directory rename is the transaction and the filesystem is the catalog.
 type Repository struct {
@@ -94,8 +92,8 @@ func validateBatch(batch Batch) error {
 	if batch.ID == "" || strings.ContainsAny(batch.ID, `/\\`) {
 		return errors.New("telemetry batch requires a safe ID")
 	}
-	if rows := batchRows(batch); rows == 0 || rows > maxBatchRows {
-		return fmt.Errorf("telemetry batch has %d rows; maximum is %d", rows, maxBatchRows)
+	if rows := batchRows(batch); rows == 0 {
+		return errors.New("telemetry batch is empty")
 	}
 	return nil
 }

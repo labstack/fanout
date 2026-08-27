@@ -111,8 +111,7 @@ func main() {
 	}
 	defer repository.Close()
 
-	// DuckDB is the SQL engine over open Parquet; indexed trace reads use the same
-	// repository directly through the typed observability kernel.
+	// DuckDB is the query facade over open Parquet and its indexed trace sidecars.
 	q, err := query.NewDuck(ctx, cfg, repository)
 	if err != nil {
 		slog.Error("duckdb init failed", "err", err)
@@ -292,7 +291,7 @@ func main() {
 	// typed query kernel through deterministic HTTP or standard MCP tools.
 	// Route both HTTP and MCP reads through Duck's retrying adapter. Passing the
 	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
-	queries := observability.New(q, repository)
+	queries := observability.New(q, q)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
 	api.RegisterIntelligenceRoutes(e, detector)
 	dashboards := dashboard.New(sqlite.DB)

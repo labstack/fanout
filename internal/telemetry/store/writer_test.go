@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 type recordingCommitter struct {
@@ -51,7 +53,7 @@ func (c *blockingCommitter) Commit(Batch) error {
 
 func TestWriterAcknowledgesOnlyAfterAtomicCommit(t *testing.T) {
 	committer := &blockingCommitter{entered: make(chan struct{}), release: make(chan struct{})}
-	w := testWriter(committer, maxBatchRows)
+	w := testWriter(committer, maxGroupBatchRows)
 	ctx, cancel := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
 	go func() { runDone <- w.Run(ctx) }()
@@ -81,7 +83,7 @@ func TestWriterAcknowledgesOnlyAfterAtomicCommit(t *testing.T) {
 
 func TestWriterGroupsQueuedSubmissions(t *testing.T) {
 	committer := &recordingCommitter{}
-	w := testWriter(committer, maxBatchRows)
+	w := testWriter(committer, maxGroupBatchRows)
 	results := make(chan error, 4)
 	for i := range 4 {
 		go func() {
@@ -108,13 +110,13 @@ func TestWriterGroupsQueuedSubmissions(t *testing.T) {
 	}
 }
 
-func TestWriterSplitsOversizedSubmission(t *testing.T) {
+func TestWriterCommitsOversizedSubmissionAtomically(t *testing.T) {
 	committer := &recordingCommitter{}
-	w := testWriter(committer, maxBatchRows)
+	w := testWriter(committer, maxGroupBatchRows)
 	ctx, cancel := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
 	go func() { runDone <- w.Run(ctx) }()
-	if err := w.Submit(context.Background(), Batch{Spans: make([]telemetry.Span, maxBatchRows+1)}); err != nil {
+	if err := w.Submit(context.Background(), Batch{Spans: make([]telemetry.Span, maxGroupBatchRows+1)}); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
@@ -123,16 +125,14 @@ func TestWriterSplitsOversizedSubmission(t *testing.T) {
 	}
 	committer.mu.Lock()
 	defer committer.mu.Unlock()
-	if len(committer.batches) != 2 {
-		t.Fatalf("committed batches = %d, want 2", len(committer.batches))
+	if len(committer.batches) != 1 {
+		t.Fatalf("committed batches = %d, want one atomic request", len(committer.batches))
 	}
-	if batchRows(committer.batches[0])+batchRows(committer.batches[1]) != maxBatchRows+1 {
-		t.Fatal("split lost rows")
+	if batchRows(committer.batches[0]) != maxGroupBatchRows+1 {
+		t.Fatal("atomic oversized commit lost rows")
 	}
-	for _, batch := range committer.batches {
-		if batch.ID == "" || batchRows(batch) > maxBatchRows {
-			t.Fatalf("invalid chunk: id=%q rows=%d", batch.ID, batchRows(batch))
-		}
+	if committer.batches[0].ID == "" {
+		t.Fatal("oversized batch has no commit ID")
 	}
 }
 
@@ -157,7 +157,38 @@ func TestWriterRetriesTransientCommitFailure(t *testing.T) {
 	}
 }
 
+func TestWriterRecordsLiveQueueAndFlushMetrics(t *testing.T) {
+	metrics.FlushTotal.Reset()
+	metrics.IngestQueueDepth.Reset()
+	committer := &recordingCommitter{}
+	w := testWriter(committer, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(ctx) }()
+	batch := Batch{
+		Spans:   []telemetry.Span{{SpanID: "span"}},
+		Logs:    []telemetry.Log{{Body: "log"}},
+		Metrics: []telemetry.Metric{{Name: "metric"}},
+	}
+	if err := w.Submit(context.Background(), batch); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		if got := testutil.ToFloat64(metrics.FlushTotal.WithLabelValues(signal)); got != 1 {
+			t.Fatalf("flush total for %s = %v, want 1", signal, got)
+		}
+	}
+	if got := testutil.ToFloat64(metrics.IngestQueueDepth.WithLabelValues("batch")); got != 0 {
+		t.Fatalf("submission queue depth after shutdown = %v, want 0", got)
+	}
+}
+
 func TestWriterSurfacesPermanentFailureToSubmitAndRun(t *testing.T) {
+	metrics.RowsDropped.Reset()
 	committer := &recordingCommitter{failures: commitRetryLimit + 1}
 	w := testWriter(committer, 1)
 	w.retryDelay = func(int) time.Duration { return 0 }
@@ -173,6 +204,9 @@ func TestWriterSurfacesPermanentFailureToSubmitAndRun(t *testing.T) {
 	defer committer.mu.Unlock()
 	if committer.calls != commitRetryLimit || len(committer.batches) != 0 {
 		t.Fatalf("calls=%d committed=%d", committer.calls, len(committer.batches))
+	}
+	if got := testutil.ToFloat64(metrics.RowsDropped.WithLabelValues("spans")); got != 1 {
+		t.Fatalf("dropped span rows = %v, want 1", got)
 	}
 }
 

@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -19,7 +20,7 @@ const defaultWriterGrace = 30 * time.Second
 type parquetReadGate struct {
 	once        sync.Once
 	mu          sync.Mutex
-	changed     *sync.Cond
+	changed     chan struct{}
 	readers     int
 	writer      bool
 	waiting     []parquetWaiter
@@ -34,7 +35,12 @@ type parquetWaiter struct {
 }
 
 func (g *parquetReadGate) init() {
-	g.once.Do(func() { g.changed = sync.NewCond(&g.mu) })
+	g.once.Do(func() { g.changed = make(chan struct{}) })
+}
+
+func (g *parquetReadGate) notifyLocked() {
+	close(g.changed)
+	g.changed = make(chan struct{})
 }
 
 func (g *parquetReadGate) clock() time.Time {
@@ -76,13 +82,27 @@ func (g *parquetReadGate) TryRLock() bool {
 }
 
 func (g *parquetReadGate) RLock() {
+	if err := g.RLockContext(context.Background()); err != nil {
+		panic(err)
+	}
+}
+
+func (g *parquetReadGate) RLockContext(ctx context.Context) error {
 	g.init()
 	g.mu.Lock()
 	for !g.admitsReaderLocked() {
-		g.changed.Wait()
+		changed := g.changed
+		g.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
+		}
+		g.mu.Lock()
 	}
 	g.readers++
 	g.mu.Unlock()
+	return nil
 }
 
 func (g *parquetReadGate) RUnlock() {
@@ -94,7 +114,7 @@ func (g *parquetReadGate) RUnlock() {
 		panic("query: parquetReadGate RUnlock without RLock")
 	}
 	if g.readers == 0 {
-		g.changed.Broadcast()
+		g.notifyLocked()
 	}
 	g.mu.Unlock()
 }
@@ -107,9 +127,12 @@ func (g *parquetReadGate) Lock() {
 	g.waiting = append(g.waiting, waiter)
 	// Wake any readers parked on an earlier publisher so they re-evaluate this
 	// publisher's grace, and so the grace clock starts for readers immediately.
-	g.changed.Broadcast()
+	g.notifyLocked()
 	for g.writer || g.readers > 0 {
-		g.changed.Wait()
+		changed := g.changed
+		g.mu.Unlock()
+		<-changed
+		g.mu.Lock()
 	}
 	for i, queued := range g.waiting {
 		if queued.id == waiter.id {
@@ -129,7 +152,7 @@ func (g *parquetReadGate) Unlock() {
 		panic("query: parquetReadGate Unlock without Lock")
 	}
 	g.writer = false
-	g.changed.Broadcast()
+	g.notifyLocked()
 	g.mu.Unlock()
 }
 

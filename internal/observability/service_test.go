@@ -217,7 +217,7 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(recentTraceQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"trace_id"}).AddRow("trace-1"))
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-fixture", Spans: []telemetry.Span{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "trace-fixture", Spans: []telemetry.Span{
 		{Namespace: "prod", TraceID: "trace-1", SpanID: "root", ServiceName: "checkout", Name: "POST /pay", Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 200, StatusCode: "ERROR", StatusMsg: "declined"},
 		{Namespace: "prod", TraceID: "trace-1", SpanID: "child", ParentSpanID: "root", ServiceName: "payments", Name: "charge", Kind: "CLIENT", StartUnixNanos: start.Add(20 * time.Millisecond).UnixNano(), DurationMS: 80, StatusCode: "OK"},
 	}, Logs: []telemetry.Log{
@@ -254,7 +254,7 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "logs-fixture", Logs: []telemetry.Log{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "logs-fixture", Logs: []telemetry.Log{
 		{Namespace: "prod", TimeUnixNanos: start.UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "payment declined", TraceID: "trace-1", SpanID: "root"},
 		{Namespace: "prod", TimeUnixNanos: start.Add(time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "card declined: token=abc123", TraceID: "trace-2", SpanID: "root2"},
 		{Namespace: "prod", TimeUnixNanos: start.Add(2 * time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: `auth declined: {"password":"hunter2"}`, TraceID: "trace-3", SpanID: "root3"},
@@ -298,7 +298,7 @@ func TestLogsRetainsOnlyNewestLimit(t *testing.T) {
 	for i := range logs {
 		logs[i] = telemetry.Log{Namespace: "prod", TimeUnixNanos: start.Add(time.Duration(i) * time.Millisecond).UnixNano(), Severity: "INFO", Body: "entry"}
 	}
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "bounded-logs", Logs: logs}); err != nil {
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "bounded-logs", Logs: logs}); err != nil {
 		t.Fatal(err)
 	}
 	entryRows := sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"})
@@ -324,7 +324,7 @@ func TestLogsAlwaysUseAuthoritativeParquet(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "parquet-logs", Logs: []telemetry.Log{{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "parquet-logs", Logs: []telemetry.Log{{
 		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
 		ServiceName: "checkout", Body: "token=secret", TraceID: "trace-parquet",
 	}}}); err != nil {
@@ -354,13 +354,13 @@ func TestLogsQueryParquetAcrossBatches(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Second)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "overlap-newer", Logs: []telemetry.Log{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "overlap-newer", Logs: []telemetry.Log{
 		{Namespace: "prod", TimeUnixNanos: start.Add(150 * time.Millisecond).UnixNano(), Body: "newer-old", Severity: "INFO"},
 		{Namespace: "prod", TimeUnixNanos: start.Add(300 * time.Millisecond).UnixNano(), Body: "newer-batch", Severity: "INFO"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "overlap-late", Logs: []telemetry.Log{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "overlap-late", Logs: []telemetry.Log{
 		{Namespace: "prod", TimeUnixNanos: start.Add(100 * time.Millisecond).UnixNano(), Body: "late-old", Severity: "INFO"},
 		{Namespace: "prod", TimeUnixNanos: start.Add(200 * time.Millisecond).UnixNano(), Body: "late-boundary", Severity: "INFO"},
 	}}); err != nil {
@@ -402,7 +402,7 @@ func TestTraceLogsUseFullScopeEventTimeAcrossBatches(t *testing.T) {
 		{ID: "trace-outside-span", Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(2 * time.Minute).UnixNano(), Body: "unrelated later event"}}},
 	}
 	for _, batch := range batches {
-		if err := svc.repository.Commit(batch); err != nil {
+		if err := svc.repository.(*telemetrystore.Repository).Commit(batch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -426,7 +426,7 @@ func TestTraceUsesIndexedParquet(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "indexed-trace", Spans: []telemetry.Span{{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "indexed-trace", Spans: []telemetry.Span{{
 		Namespace: "prod", TraceID: "parquet-trace", SpanID: "root", ServiceName: "checkout", Name: "pay",
 		Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 25, StatusCode: "ERROR", StatusMsg: "declined",
 	}}}); err != nil {
@@ -455,13 +455,13 @@ func TestTraceCombinesIndexedSpansAcrossBatches(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-old-root", Spans: []telemetry.Span{{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "trace-old-root", Spans: []telemetry.Span{{
 		Namespace: "prod", TraceID: "split-trace", SpanID: "root", ServiceName: "frontend",
 		StartUnixNanos: start.Add(10 * time.Minute).UnixNano(), DurationMS: 100, StatusCode: "ERROR",
 	}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-newer-child", Spans: []telemetry.Span{{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "trace-newer-child", Spans: []telemetry.Span{{
 		Namespace: "prod", TraceID: "split-trace", SpanID: "child", ParentSpanID: "root", ServiceName: "backend",
 		StartUnixNanos: start.Add(50 * time.Minute).UnixNano(), DurationMS: 25, StatusCode: "OK",
 	}}}); err != nil {
@@ -487,7 +487,7 @@ func TestTraceReadsRecentRootFromParquetIndex(t *testing.T) {
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	cutoff := start.Add(30 * time.Minute)
 	end := start.Add(time.Hour)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-after-rebuild", Spans: []telemetry.Span{{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "trace-after-rebuild", Spans: []telemetry.Span{{
 		Namespace: "prod", TraceID: "new-trace", SpanID: "root", ServiceName: "frontend",
 		StartUnixNanos: cutoff.Add(time.Minute).UnixNano(), DurationMS: 10, StatusCode: "OK",
 	}}}); err != nil {
@@ -513,7 +513,7 @@ func TestTraceFiltersIndexedSpansByNamespace(t *testing.T) {
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	cutoff := start.Add(30 * time.Minute)
 	end := start.Add(time.Hour)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-cross-namespace", Spans: []telemetry.Span{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "trace-cross-namespace", Spans: []telemetry.Span{
 		{Namespace: "prod", TraceID: "shared-trace", SpanID: "child", ParentSpanID: "old-root", StartUnixNanos: cutoff.Add(time.Minute).UnixNano()},
 		{Namespace: "staging", TraceID: "shared-trace", SpanID: "root", StartUnixNanos: cutoff.Add(2 * time.Minute).UnixNano()},
 	}}); err != nil {
@@ -540,7 +540,7 @@ func TestLogsBoundsParquetQueryWithLimitAndAggregatedBuckets(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "bounded-parquet", Logs: []telemetry.Log{{
+	if err := svc.repository.(*telemetrystore.Repository).Commit(telemetrystore.Batch{ID: "bounded-parquet", Logs: []telemetry.Log{{
 		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
 		ServiceName: "checkout", Body: "hello", TraceID: "trace-parquet",
 	}}}); err != nil {

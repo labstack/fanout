@@ -291,9 +291,13 @@ func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSp
 	}
 	hash := xxh3.HashString(query.TraceID)
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-	selected := make(indexedSpanHeap, 0, query.Limit)
+	batches := make([]*storedBatch, 0, len(p.batches))
 	for _, batch := range p.batches {
+		batches = append(batches, batch)
+	}
+	p.mu.RUnlock()
+	selected := make(indexedSpanHeap, 0, query.Limit)
+	for _, batch := range batches {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -431,11 +435,15 @@ func (p *ParquetStore) PruneBefore(cutoff int64) (int, error) {
 
 func (p *ParquetStore) Stats() (map[string]ParquetStats, error) {
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-	stats := map[string]ParquetStats{"spans": {}, "logs": {}, "metrics": {}}
+	dirs := make([]string, 0, len(p.batches))
 	for _, batch := range p.batches {
+		dirs = append(dirs, batch.dir)
+	}
+	p.mu.RUnlock()
+	stats := map[string]ParquetStats{"spans": {}, "logs": {}, "metrics": {}}
+	for _, dir := range dirs {
 		for signal := range stats {
-			info, err := os.Stat(filepath.Join(batch.dir, signal+".parquet"))
+			info, err := os.Stat(filepath.Join(dir, signal+".parquet"))
 			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}

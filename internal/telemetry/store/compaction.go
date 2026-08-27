@@ -2,15 +2,12 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/labstack/fanout/internal/telemetry"
@@ -30,10 +27,17 @@ type compactionKey struct {
 	generation uint32
 }
 
+// ParquetCompactor keeps DuckDB execution and publication locking in the query
+// layer while storage owns batch selection and crash-safe replacement state.
+type ParquetCompactor interface {
+	MergeParquet(context.Context, string, []string, string) error
+	PublishParquet(func() error) error
+}
+
 // CompactParquet combines one same-day, same-generation group. The output is
 // prepared outside the query gate and swapped as one batch directory.
-func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches int, publishLock sync.Locker) (int, error) {
-	if db == nil || maxBatches < minCompactionInputs {
+func (r *Repository) CompactParquet(ctx context.Context, compactor ParquetCompactor, maxBatches int) (int, error) {
+	if compactor == nil || maxBatches < minCompactionInputs {
 		return 0, nil
 	}
 	r.compactionMu.Lock()
@@ -42,7 +46,9 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 	if exists, err := pathExists(markerPath); err != nil {
 		return 0, err
 	} else if exists {
-		return 0, errors.New("pending Parquet compaction must recover before another can start")
+		if err := compactor.PublishParquet(r.recoverCompaction); err != nil {
+			return 0, fmt.Errorf("recover pending Parquet compaction: %w", err)
+		}
 	}
 	selected := selectCompactionBatches(r.Parquet.BatchMetadata(), maxBatches)
 	if len(selected) < minCompactionInputs {
@@ -84,7 +90,7 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 		for _, batch := range selected {
 			path := filepath.Join(r.Parquet.BatchPath(batch.ID), signal+".parquet")
 			if _, err := os.Stat(path); err == nil {
-				inputs = append(inputs, sqlQuote(path))
+				inputs = append(inputs, path)
 			} else if !errors.Is(err, os.ErrNotExist) {
 				return 0, err
 			}
@@ -93,12 +99,7 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 			continue
 		}
 		outputPath := filepath.Join(stage, signal+".parquet")
-		query := fmt.Sprintf("SELECT * FROM read_parquet([%s], union_by_name=true)", strings.Join(inputs, ","))
-		if signal == "spans" {
-			query += " ORDER BY _trace_hash, start_unix_nano, span_id"
-		}
-		stmt := fmt.Sprintf("COPY (%s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 1, ROW_GROUP_SIZE 122880)", query, sqlQuote(outputPath))
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
+		if err := compactor.MergeParquet(ctx, signal, inputs, outputPath); err != nil {
 			return 0, fmt.Errorf("compact %s Parquet: %w", signal, err)
 		}
 		if err := syncFile(outputPath); err != nil {
@@ -119,11 +120,7 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 		return 0, err
 	}
 	prepared = true
-	if publishLock != nil {
-		publishLock.Lock()
-		defer publishLock.Unlock()
-	}
-	if err := r.completeCompaction(marker); err != nil {
+	if err := compactor.PublishParquet(func() error { return r.completeCompaction(marker) }); err != nil {
 		return 0, err
 	}
 	return len(selected), nil
@@ -161,10 +158,10 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) 
 	return selected
 }
 
-func (r *Repository) CompactParquetBacklog(ctx context.Context, db *sql.DB, maxBatches int, publishLock sync.Locker) (int, error) {
+func (r *Repository) CompactParquetBacklog(ctx context.Context, compactor ParquetCompactor, maxBatches int) (int, error) {
 	total := 0
 	for {
-		count, err := r.CompactParquet(ctx, db, maxBatches, publishLock)
+		count, err := r.CompactParquet(ctx, compactor, maxBatches)
 		total += count
 		if err != nil || count == 0 {
 			return total, err
@@ -253,5 +250,3 @@ func writeDurableFile(path string, data []byte) error {
 	}
 	return os.Rename(tmp, path)
 }
-
-func sqlQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }

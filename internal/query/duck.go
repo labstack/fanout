@@ -19,6 +19,7 @@ import (
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/query/writegate"
 	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
@@ -445,16 +446,18 @@ func (d *Duck) runMaintenanceLoop(ctx context.Context) {
 
 func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	start := time.Now()
+	unlockMaintenance := d.writeGate.Lock(writegate.WriteMaintenance)
 	var pruneErr error
 	if d.repository != nil {
 		var parquetErr error
 		if d.cfg.RetentionDays > 0 {
-			d.parquetMu.Lock()
-			_, parquetErr = d.repository.PruneParquet(time.Now().Add(-time.Duration(d.cfg.RetentionDays) * 24 * time.Hour).UnixNano())
-			d.parquetMu.Unlock()
+			parquetErr = d.PublishParquet(func() error {
+				_, err := d.repository.PruneParquet(time.Now().Add(-time.Duration(d.cfg.RetentionDays) * 24 * time.Hour).UnixNano())
+				return err
+			})
 		}
 		compactStart := time.Now()
-		compacted, compactErr := d.repository.CompactParquetBacklog(ctx, d.DB, 64, &d.parquetMu)
+		compacted, compactErr := d.repository.CompactParquetBacklog(ctx, d, 64)
 		compactResult := metrics.TelemetryNoop
 		if compactErr != nil {
 			compactResult = metrics.TelemetryError
@@ -465,7 +468,6 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		pruneErr = errors.Join(pruneErr, parquetErr, compactErr)
 	}
 	var cacheErr error
-	unlockMaintenance := d.writeGate.Lock(writegate.WriteMaintenance)
 	if d.cfg.RetentionDays > 0 {
 		for _, table := range []string{"service_rollup", "endpoint_rollup", "edge_rollup"} {
 			if _, err := d.DB.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY", table, d.cfg.RetentionDays)); err != nil {
@@ -510,16 +512,15 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 			updateRollupProgress(metrics.RollupService, true, watermark, sourceMax)
 		}
 	}()
-	if err := d.lockParquetRead(ctx); err != nil {
-		return 0, err
-	}
-	defer d.parquetMu.RUnlock()
-
-	// Serialize against other writers (edge rollup, maintenance, ingest flushes).
+	// Serialize against other DuckDB writers (edge rollup and maintenance).
 	// The write gate is always acquired before a connection to keep lock ordering
 	// consistent and deadlock-free.
 	unlock := d.writeGate.Lock(writegate.WriteRollupService)
 	defer unlock()
+	if err := d.lockParquetRead(ctx); err != nil {
+		return 0, err
+	}
+	defer d.parquetMu.RUnlock()
 
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -635,13 +636,12 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 			updateRollupProgress(metrics.RollupEndpoint, true, watermark, sourceMax)
 		}
 	}()
+	unlock := d.writeGate.Lock(writegate.WriteRollupEndpoint)
+	defer unlock()
 	if err := d.lockParquetRead(ctx); err != nil {
 		return 0, err
 	}
 	defer d.parquetMu.RUnlock()
-
-	unlock := d.writeGate.Lock(writegate.WriteRollupEndpoint)
-	defer unlock()
 
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -759,13 +759,12 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 			updateRollupProgress(metrics.RollupEdge, true, watermark, sourceMax)
 		}
 	}()
+	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
+	defer unlock()
 	if err := d.lockParquetRead(ctx); err != nil {
 		return 0, err
 	}
 	defer d.parquetMu.RUnlock()
-
-	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
-	defer unlock()
 
 	tx, err := d.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -1416,24 +1415,43 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 	return d.DB.QueryRowContext(ctx, query, args...).Scan(dest...)
 }
 
-func (d *Duck) lockParquetRead(ctx context.Context) error {
-	for {
-		if d.parquetMu.TryRLock() {
-			return nil
-		}
-		timer := time.NewTimer(time.Millisecond)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return ctx.Err()
-		case <-timer.C:
-		}
+// Trace pins the immutable Parquet snapshot for the full indexed-file read.
+func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemetry.IndexedSpan, error) {
+	if err := d.lockParquetRead(ctx); err != nil {
+		return nil, err
 	}
+	defer d.parquetMu.RUnlock()
+	return d.repository.Trace(ctx, query)
+}
+
+// MergeParquet executes the query-engine-specific half of compaction. The
+// maintenance caller already holds writeGate, so this cannot contend with a
+// rollup transaction while it uses the shared DuckDB pool.
+func (d *Duck) MergeParquet(ctx context.Context, signal string, inputs []string, output string) error {
+	quoted := make([]string, len(inputs))
+	for i, input := range inputs {
+		quoted[i] = quoteDuckString(input)
+	}
+	query := fmt.Sprintf("SELECT * FROM read_parquet([%s], union_by_name=true)", strings.Join(quoted, ","))
+	if signal == "spans" {
+		query += " ORDER BY _trace_hash, start_unix_nano, span_id"
+	}
+	stmt := fmt.Sprintf("COPY (%s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 1, ROW_GROUP_SIZE 122880)", query, quoteDuckString(output))
+	_, err := d.DB.ExecContext(ctx, stmt)
+	return err
+}
+
+// PublishParquet limits reader exclusion to the atomic directory swap.
+func (d *Duck) PublishParquet(publish func() error) error {
+	d.parquetMu.Lock()
+	defer d.parquetMu.Unlock()
+	return publish()
+}
+
+func quoteDuckString(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
+
+func (d *Duck) lockParquetRead(ctx context.Context) error {
+	return d.parquetMu.RLockContext(ctx)
 }
 
 // ---- Queries for API ----

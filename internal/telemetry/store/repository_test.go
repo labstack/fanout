@@ -4,14 +4,43 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/telemetry"
 )
+
+type testParquetCompactor struct {
+	db         *sql.DB
+	publishErr error
+}
+
+func (c *testParquetCompactor) MergeParquet(ctx context.Context, signal string, inputs []string, output string) error {
+	quoted := make([]string, len(inputs))
+	for i, input := range inputs {
+		quoted[i] = sqlQuote(input)
+	}
+	query := fmt.Sprintf("SELECT * FROM read_parquet([%s], union_by_name=true)", strings.Join(quoted, ","))
+	if signal == "spans" {
+		query += " ORDER BY _trace_hash, start_unix_nano, span_id"
+	}
+	_, err := c.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD)", query, sqlQuote(output)))
+	return err
+}
+
+func (c *testParquetCompactor) PublishParquet(publish func() error) error {
+	if c.publishErr != nil {
+		return c.publishErr
+	}
+	return publish()
+}
+
+func sqlQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
 
 func testBatch() Batch {
 	return Batch{
@@ -68,6 +97,28 @@ func TestRepositoryCommitIsIdempotentDurableAndQueryable(t *testing.T) {
 		if count != 1 {
 			t.Fatalf("%s rows = %d, want 1", signal, count)
 		}
+	}
+}
+
+func TestRepositoryCommitsOversizedRequestAsOneBatch(t *testing.T) {
+	repository, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	spans := make([]telemetry.Span, maxGroupBatchRows+1)
+	for i := range spans {
+		spans[i] = telemetry.Span{
+			TraceID: "trace", SpanID: fmt.Sprintf("span-%d", i),
+			StartUnixNanos: int64(i + 1), EndUnixNanos: int64(i + 2), IngestedAt: 1,
+		}
+	}
+	if err := repository.Commit(Batch{ID: "oversized", Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	metadata := repository.Parquet.BatchMetadata()
+	if len(metadata) != 1 || metadata[0].Spans != len(spans) {
+		t.Fatalf("oversized batch metadata = %#v", metadata)
 	}
 }
 
@@ -195,7 +246,7 @@ func TestRepositoryCompactsParquetWithoutChangingRows(t *testing.T) {
 	}
 	db := openTestDuckDB(t)
 	defer db.Close()
-	compacted, err := repository.CompactParquet(context.Background(), db, 64, nil)
+	compacted, err := repository.CompactParquet(context.Background(), &testParquetCompactor{db: db}, 64)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,6 +275,42 @@ func TestRepositoryCompactsParquetWithoutChangingRows(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); !os.IsNotExist(err) {
 		t.Fatalf("completed compaction marker remains: %v", err)
+	}
+}
+
+func TestRepositoryRecoversPendingCompactionWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	for i := range minCompactionInputs {
+		batch := testBatch()
+		batch.ID = fmt.Sprintf("pending-%d", i)
+		batch.Spans[0].SpanID = fmt.Sprintf("span-%d", i)
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db := openTestDuckDB(t)
+	defer db.Close()
+	compactor := &testParquetCompactor{db: db, publishErr: errors.New("publication unavailable")}
+	if _, err := repository.CompactParquet(context.Background(), compactor, 64); err == nil {
+		t.Fatal("compaction succeeded despite publication failure")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {
+		t.Fatalf("pending marker: %v", err)
+	}
+	compactor.publishErr = nil
+	if compacted, err := repository.CompactParquet(context.Background(), compactor, 64); err != nil || compacted != 0 {
+		t.Fatalf("resume compaction = %d, %v", compacted, err)
+	}
+	if got := repository.Parquet.BatchMetadata(); len(got) != 1 || got[0].Generation != 1 {
+		t.Fatalf("recovered metadata = %#v", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); !os.IsNotExist(err) {
+		t.Fatalf("recovered compaction marker remains: %v", err)
 	}
 }
 

@@ -50,17 +50,12 @@ var (
 
 	IngestQueueDepth = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "fanout_ingest_queue_depth",
-		Help: "Current queue depth per signal",
+		Help: "Current ingest submission queue depth",
 	}, []string{"signal"})
 
 	FlushTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_flush_total",
 		Help: "Total flush operations",
-	}, []string{"signal"})
-
-	FlushBytes = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_flush_bytes_total",
-		Help: "Total bytes flushed",
 	}, []string{"signal"})
 
 	FlushDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
@@ -223,9 +218,8 @@ func RecordIngest(signal string, count int) {
 }
 
 // RecordFlush records a flush event
-func RecordFlush(signal string, bytes int64, durationSec float64) {
+func RecordFlush(signal string, durationSec float64) {
 	FlushTotal.WithLabelValues(signal).Inc()
-	FlushBytes.WithLabelValues(signal).Add(float64(bytes))
 	FlushDuration.WithLabelValues(signal).Observe(durationSec)
 }
 

@@ -190,10 +190,9 @@ func (h *HealthHandler) checkTelemetry() CheckResult {
 	defer cancel()
 
 	var one int
-	// Readiness must not queue behind routine Parquet publication. Maintenance
-	// health is reported separately; this probe only verifies that DuckDB and the
-	// telemetry view can plan and execute.
-	err := h.duck.DB.QueryRowContext(ctx, "SELECT 1 FROM telemetry.spans LIMIT 1").Scan(&one)
+	// Use the same snapshot gate as public reads so a short compaction/retention
+	// publication cannot race the Parquet scan and report a false outage.
+	err := h.duck.QueryRowScan(ctx, []any{&one}, "SELECT 1 FROM telemetry.spans LIMIT 1")
 	if err != nil && err != sql.ErrNoRows {
 		return CheckResult{
 			Status:    "unhealthy",

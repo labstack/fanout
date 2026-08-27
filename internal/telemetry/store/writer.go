@@ -16,6 +16,7 @@ import (
 const (
 	commitQueueDepth     = 256
 	commitRetryLimit     = 3
+	maxGroupBatchRows    = 50_000
 	maxCommitWorkers     = 4
 	submissionQueueDepth = 256
 	writerShutdownGrace  = 30 * time.Second
@@ -59,6 +60,7 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 	request := submission{batch: batch, ack: make(chan error, 1)}
 	select {
 	case w.submissions <- request:
+		metrics.UpdateQueueDepth("batch", len(w.submissions))
 	case <-w.done:
 		return errors.New("telemetry writer is stopped")
 	case <-ctx.Done():
@@ -76,6 +78,7 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 
 func (w *Writer) Run(ctx context.Context) error {
 	defer close(w.done)
+	defer metrics.UpdateQueueDepth("batch", 0)
 	jobs := make(chan commitJob, commitQueueDepth)
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
@@ -119,6 +122,7 @@ func (w *Writer) Run(ctx context.Context) error {
 	for {
 		select {
 		case request := <-w.submissions:
+			metrics.UpdateQueueDepth("batch", len(w.submissions))
 			if err := w.enqueueSubmissions(request, jobs, fatal); err != nil {
 				return errors.Join(err, finish(false))
 			}
@@ -143,24 +147,15 @@ func (w *Writer) enqueueSubmissions(request submission, out chan<- commitJob, fa
 	}
 
 drained:
+	metrics.UpdateQueueDepth("batch", len(w.submissions))
 	limit := w.batchLimit()
 	for len(requests) > 0 {
 		firstRows := batchRows(requests[0].batch)
-		if firstRows > limit {
-			oversized := requests[0]
-			requests = requests[1:]
-			chunks := splitBatch(oversized.batch, limit)
-			for i := range chunks {
-				chunks[i].ID = uuid.NewString()
-			}
-			if err := enqueueJob(out, fatal, commitJob{batches: chunks, acks: []chan error{oversized.ack}}); err != nil {
-				return err
-			}
-			continue
-		}
 		// A full batch, a lone request, or a request that cannot share the
-		// next batch needs no row copy through the group-commit buffer.
-		if firstRows == limit || len(requests) == 1 || firstRows+batchRows(requests[1].batch) > limit {
+		// next batch needs no row copy through the group-commit buffer. One
+		// oversized request remains one atomic directory; the limit is a
+		// group-commit target, not a durability boundary.
+		if firstRows >= limit || len(requests) == 1 || firstRows+batchRows(requests[1].batch) > limit {
 			direct := requests[0]
 			requests = requests[1:]
 			direct.batch.ID = uuid.NewString()
@@ -242,6 +237,7 @@ func (w *Writer) commitWorker(ctx context.Context, jobs <-chan commitJob, fatal 
 
 func (w *Writer) commitJob(ctx context.Context, job commitJob) error {
 	for _, batch := range job.batches {
+		started := time.Now()
 		var lastErr error
 		for attempt := 0; attempt < commitRetryLimit; attempt++ {
 			if err := w.repository.Commit(batch); err == nil {
@@ -271,8 +267,10 @@ func (w *Writer) commitJob(ctx context.Context, job commitJob) error {
 		}
 		if lastErr != nil {
 			metrics.FlushErrors.WithLabelValues("failed").Inc()
+			recordDroppedRows(batch)
 			return fmt.Errorf("commit telemetry batch %s after %d attempts: %w", batch.ID, commitRetryLimit, lastErr)
 		}
+		recordFlushes(batch, time.Since(started).Seconds())
 	}
 	return nil
 }
@@ -282,32 +280,29 @@ func batchRows(batch Batch) int {
 }
 
 func (w *Writer) batchLimit() int {
-	limit := min(w.batchSize, maxBatchRows)
+	limit := min(w.batchSize, maxGroupBatchRows)
 	if limit <= 0 {
-		return maxBatchRows
+		return maxGroupBatchRows
 	}
 	return limit
 }
 
-func splitBatch(batch Batch, limit int) []Batch {
-	chunks := make([]Batch, 0, (batchRows(batch)+limit-1)/limit)
-	for batchRows(batch) > 0 {
-		chunk := Batch{}
-		remaining := limit
-		if count := min(remaining, len(batch.Spans)); count > 0 {
-			chunk.Spans, batch.Spans = batch.Spans[:count], batch.Spans[count:]
-			remaining -= count
-		}
-		if count := min(remaining, len(batch.Logs)); count > 0 {
-			chunk.Logs, batch.Logs = batch.Logs[:count], batch.Logs[count:]
-			remaining -= count
-		}
-		if count := min(remaining, len(batch.Metrics)); count > 0 {
-			chunk.Metrics, batch.Metrics = batch.Metrics[:count], batch.Metrics[count:]
-		}
-		chunks = append(chunks, chunk)
+func recordFlushes(batch Batch, durationSec float64) {
+	if len(batch.Spans) > 0 {
+		metrics.RecordFlush("spans", durationSec)
 	}
-	return chunks
+	if len(batch.Logs) > 0 {
+		metrics.RecordFlush("logs", durationSec)
+	}
+	if len(batch.Metrics) > 0 {
+		metrics.RecordFlush("metrics", durationSec)
+	}
+}
+
+func recordDroppedRows(batch Batch) {
+	metrics.RowsDropped.WithLabelValues("spans").Add(float64(len(batch.Spans)))
+	metrics.RowsDropped.WithLabelValues("logs").Add(float64(len(batch.Logs)))
+	metrics.RowsDropped.WithLabelValues("metrics").Add(float64(len(batch.Metrics)))
 }
 
 func defaultCommitRetryDelay(attempt int) time.Duration {

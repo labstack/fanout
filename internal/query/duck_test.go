@@ -343,14 +343,40 @@ func TestRollupReadLockHonorsContext(t *testing.T) {
 	}
 }
 
+func TestIndexedTraceReadHonorsParquetGateContext(t *testing.T) {
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	d := &Duck{repository: repository}
+	d.parquetMu.Lock()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, err = d.Trace(ctx, telemetry.TraceQuery{TraceID: "trace", StartNanos: 1, EndNanos: 2, Limit: 1})
+	d.parquetMu.Unlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Trace error = %v, want deadline exceeded", err)
+	}
+}
+
 func TestRepositoryMaintenanceSerializesDuckDBWrites(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM endpoint_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM edge_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
-	d := &Duck{DB: db, cfg: config.Config{MaintenanceInterval: time.Nanosecond}}
+	d := &Duck{DB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
+	d.parquetMu.RLock()
 	release := d.writeGate.Lock(writegate.WriteRollupService)
 	done := make(chan error, 1)
 	go func() { done <- d.runRepositoryMaintenance(context.Background()) }()
@@ -360,6 +386,12 @@ func TestRepositoryMaintenanceSerializesDuckDBWrites(t *testing.T) {
 		t.Fatalf("maintenance bypassed write gate: %v", err)
 	case <-time.After(25 * time.Millisecond):
 	}
+	if waiting := d.parquetMu.WaitingWriters(); waiting != 0 {
+		d.parquetMu.RUnlock()
+		release()
+		t.Fatalf("maintenance queued Parquet publication before owning DuckDB write gate: %d", waiting)
+	}
+	d.parquetMu.RUnlock()
 	release()
 	if err := <-done; err != nil {
 		t.Fatal(err)

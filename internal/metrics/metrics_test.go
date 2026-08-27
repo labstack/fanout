@@ -31,21 +31,14 @@ func TestRecordIngest(t *testing.T) {
 func TestRecordFlush(t *testing.T) {
 	// Reset metrics
 	FlushTotal.Reset()
-	FlushBytes.Reset()
 
-	RecordFlush("spans", 1024, 0.5)
-	RecordFlush("spans", 2048, 0.3)
+	RecordFlush("spans", 0.5)
+	RecordFlush("spans", 0.3)
 
 	// Check counter incremented
 	flushCount := testutil.ToFloat64(FlushTotal.WithLabelValues("spans"))
 	if flushCount != 2 {
 		t.Errorf("FlushTotal[spans] = %f, want 2", flushCount)
-	}
-
-	// Check bytes accumulated
-	bytesCount := testutil.ToFloat64(FlushBytes.WithLabelValues("spans"))
-	if bytesCount != 3072 {
-		t.Errorf("FlushBytes[spans] = %f, want 3072", bytesCount)
 	}
 }
 
