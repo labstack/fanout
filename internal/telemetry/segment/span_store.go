@@ -26,9 +26,21 @@ import (
 	"github.com/zeebo/xxh3"
 )
 
+// segmentDecoderMaxMemory bounds what one decompressed segment section may
+// claim. A block holds at most rowsPerBlock rows and a section is decoded whole,
+// so this is far above any sound file while refusing a corrupt or crafted frame
+// long before zstd's 64 GiB default would.
+const segmentDecoderMaxMemory = 512 << 20
+
+// newSegmentDecoder builds a decoder bounded to segmentDecoderMaxMemory. Every
+// segment read goes through it, so no on-disk frame can size an allocation.
+func newSegmentDecoder() (*zstd.Decoder, error) {
+	return zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(segmentDecoderMaxMemory))
+}
+
 const (
-	segmentMagic   = "FANSEG02"
-	segmentVersion = uint32(2)
+	segmentMagic   = "FANSEG03"
+	segmentVersion = uint32(3)
 	headerSize     = 64
 	blockDirSize   = 32
 	traceEntrySize = 16
@@ -122,7 +134,7 @@ func Open(dir string) (*Store, error) {
 	}
 	s := &Store{dir: dir, encoder: enc}
 	s.decoders.New = func() any {
-		dec, decErr := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+		dec, decErr := newSegmentDecoder()
 		if decErr != nil {
 			panic(decErr)
 		}
@@ -891,8 +903,8 @@ func validateSegmentBlocks(size, dirOffset uint64, blocks []blockDir, rows uint3
 		if block.length == 0 || uint64(block.length) > dirOffset-block.offset {
 			return errors.New("block extends past the block directory")
 		}
-		if block.rows == 0 {
-			return errors.New("block holds no rows")
+		if block.rows == 0 || block.rows > rowsPerBlock {
+			return errors.New("block row count is out of range")
 		}
 		counted += uint64(block.rows)
 	}
@@ -962,7 +974,7 @@ func openSegment(path string) (segment, error) {
 	if _, err := f.ReadAt(indexCompressed, int64(indexOffset)); err != nil {
 		return segment{}, err
 	}
-	dec, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+	dec, err := newSegmentDecoder()
 	if err != nil {
 		return segment{}, err
 	}
@@ -1033,13 +1045,13 @@ func writeRollup(w io.Writer, r rollup) error {
 	if _, err := w.Write(fixed[:]); err != nil {
 		return fmt.Errorf("write rollup: %w", err)
 	}
+	// Key parts are varint-framed like every other string in the format: a
+	// pathological route must never make a batch unpublishable, because the WAL
+	// would then abort every restart with no way to make progress.
 	for _, value := range []string{r.key.namespace, r.key.service, r.key.method, r.key.route} {
-		if len(value) > math.MaxUint16 {
-			return errors.New("rollup key exceeds 65535 bytes")
-		}
-		var length [2]byte
-		binary.LittleEndian.PutUint16(length[:], uint16(len(value)))
-		if _, err := w.Write(length[:]); err != nil {
+		var length [binary.MaxVarintLen64]byte
+		n := binary.PutUvarint(length[:], uint64(len(value)))
+		if _, err := w.Write(length[:n]); err != nil {
 			return err
 		}
 		if _, err := io.WriteString(w, value); err != nil {
@@ -1059,11 +1071,14 @@ func readRollup(r *bufio.Reader) (rollup, error) {
 		out.bins[i] = binary.LittleEndian.Uint32(fixed[32+i*4:])
 	}
 	for _, target := range []*string{&out.key.namespace, &out.key.service, &out.key.method, &out.key.route} {
-		var length [2]byte
-		if _, err := io.ReadFull(r, length[:]); err != nil {
+		length, err := binary.ReadUvarint(r)
+		if err != nil {
 			return rollup{}, err
 		}
-		value := make([]byte, binary.LittleEndian.Uint16(length[:]))
+		if length > segmentDecoderMaxMemory {
+			return rollup{}, errors.New("rollup key length is out of range")
+		}
+		value := make([]byte, length)
 		if _, err := io.ReadFull(r, value); err != nil {
 			return rollup{}, err
 		}

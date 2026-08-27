@@ -346,6 +346,17 @@ func (r *Repository) writeWAL(batch Batch) error {
 	return syncDirectory(r.walDir)
 }
 
+// walDecoderMaxMemory bounds one decompressed WAL batch. Flush batches are
+// bounded by the writer's batch size, so this sits far above any batch the
+// writer produces while refusing a corrupt or crafted frame long before zstd's
+// 64 GiB default would.
+const walDecoderMaxMemory = 1 << 30
+
+// newWALDecoder builds the bounded decoder every WAL read goes through.
+func newWALDecoder() (*zstd.Decoder, error) {
+	return zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(walDecoderMaxMemory))
+}
+
 func (r *Repository) recover() error {
 	entries, err := os.ReadDir(r.walDir)
 	if err != nil {
@@ -358,7 +369,7 @@ func (r *Repository) recover() error {
 		}
 	}
 	sort.Strings(names)
-	dec, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+	dec, err := newWALDecoder()
 	if err != nil {
 		return err
 	}

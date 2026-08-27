@@ -3,6 +3,7 @@ package segment
 
 import (
 	"encoding/binary"
+	"github.com/klauspost/compress/zstd"
 	"os"
 	"path/filepath"
 	"strings"
@@ -326,5 +327,57 @@ func TestOpenRejectsSegmentWithCorruptBlockEntry(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "block extends past the block directory") {
 		t.Fatalf("Open error = %v, want the block-extent guard to reject it", err)
+	}
+}
+
+func TestStoreAcceptsSpanWithOversizedRollupKey(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC).UnixNano()
+	// A pathological route must not be a deterministic publish failure: the WAL
+	// would then abort every restart with no way to make progress.
+	route := "/" + strings.Repeat("x", 70000)
+	rows := []Span{{Namespace: "default", TraceID: "t", SpanID: "1", ServiceName: "api", HTTPMethod: "GET", HTTPRoute: route, StartUnixNanos: base, EndUnixNanos: base + 1, DurationMS: 1, StatusCode: "OK"}}
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendID("seg-big-key", rows); err != nil {
+		t.Fatalf("AppendID error = %v, want an oversized rollup key to be publishable", err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open error = %v, want the segment to round-trip", err)
+	}
+	defer reopened.Close()
+	endpoints := reopened.Endpoints("default", "api", base, base+int64(time.Minute), 10)
+	if len(endpoints) != 1 || endpoints[0].Route != route {
+		t.Fatalf("endpoints = %d entries, want the full route preserved", len(endpoints))
+	}
+}
+
+func TestValidateSegmentBlocksRejectsRowsPastBlockCap(t *testing.T) {
+	blocks := []blockDir{{offset: headerSize, length: 16, rows: rowsPerBlock + 1}}
+	if err := validateSegmentBlocks(4096, 2048, blocks, rowsPerBlock+1); err == nil {
+		t.Fatal("validateSegmentBlocks accepted a block claiming more rows than a block can hold")
+	}
+}
+
+func TestSegmentDecoderRejectsOversizedFrame(t *testing.T) {
+	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer encoder.Close()
+	frame := encoder.EncodeAll(make([]byte, segmentDecoderMaxMemory+(1<<20)), nil)
+	decoder, err := newSegmentDecoder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+	if _, err := decoder.DecodeAll(frame, nil); err == nil {
+		t.Fatal("segment decoder accepted a frame declaring more memory than the product ever needs")
 	}
 }

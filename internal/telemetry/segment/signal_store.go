@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	signalMagic      = "FANSIG03"
-	signalVersion    = uint32(3)
+	signalMagic      = "FANSIG04"
+	signalVersion    = uint32(4)
 	signalHeaderSize = 64
 	signalBlockSize  = 32
 	signalBlockRows  = 2048
@@ -95,7 +95,7 @@ func OpenSignalStore[T any](dir, timeField string) (*SignalStore[T], error) {
 	}
 	s := &SignalStore[T]{dir: dir, timeField: field.Index[0], codec: codec, encoder: enc, openFile: func(path string) (signalFile, error) { return os.Open(path) }}
 	s.decoders.New = func() any {
-		dec, decErr := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+		dec, decErr := newSegmentDecoder()
 		if decErr != nil {
 			panic(decErr)
 		}

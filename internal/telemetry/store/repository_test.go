@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/klauspost/compress/zstd"
 	"os"
 	"path/filepath"
 	"slices"
@@ -656,5 +657,22 @@ func TestStageRejectsBatchTheSegmentStoresCannotAccept(t *testing.T) {
 	batch.ID = "poison batch"
 	if err := repository.Stage(batch); err == nil {
 		t.Fatal("Stage accepted a batch ID no projection can ever publish")
+	}
+}
+
+func TestWALDecoderRejectsOversizedFrame(t *testing.T) {
+	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer encoder.Close()
+	frame := encoder.EncodeAll(make([]byte, walDecoderMaxMemory+(1<<20)), nil)
+	decoder, err := newWALDecoder()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer decoder.Close()
+	if _, err := decoder.DecodeAll(frame, nil); err == nil {
+		t.Fatal("WAL decoder accepted a frame declaring more memory than any batch needs")
 	}
 }
