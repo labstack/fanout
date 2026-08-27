@@ -271,17 +271,6 @@ func (r *Repository) Stage(batch Batch) error {
 	return r.writeWAL(batch)
 }
 
-// Discard removes a durably staged batch after the writer has explicitly
-// classified it as poison and accounted every row as dropped.
-func (r *Repository) Discard(id string) error {
-	if id == "" || strings.ContainsAny(id, `/\\`) {
-		return errors.New("telemetry batch requires a safe ID")
-	}
-	r.commitMu.Lock()
-	defer r.commitMu.Unlock()
-	return r.removeWAL(id)
-}
-
 func (r *Repository) apply(batch Batch) error {
 	if err := r.Spans.AppendID(batch.ID, batch.Spans); err != nil {
 		return fmt.Errorf("commit span segment: %w", err)
@@ -386,11 +375,20 @@ func (r *Repository) recover() error {
 			}
 			continue
 		}
+		// A batch that cannot be applied would otherwise abort every boot. Move
+		// it aside so the instance starts; if quarantine itself fails the
+		// environment is broken, and failing loudly is then the right answer.
 		if err := r.apply(batch); err != nil {
-			return fmt.Errorf("replay %s: %w", name, err)
+			if quarantineErr := quarantineWAL(r.walDir, name, err); quarantineErr != nil {
+				return errors.Join(fmt.Errorf("replay %s: %w", name, err), quarantineErr)
+			}
+			continue
 		}
 		if err := r.recordBatch(batch); err != nil {
-			return fmt.Errorf("record replayed %s: %w", name, err)
+			if quarantineErr := quarantineWAL(r.walDir, name, err); quarantineErr != nil {
+				return errors.Join(fmt.Errorf("record replayed %s: %w", name, err), quarantineErr)
+			}
+			continue
 		}
 		if err := os.Remove(filepath.Join(r.walDir, name)); err != nil {
 			return err

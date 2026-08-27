@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"time"
 
@@ -13,6 +12,7 @@ import (
 
 const (
 	flushQueueDepth     = 4
+	carryBatches        = 3
 	commitRetryLimit    = 8
 	writerShutdownGrace = 5 * time.Second
 )
@@ -20,7 +20,6 @@ const (
 type batchCommitter interface {
 	Stage(Batch) error
 	Commit(Batch) error
-	Discard(string) error
 }
 
 type Writer struct {
@@ -56,7 +55,7 @@ func (w *Writer) Run(ctx context.Context) error {
 	spans, logs, metricRows := w.spans, w.logs, w.metricRows
 	finish := func() error {
 		w.drain(&spans, &logs, &metricRows)
-		if err := w.flush(flushes, workerDone); err != nil {
+		if err := w.flushBuffered(flushes, workerDone, true); err != nil {
 			return err
 		}
 		close(flushes)
@@ -115,22 +114,29 @@ func (w *Writer) Run(ctx context.Context) error {
 }
 
 func (w *Writer) flush(out chan<- Batch, workerDone <-chan error) error {
+	return w.flushBuffered(out, workerDone, false)
+}
+
+// flushBuffered publishes the buffered rows. Until a batch is staged in the
+// WAL no durable copy exists, so a failed staging attempt keeps the rows
+// buffered for the next tick rather than discarding them — bounded by
+// carryBatches so a long storage outage cannot grow the buffer without limit.
+// The final flush has no next tick, so there the rows are accounted as dropped.
+func (w *Writer) flushBuffered(out chan<- Batch, workerDone <-chan error, final bool) error {
 	if len(w.bufSpans)+len(w.bufLogs)+len(w.bufMetrics) == 0 {
 		return nil
 	}
 	batch := Batch{ID: uuid.NewString(), Spans: append([]telemetry.Span(nil), w.bufSpans...), Logs: append([]telemetry.Log(nil), w.bufLogs...), Metrics: append([]telemetry.Metric(nil), w.bufMetrics...)}
-	// Establish durability before the asynchronous handoff. From this point on,
-	// cancellation may stop retries or leave batches queued, but every row is
-	// replayable from WAL on the next start. When the WAL itself is unwritable
-	// no durability exists to protect; drop this batch with visible accounting
-	// and keep the process serving rather than shutting everything down.
 	if err := w.repository.Stage(batch); err != nil {
 		metrics.FlushErrors.WithLabelValues("stage").Inc()
-		recordDroppedBatch(batch)
-		slog.Error("telemetry batch could not be staged durably; dropping", "batch_id", batch.ID, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", err)
-		w.bufSpans = w.bufSpans[:0]
-		w.bufLogs = w.bufLogs[:0]
-		w.bufMetrics = w.bufMetrics[:0]
+		if final {
+			recordDroppedBatch(batch)
+			slog.Error("telemetry batch could not be staged durably during shutdown; dropping", "batch_id", batch.ID, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", err)
+			w.resetBuffers()
+			return nil
+		}
+		slog.Warn("telemetry batch could not be staged durably; retrying on the next flush", "batch_id", batch.ID, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", err)
+		w.trimCarry()
 		return nil
 	}
 	select {
@@ -197,20 +203,58 @@ func (w *Writer) flushWorker(ctx context.Context, in <-chan Batch, done chan<- e
 			}
 		}
 		if !committed {
-			if err := w.repository.Discard(batch.ID); err != nil {
-				done <- fmt.Errorf("discard poison telemetry batch %s: %w", batch.ID, err)
-				return
-			}
-			recordDroppedBatch(batch)
-			slog.Error("telemetry batch permanently failed; dropping after bounded retries", "batch_id", batch.ID, "attempts", commitRetryLimit, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", lastErr)
+			// The batch stays in the WAL. Its projections may be partly published,
+			// and only replay can finish the transaction and register the batch in
+			// the manifest, so deleting the WAL here would both lose the rows and
+			// strand any parquet file the failed attempt already wrote.
+			metrics.FlushErrors.WithLabelValues("deferred").Inc()
+			slog.Error("telemetry batch commit failed after bounded retries; deferring to WAL replay on next start", "batch_id", batch.ID, "attempts", commitRetryLimit, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", lastErr)
 		}
 	}
 }
 
+func (w *Writer) resetBuffers() {
+	w.bufSpans = w.bufSpans[:0]
+	w.bufLogs = w.bufLogs[:0]
+	w.bufMetrics = w.bufMetrics[:0]
+}
+
+// trimCarry bounds the rows held for a later staging attempt. Once the carry
+// exceeds carryBatches worth of rows the oldest are dropped with accounting,
+// so an unwritable WAL degrades to visible loss instead of unbounded memory.
+func (w *Writer) trimCarry() {
+	limit := w.batchSize * carryBatches
+	if limit <= 0 {
+		return
+	}
+	spans, logs, metricRows := 0, 0, 0
+	if overflow := len(w.bufSpans) - limit; overflow > 0 {
+		spans = overflow
+		w.bufSpans = append(w.bufSpans[:0], w.bufSpans[overflow:]...)
+	}
+	if overflow := len(w.bufLogs) - limit; overflow > 0 {
+		logs = overflow
+		w.bufLogs = append(w.bufLogs[:0], w.bufLogs[overflow:]...)
+	}
+	if overflow := len(w.bufMetrics) - limit; overflow > 0 {
+		metricRows = overflow
+		w.bufMetrics = append(w.bufMetrics[:0], w.bufMetrics[overflow:]...)
+	}
+	if spans+logs+metricRows == 0 {
+		return
+	}
+	recordDropped(spans, logs, metricRows)
+	slog.Error("telemetry carry buffer is full; dropping the oldest rows", "spans", spans, "logs", logs, "metrics", metricRows)
+}
+
 func recordDroppedBatch(batch Batch) {
-	metrics.RowsDropped.WithLabelValues("spans").Add(float64(len(batch.Spans)))
-	metrics.RowsDropped.WithLabelValues("logs").Add(float64(len(batch.Logs)))
-	metrics.RowsDropped.WithLabelValues("metrics").Add(float64(len(batch.Metrics)))
+	recordDropped(len(batch.Spans), len(batch.Logs), len(batch.Metrics))
+}
+
+func recordDropped(spans, logs, metricRows int) {
+	metrics.RowsDropped.WithLabelValues("spans").Add(float64(spans))
+	metrics.RowsDropped.WithLabelValues("logs").Add(float64(logs))
+	metrics.RowsDropped.WithLabelValues("metrics").Add(float64(metricRows))
 }
 
 func defaultCommitRetryDelay(attempt int) time.Duration {

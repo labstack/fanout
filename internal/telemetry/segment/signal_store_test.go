@@ -66,3 +66,19 @@ func stringID(i int) string {
 	const digits = "0123456789abcdef"
 	return "batch-" + string([]byte{digits[(i>>4)&15], digits[i&15]})
 }
+
+func TestValidateSignalDirectoryRejectsOutOfBoundsCount(t *testing.T) {
+	const size = 4096
+	if err := validateSignalDirectory(size, signalHeaderSize, 0xFFFFFFFF); err == nil {
+		t.Fatal("validateSignalDirectory accepted a block count larger than the file")
+	}
+	if err := validateSignalDirectory(size, ^uint64(0)-1024, 64); err == nil {
+		t.Fatal("validateSignalDirectory accepted a wrapping directory offset")
+	}
+	if err := validateSignalDirectory(size, 0, 1); err == nil {
+		t.Fatal("validateSignalDirectory accepted a directory inside the header")
+	}
+	if err := validateSignalDirectory(size, signalHeaderSize, 8); err != nil {
+		t.Fatalf("validateSignalDirectory rejected a sound header: %v", err)
+	}
+}

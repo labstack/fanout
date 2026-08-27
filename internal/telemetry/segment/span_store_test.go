@@ -209,3 +209,59 @@ func TestOpenRejectsSegmentWithCorruptSectionOffsets(t *testing.T) {
 		})
 	})
 }
+
+func TestEndpointsCountCanonicalOTelErrorStatus(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC).UnixNano()
+	rows := []Span{
+		{Namespace: "default", TraceID: "t1", SpanID: "1", ServiceName: "api", HTTPMethod: "GET", HTTPRoute: "/x", StartUnixNanos: base, EndUnixNanos: base + 1, DurationMS: 1, StatusCode: "STATUS_CODE_ERROR"},
+		{Namespace: "default", TraceID: "t2", SpanID: "2", ServiceName: "api", HTTPMethod: "GET", HTTPRoute: "/x", StartUnixNanos: base + 1, EndUnixNanos: base + 2, DurationMS: 1, StatusCode: "STATUS_CODE_OK"},
+	}
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.AppendID("seg-status", rows); err != nil {
+		t.Fatal(err)
+	}
+	endpoints := store.Endpoints("default", "api", base, base+int64(time.Minute), 10)
+	if len(endpoints) != 1 {
+		t.Fatalf("endpoints = %#v, want one route", endpoints)
+	}
+	if endpoints[0].Errors != 1 {
+		t.Fatalf("Errors = %d, want 1: OTLP ingest stores Status.Code.String() as STATUS_CODE_ERROR", endpoints[0].Errors)
+	}
+	agg, err := store.ScanService("default", "api", base, base+int64(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agg.Errors != 1 {
+		t.Fatalf("aggregate Errors = %d, want 1", agg.Errors)
+	}
+}
+
+func TestValidateSegmentSectionsRejectsOutOfBoundsDirectory(t *testing.T) {
+	const size = 4096
+	tests := []struct {
+		name                                 string
+		dirOffset, indexOffset, rollupOffset uint64
+		blockCount                           uint32
+	}{
+		{"wrapping directory end", ^uint64(0) - uint64(0xFFFFFFFF)*blockDirSize + 1, 512, 1024, 0xFFFFFFFF},
+		{"block count past index", headerSize, 512, 1024, 0xFFFFFFFF},
+		{"directory before header", 0, 512, 1024, 1},
+		{"sections out of order", headerSize, 2048, 1024, 1},
+		{"rollups past end of file", headerSize, 512, size + 1, 1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateSegmentSections(size, test.dirOffset, test.indexOffset, test.rollupOffset, test.blockCount); err == nil {
+				t.Fatal("validateSegmentSections accepted a corrupt header")
+			}
+		})
+	}
+	if err := validateSegmentSections(size, headerSize, 512, 1024, 8); err != nil {
+		t.Fatalf("validateSegmentSections rejected a sound header: %v", err)
+	}
+}

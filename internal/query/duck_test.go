@@ -228,13 +228,7 @@ func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
 		close(writerDone)
 	}()
 	deadline := time.Now().Add(time.Second)
-	for {
-		d.parquetMu.mu.Lock()
-		waiting := d.parquetMu.waitingWriters
-		d.parquetMu.mu.Unlock()
-		if waiting > 0 {
-			break
-		}
+	for d.parquetMu.WaitingWriters() == 0 {
 		if time.Now().After(deadline) {
 			d.parquetMu.RUnlock()
 			t.Fatal("maintenance writer did not begin waiting")

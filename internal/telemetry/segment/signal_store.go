@@ -405,6 +405,18 @@ func (s *SignalStore[T]) PruneBefore(cutoff int64) (int, error) {
 	return len(removed), errors.Join(removeErr, syncDir(s.dir))
 }
 
+// validateSignalDirectory bounds the block directory against the file size,
+// so a torn header cannot size an allocation the file could never hold.
+func validateSignalDirectory(size, dirOffset uint64, blockCount uint32) error {
+	if dirOffset < signalHeaderSize || dirOffset > size {
+		return errors.New("corrupt directory offset")
+	}
+	if uint64(blockCount) > (size-dirOffset)/signalBlockSize {
+		return errors.New("directory does not fit in the segment")
+	}
+	return nil
+}
+
 func openSignalSegment(path string) (signalSegment, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -424,13 +436,18 @@ func openSignalSegment(path string) (signalSegment, error) {
 		min: int64(binary.LittleEndian.Uint64(header[24:32])), max: int64(binary.LittleEndian.Uint64(header[32:40])),
 		fingerprint: binary.LittleEndian.Uint64(header[48:56]),
 	}
-	count := int(binary.LittleEndian.Uint32(header[16:20]))
-	dirOffset := int64(binary.LittleEndian.Uint64(header[40:48]))
-	if count < 0 || dirOffset < signalHeaderSize {
-		return signalSegment{}, errors.New("invalid signal directory")
+	blockCount := binary.LittleEndian.Uint32(header[16:20])
+	dirOffset := binary.LittleEndian.Uint64(header[40:48])
+	info, err := f.Stat()
+	if err != nil {
+		return signalSegment{}, err
 	}
+	if err := validateSignalDirectory(uint64(info.Size()), dirOffset, blockCount); err != nil {
+		return signalSegment{}, fmt.Errorf("signal segment %s: %w", filepath.Base(path), err)
+	}
+	count := int(blockCount)
 	directory := make([]byte, count*signalBlockSize)
-	if _, err := f.ReadAt(directory, dirOffset); err != nil {
+	if _, err := f.ReadAt(directory, int64(dirOffset)); err != nil {
 		return signalSegment{}, err
 	}
 	for i := range count {

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,8 +28,6 @@ func (c *recoveringCommitter) Stage(batch Batch) error {
 	c.staged = append(c.staged, batch)
 	return nil
 }
-
-func (c *recoveringCommitter) Discard(string) error { return nil }
 
 func (c *recoveringCommitter) Commit(batch Batch) error {
 	c.mu.Lock()
@@ -81,8 +82,6 @@ func (c *durableFailCommitter) Stage(batch Batch) error {
 	c.staged <- struct{}{}
 	return nil
 }
-
-func (c *durableFailCommitter) Discard(id string) error { return c.repository.Discard(id) }
 
 func (c *durableFailCommitter) Commit(Batch) error {
 	c.once.Do(func() { close(c.attempted) })
@@ -215,8 +214,6 @@ func (c *stageFailCommitter) Stage(Batch) error {
 	return errors.New("wal device unavailable")
 }
 
-func (c *stageFailCommitter) Discard(string) error { return nil }
-
 func (c *stageFailCommitter) Commit(Batch) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -246,5 +243,169 @@ func TestWriterSurvivesStageFailure(t *testing.T) {
 	}
 	if committer.commits != 0 {
 		t.Fatalf("Commit calls = %d, want 0 for an unstaged batch", committer.commits)
+	}
+}
+
+type ioFailCommitter struct {
+	repository *Repository
+	mu         sync.Mutex
+	attempts   int
+}
+
+func (c *ioFailCommitter) Stage(batch Batch) error { return c.repository.Stage(batch) }
+
+func (c *ioFailCommitter) Commit(Batch) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.attempts++
+	return errors.New("storage unavailable")
+}
+
+func TestWriterKeepsWALWhenCommitRetriesAreExhausted(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spans := make(chan telemetry.Span, 1)
+	logs := make(chan telemetry.Log)
+	metricRows := make(chan telemetry.Metric)
+	spans <- telemetry.Span{TraceID: "trace", SpanID: "span", StartUnixNanos: 100, IngestedAt: 100}
+	close(spans)
+	close(logs)
+	close(metricRows)
+	committer := &ioFailCommitter{repository: repository}
+	w := &Writer{
+		repository: committer, interval: time.Hour, batchSize: 1,
+		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
+		retryDelay: func(int) time.Duration { return 0 },
+	}
+	if err := w.Run(context.Background()); err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "wal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept := 0
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".wal") {
+			kept++
+		}
+	}
+	if kept != 1 {
+		t.Fatalf("retained WAL files = %d, want 1: an I/O failure must leave the batch replayable, not delete its only durable copy", kept)
+	}
+}
+
+func TestRecoverQuarantinesBatchThatCannotApply(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := testBatch()
+	if err := repository.Stage(batch); err != nil {
+		t.Fatal(err)
+	}
+	// Make the hot span directory unusable so replay's apply always fails.
+	spanDir := filepath.Join(dir, "hot", "spans")
+	if err := os.RemoveAll(spanDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(spanDir, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(dir); err == nil {
+		t.Fatal("Open succeeded with an unusable hot span directory")
+	}
+	if err := os.Remove(spanDir); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open error = %v: a batch that cannot apply must be quarantined, not crash-loop every boot", err)
+	}
+	defer reopened.Close()
+}
+
+type transientStageCommitter struct {
+	repository *Repository
+	mu         sync.Mutex
+	failures   int
+	stages     int
+	committed  []Batch
+}
+
+func (c *transientStageCommitter) Stage(batch Batch) error {
+	c.mu.Lock()
+	c.stages++
+	fail := c.stages <= c.failures
+	c.mu.Unlock()
+	if fail {
+		return errors.New("wal device busy")
+	}
+	return c.repository.Stage(batch)
+}
+
+func (c *transientStageCommitter) Commit(batch Batch) error {
+	if err := c.repository.Commit(batch); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.committed = append(c.committed, batch)
+	return nil
+}
+
+func TestWriterCarriesRowsForwardAcrossTransientStageFailure(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	spans := make(chan telemetry.Span, 2)
+	logs := make(chan telemetry.Log)
+	metricRows := make(chan telemetry.Metric)
+	spans <- telemetry.Span{TraceID: "trace", SpanID: "a", StartUnixNanos: 100, IngestedAt: 100}
+	committer := &transientStageCommitter{repository: repository, failures: 1}
+	w := &Writer{
+		repository: committer, interval: 5 * time.Millisecond, batchSize: 1,
+		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
+		retryDelay: func(int) time.Duration { return 0 },
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	finished := make(chan error, 1)
+	go func() { finished <- w.Run(ctx) }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		committer.mu.Lock()
+		done := len(committer.committed)
+		committer.mu.Unlock()
+		if done > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-finished
+			t.Fatal("rows were not retried after a transient Stage failure; they were dropped instead of carried forward")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	close(spans)
+	close(logs)
+	close(metricRows)
+	cancel()
+	<-finished
+	committer.mu.Lock()
+	defer committer.mu.Unlock()
+	total := 0
+	for _, batch := range committer.committed {
+		total += len(batch.Spans)
+	}
+	if total != 1 {
+		t.Fatalf("committed spans = %d, want the single carried-forward row", total)
 	}
 }

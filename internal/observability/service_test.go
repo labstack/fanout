@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
@@ -306,10 +307,14 @@ func TestLogsFallsBackToParquetOutsideHotRetention(t *testing.T) {
 	if _, err := svc.repository.PruneHot(end.Add(time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(coldLogsQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "").
+	mock.ExpectQuery(regexp.QuoteMeta(coldLogEntriesQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start.Add(time.Minute), "ERROR", "checkout", "token=[REDACTED]", "trace-cold", ""))
+	mock.ExpectQuery(regexp.QuoteMeta(coldLogBucketsQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
+			AddRow(start, "ERROR", int64(1)))
 	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", "error", "", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -342,12 +347,16 @@ func TestLogsUsesDurablePruneBoundaryWithOverlappingSegments(t *testing.T) {
 	if _, err := svc.repository.PruneHot(cutoff.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(coldLogsQuery)).
-		WithArgs(start, cutoff, "prod", "prod", "", "", "", "", "", "").
+	mock.ExpectQuery(regexp.QuoteMeta(coldLogEntriesQuery)).
+		WithArgs(start, cutoff, "prod", "prod", "", "", "", "", "", "", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start.Add(100*time.Millisecond), "INFO", "", "late-old", "", "").
 			AddRow(start.Add(150*time.Millisecond), "INFO", "", "newer-old", "", "").
 			AddRow(start.Add(200*time.Millisecond), "INFO", "", "late-boundary", "", ""))
+	mock.ExpectQuery(regexp.QuoteMeta(coldLogBucketsQuery)).
+		WithArgs(start, cutoff, "prod", "prod", "", "", "", "", "", "").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
+			AddRow(start, "INFO", int64(3)))
 	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "", "", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -451,3 +460,48 @@ func TestTraceUsesParquetWhenTraceStraddlesHotBoundary(t *testing.T) {
 }
 
 var _ DB = queryrows.SQLAdapter{}
+
+func TestLogsBoundsColdQueryWithLimitAndAggregatedBuckets(t *testing.T) {
+	svc, mock := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "bounded-cold", Logs: []telemetry.Log{{
+		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
+		ServiceName: "checkout", Body: "hello", TraceID: "trace-cold",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.repository.PruneHot(end.Add(time.Hour).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	// The sample query must carry the row limit so a wide window cannot stream
+	// the whole cold tier through the driver.
+	mock.ExpectQuery(regexp.QuoteMeta(coldLogEntriesQuery)).
+		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "", 2).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(3*time.Minute), "ERROR", "checkout", "newest", "trace-c", "").
+			AddRow(start.Add(2*time.Minute), "INFO", "checkout", "older", "trace-b", ""))
+	// Histogram counts come back aggregated, so a million matching rows cost
+	// one row per bucket rather than a million transfers.
+	mock.ExpectQuery(regexp.QuoteMeta(coldLogBucketsQuery)).
+		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
+			AddRow(start, "ERROR", int64(900000)).
+			AddRow(start.Add(5*time.Minute), "INFO", int64(100000)))
+	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Entries) != 2 || result.Data.Entries[0].Body != "newest" {
+		t.Fatalf("entries = %#v, want the two newest sampled rows", result.Data.Entries)
+	}
+	if len(result.Data.Buckets) != 2 {
+		t.Fatalf("buckets = %#v, want one row per aggregated bucket", result.Data.Buckets)
+	}
+	if !strings.Contains(result.Summary, "1000000") {
+		t.Fatalf("summary = %q, want the aggregated match count", result.Summary)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

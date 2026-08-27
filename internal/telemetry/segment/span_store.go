@@ -423,7 +423,7 @@ func (s *Store) writeSegment(path string, rows []Span) (segment, error) {
 				rollups[key] = r
 			}
 			r.calls++
-			if row.StatusCode == "ERROR" {
+			if isErrorStatus(row.StatusCode) {
 				r.errors++
 			}
 			r.duration += row.DurationMS
@@ -748,7 +748,7 @@ func (s *Store) ScanService(namespace, service string, start, end int64) (Aggreg
 	defer s.mu.RUnlock()
 	var out Aggregate
 	wanted := []int{colNamespace, colServiceName, colStartUnixNanos, colDurationMS, colStatusCode}
-	namespaceNeedle, serviceNeedle, errorNeedle := []byte(namespace), []byte(service), []byte("ERROR")
+	namespaceNeedle, serviceNeedle := []byte(namespace), []byte(service)
 	for i := range s.segments {
 		seg := s.segments[i]
 		if seg.max < start || seg.min >= end {
@@ -810,7 +810,7 @@ func (s *Store) ScanService(namespace, service string, start, end int64) (Aggreg
 				}
 				out.Calls++
 				out.DurationMS += float64At(columns[colDurationMS], row)
-				if bytes.Equal(statusValue, errorNeedle) {
+				if isErrorStatus(string(statusValue)) {
 					out.Errors++
 				}
 			}
@@ -854,6 +854,43 @@ func (s *Store) readColumns(f *os.File, block blockDir, wanted []int) (map[int][
 	return columns, err
 }
 
+// isErrorStatus matches both status spellings the lake carries: OTLP ingest
+// stores Status.Code.String() ("STATUS_CODE_ERROR"), while other producers and
+// older rows use the bare code. The DuckDB rollups compare against the same
+// pair.
+func isErrorStatus(status string) bool {
+	return strings.EqualFold(status, "ERROR") || strings.EqualFold(status, "STATUS_CODE_ERROR")
+}
+
+// validateSegmentSections bounds every header offset against the file before
+// any of them is used to size an allocation. All comparisons are written as
+// subtractions against size so a corrupt offset near the top of the address
+// space cannot wrap past the check.
+func validateSegmentSections(size, dirOffset, indexOffset, rollupOffset uint64, blockCount uint32) error {
+	if err := validateDirectory(size, dirOffset, blockCount, blockDirSize); err != nil {
+		return err
+	}
+	if indexOffset < dirOffset+uint64(blockCount)*blockDirSize || indexOffset > size {
+		return errors.New("corrupt trace index offset")
+	}
+	if rollupOffset < indexOffset || rollupOffset > size {
+		return errors.New("corrupt rollup offset")
+	}
+	return nil
+}
+
+// validateDirectory reports whether count fixed-size entries fit in the file
+// when placed at offset.
+func validateDirectory(size, offset uint64, count uint32, entrySize uint64) error {
+	if offset < headerSize || offset > size {
+		return errors.New("corrupt directory offset")
+	}
+	if uint64(count) > (size-offset)/entrySize {
+		return errors.New("directory does not fit in the segment")
+	}
+	return nil
+}
+
 func openSegment(path string) (segment, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -880,12 +917,8 @@ func openSegment(path string) (segment, error) {
 	if err != nil {
 		return segment{}, err
 	}
-	// Header offsets come from disk; a torn or bit-rotted segment must fail
-	// with an error naming the file, never drive a negative or huge make().
-	size := uint64(info.Size())
-	dirEnd := dirOffset + uint64(blockCount)*blockDirSize
-	if dirOffset < headerSize || dirEnd > indexOffset || indexOffset > rollupOffset || rollupOffset > size {
-		return segment{}, fmt.Errorf("segment %s has corrupt section offsets", filepath.Base(path))
+	if err := validateSegmentSections(uint64(info.Size()), dirOffset, indexOffset, rollupOffset, blockCount); err != nil {
+		return segment{}, fmt.Errorf("segment %s: %w", filepath.Base(path), err)
 	}
 	seg.blocks = make([]blockDir, blockCount)
 	buf := make([]byte, int(blockCount)*blockDirSize)

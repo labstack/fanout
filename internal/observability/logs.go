@@ -59,16 +59,32 @@ func retainEarliest(entries *earliestLogHeap, entry LogEntry, limit int) {
 	}
 }
 
-var coldLogsQuery = `
-SELECT time, severity, coalesce(service, ''), ` + redactLogBodySQL("body") + `,
-       coalesce(trace_id, ''), coalesce(span_id, '')
-FROM logs
+var coldLogFilters = `
 WHERE time >= ? AND time < ?
   AND (? = '' OR namespace = ?)
   AND (? = '' OR service = ?)
   AND (? = '' OR lower(severity) = lower(?))
-  AND (? = '' OR contains(lower(` + redactLogBodySQL("body") + `), lower(?)))
-ORDER BY time ASC`
+  AND (? = '' OR contains(lower(` + redactLogBodySQL("body") + `), lower(?)))`
+
+// The cold tier answers the two questions the API actually asks: the newest
+// `limit` entries, and per-bucket counts. Both stay bounded in DuckDB — the
+// entry sample by LIMIT, the histogram by GROUP BY — so a wide window costs a
+// page of rows instead of the whole retained window streamed through the
+// driver.
+var coldLogEntriesQuery = `
+SELECT time, severity, coalesce(service, ''), ` + redactLogBodySQL("body") + `,
+       coalesce(trace_id, ''), coalesce(span_id, '')
+FROM logs` + coldLogFilters + `
+ORDER BY time DESC
+LIMIT ?`
+
+var coldLogBucketsQuery = `
+SELECT time_bucket(INTERVAL '5 minutes', time) AS point_time,
+       coalesce(nullif(upper(severity), ''), 'UNSPECIFIED') AS bucket_severity,
+       CAST(count(*) AS BIGINT)
+FROM logs` + coldLogFilters + `
+GROUP BY point_time, bucket_severity
+ORDER BY point_time ASC, bucket_severity ASC`
 
 func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, search string, limit int) (Result[Logs], error) {
 	scope, err := s.normalizeScope(scope)
@@ -124,9 +140,9 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 	hotStart := max(hotCutoff, startNanos)
 	usedCold := coldEnd > startNanos
 	if usedCold {
-		rows, queryErr := s.db.QueryContext(ctx, coldLogsQuery,
-			scope.Start, time.Unix(0, coldEnd).UTC(),
-			scope.Namespace, scope.Namespace, service, service, severity, severity, search, search)
+		coldStop := time.Unix(0, coldEnd).UTC()
+		filters := []any{scope.Start, coldStop, scope.Namespace, scope.Namespace, service, service, severity, severity, search, search}
+		rows, queryErr := s.db.QueryContext(ctx, coldLogEntriesQuery, append(append([]any{}, filters...), limit)...)
 		if queryErr != nil {
 			return Result[Logs]{}, fmt.Errorf("query cold logs: %w", queryErr)
 		}
@@ -136,13 +152,36 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 				rows.Close()
 				return Result[Logs]{}, fmt.Errorf("scan cold log: %w", err)
 			}
-			accumulate(entry)
+			retainNewest(&entries, entry, limit)
 		}
 		if err := rows.Err(); err != nil {
 			rows.Close()
 			return Result[Logs]{}, fmt.Errorf("iterate cold logs: %w", err)
 		}
 		rows.Close()
+
+		bucketRows, bucketErr := s.db.QueryContext(ctx, coldLogBucketsQuery, filters...)
+		if bucketErr != nil {
+			return Result[Logs]{}, fmt.Errorf("query cold log histogram: %w", bucketErr)
+		}
+		for bucketRows.Next() {
+			var (
+				bucketTime     time.Time
+				bucketSeverity string
+				count          int64
+			)
+			if err := bucketRows.Scan(&bucketTime, &bucketSeverity, &count); err != nil {
+				bucketRows.Close()
+				return Result[Logs]{}, fmt.Errorf("scan cold log bucket: %w", err)
+			}
+			matched += int(count)
+			buckets[bucketKey{time: bucketTime.UTC().UnixNano(), severity: bucketSeverity}] += count
+		}
+		if err := bucketRows.Err(); err != nil {
+			bucketRows.Close()
+			return Result[Logs]{}, fmt.Errorf("iterate cold log histogram: %w", err)
+		}
+		bucketRows.Close()
 	}
 	if err := ctx.Err(); err != nil {
 		return Result[Logs]{}, err
