@@ -27,6 +27,11 @@ const (
 
 var segmentIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
+// ValidID reports whether id can name a segment file. Callers that persist a
+// batch before publishing it use this to reject an ID no projection could ever
+// accept, rather than discovering it once part of the batch is already written.
+func ValidID(id string) bool { return segmentIDPattern.MatchString(id) }
+
 type signalBlock struct {
 	offset uint64
 	length uint32
@@ -405,6 +410,33 @@ func (s *SignalStore[T]) PruneBefore(cutoff int64) (int, error) {
 	return len(removed), errors.Join(removeErr, syncDir(s.dir))
 }
 
+// validateSignalBlocks bounds every decoded block entry. Scan allocates from
+// block.length and decodes block.rows, so both must be known to fit the file
+// before the entries are stored. Blocks live between the header and the
+// directory, and their row counts must add up to the header's total.
+func validateSignalBlocks(size, dirOffset uint64, blocks []signalBlock, rows uint32) error {
+	var counted uint64
+	for _, block := range blocks {
+		if block.offset < signalHeaderSize || block.offset > dirOffset {
+			return errors.New("block offset outside the segment payload")
+		}
+		if block.length == 0 || uint64(block.length) > dirOffset-block.offset {
+			return errors.New("block extends past the block directory")
+		}
+		if block.rows == 0 || block.rows > signalBlockRows {
+			return errors.New("block row count is out of range")
+		}
+		counted += uint64(block.rows)
+	}
+	if counted != uint64(rows) {
+		return errors.New("block row counts disagree with the segment header")
+	}
+	if dirOffset > size {
+		return errors.New("block directory starts past the end of the segment")
+	}
+	return nil
+}
+
 // validateSignalDirectory bounds the block directory against the file size,
 // so a torn header cannot size an allocation the file could never hold.
 func validateSignalDirectory(size, dirOffset uint64, blockCount uint32) error {
@@ -456,6 +488,9 @@ func openSignalSegment(path string) (signalSegment, error) {
 			offset: binary.LittleEndian.Uint64(entry[0:8]), length: binary.LittleEndian.Uint32(entry[8:12]), rows: binary.LittleEndian.Uint32(entry[12:16]),
 			min: int64(binary.LittleEndian.Uint64(entry[16:24])), max: int64(binary.LittleEndian.Uint64(entry[24:32])),
 		})
+	}
+	if err := validateSignalBlocks(uint64(info.Size()), dirOffset, seg.blocks, seg.rows); err != nil {
+		return signalSegment{}, fmt.Errorf("signal segment %s: %w", filepath.Base(path), err)
 	}
 	return seg, nil
 }

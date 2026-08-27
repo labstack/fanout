@@ -298,37 +298,6 @@ func TestWriterKeepsWALWhenCommitRetriesAreExhausted(t *testing.T) {
 	}
 }
 
-func TestRecoverQuarantinesBatchThatCannotApply(t *testing.T) {
-	dir := t.TempDir()
-	repository, err := Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	batch := testBatch()
-	if err := repository.Stage(batch); err != nil {
-		t.Fatal(err)
-	}
-	// Make the hot span directory unusable so replay's apply always fails.
-	spanDir := filepath.Join(dir, "hot", "spans")
-	if err := os.RemoveAll(spanDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(spanDir, []byte("not a directory"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Open(dir); err == nil {
-		t.Fatal("Open succeeded with an unusable hot span directory")
-	}
-	if err := os.Remove(spanDir); err != nil {
-		t.Fatal(err)
-	}
-	reopened, err := Open(dir)
-	if err != nil {
-		t.Fatalf("Open error = %v: a batch that cannot apply must be quarantined, not crash-loop every boot", err)
-	}
-	defer reopened.Close()
-}
-
 type transientStageCommitter struct {
 	repository *Repository
 	mu         sync.Mutex

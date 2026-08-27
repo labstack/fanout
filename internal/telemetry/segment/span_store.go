@@ -879,6 +879,32 @@ func validateSegmentSections(size, dirOffset, indexOffset, rollupOffset uint64, 
 	return nil
 }
 
+// validateSegmentBlocks bounds every decoded block entry against the payload
+// region, so a torn directory cannot drive a read or an allocation the file
+// could never satisfy.
+func validateSegmentBlocks(size, dirOffset uint64, blocks []blockDir, rows uint32) error {
+	var counted uint64
+	for _, block := range blocks {
+		if block.offset < headerSize || block.offset > dirOffset {
+			return errors.New("block offset outside the segment payload")
+		}
+		if block.length == 0 || uint64(block.length) > dirOffset-block.offset {
+			return errors.New("block extends past the block directory")
+		}
+		if block.rows == 0 {
+			return errors.New("block holds no rows")
+		}
+		counted += uint64(block.rows)
+	}
+	if counted != uint64(rows) {
+		return errors.New("block row counts disagree with the segment header")
+	}
+	if dirOffset > size {
+		return errors.New("block directory starts past the end of the segment")
+	}
+	return nil
+}
+
 // validateDirectory reports whether count fixed-size entries fit in the file
 // when placed at offset.
 func validateDirectory(size, offset uint64, count uint32, entrySize uint64) error {
@@ -929,6 +955,9 @@ func openSegment(path string) (segment, error) {
 		b := buf[i*blockDirSize:]
 		seg.blocks[i] = blockDir{offset: binary.LittleEndian.Uint64(b[0:8]), length: binary.LittleEndian.Uint32(b[8:12]), rows: binary.LittleEndian.Uint32(b[12:16]), min: int64(binary.LittleEndian.Uint64(b[16:24])), max: int64(binary.LittleEndian.Uint64(b[24:32]))}
 	}
+	if err := validateSegmentBlocks(uint64(info.Size()), dirOffset, seg.blocks, seg.rows); err != nil {
+		return segment{}, fmt.Errorf("segment %s: %w", filepath.Base(path), err)
+	}
 	indexCompressed := make([]byte, int(rollupOffset-indexOffset))
 	if _, err := f.ReadAt(indexCompressed, int64(indexOffset)); err != nil {
 		return segment{}, err
@@ -962,7 +991,9 @@ func openSegment(path string) (segment, error) {
 		return segment{}, fmt.Errorf("decode rollups: %w", err)
 	}
 	reader := bufio.NewReader(bytes.NewReader(rollupBytes))
-	seg.rollups = make([]rollup, 0, rollupCount)
+	// rollupCount comes from the same untrusted header, so the slice grows with
+	// the rollups actually decoded rather than being sized from it up front.
+	seg.rollups = nil
 	for range rollupCount {
 		r, err := readRollup(reader)
 		if err != nil {

@@ -557,3 +557,104 @@ func TestCompactionSourcesDropInheritedLedger(t *testing.T) {
 		}
 	}
 }
+
+func TestRecoverQuarantinesBatchThatCanNeverApply(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A batch ID the segment stores can never accept: it decodes cleanly, so
+	// only an apply attempt can reject it, and it will do so on every boot.
+	poison := testBatch()
+	poison.ID = "poison batch"
+	if err := repository.writeWAL(poison); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open error = %v, want the unappliable batch quarantined instead of a boot loop", err)
+	}
+	defer reopened.Close()
+	entries, err := os.ReadDir(filepath.Join(dir, "wal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	corrupt, live := 0, 0
+	for _, entry := range entries {
+		switch {
+		case strings.HasSuffix(entry.Name(), ".corrupt"):
+			corrupt++
+		case strings.HasSuffix(entry.Name(), ".wal"):
+			live++
+		}
+	}
+	if corrupt != 1 || live != 0 {
+		t.Fatalf("quarantined = %d, live = %d, want the poison WAL renamed aside", corrupt, live)
+	}
+}
+
+func TestRecoverRetainsWALWhenApplyFailsFromEnvironment(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root bypasses the directory permissions this test relies on")
+	}
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := testBatch()
+	if err := repository.Stage(batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Hot segments still accept the batch, so replay publishes a projection
+	// prefix and then fails on Parquet: an environmental failure that a later
+	// healthy boot must be able to finish.
+	parquetSpans := filepath.Join(dir, "parquet", "spans")
+	if err := os.Chmod(parquetSpans, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parquetSpans, 0o755) })
+	if _, err := Open(dir); err == nil {
+		t.Fatal("Open succeeded although replay could not publish the batch")
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "wal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".corrupt") {
+			t.Fatalf("environmental failure quarantined %s; a healthy restart can no longer finish the batch", entry.Name())
+		}
+	}
+	if err := os.Chmod(parquetSpans, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	healthy, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open error = %v, want the retained WAL to replay once the environment recovered", err)
+	}
+	defer healthy.Close()
+	if got := healthy.Spans.RowCount(); got != uint64(len(batch.Spans)) {
+		t.Fatalf("replayed spans = %d, want %d", got, len(batch.Spans))
+	}
+}
+
+func TestStageRejectsBatchTheSegmentStoresCannotAccept(t *testing.T) {
+	repository, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	batch := testBatch()
+	batch.ID = "poison batch"
+	if err := repository.Stage(batch); err == nil {
+		t.Fatal("Stage accepted a batch ID no projection can ever publish")
+	}
+}

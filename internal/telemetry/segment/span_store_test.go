@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -263,5 +264,67 @@ func TestValidateSegmentSectionsRejectsOutOfBoundsDirectory(t *testing.T) {
 	}
 	if err := validateSegmentSections(size, headerSize, 512, 1024, 8); err != nil {
 		t.Fatalf("validateSegmentSections rejected a sound header: %v", err)
+	}
+}
+
+func TestValidateSegmentBlocksRejectsOutOfBoundsExtents(t *testing.T) {
+	const size, dirOffset = 4096, uint64(2048)
+	sound := []blockDir{
+		{offset: headerSize, length: 512, rows: 10},
+		{offset: headerSize + 512, length: 512, rows: 10},
+	}
+	if err := validateSegmentBlocks(size, dirOffset, sound, 20); err != nil {
+		t.Fatalf("validateSegmentBlocks rejected sound blocks: %v", err)
+	}
+	tests := []struct {
+		name   string
+		blocks []blockDir
+		rows   uint32
+	}{
+		{"length past the directory", []blockDir{{offset: headerSize, length: 4096, rows: 10}}, 10},
+		{"offset inside the header", []blockDir{{offset: 0, length: 16, rows: 10}}, 10},
+		{"extent wraps", []blockDir{{offset: ^uint64(0) - 8, length: 64, rows: 10}}, 10},
+		{"rows disagree with the header", []blockDir{{offset: headerSize, length: 16, rows: 10}}, 11},
+		{"empty block", []blockDir{{offset: headerSize, length: 0, rows: 0}}, 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateSegmentBlocks(size, dirOffset, test.blocks, test.rows); err == nil {
+				t.Fatal("validateSegmentBlocks accepted a corrupt block directory")
+			}
+		})
+	}
+}
+
+func TestOpenRejectsSegmentWithCorruptBlockEntry(t *testing.T) {
+	dir := t.TempDir()
+	base := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC).UnixNano()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AppendID("seg-block", []Span{{Namespace: "default", TraceID: "t", SpanID: "1", ServiceName: "api", StartUnixNanos: base, EndUnixNanos: base + 1, DurationMS: 1, StatusCode: "OK"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "seg-block.fseg")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirOffset := binary.LittleEndian.Uint64(data[40:48])
+	// Claim the first block runs far past the directory it precedes.
+	binary.LittleEndian.PutUint32(data[int(dirOffset)+8:], 1<<30)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Open(dir)
+	if err == nil {
+		t.Fatal("Open accepted a segment whose block extends past its directory")
+	}
+	if !strings.Contains(err.Error(), "block extends past the block directory") {
+		t.Fatalf("Open error = %v, want the block-extent guard to reject it", err)
 	}
 }

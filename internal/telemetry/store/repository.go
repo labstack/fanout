@@ -226,8 +226,8 @@ func (r *Repository) PruneParquet(cutoff int64) (int, error) {
 // Commit durably records a batch and publishes its three signal projections
 // exactly once. A crash at any point leaves the WAL for replay on next boot.
 func (r *Repository) Commit(batch Batch) error {
-	if batch.ID == "" || strings.ContainsAny(batch.ID, `/\\`) {
-		return errors.New("telemetry batch requires a safe ID")
+	if err := validateBatch(batch); err != nil {
+		return err
 	}
 	normalizeBatch(&batch)
 	// Commits are serialized, but their segment and Parquet fsyncs do not hold
@@ -258,8 +258,8 @@ func (r *Repository) Commit(batch Batch) error {
 // Writers call this before handing a batch to an asynchronous commit worker, so
 // every queued or in-flight batch is replayable if shutdown interrupts retries.
 func (r *Repository) Stage(batch Batch) error {
-	if batch.ID == "" || strings.ContainsAny(batch.ID, `/\\`) {
-		return errors.New("telemetry batch requires a safe ID")
+	if err := validateBatch(batch); err != nil {
+		return err
 	}
 	normalizeBatch(&batch)
 	r.commitMu.Lock()
@@ -269,6 +269,19 @@ func (r *Repository) Stage(batch Batch) error {
 		return r.removeWAL(batch.ID)
 	}
 	return r.writeWAL(batch)
+}
+
+// validateBatch rejects a batch no projection could ever publish. The segment
+// stores name their files after the batch ID, so an ID they would refuse must
+// be caught before the WAL promises to replay it forever.
+func validateBatch(batch Batch) error {
+	if batch.ID == "" || strings.ContainsAny(batch.ID, `/\\`) {
+		return errors.New("telemetry batch requires a safe ID")
+	}
+	if !segment.ValidID(batch.ID) {
+		return fmt.Errorf("telemetry batch ID %q cannot name a segment", batch.ID)
+	}
+	return nil
 }
 
 func (r *Repository) apply(batch Batch) error {
@@ -375,20 +388,23 @@ func (r *Repository) recover() error {
 			}
 			continue
 		}
-		// A batch that cannot be applied would otherwise abort every boot. Move
-		// it aside so the instance starts; if quarantine itself fails the
-		// environment is broken, and failing loudly is then the right answer.
-		if err := r.apply(batch); err != nil {
+		// Poison is decided before anything is published: a payload the
+		// projections can never accept is moved aside so it cannot abort every
+		// boot. An apply or manifest failure after that point is environmental,
+		// so the WAL is retained and startup fails loudly — a later healthy boot
+		// must still be able to finish the batch, including one whose projection
+		// prefix this attempt already published.
+		if err := validateBatch(batch); err != nil {
 			if quarantineErr := quarantineWAL(r.walDir, name, err); quarantineErr != nil {
 				return errors.Join(fmt.Errorf("replay %s: %w", name, err), quarantineErr)
 			}
 			continue
 		}
+		if err := r.apply(batch); err != nil {
+			return fmt.Errorf("replay %s: %w", name, err)
+		}
 		if err := r.recordBatch(batch); err != nil {
-			if quarantineErr := quarantineWAL(r.walDir, name, err); quarantineErr != nil {
-				return errors.Join(fmt.Errorf("record replayed %s: %w", name, err), quarantineErr)
-			}
-			continue
+			return fmt.Errorf("record replayed %s: %w", name, err)
 		}
 		if err := os.Remove(filepath.Join(r.walDir, name)); err != nil {
 			return err
