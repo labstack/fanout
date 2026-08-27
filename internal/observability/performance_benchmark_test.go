@@ -26,7 +26,7 @@ func BenchmarkEndpointQueries24Hours(b *testing.B) {
 		b.Fatal(err)
 	}
 	start := time.Date(2026, 7, 20, 0, 0, 30, 0, time.UTC)
-	if _, err := db.Exec(`INSERT INTO lake.spans (
+	if _, err := db.Exec(`INSERT INTO telemetry.spans (
   namespace, service, start_time, duration_ms, status, http_method, http_route, operation
 )
 SELECT

@@ -7,7 +7,7 @@ import (
 )
 
 const createSpansTable = `
-CREATE TABLE IF NOT EXISTS lake.spans (
+CREATE TABLE IF NOT EXISTS telemetry.spans (
   namespace VARCHAR,
   trace_id VARCHAR,
   span_id VARCHAR,
@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS lake.spans (
 );`
 
 const createLogsTable = `
-CREATE TABLE IF NOT EXISTS lake.logs (
+CREATE TABLE IF NOT EXISTS telemetry.logs (
   namespace VARCHAR,
   log_time TIMESTAMP,
   observed_time TIMESTAMP,
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS lake.logs (
 );`
 
 const createMetricsTable = `
-CREATE TABLE IF NOT EXISTS lake.metrics (
+CREATE TABLE IF NOT EXISTS telemetry.metrics (
   namespace VARCHAR,
   metric_time TIMESTAMP,
   time_unix_nano BIGINT,
@@ -196,7 +196,7 @@ SELECT
   deployment_env,
   exception_type,
   exception_message
-FROM lake.spans;`
+FROM telemetry.spans;`
 
 const viewLogs = `
 CREATE OR REPLACE VIEW logs AS
@@ -220,7 +220,7 @@ SELECT
   ingested_at,
   ingested_unix_nano,
   body_template
-FROM lake.logs;`
+FROM telemetry.logs;`
 
 const viewMetrics = `
 CREATE OR REPLACE VIEW metrics AS
@@ -245,7 +245,7 @@ SELECT
   scope_version,
   ingested_at,
   ingested_unix_nano
-FROM lake.metrics;`
+FROM telemetry.metrics;`
 
 const macroAttr = `
 CREATE OR REPLACE MACRO attr(json_col, key) AS
@@ -255,8 +255,8 @@ CREATE OR REPLACE MACRO attr(json_col, key) AS
 // benchmarks. Production startup never calls this function: telemetry is
 // exposed exclusively through CreateParquetViews.
 func CreateTables(db *sql.DB) error {
-	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS lake`); err != nil {
-		return fmt.Errorf("create lake schema: %w", err)
+	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS telemetry`); err != nil {
+		return fmt.Errorf("create telemetry schema: %w", err)
 	}
 	for _, stmt := range []string{createSpansTable, createLogsTable, createMetricsTable} {
 		if _, err := db.Exec(stmt); err != nil {
@@ -289,16 +289,16 @@ func CreateCacheTables(db *sql.DB) error {
 }
 
 // CreateParquetViews exposes the repository's open Parquet files under the
-// canonical lake schema used by Fanout's SQL kernel.
+// canonical telemetry schema used by Fanout's SQL kernel.
 func CreateParquetViews(db *sql.DB, parquetDir string) error {
-	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS lake`); err != nil {
+	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS telemetry`); err != nil {
 		return err
 	}
 	for _, signal := range []string{"spans", "logs", "metrics"} {
 		pattern := filepath.ToSlash(filepath.Join(parquetDir, signal, "*.parquet"))
-		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW lake.%s AS SELECT * FROM read_parquet(%s, union_by_name=true)`, signal, sqlLiteral(pattern))
+		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT * FROM read_parquet(%s, union_by_name=true)`, signal, sqlLiteral(pattern))
 		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("create parquet view lake.%s: %w", signal, err)
+			return fmt.Errorf("create parquet view telemetry.%s: %w", signal, err)
 		}
 	}
 	return nil

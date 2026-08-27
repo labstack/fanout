@@ -44,7 +44,7 @@ func TestEdgeRollupBacklog(t *testing.T) {
 
 	_, err := db.ExecContext(ctx, `
 WITH input AS (SELECT CAST(? AS TIMESTAMP) AS base_time)
-INSERT INTO lake.spans (
+INSERT INTO telemetry.spans (
   namespace, trace_id, span_id, parent_span_id,
   service, operation, kind,
   start_time, end_time, start_unix_nano, end_unix_nano, duration_ms,
@@ -74,7 +74,7 @@ FROM range(?, ?) t(i), input`,
 
 	_, err = db.ExecContext(ctx, `
 WITH input AS (SELECT CAST(? AS TIMESTAMP) AS base_time)
-INSERT INTO lake.spans (
+INSERT INTO telemetry.spans (
   namespace, trace_id, span_id, parent_span_id,
   service, operation, kind,
   start_time, end_time, start_unix_nano, end_unix_nano, duration_ms,
@@ -128,7 +128,7 @@ FROM range(?, ?) t(i), input`,
 	}
 	if err := db.QueryRowContext(ctx, `
 SELECT count(DISTINCT date_trunc('minute', start_time))
-FROM lake.spans`).Scan(&spanBuckets); err != nil {
+FROM telemetry.spans`).Scan(&spanBuckets); err != nil {
 		t.Fatalf("count distinct span minute buckets: %v", err)
 	}
 	if spanBuckets != 180 {

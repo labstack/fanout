@@ -19,9 +19,8 @@ as a refusal to start rather than as a default nobody chose.
 | Setting | Environment variable | Type | Default |
 |---|---|---|---|
 | `ingest.advertised_endpoint` | `FANOUT_INGEST_ADVERTISED_ENDPOINT` | string | — |
+| `ingest.batch_size` | `FANOUT_INGEST_BATCH_SIZE` | integer | `50000` |
 | `ingest.default_namespace` | `FANOUT_DEFAULT_NAMESPACE` | string | `default` |
-| `ingest.flush_batch_size` | `FANOUT_FLUSH_BATCH_SIZE` | integer | `50000` |
-| `ingest.flush_interval` | `FANOUT_FLUSH_INTERVAL` | duration | `15s` |
 | `ingest.otlp_grpc_addr` | `FANOUT_OTLP_GRPC_ADDR` | string | `127.0.0.1:4317` |
 | `ingest.otlp_http_addr` | `FANOUT_OTLP_HTTP_ADDR` | string | `127.0.0.1:4318` |
 

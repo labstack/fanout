@@ -22,7 +22,7 @@ func TestAttrMacroAndQuotedPath(t *testing.T) {
 	// Flat object with dotted keys and a numeric value, as attrsJSON produces.
 	const attrs = `{"http.method":"GET","http.status_code":200,"messaging.system":"kafka"}`
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO lake.spans (namespace, service, attributes_json) VALUES ('default','svc',?)`, attrs); err != nil {
+		`INSERT INTO telemetry.spans (namespace, service, attributes_json) VALUES ('default','svc',?)`, attrs); err != nil {
 		t.Fatalf("insert span: %v", err)
 	}
 

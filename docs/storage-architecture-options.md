@@ -67,7 +67,7 @@ Important distinctions:
 
 ## Measured result
 
-The normalized POC used one million complete Fanout-shaped spans, 50,000-row
+The normalized benchmark used one million complete Fanout-shaped spans, 50,000-row
 commits, live endpoint rollups, complete trace reads, and another 200,000 rows
 under concurrent trace load at 100 queries per second.
 
@@ -92,7 +92,7 @@ The production-repository row includes the real atomic WAL + hot-segment +
 Parquet commit path and was rerun on 2026-08-26. The isolated rows measure each
 engine separately. These are development measurements from an Apple M3 Max,
 not published capacity claims. The detailed methodology and reproduction commands are in
-[storage-poc.md](storage-poc.md).
+[storage-benchmark.md](storage-benchmark.md).
 
 ## Options at a glance
 
@@ -134,7 +134,7 @@ not published capacity claims. The detailed methodology and reproduction command
   compaction correctness.
 - Hot and cold data use different physical formats.
 - Product queries spanning hot and cold data must merge two result streams.
-- The current POC's broad scan is much slower than DuckDB.
+- The current benchmark's broad scan is much slower than DuckDB.
 - Further promoted-attribute indexes and long-run compaction tuning remain
   workload-driven optimizations.
 
@@ -162,7 +162,7 @@ SQL and interoperable cold storage to established components.
 ### Costs and risks
 
 - Ingestion was approximately five times slower than the custom hot store in
-  the full-shape POC.
+  the full-shape benchmark.
 - Peak RSS was much higher in the isolated comparison.
 - Scheduled rollup work remains outside ingestion.
 - Native files are not an interoperable telemetry format.
@@ -283,7 +283,7 @@ requirements exist.
 ### Decision
 
 **Not selected.** It is a credible one-engine architecture, but the normalized
-POC no longer justifies its footprint and binding complexity for Fanout.
+benchmark no longer justifies its footprint and binding complexity for Fanout.
 
 ## Option F: fully custom database
 
@@ -298,7 +298,7 @@ and transaction system.
 
 ### Why not
 
-- The POC already demonstrates that custom **storage and fixed execution**
+- The benchmark already demonstrates that custom **storage and fixed execution**
   provide most of the useful advantage.
 - Building general SQL would duplicate years of DuckDB work.
 - Correct recovery, concurrency, query planning, joins, spilling, and schema

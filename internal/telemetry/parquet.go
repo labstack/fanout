@@ -76,25 +76,110 @@ func (p *ParquetStore) Stats() (map[string]ParquetStats, error) {
 	return stats, nil
 }
 
-func (p *ParquetStore) WriteSpans(id string, rows []Span) error {
-	if len(rows) == 0 {
-		return nil
+// StageBatch writes durable files that DuckDB's *.parquet views cannot see.
+// Publication is a separate, rename-only step so encoding and fsync never hold
+// the query read gate.
+func (p *ParquetStore) StageBatch(id string, spans []Span, logs []Log, metrics []Metric) error {
+	for _, item := range []struct {
+		signal string
+		write  func(string) error
+	}{
+		{"spans", func(path string) error { return writeParquet(path, spanParquetColumns(), spans) }},
+		{"logs", func(path string) error { return writeParquet(path, logParquetColumns(), logs) }},
+		{"metrics", func(path string) error { return writeParquet(path, metricParquetColumns(), metrics) }},
+	} {
+		rows := len(spans)
+		if item.signal == "logs" {
+			rows = len(logs)
+		} else if item.signal == "metrics" {
+			rows = len(metrics)
+		}
+		if rows == 0 {
+			continue
+		}
+		final := filepath.Join(p.dir, item.signal, id+".parquet")
+		if _, err := os.Stat(final); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		if err := item.write(final + ".pending"); err != nil {
+			return fmt.Errorf("stage %s parquet: %w", item.signal, err)
+		}
 	}
-	return writeParquet(filepath.Join(p.dir, "spans", id+".parquet"), spanParquetColumns(), rows)
+	return nil
 }
 
-func (p *ParquetStore) WriteLogs(id string, rows []Log) error {
-	if len(rows) == 0 {
-		return nil
+// PublishBatch atomically exposes all present signal files to in-process
+// readers when the caller holds the Parquet publication gate. The returned
+// rollback is used if the hot span projection cannot be published afterward.
+func (p *ParquetStore) PublishBatch(id string, hasSpans, hasLogs, hasMetrics bool) (func() error, error) {
+	present := []struct {
+		signal string
+		has    bool
+	}{{"spans", hasSpans}, {"logs", hasLogs}, {"metrics", hasMetrics}}
+	renamed := make([]string, 0, len(present))
+	rollback := func() error {
+		var rollbackErr error
+		for i := len(renamed) - 1; i >= 0; i-- {
+			final := filepath.Join(p.dir, renamed[i], id+".parquet")
+			if err := os.Rename(final, final+".pending"); err != nil && !errors.Is(err, os.ErrNotExist) {
+				rollbackErr = errors.Join(rollbackErr, err)
+			}
+		}
+		if len(renamed) > 0 {
+			rollbackErr = errors.Join(rollbackErr, syncParquetSignalDirectories(p.dir, renamed))
+		}
+		return rollbackErr
 	}
-	return writeParquet(filepath.Join(p.dir, "logs", id+".parquet"), logParquetColumns(), rows)
+	for _, item := range present {
+		if !item.has {
+			continue
+		}
+		final := filepath.Join(p.dir, item.signal, id+".parquet")
+		if _, err := os.Stat(final); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return rollback, errors.Join(err, rollback())
+		}
+		if err := os.Rename(final+".pending", final); err != nil {
+			return rollback, errors.Join(err, rollback())
+		}
+		renamed = append(renamed, item.signal)
+	}
+	if err := syncParquetSignalDirectories(p.dir, renamed); err != nil {
+		return rollback, errors.Join(err, rollback())
+	}
+	return rollback, nil
 }
 
-func (p *ParquetStore) WriteMetrics(id string, rows []Metric) error {
-	if len(rows) == 0 {
-		return nil
+// DiscardBatch removes invisible staging files for a batch that another commit
+// or compaction has already consumed.
+func (p *ParquetStore) DiscardBatch(id string) error {
+	var discardErr error
+	changed := make([]string, 0, 3)
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		path := filepath.Join(p.dir, signal, id+".parquet.pending")
+		if err := os.Remove(path); err == nil {
+			changed = append(changed, signal)
+		} else if !errors.Is(err, os.ErrNotExist) {
+			discardErr = errors.Join(discardErr, err)
+		}
 	}
-	return writeParquet(filepath.Join(p.dir, "metrics", id+".parquet"), metricParquetColumns(), rows)
+	return errors.Join(discardErr, syncParquetSignalDirectories(p.dir, changed))
+}
+
+func syncParquetSignalDirectories(root string, signals []string) error {
+	seen := make(map[string]struct{}, len(signals))
+	var syncErr error
+	for _, signal := range signals {
+		if _, ok := seen[signal]; ok {
+			continue
+		}
+		seen[signal] = struct{}{}
+		syncErr = errors.Join(syncErr, syncDirectory(filepath.Join(root, signal)))
+	}
+	return syncErr
 }
 
 func writeParquet[T any](path string, columns []parquetColumn[T], rows []T) error {

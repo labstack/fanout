@@ -11,7 +11,7 @@ const schemaTemplate = `
 ## Fanout Data Schema
 
 Fanout stores telemetry in indexed hot segments and open Parquet files. DuckDB
-exposes the Parquet files through the read-only lake schema. The rebuildable
+exposes the Parquet files through the read-only telemetry schema. The rebuildable
 query cache and product state live under {DATA_DIR}.
 
 Primary query surfaces:
@@ -23,7 +23,7 @@ Primary query surfaces:
 - endpoint_rollup table: minute endpoint counts, errors, and mergeable latency histograms
 
 ### 1. Spans
-Parquet relation: lake.spans
+Parquet relation: telemetry.spans
 Preferred query surface: spans
 
 Important columns:
@@ -50,7 +50,7 @@ Common queries:
 - Root spans only: ... WHERE parent_span_id IS NULL OR parent_span_id = ''
 
 ### 2. Logs
-Base table: lake.logs
+Base table: telemetry.logs
 Preferred query surface: logs
 
 Important columns:
@@ -71,7 +71,7 @@ Common queries:
 - Trace-correlated logs: ... WHERE trace_id = '...'
 
 ### 3. Metrics
-Base table: lake.metrics
+Base table: telemetry.metrics
 Preferred query surface: metrics
 
 Important columns:
@@ -113,7 +113,7 @@ endpoint_rollup columns:
 - duration_buckets (STRUCT): cumulative fixed-boundary latency counters
 
 ## Query Guidelines
-1. Prefer spans, logs, and metrics over raw lake.* tables.
+1. Prefer spans, logs, and metrics over raw telemetry.* tables.
 2. Always add a recent time filter for large queries.
 3. Filter by namespace when relevant.
 4. JSON columns are flat objects keyed by the literal attribute name. Attribute keys

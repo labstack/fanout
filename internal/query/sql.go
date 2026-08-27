@@ -30,6 +30,11 @@ type SQLResponse struct {
 // RowMap represents a single row as a map of column name to value
 type RowMap map[string]interface{}
 
+const (
+	defaultQueryTimeoutMs = 15_000
+	maxQueryTimeoutMs     = 25_000
+)
+
 // ExecuteSQL validates and executes a SQL query
 func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse) {
 	start := time.Now()
@@ -53,10 +58,12 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse
 
 	// Set a default timeout and clamp arbitrary SQL so one request cannot occupy
 	// a DuckDB worker indefinitely.
-	const maxQueryTimeoutMs = 5 * 60 * 1000
+	// Keep untrusted ad-hoc reads shorter than the Parquet publisher grace period.
+	// Otherwise one query can make maintenance queue, close the reader gate, and
+	// turn its remaining runtime into an API-wide read outage.
 	timeoutMs := req.TimeoutMs
 	if timeoutMs <= 0 {
-		timeoutMs = 30000
+		timeoutMs = defaultQueryTimeoutMs
 	}
 	if timeoutMs > maxQueryTimeoutMs {
 		timeoutMs = maxQueryTimeoutMs

@@ -190,7 +190,7 @@ func (h *HealthHandler) checkTelemetry() CheckResult {
 	defer cancel()
 
 	var one int
-	err := h.duck.QueryRowScan(ctx, []any{&one}, "SELECT 1 FROM lake.spans LIMIT 1")
+	err := h.duck.QueryRowScan(ctx, []any{&one}, "SELECT 1 FROM telemetry.spans LIMIT 1")
 	if err != nil && err != sql.ErrNoRows {
 		return CheckResult{
 			Status:    "unhealthy",

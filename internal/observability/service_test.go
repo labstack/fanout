@@ -226,6 +226,11 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("commit trace fixture: %v", err)
 	}
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("trace-1", start, end, "prod", "prod", 20).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(150*time.Millisecond), "ERROR", "checkout", "payment declined", "trace-1", "root").
+			AddRow(start.Add(160*time.Millisecond), "ERROR", "payments", `charge failed: token=abc123 {"client_secret":"cs_live_9"}`, "trace-1", "child"))
 
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "checkout", 20)
 	if err != nil {
@@ -256,6 +261,15 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("commit logs fixture: %v", err)
 	}
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "declined", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(2*time.Millisecond), "ERROR", "checkout", `auth declined: {"password":"[REDACTED]"}`, "trace-3", "root3").
+			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "card declined: token=[REDACTED]", "trace-2", "root2").
+			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root"))
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "declined").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).AddRow(start, "ERROR", int64(3)))
 
 	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", "error", "declined", 10)
 	if err != nil {
@@ -276,7 +290,7 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 }
 
 func TestLogsRetainsOnlyNewestLimit(t *testing.T) {
-	svc, _ := newMockService(t)
+	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	logs := make([]telemetry.Log, 100)
 	for i := range logs {
@@ -285,6 +299,16 @@ func TestLogsRetainsOnlyNewestLimit(t *testing.T) {
 	if err := svc.repository.Commit(telemetrystore.Batch{ID: "bounded-logs", Logs: logs}); err != nil {
 		t.Fatal(err)
 	}
+	entryRows := sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"})
+	for i := 99; i >= 95; i-- {
+		entryRows.AddRow(start.Add(time.Duration(i)*time.Millisecond), "INFO", "", "entry", "", "")
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
+		WithArgs(start, start.Add(time.Hour), "prod", "prod", "", "", "", "", "", "", 5).
+		WillReturnRows(entryRows)
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+		WithArgs(start, start.Add(time.Hour), "prod", "prod", "", "", "", "", "", "").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).AddRow(start, "INFO", int64(100)))
 	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "", "", "", 5)
 	if err != nil {
 		t.Fatal(err)
@@ -294,24 +318,24 @@ func TestLogsRetainsOnlyNewestLimit(t *testing.T) {
 	}
 }
 
-func TestLogsFallsBackToParquetOutsideHotRetention(t *testing.T) {
+func TestLogsAlwaysUseAuthoritativeParquet(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "cold-logs", Logs: []telemetry.Log{{
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "parquet-logs", Logs: []telemetry.Log{{
 		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
-		ServiceName: "checkout", Body: "token=secret", TraceID: "trace-cold",
+		ServiceName: "checkout", Body: "token=secret", TraceID: "trace-parquet",
 	}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.repository.PruneHot(end.Add(time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(coldLogEntriesQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(time.Minute), "ERROR", "checkout", "token=[REDACTED]", "trace-cold", ""))
-	mock.ExpectQuery(regexp.QuoteMeta(coldLogBucketsQuery)).
+			AddRow(start.Add(time.Minute), "ERROR", "checkout", "token=[REDACTED]", "trace-parquet", ""))
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
 			AddRow(start, "ERROR", int64(1)))
@@ -320,14 +344,14 @@ func TestLogsFallsBackToParquetOutsideHotRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(result.Data.Entries) != 1 || result.Data.Entries[0].Body != "token=[REDACTED]" || result.Provenance.DataSource != "parquet" {
-		t.Fatalf("cold logs result = %#v", result)
+		t.Fatalf("Parquet logs result = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestLogsUsesDurablePruneBoundaryWithOverlappingSegments(t *testing.T) {
+func TestLogsAreIndependentOfSpanHotPruneBoundary(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	cutoff := start.Add(250 * time.Millisecond)
@@ -347,16 +371,17 @@ func TestLogsUsesDurablePruneBoundaryWithOverlappingSegments(t *testing.T) {
 	if _, err := svc.repository.PruneHot(cutoff.UnixNano()); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(coldLogEntriesQuery)).
-		WithArgs(start, cutoff, "prod", "prod", "", "", "", "", "", "", 10).
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
+		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(100*time.Millisecond), "INFO", "", "late-old", "", "").
+			AddRow(start.Add(300*time.Millisecond), "INFO", "", "newer-hot", "", "").
+			AddRow(start.Add(200*time.Millisecond), "INFO", "", "late-boundary", "", "").
 			AddRow(start.Add(150*time.Millisecond), "INFO", "", "newer-old", "", "").
-			AddRow(start.Add(200*time.Millisecond), "INFO", "", "late-boundary", "", ""))
-	mock.ExpectQuery(regexp.QuoteMeta(coldLogBucketsQuery)).
-		WithArgs(start, cutoff, "prod", "prod", "", "", "", "", "", "").
+			AddRow(start.Add(100*time.Millisecond), "INFO", "", "late-old", "", ""))
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
-			AddRow(start, "INFO", int64(3)))
+			AddRow(start, "INFO", int64(4)))
 	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "", "", 10)
 	if err != nil {
 		t.Fatal(err)
@@ -364,7 +389,7 @@ func TestLogsUsesDurablePruneBoundaryWithOverlappingSegments(t *testing.T) {
 	if len(result.Data.Entries) != 4 || result.Summary != "4 logs matched the selected telemetry window" {
 		t.Fatalf("boundary logs = %#v", result)
 	}
-	if result.Data.Entries[0].Body != "newer-hot" || result.Provenance.DataSource != "fanout_segments+parquet" {
+	if result.Data.Entries[0].Body != "newer-hot" || result.Provenance.DataSource != "parquet" {
 		t.Fatalf("boundary result = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -372,8 +397,8 @@ func TestLogsUsesDurablePruneBoundaryWithOverlappingSegments(t *testing.T) {
 	}
 }
 
-func TestTraceLogsUseEarliestEventTimeAcrossBatches(t *testing.T) {
-	svc, _ := newMockService(t)
+func TestTraceLogsUseFullScopeEventTimeAcrossBatches(t *testing.T) {
+	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	batches := []telemetrystore.Batch{
 		{ID: "trace-latest", Spans: []telemetry.Span{{Namespace: "prod", TraceID: "trace-order", SpanID: "root", StartUnixNanos: start.UnixNano(), DurationMS: 1}}, Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(30 * time.Millisecond).UnixNano(), Body: "latest"}}},
@@ -386,33 +411,40 @@ func TestTraceLogsUseEarliestEventTimeAcrossBatches(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("trace-order", start, start.Add(time.Hour), "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(10*time.Millisecond), "", "", "earliest", "trace-order", "").
+			AddRow(start.Add(20*time.Millisecond), "", "", "middle", "trace-order", "").
+			AddRow(start.Add(30*time.Millisecond), "", "", "latest", "trace-order", "").
+			AddRow(start.Add(2*time.Minute), "", "", "unrelated later event", "trace-order", ""))
 	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "trace-order", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data.Logs) != 3 || result.Data.Logs[0].Body != "earliest" || result.Data.Logs[1].Body != "middle" || result.Data.Logs[2].Body != "latest" {
+	if len(result.Data.Logs) != 4 || result.Data.Logs[0].Body != "earliest" || result.Data.Logs[3].Body != "unrelated later event" {
 		t.Fatalf("trace logs = %#v", result.Data.Logs)
 	}
 }
 
-func TestTraceFallsBackToParquetWhenHotSegmentsMiss(t *testing.T) {
+func TestTraceUsesParquetWhenHotSegmentsMiss(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(traceSpansQuery)).
-		WithArgs("cold-trace", start, end, "prod", "prod", 10).
+		WithArgs("parquet-trace", start, end, "prod", "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"span_id", "parent_span_id", "service", "operation", "kind", "start_time", "duration_ms", "status", "status_message"}).
 			AddRow("root", "", "checkout", "pay", "SERVER", start, 25.0, "ERROR", "declined"))
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs("cold-trace", start, end, "prod", "prod", 10).
+		WithArgs("parquet-trace", start, end, "prod", "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "token=secret", "cold-trace", "root"))
-	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "cold-trace", "", 10)
+			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "token=secret", "parquet-trace", "root"))
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "parquet-trace", "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(result.Data.Spans) != 1 || len(result.Data.Logs) != 1 || !result.Data.HasError {
-		t.Fatalf("cold trace detail = %#v", result.Data)
+		t.Fatalf("Parquet trace detail = %#v", result.Data)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -461,13 +493,13 @@ func TestTraceUsesParquetWhenTraceStraddlesHotBoundary(t *testing.T) {
 
 var _ DB = queryrows.SQLAdapter{}
 
-func TestLogsBoundsColdQueryWithLimitAndAggregatedBuckets(t *testing.T) {
+func TestLogsBoundsParquetQueryWithLimitAndAggregatedBuckets(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "bounded-cold", Logs: []telemetry.Log{{
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "bounded-parquet", Logs: []telemetry.Log{{
 		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
-		ServiceName: "checkout", Body: "hello", TraceID: "trace-cold",
+		ServiceName: "checkout", Body: "hello", TraceID: "trace-parquet",
 	}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -475,15 +507,15 @@ func TestLogsBoundsColdQueryWithLimitAndAggregatedBuckets(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The sample query must carry the row limit so a wide window cannot stream
-	// the whole cold tier through the driver.
-	mock.ExpectQuery(regexp.QuoteMeta(coldLogEntriesQuery)).
+	// the whole Parquet history through the driver.
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
 		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "", 2).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start.Add(3*time.Minute), "ERROR", "checkout", "newest", "trace-c", "").
 			AddRow(start.Add(2*time.Minute), "INFO", "checkout", "older", "trace-b", ""))
 	// Histogram counts come back aggregated, so a million matching rows cost
 	// one row per bucket rather than a million transfers.
-	mock.ExpectQuery(regexp.QuoteMeta(coldLogBucketsQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
 		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
 			AddRow(start, "ERROR", int64(900000)).

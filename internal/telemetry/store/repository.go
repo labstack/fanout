@@ -31,8 +31,10 @@ type Batch struct {
 }
 
 const (
-	maxBatchRows        = 50_000
-	walDecoderMaxMemory = 128 << 20
+	maxBatchRows              = 50_000
+	walDecoderMaxMemory       = 128 << 20
+	repositoryVersion         = 2
+	manifestCheckpointRecords = 4_096
 )
 
 type batchMetadata struct {
@@ -50,8 +52,14 @@ type batchMetadata struct {
 
 type repositoryManifest struct {
 	Version        uint32          `json:"version"`
+	Epoch          uint64          `json:"epoch"`
 	HotCutoffNanos int64           `json:"hot_cutoff_nanos"`
 	Batches        []batchMetadata `json:"batches"`
+}
+
+type repositoryJournalRecord struct {
+	Epoch uint64        `json:"epoch"`
+	Batch batchMetadata `json:"batch"`
 }
 
 type Repository struct {
@@ -59,32 +67,35 @@ type Repository struct {
 	// hotMu makes the persisted prune watermark and the hot-segment snapshot one
 	// atomic read boundary. A query can never observe an old watermark after the
 	// corresponding segments have been retired.
-	hotMu        sync.RWMutex
-	commitMu     sync.Mutex
-	compactionMu sync.Mutex
-	root         string
-	walDir       string
-	Spans        *segment.Store
-	Logs         *segment.SignalStore[telemetry.Log]
-	Metrics      *segment.SignalStore[telemetry.Metric]
-	Parquet      *telemetry.ParquetStore
-	manifest     repositoryManifest
+	hotMu          sync.RWMutex
+	stageMu        sync.Mutex
+	commitMu       sync.Mutex
+	compactionMu   sync.Mutex
+	parquetPublish sync.Locker
+	root           string
+	walDir         string
+	Spans          *segment.Store
+	Parquet        *telemetry.ParquetStore
+	manifest       repositoryManifest
+	consumed       map[string]struct{}
+	journal        *os.File
+	journalRecords int
+}
+
+// SetParquetPublishLock connects repository publication to the query engine's
+// read gate. It must be called during startup, before the commit worker runs.
+func (r *Repository) SetParquetPublishLock(lock sync.Locker) {
+	r.parquetPublish = lock
 }
 
 func Open(root string) (*Repository, error) {
-	legacyCatalog := filepath.Join(root, "ducklake.sqlite")
-	if _, err := os.Stat(legacyCatalog); err == nil {
-		return nil, fmt.Errorf("legacy DuckLake catalog %s is unsupported; start Fanout with a clean storage.data_dir", legacyCatalog)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect legacy DuckLake catalog: %w", err)
-	}
 	walDir := filepath.Join(root, "wal")
-	for _, dir := range []string{root, walDir, filepath.Join(root, "hot", "spans"), filepath.Join(root, "hot", "logs"), filepath.Join(root, "hot", "metrics")} {
+	for _, dir := range []string{root, walDir, filepath.Join(root, "hot", "spans")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, err
 		}
 	}
-	spans, logs, metricsStore, err := openHotStores(root)
+	spans, err := openHotStore(root)
 	hotRebuilt := false
 	if err != nil {
 		quarantine := filepath.Join(root, fmt.Sprintf("hot.corrupt-%d", time.Now().UnixNano()))
@@ -94,7 +105,7 @@ func Open(root string) (*Repository, error) {
 		if syncErr := syncDirectory(root); syncErr != nil {
 			return nil, fmt.Errorf("sync quarantined hot tier: %w", syncErr)
 		}
-		spans, logs, metricsStore, err = openHotStores(root)
+		spans, err = openHotStore(root)
 		if err != nil {
 			return nil, fmt.Errorf("rebuild hot telemetry tier: %w", err)
 		}
@@ -103,19 +114,17 @@ func Open(root string) (*Repository, error) {
 	}
 	parquet, err := telemetry.OpenParquetStore(filepath.Join(root, "parquet"))
 	if err != nil {
-		_ = metricsStore.Close()
-		_ = logs.Close()
 		_ = spans.Close()
 		return nil, err
 	}
-	r := &Repository{root: root, walDir: walDir, Spans: spans, Logs: logs, Metrics: metricsStore, Parquet: parquet}
+	r := &Repository{root: root, walDir: walDir, Spans: spans, Parquet: parquet}
 	if err := r.loadManifest(); err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("load telemetry manifest: %w", err)
 	}
 	if hotRebuilt {
 		r.manifest.HotCutoffNanos = max(r.manifest.HotCutoffNanos, time.Now().UnixNano())
-		if err := writeRepositoryManifest(r.root, r.manifest); err != nil {
+		if err := r.checkpointManifestLocked(r.manifest); err != nil {
 			_ = r.Close()
 			return nil, fmt.Errorf("publish rebuilt hot-tier cutoff: %w", err)
 		}
@@ -131,38 +140,24 @@ func Open(root string) (*Repository, error) {
 	return r, nil
 }
 
-func openHotStores(root string) (*segment.Store, *segment.SignalStore[telemetry.Log], *segment.SignalStore[telemetry.Metric], error) {
-	hot := filepath.Join(root, "hot")
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		if err := os.MkdirAll(filepath.Join(hot, signal), 0o755); err != nil {
-			return nil, nil, nil, err
-		}
-	}
-	spans, err := segment.Open(filepath.Join(hot, "spans"))
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	logs, err := segment.OpenSignalStore[telemetry.Log](filepath.Join(hot, "logs"), "EventUnixNanos")
-	if err != nil {
-		_ = spans.Close()
-		return nil, nil, nil, err
-	}
-	metricsStore, err := segment.OpenSignalStore[telemetry.Metric](filepath.Join(hot, "metrics"), "EventUnixNanos")
-	if err != nil {
-		_ = logs.Close()
-		_ = spans.Close()
-		return nil, nil, nil, err
-	}
-	return spans, logs, metricsStore, nil
+func openHotStore(root string) (*segment.Store, error) {
+	return segment.Open(filepath.Join(root, "hot", "spans"))
 }
 
 func (r *Repository) Close() error {
-	return errors.Join(r.Spans.Close(), r.Logs.Close(), r.Metrics.Close())
+	var journalErr error
+	if r.journal != nil {
+		journalErr = r.journal.Close()
+		r.journal = nil
+	}
+	return errors.Join(journalErr, r.Spans.Close())
 }
 
 // PruneHot removes acceleration segments older than cutoff. Parquet remains
 // authoritative for longer retention and SQL queries.
 func (r *Repository) PruneHot(cutoff int64) (int, error) {
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
 	r.hotMu.Lock()
 	defer r.hotMu.Unlock()
 
@@ -170,17 +165,14 @@ func (r *Repository) PruneHot(cutoff int64) (int, error) {
 	// therefore create only harmless overlap (Parquet below the boundary and hot
 	// segments above it), never a hole after restart.
 	publishCutoff := func() error {
-		r.commitMu.Lock()
-		defer r.commitMu.Unlock()
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		if cutoff > r.manifest.HotCutoffNanos {
-			next := r.manifest
+			next := cloneRepositoryManifest(r.manifest)
 			next.HotCutoffNanos = cutoff
-			if err := writeRepositoryManifest(r.root, next); err != nil {
+			if err := r.checkpointManifestLocked(next); err != nil {
 				return err
 			}
-			r.manifest = next
 		}
 		return nil
 	}
@@ -188,24 +180,17 @@ func (r *Repository) PruneHot(cutoff int64) (int, error) {
 		return 0, fmt.Errorf("publish hot prune cutoff: %w", err)
 	}
 
-	spans, spanErr := r.Spans.PruneBefore(cutoff)
-	logs, logErr := r.Logs.PruneBefore(cutoff)
-	metricRows, metricErr := r.Metrics.PruneBefore(cutoff)
-	return spans + logs + metricRows, errors.Join(spanErr, logErr, metricErr)
+	return r.Spans.PruneBefore(cutoff)
 }
 
-// CompactHot drains committed raw segments into larger immutable files for all
-// three signals. It intentionally excludes any segment not present in the
+// CompactHot drains committed raw span-index segments into larger immutable
+// files. It intentionally excludes any segment not present in the
 // repository manifest, because that file may belong to a partially applied WAL
 // transaction that still needs exact-ID replay.
 func (r *Repository) CompactHot(maxInputs int) (int, error) {
 	if maxInputs < 2 {
 		return 0, nil
 	}
-	r.hotMu.Lock()
-	defer r.hotMu.Unlock()
-	r.commitMu.Lock()
-	defer r.commitMu.Unlock()
 	r.mu.RLock()
 	committed := make(map[string]struct{}, len(r.manifest.Batches))
 	for _, batch := range r.manifest.Batches {
@@ -225,45 +210,20 @@ func (r *Repository) CompactHot(maxInputs int) (int, error) {
 			break
 		}
 	}
-	for {
-		n, err := r.Logs.CompactCommitted(committed, maxInputs)
-		total += n
-		compactErr = errors.Join(compactErr, err)
-		if err != nil || n < 2 {
-			break
-		}
-	}
-	for {
-		n, err := r.Metrics.CompactCommitted(committed, maxInputs)
-		total += n
-		compactErr = errors.Join(compactErr, err)
-		if err != nil || n < 2 {
-			break
-		}
-	}
 	return total, compactErr
-}
-
-// ScanHotLogs reads the portion of [start,end) that is guaranteed complete in
-// the hot tier and returns the durable boundary below which Parquet is
-// authoritative. The boundary and scan are serialized with PruneHot.
-func (r *Repository) ScanHotLogs(start, end int64, visit func(telemetry.Log) bool) (int64, error) {
-	r.hotMu.RLock()
-	defer r.hotMu.RUnlock()
-	r.mu.RLock()
-	cutoff := r.manifest.HotCutoffNanos
-	r.mu.RUnlock()
-	return cutoff, r.Logs.Scan(max(start, cutoff), end, visit)
 }
 
 // HotTrace returns the hot trace snapshot and the durable prune boundary that
 // was in force for that snapshot.
-func (r *Repository) HotTrace(traceID string) ([]telemetry.Span, int64, error) {
+func (r *Repository) HotTrace(traceID string, scopeStartNanos int64) ([]telemetry.Span, int64, error) {
 	r.hotMu.RLock()
 	defer r.hotMu.RUnlock()
 	r.mu.RLock()
 	cutoff := r.manifest.HotCutoffNanos
 	r.mu.RUnlock()
+	if scopeStartNanos < cutoff {
+		return nil, cutoff, nil
+	}
 	spans, err := r.Spans.Trace(traceID)
 	return spans, cutoff, err
 }
@@ -304,11 +264,10 @@ func (r *Repository) PruneParquet(cutoff int64) (int, error) {
 	if err := syncParquetDirectories(r.Parquet.Dir()); err != nil {
 		return 0, errors.Join(removeErr, err)
 	}
-	next := repositoryManifest{Version: 1, HotCutoffNanos: r.manifest.HotCutoffNanos, Batches: kept}
-	if err := writeRepositoryManifest(r.root, next); err != nil {
+	next := repositoryManifest{Version: repositoryVersion, HotCutoffNanos: r.manifest.HotCutoffNanos, Batches: kept}
+	if err := r.checkpointManifestLocked(next); err != nil {
 		return 0, errors.Join(removeErr, err)
 	}
-	r.manifest = next
 	return removed, removeErr
 }
 
@@ -319,19 +278,28 @@ func (r *Repository) Commit(batch Batch) error {
 	if err := validateBatch(batch); err != nil {
 		return err
 	}
-	// Commits are serialized, but their segment and Parquet fsyncs do not hold
-	// the repository metadata lock. Each projection has its own atomic publish
-	// protocol; the WAL keeps a partially applied transaction replayable.
-	r.commitMu.Lock()
-	defer r.commitMu.Unlock()
-	consumed := r.batchConsumedLocked(batch.ID)
-	if consumed {
-		return r.removeWAL(batch.ID)
-	}
-	if err := r.writeWAL(batch); err != nil {
+	r.stageMu.Lock()
+	err := r.writeWAL(batch)
+	r.stageMu.Unlock()
+	if err != nil {
 		return err
 	}
-	err := r.apply(batch)
+	// Parquet encoding and fsync happen before either the query publication gate
+	// or commit mutex is acquired. Only the final renames and manifest append are
+	// serialized with readers and maintenance.
+	if err := r.Parquet.StageBatch(batch.ID, batch.Spans, batch.Logs, batch.Metrics); err != nil {
+		return err
+	}
+	if r.parquetPublish != nil {
+		r.parquetPublish.Lock()
+		defer r.parquetPublish.Unlock()
+	}
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
+	if r.batchConsumedLocked(batch.ID) {
+		return errors.Join(r.Parquet.DiscardBatch(batch.ID), r.removeWAL(batch.ID))
+	}
+	err = r.publish(batch)
 	if err == nil {
 		r.mu.Lock()
 		err = r.recordBatch(batch)
@@ -351,9 +319,12 @@ func (r *Repository) Stage(batch Batch) error {
 	if err := validateBatch(batch); err != nil {
 		return err
 	}
-	r.commitMu.Lock()
-	defer r.commitMu.Unlock()
-	consumed := r.batchConsumedLocked(batch.ID)
+	// WAL publication is independent from projection publication. Keeping this
+	// lock separate lets the next OTLP request become durable while the commit
+	// worker writes span indexes and Parquet for an earlier request.
+	r.stageMu.Lock()
+	defer r.stageMu.Unlock()
+	consumed := r.batchConsumed(batch.ID)
 	if consumed {
 		return r.removeWAL(batch.ID)
 	}
@@ -379,24 +350,15 @@ func validateBatch(batch Batch) error {
 	return nil
 }
 
-func (r *Repository) apply(batch Batch) error {
+func (r *Repository) publish(batch Batch) error {
+	r.hotMu.Lock()
+	defer r.hotMu.Unlock()
+	rollback, err := r.Parquet.PublishBatch(batch.ID, len(batch.Spans) > 0, len(batch.Logs) > 0, len(batch.Metrics) > 0)
+	if err != nil {
+		return fmt.Errorf("publish parquet batch: %w", err)
+	}
 	if err := r.Spans.AppendID(batch.ID, batch.Spans); err != nil {
-		return fmt.Errorf("commit span segment: %w", err)
-	}
-	if err := r.Logs.Append(batch.ID, batch.Logs); err != nil {
-		return fmt.Errorf("commit log segment: %w", err)
-	}
-	if err := r.Metrics.Append(batch.ID, batch.Metrics); err != nil {
-		return fmt.Errorf("commit metric segment: %w", err)
-	}
-	if err := r.Parquet.WriteSpans(batch.ID, batch.Spans); err != nil {
-		return fmt.Errorf("commit span parquet: %w", err)
-	}
-	if err := r.Parquet.WriteLogs(batch.ID, batch.Logs); err != nil {
-		return fmt.Errorf("commit log parquet: %w", err)
-	}
-	if err := r.Parquet.WriteMetrics(batch.ID, batch.Metrics); err != nil {
-		return fmt.Errorf("commit metric parquet: %w", err)
+		return errors.Join(fmt.Errorf("commit span segment: %w", err), rollback())
 	}
 	return nil
 }
@@ -505,7 +467,7 @@ func (r *Repository) recover() error {
 		}
 		// Poison is decided before anything is published: a payload the
 		// projections can never accept is moved aside so it cannot abort every
-		// boot. An apply or manifest failure after that point is environmental,
+		// boot. A publication or manifest failure after that point is environmental,
 		// so the WAL is retained and startup fails loudly — a later healthy boot
 		// must still be able to finish the batch, including one whose projection
 		// prefix this attempt already published.
@@ -516,7 +478,10 @@ func (r *Repository) recover() error {
 			}
 			continue
 		}
-		if err := r.apply(batch); err != nil {
+		if err := r.Parquet.StageBatch(batch.ID, batch.Spans, batch.Logs, batch.Metrics); err != nil {
+			return fmt.Errorf("stage replay %s: %w", name, err)
+		}
+		if err := r.publish(batch); err != nil {
 			return fmt.Errorf("replay %s: %w", name, err)
 		}
 		if err := r.recordBatch(batch); err != nil {
@@ -551,39 +516,152 @@ func (r *Repository) loadManifest() error {
 	path := filepath.Join(r.root, "MANIFEST.json")
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		r.manifest = repositoryManifest{Version: 1}
-		return writeRepositoryManifest(r.root, r.manifest)
+		r.manifest = repositoryManifest{Version: repositoryVersion, Epoch: 1}
+		if err := writeRepositoryManifest(r.root, r.manifest); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	} else {
+		if err := json.Unmarshal(data, &r.manifest); err != nil {
+			return err
+		}
+		if r.manifest.Version != repositoryVersion || r.manifest.Epoch == 0 {
+			return fmt.Errorf("unsupported telemetry manifest version %d epoch %d", r.manifest.Version, r.manifest.Epoch)
+		}
 	}
+	r.rebuildConsumedLocked()
+
+	journalPath := filepath.Join(r.root, "MANIFEST.log")
+	journalData, err := os.ReadFile(journalPath)
+	journalNew := errors.Is(err, os.ErrNotExist)
+	if err != nil && !journalNew {
+		return err
+	}
+	validBytes := 0
+	for validBytes < len(journalData) {
+		relativeEnd := bytes.IndexByte(journalData[validBytes:], '\n')
+		if relativeEnd < 0 {
+			break
+		}
+		lineStart := validBytes
+		lineEnd := lineStart + relativeEnd
+		line := journalData[lineStart:lineEnd]
+		validBytes = lineEnd + 1
+		if len(bytes.TrimSpace(line)) == 0 {
+			continue
+		}
+		var record repositoryJournalRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			return fmt.Errorf("decode telemetry manifest journal at byte %d: %w", lineStart, err)
+		}
+		if record.Epoch != r.manifest.Epoch || r.batchConsumedLocked(record.Batch.ID) {
+			continue
+		}
+		if record.Batch.ID == "" || !segment.ValidID(record.Batch.ID) {
+			return fmt.Errorf("telemetry manifest journal contains invalid batch ID %q", record.Batch.ID)
+		}
+		r.manifest.Batches = append(r.manifest.Batches, record.Batch)
+		r.addConsumedLocked(record.Batch)
+		r.journalRecords++
+	}
+	r.journal, err = os.OpenFile(journalPath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(data, &r.manifest); err != nil {
-		return err
+	if validBytes != len(journalData) {
+		if err := r.journal.Truncate(int64(validBytes)); err != nil {
+			return fmt.Errorf("truncate partial telemetry manifest journal: %w", err)
+		}
+		if err := r.journal.Sync(); err != nil {
+			return fmt.Errorf("sync repaired telemetry manifest journal: %w", err)
+		}
 	}
-	if r.manifest.Version != 1 {
-		return fmt.Errorf("unsupported telemetry manifest version %d", r.manifest.Version)
+	if journalNew {
+		return syncDirectory(r.root)
 	}
 	return nil
 }
 
 func (r *Repository) recordBatch(batch Batch) error {
-	for _, existing := range r.manifest.Batches {
-		if existing.ID == batch.ID {
-			return nil
-		}
-		for _, source := range existing.Sources {
-			if source == batch.ID {
-				return nil
-			}
+	if r.batchConsumedLocked(batch.ID) {
+		return nil
+	}
+	metadata := batchMetadata{ID: batch.ID, MinNanos: batchMinNanos(batch), MaxNanos: batchMaxNanos(batch)}
+	line, err := json.Marshal(repositoryJournalRecord{Epoch: r.manifest.Epoch, Batch: metadata})
+	if err != nil {
+		return err
+	}
+	line = append(line, '\n')
+	if r.journal == nil {
+		return errors.New("telemetry manifest journal is closed")
+	}
+	if _, err := r.journal.Write(line); err != nil {
+		return fmt.Errorf("append telemetry manifest journal: %w", err)
+	}
+	if err := r.journal.Sync(); err != nil {
+		return fmt.Errorf("sync telemetry manifest journal: %w", err)
+	}
+	r.manifest.Batches = append(r.manifest.Batches, metadata)
+	r.addConsumedLocked(metadata)
+	r.journalRecords++
+	if r.journalRecords >= manifestCheckpointRecords {
+		if err := r.checkpointManifestLocked(r.manifest); err != nil {
+			return fmt.Errorf("checkpoint telemetry manifest journal: %w", err)
 		}
 	}
-	next := r.manifest
-	next.Batches = append(append([]batchMetadata(nil), r.manifest.Batches...), batchMetadata{ID: batch.ID, MinNanos: batchMinNanos(batch), MaxNanos: batchMaxNanos(batch)})
+	return nil
+}
+
+func (r *Repository) checkpointManifestLocked(next repositoryManifest) error {
+	next = cloneRepositoryManifest(next)
+	next.Version = repositoryVersion
+	next.Epoch = max(next.Epoch, r.manifest.Epoch+1)
 	if err := writeRepositoryManifest(r.root, next); err != nil {
 		return err
 	}
 	r.manifest = next
+	r.rebuildConsumedLocked()
+	r.journalRecords = 0
+	if r.journal == nil {
+		return nil
+	}
+	if err := r.journal.Truncate(0); err != nil {
+		return fmt.Errorf("truncate telemetry manifest journal: %w", err)
+	}
+	if _, err := r.journal.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("rewind telemetry manifest journal: %w", err)
+	}
+	if err := r.journal.Sync(); err != nil {
+		return fmt.Errorf("sync telemetry manifest journal checkpoint: %w", err)
+	}
 	return nil
+}
+
+func cloneRepositoryManifest(manifest repositoryManifest) repositoryManifest {
+	clone := manifest
+	clone.Batches = append([]batchMetadata(nil), manifest.Batches...)
+	for i := range clone.Batches {
+		clone.Batches[i].Sources = append([]string(nil), manifest.Batches[i].Sources...)
+	}
+	return clone
+}
+
+func (r *Repository) rebuildConsumedLocked() {
+	r.consumed = make(map[string]struct{}, len(r.manifest.Batches))
+	for _, batch := range r.manifest.Batches {
+		r.addConsumedLocked(batch)
+	}
+}
+
+func (r *Repository) addConsumedLocked(batch batchMetadata) {
+	if r.consumed == nil {
+		r.consumed = make(map[string]struct{})
+	}
+	r.consumed[batch.ID] = struct{}{}
+	for _, source := range batch.Sources {
+		r.consumed[source] = struct{}{}
+	}
 }
 
 func (r *Repository) batchConsumed(id string) bool {
@@ -593,17 +671,8 @@ func (r *Repository) batchConsumed(id string) bool {
 }
 
 func (r *Repository) batchConsumedLocked(id string) bool {
-	for _, batch := range r.manifest.Batches {
-		if batch.ID == id {
-			return true
-		}
-		for _, source := range batch.Sources {
-			if source == id {
-				return true
-			}
-		}
-	}
-	return false
+	_, exists := r.consumed[id]
+	return exists
 }
 
 func (r *Repository) removeWAL(id string) error {
@@ -684,7 +753,7 @@ func normalizeBatch(batch *Batch) {
 	for i := range batch.Spans {
 		batch.Spans[i].Namespace = telemetry.NormalizeNamespace(batch.Spans[i].Namespace)
 		if batch.Spans[i].StartUnixNanos == 0 {
-			// Mirror the Parquet start_time coalesce so hot segments and cold SQL
+			// Mirror the Parquet start_time coalesce so hot segments and SQL scans
 			// key a zero-start span on the same instant.
 			batch.Spans[i].StartUnixNanos = batch.Spans[i].IngestedAt
 		}

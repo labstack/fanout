@@ -4,11 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/klauspost/compress/zstd"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -42,11 +42,10 @@ func TestRepositoryCommitIsIdempotentAndQueryable(t *testing.T) {
 	if got := repository.Spans.RowCount(); got != 1 {
 		t.Fatalf("span rows = %d", got)
 	}
-	if got := repository.Logs.RowCount(); got != 1 {
-		t.Fatalf("log rows = %d", got)
-	}
-	if got := repository.Metrics.RowCount(); got != 1 {
-		t.Fatalf("metric rows = %d", got)
+	for _, signal := range []string{"logs", "metrics"} {
+		if _, err := os.Stat(filepath.Join(dir, "hot", signal)); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("unused hot %s copy exists: %v", signal, err)
+		}
 	}
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
@@ -105,6 +104,112 @@ func TestRepositoryCommitIODoesNotHoldMetadataLock(t *testing.T) {
 	}
 }
 
+func TestRepositoryStageDoesNotWaitForProjectionCommitLock(t *testing.T) {
+	repository, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	repository.commitMu.Lock()
+	staged := make(chan error, 1)
+	go func() {
+		staged <- repository.Stage(Batch{ID: "independent-stage", Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}}})
+	}()
+	select {
+	case err := <-staged:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		repository.commitMu.Unlock()
+		t.Fatal("WAL staging waited for projection commit I/O")
+	}
+	repository.commitMu.Unlock()
+}
+
+func TestCompactHotDoesNotTakeRepositoryIngestOrReadLocks(t *testing.T) {
+	repository, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	repository.hotMu.Lock()
+	repository.commitMu.Lock()
+	done := make(chan error, 1)
+	go func() {
+		_, err := repository.CompactHot(2)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		repository.commitMu.Unlock()
+		repository.hotMu.Unlock()
+		t.Fatal("hot compaction acquired a repository-wide ingest or read lock")
+	}
+	repository.commitMu.Unlock()
+	repository.hotMu.Unlock()
+}
+
+func TestRepositoryManifestJournalReplaysAndRepairsPartialTail(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		batch := testBatch()
+		batch.ID = fmt.Sprintf("journal-%d", i)
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var snapshot repositoryManifest
+	data, err := os.ReadFile(filepath.Join(dir, "MANIFEST.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Batches) != 0 {
+		t.Fatalf("per-commit path rewrote manifest snapshot with %d batches", len(snapshot.Batches))
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	journalPath := filepath.Join(dir, "MANIFEST.log")
+	journal, err := os.OpenFile(journalPath, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := journal.WriteString(`{"epoch":1,"batch":`); err != nil {
+		t.Fatal(err)
+	}
+	if err := journal.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if len(reopened.manifest.Batches) != 3 || !reopened.batchConsumed("journal-2") {
+		t.Fatalf("journal replay batches = %#v", reopened.manifest.Batches)
+	}
+	repaired, err := os.ReadFile(journalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(repaired), `"batch":`) && !strings.HasSuffix(string(repaired), "}\n") {
+		t.Fatalf("partial journal tail was not truncated: %q", repaired)
+	}
+}
+
 func TestRepositoryReplaysDurableWAL(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)
@@ -124,8 +229,13 @@ func TestRepositoryReplaysDurableWAL(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer recovered.Close()
-	if recovered.Spans.RowCount() != 1 || recovered.Logs.RowCount() != 1 || recovered.Metrics.RowCount() != 1 {
-		t.Fatal("WAL recovery did not restore every signal")
+	if recovered.Spans.RowCount() != 1 {
+		t.Fatal("WAL recovery did not restore the span index")
+	}
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		if _, err := os.Stat(filepath.Join(dir, "parquet", signal, batch.ID+".parquet")); err != nil {
+			t.Fatalf("WAL recovery did not restore %s parquet: %v", signal, err)
+		}
 	}
 	entries, err := filepath.Glob(filepath.Join(dir, "wal", "*.wal"))
 	if err != nil {
@@ -133,17 +243,6 @@ func TestRepositoryReplaysDurableWAL(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("committed WAL files remain: %v", entries)
-	}
-}
-
-func TestRepositoryRejectsLegacyDuckLakeCatalog(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ducklake.sqlite"), []byte("legacy"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Open(dir)
-	if err == nil || !strings.Contains(err.Error(), "clean storage.data_dir") {
-		t.Fatalf("Open error = %v, want explicit clean-data-dir failure", err)
 	}
 }
 
@@ -213,7 +312,7 @@ func TestRepositoryPersistsHotPruneBoundary(t *testing.T) {
 	}
 	batch := testBatch()
 	batch.ID = "hot-boundary"
-	batch.Logs = []telemetry.Log{{EventUnixNanos: 100}, {EventUnixNanos: 300}}
+	batch.Spans = []telemetry.Span{{TraceID: "trace-boundary", SpanID: "span", StartUnixNanos: 300}}
 	if err := repository.Commit(batch); err != nil {
 		t.Fatal(err)
 	}
@@ -228,16 +327,19 @@ func TestRepositoryPersistsHotPruneBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	var timestamps []int64
-	cutoff, err := reopened.ScanHotLogs(0, 400, func(row telemetry.Log) bool {
-		timestamps = append(timestamps, row.EventUnixNanos)
-		return true
-	})
+	spans, cutoff, err := reopened.HotTrace("trace-boundary", 250)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cutoff != 250 || !slices.Equal(timestamps, []int64{300}) {
-		t.Fatalf("cutoff=%d timestamps=%v, want cutoff 250 and only hot timestamp 300", cutoff, timestamps)
+	if cutoff != 250 || len(spans) != 1 {
+		t.Fatalf("cutoff=%d spans=%d, want cutoff 250 and one retained boundary span", cutoff, len(spans))
+	}
+	skipped, cutoff, err := reopened.HotTrace("trace-boundary", 249)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cutoff != 250 || len(skipped) != 0 {
+		t.Fatalf("cross-boundary lookup cutoff=%d spans=%d, want Parquet handoff without a hot scan", cutoff, len(skipped))
 	}
 }
 
@@ -519,6 +621,64 @@ func TestRepositoryCompactionRecoveryRestoresRetiredInputsWhenStageMissing(t *te
 	}
 }
 
+func TestRepositoryCompactionRollsBackMidSwapFailure(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	marker := compactionMarker{ID: "compact-rollback", Inputs: []string{"rollback-a", "rollback-b"}, Signals: []string{"spans", "logs"}, MinNanos: 100, MaxNanos: 120, Generation: 1}
+	for _, id := range marker.Inputs {
+		batch := testBatch()
+		batch.ID = id
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	stageDir := filepath.Join(dir, marker.ID)
+	if err := os.Mkdir(stageDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, signal := range marker.Signals {
+		data, err := os.ReadFile(filepath.Join(repository.Parquet.Dir(), signal, marker.Inputs[0]+".parquet"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(stageDir, signal+".parquet"), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	originalRename := renameCompactionFile
+	renameCompactionFile = func(oldPath, newPath string) error {
+		if oldPath == filepath.Join(stageDir, "logs.parquet") {
+			return errors.New("injected log publish failure")
+		}
+		return os.Rename(oldPath, newPath)
+	}
+	defer func() { renameCompactionFile = originalRename }()
+	if err := repository.completeCompaction(marker); err == nil || !strings.Contains(err.Error(), "injected log publish failure") {
+		t.Fatalf("complete compaction error = %v", err)
+	}
+	for _, signal := range marker.Signals {
+		for _, id := range marker.Inputs {
+			input := filepath.Join(repository.Parquet.Dir(), signal, id+".parquet")
+			if _, err := os.Stat(input); err != nil {
+				t.Fatalf("restored %s input %s: %v", signal, id, err)
+			}
+			if _, err := os.Stat(input + ".retired-" + marker.ID); !os.IsNotExist(err) {
+				t.Fatalf("retired %s input %s remains: %v", signal, id, err)
+			}
+		}
+		if _, err := os.Stat(filepath.Join(repository.Parquet.Dir(), signal, marker.ID+".parquet")); !os.IsNotExist(err) {
+			t.Fatalf("partial compacted %s output remains: %v", signal, err)
+		}
+		if _, err := os.Stat(filepath.Join(stageDir, signal+".parquet")); err != nil {
+			t.Fatalf("restaged %s output: %v", signal, err)
+		}
+	}
+}
+
 func testBatchAt(timestamp int64) Batch {
 	batch := testBatch()
 	batch.Spans[0].StartUnixNanos = timestamp
@@ -685,7 +845,7 @@ func TestWALWriterRejectsBatchLargerThanDecoderBudget(t *testing.T) {
 	}
 }
 
-func TestCompactHotCompactsEverySignalAndPreservesRows(t *testing.T) {
+func TestCompactHotCompactsSpanIndexAndPreservesRows(t *testing.T) {
 	repository, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -709,14 +869,8 @@ func TestCompactHotCompactsEverySignalAndPreservesRows(t *testing.T) {
 	if got := repository.Spans.SegmentCount(); got != 2 {
 		t.Fatalf("span segments = %d, want 2 compacted files", got)
 	}
-	if got := repository.Logs.SegmentCount(); got != 2 {
-		t.Fatalf("log segments = %d, want 2 compacted files", got)
-	}
-	if got := repository.Metrics.SegmentCount(); got != 2 {
-		t.Fatalf("metric segments = %d, want 2 compacted files", got)
-	}
-	if repository.Spans.RowCount() != 6 || repository.Logs.RowCount() != 6 || repository.Metrics.RowCount() != 6 {
-		t.Fatal("hot compaction changed row counts")
+	if repository.Spans.RowCount() != 6 {
+		t.Fatal("hot span compaction changed row counts")
 	}
 }
 

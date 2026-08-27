@@ -120,12 +120,12 @@ func main() {
 	}
 	defer q.Close()
 
-	writer := telemetrystore.NewWriter(repository, cfg.FlushInterval, cfg.FlushBatchSize, nil, nil, nil)
+	writer := telemetrystore.NewWriter(repository, cfg.IngestBatchSize)
 	writerResult := make(chan error, 1)
 	go func() {
 		err := writer.Run(ctx)
 		// Publish the result before notifying the process-wide error channel. The
-		// shutdown path waits on writerResult after Writer.Wait, so a final-flush
+		// shutdown path waits on writerResult after Writer.Wait, so a final-commit
 		// failure cannot be lost in the close(done) -> goroutine-send scheduling gap.
 		writerResult <- err
 		if err != nil {

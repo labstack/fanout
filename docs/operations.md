@@ -67,14 +67,14 @@ its configured cycle rather than immediately when the setting changes.
 ## Backup
 
 The supported portable baseline is a **cold backup** of the complete
-`FANOUT_DATA_DIR`. It contains the telemetry catalog and Parquet files, query
-state, and the control SQLite database; copying only one subdirectory does not
-produce a recoverable installation.
+`FANOUT_DATA_DIR`. It contains the telemetry WAL, commit manifest, Parquet
+files, query state, and the control SQLite database; copying only one
+subdirectory does not produce a recoverable installation.
 
 1. Record the running Fanout version and configuration, excluding secrets from
    ordinary logs or tickets.
 2. Stop Fanout cleanly and wait for the process to exit. Shutdown stops both
-   OTLP listeners before draining the lake writer.
+   OTLP listeners before draining the telemetry commit worker.
 3. Snapshot or copy the complete data directory with ownership and permissions
    preserved.
 4. Restart Fanout and confirm `/readyz`.

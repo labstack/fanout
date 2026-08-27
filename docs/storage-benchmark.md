@@ -1,6 +1,6 @@
-# Fanout-native storage POC
+# Fanout storage benchmark
 
-This experiment asks whether a storage path designed only for Fanout's
+This benchmark asks whether a storage path designed only for Fanout's
 telemetry workload can outperform embedded general-purpose databases while
 remaining crash-safe and retaining a path to ad-hoc SQL.
 
@@ -39,16 +39,17 @@ Collected on Darwin/arm64, Apple M3 Max, 14 logical CPUs. This is a development
 comparison, not a published Fanout capacity claim. Peak RSS was measured in an
 isolated process for each embedded engine.
 
-| Storage / execution | Write rows/s | Maintenance | Active disk | Endpoint | Full trace | Raw service | Mixed write | Mixed trace p95 | Peak RSS |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| Fanout columnar + direct | **520,879** | **135 ms** | 34.4 MiB | **0.224 ms** | **0.507 ms** | 26.98 ms | **528,668/s** | **1.33 ms** | **197 MiB** |
-| DuckDB native | 98,030 | 274 ms rollup + 4 ms checkpoint | 47.5 MiB | 0.905 ms | 1.54 ms | **1.44 ms** | 85,514/s | 2.14 ms | 1,693 MiB |
-| Zstd Parquet + DuckDB | 94,824 effective | 345 ms export | **21.8 MiB** | 1.35 ms | 10.53 ms | 3.88 ms | n/a | n/a | included in DuckDB process |
-| chDB MergeTree | 129,724 | 4.13 s optimize | 38.1 MiB active | 2.81 ms | 7.39 ms | 6.06 ms | 118,722/s | 9.61 ms | 699 MiB |
+| Storage / execution | Write rows/s | Maintenance | Active disk | Endpoint | Full trace | Raw service | Mixed write | Mixed trace p95 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Production Fanout + Parquet** | 154,848 | live | 56.6 MiB | **0.171 ms** | **0.508 ms** | 27.42 ms | 156,547/s | 0.864 ms |
+| Fanout columnar experiment | **511,113** | **94 ms** | 34.4 MiB | 0.210 ms | 0.551 ms | 27.99 ms | **513,927/s** | **0.816 ms** |
+| DuckDB native | 93,189 | 143 ms rollup + 5 ms checkpoint | 47.5 MiB | 0.899 ms | 1.52 ms | **1.16 ms** | 80,255/s | 2.02 ms |
+| Zstd Parquet + DuckDB | 90,215 effective | 354 ms export | **21.8 MiB** | 1.35 ms | 9.40 ms | 3.64 ms | n/a | n/a |
+| chDB MergeTree | 78,434 | 4.64 s optimize | 38.1 MiB active | 3.47 ms | 9.47 ms | 6.88 ms | 97,271/s | 12.38 ms |
 
 The chDB directory occupied 106.7 MiB after forced merges because inactive and
 engine-internal files remain present; the table's active parts occupied 38.1
-MiB. Its embedded-engine initialization took 412 ms in the measured run.
+MiB. Its embedded-engine initialization took 747 ms in the measured run.
 
 Iceberg is not listed as an execution engine. Its data plane is Parquet; table
 metadata, snapshots, manifests, deletion vectors, and planning would sit above
@@ -56,32 +57,32 @@ the Parquet/DuckDB result and add capabilities plus some overhead.
 
 ## Interpretation
 
-The custom path wins Fanout's fixed ingestion, endpoint, trace, concurrency,
-maintenance, and memory objectives. DuckDB remains about 19 times faster for
-the broad raw aggregation, and Parquet remains about 37% smaller than the
-custom durable format.
+The custom span experiment establishes the upper bound behind the earlier
+roughly 500k rows/s figure. It is not the production write rate: it omits the
+authoritative Parquet projection for logs and metrics and is intentionally not
+a general SQL store.
 
-This supports a hybrid architecture rather than a home-grown general SQL
+The production design keeps the useful parts without taking on a home-grown
 database:
 
-- Fanout owns the hot WAL/manifest, columnar segments, indexes, retention,
-  compaction, and ingestion-time rollups;
-- known product queries use direct vectorized execution;
-- cold segments use Parquet when interoperability and density matter;
-- an established vectorized SQL engine handles arbitrary scans over cold data;
-- SQLite remains control/configuration storage only.
+- Fanout owns request-level WAL durability, a compact commit journal, the
+  recent-span index, retention, and compaction;
+- Parquet is the single authoritative format for spans, logs, and metrics;
+- DuckDB executes SQL, filtering, ordering, and broad analytical scans;
+- SQLite stores transactional control and identity state only.
 
-Before production replacement, the POC still needs logs and metrics, promoted
-attribute indexes, retention under active readers, corruption checksums,
-bounded-memory multi-day compaction, Linux 4-vCPU/8-GB measurements, and a
-long-running kill/restart soak.
+This trades some maximum write throughput for much lower implementation risk,
+full telemetry coverage, standard files, and a featureful SQL engine. The
+benchmark reports direct durable publication throughput; request acknowledgement
+is decoupled through the WAL and should be measured separately under the target
+collector concurrency and hardware before publishing a capacity claim.
 
 ## Reproduction
 
 Custom, DuckDB, and Parquet:
 
 ```sh
-go run ./cmd/storage-poc \
+go run ./bench/storage \
   -rows 1000000 \
   -batch 50000 \
   -repeats 11 \
@@ -94,6 +95,6 @@ chDB is a nested experiment module so its embedded C++ library does not enter
 Fanout's production dependency graph or binary:
 
 ```sh
-cd experiments/storage-poc-chdb
+cd bench/storage/chdb
 go run . -rows 1000000 -batch 50000 -repeats 11 -mixed-rows 200000
 ```

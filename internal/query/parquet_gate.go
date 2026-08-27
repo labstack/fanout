@@ -8,7 +8,7 @@ import (
 // defaultWriterGrace bounds how long readers may keep entering ahead of a
 // waiting publisher. Long enough that ordinary dashboard traffic never queues
 // behind maintenance, short enough that retention and compaction always run.
-const defaultWriterGrace = 5 * time.Second
+const defaultWriterGrace = 30 * time.Second
 
 // parquetReadGate protects Parquet file publication without sync.RWMutex's
 // unconditional writer preference. Queuing maintenance must not stall
@@ -22,9 +22,15 @@ type parquetReadGate struct {
 	changed     *sync.Cond
 	readers     int
 	writer      bool
-	waiting     []time.Time
+	waiting     []parquetWaiter
+	nextWaiter  uint64
 	writerGrace time.Duration
 	now         func() time.Time
+}
+
+type parquetWaiter struct {
+	id       uint64
+	queuedAt time.Time
 }
 
 func (g *parquetReadGate) init() {
@@ -55,7 +61,7 @@ func (g *parquetReadGate) admitsReaderLocked() bool {
 	if len(g.waiting) == 0 {
 		return true
 	}
-	return g.clock().Sub(g.waiting[0]) < g.grace()
+	return g.clock().Sub(g.waiting[0].queuedAt) < g.grace()
 }
 
 func (g *parquetReadGate) TryRLock() bool {
@@ -96,16 +102,17 @@ func (g *parquetReadGate) RUnlock() {
 func (g *parquetReadGate) Lock() {
 	g.init()
 	g.mu.Lock()
-	queued := g.clock()
-	g.waiting = append(g.waiting, queued)
+	g.nextWaiter++
+	waiter := parquetWaiter{id: g.nextWaiter, queuedAt: g.clock()}
+	g.waiting = append(g.waiting, waiter)
 	// Wake any readers parked on an earlier publisher so they re-evaluate this
 	// publisher's grace, and so the grace clock starts for readers immediately.
 	g.changed.Broadcast()
 	for g.writer || g.readers > 0 {
 		g.changed.Wait()
 	}
-	for i, at := range g.waiting {
-		if at.Equal(queued) {
+	for i, queued := range g.waiting {
+		if queued.id == waiter.id {
 			g.waiting = append(g.waiting[:i], g.waiting[i+1:]...)
 			break
 		}

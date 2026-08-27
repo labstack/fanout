@@ -199,7 +199,8 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
 
-	d := &Duck{DB: db, cfg: cfg, repository: repository, rollupLagNanos: rollupLagFromConfig(cfg)}
+	d := &Duck{DB: db, cfg: cfg, repository: repository, rollupLagNanos: int64(30 * time.Second)}
+	repository.SetParquetPublishLock(&d.parquetMu)
 	if cfg.DuckDBMemory == "" {
 		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
@@ -956,19 +957,9 @@ SET last_ingested_unix_nano = excluded.last_ingested_unix_nano,
 
 // rollupSafetyLagNanos is how far behind the max ingested timestamp the rollup
 // watermark is held, covering the worst-case delay between a row being stamped at
-// ingest and committed to the lake (normal flush latency plus a retry or two).
+// ingest and committed to Parquet (the bounded commit retry window plus queueing).
 func (d *Duck) rollupSafetyLagNanos() int64 {
 	return d.rollupLagNanos
-}
-
-// rollupLagFromConfig derives the watermark safety lag from the flush interval:
-// two flush cycles, with a 30s floor.
-func rollupLagFromConfig(cfg config.Config) int64 {
-	lag := 2 * cfg.FlushInterval
-	if lag < 30*time.Second {
-		lag = 30 * time.Second
-	}
-	return lag.Nanoseconds()
 }
 
 func maxServiceRollupWatermark(ctx context.Context, tx *sql.Tx) (int64, error) {

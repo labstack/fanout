@@ -42,11 +42,8 @@ func TestLoadReturnsDefaults(t *testing.T) {
 	if cfg.DataDir != "./data" {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, "./data")
 	}
-	if cfg.FlushInterval != 15*time.Second {
-		t.Errorf("FlushInterval = %s, want %s", cfg.FlushInterval, 15*time.Second)
-	}
-	if cfg.FlushBatchSize != 50000 {
-		t.Errorf("FlushBatchSize = %d, want %d", cfg.FlushBatchSize, 50000)
+	if cfg.IngestBatchSize != 50000 {
+		t.Errorf("IngestBatchSize = %d, want %d", cfg.IngestBatchSize, 50000)
 	}
 	if cfg.RollupInterval != time.Minute {
 		t.Errorf("RollupInterval = %s, want %s", cfg.RollupInterval, time.Minute)
@@ -280,9 +277,7 @@ func TestConfigurationSchemaUsesUnitBearingDurations(t *testing.T) {
 func TestLoadDurationIntervals(t *testing.T) {
 	t.Run("YAML", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "fanout.yaml")
-		document := `ingest:
-  flush_interval: 30s
-storage:
+		document := `storage:
   rollup_interval: 5m
   maintenance_interval: 1h
 alerts:
@@ -295,7 +290,7 @@ alerts:
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if cfg.FlushInterval != 30*time.Second || cfg.RollupInterval != 5*time.Minute ||
+		if cfg.RollupInterval != 5*time.Minute ||
 			cfg.MaintenanceInterval != time.Hour ||
 			cfg.AlertEvaluationInterval != 45*time.Second {
 			t.Fatalf("duration values were not decoded: %+v", cfg)
@@ -304,7 +299,6 @@ alerts:
 
 	t.Run("environment", func(t *testing.T) {
 		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
-			"FANOUT_FLUSH_INTERVAL=30s",
 			"FANOUT_ROLLUP_INTERVAL=5m",
 			"FANOUT_MAINTENANCE_INTERVAL=1h",
 			"FANOUT_ALERTS_EVALUATION_INTERVAL=45s",
@@ -312,7 +306,7 @@ alerts:
 		if err != nil {
 			t.Fatalf("Load: %v", err)
 		}
-		if cfg.FlushInterval != 30*time.Second || cfg.RollupInterval != 5*time.Minute ||
+		if cfg.RollupInterval != 5*time.Minute ||
 			cfg.MaintenanceInterval != time.Hour ||
 			cfg.AlertEvaluationInterval != 45*time.Second {
 			t.Fatalf("duration values were not decoded: %+v", cfg)
@@ -398,7 +392,6 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 
 	t.Run("removed environment variables", func(t *testing.T) {
 		for _, name := range []string{
-			"FANOUT_FLUSH_SECONDS",
 			"FANOUT_ROLLUP_EVERY_SECONDS",
 			"FANOUT_MERGE_EVERY_SECONDS",
 			"FANOUT_MERGE_INTERVAL",
@@ -499,7 +492,7 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 	for _, test := range []struct {
 		name, document string
 	}{
-		{"invalid duration", "ingest:\n  flush_interval: never\n"},
+		{"invalid duration", "storage:\n  rollup_interval: never\n"},
 		{"fractional integer", "smtp:\n  port: 25.9\n"},
 		{"integer as boolean", "mcp:\n  enabled: 2\n"},
 		{"YAML keyword as boolean", "alerts:\n  enabled: off\n"},
@@ -517,8 +510,8 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 	}
 
 	t.Run("invalid merged config", func(t *testing.T) {
-		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_FLUSH_INTERVAL=0s")})
-		if err == nil || !strings.Contains(err.Error(), "flush") {
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_INGEST_BATCH_SIZE=0")})
+		if err == nil || !strings.Contains(err.Error(), "batch_size") {
 			t.Fatalf("error = %v, want validation error", err)
 		}
 	})
@@ -553,7 +546,6 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 	for _, test := range []struct {
 		name, assignment, key string
 	}{
-		{"subsecond flush interval", "FANOUT_FLUSH_INTERVAL=999ms", "flush_interval"},
 		{"subsecond rollup interval", "FANOUT_ROLLUP_INTERVAL=999ms", "rollup_interval"},
 		{"subsecond maintenance interval", "FANOUT_MAINTENANCE_INTERVAL=500ms", "maintenance_interval"},
 		{"subsecond alert interval", "FANOUT_ALERTS_EVALUATION_INTERVAL=999ms", "evaluation_interval"},
@@ -616,8 +608,7 @@ func TestValidate(t *testing.T) {
 		OTLPGRPCAddr:            "127.0.0.1:4317",
 		OTLPHTTPAddr:            "127.0.0.1:4318",
 		DataDir:                 "./data",
-		FlushInterval:           15 * time.Second,
-		FlushBatchSize:          50000,
+		IngestBatchSize:         50000,
 		RollupInterval:          time.Minute,
 		RetentionDays:           30,
 		HotRetention:            24 * time.Hour,
@@ -645,10 +636,9 @@ func TestValidate(t *testing.T) {
 		name   string
 		modify func(*Config)
 	}{
-		{"FlushInterval=0", func(c *Config) { c.FlushInterval = 0 }},
-		{"FlushInterval=999ms", func(c *Config) { c.FlushInterval = 999 * time.Millisecond }},
-		{"FlushBatchSize=0", func(c *Config) { c.FlushBatchSize = 0 }},
-		{"FlushBatchSize=-1", func(c *Config) { c.FlushBatchSize = -1 }},
+		{"IngestBatchSize=0", func(c *Config) { c.IngestBatchSize = 0 }},
+		{"IngestBatchSize=-1", func(c *Config) { c.IngestBatchSize = -1 }},
+		{"IngestBatchSize=50001", func(c *Config) { c.IngestBatchSize = 50001 }},
 		{"RollupInterval=0", func(c *Config) { c.RollupInterval = 0 }},
 		{"RollupInterval=999ms", func(c *Config) { c.RollupInterval = 999 * time.Millisecond }},
 		{"RetentionDays=-1", func(c *Config) { c.RetentionDays = -1 }},

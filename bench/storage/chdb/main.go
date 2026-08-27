@@ -222,7 +222,7 @@ func formatDuration(value time.Duration) string {
 	return fmt.Sprintf("%.2fµs", float64(value)/float64(time.Microsecond))
 }
 
-func fatal(err error) { fmt.Fprintln(os.Stderr, "storage-poc-chdb:", err); os.Exit(1) }
+func fatal(err error) { fmt.Fprintln(os.Stderr, "storage-bench-chdb:", err); os.Exit(1) }
 
 const spansDDL = `CREATE TABLE fanout.spans (
  namespace String,trace_id String,span_id String,parent_span_id String,service_name LowCardinality(String),name LowCardinality(String),kind LowCardinality(String),

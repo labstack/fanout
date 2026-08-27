@@ -247,7 +247,7 @@ func TestRollupOnceIgnoresRowsWithoutBucketTimestamp(t *testing.T) {
 	})
 
 	if _, err := db.Exec(`
-INSERT INTO lake.logs (
+INSERT INTO telemetry.logs (
   namespace,
   log_time,
   time_unix_nano,
@@ -259,11 +259,11 @@ INSERT INTO lake.logs (
   ingested_unix_nano
 )
 VALUES ('ns-a', NULL, 0, 'INFO', 9, 'missing time', 'checkout', now(), 200)`); err != nil {
-		t.Fatalf("insert lake.logs failed: %v", err)
+		t.Fatalf("insert telemetry.logs failed: %v", err)
 	}
 
 	if _, err := db.Exec(`
-INSERT INTO lake.metrics (
+INSERT INTO telemetry.metrics (
   namespace,
   metric_time,
   time_unix_nano,
@@ -275,7 +275,7 @@ INSERT INTO lake.metrics (
   ingested_unix_nano
 )
 VALUES ('ns-a', NULL, 0, 'cpu.usage', 'gauge', 'checkout', 1.0, now(), 300)`); err != nil {
-		t.Fatalf("insert lake.metrics failed: %v", err)
+		t.Fatalf("insert telemetry.metrics failed: %v", err)
 	}
 
 	if _, err := d.rollupOnce(ctx); err != nil {
@@ -628,7 +628,7 @@ func insertRollupTestSpan(t *testing.T, db *sql.DB, span rollupTestSpan) {
 	end := span.start.Add(span.duration)
 
 	if _, err := db.Exec(`
-INSERT INTO lake.spans (
+INSERT INTO telemetry.spans (
   namespace,
   trace_id,
   span_id,
@@ -668,7 +668,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		time.Unix(0, span.ingested).UTC(),
 		span.ingested,
 	); err != nil {
-		t.Fatalf("insert lake.spans failed: %v", err)
+		t.Fatalf("insert telemetry.spans failed: %v", err)
 	}
 }
 

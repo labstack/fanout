@@ -21,8 +21,7 @@ ingest:
   otlp_http_addr: "127.0.0.1:4318" # FANOUT_OTLP_HTTP_ADDR
   advertised_endpoint: "" # FANOUT_INGEST_ADVERTISED_ENDPOINT
   default_namespace: default # FANOUT_DEFAULT_NAMESPACE
-  flush_interval: 15s # FANOUT_FLUSH_INTERVAL
-  flush_batch_size: 50000 # FANOUT_FLUSH_BATCH_SIZE
+  batch_size: 50000 # FANOUT_INGEST_BATCH_SIZE
 
 storage:
   data_dir: ./data # FANOUT_DATA_DIR

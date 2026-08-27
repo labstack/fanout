@@ -12,6 +12,8 @@ import (
 	appauth "github.com/labstack/fanout/internal/auth"
 )
 
+const maxIngestBatchSize = 50_000
+
 // Config is Fanout's canonical configuration schema. Public names use
 // FANOUT_ plus the shortest stable term that is clear in a docker run, and the
 // same terminology across YAML, environment variables, Go, logs, and docs.
@@ -27,8 +29,7 @@ type Config struct {
 	// derive host:port from the browser request and OTLPGRPCAddr as a best effort.
 	IngestAdvertisedEndpoint string        `koanf:"ingest.advertised_endpoint" env:"FANOUT_INGEST_ADVERTISED_ENDPOINT"`
 	DataDir                  string        `koanf:"storage.data_dir" env:"FANOUT_DATA_DIR" default:"./data"`
-	FlushInterval            time.Duration `koanf:"ingest.flush_interval" env:"FANOUT_FLUSH_INTERVAL" default:"15s"`
-	FlushBatchSize           int           `koanf:"ingest.flush_batch_size" env:"FANOUT_FLUSH_BATCH_SIZE" default:"50000"`
+	IngestBatchSize          int           `koanf:"ingest.batch_size" env:"FANOUT_INGEST_BATCH_SIZE" default:"50000"`
 	RollupInterval           time.Duration `koanf:"storage.rollup_interval" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
 	MCPEnabled               bool          `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" default:"true"`
 	RetentionDays            int           `koanf:"storage.retention_days" env:"FANOUT_RETENTION_DAYS" default:"30"`
@@ -182,11 +183,8 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.DataDir) == "" {
 		return fmt.Errorf("storage.data_dir must not be empty")
 	}
-	if c.FlushInterval < time.Second {
-		return fmt.Errorf("ingest.flush_interval must be at least 1s, got %s", c.FlushInterval)
-	}
-	if c.FlushBatchSize <= 0 {
-		return fmt.Errorf("ingest.flush_batch_size must be > 0, got %d", c.FlushBatchSize)
+	if c.IngestBatchSize <= 0 || c.IngestBatchSize > maxIngestBatchSize {
+		return fmt.Errorf("ingest.batch_size must be between 1 and %d, got %d", maxIngestBatchSize, c.IngestBatchSize)
 	}
 	if c.RollupInterval < time.Second {
 		return fmt.Errorf("storage.rollup_interval must be at least 1s, got %s", c.RollupInterval)

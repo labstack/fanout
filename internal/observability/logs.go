@@ -1,88 +1,33 @@
 package observability
 
 import (
-	"container/heap"
 	"context"
 	"fmt"
-	"sort"
 	"strings"
-	"time"
-
-	"github.com/labstack/fanout/internal/telemetry"
 )
 
-// newestLogHeap keeps its oldest entry at the root so a full-window scan only
-// retains the newest bounded result set.
-type newestLogHeap []LogEntry
-
-func (h newestLogHeap) Len() int           { return len(h) }
-func (h newestLogHeap) Less(i, j int) bool { return h[i].Time.Before(h[j].Time) }
-func (h newestLogHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *newestLogHeap) Push(value any)    { *h = append(*h, value.(LogEntry)) }
-func (h *newestLogHeap) Pop() any {
-	old := *h
-	value := old[len(old)-1]
-	*h = old[:len(old)-1]
-	return value
-}
-
-// earliestLogHeap keeps its newest entry at the root so trace correlation can
-// retain the earliest bounded result set even when batches arrive out of order.
-type earliestLogHeap []LogEntry
-
-func (h earliestLogHeap) Len() int           { return len(h) }
-func (h earliestLogHeap) Less(i, j int) bool { return h[i].Time.After(h[j].Time) }
-func (h earliestLogHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *earliestLogHeap) Push(value any)    { *h = append(*h, value.(LogEntry)) }
-func (h *earliestLogHeap) Pop() any {
-	old := *h
-	value := old[len(old)-1]
-	*h = old[:len(old)-1]
-	return value
-}
-
-func retainNewest(entries *newestLogHeap, entry LogEntry, limit int) {
-	if entries.Len() < limit {
-		heap.Push(entries, entry)
-	} else if entry.Time.After((*entries)[0].Time) {
-		(*entries)[0] = entry
-		heap.Fix(entries, 0)
-	}
-}
-
-func retainEarliest(entries *earliestLogHeap, entry LogEntry, limit int) {
-	if entries.Len() < limit {
-		heap.Push(entries, entry)
-	} else if entry.Time.Before((*entries)[0].Time) {
-		(*entries)[0] = entry
-		heap.Fix(entries, 0)
-	}
-}
-
-var coldLogFilters = `
+var logFilters = `
 WHERE time >= ? AND time < ?
   AND (? = '' OR namespace = ?)
   AND (? = '' OR service = ?)
   AND (? = '' OR lower(severity) = lower(?))
   AND (? = '' OR contains(lower(` + redactLogBodySQL("body") + `), lower(?)))`
 
-// The cold tier answers the two questions the API actually asks: the newest
-// `limit` entries, and per-bucket counts. Both stay bounded in DuckDB — the
-// entry sample by LIMIT, the histogram by GROUP BY — so a wide window costs a
-// page of rows instead of the whole retained window streamed through the
-// driver.
-var coldLogEntriesQuery = `
+// DuckDB answers the two questions the API asks: the newest `limit` entries
+// and per-bucket counts. LIMIT bounds the entry stream and GROUP BY bounds the
+// histogram stream regardless of the retained Parquet row count.
+var logEntriesQuery = `
 SELECT time, severity, coalesce(service, ''), ` + redactLogBodySQL("body") + `,
        coalesce(trace_id, ''), coalesce(span_id, '')
-FROM logs` + coldLogFilters + `
+	FROM logs` + logFilters + `
 ORDER BY time DESC
 LIMIT ?`
 
-var coldLogBucketsQuery = `
+var logBucketsQuery = `
 SELECT time_bucket(INTERVAL '5 minutes', time) AS point_time,
        coalesce(nullif(upper(severity), ''), 'UNSPECIFIED') AS bucket_severity,
        CAST(count(*) AS BIGINT)
-FROM logs` + coldLogFilters + `
+	FROM logs` + logFilters + `
 GROUP BY point_time, bucket_severity
 ORDER BY point_time ASC, bucket_severity ASC`
 
@@ -98,113 +43,47 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 	service, severity, search = strings.TrimSpace(service), strings.TrimSpace(severity), strings.TrimSpace(search)
 	search = strings.ToLower(search)
 	data := Logs{Entries: []LogEntry{}, Buckets: []LogBucket{}}
-	type bucketKey struct {
-		time     int64
-		severity string
-	}
-	buckets := make(map[bucketKey]int64)
-	entries := newestLogHeap{}
-	matched := 0
-	accumulate := func(entry LogEntry) {
-		matched++
-		retainNewest(&entries, entry, limit)
-		bucketSeverity := strings.ToUpper(entry.Severity)
-		if bucketSeverity == "" {
-			bucketSeverity = "UNSPECIFIED"
-		}
-		bucketNanos := entry.Time.Truncate(5 * time.Minute).UnixNano()
-		buckets[bucketKey{time: bucketNanos, severity: bucketSeverity}]++
-	}
-	startNanos, endNanos := scope.Start.UnixNano(), scope.End.UnixNano()
-	hotCutoff, err := s.repository.ScanHotLogs(startNanos, endNanos, func(row telemetry.Log) bool {
-		select {
-		case <-ctx.Done():
-			return false
-		default:
-		}
-		if (scope.Namespace != "" && row.Namespace != scope.Namespace) || (service != "" && row.ServiceName != service) || (severity != "" && !strings.EqualFold(row.Severity, severity)) {
-			return true
-		}
-		body := redactLogBody(row.Body)
-		if search != "" && !strings.Contains(strings.ToLower(body), search) {
-			return true
-		}
-		entryTime := time.Unix(0, row.EventUnixNanos).UTC()
-		accumulate(LogEntry{Time: entryTime, Severity: row.Severity, Service: row.ServiceName, Body: body, TraceID: row.TraceID, SpanID: row.SpanID})
-		return true
-	})
+	filters := []any{scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, severity, severity, search, search}
+	rows, err := s.db.QueryContext(ctx, logEntriesQuery, append(append([]any{}, filters...), limit)...)
 	if err != nil {
-		return Result[Logs]{}, fmt.Errorf("read log segments: %w", err)
+		return Result[Logs]{}, fmt.Errorf("query logs: %w", err)
 	}
-	coldEnd := min(max(hotCutoff, startNanos), endNanos)
-	hotStart := max(hotCutoff, startNanos)
-	usedCold := coldEnd > startNanos
-	if usedCold {
-		coldStop := time.Unix(0, coldEnd).UTC()
-		filters := []any{scope.Start, coldStop, scope.Namespace, scope.Namespace, service, service, severity, severity, search, search}
-		rows, queryErr := s.db.QueryContext(ctx, coldLogEntriesQuery, append(append([]any{}, filters...), limit)...)
-		if queryErr != nil {
-			return Result[Logs]{}, fmt.Errorf("query cold logs: %w", queryErr)
-		}
-		for rows.Next() {
-			var entry LogEntry
-			if err := rows.Scan(&entry.Time, &entry.Severity, &entry.Service, &entry.Body, &entry.TraceID, &entry.SpanID); err != nil {
-				rows.Close()
-				return Result[Logs]{}, fmt.Errorf("scan cold log: %w", err)
-			}
-			retainNewest(&entries, entry, limit)
-		}
-		if err := rows.Err(); err != nil {
+	for rows.Next() {
+		var entry LogEntry
+		if err := rows.Scan(&entry.Time, &entry.Severity, &entry.Service, &entry.Body, &entry.TraceID, &entry.SpanID); err != nil {
 			rows.Close()
-			return Result[Logs]{}, fmt.Errorf("iterate cold logs: %w", err)
+			return Result[Logs]{}, fmt.Errorf("scan log: %w", err)
 		}
+		data.Entries = append(data.Entries, entry)
+	}
+	if err := rows.Err(); err != nil {
 		rows.Close()
+		return Result[Logs]{}, fmt.Errorf("iterate logs: %w", err)
+	}
+	rows.Close()
 
-		bucketRows, bucketErr := s.db.QueryContext(ctx, coldLogBucketsQuery, filters...)
-		if bucketErr != nil {
-			return Result[Logs]{}, fmt.Errorf("query cold log histogram: %w", bucketErr)
-		}
-		for bucketRows.Next() {
-			var (
-				bucketTime     time.Time
-				bucketSeverity string
-				count          int64
-			)
-			if err := bucketRows.Scan(&bucketTime, &bucketSeverity, &count); err != nil {
-				bucketRows.Close()
-				return Result[Logs]{}, fmt.Errorf("scan cold log bucket: %w", err)
-			}
-			matched += int(count)
-			buckets[bucketKey{time: bucketTime.UTC().UnixNano(), severity: bucketSeverity}] += count
-		}
-		if err := bucketRows.Err(); err != nil {
+	matched := 0
+	bucketRows, err := s.db.QueryContext(ctx, logBucketsQuery, filters...)
+	if err != nil {
+		return Result[Logs]{}, fmt.Errorf("query log histogram: %w", err)
+	}
+	for bucketRows.Next() {
+		var bucket LogBucket
+		if err := bucketRows.Scan(&bucket.Time, &bucket.Severity, &bucket.Count); err != nil {
 			bucketRows.Close()
-			return Result[Logs]{}, fmt.Errorf("iterate cold log histogram: %w", err)
+			return Result[Logs]{}, fmt.Errorf("scan log bucket: %w", err)
 		}
+		bucket.Time = bucket.Time.UTC()
+		matched += int(bucket.Count)
+		data.Buckets = append(data.Buckets, bucket)
+	}
+	if err := bucketRows.Err(); err != nil {
 		bucketRows.Close()
+		return Result[Logs]{}, fmt.Errorf("iterate log histogram: %w", err)
 	}
-	if err := ctx.Err(); err != nil {
-		return Result[Logs]{}, err
-	}
-	data.Entries = append(data.Entries, entries...)
-	sort.Slice(data.Entries, func(i, j int) bool { return data.Entries[i].Time.After(data.Entries[j].Time) })
-	for key, count := range buckets {
-		data.Buckets = append(data.Buckets, LogBucket{Time: time.Unix(0, key.time).UTC(), Severity: key.severity, Count: count})
-	}
-	sort.Slice(data.Buckets, func(i, j int) bool {
-		if data.Buckets[i].Time.Equal(data.Buckets[j].Time) {
-			return data.Buckets[i].Severity < data.Buckets[j].Severity
-		}
-		return data.Buckets[i].Time.Before(data.Buckets[j].Time)
-	})
-	dataSource := "fanout_segments"
-	if usedCold && hotStart < endNanos {
-		dataSource = "fanout_segments+parquet"
-	} else if usedCold {
-		dataSource = "parquet"
-	}
+	bucketRows.Close()
 	return Result[Logs]{
 		Schema: LogsSchema, Summary: fmt.Sprintf("%d logs matched the selected telemetry window", matched),
-		Data: data, Provenance: s.provenanceFor(scope, dataSource),
+		Data: data, Provenance: s.provenanceFor(scope, "parquet"),
 	}, nil
 }

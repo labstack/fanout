@@ -28,6 +28,8 @@ const minCompactionInputs = 8
 
 var parquetSignals = [...]string{"spans", "logs", "metrics"}
 
+var renameCompactionFile = os.Rename
+
 // CompactParquet combines the oldest small atomic batches into larger files.
 // A durable marker makes the multi-signal swap recoverable after a crash.
 func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches int, publishLock sync.Locker) (int, error) {
@@ -222,14 +224,20 @@ func (r *Repository) recoverCompaction() error {
 	return r.completeCompaction(marker)
 }
 
-func (r *Repository) completeCompaction(marker compactionMarker) error {
+func (r *Repository) completeCompaction(marker compactionMarker) (resultErr error) {
 	r.commitMu.Lock()
 	defer r.commitMu.Unlock()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	stageDir := filepath.Join(r.root, marker.ID)
+	committed := r.batchConsumedLocked(marker.ID)
+	defer func() {
+		if resultErr != nil && !committed {
+			resultErr = errors.Join(resultErr, r.rollbackCompactionSwap(marker, stageDir))
+		}
+	}()
 	if err := r.validateCompactionOutputs(marker, stageDir); err != nil {
-		return errors.Join(err, r.restoreCompactionInputs(marker))
+		return err
 	}
 	for _, signal := range marker.Signals {
 		dir := filepath.Join(r.Parquet.Dir(), signal)
@@ -237,7 +245,7 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 			input := filepath.Join(dir, id+".parquet")
 			retired := input + ".retired-" + marker.ID
 			if _, err := os.Stat(input); err == nil {
-				if err := os.Rename(input, retired); err != nil {
+				if err := renameCompactionFile(input, retired); err != nil {
 					return err
 				}
 			} else if !errors.Is(err, os.ErrNotExist) {
@@ -247,7 +255,7 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 		stage := filepath.Join(stageDir, signal+".parquet")
 		final := filepath.Join(dir, marker.ID+".parquet")
 		if _, err := os.Stat(stage); err == nil {
-			if err := os.Rename(stage, final); err != nil {
+			if err := renameCompactionFile(stage, final); err != nil {
 				return err
 			}
 		}
@@ -274,11 +282,15 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 		}
 	}
 	kept = append(kept, batchMetadata{ID: marker.ID, MinNanos: marker.MinNanos, MaxNanos: marker.MaxNanos, Generation: marker.Generation, Sources: append([]string(nil), marker.Sources...)})
-	next := repositoryManifest{Version: 1, HotCutoffNanos: r.manifest.HotCutoffNanos, Batches: kept}
-	if err := writeRepositoryManifest(r.root, next); err != nil {
+	next := repositoryManifest{Version: repositoryVersion, HotCutoffNanos: r.manifest.HotCutoffNanos, Batches: kept}
+	if err := r.checkpointManifestLocked(next); err != nil {
+		// checkpointManifestLocked may fail while truncating the superseded journal
+		// after the new snapshot is already durable and installed in memory. In that
+		// case the compacted files are committed and must not be rolled back.
+		committed = r.batchConsumedLocked(marker.ID)
 		return err
 	}
-	r.manifest = next
+	committed = true
 	for _, signal := range marker.Signals {
 		for _, id := range marker.Inputs {
 			_ = os.Remove(filepath.Join(r.Parquet.Dir(), signal, id+".parquet.retired-"+marker.ID))
@@ -289,6 +301,39 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 		return err
 	}
 	return syncDirectory(r.root)
+}
+
+func (r *Repository) rollbackCompactionSwap(marker compactionMarker, stageDir string) error {
+	var rollbackErr error
+	for _, signal := range marker.Signals {
+		stage := filepath.Join(stageDir, signal+".parquet")
+		final := filepath.Join(r.Parquet.Dir(), signal, marker.ID+".parquet")
+		finalExists, err := pathExists(final)
+		if err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+			continue
+		}
+		if !finalExists {
+			continue
+		}
+		stageExists, err := pathExists(stage)
+		if err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+			continue
+		}
+		if stageExists {
+			if err := os.Remove(final); err != nil {
+				rollbackErr = errors.Join(rollbackErr, err)
+			}
+		} else if err := os.Rename(final, stage); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		}
+	}
+	rollbackErr = errors.Join(rollbackErr, r.restoreCompactionInputs(marker))
+	if err := syncDirectory(stageDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		rollbackErr = errors.Join(rollbackErr, err)
+	}
+	return rollbackErr
 }
 
 func (r *Repository) validateCompactionOutputs(marker compactionMarker, stageDir string) error {

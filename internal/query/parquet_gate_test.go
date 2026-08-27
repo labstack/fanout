@@ -35,6 +35,17 @@ func waitForQueuedWriter(t *testing.T, gate *parquetReadGate) {
 	}
 }
 
+func waitForQueuedWriters(t *testing.T, gate *parquetReadGate, count int) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for gate.WaitingWriters() < count {
+		if time.Now().After(deadline) {
+			t.Fatalf("publishers queued = %d, want %d", gate.WaitingWriters(), count)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestParquetGateAdmitsReadersWhileWriterGraceRuns(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)}
 	gate := &parquetReadGate{now: clock.Now}
@@ -91,4 +102,45 @@ func TestParquetGatePublishesAfterOverlappingReadersDrain(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("publisher never ran after readers drained")
 	}
+}
+
+func TestParquetGateDistinguishesWritersQueuedAtSameInstant(t *testing.T) {
+	clock := &fakeClock{now: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)}
+	gate := &parquetReadGate{now: clock.Now}
+	gate.RLock()
+	acquired := make(chan struct{}, 2)
+	release := make(chan struct{}, 2)
+	for range 2 {
+		go func() {
+			gate.Lock()
+			acquired <- struct{}{}
+			<-release
+			gate.Unlock()
+		}()
+	}
+	waitForQueuedWriters(t, gate, 2)
+	gate.RUnlock()
+	for range 2 {
+		select {
+		case <-acquired:
+			release <- struct{}{}
+		case <-time.After(2 * time.Second):
+			t.Fatal("publisher never acquired gate")
+		}
+	}
+	deadline := time.Now().Add(time.Second)
+	for gate.WaitingWriters() != 0 {
+		if time.Now().After(deadline) {
+			t.Fatalf("stale publisher remained queued: %d", gate.WaitingWriters())
+		}
+		time.Sleep(time.Millisecond)
+	}
+	deadline = time.Now().Add(time.Second)
+	for !gate.TryRLock() {
+		if time.Now().After(deadline) {
+			t.Fatal("reader refused after both publishers completed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	gate.RUnlock()
 }

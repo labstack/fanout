@@ -46,25 +46,26 @@ If query latency is climbing on an instance whose data volume has not changed,
 this is the first thing to look at: a high file count from many small writes
 costs more per scan than the same bytes in fewer files.
 
-## Flush behaviour
+## Publication batching
 
-How often data reaches disk in the first place:
+The maximum number of telemetry rows in one WAL and Parquet batch:
 
 ```sh
-FANOUT_FLUSH_INTERVAL=15s
-FANOUT_FLUSH_BATCH_SIZE=50000
+FANOUT_INGEST_BATCH_SIZE=50000
 ```
 
-A longer flush interval produces fewer, larger files — less compaction work, at
-the cost of newly ingested telemetry taking longer to become queryable, and more
-of it being lost if the process dies uncleanly.
+A larger batch can improve sustained write throughput and create fewer files
+under concurrent ingest. Every request is still acknowledged only after its WAL
+record is durable; this setting does not create a timer window or put accepted
+telemetry at risk. Requests larger than the limit are split into recoverable
+chunks.
 
 ## What the knobs interact with
 
-Maintenance and rollups serialise against ingest through the same write gate.
-Running maintenance much more often on a busy instance therefore trades disk
-against ingest headroom rather than being free. Change one setting at a time and
-watch `/-/metrics`.
+Maintenance briefly gates Parquet publication while it swaps immutable files;
+WAL acknowledgement and Parquet encoding continue independently. Running
+maintenance much more often still creates extra disk and CPU work, so change
+one setting at a time and watch `/-/metrics`.
 
 The full list, with defaults and types, is in the [storage
 settings](/reference/settings/storage) reference.

@@ -30,7 +30,7 @@ func TestGetSchema(t *testing.T) {
 		"endpoint_rollup",
 		"trace_id",
 		"service",
-		"lake.spans",
+		"telemetry.spans",
 		"json_extract_string",
 	}
 

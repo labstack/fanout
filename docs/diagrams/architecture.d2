@@ -26,12 +26,11 @@ fanout: "fanout — one Go process" {
   agent: "Agent runtime\nmodel + tool loop"
   mcp: "MCP server\n5 typed + 4 dashboard tools"
   obs: "Typed observability contract"
-  lake: "Lake writer\nbatched flush"
+  commit: "Telemetry commit worker\nWAL to Parquet"
   query: "Query kernel\nDuckDB + rollups"
-  gate: "Write gate\none catalog write in flight" {style.stroke-width: 2}
   alert: "Alert engine\nrule evaluation + webhooks"
 
-  ingest -> lake
+  ingest -> commit
   http -> ui: serves embedded assets
   http -> agent: AG-UI stream
   http -> mcp
@@ -40,13 +39,12 @@ fanout: "fanout — one Go process" {
   http -> obs: typed HTTP API
   obs -> query
   alert -> query: evaluates rollups
-  lake -> gate
-  query -> gate: "rollups, merge, maintenance"
+  query -> commit: "merge and maintenance"
 }
 
 store: Storage {
   style.fill: transparent
-  telemetry: "DuckLake + Parquet\nstorage.data_dir/telemetry" {shape: cylinder}
+  telemetry: "WAL + manifest + Parquet\nstorage.data_dir/telemetry" {shape: cylinder}
   qstate: "Query catalog\nstorage.data_dir/query" {shape: cylinder}
   control: "Control SQLite\nstorage.data_dir/control" {shape: cylinder}
 }
@@ -57,7 +55,7 @@ clients.collector -> fanout.ingest: "OTLP/gRPC or OTLP/HTTP"
 clients.browser -> fanout.http: HTTPS
 clients.ext -> fanout.http: "/mcp — OAuth"
 
-fanout.gate -> store.telemetry
+fanout.commit -> store.telemetry
 fanout.query -> store.qstate
 fanout.http -> store.control: "users, sessions, settings, dashboards, threads"
 fanout.alert -> store.control: "rules and fired alerts"

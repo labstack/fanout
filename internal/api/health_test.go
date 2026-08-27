@@ -125,7 +125,7 @@ func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 
 	mock.ExpectQuery("SELECT 1").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
-	mock.ExpectQuery("SELECT 1 FROM lake.spans LIMIT 1").
+	mock.ExpectQuery("SELECT 1 FROM telemetry.spans LIMIT 1").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}))
 	mock.ExpectQuery("SELECT\\s+MAX\\(updated_at\\),\\s+COUNT\\(\\*\\),\\s+COALESCE\\(date_diff\\('second', MAX\\(updated_at\\), now\\(\\)\\), 0\\)").
 		WillReturnRows(sqlmock.NewRows([]string{"max", "count", "age_seconds"}).AddRow(time.Now().UTC(), 2, int64(30)))

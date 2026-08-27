@@ -81,7 +81,7 @@ type config struct {
 	maxQueryP95  float64
 	// backfillHours, when >0, spreads each event's timestamp uniformly over the
 	// last N hours (instead of "now"). Used to PRE-SEED a multi-hour dataset so
-	// the lake spans several hour partitions — required to exercise within-day
+	// Parquet spans several hour partitions — required to exercise within-day
 	// (hour-partition) pruning, which a same-hour run can't.
 	backfillHours float64
 	// seed makes the synthetic workload reproducible: same seed, same services,

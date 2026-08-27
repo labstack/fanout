@@ -168,10 +168,10 @@ func TestRecordTelemetryOperationOutcomes(t *testing.T) {
 
 func TestBoundedMetricLabelsRejectUnknownValues(t *testing.T) {
 	for name, call := range map[string]func(){
-		"rollup component": func() { RecordRollupComponent(RollupComponent("tenant"), RollupSuccess, 0, 0) },
-		"rollup result":    func() { RecordRollupComponent(RollupService, RollupResult("unknown"), 0, 0) },
-		"lake operation":   func() { RecordTelemetryOperation(TelemetryOperation("query"), TelemetrySuccess, 0) },
-		"lake result":      func() { RecordTelemetryOperation(TelemetryCompaction, TelemetryResult("unknown"), 0) },
+		"rollup component":    func() { RecordRollupComponent(RollupComponent("tenant"), RollupSuccess, 0, 0) },
+		"rollup result":       func() { RecordRollupComponent(RollupService, RollupResult("unknown"), 0, 0) },
+		"telemetry operation": func() { RecordTelemetryOperation(TelemetryOperation("query"), TelemetrySuccess, 0) },
+		"telemetry result":    func() { RecordTelemetryOperation(TelemetryCompaction, TelemetryResult("unknown"), 0) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			defer func() {

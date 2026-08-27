@@ -1,4 +1,4 @@
-// Command storage-poc compares a workload-specific immutable segment format
+// Command storage-bench compares Fanout's storage path with alternative formats
 // with native DuckDB and Parquet on Fanout-shaped spans. It is an experiment,
 // not a supported Fanout command.
 package main
@@ -54,7 +54,7 @@ func main() {
 	root := *keep
 	if root == "" {
 		var err error
-		root, err = os.MkdirTemp("", "fanout-storage-poc-")
+		root, err = os.MkdirTemp("", "fanout-storage-bench-")
 		if err != nil {
 			fatal(err)
 		}
@@ -67,7 +67,7 @@ func main() {
 	targetTrace := storagebench.TraceID(uint64(*rows / 2 / 5))
 	start := base
 	end := base + storagebench.DayNanos
-	fmt.Printf("Fanout storage POC: %d spans, %d-row commits, %s/%s, %d CPUs\n", *rows, *batch, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+	fmt.Printf("Fanout storage benchmark: %d spans, %d-row commits, %s/%s, %d CPUs\n", *rows, *batch, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
 
 	var results []result
 	if *engine == "all" || *engine == "repository" {
@@ -522,4 +522,4 @@ func formatDuration(value time.Duration) string {
 	return fmt.Sprintf("%.2fµs", float64(value)/float64(time.Microsecond))
 }
 
-func fatal(err error) { fmt.Fprintln(os.Stderr, "storage-poc:", err); os.Exit(1) }
+func fatal(err error) { fmt.Fprintln(os.Stderr, "storage-bench:", err); os.Exit(1) }

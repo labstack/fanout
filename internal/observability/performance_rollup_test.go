@@ -62,7 +62,7 @@ FROM (VALUES ` + seed.values + `) t(ms)`
 	// Include raw rows for every minute. The query must use raw rows for the two
 	// partial boundaries and for complete minutes newer than the watermark, while
 	// excluding raw rows already represented by mature cached buckets.
-	if _, err := db.Exec(`INSERT INTO lake.spans (
+	if _, err := db.Exec(`INSERT INTO telemetry.spans (
   namespace, service, start_time, duration_ms, status, http_method, http_route, operation
 ) VALUES
 ('prod','checkout',?,5.0,'OK','GET','/pay','GET /pay'),

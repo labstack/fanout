@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,11 @@ const (
 	segmentMaxCompressedBytes = segmentDecoderMaxMemory + (1 << 20)
 	segmentMaxBlocks          = 1 << 20
 )
+
+var segmentIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
+// ValidID reports whether id can safely name a durable segment and WAL file.
+func ValidID(id string) bool { return segmentIDPattern.MatchString(id) }
 
 // newSegmentDecoder builds a decoder bounded to segmentDecoderMaxMemory. Every
 // segment read goes through it, so no on-disk frame can size an allocation.
@@ -251,6 +257,7 @@ func (s *Store) Append(rows []Span) error {
 	name := fmt.Sprintf("%020d.fseg", id)
 	tmp := filepath.Join(s.dir, name+".tmp")
 	final := filepath.Join(s.dir, name)
+	_ = os.Remove(tmp)
 	seg, err := s.writeSegment(tmp, rows)
 	if err != nil {
 		_ = os.Remove(tmp)
@@ -964,7 +971,7 @@ func (s *Store) readColumns(f *os.File, block blockDir, wanted []int) (map[int][
 	return columns, err
 }
 
-// isErrorStatus matches both status spellings the lake carries: OTLP ingest
+// isErrorStatus matches both status spellings telemetry carries: OTLP ingest
 // stores Status.Code.String() ("STATUS_CODE_ERROR"), while other producers and
 // older rows use the bare code. The DuckDB rollups compare against the same
 // pair.

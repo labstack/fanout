@@ -22,6 +22,28 @@ type recoveringCommitter struct {
 	batches  []Batch
 }
 
+func (c *recoveringCommitter) Stage(batch Batch) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.staged = append(c.staged, batch)
+	return nil
+}
+
+func (c *recoveringCommitter) Commit(batch Batch) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.calls++
+	if c.calls <= c.failures {
+		return errors.New("disk temporarily unavailable")
+	}
+	c.batches = append(c.batches, batch)
+	return nil
+}
+
+func testWriter(committer batchCommitter, batchSize int) *Writer {
+	return &Writer{repository: committer, batchSize: batchSize, done: make(chan struct{}), submissions: make(chan submission, submissionQueueDepth)}
+}
+
 type blockingStageCommitter struct {
 	entered chan struct{}
 	release chan struct{}
@@ -37,7 +59,7 @@ func (c *blockingStageCommitter) Commit(Batch) error { return nil }
 
 func TestWriterAcknowledgesSubmissionOnlyAfterDurableStage(t *testing.T) {
 	committer := &blockingStageCommitter{entered: make(chan struct{}), release: make(chan struct{})}
-	w := &Writer{repository: committer, interval: time.Hour, batchSize: 50_000, done: make(chan struct{}), submissions: make(chan submission, 1)}
+	w := testWriter(committer, maxBatchRows)
 	ctx, cancel := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
 	go func() { runDone <- w.Run(ctx) }()
@@ -57,17 +79,17 @@ func TestWriterAcknowledgesSubmissionOnlyAfterDurableStage(t *testing.T) {
 	}
 	close(committer.release)
 	if err := <-submitDone; err != nil {
-		t.Fatalf("Submit error = %v", err)
+		t.Fatal(err)
 	}
 	cancel()
 	if err := <-runDone; err != nil {
-		t.Fatalf("Run error = %v", err)
+		t.Fatal(err)
 	}
 }
 
 func TestWriterGroupCommitsConcurrentSubmissions(t *testing.T) {
 	committer := &recoveringCommitter{}
-	w := &Writer{repository: committer, interval: time.Hour, batchSize: 50_000, done: make(chan struct{}), submissions: make(chan submission, 4)}
+	w := testWriter(committer, maxBatchRows)
 	results := make(chan error, 2)
 	for i := range 2 {
 		go func() {
@@ -100,105 +122,115 @@ func TestWriterGroupCommitsConcurrentSubmissions(t *testing.T) {
 	}
 }
 
-func (c *recoveringCommitter) Stage(batch Batch) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.staged = append(c.staged, batch)
-	return nil
+func TestWriterSplitsOversizedSubmissionBeforeAcknowledging(t *testing.T) {
+	committer := &recoveringCommitter{}
+	w := testWriter(committer, maxBatchRows)
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(ctx) }()
+	if err := w.Submit(context.Background(), Batch{Spans: make([]telemetry.Span, maxBatchRows+1)}); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+	committer.mu.Lock()
+	defer committer.mu.Unlock()
+	if len(committer.staged) != 2 {
+		t.Fatalf("staged batches = %d, want 2", len(committer.staged))
+	}
+	total := 0
+	for _, batch := range committer.staged {
+		if rows := batchRows(batch); rows > maxBatchRows {
+			t.Fatalf("staged batch rows = %d", rows)
+		}
+		total += batchRows(batch)
+	}
+	if total != maxBatchRows+1 {
+		t.Fatalf("staged rows = %d, want %d", total, maxBatchRows+1)
+	}
 }
 
-func (c *recoveringCommitter) Commit(batch Batch) error {
+type secondStageFailCommitter struct {
+	mu     sync.Mutex
+	stages []Batch
+}
+
+func (c *secondStageFailCommitter) Stage(batch Batch) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.calls++
-	if c.calls <= c.failures {
-		return errors.New("disk temporarily unavailable")
+	if len(c.stages) == 1 {
+		return errors.New("WAL device failed mid-request")
 	}
-	c.batches = append(c.batches, batch)
+	c.stages = append(c.stages, batch)
 	return nil
+}
+func (*secondStageFailCommitter) Commit(Batch) error { return nil }
+
+func TestWriterStopsAfterPartialOversizedSubmissionStage(t *testing.T) {
+	committer := &secondStageFailCommitter{}
+	w := testWriter(committer, maxBatchRows)
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(context.Background()) }()
+	if err := w.Submit(context.Background(), Batch{Spans: make([]telemetry.Span, maxBatchRows+1)}); err == nil {
+		t.Fatal("Submit returned nil after only a prefix became durable")
+	}
+	if err := <-runDone; err == nil || !strings.Contains(err.Error(), "durable chunks") {
+		t.Fatalf("Run error = %v, want fatal partial-stage error", err)
+	}
 }
 
 func TestWriterRetainsBatchAcrossCommitFailures(t *testing.T) {
-	spans := make(chan telemetry.Span, 1)
-	logs := make(chan telemetry.Log)
-	metricRows := make(chan telemetry.Metric)
-	spans <- telemetry.Span{TraceID: "trace", SpanID: "span"}
-	close(spans)
-	close(logs)
-	close(metricRows)
 	committer := &recoveringCommitter{failures: 6}
-	w := &Writer{
-		repository: committer, interval: time.Hour, batchSize: 1,
-		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
-		retryDelay: func(int) time.Duration { return 0 },
+	w := testWriter(committer, 1)
+	w.retryDelay = func(int) time.Duration { return 0 }
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(ctx) }()
+	if err := w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}}}); err != nil {
+		t.Fatal(err)
 	}
-	if err := w.Run(context.Background()); err != nil {
-		t.Fatalf("Run error = %v", err)
+	cancel()
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
 	}
-	if committer.calls != 7 {
-		t.Fatalf("Commit calls = %d, want 7", committer.calls)
-	}
-	if len(committer.staged) != 1 {
-		t.Fatalf("staged batches = %d, want 1", len(committer.staged))
-	}
-	if len(committer.batches) != 1 || len(committer.batches[0].Spans) != 1 {
-		t.Fatalf("committed batches = %#v, want original batch exactly once", committer.batches)
+	if committer.calls != 7 || len(committer.staged) != 1 || len(committer.batches) != 1 {
+		t.Fatalf("calls=%d staged=%d committed=%d", committer.calls, len(committer.staged), len(committer.batches))
 	}
 }
 
 type durableFailCommitter struct {
 	repository *Repository
 	attempted  chan struct{}
-	staged     chan struct{}
 	once       sync.Once
 }
 
-func (c *durableFailCommitter) Stage(batch Batch) error {
-	if err := c.repository.Stage(batch); err != nil {
-		return err
-	}
-	c.staged <- struct{}{}
-	return nil
-}
-
+func (c *durableFailCommitter) Stage(batch Batch) error { return c.repository.Stage(batch) }
 func (c *durableFailCommitter) Commit(Batch) error {
 	c.once.Do(func() { close(c.attempted) })
 	return errors.New("storage stalled")
 }
 
-func TestWriterShutdownReplaysEveryStagedBatch(t *testing.T) {
+func TestWriterShutdownReplaysEveryAcknowledgedBatch(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	spans := make(chan telemetry.Span, 5)
-	logs := make(chan telemetry.Log)
-	metricRows := make(chan telemetry.Metric)
-	for i := range 5 {
-		spans <- telemetry.Span{TraceID: "trace", SpanID: fmt.Sprintf("span-%d", i), StartUnixNanos: int64(100 + i)}
-	}
-	committer := &durableFailCommitter{repository: repository, attempted: make(chan struct{}), staged: make(chan struct{}, 5)}
-	w := &Writer{
-		repository: committer, interval: time.Hour, batchSize: 1,
-		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
-		retryDelay: func(int) time.Duration { return time.Hour }, shutdownGrace: 25 * time.Millisecond,
-	}
+	committer := &durableFailCommitter{repository: repository, attempted: make(chan struct{})}
+	w := testWriter(committer, 1)
+	w.retryDelay = func(int) time.Duration { return time.Hour }
+	w.shutdownGrace = 25 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	finished := make(chan error, 1)
 	go func() { finished <- w.Run(ctx) }()
-	for range 5 {
-		select {
-		case <-committer.staged:
-		case <-time.After(time.Second):
-			t.Fatal("queued batch was not staged")
+	for i := range 5 {
+		if err := w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: fmt.Sprintf("span-%d", i), StartUnixNanos: int64(100 + i)}}}); err != nil {
+			t.Fatal(err)
 		}
 	}
-	select {
-	case <-committer.attempted:
-	case <-time.After(time.Second):
-		t.Fatal("commit attempt did not start")
-	}
+	<-committer.attempted
 	cancel()
 	if err := <-finished; !errors.Is(err, context.Canceled) {
 		t.Fatalf("Run error = %v, want context canceled", err)
@@ -217,44 +249,33 @@ func TestWriterShutdownReplaysEveryStagedBatch(t *testing.T) {
 }
 
 func TestWriterSurfacesPermanentCommitFailureAfterBoundedRetries(t *testing.T) {
-	spans := make(chan telemetry.Span, 1)
-	logs := make(chan telemetry.Log)
-	metricRows := make(chan telemetry.Metric)
-	spans <- telemetry.Span{TraceID: "trace", SpanID: "span"}
-	close(spans)
-	close(logs)
-	close(metricRows)
 	committer := &recoveringCommitter{failures: commitRetryLimit + 1}
-	w := &Writer{
-		repository: committer, interval: time.Hour, batchSize: 1,
-		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
-		retryDelay: func(int) time.Duration { return 0 },
+	w := testWriter(committer, 1)
+	w.retryDelay = func(int) time.Duration { return 0 }
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(context.Background()) }()
+	if err := w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}}}); err != nil {
+		t.Fatal(err)
 	}
-	if err := w.Run(context.Background()); err == nil {
+	if err := <-runDone; err == nil {
 		t.Fatal("Run returned nil after permanent commit failure")
 	}
-	if committer.calls != commitRetryLimit {
-		t.Fatalf("Commit calls = %d, want %d", committer.calls, commitRetryLimit)
-	}
-	if len(committer.batches) != 0 {
-		t.Fatalf("committed poison batches = %#v", committer.batches)
+	if committer.calls != commitRetryLimit || len(committer.batches) != 0 {
+		t.Fatalf("calls=%d committed=%d", committer.calls, len(committer.batches))
 	}
 }
 
 func TestWriterCancellationInterruptsCommitBackoff(t *testing.T) {
-	spans := make(chan telemetry.Span, 1)
-	logs := make(chan telemetry.Log)
-	metricRows := make(chan telemetry.Metric)
-	spans <- telemetry.Span{TraceID: "trace", SpanID: "span"}
 	committer := &recoveringCommitter{failures: commitRetryLimit + 1}
-	w := &Writer{
-		repository: committer, interval: time.Hour, batchSize: 1,
-		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
-		retryDelay: func(int) time.Duration { return time.Hour }, shutdownGrace: 25 * time.Millisecond,
-	}
+	w := testWriter(committer, 1)
+	w.retryDelay = func(int) time.Duration { return time.Hour }
+	w.shutdownGrace = 25 * time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	finished := make(chan error, 1)
 	go func() { finished <- w.Run(ctx) }()
+	if err := w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}}}); err != nil {
+		t.Fatal(err)
+	}
 	deadline := time.Now().Add(time.Second)
 	for {
 		committer.mu.Lock()
@@ -279,65 +300,36 @@ func TestWriterCancellationInterruptsCommitBackoff(t *testing.T) {
 	}
 }
 
-type stageFailCommitter struct {
-	mu      sync.Mutex
-	stages  int
-	commits int
-}
+type stageFailCommitter struct{ stages, commits int }
 
 func (c *stageFailCommitter) Stage(Batch) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.stages++
 	return errors.New("wal device unavailable")
 }
+func (c *stageFailCommitter) Commit(Batch) error { c.commits++; return nil }
 
-func (c *stageFailCommitter) Commit(Batch) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.commits++
-	return nil
-}
-
-func TestWriterSurvivesStageFailure(t *testing.T) {
-	spans := make(chan telemetry.Span, 1)
-	logs := make(chan telemetry.Log)
-	metricRows := make(chan telemetry.Metric)
-	spans <- telemetry.Span{TraceID: "trace", SpanID: "span"}
-	close(spans)
-	close(logs)
-	close(metricRows)
+func TestWriterSurvivesRequestStageFailure(t *testing.T) {
 	committer := &stageFailCommitter{}
-	w := &Writer{
-		repository: committer, interval: time.Hour, batchSize: 1,
-		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
-		retryDelay: func(int) time.Duration { return 0 },
+	w := testWriter(committer, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(ctx) }()
+	if err := w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}}}); err == nil {
+		t.Fatal("Submit returned nil after Stage failed")
 	}
-	if err := w.Run(context.Background()); err != nil {
-		t.Fatalf("Run error = %v, want nil: an unstageable batch must be dropped with accounting, not kill the writer", err)
+	cancel()
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
 	}
-	if committer.stages == 0 {
-		t.Fatal("Stage was never attempted")
-	}
-	if committer.commits != 0 {
-		t.Fatalf("Commit calls = %d, want 0 for an unstaged batch", committer.commits)
+	if committer.stages != 1 || committer.commits != 0 {
+		t.Fatalf("stages=%d commits=%d", committer.stages, committer.commits)
 	}
 }
 
-type ioFailCommitter struct {
-	repository *Repository
-	mu         sync.Mutex
-	attempts   int
-}
+type ioFailCommitter struct{ repository *Repository }
 
 func (c *ioFailCommitter) Stage(batch Batch) error { return c.repository.Stage(batch) }
-
-func (c *ioFailCommitter) Commit(Batch) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.attempts++
-	return errors.New("storage unavailable")
-}
+func (*ioFailCommitter) Commit(Batch) error        { return errors.New("storage unavailable") }
 
 func TestWriterKeepsWALWhenCommitRetriesAreExhausted(t *testing.T) {
 	dir := t.TempDir()
@@ -345,20 +337,14 @@ func TestWriterKeepsWALWhenCommitRetriesAreExhausted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	spans := make(chan telemetry.Span, 1)
-	logs := make(chan telemetry.Log)
-	metricRows := make(chan telemetry.Metric)
-	spans <- telemetry.Span{TraceID: "trace", SpanID: "span", StartUnixNanos: 100, IngestedAt: 100}
-	close(spans)
-	close(logs)
-	close(metricRows)
-	committer := &ioFailCommitter{repository: repository}
-	w := &Writer{
-		repository: committer, interval: time.Hour, batchSize: 1,
-		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
-		retryDelay: func(int) time.Duration { return 0 },
+	w := testWriter(&ioFailCommitter{repository: repository}, 1)
+	w.retryDelay = func(int) time.Duration { return 0 }
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(context.Background()) }()
+	if err := w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 100, IngestedAt: 100}}}); err != nil {
+		t.Fatal(err)
 	}
-	if err := w.Run(context.Background()); err == nil {
+	if err := <-runDone; err == nil {
 		t.Fatal("Run returned nil after permanent commit failure")
 	}
 	entries, err := os.ReadDir(filepath.Join(dir, "wal"))
@@ -372,14 +358,13 @@ func TestWriterKeepsWALWhenCommitRetriesAreExhausted(t *testing.T) {
 		}
 	}
 	if kept != 1 {
-		t.Fatalf("retained WAL files = %d, want 1: an I/O failure must leave the batch replayable, not delete its only durable copy", kept)
+		t.Fatalf("retained WAL files = %d, want 1", kept)
 	}
 }
 
 type transientStageCommitter struct {
 	repository *Repository
 	mu         sync.Mutex
-	failures   int
 	stages     int
 	committed  []Batch
 }
@@ -387,72 +372,48 @@ type transientStageCommitter struct {
 func (c *transientStageCommitter) Stage(batch Batch) error {
 	c.mu.Lock()
 	c.stages++
-	fail := c.stages <= c.failures
+	first := c.stages == 1
 	c.mu.Unlock()
-	if fail {
+	if first {
 		return errors.New("wal device busy")
 	}
 	return c.repository.Stage(batch)
 }
-
 func (c *transientStageCommitter) Commit(batch Batch) error {
 	if err := c.repository.Commit(batch); err != nil {
 		return err
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.committed = append(c.committed, batch)
+	c.mu.Unlock()
 	return nil
 }
 
-func TestWriterCarriesRowsForwardAcrossTransientStageFailure(t *testing.T) {
-	dir := t.TempDir()
-	repository, err := Open(dir)
+func TestWriterAcceptsCallerRetryAfterTransientStageFailure(t *testing.T) {
+	repository, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer repository.Close()
-	spans := make(chan telemetry.Span, 2)
-	logs := make(chan telemetry.Log)
-	metricRows := make(chan telemetry.Metric)
-	spans <- telemetry.Span{TraceID: "trace", SpanID: "a", StartUnixNanos: 100, IngestedAt: 100}
-	committer := &transientStageCommitter{repository: repository, failures: 1}
-	w := &Writer{
-		repository: committer, interval: 5 * time.Millisecond, batchSize: 1,
-		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
-		retryDelay: func(int) time.Duration { return 0 },
+	committer := &transientStageCommitter{repository: repository}
+	w := testWriter(committer, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(ctx) }()
+	batch := Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 100, IngestedAt: 100}}}
+	if err := w.Submit(context.Background(), batch); err == nil {
+		t.Fatal("first Submit returned nil")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	finished := make(chan error, 1)
-	go func() { finished <- w.Run(ctx) }()
-	deadline := time.Now().Add(time.Second)
-	for {
-		committer.mu.Lock()
-		done := len(committer.committed)
-		committer.mu.Unlock()
-		if done > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			cancel()
-			<-finished
-			t.Fatal("rows were not retried after a transient Stage failure; they were dropped instead of carried forward")
-		}
-		time.Sleep(time.Millisecond)
+	if err := w.Submit(context.Background(), batch); err != nil {
+		t.Fatal(err)
 	}
-	close(spans)
-	close(logs)
-	close(metricRows)
 	cancel()
-	<-finished
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
 	committer.mu.Lock()
 	defer committer.mu.Unlock()
-	total := 0
-	for _, batch := range committer.committed {
-		total += len(batch.Spans)
-	}
-	if total != 1 {
-		t.Fatalf("committed spans = %d, want the single carried-forward row", total)
+	if len(committer.committed) != 1 {
+		t.Fatalf("committed batches = %d, want 1", len(committer.committed))
 	}
 }

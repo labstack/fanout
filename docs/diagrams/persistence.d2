@@ -12,12 +12,12 @@ vars: {
 
 writers: Writers {
   style.fill: transparent
-  ingest: "Ingest flush\nspans, logs, metrics" {shape: rectangle}
+  ingest: "OTLP request\nspans, logs, metrics" {shape: rectangle}
   rollup: "Rollups\nservice, endpoint, edge" {shape: rectangle}
   maint: "Merge and maintenance" {shape: rectangle}
 }
 
-gate: "Write gate — internal/lake/writegate\none catalog write in flight at a time" {
+wal: "Durable WAL + commit worker\nrequest acknowledged after fsync" {
   shape: rectangle
   style: {
     stroke-width: 2
@@ -25,14 +25,14 @@ gate: "Write gate — internal/lake/writegate\none catalog write in flight at a 
   }
 }
 
-telemetry: "DuckLake catalog + Parquet\nstorage.data_dir/telemetry" {
+telemetry: "Manifest + Parquet + hot span index\nstorage.data_dir/telemetry" {
   shape: cylinder
-  tooltip: Partitioned telemetry. Written only through the gate.
+  tooltip: Authoritative telemetry and its crash-recovery state.
 }
 
 querystate: "DuckDB query state\nstorage.data_dir/query" {
   shape: cylinder
-  tooltip: Catalog attachment and temp spill. Not the telemetry itself.
+  tooltip: Rebuildable rollups and temp spill. Not the telemetry itself.
 }
 
 control: "Control SQLite\nstorage.data_dir/control/fanout.sqlite" {
@@ -45,9 +45,9 @@ control_tables: "users, user_identities, verifications, sessions, auth_audit_eve
   style.font-size: 13
 }
 
-writers.ingest -> gate
-writers.rollup -> gate
-writers.maint -> gate
-gate -> telemetry: "wait and hold measured per operation"
-telemetry <- querystate: attached
+writers.ingest -> wal
+wal -> telemetry: "asynchronous publication"
+writers.rollup -> querystate
+writers.maint -> telemetry
+telemetry <- querystate: "DuckDB scans Parquet"
 control -> control_tables: {style.stroke-dash: 3}

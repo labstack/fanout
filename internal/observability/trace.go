@@ -6,8 +6,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/labstack/fanout/internal/telemetry"
 )
 
 const recentTraceQuery = `
@@ -66,7 +64,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
 	hotCutoff := int64(0)
 	if traceID != "" {
-		storedSpans, spanCutoff, readErr := s.repository.HotTrace(traceID)
+		storedSpans, spanCutoff, readErr := s.repository.HotTrace(traceID, scope.Start.UnixNano())
 		if readErr != nil {
 			return Result[TraceDetail]{}, fmt.Errorf("read trace segments: %w", readErr)
 		}
@@ -113,34 +111,6 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		}
 		sort.Strings(data.Services)
 
-		traceLogs := earliestLogHeap{}
-		logStart, logEnd := startNanos, endNanos
-		if !first.IsZero() {
-			const correlationMargin = time.Second
-			logStart = max(logStart, first.Add(-correlationMargin).UnixNano())
-			logEnd = min(logEnd, last.Add(correlationMargin).UnixNano())
-		}
-		logCutoff, scanErr := s.repository.ScanHotLogs(logStart, logEnd, func(row telemetry.Log) bool {
-			select {
-			case <-ctx.Done():
-				return false
-			default:
-			}
-			if row.TraceID != traceID || (scope.Namespace != "" && row.Namespace != scope.Namespace) {
-				return true
-			}
-			retainEarliest(&traceLogs, LogEntry{Time: time.Unix(0, row.EventUnixNanos).UTC(), Severity: row.Severity, Service: row.ServiceName, Body: redactLogBody(row.Body), TraceID: row.TraceID, SpanID: row.SpanID}, limit)
-			return true
-		})
-		if scanErr != nil {
-			return Result[TraceDetail]{}, fmt.Errorf("read trace logs: %w", scanErr)
-		}
-		hotCutoff = max(hotCutoff, logCutoff)
-		if err := ctx.Err(); err != nil {
-			return Result[TraceDetail]{}, err
-		}
-		data.Logs = append(data.Logs, traceLogs...)
-		sort.Slice(data.Logs, func(i, j int) bool { return data.Logs[i].Time.Before(data.Logs[j].Time) })
 	}
 	// Any scope crossing the durable hot prune watermark may contain early trace
 	// spans that have aged out while a late suffix remains hot. Parquet is the
@@ -152,6 +122,14 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 			return Result[TraceDetail]{}, err
 		}
 		dataSource = "parquet"
+	} else if traceID != "" {
+		// Parquet is committed atomically with the hot span index. DuckDB can
+		// apply trace_id and LIMIT inside its vectorized scan, avoiding a full
+		// Go decode while preserving clock-skewed trace events.
+		data.Logs, err = s.traceLogsFromParquet(ctx, scope, traceID, limit)
+		if err != nil {
+			return Result[TraceDetail]{}, err
+		}
 	}
 
 	summary := "No traces found in this telemetry window"
@@ -205,23 +183,32 @@ func (s *Service) traceFromParquet(ctx context.Context, scope Scope, traceID str
 	}
 	sort.Strings(data.Services)
 
-	rows, err = s.db.QueryContext(ctx, traceLogsQuery, traceID, scope.Start, scope.End, scope.Namespace, scope.Namespace, limit)
+	data.Logs, err = s.traceLogsFromParquet(ctx, scope, traceID, limit)
 	if err != nil {
-		return TraceDetail{}, fmt.Errorf("query trace parquet logs: %w", err)
+		return TraceDetail{}, err
 	}
+	return data, nil
+}
+
+func (s *Service) traceLogsFromParquet(ctx context.Context, scope Scope, traceID string, limit int) ([]LogEntry, error) {
+	rows, err := s.db.QueryContext(ctx, traceLogsQuery, traceID, scope.Start, scope.End, scope.Namespace, scope.Namespace, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query trace parquet logs: %w", err)
+	}
+	logs := make([]LogEntry, 0, limit)
 	for rows.Next() {
 		var entry LogEntry
 		if err := rows.Scan(&entry.Time, &entry.Severity, &entry.Service, &entry.Body, &entry.TraceID, &entry.SpanID); err != nil {
 			rows.Close()
-			return TraceDetail{}, fmt.Errorf("scan trace parquet log: %w", err)
+			return nil, fmt.Errorf("scan trace parquet log: %w", err)
 		}
 		entry.Body = redactLogBody(entry.Body)
-		data.Logs = append(data.Logs, entry)
+		logs = append(logs, entry)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
-		return TraceDetail{}, fmt.Errorf("iterate trace parquet logs: %w", err)
+		return nil, fmt.Errorf("iterate trace parquet logs: %w", err)
 	}
 	rows.Close()
-	return data, nil
+	return logs, nil
 }
