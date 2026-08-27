@@ -10,9 +10,10 @@ trace lookup, attribute filtering, retention, and ad-hoc SQL
 
 Use a hybrid architecture:
 
-1. **Fanout columnar segments** for hot telemetry.
-2. **Direct Fanout execution** for known product queries.
-3. **Parquet** as the durable open SQL copy, written in the same commit.
+1. **Fanout columnar segments** as a rebuildable recent-span trace index.
+2. **Direct Fanout execution** for recent trace lookup.
+3. **Parquet** as the authoritative durable telemetry format, written in the
+   same commit.
 4. **DuckDB** for arbitrary SQL over Parquet.
 5. **SQLite** for control-plane data only.
 6. **Do not use DuckLake, Iceberg, or chDB initially.**
@@ -22,11 +23,10 @@ OTLP ingestion
       │
       ▼
 Fanout hot columnar store (.fseg)
-      ├── trace and promoted-attribute indexes
-      ├── ingestion-time service/endpoint rollups
-      ├── direct dashboard and trace execution
+      ├── disk-resident trace index
+      ├── direct recent-trace execution
       └── atomic manifest + streaming compaction
-                         │ same durable commit
+                         │ same WAL-backed transaction
                          ▼
                    Parquet files
                          │
@@ -67,26 +67,28 @@ Important distinctions:
 
 ## Measured result
 
-The normalized benchmark used one million complete Fanout-shaped spans, 50,000-row
-commits, live endpoint rollups, complete trace reads, and another 200,000 rows
-under concurrent trace load at 100 queries per second.
+The normalized benchmark used one million complete Fanout-shaped spans,
+50,000-row commits, complete trace reads, a raw service aggregation, and
+another 200,000 rows under concurrent trace load at 100 queries per second.
+General-purpose engines also ran an endpoint-rollup query.
 
-| Storage / execution | Write rows/s | Endpoint | Full trace | Raw scan | Mixed write | Mixed trace p95 | Active disk | Peak RSS |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| **Production repository: Fanout + Parquet** | **165,875** | **0.172 ms** | **0.517 ms** | 26.18 ms | **167,353/s** | **0.76 ms** | 56.6 MiB | Not isolated |
-| **Fanout columnar + direct** | **520,879** | **0.224 ms** | **0.507 ms** | 26.98 ms | **528,668/s** | **1.33 ms** | 34.4 MiB | **197 MiB** |
-| DuckDB native | 98,030 | 0.905 ms | 1.54 ms | **1.44 ms** | 85,514/s | 2.14 ms | 47.5 MiB | 1,693 MiB |
-| Zstd Parquet + DuckDB | 94,824 effective | 1.35 ms | 10.53 ms | 3.88 ms | n/a | n/a | **21.8 MiB** | Included in DuckDB process |
-| chDB MergeTree | 129,724 | 2.81 ms | 7.39 ms | 6.06 ms | 118,722/s | 9.61 ms | 38.1 MiB | 699 MiB |
+| Storage / execution | Write rows/s | Endpoint | Full trace | Raw scan | Mixed write | Mixed trace p95 | Active disk |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| **Production repository: Fanout + Parquet** | 161,115 | n/a | 0.846 ms | 28.63 ms | 162,544/s | 1.79 ms | 56.7 MiB |
+| **Fanout columnar + direct** | **548,714** | n/a | **0.663 ms** | 34.93 ms | **538,201/s** | **0.984 ms** | 34.6 MiB |
+| DuckDB native | 98,307 | **0.880 ms** | 1.45 ms | **1.21 ms** | 72,420/s | 2.08 ms | 47.8 MiB |
+| Zstd Parquet + DuckDB | 95,305 effective | 1.21 ms | 9.44 ms | 3.45 ms | n/a | n/a | **21.8 MiB** |
+| chDB MergeTree | 125,388 | 2.91 ms | 7.10 ms | 6.10 ms | 121,775/s | 12.41 ms | 38.1 MiB |
 
 Maintenance measurements:
 
 | Operation | Time |
 |---|---:|
-| Fanout compressed-block compaction | **135 ms** |
-| DuckDB endpoint-rollup build | 274 ms |
-| Parquet export | 345 ms |
-| chDB forced optimization | 4.13 s |
+| Fanout compressed-block and index compaction | **142 ms** |
+| DuckDB endpoint-rollup build | 166 ms |
+| DuckDB checkpoint | 4.59 ms |
+| Parquet export | 320 ms |
+| chDB forced optimization | 4.05 s |
 
 The production-repository row includes the real atomic WAL + hot-segment +
 Parquet commit path and was rerun on 2026-08-26. The isolated rows measure each
@@ -98,7 +100,7 @@ not published capacity claims. The detailed methodology and reproduction command
 
 | Option | Writes | Product reads | Ad-hoc SQL | Open data | Complexity | Verdict |
 |---|---|---|---|---|---|---|
-| Fanout hot + Parquet cold + DuckDB | **Best** | **Best** | Strong | Yes for cold data | Medium | **Recommended** |
+| Fanout hot index + Parquet + DuckDB | **Best** | **Best** | Strong | Yes | Medium | **Recommended** |
 | DuckDB native | Medium | Strong | **Best** | Export required | Low | Good simpler alternative |
 | DuckLake + DuckDB + Parquet | Medium | Strong | Strong | Yes | Medium-high | Remove from new design |
 | Iceberg v3 + Parquet + DuckDB | Medium-low | Strong | Strong | **Best** | High | Add only for shared object storage |
@@ -111,18 +113,17 @@ not published capacity claims. The detailed methodology and reproduction command
 
 - Fanout-owned immutable columnar hot segments.
 - Atomic Fanout manifest and crash recovery.
-- Trace, tenant, service, and other promoted indexes.
-- Service and endpoint rollups created during ingestion.
+- A fixed-width on-disk trace index, searched lazily without a retention-sized
+  resident map.
 - Streaming compaction that copies compressed blocks without decoding rows.
 - Parquet files committed alongside each hot segment.
-- DuckDB for ad-hoc SQL over cold files.
+- DuckDB for dashboards, broad scans, and ad-hoc SQL over Parquet.
 - SQLite for control data.
 
 ### Benefits
 
 - Highest measured ingestion throughput.
 - Lowest measured indexed-query latency.
-- Lowest measured peak memory.
 - No C++ call in the ingestion hot path.
 - Fanout can optimize precisely for append-only telemetry and TTL retention.
 - Parquet preserves interoperability for the complete retained dataset.
@@ -132,11 +133,11 @@ not published capacity claims. The detailed methodology and reproduction command
 
 - Fanout owns file-format compatibility, checksums, recovery, retention, and
   compaction correctness.
-- Hot and cold data use different physical formats.
-- Product queries spanning hot and cold data must merge two result streams.
+- Recent spans have a second, rebuildable physical representation.
+- Trace queries that cross the hot-retention boundary fall back to the
+  authoritative Parquet view.
 - The current benchmark's broad scan is much slower than DuckDB.
-- Further promoted-attribute indexes and long-run compaction tuning remain
-  workload-driven optimizations.
+- Long-run compaction tuning remains workload-driven.
 
 ### Decision
 
@@ -163,16 +164,18 @@ SQL and interoperable cold storage to established components.
 
 - Ingestion was approximately five times slower than the custom hot store in
   the full-shape benchmark.
-- Peak RSS was much higher in the isolated comparison.
+- Peak RSS was much higher in a previous isolated comparison; the current
+  normalized rerun did not repeat RSS measurement.
 - Scheduled rollup work remains outside ingestion.
 - Native files are not an interoperable telemetry format.
 - Export is required for other engines to consume the data.
 
 ### Decision
 
-**Best fallback if owning a hot format becomes too expensive.** It is preferable
-to a more complicated DuckLake or Iceberg deployment when everything remains
-inside one Fanout process.
+**Best simpler replacement if owning a hot format becomes too expensive.** It
+is preferable to a more complicated DuckLake or Iceberg deployment when
+everything remains inside one Fanout process. It is an architecture choice,
+not a runtime fallback path.
 
 ## Option C: DuckLake + DuckDB + Parquet
 
@@ -322,34 +325,32 @@ It provides:
 - straightforward export and backup;
 - independence from Fanout's hot-format evolution.
 
-Parquet should not be used for every small ingest flush. Fanout should first
-write hot segments, then create reasonably sized Parquet files during aging or
-cold compaction.
+Parquet is published in every durable repository commit. Background compaction
+combines small files without changing the authoritative format.
 
 ## Proposed data lifecycle
 
 ```text
 1. Receive OTLP batch
 2. Normalize and promote indexed attributes once
-3. Append a crash-safe Fanout hot segment
-4. Publish the segment through an atomic manifest
-5. Answer dashboards and trace lookup directly
-6. Stream-compact small hot segments
-7. Age completed time partitions into Parquet
-8. Atomically publish cold files and retire superseded hot segments
-9. Query cold/ad-hoc data with DuckDB
-10. Delete expired whole files through manifest commits
+3. Durably stage the WAL and authoritative Parquet
+4. Atomically publish Parquet under the reader gate
+5. Publish the hot segment and commit journal, then remove the WAL
+6. Answer recent complete traces through the hot index
+7. Query dashboards, broad scans, and ad-hoc SQL with DuckDB
+8. Stream-compact small Parquet and hot-segment files
+9. Delete expired whole files through manifest commits
 ```
 
 ## Query routing
 
-| Query | Hot data | Cold data |
+| Query | Recent path | Authoritative path |
 |---|---|---|
-| Trace by ID | Fanout trace index | Parquet sidecar index, then DuckDB or direct reader |
-| Service/endpoint dashboard | Fanout ingestion-time rollups | Parquet rollups through DuckDB |
-| Promoted attribute filter | Fanout attribute index | DuckDB predicate pushdown |
-| Log text search | Fanout text/token index | DuckDB scan initially; specialized cold index if required |
-| Arbitrary SQL | Optional limited direct projection | DuckDB over Parquet |
+| Trace by ID | Fanout trace index | DuckDB over Parquet |
+| Service/endpoint dashboard | DuckDB rollup cache | DuckDB rollup cache |
+| Promoted attribute filter | DuckDB predicate pushdown | DuckDB predicate pushdown |
+| Log text search | DuckDB scan | DuckDB scan |
+| Arbitrary SQL | DuckDB over Parquet | DuckDB over Parquet |
 | Export | Parquet writer | Existing Parquet files |
 
 ## Single-binary implications
@@ -367,19 +368,15 @@ No external database daemon is required by the recommended design.
 
 ## Production gates
 
-Do not replace the existing telemetry path until all gates pass:
+The implementation should remain gated on these production checks:
 
-- [ ] Add complete log and metric columnar formats.
-- [ ] Add promoted tenant and high-value attribute indexes.
 - [ ] Add per-block and per-file checksums.
 - [ ] Test torn writes and corruption at every commit boundary.
 - [ ] Run continuous kill/restart recovery tests.
 - [ ] Prove retention and compaction are safe under active readers.
 - [ ] Bound memory during multi-day compaction.
-- [ ] Add hot/cold query result merging.
 - [ ] Benchmark on the target Linux 4-vCPU/8-GB host.
 - [ ] Run a long concurrent ingest/query/retention soak.
-- [ ] Validate upgrade and format-version handling.
 - [ ] Benchmark realistic high-cardinality attributes and large exception data.
 
 ## Final decision table
@@ -387,11 +384,11 @@ Do not replace the existing telemetry path until all gates pass:
 | Component | Initial decision | Revisit when |
 |---|---|---|
 | Fanout hot columnar format | **Use** | If ownership cost exceeds its measured advantage |
-| Fanout direct query paths | **Use** | Always retain benchmarks against DuckDB |
-| Parquet cold format | **Use** | No expected replacement |
+| Fanout direct trace path | **Use** | Always retain benchmarks against DuckDB |
+| Parquet authoritative format | **Use** | No expected replacement |
 | DuckDB query engine | **Use** | If another embedded engine wins normalized SQL tests materially |
 | SQLite control database | **Use** | No overlap with telemetry storage |
-| DuckDB native telemetry tables | Do not use as primary | Fallback if the custom store fails production gates |
+| DuckDB native telemetry tables | Do not use | Reconsider only as a deliberate architecture replacement |
 | DuckLake | **Remove** | If DuckDB again becomes authoritative over mutable Parquet tables |
 | Iceberg v3 | Not initially | Shared object storage, multiple writers, or multi-engine tables |
 | chDB | **Remove** | Only if its binding, footprint, and normalized results improve materially |
@@ -404,7 +401,7 @@ Fanout does not need every lakehouse layer.
 The smallest architecture that satisfies the product is:
 
 ```text
-Fanout hot columnar store + Parquet cold files + DuckDB SQL + SQLite control
+Fanout hot trace index + authoritative Parquet + DuckDB SQL + SQLite control
 ```
 
 DuckLake and Iceberg overlap with lifecycle management that Fanout already must

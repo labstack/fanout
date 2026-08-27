@@ -38,6 +38,12 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 	}
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
+	markerPath := filepath.Join(r.root, "COMPACTION.json")
+	if exists, err := pathExists(markerPath); err != nil {
+		return 0, fmt.Errorf("inspect pending compaction: %w", err)
+	} else if exists {
+		return 0, errors.New("pending Parquet compaction must recover before another can start")
+	}
 	r.mu.RLock()
 	selected := selectCompactionBatches(r.manifest.Batches, maxBatches)
 	r.mu.RUnlock()
@@ -102,7 +108,7 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 	if err != nil {
 		return 0, err
 	}
-	if err := writeDurableFile(filepath.Join(r.root, "COMPACTION.json"), data); err != nil {
+	if err := writeDurableFile(markerPath, data); err != nil {
 		return 0, err
 	}
 	if err := syncDirectory(r.root); err != nil {

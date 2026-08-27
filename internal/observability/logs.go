@@ -54,6 +54,9 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 			rows.Close()
 			return Result[Logs]{}, fmt.Errorf("scan log: %w", err)
 		}
+		// Keep Go redaction as a defense-in-depth boundary even though DuckDB
+		// applies the equivalent expression before filtering and transfer.
+		entry.Body = redactLogBody(entry.Body)
 		data.Entries = append(data.Entries, entry)
 	}
 	if err := rows.Err(); err != nil {

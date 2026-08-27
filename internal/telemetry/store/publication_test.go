@@ -9,10 +9,11 @@ import (
 )
 
 type publicationInspectLock struct {
-	t          *testing.T
-	repository *Repository
-	id         string
-	locked     bool
+	t                 *testing.T
+	repository        *Repository
+	id                string
+	locked            bool
+	unlockedBeforeHot bool
 }
 
 func (l *publicationInspectLock) Lock() {
@@ -28,7 +29,13 @@ func (l *publicationInspectLock) Lock() {
 	}
 }
 
-func (l *publicationInspectLock) Unlock() { l.locked = false }
+func (l *publicationInspectLock) Unlock() {
+	if rows := l.repository.Spans.RowCount(); rows != 0 {
+		l.t.Fatalf("hot segment encoded while query publication gate was held: %d rows", rows)
+	}
+	l.unlockedBeforeHot = true
+	l.locked = false
+}
 
 func TestCommitStagesOutsidePublicationLock(t *testing.T) {
 	repository, err := Open(t.TempDir())
@@ -50,6 +57,9 @@ func TestCommitStagesOutsidePublicationLock(t *testing.T) {
 	}
 	if lock.locked {
 		t.Fatal("publication lock remained held after commit")
+	}
+	if !lock.unlockedBeforeHot {
+		t.Fatal("publication lock was not released before hot-index encoding")
 	}
 	for _, signal := range []string{"spans", "logs", "metrics"} {
 		if _, err := os.Stat(filepath.Join(repository.Parquet.Dir(), signal, id+".parquet")); err != nil {

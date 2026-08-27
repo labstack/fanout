@@ -110,7 +110,7 @@ func Open(root string) (*Repository, error) {
 			return nil, fmt.Errorf("rebuild hot telemetry tier: %w", err)
 		}
 		hotRebuilt = true
-		slog.Warn("corrupt hot telemetry tier quarantined and rebuilt from authoritative Parquet", "path", quarantine)
+		slog.Warn("corrupt hot telemetry tier quarantined and reset; authoritative Parquet preserved", "path", quarantine)
 	}
 	parquet, err := telemetry.OpenParquetStore(filepath.Join(root, "parquet"))
 	if err != nil {
@@ -156,8 +156,6 @@ func (r *Repository) Close() error {
 // PruneHot removes acceleration segments older than cutoff. Parquet remains
 // authoritative for longer retention and SQL queries.
 func (r *Repository) PruneHot(cutoff int64) (int, error) {
-	r.commitMu.Lock()
-	defer r.commitMu.Unlock()
 	r.hotMu.Lock()
 	defer r.hotMu.Unlock()
 
@@ -215,15 +213,12 @@ func (r *Repository) CompactHot(maxInputs int) (int, error) {
 
 // HotTrace returns the hot trace snapshot and the durable prune boundary that
 // was in force for that snapshot.
-func (r *Repository) HotTrace(traceID string, scopeStartNanos int64) ([]telemetry.Span, int64, error) {
+func (r *Repository) HotTrace(traceID string) ([]telemetry.Span, int64, error) {
 	r.hotMu.RLock()
 	defer r.hotMu.RUnlock()
 	r.mu.RLock()
 	cutoff := r.manifest.HotCutoffNanos
 	r.mu.RUnlock()
-	if scopeStartNanos < cutoff {
-		return nil, cutoff, nil
-	}
 	spans, err := r.Spans.Trace(traceID)
 	return spans, cutoff, err
 }
@@ -285,21 +280,35 @@ func (r *Repository) Commit(batch Batch) error {
 		return err
 	}
 	// Parquet encoding and fsync happen before either the query publication gate
-	// or commit mutex is acquired. Only the final renames and manifest append are
-	// serialized with readers and maintenance.
+	// or commit mutex is acquired. The query gate covers only the final Parquet
+	// renames; the hot index, journal, and WAL cleanup cannot block readers.
 	if err := r.Parquet.StageBatch(batch.ID, batch.Spans, batch.Logs, batch.Metrics); err != nil {
 		return err
 	}
+	publishLocked := false
+	unlockPublish := func() {
+		if publishLocked {
+			r.parquetPublish.Unlock()
+			publishLocked = false
+		}
+	}
 	if r.parquetPublish != nil {
 		r.parquetPublish.Lock()
-		defer r.parquetPublish.Unlock()
+		publishLocked = true
+		defer unlockPublish()
 	}
 	r.commitMu.Lock()
 	defer r.commitMu.Unlock()
 	if r.batchConsumedLocked(batch.ID) {
+		unlockPublish()
 		return errors.Join(r.Parquet.DiscardBatch(batch.ID), r.removeWAL(batch.ID))
 	}
-	err = r.publish(batch)
+	_, err = r.Parquet.PublishBatch(batch.ID, len(batch.Spans) > 0, len(batch.Logs) > 0, len(batch.Metrics) > 0)
+	unlockPublish()
+	if err != nil {
+		return fmt.Errorf("publish parquet batch: %w", err)
+	}
+	err = r.publishHot(batch)
 	if err == nil {
 		r.mu.Lock()
 		err = r.recordBatch(batch)
@@ -350,15 +359,14 @@ func validateBatch(batch Batch) error {
 	return nil
 }
 
-func (r *Repository) publish(batch Batch) error {
+func (r *Repository) publishHot(batch Batch) error {
+	// Parquet is authoritative and already queryable. If the disposable hot
+	// index fails, retain the WAL and retry/recover only that acceleration copy;
+	// a hot miss safely falls back to Parquet in the meantime.
 	r.hotMu.Lock()
 	defer r.hotMu.Unlock()
-	rollback, err := r.Parquet.PublishBatch(batch.ID, len(batch.Spans) > 0, len(batch.Logs) > 0, len(batch.Metrics) > 0)
-	if err != nil {
-		return fmt.Errorf("publish parquet batch: %w", err)
-	}
 	if err := r.Spans.AppendID(batch.ID, batch.Spans); err != nil {
-		return errors.Join(fmt.Errorf("commit span segment: %w", err), rollback())
+		return fmt.Errorf("commit span segment: %w", err)
 	}
 	return nil
 }
@@ -481,8 +489,11 @@ func (r *Repository) recover() error {
 		if err := r.Parquet.StageBatch(batch.ID, batch.Spans, batch.Logs, batch.Metrics); err != nil {
 			return fmt.Errorf("stage replay %s: %w", name, err)
 		}
-		if err := r.publish(batch); err != nil {
-			return fmt.Errorf("replay %s: %w", name, err)
+		if _, err := r.Parquet.PublishBatch(batch.ID, len(batch.Spans) > 0, len(batch.Logs) > 0, len(batch.Metrics) > 0); err != nil {
+			return fmt.Errorf("publish replayed Parquet %s: %w", name, err)
+		}
+		if err := r.publishHot(batch); err != nil {
+			return fmt.Errorf("publish replayed hot index %s: %w", name, err)
 		}
 		if err := r.recordBatch(batch); err != nil {
 			return fmt.Errorf("record replayed %s: %w", name, err)

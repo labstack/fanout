@@ -6,6 +6,7 @@ package segment
 import (
 	"bufio"
 	"bytes"
+	"container/heap"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -20,7 +21,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/klauspost/compress/zstd"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -33,7 +33,6 @@ import (
 // long before zstd's 64 GiB default would.
 const (
 	segmentDecoderMaxMemory   = 128 << 20
-	maxRollupKeyBytes         = 32 << 20
 	segmentMaxCompressedBytes = segmentDecoderMaxMemory + (1 << 20)
 	segmentMaxBlocks          = 1 << 20
 )
@@ -54,62 +53,42 @@ func newSegmentDecoderWithLimit(limit uint64) (*zstd.Decoder, error) {
 }
 
 const (
-	segmentMagic   = "FANSEG03"
-	segmentVersion = uint32(3)
+	segmentMagic   = "FANSEG04"
+	segmentVersion = uint32(4)
 	headerSize     = 64
 	blockDirSize   = 32
-	traceEntrySize = 16
+	traceEntrySize = 12
 	rowsPerBlock   = 2048
-	rollupBins     = 32
-	rollupWindow   = 5 * time.Minute
 )
 
 type Span = telemetry.Span
 
-// ValidateSpanRows rejects rows whose derived rollup representation could not
-// be reopened within the production decoder budget. It must run before WAL
-// staging so deterministic format errors never become boot-blocking WALs.
+// ValidateSpanRows rejects rows whose columnar blocks could not be reopened
+// within the production decoder budget. It must run before WAL staging so a
+// deterministic format error never becomes a boot-blocking WAL.
 func ValidateSpanRows(rows []Span) error {
-	return validateSpanRowsWithLimits(rows, maxRollupKeyBytes, segmentDecoderMaxMemory)
+	return validateSpanRowsWithLimit(rows, segmentDecoderMaxMemory)
 }
 
-func validateSpanRowsWithLimits(rows []Span, maxKeyBytes, maxSectionBytes uint64) error {
-	keys := make(map[rollupKey]struct{}, len(rows))
-	var sectionBytes uint64
-	for _, row := range rows {
-		key := rollupKey{
-			bucket:    row.StartUnixNanos - row.StartUnixNanos%int64(rollupWindow),
-			namespace: row.Namespace, service: row.ServiceName, method: row.HTTPMethod, route: row.HTTPRoute,
+func validateSpanRowsWithLimit(rows []Span, maxBlockBytes uint64) error {
+	if maxBlockBytes < columnarHeaderSize {
+		return fmt.Errorf("span block budget %d is smaller than its %d-byte header", maxBlockBytes, columnarHeaderSize)
+	}
+	for start := 0; start < len(rows); start += rowsPerBlock {
+		end := min(start+rowsPerBlock, len(rows))
+		sizes := spanColumnPlainSizes(rows[start:end])
+		total := uint64(columnarHeaderSize)
+		for id, size := range sizes {
+			if size > maxBlockBytes {
+				return fmt.Errorf("span block column %d uses %d bytes; maximum is %d", id, size, maxBlockBytes)
+			}
+			if size > maxBlockBytes-total {
+				return fmt.Errorf("span block uses more than %d bytes", maxBlockBytes)
+			}
+			total += size
 		}
-		if _, exists := keys[key]; exists {
-			continue
-		}
-		keys[key] = struct{}{}
-		keyBytes := uint64(len(key.namespace)) + uint64(len(key.service)) + uint64(len(key.method)) + uint64(len(key.route))
-		if keyBytes > maxKeyBytes {
-			return fmt.Errorf("span rollup key uses %d bytes; maximum is %d", keyBytes, maxKeyBytes)
-		}
-		size := uint64(160)
-		var scratch [binary.MaxVarintLen64]byte
-		for _, value := range []string{key.namespace, key.service, key.method, key.route} {
-			size += uint64(binary.PutUvarint(scratch[:], uint64(len(value)))) + uint64(len(value))
-		}
-		if size > maxSectionBytes-sectionBytes {
-			return fmt.Errorf("span rollups exceed %d-byte decoder budget", maxSectionBytes)
-		}
-		sectionBytes += size
 	}
 	return nil
-}
-
-type Endpoint struct {
-	Service   string
-	Method    string
-	Route     string
-	Calls     uint64
-	Errors    uint64
-	AverageMS float64
-	P95MS     float64
 }
 
 type Aggregate struct {
@@ -129,33 +108,42 @@ type blockDir struct {
 type traceEntry struct {
 	hash  uint64
 	block uint32
-	row   uint32
 }
 
-type rollupKey struct {
-	bucket    int64
-	namespace string
-	service   string
-	method    string
-	route     string
+type indexCursor struct {
+	file      *os.File
+	segment   segment
+	blockBase uint32
+	position  uint32
+	entry     traceEntry
 }
 
-type rollup struct {
-	key      rollupKey
-	calls    uint64
-	errors   uint64
-	duration float64
-	bins     [rollupBins]uint32
+type indexCursorHeap []*indexCursor
+
+func (h indexCursorHeap) Len() int { return len(h) }
+func (h indexCursorHeap) Less(i, j int) bool {
+	if h[i].entry.hash != h[j].entry.hash {
+		return h[i].entry.hash < h[j].entry.hash
+	}
+	return h[i].entry.block < h[j].entry.block
+}
+func (h indexCursorHeap) Swap(i, j int)   { h[i], h[j] = h[j], h[i] }
+func (h *indexCursorHeap) Push(value any) { *h = append(*h, value.(*indexCursor)) }
+func (h *indexCursorHeap) Pop() any {
+	old := *h
+	last := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return last
 }
 
 type segment struct {
-	path       string
-	rows       uint32
-	min        int64
-	max        int64
-	blocks     []blockDir
-	traceIndex []traceEntry
-	rollups    []rollup
+	path        string
+	rows        uint32
+	min         int64
+	max         int64
+	blocks      []blockDir
+	indexOffset uint64
+	indexCount  uint32
 }
 
 type manifest struct {
@@ -242,7 +230,7 @@ func (s *Store) loadManifest() error {
 }
 
 // Append writes one crash-safe immutable segment and atomically publishes it.
-// Rollups and the trace index are built in the same pass as block encoding.
+// The on-disk trace index is built in the same pass as block encoding.
 func (s *Store) Append(rows []Span) error {
 	if len(rows) == 0 {
 		return nil
@@ -501,7 +489,6 @@ func (s *Store) writeSegment(path string, rows []Span) (segment, error) {
 
 	seg := segment{rows: uint32(len(rows)), min: math.MaxInt64, max: math.MinInt64}
 	index := make([]traceEntry, 0, len(rows))
-	rollups := make(map[rollupKey]*rollup)
 	var offset = uint64(headerSize)
 	for blockStart := 0; blockStart < len(rows); blockStart += rowsPerBlock {
 		blockEnd := min(blockStart+rowsPerBlock, len(rows))
@@ -518,23 +505,11 @@ func (s *Store) writeSegment(path string, rows []Span) (segment, error) {
 				index = append(index, traceEntry{hash: traceHash, block: uint32(len(seg.blocks))})
 				blockTraces[traceHash] = struct{}{}
 			}
-			key := rollupKey{
-				bucket:    row.StartUnixNanos - row.StartUnixNanos%int64(rollupWindow),
-				namespace: row.Namespace, service: row.ServiceName, method: row.HTTPMethod, route: row.HTTPRoute,
-			}
-			r := rollups[key]
-			if r == nil {
-				r = &rollup{key: key}
-				rollups[key] = r
-			}
-			r.calls++
-			if isErrorStatus(row.StatusCode) {
-				r.errors++
-			}
-			r.duration += row.DurationMS
-			r.bins[durationBin(row.DurationMS)]++
 		}
-		encoded := encodeColumnarBlock(s.encoder, rows[blockStart:blockEnd])
+		encoded, err := encodeColumnarBlock(s.encoder, rows[blockStart:blockEnd])
+		if err != nil {
+			return segment{}, fmt.Errorf("encode block: %w", err)
+		}
 		if _, err := f.Write(encoded); err != nil {
 			return segment{}, fmt.Errorf("write block: %w", err)
 		}
@@ -546,31 +521,7 @@ func (s *Store) writeSegment(path string, rows []Span) (segment, error) {
 		if index[i].hash != index[j].hash {
 			return index[i].hash < index[j].hash
 		}
-		if index[i].block != index[j].block {
-			return index[i].block < index[j].block
-		}
-		return index[i].row < index[j].row
-	})
-	seg.traceIndex = index
-	seg.rollups = make([]rollup, 0, len(rollups))
-	for _, r := range rollups {
-		seg.rollups = append(seg.rollups, *r)
-	}
-	sort.Slice(seg.rollups, func(i, j int) bool {
-		a, b := seg.rollups[i].key, seg.rollups[j].key
-		if a.bucket != b.bucket {
-			return a.bucket < b.bucket
-		}
-		if a.namespace != b.namespace {
-			return a.namespace < b.namespace
-		}
-		if a.service != b.service {
-			return a.service < b.service
-		}
-		if a.method != b.method {
-			return a.method < b.method
-		}
-		return a.route < b.route
+		return index[i].block < index[j].block
 	})
 
 	dirOffset := offset
@@ -588,43 +539,29 @@ func (s *Store) writeSegment(path string, rows []Span) (segment, error) {
 	}
 	indexOffset, _ := f.Seek(0, io.SeekCurrent)
 	indexPlain := make([]byte, len(index)*traceEntrySize)
-	if len(indexPlain) > segmentDecoderMaxMemory {
-		return segment{}, errors.New("trace index exceeds decoder memory limit")
-	}
 	for i, entry := range index {
 		buf := indexPlain[i*traceEntrySize:]
 		binary.LittleEndian.PutUint64(buf[0:8], entry.hash)
 		binary.LittleEndian.PutUint32(buf[8:12], entry.block)
-		binary.LittleEndian.PutUint32(buf[12:16], entry.row)
 	}
-	if _, err := f.Write(s.encoder.EncodeAll(indexPlain, nil)); err != nil {
+	if _, err := f.Write(indexPlain); err != nil {
 		return segment{}, fmt.Errorf("write trace index: %w", err)
 	}
-	rollupOffset, _ := f.Seek(0, io.SeekCurrent)
-	var rollupPlain bytes.Buffer
-	for _, r := range seg.rollups {
-		if err := writeRollup(&rollupPlain, r); err != nil {
-			return segment{}, err
-		}
-	}
-	if rollupPlain.Len() > segmentDecoderMaxMemory {
-		return segment{}, errors.New("rollup section exceeds decoder memory limit")
-	}
-	if _, err := f.Write(s.encoder.EncodeAll(rollupPlain.Bytes(), nil)); err != nil {
-		return segment{}, fmt.Errorf("write rollups: %w", err)
-	}
+	indexEnd, _ := f.Seek(0, io.SeekCurrent)
+	seg.indexOffset = uint64(indexOffset)
+	seg.indexCount = uint32(len(index))
 
 	var header [headerSize]byte
 	copy(header[0:8], segmentMagic)
 	binary.LittleEndian.PutUint32(header[8:12], segmentVersion)
 	binary.LittleEndian.PutUint32(header[12:16], seg.rows)
 	binary.LittleEndian.PutUint32(header[16:20], uint32(len(seg.blocks)))
-	binary.LittleEndian.PutUint32(header[20:24], uint32(len(seg.rollups)))
+	binary.LittleEndian.PutUint32(header[20:24], seg.indexCount)
 	binary.LittleEndian.PutUint64(header[24:32], uint64(seg.min))
 	binary.LittleEndian.PutUint64(header[32:40], uint64(seg.max))
 	binary.LittleEndian.PutUint64(header[40:48], dirOffset)
 	binary.LittleEndian.PutUint64(header[48:56], uint64(indexOffset))
-	binary.LittleEndian.PutUint64(header[56:64], uint64(rollupOffset))
+	binary.LittleEndian.PutUint64(header[56:64], uint64(indexEnd))
 	if _, err := f.WriteAt(header[:], 0); err != nil {
 		return segment{}, fmt.Errorf("write header: %w", err)
 	}
@@ -654,13 +591,15 @@ func (s *Store) writeCompactedSegment(path string, inputs []segment) (segment, e
 		return segment{}, err
 	}
 	replacement := segment{min: math.MaxInt64, max: math.MinInt64}
+	blockBases := make([]uint32, len(inputs))
 	var offset = uint64(headerSize)
-	for _, input := range inputs {
+	for i, input := range inputs {
 		source, err := os.Open(input.path)
 		if err != nil {
 			return segment{}, err
 		}
 		blockBase := uint32(len(replacement.blocks))
+		blockBases[i] = blockBase
 		for _, block := range input.blocks {
 			if _, err := io.CopyN(f, io.NewSectionReader(source, int64(block.offset), int64(block.length)), int64(block.length)); err != nil {
 				_ = source.Close()
@@ -672,41 +611,10 @@ func (s *Store) writeCompactedSegment(path string, inputs []segment) (segment, e
 		if err := source.Close(); err != nil {
 			return segment{}, err
 		}
-		for _, entry := range input.traceIndex {
-			entry.block += blockBase
-			replacement.traceIndex = append(replacement.traceIndex, entry)
-		}
-		replacement.rollups = append(replacement.rollups, input.rollups...)
 		replacement.rows += input.rows
 		replacement.min = min(replacement.min, input.min)
 		replacement.max = max(replacement.max, input.max)
 	}
-	sort.Slice(replacement.traceIndex, func(i, j int) bool {
-		a, b := replacement.traceIndex[i], replacement.traceIndex[j]
-		if a.hash != b.hash {
-			return a.hash < b.hash
-		}
-		if a.block != b.block {
-			return a.block < b.block
-		}
-		return a.row < b.row
-	})
-	sort.Slice(replacement.rollups, func(i, j int) bool {
-		a, b := replacement.rollups[i].key, replacement.rollups[j].key
-		if a.bucket != b.bucket {
-			return a.bucket < b.bucket
-		}
-		if a.namespace != b.namespace {
-			return a.namespace < b.namespace
-		}
-		if a.service != b.service {
-			return a.service < b.service
-		}
-		if a.method != b.method {
-			return a.method < b.method
-		}
-		return a.route < b.route
-	})
 
 	dirOffset := offset
 	directory := make([]byte, len(replacement.blocks)*blockDirSize)
@@ -722,43 +630,24 @@ func (s *Store) writeCompactedSegment(path string, inputs []segment) (segment, e
 		return segment{}, err
 	}
 	indexOffset, _ := f.Seek(0, io.SeekCurrent)
-	indexPlain := make([]byte, len(replacement.traceIndex)*traceEntrySize)
-	if len(indexPlain) > segmentDecoderMaxMemory {
-		return segment{}, errors.New("compacted trace index exceeds decoder memory limit")
-	}
-	for i, entry := range replacement.traceIndex {
-		buf := indexPlain[i*traceEntrySize:]
-		binary.LittleEndian.PutUint64(buf[0:8], entry.hash)
-		binary.LittleEndian.PutUint32(buf[8:12], entry.block)
-		binary.LittleEndian.PutUint32(buf[12:16], entry.row)
-	}
-	if _, err := f.Write(s.encoder.EncodeAll(indexPlain, nil)); err != nil {
+	indexCount, err := mergeTraceIndexes(f, inputs, blockBases)
+	if err != nil {
 		return segment{}, err
 	}
-	rollupOffset, _ := f.Seek(0, io.SeekCurrent)
-	var rollupPlain bytes.Buffer
-	for _, r := range replacement.rollups {
-		if err := writeRollup(&rollupPlain, r); err != nil {
-			return segment{}, err
-		}
-	}
-	if rollupPlain.Len() > segmentDecoderMaxMemory {
-		return segment{}, errors.New("compacted rollup section exceeds decoder memory limit")
-	}
-	if _, err := f.Write(s.encoder.EncodeAll(rollupPlain.Bytes(), nil)); err != nil {
-		return segment{}, err
-	}
+	indexEnd, _ := f.Seek(0, io.SeekCurrent)
+	replacement.indexOffset = uint64(indexOffset)
+	replacement.indexCount = indexCount
 	var header [headerSize]byte
 	copy(header[0:8], segmentMagic)
 	binary.LittleEndian.PutUint32(header[8:12], segmentVersion)
 	binary.LittleEndian.PutUint32(header[12:16], replacement.rows)
 	binary.LittleEndian.PutUint32(header[16:20], uint32(len(replacement.blocks)))
-	binary.LittleEndian.PutUint32(header[20:24], uint32(len(replacement.rollups)))
+	binary.LittleEndian.PutUint32(header[20:24], replacement.indexCount)
 	binary.LittleEndian.PutUint64(header[24:32], uint64(replacement.min))
 	binary.LittleEndian.PutUint64(header[32:40], uint64(replacement.max))
 	binary.LittleEndian.PutUint64(header[40:48], dirOffset)
 	binary.LittleEndian.PutUint64(header[48:56], uint64(indexOffset))
-	binary.LittleEndian.PutUint64(header[56:64], uint64(rollupOffset))
+	binary.LittleEndian.PutUint64(header[56:64], uint64(indexEnd))
 	if _, err := f.WriteAt(header[:], 0); err != nil {
 		return segment{}, err
 	}
@@ -772,6 +661,129 @@ func (s *Store) writeCompactedSegment(path string, inputs []segment) (segment, e
 	return replacement, nil
 }
 
+// mergeTraceIndexes performs a bounded-memory k-way merge of fixed-width,
+// sorted on-disk indexes. Compaction therefore scales with file count rather
+// than retaining every trace entry from every generation in the Go heap.
+func mergeTraceIndexes(dst io.Writer, inputs []segment, blockBases []uint32) (uint32, error) {
+	if len(inputs) != len(blockBases) {
+		return 0, errors.New("trace-index inputs and block bases disagree")
+	}
+	cursors := make(indexCursorHeap, 0, len(inputs))
+	files := make([]*os.File, 0, len(inputs))
+	defer func() {
+		for _, file := range files {
+			_ = file.Close()
+		}
+	}()
+	var total uint64
+	for i, input := range inputs {
+		total += uint64(input.indexCount)
+		if total > math.MaxUint32 {
+			return 0, errors.New("compacted trace index exceeds entry limit")
+		}
+		if input.indexCount == 0 {
+			continue
+		}
+		f, err := os.Open(input.path)
+		if err != nil {
+			return 0, err
+		}
+		files = append(files, f)
+		cursor := &indexCursor{file: f, segment: input, blockBase: blockBases[i]}
+		entry, err := readTraceEntry(f, input, 0)
+		if err != nil {
+			_ = f.Close()
+			return 0, err
+		}
+		if entry.block > math.MaxUint32-cursor.blockBase {
+			_ = f.Close()
+			return 0, errors.New("compacted trace block id overflows")
+		}
+		entry.block += cursor.blockBase
+		cursor.entry = entry
+		cursors = append(cursors, cursor)
+	}
+	heap.Init(&cursors)
+	writer := bufio.NewWriterSize(dst, 64<<10)
+	var encoded [traceEntrySize]byte
+	for cursors.Len() > 0 {
+		cursor := heap.Pop(&cursors).(*indexCursor)
+		binary.LittleEndian.PutUint64(encoded[0:8], cursor.entry.hash)
+		binary.LittleEndian.PutUint32(encoded[8:12], cursor.entry.block)
+		if _, err := writer.Write(encoded[:]); err != nil {
+			return 0, err
+		}
+		cursor.position++
+		if cursor.position < cursor.segment.indexCount {
+			entry, err := readTraceEntry(cursor.file, cursor.segment, cursor.position)
+			if err != nil {
+				return 0, err
+			}
+			if entry.block > math.MaxUint32-cursor.blockBase {
+				return 0, errors.New("compacted trace block id overflows")
+			}
+			entry.block += cursor.blockBase
+			cursor.entry = entry
+			heap.Push(&cursors, cursor)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		return 0, err
+	}
+	return uint32(total), nil
+}
+
+func readTraceEntry(f *os.File, seg segment, position uint32) (traceEntry, error) {
+	if position >= seg.indexCount {
+		return traceEntry{}, io.EOF
+	}
+	var encoded [traceEntrySize]byte
+	offset := seg.indexOffset + uint64(position)*traceEntrySize
+	if _, err := f.ReadAt(encoded[:], int64(offset)); err != nil {
+		return traceEntry{}, err
+	}
+	entry := traceEntry{hash: binary.LittleEndian.Uint64(encoded[0:8]), block: binary.LittleEndian.Uint32(encoded[8:12])}
+	if int(entry.block) >= len(seg.blocks) {
+		return traceEntry{}, errors.New("trace index references a missing block")
+	}
+	return entry, nil
+}
+
+func traceBlocks(seg segment, hash uint64) ([]uint32, error) {
+	f, err := os.Open(seg.path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	low, high := uint32(0), seg.indexCount
+	for low < high {
+		middle := low + (high-low)/2
+		entry, err := readTraceEntry(f, seg, middle)
+		if err != nil {
+			return nil, err
+		}
+		if entry.hash < hash {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+	blocks := make([]uint32, 0, 1)
+	for position := low; position < seg.indexCount; position++ {
+		entry, err := readTraceEntry(f, seg, position)
+		if err != nil {
+			return nil, err
+		}
+		if entry.hash != hash {
+			break
+		}
+		if len(blocks) == 0 || blocks[len(blocks)-1] != entry.block {
+			blocks = append(blocks, entry.block)
+		}
+	}
+	return blocks, nil
+}
+
 // Trace performs a hash-index lookup and decompresses only the blocks that can
 // contain the requested trace. The full trace ID is checked after hashing.
 func (s *Store) Trace(traceID string) ([]Span, error) {
@@ -780,15 +792,13 @@ func (s *Store) Trace(traceID string) ([]Span, error) {
 	hash := xxh3.HashString(traceID)
 	var out []Span
 	for i := range s.segments {
-		seg := &s.segments[i]
-		start := sort.Search(len(seg.traceIndex), func(j int) bool { return seg.traceIndex[j].hash >= hash })
-		blocks := make(map[uint32][]uint32)
-		for j := start; j < len(seg.traceIndex) && seg.traceIndex[j].hash == hash; j++ {
-			entry := seg.traceIndex[j]
-			blocks[entry.block] = append(blocks[entry.block], entry.row)
+		seg := s.segments[i]
+		blocks, err := traceBlocks(seg, hash)
+		if err != nil {
+			return nil, err
 		}
-		for blockID := range blocks {
-			rows, err := s.readTraceBlock(*seg, blockID, traceID)
+		for _, blockID := range blocks {
+			rows, err := s.readTraceBlock(seg, blockID, traceID)
 			if err != nil {
 				return nil, err
 			}
@@ -797,65 +807,6 @@ func (s *Store) Trace(traceID string) ([]Span, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].StartUnixNanos < out[j].StartUnixNanos })
 	return out, nil
-}
-
-// Endpoints answers Fanout's dashboard query entirely from ingestion-time
-// rollups. Quantiles use the same bounded-histogram approximation style as the
-// existing Fanout endpoint cache.
-func (s *Store) Endpoints(namespace, service string, start, end int64, limit int) []Endpoint {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	type value struct {
-		calls, errors uint64
-		duration      float64
-		bins          [rollupBins]uint32
-	}
-	values := make(map[string]*value)
-	keys := make(map[string]rollupKey)
-	for i := range s.segments {
-		seg := &s.segments[i]
-		if seg.max < start || seg.min >= end {
-			continue
-		}
-		for _, r := range seg.rollups {
-			if r.key.bucket < start-start%int64(rollupWindow) || r.key.bucket >= end {
-				continue
-			}
-			if namespace != "" && r.key.namespace != namespace {
-				continue
-			}
-			if service != "" && r.key.service != service {
-				continue
-			}
-			key := r.key.service + "\x00" + r.key.method + "\x00" + r.key.route
-			v := values[key]
-			if v == nil {
-				v = &value{}
-				values[key] = v
-				keys[key] = r.key
-			}
-			v.calls += r.calls
-			v.errors += r.errors
-			v.duration += r.duration
-			for j := range v.bins {
-				v.bins[j] += r.bins[j]
-			}
-		}
-	}
-	out := make([]Endpoint, 0, len(values))
-	for key, v := range values {
-		k := keys[key]
-		average := 0.0
-		if v.calls > 0 {
-			average = v.duration / float64(v.calls)
-		}
-		out = append(out, Endpoint{Service: k.service, Method: k.method, Route: k.route, Calls: v.calls, Errors: v.errors, AverageMS: average, P95MS: histogramQuantile(v.bins, v.calls, .95)})
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Calls > out[j].Calls })
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
-	}
-	return out
 }
 
 // ScanService is the deliberately expensive raw path. It demonstrates block
@@ -983,7 +934,7 @@ func isErrorStatus(status string) bool {
 // any of them is used to size an allocation. All comparisons are written as
 // subtractions against size so a corrupt offset near the top of the address
 // space cannot wrap past the check.
-func validateSegmentSections(size, dirOffset, indexOffset, rollupOffset uint64, blockCount uint32) error {
+func validateSegmentSections(size, dirOffset, indexOffset, indexEnd uint64, blockCount, indexCount uint32) error {
 	if blockCount > segmentMaxBlocks {
 		return errors.New("segment block count is out of range")
 	}
@@ -993,11 +944,14 @@ func validateSegmentSections(size, dirOffset, indexOffset, rollupOffset uint64, 
 	if indexOffset < dirOffset+uint64(blockCount)*blockDirSize || indexOffset > size {
 		return errors.New("corrupt trace index offset")
 	}
-	if rollupOffset < indexOffset || rollupOffset > size {
-		return errors.New("corrupt rollup offset")
+	if indexEnd < indexOffset || indexEnd > size {
+		return errors.New("corrupt trace index end")
 	}
-	if rollupOffset-indexOffset > segmentMaxCompressedBytes || size-rollupOffset > segmentMaxCompressedBytes {
-		return errors.New("compressed segment section exceeds memory limit")
+	if uint64(indexCount) > (indexEnd-indexOffset)/traceEntrySize || indexEnd-indexOffset != uint64(indexCount)*traceEntrySize {
+		return errors.New("trace index size disagrees with the segment header")
+	}
+	if indexEnd != size {
+		return errors.New("segment has data past the trace index")
 	}
 	return nil
 }
@@ -1058,15 +1012,15 @@ func openSegment(path string) (segment, error) {
 	}
 	seg := segment{path: path, rows: binary.LittleEndian.Uint32(header[12:16]), min: int64(binary.LittleEndian.Uint64(header[24:32])), max: int64(binary.LittleEndian.Uint64(header[32:40]))}
 	blockCount := binary.LittleEndian.Uint32(header[16:20])
-	rollupCount := binary.LittleEndian.Uint32(header[20:24])
+	indexCount := binary.LittleEndian.Uint32(header[20:24])
 	dirOffset := binary.LittleEndian.Uint64(header[40:48])
 	indexOffset := binary.LittleEndian.Uint64(header[48:56])
-	rollupOffset := binary.LittleEndian.Uint64(header[56:64])
+	indexEnd := binary.LittleEndian.Uint64(header[56:64])
 	info, err := f.Stat()
 	if err != nil {
 		return segment{}, err
 	}
-	if err := validateSegmentSections(uint64(info.Size()), dirOffset, indexOffset, rollupOffset, blockCount); err != nil {
+	if err := validateSegmentSections(uint64(info.Size()), dirOffset, indexOffset, indexEnd, blockCount, indexCount); err != nil {
 		return segment{}, fmt.Errorf("segment %s: %w", filepath.Base(path), err)
 	}
 	seg.blocks = make([]blockDir, blockCount)
@@ -1081,50 +1035,32 @@ func openSegment(path string) (segment, error) {
 	if err := validateSegmentBlocks(uint64(info.Size()), dirOffset, seg.blocks, seg.rows); err != nil {
 		return segment{}, fmt.Errorf("segment %s: %w", filepath.Base(path), err)
 	}
-	indexCompressed := make([]byte, int(rollupOffset-indexOffset))
-	if _, err := f.ReadAt(indexCompressed, int64(indexOffset)); err != nil {
-		return segment{}, err
-	}
-	dec, err := newSegmentDecoder()
-	if err != nil {
-		return segment{}, err
-	}
-	indexBytes, err := dec.DecodeAll(indexCompressed, nil)
-	if err != nil {
-		dec.Close()
-		return segment{}, fmt.Errorf("decode trace index: %w", err)
-	}
-	if len(indexBytes)%traceEntrySize != 0 {
-		dec.Close()
-		return segment{}, fmt.Errorf("trace index size %d is not entry-aligned", len(indexBytes))
-	}
-	seg.traceIndex = make([]traceEntry, len(indexBytes)/traceEntrySize)
-	for i := range seg.traceIndex {
-		b := indexBytes[i*traceEntrySize:]
-		seg.traceIndex[i] = traceEntry{hash: binary.LittleEndian.Uint64(b[0:8]), block: binary.LittleEndian.Uint32(b[8:12]), row: binary.LittleEndian.Uint32(b[12:16])}
-	}
-	rollupCompressed := make([]byte, info.Size()-int64(rollupOffset))
-	if _, err := f.ReadAt(rollupCompressed, int64(rollupOffset)); err != nil {
-		dec.Close()
-		return segment{}, err
-	}
-	rollupBytes, err := dec.DecodeAll(rollupCompressed, nil)
-	dec.Close()
-	if err != nil {
-		return segment{}, fmt.Errorf("decode rollups: %w", err)
-	}
-	reader := bufio.NewReader(bytes.NewReader(rollupBytes))
-	// rollupCount comes from the same untrusted header, so the slice grows with
-	// the rollups actually decoded rather than being sized from it up front.
-	seg.rollups = nil
-	for range rollupCount {
-		r, err := readRollup(reader)
-		if err != nil {
-			return segment{}, err
-		}
-		seg.rollups = append(seg.rollups, r)
+	seg.indexOffset = indexOffset
+	seg.indexCount = indexCount
+	if err := validateTraceIndex(f, seg); err != nil {
+		return segment{}, fmt.Errorf("segment %s: %w", filepath.Base(path), err)
 	}
 	return seg, nil
+}
+
+func validateTraceIndex(f *os.File, seg segment) error {
+	reader := bufio.NewReaderSize(io.NewSectionReader(f, int64(seg.indexOffset), int64(seg.indexCount)*traceEntrySize), 64<<10)
+	var encoded [traceEntrySize]byte
+	var previous traceEntry
+	for position := uint32(0); position < seg.indexCount; position++ {
+		if _, err := io.ReadFull(reader, encoded[:]); err != nil {
+			return err
+		}
+		entry := traceEntry{hash: binary.LittleEndian.Uint64(encoded[0:8]), block: binary.LittleEndian.Uint32(encoded[8:12])}
+		if int(entry.block) >= len(seg.blocks) {
+			return errors.New("trace index references a missing block")
+		}
+		if position > 0 && (entry.hash < previous.hash || entry.hash == previous.hash && entry.block < previous.block) {
+			return errors.New("trace index is not sorted")
+		}
+		previous = entry
+	}
+	return nil
 }
 
 func appendString(dst []byte, value string) []byte {
@@ -1142,89 +1078,6 @@ func consumeByteView(src []byte) ([]byte, []byte, error) {
 		return nil, nil, io.ErrUnexpectedEOF
 	}
 	return src[:length], src[length:], nil
-}
-
-func writeRollup(w io.Writer, r rollup) error {
-	var fixed [160]byte
-	binary.LittleEndian.PutUint64(fixed[0:8], uint64(r.key.bucket))
-	binary.LittleEndian.PutUint64(fixed[8:16], r.calls)
-	binary.LittleEndian.PutUint64(fixed[16:24], r.errors)
-	binary.LittleEndian.PutUint64(fixed[24:32], math.Float64bits(r.duration))
-	for i, count := range r.bins {
-		binary.LittleEndian.PutUint32(fixed[32+i*4:], count)
-	}
-	if _, err := w.Write(fixed[:]); err != nil {
-		return fmt.Errorf("write rollup: %w", err)
-	}
-	// Key parts are varint-framed like every other string in the format: a
-	// pathological route must never make a batch unpublishable, because the WAL
-	// would then abort every restart with no way to make progress.
-	for _, value := range []string{r.key.namespace, r.key.service, r.key.method, r.key.route} {
-		var length [binary.MaxVarintLen64]byte
-		n := binary.PutUvarint(length[:], uint64(len(value)))
-		if _, err := w.Write(length[:n]); err != nil {
-			return err
-		}
-		if _, err := io.WriteString(w, value); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func readRollup(r *bufio.Reader) (rollup, error) {
-	return readRollupWithLimit(r, maxRollupKeyBytes)
-}
-
-func readRollupWithLimit(r *bufio.Reader, maxKeyBytes uint64) (rollup, error) {
-	var fixed [160]byte
-	if _, err := io.ReadFull(r, fixed[:]); err != nil {
-		return rollup{}, err
-	}
-	out := rollup{key: rollupKey{bucket: int64(binary.LittleEndian.Uint64(fixed[0:8]))}, calls: binary.LittleEndian.Uint64(fixed[8:16]), errors: binary.LittleEndian.Uint64(fixed[16:24]), duration: math.Float64frombits(binary.LittleEndian.Uint64(fixed[24:32]))}
-	for i := range out.bins {
-		out.bins[i] = binary.LittleEndian.Uint32(fixed[32+i*4:])
-	}
-	remaining := maxKeyBytes
-	for _, target := range []*string{&out.key.namespace, &out.key.service, &out.key.method, &out.key.route} {
-		length, err := binary.ReadUvarint(r)
-		if err != nil {
-			return rollup{}, err
-		}
-		if length > remaining {
-			return rollup{}, errors.New("rollup key length is out of range")
-		}
-		remaining -= length
-		value := make([]byte, length)
-		if _, err := io.ReadFull(r, value); err != nil {
-			return rollup{}, err
-		}
-		*target = string(value)
-	}
-	return out, nil
-}
-
-func durationBin(ms float64) int {
-	if ms <= 0 {
-		return 0
-	}
-	bin := int(math.Log2(ms*1000 + 1))
-	return min(bin, rollupBins-1)
-}
-
-func histogramQuantile(bins [rollupBins]uint32, total uint64, q float64) float64 {
-	if total == 0 {
-		return 0
-	}
-	target := uint64(math.Ceil(float64(total) * q))
-	var seen uint64
-	for i, count := range bins {
-		seen += uint64(count)
-		if seen >= target {
-			return (math.Pow(2, float64(i+1)) - 1) / 1000
-		}
-	}
-	return (math.Pow(2, rollupBins) - 1) / 1000
 }
 
 func writeManifest(dir string, m manifest) error {

@@ -119,7 +119,7 @@ func (w *Writer) stageSubmission(request submission, out chan<- Batch, workerDon
 			oversized := requests[0]
 			requests = requests[1:]
 			chunks := splitBatch(oversized.batch, limit)
-			staged := chunks[:0]
+			staged := make([]Batch, 0, len(chunks))
 			var stageErr error
 			for _, chunk := range chunks {
 				chunk.ID = uuid.NewString()

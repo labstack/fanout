@@ -327,19 +327,12 @@ func TestRepositoryPersistsHotPruneBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	spans, cutoff, err := reopened.HotTrace("trace-boundary", 250)
+	spans, cutoff, err := reopened.HotTrace("trace-boundary")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cutoff != 250 || len(spans) != 1 {
 		t.Fatalf("cutoff=%d spans=%d, want cutoff 250 and one retained boundary span", cutoff, len(spans))
-	}
-	skipped, cutoff, err := reopened.HotTrace("trace-boundary", 249)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cutoff != 250 || len(skipped) != 0 {
-		t.Fatalf("cross-boundary lookup cutoff=%d spans=%d, want Parquet handoff without a hot scan", cutoff, len(skipped))
 	}
 }
 
@@ -676,6 +669,35 @@ func TestRepositoryCompactionRollsBackMidSwapFailure(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(stageDir, signal+".parquet")); err != nil {
 			t.Fatalf("restaged %s output: %v", signal, err)
 		}
+	}
+}
+
+func TestRepositoryRefusesToOverwritePendingCompactionMarker(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	markerPath := filepath.Join(dir, "COMPACTION.json")
+	original := []byte(`{"id":"compact-pending"}`)
+	if err := writeDurableFile(markerPath, original); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := repository.CompactParquet(context.Background(), db, 64, nil); err == nil || !strings.Contains(err.Error(), "must recover") {
+		t.Fatalf("CompactParquet error = %v, want pending-marker refusal", err)
+	}
+	got, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("pending marker was overwritten: %q", got)
 	}
 }
 

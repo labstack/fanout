@@ -70,6 +70,12 @@ const (
 	defaultDuckDBPoolSize    = 1
 )
 
+// rollupPublicationSafetyLag covers the maximum public SQL hold, publication
+// grace, bounded commit retries, and queued segment encoding with headroom for
+// a busy disk. Rows stamped at request receipt remain inside the recomputed
+// tail until their Parquet commit becomes visible.
+const rollupPublicationSafetyLag = 5 * time.Minute
+
 // WriteGate returns the gate that serializes writes to DuckDB's rebuildable
 // rollup cache.
 func (d *Duck) WriteGate() *writegate.WriteGate { return &d.writeGate }
@@ -199,7 +205,7 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
 
-	d := &Duck{DB: db, cfg: cfg, repository: repository, rollupLagNanos: int64(30 * time.Second)}
+	d := &Duck{DB: db, cfg: cfg, repository: repository, rollupLagNanos: int64(rollupPublicationSafetyLag)}
 	repository.SetParquetPublishLock(&d.parquetMu)
 	if cfg.DuckDBMemory == "" {
 		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's

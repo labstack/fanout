@@ -17,7 +17,7 @@ state—users, sessions, dashboards, alert rules, and agent history—lives in S
 | WAL | Acknowledges an OTLP request only after its complete bounded batch is durable |
 | Parquet | Authoritative retained spans, logs, and metrics |
 | DuckDB | SQL, log filtering, aggregation, and broad analytical reads |
-| Hot span index | Fast trace lookup and service/endpoint rollups for recent spans |
+| Hot span index | Fast trace lookup for recent spans |
 | Manifest journal | Constant-time commit ledger and crash-safe Parquet file lifecycle |
 | SQLite | Transactional application and identity state |
 
@@ -43,9 +43,10 @@ Logs and metrics are written once, to Parquet. DuckDB applies filters, ordering,
 copies would add write latency and compaction work without serving a production
 query.
 
-Spans additionally use a compact purpose-built index because trace lookup and
-service rollups benefit from it. Parquet remains authoritative when the recent
-span index is pruned or rebuilt.
+Spans additionally use a compact purpose-built on-disk index because trace
+lookup benefits from it. Parquet remains authoritative when the recent span
+index is pruned or rebuilt. Dashboard rollups are rebuildable DuckDB caches,
+not a second resident copy in the hot index.
 
 ## Small files are bounded by compaction
 

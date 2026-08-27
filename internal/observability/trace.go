@@ -63,16 +63,22 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	dataSource := "fanout_segments"
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
 	hotCutoff := int64(0)
+	hotHasRoot := false
 	if traceID != "" {
-		storedSpans, spanCutoff, readErr := s.repository.HotTrace(traceID, scope.Start.UnixNano())
+		storedSpans, spanCutoff, readErr := s.repository.HotTrace(traceID)
 		if readErr != nil {
 			return Result[TraceDetail]{}, fmt.Errorf("read trace segments: %w", readErr)
 		}
 		hotCutoff = spanCutoff
 		startNanos, endNanos := scope.Start.UnixNano(), scope.End.UnixNano()
 		for _, row := range storedSpans {
+			matchesNamespace := scope.Namespace == "" || row.Namespace == scope.Namespace
+			if row.ParentSpanID == "" && row.StartUnixNanos >= hotCutoff &&
+				row.StartUnixNanos < endNanos && matchesNamespace {
+				hotHasRoot = true
+			}
 			if row.StartUnixNanos < startNanos || row.StartUnixNanos >= endNanos ||
-				(scope.Namespace != "" && row.Namespace != scope.Namespace) {
+				!matchesNamespace {
 				continue
 			}
 			data.Spans = append(data.Spans, TraceSpan{SpanID: row.SpanID, ParentSpanID: row.ParentSpanID, Service: row.ServiceName, Operation: row.Name, Kind: row.Kind, Start: time.Unix(0, row.StartUnixNanos).UTC(), DurationMS: row.DurationMS, Status: row.StatusCode, StatusMessage: row.StatusMsg})
@@ -112,20 +118,21 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		sort.Strings(data.Services)
 
 	}
-	// Any scope crossing the durable hot prune watermark may contain early trace
-	// spans that have aged out while a late suffix remains hot. Parquet is the
-	// authoritative complete trace in that case; a zero-span hot miss uses the
-	// same path.
-	if traceID != "" && (len(data.Spans) == 0 || scope.Start.UnixNano() < hotCutoff) {
+	// A root retained at or above the durable cutoff proves the hot index contains
+	// the beginning of this trace, including immediately after a tier rebuild. A
+	// crossing scope without that root may contain only a suffix and must use the
+	// authoritative Parquet copy.
+	hotComplete := scope.Start.UnixNano() >= hotCutoff || hotHasRoot
+	if traceID != "" && (len(data.Spans) == 0 || !hotComplete) {
 		data, err = s.traceFromParquet(ctx, scope, traceID, limit)
 		if err != nil {
 			return Result[TraceDetail]{}, err
 		}
 		dataSource = "parquet"
 	} else if traceID != "" {
-		// Parquet is committed atomically with the hot span index. DuckDB can
-		// apply trace_id and LIMIT inside its vectorized scan, avoiding a full
-		// Go decode while preserving clock-skewed trace events.
+		// Parquet is authoritative and published before the disposable hot index.
+		// DuckDB can apply trace_id and LIMIT to the associated logs without a
+		// full Go decode while preserving clock-skewed trace events.
 		data.Logs, err = s.traceLogsFromParquet(ctx, scope, traceID, limit)
 		if err != nil {
 			return Result[TraceDetail]{}, err

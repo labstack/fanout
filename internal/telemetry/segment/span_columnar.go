@@ -58,7 +58,7 @@ var allColumns = func() []int {
 	return out
 }()
 
-func encodeColumnarBlock(enc *zstd.Encoder, rows []Span) []byte {
+func encodeColumnarBlock(enc *zstd.Encoder, rows []Span) ([]byte, error) {
 	columns := make([][]byte, columnCount)
 	for _, row := range rows {
 		columns[colNamespace] = appendString(columns[colNamespace], row.Namespace)
@@ -99,14 +99,64 @@ func encodeColumnarBlock(enc *zstd.Encoder, rows []Span) []byte {
 	binary.LittleEndian.PutUint32(out[0:4], columnCount)
 	offset := columnarHeaderSize
 	for id, plain := range columns {
+		if len(plain) > segmentDecoderMaxMemory {
+			return nil, fmt.Errorf("column %d exceeds decoder memory limit", id)
+		}
 		compressed := enc.EncodeAll(plain, nil)
+		if len(compressed) > math.MaxUint32 || offset > math.MaxUint32-len(compressed) {
+			return nil, fmt.Errorf("column %d exceeds segment extent limit", id)
+		}
 		entry := out[4+id*8:]
 		binary.LittleEndian.PutUint32(entry[0:4], uint32(offset))
 		binary.LittleEndian.PutUint32(entry[4:8], uint32(len(compressed)))
 		out = append(out, compressed...)
 		offset += len(compressed)
 	}
-	return out
+	if len(out) > segmentMaxCompressedBytes {
+		return nil, fmt.Errorf("encoded block uses %d bytes; maximum is %d", len(out), segmentMaxCompressedBytes)
+	}
+	return out, nil
+}
+
+// spanColumnPlainSizes mirrors encodeColumnarBlock without allocating. The WAL
+// validator uses it to guarantee that every acknowledged block fits the same
+// per-column and aggregate budgets enforced by the decoder.
+func spanColumnPlainSizes(rows []Span) [columnCount]uint64 {
+	var sizes [columnCount]uint64
+	framed := func(valueLen int) uint64 {
+		var scratch [binary.MaxVarintLen64]byte
+		return uint64(binary.PutUvarint(scratch[:], uint64(valueLen)) + valueLen)
+	}
+	for _, row := range rows {
+		for id, value := range []string{
+			row.Namespace, row.TraceID, row.SpanID, row.ParentSpanID,
+			row.ServiceName, row.Name, row.Kind,
+		} {
+			sizes[id] += framed(len(value))
+		}
+		sizes[colStartUnixNanos] += 8
+		sizes[colEndUnixNanos] += 8
+		sizes[colDurationMS] += 8
+		for offset, value := range []string{row.StatusCode, row.StatusMsg} {
+			sizes[colStatusCode+offset] += framed(len(value))
+		}
+		for offset, value := range [][]byte{row.ResourceJSON, row.AttributesJSON, row.EventsJSON, row.LinksJSON} {
+			sizes[colResourceJSON+offset] += framed(len(value))
+		}
+		sizes[colTraceState] += framed(len(row.TraceState))
+		sizes[colFlags] += 4
+		sizes[colScopeName] += framed(len(row.ScopeName))
+		sizes[colScopeVersion] += framed(len(row.ScopeVersion))
+		sizes[colIngestedAt] += 8
+		for offset, value := range []string{
+			row.HTTPMethod, row.HTTPStatusCode, row.HTTPRoute, row.DBSystem,
+			row.RPCMethod, row.RPCService, row.PeerService, row.ServiceVersion,
+			row.DeploymentEnv, row.ExceptionType, row.ExceptionMessage,
+		} {
+			sizes[colHTTPMethod+offset] += framed(len(value))
+		}
+	}
+	return sizes
 }
 
 func decodeColumns(dec *zstd.Decoder, block []byte, wanted []int) (map[int][]byte, error) {

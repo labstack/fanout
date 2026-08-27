@@ -2,15 +2,15 @@
 package segment
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/binary"
-	"github.com/klauspost/compress/zstd"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
+	"github.com/zeebo/xxh3"
 )
 
 func TestStoreCommitReopenAndQueries(t *testing.T) {
@@ -57,10 +57,6 @@ func TestStoreCommitReopenAndQueries(t *testing.T) {
 	}
 	if len(trace) != 2 || !EqualSpan(trace[0], rows[0]) || !EqualSpan(trace[1], rows[1]) {
 		t.Fatalf("trace result = %#v", trace)
-	}
-	endpoints := store.Endpoints("default", "api", base, base+int64(5*time.Minute), 10)
-	if len(endpoints) != 1 || endpoints[0].Calls != 2 || endpoints[0].Errors != 1 {
-		t.Fatalf("endpoint result = %#v", endpoints)
 	}
 	agg, err := store.ScanService("default", "api", base, base+int64(5*time.Minute))
 	if err != nil {
@@ -159,6 +155,44 @@ func TestStoreCompactionPreservesRowsAndIndexes(t *testing.T) {
 	}
 }
 
+func TestTraceIndexIsReadLazilyFromDisk(t *testing.T) {
+	dir := t.TempDir()
+	store, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if err := store.AppendID("lazy-index", []Span{{TraceID: "trace-a", SpanID: "span-a", StartUnixNanos: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.RLock()
+	seg := store.segments[0]
+	store.mu.RUnlock()
+	if seg.indexCount != 1 {
+		t.Fatalf("index count = %d, want 1", seg.indexCount)
+	}
+	f, err := os.OpenFile(seg.path, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replacement [8]byte
+	binary.LittleEndian.PutUint64(replacement[:], xxh3.HashString("trace-b"))
+	if _, err := f.WriteAt(replacement[:], int64(seg.indexOffset)); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.Trace("trace-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("Trace returned %d rows from a stale resident index", len(rows))
+	}
+}
+
 func TestStoreRejectsCorruptCommittedSegment(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "broken.fseg"), []byte("bad"), 0o644); err != nil {
@@ -201,20 +235,20 @@ func TestOpenRejectsSegmentWithCorruptSectionOffsets(t *testing.T) {
 			t.Fatal("Open succeeded with corrupt section offsets")
 		}
 	}
-	t.Run("rollup offset before index offset", func(t *testing.T) {
+	t.Run("index end before index offset", func(t *testing.T) {
 		corrupt(t, func(header []byte) {
 			indexOffset := binary.LittleEndian.Uint64(header[48:56])
 			binary.LittleEndian.PutUint64(header[56:64], indexOffset-1)
 		})
 	})
-	t.Run("rollup offset beyond file size", func(t *testing.T) {
+	t.Run("index end beyond file size", func(t *testing.T) {
 		corrupt(t, func(header []byte) {
 			binary.LittleEndian.PutUint64(header[56:64], 1<<40)
 		})
 	})
 }
 
-func TestEndpointsCountCanonicalOTelErrorStatus(t *testing.T) {
+func TestScanServiceCountsCanonicalOTelErrorStatus(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC).UnixNano()
 	rows := []Span{
@@ -229,13 +263,6 @@ func TestEndpointsCountCanonicalOTelErrorStatus(t *testing.T) {
 	if err := store.AppendID("seg-status", rows); err != nil {
 		t.Fatal(err)
 	}
-	endpoints := store.Endpoints("default", "api", base, base+int64(time.Minute), 10)
-	if len(endpoints) != 1 {
-		t.Fatalf("endpoints = %#v, want one route", endpoints)
-	}
-	if endpoints[0].Errors != 1 {
-		t.Fatalf("Errors = %d, want 1: OTLP ingest stores Status.Code.String() as STATUS_CODE_ERROR", endpoints[0].Errors)
-	}
 	agg, err := store.ScanService("default", "api", base, base+int64(time.Minute))
 	if err != nil {
 		t.Fatal(err)
@@ -248,24 +275,25 @@ func TestEndpointsCountCanonicalOTelErrorStatus(t *testing.T) {
 func TestValidateSegmentSectionsRejectsOutOfBoundsDirectory(t *testing.T) {
 	const size = 4096
 	tests := []struct {
-		name                                 string
-		dirOffset, indexOffset, rollupOffset uint64
-		blockCount                           uint32
+		name                             string
+		dirOffset, indexOffset, indexEnd uint64
+		blockCount, indexCount           uint32
 	}{
-		{"wrapping directory end", ^uint64(0) - uint64(0xFFFFFFFF)*blockDirSize + 1, 512, 1024, 0xFFFFFFFF},
-		{"block count past index", headerSize, 512, 1024, 0xFFFFFFFF},
-		{"directory before header", 0, 512, 1024, 1},
-		{"sections out of order", headerSize, 2048, 1024, 1},
-		{"rollups past end of file", headerSize, 512, size + 1, 1},
+		{"wrapping directory end", ^uint64(0) - uint64(0xFFFFFFFF)*blockDirSize + 1, 512, 512, 0xFFFFFFFF, 0},
+		{"block count past index", headerSize, 512, 512, 0xFFFFFFFF, 0},
+		{"directory before header", 0, 512, 512, 1, 0},
+		{"sections out of order", headerSize, 2048, 1024, 1, 0},
+		{"index past end of file", headerSize, 512, size + 1, 1, 0},
+		{"index count exceeds extent", headerSize, 512, 512, 1, 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if err := validateSegmentSections(size, test.dirOffset, test.indexOffset, test.rollupOffset, test.blockCount); err == nil {
+			if err := validateSegmentSections(size, test.dirOffset, test.indexOffset, test.indexEnd, test.blockCount, test.indexCount); err == nil {
 				t.Fatal("validateSegmentSections accepted a corrupt header")
 			}
 		})
 	}
-	if err := validateSegmentSections(size, headerSize, 512, 1024, 8); err != nil {
+	if err := validateSegmentSections(size, headerSize, size, size, 8, 0); err != nil {
 		t.Fatalf("validateSegmentSections rejected a sound header: %v", err)
 	}
 }
@@ -332,7 +360,7 @@ func TestOpenRejectsSegmentWithCorruptBlockEntry(t *testing.T) {
 	}
 }
 
-func TestStoreAcceptsSpanWithOversizedRollupKey(t *testing.T) {
+func TestStoreAcceptsSpanWithLargeRoute(t *testing.T) {
 	dir := t.TempDir()
 	base := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC).UnixNano()
 	// A pathological route must not be a deterministic publish failure: the WAL
@@ -344,7 +372,7 @@ func TestStoreAcceptsSpanWithOversizedRollupKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.AppendID("seg-big-key", rows); err != nil {
-		t.Fatalf("AppendID error = %v, want an oversized rollup key to be publishable", err)
+		t.Fatalf("AppendID error = %v, want a large but bounded route to be publishable", err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
@@ -354,9 +382,12 @@ func TestStoreAcceptsSpanWithOversizedRollupKey(t *testing.T) {
 		t.Fatalf("Open error = %v, want the segment to round-trip", err)
 	}
 	defer reopened.Close()
-	endpoints := reopened.Endpoints("default", "api", base, base+int64(time.Minute), 10)
-	if len(endpoints) != 1 || endpoints[0].Route != route {
-		t.Fatalf("endpoints = %d entries, want the full route preserved", len(endpoints))
+	trace, err := reopened.Trace("t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(trace) != 1 || trace[0].HTTPRoute != route {
+		t.Fatalf("trace = %#v, want the full route preserved", trace)
 	}
 }
 
@@ -385,21 +416,13 @@ func TestSegmentDecoderRejectsOversizedFrame(t *testing.T) {
 	}
 }
 
-func TestReadRollupRejectsLengthBeforeAllocating(t *testing.T) {
-	payload := make([]byte, 160, 170)
-	payload = binary.AppendUvarint(payload, 9)
-	if _, err := readRollupWithLimit(bufio.NewReader(bytes.NewReader(payload)), 8); err == nil {
-		t.Fatal("readRollup accepted a disk-controlled allocation above its budget")
+func TestValidateSpanRowsRejectsUnreopenableBlock(t *testing.T) {
+	rows := []Span{{AttributesJSON: []byte(strings.Repeat("x", 1024))}}
+	if err := validateSpanRowsWithLimit(rows, 512); err == nil || !strings.Contains(err.Error(), "column") {
+		t.Fatal("validator accepted a column larger than the decoder budget")
 	}
-}
-
-func TestValidateSpanRowsRejectsUnreopenableRollups(t *testing.T) {
-	rows := []Span{{HTTPRoute: "123456789"}}
-	if err := validateSpanRowsWithLimits(rows, 8, 1024); err == nil {
-		t.Fatal("validator accepted a rollup key larger than the reader budget")
-	}
-	rows = []Span{{HTTPRoute: "a"}, {HTTPRoute: "b"}}
-	if err := validateSpanRowsWithLimits(rows, 1024, 200); err == nil {
-		t.Fatal("validator accepted a rollup section larger than the decoder budget")
+	rows = []Span{{TraceID: "a", SpanID: "b", HTTPRoute: "c"}}
+	if err := validateSpanRowsWithLimit(rows, uint64(columnarHeaderSize+3)); err == nil {
+		t.Fatal("validator accepted a block larger than the decoder budget")
 	}
 }

@@ -104,7 +104,7 @@ func main() {
 		if r.rollupBuild > 0 {
 			rollup = formatDuration(r.rollupBuild)
 		}
-		fmt.Printf("%-20s %14.0f %13s %12s %12.1f %12s %12s %12s\n", r.name, r.writeRate, rollup, formatDuration(r.maintenance), float64(r.diskBytes)/(1<<20), formatDuration(r.endpoint), formatDuration(r.trace), formatDuration(r.rawService))
+		fmt.Printf("%-20s %14.0f %13s %12s %12.1f %12s %12s %12s\n", r.name, r.writeRate, rollup, formatDuration(r.maintenance), float64(r.diskBytes)/(1<<20), formatOptionalDuration(r.endpoint), formatDuration(r.trace), formatDuration(r.rawService))
 	}
 	fmt.Println("\nMixed load: committed writes plus full trace reads at 100 qps")
 	fmt.Printf("%-20s %14s %14s\n", "storage / execution", "write rows/s", "trace p95")
@@ -136,11 +136,6 @@ func runRepository(dir string, total, batch, repeats, mixedRows int, base, start
 		}
 	}
 	writeElapsed := time.Since(writeStart)
-	var endpointSink []segment.Endpoint
-	endpoint := median(repeats, func() error {
-		endpointSink = repository.Spans.Endpoints("default", "service-00", start, end, 20)
-		return nil
-	})
 	var traceSink []segment.Span
 	trace := median(repeats, func() (err error) { traceSink, err = repository.Spans.Trace(targetTrace); return err })
 	var aggregateSink segment.Aggregate
@@ -148,7 +143,7 @@ func runRepository(dir string, total, batch, repeats, mixedRows int, base, start
 		aggregateSink, err = repository.Spans.ScanService("default", "service-00", start, end)
 		return err
 	})
-	if len(endpointSink) == 0 || aggregateSink.Calls == 0 {
+	if aggregateSink.Calls == 0 {
 		return result{}, errors.New("production repository queries returned no rows")
 	}
 	disk, err := directoryBytes(dir)
@@ -170,7 +165,7 @@ func runRepository(dir string, total, batch, repeats, mixedRows int, base, start
 	if err != nil {
 		return result{}, err
 	}
-	return result{name: "Fanout + Parquet", writeRate: float64(total) / writeElapsed.Seconds(), diskBytes: disk, endpoint: endpoint, trace: trace, rawService: raw, queryRowCount: uint64(len(traceSink)), mixedWrite: mixedWrite, mixedReadP95: mixedP95}, nil
+	return result{name: "Fanout + Parquet", writeRate: float64(total) / writeElapsed.Seconds(), diskBytes: disk, trace: trace, rawService: raw, queryRowCount: uint64(len(traceSink)), mixedWrite: mixedWrite, mixedReadP95: mixedP95}, nil
 }
 
 func directoryBytes(root string) (int64, error) {
@@ -224,20 +219,18 @@ func runCustom(dir string, total, batch, repeats, mixedRows int, base, start, en
 	recovery := time.Since(reopenStart)
 	defer store.Close()
 
-	var endpointSink []segment.Endpoint
-	endpoint := median(repeats, func() error { endpointSink = store.Endpoints("default", "service-00", start, end, 20); return nil })
 	var traceSink []segment.Span
 	trace := median(repeats, func() (err error) { traceSink, err = store.Trace(targetTrace); return err })
 	var aggSink segment.Aggregate
 	raw := median(repeats, func() (err error) { aggSink, err = store.ScanService("default", "service-00", start, end); return err })
-	if len(endpointSink) == 0 || aggSink.Calls == 0 {
+	if aggSink.Calls == 0 {
 		return result{}, fmt.Errorf("queries returned no rows")
 	}
 	mixedWrite, mixedP95, err := mixedCustom(store, total, mixedRows, batch, base, targetTrace)
 	if err != nil {
 		return result{}, err
 	}
-	return result{name: "fanseg + direct", writeRate: float64(total) / writeElapsed.Seconds(), maintenance: maintenance, diskBytes: disk, endpoint: endpoint, trace: trace, rawService: raw, recovery: recovery, queryRowCount: uint64(len(traceSink)), mixedWrite: mixedWrite, mixedReadP95: mixedP95}, nil
+	return result{name: "fanseg + direct", writeRate: float64(total) / writeElapsed.Seconds(), maintenance: maintenance, diskBytes: disk, trace: trace, rawService: raw, recovery: recovery, queryRowCount: uint64(len(traceSink)), mixedWrite: mixedWrite, mixedReadP95: mixedP95}, nil
 }
 
 func runDuck(dbPath, parquetDir string, total, batch, repeats, mixedRows int, base, start, end int64, targetTrace string) (result, result, error) {
@@ -520,6 +513,13 @@ func formatDuration(value time.Duration) string {
 		return fmt.Sprintf("%.2fms", float64(value)/float64(time.Millisecond))
 	}
 	return fmt.Sprintf("%.2fµs", float64(value)/float64(time.Microsecond))
+}
+
+func formatOptionalDuration(value time.Duration) string {
+	if value == 0 {
+		return "n/a"
+	}
+	return formatDuration(value)
 }
 
 func fatal(err error) { fmt.Fprintln(os.Stderr, "storage-bench:", err); os.Exit(1) }

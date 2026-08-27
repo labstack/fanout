@@ -192,8 +192,8 @@ func (c Config) Validate() error {
 	if c.RetentionDays < 0 {
 		return fmt.Errorf("storage.retention_days must be >= 0, got %d", c.RetentionDays)
 	}
-	if c.HotRetention < 24*time.Hour {
-		return fmt.Errorf("storage.hot_retention must be at least 24h, got %s", c.HotRetention)
+	if c.HotRetention <= 0 {
+		return fmt.Errorf("storage.hot_retention must be positive, got %s", c.HotRetention)
 	}
 	if c.MaintenanceInterval < time.Second {
 		return fmt.Errorf("storage.maintenance_interval must be at least 1s, got %s", c.MaintenanceInterval)

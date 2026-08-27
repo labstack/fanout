@@ -264,8 +264,10 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "declined", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(2*time.Millisecond), "ERROR", "checkout", `auth declined: {"password":"[REDACTED]"}`, "trace-3", "root3").
-			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "card declined: token=[REDACTED]", "trace-2", "root2").
+			// Return raw values to prove the Go boundary still redacts even if the
+			// SQL expression and driver ever diverge.
+			AddRow(start.Add(2*time.Millisecond), "ERROR", "checkout", `auth declined: {"password":"hunter2"}`, "trace-3", "root3").
+			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "card declined: token=abc123", "trace-2", "root2").
 			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root"))
 	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "declined").
@@ -485,6 +487,69 @@ func TestTraceUsesParquetWhenTraceStraddlesHotBoundary(t *testing.T) {
 	}
 	if len(result.Data.Spans) != 2 || !result.Data.HasError || len(result.Data.Services) != 2 || result.Provenance.DataSource != "parquet" {
 		t.Fatalf("straddling trace = %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTraceUsesRebuiltHotTierWhenRootIsAboveCutoff(t *testing.T) {
+	svc, mock := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	cutoff := start.Add(30 * time.Minute)
+	end := start.Add(time.Hour)
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-after-rebuild", Spans: []telemetry.Span{{
+		Namespace: "prod", TraceID: "new-trace", SpanID: "root", ServiceName: "frontend",
+		StartUnixNanos: cutoff.Add(time.Minute).UnixNano(), DurationMS: 10, StatusCode: "OK",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.repository.PruneHot(cutoff.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("new-trace", start, end, "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "new-trace", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "root" || result.Provenance.DataSource != "fanout_segments" {
+		t.Fatalf("rebuilt hot trace = %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTraceDoesNotUseRootFromAnotherNamespaceAsHotCoverage(t *testing.T) {
+	svc, mock := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	cutoff := start.Add(30 * time.Minute)
+	end := start.Add(time.Hour)
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-cross-namespace", Spans: []telemetry.Span{
+		{Namespace: "prod", TraceID: "shared-trace", SpanID: "child", ParentSpanID: "old-root", StartUnixNanos: cutoff.Add(time.Minute).UnixNano()},
+		{Namespace: "staging", TraceID: "shared-trace", SpanID: "root", StartUnixNanos: cutoff.Add(2 * time.Minute).UnixNano()},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.repository.PruneHot(cutoff.UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(traceSpansQuery)).
+		WithArgs("shared-trace", start, end, "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"span_id", "parent_span_id", "service", "operation", "kind", "start_time", "duration_ms", "status", "status_message"}).
+			AddRow("old-root", "", "frontend", "request", "SERVER", start.Add(10*time.Minute), 10.0, "OK", "").
+			AddRow("child", "old-root", "backend", "work", "CLIENT", cutoff.Add(time.Minute), 5.0, "OK", ""))
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("shared-trace", start, end, "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "shared-trace", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Spans) != 2 || result.Provenance.DataSource != "parquet" {
+		t.Fatalf("cross-namespace trace = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
