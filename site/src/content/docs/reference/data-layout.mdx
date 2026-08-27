@@ -13,20 +13,21 @@ Everything Fanout persists lives under `FANOUT_DATA_DIR` (`./data` by default,
 
 | Path | Holds |
 |---|---|
-| `telemetry/wal/` | Durable requests waiting for publication or cleanup |
-| `telemetry/parquet/{spans,logs,metrics}/` | Authoritative retained telemetry |
-| `telemetry/hot/spans/` | Rebuildable recent-span index |
-| `telemetry/MANIFEST.json` | Checkpoint of published WAL batches |
-| `telemetry/MANIFEST.log` | Append-only commit journal since the checkpoint |
+| `telemetry/parquet/batches/*.batch/` | Atomic batches containing Parquet signals, metadata, and a trace index |
+| `telemetry/parquet/batches/_schema.batch/` | Empty schema anchors that keep every DuckDB view queryable |
+| `telemetry/parquet/staging/` | Unacknowledged writes being prepared for atomic publication |
+| `telemetry/compaction/` | Prepared replacement batches during compaction |
+| `telemetry/COMPACTION.json` | Transient durable marker for an interrupted compaction swap |
 | `query/catalog.duckdb` | Rebuildable DuckDB rollups and query state |
 | `query/tmp/` | Spill space for queries that exceed the memory cap |
 | `control/fanout.sqlite` | Users, sessions, dashboards, alert rules, agent history |
 
 ## Why it is one unit
 
-The WAL, Parquet files, and manifest form one crash-recovery unit. The hot span
-index and DuckDB rollups can be rebuilt, but keeping the complete directory is
-the supported and fastest restore path.
+Each published Parquet batch directory is a self-contained crash-recovery unit.
+Its trace sidecar is an index over the batch's span file, while DuckDB rollups
+can be rebuilt. Keeping the complete data directory is the supported and fastest
+restore path.
 
 `control/fanout.sqlite` is independent of both in format but not in meaning: it
 holds the dashboards and alert rules that refer to the telemetry, and the
@@ -54,7 +55,7 @@ disk fails the query rather than degrading it.
 
 Retention is the main lever — `FANOUT_RETENTION_DAYS`, with expiry applied on
 the maintenance cycle rather than the moment you change it. File count matters
-as much as byte count for query latency, which is what the merge pass exists to
+as much as byte count for query latency, which is what the compaction pass exists to
 bound. [Tune retention](/guides/tune-retention) covers both.
 
 :::caution[Do not edit these files]

@@ -53,5 +53,6 @@ cover.out
 .playwright-mcp/
 
 # Ad-hoc output from `go build` without -o (named after the package).
+/bench
 /fanout
 /fanout-docgen

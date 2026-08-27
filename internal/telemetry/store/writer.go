@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,14 +14,14 @@ import (
 )
 
 const (
-	commitQueueDepth     = 4
-	commitRetryLimit     = 8
-	writerShutdownGrace  = 5 * time.Second
+	commitQueueDepth     = 256
+	commitRetryLimit     = 3
+	maxCommitWorkers     = 4
 	submissionQueueDepth = 256
+	writerShutdownGrace  = 30 * time.Second
 )
 
 type batchCommitter interface {
-	Stage(Batch) error
 	Commit(Batch) error
 }
 
@@ -37,17 +39,21 @@ type submission struct {
 	ack   chan error
 }
 
+type commitJob struct {
+	batches []Batch
+	acks    []chan error
+}
+
 func NewWriter(repository *Repository, batchSize int) *Writer {
 	return &Writer{repository: repository, batchSize: batchSize, done: make(chan struct{}), submissions: make(chan submission, submissionQueueDepth)}
 }
 
 func (w *Writer) Wait() { <-w.done }
 
-// Submit accepts one decoded OTLP request. It returns only after the complete
-// request is fsynced to the WAL, so a successful OTLP response is durable even
-// though publication to the query projections continues asynchronously.
+// Submit returns after every row in the request belongs to a durably published
+// atomic Parquet batch directory.
 func (w *Writer) Submit(ctx context.Context, batch Batch) error {
-	if len(batch.Spans)+len(batch.Logs)+len(batch.Metrics) == 0 {
+	if batchRows(batch) == 0 {
 		return nil
 	}
 	request := submission{batch: batch, ack: make(chan error, 1)}
@@ -70,88 +76,100 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 
 func (w *Writer) Run(ctx context.Context) error {
 	defer close(w.done)
-	commits := make(chan Batch, commitQueueDepth)
-	workerDone := make(chan error, 1)
-	workerCtx, cancelWorker := context.WithCancel(context.Background())
-	defer cancelWorker()
-	go w.commitWorker(workerCtx, commits, workerDone)
-	finish := func() error {
-		close(commits)
-		return <-workerDone
+	jobs := make(chan commitJob, commitQueueDepth)
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	defer cancelWorkers()
+	fatal := make(chan error, 1)
+	var workers sync.WaitGroup
+	for range min(maxCommitWorkers, max(1, runtime.GOMAXPROCS(0))) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			w.commitWorker(workerCtx, jobs, fatal)
+		}()
 	}
-	finishBounded := func() error {
+
+	finish := func(graceful bool) error {
+		close(jobs)
+		if !graceful {
+			cancelWorkers()
+		}
+		finished := make(chan struct{})
+		go func() { workers.Wait(); close(finished) }()
 		grace := w.shutdownGrace
 		if grace <= 0 {
 			grace = writerShutdownGrace
 		}
-		timer := time.AfterFunc(grace, cancelWorker)
+		timer := time.NewTimer(grace)
 		defer timer.Stop()
-		return finish()
+		select {
+		case <-finished:
+		case <-timer.C:
+			cancelWorkers()
+			<-finished
+		}
+		select {
+		case err := <-fatal:
+			return err
+		default:
+			return nil
+		}
 	}
+
 	for {
 		select {
 		case request := <-w.submissions:
-			if err := w.stageSubmission(request, commits, workerDone); err != nil {
-				return err
+			if err := w.enqueueSubmissions(request, jobs, fatal); err != nil {
+				return errors.Join(err, finish(false))
 			}
 		case <-ctx.Done():
-			return finishBounded()
-		case err := <-workerDone:
-			return err
+			return finish(true)
+		case err := <-fatal:
+			cancelWorkers()
+			return errors.Join(err, finish(false))
 		}
 	}
 }
 
-func (w *Writer) stageSubmission(request submission, out chan<- Batch, workerDone <-chan error) error {
+func (w *Writer) enqueueSubmissions(request submission, out chan<- commitJob, fatal <-chan error) error {
 	requests := []submission{request}
-	draining := true
-	for draining && len(requests) < submissionQueueDepth {
+	for len(requests) < submissionQueueDepth {
 		select {
 		case next := <-w.submissions:
 			requests = append(requests, next)
 		default:
-			draining = false
+			goto drained
 		}
 	}
+
+drained:
 	limit := w.batchLimit()
 	for len(requests) > 0 {
-		if batchRows(requests[0].batch) > limit {
+		firstRows := batchRows(requests[0].batch)
+		if firstRows > limit {
 			oversized := requests[0]
 			requests = requests[1:]
 			chunks := splitBatch(oversized.batch, limit)
-			staged := make([]Batch, 0, len(chunks))
-			var stageErr error
-			for _, chunk := range chunks {
-				chunk.ID = uuid.NewString()
-				if stageErr = w.repository.Stage(chunk); stageErr != nil {
-					metrics.FlushErrors.WithLabelValues("stage").Inc()
-					break
-				}
-				staged = append(staged, chunk)
+			for i := range chunks {
+				chunks[i].ID = uuid.NewString()
 			}
-			if stageErr != nil {
-				// Already-staged chunks remain replayable. Do not enqueue only a
-				// prefix for live publication; recovery will publish that durable
-				// prefix after the storage fault is repaired.
-				oversized.ack <- stageErr
-				if len(staged) > 0 {
-					return fmt.Errorf("stage oversized telemetry request after %d durable chunks: %w", len(staged), stageErr)
-				}
-				continue
-			}
-			metrics.RecordIngest("spans", len(oversized.batch.Spans))
-			metrics.RecordIngest("logs", len(oversized.batch.Logs))
-			metrics.RecordIngest("metrics", len(oversized.batch.Metrics))
-			oversized.ack <- nil
-			for _, chunk := range staged {
-				select {
-				case out <- chunk:
-				case err := <-workerDone:
-					return err
-				}
+			if err := enqueueJob(out, fatal, commitJob{batches: chunks, acks: []chan error{oversized.ack}}); err != nil {
+				return err
 			}
 			continue
 		}
+		// A full batch, a lone request, or a request that cannot share the
+		// next batch needs no row copy through the group-commit buffer.
+		if firstRows == limit || len(requests) == 1 || firstRows+batchRows(requests[1].batch) > limit {
+			direct := requests[0]
+			requests = requests[1:]
+			direct.batch.ID = uuid.NewString()
+			if err := enqueueJob(out, fatal, commitJob{batches: []Batch{direct.batch}, acks: []chan error{direct.ack}}); err != nil {
+				return err
+			}
+			continue
+		}
+
 		batch := Batch{ID: uuid.NewString()}
 		group := make([]submission, 0, len(requests))
 		rows := 0
@@ -171,23 +189,89 @@ func (w *Writer) stageSubmission(request submission, out chan<- Batch, workerDon
 				break
 			}
 		}
-		if err := w.repository.Stage(batch); err != nil {
-			metrics.FlushErrors.WithLabelValues("stage").Inc()
-			for _, item := range group {
-				item.ack <- err
-			}
-			continue
+		acks := make([]chan error, len(group))
+		for i := range group {
+			acks[i] = group[i].ack
 		}
-		metrics.RecordIngest("spans", len(batch.Spans))
-		metrics.RecordIngest("logs", len(batch.Logs))
-		metrics.RecordIngest("metrics", len(batch.Metrics))
-		for _, item := range group {
-			item.ack <- nil
-		}
-		select {
-		case out <- batch:
-		case err := <-workerDone:
+		if err := enqueueJob(out, fatal, commitJob{batches: []Batch{batch}, acks: acks}); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func enqueueJob(out chan<- commitJob, fatal <-chan error, job commitJob) error {
+	select {
+	case out <- job:
+		return nil
+	case err := <-fatal:
+		return err
+	}
+}
+
+func (w *Writer) commitWorker(ctx context.Context, jobs <-chan commitJob, fatal chan<- error) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job, ok := <-jobs:
+			if !ok {
+				return
+			}
+			if err := w.commitJob(ctx, job); err != nil {
+				for _, ack := range job.acks {
+					ack <- err
+				}
+				select {
+				case fatal <- err:
+				default:
+				}
+				return
+			}
+			for _, batch := range job.batches {
+				metrics.RecordIngest("spans", len(batch.Spans))
+				metrics.RecordIngest("logs", len(batch.Logs))
+				metrics.RecordIngest("metrics", len(batch.Metrics))
+			}
+			for _, ack := range job.acks {
+				ack <- nil
+			}
+		}
+	}
+}
+
+func (w *Writer) commitJob(ctx context.Context, job commitJob) error {
+	for _, batch := range job.batches {
+		var lastErr error
+		for attempt := 0; attempt < commitRetryLimit; attempt++ {
+			if err := w.repository.Commit(batch); err == nil {
+				lastErr = nil
+				break
+			} else {
+				lastErr = err
+			}
+			metrics.FlushErrors.WithLabelValues("batch").Inc()
+			slog.Warn("telemetry batch commit failed; retrying", "batch_id", batch.ID, "attempt", attempt+1, "error", lastErr)
+			if attempt+1 == commitRetryLimit {
+				break
+			}
+			delay := defaultCommitRetryDelay(attempt)
+			if w.retryDelay != nil {
+				delay = w.retryDelay(attempt)
+			}
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
+		if lastErr != nil {
+			metrics.FlushErrors.WithLabelValues("failed").Inc()
+			return fmt.Errorf("commit telemetry batch %s after %d attempts: %w", batch.ID, commitRetryLimit, lastErr)
 		}
 	}
 	return nil
@@ -205,8 +289,6 @@ func (w *Writer) batchLimit() int {
 	return limit
 }
 
-// splitBatch partitions one request without copying telemetry payloads. Each
-// chunk is independently WAL-safe and no chunk exceeds the projection limit.
 func splitBatch(batch Batch, limit int) []Batch {
 	chunks := make([]Batch, 0, (batchRows(batch)+limit-1)/limit)
 	for batchRows(batch) > 0 {
@@ -228,71 +310,6 @@ func splitBatch(batch Batch, limit int) []Batch {
 	return chunks
 }
 
-func (w *Writer) commitWorker(ctx context.Context, in <-chan Batch, done chan<- error) {
-	for {
-		var batch Batch
-		select {
-		case <-ctx.Done():
-			done <- ctx.Err()
-			return
-		case next, ok := <-in:
-			if !ok {
-				done <- nil
-				return
-			}
-			batch = next
-		}
-		committed := false
-		var lastErr error
-		for attempt := 0; attempt < commitRetryLimit; attempt++ {
-			err := w.repository.Commit(batch)
-			if err == nil {
-				committed = true
-				break
-			}
-			lastErr = err
-			metrics.FlushErrors.WithLabelValues("batch").Inc()
-			// Log immediately and then at powers of two so a persistent storage
-			// outage stays visible without producing an unbounded log storm.
-			if attempt == 0 || attempt&(attempt-1) == 0 {
-				slog.Warn("telemetry batch commit failed; retrying", "batch_id", batch.ID, "attempt", attempt+1, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", err)
-			}
-			delay := defaultCommitRetryDelay(attempt)
-			if w.retryDelay != nil {
-				delay = w.retryDelay(attempt)
-			}
-			if attempt+1 == commitRetryLimit {
-				break
-			}
-			if delay > 0 {
-				timer := time.NewTimer(delay)
-				select {
-				case <-ctx.Done():
-					if !timer.Stop() {
-						select {
-						case <-timer.C:
-						default:
-						}
-					}
-					done <- ctx.Err()
-					return
-				case <-timer.C:
-				}
-			}
-		}
-		if !committed {
-			// The batch stays in the WAL. Its invisible Parquet staging files may
-			// already be durable, and replay can finish publication and register the
-			// batch without re-encoding them.
-			metrics.FlushErrors.WithLabelValues("deferred").Inc()
-			slog.Error("telemetry batch commit failed after bounded retries; stopping ingest with WAL retained for replay", "batch_id", batch.ID, "attempts", commitRetryLimit, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", lastErr)
-			done <- fmt.Errorf("commit telemetry batch %s after %d attempts: %w", batch.ID, commitRetryLimit, lastErr)
-			return
-		}
-	}
-}
-
 func defaultCommitRetryDelay(attempt int) time.Duration {
-	shift := min(attempt, 6)
-	return min(100*time.Millisecond*time.Duration(1<<shift), 5*time.Second)
+	return min(100*time.Millisecond*time.Duration(1<<min(attempt, 6)), 5*time.Second)
 }

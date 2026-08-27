@@ -144,7 +144,7 @@ FROM telemetry.spans`).Scan(&spanBuckets); err != nil {
 func TestSkipRollupToLatest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", RetentionDays: 30, HotRetention: 24 * time.Hour}
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", RetentionDays: 30}
 	repository, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
 		t.Fatalf("open telemetry repository: %v", err)

@@ -33,11 +33,8 @@ type Config struct {
 	RollupInterval           time.Duration `koanf:"storage.rollup_interval" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
 	MCPEnabled               bool          `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" default:"true"`
 	RetentionDays            int           `koanf:"storage.retention_days" env:"FANOUT_RETENTION_DAYS" default:"30"`
-	// HotRetention controls how long the custom indexed segments are retained.
-	// Older telemetry remains queryable in Parquet through DuckDB.
-	HotRetention time.Duration `koanf:"storage.hot_retention" env:"FANOUT_HOT_RETENTION" default:"24h"`
-	// MaintenanceInterval controls hot-segment pruning, Parquet retention and
-	// compaction, and query-cache checkpointing.
+	// MaintenanceInterval controls Parquet retention and compaction, and
+	// query-cache checkpointing.
 	MaintenanceInterval time.Duration `koanf:"storage.maintenance_interval" env:"FANOUT_MAINTENANCE_INTERVAL" default:"1h"`
 	// RollupSkipToLatest, set once at boot, advances every rollup watermark to the
 	// current max ingested timestamp so existing data is treated as already-rolled-up
@@ -54,9 +51,9 @@ type Config struct {
 	// values validated on the reference deployment target, a small shared VM
 	// (Hetzner CPX32: 4 vCPU, 8 GB RAM, 160 GB disk). There the self-sizing
 	// resolves to a ~6.4 GB memory cap and 4 query threads (deterministic from
-	// 8 GB / 4 vCPU). For a current throughput figure run `just stress hetzner`
-	// rather than trusting a number here — as of 2026-06 it handled ~55k rows/s
-	// with 0 drops and ~0.4 GB RSS, but that will drift with the ingest path.
+	// 8 GB / 4 vCPU). Measure the target host with cmd/bench before setting
+	// production limits; throughput and memory use vary with CPU, disk, and the
+	// telemetry mix.
 	//
 	// Kept free-floating, separated from the field below by a blank line, so it
 	// stays context for the group rather than becoming DuckDBMemory's own doc
@@ -191,9 +188,6 @@ func (c Config) Validate() error {
 	}
 	if c.RetentionDays < 0 {
 		return fmt.Errorf("storage.retention_days must be >= 0, got %d", c.RetentionDays)
-	}
-	if c.HotRetention <= 0 {
-		return fmt.Errorf("storage.hot_retention must be positive, got %s", c.HotRetention)
 	}
 	if c.MaintenanceInterval < time.Second {
 		return fmt.Errorf("storage.maintenance_interval must be at least 1s, got %s", c.MaintenanceInterval)

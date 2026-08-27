@@ -17,7 +17,7 @@ writers: Writers {
   maint: "Merge and maintenance" {shape: rectangle}
 }
 
-wal: "Durable WAL + commit worker\nrequest acknowledged after fsync" {
+commit: "Parallel atomic Parquet commits\nacknowledged after directory publication" {
   shape: rectangle
   style: {
     stroke-width: 2
@@ -25,7 +25,7 @@ wal: "Durable WAL + commit worker\nrequest acknowledged after fsync" {
   }
 }
 
-telemetry: "Manifest + Parquet + hot span index\nstorage.data_dir/telemetry" {
+telemetry: "Parquet batches + trace sidecars\nstorage.data_dir/telemetry" {
   shape: cylinder
   tooltip: Authoritative telemetry and its crash-recovery state.
 }
@@ -45,8 +45,8 @@ control_tables: "users, user_identities, verifications, sessions, auth_audit_eve
   style.font-size: 13
 }
 
-writers.ingest -> wal
-wal -> telemetry: "asynchronous publication"
+writers.ingest -> commit
+commit -> telemetry: "atomic directory rename"
 writers.rollup -> querystate
 writers.maint -> telemetry
 telemetry <- querystate: "DuckDB scans Parquet"

@@ -1,7 +1,7 @@
 ---
 title: How storage works
 description: What Fanout writes to disk, how it is queried, and why each component exists.
-summary: Durable WAL ingestion, authoritative Parquet, DuckDB queries, and a focused hot span index.
+summary: Atomic Parquet ingestion, indexed trace reads, DuckDB analytics, and SQLite control state.
 read_when:
   - You are sizing disk, or deciding what to back up.
   - You want to understand ingest durability or query performance.
@@ -14,11 +14,9 @@ state—users, sessions, dashboards, alert rules, and agent history—lives in S
 
 | Component | Purpose |
 |---|---|
-| WAL | Acknowledges an OTLP request only after its complete bounded batch is durable |
-| Parquet | Authoritative retained spans, logs, and metrics |
+| Atomic Parquet batches | Authoritative retained spans, logs, and metrics |
+| Trace sidecar | Persistent row-range index for targeted trace reads from Parquet |
 | DuckDB | SQL, log filtering, aggregation, and broad analytical reads |
-| Hot span index | Fast trace lookup for recent spans |
-| Manifest journal | Constant-time commit ledger and crash-safe Parquet file lifecycle |
 | SQLite | Transactional application and identity state |
 
 There is no Iceberg, DuckLake, external catalog, or server database in the
@@ -26,34 +24,39 @@ telemetry path.
 
 ## Writes are durable immediately
 
-Each decoded OTLP request goes directly to the WAL. Concurrent small requests
-may share one group commit; a request larger than `FANOUT_INGEST_BATCH_SIZE` is
-split into independently recoverable chunks. Fanout returns success only after
-every chunk is fsynced.
+Concurrent small OTLP requests may share one bounded Parquet batch. Up to four
+commit workers encode independent batches in parallel. Each worker writes all
+present signals, metadata, and the trace index into a staging directory, fsyncs
+them, and publishes the complete directory with one atomic rename. Fanout
+returns success only after every batch belonging to the request is published.
 
-An asynchronous worker then writes Parquet and updates the hot span index. A
-crash or permanent I/O failure leaves the WAL in place, and startup replays it
-idempotently. There is no timer-based flush window and no acknowledged telemetry
-that exists only in memory.
+A crash before the rename leaves only an unacknowledged staging directory,
+which startup removes. A crash after the rename leaves a complete batch that
+startup discovers directly from the filesystem. There is no separate WAL,
+manifest, catalog, timer-based flush window, or acknowledged memory-only state.
 
 ## One authoritative copy for logs and metrics
 
-Logs and metrics are written once, to Parquet. DuckDB applies filters, ordering,
-`LIMIT`, and aggregation inside its vectorized scan. Keeping separate custom hot
-copies would add write latency and compaction work without serving a production
-query.
+Every signal is written once, to typed Zstandard-compressed Parquet. DuckDB
+applies filters, ordering, `LIMIT`, and aggregation inside its vectorized scan.
+Trace lookup binary-searches a fixed-width sidecar on disk, seeks directly to the
+matching Parquet row ranges, and verifies the complete trace ID after hashing.
+The sidecar is an index, not another telemetry representation.
 
-Spans additionally use a compact purpose-built on-disk index because trace
-lookup benefits from it. Parquet remains authoritative when the recent span
-index is pruned or rebuilt. Dashboard rollups are rebuildable DuckDB caches,
-not a second resident copy in the hot index.
+Dashboard rollups are rebuildable DuckDB caches. SQLite remains independent and
+stores only transactional product state.
 
 ## Small files are bounded by compaction
 
-Request-level durability can create many Parquet files. Maintenance drains every
+Atomic ingestion creates immutable batch directories. Maintenance drains every
 eligible compaction group, combines files within bounded day/generation levels,
-and applies retention. Active DuckDB readers pin their immutable files while a
-publish is in progress, so reads see a consistent set.
+builds a replacement trace index, and atomically swaps the replacement for its
+inputs. A durable compaction marker makes an interrupted swap resumable. Active
+DuckDB readers pin immutable files while retention or compaction removes them,
+so reads never lose an open input file.
+
+Retention is based on ingestion time rather than event time. A service with a
+bad clock therefore cannot pin a batch on disk by emitting a far-future event.
 
 ## Rollups lag deliberately
 

@@ -22,7 +22,6 @@ as a refusal to start rather than as a default nobody chose.
 | `storage.duckdb.max_connections` | `FANOUT_DUCKDB_MAX_CONNECTIONS` | integer | `0` |
 | `storage.duckdb.memory` | `FANOUT_DUCKDB_MEMORY` | string | — |
 | `storage.duckdb.threads` | `FANOUT_DUCKDB_THREADS` | integer | — |
-| `storage.hot_retention` | `FANOUT_HOT_RETENTION` | duration | `24h` |
 | `storage.maintenance_interval` | `FANOUT_MAINTENANCE_INTERVAL` | duration | `1h` |
 | `storage.retention_days` | `FANOUT_RETENTION_DAYS` | integer | `30` |
 | `storage.rollup_interval` | `FANOUT_ROLLUP_INTERVAL` | duration | `1m` |
@@ -42,13 +41,9 @@ Caps DuckDB's memory (e.g. "8GB"). Empty means Fanout sizes it from detected mem
 
 Caps DuckDB's global query worker pool. Zero leaves DuckDB's own default in place (one worker per core). Set it to leave cores free for ingest on a query-heavy co-tenant host.
 
-### `storage.hot_retention`
-
-Controls how long the custom indexed segments are retained. Older telemetry remains queryable in Parquet through DuckDB.
-
 ### `storage.maintenance_interval`
 
-Controls hot-segment pruning, Parquet retention and compaction, and query-cache checkpointing.
+Controls Parquet retention and compaction, and query-cache checkpointing.
 
 ### `storage.rollup_skip_to_latest`
 

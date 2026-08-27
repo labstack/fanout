@@ -26,7 +26,7 @@ fanout: "fanout — one Go process" {
   agent: "Agent runtime\nmodel + tool loop"
   mcp: "MCP server\n5 typed + 4 dashboard tools"
   obs: "Typed observability contract"
-  commit: "Telemetry commit worker\nWAL to Parquet"
+  commit: "Telemetry commit workers\natomic Parquet batches"
   query: "Query kernel\nDuckDB + rollups"
   alert: "Alert engine\nrule evaluation + webhooks"
 
@@ -44,7 +44,7 @@ fanout: "fanout — one Go process" {
 
 store: Storage {
   style.fill: transparent
-  telemetry: "WAL + manifest + Parquet\nstorage.data_dir/telemetry" {shape: cylinder}
+  telemetry: "Parquet batches + trace indexes\nstorage.data_dir/telemetry" {shape: cylinder}
   qstate: "Query catalog\nstorage.data_dir/query" {shape: cylinder}
   control: "Control SQLite\nstorage.data_dir/control" {shape: cylinder}
 }

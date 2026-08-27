@@ -22,16 +22,16 @@ executable, including the React client.
 
 ![Fanout architecture](docs/diagrams/architecture.svg)
 
-Telemetry lands over OTLP/gRPC or OTLP/HTTP, is durably committed to indexed
-hot segments and open Parquet files,
-and is read back through a DuckDB query kernel that also maintains service,
+Telemetry lands over OTLP/gRPC or OTLP/HTTP, is durably committed as atomic
+Parquet batches with persistent trace indexes, and is read back through a
+DuckDB query kernel that also maintains service,
 endpoint, and edge rollups. The browser client, an in-process agent, and any
 external MCP host all reach the same typed observability contract rather than
 issuing raw SQL.
 
-Every write to the telemetry catalog — ingest flush, rollups, and background
-maintenance alike — passes through a single write gate that holds one catalog
-write in flight at a time:
+Independent ingest batches encode in parallel. Rollup-cache writes are
+serialized inside DuckDB, while retention and compaction atomically swap
+immutable Parquet directories behind active readers:
 
 ![Fanout persistence](docs/diagrams/persistence.svg)
 

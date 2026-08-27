@@ -111,7 +111,7 @@ func main() {
 	}
 	defer repository.Close()
 
-	// DuckDB is the SQL engine over open Parquet; hot indexed reads use the same
+	// DuckDB is the SQL engine over open Parquet; indexed trace reads use the same
 	// repository directly through the typed observability kernel.
 	q, err := query.NewDuck(ctx, cfg, repository)
 	if err != nil {

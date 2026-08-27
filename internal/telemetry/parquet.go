@@ -1,28 +1,65 @@
 package telemetry
 
 import (
+	"container/heap"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
 
-	"github.com/apache/arrow-go/v18/arrow"
-	"github.com/apache/arrow-go/v18/arrow/array"
-	"github.com/apache/arrow-go/v18/arrow/memory"
-	"github.com/apache/arrow-go/v18/parquet"
-	"github.com/apache/arrow-go/v18/parquet/compress"
-	"github.com/apache/arrow-go/v18/parquet/pqarrow"
+	"github.com/parquet-go/parquet-go"
+	"github.com/parquet-go/parquet-go/compress/zstd"
+	"github.com/zeebo/xxh3"
 )
 
-type parquetColumn[T any] struct {
-	name     string
-	typeInfo arrow.DataType
-	nullable bool
-	value    func(T) any
+const (
+	BatchSuffix          = ".batch"
+	SchemaBatch          = "_schema" + BatchSuffix
+	batchMetadataVersion = 1
+	parquetPageSize      = 64 << 10
+	parquetRowGroupRows  = 50_000
+	maxTraceQueryResults = 500
+)
+
+type BatchMetadata struct {
+	Version          uint32 `json:"version"`
+	ID               string `json:"id"`
+	MinIngestedNanos int64  `json:"min_ingested_nanos"`
+	MaxIngestedNanos int64  `json:"max_ingested_nanos"`
+	Generation       uint32 `json:"generation"`
+	Spans            int    `json:"spans"`
+	Logs             int    `json:"logs"`
+	Metrics          int    `json:"metrics"`
+}
+
+type TraceQuery struct {
+	TraceID    string
+	Namespace  string
+	StartNanos int64
+	EndNanos   int64
+	Limit      int
+}
+
+type storedBatch struct {
+	metadata BatchMetadata
+	dir      string
+	traces   traceIndex
 }
 
 type ParquetStore struct {
-	dir string
+	dir        string
+	batchesDir string
+	stagingDir string
+	mu         sync.RWMutex
+	publishMu  sync.Mutex
+	batches    map[string]*storedBatch
 }
 
 type ParquetStats struct {
@@ -31,183 +68,642 @@ type ParquetStats struct {
 }
 
 func OpenParquetStore(dir string) (*ParquetStore, error) {
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		if err := os.MkdirAll(filepath.Join(dir, signal), 0o755); err != nil {
-			return nil, fmt.Errorf("create parquet %s directory: %w", signal, err)
+	p := &ParquetStore{
+		dir: dir, batchesDir: filepath.Join(dir, "batches"), stagingDir: filepath.Join(dir, "staging"),
+		batches: make(map[string]*storedBatch),
+	}
+	for _, path := range []string{p.dir, p.batchesDir} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return nil, err
 		}
 	}
-	store := &ParquetStore{dir: dir}
-	if err := writeParquet(filepath.Join(dir, "spans", "_schema.parquet"), spanParquetColumns(), []Span{}); err != nil {
-		return nil, fmt.Errorf("create span parquet schema: %w", err)
+	// Staging is never acknowledged or queried. Removing it is the complete
+	// recovery protocol for writes interrupted before atomic publication.
+	if err := os.RemoveAll(p.stagingDir); err != nil {
+		return nil, fmt.Errorf("clear incomplete Parquet batches: %w", err)
 	}
-	if err := writeParquet(filepath.Join(dir, "logs", "_schema.parquet"), logParquetColumns(), []Log{}); err != nil {
-		return nil, fmt.Errorf("create log parquet schema: %w", err)
+	if err := os.Mkdir(p.stagingDir, 0o755); err != nil {
+		return nil, err
 	}
-	if err := writeParquet(filepath.Join(dir, "metrics", "_schema.parquet"), metricParquetColumns(), []Metric{}); err != nil {
-		return nil, fmt.Errorf("create metric parquet schema: %w", err)
+	if err := p.ensureSchemaBatch(); err != nil {
+		return nil, err
 	}
-	return store, nil
+	if err := p.loadBatches(); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
-func (p *ParquetStore) Dir() string { return p.dir }
+func (p *ParquetStore) Close() error       { return nil }
+func (p *ParquetStore) Dir() string        { return p.dir }
+func (p *ParquetStore) BatchesDir() string { return p.batchesDir }
 
-// Stats reports the current immutable-file footprint for each signal.
-func (p *ParquetStore) Stats() (map[string]ParquetStats, error) {
-	stats := make(map[string]ParquetStats, 3)
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		entries, err := os.ReadDir(filepath.Join(p.dir, signal))
+func (p *ParquetStore) Pattern(signal string) string {
+	return filepath.ToSlash(filepath.Join(p.batchesDir, "*"+BatchSuffix, signal+".parquet"))
+}
+
+func (p *ParquetStore) BatchPath(id string) string {
+	return filepath.Join(p.batchesDir, id+BatchSuffix)
+}
+
+func (p *ParquetStore) StagingPath(id string) string {
+	return filepath.Join(p.stagingDir, id)
+}
+
+func (p *ParquetStore) BatchMetadata() []BatchMetadata {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make([]BatchMetadata, 0, len(p.batches))
+	for _, batch := range p.batches {
+		out = append(out, batch.metadata)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Generation != out[j].Generation {
+			return out[i].Generation < out[j].Generation
+		}
+		if out[i].MinIngestedNanos != out[j].MinIngestedNanos {
+			return out[i].MinIngestedNanos < out[j].MinIngestedNanos
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+func (p *ParquetStore) RowCount() uint64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var count uint64
+	for _, batch := range p.batches {
+		count += uint64(batch.metadata.Spans + batch.metadata.Logs + batch.metadata.Metrics)
+	}
+	return count
+}
+
+func (p *ParquetStore) CommitBatch(metadata BatchMetadata, spans []Span, logs []Log, metrics []Metric) error {
+	if err := validateBatchID(metadata.ID); err != nil {
+		return err
+	}
+	metadata.Version = batchMetadataVersion
+	metadata.Spans, metadata.Logs, metadata.Metrics = len(spans), len(logs), len(metrics)
+	final := p.BatchPath(metadata.ID)
+	if p.hasBatch(metadata.ID) {
+		return nil
+	}
+	if info, err := os.Stat(final); err == nil && info.IsDir() {
+		if err := syncDirectory(p.batchesDir); err != nil {
+			return err
+		}
+		return p.registerBatch(final)
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+
+	stage := filepath.Join(p.stagingDir, metadata.ID)
+	if err := os.RemoveAll(stage); err != nil {
+		return err
+	}
+	if err := os.Mkdir(stage, 0o755); err != nil {
+		return err
+	}
+	complete := false
+	defer func() {
+		if !complete {
+			_ = os.RemoveAll(stage)
+		}
+	}()
+
+	if len(spans) > 0 {
+		rows := make([]spanParquetRow, len(spans))
+		for i := range spans {
+			rows[i] = makeSpanParquetRow(spans[i])
+			rows[i].TraceHash = xxh3.HashString(rows[i].TraceID)
+		}
+		sort.Slice(rows, func(i, j int) bool {
+			if rows[i].TraceHash != rows[j].TraceHash {
+				return rows[i].TraceHash < rows[j].TraceHash
+			}
+			if rows[i].StartUnixNano != rows[j].StartUnixNano {
+				return rows[i].StartUnixNano < rows[j].StartUnixNano
+			}
+			return rows[i].SpanID < rows[j].SpanID
+		})
+		if err := writeTypedParquet(filepath.Join(stage, "spans.parquet"), rows, parquetPageSize); err != nil {
+			return fmt.Errorf("write span Parquet: %w", err)
+		}
+		if err := writeTraceIndex(filepath.Join(stage, "trace.fidx"), rows); err != nil {
+			return fmt.Errorf("write trace index: %w", err)
+		}
+	}
+	if len(logs) > 0 {
+		rows := make([]logParquetRow, len(logs))
+		for i := range logs {
+			rows[i] = makeLogParquetRow(logs[i])
+		}
+		if err := writeTypedParquet(filepath.Join(stage, "logs.parquet"), rows, parquetPageSize); err != nil {
+			return fmt.Errorf("write log Parquet: %w", err)
+		}
+	}
+	if len(metrics) > 0 {
+		rows := make([]metricParquetRow, len(metrics))
+		for i := range metrics {
+			rows[i] = makeMetricParquetRow(metrics[i])
+		}
+		if err := writeTypedParquet(filepath.Join(stage, "metrics.parquet"), rows, parquetPageSize); err != nil {
+			return fmt.Errorf("write metric Parquet: %w", err)
+		}
+	}
+	if err := writeJSONFile(filepath.Join(stage, "metadata.json"), metadata); err != nil {
+		return err
+	}
+	if err := syncDirectory(stage); err != nil {
+		return err
+	}
+
+	p.publishMu.Lock()
+	defer p.publishMu.Unlock()
+	if p.hasBatch(metadata.ID) {
+		complete = true
+		return os.RemoveAll(stage)
+	}
+	if err := os.Rename(stage, final); err != nil {
+		if info, statErr := os.Stat(final); statErr == nil && info.IsDir() {
+			complete = true
+			if err := syncDirectory(p.batchesDir); err != nil {
+				return err
+			}
+			return p.registerBatch(final)
+		}
+		return fmt.Errorf("publish Parquet batch: %w", err)
+	}
+	complete = true
+	if err := syncDirectory(p.batchesDir); err != nil {
+		return err
+	}
+	return p.registerBatch(final)
+}
+
+// CleanupRetired removes inputs hidden by a completed retention or compaction
+// publication. It is called only after compaction recovery has consumed its
+// durable marker, so no rollback can still need these directories.
+func (p *ParquetStore) CleanupRetired() error {
+	p.publishMu.Lock()
+	defer p.publishMu.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entries, err := os.ReadDir(p.batchesDir)
+	if err != nil {
+		return err
+	}
+	removed := false
+	var cleanupErr error
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() || strings.HasSuffix(name, BatchSuffix) || !strings.Contains(name, ".retired") {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(p.batchesDir, name)); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		} else {
+			removed = true
+		}
+	}
+	if removed {
+		cleanupErr = errors.Join(cleanupErr, syncDirectory(p.batchesDir))
+	}
+	return cleanupErr
+}
+
+// Trace reads only ranges selected by the persistent hash index. Scope filters
+// and the limit are applied while decoding so a pathological trace cannot grow
+// request memory without bound.
+func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSpan, error) {
+	if query.TraceID == "" {
+		return nil, nil
+	}
+	if query.Limit <= 0 {
+		return nil, errors.New("trace query limit must be positive")
+	}
+	if query.Limit > maxTraceQueryResults {
+		return nil, fmt.Errorf("trace query limit exceeds %d", maxTraceQueryResults)
+	}
+	if query.StartNanos >= query.EndNanos {
+		return nil, errors.New("trace query time range must be positive")
+	}
+	hash := xxh3.HashString(query.TraceID)
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	selected := make(indexedSpanHeap, 0, query.Limit)
+	for _, batch := range p.batches {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		match, found, err := batch.traces.Lookup(hash)
 		if err != nil {
 			return nil, err
 		}
-		var signalStats ParquetStats
-		for _, entry := range entries {
-			if entry.IsDir() || filepath.Ext(entry.Name()) != ".parquet" || entry.Name() == "_schema.parquet" {
+		if !found {
+			continue
+		}
+		if err := readIndexedTrace(ctx, batch, match, query, &selected); err != nil {
+			return nil, err
+		}
+	}
+	out := []IndexedSpan(selected)
+	sort.Slice(out, func(i, j int) bool {
+		return indexedSpanEarlier(out[i], out[j])
+	})
+	return out, nil
+}
+
+func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange, query TraceQuery, selected *indexedSpanHeap) (err error) {
+	if match.row > uint64(math.MaxInt64) {
+		return errors.New("trace index row exceeds Parquet reader limit")
+	}
+	file, err := os.Open(filepath.Join(batch.dir, "spans.parquet"))
+	if err != nil {
+		return err
+	}
+	reader := parquet.NewGenericReader[indexedSpanParquetRow](file)
+	defer func() { err = errors.Join(err, reader.Close(), file.Close()) }()
+	if err := reader.SeekToRow(int64(match.row)); err != nil {
+		return err
+	}
+	remaining := match.count
+	buffer := make([]indexedSpanParquetRow, min(uint64(8192), remaining))
+	for remaining > 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		want := min(uint64(len(buffer)), remaining)
+		n, readErr := reader.Read(buffer[:int(want)])
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return readErr
+		}
+		if n == 0 {
+			return io.ErrUnexpectedEOF
+		}
+		for i := range n {
+			row := buffer[i]
+			if row.StartUnixNano >= query.EndNanos {
+				return nil
+			}
+			if row.TraceID != query.TraceID || row.StartUnixNano < query.StartNanos ||
+				(query.Namespace != "" && row.Namespace != query.Namespace) {
 				continue
 			}
-			info, err := entry.Info()
+			selected.Add(row.span(), query.Limit)
+		}
+		remaining -= uint64(n)
+	}
+	return nil
+}
+
+type indexedSpanHeap []IndexedSpan
+
+func (h indexedSpanHeap) Len() int { return len(h) }
+func (h indexedSpanHeap) Less(i, j int) bool {
+	return indexedSpanEarlier(h[j], h[i])
+}
+func (h indexedSpanHeap) Swap(i, j int) { h[i], h[j] = h[j], h[i] }
+func (h *indexedSpanHeap) Push(value any) {
+	*h = append(*h, value.(IndexedSpan))
+}
+func (h *indexedSpanHeap) Pop() any {
+	old := *h
+	value := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return value
+}
+
+func (h *indexedSpanHeap) Add(span IndexedSpan, limit int) {
+	if len(*h) < limit {
+		heap.Push(h, span)
+		return
+	}
+	if indexedSpanEarlier(span, (*h)[0]) {
+		(*h)[0] = span
+		heap.Fix(h, 0)
+	}
+}
+
+func indexedSpanEarlier(left, right IndexedSpan) bool {
+	if left.StartUnixNanos != right.StartUnixNanos {
+		return left.StartUnixNanos < right.StartUnixNanos
+	}
+	if left.DurationMS != right.DurationMS {
+		return left.DurationMS > right.DurationMS
+	}
+	return left.SpanID < right.SpanID
+}
+
+// PruneBefore hides complete batches before deleting them. The caller pins
+// DuckDB readers while this method runs.
+func (p *ParquetStore) PruneBefore(cutoff int64) (int, error) {
+	p.publishMu.Lock()
+	defer p.publishMu.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var retired []string
+	var pruneErr error
+	for id, batch := range p.batches {
+		if batch.metadata.MaxIngestedNanos <= 0 || batch.metadata.MaxIngestedNanos >= cutoff {
+			continue
+		}
+		path := filepath.Join(p.batchesDir, id+".retired")
+		if err := os.Rename(batch.dir, path); err != nil {
+			pruneErr = errors.Join(pruneErr, err)
+			continue
+		}
+		delete(p.batches, id)
+		retired = append(retired, path)
+	}
+	if len(retired) > 0 {
+		pruneErr = errors.Join(pruneErr, syncDirectory(p.batchesDir))
+	}
+	for _, path := range retired {
+		pruneErr = errors.Join(pruneErr, os.RemoveAll(path))
+	}
+	if len(retired) > 0 {
+		pruneErr = errors.Join(pruneErr, syncDirectory(p.batchesDir))
+	}
+	return len(retired), pruneErr
+}
+
+func (p *ParquetStore) Stats() (map[string]ParquetStats, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	stats := map[string]ParquetStats{"spans": {}, "logs": {}, "metrics": {}}
+	for _, batch := range p.batches {
+		for signal := range stats {
+			info, err := os.Stat(filepath.Join(batch.dir, signal+".parquet"))
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			if err != nil {
 				return nil, err
 			}
-			signalStats.Files++
-			signalStats.Bytes += info.Size()
+			value := stats[signal]
+			value.Files++
+			value.Bytes += info.Size()
+			stats[signal] = value
 		}
-		stats[signal] = signalStats
 	}
 	return stats, nil
 }
 
-// StageBatch writes durable files that DuckDB's *.parquet views cannot see.
-// Publication is a separate, rename-only step so encoding and fsync never hold
-// the query read gate.
-func (p *ParquetStore) StageBatch(id string, spans []Span, logs []Log, metrics []Metric) error {
-	for _, item := range []struct {
-		signal string
-		write  func(string) error
-	}{
-		{"spans", func(path string) error { return writeParquet(path, spanParquetColumns(), spans) }},
-		{"logs", func(path string) error { return writeParquet(path, logParquetColumns(), logs) }},
-		{"metrics", func(path string) error { return writeParquet(path, metricParquetColumns(), metrics) }},
-	} {
-		rows := len(spans)
-		if item.signal == "logs" {
-			rows = len(logs)
-		} else if item.signal == "metrics" {
-			rows = len(metrics)
-		}
-		if rows == 0 {
-			continue
-		}
-		final := filepath.Join(p.dir, item.signal, id+".parquet")
-		if _, err := os.Stat(final); err == nil {
-			continue
-		} else if !errors.Is(err, os.ErrNotExist) {
+// PrepareReplacement completes metadata and the trace sidecar for Parquet
+// files produced by the compactor.
+func (p *ParquetStore) PrepareReplacement(dir string, metadata BatchMetadata) error {
+	metadata.Version = batchMetadataVersion
+	if metadata.Spans > 0 {
+		f, err := os.Open(filepath.Join(dir, "spans.parquet"))
+		if err != nil {
 			return err
 		}
-		if err := item.write(final + ".pending"); err != nil {
-			return fmt.Errorf("stage %s parquet: %w", item.signal, err)
+		reader := parquet.NewGenericReader[traceParquetRow](f)
+		index, err := newTraceIndexWriter(filepath.Join(dir, "trace.fidx"))
+		if err != nil {
+			_ = reader.Close()
+			_ = f.Close()
+			return err
+		}
+		rows := 0
+		buffer := make([]traceParquetRow, min(8192, metadata.Spans))
+		for {
+			n, readErr := reader.Read(buffer)
+			for i := range n {
+				if err := index.Append(buffer[i].TraceHash); err != nil {
+					index.Abort()
+					_ = reader.Close()
+					_ = f.Close()
+					return err
+				}
+			}
+			rows += n
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			if readErr != nil {
+				index.Abort()
+				_ = reader.Close()
+				_ = f.Close()
+				return readErr
+			}
+			if n == 0 {
+				index.Abort()
+				_ = reader.Close()
+				_ = f.Close()
+				return io.ErrNoProgress
+			}
+		}
+		if err := errors.Join(reader.Close(), f.Close()); err != nil {
+			index.Abort()
+			return err
+		}
+		if rows != metadata.Spans {
+			index.Abort()
+			return fmt.Errorf("compacted span count: got %d want %d", rows, metadata.Spans)
+		}
+		if err := index.Close(); err != nil {
+			return err
+		}
+	}
+	if err := writeJSONFile(filepath.Join(dir, "metadata.json"), metadata); err != nil {
+		return err
+	}
+	return syncDirectory(dir)
+}
+
+// PublishReplacement swaps a prepared compacted batch for its inputs while
+// holding the store lock, so native trace readers cannot observe removed files.
+func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, inputs []string) error {
+	p.publishMu.Lock()
+	defer p.publishMu.Unlock()
+	final := p.BatchPath(metadata.ID)
+	source := stage
+	if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
+		source = final
+	} else if err != nil {
+		return err
+	}
+	replacement, err := loadStoredBatch(source)
+	if err != nil {
+		return err
+	}
+	replacement.dir = final
+	if replacement.metadata.Spans > 0 {
+		replacement.traces.path = filepath.Join(final, "trace.fidx")
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	retired := make([][2]string, 0, len(inputs))
+	rollback := func() error {
+		var rollbackErr error
+		if source == final {
+			if _, statErr := os.Stat(stage); errors.Is(statErr, os.ErrNotExist) {
+				rollbackErr = errors.Join(rollbackErr, os.Rename(final, stage))
+			}
+		}
+		for i := len(retired) - 1; i >= 0; i-- {
+			rollbackErr = errors.Join(rollbackErr, os.Rename(retired[i][1], retired[i][0]))
+		}
+		return errors.Join(rollbackErr, syncDirectory(p.batchesDir))
+	}
+	for _, id := range inputs {
+		active := p.BatchPath(id)
+		retiredPath := filepath.Join(p.batchesDir, id+".retired-"+metadata.ID)
+		if _, statErr := os.Stat(active); statErr == nil {
+			if err := os.Rename(active, retiredPath); err != nil {
+				return errors.Join(err, rollback())
+			}
+			retired = append(retired, [2]string{active, retiredPath})
+		} else if !errors.Is(statErr, os.ErrNotExist) {
+			return errors.Join(statErr, rollback())
+		} else if _, retiredErr := os.Stat(retiredPath); retiredErr == nil {
+			// Recovery can resume after inputs were retired but before the
+			// replacement or directory sync completed.
+			retired = append(retired, [2]string{active, retiredPath})
+		} else if !errors.Is(retiredErr, os.ErrNotExist) {
+			return errors.Join(retiredErr, rollback())
+		}
+	}
+	if source != final {
+		if err := os.Rename(stage, final); err != nil {
+			return errors.Join(err, rollback())
+		}
+		source = final
+	}
+	if err := syncDirectory(p.batchesDir); err != nil {
+		return errors.Join(err, rollback())
+	}
+	for _, id := range inputs {
+		delete(p.batches, id)
+	}
+	p.batches[metadata.ID] = replacement
+	var removeErr error
+	for _, pair := range retired {
+		removeErr = errors.Join(removeErr, os.RemoveAll(pair[1]))
+	}
+	return errors.Join(removeErr, syncDirectory(p.batchesDir))
+}
+
+func (p *ParquetStore) ensureSchemaBatch() error {
+	final := filepath.Join(p.batchesDir, SchemaBatch)
+	if info, err := os.Stat(final); err == nil && info.IsDir() {
+		return nil
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	stage := filepath.Join(p.stagingDir, "_schema")
+	if err := os.Mkdir(stage, 0o755); err != nil {
+		return err
+	}
+	if err := writeTypedParquet(filepath.Join(stage, "spans.parquet"), []spanParquetRow{}, parquetPageSize); err != nil {
+		return err
+	}
+	if err := writeTypedParquet(filepath.Join(stage, "logs.parquet"), []logParquetRow{}, parquetPageSize); err != nil {
+		return err
+	}
+	if err := writeTypedParquet(filepath.Join(stage, "metrics.parquet"), []metricParquetRow{}, parquetPageSize); err != nil {
+		return err
+	}
+	if err := syncDirectory(stage); err != nil {
+		return err
+	}
+	if err := os.Rename(stage, final); err != nil {
+		return err
+	}
+	return syncDirectory(p.batchesDir)
+}
+
+func (p *ParquetStore) loadBatches() error {
+	entries, err := os.ReadDir(p.batchesDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == SchemaBatch || !strings.HasSuffix(entry.Name(), BatchSuffix) {
+			continue
+		}
+		if err := p.registerBatch(filepath.Join(p.batchesDir, entry.Name())); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// PublishBatch atomically exposes all present signal files to in-process
-// readers when the caller holds the Parquet publication gate. The returned
-// rollback is used if the hot span projection cannot be published afterward.
-func (p *ParquetStore) PublishBatch(id string, hasSpans, hasLogs, hasMetrics bool) (func() error, error) {
-	present := []struct {
-		signal string
-		has    bool
-	}{{"spans", hasSpans}, {"logs", hasLogs}, {"metrics", hasMetrics}}
-	renamed := make([]string, 0, len(present))
-	rollback := func() error {
-		var rollbackErr error
-		for i := len(renamed) - 1; i >= 0; i-- {
-			final := filepath.Join(p.dir, renamed[i], id+".parquet")
-			if err := os.Rename(final, final+".pending"); err != nil && !errors.Is(err, os.ErrNotExist) {
-				rollbackErr = errors.Join(rollbackErr, err)
-			}
-		}
-		if len(renamed) > 0 {
-			rollbackErr = errors.Join(rollbackErr, syncParquetSignalDirectories(p.dir, renamed))
-		}
-		return rollbackErr
-	}
-	for _, item := range present {
-		if !item.has {
-			continue
-		}
-		final := filepath.Join(p.dir, item.signal, id+".parquet")
-		if _, err := os.Stat(final); err == nil {
-			continue
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return rollback, errors.Join(err, rollback())
-		}
-		if err := os.Rename(final+".pending", final); err != nil {
-			return rollback, errors.Join(err, rollback())
-		}
-		renamed = append(renamed, item.signal)
-	}
-	if err := syncParquetSignalDirectories(p.dir, renamed); err != nil {
-		return rollback, errors.Join(err, rollback())
-	}
-	return rollback, nil
-}
-
-// DiscardBatch removes invisible staging files for a batch that another commit
-// or compaction has already consumed.
-func (p *ParquetStore) DiscardBatch(id string) error {
-	var discardErr error
-	changed := make([]string, 0, 3)
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		path := filepath.Join(p.dir, signal, id+".parquet.pending")
-		if err := os.Remove(path); err == nil {
-			changed = append(changed, signal)
-		} else if !errors.Is(err, os.ErrNotExist) {
-			discardErr = errors.Join(discardErr, err)
-		}
-	}
-	return errors.Join(discardErr, syncParquetSignalDirectories(p.dir, changed))
-}
-
-func syncParquetSignalDirectories(root string, signals []string) error {
-	seen := make(map[string]struct{}, len(signals))
-	var syncErr error
-	for _, signal := range signals {
-		if _, ok := seen[signal]; ok {
-			continue
-		}
-		seen[signal] = struct{}{}
-		syncErr = errors.Join(syncErr, syncDirectory(filepath.Join(root, signal)))
-	}
-	return syncErr
-}
-
-func writeParquet[T any](path string, columns []parquetColumn[T], rows []T) error {
-	if _, err := os.Stat(path); err == nil {
-		return nil
-	} else if !errors.Is(err, os.ErrNotExist) {
+func (p *ParquetStore) registerBatch(dir string) error {
+	batch, err := loadStoredBatch(dir)
+	if err != nil {
 		return err
 	}
-	fields := make([]arrow.Field, len(columns))
-	for i, column := range columns {
-		fields[i] = arrow.Field{Name: column.name, Type: column.typeInfo, Nullable: column.nullable}
+	if filepath.Base(dir) != batch.metadata.ID+BatchSuffix {
+		return fmt.Errorf("parquet batch directory %q does not match metadata ID %q", filepath.Base(dir), batch.metadata.ID)
 	}
-	schema := arrow.NewSchema(fields, nil)
-	builder := array.NewRecordBuilder(memory.DefaultAllocator, schema)
-	defer builder.Release()
-	for _, row := range rows {
-		for i, column := range columns {
-			if err := appendArrowValue(builder.Field(i), column.value(row)); err != nil {
-				return fmt.Errorf("append parquet column %s: %w", column.name, err)
-			}
+	p.mu.Lock()
+	p.batches[batch.metadata.ID] = batch
+	p.mu.Unlock()
+	return nil
+}
+
+func loadStoredBatch(dir string) (*storedBatch, error) {
+	metadata, err := readBatchMetadata(filepath.Join(dir, "metadata.json"))
+	if err != nil {
+		return nil, err
+	}
+	signals := [...]struct {
+		name  string
+		count int
+	}{
+		{name: "spans", count: metadata.Spans},
+		{name: "logs", count: metadata.Logs},
+		{name: "metrics", count: metadata.Metrics},
+	}
+	for _, signal := range signals {
+		if signal.count == 0 {
+			continue
+		}
+		path := filepath.Join(dir, signal.name+".parquet")
+		info, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("%s Parquet is not a regular file", signal.name)
+		}
+		file, err := os.Open(path)
+		if err != nil {
+			return nil, err
+		}
+		parquetFile, openErr := parquet.OpenFile(file, info.Size())
+		closeErr := file.Close()
+		if err := errors.Join(openErr, closeErr); err != nil {
+			return nil, fmt.Errorf("open %s Parquet: %w", signal.name, err)
+		}
+		if rows := parquetFile.NumRows(); rows != int64(signal.count) {
+			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.name, rows, signal.count)
 		}
 	}
-	record := builder.NewRecordBatch()
-	defer record.Release()
+	var traces traceIndex
+	if metadata.Spans > 0 {
+		traces, err = loadTraceIndex(filepath.Join(dir, "trace.fidx"), metadata.Spans)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &storedBatch{metadata: metadata, dir: dir, traces: traces}, nil
+}
 
-	tmp := path + ".tmp"
-	_ = os.Remove(tmp)
-	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
+func (p *ParquetStore) hasBatch(id string) bool {
+	p.mu.RLock()
+	_, ok := p.batches[id]
+	p.mu.RUnlock()
+	return ok
+}
+
+func writeTypedParquet[T any](path string, rows []T, pageSize int) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
 	if err != nil {
 		return err
 	}
@@ -215,65 +711,75 @@ func writeParquet[T any](path string, columns []parquetColumn[T], rows []T) erro
 	defer func() {
 		_ = f.Close()
 		if !ok {
-			_ = os.Remove(tmp)
+			_ = os.Remove(path)
 		}
 	}()
-	writer, err := pqarrow.NewFileWriter(
-		schema,
-		f,
-		parquet.NewWriterProperties(parquet.WithCompression(compress.Codecs.Zstd)),
-		pqarrow.NewArrowWriterProperties(pqarrow.WithStoreSchema()),
-	)
-	if err != nil {
-		return err
-	}
-	if err := writer.Write(record); err != nil {
+	writer := parquet.NewGenericWriter[T](f,
+		parquet.Compression(&zstd.Codec{Level: zstd.SpeedFastest, Concurrency: 1}),
+		parquet.MaxRowsPerRowGroup(parquetRowGroupRows), parquet.PageBufferSize(pageSize))
+	if _, err := writer.Write(rows); err != nil {
 		_ = writer.Close()
 		return err
 	}
 	if err := writer.Close(); err != nil {
 		return err
 	}
-	_ = f.Close() // pqarrow may already have closed the sink.
-	syncFile, err := os.OpenFile(tmp, os.O_RDWR, 0)
-	if err != nil {
+	if err := f.Sync(); err != nil {
 		return err
 	}
-	if err := syncFile.Sync(); err != nil {
-		_ = syncFile.Close()
-		return err
-	}
-	if err := syncFile.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		return err
-	}
-	if err := syncDirectory(filepath.Dir(path)); err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
 	ok = true
 	return nil
 }
 
-func appendArrowValue(builder array.Builder, value any) error {
-	if value == nil {
-		builder.AppendNull()
-		return nil
+func readBatchMetadata(path string) (BatchMetadata, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return BatchMetadata{}, err
 	}
-	switch b := builder.(type) {
-	case *array.StringBuilder:
-		b.Append(value.(string))
-	case *array.Int64Builder:
-		b.Append(value.(int64))
-	case *array.Float64Builder:
-		b.Append(value.(float64))
-	case *array.TimestampBuilder:
-		b.Append(arrow.Timestamp(value.(int64)))
-	default:
-		return fmt.Errorf("unsupported Arrow builder %T", builder)
+	var metadata BatchMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return BatchMetadata{}, err
 	}
-	return nil
+	if metadata.Version != batchMetadataVersion {
+		return BatchMetadata{}, fmt.Errorf("unsupported batch metadata version %d", metadata.Version)
+	}
+	if err := validateBatchID(metadata.ID); err != nil {
+		return BatchMetadata{}, err
+	}
+	if metadata.Spans < 0 || metadata.Logs < 0 || metadata.Metrics < 0 {
+		return BatchMetadata{}, errors.New("parquet batch metadata has a negative row count")
+	}
+	if metadata.MinIngestedNanos > 0 && metadata.MaxIngestedNanos > 0 && metadata.MinIngestedNanos > metadata.MaxIngestedNanos {
+		return BatchMetadata{}, errors.New("parquet batch metadata has an inverted time range")
+	}
+	return metadata, nil
+}
+
+func writeJSONFile(path string, value any) error {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return writeBytesFile(path, data)
+}
+
+func writeBytesFile(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func syncDirectory(dir string) error {
@@ -285,131 +791,18 @@ func syncDirectory(dir string) error {
 	return f.Sync()
 }
 
-func text(v string) any {
-	if v == "" {
-		return nil
+func validateBatchID(id string) error {
+	if id == "" || len(id) > 128 || id[0] == '.' || strings.ContainsAny(id, `/\\`) {
+		return fmt.Errorf("invalid telemetry batch ID %q", id)
 	}
-	return v
-}
-
-func jsonText(v []byte) any {
-	if len(v) == 0 {
-		return nil
-	}
-	return string(v)
-}
-
-func nanos(primary, secondary, ingested int64) any {
-	for _, value := range []int64{primary, secondary, ingested} {
-		if value > 0 {
-			return value
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return fmt.Errorf("invalid telemetry batch ID %q", id)
 		}
 	}
 	return nil
 }
 
-func optionalNanos(value int64) any {
-	if value <= 0 {
-		return nil
-	}
-	return value
-}
-
-func optionalInt(value int64) any {
-	if value == 0 {
-		return nil
-	}
-	return value
-}
-
-func spanParquetColumns() []parquetColumn[Span] {
-	s, i, f, ts := arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Float64, arrow.FixedWidthTypes.Timestamp_ns
-	return []parquetColumn[Span]{
-		{"namespace", s, false, func(r Span) any { return r.Namespace }},
-		{"trace_id", s, false, func(r Span) any { return r.TraceID }},
-		{"span_id", s, false, func(r Span) any { return r.SpanID }},
-		{"parent_span_id", s, true, func(r Span) any { return text(r.ParentSpanID) }},
-		{"service", s, false, func(r Span) any { return r.ServiceName }},
-		{"operation", s, false, func(r Span) any { return r.Name }},
-		{"kind", s, false, func(r Span) any { return r.Kind }},
-		{"start_time", ts, true, func(r Span) any { return nanos(r.StartUnixNanos, 0, r.IngestedAt) }},
-		{"end_time", ts, true, func(r Span) any { return optionalNanos(r.EndUnixNanos) }},
-		{"start_unix_nano", i, false, func(r Span) any { return r.StartUnixNanos }},
-		{"end_unix_nano", i, false, func(r Span) any { return r.EndUnixNanos }},
-		{"duration_ms", f, false, func(r Span) any { return r.DurationMS }},
-		{"status", s, false, func(r Span) any { return r.StatusCode }},
-		{"status_message", s, true, func(r Span) any { return text(r.StatusMsg) }},
-		{"resource_json", s, true, func(r Span) any { return jsonText(r.ResourceJSON) }},
-		{"attributes_json", s, true, func(r Span) any { return jsonText(r.AttributesJSON) }},
-		{"events_json", s, true, func(r Span) any { return jsonText(r.EventsJSON) }},
-		{"links_json", s, true, func(r Span) any { return jsonText(r.LinksJSON) }},
-		{"trace_state", s, true, func(r Span) any { return text(r.TraceState) }},
-		{"flags", i, false, func(r Span) any { return int64(r.Flags) }},
-		{"scope_name", s, true, func(r Span) any { return text(r.ScopeName) }},
-		{"scope_version", s, true, func(r Span) any { return text(r.ScopeVersion) }},
-		{"ingested_at", ts, true, func(r Span) any { return optionalNanos(r.IngestedAt) }},
-		{"ingested_unix_nano", i, false, func(r Span) any { return r.IngestedAt }},
-		{"http_method", s, true, func(r Span) any { return text(r.HTTPMethod) }},
-		{"http_status_code", s, true, func(r Span) any { return text(r.HTTPStatusCode) }},
-		{"http_route", s, true, func(r Span) any { return text(r.HTTPRoute) }},
-		{"db_system", s, true, func(r Span) any { return text(r.DBSystem) }},
-		{"rpc_method", s, true, func(r Span) any { return text(r.RPCMethod) }},
-		{"rpc_service", s, true, func(r Span) any { return text(r.RPCService) }},
-		{"peer_service", s, true, func(r Span) any { return text(r.PeerService) }},
-		{"service_version", s, true, func(r Span) any { return text(r.ServiceVersion) }},
-		{"deployment_env", s, true, func(r Span) any { return text(r.DeploymentEnv) }},
-		{"exception_type", s, true, func(r Span) any { return text(r.ExceptionType) }},
-		{"exception_message", s, true, func(r Span) any { return text(r.ExceptionMessage) }},
-	}
-}
-
-func logParquetColumns() []parquetColumn[Log] {
-	s, i, ts := arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64, arrow.FixedWidthTypes.Timestamp_ns
-	return []parquetColumn[Log]{
-		{"namespace", s, false, func(r Log) any { return r.Namespace }},
-		{"log_time", ts, true, func(r Log) any { return nanos(r.TimeUnixNanos, r.ObservedTimeNanos, r.IngestedAt) }},
-		{"observed_time", ts, true, func(r Log) any { return nanos(r.ObservedTimeNanos, r.TimeUnixNanos, r.IngestedAt) }},
-		{"time_unix_nano", i, false, func(r Log) any { return r.TimeUnixNanos }},
-		{"observed_time_unix_nano", i, true, func(r Log) any { return optionalInt(r.ObservedTimeNanos) }},
-		{"severity", s, false, func(r Log) any { return r.Severity }},
-		{"severity_number", i, false, func(r Log) any { return int64(r.SeverityNumber) }},
-		{"body", s, false, func(r Log) any { return r.Body }},
-		{"service", s, true, func(r Log) any { return text(r.ServiceName) }},
-		{"trace_id", s, true, func(r Log) any { return text(r.TraceID) }},
-		{"span_id", s, true, func(r Log) any { return text(r.SpanID) }},
-		{"flags", i, false, func(r Log) any { return int64(r.Flags) }},
-		{"resource_json", s, true, func(r Log) any { return jsonText(r.ResourceJSON) }},
-		{"attributes_json", s, true, func(r Log) any { return jsonText(r.AttributesJSON) }},
-		{"scope_name", s, true, func(r Log) any { return text(r.ScopeName) }},
-		{"scope_version", s, true, func(r Log) any { return text(r.ScopeVersion) }},
-		{"ingested_at", ts, true, func(r Log) any { return optionalNanos(r.IngestedAt) }},
-		{"ingested_unix_nano", i, false, func(r Log) any { return r.IngestedAt }},
-		{"body_template", s, true, func(r Log) any { return text(r.BodyTemplate) }},
-	}
-}
-
-func metricParquetColumns() []parquetColumn[Metric] {
-	s, i, f, ts := arrow.BinaryTypes.String, arrow.PrimitiveTypes.Int64, arrow.PrimitiveTypes.Float64, arrow.FixedWidthTypes.Timestamp_ns
-	return []parquetColumn[Metric]{
-		{"namespace", s, false, func(r Metric) any { return r.Namespace }},
-		{"metric_time", ts, true, func(r Metric) any { return nanos(r.TimeUnixNanos, 0, r.IngestedAt) }},
-		{"time_unix_nano", i, false, func(r Metric) any { return r.TimeUnixNanos }},
-		{"name", s, false, func(r Metric) any { return r.Name }},
-		{"description", s, true, func(r Metric) any { return text(r.Description) }},
-		{"unit", s, true, func(r Metric) any { return text(r.Unit) }},
-		{"metric_type", s, false, func(r Metric) any { return r.Type }},
-		{"service", s, true, func(r Metric) any { return text(r.ServiceName) }},
-		{"value", f, false, func(r Metric) any { return r.Value }},
-		{"hist_bounds_json", s, true, func(r Metric) any { return jsonText(r.HistBoundsJSON) }},
-		{"hist_counts_json", s, true, func(r Metric) any { return jsonText(r.HistCountsJSON) }},
-		{"hist_count", i, true, func(r Metric) any { return optionalInt(r.HistCount) }},
-		{"hist_sum", f, false, func(r Metric) any { return r.HistSum }},
-		{"exemplars_json", s, true, func(r Metric) any { return jsonText(r.ExemplarsJSON) }},
-		{"attributes_json", s, true, func(r Metric) any { return jsonText(r.AttributesJSON) }},
-		{"resource_json", s, true, func(r Metric) any { return jsonText(r.ResourceJSON) }},
-		{"scope_name", s, true, func(r Metric) any { return text(r.ScopeName) }},
-		{"scope_version", s, true, func(r Metric) any { return text(r.ScopeVersion) }},
-		{"ingested_at", ts, true, func(r Metric) any { return optionalNanos(r.IngestedAt) }},
-		{"ingested_unix_nano", i, false, func(r Metric) any { return r.IngestedAt }},
-	}
+type traceParquetRow struct {
+	TraceHash uint64 `parquet:"_trace_hash"`
 }

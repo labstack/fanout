@@ -267,7 +267,7 @@ func CreateTables(db *sql.DB) error {
 }
 
 // CreateCacheTables creates only DuckDB's rebuildable query accelerators. The
-// production telemetry rows themselves live in immutable segments and Parquet.
+// production telemetry rows themselves live in immutable Parquet batches.
 func CreateCacheTables(db *sql.DB) error {
 	if err := ensureCacheTable(db, "service_rollup", createServiceRollupTable,
 		"namespace", "bucket", "service", "spans", "p50_ms", "p95_ms", "error_rate", "log_count", "metric_count"); err != nil {
@@ -295,8 +295,12 @@ func CreateParquetViews(db *sql.DB, parquetDir string) error {
 		return err
 	}
 	for _, signal := range []string{"spans", "logs", "metrics"} {
-		pattern := filepath.ToSlash(filepath.Join(parquetDir, signal, "*.parquet"))
-		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT * FROM read_parquet(%s, union_by_name=true)`, signal, sqlLiteral(pattern))
+		pattern := filepath.ToSlash(filepath.Join(parquetDir, "batches", "*.batch", signal+".parquet"))
+		projection := "*"
+		if signal == "spans" {
+			projection = "* EXCLUDE (_trace_hash)"
+		}
+		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=true)`, signal, projection, sqlLiteral(pattern))
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create parquet view telemetry.%s: %w", signal, err)
 		}

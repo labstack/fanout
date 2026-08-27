@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 const recentTraceQuery = `
@@ -16,14 +18,6 @@ GROUP BY trace_id
 ORDER BY MAX(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1 ELSE 0 END) DESC,
          MAX(end_time) - MIN(start_time) DESC
 LIMIT 1`
-
-const traceSpansQuery = `
-SELECT span_id, coalesce(parent_span_id, ''), service, operation, kind, start_time,
-       duration_ms, status, coalesce(status_message, '')
-FROM spans
-WHERE trace_id = ? AND start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?)
-ORDER BY start_time ASC, duration_ms DESC
-LIMIT ?`
 
 const traceLogsQuery = `
 SELECT time, severity, coalesce(service, ''), body, coalesce(trace_id, ''), coalesce(span_id, '')
@@ -60,37 +54,18 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		rows.Close()
 	}
 
-	dataSource := "fanout_segments"
+	dataSource := "parquet_index"
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
-	hotCutoff := int64(0)
-	hotHasRoot := false
 	if traceID != "" {
-		storedSpans, spanCutoff, readErr := s.repository.HotTrace(traceID)
-		if readErr != nil {
-			return Result[TraceDetail]{}, fmt.Errorf("read trace segments: %w", readErr)
-		}
-		hotCutoff = spanCutoff
-		startNanos, endNanos := scope.Start.UnixNano(), scope.End.UnixNano()
-		for _, row := range storedSpans {
-			matchesNamespace := scope.Namespace == "" || row.Namespace == scope.Namespace
-			if row.ParentSpanID == "" && row.StartUnixNanos >= hotCutoff &&
-				row.StartUnixNanos < endNanos && matchesNamespace {
-				hotHasRoot = true
-			}
-			if row.StartUnixNanos < startNanos || row.StartUnixNanos >= endNanos ||
-				!matchesNamespace {
-				continue
-			}
-			data.Spans = append(data.Spans, TraceSpan{SpanID: row.SpanID, ParentSpanID: row.ParentSpanID, Service: row.ServiceName, Operation: row.Name, Kind: row.Kind, Start: time.Unix(0, row.StartUnixNanos).UTC(), DurationMS: row.DurationMS, Status: row.StatusCode, StatusMessage: row.StatusMsg})
-		}
-		sort.Slice(data.Spans, func(i, j int) bool {
-			if data.Spans[i].Start.Equal(data.Spans[j].Start) {
-				return data.Spans[i].DurationMS > data.Spans[j].DurationMS
-			}
-			return data.Spans[i].Start.Before(data.Spans[j].Start)
+		storedSpans, readErr := s.repository.Trace(ctx, telemetry.TraceQuery{
+			TraceID: traceID, Namespace: scope.Namespace,
+			StartNanos: scope.Start.UnixNano(), EndNanos: scope.End.UnixNano(), Limit: limit,
 		})
-		if len(data.Spans) > limit {
-			data.Spans = data.Spans[:limit]
+		if readErr != nil {
+			return Result[TraceDetail]{}, fmt.Errorf("read indexed Parquet trace: %w", readErr)
+		}
+		for _, row := range storedSpans {
+			data.Spans = append(data.Spans, TraceSpan{SpanID: row.SpanID, ParentSpanID: row.ParentSpanID, Service: row.ServiceName, Operation: row.Name, Kind: row.Kind, Start: time.Unix(0, row.StartUnixNanos).UTC(), DurationMS: row.DurationMS, Status: row.StatusCode, StatusMessage: row.StatusMsg})
 		}
 
 		serviceSet := make(map[string]struct{})
@@ -116,23 +91,6 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 			data.Services = append(data.Services, name)
 		}
 		sort.Strings(data.Services)
-
-	}
-	// A root retained at or above the durable cutoff proves the hot index contains
-	// the beginning of this trace, including immediately after a tier rebuild. A
-	// crossing scope without that root may contain only a suffix and must use the
-	// authoritative Parquet copy.
-	hotComplete := scope.Start.UnixNano() >= hotCutoff || hotHasRoot
-	if traceID != "" && (len(data.Spans) == 0 || !hotComplete) {
-		data, err = s.traceFromParquet(ctx, scope, traceID, limit)
-		if err != nil {
-			return Result[TraceDetail]{}, err
-		}
-		dataSource = "parquet"
-	} else if traceID != "" {
-		// Parquet is authoritative and published before the disposable hot index.
-		// DuckDB can apply trace_id and LIMIT to the associated logs without a
-		// full Go decode while preserving clock-skewed trace events.
 		data.Logs, err = s.traceLogsFromParquet(ctx, scope, traceID, limit)
 		if err != nil {
 			return Result[TraceDetail]{}, err
@@ -144,57 +102,6 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		summary = fmt.Sprintf("Trace %s contains %d spans across %d services", traceID, len(data.Spans), len(data.Services))
 	}
 	return Result[TraceDetail]{Schema: TraceSchema, Summary: summary, Data: data, Provenance: s.provenanceFor(scope, dataSource)}, nil
-}
-
-func (s *Service) traceFromParquet(ctx context.Context, scope Scope, traceID string, limit int) (TraceDetail, error) {
-	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
-	rows, err := s.db.QueryContext(ctx, traceSpansQuery, traceID, scope.Start, scope.End, scope.Namespace, scope.Namespace, limit)
-	if err != nil {
-		return TraceDetail{}, fmt.Errorf("query trace parquet spans: %w", err)
-	}
-	for rows.Next() {
-		var span TraceSpan
-		if err := rows.Scan(&span.SpanID, &span.ParentSpanID, &span.Service, &span.Operation, &span.Kind, &span.Start, &span.DurationMS, &span.Status, &span.StatusMessage); err != nil {
-			rows.Close()
-			return TraceDetail{}, fmt.Errorf("scan trace parquet span: %w", err)
-		}
-		data.Spans = append(data.Spans, span)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return TraceDetail{}, fmt.Errorf("iterate trace parquet spans: %w", err)
-	}
-	rows.Close()
-
-	serviceSet := make(map[string]struct{})
-	var first, last time.Time
-	for _, span := range data.Spans {
-		if first.IsZero() || span.Start.Before(first) {
-			first = span.Start
-		}
-		if end := span.Start.Add(time.Duration(span.DurationMS * float64(time.Millisecond))); end.After(last) {
-			last = end
-		}
-		if strings.Contains(strings.ToUpper(span.Status), "ERROR") {
-			data.HasError = true
-		}
-		if span.Service != "" {
-			serviceSet[span.Service] = struct{}{}
-		}
-	}
-	if !first.IsZero() {
-		data.DurationMS = last.Sub(first).Seconds() * 1000
-	}
-	for service := range serviceSet {
-		data.Services = append(data.Services, service)
-	}
-	sort.Strings(data.Services)
-
-	data.Logs, err = s.traceLogsFromParquet(ctx, scope, traceID, limit)
-	if err != nil {
-		return TraceDetail{}, err
-	}
-	return data, nil
 }
 
 func (s *Service) traceLogsFromParquet(ctx context.Context, scope Scope, traceID string, limit int) ([]LogEntry, error) {

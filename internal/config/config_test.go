@@ -611,7 +611,6 @@ func TestValidate(t *testing.T) {
 		IngestBatchSize:         50000,
 		RollupInterval:          time.Minute,
 		RetentionDays:           30,
-		HotRetention:            24 * time.Hour,
 		MaintenanceInterval:     time.Hour,
 		DuckDBMaxConns:          4,
 		AlertEvaluationInterval: 30 * time.Second,
@@ -642,7 +641,6 @@ func TestValidate(t *testing.T) {
 		{"RollupInterval=0", func(c *Config) { c.RollupInterval = 0 }},
 		{"RollupInterval=999ms", func(c *Config) { c.RollupInterval = 999 * time.Millisecond }},
 		{"RetentionDays=-1", func(c *Config) { c.RetentionDays = -1 }},
-		{"HotRetention=0", func(c *Config) { c.HotRetention = 0 }},
 		{"HTTPAddr empty", func(c *Config) { c.HTTPAddr = "" }},
 		{"OTLPGRPCAddr empty", func(c *Config) { c.OTLPGRPCAddr = "" }},
 		{"OTLPHTTPAddr empty", func(c *Config) { c.OTLPHTTPAddr = "" }},
@@ -696,14 +694,6 @@ func TestValidate(t *testing.T) {
 		c.RetentionDays = 0
 		if err := c.Validate(); err != nil {
 			t.Errorf("RetentionDays=0 should be valid: %v", err)
-		}
-	})
-
-	t.Run("short hot retention valid", func(t *testing.T) {
-		c := valid
-		c.HotRetention = 15 * time.Minute
-		if err := c.Validate(); err != nil {
-			t.Errorf("HotRetention=15m should be valid: %v", err)
 		}
 	})
 

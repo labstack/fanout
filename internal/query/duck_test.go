@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/query/writegate"
+	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
@@ -146,6 +148,74 @@ func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 	stats := d.DB.Stats()
 	if stats.MaxOpenConnections != 1 {
 		t.Fatalf("MaxOpenConnections = %d, want 1 when DuckDBMaxConns is unset", stats.MaxOpenConnections)
+	}
+}
+
+func TestNewDuckUsesUTCForEveryConnection(t *testing.T) {
+	t.Setenv("TZ", "America/Los_Angeles")
+	ctx := context.Background()
+	cfg := config.Config{
+		DataDir:             t.TempDir(),
+		RollupInterval:      time.Minute,
+		DuckDBMemory:        "128MB",
+		DuckDBMaxConns:      4,
+		DuckDBThreads:       2,
+		MaintenanceInterval: time.Hour,
+	}
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatalf("open telemetry repository: %v", err)
+	}
+	defer repository.Close()
+	d, err := NewDuck(ctx, cfg, repository)
+	if err != nil {
+		t.Fatalf("NewDuck() error = %v", err)
+	}
+	defer d.Close()
+	eventTime := time.Date(2026, 8, 27, 16, 0, 30, 0, time.UTC)
+	if err := repository.Commit(telemetrystore.Batch{ID: "timezone-window", Spans: []telemetry.Span{{
+		Namespace: "default", TraceID: "trace-timezone", SpanID: "span-timezone",
+		ServiceName: "checkout", StartUnixNanos: eventTime.UnixNano(), DurationMS: 5,
+		StatusCode: "STATUS_CODE_OK", IngestedAt: eventTime.UnixNano(),
+	}}}); err != nil {
+		t.Fatalf("commit timezone fixture: %v", err)
+	}
+	d.rollupLagNanos = 0
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("roll up timezone fixture: %v", err)
+	}
+	var spans int64
+	if err := d.DB.QueryRowContext(ctx, `
+SELECT COALESCE(SUM(spans), 0)::BIGINT
+FROM service_rollup
+WHERE bucket >= ? AND bucket < ?`, eventTime.Add(-time.Minute), eventTime.Add(time.Minute)).Scan(&spans); err != nil {
+		t.Fatalf("query UTC rollup window: %v", err)
+	}
+	if spans != 1 {
+		t.Fatalf("UTC rollup window spans = %d, want 1", spans)
+	}
+
+	connections := make([]*sql.Conn, 0, cfg.DuckDBMaxConns)
+	defer func() {
+		for _, connection := range connections {
+			_ = connection.Close()
+		}
+	}()
+	for range cfg.DuckDBMaxConns {
+		connection, err := d.DB.Conn(ctx)
+		if err != nil {
+			t.Fatalf("open pooled connection: %v", err)
+		}
+		connections = append(connections, connection)
+	}
+	for i, connection := range connections {
+		var zone string
+		if err := connection.QueryRowContext(ctx, "SELECT current_setting('TimeZone')").Scan(&zone); err != nil {
+			t.Fatalf("connection %d timezone query: %v", i, err)
+		}
+		if zone != "UTC" {
+			t.Fatalf("connection %d timezone = %q, want UTC", i, zone)
+		}
 	}
 }
 

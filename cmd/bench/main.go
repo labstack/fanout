@@ -81,8 +81,7 @@ type config struct {
 	maxQueryP95  float64
 	// backfillHours, when >0, spreads each event's timestamp uniformly over the
 	// last N hours (instead of "now"). Used to PRE-SEED a multi-hour dataset so
-	// Parquet spans several hour partitions — required to exercise within-day
-	// (hour-partition) pruning, which a same-hour run can't.
+	// time-window queries and rollups cover more than the current hour.
 	backfillHours float64
 	// seed makes the synthetic workload reproducible: same seed, same services,
 	// endpoints, attributes, and error placement. Two runs are only comparable if
@@ -557,7 +556,7 @@ func (g *generator) outCtx(ctx context.Context) context.Context {
 
 // eventTime returns the timestamp for an emitted event: now(), or — when
 // backfillHours>0 — a time spread uniformly over the last N hours so a pre-seed
-// run populates multiple hour partitions (to exercise within-day pruning).
+// run exercises multi-hour time-window queries and rollups.
 func (g *generator) eventTime(rng *rand.Rand) time.Time {
 	if g.cfg.backfillHours <= 0 {
 		return time.Now()
@@ -919,9 +918,9 @@ type serverReport struct {
 	RowsDroppedStart         float64                              `json:"rows_dropped_start"`
 	RowsDroppedEnd           float64                              `json:"rows_dropped_end"`
 	RowsDroppedDelta         float64                              `json:"rows_dropped_delta"`
-	ParquetFilesStart        float64                              `json:"parquet_partitions_start"`
-	ParquetFiles             float64                              `json:"parquet_partitions"`
-	ParquetFilesDelta        float64                              `json:"parquet_partitions_delta"`
+	ParquetFilesStart        float64                              `json:"parquet_files_start"`
+	ParquetFiles             float64                              `json:"parquet_files"`
+	ParquetFilesDelta        float64                              `json:"parquet_files_delta"`
 	ParquetSizeBytesStart    float64                              `json:"parquet_size_bytes_start"`
 	ParquetSizeBytes         float64                              `json:"parquet_size_bytes"`
 	ParquetSizeBytesDelta    float64                              `json:"parquet_size_bytes_delta"`
@@ -982,7 +981,7 @@ func printReport(r report) {
 		s := r.Server
 		fmt.Printf("server (Δ over run):\n")
 		fmt.Printf("  rows accepted=%.0f  dropped=%.0f\n", s.IngestRowsDelta, s.RowsDroppedDelta)
-		fmt.Printf("  parquet_partitions=%.0f  parquet_size=%.1fMB  ingest_queue_depth=%.0f\n",
+		fmt.Printf("  parquet_files=%.0f  parquet_size=%.1fMB  ingest_queue_depth=%.0f\n",
 			s.ParquetFiles, s.ParquetSizeBytes/(1<<20), s.IngestQueueDepth)
 		fmt.Printf("  avg rollup=%.1fms  flush=%.1fms  query=%.1fms\n", s.AvgRollupMs, s.AvgFlushMs, s.AvgQueryMs)
 		fmt.Printf("  cpu=%.2f core(s)  rss=%.1fMB  alloc=%.1fMB/s  parquet_growth=%.1fMB\n",

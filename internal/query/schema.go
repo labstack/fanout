@@ -10,9 +10,9 @@ func GetSchema(dataDir string) string {
 const schemaTemplate = `
 ## Fanout Data Schema
 
-Fanout stores telemetry in indexed hot segments and open Parquet files. DuckDB
-exposes the Parquet files through the read-only telemetry schema. The rebuildable
-query cache and product state live under {DATA_DIR}.
+Fanout stores telemetry in atomic Parquet batches with persistent trace indexes.
+DuckDB exposes the Parquet files through the read-only telemetry schema. The
+rebuildable query cache and product state live under {DATA_DIR}.
 
 Primary query surfaces:
 - spans view: clean span columns for most queries

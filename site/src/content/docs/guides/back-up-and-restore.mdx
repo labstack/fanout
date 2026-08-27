@@ -11,16 +11,16 @@ status: shipped
 Fanout is one process and one persistent data directory. Back up the directory
 as a unit.
 
-The directory holds the telemetry WAL, commit manifest, Parquet files,
-rebuildable query state, and the control SQLite database. Copying one
-subdirectory produces something that looks like a backup and does not restore.
+The directory holds atomic telemetry Parquet batches, rebuildable query state,
+and the control SQLite database. Copying one subdirectory produces something
+that looks like a backup and does not restore.
 
 ## Take a cold backup
 
 1. Record the running version and configuration, keeping secrets out of ordinary
    logs and tickets.
 2. Stop Fanout cleanly and wait for the process to exit. Shutdown closes both
-   OTLP listeners before draining the telemetry commit worker, so a clean exit
+   OTLP listeners before draining the telemetry commit workers, so a clean exit
    leaves no accepted request waiting for publication.
 3. Copy or snapshot the complete data directory, preserving ownership and
    permissions.

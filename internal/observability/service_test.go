@@ -330,9 +330,6 @@ func TestLogsAlwaysUseAuthoritativeParquet(t *testing.T) {
 	}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.repository.PruneHot(end.Add(time.Hour).UnixNano()); err != nil {
-		t.Fatal(err)
-	}
 	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
@@ -353,14 +350,13 @@ func TestLogsAlwaysUseAuthoritativeParquet(t *testing.T) {
 	}
 }
 
-func TestLogsAreIndependentOfSpanHotPruneBoundary(t *testing.T) {
+func TestLogsQueryParquetAcrossBatches(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	cutoff := start.Add(250 * time.Millisecond)
 	end := start.Add(time.Second)
 	if err := svc.repository.Commit(telemetrystore.Batch{ID: "overlap-newer", Logs: []telemetry.Log{
 		{Namespace: "prod", TimeUnixNanos: start.Add(150 * time.Millisecond).UnixNano(), Body: "newer-old", Severity: "INFO"},
-		{Namespace: "prod", TimeUnixNanos: start.Add(300 * time.Millisecond).UnixNano(), Body: "newer-hot", Severity: "INFO"},
+		{Namespace: "prod", TimeUnixNanos: start.Add(300 * time.Millisecond).UnixNano(), Body: "newer-batch", Severity: "INFO"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -370,13 +366,10 @@ func TestLogsAreIndependentOfSpanHotPruneBoundary(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.repository.PruneHot(cutoff.UnixNano()); err != nil {
-		t.Fatal(err)
-	}
 	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
 		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start.Add(300*time.Millisecond), "INFO", "", "newer-hot", "", "").
+			AddRow(start.Add(300*time.Millisecond), "INFO", "", "newer-batch", "", "").
 			AddRow(start.Add(200*time.Millisecond), "INFO", "", "late-boundary", "", "").
 			AddRow(start.Add(150*time.Millisecond), "INFO", "", "newer-old", "", "").
 			AddRow(start.Add(100*time.Millisecond), "INFO", "", "late-old", "", ""))
@@ -391,7 +384,7 @@ func TestLogsAreIndependentOfSpanHotPruneBoundary(t *testing.T) {
 	if len(result.Data.Entries) != 4 || result.Summary != "4 logs matched the selected telemetry window" {
 		t.Fatalf("boundary logs = %#v", result)
 	}
-	if result.Data.Entries[0].Body != "newer-hot" || result.Provenance.DataSource != "parquet" {
+	if result.Data.Entries[0].Body != "newer-batch" || result.Provenance.DataSource != "parquet" {
 		t.Fatalf("boundary result = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -429,14 +422,16 @@ func TestTraceLogsUseFullScopeEventTimeAcrossBatches(t *testing.T) {
 	}
 }
 
-func TestTraceUsesParquetWhenHotSegmentsMiss(t *testing.T) {
+func TestTraceUsesIndexedParquet(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	mock.ExpectQuery(regexp.QuoteMeta(traceSpansQuery)).
-		WithArgs("parquet-trace", start, end, "prod", "prod", 10).
-		WillReturnRows(sqlmock.NewRows([]string{"span_id", "parent_span_id", "service", "operation", "kind", "start_time", "duration_ms", "status", "status_message"}).
-			AddRow("root", "", "checkout", "pay", "SERVER", start, 25.0, "ERROR", "declined"))
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "indexed-trace", Spans: []telemetry.Span{{
+		Namespace: "prod", TraceID: "parquet-trace", SpanID: "root", ServiceName: "checkout", Name: "pay",
+		Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 25, StatusCode: "ERROR", StatusMsg: "declined",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
 		WithArgs("parquet-trace", start, end, "prod", "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
@@ -446,17 +441,19 @@ func TestTraceUsesParquetWhenHotSegmentsMiss(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(result.Data.Spans) != 1 || len(result.Data.Logs) != 1 || !result.Data.HasError {
-		t.Fatalf("Parquet trace detail = %#v", result.Data)
+		t.Fatalf("indexed Parquet trace detail = %#v", result.Data)
+	}
+	if result.Provenance.DataSource != "parquet_index" {
+		t.Fatalf("trace data source = %q", result.Provenance.DataSource)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestTraceUsesParquetWhenTraceStraddlesHotBoundary(t *testing.T) {
+func TestTraceCombinesIndexedSpansAcrossBatches(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	cutoff := start.Add(30 * time.Minute)
 	end := start.Add(time.Hour)
 	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-old-root", Spans: []telemetry.Span{{
 		Namespace: "prod", TraceID: "split-trace", SpanID: "root", ServiceName: "frontend",
@@ -464,20 +461,12 @@ func TestTraceUsesParquetWhenTraceStraddlesHotBoundary(t *testing.T) {
 	}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-hot-child", Spans: []telemetry.Span{{
+	if err := svc.repository.Commit(telemetrystore.Batch{ID: "trace-newer-child", Spans: []telemetry.Span{{
 		Namespace: "prod", TraceID: "split-trace", SpanID: "child", ParentSpanID: "root", ServiceName: "backend",
 		StartUnixNanos: start.Add(50 * time.Minute).UnixNano(), DurationMS: 25, StatusCode: "OK",
 	}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.repository.PruneHot(cutoff.UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(traceSpansQuery)).
-		WithArgs("split-trace", start, end, "prod", "prod", 10).
-		WillReturnRows(sqlmock.NewRows([]string{"span_id", "parent_span_id", "service", "operation", "kind", "start_time", "duration_ms", "status", "status_message"}).
-			AddRow("root", "", "frontend", "request", "SERVER", start.Add(10*time.Minute), 100.0, "ERROR", "failed").
-			AddRow("child", "root", "backend", "work", "CLIENT", start.Add(50*time.Minute), 25.0, "OK", ""))
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
 		WithArgs("split-trace", start, end, "prod", "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
@@ -485,15 +474,15 @@ func TestTraceUsesParquetWhenTraceStraddlesHotBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data.Spans) != 2 || !result.Data.HasError || len(result.Data.Services) != 2 || result.Provenance.DataSource != "parquet" {
-		t.Fatalf("straddling trace = %#v", result)
+	if len(result.Data.Spans) != 2 || !result.Data.HasError || len(result.Data.Services) != 2 || result.Provenance.DataSource != "parquet_index" {
+		t.Fatalf("multi-batch trace = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestTraceUsesRebuiltHotTierWhenRootIsAboveCutoff(t *testing.T) {
+func TestTraceReadsRecentRootFromParquetIndex(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	cutoff := start.Add(30 * time.Minute)
@@ -504,9 +493,6 @@ func TestTraceUsesRebuiltHotTierWhenRootIsAboveCutoff(t *testing.T) {
 	}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.repository.PruneHot(cutoff.UnixNano()); err != nil {
-		t.Fatal(err)
-	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
 		WithArgs("new-trace", start, end, "prod", "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
@@ -514,15 +500,15 @@ func TestTraceUsesRebuiltHotTierWhenRootIsAboveCutoff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "root" || result.Provenance.DataSource != "fanout_segments" {
-		t.Fatalf("rebuilt hot trace = %#v", result)
+	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "root" || result.Provenance.DataSource != "parquet_index" {
+		t.Fatalf("indexed trace = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestTraceDoesNotUseRootFromAnotherNamespaceAsHotCoverage(t *testing.T) {
+func TestTraceFiltersIndexedSpansByNamespace(t *testing.T) {
 	svc, mock := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	cutoff := start.Add(30 * time.Minute)
@@ -533,14 +519,6 @@ func TestTraceDoesNotUseRootFromAnotherNamespaceAsHotCoverage(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.repository.PruneHot(cutoff.UnixNano()); err != nil {
-		t.Fatal(err)
-	}
-	mock.ExpectQuery(regexp.QuoteMeta(traceSpansQuery)).
-		WithArgs("shared-trace", start, end, "prod", "prod", 10).
-		WillReturnRows(sqlmock.NewRows([]string{"span_id", "parent_span_id", "service", "operation", "kind", "start_time", "duration_ms", "status", "status_message"}).
-			AddRow("old-root", "", "frontend", "request", "SERVER", start.Add(10*time.Minute), 10.0, "OK", "").
-			AddRow("child", "old-root", "backend", "work", "CLIENT", cutoff.Add(time.Minute), 5.0, "OK", ""))
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
 		WithArgs("shared-trace", start, end, "prod", "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
@@ -548,8 +526,8 @@ func TestTraceDoesNotUseRootFromAnotherNamespaceAsHotCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Data.Spans) != 2 || result.Provenance.DataSource != "parquet" {
-		t.Fatalf("cross-namespace trace = %#v", result)
+	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "child" || result.Provenance.DataSource != "parquet_index" {
+		t.Fatalf("namespace-filtered trace = %#v", result)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -566,9 +544,6 @@ func TestLogsBoundsParquetQueryWithLimitAndAggregatedBuckets(t *testing.T) {
 		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
 		ServiceName: "checkout", Body: "hello", TraceID: "trace-parquet",
 	}}}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.repository.PruneHot(end.Add(time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 	// The sample query must carry the row limit so a wide window cannot stream

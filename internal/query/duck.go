@@ -71,7 +71,7 @@ const (
 )
 
 // rollupPublicationSafetyLag covers the maximum public SQL hold, publication
-// grace, bounded commit retries, and queued segment encoding with headroom for
+// grace, bounded commit retries, and queued Parquet encoding with headroom for
 // a busy disk. Rows stamped at request receipt remain inside the recomputed
 // tail until their Parquet commit becomes visible.
 const rollupPublicationSafetyLag = 5 * time.Minute
@@ -206,7 +206,6 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 	}
 
 	d := &Duck{DB: db, cfg: cfg, repository: repository, rollupLagNanos: int64(rollupPublicationSafetyLag)}
-	repository.SetParquetPublishLock(&d.parquetMu)
 	if cfg.DuckDBMemory == "" {
 		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
@@ -289,6 +288,10 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 }
 
 func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB, error) {
+	// Every pooled connection must use UTC. DuckDB otherwise inherits the host
+	// timezone and casts TIMESTAMPTZ rollup buckets into local wall-clock
+	// TIMESTAMP values, while API windows arrive in UTC.
+	//
 	// temp_directory is an instance-global setting: re-setting it after the temp
 	// dir has already been used fails with "Cannot switch temporary directory
 	// after the current one has been used". The boot hook runs once per pooled
@@ -298,6 +301,9 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 	var tempDirErr error
 
 	connector, err := duckdb.NewConnector(dsn, func(execer driver.ExecerContext) error {
+		if _, err := execer.ExecContext(ctx, "SET TimeZone='UTC'", nil); err != nil {
+			return fmt.Errorf("set timezone: %w", err)
+		}
 		tempDirOnce.Do(func() {
 			_, tempDirErr = execer.ExecContext(ctx, "SET temp_directory="+sqlLiteral(tempDir), nil)
 		})
@@ -439,11 +445,8 @@ func (d *Duck) runMaintenanceLoop(ctx context.Context) {
 
 func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	start := time.Now()
-	cutoff := time.Now().Add(-d.cfg.HotRetention).UnixNano()
 	var pruneErr error
 	if d.repository != nil {
-		_, pruneErr = d.repository.PruneHot(cutoff)
-		_, hotCompactErr := d.repository.CompactHot(64)
 		var parquetErr error
 		if d.cfg.RetentionDays > 0 {
 			d.parquetMu.Lock()
@@ -459,7 +462,7 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 			compactResult = metrics.TelemetrySuccess
 		}
 		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, compactResult, time.Since(compactStart).Seconds())
-		pruneErr = errors.Join(pruneErr, hotCompactErr, parquetErr, compactErr)
+		pruneErr = errors.Join(pruneErr, parquetErr, compactErr)
 	}
 	var cacheErr error
 	unlockMaintenance := d.writeGate.Lock(writegate.WriteMaintenance)

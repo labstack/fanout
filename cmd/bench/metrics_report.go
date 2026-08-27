@@ -292,8 +292,8 @@ func serverDelta(base, final *metricSnapshot, durationSeconds float64) *serverRe
 		}
 		return round2(value / durationSeconds)
 	}
-	lakePartitionsStart := base.total("fanout_parquet_files")
-	lakeSizeStart := base.total("fanout_parquet_size_bytes")
+	parquetFilesStart := base.total("fanout_parquet_files")
+	parquetSizeStart := base.total("fanout_parquet_size_bytes")
 	cpuSeconds := delta("process_cpu_seconds_total")
 	allocBytes := delta("go_memstats_alloc_bytes_total")
 	// process_start_time_seconds is constant for the life of a process, so a
@@ -311,13 +311,13 @@ func serverDelta(base, final *metricSnapshot, durationSeconds float64) *serverRe
 		RowsDroppedStart:         base.total("fanout_rows_dropped_total"),
 		RowsDroppedEnd:           final.total("fanout_rows_dropped_total"),
 		RowsDroppedDelta:         delta("fanout_rows_dropped_total"),
-		ParquetFilesStart:        lakePartitionsStart,
+		ParquetFilesStart:        parquetFilesStart,
 		ParquetFiles:             final.total("fanout_parquet_files"),
-		ParquetFilesDelta:        final.total("fanout_parquet_files") - lakePartitionsStart,
-		ParquetSizeBytesStart:    lakeSizeStart,
+		ParquetFilesDelta:        final.total("fanout_parquet_files") - parquetFilesStart,
+		ParquetSizeBytesStart:    parquetSizeStart,
 		ParquetSizeBytes:         final.total("fanout_parquet_size_bytes"),
-		ParquetSizeBytesDelta:    final.total("fanout_parquet_size_bytes") - lakeSizeStart,
-		ParquetGrowthBytesPerSec: rate(final.total("fanout_parquet_size_bytes") - lakeSizeStart),
+		ParquetSizeBytesDelta:    final.total("fanout_parquet_size_bytes") - parquetSizeStart,
+		ParquetGrowthBytesPerSec: rate(final.total("fanout_parquet_size_bytes") - parquetSizeStart),
 		IngestQueueDepth:         final.total("fanout_ingest_queue_depth"),
 		AvgRollupMs:              averageDurationMs(base, final, "fanout_rollup_duration_seconds"),
 		AvgFlushMs:               averageDurationMs(base, final, "fanout_flush_duration_seconds"),
