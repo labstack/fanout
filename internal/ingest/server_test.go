@@ -511,7 +511,7 @@ func TestTraceExportContextCancellation(t *testing.T) {
 	logs := make(chan telemetry.Log, 1)
 	metrics := make(chan telemetry.Metric, 1)
 
-	srv := NewServer(config.Config{}, spans, logs, metrics)
+	srv := NewServer(config.Config{}, newTestSubmitter(spans, logs, metrics))
 	ts := &traceService{srv: srv}
 
 	// Cancel the context before calling Export

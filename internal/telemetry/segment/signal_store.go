@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -23,6 +24,7 @@ const (
 	signalHeaderSize = 64
 	signalBlockSize  = 32
 	signalBlockRows  = 2048
+	signalMaxBlocks  = 1 << 20
 )
 
 var segmentIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
@@ -371,6 +373,140 @@ func (s *SignalStore[T]) SegmentCount() int {
 	return len(s.segments)
 }
 
+// CompactCommitted combines raw ingest segments known to be fully committed.
+// Compressed column blocks are copied verbatim, so compaction is independent of
+// row width and does not inflate the process heap.
+func (s *SignalStore[T]) CompactCommitted(committed map[string]struct{}, maxInputs int) (int, error) {
+	if maxInputs < 2 {
+		return 0, nil
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.mu.RLock()
+	selected := make([]signalSegment, 0, maxInputs)
+	rest := make([]signalSegment, 0, len(s.segments))
+	for _, seg := range s.segments {
+		if len(selected) < maxInputs {
+			if _, ok := committed[seg.id]; ok {
+				selected = append(selected, seg)
+				continue
+			}
+		}
+		rest = append(rest, seg)
+	}
+	s.mu.RUnlock()
+	if len(selected) < 2 {
+		return 0, nil
+	}
+	id := fmt.Sprintf("compact-%d", time.Now().UnixNano())
+	name := id + ".fseg"
+	tmp, final := filepath.Join(s.dir, name+".tmp"), filepath.Join(s.dir, name)
+	replacement, err := s.writeCompactedSegment(tmp, id, selected)
+	if err != nil {
+		return 0, err
+	}
+	if err := os.Rename(tmp, final); err != nil {
+		_ = os.Remove(tmp)
+		return 0, fmt.Errorf("publish compacted signal segment: %w", err)
+	}
+	if err := syncDir(s.dir); err != nil {
+		return 0, err
+	}
+	next := signalManifest{Version: signalVersion, Files: make([]string, 0, len(rest)+1)}
+	next.Files = append(next.Files, name)
+	for _, seg := range rest {
+		next.Files = append(next.Files, filepath.Base(seg.path))
+	}
+	if err := writeSignalManifest(s.dir, next); err != nil {
+		return 0, err
+	}
+	replacement.path = final
+	s.mu.Lock()
+	s.manifest = next
+	s.segments = append([]signalSegment{replacement}, rest...)
+	s.mu.Unlock()
+	var removeErr error
+	for _, seg := range selected {
+		if err := os.Remove(seg.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			removeErr = errors.Join(removeErr, err)
+		}
+	}
+	return len(selected), errors.Join(removeErr, syncDir(s.dir))
+}
+
+func (s *SignalStore[T]) writeCompactedSegment(path, id string, inputs []signalSegment) (signalSegment, error) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
+	if err != nil {
+		return signalSegment{}, fmt.Errorf("create compacted signal segment: %w", err)
+	}
+	ok := false
+	defer func() {
+		_ = f.Close()
+		if !ok {
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := f.Write(make([]byte, signalHeaderSize)); err != nil {
+		return signalSegment{}, err
+	}
+	replacement := signalSegment{id: id, min: math.MaxInt64, max: math.MinInt64, fieldCount: uint32(len(s.codec.fields)), fingerprint: s.codec.fingerprint}
+	offset := uint64(signalHeaderSize)
+	for _, input := range inputs {
+		source, err := os.Open(input.path)
+		if err != nil {
+			return signalSegment{}, err
+		}
+		for _, block := range input.blocks {
+			if _, err := io.CopyN(f, io.NewSectionReader(source, int64(block.offset), int64(block.length)), int64(block.length)); err != nil {
+				_ = source.Close()
+				return signalSegment{}, fmt.Errorf("copy compressed signal block: %w", err)
+			}
+			replacement.blocks = append(replacement.blocks, signalBlock{offset: offset, length: block.length, rows: block.rows, min: block.min, max: block.max})
+			offset += uint64(block.length)
+		}
+		if err := source.Close(); err != nil {
+			return signalSegment{}, err
+		}
+		replacement.rows += input.rows
+		replacement.min = min(replacement.min, input.min)
+		replacement.max = max(replacement.max, input.max)
+	}
+	dirOffset := offset
+	directory := make([]byte, len(replacement.blocks)*signalBlockSize)
+	for i, block := range replacement.blocks {
+		entry := directory[i*signalBlockSize:]
+		binary.LittleEndian.PutUint64(entry[0:8], block.offset)
+		binary.LittleEndian.PutUint32(entry[8:12], block.length)
+		binary.LittleEndian.PutUint32(entry[12:16], block.rows)
+		binary.LittleEndian.PutUint64(entry[16:24], uint64(block.min))
+		binary.LittleEndian.PutUint64(entry[24:32], uint64(block.max))
+	}
+	if _, err := f.Write(directory); err != nil {
+		return signalSegment{}, err
+	}
+	var header [signalHeaderSize]byte
+	copy(header[0:8], signalMagic)
+	binary.LittleEndian.PutUint32(header[8:12], signalVersion)
+	binary.LittleEndian.PutUint32(header[12:16], replacement.rows)
+	binary.LittleEndian.PutUint32(header[16:20], uint32(len(replacement.blocks)))
+	binary.LittleEndian.PutUint32(header[20:24], replacement.fieldCount)
+	binary.LittleEndian.PutUint64(header[24:32], uint64(replacement.min))
+	binary.LittleEndian.PutUint64(header[32:40], uint64(replacement.max))
+	binary.LittleEndian.PutUint64(header[40:48], dirOffset)
+	binary.LittleEndian.PutUint64(header[48:56], replacement.fingerprint)
+	if _, err := f.WriteAt(header[:], 0); err != nil {
+		return signalSegment{}, err
+	}
+	if err := f.Sync(); err != nil {
+		return signalSegment{}, err
+	}
+	if err := f.Close(); err != nil {
+		return signalSegment{}, err
+	}
+	ok = true
+	return replacement, nil
+}
+
 func (s *SignalStore[T]) PruneBefore(cutoff int64) (int, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
@@ -420,7 +556,7 @@ func validateSignalBlocks(size, dirOffset uint64, blocks []signalBlock, rows uin
 		if block.offset < signalHeaderSize || block.offset > dirOffset {
 			return errors.New("block offset outside the segment payload")
 		}
-		if block.length == 0 || uint64(block.length) > dirOffset-block.offset {
+		if block.length == 0 || uint64(block.length) > dirOffset-block.offset || uint64(block.length) > segmentMaxCompressedBytes {
 			return errors.New("block extends past the block directory")
 		}
 		if block.rows == 0 || block.rows > signalBlockRows {
@@ -440,6 +576,9 @@ func validateSignalBlocks(size, dirOffset uint64, blocks []signalBlock, rows uin
 // validateSignalDirectory bounds the block directory against the file size,
 // so a torn header cannot size an allocation the file could never hold.
 func validateSignalDirectory(size, dirOffset uint64, blockCount uint32) error {
+	if blockCount > signalMaxBlocks {
+		return errors.New("signal block count is out of range")
+	}
 	if dirOffset < signalHeaderSize || dirOffset > size {
 		return errors.New("corrupt directory offset")
 	}

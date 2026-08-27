@@ -30,6 +30,11 @@ type Batch struct {
 	Metrics []telemetry.Metric
 }
 
+const (
+	maxBatchRows        = 50_000
+	walDecoderMaxMemory = 128 << 20
+)
+
 type batchMetadata struct {
 	ID         string `json:"id"`
 	MinNanos   int64  `json:"min_nanos"`
@@ -79,20 +84,22 @@ func Open(root string) (*Repository, error) {
 			return nil, err
 		}
 	}
-	spans, err := segment.Open(filepath.Join(root, "hot", "spans"))
+	spans, logs, metricsStore, err := openHotStores(root)
+	hotRebuilt := false
 	if err != nil {
-		return nil, err
-	}
-	logs, err := segment.OpenSignalStore[telemetry.Log](filepath.Join(root, "hot", "logs"), "EventUnixNanos")
-	if err != nil {
-		_ = spans.Close()
-		return nil, err
-	}
-	metricsStore, err := segment.OpenSignalStore[telemetry.Metric](filepath.Join(root, "hot", "metrics"), "EventUnixNanos")
-	if err != nil {
-		_ = logs.Close()
-		_ = spans.Close()
-		return nil, err
+		quarantine := filepath.Join(root, fmt.Sprintf("hot.corrupt-%d", time.Now().UnixNano()))
+		if renameErr := os.Rename(filepath.Join(root, "hot"), quarantine); renameErr != nil {
+			return nil, errors.Join(fmt.Errorf("open hot telemetry tier: %w", err), fmt.Errorf("quarantine corrupt hot tier: %w", renameErr))
+		}
+		if syncErr := syncDirectory(root); syncErr != nil {
+			return nil, fmt.Errorf("sync quarantined hot tier: %w", syncErr)
+		}
+		spans, logs, metricsStore, err = openHotStores(root)
+		if err != nil {
+			return nil, fmt.Errorf("rebuild hot telemetry tier: %w", err)
+		}
+		hotRebuilt = true
+		slog.Warn("corrupt hot telemetry tier quarantined and rebuilt from authoritative Parquet", "path", quarantine)
 	}
 	parquet, err := telemetry.OpenParquetStore(filepath.Join(root, "parquet"))
 	if err != nil {
@@ -106,6 +113,13 @@ func Open(root string) (*Repository, error) {
 		_ = r.Close()
 		return nil, fmt.Errorf("load telemetry manifest: %w", err)
 	}
+	if hotRebuilt {
+		r.manifest.HotCutoffNanos = max(r.manifest.HotCutoffNanos, time.Now().UnixNano())
+		if err := writeRepositoryManifest(r.root, r.manifest); err != nil {
+			_ = r.Close()
+			return nil, fmt.Errorf("publish rebuilt hot-tier cutoff: %w", err)
+		}
+	}
 	if err := r.recoverCompaction(); err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("recover parquet compaction: %w", err)
@@ -115,6 +129,31 @@ func Open(root string) (*Repository, error) {
 		return nil, fmt.Errorf("recover telemetry WAL: %w", err)
 	}
 	return r, nil
+}
+
+func openHotStores(root string) (*segment.Store, *segment.SignalStore[telemetry.Log], *segment.SignalStore[telemetry.Metric], error) {
+	hot := filepath.Join(root, "hot")
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		if err := os.MkdirAll(filepath.Join(hot, signal), 0o755); err != nil {
+			return nil, nil, nil, err
+		}
+	}
+	spans, err := segment.Open(filepath.Join(hot, "spans"))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	logs, err := segment.OpenSignalStore[telemetry.Log](filepath.Join(hot, "logs"), "EventUnixNanos")
+	if err != nil {
+		_ = spans.Close()
+		return nil, nil, nil, err
+	}
+	metricsStore, err := segment.OpenSignalStore[telemetry.Metric](filepath.Join(hot, "metrics"), "EventUnixNanos")
+	if err != nil {
+		_ = logs.Close()
+		_ = spans.Close()
+		return nil, nil, nil, err
+	}
+	return spans, logs, metricsStore, nil
 }
 
 func (r *Repository) Close() error {
@@ -153,6 +192,56 @@ func (r *Repository) PruneHot(cutoff int64) (int, error) {
 	logs, logErr := r.Logs.PruneBefore(cutoff)
 	metricRows, metricErr := r.Metrics.PruneBefore(cutoff)
 	return spans + logs + metricRows, errors.Join(spanErr, logErr, metricErr)
+}
+
+// CompactHot drains committed raw segments into larger immutable files for all
+// three signals. It intentionally excludes any segment not present in the
+// repository manifest, because that file may belong to a partially applied WAL
+// transaction that still needs exact-ID replay.
+func (r *Repository) CompactHot(maxInputs int) (int, error) {
+	if maxInputs < 2 {
+		return 0, nil
+	}
+	r.hotMu.Lock()
+	defer r.hotMu.Unlock()
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
+	r.mu.RLock()
+	committed := make(map[string]struct{}, len(r.manifest.Batches))
+	for _, batch := range r.manifest.Batches {
+		committed[batch.ID] = struct{}{}
+		for _, source := range batch.Sources {
+			committed[source] = struct{}{}
+		}
+	}
+	r.mu.RUnlock()
+	total := 0
+	var compactErr error
+	for {
+		n, err := r.Spans.CompactCommitted(committed, maxInputs)
+		total += n
+		compactErr = errors.Join(compactErr, err)
+		if err != nil || n < 2 {
+			break
+		}
+	}
+	for {
+		n, err := r.Logs.CompactCommitted(committed, maxInputs)
+		total += n
+		compactErr = errors.Join(compactErr, err)
+		if err != nil || n < 2 {
+			break
+		}
+	}
+	for {
+		n, err := r.Metrics.CompactCommitted(committed, maxInputs)
+		total += n
+		compactErr = errors.Join(compactErr, err)
+		if err != nil || n < 2 {
+			break
+		}
+	}
+	return total, compactErr
 }
 
 // ScanHotLogs reads the portion of [start,end) that is guaranteed complete in
@@ -226,10 +315,10 @@ func (r *Repository) PruneParquet(cutoff int64) (int, error) {
 // Commit durably records a batch and publishes its three signal projections
 // exactly once. A crash at any point leaves the WAL for replay on next boot.
 func (r *Repository) Commit(batch Batch) error {
+	normalizeBatch(&batch)
 	if err := validateBatch(batch); err != nil {
 		return err
 	}
-	normalizeBatch(&batch)
 	// Commits are serialized, but their segment and Parquet fsyncs do not hold
 	// the repository metadata lock. Each projection has its own atomic publish
 	// protocol; the WAL keeps a partially applied transaction replayable.
@@ -258,10 +347,10 @@ func (r *Repository) Commit(batch Batch) error {
 // Writers call this before handing a batch to an asynchronous commit worker, so
 // every queued or in-flight batch is replayable if shutdown interrupts retries.
 func (r *Repository) Stage(batch Batch) error {
+	normalizeBatch(&batch)
 	if err := validateBatch(batch); err != nil {
 		return err
 	}
-	normalizeBatch(&batch)
 	r.commitMu.Lock()
 	defer r.commitMu.Unlock()
 	consumed := r.batchConsumedLocked(batch.ID)
@@ -280,6 +369,12 @@ func validateBatch(batch Batch) error {
 	}
 	if !segment.ValidID(batch.ID) {
 		return fmt.Errorf("telemetry batch ID %q cannot name a segment", batch.ID)
+	}
+	if rows := len(batch.Spans) + len(batch.Logs) + len(batch.Metrics); rows > maxBatchRows {
+		return fmt.Errorf("telemetry batch has %d rows; maximum is %d", rows, maxBatchRows)
+	}
+	if err := segment.ValidateSpanRows(batch.Spans); err != nil {
+		return fmt.Errorf("telemetry batch cannot be represented by the hot span tier: %w", err)
 	}
 	return nil
 }
@@ -313,16 +408,10 @@ func (r *Repository) writeWAL(batch Batch) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	var plain bytes.Buffer
-	if err := gob.NewEncoder(&plain).Encode(batch); err != nil {
-		return err
-	}
-	enc, err := zstd.NewWriter(nil, zstd.WithEncoderCRC(true), zstd.WithEncoderConcurrency(1))
+	data, err := encodeWALBatch(batch, walDecoderMaxMemory)
 	if err != nil {
 		return err
 	}
-	data := enc.EncodeAll(plain.Bytes(), nil)
-	enc.Close()
 	tmp := final + ".tmp"
 	_ = os.Remove(tmp)
 	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -346,15 +435,30 @@ func (r *Repository) writeWAL(batch Batch) error {
 	return syncDirectory(r.walDir)
 }
 
-// walDecoderMaxMemory bounds one decompressed WAL batch. Flush batches are
-// bounded by the writer's batch size, so this sits far above any batch the
-// writer produces while refusing a corrupt or crafted frame long before zstd's
-// 64 GiB default would.
-const walDecoderMaxMemory = 1 << 30
+func encodeWALBatch(batch Batch, maxDecodedBytes int) ([]byte, error) {
+	var plain bytes.Buffer
+	if err := gob.NewEncoder(&plain).Encode(batch); err != nil {
+		return nil, err
+	}
+	if plain.Len() > maxDecodedBytes {
+		return nil, fmt.Errorf("telemetry batch encodes to %d bytes; maximum is %d", plain.Len(), maxDecodedBytes)
+	}
+	enc, err := zstd.NewWriter(nil, zstd.WithEncoderCRC(true), zstd.WithEncoderConcurrency(1))
+	if err != nil {
+		return nil, err
+	}
+	data := enc.EncodeAll(plain.Bytes(), nil)
+	enc.Close()
+	return data, nil
+}
 
 // newWALDecoder builds the bounded decoder every WAL read goes through.
 func newWALDecoder() (*zstd.Decoder, error) {
-	return zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(walDecoderMaxMemory))
+	return newWALDecoderWithLimit(walDecoderMaxMemory)
+}
+
+func newWALDecoderWithLimit(limit uint64) (*zstd.Decoder, error) {
+	return zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(limit))
 }
 
 func (r *Repository) recover() error {
@@ -405,6 +509,7 @@ func (r *Repository) recover() error {
 		// so the WAL is retained and startup fails loudly — a later healthy boot
 		// must still be able to finish the batch, including one whose projection
 		// prefix this attempt already published.
+		normalizeBatch(&batch)
 		if err := validateBatch(batch); err != nil {
 			if quarantineErr := quarantineWAL(r.walDir, name, err); quarantineErr != nil {
 				return errors.Join(fmt.Errorf("replay %s: %w", name, err), quarantineErr)
@@ -489,6 +594,9 @@ func (r *Repository) batchConsumed(id string) bool {
 
 func (r *Repository) batchConsumedLocked(id string) bool {
 	for _, batch := range r.manifest.Batches {
+		if batch.ID == id {
+			return true
+		}
 		for _, source := range batch.Sources {
 			if source == id {
 				return true

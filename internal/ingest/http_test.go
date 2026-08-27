@@ -53,7 +53,7 @@ func newHTTPIngestFixture(t *testing.T, configured bool) *httpIngestFixture {
 	spans := make(chan telemetry.Span, 8)
 	logs := make(chan telemetry.Log, 8)
 	metrics := make(chan telemetry.Metric, 8)
-	srv := NewServer(config.Config{DefaultNamespace: "default"}, spans, logs, metrics)
+	srv := NewServer(config.Config{DefaultNamespace: "default"}, newTestSubmitter(spans, logs, metrics))
 	return &httpIngestFixture{
 		handler: NewHTTPHandler(srv, store),
 		token:   token,
@@ -268,7 +268,7 @@ func TestHTTPAndGRPCPathsProduceEquivalentRows(t *testing.T) {
 	t.Run("traces", func(t *testing.T) {
 		request := testTraceRequest()
 		grpcRows := make(chan telemetry.Span, 1)
-		grpcSrv := NewServer(config.Config{DefaultNamespace: "default"}, grpcRows, make(chan telemetry.Log, 1), make(chan telemetry.Metric, 1))
+		grpcSrv := NewServer(config.Config{DefaultNamespace: "default"}, newTestSubmitter(grpcRows, make(chan telemetry.Log, 1), make(chan telemetry.Metric, 1)))
 		if _, err := grpcSrv.exportTraces(context.Background(), request); err != nil {
 			t.Fatal(err)
 		}
@@ -285,7 +285,7 @@ func TestHTTPAndGRPCPathsProduceEquivalentRows(t *testing.T) {
 	t.Run("logs", func(t *testing.T) {
 		request := testLogsRequest()
 		grpcRows := make(chan telemetry.Log, 1)
-		grpcSrv := NewServer(config.Config{DefaultNamespace: "default"}, make(chan telemetry.Span, 1), grpcRows, make(chan telemetry.Metric, 1))
+		grpcSrv := NewServer(config.Config{DefaultNamespace: "default"}, newTestSubmitter(make(chan telemetry.Span, 1), grpcRows, make(chan telemetry.Metric, 1)))
 		if _, err := grpcSrv.exportLogs(context.Background(), request); err != nil {
 			t.Fatal(err)
 		}
@@ -302,7 +302,7 @@ func TestHTTPAndGRPCPathsProduceEquivalentRows(t *testing.T) {
 	t.Run("metrics", func(t *testing.T) {
 		request := testMetricsRequest()
 		grpcRows := make(chan telemetry.Metric, 1)
-		grpcSrv := NewServer(config.Config{DefaultNamespace: "default"}, make(chan telemetry.Span, 1), make(chan telemetry.Log, 1), grpcRows)
+		grpcSrv := NewServer(config.Config{DefaultNamespace: "default"}, newTestSubmitter(make(chan telemetry.Span, 1), make(chan telemetry.Log, 1), grpcRows))
 		if _, err := grpcSrv.exportMetrics(context.Background(), request); err != nil {
 			t.Fatal(err)
 		}

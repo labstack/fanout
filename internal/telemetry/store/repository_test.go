@@ -661,18 +661,97 @@ func TestStageRejectsBatchTheSegmentStoresCannotAccept(t *testing.T) {
 }
 
 func TestWALDecoderRejectsOversizedFrame(t *testing.T) {
+	const testLimit = 64 << 10
 	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer encoder.Close()
-	frame := encoder.EncodeAll(make([]byte, walDecoderMaxMemory+(1<<20)), nil)
-	decoder, err := newWALDecoder()
+	frame := encoder.EncodeAll(make([]byte, testLimit+(1<<10)), nil)
+	decoder, err := newWALDecoderWithLimit(testLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer decoder.Close()
 	if _, err := decoder.DecodeAll(frame, nil); err == nil {
 		t.Fatal("WAL decoder accepted a frame declaring more memory than any batch needs")
+	}
+}
+
+func TestWALWriterRejectsBatchLargerThanDecoderBudget(t *testing.T) {
+	batch := Batch{ID: "large", Logs: []telemetry.Log{{Body: strings.Repeat("x", 2048)}}}
+	if _, err := encodeWALBatch(batch, 1024); err == nil {
+		t.Fatal("WAL writer produced a frame its paired decoder budget could not reopen")
+	}
+}
+
+func TestCompactHotCompactsEverySignalAndPreservesRows(t *testing.T) {
+	repository, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	for i := range 6 {
+		now := int64(100 + i)
+		batch := Batch{
+			ID:      fmt.Sprintf("batch-%d", i),
+			Spans:   []telemetry.Span{{TraceID: "trace", SpanID: fmt.Sprintf("span-%d", i), StartUnixNanos: now, IngestedAt: now}},
+			Logs:    []telemetry.Log{{Body: fmt.Sprintf("log-%d", i), EventUnixNanos: now, IngestedAt: now}},
+			Metrics: []telemetry.Metric{{Name: "requests", EventUnixNanos: now, IngestedAt: now}},
+		}
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repository.CompactHot(3); err != nil {
+		t.Fatal(err)
+	}
+	if got := repository.Spans.SegmentCount(); got != 2 {
+		t.Fatalf("span segments = %d, want 2 compacted files", got)
+	}
+	if got := repository.Logs.SegmentCount(); got != 2 {
+		t.Fatalf("log segments = %d, want 2 compacted files", got)
+	}
+	if got := repository.Metrics.SegmentCount(); got != 2 {
+		t.Fatalf("metric segments = %d, want 2 compacted files", got)
+	}
+	if repository.Spans.RowCount() != 6 || repository.Logs.RowCount() != 6 || repository.Metrics.RowCount() != 6 {
+		t.Fatal("hot compaction changed row counts")
+	}
+}
+
+func TestOpenQuarantinesCorruptDisposableHotTier(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := Batch{ID: "committed", Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 100, IngestedAt: 100}}}
+	if err := repository.Commit(batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "hot", "spans", "committed.fseg"), []byte("corrupt"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open failed on disposable hot corruption: %v", err)
+	}
+	defer reopened.Close()
+	if got := reopened.Spans.RowCount(); got != 0 {
+		t.Fatalf("rebuilt hot rows = %d, want empty acceleration tier", got)
+	}
+	if reopened.manifest.HotCutoffNanos == 0 {
+		t.Fatal("rebuilt hot tier did not move the authoritative boundary to Parquet")
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "hot.corrupt-*"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("hot quarantine paths = %v, err = %v", matches, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "parquet", "spans", "committed.parquet")); err != nil {
+		t.Fatalf("authoritative Parquet was not preserved: %v", err)
 	}
 }

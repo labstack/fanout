@@ -25,13 +25,16 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
+type batchSubmitter interface {
+	Submit(context.Context, telemetrystore.Batch) error
+}
+
 type Server struct {
-	cfg        config.Config
-	outSpans   chan<- telemetry.Span
-	outLogs    chan<- telemetry.Log
-	outMetrics chan<- telemetry.Metric
+	cfg       config.Config
+	submitter batchSubmitter
 }
 
 type traceService struct {
@@ -49,8 +52,8 @@ type metricsService struct {
 	srv *Server
 }
 
-func NewServer(cfg config.Config, spans chan<- telemetry.Span, logs chan<- telemetry.Log, metrics chan<- telemetry.Metric) *Server {
-	return &Server{cfg: cfg, outSpans: spans, outLogs: logs, outMetrics: metrics}
+func NewServer(cfg config.Config, submitter batchSubmitter) *Server {
+	return &Server{cfg: cfg, submitter: submitter}
 }
 
 func RegisterOTLP(s grpc.ServiceRegistrar, srv *Server) {
@@ -68,6 +71,7 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTraceServiceRequest) (*collectortrace.ExportTraceServiceResponse, error) {
 	cfg := s.cfg
 	now := time.Now().UnixNano()
+	batch := telemetrystore.Batch{}
 	for _, rs := range req.ResourceSpans {
 		resourceJSON := resourceAttrsJSON(rs.Resource)
 		svc := getServiceName(rs.Resource)
@@ -115,14 +119,12 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 				excType, excMsg := extractException(sp.Events)
 				row.ExceptionType = excType
 				row.ExceptionMessage = excMsg
-				// Partial ingest is acceptable: OTLP clients retry the full batch on error.
-				select {
-				case s.outSpans <- row:
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
+				batch.Spans = append(batch.Spans, row)
 			}
 		}
+	}
+	if err := s.submitter.Submit(ctx, batch); err != nil {
+		return nil, err
 	}
 	return &collectortrace.ExportTraceServiceResponse{}, nil
 }
@@ -136,6 +138,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsServiceRequest) (*collectorlogs.ExportLogsServiceResponse, error) {
 	cfg := s.cfg
 	now := time.Now().UnixNano()
+	batch := telemetrystore.Batch{}
 	for _, rl := range req.ResourceLogs {
 		resourceJSON := resourceAttrsJSON(rl.Resource)
 		svc := getServiceName(rl.Resource)
@@ -166,13 +169,12 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 					ScopeVersion:      scopeVer,
 					IngestedAt:        now,
 				}
-				select {
-				case s.outLogs <- row:
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
+				batch.Logs = append(batch.Logs, row)
 			}
 		}
+	}
+	if err := s.submitter.Submit(ctx, batch); err != nil {
+		return nil, err
 	}
 	return &collectorlogs.ExportLogsServiceResponse{}, nil
 }
@@ -186,6 +188,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.ExportMetricsServiceRequest) (*collectormetrics.ExportMetricsServiceResponse, error) {
 	cfg := s.cfg
 	now := time.Now().UnixNano()
+	batch := telemetrystore.Batch{}
 	for _, rm := range req.ResourceMetrics {
 		resourceJSON := resourceAttrsJSON(rm.Resource)
 		svc := getServiceName(rm.Resource)
@@ -215,11 +218,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Sum:
 					kind := "sum"
@@ -243,11 +242,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Histogram:
 					for _, dp := range d.Histogram.DataPoints {
@@ -274,11 +269,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_ExponentialHistogram:
 					for _, dp := range d.ExponentialHistogram.DataPoints {
@@ -305,11 +296,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Summary:
 					for _, dp := range d.Summary.DataPoints {
@@ -331,15 +318,14 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				}
 			}
 		}
+	}
+	if err := s.submitter.Submit(ctx, batch); err != nil {
+		return nil, err
 	}
 	return &collectormetrics.ExportMetricsServiceResponse{}, nil
 }

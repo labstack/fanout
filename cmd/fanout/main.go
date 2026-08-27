@@ -41,7 +41,6 @@ import (
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
-	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/labstack/fanout/internal/ui"
 )
@@ -96,11 +95,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Channels for OTLP decoding → the single authoritative telemetry writer.
-	chSpans := make(chan telemetry.Span, 10000)
-	chLogs := make(chan telemetry.Log, 10000)
-	chMetrics := make(chan telemetry.Metric, 10000)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -126,7 +120,7 @@ func main() {
 	}
 	defer q.Close()
 
-	writer := telemetrystore.NewWriter(repository, cfg.FlushInterval, cfg.FlushBatchSize, chSpans, chLogs, chMetrics)
+	writer := telemetrystore.NewWriter(repository, cfg.FlushInterval, cfg.FlushBatchSize, nil, nil, nil)
 	writerResult := make(chan error, 1)
 	go func() {
 		err := writer.Run(ctx)
@@ -200,7 +194,7 @@ func main() {
 		os.Exit(1)
 	}
 	grpcSrv := grpc.NewServer(grpcOpts...)
-	ing := ingest.NewServer(cfg, chSpans, chLogs, chMetrics)
+	ing := ingest.NewServer(cfg, writer)
 	ingest.RegisterOTLP(grpcSrv, ing)
 	otlpHTTPLis, err := net.Listen("tcp", cfg.OTLPHTTPAddr)
 	if err != nil {

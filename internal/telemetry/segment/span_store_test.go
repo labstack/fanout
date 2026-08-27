@@ -2,6 +2,8 @@
 package segment
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/binary"
 	"github.com/klauspost/compress/zstd"
 	"os"
@@ -366,18 +368,38 @@ func TestValidateSegmentBlocksRejectsRowsPastBlockCap(t *testing.T) {
 }
 
 func TestSegmentDecoderRejectsOversizedFrame(t *testing.T) {
+	const testLimit = 64 << 10
 	encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer encoder.Close()
-	frame := encoder.EncodeAll(make([]byte, segmentDecoderMaxMemory+(1<<20)), nil)
-	decoder, err := newSegmentDecoder()
+	frame := encoder.EncodeAll(make([]byte, testLimit+(1<<10)), nil)
+	decoder, err := newSegmentDecoderWithLimit(testLimit)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer decoder.Close()
 	if _, err := decoder.DecodeAll(frame, nil); err == nil {
 		t.Fatal("segment decoder accepted a frame declaring more memory than the product ever needs")
+	}
+}
+
+func TestReadRollupRejectsLengthBeforeAllocating(t *testing.T) {
+	payload := make([]byte, 160, 170)
+	payload = binary.AppendUvarint(payload, 9)
+	if _, err := readRollupWithLimit(bufio.NewReader(bytes.NewReader(payload)), 8); err == nil {
+		t.Fatal("readRollup accepted a disk-controlled allocation above its budget")
+	}
+}
+
+func TestValidateSpanRowsRejectsUnreopenableRollups(t *testing.T) {
+	rows := []Span{{HTTPRoute: "123456789"}}
+	if err := validateSpanRowsWithLimits(rows, 8, 1024); err == nil {
+		t.Fatal("validator accepted a rollup key larger than the reader budget")
+	}
+	rows = []Span{{HTTPRoute: "a"}, {HTTPRoute: "b"}}
+	if err := validateSpanRowsWithLimits(rows, 1024, 200); err == nil {
+		t.Fatal("validator accepted a rollup section larger than the decoder budget")
 	}
 }

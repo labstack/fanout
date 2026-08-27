@@ -436,6 +436,7 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	var pruneErr error
 	if d.repository != nil {
 		_, pruneErr = d.repository.PruneHot(cutoff)
+		_, hotCompactErr := d.repository.CompactHot(64)
 		var parquetErr error
 		if d.cfg.RetentionDays > 0 {
 			d.parquetMu.Lock()
@@ -451,7 +452,7 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 			compactResult = metrics.TelemetrySuccess
 		}
 		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, compactResult, time.Since(compactStart).Seconds())
-		pruneErr = errors.Join(pruneErr, parquetErr, compactErr)
+		pruneErr = errors.Join(pruneErr, hotCompactErr, parquetErr, compactErr)
 	}
 	var cacheErr error
 	unlockMaintenance := d.writeGate.Lock(writegate.WriteMaintenance)

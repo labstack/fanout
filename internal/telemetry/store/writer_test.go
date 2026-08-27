@@ -22,6 +22,84 @@ type recoveringCommitter struct {
 	batches  []Batch
 }
 
+type blockingStageCommitter struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (c *blockingStageCommitter) Stage(Batch) error {
+	close(c.entered)
+	<-c.release
+	return nil
+}
+
+func (c *blockingStageCommitter) Commit(Batch) error { return nil }
+
+func TestWriterAcknowledgesSubmissionOnlyAfterDurableStage(t *testing.T) {
+	committer := &blockingStageCommitter{entered: make(chan struct{}), release: make(chan struct{})}
+	w := &Writer{repository: committer, interval: time.Hour, batchSize: 50_000, done: make(chan struct{}), submissions: make(chan submission, 1)}
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(ctx) }()
+	submitDone := make(chan error, 1)
+	go func() {
+		submitDone <- w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}}})
+	}()
+	select {
+	case <-committer.entered:
+	case <-time.After(time.Second):
+		t.Fatal("Stage was not called")
+	}
+	select {
+	case err := <-submitDone:
+		t.Fatalf("Submit returned before Stage completed: %v", err)
+	default:
+	}
+	close(committer.release)
+	if err := <-submitDone; err != nil {
+		t.Fatalf("Submit error = %v", err)
+	}
+	cancel()
+	if err := <-runDone; err != nil {
+		t.Fatalf("Run error = %v", err)
+	}
+}
+
+func TestWriterGroupCommitsConcurrentSubmissions(t *testing.T) {
+	committer := &recoveringCommitter{}
+	w := &Writer{repository: committer, interval: time.Hour, batchSize: 50_000, done: make(chan struct{}), submissions: make(chan submission, 4)}
+	results := make(chan error, 2)
+	for i := range 2 {
+		go func() {
+			results <- w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: fmt.Sprintf("span-%d", i)}}})
+		}()
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(w.submissions) != 2 {
+		if time.Now().After(deadline) {
+			t.Fatal("submissions were not queued")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	runDone := make(chan error, 1)
+	go func() { runDone <- w.Run(ctx) }()
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+	cancel()
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
+	}
+	committer.mu.Lock()
+	defer committer.mu.Unlock()
+	if len(committer.staged) != 1 || len(committer.staged[0].Spans) != 2 {
+		t.Fatalf("staged batches = %#v, want one two-row group commit", committer.staged)
+	}
+}
+
 func (c *recoveringCommitter) Stage(batch Batch) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -138,7 +216,7 @@ func TestWriterShutdownReplaysEveryStagedBatch(t *testing.T) {
 	}
 }
 
-func TestWriterDropsPoisonBatchAfterBoundedRetries(t *testing.T) {
+func TestWriterSurfacesPermanentCommitFailureAfterBoundedRetries(t *testing.T) {
 	spans := make(chan telemetry.Span, 1)
 	logs := make(chan telemetry.Log)
 	metricRows := make(chan telemetry.Metric)
@@ -152,8 +230,8 @@ func TestWriterDropsPoisonBatchAfterBoundedRetries(t *testing.T) {
 		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
 		retryDelay: func(int) time.Duration { return 0 },
 	}
-	if err := w.Run(context.Background()); err != nil {
-		t.Fatalf("Run error = %v", err)
+	if err := w.Run(context.Background()); err == nil {
+		t.Fatal("Run returned nil after permanent commit failure")
 	}
 	if committer.calls != commitRetryLimit {
 		t.Fatalf("Commit calls = %d, want %d", committer.calls, commitRetryLimit)
@@ -280,8 +358,8 @@ func TestWriterKeepsWALWhenCommitRetriesAreExhausted(t *testing.T) {
 		spans: spans, logs: logs, metricRows: metricRows, done: make(chan struct{}),
 		retryDelay: func(int) time.Duration { return 0 },
 	}
-	if err := w.Run(context.Background()); err != nil {
-		t.Fatalf("Run error = %v", err)
+	if err := w.Run(context.Background()); err == nil {
+		t.Fatal("Run returned nil after permanent commit failure")
 	}
 	entries, err := os.ReadDir(filepath.Join(dir, "wal"))
 	if err != nil {

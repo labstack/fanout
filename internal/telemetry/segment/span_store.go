@@ -30,12 +30,21 @@ import (
 // claim. A block holds at most rowsPerBlock rows and a section is decoded whole,
 // so this is far above any sound file while refusing a corrupt or crafted frame
 // long before zstd's 64 GiB default would.
-const segmentDecoderMaxMemory = 512 << 20
+const (
+	segmentDecoderMaxMemory   = 128 << 20
+	maxRollupKeyBytes         = 32 << 20
+	segmentMaxCompressedBytes = segmentDecoderMaxMemory + (1 << 20)
+	segmentMaxBlocks          = 1 << 20
+)
 
 // newSegmentDecoder builds a decoder bounded to segmentDecoderMaxMemory. Every
 // segment read goes through it, so no on-disk frame can size an allocation.
 func newSegmentDecoder() (*zstd.Decoder, error) {
-	return zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(segmentDecoderMaxMemory))
+	return newSegmentDecoderWithLimit(segmentDecoderMaxMemory)
+}
+
+func newSegmentDecoderWithLimit(limit uint64) (*zstd.Decoder, error) {
+	return zstd.NewReader(nil, zstd.WithDecoderConcurrency(1), zstd.WithDecoderMaxMemory(limit))
 }
 
 const (
@@ -50,6 +59,42 @@ const (
 )
 
 type Span = telemetry.Span
+
+// ValidateSpanRows rejects rows whose derived rollup representation could not
+// be reopened within the production decoder budget. It must run before WAL
+// staging so deterministic format errors never become boot-blocking WALs.
+func ValidateSpanRows(rows []Span) error {
+	return validateSpanRowsWithLimits(rows, maxRollupKeyBytes, segmentDecoderMaxMemory)
+}
+
+func validateSpanRowsWithLimits(rows []Span, maxKeyBytes, maxSectionBytes uint64) error {
+	keys := make(map[rollupKey]struct{}, len(rows))
+	var sectionBytes uint64
+	for _, row := range rows {
+		key := rollupKey{
+			bucket:    row.StartUnixNanos - row.StartUnixNanos%int64(rollupWindow),
+			namespace: row.Namespace, service: row.ServiceName, method: row.HTTPMethod, route: row.HTTPRoute,
+		}
+		if _, exists := keys[key]; exists {
+			continue
+		}
+		keys[key] = struct{}{}
+		keyBytes := uint64(len(key.namespace)) + uint64(len(key.service)) + uint64(len(key.method)) + uint64(len(key.route))
+		if keyBytes > maxKeyBytes {
+			return fmt.Errorf("span rollup key uses %d bytes; maximum is %d", keyBytes, maxKeyBytes)
+		}
+		size := uint64(160)
+		var scratch [binary.MaxVarintLen64]byte
+		for _, value := range []string{key.namespace, key.service, key.method, key.route} {
+			size += uint64(binary.PutUvarint(scratch[:], uint64(len(value)))) + uint64(len(value))
+		}
+		if size > maxSectionBytes-sectionBytes {
+			return fmt.Errorf("span rollups exceed %d-byte decoder budget", maxSectionBytes)
+		}
+		sectionBytes += size
+	}
+	return nil
+}
 
 type Endpoint struct {
 	Service   string
@@ -306,8 +351,46 @@ func (s *Store) CompactOldest(count int) error {
 	old := append([]segment(nil), s.segments[:count]...)
 	rest := append([]segment(nil), s.segments[count:]...)
 	current := s.manifest
-	id := current.NextID
 	s.mu.RUnlock()
+	return s.compactSegments(old, rest, current)
+}
+
+// CompactCommitted compacts only raw ingest segments whose batch IDs are in
+// the authoritative repository manifest. A partially applied WAL is therefore
+// never folded into a replacement that could defeat replay idempotence.
+func (s *Store) CompactCommitted(committed map[string]struct{}, maxInputs int) (int, error) {
+	if maxInputs < 2 {
+		return 0, nil
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.mu.RLock()
+	current := s.manifest
+	selected := make([]segment, 0, maxInputs)
+	rest := make([]segment, 0, len(s.segments))
+	for _, seg := range s.segments {
+		id := strings.TrimSuffix(filepath.Base(seg.path), ".fseg")
+		if len(selected) < maxInputs {
+			if _, ok := committed[id]; ok {
+				selected = append(selected, seg)
+				continue
+			}
+		}
+		rest = append(rest, seg)
+	}
+	s.mu.RUnlock()
+	if len(selected) < 2 {
+		return 0, nil
+	}
+	if err := s.compactSegments(selected, rest, current); err != nil {
+		return 0, err
+	}
+	return len(selected), nil
+}
+
+// compactSegments publishes a replacement while writeMu is held.
+func (s *Store) compactSegments(old, rest []segment, current manifest) error {
+	id := current.NextID
 
 	name := fmt.Sprintf("%020d.fseg", id)
 	tmp, final := filepath.Join(s.dir, name+".tmp"), filepath.Join(s.dir, name)
@@ -391,6 +474,9 @@ func (s *Store) PruneBefore(cutoff int64) (int, error) {
 }
 
 func (s *Store) writeSegment(path string, rows []Span) (segment, error) {
+	if err := ValidateSpanRows(rows); err != nil {
+		return segment{}, err
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o644)
 	if err != nil {
 		return segment{}, fmt.Errorf("create segment: %w", err)
@@ -495,6 +581,9 @@ func (s *Store) writeSegment(path string, rows []Span) (segment, error) {
 	}
 	indexOffset, _ := f.Seek(0, io.SeekCurrent)
 	indexPlain := make([]byte, len(index)*traceEntrySize)
+	if len(indexPlain) > segmentDecoderMaxMemory {
+		return segment{}, errors.New("trace index exceeds decoder memory limit")
+	}
 	for i, entry := range index {
 		buf := indexPlain[i*traceEntrySize:]
 		binary.LittleEndian.PutUint64(buf[0:8], entry.hash)
@@ -510,6 +599,9 @@ func (s *Store) writeSegment(path string, rows []Span) (segment, error) {
 		if err := writeRollup(&rollupPlain, r); err != nil {
 			return segment{}, err
 		}
+	}
+	if rollupPlain.Len() > segmentDecoderMaxMemory {
+		return segment{}, errors.New("rollup section exceeds decoder memory limit")
 	}
 	if _, err := f.Write(s.encoder.EncodeAll(rollupPlain.Bytes(), nil)); err != nil {
 		return segment{}, fmt.Errorf("write rollups: %w", err)
@@ -624,6 +716,9 @@ func (s *Store) writeCompactedSegment(path string, inputs []segment) (segment, e
 	}
 	indexOffset, _ := f.Seek(0, io.SeekCurrent)
 	indexPlain := make([]byte, len(replacement.traceIndex)*traceEntrySize)
+	if len(indexPlain) > segmentDecoderMaxMemory {
+		return segment{}, errors.New("compacted trace index exceeds decoder memory limit")
+	}
 	for i, entry := range replacement.traceIndex {
 		buf := indexPlain[i*traceEntrySize:]
 		binary.LittleEndian.PutUint64(buf[0:8], entry.hash)
@@ -639,6 +734,9 @@ func (s *Store) writeCompactedSegment(path string, inputs []segment) (segment, e
 		if err := writeRollup(&rollupPlain, r); err != nil {
 			return segment{}, err
 		}
+	}
+	if rollupPlain.Len() > segmentDecoderMaxMemory {
+		return segment{}, errors.New("compacted rollup section exceeds decoder memory limit")
 	}
 	if _, err := f.Write(s.encoder.EncodeAll(rollupPlain.Bytes(), nil)); err != nil {
 		return segment{}, err
@@ -879,6 +977,9 @@ func isErrorStatus(status string) bool {
 // subtractions against size so a corrupt offset near the top of the address
 // space cannot wrap past the check.
 func validateSegmentSections(size, dirOffset, indexOffset, rollupOffset uint64, blockCount uint32) error {
+	if blockCount > segmentMaxBlocks {
+		return errors.New("segment block count is out of range")
+	}
 	if err := validateDirectory(size, dirOffset, blockCount, blockDirSize); err != nil {
 		return err
 	}
@@ -887,6 +988,9 @@ func validateSegmentSections(size, dirOffset, indexOffset, rollupOffset uint64, 
 	}
 	if rollupOffset < indexOffset || rollupOffset > size {
 		return errors.New("corrupt rollup offset")
+	}
+	if rollupOffset-indexOffset > segmentMaxCompressedBytes || size-rollupOffset > segmentMaxCompressedBytes {
+		return errors.New("compressed segment section exceeds memory limit")
 	}
 	return nil
 }
@@ -900,7 +1004,7 @@ func validateSegmentBlocks(size, dirOffset uint64, blocks []blockDir, rows uint3
 		if block.offset < headerSize || block.offset > dirOffset {
 			return errors.New("block offset outside the segment payload")
 		}
-		if block.length == 0 || uint64(block.length) > dirOffset-block.offset {
+		if block.length == 0 || uint64(block.length) > dirOffset-block.offset || uint64(block.length) > segmentMaxCompressedBytes {
 			return errors.New("block extends past the block directory")
 		}
 		if block.rows == 0 || block.rows > rowsPerBlock {
@@ -1062,6 +1166,10 @@ func writeRollup(w io.Writer, r rollup) error {
 }
 
 func readRollup(r *bufio.Reader) (rollup, error) {
+	return readRollupWithLimit(r, maxRollupKeyBytes)
+}
+
+func readRollupWithLimit(r *bufio.Reader, maxKeyBytes uint64) (rollup, error) {
 	var fixed [160]byte
 	if _, err := io.ReadFull(r, fixed[:]); err != nil {
 		return rollup{}, err
@@ -1070,14 +1178,16 @@ func readRollup(r *bufio.Reader) (rollup, error) {
 	for i := range out.bins {
 		out.bins[i] = binary.LittleEndian.Uint32(fixed[32+i*4:])
 	}
+	remaining := maxKeyBytes
 	for _, target := range []*string{&out.key.namespace, &out.key.service, &out.key.method, &out.key.route} {
 		length, err := binary.ReadUvarint(r)
 		if err != nil {
 			return rollup{}, err
 		}
-		if length > segmentDecoderMaxMemory {
+		if length > remaining {
 			return rollup{}, errors.New("rollup key length is out of range")
 		}
+		remaining -= length
 		value := make([]byte, length)
 		if _, err := io.ReadFull(r, value); err != nil {
 			return rollup{}, err
