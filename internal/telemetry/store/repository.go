@@ -38,7 +38,7 @@ func Open(root string) (*Repository, error) {
 		return nil, err
 	}
 	r := &Repository{root: root, Parquet: parquetStore}
-	if err := r.recoverCompaction(); err != nil {
+	if err := r.recoverCompaction(context.Background(), func(_ context.Context, publish func() error) error { return publish() }); err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("recover Parquet compaction: %w", err)
 	}
@@ -82,10 +82,12 @@ func (r *Repository) Trace(ctx context.Context, query telemetry.TraceQuery) ([]t
 
 func (r *Repository) RowCount() uint64 { return r.Parquet.RowCount() }
 
-func (r *Repository) PruneParquet(cutoff int64) (int, error) {
+func (r *Repository) PruneParquet(ctx context.Context, publisher ParquetPublisher, cutoff int64) (int, error) {
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
-	return r.Parquet.PruneBefore(cutoff)
+	return r.Parquet.PruneBefore(cutoff, func(prune func() error) error {
+		return publisher.PublishParquet(ctx, prune)
+	})
 }
 
 func validateBatch(batch Batch) error {
@@ -115,7 +117,7 @@ func normalizeBatch(batch *Batch) {
 			batch.Logs[i].IngestedAt = ingestedAt
 		}
 		if batch.Logs[i].EventUnixNanos == 0 {
-			batch.Logs[i].EventUnixNanos = firstNonzero(batch.Logs[i].TimeUnixNanos, batch.Logs[i].ObservedTimeNanos, batch.Logs[i].IngestedAt)
+			batch.Logs[i].EventUnixNanos = telemetry.FirstPositiveNanos(batch.Logs[i].TimeUnixNanos, batch.Logs[i].ObservedTimeNanos, batch.Logs[i].IngestedAt)
 		}
 	}
 	for i := range batch.Metrics {
@@ -124,7 +126,7 @@ func normalizeBatch(batch *Batch) {
 			batch.Metrics[i].IngestedAt = ingestedAt
 		}
 		if batch.Metrics[i].EventUnixNanos == 0 {
-			batch.Metrics[i].EventUnixNanos = firstNonzero(batch.Metrics[i].TimeUnixNanos, batch.Metrics[i].IngestedAt)
+			batch.Metrics[i].EventUnixNanos = telemetry.FirstPositiveNanos(batch.Metrics[i].TimeUnixNanos, batch.Metrics[i].IngestedAt)
 		}
 	}
 }
@@ -163,13 +165,4 @@ func batchMinIngestedNanos(batch Batch) int64 {
 		return 0
 	}
 	return value
-}
-
-func firstNonzero(values ...int64) int64 {
-	for _, value := range values {
-		if value != 0 {
-			return value
-		}
-	}
-	return 0
 }

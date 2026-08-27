@@ -1,6 +1,8 @@
 package query
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +12,24 @@ import (
 type fakeClock struct {
 	mu  sync.Mutex
 	now time.Time
+}
+
+func TestParquetGateRemovesCanceledPublisher(t *testing.T) {
+	var gate parquetReadGate
+	gate.RLock()
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if err := gate.LockContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LockContext error = %v, want deadline exceeded", err)
+	}
+	if got := gate.WaitingWriters(); got != 0 {
+		t.Fatalf("canceled publisher remained queued: %d", got)
+	}
+	gate.RUnlock()
+	if !gate.TryRLock() {
+		t.Fatal("canceled publisher continued blocking readers")
+	}
+	gate.RUnlock()
 }
 
 func (c *fakeClock) Now() time.Time {

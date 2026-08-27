@@ -278,6 +278,28 @@ func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
 	}
 }
 
+func TestPublishParquetHonorsContext(t *testing.T) {
+	d := &Duck{}
+	d.parquetMu.RLock()
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	called := false
+	err := d.PublishParquet(ctx, func() error {
+		called = true
+		return nil
+	})
+	d.parquetMu.RUnlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("PublishParquet error = %v, want deadline exceeded", err)
+	}
+	if called {
+		t.Fatal("publication ran after its context expired")
+	}
+	if got := d.parquetMu.WaitingWriters(); got != 0 {
+		t.Fatalf("canceled publication remained queued: %d", got)
+	}
+}
+
 func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

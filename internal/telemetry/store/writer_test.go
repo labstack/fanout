@@ -187,22 +187,32 @@ func TestWriterRecordsLiveQueueAndFlushMetrics(t *testing.T) {
 	}
 }
 
-func TestWriterSurfacesPermanentFailureToSubmitAndRun(t *testing.T) {
+func TestWriterFailsOneSubmissionAndKeepsServing(t *testing.T) {
 	metrics.RowsDropped.Reset()
-	committer := &recordingCommitter{failures: commitRetryLimit + 1}
+	committer := &recordingCommitter{failures: commitRetryLimit}
 	w := testWriter(committer, 1)
 	w.retryDelay = func(int) time.Duration { return 0 }
+	ctx, cancel := context.WithCancel(context.Background())
 	runDone := make(chan error, 1)
-	go func() { runDone <- w.Run(context.Background()) }()
+	go func() { runDone <- w.Run(ctx) }()
 	if err := w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "trace"}}}); err == nil {
 		t.Fatal("Submit succeeded after permanent storage failure")
 	}
-	if err := <-runDone; err == nil {
-		t.Fatal("Run succeeded after permanent storage failure")
+	if err := w.Submit(context.Background(), Batch{Spans: []telemetry.Span{{TraceID: "recovered"}}}); err != nil {
+		t.Fatalf("writer did not recover after a failed submission: %v", err)
+	}
+	select {
+	case err := <-runDone:
+		t.Fatalf("writer stopped after one failed submission: %v", err)
+	default:
+	}
+	cancel()
+	if err := <-runDone; err != nil {
+		t.Fatal(err)
 	}
 	committer.mu.Lock()
 	defer committer.mu.Unlock()
-	if committer.calls != commitRetryLimit || len(committer.batches) != 0 {
+	if committer.calls != commitRetryLimit+1 || len(committer.batches) != 1 {
 		t.Fatalf("calls=%d committed=%d", committer.calls, len(committer.batches))
 	}
 	if got := testutil.ToFloat64(metrics.RowsDropped.WithLabelValues("spans")); got != 1 {

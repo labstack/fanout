@@ -29,9 +29,13 @@ type compactionKey struct {
 
 // ParquetCompactor keeps DuckDB execution and publication locking in the query
 // layer while storage owns batch selection and crash-safe replacement state.
+type ParquetPublisher interface {
+	PublishParquet(context.Context, func() error) error
+}
+
 type ParquetCompactor interface {
+	ParquetPublisher
 	MergeParquet(context.Context, string, []string, string) error
-	PublishParquet(func() error) error
 }
 
 // CompactParquet combines one same-day, same-generation group. The output is
@@ -46,7 +50,7 @@ func (r *Repository) CompactParquet(ctx context.Context, compactor ParquetCompac
 	if exists, err := pathExists(markerPath); err != nil {
 		return 0, err
 	} else if exists {
-		if err := compactor.PublishParquet(r.recoverCompaction); err != nil {
+		if err := r.recoverCompaction(ctx, compactor.PublishParquet); err != nil {
 			return 0, fmt.Errorf("recover pending Parquet compaction: %w", err)
 		}
 	}
@@ -77,6 +81,9 @@ func (r *Repository) CompactParquet(ctx context.Context, compactor ParquetCompac
 		return 0, err
 	}
 	if err := os.MkdirAll(stage, 0o755); err != nil {
+		return 0, err
+	}
+	if err := errors.Join(syncDirectory(filepath.Dir(stage)), syncDirectory(r.root)); err != nil {
 		return 0, err
 	}
 	prepared := false
@@ -120,7 +127,7 @@ func (r *Repository) CompactParquet(ctx context.Context, compactor ParquetCompac
 		return 0, err
 	}
 	prepared = true
-	if err := compactor.PublishParquet(func() error { return r.completeCompaction(marker) }); err != nil {
+	if err := r.completeCompaction(ctx, marker, compactor.PublishParquet); err != nil {
 		return 0, err
 	}
 	return len(selected), nil
@@ -169,7 +176,9 @@ func (r *Repository) CompactParquetBacklog(ctx context.Context, compactor Parque
 	}
 }
 
-func (r *Repository) recoverCompaction() error {
+type parquetPublishFunc func(context.Context, func() error) error
+
+func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPublishFunc) error {
 	data, err := os.ReadFile(filepath.Join(r.root, "COMPACTION.json"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -181,11 +190,36 @@ func (r *Repository) recoverCompaction() error {
 	if err := json.Unmarshal(data, &marker); err != nil {
 		return err
 	}
-	return r.completeCompaction(marker)
+	stageExists, err := pathExists(r.compactionStage(marker.Output.ID))
+	if err != nil {
+		return err
+	}
+	finalExists, err := pathExists(r.Parquet.BatchPath(marker.Output.ID))
+	if err != nil {
+		return err
+	}
+	if !stageExists && !finalExists {
+		for _, id := range marker.Inputs {
+			exists, statErr := pathExists(r.Parquet.BatchPath(id))
+			if statErr != nil {
+				return statErr
+			}
+			if !exists {
+				return fmt.Errorf("compaction %s has no output and input %s is missing", marker.Output.ID, id)
+			}
+		}
+		if err := os.Remove(filepath.Join(r.root, "COMPACTION.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return syncDirectory(r.root)
+	}
+	return r.completeCompaction(ctx, marker, publish)
 }
 
-func (r *Repository) completeCompaction(marker compactionMarker) error {
-	if err := r.Parquet.PublishReplacement(r.compactionStage(marker.Output.ID), marker.Output, marker.Inputs); err != nil {
+func (r *Repository) completeCompaction(ctx context.Context, marker compactionMarker, publish parquetPublishFunc) error {
+	if err := r.Parquet.PublishReplacement(r.compactionStage(marker.Output.ID), marker.Output, marker.Inputs, func(swap func() error) error {
+		return publish(ctx, swap)
+	}); err != nil {
 		return err
 	}
 	markerPath := filepath.Join(r.root, "COMPACTION.json")

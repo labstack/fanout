@@ -15,7 +15,7 @@ import (
 
 const (
 	commitQueueDepth     = 256
-	commitRetryLimit     = 3
+	commitRetryLimit     = 5
 	maxGroupBatchRows    = 50_000
 	maxCommitWorkers     = 4
 	submissionQueueDepth = 256
@@ -52,7 +52,9 @@ func NewWriter(repository *Repository, batchSize int) *Writer {
 func (w *Writer) Wait() { <-w.done }
 
 // Submit returns after every row in the request belongs to a durably published
-// atomic Parquet batch directory.
+// atomic Parquet batch directory. Delivery is at least once: callers that retry
+// an ambiguous request may create another batch because OTLP has no idempotency
+// key that survives across requests.
 func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 	if batchRows(batch) == 0 {
 		return nil
@@ -82,13 +84,12 @@ func (w *Writer) Run(ctx context.Context) error {
 	jobs := make(chan commitJob, commitQueueDepth)
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
-	fatal := make(chan error, 1)
 	var workers sync.WaitGroup
 	for range min(maxCommitWorkers, max(1, runtime.GOMAXPROCS(0))) {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			w.commitWorker(workerCtx, jobs, fatal)
+			w.commitWorker(workerCtx, jobs)
 		}()
 	}
 
@@ -111,31 +112,23 @@ func (w *Writer) Run(ctx context.Context) error {
 			cancelWorkers()
 			<-finished
 		}
-		select {
-		case err := <-fatal:
-			return err
-		default:
-			return nil
-		}
+		return nil
 	}
 
 	for {
 		select {
 		case request := <-w.submissions:
 			metrics.UpdateQueueDepth("batch", len(w.submissions))
-			if err := w.enqueueSubmissions(request, jobs, fatal); err != nil {
+			if err := w.enqueueSubmissions(ctx, request, jobs); err != nil {
 				return errors.Join(err, finish(false))
 			}
 		case <-ctx.Done():
 			return finish(true)
-		case err := <-fatal:
-			cancelWorkers()
-			return errors.Join(err, finish(false))
 		}
 	}
 }
 
-func (w *Writer) enqueueSubmissions(request submission, out chan<- commitJob, fatal <-chan error) error {
+func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out chan<- commitJob) error {
 	requests := []submission{request}
 	for len(requests) < submissionQueueDepth {
 		select {
@@ -159,7 +152,7 @@ drained:
 			direct := requests[0]
 			requests = requests[1:]
 			direct.batch.ID = uuid.NewString()
-			if err := enqueueJob(out, fatal, commitJob{batches: []Batch{direct.batch}, acks: []chan error{direct.ack}}); err != nil {
+			if err := enqueueJob(ctx, out, commitJob{batches: []Batch{direct.batch}, acks: []chan error{direct.ack}}); err != nil {
 				return err
 			}
 			continue
@@ -188,23 +181,23 @@ drained:
 		for i := range group {
 			acks[i] = group[i].ack
 		}
-		if err := enqueueJob(out, fatal, commitJob{batches: []Batch{batch}, acks: acks}); err != nil {
+		if err := enqueueJob(ctx, out, commitJob{batches: []Batch{batch}, acks: acks}); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func enqueueJob(out chan<- commitJob, fatal <-chan error, job commitJob) error {
+func enqueueJob(ctx context.Context, out chan<- commitJob, job commitJob) error {
 	select {
 	case out <- job:
 		return nil
-	case err := <-fatal:
-		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
-func (w *Writer) commitWorker(ctx context.Context, jobs <-chan commitJob, fatal chan<- error) {
+func (w *Writer) commitWorker(ctx context.Context, jobs <-chan commitJob) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -217,11 +210,8 @@ func (w *Writer) commitWorker(ctx context.Context, jobs <-chan commitJob, fatal 
 				for _, ack := range job.acks {
 					ack <- err
 				}
-				select {
-				case fatal <- err:
-				default:
-				}
-				return
+				slog.Error("telemetry batch commit exhausted retries", "error", err)
+				continue
 			}
 			for _, batch := range job.batches {
 				metrics.RecordIngest("spans", len(batch.Spans))
@@ -306,5 +296,5 @@ func recordDroppedRows(batch Batch) {
 }
 
 func defaultCommitRetryDelay(attempt int) time.Duration {
-	return min(100*time.Millisecond*time.Duration(1<<min(attempt, 6)), 5*time.Second)
+	return min(250*time.Millisecond*time.Duration(1<<min(attempt, 6)), 5*time.Second)
 }

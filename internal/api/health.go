@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -177,6 +178,8 @@ func maintenanceStaleThreshold(maintEvery time.Duration) time.Duration {
 	return stale
 }
 
+var telemetryReadinessTimeout = 5 * time.Second
+
 func (h *HealthHandler) checkTelemetry() CheckResult {
 	if h.duck == nil {
 		return CheckResult{
@@ -186,13 +189,20 @@ func (h *HealthHandler) checkTelemetry() CheckResult {
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), telemetryReadinessTimeout)
 	defer cancel()
 
 	var one int
 	// Use the same snapshot gate as public reads so a short compaction/retention
 	// publication cannot race the Parquet scan and report a false outage.
 	err := h.duck.QueryRowScan(ctx, []any{&one}, "SELECT 1 FROM telemetry.spans LIMIT 1")
+	if errors.Is(err, query.ErrParquetReadWait) {
+		return CheckResult{
+			Status:    "degraded",
+			LatencyMs: time.Since(start).Milliseconds(),
+			Error:     err.Error(),
+		}
+	}
 	if err != nil && err != sql.ErrNoRows {
 		return CheckResult{
 			Status:    "unhealthy",

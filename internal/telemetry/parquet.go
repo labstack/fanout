@@ -22,21 +22,23 @@ import (
 const (
 	BatchSuffix          = ".batch"
 	SchemaBatch          = "_schema" + BatchSuffix
-	batchMetadataVersion = 1
+	batchMetadataVersion = 2
 	parquetPageSize      = 64 << 10
 	parquetRowGroupRows  = 50_000
 	maxTraceQueryResults = 500
 )
 
 type BatchMetadata struct {
-	Version          uint32 `json:"version"`
-	ID               string `json:"id"`
-	MinIngestedNanos int64  `json:"min_ingested_nanos"`
-	MaxIngestedNanos int64  `json:"max_ingested_nanos"`
-	Generation       uint32 `json:"generation"`
-	Spans            int    `json:"spans"`
-	Logs             int    `json:"logs"`
-	Metrics          int    `json:"metrics"`
+	Version           uint32 `json:"version"`
+	ID                string `json:"id"`
+	MinIngestedNanos  int64  `json:"min_ingested_nanos"`
+	MaxIngestedNanos  int64  `json:"max_ingested_nanos"`
+	MinSpanStartNanos int64  `json:"min_span_start_nanos"`
+	MaxSpanStartNanos int64  `json:"max_span_start_nanos"`
+	Generation        uint32 `json:"generation"`
+	Spans             int    `json:"spans"`
+	Logs              int    `json:"logs"`
+	Metrics           int    `json:"metrics"`
 }
 
 type TraceQuery struct {
@@ -177,6 +179,10 @@ func (p *ParquetStore) CommitBatch(metadata BatchMetadata, spans []Span, logs []
 		for i := range spans {
 			rows[i] = makeSpanParquetRow(spans[i])
 			rows[i].TraceHash = xxh3.HashString(rows[i].TraceID)
+			if rows[i].StartUnixNano > 0 && (metadata.MinSpanStartNanos == 0 || rows[i].StartUnixNano < metadata.MinSpanStartNanos) {
+				metadata.MinSpanStartNanos = rows[i].StartUnixNano
+			}
+			metadata.MaxSpanStartNanos = max(metadata.MaxSpanStartNanos, rows[i].StartUnixNano)
 		}
 		sort.Slice(rows, func(i, j int) bool {
 			if rows[i].TraceHash != rows[j].TraceHash {
@@ -301,6 +307,10 @@ func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSp
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
+		if batch.metadata.MaxSpanStartNanos > 0 &&
+			(batch.metadata.MaxSpanStartNanos < query.StartNanos || batch.metadata.MinSpanStartNanos >= query.EndNanos) {
+			continue
+		}
 		match, found, err := batch.traces.Lookup(hash)
 		if err != nil {
 			return nil, err
@@ -400,30 +410,34 @@ func indexedSpanEarlier(left, right IndexedSpan) bool {
 	return left.SpanID < right.SpanID
 }
 
-// PruneBefore hides complete batches before deleting them. The caller pins
-// DuckDB readers while this method runs.
-func (p *ParquetStore) PruneBefore(cutoff int64) (int, error) {
-	p.publishMu.Lock()
-	defer p.publishMu.Unlock()
-	p.mu.Lock()
-	defer p.mu.Unlock()
+// PruneBefore hides complete batches while readers are pinned, then deletes
+// the retired directories after publication.
+func (p *ParquetStore) PruneBefore(cutoff int64, publish func(func() error) error) (int, error) {
 	var retired []string
 	var pruneErr error
-	for id, batch := range p.batches {
-		if batch.metadata.MaxIngestedNanos <= 0 || batch.metadata.MaxIngestedNanos >= cutoff {
-			continue
+	err := publish(func() error {
+		p.publishMu.Lock()
+		defer p.publishMu.Unlock()
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		for id, batch := range p.batches {
+			if batch.metadata.MaxIngestedNanos <= 0 || batch.metadata.MaxIngestedNanos >= cutoff {
+				continue
+			}
+			path := filepath.Join(p.batchesDir, id+".retired")
+			if err := os.Rename(batch.dir, path); err != nil {
+				pruneErr = errors.Join(pruneErr, err)
+				continue
+			}
+			delete(p.batches, id)
+			retired = append(retired, path)
 		}
-		path := filepath.Join(p.batchesDir, id+".retired")
-		if err := os.Rename(batch.dir, path); err != nil {
-			pruneErr = errors.Join(pruneErr, err)
-			continue
+		if len(retired) > 0 {
+			pruneErr = errors.Join(pruneErr, syncDirectory(p.batchesDir))
 		}
-		delete(p.batches, id)
-		retired = append(retired, path)
-	}
-	if len(retired) > 0 {
-		pruneErr = errors.Join(pruneErr, syncDirectory(p.batchesDir))
-	}
+		return nil
+	})
+	pruneErr = errors.Join(pruneErr, err)
 	for _, path := range retired {
 		pruneErr = errors.Join(pruneErr, os.RemoveAll(path))
 	}
@@ -463,6 +477,8 @@ func (p *ParquetStore) Stats() (map[string]ParquetStats, error) {
 // files produced by the compactor.
 func (p *ParquetStore) PrepareReplacement(dir string, metadata BatchMetadata) error {
 	metadata.Version = batchMetadataVersion
+	metadata.MinSpanStartNanos = 0
+	metadata.MaxSpanStartNanos = 0
 	if metadata.Spans > 0 {
 		f, err := os.Open(filepath.Join(dir, "spans.parquet"))
 		if err != nil {
@@ -480,6 +496,10 @@ func (p *ParquetStore) PrepareReplacement(dir string, metadata BatchMetadata) er
 		for {
 			n, readErr := reader.Read(buffer)
 			for i := range n {
+				if start := buffer[i].StartUnixNano; start > 0 && (metadata.MinSpanStartNanos == 0 || start < metadata.MinSpanStartNanos) {
+					metadata.MinSpanStartNanos = start
+				}
+				metadata.MaxSpanStartNanos = max(metadata.MaxSpanStartNanos, buffer[i].StartUnixNano)
 				if err := index.Append(buffer[i].TraceHash); err != nil {
 					index.Abort()
 					_ = reader.Close()
@@ -522,11 +542,9 @@ func (p *ParquetStore) PrepareReplacement(dir string, metadata BatchMetadata) er
 	return syncDirectory(dir)
 }
 
-// PublishReplacement swaps a prepared compacted batch for its inputs while
-// holding the store lock, so native trace readers cannot observe removed files.
-func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, inputs []string) error {
-	p.publishMu.Lock()
-	defer p.publishMu.Unlock()
+// PublishReplacement validates a prepared compacted batch, atomically swaps it
+// for its inputs while readers are pinned, then deletes retired inputs.
+func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, inputs []string, publish func(func() error) error) error {
 	final := p.BatchPath(metadata.ID)
 	source := stage
 	if _, err := os.Stat(source); errors.Is(err, os.ErrNotExist) {
@@ -543,52 +561,58 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 		replacement.traces.path = filepath.Join(final, "trace.fidx")
 	}
 
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	retired := make([][2]string, 0, len(inputs))
-	rollback := func() error {
-		var rollbackErr error
-		if source == final {
-			if _, statErr := os.Stat(stage); errors.Is(statErr, os.ErrNotExist) {
-				rollbackErr = errors.Join(rollbackErr, os.Rename(final, stage))
+	err = publish(func() error {
+		p.publishMu.Lock()
+		defer p.publishMu.Unlock()
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		rollback := func() error {
+			var rollbackErr error
+			if source == final {
+				if _, statErr := os.Stat(stage); errors.Is(statErr, os.ErrNotExist) {
+					rollbackErr = errors.Join(rollbackErr, os.Rename(final, stage))
+				}
+			}
+			for i := len(retired) - 1; i >= 0; i-- {
+				rollbackErr = errors.Join(rollbackErr, os.Rename(retired[i][1], retired[i][0]))
+			}
+			return errors.Join(rollbackErr, syncDirectory(p.batchesDir))
+		}
+		for _, id := range inputs {
+			active := p.BatchPath(id)
+			retiredPath := filepath.Join(p.batchesDir, id+".retired-"+metadata.ID)
+			if _, statErr := os.Stat(active); statErr == nil {
+				if err := os.Rename(active, retiredPath); err != nil {
+					return errors.Join(err, rollback())
+				}
+				retired = append(retired, [2]string{active, retiredPath})
+			} else if !errors.Is(statErr, os.ErrNotExist) {
+				return errors.Join(statErr, rollback())
+			} else if _, retiredErr := os.Stat(retiredPath); retiredErr == nil {
+				retired = append(retired, [2]string{active, retiredPath})
+			} else if !errors.Is(retiredErr, os.ErrNotExist) {
+				return errors.Join(retiredErr, rollback())
 			}
 		}
-		for i := len(retired) - 1; i >= 0; i-- {
-			rollbackErr = errors.Join(rollbackErr, os.Rename(retired[i][1], retired[i][0]))
-		}
-		return errors.Join(rollbackErr, syncDirectory(p.batchesDir))
-	}
-	for _, id := range inputs {
-		active := p.BatchPath(id)
-		retiredPath := filepath.Join(p.batchesDir, id+".retired-"+metadata.ID)
-		if _, statErr := os.Stat(active); statErr == nil {
-			if err := os.Rename(active, retiredPath); err != nil {
+		if source != final {
+			if err := os.Rename(stage, final); err != nil {
 				return errors.Join(err, rollback())
 			}
-			retired = append(retired, [2]string{active, retiredPath})
-		} else if !errors.Is(statErr, os.ErrNotExist) {
-			return errors.Join(statErr, rollback())
-		} else if _, retiredErr := os.Stat(retiredPath); retiredErr == nil {
-			// Recovery can resume after inputs were retired but before the
-			// replacement or directory sync completed.
-			retired = append(retired, [2]string{active, retiredPath})
-		} else if !errors.Is(retiredErr, os.ErrNotExist) {
-			return errors.Join(retiredErr, rollback())
+			source = final
 		}
-	}
-	if source != final {
-		if err := os.Rename(stage, final); err != nil {
+		if err := syncDirectory(p.batchesDir); err != nil {
 			return errors.Join(err, rollback())
 		}
-		source = final
+		for _, id := range inputs {
+			delete(p.batches, id)
+		}
+		p.batches[metadata.ID] = replacement
+		return nil
+	})
+	if err != nil {
+		return err
 	}
-	if err := syncDirectory(p.batchesDir); err != nil {
-		return errors.Join(err, rollback())
-	}
-	for _, id := range inputs {
-		delete(p.batches, id)
-	}
-	p.batches[metadata.ID] = replacement
 	var removeErr error
 	for _, pair := range retired {
 		removeErr = errors.Join(removeErr, os.RemoveAll(pair[1]))
@@ -812,5 +836,6 @@ func validateBatchID(id string) error {
 }
 
 type traceParquetRow struct {
-	TraceHash uint64 `parquet:"_trace_hash"`
+	TraceHash     uint64 `parquet:"_trace_hash"`
+	StartUnixNano int64  `parquet:"start_unix_nano"`
 }

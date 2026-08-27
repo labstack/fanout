@@ -100,8 +100,8 @@ type logParquetRow struct {
 
 func makeLogParquetRow(r Log) logParquetRow {
 	return logParquetRow{
-		Namespace: r.Namespace, LogTime: firstPositive(r.TimeUnixNanos, r.ObservedTimeNanos, r.IngestedAt),
-		ObservedTime: firstPositive(r.ObservedTimeNanos, r.TimeUnixNanos, r.IngestedAt), TimeUnixNano: r.TimeUnixNanos,
+		Namespace: r.Namespace, LogTime: FirstPositiveNanos(r.EventUnixNanos, r.TimeUnixNanos, r.ObservedTimeNanos, r.IngestedAt),
+		ObservedTime: FirstPositiveNanos(r.ObservedTimeNanos, r.EventUnixNanos, r.TimeUnixNanos, r.IngestedAt), TimeUnixNano: r.TimeUnixNanos,
 		ObservedTimeUnixNano: r.ObservedTimeNanos, Severity: r.Severity, SeverityNumber: int64(r.SeverityNumber),
 		Body: r.Body, Service: r.ServiceName, TraceID: r.TraceID, SpanID: r.SpanID, Flags: int64(r.Flags),
 		ResourceJSON: string(r.ResourceJSON), AttributesJSON: string(r.AttributesJSON), ScopeName: r.ScopeName,
@@ -134,20 +134,11 @@ type metricParquetRow struct {
 
 func makeMetricParquetRow(r Metric) metricParquetRow {
 	return metricParquetRow{
-		Namespace: r.Namespace, MetricTime: firstPositive(r.TimeUnixNanos, r.IngestedAt), TimeUnixNano: r.TimeUnixNanos,
+		Namespace: r.Namespace, MetricTime: FirstPositiveNanos(r.EventUnixNanos, r.TimeUnixNanos, r.IngestedAt), TimeUnixNano: r.TimeUnixNanos,
 		Name: r.Name, Description: r.Description, Unit: r.Unit, MetricType: r.Type, Service: r.ServiceName,
 		Value: r.Value, HistBoundsJSON: string(r.HistBoundsJSON), HistCountsJSON: string(r.HistCountsJSON),
 		HistCount: r.HistCount, HistSum: r.HistSum, ExemplarsJSON: string(r.ExemplarsJSON),
 		AttributesJSON: string(r.AttributesJSON), ResourceJSON: string(r.ResourceJSON), ScopeName: r.ScopeName,
 		ScopeVersion: r.ScopeVersion, IngestedAt: r.IngestedAt, IngestedUnixNano: r.IngestedAt,
 	}
-}
-
-func firstPositive(values ...int64) int64 {
-	for _, value := range values {
-		if value > 0 {
-			return value
-		}
-	}
-	return 0
 }

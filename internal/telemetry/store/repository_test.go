@@ -18,6 +18,7 @@ import (
 type testParquetCompactor struct {
 	db         *sql.DB
 	publishErr error
+	afterSwap  func() error
 }
 
 func (c *testParquetCompactor) MergeParquet(ctx context.Context, signal string, inputs []string, output string) error {
@@ -33,11 +34,17 @@ func (c *testParquetCompactor) MergeParquet(ctx context.Context, signal string, 
 	return err
 }
 
-func (c *testParquetCompactor) PublishParquet(publish func() error) error {
+func (c *testParquetCompactor) PublishParquet(_ context.Context, publish func() error) error {
 	if c.publishErr != nil {
 		return c.publishErr
 	}
-	return publish()
+	if err := publish(); err != nil {
+		return err
+	}
+	if c.afterSwap != nil {
+		return c.afterSwap()
+	}
+	return nil
 }
 
 func sqlQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
@@ -190,7 +197,21 @@ func TestRepositoryPrunesOnlyExpiredBatches(t *testing.T) {
 	if err := repository.Commit(newer); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := repository.PruneParquet(500)
+	publisher := &testParquetCompactor{afterSwap: func() error {
+		if repository.compactionMu.TryLock() {
+			repository.compactionMu.Unlock()
+			return errors.New("retention published without holding compaction lock")
+		}
+		retired, err := filepath.Glob(filepath.Join(repository.Parquet.BatchesDir(), "*.retired"))
+		if err != nil {
+			return err
+		}
+		if len(retired) != 1 {
+			return fmt.Errorf("retired directories during publication = %d, want 1", len(retired))
+		}
+		return nil
+	}}
+	removed, err := repository.PruneParquet(context.Background(), publisher, 500)
 	if err != nil || removed != 1 {
 		t.Fatalf("prune = %d, %v", removed, err)
 	}
@@ -202,6 +223,45 @@ func TestRepositoryPrunesOnlyExpiredBatches(t *testing.T) {
 	}
 	if got := repository.RowCount(); got != 3 {
 		t.Fatalf("retained rows = %d, want 3", got)
+	}
+}
+
+func TestRepositoryDiscardsRecoverableMarkerWithoutOutput(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := testBatch()
+	batch.ID = "intact-input"
+	if err := repository.Commit(batch); err != nil {
+		t.Fatal(err)
+	}
+	marker := compactionMarker{
+		Output: telemetry.BatchMetadata{ID: "missing-output", Generation: 1},
+		Inputs: []string{batch.ID},
+	}
+	data, err := json.Marshal(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDurableFile(filepath.Join(dir, "COMPACTION.json"), data); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	recovered, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recovered.Close()
+	if got := recovered.RowCount(); got != 3 {
+		t.Fatalf("rows after marker recovery = %d, want 3", got)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); !os.IsNotExist(err) {
+		t.Fatalf("recoverable marker remains: %v", err)
 	}
 }
 
@@ -222,7 +282,7 @@ func TestRepositoryRetentionUsesIngestTimeNotEventTime(t *testing.T) {
 	if err := repository.Commit(batch); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := repository.PruneParquet(500)
+	removed, err := repository.PruneParquet(context.Background(), &testParquetCompactor{}, 500)
 	if err != nil || removed != 1 {
 		t.Fatalf("prune future-dated events = %d, %v; want one batch expired by ingest time", removed, err)
 	}
@@ -246,7 +306,17 @@ func TestRepositoryCompactsParquetWithoutChangingRows(t *testing.T) {
 	}
 	db := openTestDuckDB(t)
 	defer db.Close()
-	compacted, err := repository.CompactParquet(context.Background(), &testParquetCompactor{db: db}, 64)
+	compactor := &testParquetCompactor{db: db, afterSwap: func() error {
+		retired, err := filepath.Glob(filepath.Join(repository.Parquet.BatchesDir(), "*.retired-*"))
+		if err != nil {
+			return err
+		}
+		if len(retired) != minCompactionInputs {
+			return fmt.Errorf("retired compaction inputs during publication = %d, want %d", len(retired), minCompactionInputs)
+		}
+		return nil
+	}}
+	compacted, err := repository.CompactParquet(context.Background(), compactor, 64)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -4,12 +4,26 @@ package writegate
 // repository lock and never pass through DuckDB.
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
+
+func TestWriteGateLockContextHonorsCancellation(t *testing.T) {
+	var gate WriteGate
+	unlock := gate.Lock(WriteMaintenance)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := gate.LockContext(ctx, WriteMaintenance); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LockContext error = %v, want deadline exceeded", err)
+	}
+	unlock()
+	gate.Lock(WriteMaintenance)()
+}
 
 func TestWriteGateSerializesHoldersInAcquisitionOrder(t *testing.T) {
 	t.Parallel()
@@ -92,9 +106,11 @@ func TestWriteGateObservesOutsideTheCriticalSection(t *testing.T) {
 
 	var freeDuringObserve bool
 	restore := swapObserver(t, func(string, float64, float64) {
-		if gate.mu.TryLock() {
+		select {
+		case <-gate.token:
 			freeDuringObserve = true
-			gate.mu.Unlock()
+			gate.token <- struct{}{}
+		default:
 		}
 	})
 	defer restore()

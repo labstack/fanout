@@ -3,6 +3,7 @@
 package writegate
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -22,11 +23,18 @@ const (
 	WriteMaintenance    WriteOperation = "maintenance"
 )
 
-// WriteGate preserves the existing process-wide sync.Mutex acquisition
-// semantics while measuring how long each operation waits for and holds the
-// catalog write critical section. The zero value is ready for use.
+// WriteGate serializes DuckDB writes while measuring how long each operation
+// waits for and holds the critical section. The zero value is ready for use.
 type WriteGate struct {
-	mu sync.Mutex
+	once  sync.Once
+	token chan struct{}
+}
+
+func (g *WriteGate) init() {
+	g.once.Do(func() {
+		g.token = make(chan struct{}, 1)
+		g.token <- struct{}{}
+	})
 }
 
 // observe is a package-level seam so a test can prove the observation happens
@@ -39,15 +47,29 @@ var observe = metrics.RecordWriteGate
 // Callers must defer the returned function before acquiring a database
 // connection, transaction, or appender, and must call it exactly once.
 func (g *WriteGate) Lock(operation WriteOperation) func() {
+	unlock, err := g.LockContext(context.Background(), operation)
+	if err != nil {
+		panic(err)
+	}
+	return unlock
+}
+
+// LockContext acquires the cache write gate, or returns when ctx expires.
+func (g *WriteGate) LockContext(ctx context.Context, operation WriteOperation) (func(), error) {
+	g.init()
 	waitStarted := time.Now()
-	g.mu.Lock()
+	select {
+	case <-g.token:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 	acquired := time.Now()
 	return func() {
 		hold := time.Since(acquired)
 		// Unlock before observing: a Prometheus histogram takes its own lock,
 		// and holding the process's hottest critical section across that would
 		// be a throughput regression in the code added to detect one.
-		g.mu.Unlock()
+		g.token <- struct{}{}
 		observe(string(operation), acquired.Sub(waitStarted).Seconds(), hold.Seconds())
-	}
+	}, nil
 }

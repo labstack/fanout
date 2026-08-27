@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 )
@@ -10,6 +11,9 @@ import (
 // waiting publisher. Long enough that ordinary dashboard traffic never queues
 // behind maintenance, short enough that retention and compaction always run.
 const defaultWriterGrace = 30 * time.Second
+
+// ErrParquetReadWait distinguishes publication contention from a query error.
+var ErrParquetReadWait = errors.New("wait for Parquet publication")
 
 // parquetReadGate protects Parquet file publication without sync.RWMutex's
 // unconditional writer preference. Queuing maintenance must not stall
@@ -120,6 +124,12 @@ func (g *parquetReadGate) RUnlock() {
 }
 
 func (g *parquetReadGate) Lock() {
+	if err := g.LockContext(context.Background()); err != nil {
+		panic(err)
+	}
+}
+
+func (g *parquetReadGate) LockContext(ctx context.Context) error {
 	g.init()
 	g.mu.Lock()
 	g.nextWaiter++
@@ -131,7 +141,20 @@ func (g *parquetReadGate) Lock() {
 	for g.writer || g.readers > 0 {
 		changed := g.changed
 		g.mu.Unlock()
-		<-changed
+		select {
+		case <-ctx.Done():
+			g.mu.Lock()
+			for i, queued := range g.waiting {
+				if queued.id == waiter.id {
+					g.waiting = append(g.waiting[:i], g.waiting[i+1:]...)
+					break
+				}
+			}
+			g.notifyLocked()
+			g.mu.Unlock()
+			return ctx.Err()
+		case <-changed:
+		}
 		g.mu.Lock()
 	}
 	for i, queued := range g.waiting {
@@ -142,6 +165,7 @@ func (g *parquetReadGate) Lock() {
 	}
 	g.writer = true
 	g.mu.Unlock()
+	return nil
 }
 
 func (g *parquetReadGate) Unlock() {

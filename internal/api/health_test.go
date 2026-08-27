@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -179,6 +180,33 @@ func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) {
+	duck := &query.Duck{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- duck.PublishParquet(context.Background(), func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	original := telemetryReadinessTimeout
+	telemetryReadinessTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { telemetryReadinessTimeout = original })
+
+	result := NewHealthHandler(duck, config.Config{}).checkTelemetry()
+	if result.Status != "degraded" {
+		t.Fatalf("telemetry status = %q, want degraded: %+v", result.Status, result)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

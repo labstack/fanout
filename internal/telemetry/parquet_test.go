@@ -163,12 +163,61 @@ func TestParquetStorePreservesCompleteLogAndMetricRows(t *testing.T) {
 	}
 	batchDir := store.BatchPath("complete-signals")
 	gotLog := readOneParquetRow[logParquetRow](t, filepath.Join(batchDir, "logs.parquet"))
+	if gotLog.LogTime != logRow.EventUnixNanos {
+		t.Fatalf("log event time = %d, want canonical %d", gotLog.LogTime, logRow.EventUnixNanos)
+	}
 	if want := makeLogParquetRow(logRow); !reflect.DeepEqual(gotLog, want) {
 		t.Fatalf("log row mismatch\n got: %#v\nwant: %#v", gotLog, want)
 	}
 	gotMetric := readOneParquetRow[metricParquetRow](t, filepath.Join(batchDir, "metrics.parquet"))
+	if gotMetric.MetricTime != metricRow.EventUnixNanos {
+		t.Fatalf("metric event time = %d, want canonical %d", gotMetric.MetricTime, metricRow.EventUnixNanos)
+	}
 	if want := makeMetricParquetRow(metricRow); !reflect.DeepEqual(gotMetric, want) {
 		t.Fatalf("metric row mismatch\n got: %#v\nwant: %#v", gotMetric, want)
+	}
+}
+
+func TestParquetStoreSkipsTraceIndexesOutsideTimeWindow(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitBatch(BatchMetadata{ID: "old-traces"}, []Span{{
+		TraceID: "wanted", SpanID: "old", StartUnixNanos: 100,
+	}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(store.BatchPath("old-traces"), "trace.fidx")); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.Trace(context.Background(), TraceQuery{
+		TraceID: "wanted", StartNanos: 1_000, EndNanos: 2_000, Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("non-overlapping query opened old trace index: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("non-overlapping trace query returned %#v", got)
+	}
+}
+
+func TestPublishReplacementValidatesBeforePublication(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage := t.TempDir()
+	called := false
+	err = store.PublishReplacement(stage, BatchMetadata{ID: "replacement"}, nil, func(publish func() error) error {
+		called = true
+		return publish()
+	})
+	if err == nil {
+		t.Fatal("invalid replacement was accepted")
+	}
+	if called {
+		t.Fatal("publication gate entered before replacement validation")
 	}
 }
 

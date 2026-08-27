@@ -102,3 +102,13 @@ func NormalizeNamespace(namespace string) string {
 	}
 	return namespace
 }
+
+// FirstPositiveNanos returns the first usable timestamp in priority order.
+func FirstPositiveNanos(values ...int64) int64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
