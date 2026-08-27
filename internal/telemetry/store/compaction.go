@@ -42,14 +42,9 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 	if len(selected) < minCompactionInputs {
 		return 0, nil
 	}
-	marker := compactionMarker{ID: fmt.Sprintf("compact-%d", time.Now().UnixNano()), MinNanos: math.MaxInt64, Generation: selected[0].Generation + 1}
+	marker := compactionMarker{ID: fmt.Sprintf("compact-%d", time.Now().UnixNano()), MinNanos: math.MaxInt64, Generation: selected[0].Generation + 1, Sources: compactionSources(selected)}
 	for _, batch := range selected {
 		marker.Inputs = append(marker.Inputs, batch.ID)
-		if len(batch.Sources) == 0 {
-			marker.Sources = append(marker.Sources, batch.ID)
-		} else {
-			marker.Sources = append(marker.Sources, batch.Sources...)
-		}
 		if batch.MinNanos > 0 {
 			marker.MinNanos = min(marker.MinNanos, batch.MinNanos)
 		}
@@ -120,6 +115,23 @@ func (r *Repository) CompactParquet(ctx context.Context, db *sql.DB, maxBatches 
 		return 0, err
 	}
 	return len(selected), nil
+}
+
+// compactionSources builds the replay ledger for one compaction output. Only
+// raw ingest batches folded in this pass need protection: their WAL files are
+// removed durably when this compaction completes, and any writer still
+// retrying one of them consults this ledger. Ledgers inherited from earlier
+// outputs are dropped rather than folded forward — those WALs were already
+// removed when their own compaction completed — which bounds the manifest to
+// one generation of batch IDs instead of the whole retention window.
+func compactionSources(selected []batchMetadata) []string {
+	sources := make([]string, 0, len(selected))
+	for _, batch := range selected {
+		if len(batch.Sources) == 0 {
+			sources = append(sources, batch.ID)
+		}
+	}
+	return sources
 }
 
 type compactionKey struct {
@@ -262,7 +274,7 @@ func (r *Repository) completeCompaction(marker compactionMarker) error {
 		}
 	}
 	kept = append(kept, batchMetadata{ID: marker.ID, MinNanos: marker.MinNanos, MaxNanos: marker.MaxNanos, Generation: marker.Generation, Sources: append([]string(nil), marker.Sources...)})
-	next := repositoryManifest{Version: 1, Batches: kept}
+	next := repositoryManifest{Version: 1, HotCutoffNanos: r.manifest.HotCutoffNanos, Batches: kept}
 	if err := writeRepositoryManifest(r.root, next); err != nil {
 		return err
 	}

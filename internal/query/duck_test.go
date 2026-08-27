@@ -208,6 +208,65 @@ func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
 	}
 }
 
+func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
+	d := &Duck{DB: db}
+	d.parquetMu.RLock()
+	writerAcquired := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		d.parquetMu.Lock()
+		close(writerAcquired)
+		<-releaseWriter
+		d.parquetMu.Unlock()
+		close(writerDone)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for {
+		d.parquetMu.mu.Lock()
+		waiting := d.parquetMu.waitingWriters
+		d.parquetMu.mu.Unlock()
+		if waiting > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			d.parquetMu.RUnlock()
+			t.Fatal("maintenance writer did not begin waiting")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	var value int
+	if err := d.QueryRowScan(context.Background(), []any{&value}, "SELECT 1"); err != nil {
+		d.parquetMu.RUnlock()
+		t.Fatalf("new read blocked behind waiting maintenance: %v", err)
+	}
+	if value != 1 {
+		d.parquetMu.RUnlock()
+		t.Fatalf("value = %d, want 1", value)
+	}
+	d.parquetMu.RUnlock()
+	select {
+	case <-writerAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("maintenance writer did not run after readers drained")
+	}
+	close(releaseWriter)
+	select {
+	case <-writerDone:
+	case <-time.After(time.Second):
+		t.Fatal("maintenance writer did not release")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRollupReadLockHonorsContext(t *testing.T) {
 	d := &Duck{}
 	d.parquetMu.Lock()
@@ -412,5 +471,29 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 				t.Errorf("%s rollup source tip = %f, want %f", tc.component, got, float64(sourceNanos)/1e9)
 			}
 		})
+	}
+}
+
+func TestMaintenanceRunsOnEveryTick(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	d := &Duck{DB: db, cfg: config.Config{MaintenanceInterval: time.Hour}}
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := d.lastMaintenanceAt
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !d.lastMaintenanceAt.After(first) {
+		t.Fatal("second maintenance pass was throttled; the ticker is the only intended throttle")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

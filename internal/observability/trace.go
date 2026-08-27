@@ -64,11 +64,13 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 
 	dataSource := "fanout_segments"
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
+	hotCutoff := int64(0)
 	if traceID != "" {
-		storedSpans, readErr := s.repository.Spans.Trace(traceID)
+		storedSpans, spanCutoff, readErr := s.repository.HotTrace(traceID)
 		if readErr != nil {
 			return Result[TraceDetail]{}, fmt.Errorf("read trace segments: %w", readErr)
 		}
+		hotCutoff = spanCutoff
 		startNanos, endNanos := scope.Start.UnixNano(), scope.End.UnixNano()
 		for _, row := range storedSpans {
 			if row.StartUnixNanos < startNanos || row.StartUnixNanos >= endNanos ||
@@ -118,7 +120,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 			logStart = max(logStart, first.Add(-correlationMargin).UnixNano())
 			logEnd = min(logEnd, last.Add(correlationMargin).UnixNano())
 		}
-		readErr = s.repository.Logs.Scan(logStart, logEnd, func(row telemetry.Log) bool {
+		logCutoff, scanErr := s.repository.ScanHotLogs(logStart, logEnd, func(row telemetry.Log) bool {
 			select {
 			case <-ctx.Done():
 				return false
@@ -130,16 +132,21 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 			retainEarliest(&traceLogs, LogEntry{Time: time.Unix(0, row.EventUnixNanos).UTC(), Severity: row.Severity, Service: row.ServiceName, Body: redactLogBody(row.Body), TraceID: row.TraceID, SpanID: row.SpanID}, limit)
 			return true
 		})
-		if readErr != nil {
-			return Result[TraceDetail]{}, fmt.Errorf("read trace logs: %w", readErr)
+		if scanErr != nil {
+			return Result[TraceDetail]{}, fmt.Errorf("read trace logs: %w", scanErr)
 		}
+		hotCutoff = max(hotCutoff, logCutoff)
 		if err := ctx.Err(); err != nil {
 			return Result[TraceDetail]{}, err
 		}
 		data.Logs = append(data.Logs, traceLogs...)
 		sort.Slice(data.Logs, func(i, j int) bool { return data.Logs[i].Time.Before(data.Logs[j].Time) })
 	}
-	if traceID != "" && len(data.Spans) == 0 {
+	// Any scope crossing the durable hot prune watermark may contain early trace
+	// spans that have aged out while a late suffix remains hot. Parquet is the
+	// authoritative complete trace in that case; a zero-span hot miss uses the
+	// same path.
+	if traceID != "" && (len(data.Spans) == 0 || scope.Start.UnixNano() < hotCutoff) {
 		data, err = s.traceFromParquet(ctx, scope, traceID, limit)
 		if err != nil {
 			return Result[TraceDetail]{}, err

@@ -27,9 +27,8 @@ func TestEdgeRollupBacklog(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30, DuckDBMemory: "1GB"},
-		lastMaintenance: time.Now(),
+		DB:  db,
+		cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"},
 	}
 	ctx := context.Background()
 

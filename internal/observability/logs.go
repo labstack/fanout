@@ -100,14 +100,28 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 		buckets[bucketKey{time: bucketNanos, severity: bucketSeverity}]++
 	}
 	startNanos, endNanos := scope.Start.UnixNano(), scope.End.UnixNano()
-	hotStart, coldEnd := startNanos, startNanos
-	oldestHot, _, hasHot := s.repository.Logs.Bounds()
-	if !hasHot {
-		coldEnd, hotStart = endNanos, endNanos
-	} else if oldestHot > startNanos {
-		coldEnd = min(oldestHot, endNanos)
-		hotStart = coldEnd
+	hotCutoff, err := s.repository.ScanHotLogs(startNanos, endNanos, func(row telemetry.Log) bool {
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+		if (scope.Namespace != "" && row.Namespace != scope.Namespace) || (service != "" && row.ServiceName != service) || (severity != "" && !strings.EqualFold(row.Severity, severity)) {
+			return true
+		}
+		body := redactLogBody(row.Body)
+		if search != "" && !strings.Contains(strings.ToLower(body), search) {
+			return true
+		}
+		entryTime := time.Unix(0, row.EventUnixNanos).UTC()
+		accumulate(LogEntry{Time: entryTime, Severity: row.Severity, Service: row.ServiceName, Body: body, TraceID: row.TraceID, SpanID: row.SpanID})
+		return true
+	})
+	if err != nil {
+		return Result[Logs]{}, fmt.Errorf("read log segments: %w", err)
 	}
+	coldEnd := min(max(hotCutoff, startNanos), endNanos)
+	hotStart := max(hotCutoff, startNanos)
 	usedCold := coldEnd > startNanos
 	if usedCold {
 		rows, queryErr := s.db.QueryContext(ctx, coldLogsQuery,
@@ -129,28 +143,6 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 			return Result[Logs]{}, fmt.Errorf("iterate cold logs: %w", err)
 		}
 		rows.Close()
-	}
-	if hotStart < endNanos {
-		err = s.repository.Logs.Scan(hotStart, endNanos, func(row telemetry.Log) bool {
-			select {
-			case <-ctx.Done():
-				return false
-			default:
-			}
-			if (scope.Namespace != "" && row.Namespace != scope.Namespace) || (service != "" && row.ServiceName != service) || (severity != "" && !strings.EqualFold(row.Severity, severity)) {
-				return true
-			}
-			body := redactLogBody(row.Body)
-			if search != "" && !strings.Contains(strings.ToLower(body), search) {
-				return true
-			}
-			entryTime := time.Unix(0, row.EventUnixNanos).UTC()
-			accumulate(LogEntry{Time: entryTime, Severity: row.Severity, Service: row.ServiceName, Body: body, TraceID: row.TraceID, SpanID: row.SpanID})
-			return true
-		})
-		if err != nil {
-			return Result[Logs]{}, fmt.Errorf("read log segments: %w", err)
-		}
 	}
 	if err := ctx.Err(); err != nil {
 		return Result[Logs]{}, err

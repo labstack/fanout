@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -17,7 +18,9 @@ const (
 )
 
 type batchCommitter interface {
+	Stage(Batch) error
 	Commit(Batch) error
+	Discard(string) error
 }
 
 type Writer struct {
@@ -116,6 +119,20 @@ func (w *Writer) flush(out chan<- Batch, workerDone <-chan error) error {
 		return nil
 	}
 	batch := Batch{ID: uuid.NewString(), Spans: append([]telemetry.Span(nil), w.bufSpans...), Logs: append([]telemetry.Log(nil), w.bufLogs...), Metrics: append([]telemetry.Metric(nil), w.bufMetrics...)}
+	// Establish durability before the asynchronous handoff. From this point on,
+	// cancellation may stop retries or leave batches queued, but every row is
+	// replayable from WAL on the next start. When the WAL itself is unwritable
+	// no durability exists to protect; drop this batch with visible accounting
+	// and keep the process serving rather than shutting everything down.
+	if err := w.repository.Stage(batch); err != nil {
+		metrics.FlushErrors.WithLabelValues("stage").Inc()
+		recordDroppedBatch(batch)
+		slog.Error("telemetry batch could not be staged durably; dropping", "batch_id", batch.ID, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", err)
+		w.bufSpans = w.bufSpans[:0]
+		w.bufLogs = w.bufLogs[:0]
+		w.bufMetrics = w.bufMetrics[:0]
+		return nil
+	}
 	select {
 	case out <- batch:
 		w.bufSpans = w.bufSpans[:0]
@@ -180,6 +197,10 @@ func (w *Writer) flushWorker(ctx context.Context, in <-chan Batch, done chan<- e
 			}
 		}
 		if !committed {
+			if err := w.repository.Discard(batch.ID); err != nil {
+				done <- fmt.Errorf("discard poison telemetry batch %s: %w", batch.ID, err)
+				return
+			}
 			recordDroppedBatch(batch)
 			slog.Error("telemetry batch permanently failed; dropping after bounded retries", "batch_id", batch.ID, "attempts", commitRetryLimit, "spans", len(batch.Spans), "logs", len(batch.Logs), "metrics", len(batch.Metrics), "error", lastErr)
 		}

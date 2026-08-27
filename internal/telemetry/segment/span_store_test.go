@@ -2,6 +2,7 @@
 package segment
 
 import (
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"testing"
@@ -165,4 +166,46 @@ func TestStoreRejectsCorruptCommittedSegment(t *testing.T) {
 	if _, err := Open(dir); err == nil {
 		t.Fatal("Open succeeded with a corrupt committed segment")
 	}
+}
+
+func TestOpenRejectsSegmentWithCorruptSectionOffsets(t *testing.T) {
+	base := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC).UnixNano()
+	rows := []Span{{Namespace: "default", TraceID: "trace-a", SpanID: "1", ServiceName: "api", StartUnixNanos: base, EndUnixNanos: base + 1, DurationMS: 1, StatusCode: "OK"}}
+	corrupt := func(t *testing.T, mutate func(header []byte)) {
+		t.Helper()
+		dir := t.TempDir()
+		store, err := Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.AppendID("seg-a", rows); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(dir, "seg-a.fseg")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutate(data[:headerSize])
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Open(dir); err == nil {
+			t.Fatal("Open succeeded with corrupt section offsets")
+		}
+	}
+	t.Run("rollup offset before index offset", func(t *testing.T) {
+		corrupt(t, func(header []byte) {
+			indexOffset := binary.LittleEndian.Uint64(header[48:56])
+			binary.LittleEndian.PutUint64(header[56:64], indexOffset-1)
+		})
+	})
+	t.Run("rollup offset beyond file size", func(t *testing.T) {
+		corrupt(t, func(header []byte) {
+			binary.LittleEndian.PutUint64(header[56:64], 1<<40)
+		})
+	})
 }

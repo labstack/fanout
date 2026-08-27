@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -203,6 +204,42 @@ func TestRepositoryPrunesOnlyCompleteExpiredParquetBatches(t *testing.T) {
 	}
 }
 
+func TestRepositoryPersistsHotPruneBoundary(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := testBatch()
+	batch.ID = "hot-boundary"
+	batch.Logs = []telemetry.Log{{EventUnixNanos: 100}, {EventUnixNanos: 300}}
+	if err := repository.Commit(batch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.PruneHot(250); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	var timestamps []int64
+	cutoff, err := reopened.ScanHotLogs(0, 400, func(row telemetry.Log) bool {
+		timestamps = append(timestamps, row.EventUnixNanos)
+		return true
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cutoff != 250 || !slices.Equal(timestamps, []int64{300}) {
+		t.Fatalf("cutoff=%d timestamps=%v, want cutoff 250 and only hot timestamp 300", cutoff, timestamps)
+	}
+}
+
 func TestRepositoryCompactsParquetBatchesWithoutChangingRows(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)
@@ -217,6 +254,9 @@ func TestRepositoryCompactsParquetBatchesWithoutChangingRows(t *testing.T) {
 		if err := repository.Commit(batch); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if _, err := repository.PruneHot(50); err != nil {
+		t.Fatal(err)
 	}
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
@@ -236,6 +276,9 @@ func TestRepositoryCompactsParquetBatchesWithoutChangingRows(t *testing.T) {
 	}
 	if stats["spans"].Files != 1 {
 		t.Fatalf("span files = %d, want 1", stats["spans"].Files)
+	}
+	if repository.manifest.HotCutoffNanos != 50 {
+		t.Fatalf("hot cutoff after compaction = %d, want 50", repository.manifest.HotCutoffNanos)
 	}
 	pattern := filepath.ToSlash(filepath.Join(dir, "parquet", "spans", "*.parquet"))
 	var rows int
@@ -487,4 +530,30 @@ func testBatchAt(timestamp int64) Batch {
 	batch.Metrics[0].EventUnixNanos = timestamp
 	batch.Metrics[0].IngestedAt = timestamp
 	return batch
+}
+
+func TestNormalizeBatchBackfillsSpanStartFromIngestedAt(t *testing.T) {
+	batch := Batch{Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span", IngestedAt: 12345}}}
+	normalizeBatch(&batch)
+	if got := batch.Spans[0].StartUnixNanos; got != 12345 {
+		t.Fatalf("StartUnixNanos = %d, want ingested-at fallback 12345", got)
+	}
+}
+
+func TestCompactionSourcesDropInheritedLedger(t *testing.T) {
+	selected := []batchMetadata{
+		{ID: "raw-1"},
+		{ID: "out-1", Sources: []string{"old-a", "old-b"}},
+		{ID: "raw-2"},
+	}
+	got := compactionSources(selected)
+	want := []string{"raw-1", "raw-2"}
+	if len(got) != len(want) {
+		t.Fatalf("compactionSources = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("compactionSources = %v, want %v", got, want)
+		}
+	}
 }

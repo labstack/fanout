@@ -23,19 +23,18 @@ import (
 )
 
 type Duck struct {
-	DB              *sql.DB
-	cfg             config.Config
-	lastMaintenance time.Time
-	repository      *telemetrystore.Repository
+	DB         *sql.DB
+	cfg        config.Config
+	repository *telemetrystore.Repository
 	// rollupLagNanos holds the rollup watermark back from the max ingested
 	// timestamp so late/out-of-order commits aren't skipped. Zero disables the
 	// lag (no trailing window).
 	rollupLagNanos int64
 	// writeGate serializes writes to the rebuildable DuckDB rollup cache.
 	writeGate writegate.WriteGate
-	// parquetMu prevents retention from unlinking a file while DuckDB is opening
-	// the immutable files selected for a new query.
-	parquetMu sync.RWMutex
+	// parquetMu pins immutable files for active DuckDB readers. Its reader-first
+	// gate keeps a queued maintenance publish from stalling unrelated new reads.
+	parquetMu parquetReadGate
 	// maintHealthMu guards the maintenance health fields below, which the
 	// readiness probe reads while the maintenance pass writes them.
 	maintHealthMu      sync.Mutex
@@ -432,14 +431,6 @@ func (d *Duck) runMaintenanceLoop(ctx context.Context) {
 }
 
 func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
-	every := d.cfg.MaintenanceInterval
-	if every <= 0 {
-		every = time.Hour
-	}
-	if !d.lastMaintenance.IsZero() && time.Since(d.lastMaintenance) < every {
-		metrics.RecordTelemetryOperation(metrics.TelemetryMaintenance, metrics.TelemetryThrottled, 0)
-		return nil
-	}
 	start := time.Now()
 	cutoff := time.Now().Add(-d.cfg.HotRetention).UnixNano()
 	var pruneErr error
@@ -479,11 +470,11 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		maintenanceResult = metrics.TelemetryError
 	}
 	metrics.RecordTelemetryOperation(metrics.TelemetryMaintenance, maintenanceResult, time.Since(start).Seconds())
-	d.lastMaintenance = time.Now()
+	finished := time.Now()
 	d.maintHealthMu.Lock()
-	d.lastMaintenanceAt = d.lastMaintenance
+	d.lastMaintenanceAt = finished
 	if err == nil {
-		d.lastMaintenanceOK = d.lastMaintenance
+		d.lastMaintenanceOK = finished
 	}
 	d.lastMaintenanceErr = err
 	d.maintHealthMu.Unlock()

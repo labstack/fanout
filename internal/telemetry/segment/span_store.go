@@ -880,6 +880,13 @@ func openSegment(path string) (segment, error) {
 	if err != nil {
 		return segment{}, err
 	}
+	// Header offsets come from disk; a torn or bit-rotted segment must fail
+	// with an error naming the file, never drive a negative or huge make().
+	size := uint64(info.Size())
+	dirEnd := dirOffset + uint64(blockCount)*blockDirSize
+	if dirOffset < headerSize || dirEnd > indexOffset || indexOffset > rollupOffset || rollupOffset > size {
+		return segment{}, fmt.Errorf("segment %s has corrupt section offsets", filepath.Base(path))
+	}
 	seg.blocks = make([]blockDir, blockCount)
 	buf := make([]byte, int(blockCount)*blockDirSize)
 	if _, err := f.ReadAt(buf, int64(dirOffset)); err != nil {

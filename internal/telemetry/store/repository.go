@@ -35,19 +35,26 @@ type batchMetadata struct {
 	MinNanos   int64  `json:"min_nanos"`
 	MaxNanos   int64  `json:"max_nanos"`
 	Generation uint32 `json:"generation"`
-	// Sources retains the original ingest batch IDs folded into a compacted
-	// output. It is a retention-bounded replay ledger: a stale WAL can never
-	// resurrect rows already present in this output.
+	// Sources retains the raw ingest batch IDs folded into a compacted output
+	// by its own compaction pass. It is a one-generation replay ledger: a stale
+	// WAL can never resurrect rows already present in this output, and earlier
+	// generations need no entries because their WALs were removed durably when
+	// their own compaction completed.
 	Sources []string `json:"sources,omitempty"`
 }
 
 type repositoryManifest struct {
-	Version uint32          `json:"version"`
-	Batches []batchMetadata `json:"batches"`
+	Version        uint32          `json:"version"`
+	HotCutoffNanos int64           `json:"hot_cutoff_nanos"`
+	Batches        []batchMetadata `json:"batches"`
 }
 
 type Repository struct {
-	mu           sync.RWMutex
+	mu sync.RWMutex
+	// hotMu makes the persisted prune watermark and the hot-segment snapshot one
+	// atomic read boundary. A query can never observe an old watermark after the
+	// corresponding segments have been retired.
+	hotMu        sync.RWMutex
 	commitMu     sync.Mutex
 	compactionMu sync.Mutex
 	root         string
@@ -117,10 +124,59 @@ func (r *Repository) Close() error {
 // PruneHot removes acceleration segments older than cutoff. Parquet remains
 // authoritative for longer retention and SQL queries.
 func (r *Repository) PruneHot(cutoff int64) (int, error) {
+	r.hotMu.Lock()
+	defer r.hotMu.Unlock()
+
+	// Publish the boundary before retiring segments. A crash or partial prune can
+	// therefore create only harmless overlap (Parquet below the boundary and hot
+	// segments above it), never a hole after restart.
+	publishCutoff := func() error {
+		r.commitMu.Lock()
+		defer r.commitMu.Unlock()
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if cutoff > r.manifest.HotCutoffNanos {
+			next := r.manifest
+			next.HotCutoffNanos = cutoff
+			if err := writeRepositoryManifest(r.root, next); err != nil {
+				return err
+			}
+			r.manifest = next
+		}
+		return nil
+	}
+	if err := publishCutoff(); err != nil {
+		return 0, fmt.Errorf("publish hot prune cutoff: %w", err)
+	}
+
 	spans, spanErr := r.Spans.PruneBefore(cutoff)
 	logs, logErr := r.Logs.PruneBefore(cutoff)
 	metricRows, metricErr := r.Metrics.PruneBefore(cutoff)
 	return spans + logs + metricRows, errors.Join(spanErr, logErr, metricErr)
+}
+
+// ScanHotLogs reads the portion of [start,end) that is guaranteed complete in
+// the hot tier and returns the durable boundary below which Parquet is
+// authoritative. The boundary and scan are serialized with PruneHot.
+func (r *Repository) ScanHotLogs(start, end int64, visit func(telemetry.Log) bool) (int64, error) {
+	r.hotMu.RLock()
+	defer r.hotMu.RUnlock()
+	r.mu.RLock()
+	cutoff := r.manifest.HotCutoffNanos
+	r.mu.RUnlock()
+	return cutoff, r.Logs.Scan(max(start, cutoff), end, visit)
+}
+
+// HotTrace returns the hot trace snapshot and the durable prune boundary that
+// was in force for that snapshot.
+func (r *Repository) HotTrace(traceID string) ([]telemetry.Span, int64, error) {
+	r.hotMu.RLock()
+	defer r.hotMu.RUnlock()
+	r.mu.RLock()
+	cutoff := r.manifest.HotCutoffNanos
+	r.mu.RUnlock()
+	spans, err := r.Spans.Trace(traceID)
+	return spans, cutoff, err
 }
 
 // PruneParquet removes complete ingest batches older than cutoff. A batch that
@@ -159,7 +215,7 @@ func (r *Repository) PruneParquet(cutoff int64) (int, error) {
 	if err := syncParquetDirectories(r.Parquet.Dir()); err != nil {
 		return 0, errors.Join(removeErr, err)
 	}
-	next := repositoryManifest{Version: 1, Batches: kept}
+	next := repositoryManifest{Version: 1, HotCutoffNanos: r.manifest.HotCutoffNanos, Batches: kept}
 	if err := writeRepositoryManifest(r.root, next); err != nil {
 		return 0, errors.Join(removeErr, err)
 	}
@@ -196,6 +252,34 @@ func (r *Repository) Commit(batch Batch) error {
 		return err
 	}
 	return r.removeWAL(batch.ID)
+}
+
+// Stage durably records a batch in the WAL without publishing its projections.
+// Writers call this before handing a batch to an asynchronous commit worker, so
+// every queued or in-flight batch is replayable if shutdown interrupts retries.
+func (r *Repository) Stage(batch Batch) error {
+	if batch.ID == "" || strings.ContainsAny(batch.ID, `/\\`) {
+		return errors.New("telemetry batch requires a safe ID")
+	}
+	normalizeBatch(&batch)
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
+	consumed := r.batchConsumedLocked(batch.ID)
+	if consumed {
+		return r.removeWAL(batch.ID)
+	}
+	return r.writeWAL(batch)
+}
+
+// Discard removes a durably staged batch after the writer has explicitly
+// classified it as poison and accounted every row as dropped.
+func (r *Repository) Discard(id string) error {
+	if id == "" || strings.ContainsAny(id, `/\\`) {
+		return errors.New("telemetry batch requires a safe ID")
+	}
+	r.commitMu.Lock()
+	defer r.commitMu.Unlock()
+	return r.removeWAL(id)
 }
 
 func (r *Repository) apply(batch Batch) error {
@@ -466,6 +550,11 @@ func writeRepositoryManifest(root string, manifest repositoryManifest) error {
 func normalizeBatch(batch *Batch) {
 	for i := range batch.Spans {
 		batch.Spans[i].Namespace = telemetry.NormalizeNamespace(batch.Spans[i].Namespace)
+		if batch.Spans[i].StartUnixNanos == 0 {
+			// Mirror the Parquet start_time coalesce so hot segments and cold SQL
+			// key a zero-start span on the same instant.
+			batch.Spans[i].StartUnixNanos = batch.Spans[i].IngestedAt
+		}
 	}
 	for i := range batch.Logs {
 		batch.Logs[i].Namespace = telemetry.NormalizeNamespace(batch.Logs[i].Namespace)

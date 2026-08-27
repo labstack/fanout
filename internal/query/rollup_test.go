@@ -19,9 +19,8 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
+		DB:  db,
+		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
 
@@ -90,7 +89,7 @@ func TestRollupOnceRebuildsAffectedEndpointBuckets(t *testing.T) {
 	if err := CreateViews(db); err != nil {
 		t.Fatalf("CreateViews failed: %v", err)
 	}
-	d := &Duck{DB: db, cfg: config.Config{RetentionDays: 30}, lastMaintenance: time.Now()}
+	d := &Duck{DB: db, cfg: config.Config{RetentionDays: 30}}
 	ctx := context.Background()
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
 
@@ -141,9 +140,8 @@ func TestRollupOnceRebuildsAffectedEdgeBuckets(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
+		DB:  db,
+		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
 
@@ -231,9 +229,8 @@ func TestRollupOnceIgnoresRowsWithoutBucketTimestamp(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
+		DB:  db,
+		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
 
@@ -306,9 +303,8 @@ func TestRollupOnceMessagingEdgeCountsConsumedMessages(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
+		DB:  db,
+		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
 
@@ -378,9 +374,8 @@ func TestRollupOnceDropsCallEdgeParentOutsideWindow(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
+		DB:  db,
+		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
 
@@ -502,9 +497,8 @@ func TestRollupOnceChunksWideBacklog(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
+		DB:  db,
+		cfg: config.Config{RetentionDays: 30},
 	}
 	ctx := context.Background()
 

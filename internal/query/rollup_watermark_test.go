@@ -23,10 +23,9 @@ func TestRollupWatermarkPicksUpLateLowIngestedRow(t *testing.T) {
 
 	const lag = 2 * time.Second
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
-		rollupLagNanos:  lag.Nanoseconds(),
+		DB:             db,
+		cfg:            config.Config{RetentionDays: 30},
+		rollupLagNanos: lag.Nanoseconds(),
 	}
 	ctx := context.Background()
 
@@ -89,10 +88,9 @@ func TestRollupWatermarkLagSurvivesChunkedCatchUp(t *testing.T) {
 
 	const lag = 2 * time.Second
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
-		rollupLagNanos:  lag.Nanoseconds(),
+		DB:             db,
+		cfg:            config.Config{RetentionDays: 30},
+		rollupLagNanos: lag.Nanoseconds(),
 	}
 	ctx := context.Background()
 
@@ -152,10 +150,9 @@ func TestEdgeRollupWatermarkPicksUpLateChild(t *testing.T) {
 
 	const lag = 2 * time.Second
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
-		rollupLagNanos:  lag.Nanoseconds(),
+		DB:             db,
+		cfg:            config.Config{RetentionDays: 30},
+		rollupLagNanos: lag.Nanoseconds(),
 	}
 	ctx := context.Background()
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
