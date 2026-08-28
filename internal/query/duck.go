@@ -72,7 +72,9 @@ const (
 	EndpointReadyStateKey         = "endpoint_rollup_v1_ready"
 	EndpointDisabledStateKey      = "endpoint_rollup_v1_disabled"
 	defaultDuckDBPoolSize         = 1
-	parquetMaintenanceBatchLimit  = 64
+	parquetCompactionCycle        = 10 * time.Second
+	parquetCompactionCycleBudget  = 8 * time.Second
+	parquetMaintenanceBatchLimit  = 128
 	parquetMaintenancePhaseBudget = 10 * time.Minute
 )
 
@@ -470,16 +472,47 @@ func (d *Duck) runMaintenanceLoop(ctx context.Context) {
 		d.updateParquetStats(ctx)
 	}
 	run()
-	ticker := time.NewTicker(every)
-	defer ticker.Stop()
+	maintenanceTicker := time.NewTicker(every)
+	defer maintenanceTicker.Stop()
+	var compactionTicker *time.Ticker
+	var compactionTick <-chan time.Time
+	if every > parquetCompactionCycle {
+		compactionTicker = time.NewTicker(parquetCompactionCycle)
+		compactionTick = compactionTicker.C
+		defer compactionTicker.Stop()
+	}
 	for {
 		select {
-		case <-ticker.C:
+		case <-maintenanceTicker.C:
 			run()
+		case <-compactionTick:
+			if err := d.runParquetCompactionCycle(ctx); err != nil && ctx.Err() == nil {
+				slog.Warn("telemetry compaction cycle failed", "err", err)
+			}
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+func (d *Duck) runParquetCompactionCycle(ctx context.Context) error {
+	if d.repository == nil {
+		return nil
+	}
+	started := time.Now()
+	if err := d.repository.RecoverParquet(ctx, d); err != nil {
+		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, metrics.TelemetryError, time.Since(started).Seconds())
+		return err
+	}
+	compacted, err := d.repository.CompactParquetPass(ctx, d, parquetMaintenanceBatchLimit, parquetCompactionCycleBudget)
+	result := metrics.TelemetryNoop
+	if err != nil {
+		result = metrics.TelemetryError
+	} else if compacted > 0 {
+		result = metrics.TelemetrySuccess
+	}
+	metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, result, time.Since(started).Seconds())
+	return err
 }
 
 func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
@@ -1591,23 +1624,6 @@ func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemet
 	return d.repository.Parquet.Trace(ctx, query)
 }
 
-// MergeParquet executes the query-engine-specific half of compaction. It reads
-// immutable inputs and writes an unpublished staging file, so it does not
-// contend with DuckDB rollup-cache writes.
-func (d *Duck) MergeParquet(ctx context.Context, signal string, inputs []string, output string) error {
-	quoted := make([]string, len(inputs))
-	for i, input := range inputs {
-		quoted[i] = quoteDuckString(input)
-	}
-	query := fmt.Sprintf("SELECT * FROM read_parquet([%s], union_by_name=true)", strings.Join(quoted, ","))
-	if signal == "spans" {
-		query += " ORDER BY _trace_hash, start_unix_nano, span_id"
-	}
-	stmt := fmt.Sprintf("COPY (%s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 1, ROW_GROUP_SIZE 122880)", query, quoteDuckString(output))
-	_, err := d.DB.ExecContext(ctx, stmt)
-	return err
-}
-
 // PublishParquet limits reader exclusion to the atomic directory swap.
 //
 // The drain and the swap get separate budgets. Sharing one deadline meant a
@@ -1633,8 +1649,6 @@ func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context)
 	defer cancelSwap()
 	return publish(swapCtx)
 }
-
-func quoteDuckString(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
 
 func (d *Duck) lockParquetRead(ctx context.Context) error {
 	if err := d.parquetMu.RLockContext(ctx); err != nil {

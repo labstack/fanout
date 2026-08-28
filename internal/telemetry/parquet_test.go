@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,6 +107,39 @@ func TestParquetStoreTraceUsesExactIDAndEventOrder(t *testing.T) {
 	missing, err := traceAll(store, "missing")
 	if err != nil || len(missing) != 0 {
 		t.Fatalf("missing trace = %#v, %v", missing, err)
+	}
+}
+
+func TestValidatePublishedBatchDetectsTraceIndexDataDivergence(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "diverged"}, []Span{{
+		TraceID: "trace", SpanID: "span", StartUnixNanos: 1,
+	}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	batchDir := store.BatchPath("diverged")
+	indexPath := filepath.Join(batchDir, "trace.fidx")
+	file, err := os.OpenFile(indexPath, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var encoded [8]byte
+	binary.LittleEndian.PutUint64(encoded[:], 1)
+	if _, err := file.WriteAt(encoded[:], traceIndexHeaderSize); err != nil {
+		_ = file.Close()
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadRegisteredBatch(batchDir); err != nil {
+		t.Fatalf("startup structural validation unexpectedly caught divergence: %v", err)
+	}
+	if err := ValidatePublishedBatch(batchDir); err == nil {
+		t.Fatal("deep validation accepted a trace index that disagrees with Parquet")
 	}
 }
 

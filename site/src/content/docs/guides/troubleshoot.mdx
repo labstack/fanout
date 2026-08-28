@@ -75,6 +75,39 @@ reclaimable and removes it. Deleting the marker on its own is not a rollback;
 it discards the rows the compaction had retired.
 :::
 
+## An unreadable telemetry batch blocks startup
+
+Fanout also refuses to start when an authoritative `.batch` directory has
+invalid metadata, a corrupt Parquet file, a missing signal file, or a damaged
+trace index. First stop Fanout and back up `telemetry/`, then verify the full
+authoritative set:
+
+```sh
+fanout --config /etc/fanout/fanout.yaml repair verify
+```
+
+The command is read-only and names every unreadable batch. Restore each named
+batch from backup when possible. If one cannot be recovered and discarding
+only its telemetry is preferable to leaving the instance offline, set it aside
+explicitly:
+
+```sh
+fanout --config /etc/fanout/fanout.yaml repair quarantine --batch <id>
+```
+
+Quarantine is an atomic rename beside the authoritative batch set, not a
+deletion. It refuses a batch that validates successfully and refuses any input
+or output protected by a live compaction marker. Preserve the reported
+quarantine directory for later recovery, run `repair verify` again, and only
+then restart Fanout.
+
+:::caution[Quarantine makes those rows unavailable]
+The command is intentionally batch-specific and never runs during startup.
+Every row in the quarantined directory disappears from queries until the batch
+is restored, so do not use it as a substitute for fixing a transient disk or
+permission error.
+:::
+
 ## An exporter is rejected
 
 Work down this list in order:

@@ -8,12 +8,17 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/labstack/fanout/internal/telemetry"
+	"golang.org/x/sync/errgroup"
 )
 
-const minCompactionInputs = 8
+const (
+	maxCompactionRows   = 25_000_000
+	minCompactionInputs = 8
+)
 
 var parquetSignals = [...]string{"spans", "logs", "metrics"}
 
@@ -27,21 +32,16 @@ type compactionKey struct {
 	generation uint32
 }
 
-// ParquetCompactor keeps DuckDB execution and publication locking in the query
-// layer while storage owns batch selection and crash-safe replacement state.
+// ParquetPublisher lets the query layer exclude readers only for the atomic
+// namespace swap; storage owns native merges and crash-safe replacement state.
 type ParquetPublisher interface {
 	PublishParquet(context.Context, func(context.Context) error) error
 }
 
-type ParquetCompactor interface {
-	ParquetPublisher
-	MergeParquet(context.Context, string, []string, string) error
-}
-
 // CompactParquet combines one same-day, same-generation group. The output is
 // prepared outside the query gate and swapped as one batch directory.
-func (r *Repository) CompactParquet(ctx context.Context, compactor ParquetCompactor, maxBatches int) (int, error) {
-	if compactor == nil || maxBatches < minCompactionInputs {
+func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublisher, maxBatches int) (int, error) {
+	if publisher == nil || maxBatches < minCompactionInputs {
 		return 0, nil
 	}
 	r.compactionMu.Lock()
@@ -50,12 +50,12 @@ func (r *Repository) CompactParquet(ctx context.Context, compactor ParquetCompac
 	if exists, err := pathExists(markerPath); err != nil {
 		return 0, err
 	} else if exists {
-		if err := r.recoverCompaction(ctx, compactor.PublishParquet); err != nil {
+		if err := r.recoverCompaction(ctx, publisher.PublishParquet); err != nil {
 			return 0, fmt.Errorf("recover pending Parquet compaction: %w", err)
 		}
 	}
 	selected := selectCompactionBatches(r.Parquet.BatchMetadata(), maxBatches)
-	if len(selected) < minCompactionInputs {
+	if len(selected) < 2 {
 		return 0, nil
 	}
 	output := telemetry.BatchMetadata{
@@ -92,6 +92,12 @@ func (r *Repository) CompactParquet(ctx context.Context, compactor ParquetCompac
 			_ = os.RemoveAll(stage)
 		}
 	}()
+	type mergePlan struct {
+		signal string
+		inputs []string
+		output string
+	}
+	plans := make([]mergePlan, 0, len(parquetSignals))
 	for _, signal := range parquetSignals {
 		inputs := make([]string, 0, len(selected))
 		for _, batch := range selected {
@@ -105,13 +111,25 @@ func (r *Repository) CompactParquet(ctx context.Context, compactor ParquetCompac
 		if len(inputs) == 0 {
 			continue
 		}
-		outputPath := filepath.Join(stage, signal+".parquet")
-		if err := compactor.MergeParquet(ctx, signal, inputs, outputPath); err != nil {
-			return 0, fmt.Errorf("compact %s Parquet: %w", signal, err)
-		}
-		if err := syncFile(outputPath); err != nil {
-			return 0, err
-		}
+		plans = append(plans, mergePlan{signal: signal, inputs: inputs, output: filepath.Join(stage, signal+".parquet")})
+	}
+	group, mergeCtx := errgroup.WithContext(ctx)
+	for _, plan := range plans {
+		group.Go(func() error {
+			if err := r.Parquet.MergeParquet(mergeCtx, plan.signal, plan.inputs, plan.output); err != nil {
+				return fmt.Errorf("compact %s Parquet: %w", plan.signal, err)
+			}
+			if err := mergeCtx.Err(); err != nil {
+				return err
+			}
+			if err := syncFile(plan.output); err != nil {
+				return fmt.Errorf("sync compacted %s Parquet: %w", plan.signal, err)
+			}
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return 0, err
 	}
 	if err := r.Parquet.PrepareReplacement(stage, marker.Output); err != nil {
 		return 0, err
@@ -127,7 +145,7 @@ func (r *Repository) CompactParquet(ctx context.Context, compactor ParquetCompac
 		return 0, err
 	}
 	prepared = true
-	if err := r.completeCompaction(ctx, marker, compactor.PublishParquet); err != nil {
+	if err := r.completeCompaction(ctx, marker, publisher.PublishParquet); err != nil {
 		return 0, err
 	}
 	return len(selected), nil
@@ -137,48 +155,105 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) 
 	if maxBatches < minCompactionInputs {
 		return nil
 	}
-	counts := make(map[compactionKey]int)
+	groups := make(map[compactionKey][]telemetry.BatchMetadata)
 	for _, batch := range batches {
-		if batch.MaxIngestedNanos > 0 {
-			counts[compactionKey{day: batch.MaxIngestedNanos / int64(24*time.Hour), generation: batch.Generation}]++
+		if batch.MaxIngestedNanos <= 0 {
+			continue
 		}
+		key := compactionKey{day: batch.MaxIngestedNanos / int64(24*time.Hour), generation: batch.Generation}
+		groups[key] = append(groups[key], batch)
 	}
 	var chosen compactionKey
+	var selected []telemetry.BatchMetadata
 	found := false
-	for key, count := range counts {
-		if count >= minCompactionInputs && (!found || key.day < chosen.day || key.day == chosen.day && key.generation < chosen.generation) {
-			chosen, found = key, true
+	for key, group := range groups {
+		candidate := selectBoundedCompactionGroup(group, maxBatches)
+		if len(candidate) < 2 {
+			continue
+		}
+		if !found || key.day < chosen.day || key.day == chosen.day && key.generation < chosen.generation {
+			chosen, selected, found = key, candidate, true
 		}
 	}
 	if !found {
 		return nil
 	}
-	selected := make([]telemetry.BatchMetadata, 0, min(maxBatches, counts[chosen]))
-	for _, batch := range batches {
-		if batch.MaxIngestedNanos <= 0 {
+	return selected
+}
+
+// selectBoundedCompactionGroup keeps the high-reclaim full-group behavior for
+// small files, but admits a smaller group when the row ceiling fills first.
+// Without the latter, one successful generation can make every later group too
+// large for the ceiling and permanently strand those files.
+func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches int) []telemetry.BatchMetadata {
+	ordered := append([]telemetry.BatchMetadata(nil), group...)
+	sort.Slice(ordered, func(i, j int) bool {
+		left, right := compactionBatchRows(ordered[i]), compactionBatchRows(ordered[j])
+		if left != right {
+			return left < right
+		}
+		if ordered[i].MinIngestedNanos != ordered[j].MinIngestedNanos {
+			return ordered[i].MinIngestedNanos < ordered[j].MinIngestedNanos
+		}
+		return ordered[i].ID < ordered[j].ID
+	})
+	candidate := make([]telemetry.BatchMetadata, 0, min(maxBatches, len(ordered)))
+	var rows int64
+	saturated := false
+	var smallest int64
+	for _, batch := range ordered {
+		batchRows := compactionBatchRows(batch)
+		if batchRows <= 0 || batchRows > maxCompactionRows {
 			continue
 		}
-		if (compactionKey{day: batch.MaxIngestedNanos / int64(24*time.Hour), generation: batch.Generation}) == chosen {
-			selected = append(selected, batch)
-			if len(selected) == maxBatches {
-				break
-			}
+		if smallest == 0 {
+			smallest = batchRows
 		}
+		if len(candidate) == maxBatches {
+			saturated = true
+			break
+		}
+		if rows > maxCompactionRows-batchRows {
+			saturated = true
+			break
+		}
+		candidate = append(candidate, batch)
+		rows += batchRows
 	}
-	return selected
+	if rows == maxCompactionRows || smallest > 0 && smallest > maxCompactionRows-rows {
+		saturated = true
+	}
+	if len(candidate) == maxBatches || saturated && len(candidate) >= 2 {
+		return candidate
+	}
+	return nil
+}
+
+func compactionBatchRows(batch telemetry.BatchMetadata) int64 {
+	if batch.Spans < 0 {
+		return math.MaxInt64
+	}
+	rows := int64(batch.Spans)
+	for _, count := range [...]int{batch.Logs, batch.Metrics} {
+		if count < 0 || rows > math.MaxInt64-int64(count) {
+			return math.MaxInt64
+		}
+		rows += int64(count)
+	}
+	return rows
 }
 
 // CompactParquetPass starts complete compactions until the phase budget
 // expires. An in-flight merge keeps the caller context so slow, valid work
 // commits instead of restarting the same input group on every pass.
-func (r *Repository) CompactParquetPass(ctx context.Context, compactor ParquetCompactor, maxBatches int, budget time.Duration) (int, error) {
+func (r *Repository) CompactParquetPass(ctx context.Context, publisher ParquetPublisher, maxBatches int, budget time.Duration) (int, error) {
 	if maxBatches <= 0 || budget <= 0 {
 		return 0, nil
 	}
 	deadline := time.Now().Add(budget)
 	total := 0
 	for {
-		count, err := r.CompactParquet(ctx, compactor, maxBatches)
+		count, err := r.CompactParquet(ctx, publisher, maxBatches)
 		total += count
 		if err != nil || count == 0 || !time.Now().Before(deadline) {
 			return total, err

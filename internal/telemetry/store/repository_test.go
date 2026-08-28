@@ -17,7 +17,6 @@ import (
 )
 
 type testParquetCompactor struct {
-	db         *sql.DB
 	publishErr error
 	afterSwap  func() error
 }
@@ -26,19 +25,6 @@ type testParquetPublisherFunc func(context.Context, func(context.Context) error)
 
 func (f testParquetPublisherFunc) PublishParquet(ctx context.Context, publish func(context.Context) error) error {
 	return f(ctx, publish)
-}
-
-func (c *testParquetCompactor) MergeParquet(ctx context.Context, signal string, inputs []string, output string) error {
-	quoted := make([]string, len(inputs))
-	for i, input := range inputs {
-		quoted[i] = sqlQuote(input)
-	}
-	query := fmt.Sprintf("SELECT * FROM read_parquet([%s], union_by_name=true)", strings.Join(quoted, ","))
-	if signal == "spans" {
-		query += " ORDER BY _trace_hash, start_unix_nano, span_id"
-	}
-	_, err := c.db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD)", query, sqlQuote(output)))
-	return err
 }
 
 func (c *testParquetCompactor) PublishParquet(ctx context.Context, publish func(context.Context) error) error {
@@ -460,7 +446,7 @@ func TestRepositoryCompactsParquetWithoutChangingRows(t *testing.T) {
 	}
 	db := openTestDuckDB(t)
 	defer db.Close()
-	compactor := &testParquetCompactor{db: db, afterSwap: func() error {
+	compactor := &testParquetCompactor{afterSwap: func() error {
 		retired, err := filepath.Glob(filepath.Join(repository.Parquet.BatchesDir(), "*.retired-*"))
 		if err != nil {
 			return err
@@ -470,7 +456,9 @@ func TestRepositoryCompactsParquetWithoutChangingRows(t *testing.T) {
 		}
 		return nil
 	}}
-	compacted, err := repository.CompactParquet(context.Background(), compactor, 64)
+	compactCtx, cancelCompact := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelCompact()
+	compacted, err := repository.CompactParquet(compactCtx, compactor, minCompactionInputs)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -502,6 +490,77 @@ func TestRepositoryCompactsParquetWithoutChangingRows(t *testing.T) {
 	}
 }
 
+func TestSelectCompactionBatchesRequiresFullSmallFileGroup(t *testing.T) {
+	const groupSize = 16
+	batches := make([]telemetry.BatchMetadata, groupSize)
+	for i := range batches {
+		batches[i] = telemetry.BatchMetadata{ID: fmt.Sprintf("batch-%d", i), MaxIngestedNanos: 1, Spans: 1}
+	}
+	if selected := selectCompactionBatches(batches[:groupSize-1], groupSize); len(selected) != 0 {
+		t.Fatalf("selected partial group of %d batches", len(selected))
+	}
+	if selected := selectCompactionBatches(batches, groupSize); len(selected) != groupSize {
+		t.Fatalf("selected full group = %d, want %d", len(selected), groupSize)
+	}
+}
+
+func TestSelectCompactionBatchesBuildsRowBoundedGroup(t *testing.T) {
+	const maxBatches = 16
+	batches := make([]telemetry.BatchMetadata, maxBatches)
+	for i := range batches {
+		batches[i] = telemetry.BatchMetadata{
+			ID: fmt.Sprintf("batch-%d", i), MaxIngestedNanos: 1, Generation: 2,
+			Spans: 2_000_000,
+		}
+	}
+	selected := selectCompactionBatches(batches, maxBatches)
+	if len(selected) != 12 {
+		t.Fatalf("selected %d batches, want 12 below row limit", len(selected))
+	}
+	var rows int
+	for _, batch := range selected {
+		rows += batch.Spans + batch.Logs + batch.Metrics
+	}
+	if rows > maxCompactionRows {
+		t.Fatalf("selected %d rows above limit %d", rows, maxCompactionRows)
+	}
+}
+
+func TestSelectCompactionBatchesCombinesSaturatedLargeFiles(t *testing.T) {
+	const maxBatches = 16
+	batches := make([]telemetry.BatchMetadata, 4)
+	for i := range batches {
+		batches[i] = telemetry.BatchMetadata{
+			ID: fmt.Sprintf("large-%d", i), MaxIngestedNanos: 1, Generation: 3,
+			Spans: 6_000_000,
+		}
+	}
+	selected := selectCompactionBatches(batches, maxBatches)
+	if len(selected) != len(batches) {
+		t.Fatalf("selected %d saturated large batches, want %d", len(selected), len(batches))
+	}
+}
+
+func TestSelectCompactionBatchesSkipsUncompactableOlderGroup(t *testing.T) {
+	batches := make([]telemetry.BatchMetadata, 2*minCompactionInputs)
+	for i := range minCompactionInputs {
+		batches[i] = telemetry.BatchMetadata{
+			ID: fmt.Sprintf("oversized-%d", i), MaxIngestedNanos: 1,
+			Spans: maxCompactionRows + 1,
+		}
+	}
+	for i := minCompactionInputs; i < len(batches); i++ {
+		batches[i] = telemetry.BatchMetadata{
+			ID: fmt.Sprintf("newer-%d", i), MaxIngestedNanos: int64(24*time.Hour) + 1,
+			Spans: 1,
+		}
+	}
+	selected := selectCompactionBatches(batches, minCompactionInputs)
+	if len(selected) != minCompactionInputs || !strings.HasPrefix(selected[0].ID, "newer-") {
+		t.Fatalf("selection did not skip uncompactable older group: %#v", selected)
+	}
+}
+
 func TestRepositoryRecoversPendingCompactionWithoutRestart(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)
@@ -517,17 +576,15 @@ func TestRepositoryRecoversPendingCompactionWithoutRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	db := openTestDuckDB(t)
-	defer db.Close()
-	compactor := &testParquetCompactor{db: db, publishErr: errors.New("publication unavailable")}
-	if _, err := repository.CompactParquet(context.Background(), compactor, 64); err == nil {
+	compactor := &testParquetCompactor{publishErr: errors.New("publication unavailable")}
+	if _, err := repository.CompactParquet(context.Background(), compactor, minCompactionInputs); err == nil {
 		t.Fatal("compaction succeeded despite publication failure")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {
 		t.Fatalf("pending marker: %v", err)
 	}
 	compactor.publishErr = nil
-	if compacted, err := repository.CompactParquet(context.Background(), compactor, 64); err != nil || compacted != 0 {
+	if compacted, err := repository.CompactParquet(context.Background(), compactor, minCompactionInputs); err != nil || compacted != 0 {
 		t.Fatalf("resume compaction = %d, %v", compacted, err)
 	}
 	if got := repository.Parquet.BatchMetadata(); len(got) != 1 || got[0].Generation != 1 {
@@ -643,10 +700,8 @@ func seedFailedCompaction(t *testing.T, dir string, repository *Repository) {
 			t.Fatal(err)
 		}
 	}
-	db := openTestDuckDB(t)
-	t.Cleanup(func() { db.Close() })
-	compactor := &testParquetCompactor{db: db, publishErr: errors.New("publication unavailable")}
-	if _, err := repository.CompactParquet(context.Background(), compactor, 64); err == nil {
+	compactor := &testParquetCompactor{publishErr: errors.New("publication unavailable")}
+	if _, err := repository.CompactParquet(context.Background(), compactor, minCompactionInputs); err == nil {
 		t.Fatal("compaction succeeded despite publication failure")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {

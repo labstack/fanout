@@ -50,8 +50,13 @@ var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
+type repairCommand struct {
+	action string
+	batch  string
+}
+
 func main() {
-	configPath, showVersion, loginEmail, healthURL, err := parseCommandLine(os.Args[1:], os.Stderr)
+	configPath, showVersion, loginEmail, healthURL, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
 	}
@@ -76,6 +81,13 @@ func main() {
 	if err != nil {
 		slog.Error("invalid configuration", "err", err)
 		os.Exit(1)
+	}
+	if repair != nil {
+		if err := runRepair(cfg.TelemetryDir(), *repair, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "fanout repair:", err)
+			os.Exit(1)
+		}
+		return
 	}
 	if loginEmail != "" {
 		if err := createLoginLink(cfg, loginEmail, os.Stderr); err != nil {
@@ -456,15 +468,15 @@ func main() {
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 
-func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, loginEmail, healthURL string, err error) {
+func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, loginEmail, healthURL string, repair *repairCommand, err error) {
 	if len(args) == 1 && args[0] == "version" {
-		return "", true, "", "", nil
+		return "", true, "", "", nil, nil
 	}
 	if len(args) >= 1 && len(args) <= 2 && args[0] == "healthcheck" {
 		if len(args) == 2 {
-			return "", false, "", args[1], nil
+			return "", false, "", args[1], nil, nil
 		}
-		return "", false, "", "http://127.0.0.1:7520/healthz", nil
+		return "", false, "", "http://127.0.0.1:7520/healthz", nil, nil
 	}
 
 	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
@@ -473,6 +485,8 @@ func parseCommandLine(args []string, output io.Writer) (configPath string, showV
 		fmt.Fprintln(output, "Usage of fanout:")
 		fmt.Fprintln(output, "  fanout [flags]")
 		fmt.Fprintln(output, "  fanout [--config path] login-link <email>")
+		fmt.Fprintln(output, "  fanout [--config path] repair verify")
+		fmt.Fprintln(output, "  fanout [--config path] repair quarantine --batch <id>")
 		fmt.Fprintln(output, "  fanout healthcheck [url]")
 		fmt.Fprintln(output, "  fanout version")
 		fmt.Fprintln(output, "Flags:")
@@ -482,18 +496,71 @@ func parseCommandLine(args []string, output io.Writer) (configPath string, showV
 	flags.BoolVar(&showVersion, "version", false, "print the Fanout version")
 	flags.BoolVar(&showVersion, "v", false, "print the Fanout version")
 	if err := flags.Parse(args); err != nil {
-		return "", false, "", "", err
+		return "", false, "", "", nil, err
 	}
 	if flags.NArg() == 2 && flags.Arg(0) == "login-link" {
-		return configPath, false, flags.Arg(1), "", nil
+		return configPath, false, flags.Arg(1), "", nil, nil
+	}
+	if flags.NArg() > 0 && flags.Arg(0) == "repair" {
+		repair, err := parseRepairCommand(flags.Args()[1:], output)
+		return configPath, false, "", "", repair, err
 	}
 	if flags.NArg() != 0 {
 		err := fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
 		fmt.Fprintln(output, err)
 		flags.Usage()
-		return "", false, "", "", err
+		return "", false, "", "", nil, err
 	}
-	return configPath, showVersion, "", "", nil
+	return configPath, showVersion, "", "", nil, nil
+}
+
+func parseRepairCommand(args []string, output io.Writer) (*repairCommand, error) {
+	if len(args) == 1 && args[0] == "verify" {
+		return &repairCommand{action: "verify"}, nil
+	}
+	if len(args) == 0 || args[0] != "quarantine" {
+		return nil, errors.New("repair requires 'verify' or 'quarantine --batch <id>'")
+	}
+	flags := flag.NewFlagSet("fanout repair quarantine", flag.ContinueOnError)
+	flags.SetOutput(output)
+	batch := flags.String("batch", "", "unreadable authoritative batch ID to set aside")
+	if err := flags.Parse(args[1:]); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(*batch) == "" || flags.NArg() != 0 {
+		return nil, errors.New("repair quarantine requires exactly --batch <id>")
+	}
+	return &repairCommand{action: "quarantine", batch: *batch}, nil
+}
+
+func runRepair(root string, command repairCommand, output io.Writer) error {
+	switch command.action {
+	case "verify":
+		issues, err := telemetrystore.VerifyBatches(root)
+		if err != nil {
+			return err
+		}
+		if len(issues) == 0 {
+			fmt.Fprintln(output, "all authoritative telemetry batches passed validation")
+			return nil
+		}
+		for _, issue := range issues {
+			fmt.Fprintf(output, "%s: %v\n", issue.ID, issue.Err)
+		}
+		return fmt.Errorf("%d unreadable authoritative telemetry batch(es)", len(issues))
+	case "quarantine":
+		destination, err := telemetrystore.QuarantineBatch(root, command.batch)
+		if destination != "" {
+			fmt.Fprintf(output, "batch %s set aside at %s\n", command.batch, destination)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(output, "the quarantined telemetry is no longer queryable; preserve it for recovery from backup")
+		return nil
+	default:
+		return fmt.Errorf("unknown repair action %q", command.action)
+	}
 }
 
 func checkHealth(healthURL string) error {

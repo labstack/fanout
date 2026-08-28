@@ -310,30 +310,18 @@ func TestPublishParquetHonorsContext(t *testing.T) {
 	}
 }
 
-func TestParquetWorkDoesNotWaitForDuckDBWriteGate(t *testing.T) {
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	mock.ExpectExec("COPY").WillReturnResult(sqlmock.NewResult(0, 1))
-	d := &Duck{DB: db}
+func TestParquetPublicationDoesNotWaitForDuckDBWriteGate(t *testing.T) {
+	d := &Duck{}
 	release := d.writeGate.Lock(writegate.WriteRollupService)
 	defer release()
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if err := d.MergeParquet(ctx, "logs", []string{"/tmp/input.parquet"}, "/tmp/output.parquet"); err != nil {
-		t.Fatalf("merge waited for unrelated DuckDB write gate: %v", err)
-	}
 	called := false
 	if err := d.PublishParquet(ctx, func(context.Context) error { called = true; return nil }); err != nil {
 		t.Fatalf("publication waited for unrelated DuckDB write gate: %v", err)
 	}
 	if !called {
 		t.Fatal("publication callback did not run")
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -607,7 +595,7 @@ func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := repository.CompactParquet(context.Background(), failingPublishCompactor{d}, 64); err == nil {
+	if _, err := repository.CompactParquet(context.Background(), failingPublishCompactor{d}, 8); err == nil {
 		t.Fatal("compaction unexpectedly published")
 	}
 	if err := d.runRepositoryMaintenance(context.Background()); err != nil {

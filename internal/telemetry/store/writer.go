@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	commitQueueDepth     = 256
+	commitQueueDepth     = maxCommitWorkers
 	commitRetryLimit     = 5
+	groupAdmissionWindow = 20 * time.Millisecond
+	maxAdmissionRequests = 512
 	maxGroupBatchRows    = 50_000
 	maxCommitWorkers     = 4
 	submissionQueueDepth = 256
@@ -30,6 +32,7 @@ type Writer struct {
 	repository    batchCommitter
 	batchSize     int
 	retryDelay    func(int) time.Duration
+	groupWindow   time.Duration
 	shutdownGrace time.Duration
 	done          chan struct{}
 	submissions   chan submission
@@ -46,7 +49,10 @@ type commitJob struct {
 }
 
 func NewWriter(repository *Repository, batchSize int) *Writer {
-	return &Writer{repository: repository, batchSize: batchSize, done: make(chan struct{}), submissions: make(chan submission, submissionQueueDepth)}
+	return &Writer{
+		repository: repository, batchSize: batchSize, groupWindow: groupAdmissionWindow,
+		done: make(chan struct{}), submissions: make(chan submission, submissionQueueDepth),
+	}
 }
 
 func (w *Writer) Wait() { <-w.done }
@@ -129,8 +135,31 @@ func (w *Writer) Run(ctx context.Context) error {
 }
 
 func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out chan<- commitJob) error {
-	requests := []submission{request}
-	for len(requests) < submissionQueueDepth {
+	requests := make([]submission, 1, maxAdmissionRequests)
+	requests[0] = request
+	rows := batchRows(request.batch)
+	limit := w.batchLimit()
+	if rows < limit {
+		window := w.groupWindow
+		if window <= 0 {
+			window = groupAdmissionWindow
+		}
+		timer := time.NewTimer(window)
+		defer timer.Stop()
+	admit:
+		for len(requests) < maxAdmissionRequests && rows < limit {
+			select {
+			case next := <-w.submissions:
+				requests = append(requests, next)
+				rows += batchRows(next.batch)
+			case <-timer.C:
+				break admit
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+	for len(requests) < maxAdmissionRequests {
 		select {
 		case next := <-w.submissions:
 			requests = append(requests, next)
@@ -141,7 +170,6 @@ func (w *Writer) enqueueSubmissions(ctx context.Context, request submission, out
 
 drained:
 	metrics.UpdateQueueDepth("batch", len(w.submissions))
-	limit := w.batchLimit()
 	for len(requests) > 0 {
 		firstRows := batchRows(requests[0].batch)
 		// A full batch, a lone request, or a request that cannot share the

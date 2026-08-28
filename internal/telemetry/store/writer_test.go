@@ -34,7 +34,7 @@ func (c *recordingCommitter) Commit(_ context.Context, batch Batch) error {
 
 func testWriter(committer batchCommitter, batchSize int) *Writer {
 	return &Writer{
-		repository: committer, batchSize: batchSize, done: make(chan struct{}),
+		repository: committer, batchSize: batchSize, groupWindow: groupAdmissionWindow, done: make(chan struct{}),
 		submissions: make(chan submission, submissionQueueDepth),
 	}
 }
@@ -107,6 +107,29 @@ func TestWriterGroupsQueuedSubmissions(t *testing.T) {
 	defer committer.mu.Unlock()
 	if len(committer.batches) != 1 || len(committer.batches[0].Spans) != 4 {
 		t.Fatalf("committed batches = %#v", committer.batches)
+	}
+}
+
+func TestWriterAdmitsSubmissionArrivingDuringBoundedWindow(t *testing.T) {
+	committer := &recordingCommitter{}
+	w := testWriter(committer, maxGroupBatchRows)
+	w.groupWindow = 100 * time.Millisecond
+	first := submission{batch: Batch{Spans: []telemetry.Span{{SpanID: "first"}}}, ack: make(chan error, 1)}
+	second := submission{batch: Batch{Spans: []telemetry.Span{{SpanID: "second"}}}, ack: make(chan error, 1)}
+	out := make(chan commitJob, 1)
+	started := make(chan struct{})
+	go func() {
+		close(started)
+		time.Sleep(time.Millisecond)
+		w.submissions <- second
+	}()
+	<-started
+	if err := w.enqueueSubmissions(context.Background(), first, out); err != nil {
+		t.Fatal(err)
+	}
+	job := <-out
+	if len(job.batches) != 1 || batchRows(job.batches[0]) != 2 || len(job.acks) != 2 {
+		t.Fatalf("admitted job = %#v", job)
 	}
 }
 
