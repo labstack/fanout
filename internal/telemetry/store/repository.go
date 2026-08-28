@@ -2,8 +2,10 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -24,10 +26,24 @@ type Batch struct {
 // Repository publishes self-contained Parquet batch directories. The
 // directory rename is the transaction and the filesystem is the catalog.
 type Repository struct {
-	root         string
-	Parquet      *telemetry.ParquetStore
-	compactionMu sync.Mutex
+	root    string
+	Parquet *telemetry.ParquetStore
+	// compactionMu guards the compaction marker and the retired directories a
+	// pending marker may still need, along with recoveryFailures.
+	compactionMu     sync.Mutex
+	recoveryFailures int
 }
+
+// maxCompactionRecoveryAttempts bounds how many passes a marker may fail
+// recovery before it is set aside. A marker that cannot be recovered gates
+// retention, compaction, and retired-directory cleanup — correctly, since all
+// three could destroy what a rollback needs — so without a give-up path one
+// bad marker latches every form of maintenance off for the process lifetime
+// and storage grows unreclaimed behind a healthy-looking probe.
+const maxCompactionRecoveryAttempts = 3
+
+// quarantinedMarkerName is the marker set aside by quarantineCompactionMarker.
+const quarantinedMarkerName = "COMPACTION.json.failed"
 
 func Open(root string) (*Repository, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -38,11 +54,23 @@ func Open(root string) (*Repository, error) {
 		return nil, err
 	}
 	r := &Repository{root: root, Parquet: parquetStore}
+	// A marker that cannot be recovered must not keep the process from
+	// booting: refusing to start leaves the operator with no way to run the
+	// cleanup that would clear it, so the only recovery was a manual rm -rf of
+	// live storage. Set it aside instead and come up degraded. Nothing is
+	// deleted — the staged output and the retired inputs both survive — so the
+	// compaction can still be completed or rolled back by hand.
+	quarantined := false
 	if err := r.recoverCompaction(context.Background(), func(ctx context.Context, publish func(context.Context) error) error { return publish(ctx) }); err != nil {
-		_ = r.Close()
-		return nil, fmt.Errorf("recover Parquet compaction: %w", err)
+		slog.Error("Parquet compaction recovery failed at open; setting marker aside",
+			"err", err, "marker", quarantinedMarkerName)
+		if quarantineErr := r.quarantineCompactionMarker(); quarantineErr != nil {
+			_ = r.Close()
+			return nil, errors.Join(fmt.Errorf("recover Parquet compaction: %w", err), quarantineErr)
+		}
+		quarantined = true
 	}
-	if err := r.cleanupCompactionArtifacts(); err != nil {
+	if err := r.cleanupCompactionArtifacts(quarantined); err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("clean Parquet compaction staging: %w", err)
 	}
@@ -53,11 +81,34 @@ func Open(root string) (*Repository, error) {
 	return r, nil
 }
 
-func (r *Repository) cleanupCompactionArtifacts() error {
-	if err := os.RemoveAll(filepath.Join(r.root, "compaction")); err != nil {
-		return err
+// cleanupCompactionArtifacts drops staging left by an interrupted compaction.
+// preserveStage keeps the staged output for a marker that was set aside, which
+// is the only copy of that compaction's merged rows.
+func (r *Repository) cleanupCompactionArtifacts(preserveStage bool) error {
+	if !preserveStage {
+		if err := os.RemoveAll(filepath.Join(r.root, "compaction")); err != nil {
+			return err
+		}
 	}
 	if err := os.Remove(filepath.Join(r.root, "COMPACTION.json.tmp")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return syncDirectory(r.root)
+}
+
+// quarantineCompactionMarker sets aside a marker whose recovery keeps failing
+// so it stops gating retention, compaction, and retired-directory cleanup.
+//
+// Nothing is deleted: the staged output stays, and the retired inputs are
+// protected from cleanup by protectedRetiredSuffixes, so the operator can
+// still complete or roll back the compaction by hand. This is not the
+// batch-level quarantine that was rejected — no authoritative telemetry is
+// discarded, and no batch becomes unreadable that was readable before.
+func (r *Repository) quarantineCompactionMarker() error {
+	if err := os.Rename(filepath.Join(r.root, "COMPACTION.json"), filepath.Join(r.root, quarantinedMarkerName)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
 		return err
 	}
 	return syncDirectory(r.root)
@@ -74,6 +125,10 @@ func (r *Repository) CleanupParquet() error {
 }
 
 func (r *Repository) cleanupRetired() error {
+	protected, err := r.protectedRetiredSuffixes()
+	if err != nil {
+		return err
+	}
 	entries, err := os.ReadDir(r.Parquet.BatchesDir())
 	if err != nil {
 		return err
@@ -83,6 +138,9 @@ func (r *Repository) cleanupRetired() error {
 	for _, entry := range entries {
 		name := entry.Name()
 		if !entry.IsDir() || strings.HasSuffix(name, telemetry.BatchSuffix) || !strings.Contains(name, ".retired") {
+			continue
+		}
+		if protectedRetired(name, protected) {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(r.Parquet.BatchesDir(), name)); err != nil {
@@ -97,7 +155,40 @@ func (r *Repository) cleanupRetired() error {
 	return cleanupErr
 }
 
-func (r *Repository) Commit(batch Batch) error {
+func protectedRetired(name string, protected map[string]bool) bool {
+	for suffix := range protected {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// protectedRetiredSuffixes names the retired-input sets that a live or
+// set-aside compaction marker may still need in order to roll back. Deleting
+// one of those is unrecoverable: the input is gone and its rows were never
+// published under the replacement. An unreadable marker therefore fails
+// closed rather than protecting nothing.
+func (r *Repository) protectedRetiredSuffixes() (map[string]bool, error) {
+	protected := make(map[string]bool)
+	for _, name := range []string{"COMPACTION.json", quarantinedMarkerName} {
+		data, err := os.ReadFile(filepath.Join(r.root, name))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		var marker compactionMarker
+		if err := json.Unmarshal(data, &marker); err != nil {
+			return nil, fmt.Errorf("read compaction marker %s: %w", name, err)
+		}
+		protected[".retired-"+marker.Output.ID] = true
+	}
+	return protected, nil
+}
+
+func (r *Repository) Commit(ctx context.Context, batch Batch) error {
 	normalizeBatch(&batch)
 	if err := validateBatch(batch); err != nil {
 		return err
@@ -105,11 +196,7 @@ func (r *Repository) Commit(batch Batch) error {
 	metadata := telemetry.BatchMetadata{
 		ID: batch.ID, MinIngestedNanos: batchMinIngestedNanos(batch), MaxIngestedNanos: batchMaxIngestedNanos(batch),
 	}
-	return r.Parquet.CommitBatch(metadata, batch.Spans, batch.Logs, batch.Metrics)
-}
-
-func (r *Repository) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemetry.IndexedSpan, error) {
-	return r.Parquet.Trace(ctx, query)
+	return r.Parquet.CommitBatch(ctx, metadata, batch.Spans, batch.Logs, batch.Metrics)
 }
 
 func (r *Repository) RowCount() uint64 { return r.Parquet.RowCount() }

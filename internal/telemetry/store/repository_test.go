@@ -75,10 +75,10 @@ func TestRepositoryCommitIsIdempotentDurableAndQueryable(t *testing.T) {
 		t.Fatal(err)
 	}
 	batch := testBatch()
-	if err := repository.Commit(batch); err != nil {
+	if err := repository.Commit(context.Background(), batch); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.Commit(batch); err != nil {
+	if err := repository.Commit(context.Background(), batch); err != nil {
 		t.Fatalf("idempotent commit: %v", err)
 	}
 	if got := repository.RowCount(); got != 3 {
@@ -127,7 +127,7 @@ func TestRepositoryCommitsOversizedRequestAsOneBatch(t *testing.T) {
 			StartUnixNanos: int64(i + 1), EndUnixNanos: int64(i + 2), IngestedAt: 1,
 		}
 	}
-	if err := repository.Commit(Batch{ID: "oversized", Spans: spans}); err != nil {
+	if err := repository.Commit(context.Background(), Batch{ID: "oversized", Spans: spans}); err != nil {
 		t.Fatal(err)
 	}
 	metadata := repository.Parquet.BatchMetadata()
@@ -143,7 +143,7 @@ func TestRepositoryHasOneAuthoritativeStorageLayout(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repository.Close()
-	if err := repository.Commit(testBatch()); err != nil {
+	if err := repository.Commit(context.Background(), testBatch()); err != nil {
 		t.Fatal(err)
 	}
 	for _, removed := range []string{"wal", "hot", "MANIFEST.json", "MANIFEST.log", "ducklake.sqlite"} {
@@ -198,10 +198,10 @@ func TestRepositoryPrunesOnlyExpiredBatches(t *testing.T) {
 	newer.Spans[0].StartUnixNanos, newer.Spans[0].IngestedAt = 1_000, 1_000
 	newer.Logs[0].TimeUnixNanos, newer.Logs[0].IngestedAt = 1_000, 1_000
 	newer.Metrics[0].TimeUnixNanos, newer.Metrics[0].IngestedAt = 1_000, 1_000
-	if err := repository.Commit(old); err != nil {
+	if err := repository.Commit(context.Background(), old); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.Commit(newer); err != nil {
+	if err := repository.Commit(context.Background(), newer); err != nil {
 		t.Fatal(err)
 	}
 	publisher := &testParquetCompactor{afterSwap: func() error {
@@ -241,7 +241,7 @@ func TestRepositoryDiscardsRecoverableMarkerWithoutOutput(t *testing.T) {
 	}
 	batch := testBatch()
 	batch.ID = "intact-input"
-	if err := repository.Commit(batch); err != nil {
+	if err := repository.Commit(context.Background(), batch); err != nil {
 		t.Fatal(err)
 	}
 	marker := compactionMarker{
@@ -285,7 +285,7 @@ func TestRepositoryRestoresInputsThroughPublicationGate(t *testing.T) {
 	defer repository.Close()
 	batch := testBatch()
 	batch.ID = "retired-input"
-	if err := repository.Commit(batch); err != nil {
+	if err := repository.Commit(context.Background(), batch); err != nil {
 		t.Fatal(err)
 	}
 	marker := compactionMarker{
@@ -342,7 +342,7 @@ func TestRepositoryPrunePassDrainsWithinBudgetAndOldestFirst(t *testing.T) {
 		batch.Spans[0].IngestedAt = int64(i + 1)
 		batch.Logs[0].IngestedAt = int64(i + 1)
 		batch.Metrics[0].IngestedAt = int64(i + 1)
-		if err := repository.Commit(batch); err != nil {
+		if err := repository.Commit(context.Background(), batch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -376,7 +376,7 @@ func TestRepositoryPrunePassFinishesPublicationAfterBudget(t *testing.T) {
 		batch.Spans[0].IngestedAt = int64(i + 1)
 		batch.Logs[0].IngestedAt = int64(i + 1)
 		batch.Metrics[0].IngestedAt = int64(i + 1)
-		if err := repository.Commit(batch); err != nil {
+		if err := repository.Commit(context.Background(), batch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -405,7 +405,7 @@ func TestRepositoryCleanupOwnsRetiredDirectories(t *testing.T) {
 	if err := os.Mkdir(retired, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.Commit(Batch{ID: "contains.retired", Spans: []telemetry.Span{{TraceID: "trace"}}}); err != nil {
+	if err := repository.Commit(context.Background(), Batch{ID: "contains.retired", Spans: []telemetry.Span{{TraceID: "trace"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := repository.CleanupParquet(); err != nil {
@@ -433,7 +433,7 @@ func TestRepositoryRetentionUsesIngestTimeNotEventTime(t *testing.T) {
 	batch.Spans[0].IngestedAt = 100
 	batch.Logs[0].IngestedAt = 100
 	batch.Metrics[0].IngestedAt = 100
-	if err := repository.Commit(batch); err != nil {
+	if err := repository.Commit(context.Background(), batch); err != nil {
 		t.Fatal(err)
 	}
 	removed, err := repository.PruneParquet(context.Background(), &testParquetCompactor{}, 500, 64)
@@ -454,7 +454,7 @@ func TestRepositoryCompactsParquetWithoutChangingRows(t *testing.T) {
 		batch.ID = fmt.Sprintf("batch-%d", i)
 		batch.Spans[0].SpanID = fmt.Sprintf("span-%d", i)
 		batch.Spans[0].StartUnixNanos = int64(100 + i)
-		if err := repository.Commit(batch); err != nil {
+		if err := repository.Commit(context.Background(), batch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -513,7 +513,7 @@ func TestRepositoryRecoversPendingCompactionWithoutRestart(t *testing.T) {
 		batch := testBatch()
 		batch.ID = fmt.Sprintf("pending-%d", i)
 		batch.Spans[0].SpanID = fmt.Sprintf("span-%d", i)
-		if err := repository.Commit(batch); err != nil {
+		if err := repository.Commit(context.Background(), batch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -548,7 +548,7 @@ func TestRepositoryRecoversInterruptedCompactionSwap(t *testing.T) {
 		batch := testBatch()
 		batch.ID = fmt.Sprintf("recover-%d", i)
 		batch.Spans[0].SpanID = fmt.Sprintf("span-%d", i)
-		if err := repository.Commit(batch); err != nil {
+		if err := repository.Commit(context.Background(), batch); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -626,7 +626,178 @@ func openTestDuckDB(t *testing.T) *sql.DB {
 }
 
 func traceAll(repository *Repository, traceID string) ([]telemetry.IndexedSpan, error) {
-	return repository.Trace(context.Background(), telemetry.TraceQuery{
+	return repository.Parquet.Trace(context.Background(), telemetry.TraceQuery{
 		TraceID: traceID, StartNanos: -1 << 63, EndNanos: 1<<63 - 1, Limit: 500,
 	})
+}
+
+// seedFailedCompaction leaves a live COMPACTION.json whose recovery always
+// fails, which is the state that used to latch maintenance off permanently.
+func seedFailedCompaction(t *testing.T, dir string, repository *Repository) {
+	t.Helper()
+	for i := range minCompactionInputs {
+		batch := testBatch()
+		batch.ID = fmt.Sprintf("latched-%d", i)
+		batch.Spans[0].SpanID = fmt.Sprintf("span-%d", i)
+		if err := repository.Commit(context.Background(), batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db := openTestDuckDB(t)
+	t.Cleanup(func() { db.Close() })
+	compactor := &testParquetCompactor{db: db, publishErr: errors.New("publication unavailable")}
+	if _, err := repository.CompactParquet(context.Background(), compactor, 64); err == nil {
+		t.Fatal("compaction succeeded despite publication failure")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {
+		t.Fatalf("expected a live marker: %v", err)
+	}
+}
+
+// TestRepositorySetsAsideUnrecoverableMarker pins the give-up path. A marker
+// that cannot be recovered correctly gates retention, compaction, and retired
+// cleanup — all three can destroy what a rollback needs — so without a bound on
+// how long it may do so, one bad marker disables every form of maintenance for
+// the process lifetime while storage grows behind a healthy-looking probe.
+func TestRepositorySetsAsideUnrecoverableMarker(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	seedFailedCompaction(t, dir, repository)
+
+	failing := testParquetPublisherFunc(func(context.Context, func(context.Context) error) error {
+		return errors.New("publication unavailable")
+	})
+	for attempt := 1; attempt < maxCompactionRecoveryAttempts; attempt++ {
+		if err := repository.RecoverParquet(context.Background(), failing); err == nil {
+			t.Fatalf("attempt %d: recovery reported success", attempt)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {
+			t.Fatalf("attempt %d: marker set aside too early: %v", attempt, err)
+		}
+	}
+	if err := repository.RecoverParquet(context.Background(), failing); err == nil {
+		t.Fatal("final attempt reported success")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); !os.IsNotExist(err) {
+		t.Fatalf("marker still live after %d failures: %v", maxCompactionRecoveryAttempts, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, quarantinedMarkerName)); err != nil {
+		t.Fatalf("marker was not preserved for the operator: %v", err)
+	}
+	// Maintenance is unblocked: recovery is a no-op now, so a later pass runs.
+	if err := repository.RecoverParquet(context.Background(), failing); err != nil {
+		t.Fatalf("maintenance still gated after the marker was set aside: %v", err)
+	}
+}
+
+// TestRepositoryCancelledRecoveryDoesNotCountTowardGivingUp keeps shutdown and
+// publication contention from being mistaken for a bad marker.
+func TestRepositoryCancelledRecoveryDoesNotCountTowardGivingUp(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	seedFailedCompaction(t, dir, repository)
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	failing := testParquetPublisherFunc(func(ctx context.Context, _ func(context.Context) error) error {
+		return ctx.Err()
+	})
+	for range maxCompactionRecoveryAttempts * 2 {
+		if err := repository.RecoverParquet(cancelled, failing); err == nil {
+			t.Fatal("cancelled recovery reported success")
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {
+		t.Fatalf("cancelled attempts set the marker aside: %v", err)
+	}
+}
+
+// TestRepositoryCleanupPreservesMarkerRollbackSet pins that cleanup never
+// deletes the retired inputs a pending marker still needs. Deleting one is
+// unrecoverable: the input is gone and its rows were never published under the
+// replacement, so the rows exist in no queryable batch at all.
+func TestRepositoryCleanupPreservesMarkerRollbackSet(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+
+	marker := compactionMarker{
+		Output: telemetry.BatchMetadata{ID: "compact-live", Generation: 1},
+		Inputs: []string{"input-a"},
+	}
+	data, err := json.Marshal(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDurableFile(filepath.Join(dir, "COMPACTION.json"), data); err != nil {
+		t.Fatal(err)
+	}
+	batches := repository.Parquet.BatchesDir()
+	needed := filepath.Join(batches, "input-a.retired-compact-live")
+	stale := filepath.Join(batches, "input-b.retired")
+	for _, path := range []string{needed, stale} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := repository.CleanupParquet(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(needed); err != nil {
+		t.Fatalf("cleanup deleted the rollback set of a live marker: %v", err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("cleanup left an unreferenced retired directory: %v", err)
+	}
+}
+
+// TestRepositoryOpensDespiteUnrecoverableMarker pins that a bad marker cannot
+// stop the process from booting. Failing Open left the operator with no way to
+// run the cleanup that would clear it, so the only recovery was a manual
+// rm -rf of live storage.
+func TestRepositoryOpensDespiteUnrecoverableMarker(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedFailedCompaction(t, dir, repository)
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Corrupt the staged output so recovery cannot complete or roll back.
+	stage := filepath.Join(dir, "compaction")
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if err := os.WriteFile(filepath.Join(stage, entry.Name(), "metadata.json"), []byte("{"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open refused to boot with an unrecoverable marker: %v", err)
+	}
+	defer reopened.Close()
+	if _, err := os.Stat(filepath.Join(dir, quarantinedMarkerName)); err != nil {
+		t.Fatalf("marker was not set aside at open: %v", err)
+	}
+	if _, err := os.Stat(stage); err != nil {
+		t.Fatalf("staged output was destroyed rather than preserved: %v", err)
+	}
 }

@@ -91,12 +91,6 @@ func (g *parquetReadGate) TryRLock() bool {
 	return true
 }
 
-func (g *parquetReadGate) RLock() {
-	if err := g.RLockContext(context.Background()); err != nil {
-		panic(err)
-	}
-}
-
 func (g *parquetReadGate) RLockContext(ctx context.Context) error {
 	g.init()
 	g.mu.Lock()
@@ -127,12 +121,6 @@ func (g *parquetReadGate) RUnlock() {
 		g.notifyLocked()
 	}
 	g.mu.Unlock()
-}
-
-func (g *parquetReadGate) Lock() {
-	if err := g.LockContext(context.Background()); err != nil {
-		panic(err)
-	}
 }
 
 func (g *parquetReadGate) LockContext(ctx context.Context) error {

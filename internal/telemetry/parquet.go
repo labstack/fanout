@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/parquet-go/parquet-go"
 	"github.com/parquet-go/parquet-go/compress/zstd"
@@ -27,6 +28,12 @@ const (
 	parquetRowGroupRows  = 50_000
 	maxTraceQueryResults = 500
 )
+
+// commitPublishWait caps how long one ingest commit waits for the publish
+// gate. It sits above the publisher's own swap budget so it only fires when a
+// publication is genuinely stuck rather than merely slow, and it keeps a stuck
+// publication from being indistinguishable from a hung ingest path.
+const commitPublishWait = 60 * time.Second
 
 var syncPublishedDirectory = syncDirectory
 
@@ -144,7 +151,14 @@ func (p *ParquetStore) RowCount() uint64 {
 	return count
 }
 
-func (p *ParquetStore) CommitBatch(metadata BatchMetadata, spans []Span, logs []Log, metrics []Metric) error {
+// CommitBatch publishes one atomic batch directory. ctx bounds the wait for
+// the publish gate: ingest is the only caller that used to wait on it without
+// a deadline, so a publication that stalled took the ingest path down with it
+// and OTLP clients lost rows to their own timeouts. A commit that cannot get
+// the gate now fails, retries, and is counted, instead of hanging.
+func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, spans []Span, logs []Log, metrics []Metric) error {
+	ctx, cancel := context.WithTimeout(ctx, commitPublishWait)
+	defer cancel()
 	if err := validateBatchID(metadata.ID); err != nil {
 		return err
 	}
@@ -155,14 +169,23 @@ func (p *ParquetStore) CommitBatch(metadata BatchMetadata, spans []Span, logs []
 		return nil
 	}
 	if info, err := os.Stat(final); err == nil && info.IsDir() {
-		if err := p.lockPublish(context.Background()); err != nil {
+		// Adopting a directory left by an interrupted commit means validating
+		// it — Parquet footers plus a full trace-index walk. That is done
+		// before taking the gate, so re-registering one batch cannot stall
+		// every other publisher and ingest worker behind it.
+		adopted, err := loadRegisteredBatch(final)
+		if err != nil {
+			return err
+		}
+		if err := p.lockPublish(ctx); err != nil {
 			return err
 		}
 		defer p.unlockPublish()
 		if err := syncDirectory(p.batchesDir); err != nil {
 			return err
 		}
-		return p.registerBatch(final)
+		p.installBatch(adopted)
+		return nil
 	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
@@ -243,7 +266,7 @@ func (p *ParquetStore) CommitBatch(metadata BatchMetadata, spans []Span, logs []
 		prepared.traces.path = filepath.Join(final, "trace.fidx")
 	}
 
-	if err := p.lockPublish(context.Background()); err != nil {
+	if err := p.lockPublish(ctx); err != nil {
 		return err
 	}
 	defer p.unlockPublish()
@@ -533,10 +556,26 @@ func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(fu
 			return err
 		}
 		defer p.unlockPublish()
-		p.mu.Lock()
-		defer p.mu.Unlock()
+		// p.mu is taken only to mutate the in-memory set, never across the
+		// renames and fsync. Holding it for filesystem work made it a second,
+		// undeadlined serialization point on the ingest path — CommitBatch's
+		// first action is a hasBatch read of this same mutex — and one
+		// invisible to the publish gate's accounting. The renames themselves
+		// need no additional exclusion: readers are already outside the
+		// snapshot for the length of this callback, and the publish gate
+		// serializes this against every other publisher.
+		p.mu.RLock()
+		planned := make(map[string]*storedBatch, len(candidates))
 		for _, candidate := range candidates {
-			batch, exists := p.batches[candidate.id]
+			if batch, exists := p.batches[candidate.id]; exists {
+				planned[candidate.id] = batch
+			}
+		}
+		p.mu.RUnlock()
+
+		retiredIDs := make([]string, 0, len(planned))
+		for _, candidate := range candidates {
+			batch, exists := planned[candidate.id]
 			if !exists {
 				continue
 			}
@@ -545,12 +584,17 @@ func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(fu
 				pruneErr = errors.Join(pruneErr, err)
 				continue
 			}
-			delete(p.batches, candidate.id)
+			retiredIDs = append(retiredIDs, candidate.id)
 			retired = append(retired, path)
 		}
 		if len(retired) > 0 {
 			pruneErr = errors.Join(pruneErr, syncDirectory(p.batchesDir))
 		}
+		p.mu.Lock()
+		for _, id := range retiredIDs {
+			delete(p.batches, id)
+		}
+		p.mu.Unlock()
 		return nil
 	})
 	pruneErr = errors.Join(pruneErr, err)
@@ -842,17 +886,32 @@ func (p *ParquetStore) loadBatches() error {
 }
 
 func (p *ParquetStore) registerBatch(dir string) error {
-	batch, err := loadStoredBatch(dir)
+	batch, err := loadRegisteredBatch(dir)
 	if err != nil {
 		return err
 	}
-	if filepath.Base(dir) != batch.metadata.ID+BatchSuffix {
-		return fmt.Errorf("parquet batch directory %q does not match metadata ID %q", filepath.Base(dir), batch.metadata.ID)
+	p.installBatch(batch)
+	return nil
+}
+
+// loadRegisteredBatch validates a published directory and is safe to call
+// outside the publish gate: it only reads files that are already immutable.
+func loadRegisteredBatch(dir string) (*storedBatch, error) {
+	batch, err := loadStoredBatch(dir)
+	if err != nil {
+		return nil, err
 	}
+	if filepath.Base(dir) != batch.metadata.ID+BatchSuffix {
+		return nil, fmt.Errorf("parquet batch directory %q does not match metadata ID %q", filepath.Base(dir), batch.metadata.ID)
+	}
+	return batch, nil
+}
+
+// installBatch publishes a validated batch into the queryable set.
+func (p *ParquetStore) installBatch(batch *storedBatch) {
 	p.mu.Lock()
 	p.batches[batch.metadata.ID] = batch
 	p.mu.Unlock()
-	return nil
 }
 
 func loadStoredBatch(dir string) (*storedBatch, error) {

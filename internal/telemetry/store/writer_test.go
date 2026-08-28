@@ -21,7 +21,7 @@ type recordingCommitter struct {
 	batches  []Batch
 }
 
-func (c *recordingCommitter) Commit(batch Batch) error {
+func (c *recordingCommitter) Commit(_ context.Context, batch Batch) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.calls++
@@ -45,7 +45,7 @@ type blockingCommitter struct {
 	once    sync.Once
 }
 
-func (c *blockingCommitter) Commit(Batch) error {
+func (c *blockingCommitter) Commit(context.Context, Batch) error {
 	c.once.Do(func() { close(c.entered) })
 	<-c.release
 	return nil
@@ -230,7 +230,7 @@ type parallelCommitter struct {
 	once      sync.Once
 }
 
-func (c *parallelCommitter) Commit(Batch) error {
+func (c *parallelCommitter) Commit(context.Context, Batch) error {
 	c.mu.Lock()
 	c.active++
 	c.maxActive = max(c.maxActive, c.active)

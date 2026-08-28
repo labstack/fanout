@@ -24,7 +24,7 @@ func TestParquetStorePublishesCompleteBatchAndRecovers(t *testing.T) {
 	}
 	span := completeTestSpan()
 	metadata := BatchMetadata{ID: "batch-1", MinIngestedNanos: span.IngestedAt, MaxIngestedNanos: span.IngestedAt}
-	if err := store.CommitBatch(metadata, []Span{span}, []Log{{Namespace: "tenant", Body: "ready", TimeUnixNanos: 12}}, []Metric{{Namespace: "tenant", Name: "requests", TimeUnixNanos: 13}}); err != nil {
+	if err := store.CommitBatch(context.Background(), metadata, []Span{span}, []Log{{Namespace: "tenant", Body: "ready", TimeUnixNanos: 12}}, []Metric{{Namespace: "tenant", Name: "requests", TimeUnixNanos: 13}}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -37,7 +37,7 @@ func TestParquetStorePublishesCompleteBatchAndRecovers(t *testing.T) {
 	if got := store.RowCount(); got != 3 {
 		t.Fatalf("row count = %d, want 3", got)
 	}
-	if err := store.CommitBatch(metadata, []Span{span}, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), metadata, []Span{span}, nil, nil); err != nil {
 		t.Fatalf("idempotent commit: %v", err)
 	}
 	if got := store.RowCount(); got != 3 {
@@ -93,7 +93,7 @@ func TestParquetStoreTraceUsesExactIDAndEventOrder(t *testing.T) {
 		{TraceID: "other", SpanID: "other", StartUnixNanos: 20},
 		{TraceID: "wanted", SpanID: "earlier", StartUnixNanos: 10},
 	}
-	if err := store.CommitBatch(BatchMetadata{ID: "batch"}, spans, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "batch"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := traceAll(store, "wanted")
@@ -125,7 +125,7 @@ func TestParquetStoreTraceFiltersAndBoundsResultsDuringRead(t *testing.T) {
 		Span{Namespace: "staging", TraceID: "large-trace", SpanID: "wrong-namespace", StartUnixNanos: 11},
 		Span{Namespace: "prod", TraceID: "large-trace", SpanID: "outside-window", StartUnixNanos: 200},
 	)
-	if err := store.CommitBatch(BatchMetadata{ID: "large"}, spans, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "large"}, spans, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,7 +159,7 @@ func TestParquetStorePreservesCompleteLogAndMetricRows(t *testing.T) {
 		ExemplarsJSON: []byte(`[{"trace_id":"trace"}]`), AttributesJSON: []byte(`{"route":"/pay"}`),
 		ResourceJSON: []byte(`{"host":"one"}`), ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 24,
 	}
-	if err := store.CommitBatch(BatchMetadata{ID: "complete-signals"}, nil, []Log{logRow}, []Metric{metricRow}); err != nil {
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "complete-signals"}, nil, []Log{logRow}, []Metric{metricRow}); err != nil {
 		t.Fatal(err)
 	}
 	batchDir := store.BatchPath("complete-signals")
@@ -184,7 +184,7 @@ func TestParquetStoreSkipsTraceIndexesOutsideTimeWindow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(BatchMetadata{ID: "old-traces"}, []Span{{
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "old-traces"}, []Span{{
 		TraceID: "wanted", SpanID: "old", StartUnixNanos: 100,
 	}}, nil, nil); err != nil {
 		t.Fatal(err)
@@ -227,7 +227,7 @@ func TestPruneReaderWaitDoesNotBlockCommit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	entered := make(chan struct{})
@@ -248,7 +248,7 @@ func TestPruneReaderWaitDoesNotBlockCommit(t *testing.T) {
 	}
 	commitDone := make(chan error, 1)
 	go func() {
-		commitDone <- store.CommitBatch(BatchMetadata{ID: "concurrent", MaxIngestedNanos: 3}, []Span{{TraceID: "trace-2"}}, nil, nil)
+		commitDone <- store.CommitBatch(context.Background(), BatchMetadata{ID: "concurrent", MaxIngestedNanos: 3}, []Span{{TraceID: "trace-2"}}, nil, nil)
 	}()
 	select {
 	case err := <-commitDone:
@@ -269,7 +269,7 @@ func TestPrunePublicationContextBoundsStorageLockWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.lockPublish(context.Background()); err != nil {
@@ -296,11 +296,11 @@ func TestReplacementReaderWaitDoesNotBlockCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
-	if err := store.CommitBatch(BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	output := BatchMetadata{ID: "output"}
-	if err := store.CommitBatch(output, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), output, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	entered := make(chan struct{})
@@ -321,7 +321,7 @@ func TestReplacementReaderWaitDoesNotBlockCommit(t *testing.T) {
 	}
 	commitDone := make(chan error, 1)
 	go func() {
-		commitDone <- store.CommitBatch(BatchMetadata{ID: "concurrent"}, []Span{{TraceID: "trace-2"}}, nil, nil)
+		commitDone <- store.CommitBatch(context.Background(), BatchMetadata{ID: "concurrent"}, []Span{{TraceID: "trace-2"}}, nil, nil)
 	}()
 	select {
 	case err := <-commitDone:
@@ -343,11 +343,11 @@ func TestPublishReplacementKeepsOutputOnlyAfterSyncFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
-	if err := store.CommitBatch(BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	output := BatchMetadata{ID: "output"}
-	if err := store.CommitBatch(output, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), output, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	originalSync := syncPublishedDirectory
@@ -378,11 +378,11 @@ func TestPublishReplacementUnpublishesRecoveredOutputBeforeRetiringInputs(t *tes
 		t.Fatal(err)
 	}
 	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
-	if err := store.CommitBatch(BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	output := BatchMetadata{ID: "output"}
-	if err := store.CommitBatch(output, span, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), output, span, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	blockedRetired := filepath.Join(store.BatchesDir(), "input.retired-output")
@@ -420,7 +420,7 @@ func TestParquetStoreRejectsUnsafeBatchID(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"", ".hidden", "../escape", "has space"} {
-		if err := store.CommitBatch(BatchMetadata{ID: id}, []Span{{TraceID: "t"}}, nil, nil); err == nil {
+		if err := store.CommitBatch(context.Background(), BatchMetadata{ID: id}, []Span{{TraceID: "t"}}, nil, nil); err == nil {
 			t.Fatalf("CommitBatch accepted unsafe ID %q", id)
 		}
 	}
@@ -432,7 +432,7 @@ func TestParquetStoreRejectsMetadataRowCountMismatchOnOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CommitBatch(BatchMetadata{ID: "mismatch"}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
+	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "mismatch"}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	metadataPath := filepath.Join(store.BatchPath("mismatch"), "metadata.json")
@@ -487,4 +487,37 @@ func readOneParquetRow[T any](t *testing.T, path string) T {
 		t.Fatalf("read %s: rows=%d err=%v", path, n, err)
 	}
 	return rows[0]
+}
+
+// TestCommitBatchDoesNotBlockIndefinitelyOnStalledPublication pins the
+// invariant that ingest is never held hostage by a publication. CommitBatch
+// used to wait on the publish gate with context.Background(), so a publisher
+// stuck inside the gate blocked every OTLP commit until it finished — the
+// clients then dropped rows on their own timeouts, turning a latency problem
+// into permanent data loss.
+func TestCommitBatchDoesNotBlockIndefinitelyOnStalledPublication(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.lockPublish(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.unlockPublish()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	span := completeTestSpan()
+	metadata := BatchMetadata{ID: "batch-stalled", MinIngestedNanos: span.IngestedAt, MaxIngestedNanos: span.IngestedAt}
+
+	done := make(chan error, 1)
+	go func() { done <- store.CommitBatch(ctx, metadata, []Span{span}, nil, nil) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("commit against a stalled publication = %v, want context.DeadlineExceeded", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("commit blocked on a stalled publication instead of honouring its context")
+	}
 }

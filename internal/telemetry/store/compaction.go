@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -185,10 +186,31 @@ func (r *Repository) CompactParquetPass(ctx context.Context, compactor ParquetCo
 
 type parquetPublishFunc func(context.Context, func(context.Context) error) error
 
+// RecoverParquet resolves a pending compaction marker. A marker that keeps
+// failing is set aside after maxCompactionRecoveryAttempts so it stops gating
+// the rest of maintenance; see quarantineCompactionMarker for why that
+// preserves every input and output it touched.
 func (r *Repository) RecoverParquet(ctx context.Context, publisher ParquetPublisher) error {
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
-	return r.recoverCompaction(ctx, publisher.PublishParquet)
+	err := r.recoverCompaction(ctx, publisher.PublishParquet)
+	if err == nil {
+		r.recoveryFailures = 0
+		return nil
+	}
+	// A cancelled pass says nothing about the marker: shutdown and publication
+	// contention must not count toward giving up on it.
+	if ctx.Err() != nil {
+		return err
+	}
+	r.recoveryFailures++
+	if r.recoveryFailures < maxCompactionRecoveryAttempts {
+		return err
+	}
+	slog.Error("Parquet compaction recovery failed repeatedly; setting marker aside",
+		"attempts", r.recoveryFailures, "err", err, "marker", quarantinedMarkerName)
+	r.recoveryFailures = 0
+	return errors.Join(err, r.quarantineCompactionMarker())
 }
 
 func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPublishFunc) error {

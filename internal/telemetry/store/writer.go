@@ -23,7 +23,7 @@ const (
 )
 
 type batchCommitter interface {
-	Commit(Batch) error
+	Commit(context.Context, Batch) error
 }
 
 type Writer struct {
@@ -230,7 +230,7 @@ func (w *Writer) commitJob(ctx context.Context, job commitJob) error {
 		started := time.Now()
 		var lastErr error
 		for attempt := 0; attempt < commitRetryLimit; attempt++ {
-			if err := w.repository.Commit(batch); err == nil {
+			if err := w.repository.Commit(ctx, batch); err == nil {
 				lastErr = nil
 				break
 			} else {

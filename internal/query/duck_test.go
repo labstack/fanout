@@ -176,7 +176,7 @@ func TestNewDuckUsesUTCForEveryConnection(t *testing.T) {
 	}
 	defer d.Close()
 	eventTime := time.Date(2026, 8, 27, 16, 0, 30, 0, time.UTC)
-	if err := repository.Commit(telemetrystore.Batch{ID: "timezone-window", Spans: []telemetry.Span{{
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "timezone-window", Spans: []telemetry.Span{{
 		Namespace: "default", TraceID: "trace-timezone", SpanID: "span-timezone",
 		ServiceName: "checkout", StartUnixNanos: eventTime.UnixNano(), DurationMS: 5,
 		StatusCode: "STATUS_CODE_OK", IngestedAt: eventTime.UnixNano(),
@@ -236,7 +236,7 @@ func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
 	}
 	lockAcquired := make(chan struct{})
 	go func() {
-		d.parquetMu.Lock()
+		mustLock(&d.parquetMu)
 		close(lockAcquired)
 		d.parquetMu.Unlock()
 	}()
@@ -267,7 +267,7 @@ func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
 
 func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
 	d := &Duck{}
-	d.parquetMu.Lock()
+	mustLock(&d.parquetMu)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	started := time.Now()
@@ -283,7 +283,7 @@ func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
 
 func TestPublishParquetHonorsContext(t *testing.T) {
 	d := &Duck{}
-	d.parquetMu.RLock()
+	mustRLock(t, &d.parquetMu)
 	timeoutsBefore := testutil.ToFloat64(metrics.ParquetPublishTimeouts)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
@@ -345,12 +345,12 @@ func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
 	defer db.Close()
 	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
 	d := &Duck{DB: db}
-	d.parquetMu.RLock()
+	mustRLock(t, &d.parquetMu)
 	writerAcquired := make(chan struct{})
 	releaseWriter := make(chan struct{})
 	writerDone := make(chan struct{})
 	go func() {
-		d.parquetMu.Lock()
+		mustLock(&d.parquetMu)
 		close(writerAcquired)
 		<-releaseWriter
 		d.parquetMu.Unlock()
@@ -392,7 +392,7 @@ func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
 
 func TestRollupReadLockHonorsContext(t *testing.T) {
 	d := &Duck{}
-	d.parquetMu.Lock()
+	mustLock(&d.parquetMu)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	_, err := d.refreshServiceRollup(ctx)
@@ -437,7 +437,7 @@ func TestIndexedTraceReadHonorsParquetGateContext(t *testing.T) {
 	}
 	defer repository.Close()
 	d := &Duck{repository: repository}
-	d.parquetMu.Lock()
+	mustLock(&d.parquetMu)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	_, err = d.Trace(ctx, telemetry.TraceQuery{TraceID: "trace", StartNanos: 1, EndNanos: 2, Limit: 1})
@@ -458,7 +458,7 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repository.Close()
-	if err := repository.Commit(telemetrystore.Batch{ID: "expired", Spans: []telemetry.Span{{TraceID: "trace", IngestedAt: 1}}}); err != nil {
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "expired", Spans: []telemetry.Span{{TraceID: "trace", IngestedAt: 1}}}); err != nil {
 		t.Fatal(err)
 	}
 	mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -466,7 +466,7 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 	mock.ExpectExec("DELETE FROM edge_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
 	d := &Duck{DB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
-	d.parquetMu.RLock()
+	mustRLock(t, &d.parquetMu)
 	release := d.writeGate.Lock(writegate.WriteRollupService)
 	done := make(chan error, 1)
 	go func() { done <- d.runRepositoryMaintenance(context.Background()) }()
@@ -576,7 +576,7 @@ func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
 			Logs:    []telemetry.Log{{Body: "old", IngestedAt: 1}},
 			Metrics: []telemetry.Metric{{Name: "old", IngestedAt: 1}},
 		}
-		if err := repository.Commit(batch); err != nil {
+		if err := repository.Commit(context.Background(), batch); err != nil {
 			t.Fatal(err)
 		}
 	}

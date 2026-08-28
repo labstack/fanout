@@ -23,7 +23,7 @@ func waitingParquetWriters(g *parquetReadGate) int {
 
 func TestParquetGateRemovesCanceledPublisher(t *testing.T) {
 	var gate parquetReadGate
-	gate.RLock()
+	mustRLock(t, &gate)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if err := gate.LockContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
@@ -79,7 +79,7 @@ func TestParquetGateAdmitsReadersWhileWriterGraceRuns(t *testing.T) {
 	if !gate.TryRLock() {
 		t.Fatal("first reader was not admitted")
 	}
-	go gate.Lock()
+	go mustLock(gate)
 	waitForQueuedWriter(t, gate)
 	clock.Advance(defaultWriterGrace / 2)
 	if !gate.TryRLock() {
@@ -95,7 +95,7 @@ func TestParquetGateQueuesReadersOnceWriterGraceExpires(t *testing.T) {
 	if !gate.TryRLock() {
 		t.Fatal("first reader was not admitted")
 	}
-	go gate.Lock()
+	go mustLock(gate)
 	waitForQueuedWriter(t, gate)
 	clock.Advance(defaultWriterGrace + time.Second)
 	if gate.TryRLock() {
@@ -109,10 +109,10 @@ func TestParquetGateQueuesReadersOnceWriterGraceExpires(t *testing.T) {
 func TestParquetGatePublishesAfterOverlappingReadersDrain(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)}
 	gate := &parquetReadGate{now: clock.Now}
-	gate.RLock()
+	mustRLock(t, gate)
 	published := make(chan struct{})
 	go func() {
-		gate.Lock()
+		mustLock(gate)
 		close(published)
 		gate.Unlock()
 	}()
@@ -134,12 +134,12 @@ func TestParquetGatePublishesAfterOverlappingReadersDrain(t *testing.T) {
 func TestParquetGateDistinguishesWritersQueuedAtSameInstant(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)}
 	gate := &parquetReadGate{now: clock.Now}
-	gate.RLock()
+	mustRLock(t, gate)
 	acquired := make(chan struct{}, 2)
 	release := make(chan struct{}, 2)
 	for range 2 {
 		go func() {
-			gate.Lock()
+			mustLock(gate)
 			acquired <- struct{}{}
 			<-release
 			gate.Unlock()
@@ -170,4 +170,17 @@ func TestParquetGateDistinguishesWritersQueuedAtSameInstant(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	gate.RUnlock()
+}
+
+func mustRLock(t *testing.T, gate *parquetReadGate) {
+	t.Helper()
+	if err := gate.RLockContext(context.Background()); err != nil {
+		t.Fatalf("RLockContext: %v", err)
+	}
+}
+
+func mustLock(gate *parquetReadGate) {
+	if err := gate.LockContext(context.Background()); err != nil {
+		panic(err)
+	}
 }

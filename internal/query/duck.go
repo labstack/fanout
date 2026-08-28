@@ -64,6 +64,8 @@ const (
 	serviceRollupRawMaxKey        = "service_rollup_v2_rawmax"
 	edgeRollupStateKey            = "edge_rollup_v2"
 	edgeRollupRawMaxKey           = "edge_rollup_v2_rawmax"
+	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"
+	edgeRollupSubWindowKey        = "edge_rollup_v2_subwindow_end"
 	EndpointRollupStateKey        = "endpoint_rollup_v1"
 	endpointRollupRawMaxKey       = "endpoint_rollup_v1_rawmax"
 	endpointBackfillStateKey      = "endpoint_rollup_v1_backfill_started"
@@ -72,6 +74,16 @@ const (
 	defaultDuckDBPoolSize         = 1
 	parquetMaintenanceBatchLimit  = 64
 	parquetMaintenancePhaseBudget = 10 * time.Minute
+)
+
+// parquetDrainBudget bounds how long a publisher waits for readers already
+// inside the snapshot to leave. parquetSwapBudget bounds the exclusive window
+// that follows — the renames and fsync of at most parquetMaintenanceBatchLimit
+// directories — which must be allowed to finish rather than be abandoned with
+// every reader already excluded.
+const (
+	parquetDrainBudget = 2 * defaultWriterGrace
+	parquetSwapBudget  = 30 * time.Second
 )
 
 // rollupPublicationSafetyLag covers the maximum public SQL hold, publication
@@ -278,6 +290,11 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 		{serviceRollupRawMaxKey, svc},
 		{edgeRollupStateKey, edge},
 		{edgeRollupRawMaxKey, edge},
+		// Skipping discards any half-aggregated window, so its resume point
+		// must go too or the next pass would reopen a window behind the
+		// watermark it just advanced.
+		{edgeRollupSubCursorKey, 0},
+		{edgeRollupSubWindowKey, 0},
 		// Endpoint queries remain on their raw-span fallback when the operator
 		// explicitly skips historical rollups. Mark this cache disabled instead of
 		// later declaring a new-only, incomplete endpoint cache ready.
@@ -801,7 +818,22 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 		return 0, err
 	}
 	sourceMax = rawWatermark
-	if rawWatermark <= lastWatermark {
+
+	// A previous pass that ran out of sub-window budget recorded where to
+	// resume and left the ingested watermark untouched. Reuse that window
+	// verbatim so its unprocessed start_time tail is finished before the
+	// watermark is allowed past it.
+	subCursor, err := rollupWatermark(ctx, tx, edgeRollupSubCursorKey)
+	if err != nil {
+		return 0, err
+	}
+	resumeEnd, err := rollupWatermark(ctx, tx, edgeRollupSubWindowKey)
+	if err != nil {
+		return 0, err
+	}
+	resuming := subCursor > 0 && resumeEnd > lastWatermark
+
+	if rawWatermark <= lastWatermark && !resuming {
 		err := tx.Commit()
 		if err == nil {
 			result = metrics.RollupNoop
@@ -816,6 +848,10 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 		}
 	}
 	windowStart, windowEnd, chunked := rollupWindow(lastWatermark, minIngested, rawWatermark)
+	if resuming {
+		windowEnd = resumeEnd
+		chunked = windowEnd < rawWatermark
+	}
 
 	// Same chunking + trailing-window logic as the service rollup (see
 	// refreshServiceRollup): never advance into the lag window below an
@@ -853,10 +889,23 @@ WHERE ingested_unix_nano > ?
 	}
 
 	var totalAffected int64
+	completed := true
+	var nextCursor int64
 	if minStartT.Valid {
 		subLo := minStartT.Time
+		if subCursor > 0 {
+			if resumeAt := time.Unix(0, subCursor).In(subLo.Location()); resumeAt.After(subLo) {
+				subLo = resumeAt
+			}
+		}
 		maxT := maxStartT.Time
+		processed := 0
 		for !subLo.After(maxT) {
+			if processed == maxEdgeSubWindowsPerPass {
+				completed = false
+				nextCursor = subLo.UnixNano()
+				break
+			}
 			subHi := subLo.Add(time.Duration(edgeStartChunkNanos))
 			if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, windowStart, windowEnd, subLo, subHi); err != nil {
 				return 0, err
@@ -872,14 +921,32 @@ WHERE ingested_unix_nano > ?
 				totalAffected += rows
 			}
 			subLo = subHi
+			processed++
 		}
 	}
 
-	if err := storeRollupWatermark(ctx, tx, edgeRollupStateKey, newWatermark); err != nil {
-		return 0, err
-	}
-	if err := storeRollupWatermark(ctx, tx, edgeRollupRawMaxKey, rawMaxProcessed); err != nil {
-		return 0, err
+	// An unfinished window keeps the ingested watermark where it was: the
+	// sub-window cursor is the only durable record that part of this window is
+	// already aggregated, and advancing past it would drop the remainder.
+	storedWatermark := newWatermark
+	if completed {
+		if err := storeRollupWatermark(ctx, tx, edgeRollupStateKey, newWatermark); err != nil {
+			return 0, err
+		}
+		if err := storeRollupWatermark(ctx, tx, edgeRollupRawMaxKey, rawMaxProcessed); err != nil {
+			return 0, err
+		}
+		if err := clearEdgeRollupCursor(ctx, tx); err != nil {
+			return 0, err
+		}
+	} else {
+		storedWatermark = lastWatermark
+		if err := storeRollupWatermark(ctx, tx, edgeRollupSubCursorKey, nextCursor); err != nil {
+			return 0, err
+		}
+		if err := storeRollupWatermark(ctx, tx, edgeRollupSubWindowKey, windowEnd); err != nil {
+			return 0, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
@@ -887,8 +954,17 @@ WHERE ingested_unix_nano > ?
 
 	result = metrics.RollupSuccess
 	recordedRows = totalAffected
-	updateRollupProgress(metrics.RollupEdge, true, newWatermark, rawWatermark)
+	updateRollupProgress(metrics.RollupEdge, true, storedWatermark, rawWatermark)
 	return totalAffected, nil
+}
+
+// clearEdgeRollupCursor drops the resume point once its window is fully
+// aggregated, so the next pass opens a fresh ingested window.
+func clearEdgeRollupCursor(ctx context.Context, tx *sql.Tx) error {
+	if err := storeRollupWatermark(ctx, tx, edgeRollupSubCursorKey, 0); err != nil {
+		return err
+	}
+	return storeRollupWatermark(ctx, tx, edgeRollupSubWindowKey, 0)
 }
 
 // rollupChunkNanos caps how much ingest history one rollup pass scans. A pass
@@ -906,6 +982,20 @@ const rollupChunkNanos = int64(time.Hour)
 // DELETE+INSERT processes, so the call_edges self-join over a wide backlog
 // (catch-up/bulk-load) can't exhaust memory. The pass loops over sub-windows.
 const edgeStartChunkNanos = int64(30 * time.Minute)
+
+// maxEdgeSubWindowsPerPass bounds how many start_time sub-windows one pass
+// processes, and with it how long that pass holds the Parquet read gate.
+//
+// Chunking ingested time alone does not bound the work: a seed load or a
+// backfill compresses a wide start_time range into a narrow ingested window,
+// so a single one-hour chunk can expand to hundreds of sub-windows and hold
+// the gate for as long as that takes. No timeout can bound that from outside —
+// cancelling mid-transaction only discards the work and retries it forever. So
+// the pass instead stops at a fixed number of sub-windows, persists where to
+// resume, and leaves the ingested watermark where it was. Hold time is then a
+// function of this constant rather than of the dataset's shape, and every pass
+// makes durable forward progress.
+const maxEdgeSubWindowsPerPass = 8
 
 // rollupWindow bounds one pass's scan to (start, end]. start falls back to
 // just before the oldest ingested row when there's no stored watermark, so a
@@ -1438,7 +1528,7 @@ func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemet
 		return nil, err
 	}
 	defer d.parquetMu.RUnlock()
-	return d.repository.Trace(ctx, query)
+	return d.repository.Parquet.Trace(ctx, query)
 }
 
 // MergeParquet executes the query-engine-specific half of compaction. It reads
@@ -1459,12 +1549,19 @@ func (d *Duck) MergeParquet(ctx context.Context, signal string, inputs []string,
 }
 
 // PublishParquet limits reader exclusion to the atomic directory swap.
+//
+// The drain and the swap get separate budgets. Sharing one deadline meant a
+// publisher that spent most of it waiting for readers entered the exclusive
+// window with almost nothing left, cancelled its own renames, and failed the
+// pass — having already paid the full cost of excluding every reader. The swap
+// is renames plus fsync against a bounded batch count, so it is budgeted for
+// what that work costs rather than for whatever the drain happened to leave.
 func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context) error) error {
-	publishCtx, cancelPublish := context.WithTimeout(ctx, 2*defaultWriterGrace)
-	defer cancelPublish()
+	drainCtx, cancelDrain := context.WithTimeout(ctx, parquetDrainBudget)
+	defer cancelDrain()
 	metrics.ParquetPublishWaiters.Inc()
 	waitStarted := time.Now()
-	err := d.parquetMu.LockContext(publishCtx)
+	err := d.parquetMu.LockContext(drainCtx)
 	metrics.ParquetPublishWaiters.Dec()
 	metrics.ParquetPublishWait.Observe(time.Since(waitStarted).Seconds())
 	if err != nil {
@@ -1472,7 +1569,9 @@ func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context)
 		return fmt.Errorf("wait for Parquet readers: %w", err)
 	}
 	defer d.parquetMu.Unlock()
-	return publish(publishCtx)
+	swapCtx, cancelSwap := context.WithTimeout(ctx, parquetSwapBudget)
+	defer cancelSwap()
+	return publish(swapCtx)
 }
 
 func quoteDuckString(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }

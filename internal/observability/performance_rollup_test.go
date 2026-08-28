@@ -90,7 +90,7 @@ FROM (VALUES ` + seed.values + `) t(ms)`
 		t.Fatalf("seed endpoint rollup state: %v", err)
 	}
 
-	svc := New(SQLDB(db), newTestRepository(t))
+	svc := New(SQLDB(db), newTestRepository(t).Parquet)
 	svc.endpointMature.Store(true)
 	var cachedCalls, totalCachedCalls int64
 	var minBucket, maxBucket time.Time
