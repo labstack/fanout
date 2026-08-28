@@ -178,6 +178,12 @@ func (r *Repository) CompactParquetBacklog(ctx context.Context, compactor Parque
 
 type parquetPublishFunc func(context.Context, func() error) error
 
+func (r *Repository) RecoverParquet(ctx context.Context, publisher ParquetPublisher) error {
+	r.compactionMu.Lock()
+	defer r.compactionMu.Unlock()
+	return r.recoverCompaction(ctx, publisher.PublishParquet)
+}
+
 func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPublishFunc) error {
 	data, err := os.ReadFile(filepath.Join(r.root, "COMPACTION.json"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -199,14 +205,8 @@ func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPubli
 		return err
 	}
 	if !stageExists && !finalExists {
-		for _, id := range marker.Inputs {
-			exists, statErr := pathExists(r.Parquet.BatchPath(id))
-			if statErr != nil {
-				return statErr
-			}
-			if !exists {
-				return fmt.Errorf("compaction %s has no output and input %s is missing", marker.Output.ID, id)
-			}
+		if err := r.Parquet.RestoreRetiredInputs(marker.Inputs, marker.Output.ID); err != nil {
+			return fmt.Errorf("restore compaction %s inputs: %w", marker.Output.ID, err)
 		}
 		if err := os.Remove(filepath.Join(r.root, "COMPACTION.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err

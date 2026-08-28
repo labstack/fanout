@@ -82,12 +82,26 @@ func (r *Repository) Trace(ctx context.Context, query telemetry.TraceQuery) ([]t
 
 func (r *Repository) RowCount() uint64 { return r.Parquet.RowCount() }
 
-func (r *Repository) PruneParquet(ctx context.Context, publisher ParquetPublisher, cutoff int64) (int, error) {
+func (r *Repository) PruneParquet(ctx context.Context, publisher ParquetPublisher, cutoff int64, maxBatches int) (int, error) {
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
-	return r.Parquet.PruneBefore(cutoff, func(prune func() error) error {
+	return r.Parquet.PruneBefore(cutoff, maxBatches, func(prune func() error) error {
 		return publisher.PublishParquet(ctx, prune)
 	})
+}
+
+func (r *Repository) PruneParquetBacklog(ctx context.Context, publisher ParquetPublisher, cutoff int64, maxBatches int) (int, error) {
+	if maxBatches <= 0 {
+		return 0, nil
+	}
+	total := 0
+	for {
+		count, err := r.PruneParquet(ctx, publisher, cutoff, maxBatches)
+		total += count
+		if err != nil || count < maxBatches {
+			return total, err
+		}
+	}
 }
 
 func validateBatch(batch Batch) error {

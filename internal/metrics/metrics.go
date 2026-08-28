@@ -188,6 +188,22 @@ var (
 		Help: "Number of telemetry Parquet files per signal",
 	}, []string{"signal"})
 
+	ParquetPublishWaiters = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "fanout_parquet_publish_waiters",
+		Help: "Current Parquet publications waiting for active readers",
+	})
+
+	ParquetPublishWait = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "fanout_parquet_publish_wait_seconds",
+		Help:    "Time spent waiting to publish a new Parquet file set",
+		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+	})
+
+	ParquetPublishTimeouts = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_parquet_publish_timeouts_total",
+		Help: "Parquet publications abandoned after reader wait timeout",
+	})
+
 	// HTTP metrics
 	HTTPRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_http_requests_total",

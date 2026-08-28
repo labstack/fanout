@@ -448,20 +448,24 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	start := time.Now()
 	var pruneErr error
 	if d.repository != nil {
-		var parquetErr error
-		if d.cfg.RetentionDays > 0 {
-			_, parquetErr = d.repository.PruneParquet(ctx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano())
-		}
+		recoveryErr := d.repository.RecoverParquet(ctx, d)
 		compactStart := time.Now()
-		compacted, compactErr := d.repository.CompactParquetBacklog(ctx, d, 64)
+		var parquetErr, compactErr error
+		compacted := 0
+		if recoveryErr == nil {
+			if d.cfg.RetentionDays > 0 {
+				_, parquetErr = d.repository.PruneParquetBacklog(ctx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano(), 64)
+			}
+			compacted, compactErr = d.repository.CompactParquetBacklog(ctx, d, 64)
+		}
 		compactResult := metrics.TelemetryNoop
-		if compactErr != nil {
+		if recoveryErr != nil || compactErr != nil {
 			compactResult = metrics.TelemetryError
 		} else if compacted > 0 {
 			compactResult = metrics.TelemetrySuccess
 		}
 		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, compactResult, time.Since(compactStart).Seconds())
-		pruneErr = errors.Join(pruneErr, parquetErr, compactErr)
+		pruneErr = errors.Join(pruneErr, recoveryErr, parquetErr, compactErr)
 	}
 	cacheErr := func() error {
 		unlock, err := d.writeGate.LockContext(ctx, writegate.WriteMaintenance)
@@ -1427,15 +1431,10 @@ func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemet
 	return d.repository.Trace(ctx, query)
 }
 
-// MergeParquet executes the query-engine-specific half of compaction. The
-// write is serialized with rollup-cache transactions, but only for this one
-// merge so a large compaction backlog cannot starve rollups.
+// MergeParquet executes the query-engine-specific half of compaction. It reads
+// immutable inputs and writes an unpublished staging file, so it does not
+// contend with DuckDB rollup-cache writes.
 func (d *Duck) MergeParquet(ctx context.Context, signal string, inputs []string, output string) error {
-	unlock, err := d.writeGate.LockContext(ctx, writegate.WriteMaintenance)
-	if err != nil {
-		return err
-	}
-	defer unlock()
 	quoted := make([]string, len(inputs))
 	for i, input := range inputs {
 		quoted[i] = quoteDuckString(input)
@@ -1445,22 +1444,21 @@ func (d *Duck) MergeParquet(ctx context.Context, signal string, inputs []string,
 		query += " ORDER BY _trace_hash, start_unix_nano, span_id"
 	}
 	stmt := fmt.Sprintf("COPY (%s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 1, ROW_GROUP_SIZE 122880)", query, quoteDuckString(output))
-	_, err = d.DB.ExecContext(ctx, stmt)
+	_, err := d.DB.ExecContext(ctx, stmt)
 	return err
 }
 
 // PublishParquet limits reader exclusion to the atomic directory swap.
 func (d *Duck) PublishParquet(ctx context.Context, publish func() error) error {
-	writeCtx, cancelWrite := context.WithTimeout(ctx, 2*defaultWriterGrace)
-	unlockWrite, err := d.writeGate.LockContext(writeCtx, writegate.WriteMaintenance)
-	cancelWrite()
-	if err != nil {
-		return fmt.Errorf("wait for DuckDB write gate: %w", err)
-	}
-	defer unlockWrite()
 	publishCtx, cancelPublish := context.WithTimeout(ctx, 2*defaultWriterGrace)
 	defer cancelPublish()
-	if err := d.parquetMu.LockContext(publishCtx); err != nil {
+	metrics.ParquetPublishWaiters.Inc()
+	waitStarted := time.Now()
+	err := d.parquetMu.LockContext(publishCtx)
+	metrics.ParquetPublishWaiters.Dec()
+	metrics.ParquetPublishWait.Observe(time.Since(waitStarted).Seconds())
+	if err != nil {
+		metrics.ParquetPublishTimeouts.Inc()
 		return fmt.Errorf("wait for Parquet readers: %w", err)
 	}
 	defer d.parquetMu.Unlock()

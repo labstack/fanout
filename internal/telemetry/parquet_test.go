@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/parquet-go/parquet-go"
 )
@@ -218,6 +219,71 @@ func TestPublishReplacementValidatesBeforePublication(t *testing.T) {
 	}
 	if called {
 		t.Fatal("publication gate entered before replacement validation")
+	}
+}
+
+func TestPruneOwnsStoragePublicationBeforeExcludingReaders(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitBatch(BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	store.publishMu.Lock()
+	entered := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := store.PruneBefore(2, 1, func(prune func() error) error {
+			close(entered)
+			return prune()
+		})
+		done <- err
+	}()
+	select {
+	case <-entered:
+		store.publishMu.Unlock()
+		t.Fatal("reader exclusion began before storage publication ownership")
+	case <-time.After(20 * time.Millisecond):
+	}
+	store.publishMu.Unlock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPublishReplacementKeepsOutputOnlyAfterSyncFailure(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
+	if err := store.CommitBatch(BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	output := BatchMetadata{ID: "output"}
+	if err := store.CommitBatch(output, span, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	originalSync := syncPublishedDirectory
+	syncPublishedDirectory = func(string) error { return errors.New("injected directory sync failure") }
+	t.Cleanup(func() { syncPublishedDirectory = originalSync })
+
+	err = store.PublishReplacement(filepath.Join(t.TempDir(), "missing-stage"), output, []string{"input"}, func(publish func() error) error {
+		return publish()
+	})
+	if err == nil {
+		t.Fatal("replacement succeeded despite injected sync failure")
+	}
+	if _, err := os.Stat(store.BatchPath("input")); !os.IsNotExist(err) {
+		t.Fatalf("input was restored beside live output: %v", err)
+	}
+	if _, err := os.Stat(store.BatchPath("output")); err != nil {
+		t.Fatalf("replacement output missing: %v", err)
+	}
+	metadata := store.BatchMetadata()
+	if len(metadata) != 1 || metadata[0].ID != "output" {
+		t.Fatalf("live batches after sync failure = %#v, want output only", metadata)
 	}
 }
 

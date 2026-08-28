@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -281,6 +282,7 @@ func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
 func TestPublishParquetHonorsContext(t *testing.T) {
 	d := &Duck{}
 	d.parquetMu.RLock()
+	timeoutsBefore := testutil.ToFloat64(metrics.ParquetPublishTimeouts)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	called := false
@@ -297,6 +299,39 @@ func TestPublishParquetHonorsContext(t *testing.T) {
 	}
 	if got := d.parquetMu.WaitingWriters(); got != 0 {
 		t.Fatalf("canceled publication remained queued: %d", got)
+	}
+	if got := testutil.ToFloat64(metrics.ParquetPublishTimeouts); got != timeoutsBefore+1 {
+		t.Fatalf("publication timeouts = %v, want %v", got, timeoutsBefore+1)
+	}
+	if got := testutil.ToFloat64(metrics.ParquetPublishWaiters); got != 0 {
+		t.Fatalf("publication waiters after timeout = %v, want 0", got)
+	}
+}
+
+func TestParquetWorkDoesNotWaitForDuckDBWriteGate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("COPY").WillReturnResult(sqlmock.NewResult(0, 1))
+	d := &Duck{DB: db}
+	release := d.writeGate.Lock(writegate.WriteRollupService)
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	if err := d.MergeParquet(ctx, "logs", []string{"/tmp/input.parquet"}, "/tmp/output.parquet"); err != nil {
+		t.Fatalf("merge waited for unrelated DuckDB write gate: %v", err)
+	}
+	called := false
+	if err := d.PublishParquet(ctx, func() error { called = true; return nil }); err != nil {
+		t.Fatalf("publication waited for unrelated DuckDB write gate: %v", err)
+	}
+	if !called {
+		t.Fatal("publication callback did not run")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -382,7 +417,7 @@ func TestIndexedTraceReadHonorsParquetGateContext(t *testing.T) {
 	}
 }
 
-func TestRepositoryMaintenanceSerializesDuckDBWrites(t *testing.T) {
+func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
@@ -393,6 +428,9 @@ func TestRepositoryMaintenanceSerializesDuckDBWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer repository.Close()
+	if err := repository.Commit(telemetrystore.Batch{ID: "expired", Spans: []telemetry.Span{{TraceID: "trace", IngestedAt: 1}}}); err != nil {
+		t.Fatal(err)
+	}
 	mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DELETE FROM endpoint_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DELETE FROM edge_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
@@ -402,16 +440,14 @@ func TestRepositoryMaintenanceSerializesDuckDBWrites(t *testing.T) {
 	release := d.writeGate.Lock(writegate.WriteRollupService)
 	done := make(chan error, 1)
 	go func() { done <- d.runRepositoryMaintenance(context.Background()) }()
-	select {
-	case err := <-done:
-		release()
-		t.Fatalf("maintenance bypassed write gate: %v", err)
-	case <-time.After(25 * time.Millisecond):
+	deadline := time.Now().Add(time.Second)
+	for d.parquetMu.WaitingWriters() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
-	if waiting := d.parquetMu.WaitingWriters(); waiting != 0 {
+	if waiting := d.parquetMu.WaitingWriters(); waiting != 1 {
 		d.parquetMu.RUnlock()
 		release()
-		t.Fatalf("maintenance queued Parquet publication before owning DuckDB write gate: %d", waiting)
+		t.Fatalf("publication waiters = %d, want 1 while DuckDB write gate is independently held", waiting)
 	}
 	d.parquetMu.RUnlock()
 	release()
@@ -420,6 +456,48 @@ func TestRepositoryMaintenanceSerializesDuckDBWrites(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type failingPublishCompactor struct{ *Duck }
+
+func (f failingPublishCompactor) PublishParquet(context.Context, func() error) error {
+	return errors.New("injected publication failure")
+}
+
+func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	db := openTestDuck(t)
+	defer db.Close()
+	for _, table := range []string{"service_rollup", "endpoint_rollup", "edge_rollup"} {
+		if _, err := db.Exec("CREATE TABLE " + table + " (bucket TIMESTAMP)"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := &Duck{DB: db, repository: repository, cfg: config.Config{RetentionDays: 1}}
+	for i := range 8 {
+		batch := telemetrystore.Batch{
+			ID:      fmt.Sprintf("expired-%d", i),
+			Spans:   []telemetry.Span{{TraceID: "trace", SpanID: fmt.Sprintf("span-%d", i), StartUnixNanos: 1, IngestedAt: 1}},
+			Logs:    []telemetry.Log{{Body: "old", IngestedAt: 1}},
+			Metrics: []telemetry.Metric{{Name: "old", IngestedAt: 1}},
+		}
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repository.CompactParquet(context.Background(), failingPublishCompactor{d}, 64); err == nil {
+		t.Fatal("compaction unexpectedly published")
+	}
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := repository.RowCount(); got != 0 {
+		t.Fatalf("retention resurrected pending compaction rows: %d", got)
 	}
 }
 

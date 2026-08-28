@@ -28,6 +28,8 @@ const (
 	maxTraceQueryResults = 500
 )
 
+var syncPublishedDirectory = syncDirectory
+
 type BatchMetadata struct {
 	Version           uint32 `json:"version"`
 	ID                string `json:"id"`
@@ -279,6 +281,48 @@ func (p *ParquetStore) CleanupRetired() error {
 	return cleanupErr
 }
 
+// RestoreRetiredInputs rolls back a compaction whose durable output vanished
+// before publication. Active inputs are left untouched; already-retired inputs
+// are restored and registered again.
+func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID string) error {
+	if err := validateBatchID(replacementID); err != nil {
+		return err
+	}
+	p.publishMu.Lock()
+	defer p.publishMu.Unlock()
+	restored := false
+	for _, id := range inputs {
+		if err := validateBatchID(id); err != nil {
+			return err
+		}
+		active := p.BatchPath(id)
+		if _, err := os.Stat(active); errors.Is(err, os.ErrNotExist) {
+			retired := filepath.Join(p.batchesDir, id+".retired-"+replacementID)
+			if _, retiredErr := os.Stat(retired); retiredErr != nil {
+				if errors.Is(retiredErr, os.ErrNotExist) {
+					return fmt.Errorf("input %s is missing", id)
+				}
+				return retiredErr
+			}
+			if err := os.Rename(retired, active); err != nil {
+				return err
+			}
+			restored = true
+		} else if err != nil {
+			return err
+		}
+		if !p.hasBatch(id) {
+			if err := p.registerBatch(active); err != nil {
+				return err
+			}
+		}
+	}
+	if restored {
+		return syncDirectory(p.batchesDir)
+	}
+	return nil
+}
+
 // Trace reads only ranges selected by the persistent hash index. Scope filters
 // and the limit are applied while decoding so a pathological trace cannot grow
 // request memory without bound.
@@ -412,16 +456,41 @@ func indexedSpanEarlier(left, right IndexedSpan) bool {
 
 // PruneBefore hides complete batches while readers are pinned, then deletes
 // the retired directories after publication.
-func (p *ParquetStore) PruneBefore(cutoff int64, publish func(func() error) error) (int, error) {
+func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(func() error) error) (int, error) {
+	if maxBatches <= 0 {
+		return 0, nil
+	}
+	p.publishMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			p.publishMu.Unlock()
+		}
+	}()
+	p.mu.RLock()
+	candidates := make([]string, 0, maxBatches)
+	for id, batch := range p.batches {
+		if batch.metadata.MaxIngestedNanos > 0 && batch.metadata.MaxIngestedNanos < cutoff {
+			candidates = append(candidates, id)
+			if len(candidates) == maxBatches {
+				break
+			}
+		}
+	}
+	p.mu.RUnlock()
+	if len(candidates) == 0 {
+		p.publishMu.Unlock()
+		locked = false
+		return 0, nil
+	}
 	var retired []string
 	var pruneErr error
 	err := publish(func() error {
-		p.publishMu.Lock()
-		defer p.publishMu.Unlock()
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		for id, batch := range p.batches {
-			if batch.metadata.MaxIngestedNanos <= 0 || batch.metadata.MaxIngestedNanos >= cutoff {
+		for _, id := range candidates {
+			batch, exists := p.batches[id]
+			if !exists {
 				continue
 			}
 			path := filepath.Join(p.batchesDir, id+".retired")
@@ -437,6 +506,8 @@ func (p *ParquetStore) PruneBefore(cutoff int64, publish func(func() error) erro
 		}
 		return nil
 	})
+	p.publishMu.Unlock()
+	locked = false
 	pruneErr = errors.Join(pruneErr, err)
 	for _, path := range retired {
 		pruneErr = errors.Join(pruneErr, os.RemoveAll(path))
@@ -560,19 +631,39 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 	if replacement.metadata.Spans > 0 {
 		replacement.traces.path = filepath.Join(final, "trace.fidx")
 	}
+	p.publishMu.Lock()
+	locked := true
+	defer func() {
+		if locked {
+			p.publishMu.Unlock()
+		}
+	}()
 
 	retired := make([][2]string, 0, len(inputs))
 	err = publish(func() error {
-		p.publishMu.Lock()
-		defer p.publishMu.Unlock()
 		p.mu.Lock()
 		defer p.mu.Unlock()
+		installReplacement := func() {
+			for _, id := range inputs {
+				delete(p.batches, id)
+			}
+			p.batches[metadata.ID] = replacement
+		}
 		rollback := func() error {
 			var rollbackErr error
 			if source == final {
-				if _, statErr := os.Stat(stage); errors.Is(statErr, os.ErrNotExist) {
-					rollbackErr = errors.Join(rollbackErr, os.Rename(final, stage))
+				if err := os.MkdirAll(filepath.Dir(stage), 0o755); err != nil {
+					installReplacement()
+					return err
 				}
+				if err := os.Rename(final, stage); err != nil {
+					// Restoring inputs while the output remains published would
+					// double-count every compacted row. Keep the output-only view.
+					installReplacement()
+					return err
+				}
+				source = stage
+				delete(p.batches, metadata.ID)
 			}
 			for i := len(retired) - 1; i >= 0; i-- {
 				rollbackErr = errors.Join(rollbackErr, os.Rename(retired[i][1], retired[i][0]))
@@ -601,15 +692,17 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 			}
 			source = final
 		}
-		if err := syncDirectory(p.batchesDir); err != nil {
-			return errors.Join(err, rollback())
+		if err := syncPublishedDirectory(p.batchesDir); err != nil {
+			// The namespace already contains only the replacement. Keep the
+			// in-memory view consistent and let marker recovery retry the fsync.
+			installReplacement()
+			return err
 		}
-		for _, id := range inputs {
-			delete(p.batches, id)
-		}
-		p.batches[metadata.ID] = replacement
+		installReplacement()
 		return nil
 	})
+	p.publishMu.Unlock()
+	locked = false
 	if err != nil {
 		return err
 	}
@@ -659,7 +752,7 @@ func (p *ParquetStore) loadBatches() error {
 			continue
 		}
 		if err := p.registerBatch(filepath.Join(p.batchesDir, entry.Name())); err != nil {
-			return err
+			return fmt.Errorf("load Parquet batch %s: %w", entry.Name(), err)
 		}
 	}
 	return nil

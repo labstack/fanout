@@ -211,7 +211,7 @@ func TestRepositoryPrunesOnlyExpiredBatches(t *testing.T) {
 		}
 		return nil
 	}}
-	removed, err := repository.PruneParquet(context.Background(), publisher, 500)
+	removed, err := repository.PruneParquet(context.Background(), publisher, 500, 64)
 	if err != nil || removed != 1 {
 		t.Fatalf("prune = %d, %v", removed, err)
 	}
@@ -248,6 +248,10 @@ func TestRepositoryDiscardsRecoverableMarkerWithoutOutput(t *testing.T) {
 	if err := writeDurableFile(filepath.Join(dir, "COMPACTION.json"), data); err != nil {
 		t.Fatal(err)
 	}
+	retired := filepath.Join(repository.Parquet.BatchesDir(), batch.ID+".retired-"+marker.Output.ID)
+	if err := os.Rename(repository.Parquet.BatchPath(batch.ID), retired); err != nil {
+		t.Fatal(err)
+	}
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -262,6 +266,36 @@ func TestRepositoryDiscardsRecoverableMarkerWithoutOutput(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); !os.IsNotExist(err) {
 		t.Fatalf("recoverable marker remains: %v", err)
+	}
+}
+
+func TestRepositoryPrunesBacklogInBoundedPublications(t *testing.T) {
+	repository, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	for i := range 5 {
+		batch := testBatch()
+		batch.ID = fmt.Sprintf("expired-%d", i)
+		batch.Spans[0].IngestedAt = 1
+		batch.Logs[0].IngestedAt = 1
+		batch.Metrics[0].IngestedAt = 1
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publications := 0
+	publisher := &testParquetCompactor{afterSwap: func() error {
+		publications++
+		return nil
+	}}
+	removed, err := repository.PruneParquetBacklog(context.Background(), publisher, 2, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 5 || publications != 3 {
+		t.Fatalf("removed=%d publications=%d, want 5 across 3 bounded swaps", removed, publications)
 	}
 }
 
@@ -282,7 +316,7 @@ func TestRepositoryRetentionUsesIngestTimeNotEventTime(t *testing.T) {
 	if err := repository.Commit(batch); err != nil {
 		t.Fatal(err)
 	}
-	removed, err := repository.PruneParquet(context.Background(), &testParquetCompactor{}, 500)
+	removed, err := repository.PruneParquet(context.Background(), &testParquetCompactor{}, 500, 64)
 	if err != nil || removed != 1 {
 		t.Fatalf("prune future-dated events = %d, %v; want one batch expired by ingest time", removed, err)
 	}
