@@ -38,25 +38,31 @@ Before any figure goes back on this page, it has to ship with:
 
 ## Measure your own instead
 
-`cmd/bench` is the supported load generator. It sends traces, metrics and logs,
-ramps to find the ingest boundary, and confirms the result at the rate it found.
-It can add authenticated dashboard reads on top, which is the part that matters.
+The independent
+[Fanout Bench](https://github.com/labstack/fanout-bench) project drives the
+official OpenTelemetry `telemetrygen` client, counts rows accepted by Fanout,
+and emits raw JSON plus a publication-ready report. It can add authenticated
+dashboard reads on top, which is the part that matters.
 Parquet ingest and DuckDB reads no longer serialize through one write gate, but
 they still compete for the same CPU, memory bandwidth, filesystem cache, and
 disk. Maintenance adds native Parquet merge work and short reader-exclusive
 namespace changes. An ingest-only number therefore still overstates what an
 instance does while anyone is looking at it.
 
-Build it, create an ingest token through first-admin setup, then:
+Create a short-lived ingest token through first-admin setup, then follow the
+standalone harness instructions. A local run starts with:
 
 ```sh
-./bin/bench \
-  -endpoint localhost:4317 \
-  -token "$INGEST_TOKEN" \
-  -report ingest.json
+export FANOUT_BENCH_INGEST_TOKEN='…'
+fanout-bench run \
+  --endpoint localhost:4317 \
+  --metrics-url http://localhost:7520/-/metrics \
+  --insecure \
+  --same-host
 ```
 
-`./bin/bench -help` covers fixed-rate, query-load and metrics options.
+The harness repository documents signal-specific saturation, sustained mixed
+load, read-under-write latency, machine identity, and publication rules.
 
 :::caution[A result describes the machine it ran on]
 Benchmark output describes the hardware and dataset you tested, not an
