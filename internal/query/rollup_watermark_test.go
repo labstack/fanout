@@ -8,6 +8,13 @@ import (
 	"github.com/labstack/fanout/internal/config"
 )
 
+func TestRollupPublicationLagExceedsReaderAndPublisherWindow(t *testing.T) {
+	minimum := defaultWriterGrace + time.Duration(maxQueryTimeoutMs)*time.Millisecond
+	if rollupPublicationSafetyLag <= minimum {
+		t.Fatalf("rollup publication lag = %s, must exceed reader+publisher window %s", rollupPublicationSafetyLag, minimum)
+	}
+}
+
 // TestRollupWatermarkPicksUpLateLowIngestedRow reproduces the silent-data-loss
 // bug: a row that commits with an ingested timestamp below a watermark already
 // advanced by another signal would be excluded from the rollup forever. The
@@ -23,10 +30,9 @@ func TestRollupWatermarkPicksUpLateLowIngestedRow(t *testing.T) {
 
 	const lag = 2 * time.Second
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
-		rollupLagNanos:  lag.Nanoseconds(),
+		DB:             db,
+		cfg:            config.Config{RetentionDays: 30},
+		rollupLagNanos: lag.Nanoseconds(),
 	}
 	ctx := context.Background()
 
@@ -89,10 +95,9 @@ func TestRollupWatermarkLagSurvivesChunkedCatchUp(t *testing.T) {
 
 	const lag = 2 * time.Second
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
-		rollupLagNanos:  lag.Nanoseconds(),
+		DB:             db,
+		cfg:            config.Config{RetentionDays: 30},
+		rollupLagNanos: lag.Nanoseconds(),
 	}
 	ctx := context.Background()
 
@@ -152,10 +157,9 @@ func TestEdgeRollupWatermarkPicksUpLateChild(t *testing.T) {
 
 	const lag = 2 * time.Second
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30},
-		lastMaintenance: time.Now(),
-		rollupLagNanos:  lag.Nanoseconds(),
+		DB:             db,
+		cfg:            config.Config{RetentionDays: 30},
+		rollupLagNanos: lag.Nanoseconds(),
 	}
 	ctx := context.Background()
 	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)

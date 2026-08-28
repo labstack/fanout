@@ -186,6 +186,50 @@ h1#_top {
   outline-offset: 2px;
 }
 
+/* Architecture diagrams are generated for a light technical canvas. Give them
+   one explicit blueprint-like media surface in both themes rather than letting
+   dark mode erase their ink. The border carries hierarchy; no decorative
+   shadow or gradient competes with the diagram itself. */
+.sl-markdown-content .docs-diagram {
+  margin: 1.75rem 0 2rem;
+  padding: clamp(0.75rem, 2vw, 1.25rem);
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 0.5rem;
+  background: #fafafa;
+}
+
+.sl-markdown-content .docs-diagram__asset {
+  display: block;
+  border-radius: 0.25rem;
+}
+
+.sl-markdown-content .docs-diagram__asset:focus-visible {
+  outline: 2px solid var(--sl-color-accent);
+  outline-offset: 4px;
+}
+
+.sl-markdown-content .docs-diagram img {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.sl-markdown-content .docs-diagram figcaption {
+  margin-top: 0.75rem;
+  color: #565b69;
+  font-family: var(--fo-font-display);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+@media (max-width: 50rem) {
+  .sl-markdown-content .docs-diagram {
+    margin-inline: 0;
+  }
+}
+
 /* Without a minimum, a four-column reference table compresses to fit a phone
    and every column becomes a ribbon of wrapped text. The minimum makes it
    overflow instead, which is what the scroll container is there to absorb.

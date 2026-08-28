@@ -2,12 +2,14 @@ package query
 
 import (
 	"context"
-	"strings"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -26,9 +28,8 @@ func TestEdgeRollupBacklog(t *testing.T) {
 	}
 
 	d := &Duck{
-		DB:              db,
-		cfg:             config.Config{RetentionDays: 30, DuckDBMemory: "1GB"},
-		lastMaintenance: time.Now(),
+		DB:  db,
+		cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"},
 	}
 	ctx := context.Background()
 
@@ -44,7 +45,7 @@ func TestEdgeRollupBacklog(t *testing.T) {
 
 	_, err := db.ExecContext(ctx, `
 WITH input AS (SELECT CAST(? AS TIMESTAMP) AS base_time)
-INSERT INTO lake.spans (
+INSERT INTO telemetry.spans (
   namespace, trace_id, span_id, parent_span_id,
   service, operation, kind,
   start_time, end_time, start_unix_nano, end_unix_nano, duration_ms,
@@ -74,7 +75,7 @@ FROM range(?, ?) t(i), input`,
 
 	_, err = db.ExecContext(ctx, `
 WITH input AS (SELECT CAST(? AS TIMESTAMP) AS base_time)
-INSERT INTO lake.spans (
+INSERT INTO telemetry.spans (
   namespace, trace_id, span_id, parent_span_id,
   service, operation, kind,
   start_time, end_time, start_unix_nano, end_unix_nano, duration_ms,
@@ -128,7 +129,7 @@ FROM range(?, ?) t(i), input`,
 	}
 	if err := db.QueryRowContext(ctx, `
 SELECT count(DISTINCT date_trunc('minute', start_time))
-FROM lake.spans`).Scan(&spanBuckets); err != nil {
+FROM telemetry.spans`).Scan(&spanBuckets); err != nil {
 		t.Fatalf("count distinct span minute buckets: %v", err)
 	}
 	if spanBuckets != 180 {
@@ -144,22 +145,25 @@ FROM lake.spans`).Scan(&spanBuckets); err != nil {
 func TestSkipRollupToLatest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	d, err := NewDuck(ctx, config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", RetentionDays: 30})
+	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "2GB", RetentionDays: 30}
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
-		if strings.Contains(err.Error(), "ducklake") || strings.Contains(err.Error(), "ATTACH") {
-			t.Skipf("DuckLake unavailable: %v", err)
-		}
+		t.Fatalf("open telemetry repository: %v", err)
+	}
+	defer repository.Close()
+	now := time.Now().UnixNano()
+	spans := make([]telemetry.Span, 100)
+	for i := range spans {
+		spans[i] = telemetry.Span{Namespace: "default", TraceID: "backlog", SpanID: string(rune(i + 1)), ServiceName: "svc", Kind: "SPAN_KIND_CLIENT", StartUnixNanos: now - int64(i)*int64(time.Minute), DurationMS: 10, StatusCode: "STATUS_CODE_OK", IngestedAt: now}
+	}
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "skip-backlog", Spans: spans}); err != nil {
+		t.Fatalf("commit backlog: %v", err)
+	}
+	d, err := NewDuck(ctx, cfg, repository)
+	if err != nil {
 		t.Fatalf("NewDuck: %v", err)
 	}
 	defer d.Close()
-
-	if _, err := d.DB.ExecContext(ctx, `
-INSERT INTO lake.spans (namespace, trace_id, span_id, parent_span_id, service, kind, start_time, duration_ms, status, ingested_unix_nano)
-SELECT 'default', 'tr-'||i, 'c-'||i, 'p-'||i, 'svc-'||(i%5), 'SPAN_KIND_CLIENT',
-       now() - ((i % 120) * INTERVAL 1 MINUTE), 10.0, 'STATUS_CODE_OK', epoch_ns(now())
-FROM range(5000) t(i)`); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
 	if _, err := d.DB.ExecContext(ctx, `
 INSERT INTO endpoint_rollup (
   namespace, bucket, service, method, path, calls, error_count, duration_count, duration_buckets
@@ -227,12 +231,9 @@ ON CONFLICT (cache_key) DO UPDATE SET last_ingested_unix_nano = 1, updated_at = 
 	// Insert one fresh live span (ingested_unix_nano = now) and verify that
 	// rollupOnce picks it up — proves the watermark didn't over-advance and
 	// swallow data that arrived after the skip.
-	if _, err := d.DB.ExecContext(ctx, `
-INSERT INTO lake.spans (namespace, trace_id, span_id, parent_span_id, service, kind,
-                        start_time, duration_ms, status, ingested_unix_nano)
-VALUES ('default', 'tr-live-1', 'sp-live-1', '', 'svc-live', 'SPAN_KIND_SERVER',
-        now(), 5.0, 'STATUS_CODE_OK', epoch_ns(now()))`); err != nil {
-		t.Fatalf("insert live span: %v", err)
+	liveTime := time.Now().Add(time.Millisecond).UnixNano()
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "skip-live", Spans: []telemetry.Span{{Namespace: "default", TraceID: "tr-live-1", SpanID: "sp-live-1", ServiceName: "svc-live", Kind: "SPAN_KIND_SERVER", StartUnixNanos: liveTime, DurationMS: 5, StatusCode: "STATUS_CODE_OK", IngestedAt: liveTime}}}); err != nil {
+		t.Fatalf("commit live span: %v", err)
 	}
 
 	n2, err := d.rollupOnce(ctx)
@@ -241,5 +242,184 @@ VALUES ('default', 'tr-live-1', 'sp-live-1', '', 'svc-live', 'SPAN_KIND_SERVER',
 	}
 	if n2 == 0 {
 		t.Error("rollupOnce processed 0 rows for live span after skip-to-latest; watermark may have over-advanced")
+	}
+}
+
+// readEdgeRollupState returns the edge rollup's persisted watermark and its
+// sub-window resume point.
+func readEdgeRollupState(t *testing.T, d *Duck) (watermark, cursor int64) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := d.DB.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if watermark, err = rollupWatermark(ctx, tx, edgeRollupStateKey); err != nil {
+		t.Fatal(err)
+	}
+	if cursor, err = rollupWatermark(ctx, tx, edgeRollupSubCursorKey); err != nil {
+		t.Fatal(err)
+	}
+	return watermark, cursor
+}
+
+// TestEdgeRollupBoundsSubWindowsPerPass pins the invariant that one rollup pass
+// holds the Parquet read gate for an amount of work fixed by configuration,
+// never by the shape of the data.
+//
+// Chunking ingested time does not provide that bound: a seed load or backfill
+// compresses a wide start_time range into a narrow ingested window, so a single
+// one-hour chunk can expand into an unbounded number of sub-windows and hold
+// the gate for as long as that takes — starving every retention and compaction
+// publication behind it. No timeout can fix that from the outside; cancelling
+// mid-transaction only discards the work and retries it forever. The pass must
+// instead stop at a fixed sub-window count, persist where to resume, and leave
+// the ingested watermark behind until the window is finished.
+func TestEdgeRollupBoundsSubWindowsPerPass(t *testing.T) {
+	db := openTestDuck(t)
+	if err := CreateTables(db); err != nil {
+		t.Fatalf("CreateTables: %v", err)
+	}
+	if err := CreateViews(db); err != nil {
+		t.Fatalf("CreateViews: %v", err)
+	}
+	d := &Duck{DB: db, cfg: config.Config{RetentionDays: 30, DuckDBMemory: "1GB"}}
+	ctx := context.Background()
+
+	// One ingested instant, but start_time spread over 600 minutes: 20
+	// sub-windows of edgeStartChunkNanos, well past maxEdgeSubWindowsPerPass.
+	const (
+		rows        = 12_000
+		spreadMins  = 600
+		wantWindows = spreadMins / 30
+	)
+	baseTime := time.Now().UTC().Truncate(time.Minute)
+	ingestedNano := baseTime.UnixNano()
+	for _, spec := range []struct{ kind, span, parent, service string }{
+		{"SPAN_KIND_SERVER", "parent-%d", "", "svc-a"},
+		{"SPAN_KIND_CLIENT", "child-%d", "parent-%d", "svc-b"},
+	} {
+		parent := "NULL"
+		if spec.parent != "" {
+			parent = fmt.Sprintf("printf('%s', i)", spec.parent)
+		}
+		_, err := db.ExecContext(ctx, fmt.Sprintf(`
+WITH input AS (SELECT CAST(? AS TIMESTAMP) AS base_time)
+INSERT INTO telemetry.spans (
+  namespace, trace_id, span_id, parent_span_id, service, operation, kind,
+  start_time, end_time, start_unix_nano, end_unix_nano, duration_ms,
+  status, ingested_at, ingested_unix_nano
+)
+SELECT 'default', printf('trace-%%d', i %% 2000), printf('%s', i), %s, '%s', 'op', '%s',
+  base_time - ((i %% %d) * INTERVAL '1' MINUTE),
+  base_time - ((i %% %d) * INTERVAL '1' MINUTE) + INTERVAL '10' MILLISECOND,
+  epoch_ns(base_time - ((i %% %d) * INTERVAL '1' MINUTE)),
+  epoch_ns(base_time - ((i %% %d) * INTERVAL '1' MINUTE)) + 10000000,
+  10.0, 'STATUS_CODE_OK', base_time, ?
+FROM range(?, ?) t(i), input`,
+			spec.span, parent, spec.service, spec.kind, spreadMins, spreadMins, spreadMins, spreadMins),
+			baseTime, ingestedNano, 0, rows)
+		if err != nil {
+			t.Fatalf("insert %s: %v", spec.kind, err)
+		}
+	}
+
+	// The first pass must stop short and record where to resume, leaving the
+	// ingested watermark untouched so nothing in the window can be skipped.
+	if _, err := d.refreshEdgeRollup(ctx); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	watermark, cursor := readEdgeRollupState(t, d)
+	if cursor == 0 {
+		t.Fatal("first pass consumed the whole window: the per-pass sub-window bound did not engage")
+	}
+	if watermark != 0 {
+		t.Fatalf("ingested watermark advanced to %d over an unfinished window", watermark)
+	}
+
+	passes := 1
+	for {
+		if passes > wantWindows+2 {
+			t.Fatal("edge rollup did not converge: passes are not making forward progress")
+		}
+		if _, err := d.refreshEdgeRollup(ctx); err != nil {
+			t.Fatalf("pass %d: %v", passes+1, err)
+		}
+		passes++
+		if _, cursor = readEdgeRollupState(t, d); cursor == 0 {
+			break
+		}
+	}
+	if passes < 2 {
+		t.Fatalf("converged in %d passes, want the work spread over several", passes)
+	}
+	if watermark, _ = readEdgeRollupState(t, d); watermark == 0 {
+		t.Fatal("ingested watermark never advanced after the window completed")
+	}
+
+	// Resuming must neither drop nor double-count a bucket: the aggregate has
+	// to match what a single unbounded pass would have produced.
+	var edgeBuckets, spanBuckets int64
+	if err := db.QueryRowContext(ctx, `SELECT count(DISTINCT bucket) FROM edge_rollup`).Scan(&edgeBuckets); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, `
+SELECT count(DISTINCT date_trunc('minute', start_time)) FROM telemetry.spans`).Scan(&spanBuckets); err != nil {
+		t.Fatal(err)
+	}
+	if spanBuckets != spreadMins {
+		t.Fatalf("spans cover %d minute buckets, want %d", spanBuckets, spreadMins)
+	}
+	if edgeBuckets != spanBuckets {
+		t.Fatalf("edge_rollup covers %d buckets, spans cover %d — resuming dropped or duplicated work", edgeBuckets, spanBuckets)
+	}
+	t.Logf("converged in %d passes over %d sub-windows; buckets edge=%d spans=%d", passes, wantWindows, edgeBuckets, spanBuckets)
+}
+
+func TestEdgeSubWindowShrinksForDenseIngest(t *testing.T) {
+	db := openTestDuck(t)
+	if err := CreateTables(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateViews(db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Minute)
+	ingested := base.UnixNano()
+	if _, err := db.ExecContext(ctx, `
+WITH input AS (SELECT CAST(? AS TIMESTAMP) AS base_time)
+INSERT INTO telemetry.spans (
+  namespace, trace_id, span_id, service, start_time, start_unix_nano,
+  ingested_at, ingested_unix_nano
+)
+SELECT
+  'default', printf('trace-%d', i), printf('span-%d', i), 'svc',
+  base_time + ((i % 30) * INTERVAL '1' MINUTE),
+  epoch_ns(base_time + ((i % 30) * INTERVAL '1' MINUTE)), base_time, ?
+FROM range(100) t(i), input`, base, ingested); err != nil {
+		t.Fatal(err)
+	}
+	var affected int64
+	if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM spans
+WHERE ingested_unix_nano > ? AND ingested_unix_nano <= ?`, ingested-1, ingested).Scan(&affected); err != nil {
+		t.Fatal(err)
+	}
+	if affected != 100 {
+		t.Fatalf("affected fixture rows = %d, want 100", affected)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	subHi, err := edgeSubWindowEnd(ctx, tx, ingested-1, ingested, base, base.Add(29*time.Minute), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := base.Add(time.Minute); !subHi.Equal(want) {
+		t.Fatalf("dense sub-window ended at %s, want %s", subHi, want)
 	}
 }

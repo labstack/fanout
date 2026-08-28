@@ -23,7 +23,6 @@ as a refusal to start rather than as a default nobody chose.
 | `storage.duckdb.memory` | `FANOUT_DUCKDB_MEMORY` | string | — |
 | `storage.duckdb.threads` | `FANOUT_DUCKDB_THREADS` | integer | — |
 | `storage.maintenance_interval` | `FANOUT_MAINTENANCE_INTERVAL` | duration | `1h` |
-| `storage.merge_interval` | `FANOUT_MERGE_INTERVAL` | duration | `1m` |
 | `storage.retention_days` | `FANOUT_RETENTION_DAYS` | integer | `30` |
 | `storage.rollup_interval` | `FANOUT_ROLLUP_INTERVAL` | duration | `1m` |
 | `storage.rollup_skip_to_latest` | `FANOUT_ROLLUP_SKIP_TO_LATEST` | boolean | `false` |
@@ -32,7 +31,7 @@ as a refusal to start rather than as a default nobody chose.
 
 ### `storage.duckdb.max_connections`
 
-Caps the DuckDB connection pool. A value of 1 serializes everything through one handle; the machine-sized default lets read queries run concurrently with each other and with ingest flushes. Two things make >1 safe: the DuckLake SQLite catalog is opened in WAL mode (enableCatalogWAL), so readers don't collide with the single writer and a crashed writer can't leave the catalog permanently locked; and write commits are serialized by the shared write gate (Duck.WriteGate, wired into the writer via UseWriteGate in cmd/fanout/main.go, enforced at startup). Without the WAL mode, pool >1 fails with "database is locked". Zero means "size it from the machine" — the same spelling DuckDBThreads uses for deferring to a default. Resolution happens in resolveSizing and is reported in the startup configuration log.
+Caps the DuckDB connection pool. Reads scan immutable Parquet concurrently; rollup-cache writes are serialized by the query write gate. Zero means "size it from the machine" — the same spelling DuckDBThreads uses for deferring to a default. Resolution happens in resolveSizing and is reported in the startup configuration log.
 
 ### `storage.duckdb.memory`
 
@@ -44,11 +43,7 @@ Caps DuckDB's global query worker pool. Zero leaves DuckDB's own default in plac
 
 ### `storage.maintenance_interval`
 
-Throttles the DuckLake maintenance cycle (retention deletes + compaction). Default 1h. Lower it to compact more aggressively, or for soak tests that need to observe file-count staying bounded within minutes rather than hours.
-
-### `storage.merge_interval`
-
-The cadence for the cheap, frequent DuckLake file compaction pass (ducklake_merge_adjacent_files only — it consolidates the newest small parquet files and deletes nothing). Run often (default 1m) it keeps the queryable file count continuously low, which is what bounds rollup/query scan latency — WITHOUT the churn, deletion race, or catalog cost of the full hourly maintenance pass (expire + cleanup). 0 disables it.
+Controls Parquet retention and compaction, and query-cache checkpointing.
 
 ### `storage.rollup_skip_to_latest`
 

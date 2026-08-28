@@ -9,14 +9,14 @@ import (
 func TestParseMetricSnapshotPreservesLabelsAndTotals(t *testing.T) {
 	snapshot := mustMetricSnapshot(t, `
 # HELP fanout_test_total test metric
-fanout_test_total{operation="merge",detail="quoted\" value\\path"} 2
+fanout_test_total{operation="compaction",detail="quoted\" value\\path"} 2
 fanout_test_total{operation="maintenance",detail="plain"} 3
 `)
 
 	if got := snapshot.total("fanout_test_total"); got != 5 {
 		t.Fatalf("total = %v, want 5", got)
 	}
-	if got := snapshot.filteredTotal("fanout_test_total", map[string]string{"operation": "merge"}); got != 2 {
+	if got := snapshot.filteredTotal("fanout_test_total", map[string]string{"operation": "compaction"}); got != 2 {
 		t.Fatalf("merge total = %v, want 2", got)
 	}
 	if got := snapshot.Samples[0].Labels["detail"]; got != "quoted\" value\\path" {
@@ -29,10 +29,10 @@ func TestServerDeltaReportsOperationAndRuntimeDistributions(t *testing.T) {
 fanout_ingest_rows_total{signal="spans"} 10
 fanout_ingest_rows_total{signal="logs"} 5
 fanout_rows_dropped_total{signal="spans"} 0
-fanout_lake_partitions{signal="spans"} 2
-fanout_lake_partitions{signal="logs"} 1
-fanout_lake_size_bytes{signal="spans"} 60
-fanout_lake_size_bytes{signal="logs"} 40
+fanout_parquet_files{signal="spans"} 2
+fanout_parquet_files{signal="logs"} 1
+fanout_parquet_size_bytes{signal="spans"} 60
+fanout_parquet_size_bytes{signal="logs"} 40
 fanout_ingest_queue_depth{signal="spans"} 2
 fanout_ingest_queue_depth{signal="logs"} 1
 process_cpu_seconds_total 10
@@ -57,14 +57,14 @@ fanout_write_gate_hold_seconds_bucket{operation="ingest_spans",le="0.100"} 1
 fanout_write_gate_hold_seconds_bucket{operation="ingest_spans",le="+Inf"} 1
 fanout_write_gate_hold_seconds_sum{operation="ingest_spans"} 0.005
 fanout_write_gate_hold_seconds_count{operation="ingest_spans"} 1
-fanout_ducklake_operation_duration_seconds_bucket{operation="merge",le="0.010"} 1
-fanout_ducklake_operation_duration_seconds_bucket{operation="merge",le="0.100"} 1
-fanout_ducklake_operation_duration_seconds_bucket{operation="merge",le="1.000"} 1
-fanout_ducklake_operation_duration_seconds_bucket{operation="merge",le="+Inf"} 1
-fanout_ducklake_operation_duration_seconds_sum{operation="merge"} 0.005
-fanout_ducklake_operation_duration_seconds_count{operation="merge"} 1
-fanout_ducklake_operation_total{operation="merge",result="success"} 1
-fanout_ducklake_operation_total{operation="merge",result="throttled"} 2
+fanout_telemetry_operation_duration_seconds_bucket{operation="compaction",le="0.010"} 1
+fanout_telemetry_operation_duration_seconds_bucket{operation="compaction",le="0.100"} 1
+fanout_telemetry_operation_duration_seconds_bucket{operation="compaction",le="1.000"} 1
+fanout_telemetry_operation_duration_seconds_bucket{operation="compaction",le="+Inf"} 1
+fanout_telemetry_operation_duration_seconds_sum{operation="compaction"} 0.005
+fanout_telemetry_operation_duration_seconds_count{operation="compaction"} 1
+fanout_telemetry_operation_total{operation="compaction",result="success"} 1
+fanout_telemetry_operation_total{operation="compaction",result="throttled"} 2
 fanout_rollup_enabled{rollup="service"} 1
 fanout_rollup_watermark_timestamp_seconds{rollup="service"} 100
 fanout_rollup_source_timestamp_seconds{rollup="service"} 105
@@ -82,10 +82,10 @@ fanout_rollup_component_total{rollup="service",result="success"} 1
 fanout_ingest_rows_total{signal="spans"} 30
 fanout_ingest_rows_total{signal="logs"} 15
 fanout_rows_dropped_total{signal="spans"} 0
-fanout_lake_partitions{signal="spans"} 3
-fanout_lake_partitions{signal="logs"} 2
-fanout_lake_size_bytes{signal="spans"} 100
-fanout_lake_size_bytes{signal="logs"} 80
+fanout_parquet_files{signal="spans"} 3
+fanout_parquet_files{signal="logs"} 2
+fanout_parquet_size_bytes{signal="spans"} 100
+fanout_parquet_size_bytes{signal="logs"} 80
 fanout_ingest_queue_depth{signal="spans"} 0
 fanout_ingest_queue_depth{signal="logs"} 1
 process_cpu_seconds_total 14
@@ -110,15 +110,15 @@ fanout_write_gate_hold_seconds_bucket{operation="ingest_spans",le="0.100"} 3
 fanout_write_gate_hold_seconds_bucket{operation="ingest_spans",le="+Inf"} 3
 fanout_write_gate_hold_seconds_sum{operation="ingest_spans"} 0.035
 fanout_write_gate_hold_seconds_count{operation="ingest_spans"} 3
-fanout_ducklake_operation_duration_seconds_bucket{operation="merge",le="0.010"} 1
-fanout_ducklake_operation_duration_seconds_bucket{operation="merge",le="0.100"} 2
-fanout_ducklake_operation_duration_seconds_bucket{operation="merge",le="1.000"} 3
-fanout_ducklake_operation_duration_seconds_bucket{operation="merge",le="+Inf"} 3
-fanout_ducklake_operation_duration_seconds_sum{operation="merge"} 0.125
-fanout_ducklake_operation_duration_seconds_count{operation="merge"} 3
-fanout_ducklake_operation_total{operation="merge",result="success"} 3
-fanout_ducklake_operation_total{operation="merge",result="throttled"} 5
-fanout_ducklake_operation_total{operation="merge",result="error"} 1
+fanout_telemetry_operation_duration_seconds_bucket{operation="compaction",le="0.010"} 1
+fanout_telemetry_operation_duration_seconds_bucket{operation="compaction",le="0.100"} 2
+fanout_telemetry_operation_duration_seconds_bucket{operation="compaction",le="1.000"} 3
+fanout_telemetry_operation_duration_seconds_bucket{operation="compaction",le="+Inf"} 3
+fanout_telemetry_operation_duration_seconds_sum{operation="compaction"} 0.125
+fanout_telemetry_operation_duration_seconds_count{operation="compaction"} 3
+fanout_telemetry_operation_total{operation="compaction",result="success"} 3
+fanout_telemetry_operation_total{operation="compaction",result="throttled"} 5
+fanout_telemetry_operation_total{operation="compaction",result="error"} 1
 fanout_rollup_enabled{rollup="service"} 1
 fanout_rollup_watermark_timestamp_seconds{rollup="service"} 200
 fanout_rollup_source_timestamp_seconds{rollup="service"} 212
@@ -141,9 +141,9 @@ fanout_rollup_component_total{rollup="service",result="noop"} 2
 	assertFloat(t, "ingest rows start", report.IngestRowsStart, 15)
 	assertFloat(t, "ingest rows end", report.IngestRowsEnd, 45)
 	assertFloat(t, "ingest rows", report.IngestRowsDelta, 30)
-	assertFloat(t, "lake partitions delta", report.LakePartitionsDelta, 2)
-	assertFloat(t, "lake size delta", report.LakeSizeBytesDelta, 80)
-	assertFloat(t, "lake growth rate", report.LakeGrowthBytesPerSec, 10)
+	assertFloat(t, "Parquet files delta", report.ParquetFilesDelta, 2)
+	assertFloat(t, "Parquet size delta", report.ParquetSizeBytesDelta, 80)
+	assertFloat(t, "Parquet growth rate", report.ParquetGrowthBytesPerSec, 10)
 	assertFloat(t, "average rollup", report.AvgRollupMs, 750)
 	assertFloat(t, "average flush", report.AvgFlushMs, 200)
 	assertFloat(t, "average query", report.AvgQueryMs, 500)
@@ -170,7 +170,7 @@ fanout_rollup_component_total{rollup="service",result="noop"} 2
 	assertFloat(t, "wait p95", wait.P95Ms, 100)
 	assertFloat(t, "hold mean", report.WriteGateHoldMs["ingest_spans"].MeanMs, 15)
 
-	merge := report.DuckLakeOperations["merge"]
+	merge := report.TelemetryOperations["compaction"]
 	if merge.DurationMs.Count != 2 {
 		t.Fatalf("merge duration count = %d, want 2", merge.DurationMs.Count)
 	}

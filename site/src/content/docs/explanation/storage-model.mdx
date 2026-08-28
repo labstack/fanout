@@ -1,71 +1,85 @@
 ---
 title: How storage works
-description: What Fanout writes to disk, how it is queried, and why the data directory is one unit.
-summary: Parquet under a DuckLake catalog, queried by DuckDB in-process, with SQLite holding application state.
+description: What Fanout writes to disk, how it is queried, and why each component exists.
+summary: Atomic Parquet ingestion, indexed trace reads, DuckDB analytics, and SQLite control state.
 read_when:
   - You are sizing disk, or deciding what to back up.
-  - You want to know why a rollup lags the raw telemetry.
+  - You want to understand ingest durability or query performance.
 status: preview
 ---
 
-Telemetry lands on disk as Parquet. A DuckLake catalog tracks those files, and
-DuckDB queries them in the same process that wrote them. Application state —
-users, sessions, dashboards, alert rules, agent history — lives in a separate
-SQLite database.
+Fanout uses a small embedded storage stack, not a data lake. Telemetry is retained
+as ordinary Parquet files and queried by DuckDB in the same process. Application
+state—users, sessions, dashboards, alert rules, and agent history—lives in SQLite.
 
-Under the data directory:
-
-| Path | Holds |
+| Component | Purpose |
 |---|---|
-| `telemetry/parquet` | The telemetry itself |
-| `telemetry/ducklake.sqlite` | The catalog tracking those files |
-| `query/catalog.duckdb` | Query-side state |
-| `control/fanout.sqlite` | Users, sessions, dashboards, alerts, agent history |
+| Atomic Parquet batches | Authoritative retained spans, logs, and metrics |
+| Trace sidecar | Persistent row-range index for targeted trace reads from Parquet |
+| DuckDB | SQL, log filtering, aggregation, and broad analytical reads |
+| SQLite | Transactional application and identity state |
 
-These reference each other, which is why [backup](/guides/back-up-and-restore)
-takes the whole directory. A copy of `telemetry/parquet` without its catalog is
-a directory of files nothing can find.
+There is no Iceberg, DuckLake, external catalog, or server database in the
+telemetry path.
 
-## Why two databases
+<figure class="docs-diagram">
+  <a href="/diagrams/persistence.svg" class="docs-diagram__asset" aria-label="Open the Fanout persistence diagram at full size">
+    <img
+      src="/diagrams/persistence.svg"
+      alt="Fanout persistence flow: authenticated OTLP requests enter bounded group admission and parallel commit workers, publish immutable Parquet batches atomically, then serve indexed trace reads and DuckDB SQL while native maintenance prepares and swaps compacted replacements."
+      loading="lazy"
+      decoding="async"
+    />
+  </a>
+  <figcaption>Parquet is authoritative; indexes and DuckDB rollups are derived state.</figcaption>
+</figure>
 
-They have different shapes. Telemetry is append-heavy, queried analytically over
-wide time ranges, and never updated — which is what Parquet and DuckDB are good
-at. Application state is small, transactional, and updated constantly, which
-they are not. Using one engine for both would make one of the two jobs worse.
+## Writes are durable immediately
 
-## Writes are batched
+Concurrent small OTLP requests may share one group-commit batch. Up to four
+commit workers encode independent batches in parallel. Each worker writes all
+present signals and metadata into a staging directory, adds `trace.fidx` when
+spans are present, fsyncs them, and publishes the complete directory with one
+atomic rename. Fanout
+returns success only after every batch belonging to the request is published.
 
-Incoming telemetry is buffered and flushed on `FANOUT_FLUSH_INTERVAL` or when
-`FANOUT_FLUSH_BATCH_SIZE` rows accumulate. Nothing is queryable until it is
-flushed, so the flush interval is the floor on how quickly new telemetry becomes
-visible — and the amount of data at risk if the process dies uncleanly.
+A crash before the rename leaves only an unacknowledged staging directory,
+which startup removes. A crash after the rename leaves a complete batch that
+startup discovers directly from the filesystem. There is no separate WAL,
+manifest, catalog, post-acknowledgement flush timer, or acknowledged memory-only
+state.
 
-## Small files are the thing to manage
+## One authoritative copy for logs and metrics
 
-Frequent flushes produce many small Parquet files, and scan cost tracks file
-count as much as it tracks bytes. Two passes address it: a frequent merge that
-consolidates the newest small files and deletes nothing, and an hourly
-maintenance cycle that also applies retention. [Tuning
-retention](/guides/tune-retention) covers both.
+Every signal is written once, to typed Zstandard-compressed Parquet. DuckDB
+applies filters, ordering, `LIMIT`, and aggregation inside its vectorized scan.
+Trace lookup binary-searches a fixed-width sidecar on disk, seeks directly to the
+matching Parquet row ranges, and verifies the complete trace ID after hashing.
+The sidecar is an index, not another telemetry representation.
 
-## Rollups lag, on purpose
+Dashboard rollups are rebuildable DuckDB caches. SQLite remains independent and
+stores only transactional product state.
 
-The overview and the alert engine read pre-aggregated rollups rather than raw
-telemetry, recomputed on `FANOUT_ROLLUP_INTERVAL`. A rollup deliberately trails
-the newest data by a safety margin, because telemetry arrives out of order —
-aggregating right up to the current instant would produce numbers that change
-after the fact as late spans land.
+## Small files are bounded by compaction
 
-The practical consequence: the newest few seconds are queryable as raw
-telemetry before they appear in an overview or fire an alert. That is a
-correctness choice, not lag to be tuned away.
+Atomic ingestion creates immutable batch directories. Maintenance drains every
+eligible compaction group, choosing inputs by both count and a 25-million-row
+ceiling. It combines same-day, same-generation files, builds a replacement trace
+index, and atomically swaps the replacement for its inputs. A durable compaction
+marker makes an interrupted swap resumable. Active DuckDB readers pin immutable
+files while retention or compaction removes them, so reads never lose an open
+input file.
 
-## Everything serialises through one write gate
+The expensive merge runs before readers are excluded. Only the bounded directory
+swap takes the exclusive reader gate; new ingest batches continue encoding while
+that work is prepared.
 
-Flushes, rollups and maintenance all commit through a shared gate, so DuckDB's
-single writer is never contended. Reads run concurrently — the catalog is opened
-in WAL mode, which is what makes a connection pool larger than one safe.
+Retention is based on ingestion time rather than event time. A service with a
+bad clock therefore cannot pin a batch on disk by emitting a far-future event.
 
-This is the mechanism behind the trade in [why one
-binary](/explanation/why-one-binary): maintenance that runs harder takes gate
-time that ingest is not getting.
+## Rollups lag deliberately
+
+Overview and alert queries read rebuildable DuckDB rollups. Their watermark
+trails committed telemetry by a fixed safety window so out-of-order events from
+bounded commit retries are not skipped. Raw committed telemetry is queryable
+before it appears in a rollup.

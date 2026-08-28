@@ -131,14 +131,14 @@ func TestSQLResponseQueryPlan(t *testing.T) {
 }
 
 func TestDefaultTimeout(t *testing.T) {
-	// When TimeoutMs is 0, the effective timeout should be 30000 ms.
+	// When TimeoutMs is 0, the effective timeout should be 15000 ms.
 	// We test the logic directly via the guard in ExecuteSQL.
 	timeoutMs := 0
 	if timeoutMs <= 0 {
-		timeoutMs = 30000
+		timeoutMs = defaultQueryTimeoutMs
 	}
-	if timeoutMs != 30000 {
-		t.Errorf("default timeout = %d, want 30000", timeoutMs)
+	if timeoutMs != 15000 {
+		t.Errorf("default timeout = %d, want 15000", timeoutMs)
 	}
 
 	// Custom timeout is preserved.

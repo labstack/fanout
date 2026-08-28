@@ -21,8 +21,7 @@ ingest:
   otlp_http_addr: "127.0.0.1:4318" # FANOUT_OTLP_HTTP_ADDR
   advertised_endpoint: "" # FANOUT_INGEST_ADVERTISED_ENDPOINT
   default_namespace: default # FANOUT_DEFAULT_NAMESPACE
-  flush_interval: 15s # FANOUT_FLUSH_INTERVAL
-  flush_batch_size: 50000 # FANOUT_FLUSH_BATCH_SIZE
+  batch_size: 50000 # FANOUT_INGEST_BATCH_SIZE
 
 storage:
   data_dir: ./data # FANOUT_DATA_DIR
@@ -30,7 +29,6 @@ storage:
   rollup_interval: 1m # FANOUT_ROLLUP_INTERVAL
   rollup_skip_to_latest: false # FANOUT_ROLLUP_SKIP_TO_LATEST
   maintenance_interval: 1h # FANOUT_MAINTENANCE_INTERVAL
-  merge_interval: 1m # FANOUT_MERGE_INTERVAL
   duckdb:
     # Empty/zero values let Fanout size these from the machine.
     memory: "" # FANOUT_DUCKDB_MEMORY

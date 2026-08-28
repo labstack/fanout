@@ -24,14 +24,17 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/labstack/fanout/internal/config"
-	"github.com/labstack/fanout/internal/lake"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
+type batchSubmitter interface {
+	Submit(context.Context, telemetrystore.Batch) error
+}
+
 type Server struct {
-	cfg        config.Config
-	outSpans   chan<- lake.SpanRow
-	outLogs    chan<- lake.LogRow
-	outMetrics chan<- lake.MetricRow
+	cfg       config.Config
+	submitter batchSubmitter
 }
 
 type traceService struct {
@@ -49,8 +52,8 @@ type metricsService struct {
 	srv *Server
 }
 
-func NewServer(cfg config.Config, spans chan<- lake.SpanRow, logs chan<- lake.LogRow, metrics chan<- lake.MetricRow) *Server {
-	return &Server{cfg: cfg, outSpans: spans, outLogs: logs, outMetrics: metrics}
+func NewServer(cfg config.Config, submitter batchSubmitter) *Server {
+	return &Server{cfg: cfg, submitter: submitter}
 }
 
 func RegisterOTLP(s grpc.ServiceRegistrar, srv *Server) {
@@ -68,6 +71,7 @@ func (ts *traceService) Export(ctx context.Context, req *collectortrace.ExportTr
 func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTraceServiceRequest) (*collectortrace.ExportTraceServiceResponse, error) {
 	cfg := s.cfg
 	now := time.Now().UnixNano()
+	batch := telemetrystore.Batch{}
 	for _, rs := range req.ResourceSpans {
 		resourceJSON := resourceAttrsJSON(rs.Resource)
 		svc := getServiceName(rs.Resource)
@@ -78,7 +82,7 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 		for _, ss := range rs.ScopeSpans {
 			scopeName, scopeVer := scopeInfo(ss.Scope)
 			for _, sp := range ss.Spans {
-				row := lake.SpanRow{
+				row := telemetry.Span{
 					Namespace:      namespace,
 					TraceID:        fmt.Sprintf("%x", sp.TraceId),
 					SpanID:         fmt.Sprintf("%x", sp.SpanId),
@@ -88,7 +92,7 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					Kind:           sp.Kind.String(),
 					StartUnixNanos: int64(sp.StartTimeUnixNano),
 					EndUnixNanos:   int64(sp.EndTimeUnixNano),
-					DurationMs:     spanDurationMs(sp.StartTimeUnixNano, sp.EndTimeUnixNano),
+					DurationMS:     spanDurationMS(sp.StartTimeUnixNano, sp.EndTimeUnixNano),
 					StatusCode:     sp.Status.Code.String(),
 					StatusMsg:      sp.Status.Message,
 					ResourceJSON:   resourceJSON,
@@ -115,14 +119,12 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 				excType, excMsg := extractException(sp.Events)
 				row.ExceptionType = excType
 				row.ExceptionMessage = excMsg
-				// Partial ingest is acceptable: OTLP clients retry the full batch on error.
-				select {
-				case s.outSpans <- row:
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
+				batch.Spans = append(batch.Spans, row)
 			}
 		}
+	}
+	if err := s.submitter.Submit(ctx, batch); err != nil {
+		return nil, err
 	}
 	return &collectortrace.ExportTraceServiceResponse{}, nil
 }
@@ -136,6 +138,7 @@ func (ls *logsService) Export(ctx context.Context, req *collectorlogs.ExportLogs
 func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsServiceRequest) (*collectorlogs.ExportLogsServiceResponse, error) {
 	cfg := s.cfg
 	now := time.Now().UnixNano()
+	batch := telemetrystore.Batch{}
 	for _, rl := range req.ResourceLogs {
 		resourceJSON := resourceAttrsJSON(rl.Resource)
 		svc := getServiceName(rl.Resource)
@@ -148,7 +151,7 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 			for _, lr := range sl.LogRecords {
 				body := bodyString(lr.Body)
 				tmpl := safeNormalizeTemplate(body)
-				row := lake.LogRow{
+				row := telemetry.Log{
 					Namespace:         namespace,
 					TimeUnixNanos:     int64(lr.TimeUnixNano),
 					ObservedTimeNanos: int64(lr.ObservedTimeUnixNano),
@@ -166,13 +169,12 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 					ScopeVersion:      scopeVer,
 					IngestedAt:        now,
 				}
-				select {
-				case s.outLogs <- row:
-				case <-ctx.Done():
-					return nil, ctx.Err()
-				}
+				batch.Logs = append(batch.Logs, row)
 			}
 		}
+	}
+	if err := s.submitter.Submit(ctx, batch); err != nil {
+		return nil, err
 	}
 	return &collectorlogs.ExportLogsServiceResponse{}, nil
 }
@@ -186,6 +188,7 @@ func (ms *metricsService) Export(ctx context.Context, req *collectormetrics.Expo
 func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.ExportMetricsServiceRequest) (*collectormetrics.ExportMetricsServiceResponse, error) {
 	cfg := s.cfg
 	now := time.Now().UnixNano()
+	batch := telemetrystore.Batch{}
 	for _, rm := range req.ResourceMetrics {
 		resourceJSON := resourceAttrsJSON(rm.Resource)
 		svc := getServiceName(rm.Resource)
@@ -199,13 +202,13 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 				switch d := m.Data.(type) {
 				case *metricspb.Metric_Gauge:
 					for _, dp := range d.Gauge.DataPoints {
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          "gauge",
+							Type:           "gauge",
 							ServiceName:    svc,
 							Value:          number(dp.Value),
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
@@ -215,11 +218,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Sum:
 					kind := "sum"
@@ -227,13 +226,13 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 						kind = "sum_delta"
 					}
 					for _, dp := range d.Sum.DataPoints {
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          kind,
+							Type:           kind,
 							ServiceName:    svc,
 							Value:          number(dp.Value),
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
@@ -243,11 +242,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Histogram:
 					for _, dp := range d.Histogram.DataPoints {
@@ -255,13 +250,13 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 						if dp.Sum != nil {
 							histSum = *dp.Sum
 						}
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          "histogram",
+							Type:           "histogram",
 							ServiceName:    svc,
 							HistBoundsJSON: toJSON(dp.ExplicitBounds),
 							HistCountsJSON: toJSON(dp.BucketCounts),
@@ -274,11 +269,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_ExponentialHistogram:
 					for _, dp := range d.ExponentialHistogram.DataPoints {
@@ -286,13 +277,13 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 						if dp.Sum != nil {
 							histSum = *dp.Sum
 						}
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          "exp_histogram",
+							Type:           "exp_histogram",
 							ServiceName:    svc,
 							HistBoundsJSON: toJSON(expHistBuckets(dp)),
 							HistCountsJSON: toJSON(expHistCounts(dp)),
@@ -305,21 +296,17 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				case *metricspb.Metric_Summary:
 					for _, dp := range d.Summary.DataPoints {
-						row := lake.MetricRow{
+						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
 							Name:           m.Name,
 							Description:    m.Description,
 							Unit:           m.Unit,
-							MType:          "summary",
+							Type:           "summary",
 							ServiceName:    svc,
 							HistBoundsJSON: toJSON(summaryQuantiles(dp)),
 							HistCountsJSON: toJSON(summaryValues(dp)),
@@ -331,26 +318,25 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
 						}
-						select {
-						case s.outMetrics <- row:
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
+						batch.Metrics = append(batch.Metrics, row)
 					}
 				}
 			}
 		}
+	}
+	if err := s.submitter.Submit(ctx, batch); err != nil {
+		return nil, err
 	}
 	return &collectormetrics.ExportMetricsServiceResponse{}, nil
 }
 
 // ---- helpers ----
 
-// spanDurationMs computes a span's duration in milliseconds, guarding against
+// spanDurationMS computes a span's duration in milliseconds, guarding against
 // the unsigned underflow that a malformed span (end before start) would produce:
 // uint64 subtraction wraps to a huge positive value, which would otherwise be
 // stored as a multi-century duration. Such spans are clamped to 0.
-func spanDurationMs(startNano, endNano uint64) float64 {
+func spanDurationMS(startNano, endNano uint64) float64 {
 	if endNano < startNano {
 		return 0
 	}

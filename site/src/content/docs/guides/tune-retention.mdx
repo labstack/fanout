@@ -1,14 +1,14 @@
 ---
 title: Tune retention
 description: Control how long telemetry is kept and how aggressively Fanout compacts what it has written.
-summary: Retention, the hourly maintenance cycle, and the frequent merge pass that keeps query latency bounded.
+summary: Retention, atomic batch sizing, and the maintenance pass that keeps query latency bounded.
 read_when:
   - Disk use is growing faster than expected.
   - Query or rollup latency is climbing on an instance that was fine.
 status: preview
 ---
 
-Three settings govern what is on disk and how it is shaped. They do different
+These settings govern what is on disk and how it is shaped. They do different
 jobs and are worth separating before changing any of them.
 
 ## How long data is kept
@@ -30,41 +30,28 @@ FANOUT_MAINTENANCE_INTERVAL=1h
 This is the expensive pass: retention deletes plus full compaction. Lower it to
 reclaim space sooner, at the cost of running the heavy work more often.
 
-## The merge pass
+## Group-commit target
+
+The target number of telemetry rows that concurrent small requests may share in
+one atomic Parquet batch:
 
 ```sh
-FANOUT_MERGE_INTERVAL=1m
+FANOUT_INGEST_BATCH_SIZE=50000
 ```
 
-This is the cheap one, and it is the setting that most often matters for
-latency. It consolidates the newest small Parquet files and deletes nothing.
-Running it often keeps the queryable file count continuously low, which is what
-bounds rollup and query scan time — without the churn, the deletion race or the
-catalog cost of the full maintenance pass. `0s` disables it.
-
-If query latency is climbing on an instance whose data volume has not changed,
-this is the first thing to look at: a high file count from many small writes
-costs more per scan than the same bytes in fewer files.
-
-## Flush behaviour
-
-How often data reaches disk in the first place:
-
-```sh
-FANOUT_FLUSH_INTERVAL=15s
-FANOUT_FLUSH_BATCH_SIZE=50000
-```
-
-A longer flush interval produces fewer, larger files — less compaction work, at
-the cost of newly ingested telemetry taking longer to become queryable, and more
-of it being lost if the process dies uncleanly.
+A larger target can improve sustained write throughput and create fewer files
+under concurrent ingest. Every request is still acknowledged only after its
+Parquet batch is durably published. An individual request is never split merely
+to satisfy this target: an oversized request remains one atomic batch. The
+setting controls admission grouping, not the durability boundary.
 
 ## What the knobs interact with
 
-Maintenance and rollups serialise against ingest through the same write gate.
-Running maintenance much more often on a busy instance therefore trades disk
-against ingest headroom rather than being free. Change one setting at a time and
-watch `/-/metrics`.
+Maintenance prepares merges while reads continue, then briefly gates readers
+while it swaps or removes immutable files. New batches keep encoding and need
+only the short publication lock. Ingest, queries, and maintenance still share
+CPU, memory bandwidth, and disk, so running maintenance much more often is not
+free. Change one setting at a time and watch `/-/metrics`.
 
 The full list, with defaults and types, is in the [storage
 settings](/reference/settings/storage) reference.

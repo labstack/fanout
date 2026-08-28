@@ -85,9 +85,9 @@ func evaluateReport(cfg config, report report, infrastructureFailures []string) 
 					fails = append(fails, fmt.Sprintf("%s rollup errors=%.0f", name, errors))
 				}
 			}
-			for _, name := range sortedMapKeys(report.Server.DuckLakeOperations) {
-				if errors := report.Server.DuckLakeOperations[name].Outcomes["error"]; errors > 0 {
-					fails = append(fails, fmt.Sprintf("ducklake %s errors=%.0f", name, errors))
+			for _, name := range sortedMapKeys(report.Server.TelemetryOperations) {
+				if errors := report.Server.TelemetryOperations[name].Outcomes["error"]; errors > 0 {
+					fails = append(fails, fmt.Sprintf("telemetry %s errors=%.0f", name, errors))
 				}
 			}
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"io"
@@ -9,12 +10,15 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/store"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
 func TestParseCommandLine(t *testing.T) {
@@ -25,6 +29,7 @@ func TestParseCommandLine(t *testing.T) {
 		wantVersion bool
 		wantEmail   string
 		wantHealth  string
+		wantRepair  *repairCommand
 		wantErr     bool
 	}{
 		{name: "server defaults", args: nil},
@@ -36,25 +41,32 @@ func TestParseCommandLine(t *testing.T) {
 		{name: "login link with config", args: []string{"--config", "/etc/fanout.yaml", "login-link", "admin@example.com"}, wantPath: "/etc/fanout.yaml", wantEmail: "admin@example.com"},
 		{name: "default healthcheck", args: []string{"healthcheck"}, wantHealth: "http://127.0.0.1:7520/healthz"},
 		{name: "custom healthcheck", args: []string{"healthcheck", "http://fanout:8080/healthz"}, wantHealth: "http://fanout:8080/healthz"},
+		{name: "repair verify", args: []string{"repair", "verify"}, wantRepair: &repairCommand{action: "verify"}},
+		{name: "repair quarantine with config", args: []string{"--config", "/etc/fanout.yaml", "repair", "quarantine", "--batch", "broken"}, wantPath: "/etc/fanout.yaml", wantRepair: &repairCommand{action: "quarantine", batch: "broken"}},
+		{name: "repair quarantine missing batch", args: []string{"repair", "quarantine"}, wantErr: true},
+		{name: "unknown repair action", args: []string{"repair", "delete"}, wantErr: true},
 		{name: "login link missing email", args: []string{"login-link"}, wantErr: true},
 		{name: "unexpected argument", args: []string{"serve"}, wantErr: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			path, showVersion, email, healthURL, err := parseCommandLine(test.args, io.Discard)
+			path, showVersion, email, healthURL, repair, err := parseCommandLine(test.args, io.Discard)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, test.wantErr)
 			}
 			if path != test.wantPath || showVersion != test.wantVersion || email != test.wantEmail || healthURL != test.wantHealth {
 				t.Fatalf("result = (%q, %v, %q, %q), want (%q, %v, %q, %q)", path, showVersion, email, healthURL, test.wantPath, test.wantVersion, test.wantEmail, test.wantHealth)
 			}
+			if repair == nil != (test.wantRepair == nil) || repair != nil && *repair != *test.wantRepair {
+				t.Fatalf("repair = %#v, want %#v", repair, test.wantRepair)
+			}
 		})
 	}
 }
 
 func TestParseCommandLineHelp(t *testing.T) {
-	_, _, _, _, err := parseCommandLine([]string{"--help"}, io.Discard)
+	_, _, _, _, _, err := parseCommandLine([]string{"--help"}, io.Discard)
 	if !errors.Is(err, flag.ErrHelp) {
 		t.Fatalf("error = %v, want flag.ErrHelp", err)
 	}
@@ -62,7 +74,7 @@ func TestParseCommandLineHelp(t *testing.T) {
 
 func TestParseCommandLinePrintsOneErrorAndUsage(t *testing.T) {
 	var output bytes.Buffer
-	_, _, _, _, err := parseCommandLine([]string{"serve"}, &output)
+	_, _, _, _, _, err := parseCommandLine([]string{"serve"}, &output)
 	if err == nil {
 		t.Fatal("expected unexpected-argument error")
 	}
@@ -77,6 +89,9 @@ func TestParseCommandLinePrintsOneErrorAndUsage(t *testing.T) {
 	}
 	if !strings.Contains(output.String(), "healthcheck [url]") {
 		t.Fatalf("output does not include healthcheck command: %q", output.String())
+	}
+	if !strings.Contains(output.String(), "repair quarantine --batch <id>") {
+		t.Fatalf("output does not include repair command: %q", output.String())
 	}
 }
 
@@ -99,6 +114,41 @@ func TestCheckHealth(t *testing.T) {
 				t.Fatalf("checkHealth() error = %v, wantErr %v", err, test.wantErr)
 			}
 		})
+	}
+}
+
+func TestRunRepairVerifiesAndQuarantinesUnreadableBatch(t *testing.T) {
+	root := t.TempDir()
+	repository, err := telemetrystore.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{
+		ID: "broken", Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "parquet", "batches", "broken.batch", "trace.fidx"), []byte("bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var output bytes.Buffer
+	if err := runRepair(root, repairCommand{action: "verify"}, &output); err == nil || !strings.Contains(output.String(), "broken:") {
+		t.Fatalf("verify = %v, output %q", err, output.String())
+	}
+	output.Reset()
+	if err := runRepair(root, repairCommand{action: "quarantine", batch: "broken"}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.String(), "no longer queryable") {
+		t.Fatalf("quarantine output = %q", output.String())
+	}
+	output.Reset()
+	if err := runRepair(root, repairCommand{action: "verify"}, &output); err != nil {
+		t.Fatal(err)
 	}
 }
 

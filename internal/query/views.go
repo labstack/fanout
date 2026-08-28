@@ -3,10 +3,11 @@ package query
 import (
 	"database/sql"
 	"fmt"
+	"path/filepath"
 )
 
 const createSpansTable = `
-CREATE TABLE IF NOT EXISTS lake.spans (
+CREATE TABLE IF NOT EXISTS telemetry.spans (
   namespace VARCHAR,
   trace_id VARCHAR,
   span_id VARCHAR,
@@ -45,7 +46,7 @@ CREATE TABLE IF NOT EXISTS lake.spans (
 );`
 
 const createLogsTable = `
-CREATE TABLE IF NOT EXISTS lake.logs (
+CREATE TABLE IF NOT EXISTS telemetry.logs (
   namespace VARCHAR,
   log_time TIMESTAMP,
   observed_time TIMESTAMP,
@@ -68,7 +69,7 @@ CREATE TABLE IF NOT EXISTS lake.logs (
 );`
 
 const createMetricsTable = `
-CREATE TABLE IF NOT EXISTS lake.metrics (
+CREATE TABLE IF NOT EXISTS telemetry.metrics (
   namespace VARCHAR,
   metric_time TIMESTAMP,
   time_unix_nano BIGINT,
@@ -195,7 +196,7 @@ SELECT
   deployment_env,
   exception_type,
   exception_message
-FROM lake.spans;`
+FROM telemetry.spans;`
 
 const viewLogs = `
 CREATE OR REPLACE VIEW logs AS
@@ -219,7 +220,7 @@ SELECT
   ingested_at,
   ingested_unix_nano,
   body_template
-FROM lake.logs;`
+FROM telemetry.logs;`
 
 const viewMetrics = `
 CREATE OR REPLACE VIEW metrics AS
@@ -244,21 +245,30 @@ SELECT
   scope_version,
   ingested_at,
   ingested_unix_nano
-FROM lake.metrics;`
+FROM telemetry.metrics;`
 
 const macroAttr = `
 CREATE OR REPLACE MACRO attr(json_col, key) AS
   json_extract_string(json_col, '$."' || key || '"');`
 
+// CreateTables creates mutable telemetry tables for query-kernel tests and
+// benchmarks. Production startup never calls this function: telemetry is
+// exposed exclusively through CreateParquetViews.
 func CreateTables(db *sql.DB) error {
+	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS telemetry`); err != nil {
+		return fmt.Errorf("create telemetry schema: %w", err)
+	}
 	for _, stmt := range []string{createSpansTable, createLogsTable, createMetricsTable} {
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create table: %w", err)
 		}
 	}
-	if err := configureDuckLake(db); err != nil {
-		return err
-	}
+	return CreateCacheTables(db)
+}
+
+// CreateCacheTables creates only DuckDB's rebuildable query accelerators. The
+// production telemetry rows themselves live in immutable Parquet batches.
+func CreateCacheTables(db *sql.DB) error {
 	if err := ensureCacheTable(db, "service_rollup", createServiceRollupTable,
 		"namespace", "bucket", "service", "spans", "p50_ms", "p95_ms", "error_rate", "log_count", "metric_count"); err != nil {
 		return err
@@ -278,45 +288,31 @@ func CreateTables(db *sql.DB) error {
 	return nil
 }
 
-// CreateViews creates the clean-name views over DuckLake tables plus the attr() macro.
-func CreateViews(db *sql.DB) error {
-	for _, stmt := range []string{macroAttr, viewSpans, viewLogs, viewMetrics} {
+// CreateParquetViews exposes the repository's open Parquet files under the
+// canonical telemetry schema used by Fanout's SQL kernel.
+func CreateParquetViews(db *sql.DB, parquetDir string) error {
+	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS telemetry`); err != nil {
+		return err
+	}
+	for _, signal := range []string{"spans", "logs", "metrics"} {
+		pattern := filepath.ToSlash(filepath.Join(parquetDir, "batches", "*.batch", signal+".parquet"))
+		projection := "*"
+		if signal == "spans" {
+			projection = "* EXCLUDE (_trace_hash)"
+		}
+		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=true)`, signal, projection, sqlLiteral(pattern))
 		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("create view/macro: %w", err)
+			return fmt.Errorf("create parquet view telemetry.%s: %w", signal, err)
 		}
 	}
 	return nil
 }
 
-func configureDuckLake(db *sql.DB) error {
-	var loaded int
-	if err := db.QueryRow(`
-SELECT count(*)
-FROM duckdb_extensions()
-WHERE extension_name = 'ducklake' AND loaded`).Scan(&loaded); err != nil {
-		return fmt.Errorf("check ducklake extension: %w", err)
-	}
-	if loaded == 0 {
-		return nil
-	}
-
-	stmts := []string{
-		`CALL lake.set_option('parquet_compression', 'zstd')`,
-		`CALL lake.set_option('target_file_size', '256MB')`,
-		// Partition by HOUR (not day) of the event time so recent-window scans
-		// (Overview error queries, rollup aggregations) prune by per-file
-		// start_time zonemaps to ~the current 1-2 hours' files instead of the whole
-		// day. day-partitioning let merge produce day-spanning files whose zonemaps
-		// couldn't prune within a day — the rollup hit 35s and query p95 5s as a UTC
-		// day filled. hour() is DuckLake's date-inclusive, order-preserving hour
-		// transform (hours since epoch), so it uniquely identifies a calendar hour.
-		`ALTER TABLE lake.spans SET PARTITIONED BY (namespace, hour(start_time))`,
-		`ALTER TABLE lake.logs SET PARTITIONED BY (namespace, hour(log_time))`,
-		`ALTER TABLE lake.metrics SET PARTITIONED BY (namespace, hour(metric_time))`,
-	}
-	for _, stmt := range stmts {
+// CreateViews creates stable clean-name views plus the attr() macro.
+func CreateViews(db *sql.DB) error {
+	for _, stmt := range []string{macroAttr, viewSpans, viewLogs, viewMetrics} {
 		if _, err := db.Exec(stmt); err != nil {
-			return fmt.Errorf("configure ducklake: %w", err)
+			return fmt.Errorf("create view/macro: %w", err)
 		}
 	}
 	return nil

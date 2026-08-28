@@ -2,15 +2,20 @@ package query
 
 import (
 	"context"
+	"database/sql"
 	"errors"
-	"regexp"
-	"strings"
+	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/query/writegate"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
@@ -122,222 +127,6 @@ func TestErrorRouteRowStruct(t *testing.T) {
 	}
 }
 
-func TestRunMaintenanceContinuesAfterDeleteFailure(t *testing.T) {
-	metrics.DuckLakeOperationTotal.Reset()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	d := &Duck{
-		DB:  db,
-		cfg: config.Config{RetentionDays: 7},
-	}
-
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.spans WHERE COALESCE(start_time, ingested_at) < now() - INTERVAL 7 DAY")).
-		WillReturnResult(sqlmock.NewResult(0, 11))
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.logs WHERE COALESCE(log_time, observed_time, ingested_at) < now() - INTERVAL 7 DAY")).
-		WillReturnError(errors.New("log delete failed"))
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM lake.metrics WHERE COALESCE(metric_time, ingested_at) < now() - INTERVAL 7 DAY")).
-		WillReturnResult(sqlmock.NewResult(0, 7))
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM service_rollup WHERE bucket < now() - INTERVAL 7 DAY")).
-		WillReturnResult(sqlmock.NewResult(0, 5))
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM endpoint_rollup WHERE bucket < now() - INTERVAL 7 DAY")).
-		WillReturnResult(sqlmock.NewResult(0, 4))
-	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM edge_rollup WHERE bucket < now() - INTERVAL 7 DAY")).
-		WillReturnResult(sqlmock.NewResult(0, 3))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_rewrite_data_files('lake')")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CHECKPOINT")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-
-	err = d.runMaintenance(context.Background())
-	if err == nil {
-		t.Fatal("runMaintenance() error = nil, want joined error")
-	}
-	if d.lastMaintenance.IsZero() {
-		t.Fatal("runMaintenance() did not update lastMaintenance")
-	}
-	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "error")); got != 1 {
-		t.Errorf("maintenance error outcomes = %f, want 1", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
-	}
-}
-
-// A merge failure must not stop snapshot expiry, file cleanup, or the
-// checkpoint — each compaction step degrades independently.
-// Within storage.maintenance_interval of the last pass, runMaintenance
-// must short-circuit before issuing ANY SQL — the throttle that keeps the
-// retention+compaction cycle off every rollup tick.
-// runMerge issues exactly one merge_adjacent_files call when due, and nothing
-// on the next call within the storage.merge_interval cadence.
-func TestRunMergeExecutesThenThrottles(t *testing.T) {
-	metrics.DuckLakeOperationTotal.Reset()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	d := &Duck{DB: db, cfg: config.Config{MergeInterval: time.Minute}}
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-
-	if err := d.runMerge(context.Background()); err != nil {
-		t.Fatalf("runMerge() = %v, want nil", err)
-	}
-	// Second call is within the cadence → must issue no SQL.
-	if err := d.runMerge(context.Background()); err != nil {
-		t.Fatalf("throttled runMerge() = %v, want nil", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
-	}
-	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("merge", "success")); got != 1 {
-		t.Errorf("merge success outcomes = %f, want 1", got)
-	}
-	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("merge", "throttled")); got != 1 {
-		t.Errorf("merge throttled outcomes = %f, want 1", got)
-	}
-}
-
-// MergeInterval=0 disables the frequent merge pass entirely.
-func TestRunMergeDisabled(t *testing.T) {
-	metrics.DuckLakeOperationTotal.Reset()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	d := &Duck{DB: db, cfg: config.Config{MergeInterval: 0}}
-	if err := d.runMerge(context.Background()); err != nil {
-		t.Fatalf("disabled runMerge() = %v, want nil", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("disabled runMerge should issue no SQL: %v", err)
-	}
-	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("merge", "disabled")); got != 1 {
-		t.Errorf("merge disabled outcomes = %f, want 1", got)
-	}
-}
-
-func TestRunMaintenanceThrottle(t *testing.T) {
-	metrics.DuckLakeOperationTotal.Reset()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	d := &Duck{DB: db, cfg: config.Config{MaintenanceInterval: time.Hour}, lastMaintenance: time.Now()}
-	if err := d.runMaintenance(context.Background()); err != nil {
-		t.Fatalf("throttled runMaintenance() = %v, want nil", err)
-	}
-	// No expectations were registered: if it ran any SQL, this fails.
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("throttled runMaintenance should issue no SQL: %v", err)
-	}
-	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "throttled")); got != 1 {
-		t.Errorf("maintenance throttled outcomes = %f, want 1", got)
-	}
-}
-
-func TestRunMaintenanceContinuesAfterCompactionFailure(t *testing.T) {
-	metrics.DuckLakeOperationTotal.Reset()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	d := &Duck{DB: db, cfg: config.Config{}}
-
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
-		WillReturnError(errors.New("merge failed"))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_rewrite_data_files('lake')")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CHECKPOINT")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-
-	err = d.runMaintenance(context.Background())
-	if err == nil {
-		t.Fatal("runMaintenance() error = nil, want merge error surfaced")
-	}
-	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr == nil || !lastOK.IsZero() || lastAt.IsZero() {
-		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want zero lastOK, non-zero lastAt, non-nil lastErr", lastOK, lastAt, lastErr)
-	}
-	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "error")); got != 1 {
-		t.Errorf("maintenance error outcomes = %f, want 1", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
-	}
-}
-
-// A failing rollup must not skip maintenance: file/snapshot growth is what
-// makes the failing rollup heavier each retry, so compaction has to run anyway.
-func TestRollupOnceRunsMaintenanceDespiteRollupFailure(t *testing.T) {
-	metrics.RollupComponentTotal.Reset()
-	metrics.DuckLakeOperationTotal.Reset()
-	db, mock, err := sqlmock.New()
-	if err != nil {
-		t.Fatalf("sqlmock.New: %v", err)
-	}
-	defer db.Close()
-
-	d := &Duck{DB: db, cfg: config.Config{}}
-
-	// All rollup transactions fail at BeginTx.
-	mock.ExpectBegin().WillReturnError(errors.New("service tx failed"))
-	mock.ExpectBegin().WillReturnError(errors.New("endpoint tx failed"))
-	mock.ExpectBegin().WillReturnError(errors.New("edge tx failed"))
-	// Maintenance still runs: compaction calls + checkpoint (RetentionDays=0
-	// skips the TTL deletes).
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_merge_adjacent_files('lake')")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_rewrite_data_files('lake')")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_expire_snapshots('lake', older_than => now() - INTERVAL 10 MINUTE)")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CALL ducklake_cleanup_old_files('lake', cleanup_all => true)")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec(regexp.QuoteMeta("CHECKPOINT")).
-		WillReturnResult(sqlmock.NewResult(0, 0))
-
-	_, err = d.rollupOnce(context.Background())
-	if err == nil {
-		t.Fatal("rollupOnce() error = nil, want rollup errors surfaced")
-	}
-	if lastOK, lastAt, lastErr := d.MaintenanceHealth(); lastErr != nil || lastOK.IsZero() || lastAt.IsZero() {
-		t.Fatalf("MaintenanceHealth() = (%v, %v, %v), want non-zero lastOK and lastAt, nil lastErr", lastOK, lastAt, lastErr)
-	}
-	for _, component := range []string{"service", "endpoint", "edge"} {
-		if got := testutil.ToFloat64(metrics.RollupComponentTotal.WithLabelValues(component, "error")); got != 1 {
-			t.Errorf("%s rollup error outcomes = %f, want 1", component, got)
-		}
-	}
-	if got := testutil.ToFloat64(metrics.DuckLakeOperationTotal.WithLabelValues("maintenance", "success")); got != 1 {
-		t.Errorf("maintenance success outcomes = %f, want 1", got)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet sql expectations: %v", err)
-	}
-}
-
 func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -348,20 +137,472 @@ func TestNewDuckUsesSingleConnectionPool(t *testing.T) {
 		DuckDBMemory:   "128MB",
 	}
 
-	d, err := NewDuck(ctx, cfg)
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
-		if strings.Contains(err.Error(), "LOAD ducklake") ||
-			strings.Contains(err.Error(), "LOAD sqlite") ||
-			strings.Contains(err.Error(), "ATTACH") {
-			t.Skipf("DuckLake extensions unavailable: %v", err)
-		}
+		t.Fatalf("open telemetry repository: %v", err)
+	}
+	defer repository.Close()
+	d, err := NewDuck(ctx, cfg, repository)
+	if err != nil {
 		t.Fatalf("NewDuck() error = %v", err)
 	}
 	defer d.Close()
 
 	stats := d.DB.Stats()
 	if stats.MaxOpenConnections != 1 {
-		t.Fatalf("MaxOpenConnections = %d, want 1 when DuckDBMaxConns is unset (floored for DuckLake serialization)", stats.MaxOpenConnections)
+		t.Fatalf("MaxOpenConnections = %d, want 1 when DuckDBMaxConns is unset", stats.MaxOpenConnections)
+	}
+}
+
+func TestNewDuckUsesUTCForEveryConnection(t *testing.T) {
+	t.Setenv("TZ", "America/Los_Angeles")
+	ctx := context.Background()
+	cfg := config.Config{
+		DataDir:             t.TempDir(),
+		RollupInterval:      time.Minute,
+		DuckDBMemory:        "128MB",
+		DuckDBMaxConns:      4,
+		DuckDBThreads:       2,
+		MaintenanceInterval: time.Hour,
+	}
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatalf("open telemetry repository: %v", err)
+	}
+	defer repository.Close()
+	d, err := NewDuck(ctx, cfg, repository)
+	if err != nil {
+		t.Fatalf("NewDuck() error = %v", err)
+	}
+	defer d.Close()
+	eventTime := time.Date(2026, 8, 27, 16, 0, 30, 0, time.UTC)
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "timezone-window", Spans: []telemetry.Span{{
+		Namespace: "default", TraceID: "trace-timezone", SpanID: "span-timezone",
+		ServiceName: "checkout", StartUnixNanos: eventTime.UnixNano(), DurationMS: 5,
+		StatusCode: "STATUS_CODE_OK", IngestedAt: eventTime.UnixNano(),
+	}}}); err != nil {
+		t.Fatalf("commit timezone fixture: %v", err)
+	}
+	d.rollupLagNanos = 0
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("roll up timezone fixture: %v", err)
+	}
+	var spans int64
+	if err := d.DB.QueryRowContext(ctx, `
+SELECT COALESCE(SUM(spans), 0)::BIGINT
+FROM service_rollup
+WHERE bucket >= ? AND bucket < ?`, eventTime.Add(-time.Minute), eventTime.Add(time.Minute)).Scan(&spans); err != nil {
+		t.Fatalf("query UTC rollup window: %v", err)
+	}
+	if spans != 1 {
+		t.Fatalf("UTC rollup window spans = %d, want 1", spans)
+	}
+
+	connections := make([]*sql.Conn, 0, cfg.DuckDBMaxConns)
+	defer func() {
+		for _, connection := range connections {
+			_ = connection.Close()
+		}
+	}()
+	for range cfg.DuckDBMaxConns {
+		connection, err := d.DB.Conn(ctx)
+		if err != nil {
+			t.Fatalf("open pooled connection: %v", err)
+		}
+		connections = append(connections, connection)
+	}
+	for i, connection := range connections {
+		var zone string
+		if err := connection.QueryRowContext(ctx, "SELECT current_setting('TimeZone')").Scan(&zone); err != nil {
+			t.Fatalf("connection %d timezone query: %v", i, err)
+		}
+		if zone != "UTC" {
+			t.Fatalf("connection %d timezone = %q, want UTC", i, zone)
+		}
+	}
+}
+
+func TestQueryContextHoldsParquetLockUntilRowsFinish(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
+	d := &Duck{DB: db}
+	rows, err := d.QueryContext(context.Background(), "SELECT 1")
+	if err != nil {
+		t.Fatalf("QueryContext: %v", err)
+	}
+	lockAcquired := make(chan struct{})
+	go func() {
+		mustLock(&d.parquetMu)
+		close(lockAcquired)
+		d.parquetMu.Unlock()
+	}()
+	select {
+	case <-lockAcquired:
+		t.Fatal("Parquet write lock acquired while query rows were still open")
+	case <-time.After(25 * time.Millisecond):
+	}
+	if !rows.Next() {
+		t.Fatalf("rows.Next() = false: %v", rows.Err())
+	}
+	var value int
+	if err := rows.Scan(&value); err != nil {
+		t.Fatalf("rows.Scan: %v", err)
+	}
+	if rows.Next() {
+		t.Fatal("rows.Next() returned an unexpected second row")
+	}
+	select {
+	case <-lockAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("Parquet write lock remained blocked after row iteration completed")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestQueryRowScanCancelsWhileMaintenanceWaitsForReaders(t *testing.T) {
+	d := &Duck{}
+	mustLock(&d.parquetMu)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := d.QueryRowScan(ctx, []any{new(int)}, "SELECT 1")
+	d.parquetMu.Unlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("QueryRowScan error = %v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("QueryRowScan ignored lock deadline for %s", elapsed)
+	}
+}
+
+func TestPublishParquetHonorsContext(t *testing.T) {
+	d := &Duck{}
+	mustRLock(t, &d.parquetMu)
+	timeoutsBefore := testutil.ToFloat64(metrics.ParquetPublishTimeouts)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	called := false
+	err := d.PublishParquet(ctx, func(context.Context) error {
+		called = true
+		return nil
+	})
+	d.parquetMu.RUnlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("PublishParquet error = %v, want deadline exceeded", err)
+	}
+	if called {
+		t.Fatal("publication ran after its context expired")
+	}
+	if got := waitingParquetWriters(&d.parquetMu); got != 0 {
+		t.Fatalf("canceled publication remained queued: %d", got)
+	}
+	if got := testutil.ToFloat64(metrics.ParquetPublishTimeouts); got != timeoutsBefore+1 {
+		t.Fatalf("publication timeouts = %v, want %v", got, timeoutsBefore+1)
+	}
+	if got := testutil.ToFloat64(metrics.ParquetPublishWaiters); got != 0 {
+		t.Fatalf("publication waiters after timeout = %v, want 0", got)
+	}
+}
+
+func TestParquetPublicationDoesNotWaitForDuckDBWriteGate(t *testing.T) {
+	d := &Duck{}
+	release := d.writeGate.Lock(writegate.WriteRollupService)
+	defer release()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	called := false
+	if err := d.PublishParquet(ctx, func(context.Context) error { called = true; return nil }); err != nil {
+		t.Fatalf("publication waited for unrelated DuckDB write gate: %v", err)
+	}
+	if !called {
+		t.Fatal("publication callback did not run")
+	}
+}
+
+func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT 1").WillReturnRows(sqlmock.NewRows([]string{"value"}).AddRow(1))
+	d := &Duck{DB: db}
+	mustRLock(t, &d.parquetMu)
+	writerAcquired := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	writerDone := make(chan struct{})
+	go func() {
+		mustLock(&d.parquetMu)
+		close(writerAcquired)
+		<-releaseWriter
+		d.parquetMu.Unlock()
+		close(writerDone)
+	}()
+	deadline := time.Now().Add(time.Second)
+	for waitingParquetWriters(&d.parquetMu) == 0 {
+		if time.Now().After(deadline) {
+			d.parquetMu.RUnlock()
+			t.Fatal("maintenance writer did not begin waiting")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	var value int
+	if err := d.QueryRowScan(context.Background(), []any{&value}, "SELECT 1"); err != nil {
+		d.parquetMu.RUnlock()
+		t.Fatalf("new read blocked behind waiting maintenance: %v", err)
+	}
+	if value != 1 {
+		d.parquetMu.RUnlock()
+		t.Fatalf("value = %d, want 1", value)
+	}
+	d.parquetMu.RUnlock()
+	select {
+	case <-writerAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("maintenance writer did not run after readers drained")
+	}
+	close(releaseWriter)
+	select {
+	case <-writerDone:
+	case <-time.After(time.Second):
+		t.Fatal("maintenance writer did not release")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRollupReadLockHonorsContext(t *testing.T) {
+	d := &Duck{}
+	mustLock(&d.parquetMu)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, err := d.refreshServiceRollup(ctx)
+	d.parquetMu.Unlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("refreshServiceRollup error = %v, want deadline exceeded", err)
+	}
+}
+
+func TestRollupAdmissionLeaseDoesNotCancelAdmittedWork(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	originalLease := rollupReaderLease
+	rollupReaderLease = 5 * time.Millisecond
+	t.Cleanup(func() { rollupReaderLease = originalLease })
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupStateKey).
+		WillReturnRows(sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(100))
+	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupRawMaxKey).
+		WillReturnRows(sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(100))
+	mock.ExpectQuery("FROM \\(").WillDelayFor(20 * time.Millisecond).
+		WillReturnRows(sqlmock.NewRows([]string{"watermark"}).AddRow(100))
+	mock.ExpectCommit()
+
+	d := &Duck{DB: db}
+	if _, err := d.refreshServiceRollup(context.Background()); err != nil {
+		t.Fatalf("admitted rollup was canceled by its admission lease: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestIndexedTraceReadHonorsParquetGateContext(t *testing.T) {
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	d := &Duck{repository: repository}
+	mustLock(&d.parquetMu)
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
+	defer cancel()
+	_, err = d.Trace(ctx, telemetry.TraceQuery{TraceID: "trace", StartNanos: 1, EndNanos: 2, Limit: 1})
+	d.parquetMu.Unlock()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Trace error = %v, want deadline exceeded", err)
+	}
+}
+
+func TestParquetStatsWaitForStableNamespace(t *testing.T) {
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	d := &Duck{repository: repository}
+	mustLock(&d.parquetMu)
+	done := make(chan struct{})
+	go func() {
+		d.updateParquetStats(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+		d.parquetMu.Unlock()
+		t.Fatal("Parquet stats read while the batch namespace was changing")
+	case <-time.After(25 * time.Millisecond):
+	}
+	d.parquetMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Parquet stats did not resume after publication")
+	}
+}
+
+func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "expired", Spans: []telemetry.Span{{TraceID: "trace", IngestedAt: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM endpoint_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("DELETE FROM edge_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	d := &Duck{DB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
+	mustRLock(t, &d.parquetMu)
+	release := d.writeGate.Lock(writegate.WriteRollupService)
+	done := make(chan error, 1)
+	go func() { done <- d.runRepositoryMaintenance(context.Background()) }()
+	deadline := time.Now().Add(time.Second)
+	for waitingParquetWriters(&d.parquetMu) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if waiting := waitingParquetWriters(&d.parquetMu); waiting != 1 {
+		d.parquetMu.RUnlock()
+		release()
+		t.Fatalf("publication waiters = %d, want 1 while DuckDB write gate is independently held", waiting)
+	}
+	d.parquetMu.RUnlock()
+	release()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMaintenanceRetriesRetiredDirectoryCleanup(t *testing.T) {
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	retired := filepath.Join(repository.Parquet.BatchesDir(), "stale.retired-old")
+	if err := os.Mkdir(retired, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	d := &Duck{DB: db, repository: repository}
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(retired); !os.IsNotExist(err) {
+		t.Fatalf("retired directory remains after maintenance: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMaintenanceTracksConsecutiveFailures(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for range 3 {
+		mock.ExpectExec("CHECKPOINT").WillReturnError(errors.New("injected checkpoint failure"))
+	}
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	d := &Duck{DB: db}
+	for range 3 {
+		if err := d.runRepositoryMaintenance(context.Background()); err == nil {
+			t.Fatal("maintenance succeeded despite checkpoint failure")
+		}
+	}
+	_, _, failures, _ := d.MaintenanceHealth()
+	if failures != 3 {
+		t.Fatalf("consecutive failures = %d, want 3", failures)
+	}
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, _, failures, _ = d.MaintenanceHealth()
+	if failures != 0 {
+		t.Fatalf("consecutive failures after recovery = %d, want 0", failures)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type failingPublishCompactor struct{ *Duck }
+
+func (f failingPublishCompactor) PublishParquet(context.Context, func(context.Context) error) error {
+	return errors.New("injected publication failure")
+}
+
+func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	db := openTestDuck(t)
+	defer db.Close()
+	for _, table := range []string{"service_rollup", "endpoint_rollup", "edge_rollup"} {
+		if _, err := db.Exec("CREATE TABLE " + table + " (bucket TIMESTAMP)"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d := &Duck{DB: db, repository: repository, cfg: config.Config{RetentionDays: 1}}
+	for i := range 8 {
+		batch := telemetrystore.Batch{
+			ID:      fmt.Sprintf("expired-%d", i),
+			Spans:   []telemetry.Span{{TraceID: "trace", SpanID: fmt.Sprintf("span-%d", i), StartUnixNanos: 1, IngestedAt: 1}},
+			Logs:    []telemetry.Log{{Body: "old", IngestedAt: 1}},
+			Metrics: []telemetry.Metric{{Name: "old", IngestedAt: 1}},
+		}
+		if err := repository.Commit(context.Background(), batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repository.CompactParquet(context.Background(), failingPublishCompactor{d}, 8); err == nil {
+		t.Fatal("compaction unexpectedly published")
+	}
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := repository.RowCount(); got != 0 {
+		t.Fatalf("retention resurrected pending compaction rows: %d", got)
 	}
 }
 
@@ -531,5 +772,55 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 				t.Errorf("%s rollup source tip = %f, want %f", tc.component, got, float64(sourceNanos)/1e9)
 			}
 		})
+	}
+}
+
+func TestMaintenanceRunsOnEveryTick(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	d := &Duck{DB: db, cfg: config.Config{MaintenanceInterval: time.Hour}}
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	first := d.lastMaintenanceAt
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !d.lastMaintenanceAt.After(first) {
+		t.Fatal("second maintenance pass was throttled; the ticker is the only intended throttle")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestUpdateParquetStatsDoesNotParkOnAStalledPublication pins that the gauge
+// refresh gives up rather than waiting out a stuck publication. It is the only
+// Parquet reader that runs on the rollup and maintenance loop goroutines under
+// the process context, so an unbounded wait here stops those loops entirely —
+// the same failure this storage layer has produced repeatedly, one level down.
+func TestUpdateParquetStatsDoesNotParkOnAStalledPublication(t *testing.T) {
+	originalWait := parquetStatsWait
+	parquetStatsWait = 25 * time.Millisecond
+	t.Cleanup(func() { parquetStatsWait = originalWait })
+
+	d := &Duck{}
+	mustLock(&d.parquetMu)
+	defer d.parquetMu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.updateParquetStats(context.Background())
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stats refresh parked on a stalled publication instead of giving up")
 	}
 }

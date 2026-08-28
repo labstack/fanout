@@ -19,6 +19,95 @@ The one that surprises people is an unrecognised variable. Fanout rejects any
 release — stops the process instead of being ignored. That is deliberate; see
 [configuration](/reference/configuration).
 
+## An unresolved compaction blocks startup
+
+One startup refusal is not about configuration. If a compaction was interrupted
+and Fanout can neither finish nor undo it, recovery fails closed and the error
+names `telemetry/COMPACTION.json`.
+
+That is deliberate. The marker lists the batches the compaction retired, and
+recovery must not guess whether the original batches or their replacement are
+authoritative. A wrong guess could delete the only surviving copy of some rows,
+so Fanout stops instead and leaves things where they are: the replacement is
+either staged under `telemetry/compaction/` or already published as
+`telemetry/parquet/batches/<output id>.batch`, and the retired inputs sit under
+`telemetry/parquet/batches/`, named `<id>.retired-<output id>`.
+
+A publish that failed partway through may already have removed some of those
+retired inputs, so the rollback set is not guaranteed to be complete. That is
+what step 2 below checks, and why it has to be checked before anything is
+deleted.
+
+Usually the interruption was transient — a full disk, or the process killed
+mid-swap. **Clear the underlying cause and start Fanout again.** Recovery
+re-runs on its own and needs no manual step.
+
+If recovery keeps failing, roll the compaction back by hand. With the process
+stopped, use `telemetry/parquet/batches/` as the batch directory:
+
+1. Read `telemetry/COMPACTION.json`. It is JSON, with an `output` object and an
+   `inputs` list of batch ids.
+2. Back up `telemetry/`, then check every id in `inputs`. Each must exist in
+   exactly one form: `<id>.batch` (never retired) or
+   `<id>.retired-<output id>` (retired, restorable). **If an id exists in both
+   forms or neither form, stop here.** Both forms make the authoritative copy
+   ambiguous; neither means its rows may survive only inside the replacement.
+   Reconcile the batch from the backup, or complete the compaction instead of
+   rolling it back.
+3. Rename each `<id>.retired-<output id>` back to `<id>.batch`.
+4. Delete `telemetry/compaction/<output id>` if it exists.
+5. Delete `telemetry/parquet/batches/<output id>.batch` if it exists. Leaving
+   a published replacement beside the restored inputs duplicates its rows; a
+   corrupt replacement continues to block startup.
+6. Delete `telemetry/COMPACTION.json`.
+7. Start Fanout.
+
+Deleting the whole `telemetry/` directory also clears the refusal, and discards
+exactly the telemetry the refusal was protecting. Neither step above needs it.
+
+:::caution[Verify the set, then restore, then delete]
+The order is load-bearing in both directions. Verifying first (step 2) is what
+keeps you from deleting a replacement that holds the only surviving copy of an
+input's rows. Restoring before deleting the marker (steps 3 and 6) matters
+because the marker is what protects the retired directories from cleanup — with
+it gone, the next successful startup treats every `*.retired-*` directory as
+reclaimable and removes it. Deleting the marker on its own is not a rollback;
+it discards the rows the compaction had retired.
+:::
+
+## An unreadable telemetry batch blocks startup
+
+Fanout also refuses to start when an authoritative `.batch` directory has
+invalid metadata, a corrupt Parquet file, a missing signal file, or a damaged
+trace index. First stop Fanout and back up `telemetry/`, then verify the full
+authoritative set:
+
+```sh
+fanout --config /etc/fanout/fanout.yaml repair verify
+```
+
+The command is read-only and names every unreadable batch. Restore each named
+batch from backup when possible. If one cannot be recovered and discarding
+only its telemetry is preferable to leaving the instance offline, set it aside
+explicitly:
+
+```sh
+fanout --config /etc/fanout/fanout.yaml repair quarantine --batch <id>
+```
+
+Quarantine is an atomic rename beside the authoritative batch set, not a
+deletion. It refuses a batch that validates successfully and refuses any input
+or output protected by a live compaction marker. Preserve the reported
+quarantine directory for later recovery, run `repair verify` again, and only
+then restart Fanout.
+
+:::caution[Quarantine makes those rows unavailable]
+The command is intentionally batch-specific and never runs during startup.
+Every row in the quarantined directory disappears from queries until the batch
+is restored, so do not use it as a substitute for fixing a transient disk or
+permission error.
+:::
+
 ## An exporter is rejected
 
 Work down this list in order:

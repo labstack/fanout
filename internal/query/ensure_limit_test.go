@@ -3,9 +3,6 @@ package query
 import (
 	"context"
 	"testing"
-	"time"
-
-	"github.com/labstack/fanout/internal/config"
 )
 
 func TestEnsureLimit_WrapsWithoutClobberingInnerLimits(t *testing.T) {
@@ -80,23 +77,5 @@ func TestExecuteSQL_CapsRowsAtMaxRows(t *testing.T) {
 	}
 	if resp.RowsReturned != 5 {
 		t.Errorf("RowsReturned = %d, want 5 (capped)", resp.RowsReturned)
-	}
-}
-
-func TestRollupLagFromConfig(t *testing.T) {
-	sec := int64(1_000_000_000)
-	cases := []struct {
-		flushSeconds int
-		wantNanos    int64
-	}{
-		{15, 30 * sec}, // 2×15s = 30s
-		{20, 40 * sec}, // 2×20s = 40s
-		{5, 30 * sec},  // 2×5s = 10s, floored to 30s
-		{0, 30 * sec},  // floored to 30s
-	}
-	for _, c := range cases {
-		if got := rollupLagFromConfig(config.Config{FlushInterval: time.Duration(c.flushSeconds) * time.Second}); got != c.wantNanos {
-			t.Errorf("rollupLagFromConfig(FlushInterval=%ds) = %d, want %d", c.flushSeconds, got, c.wantNanos)
-		}
 	}
 }

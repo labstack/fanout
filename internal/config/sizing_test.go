@@ -52,10 +52,8 @@ func TestResolveDuckDBMemoryDeclinesForAbsurdlySmallMachines(t *testing.T) {
 	}
 }
 
-func TestResolveDuckDBMaxConnsKeepsTheWriteGateInvariant(t *testing.T) {
-	// internal/lake refuses to start when max_connections > 1 without a write
-	// gate; at or below 1 it serializes everything through one handle. The
-	// floor is an invariant, not a preference.
+func TestResolveDuckDBMaxConnsKeepsReadConcurrency(t *testing.T) {
+	// At or below 1 every query is serialized through one handle.
 	for _, cores := range []int{0, 1, 2} {
 		if got := resolveDuckDBMaxConns(cores); got < 2 {
 			t.Fatalf("resolveDuckDBMaxConns(%d) = %d, want at least 2", cores, got)

@@ -2,7 +2,6 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -10,6 +9,8 @@ import (
 	"time"
 
 	appid "github.com/labstack/fanout/internal/id"
+	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 const (
@@ -24,21 +25,29 @@ var (
 	ErrInvalidLimit = errors.New("invalid observability query limit")
 )
 
-// DB is the narrow database surface used by the query kernel. *sql.DB
-// satisfies it, while tests can use sqlmock without a storage-specific fake.
-type DB interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+type DB = queryrows.Queryer
+
+type traceReader interface {
+	Trace(context.Context, telemetry.TraceQuery) ([]telemetry.IndexedSpan, error)
 }
 
 type Service struct {
 	db             DB
+	repository     traceReader
 	now            func() time.Time
 	endpointMature atomic.Bool
 }
 
-func New(db DB) *Service {
-	return &Service{db: db, now: time.Now}
+func New(db DB, repository traceReader) *Service {
+	if db == nil || repository == nil {
+		panic("observability requires query engine and indexed trace reader")
+	}
+	return &Service{db: db, repository: repository, now: time.Now}
 }
+
+// SQLDB adapts a standard database/sql queryer for tests and callers that do
+// not need storage-engine row-lifetime hooks.
+func SQLDB(db queryrows.SQLQueryer) DB { return queryrows.SQLAdapter{DB: db} }
 
 func (s *Service) normalizeScope(scope Scope) (Scope, error) {
 	now := s.now().UTC()

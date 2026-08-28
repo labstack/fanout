@@ -24,20 +24,21 @@ const (
 	RollupDisabled RollupResult = "disabled"
 )
 
-type DuckLakeOperation string
+type TelemetryOperation string
 
 const (
-	DuckLakeMerge       DuckLakeOperation = "merge"
-	DuckLakeMaintenance DuckLakeOperation = "maintenance"
+	TelemetryCompaction  TelemetryOperation = "compaction"
+	TelemetryMaintenance TelemetryOperation = "maintenance"
 )
 
-type DuckLakeResult string
+type TelemetryResult string
 
 const (
-	DuckLakeSuccess   DuckLakeResult = "success"
-	DuckLakeError     DuckLakeResult = "error"
-	DuckLakeDisabled  DuckLakeResult = "disabled"
-	DuckLakeThrottled DuckLakeResult = "throttled"
+	TelemetrySuccess   TelemetryResult = "success"
+	TelemetryError     TelemetryResult = "error"
+	TelemetryDisabled  TelemetryResult = "disabled"
+	TelemetryThrottled TelemetryResult = "throttled"
+	TelemetryNoop      TelemetryResult = "noop"
 )
 
 var (
@@ -49,17 +50,12 @@ var (
 
 	IngestQueueDepth = promauto.NewGaugeVec(prometheus.GaugeOpts{
 		Name: "fanout_ingest_queue_depth",
-		Help: "Current queue depth per signal",
+		Help: "Current ingest submission queue depth",
 	}, []string{"signal"})
 
 	FlushTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_flush_total",
 		Help: "Total flush operations",
-	}, []string{"signal"})
-
-	FlushBytes = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_flush_bytes_total",
-		Help: "Total bytes flushed",
 	}, []string{"signal"})
 
 	FlushDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
@@ -75,18 +71,18 @@ var (
 
 	RowsDropped = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_rows_dropped_total",
-		Help: "Total rows dropped due to retry buffer overflow",
+		Help: "Total rows left uncommitted after a permanent flush failure",
 	}, []string{"signal"})
 
 	WriteGateWait = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "fanout_write_gate_wait_seconds",
-		Help:    "Time spent waiting to enter the DuckLake catalog write critical section",
+		Help:    "Time spent waiting to enter the Telemetry catalog write critical section",
 		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 	}, []string{"operation"})
 
 	WriteGateHold = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "fanout_write_gate_hold_seconds",
-		Help:    "Time spent inside the DuckLake catalog write critical section",
+		Help:    "Time spent inside the Telemetry catalog write critical section",
 		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
 	}, []string{"operation"})
 
@@ -170,27 +166,43 @@ var (
 		Help: "Estimated bounded catch-up chunks remaining for the rollup",
 	}, []string{"rollup"})
 
-	DuckLakeOperationTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "fanout_ducklake_operation_total",
-		Help: "DuckLake merge and maintenance calls by bounded outcome",
+	TelemetryOperationTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_telemetry_operation_total",
+		Help: "Telemetry compaction and maintenance calls by bounded outcome",
 	}, []string{"operation", "result"})
 
-	DuckLakeOperationDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
-		Name:    "fanout_ducklake_operation_duration_seconds",
-		Help:    "Executed DuckLake merge and maintenance duration in seconds, including write-gate wait",
+	TelemetryOperationDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "fanout_telemetry_operation_duration_seconds",
+		Help:    "Executed telemetry compaction and maintenance duration in seconds",
 		Buckets: []float64{.001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60, 120, 300},
 	}, []string{"operation"})
 
 	// Storage metrics
-	LakeSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_lake_size_bytes",
-		Help: "Total size of lake data in bytes",
+	ParquetSize = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "fanout_parquet_size_bytes",
+		Help: "Total size of telemetry Parquet files in bytes",
 	}, []string{"signal"})
 
-	LakePartitions = promauto.NewGaugeVec(prometheus.GaugeOpts{
-		Name: "fanout_lake_partitions",
-		Help: "Number of partitions per signal",
+	ParquetFiles = promauto.NewGaugeVec(prometheus.GaugeOpts{
+		Name: "fanout_parquet_files",
+		Help: "Number of telemetry Parquet files per signal",
 	}, []string{"signal"})
+
+	ParquetPublishWaiters = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "fanout_parquet_publish_waiters",
+		Help: "Current Parquet publications waiting for active readers",
+	})
+
+	ParquetPublishWait = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "fanout_parquet_publish_wait_seconds",
+		Help:    "Time spent waiting to publish a new Parquet file set",
+		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+	})
+
+	ParquetPublishTimeouts = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_parquet_publish_timeouts_total",
+		Help: "Parquet publications abandoned after reader wait timeout",
+	})
 
 	// HTTP metrics
 	HTTPRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -222,13 +234,12 @@ func RecordIngest(signal string, count int) {
 }
 
 // RecordFlush records a flush event
-func RecordFlush(signal string, bytes int64, durationSec float64) {
+func RecordFlush(signal string, durationSec float64) {
 	FlushTotal.WithLabelValues(signal).Inc()
-	FlushBytes.WithLabelValues(signal).Add(float64(bytes))
 	FlushDuration.WithLabelValues(signal).Observe(durationSec)
 }
 
-// RecordWriteGate records one complete DuckLake catalog write critical section.
+// RecordWriteGate records one complete Telemetry catalog write critical section.
 // Callers constrain operation to the fixed writegate.WriteOperation set so this
 // metric cannot grow with tenant or telemetry cardinality.
 func RecordWriteGate(operation string, waitSec, holdSec float64) {
@@ -294,21 +305,21 @@ func UpdateRollupProgress(component RollupComponent, enabled bool, watermarkNano
 	RollupBacklogChunks.WithLabelValues(string(component)).Set(float64(backlogChunks))
 }
 
-// RecordDuckLakeOperation records an outcome for merge or maintenance. Skipped
+// RecordTelemetryOperation records an outcome for compaction or maintenance. Skipped
 // calls have no duration sample so throttle ticks cannot distort execution p95.
-func RecordDuckLakeOperation(operation DuckLakeOperation, result DuckLakeResult, durationSec float64) {
-	validateDuckLakeOperation(operation)
-	validateDuckLakeResult(result)
-	DuckLakeOperationTotal.WithLabelValues(string(operation), string(result)).Inc()
-	if result == DuckLakeSuccess || result == DuckLakeError {
-		DuckLakeOperationDuration.WithLabelValues(string(operation)).Observe(math.Max(durationSec, 0))
+func RecordTelemetryOperation(operation TelemetryOperation, result TelemetryResult, durationSec float64) {
+	validateTelemetryOperation(operation)
+	validateTelemetryResult(result)
+	TelemetryOperationTotal.WithLabelValues(string(operation), string(result)).Inc()
+	if result == TelemetrySuccess || result == TelemetryError {
+		TelemetryOperationDuration.WithLabelValues(string(operation)).Observe(math.Max(durationSec, 0))
 	}
 }
 
-// UpdateLakeStats updates lake storage metrics
-func UpdateLakeStats(signal string, bytes int64, partitions int) {
-	LakeSize.WithLabelValues(signal).Set(float64(bytes))
-	LakePartitions.WithLabelValues(signal).Set(float64(partitions))
+// UpdateParquetStats updates open Parquet storage metrics.
+func UpdateParquetStats(signal string, bytes int64, partitions int) {
+	ParquetSize.WithLabelValues(signal).Set(float64(bytes))
+	ParquetFiles.WithLabelValues(signal).Set(float64(partitions))
 }
 
 // UpdateQueueDepth updates queue depth metric
@@ -334,20 +345,20 @@ func validateRollupResult(result RollupResult) {
 	}
 }
 
-func validateDuckLakeOperation(operation DuckLakeOperation) {
+func validateTelemetryOperation(operation TelemetryOperation) {
 	switch operation {
-	case DuckLakeMerge, DuckLakeMaintenance:
+	case TelemetryCompaction, TelemetryMaintenance:
 		return
 	default:
-		panic("metrics: invalid DuckLake operation: " + string(operation))
+		panic("metrics: invalid Telemetry operation: " + string(operation))
 	}
 }
 
-func validateDuckLakeResult(result DuckLakeResult) {
+func validateTelemetryResult(result TelemetryResult) {
 	switch result {
-	case DuckLakeSuccess, DuckLakeError, DuckLakeDisabled, DuckLakeThrottled:
+	case TelemetrySuccess, TelemetryError, TelemetryDisabled, TelemetryThrottled, TelemetryNoop:
 		return
 	default:
-		panic("metrics: invalid DuckLake result: " + string(result))
+		panic("metrics: invalid Telemetry result: " + string(result))
 	}
 }

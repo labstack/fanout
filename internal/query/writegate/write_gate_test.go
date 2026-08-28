@@ -1,12 +1,29 @@
 package writegate
 
+// These tests cover the query-cache gate; telemetry commits use their own
+// repository lock and never pass through DuckDB.
+
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
+
+func TestWriteGateLockContextHonorsCancellation(t *testing.T) {
+	var gate WriteGate
+	unlock := gate.Lock(WriteMaintenance)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if _, err := gate.LockContext(ctx, WriteMaintenance); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("LockContext error = %v, want deadline exceeded", err)
+	}
+	unlock()
+	gate.Lock(WriteMaintenance)()
+}
 
 func TestWriteGateSerializesHoldersInAcquisitionOrder(t *testing.T) {
 	t.Parallel()
@@ -20,7 +37,7 @@ func TestWriteGateSerializesHoldersInAcquisitionOrder(t *testing.T) {
 
 	go func() {
 		defer func() { done <- struct{}{} }()
-		unlock := gate.Lock(WriteMerge)
+		unlock := gate.Lock(WriteMaintenance)
 		close(firstEntered)
 		<-releaseFirst
 		unlock()
@@ -63,13 +80,13 @@ func TestWriteGateReleasesAfterPanic(t *testing.T) {
 				t.Error("expected panic to propagate")
 			}
 		}()
-		defer gate.Lock(WriteMerge)()
+		defer gate.Lock(WriteMaintenance)()
 		panic("boom")
 	}()
 
 	acquired := make(chan struct{})
 	go func() {
-		defer gate.Lock(WriteMerge)()
+		defer gate.Lock(WriteMaintenance)()
 		close(acquired)
 	}()
 	select {
@@ -89,14 +106,16 @@ func TestWriteGateObservesOutsideTheCriticalSection(t *testing.T) {
 
 	var freeDuringObserve bool
 	restore := swapObserver(t, func(string, float64, float64) {
-		if gate.mu.TryLock() {
+		select {
+		case <-gate.token:
 			freeDuringObserve = true
-			gate.mu.Unlock()
+			gate.token <- struct{}{}
+		default:
 		}
 	})
 	defer restore()
 
-	gate.Lock(WriteMerge)()
+	gate.Lock(WriteMaintenance)()
 
 	if !freeDuringObserve {
 		t.Fatal("gate was still held while the observation ran — move the Unlock above observe()")
@@ -107,16 +126,16 @@ func TestWriteGateObservesOutsideTheCriticalSection(t *testing.T) {
 // whether ingest is stalling behind rollups, which is the question this
 // instrumentation exists to answer.
 func TestWriteGateRecordsBothWaitAndHoldHistograms(t *testing.T) {
-	beforeWait := histogramCount(t, "fanout_write_gate_wait_seconds", WriteMerge)
-	beforeHold := histogramCount(t, "fanout_write_gate_hold_seconds", WriteMerge)
+	beforeWait := histogramCount(t, "fanout_write_gate_wait_seconds", WriteMaintenance)
+	beforeHold := histogramCount(t, "fanout_write_gate_hold_seconds", WriteMaintenance)
 
 	var gate WriteGate
-	gate.Lock(WriteMerge)()
+	gate.Lock(WriteMaintenance)()
 
-	if after := histogramCount(t, "fanout_write_gate_wait_seconds", WriteMerge); after != beforeWait+1 {
+	if after := histogramCount(t, "fanout_write_gate_wait_seconds", WriteMaintenance); after != beforeWait+1 {
 		t.Errorf("wait sample count = %d, want %d", after, beforeWait+1)
 	}
-	if after := histogramCount(t, "fanout_write_gate_hold_seconds", WriteMerge); after != beforeHold+1 {
+	if after := histogramCount(t, "fanout_write_gate_hold_seconds", WriteMaintenance); after != beforeHold+1 {
 		t.Errorf("hold sample count = %d, want %d", after, beforeHold+1)
 	}
 }

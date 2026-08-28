@@ -31,21 +31,14 @@ func TestRecordIngest(t *testing.T) {
 func TestRecordFlush(t *testing.T) {
 	// Reset metrics
 	FlushTotal.Reset()
-	FlushBytes.Reset()
 
-	RecordFlush("spans", 1024, 0.5)
-	RecordFlush("spans", 2048, 0.3)
+	RecordFlush("spans", 0.5)
+	RecordFlush("spans", 0.3)
 
 	// Check counter incremented
 	flushCount := testutil.ToFloat64(FlushTotal.WithLabelValues("spans"))
 	if flushCount != 2 {
 		t.Errorf("FlushTotal[spans] = %f, want 2", flushCount)
-	}
-
-	// Check bytes accumulated
-	bytesCount := testutil.ToFloat64(FlushBytes.WithLabelValues("spans"))
-	if bytesCount != 3072 {
-		t.Errorf("FlushBytes[spans] = %f, want 3072", bytesCount)
 	}
 }
 
@@ -136,42 +129,42 @@ func TestRecordRollupComponentAndProgress(t *testing.T) {
 	}
 }
 
-func TestRecordDuckLakeOperationOutcomes(t *testing.T) {
-	DuckLakeOperationTotal.Reset()
-	DuckLakeOperationDuration.Reset()
+func TestRecordTelemetryOperationOutcomes(t *testing.T) {
+	TelemetryOperationTotal.Reset()
+	TelemetryOperationDuration.Reset()
 
-	RecordDuckLakeOperation(DuckLakeMerge, DuckLakeSuccess, 0.2)
-	RecordDuckLakeOperation(DuckLakeMerge, DuckLakeThrottled, 0)
-	RecordDuckLakeOperation(DuckLakeMerge, DuckLakeDisabled, 0)
-	RecordDuckLakeOperation(DuckLakeMaintenance, DuckLakeError, 1.5)
+	RecordTelemetryOperation(TelemetryCompaction, TelemetrySuccess, 0.2)
+	RecordTelemetryOperation(TelemetryCompaction, TelemetryThrottled, 0)
+	RecordTelemetryOperation(TelemetryCompaction, TelemetryDisabled, 0)
+	RecordTelemetryOperation(TelemetryMaintenance, TelemetryError, 1.5)
 
 	for _, tc := range []struct {
 		operation string
 		result    string
 	}{
-		{"merge", "success"},
-		{"merge", "throttled"},
-		{"merge", "disabled"},
+		{"compaction", "success"},
+		{"compaction", "throttled"},
+		{"compaction", "disabled"},
 		{"maintenance", "error"},
 	} {
-		if got := testutil.ToFloat64(DuckLakeOperationTotal.WithLabelValues(tc.operation, tc.result)); got != 1 {
-			t.Errorf("DuckLakeOperationTotal[%s,%s] = %f, want 1", tc.operation, tc.result, got)
+		if got := testutil.ToFloat64(TelemetryOperationTotal.WithLabelValues(tc.operation, tc.result)); got != 1 {
+			t.Errorf("TelemetryOperationTotal[%s,%s] = %f, want 1", tc.operation, tc.result, got)
 		}
 	}
-	if got := histogramSampleCount(t, "fanout_ducklake_operation_duration_seconds", "operation", "merge"); got != 1 {
+	if got := histogramSampleCount(t, "fanout_telemetry_operation_duration_seconds", "operation", "compaction"); got != 1 {
 		t.Errorf("merge duration samples = %d, want 1 (skipped outcomes must not distort duration)", got)
 	}
-	if got := histogramSampleCount(t, "fanout_ducklake_operation_duration_seconds", "operation", "maintenance"); got != 1 {
+	if got := histogramSampleCount(t, "fanout_telemetry_operation_duration_seconds", "operation", "maintenance"); got != 1 {
 		t.Errorf("maintenance duration samples = %d, want 1", got)
 	}
 }
 
 func TestBoundedMetricLabelsRejectUnknownValues(t *testing.T) {
 	for name, call := range map[string]func(){
-		"rollup component": func() { RecordRollupComponent(RollupComponent("tenant"), RollupSuccess, 0, 0) },
-		"rollup result":    func() { RecordRollupComponent(RollupService, RollupResult("unknown"), 0, 0) },
-		"lake operation":   func() { RecordDuckLakeOperation(DuckLakeOperation("query"), DuckLakeSuccess, 0) },
-		"lake result":      func() { RecordDuckLakeOperation(DuckLakeMerge, DuckLakeResult("unknown"), 0) },
+		"rollup component":    func() { RecordRollupComponent(RollupComponent("tenant"), RollupSuccess, 0, 0) },
+		"rollup result":       func() { RecordRollupComponent(RollupService, RollupResult("unknown"), 0, 0) },
+		"telemetry operation": func() { RecordTelemetryOperation(TelemetryOperation("query"), TelemetrySuccess, 0) },
+		"telemetry result":    func() { RecordTelemetryOperation(TelemetryCompaction, TelemetryResult("unknown"), 0) },
 	} {
 		t.Run(name, func(t *testing.T) {
 			defer func() {
@@ -184,30 +177,30 @@ func TestBoundedMetricLabelsRejectUnknownValues(t *testing.T) {
 	}
 }
 
-func TestUpdateLakeStats(t *testing.T) {
+func TestUpdateParquetStats(t *testing.T) {
 	// Reset metrics
-	LakeSize.Reset()
-	LakePartitions.Reset()
+	ParquetSize.Reset()
+	ParquetFiles.Reset()
 
-	UpdateLakeStats("spans", 1024*1024, 10)
-	UpdateLakeStats("logs", 512*1024, 5)
+	UpdateParquetStats("spans", 1024*1024, 10)
+	UpdateParquetStats("logs", 512*1024, 5)
 
 	// Check spans size
-	spansSize := testutil.ToFloat64(LakeSize.WithLabelValues("spans"))
+	spansSize := testutil.ToFloat64(ParquetSize.WithLabelValues("spans"))
 	if spansSize != 1024*1024 {
-		t.Errorf("LakeSize[spans] = %f, want %d", spansSize, 1024*1024)
+		t.Errorf("ParquetSize[spans] = %f, want %d", spansSize, 1024*1024)
 	}
 
 	// Check spans partitions
-	spansPartitions := testutil.ToFloat64(LakePartitions.WithLabelValues("spans"))
+	spansPartitions := testutil.ToFloat64(ParquetFiles.WithLabelValues("spans"))
 	if spansPartitions != 10 {
-		t.Errorf("LakePartitions[spans] = %f, want 10", spansPartitions)
+		t.Errorf("ParquetFiles[spans] = %f, want 10", spansPartitions)
 	}
 
 	// Check logs size
-	logsSize := testutil.ToFloat64(LakeSize.WithLabelValues("logs"))
+	logsSize := testutil.ToFloat64(ParquetSize.WithLabelValues("logs"))
 	if logsSize != 512*1024 {
-		t.Errorf("LakeSize[logs] = %f, want %d", logsSize, 512*1024)
+		t.Errorf("ParquetSize[logs] = %f, want %d", logsSize, 512*1024)
 	}
 }
 

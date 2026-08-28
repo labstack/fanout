@@ -163,8 +163,8 @@ func TestSpanDurationMs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := spanDurationMs(c.start, c.end); got != c.want {
-				t.Errorf("spanDurationMs(%d, %d) = %v, want %v", c.start, c.end, got, c.want)
+			if got := spanDurationMS(c.start, c.end); got != c.want {
+				t.Errorf("spanDurationMS(%d, %d) = %v, want %v", c.start, c.end, got, c.want)
 			}
 		})
 	}

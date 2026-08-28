@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -111,7 +112,7 @@ func TestReadinessReportsSizingResolvedByLoader(t *testing.T) {
 	}
 }
 
-func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
+func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
@@ -125,7 +126,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 
 	mock.ExpectQuery("SELECT 1").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}).AddRow(1))
-	mock.ExpectQuery("SELECT 1 FROM lake.spans LIMIT 1").
+	mock.ExpectQuery("SELECT 1 FROM telemetry.spans LIMIT 1").
 		WillReturnRows(sqlmock.NewRows([]string{"1"}))
 	mock.ExpectQuery("SELECT\\s+MAX\\(updated_at\\),\\s+COUNT\\(\\*\\),\\s+COALESCE\\(date_diff\\('second', MAX\\(updated_at\\), now\\(\\)\\), 0\\)").
 		WillReturnRows(sqlmock.NewRows([]string{"max", "count", "age_seconds"}).AddRow(time.Now().UTC(), 2, int64(30)))
@@ -151,12 +152,12 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	}
 
 	// The "data" check reads real host free space, which can legitimately be
-	// degraded on a low-disk CI/dev box. This test is about ducklake+rollups, so
+	// degraded on a low-disk CI/dev box. This test is about telemetry+rollups, so
 	// tolerate a data-only degradation but require the actual subjects to be ok.
 	if resp.Status != "ready" && resp.Status != "degraded" {
 		t.Fatalf("status = %q, want ready or degraded", resp.Status)
 	}
-	for _, key := range []string{"duckdb", "ducklake", "data", "rollups", "maintenance"} {
+	for _, key := range []string{"duckdb", "telemetry", "data", "rollups", "maintenance"} {
 		if _, ok := resp.Checks[key]; !ok {
 			t.Fatalf("missing %s check", key)
 		}
@@ -167,7 +168,7 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	if resp.RuntimeSizing.GOMAXPROCS <= 0 {
 		t.Fatalf("runtime sizing GOMAXPROCS = %d, want positive", resp.RuntimeSizing.GOMAXPROCS)
 	}
-	for _, key := range []string{"duckdb", "ducklake", "rollups", "maintenance"} {
+	for _, key := range []string{"duckdb", "telemetry", "rollups", "maintenance"} {
 		if got := resp.Checks[key].Status; got != "ok" {
 			t.Fatalf("%s check = %q, want ok", key, got)
 		}
@@ -179,6 +180,33 @@ func TestReadiness_HealthyDuckLakeAndRollups(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) {
+	duck := &query.Duck{}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- duck.PublishParquet(context.Background(), func(context.Context) error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	<-entered
+	original := telemetryReadinessTimeout
+	telemetryReadinessTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { telemetryReadinessTimeout = original })
+
+	result := NewHealthHandler(duck, config.Config{}).checkTelemetry()
+	if result.Status != "degraded" {
+		t.Fatalf("telemetry status = %q, want degraded: %+v", result.Status, result)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -266,23 +294,25 @@ func TestMaintenanceResult(t *testing.T) {
 		name           string
 		lastOK, lastAt time.Time
 		lastErr        error
+		failures       int
 		started        time.Time
 		maintEvery     time.Duration
 		wantStatus     string
 	}{
-		{"clean recent pass", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, now.Add(-2 * time.Hour), time.Hour, "ok"},
-		{"failing pass", now.Add(-3 * time.Hour), now.Add(-time.Hour), errors.New("boom"), now.Add(-4 * time.Hour), time.Hour, "degraded"},
-		{"never ran, past grace", time.Time{}, time.Time{}, nil, now.Add(-10 * time.Minute), time.Hour, "degraded"},
-		{"never ran, within grace", time.Time{}, time.Time{}, nil, now.Add(-time.Minute), time.Hour, "ok"},
-		{"stalled after clean pass", now.Add(-5 * time.Hour), now.Add(-5 * time.Hour), nil, now.Add(-6 * time.Hour), time.Hour, "degraded"},
+		{"clean recent pass", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, 0, now.Add(-2 * time.Hour), time.Hour, "ok"},
+		{"failing pass", now.Add(-3 * time.Hour), now.Add(-time.Hour), errors.New("boom"), 1, now.Add(-4 * time.Hour), time.Hour, "degraded"},
+		{"repeated failure remains routable", now.Add(-4 * time.Hour), now.Add(-time.Hour), errors.New("boom"), 3, now.Add(-5 * time.Hour), time.Hour, "degraded"},
+		{"never ran, past grace", time.Time{}, time.Time{}, nil, 0, now.Add(-10 * time.Minute), time.Hour, "degraded"},
+		{"never ran, within grace", time.Time{}, time.Time{}, nil, 0, now.Add(-time.Minute), time.Hour, "ok"},
+		{"stalled after clean pass", now.Add(-5 * time.Hour), now.Add(-5 * time.Hour), nil, 0, now.Add(-6 * time.Hour), time.Hour, "degraded"},
 		// maintEvery=0 must still detect staleness: the loop floors 0→1h and keeps
 		// running, so the check mirrors that (2h stale > 1h floored threshold).
-		{"stalled, interval unset (floored)", now.Add(-3 * time.Hour), now.Add(-3 * time.Hour), nil, now.Add(-4 * time.Hour), 0, "degraded"},
-		{"recent pass, interval unset", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, now.Add(-4 * time.Hour), 0, "ok"},
+		{"stalled, interval unset (floored)", now.Add(-3 * time.Hour), now.Add(-3 * time.Hour), nil, 0, now.Add(-4 * time.Hour), 0, "degraded"},
+		{"recent pass, interval unset", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, 0, now.Add(-4 * time.Hour), 0, "ok"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res := maintenanceResult(c.lastOK, c.lastAt, c.lastErr, c.started, rollupEvery, c.maintEvery, now)
+			res := maintenanceResult(c.lastOK, c.lastAt, c.lastErr, c.failures, c.started, rollupEvery, c.maintEvery, now)
 			if res.Status != c.wantStatus {
 				t.Errorf("status = %q, want %q (detail=%q err=%q)", res.Status, c.wantStatus, res.Detail, res.Error)
 			}

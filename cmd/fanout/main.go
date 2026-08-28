@@ -35,13 +35,13 @@ import (
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/ingest"
 	"github.com/labstack/fanout/internal/intelligence"
-	"github.com/labstack/fanout/internal/lake"
 	"github.com/labstack/fanout/internal/mcp"
 	appmetrics "github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 	"github.com/labstack/fanout/internal/ui"
 )
 
@@ -50,8 +50,13 @@ var tokenRedactRe = regexp.MustCompile(`token=[^&]+`)
 // version is set at build time via -ldflags "-X main.version=...".
 var version = "dev"
 
+type repairCommand struct {
+	action string
+	batch  string
+}
+
 func main() {
-	configPath, showVersion, loginEmail, healthURL, err := parseCommandLine(os.Args[1:], os.Stderr)
+	configPath, showVersion, loginEmail, healthURL, repair, err := parseCommandLine(os.Args[1:], os.Stderr)
 	if errors.Is(err, flag.ErrHelp) {
 		return
 	}
@@ -77,6 +82,13 @@ func main() {
 		slog.Error("invalid configuration", "err", err)
 		os.Exit(1)
 	}
+	if repair != nil {
+		if err := runRepair(cfg.TelemetryDir(), *repair, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "fanout repair:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if loginEmail != "" {
 		if err := createLoginLink(cfg, loginEmail, os.Stderr); err != nil {
 			slog.Error("create login link failed", "err", err)
@@ -95,11 +107,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Channels for ingest → lake writer
-	chSpans := make(chan lake.SpanRow, 10000)
-	chLogs := make(chan lake.LogRow, 10000)
-	chMetrics := make(chan lake.MetricRow, 10000)
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -109,27 +116,31 @@ func main() {
 	// Error channel for goroutine failures
 	errCh := make(chan error, 4)
 
-	// Start DuckDB + rollups
-	q, err := query.NewDuck(ctx, cfg)
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		slog.Error("telemetry store init failed", "err", err)
+		os.Exit(1)
+	}
+	defer repository.Close()
+
+	// DuckDB is the query facade over open Parquet and its indexed trace sidecars.
+	q, err := query.NewDuck(ctx, cfg, repository)
 	if err != nil {
 		slog.Error("duckdb init failed", "err", err)
 		os.Exit(1)
 	}
 	defer q.Close()
 
-	// Start Lake Writer. Share the query layer's write gate so appender flushes
-	// serialize with rollup/maintenance commits when the pool holds >1 connection.
-	writer := lake.NewWriter(cfg, q.DB, chSpans, chLogs, chMetrics)
-	writer.UseWriteGate(q.WriteGate())
+	writer := telemetrystore.NewWriter(repository, cfg.IngestBatchSize)
 	writerResult := make(chan error, 1)
 	go func() {
 		err := writer.Run(ctx)
 		// Publish the result before notifying the process-wide error channel. The
-		// shutdown path waits on writerResult after Writer.Wait, so a final-flush
+		// shutdown path waits on writerResult after Writer.Wait, so a final-commit
 		// failure cannot be lost in the close(done) -> goroutine-send scheduling gap.
 		writerResult <- err
 		if err != nil {
-			errCh <- fmt.Errorf("lake writer: %w", err)
+			errCh <- fmt.Errorf("telemetry writer: %w", err)
 		}
 	}()
 
@@ -194,7 +205,7 @@ func main() {
 		os.Exit(1)
 	}
 	grpcSrv := grpc.NewServer(grpcOpts...)
-	ing := ingest.NewServer(cfg, chSpans, chLogs, chMetrics)
+	ing := ingest.NewServer(cfg, writer)
 	ingest.RegisterOTLP(grpcSrv, ing)
 	otlpHTTPLis, err := net.Listen("tcp", cfg.OTLPHTTPAddr)
 	if err != nil {
@@ -291,8 +302,8 @@ func main() {
 	// Fanout owns telemetry semantics; agents and web clients consume this one
 	// typed query kernel through deterministic HTTP or standard MCP tools.
 	// Route both HTTP and MCP reads through Duck's retrying adapter. Passing the
-	// raw *sql.DB here bypassed the DuckLake maintenance-race protection.
-	queries := observability.New(q)
+	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
+	queries := observability.New(q, q)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
 	api.RegisterIntelligenceRoutes(e, detector)
 	dashboards := dashboard.New(sqlite.DB)
@@ -452,20 +463,20 @@ func main() {
 	cancel()
 	writer.Wait()
 	if err := <-writerResult; err != nil {
-		slog.Error("lake writer stopped with unwritten telemetry", "err", err)
+		slog.Error("telemetry writer stopped with unwritten telemetry", "err", err)
 	}
 	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 
-func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, loginEmail, healthURL string, err error) {
+func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, loginEmail, healthURL string, repair *repairCommand, err error) {
 	if len(args) == 1 && args[0] == "version" {
-		return "", true, "", "", nil
+		return "", true, "", "", nil, nil
 	}
 	if len(args) >= 1 && len(args) <= 2 && args[0] == "healthcheck" {
 		if len(args) == 2 {
-			return "", false, "", args[1], nil
+			return "", false, "", args[1], nil, nil
 		}
-		return "", false, "", "http://127.0.0.1:7520/healthz", nil
+		return "", false, "", "http://127.0.0.1:7520/healthz", nil, nil
 	}
 
 	flags := flag.NewFlagSet("fanout", flag.ContinueOnError)
@@ -474,6 +485,8 @@ func parseCommandLine(args []string, output io.Writer) (configPath string, showV
 		fmt.Fprintln(output, "Usage of fanout:")
 		fmt.Fprintln(output, "  fanout [flags]")
 		fmt.Fprintln(output, "  fanout [--config path] login-link <email>")
+		fmt.Fprintln(output, "  fanout [--config path] repair verify")
+		fmt.Fprintln(output, "  fanout [--config path] repair quarantine --batch <id>")
 		fmt.Fprintln(output, "  fanout healthcheck [url]")
 		fmt.Fprintln(output, "  fanout version")
 		fmt.Fprintln(output, "Flags:")
@@ -483,18 +496,71 @@ func parseCommandLine(args []string, output io.Writer) (configPath string, showV
 	flags.BoolVar(&showVersion, "version", false, "print the Fanout version")
 	flags.BoolVar(&showVersion, "v", false, "print the Fanout version")
 	if err := flags.Parse(args); err != nil {
-		return "", false, "", "", err
+		return "", false, "", "", nil, err
 	}
 	if flags.NArg() == 2 && flags.Arg(0) == "login-link" {
-		return configPath, false, flags.Arg(1), "", nil
+		return configPath, false, flags.Arg(1), "", nil, nil
+	}
+	if flags.NArg() > 0 && flags.Arg(0) == "repair" {
+		repair, err := parseRepairCommand(flags.Args()[1:], output)
+		return configPath, false, "", "", repair, err
 	}
 	if flags.NArg() != 0 {
 		err := fmt.Errorf("unexpected arguments: %s", strings.Join(flags.Args(), " "))
 		fmt.Fprintln(output, err)
 		flags.Usage()
-		return "", false, "", "", err
+		return "", false, "", "", nil, err
 	}
-	return configPath, showVersion, "", "", nil
+	return configPath, showVersion, "", "", nil, nil
+}
+
+func parseRepairCommand(args []string, output io.Writer) (*repairCommand, error) {
+	if len(args) == 1 && args[0] == "verify" {
+		return &repairCommand{action: "verify"}, nil
+	}
+	if len(args) == 0 || args[0] != "quarantine" {
+		return nil, errors.New("repair requires 'verify' or 'quarantine --batch <id>'")
+	}
+	flags := flag.NewFlagSet("fanout repair quarantine", flag.ContinueOnError)
+	flags.SetOutput(output)
+	batch := flags.String("batch", "", "unreadable authoritative batch ID to set aside")
+	if err := flags.Parse(args[1:]); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(*batch) == "" || flags.NArg() != 0 {
+		return nil, errors.New("repair quarantine requires exactly --batch <id>")
+	}
+	return &repairCommand{action: "quarantine", batch: *batch}, nil
+}
+
+func runRepair(root string, command repairCommand, output io.Writer) error {
+	switch command.action {
+	case "verify":
+		issues, err := telemetrystore.VerifyBatches(root)
+		if err != nil {
+			return err
+		}
+		if len(issues) == 0 {
+			fmt.Fprintln(output, "all authoritative telemetry batches passed validation")
+			return nil
+		}
+		for _, issue := range issues {
+			fmt.Fprintf(output, "%s: %v\n", issue.ID, issue.Err)
+		}
+		return fmt.Errorf("%d unreadable authoritative telemetry batch(es)", len(issues))
+	case "quarantine":
+		destination, err := telemetrystore.QuarantineBatch(root, command.batch)
+		if destination != "" {
+			fmt.Fprintf(output, "batch %s set aside at %s\n", command.batch, destination)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintln(output, "the quarantined telemetry is no longer queryable; preserve it for recovery from backup")
+		return nil
+	default:
+		return fmt.Errorf("unknown repair action %q", command.action)
+	}
 }
 
 func checkHealth(healthURL string) error {

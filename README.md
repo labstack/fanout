@@ -22,27 +22,36 @@ executable, including the React client.
 
 ![Fanout architecture](docs/diagrams/architecture.svg)
 
-Telemetry lands over OTLP/gRPC or OTLP/HTTP, is batched into DuckLake/Parquet,
-and is read back through a DuckDB query kernel that also maintains service,
-endpoint, and edge rollups. The browser client, an in-process agent, and any
+Telemetry lands over OTLP/gRPC or OTLP/HTTP. Concurrent small requests may
+share a group-commit batch, while up to four workers independently encode and
+durably publish atomic Parquet directories with persistent trace indexes.
+Targeted trace reads go through those indexes; DuckDB scans the same Parquet
+for SQL and maintains rebuildable service, endpoint, and edge rollups. The
+browser client, an in-process agent, and any
 external MCP host all reach the same typed observability contract rather than
 issuing raw SQL.
 
-Every write to the telemetry catalog — ingest flush, rollups, and background
-maintenance alike — passes through a single write gate that holds one catalog
-write in flight at a time:
+Parquet is the telemetry source of truth, DuckDB query state is disposable,
+and SQLite is reserved for transactional product state. Native compaction
+prepares replacements while reads continue and briefly gates readers only for
+the crash-safe namespace swap:
 
 ![Fanout persistence](docs/diagrams/persistence.svg)
 
 Application state (users, sessions, dashboards, alert rules, agent threads)
-lives in a separate SQLite database and never sits on the telemetry write path.
+lives in that separate SQLite database and never sits on the telemetry write
+path. There is no Iceberg, DuckLake, external catalog, or telemetry server
+database.
 
 ## Performance
 
 The bundled [`cmd/bench`](cmd/bench) driver measures authenticated ingest and
-optional dashboard read load against your hardware. Fanout does not publish a
-throughput headline until the raw reports and exact driver revision can ship
-with it; see [the benchmark publication standard](docs/benchmarking.md).
+optional dashboard read load against your hardware. Ingest, DuckDB queries,
+and native Parquet maintenance have separate coordination paths but still
+compete for the same CPU, memory bandwidth, filesystem cache, and disk. Fanout
+does not publish a throughput headline until the raw reports and exact driver
+revision can ship with it; see [the benchmark publication
+standard](docs/benchmarking.md).
 
 ## How it compares
 
@@ -53,7 +62,7 @@ what separates it from its neighbours.
 | If you use | Where Fanout differs |
 | --- | --- |
 | **Grafana with Loki, Tempo, and Mimir** | That stack keeps a service and a query language per signal, plus object storage underneath. Fanout keeps one process, one data directory, and one typed contract across all three signals, at the cost of the horizontal scale those components are built for. |
-| **SigNoz** | Both are OTLP-native and self-hosted. SigNoz composes a collector, ClickHouse, and query services; Fanout compiles ingest, storage, query, alerting, and the browser client into one binary, with DuckLake/Parquet on local disk instead of a database cluster. |
+| **SigNoz** | Both are OTLP-native and self-hosted. SigNoz composes a collector, ClickHouse, and query services; Fanout compiles ingest, indexed storage, DuckDB queries, alerting, and the browser client into one binary, with open Parquet on local disk instead of a database cluster. |
 | **Jaeger** | Jaeger covers traces and expects a storage backend you run separately. Fanout ingests traces, logs, and metrics into the same store, with nothing else to deploy. |
 | **Prometheus with Grafana** | Prometheus pulls metrics and is excellent at them. Fanout accepts pushed OTLP for all three signals and is built around investigating a specific incident rather than maintaining long-range metric series. |
 | **Datadog**, **Honeycomb**, **Grafana Cloud** | Those are managed services: someone else runs the storage, the scaling, and the upgrades, and your telemetry leaves your network to get there. Fanout is a binary you run, on data that stays on your disk. |

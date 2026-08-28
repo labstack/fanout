@@ -1,4 +1,4 @@
-# Where Fanout keeps state, and what serializes writes to it.
+# How telemetry becomes durable, queryable, and compacted.
 # Render with `just diagrams`; commit the generated SVG beside this file.
 
 direction: down
@@ -10,44 +10,54 @@ vars: {
   }
 }
 
-writers: Writers {
-  style.fill: transparent
-  ingest: "Ingest flush\nspans, logs, metrics" {shape: rectangle}
-  rollup: "Rollups\nservice, endpoint, edge" {shape: rectangle}
-  maint: "Merge and maintenance" {shape: rectangle}
-}
-
-gate: "Write gate — internal/lake/writegate\none catalog write in flight at a time" {
+ingest: "Authenticated OTLP requests\nspans, logs, metrics" {
   shape: rectangle
-  style: {
-    stroke-width: 2
-    bold: true
-  }
+  style.stroke-dash: 3
 }
 
-telemetry: "DuckLake catalog + Parquet\nstorage.data_dir/telemetry" {
+writers: "Durable write path" {
+  style.fill: transparent
+  admission: "Bounded group admission\nconfigured row target + 20 ms window" {shape: rectangle}
+  workers: "Up to four commit workers\nindependent batches encode in parallel" {shape: rectangle}
+  stage: "Staging batch directory\nmetadata + signal Parquet + trace.fidx for spans" {shape: rectangle}
+  publish: "Durable publication\nfsync → atomic rename → fsync parent" {shape: rectangle}
+
+  admission -> workers
+  workers -> stage
+  stage -> publish
+}
+
+authority: "Authoritative telemetry\nimmutable *.batch directories" {
   shape: cylinder
-  tooltip: Partitioned telemetry. Written only through the gate.
+  tooltip: Ordinary Parquet files are the source of truth; the filesystem is the catalog.
 }
 
-querystate: "DuckDB query state\nstorage.data_dir/query" {
+readers: Readers {
+  style.fill: transparent
+  trace: "Indexed trace read\nbinary-search .fidx → Parquet rows" {shape: rectangle}
+  sql: "DuckDB SQL\nfilters, ordering, broad scans" {shape: rectangle}
+  rollups: "DuckDB rollups\nrebuildable analytical cache" {shape: rectangle}
+}
+
+maintenance: "Bounded maintenance" {
+  style.fill: transparent
+  choose: "Retention + compaction admission\nbounded batch and row groups" {shape: rectangle}
+  merge: "Native Parquet merge\nprepared outside the reader gate" {shape: rectangle}
+  swap: "Crash-safe namespace swap\nmarker + bounded renames + fsync" {shape: rectangle}
+
+  choose -> merge
+  merge -> swap
+}
+
+querystate: "Rebuildable query state\nstorage.data_dir/query" {
   shape: cylinder
-  tooltip: Catalog attachment and temp spill. Not the telemetry itself.
+  tooltip: DuckDB rollups and temporary spill. Not authoritative telemetry.
 }
 
-control: "Control SQLite\nstorage.data_dir/control/fanout.sqlite" {
-  shape: cylinder
-  tooltip: Application state. Never on the telemetry write path.
-}
-
-control_tables: "users, user_identities, verifications, sessions, auth_audit_events\noauth_clients, oauth_tokens, oauth_authorization_codes\ndashboards, dashboard_widgets, dashboard_state\nagui_threads, agui_runs, alert_rules, alerts, settings" {
-  shape: text
-  style.font-size: 13
-}
-
-writers.ingest -> gate
-writers.rollup -> gate
-writers.maint -> gate
-gate -> telemetry: "wait and hold measured per operation"
-telemetry <- querystate: attached
-control -> control_tables: {style.stroke-dash: 3}
+ingest -> writers.admission
+writers.publish -> authority: "acknowledge only after publication"
+authority -> readers.trace
+authority -> readers.sql
+readers.sql -> readers.rollups
+readers.rollups -> querystate
+authority -> maintenance.choose

@@ -2,29 +2,43 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+	"github.com/labstack/fanout/internal/queryrows"
+	"github.com/labstack/fanout/internal/telemetry"
+	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
 )
 
-func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock) {
+func newTestRepository(t *testing.T) *telemetrystore.Repository {
+	t.Helper()
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("open telemetry repository: %v", err)
+	}
+	t.Cleanup(func() { _ = repository.Close() })
+	return repository
+}
+
+func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock, *telemetrystore.Repository) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatalf("sqlmock.New: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	svc := New(db)
+	repository := newTestRepository(t)
+	svc := New(SQLDB(db), repository.Parquet)
 	svc.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
-	return svc, mock
+	return svc, mock, repository
 }
 
 func TestNormalizeScopeDefaultsAndBounds(t *testing.T) {
-	svc, _ := newMockService(t)
+	svc, _, _ := newMockService(t)
 	scope, err := svc.normalizeScope(Scope{})
 	if err != nil {
 		t.Fatalf("normalizeScope: %v", err)
@@ -43,7 +57,7 @@ func TestNormalizeScopeDefaultsAndBounds(t *testing.T) {
 }
 
 func TestOverviewReturnsCanonicalEnvelope(t *testing.T) {
-	svc, mock := newMockService(t)
+	svc, mock, _ := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	rows := sqlmock.NewRows([]string{"service", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}).
@@ -75,7 +89,7 @@ func TestOverviewReturnsCanonicalEnvelope(t *testing.T) {
 }
 
 func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
-	svc, mock := newMockService(t)
+	svc, mock, _ := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(overviewQuery)).
@@ -104,7 +118,7 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 }
 
 func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
-	svc, mock := newMockService(t)
+	svc, mock, _ := newMockService(t)
 	svc.endpointMature.Store(true)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
@@ -150,7 +164,7 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 }
 
 func TestQueryEndpointsFallsBackToRawUntilBackfillReady(t *testing.T) {
-	svc, mock := newMockService(t)
+	svc, mock, _ := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 
@@ -174,7 +188,7 @@ func TestQueryEndpointsFallsBackToRawUntilBackfillReady(t *testing.T) {
 }
 
 func TestQueryEndpointsFallsBackToRawWhenRollupProbeFails(t *testing.T) {
-	svc, mock := newMockService(t)
+	svc, mock, _ := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 
@@ -198,19 +212,23 @@ func TestQueryEndpointsFallsBackToRawWhenRollupProbeFails(t *testing.T) {
 }
 
 func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
-	svc, mock := newMockService(t)
+	svc, mock, repository := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	mock.ExpectQuery(regexp.QuoteMeta(recentTraceQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"trace_id"}).AddRow("trace-1"))
-	mock.ExpectQuery(regexp.QuoteMeta(traceSpansQuery)).
-		WithArgs(start, end, "prod", "prod", "trace-1", 20).
-		WillReturnRows(sqlmock.NewRows([]string{"span_id", "parent_span_id", "service", "operation", "kind", "start_time", "duration_ms", "status", "status_message"}).
-			AddRow("root", "", "checkout", "POST /pay", "SERVER", start, 200.0, "ERROR", "declined").
-			AddRow("child", "root", "payments", "charge", "CLIENT", start.Add(20*time.Millisecond), 80.0, "OK", ""))
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-fixture", Spans: []telemetry.Span{
+		{Namespace: "prod", TraceID: "trace-1", SpanID: "root", ServiceName: "checkout", Name: "POST /pay", Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 200, StatusCode: "ERROR", StatusMsg: "declined"},
+		{Namespace: "prod", TraceID: "trace-1", SpanID: "child", ParentSpanID: "root", ServiceName: "payments", Name: "charge", Kind: "CLIENT", StartUnixNanos: start.Add(20 * time.Millisecond).UnixNano(), DurationMS: 80, StatusCode: "OK"},
+	}, Logs: []telemetry.Log{
+		{Namespace: "prod", TimeUnixNanos: start.Add(150 * time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "payment declined", TraceID: "trace-1", SpanID: "root"},
+		{Namespace: "prod", TimeUnixNanos: start.Add(160 * time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "payments", Body: `charge failed: token=abc123 {"client_secret":"cs_live_9"}`, TraceID: "trace-1", SpanID: "child"},
+	}}); err != nil {
+		t.Fatalf("commit trace fixture: %v", err)
+	}
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
-		WithArgs(start, end, "prod", "prod", "trace-1", 20).
+		WithArgs("trace-1", start, end, "prod", "prod", 20).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start.Add(150*time.Millisecond), "ERROR", "checkout", "payment declined", "trace-1", "root").
 			AddRow(start.Add(160*time.Millisecond), "ERROR", "payments", `charge failed: token=abc123 {"client_secret":"cs_live_9"}`, "trace-1", "child"))
@@ -234,19 +252,27 @@ func TestTraceSelectsRecentErrorAndCorrelatesLogs(t *testing.T) {
 }
 
 func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
-	svc, mock := newMockService(t)
+	svc, mock, repository := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
-	mock.ExpectQuery(regexp.QuoteMeta(logsEntriesQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "%declined%", 10).
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "logs-fixture", Logs: []telemetry.Log{
+		{Namespace: "prod", TimeUnixNanos: start.UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "payment declined", TraceID: "trace-1", SpanID: "root"},
+		{Namespace: "prod", TimeUnixNanos: start.Add(time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: "card declined: token=abc123", TraceID: "trace-2", SpanID: "root2"},
+		{Namespace: "prod", TimeUnixNanos: start.Add(2 * time.Millisecond).UnixNano(), Severity: "ERROR", ServiceName: "checkout", Body: `auth declined: {"password":"hunter2"}`, TraceID: "trace-3", SpanID: "root3"},
+	}}); err != nil {
+		t.Fatalf("commit logs fixture: %v", err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "declined", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
-			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root").
-			AddRow(start, "ERROR", "checkout", "card declined: token=abc123", "trace-2", "root2").
-			AddRow(start, "ERROR", "checkout", `auth declined: {"password":"hunter2"}`, "trace-3", "root3"))
-	mock.ExpectQuery(regexp.QuoteMeta(logsBucketsQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "%declined%").
-		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
-			AddRow(start, "ERROR", int64(3)))
+			// Return raw values to prove the Go boundary still redacts even if the
+			// SQL expression and driver ever diverge.
+			AddRow(start.Add(2*time.Millisecond), "ERROR", "checkout", `auth declined: {"password":"hunter2"}`, "trace-3", "root3").
+			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "card declined: token=abc123", "trace-2", "root2").
+			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root"))
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "declined").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).AddRow(start, "ERROR", int64(3)))
 
 	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", "error", "declined", 10)
 	if err != nil {
@@ -258,12 +284,297 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 	if want := "card declined: token=[REDACTED]"; result.Data.Entries[1].Body != want {
 		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[1].Body, want)
 	}
-	if want := `auth declined: {"password":"[REDACTED]"}`; result.Data.Entries[2].Body != want {
-		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[2].Body, want)
+	if want := `auth declined: {"password":"[REDACTED]"}`; result.Data.Entries[0].Body != want {
+		t.Fatalf("log body = %q, want %q (redaction bypassed)", result.Data.Entries[0].Body, want)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
 }
 
-var _ DB = (*sql.DB)(nil)
+func TestLogsRetainsOnlyNewestLimit(t *testing.T) {
+	svc, mock, repository := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	logs := make([]telemetry.Log, 100)
+	for i := range logs {
+		logs[i] = telemetry.Log{Namespace: "prod", TimeUnixNanos: start.Add(time.Duration(i) * time.Millisecond).UnixNano(), Severity: "INFO", Body: "entry"}
+	}
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "bounded-logs", Logs: logs}); err != nil {
+		t.Fatal(err)
+	}
+	entryRows := sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"})
+	for i := 99; i >= 95; i-- {
+		entryRows.AddRow(start.Add(time.Duration(i)*time.Millisecond), "INFO", "", "entry", "", "")
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
+		WithArgs(start, start.Add(time.Hour), "prod", "prod", "", "", "", "", "", "", 5).
+		WillReturnRows(entryRows)
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+		WithArgs(start, start.Add(time.Hour), "prod", "prod", "", "", "", "", "", "").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).AddRow(start, "INFO", int64(100)))
+	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "", "", "", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Entries) != 5 || !result.Data.Entries[0].Time.Equal(start.Add(99*time.Millisecond)) || !result.Data.Entries[4].Time.Equal(start.Add(95*time.Millisecond)) {
+		t.Fatalf("newest bounded entries = %#v", result.Data.Entries)
+	}
+}
+
+func TestLogsAlwaysUseAuthoritativeParquet(t *testing.T) {
+	svc, mock, repository := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "parquet-logs", Logs: []telemetry.Log{{
+		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
+		ServiceName: "checkout", Body: "token=secret", TraceID: "trace-parquet",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(time.Minute), "ERROR", "checkout", "token=[REDACTED]", "trace-parquet", ""))
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
+			AddRow(start, "ERROR", int64(1)))
+	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", "error", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Entries) != 1 || result.Data.Entries[0].Body != "token=[REDACTED]" || result.Provenance.DataSource != "parquet" {
+		t.Fatalf("Parquet logs result = %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLogsQueryParquetAcrossBatches(t *testing.T) {
+	svc, mock, repository := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Second)
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "overlap-newer", Logs: []telemetry.Log{
+		{Namespace: "prod", TimeUnixNanos: start.Add(150 * time.Millisecond).UnixNano(), Body: "newer-old", Severity: "INFO"},
+		{Namespace: "prod", TimeUnixNanos: start.Add(300 * time.Millisecond).UnixNano(), Body: "newer-batch", Severity: "INFO"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "overlap-late", Logs: []telemetry.Log{
+		{Namespace: "prod", TimeUnixNanos: start.Add(100 * time.Millisecond).UnixNano(), Body: "late-old", Severity: "INFO"},
+		{Namespace: "prod", TimeUnixNanos: start.Add(200 * time.Millisecond).UnixNano(), Body: "late-boundary", Severity: "INFO"},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
+		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(300*time.Millisecond), "INFO", "", "newer-batch", "", "").
+			AddRow(start.Add(200*time.Millisecond), "INFO", "", "late-boundary", "", "").
+			AddRow(start.Add(150*time.Millisecond), "INFO", "", "newer-old", "", "").
+			AddRow(start.Add(100*time.Millisecond), "INFO", "", "late-old", "", ""))
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
+			AddRow(start, "INFO", int64(4)))
+	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Entries) != 4 || result.Summary != "4 logs matched the selected telemetry window" {
+		t.Fatalf("boundary logs = %#v", result)
+	}
+	if result.Data.Entries[0].Body != "newer-batch" || result.Provenance.DataSource != "parquet" {
+		t.Fatalf("boundary result = %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTraceLogsUseFullScopeEventTimeAcrossBatches(t *testing.T) {
+	svc, mock, repository := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	batches := []telemetrystore.Batch{
+		{ID: "trace-latest", Spans: []telemetry.Span{{Namespace: "prod", TraceID: "trace-order", SpanID: "root", StartUnixNanos: start.UnixNano(), DurationMS: 1}}, Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(30 * time.Millisecond).UnixNano(), Body: "latest"}}},
+		{ID: "trace-earliest", Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(10 * time.Millisecond).UnixNano(), Body: "earliest"}}},
+		{ID: "trace-middle", Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(20 * time.Millisecond).UnixNano(), Body: "middle"}}},
+		{ID: "trace-outside-span", Logs: []telemetry.Log{{Namespace: "prod", TraceID: "trace-order", TimeUnixNanos: start.Add(2 * time.Minute).UnixNano(), Body: "unrelated later event"}}},
+	}
+	for _, batch := range batches {
+		if err := repository.Commit(context.Background(), batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("trace-order", start, start.Add(time.Hour), "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(10*time.Millisecond), "", "", "earliest", "trace-order", "").
+			AddRow(start.Add(20*time.Millisecond), "", "", "middle", "trace-order", "").
+			AddRow(start.Add(30*time.Millisecond), "", "", "latest", "trace-order", "").
+			AddRow(start.Add(2*time.Minute), "", "", "unrelated later event", "trace-order", ""))
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "trace-order", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Logs) != 4 || result.Data.Logs[0].Body != "earliest" || result.Data.Logs[3].Body != "unrelated later event" {
+		t.Fatalf("trace logs = %#v", result.Data.Logs)
+	}
+}
+
+func TestTraceUsesIndexedParquet(t *testing.T) {
+	svc, mock, repository := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "indexed-trace", Spans: []telemetry.Span{{
+		Namespace: "prod", TraceID: "parquet-trace", SpanID: "root", ServiceName: "checkout", Name: "pay",
+		Kind: "SERVER", StartUnixNanos: start.UnixNano(), DurationMS: 25, StatusCode: "ERROR", StatusMsg: "declined",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("parquet-trace", start, end, "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "token=secret", "parquet-trace", "root"))
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "parquet-trace", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Spans) != 1 || len(result.Data.Logs) != 1 || !result.Data.HasError {
+		t.Fatalf("indexed Parquet trace detail = %#v", result.Data)
+	}
+	if result.Provenance.DataSource != "parquet_index" {
+		t.Fatalf("trace data source = %q", result.Provenance.DataSource)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTraceCombinesIndexedSpansAcrossBatches(t *testing.T) {
+	svc, mock, repository := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-old-root", Spans: []telemetry.Span{{
+		Namespace: "prod", TraceID: "split-trace", SpanID: "root", ServiceName: "frontend",
+		StartUnixNanos: start.Add(10 * time.Minute).UnixNano(), DurationMS: 100, StatusCode: "ERROR",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-newer-child", Spans: []telemetry.Span{{
+		Namespace: "prod", TraceID: "split-trace", SpanID: "child", ParentSpanID: "root", ServiceName: "backend",
+		StartUnixNanos: start.Add(50 * time.Minute).UnixNano(), DurationMS: 25, StatusCode: "OK",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("split-trace", start, end, "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "split-trace", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Spans) != 2 || !result.Data.HasError || len(result.Data.Services) != 2 || result.Provenance.DataSource != "parquet_index" {
+		t.Fatalf("multi-batch trace = %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTraceReadsRecentRootFromParquetIndex(t *testing.T) {
+	svc, mock, repository := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	cutoff := start.Add(30 * time.Minute)
+	end := start.Add(time.Hour)
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-after-rebuild", Spans: []telemetry.Span{{
+		Namespace: "prod", TraceID: "new-trace", SpanID: "root", ServiceName: "frontend",
+		StartUnixNanos: cutoff.Add(time.Minute).UnixNano(), DurationMS: 10, StatusCode: "OK",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("new-trace", start, end, "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "new-trace", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "root" || result.Provenance.DataSource != "parquet_index" {
+		t.Fatalf("indexed trace = %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTraceFiltersIndexedSpansByNamespace(t *testing.T) {
+	svc, mock, repository := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	cutoff := start.Add(30 * time.Minute)
+	end := start.Add(time.Hour)
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "trace-cross-namespace", Spans: []telemetry.Span{
+		{Namespace: "prod", TraceID: "shared-trace", SpanID: "child", ParentSpanID: "old-root", StartUnixNanos: cutoff.Add(time.Minute).UnixNano()},
+		{Namespace: "staging", TraceID: "shared-trace", SpanID: "root", StartUnixNanos: cutoff.Add(2 * time.Minute).UnixNano()},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
+		WithArgs("shared-trace", start, end, "prod", "prod", 10).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
+	result, err := svc.Trace(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "shared-trace", "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Spans) != 1 || result.Data.Spans[0].SpanID != "child" || result.Provenance.DataSource != "parquet_index" {
+		t.Fatalf("namespace-filtered trace = %#v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+var _ DB = queryrows.SQLAdapter{}
+
+func TestLogsBoundsParquetQueryWithLimitAndAggregatedBuckets(t *testing.T) {
+	svc, mock, repository := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	if err := repository.Commit(context.Background(), telemetrystore.Batch{ID: "bounded-parquet", Logs: []telemetry.Log{{
+		Namespace: "prod", TimeUnixNanos: start.Add(time.Minute).UnixNano(), Severity: "ERROR",
+		ServiceName: "checkout", Body: "hello", TraceID: "trace-parquet",
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	// The sample query must carry the row limit so a wide window cannot stream
+	// the whole Parquet history through the driver.
+	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
+		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "", 2).
+		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
+			AddRow(start.Add(3*time.Minute), "ERROR", "checkout", "newest", "trace-c", "").
+			AddRow(start.Add(2*time.Minute), "INFO", "checkout", "older", "trace-b", ""))
+	// Histogram counts come back aggregated, so a million matching rows cost
+	// one row per bucket rather than a million transfers.
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "").
+		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
+			AddRow(start, "ERROR", int64(900000)).
+			AddRow(start.Add(5*time.Minute), "INFO", int64(100000)))
+	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "", "", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Data.Entries) != 2 || result.Data.Entries[0].Body != "newest" {
+		t.Fatalf("entries = %#v, want the two newest sampled rows", result.Data.Entries)
+	}
+	if len(result.Data.Buckets) != 2 {
+		t.Fatalf("buckets = %#v, want one row per aggregated bucket", result.Data.Buckets)
+	}
+	if !strings.Contains(result.Summary, "1000000") {
+		t.Fatalf("summary = %q, want the aggregated match count", result.Summary)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

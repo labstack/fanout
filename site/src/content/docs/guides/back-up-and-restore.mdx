@@ -11,18 +11,17 @@ status: shipped
 Fanout is one process and one persistent data directory. Back up the directory
 as a unit.
 
-That is not a simplification. The directory holds the telemetry catalog and its
-Parquet files, query state, and the control SQLite database, and they reference
-each other. Copying one subdirectory produces something that looks like a backup
-and does not restore.
+The directory holds atomic telemetry Parquet batches, rebuildable query state,
+and the control SQLite database. Copying one subdirectory produces something
+that looks like a backup and does not restore.
 
 ## Take a cold backup
 
 1. Record the running version and configuration, keeping secrets out of ordinary
    logs and tickets.
 2. Stop Fanout cleanly and wait for the process to exit. Shutdown closes both
-   OTLP listeners before draining the lake writer, so a clean exit is what makes
-   the files on disk consistent.
+   OTLP listeners before draining the telemetry commit workers, so a clean exit
+   leaves no accepted request waiting for publication.
 3. Copy or snapshot the complete data directory, preserving ownership and
    permissions.
 4. Start Fanout and confirm `/readyz`.
@@ -32,8 +31,8 @@ and does not restore.
 :::caution[Not while it is running]
 Do not take a recursive copy of a live data directory. A storage-level snapshot
 is acceptable only if it gives a crash-consistent point-in-time view of the
-whole directory at once — a copy that walks the tree while the writer moves
-through it captures a catalog and Parquet files from different moments.
+whole directory at once — a copy that walks the tree while commits publish can
+capture related files from different moments.
 :::
 
 ## Restore

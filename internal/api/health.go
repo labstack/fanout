@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -59,7 +60,7 @@ func (h *HealthHandler) Readiness(c *echo.Context) error {
 
 	// Check DuckDB
 	resp.Checks["duckdb"] = h.checkDuckDB()
-	resp.Checks["ducklake"] = h.checkDuckLake()
+	resp.Checks["telemetry"] = h.checkTelemetry()
 
 	// Check data directory
 	resp.Checks["data"] = h.checkDataDir()
@@ -117,8 +118,8 @@ func (h *HealthHandler) checkDuckDB() CheckResult {
 }
 
 // diskDegradedPct is the free-space fraction below which the data dir reports
-// degraded. A full disk silently fails Parquet flushes (the writer drops rows
-// once its retry buffer overflows), so we surface pressure before that point.
+// degraded. A full disk fails Parquet flushes and stops ingest, so we surface
+// pressure before that point.
 const diskDegradedPct = 10.0
 
 func (h *HealthHandler) checkDataDir() CheckResult {
@@ -161,7 +162,7 @@ func diskSpaceResult(freeBytes, totalBytes uint64) CheckResult {
 	}
 	if freePct < diskDegradedPct {
 		res.Status = "degraded"
-		res.Error = fmt.Sprintf("low disk space: %.1f%% free — ingest flushes drop rows when the disk fills", freePct)
+		res.Error = fmt.Sprintf("low disk space: %.1f%% free — ingest stops when telemetry cannot commit", freePct)
 	}
 	return res
 }
@@ -177,7 +178,9 @@ func maintenanceStaleThreshold(maintEvery time.Duration) time.Duration {
 	return stale
 }
 
-func (h *HealthHandler) checkDuckLake() CheckResult {
+var telemetryReadinessTimeout = 5 * time.Second
+
+func (h *HealthHandler) checkTelemetry() CheckResult {
 	if h.duck == nil {
 		return CheckResult{
 			Status: "unhealthy",
@@ -186,11 +189,20 @@ func (h *HealthHandler) checkDuckLake() CheckResult {
 	}
 
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), telemetryReadinessTimeout)
 	defer cancel()
 
 	var one int
-	err := h.duck.DB.QueryRowContext(ctx, "SELECT 1 FROM lake.spans LIMIT 1").Scan(&one)
+	// Use the same snapshot gate as public reads so a short compaction/retention
+	// publication cannot race the Parquet scan and report a false outage.
+	err := h.duck.QueryRowScan(ctx, []any{&one}, "SELECT 1 FROM telemetry.spans LIMIT 1")
+	if errors.Is(err, query.ErrParquetReadWait) {
+		return CheckResult{
+			Status:    "degraded",
+			LatencyMs: time.Since(start).Milliseconds(),
+			Error:     err.Error(),
+		}
+	}
 	if err != nil && err != sql.ErrNoRows {
 		return CheckResult{
 			Status:    "unhealthy",
@@ -204,13 +216,14 @@ func (h *HealthHandler) checkDuckLake() CheckResult {
 		LatencyMs: time.Since(start).Milliseconds(),
 	}
 	if err == sql.ErrNoRows {
-		res.Detail = "telemetry attached, no spans yet"
+		res.Detail = "telemetry repository ready, no spans yet"
 	}
 	return res
 }
 
-// checkMaintenance surfaces the maintenance loop's own health (retention +
-// DuckLake compaction). A failing pass reports "degraded", not "unhealthy":
+// checkMaintenance surfaces the maintenance loop's own health (retention,
+// compaction, and cache checkpointing). A failing pass reports "degraded", not
+// "unhealthy":
 // ingest and queries still work while maintenance fails, and a restart
 // wouldn't fix it — pulling the instance from rotation would only hide the
 // signal that storage growth is no longer being reclaimed. A maintenance pass
@@ -226,8 +239,8 @@ func (h *HealthHandler) checkMaintenance() CheckResult {
 		}
 	}
 
-	lastOK, lastAt, lastErr := h.duck.MaintenanceHealth()
-	return maintenanceResult(lastOK, lastAt, lastErr, h.started,
+	lastOK, lastAt, failures, lastErr := h.duck.MaintenanceHealth()
+	return maintenanceResult(lastOK, lastAt, lastErr, failures, h.started,
 		h.cfg.RollupInterval,
 		h.cfg.MaintenanceInterval,
 		time.Now())
@@ -236,7 +249,7 @@ func (h *HealthHandler) checkMaintenance() CheckResult {
 // maintenanceResult classifies the maintenance loop's health. now/started are
 // injected so every branch — a failing pass, never-ran-past-grace, and a loop
 // that stalled after a clean pass — is unit-testable without a running Duck.
-func maintenanceResult(lastOK, lastAt time.Time, lastErr error, started time.Time, rollupEvery, maintEvery time.Duration, now time.Time) CheckResult {
+func maintenanceResult(lastOK, lastAt time.Time, lastErr error, consecutiveFailures int, started time.Time, rollupEvery, maintEvery time.Duration, now time.Time) CheckResult {
 	res := CheckResult{Status: "ok"}
 	if !lastAt.IsZero() {
 		res.UpdatedAt = lastAt.UTC().Format(time.RFC3339)
@@ -244,8 +257,9 @@ func maintenanceResult(lastOK, lastAt time.Time, lastErr error, started time.Tim
 	if lastErr != nil {
 		res.Status = "degraded"
 		res.Error = lastErr.Error()
+		res.Detail = fmt.Sprintf("%d consecutive failed passes", consecutiveFailures)
 		if !lastOK.IsZero() {
-			res.Detail = "last clean pass: " + lastOK.UTC().Format(time.RFC3339)
+			res.Detail += "; last clean pass: " + lastOK.UTC().Format(time.RFC3339)
 		}
 		return res
 	}

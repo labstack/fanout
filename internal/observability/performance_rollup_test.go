@@ -21,9 +21,6 @@ func TestEndpointRollupQueryMergesBucketsAndExactBoundaries(t *testing.T) {
 	if _, err := db.Exec(`SET TimeZone='UTC'`); err != nil {
 		t.Fatalf("set timezone: %v", err)
 	}
-	if _, err := db.Exec(`ATTACH ':memory:' AS lake`); err != nil {
-		t.Fatalf("attach lake catalog: %v", err)
-	}
 	if err := query.CreateTables(db); err != nil {
 		t.Fatalf("CreateTables: %v", err)
 	}
@@ -65,7 +62,7 @@ FROM (VALUES ` + seed.values + `) t(ms)`
 	// Include raw rows for every minute. The query must use raw rows for the two
 	// partial boundaries and for complete minutes newer than the watermark, while
 	// excluding raw rows already represented by mature cached buckets.
-	if _, err := db.Exec(`INSERT INTO lake.spans (
+	if _, err := db.Exec(`INSERT INTO telemetry.spans (
   namespace, service, start_time, duration_ms, status, http_method, http_route, operation
 ) VALUES
 ('prod','checkout',?,5.0,'OK','GET','/pay','GET /pay'),
@@ -93,7 +90,7 @@ FROM (VALUES ` + seed.values + `) t(ms)`
 		t.Fatalf("seed endpoint rollup state: %v", err)
 	}
 
-	svc := New(db)
+	svc := New(SQLDB(db), newTestRepository(t).Parquet)
 	svc.endpointMature.Store(true)
 	var cachedCalls, totalCachedCalls int64
 	var minBucket, maxBucket time.Time

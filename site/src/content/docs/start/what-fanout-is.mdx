@@ -13,6 +13,18 @@ OTLP over gRPC and HTTP, writes telemetry to disk as Parquet, answers queries
 with DuckDB, evaluates alert rules, serves a chat investigator and MCP tools,
 and hosts the browser client.
 
+<figure class="docs-diagram">
+  <a href="/diagrams/architecture.svg" class="docs-diagram__asset" aria-label="Open the Fanout architecture diagram at full size">
+    <img
+      src="/diagrams/architecture.svg"
+      alt="Fanout architecture: collectors, browsers, and MCP hosts connect to one process containing ingest, query, maintenance, alerts, agent, and UI components backed by Parquet, DuckDB query state, and SQLite control state."
+      loading="lazy"
+      decoding="async"
+    />
+  </a>
+  <figcaption>One process owns the complete path from OTLP ingest to investigation.</figcaption>
+</figure>
+
 The point of that list is that it is one list. A conventional deployment of the
 same capability is a collector, a storage backend, a query layer, a dashboard
 service and an alertmanager, each with its own configuration, failure modes and
@@ -24,8 +36,8 @@ restart.
 | Part | What it does |
 |---|---|
 | OTLP ingest | Accepts traces, logs and metrics on gRPC and HTTP |
-| Storage | Writes Parquet to a local data directory; no external database |
-| Query | DuckDB in-process, over the Parquet it wrote |
+| Storage | Atomically publishes indexed Parquet batches to a local data directory |
+| Query | Direct indexed trace reads plus in-process DuckDB SQL and rollups |
 | Alerts | Evaluates persisted rules on a fixed interval against rollups |
 | Investigator | A chat agent working from the same typed query tools |
 | MCP server | Exposes those tools to an external agent |
