@@ -28,10 +28,15 @@ names `telemetry/COMPACTION.json`.
 That is deliberate. The marker lists the batches the compaction retired, and
 those directories hold the only copy of the rows it was merging. A startup that
 guessed at the rollback set could delete them, so Fanout stops instead and
-leaves everything where it is: the replacement is either staged under
+leaves things where they are: the replacement is either staged under
 `telemetry/compaction/` or already published as
-`telemetry/parquet/batches/<output id>.batch`, and the retired inputs under
-`telemetry/parquet/batches/` (named `<id>.retired-<output id>`) remain intact.
+`telemetry/parquet/batches/<output id>.batch`, and the retired inputs sit under
+`telemetry/parquet/batches/`, named `<id>.retired-<output id>`.
+
+A publish that failed partway through may already have removed some of those
+retired inputs, so the rollback set is not guaranteed to be complete. That is
+what step 2 below checks, and why it has to be checked before anything is
+deleted.
 
 Usually the interruption was transient — a full disk, or the process killed
 mid-swap. **Clear the underlying cause and start Fanout again.** Recovery
@@ -42,25 +47,31 @@ stopped, and from `telemetry/parquet/batches/`:
 
 1. Read `telemetry/COMPACTION.json`. It is JSON, with an `output` object and an
    `inputs` list of batch ids.
-2. For each id in `inputs`, if `<id>.retired-<output id>` exists, rename it back
-   to `<id>.batch`. Ids already present as `<id>.batch` were never retired and
-   need nothing.
-3. Delete `telemetry/compaction/<output id>` if it exists.
-4. Delete `telemetry/parquet/batches/<output id>.batch` if it exists. Leaving
+2. Back up `telemetry/`, then check every id in `inputs`. Each must exist as
+   either `<id>.batch` (never retired) or `<id>.retired-<output id>` (retired,
+   restorable). **If any id is missing in both forms, stop here.** Its rows now
+   survive only inside the replacement, so deleting the replacement or the
+   marker would destroy them. Recover that batch from a backup, or complete the
+   compaction instead of rolling it back.
+3. Rename each `<id>.retired-<output id>` back to `<id>.batch`.
+4. Delete `telemetry/compaction/<output id>` if it exists.
+5. Delete `telemetry/parquet/batches/<output id>.batch` if it exists. Leaving
    a published replacement beside the restored inputs duplicates its rows; a
    corrupt replacement continues to block startup.
-5. Delete `telemetry/COMPACTION.json`.
-6. Start Fanout.
+6. Delete `telemetry/COMPACTION.json`.
+7. Start Fanout.
 
 Deleting the whole `telemetry/` directory also clears the refusal, and discards
 exactly the telemetry the refusal was protecting. Neither step above needs it.
 
-:::caution[Restore the inputs before deleting the marker]
-Step 2 comes before step 4 for a reason. The marker is what protects the
-retired directories from cleanup — with it gone, the next successful startup
-treats every `*.retired-*` directory as reclaimable and removes it. Deleting
-the marker on its own is therefore not a rollback; it discards the rows the
-compaction had retired.
+:::caution[Verify the set, then restore, then delete]
+The order is load-bearing in both directions. Verifying first (step 2) is what
+keeps you from deleting a replacement that holds the only surviving copy of an
+input's rows. Restoring before deleting the marker (steps 3 and 6) matters
+because the marker is what protects the retired directories from cleanup — with
+it gone, the next successful startup treats every `*.retired-*` directory as
+reclaimable and removes it. Deleting the marker on its own is not a rollback;
+it discards the rows the compaction had retired.
 :::
 
 ## An exporter is rejected
