@@ -49,11 +49,14 @@ disk. Maintenance adds native Parquet merge work and short reader-exclusive
 namespace changes. An ingest-only number therefore still overstates what an
 instance does while anyone is looking at it.
 
-Create a short-lived ingest token through first-admin setup, then follow the
-standalone harness instructions. A local run starts with:
+Create a short-lived ingest token through first-admin setup, configure Fanout
+with a dedicated `FANOUT_METRICS_TOKEN`, then expose that same metrics token to
+the harness as `FANOUT_BENCH_METRICS_TOKEN`. Metrics are private by default. A
+local run starts with:
 
 ```sh
 export FANOUT_BENCH_INGEST_TOKEN='…'
+export FANOUT_BENCH_METRICS_TOKEN='…'
 fanout-bench run \
   --endpoint localhost:4317 \
   --metrics-url http://localhost:7520/-/metrics \
