@@ -288,7 +288,7 @@ func TestPublishParquetHonorsContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
 	called := false
-	err := d.PublishParquet(ctx, func() error {
+	err := d.PublishParquet(ctx, func(context.Context) error {
 		called = true
 		return nil
 	})
@@ -326,7 +326,7 @@ func TestParquetWorkDoesNotWaitForDuckDBWriteGate(t *testing.T) {
 		t.Fatalf("merge waited for unrelated DuckDB write gate: %v", err)
 	}
 	called := false
-	if err := d.PublishParquet(ctx, func() error { called = true; return nil }); err != nil {
+	if err := d.PublishParquet(ctx, func(context.Context) error { called = true; return nil }); err != nil {
 		t.Fatalf("publication waited for unrelated DuckDB write gate: %v", err)
 	}
 	if !called {
@@ -399,6 +399,34 @@ func TestRollupReadLockHonorsContext(t *testing.T) {
 	d.parquetMu.Unlock()
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("refreshServiceRollup error = %v, want deadline exceeded", err)
+	}
+}
+
+func TestRollupAdmissionLeaseDoesNotCancelAdmittedWork(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	originalLease := rollupReaderLease
+	rollupReaderLease = 5 * time.Millisecond
+	t.Cleanup(func() { rollupReaderLease = originalLease })
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupStateKey).
+		WillReturnRows(sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(100))
+	mock.ExpectQuery("FROM rollup_state").WithArgs(serviceRollupRawMaxKey).
+		WillReturnRows(sqlmock.NewRows([]string{"last_ingested_unix_nano"}).AddRow(100))
+	mock.ExpectQuery("FROM \\(").WillDelayFor(20 * time.Millisecond).
+		WillReturnRows(sqlmock.NewRows([]string{"watermark"}).AddRow(100))
+	mock.ExpectCommit()
+
+	d := &Duck{DB: db}
+	if _, err := d.refreshServiceRollup(context.Background()); err != nil {
+		t.Fatalf("admitted rollup was canceled by its admission lease: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -523,7 +551,7 @@ func TestMaintenanceTracksConsecutiveFailures(t *testing.T) {
 
 type failingPublishCompactor struct{ *Duck }
 
-func (f failingPublishCompactor) PublishParquet(context.Context, func() error) error {
+func (f failingPublishCompactor) PublishParquet(context.Context, func(context.Context) error) error {
 	return errors.New("injected publication failure")
 }
 

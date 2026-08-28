@@ -58,12 +58,12 @@ type storedBatch struct {
 }
 
 type ParquetStore struct {
-	dir        string
-	batchesDir string
-	stagingDir string
-	mu         sync.RWMutex
-	publishMu  sync.Mutex
-	batches    map[string]*storedBatch
+	dir         string
+	batchesDir  string
+	stagingDir  string
+	mu          sync.RWMutex
+	publishGate chan struct{}
+	batches     map[string]*storedBatch
 }
 
 type ParquetStats struct {
@@ -74,8 +74,9 @@ type ParquetStats struct {
 func OpenParquetStore(dir string) (*ParquetStore, error) {
 	p := &ParquetStore{
 		dir: dir, batchesDir: filepath.Join(dir, "batches"), stagingDir: filepath.Join(dir, "staging"),
-		batches: make(map[string]*storedBatch),
+		publishGate: make(chan struct{}, 1), batches: make(map[string]*storedBatch),
 	}
+	p.publishGate <- struct{}{}
 	for _, path := range []string{p.dir, p.batchesDir} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return nil, err
@@ -154,6 +155,10 @@ func (p *ParquetStore) CommitBatch(metadata BatchMetadata, spans []Span, logs []
 		return nil
 	}
 	if info, err := os.Stat(final); err == nil && info.IsDir() {
+		if err := p.lockPublish(context.Background()); err != nil {
+			return err
+		}
+		defer p.unlockPublish()
 		if err := syncDirectory(p.batchesDir); err != nil {
 			return err
 		}
@@ -226,9 +231,22 @@ func (p *ParquetStore) CommitBatch(metadata BatchMetadata, spans []Span, logs []
 	if err := syncDirectory(stage); err != nil {
 		return err
 	}
+	prepared, err := loadStoredBatch(stage)
+	if err != nil {
+		return fmt.Errorf("validate staged Parquet batch: %w", err)
+	}
+	if prepared.metadata.ID != metadata.ID {
+		return fmt.Errorf("staged Parquet metadata ID %q does not match batch ID %q", prepared.metadata.ID, metadata.ID)
+	}
+	prepared.dir = final
+	if prepared.metadata.Spans > 0 {
+		prepared.traces.path = filepath.Join(final, "trace.fidx")
+	}
 
-	p.publishMu.Lock()
-	defer p.publishMu.Unlock()
+	if err := p.lockPublish(context.Background()); err != nil {
+		return err
+	}
+	defer p.unlockPublish()
 	if p.hasBatch(metadata.ID) {
 		complete = true
 		return os.RemoveAll(stage)
@@ -247,39 +265,26 @@ func (p *ParquetStore) CommitBatch(metadata BatchMetadata, spans []Span, logs []
 	if err := syncDirectory(p.batchesDir); err != nil {
 		return err
 	}
-	return p.registerBatch(final)
+	p.mu.Lock()
+	p.batches[metadata.ID] = prepared
+	p.mu.Unlock()
+	return nil
 }
 
-// CleanupRetired removes inputs hidden by a completed retention or compaction
-// publication. It is called only after compaction recovery has consumed its
-// durable marker, so no rollback can still need these directories.
-func (p *ParquetStore) CleanupRetired() error {
-	entries, err := os.ReadDir(p.batchesDir)
-	if err != nil {
-		return err
+func (p *ParquetStore) lockPublish(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-p.publishGate:
+		return nil
 	}
-	removed := false
-	var cleanupErr error
-	for _, entry := range entries {
-		name := entry.Name()
-		if !entry.IsDir() || strings.HasSuffix(name, BatchSuffix) || !strings.Contains(name, ".retired") {
-			continue
-		}
-		if err := os.RemoveAll(filepath.Join(p.batchesDir, name)); err != nil {
-			cleanupErr = errors.Join(cleanupErr, err)
-		} else {
-			removed = true
-		}
-	}
-	if removed {
-		cleanupErr = errors.Join(cleanupErr, syncDirectory(p.batchesDir))
-	}
-	return cleanupErr
 }
+
+func (p *ParquetStore) unlockPublish() { p.publishGate <- struct{}{} }
 
 // RestoreRetiredInputs rolls back a compaction whose durable output vanished.
 // The complete namespace change is hidden from readers by publish.
-func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID string, publish func(func() error) error) error {
+func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID string, publish func(func(context.Context) error) error) error {
 	if err := validateBatchID(replacementID); err != nil {
 		return err
 	}
@@ -319,9 +324,11 @@ func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID strin
 		}
 		prepared = append(prepared, restoredInput{id: id, active: active, retired: path, batch: batch, move: move})
 	}
-	return publish(func() error {
-		p.publishMu.Lock()
-		defer p.publishMu.Unlock()
+	return publish(func(ctx context.Context) error {
+		if err := p.lockPublish(ctx); err != nil {
+			return err
+		}
+		defer p.unlockPublish()
 		installActive := func() {
 			p.mu.Lock()
 			defer p.mu.Unlock()
@@ -491,7 +498,7 @@ func indexedSpanEarlier(left, right IndexedSpan) bool {
 
 // PruneBefore hides complete batches while readers are pinned, then deletes
 // the retired directories after publication.
-func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(func() error) error) (int, error) {
+func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(func(context.Context) error) error) (int, error) {
 	if maxBatches <= 0 {
 		return 0, nil
 	}
@@ -521,9 +528,11 @@ func (p *ParquetStore) PruneBefore(cutoff int64, maxBatches int, publish func(fu
 	}
 	var retired []string
 	var pruneErr error
-	err := publish(func() error {
-		p.publishMu.Lock()
-		defer p.publishMu.Unlock()
+	err := publish(func(ctx context.Context) error {
+		if err := p.lockPublish(ctx); err != nil {
+			return err
+		}
+		defer p.unlockPublish()
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		for _, candidate := range candidates {
@@ -651,7 +660,7 @@ func (p *ParquetStore) PrepareReplacement(dir string, metadata BatchMetadata) er
 
 // PublishReplacement validates a prepared compacted batch, atomically swaps it
 // for its inputs while readers are pinned, then deletes retired inputs.
-func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, inputs []string, publish func(func() error) error) error {
+func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, inputs []string, publish func(func(context.Context) error) error) error {
 	if err := validateBatchID(metadata.ID); err != nil {
 		return err
 	}
@@ -705,9 +714,11 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 		inputBatches[id] = batch
 	}
 	retired := make([][2]string, 0, len(inputs))
-	err = publish(func() error {
-		p.publishMu.Lock()
-		defer p.publishMu.Unlock()
+	err = publish(func(ctx context.Context) error {
+		if err := p.lockPublish(ctx); err != nil {
+			return err
+		}
+		defer p.unlockPublish()
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		installReplacement := func() {

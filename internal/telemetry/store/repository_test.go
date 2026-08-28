@@ -22,9 +22,9 @@ type testParquetCompactor struct {
 	afterSwap  func() error
 }
 
-type testParquetPublisherFunc func(context.Context, func() error) error
+type testParquetPublisherFunc func(context.Context, func(context.Context) error) error
 
-func (f testParquetPublisherFunc) PublishParquet(ctx context.Context, publish func() error) error {
+func (f testParquetPublisherFunc) PublishParquet(ctx context.Context, publish func(context.Context) error) error {
 	return f(ctx, publish)
 }
 
@@ -41,11 +41,11 @@ func (c *testParquetCompactor) MergeParquet(ctx context.Context, signal string, 
 	return err
 }
 
-func (c *testParquetCompactor) PublishParquet(_ context.Context, publish func() error) error {
+func (c *testParquetCompactor) PublishParquet(ctx context.Context, publish func(context.Context) error) error {
 	if c.publishErr != nil {
 		return c.publishErr
 	}
-	if err := publish(); err != nil {
+	if err := publish(ctx); err != nil {
 		return err
 	}
 	if c.afterSwap != nil {
@@ -306,10 +306,10 @@ func TestRepositoryRestoresInputsThroughPublicationGate(t *testing.T) {
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	publisher := testParquetPublisherFunc(func(_ context.Context, publish func() error) error {
+	publisher := testParquetPublisherFunc(func(ctx context.Context, publish func(context.Context) error) error {
 		close(entered)
 		<-release
-		return publish()
+		return publish(ctx)
 	})
 	done := make(chan error, 1)
 	go func() { done <- repository.RecoverParquet(context.Background(), publisher) }()
@@ -330,7 +330,7 @@ func TestRepositoryRestoresInputsThroughPublicationGate(t *testing.T) {
 	}
 }
 
-func TestRepositoryPrunePassIsBoundedAndOldestFirst(t *testing.T) {
+func TestRepositoryPrunePassDrainsWithinBudgetAndOldestFirst(t *testing.T) {
 	repository, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -351,16 +351,71 @@ func TestRepositoryPrunePassIsBoundedAndOldestFirst(t *testing.T) {
 		publications++
 		return nil
 	}}
-	removed, err := repository.PruneParquetPass(context.Background(), publisher, 10, 2, 2)
+	removed, err := repository.PruneParquetPass(context.Background(), publisher, 10, 2, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 4 || publications != 2 {
-		t.Fatalf("removed=%d publications=%d, want 4 across 2 bounded swaps", removed, publications)
+	if removed != 5 || publications != 3 {
+		t.Fatalf("removed=%d publications=%d, want 5 across 3 bounded swaps", removed, publications)
 	}
 	metadata := repository.Parquet.BatchMetadata()
-	if len(metadata) != 1 || metadata[0].ID != "expired-4" {
-		t.Fatalf("remaining batches = %#v, want newest expired-4", metadata)
+	if len(metadata) != 0 {
+		t.Fatalf("remaining batches = %#v, want the backlog drained", metadata)
+	}
+}
+
+func TestRepositoryPrunePassFinishesPublicationAfterBudget(t *testing.T) {
+	repository, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	for i := range 4 {
+		batch := testBatch()
+		batch.ID = fmt.Sprintf("expired-%d", i)
+		batch.Spans[0].IngestedAt = int64(i + 1)
+		batch.Logs[0].IngestedAt = int64(i + 1)
+		batch.Metrics[0].IngestedAt = int64(i + 1)
+		if err := repository.Commit(batch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	publications := 0
+	publisher := &testParquetCompactor{afterSwap: func() error {
+		publications++
+		time.Sleep(10 * time.Millisecond)
+		return nil
+	}}
+	removed, err := repository.PruneParquetPass(context.Background(), publisher, 10, 2, time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 2 || publications != 1 {
+		t.Fatalf("removed=%d publications=%d, want the in-flight 2-batch publication completed once", removed, publications)
+	}
+}
+
+func TestRepositoryCleanupOwnsRetiredDirectories(t *testing.T) {
+	repository, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	retired := filepath.Join(repository.Parquet.BatchesDir(), "old.retired-compacted")
+	if err := os.Mkdir(retired, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Commit(Batch{ID: "contains.retired", Spans: []telemetry.Span{{TraceID: "trace"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CleanupParquet(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(retired); !os.IsNotExist(err) {
+		t.Fatalf("retired directory remains: %v", err)
+	}
+	if _, err := os.Stat(repository.Parquet.BatchPath("contains.retired")); err != nil {
+		t.Fatalf("published batch with retired in its ID was removed: %v", err)
 	}
 }
 

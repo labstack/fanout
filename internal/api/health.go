@@ -256,9 +256,6 @@ func maintenanceResult(lastOK, lastAt time.Time, lastErr error, consecutiveFailu
 	}
 	if lastErr != nil {
 		res.Status = "degraded"
-		if consecutiveFailures >= 3 {
-			res.Status = "unhealthy"
-		}
 		res.Error = lastErr.Error()
 		res.Detail = fmt.Sprintf("%d consecutive failed passes", consecutiveFailures)
 		if !lastOK.IsZero() {

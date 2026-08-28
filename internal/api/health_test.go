@@ -189,7 +189,7 @@ func TestTelemetryReadinessReportsPublicationContentionAsDegraded(t *testing.T) 
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		done <- duck.PublishParquet(context.Background(), func() error {
+		done <- duck.PublishParquet(context.Background(), func(context.Context) error {
 			close(entered)
 			<-release
 			return nil
@@ -301,7 +301,7 @@ func TestMaintenanceResult(t *testing.T) {
 	}{
 		{"clean recent pass", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, 0, now.Add(-2 * time.Hour), time.Hour, "ok"},
 		{"failing pass", now.Add(-3 * time.Hour), now.Add(-time.Hour), errors.New("boom"), 1, now.Add(-4 * time.Hour), time.Hour, "degraded"},
-		{"repeated failure", now.Add(-4 * time.Hour), now.Add(-time.Hour), errors.New("boom"), 3, now.Add(-5 * time.Hour), time.Hour, "unhealthy"},
+		{"repeated failure remains routable", now.Add(-4 * time.Hour), now.Add(-time.Hour), errors.New("boom"), 3, now.Add(-5 * time.Hour), time.Hour, "degraded"},
 		{"never ran, past grace", time.Time{}, time.Time{}, nil, 0, now.Add(-10 * time.Minute), time.Hour, "degraded"},
 		{"never ran, within grace", time.Time{}, time.Time{}, nil, 0, now.Add(-time.Minute), time.Hour, "ok"},
 		{"stalled after clean pass", now.Add(-5 * time.Hour), now.Add(-5 * time.Hour), nil, 0, now.Add(-6 * time.Hour), time.Hour, "degraded"},

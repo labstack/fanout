@@ -30,7 +30,7 @@ type compactionKey struct {
 // ParquetCompactor keeps DuckDB execution and publication locking in the query
 // layer while storage owns batch selection and crash-safe replacement state.
 type ParquetPublisher interface {
-	PublishParquet(context.Context, func() error) error
+	PublishParquet(context.Context, func(context.Context) error) error
 }
 
 type ParquetCompactor interface {
@@ -165,22 +165,25 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) 
 	return selected
 }
 
-func (r *Repository) CompactParquetPass(ctx context.Context, compactor ParquetCompactor, maxBatches, maxPublications int) (int, error) {
-	if maxBatches <= 0 || maxPublications <= 0 {
+// CompactParquetPass starts complete compactions until the phase budget
+// expires. An in-flight merge keeps the caller context so slow, valid work
+// commits instead of restarting the same input group on every pass.
+func (r *Repository) CompactParquetPass(ctx context.Context, compactor ParquetCompactor, maxBatches int, budget time.Duration) (int, error) {
+	if maxBatches <= 0 || budget <= 0 {
 		return 0, nil
 	}
+	deadline := time.Now().Add(budget)
 	total := 0
-	for range maxPublications {
+	for {
 		count, err := r.CompactParquet(ctx, compactor, maxBatches)
 		total += count
-		if err != nil || count == 0 {
+		if err != nil || count == 0 || !time.Now().Before(deadline) {
 			return total, err
 		}
 	}
-	return total, nil
 }
 
-type parquetPublishFunc func(context.Context, func() error) error
+type parquetPublishFunc func(context.Context, func(context.Context) error) error
 
 func (r *Repository) RecoverParquet(ctx context.Context, publisher ParquetPublisher) error {
 	r.compactionMu.Lock()
@@ -209,7 +212,7 @@ func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPubli
 		return err
 	}
 	if !stageExists && !finalExists {
-		if err := r.Parquet.RestoreRetiredInputs(marker.Inputs, marker.Output.ID, func(swap func() error) error {
+		if err := r.Parquet.RestoreRetiredInputs(marker.Inputs, marker.Output.ID, func(swap func(context.Context) error) error {
 			return publish(ctx, swap)
 		}); err != nil {
 			return fmt.Errorf("restore compaction %s inputs: %w", marker.Output.ID, err)
@@ -223,7 +226,7 @@ func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPubli
 }
 
 func (r *Repository) completeCompaction(ctx context.Context, marker compactionMarker, publish parquetPublishFunc) error {
-	if err := r.Parquet.PublishReplacement(r.compactionStage(marker.Output.ID), marker.Output, marker.Inputs, func(swap func() error) error {
+	if err := r.Parquet.PublishReplacement(r.compactionStage(marker.Output.ID), marker.Output, marker.Inputs, func(swap func(context.Context) error) error {
 		return publish(ctx, swap)
 	}); err != nil {
 		return err

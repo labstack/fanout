@@ -210,9 +210,9 @@ func TestPublishReplacementValidatesBeforePublication(t *testing.T) {
 	}
 	stage := t.TempDir()
 	called := false
-	err = store.PublishReplacement(stage, BatchMetadata{ID: "replacement"}, nil, func(publish func() error) error {
+	err = store.PublishReplacement(stage, BatchMetadata{ID: "replacement"}, nil, func(publish func(context.Context) error) error {
 		called = true
-		return publish()
+		return publish(context.Background())
 	})
 	if err == nil {
 		t.Fatal("invalid replacement was accepted")
@@ -234,10 +234,10 @@ func TestPruneReaderWaitDoesNotBlockCommit(t *testing.T) {
 	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
-		_, err := store.PruneBefore(2, 1, func(prune func() error) error {
+		_, err := store.PruneBefore(2, 1, func(prune func(context.Context) error) error {
 			close(entered)
 			<-release
-			return prune()
+			return prune(context.Background())
 		})
 		done <- err
 	}()
@@ -264,6 +264,32 @@ func TestPruneReaderWaitDoesNotBlockCommit(t *testing.T) {
 	}
 }
 
+func TestPrunePublicationContextBoundsStorageLockWait(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CommitBatch(BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.lockPublish(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer store.unlockPublish()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	removed, err := store.PruneBefore(2, 1, func(prune func(context.Context) error) error {
+		return prune(ctx)
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("PruneBefore error = %v, want deadline exceeded", err)
+	}
+	if removed != 0 || len(store.BatchMetadata()) != 1 {
+		t.Fatalf("timed-out publication removed=%d batches=%d, want the input untouched", removed, len(store.BatchMetadata()))
+	}
+}
+
 func TestReplacementReaderWaitDoesNotBlockCommit(t *testing.T) {
 	store, err := OpenParquetStore(t.TempDir())
 	if err != nil {
@@ -282,10 +308,10 @@ func TestReplacementReaderWaitDoesNotBlockCommit(t *testing.T) {
 	done := make(chan error, 1)
 	stage := filepath.Join(t.TempDir(), "missing-stage")
 	go func() {
-		done <- store.PublishReplacement(stage, output, []string{"input"}, func(publish func() error) error {
+		done <- store.PublishReplacement(stage, output, []string{"input"}, func(publish func(context.Context) error) error {
 			close(entered)
 			<-release
-			return publish()
+			return publish(context.Background())
 		})
 	}()
 	select {
@@ -328,8 +354,8 @@ func TestPublishReplacementKeepsOutputOnlyAfterSyncFailure(t *testing.T) {
 	syncPublishedDirectory = func(string) error { return errors.New("injected directory sync failure") }
 	t.Cleanup(func() { syncPublishedDirectory = originalSync })
 
-	err = store.PublishReplacement(filepath.Join(t.TempDir(), "missing-stage"), output, []string{"input"}, func(publish func() error) error {
-		return publish()
+	err = store.PublishReplacement(filepath.Join(t.TempDir(), "missing-stage"), output, []string{"input"}, func(publish func(context.Context) error) error {
+		return publish(context.Background())
 	})
 	if err == nil {
 		t.Fatal("replacement succeeded despite injected sync failure")
@@ -367,8 +393,8 @@ func TestPublishReplacementUnpublishesRecoveredOutputBeforeRetiringInputs(t *tes
 		t.Fatal(err)
 	}
 	stage := filepath.Join(t.TempDir(), "recovery", "output")
-	err = store.PublishReplacement(stage, output, []string{"input"}, func(publish func() error) error {
-		return publish()
+	err = store.PublishReplacement(stage, output, []string{"input"}, func(publish func(context.Context) error) error {
+		return publish(context.Background())
 	})
 	if err == nil {
 		t.Fatal("replacement succeeded despite blocked input retirement")
@@ -397,29 +423,6 @@ func TestParquetStoreRejectsUnsafeBatchID(t *testing.T) {
 		if err := store.CommitBatch(BatchMetadata{ID: id}, []Span{{TraceID: "t"}}, nil, nil); err == nil {
 			t.Fatalf("CommitBatch accepted unsafe ID %q", id)
 		}
-	}
-}
-
-func TestParquetStoreCleansOnlyRetiredDirectories(t *testing.T) {
-	store, err := OpenParquetStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	retired := filepath.Join(store.BatchesDir(), "old.retired-compacted")
-	if err := os.Mkdir(retired, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.CommitBatch(BatchMetadata{ID: "contains.retired"}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.CleanupRetired(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(retired); !os.IsNotExist(err) {
-		t.Fatalf("retired directory remains: %v", err)
-	}
-	if _, err := os.Stat(store.BatchPath("contains.retired")); err != nil {
-		t.Fatalf("published batch with retired in its ID was removed: %v", err)
 	}
 }
 

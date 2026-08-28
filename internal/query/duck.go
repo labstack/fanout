@@ -60,18 +60,18 @@ func (d *Duck) MaintenanceHealth() (lastOK, lastAt time.Time, consecutiveFailure
 }
 
 const (
-	serviceRollupStateKey          = "service_rollup_v2"
-	serviceRollupRawMaxKey         = "service_rollup_v2_rawmax"
-	edgeRollupStateKey             = "edge_rollup_v2"
-	edgeRollupRawMaxKey            = "edge_rollup_v2_rawmax"
-	EndpointRollupStateKey         = "endpoint_rollup_v1"
-	endpointRollupRawMaxKey        = "endpoint_rollup_v1_rawmax"
-	endpointBackfillStateKey       = "endpoint_rollup_v1_backfill_started"
-	EndpointReadyStateKey          = "endpoint_rollup_v1_ready"
-	EndpointDisabledStateKey       = "endpoint_rollup_v1_disabled"
-	defaultDuckDBPoolSize          = 1
-	parquetMaintenanceBatchLimit   = 64
-	parquetMaintenancePublishLimit = 4
+	serviceRollupStateKey         = "service_rollup_v2"
+	serviceRollupRawMaxKey        = "service_rollup_v2_rawmax"
+	edgeRollupStateKey            = "edge_rollup_v2"
+	edgeRollupRawMaxKey           = "edge_rollup_v2_rawmax"
+	EndpointRollupStateKey        = "endpoint_rollup_v1"
+	endpointRollupRawMaxKey       = "endpoint_rollup_v1_rawmax"
+	endpointBackfillStateKey      = "endpoint_rollup_v1_backfill_started"
+	EndpointReadyStateKey         = "endpoint_rollup_v1_ready"
+	EndpointDisabledStateKey      = "endpoint_rollup_v1_disabled"
+	defaultDuckDBPoolSize         = 1
+	parquetMaintenanceBatchLimit  = 64
+	parquetMaintenancePhaseBudget = 10 * time.Minute
 )
 
 // rollupPublicationSafetyLag covers the maximum public SQL hold, publication
@@ -451,18 +451,16 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	start := time.Now()
 	var pruneErr error
 	if d.repository != nil {
-		storageCtx, cancelStorage := context.WithTimeout(ctx, 2*defaultWriterGrace)
-		defer cancelStorage()
-		recoveryErr := d.repository.RecoverParquet(storageCtx, d)
+		recoveryErr := d.repository.RecoverParquet(ctx, d)
 		compactStart := time.Now()
 		var cleanupErr, parquetErr, compactErr error
 		compacted := 0
 		if recoveryErr == nil {
 			cleanupErr = d.repository.CleanupParquet()
 			if d.cfg.RetentionDays > 0 {
-				_, parquetErr = d.repository.PruneParquetPass(storageCtx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano(), parquetMaintenanceBatchLimit, parquetMaintenancePublishLimit)
+				_, parquetErr = d.repository.PruneParquetPass(ctx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano(), parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
 			}
-			compacted, compactErr = d.repository.CompactParquetPass(storageCtx, d, parquetMaintenanceBatchLimit, parquetMaintenancePublishLimit)
+			compacted, compactErr = d.repository.CompactParquetPass(ctx, d, parquetMaintenanceBatchLimit, parquetMaintenancePhaseBudget)
 		}
 		compactResult := metrics.TelemetryNoop
 		if recoveryErr != nil || compactErr != nil {
@@ -533,9 +531,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	// consistent and deadlock-free.
 	unlock := d.writeGate.Lock(writegate.WriteRollupService)
 	defer unlock()
-	ctx, cancel := context.WithTimeout(ctx, rollupReaderLease)
-	defer cancel()
-	if err := d.lockParquetRead(ctx); err != nil {
+	if err := d.lockRollupParquetRead(ctx); err != nil {
 		return 0, err
 	}
 	defer d.parquetMu.RUnlock()
@@ -656,9 +652,7 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	}()
 	unlock := d.writeGate.Lock(writegate.WriteRollupEndpoint)
 	defer unlock()
-	ctx, cancel := context.WithTimeout(ctx, rollupReaderLease)
-	defer cancel()
-	if err := d.lockParquetRead(ctx); err != nil {
+	if err := d.lockRollupParquetRead(ctx); err != nil {
 		return 0, err
 	}
 	defer d.parquetMu.RUnlock()
@@ -781,9 +775,7 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	}()
 	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
 	defer unlock()
-	ctx, cancel := context.WithTimeout(ctx, rollupReaderLease)
-	defer cancel()
-	if err := d.lockParquetRead(ctx); err != nil {
+	if err := d.lockRollupParquetRead(ctx); err != nil {
 		return 0, err
 	}
 	defer d.parquetMu.RUnlock()
@@ -905,9 +897,10 @@ WHERE ingested_unix_nano > ?
 // backlog in a single statement. Unbounded catch-up is what took prod down on
 // 2026-06-13 (UTC): the edge rollup's first pass covered 12 days of spans,
 // spilled 375 GiB to temp, filled the disk, and never committed.
-// Ten-minute chunks also keep the rebuildable read lease short enough for
-// retention and compaction to acquire the Parquet publication gate.
-const rollupChunkNanos = int64(10 * time.Minute)
+// One-hour chunks preserve fast catch-up while bounding the work admitted to a
+// transaction. Publication may wait for the current chunk, but does not cancel
+// it and force the same cache work to restart indefinitely.
+const rollupChunkNanos = int64(time.Hour)
 
 // edgeStartChunkNanos bounds how wide a start_time range one edge-rollup
 // DELETE+INSERT processes, so the call_edges self-join over a wide backlog
@@ -1466,7 +1459,7 @@ func (d *Duck) MergeParquet(ctx context.Context, signal string, inputs []string,
 }
 
 // PublishParquet limits reader exclusion to the atomic directory swap.
-func (d *Duck) PublishParquet(ctx context.Context, publish func() error) error {
+func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context) error) error {
 	publishCtx, cancelPublish := context.WithTimeout(ctx, 2*defaultWriterGrace)
 	defer cancelPublish()
 	metrics.ParquetPublishWaiters.Inc()
@@ -1479,7 +1472,7 @@ func (d *Duck) PublishParquet(ctx context.Context, publish func() error) error {
 		return fmt.Errorf("wait for Parquet readers: %w", err)
 	}
 	defer d.parquetMu.Unlock()
-	return publish()
+	return publish(publishCtx)
 }
 
 func quoteDuckString(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
@@ -1489,6 +1482,12 @@ func (d *Duck) lockParquetRead(ctx context.Context) error {
 		return errors.Join(ErrParquetReadWait, err)
 	}
 	return nil
+}
+
+func (d *Duck) lockRollupParquetRead(ctx context.Context) error {
+	waitCtx, cancel := context.WithTimeout(ctx, rollupReaderLease)
+	defer cancel()
+	return d.lockParquetRead(waitCtx)
 }
 
 // ---- Queries for API ----

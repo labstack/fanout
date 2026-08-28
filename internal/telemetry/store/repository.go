@@ -38,7 +38,7 @@ func Open(root string) (*Repository, error) {
 		return nil, err
 	}
 	r := &Repository{root: root, Parquet: parquetStore}
-	if err := r.recoverCompaction(context.Background(), func(_ context.Context, publish func() error) error { return publish() }); err != nil {
+	if err := r.recoverCompaction(context.Background(), func(ctx context.Context, publish func(context.Context) error) error { return publish(ctx) }); err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("recover Parquet compaction: %w", err)
 	}
@@ -46,7 +46,7 @@ func Open(root string) (*Repository, error) {
 		_ = r.Close()
 		return nil, fmt.Errorf("clean Parquet compaction staging: %w", err)
 	}
-	if err := r.Parquet.CleanupRetired(); err != nil {
+	if err := r.cleanupRetired(); err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("clean retired Parquet batches: %w", err)
 	}
@@ -70,7 +70,31 @@ func (r *Repository) Close() error { return r.Parquet.Close() }
 func (r *Repository) CleanupParquet() error {
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
-	return r.Parquet.CleanupRetired()
+	return r.cleanupRetired()
+}
+
+func (r *Repository) cleanupRetired() error {
+	entries, err := os.ReadDir(r.Parquet.BatchesDir())
+	if err != nil {
+		return err
+	}
+	removed := false
+	var cleanupErr error
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() || strings.HasSuffix(name, telemetry.BatchSuffix) || !strings.Contains(name, ".retired") {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(r.Parquet.BatchesDir(), name)); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		} else {
+			removed = true
+		}
+	}
+	if removed {
+		cleanupErr = errors.Join(cleanupErr, syncDirectory(r.Parquet.BatchesDir()))
+	}
+	return cleanupErr
 }
 
 func (r *Repository) Commit(batch Batch) error {
@@ -93,24 +117,27 @@ func (r *Repository) RowCount() uint64 { return r.Parquet.RowCount() }
 func (r *Repository) PruneParquet(ctx context.Context, publisher ParquetPublisher, cutoff int64, maxBatches int) (int, error) {
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
-	return r.Parquet.PruneBefore(cutoff, maxBatches, func(prune func() error) error {
+	return r.Parquet.PruneBefore(cutoff, maxBatches, func(prune func(context.Context) error) error {
 		return publisher.PublishParquet(ctx, prune)
 	})
 }
 
-func (r *Repository) PruneParquetPass(ctx context.Context, publisher ParquetPublisher, cutoff int64, maxBatches, maxPublications int) (int, error) {
-	if maxBatches <= 0 || maxPublications <= 0 {
+// PruneParquetPass starts bounded publications until the phase budget expires.
+// The budget is checked between publications so an atomic swap is never
+// canceled halfway through.
+func (r *Repository) PruneParquetPass(ctx context.Context, publisher ParquetPublisher, cutoff int64, maxBatches int, budget time.Duration) (int, error) {
+	if maxBatches <= 0 || budget <= 0 {
 		return 0, nil
 	}
+	deadline := time.Now().Add(budget)
 	total := 0
-	for range maxPublications {
+	for {
 		count, err := r.PruneParquet(ctx, publisher, cutoff, maxBatches)
 		total += count
-		if err != nil || count < maxBatches {
+		if err != nil || count < maxBatches || !time.Now().Before(deadline) {
 			return total, err
 		}
 	}
-	return total, nil
 }
 
 func validateBatch(batch Batch) error {

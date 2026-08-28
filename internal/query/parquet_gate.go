@@ -12,10 +12,11 @@ import (
 // behind maintenance, short enough that retention and compaction always run.
 const defaultWriterGrace = 30 * time.Second
 
-// rollupReaderLease leaves publication enough headroom after the admission
-// grace expires. Rollups are rebuildable cache work and may be canceled; user
-// queries retain their caller-provided deadlines.
-const rollupReaderLease = defaultWriterGrace / 2
+// rollupReaderLease bounds only how long rebuildable rollup work waits to enter
+// the Parquet snapshot. Once admitted, the bounded rollup chunk runs under its
+// caller context so a slow but healthy pass can commit instead of retrying the
+// same chunk forever.
+var rollupReaderLease = defaultWriterGrace / 2
 
 // ErrParquetReadWait distinguishes publication contention from a query error.
 var ErrParquetReadWait = errors.New("wait for Parquet publication")
