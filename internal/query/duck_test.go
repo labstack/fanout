@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -297,7 +299,7 @@ func TestPublishParquetHonorsContext(t *testing.T) {
 	if called {
 		t.Fatal("publication ran after its context expired")
 	}
-	if got := d.parquetMu.WaitingWriters(); got != 0 {
+	if got := waitingParquetWriters(&d.parquetMu); got != 0 {
 		t.Fatalf("canceled publication remained queued: %d", got)
 	}
 	if got := testutil.ToFloat64(metrics.ParquetPublishTimeouts); got != timeoutsBefore+1 {
@@ -355,7 +357,7 @@ func TestWaitingMaintenanceDoesNotBlockNewReaders(t *testing.T) {
 		close(writerDone)
 	}()
 	deadline := time.Now().Add(time.Second)
-	for d.parquetMu.WaitingWriters() == 0 {
+	for waitingParquetWriters(&d.parquetMu) == 0 {
 		if time.Now().After(deadline) {
 			d.parquetMu.RUnlock()
 			t.Fatal("maintenance writer did not begin waiting")
@@ -441,10 +443,10 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- d.runRepositoryMaintenance(context.Background()) }()
 	deadline := time.Now().Add(time.Second)
-	for d.parquetMu.WaitingWriters() == 0 && time.Now().Before(deadline) {
+	for waitingParquetWriters(&d.parquetMu) == 0 && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
 	}
-	if waiting := d.parquetMu.WaitingWriters(); waiting != 1 {
+	if waiting := waitingParquetWriters(&d.parquetMu); waiting != 1 {
 		d.parquetMu.RUnlock()
 		release()
 		t.Fatalf("publication waiters = %d, want 1 while DuckDB write gate is independently held", waiting)
@@ -453,6 +455,66 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 	release()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMaintenanceRetriesRetiredDirectoryCleanup(t *testing.T) {
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	retired := filepath.Join(repository.Parquet.BatchesDir(), "stale.retired-old")
+	if err := os.Mkdir(retired, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	d := &Duck{DB: db, repository: repository}
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(retired); !os.IsNotExist(err) {
+		t.Fatalf("retired directory remains after maintenance: %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMaintenanceTracksConsecutiveFailures(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for range 3 {
+		mock.ExpectExec("CHECKPOINT").WillReturnError(errors.New("injected checkpoint failure"))
+	}
+	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
+	d := &Duck{DB: db}
+	for range 3 {
+		if err := d.runRepositoryMaintenance(context.Background()); err == nil {
+			t.Fatal("maintenance succeeded despite checkpoint failure")
+		}
+	}
+	_, _, failures, _ := d.MaintenanceHealth()
+	if failures != 3 {
+		t.Fatalf("consecutive failures = %d, want 3", failures)
+	}
+	if err := d.runRepositoryMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	_, _, failures, _ = d.MaintenanceHealth()
+	if failures != 0 {
+		t.Fatalf("consecutive failures after recovery = %d, want 0", failures)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

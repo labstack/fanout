@@ -38,10 +38,11 @@ type Duck struct {
 	parquetMu parquetReadGate
 	// maintHealthMu guards the maintenance health fields below, which the
 	// readiness probe reads while the maintenance pass writes them.
-	maintHealthMu      sync.Mutex
-	lastMaintenanceOK  time.Time
-	lastMaintenanceAt  time.Time
-	lastMaintenanceErr error
+	maintHealthMu       sync.Mutex
+	lastMaintenanceOK   time.Time
+	lastMaintenanceAt   time.Time
+	lastMaintenanceErr  error
+	maintenanceFailures int
 }
 
 // MaintenanceHealth reports the maintenance loop's own health: when it last
@@ -52,23 +53,25 @@ type Duck struct {
 // operator instead of only logging. lastAt distinguishes "failing right now"
 // from a stale error awaiting the hourly retry; a zero lastAt means no pass
 // has executed since the process started.
-func (d *Duck) MaintenanceHealth() (lastOK, lastAt time.Time, lastErr error) {
+func (d *Duck) MaintenanceHealth() (lastOK, lastAt time.Time, consecutiveFailures int, lastErr error) {
 	d.maintHealthMu.Lock()
 	defer d.maintHealthMu.Unlock()
-	return d.lastMaintenanceOK, d.lastMaintenanceAt, d.lastMaintenanceErr
+	return d.lastMaintenanceOK, d.lastMaintenanceAt, d.maintenanceFailures, d.lastMaintenanceErr
 }
 
 const (
-	serviceRollupStateKey    = "service_rollup_v2"
-	serviceRollupRawMaxKey   = "service_rollup_v2_rawmax"
-	edgeRollupStateKey       = "edge_rollup_v2"
-	edgeRollupRawMaxKey      = "edge_rollup_v2_rawmax"
-	EndpointRollupStateKey   = "endpoint_rollup_v1"
-	endpointRollupRawMaxKey  = "endpoint_rollup_v1_rawmax"
-	endpointBackfillStateKey = "endpoint_rollup_v1_backfill_started"
-	EndpointReadyStateKey    = "endpoint_rollup_v1_ready"
-	EndpointDisabledStateKey = "endpoint_rollup_v1_disabled"
-	defaultDuckDBPoolSize    = 1
+	serviceRollupStateKey          = "service_rollup_v2"
+	serviceRollupRawMaxKey         = "service_rollup_v2_rawmax"
+	edgeRollupStateKey             = "edge_rollup_v2"
+	edgeRollupRawMaxKey            = "edge_rollup_v2_rawmax"
+	EndpointRollupStateKey         = "endpoint_rollup_v1"
+	endpointRollupRawMaxKey        = "endpoint_rollup_v1_rawmax"
+	endpointBackfillStateKey       = "endpoint_rollup_v1_backfill_started"
+	EndpointReadyStateKey          = "endpoint_rollup_v1_ready"
+	EndpointDisabledStateKey       = "endpoint_rollup_v1_disabled"
+	defaultDuckDBPoolSize          = 1
+	parquetMaintenanceBatchLimit   = 64
+	parquetMaintenancePublishLimit = 4
 )
 
 // rollupPublicationSafetyLag covers the maximum public SQL hold, publication
@@ -448,15 +451,18 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	start := time.Now()
 	var pruneErr error
 	if d.repository != nil {
-		recoveryErr := d.repository.RecoverParquet(ctx, d)
+		storageCtx, cancelStorage := context.WithTimeout(ctx, 2*defaultWriterGrace)
+		defer cancelStorage()
+		recoveryErr := d.repository.RecoverParquet(storageCtx, d)
 		compactStart := time.Now()
-		var parquetErr, compactErr error
+		var cleanupErr, parquetErr, compactErr error
 		compacted := 0
 		if recoveryErr == nil {
+			cleanupErr = d.repository.CleanupParquet()
 			if d.cfg.RetentionDays > 0 {
-				_, parquetErr = d.repository.PruneParquetBacklog(ctx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano(), 64)
+				_, parquetErr = d.repository.PruneParquetPass(storageCtx, d, time.Now().Add(-time.Duration(d.cfg.RetentionDays)*24*time.Hour).UnixNano(), parquetMaintenanceBatchLimit, parquetMaintenancePublishLimit)
 			}
-			compacted, compactErr = d.repository.CompactParquetBacklog(ctx, d, 64)
+			compacted, compactErr = d.repository.CompactParquetPass(storageCtx, d, parquetMaintenanceBatchLimit, parquetMaintenancePublishLimit)
 		}
 		compactResult := metrics.TelemetryNoop
 		if recoveryErr != nil || compactErr != nil {
@@ -465,7 +471,7 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 			compactResult = metrics.TelemetrySuccess
 		}
 		metrics.RecordTelemetryOperation(metrics.TelemetryCompaction, compactResult, time.Since(compactStart).Seconds())
-		pruneErr = errors.Join(pruneErr, recoveryErr, parquetErr, compactErr)
+		pruneErr = errors.Join(pruneErr, recoveryErr, cleanupErr, parquetErr, compactErr)
 	}
 	cacheErr := func() error {
 		unlock, err := d.writeGate.LockContext(ctx, writegate.WriteMaintenance)
@@ -495,6 +501,9 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 	d.lastMaintenanceAt = finished
 	if err == nil {
 		d.lastMaintenanceOK = finished
+		d.maintenanceFailures = 0
+	} else {
+		d.maintenanceFailures++
 	}
 	d.lastMaintenanceErr = err
 	d.maintHealthMu.Unlock()
@@ -524,6 +533,8 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	// consistent and deadlock-free.
 	unlock := d.writeGate.Lock(writegate.WriteRollupService)
 	defer unlock()
+	ctx, cancel := context.WithTimeout(ctx, rollupReaderLease)
+	defer cancel()
 	if err := d.lockParquetRead(ctx); err != nil {
 		return 0, err
 	}
@@ -645,6 +656,8 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	}()
 	unlock := d.writeGate.Lock(writegate.WriteRollupEndpoint)
 	defer unlock()
+	ctx, cancel := context.WithTimeout(ctx, rollupReaderLease)
+	defer cancel()
 	if err := d.lockParquetRead(ctx); err != nil {
 		return 0, err
 	}
@@ -768,6 +781,8 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	}()
 	unlock := d.writeGate.Lock(writegate.WriteRollupEdge)
 	defer unlock()
+	ctx, cancel := context.WithTimeout(ctx, rollupReaderLease)
+	defer cancel()
 	if err := d.lockParquetRead(ctx); err != nil {
 		return 0, err
 	}
@@ -890,7 +905,9 @@ WHERE ingested_unix_nano > ?
 // backlog in a single statement. Unbounded catch-up is what took prod down on
 // 2026-06-13 (UTC): the edge rollup's first pass covered 12 days of spans,
 // spilled 375 GiB to temp, filled the disk, and never committed.
-const rollupChunkNanos = int64(time.Hour)
+// Ten-minute chunks also keep the rebuildable read lease short enough for
+// retention and compaction to acquire the Parquet publication gate.
+const rollupChunkNanos = int64(10 * time.Minute)
 
 // edgeStartChunkNanos bounds how wide a start_time range one edge-rollup
 // DELETE+INSERT processes, so the call_edges self-join over a wide backlog

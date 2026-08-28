@@ -12,6 +12,11 @@ import (
 // behind maintenance, short enough that retention and compaction always run.
 const defaultWriterGrace = 30 * time.Second
 
+// rollupReaderLease leaves publication enough headroom after the admission
+// grace expires. Rollups are rebuildable cache work and may be canceled; user
+// queries retain their caller-provided deadlines.
+const rollupReaderLease = defaultWriterGrace / 2
+
 // ErrParquetReadWait distinguishes publication contention from a query error.
 var ErrParquetReadWait = errors.New("wait for Parquet publication")
 
@@ -178,12 +183,4 @@ func (g *parquetReadGate) Unlock() {
 	g.writer = false
 	g.notifyLocked()
 	g.mu.Unlock()
-}
-
-// WaitingWriters reports how many publishers are queued behind active readers.
-func (g *parquetReadGate) WaitingWriters() int {
-	g.init()
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return len(g.waiting)
 }

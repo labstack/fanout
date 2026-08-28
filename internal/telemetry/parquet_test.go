@@ -222,7 +222,7 @@ func TestPublishReplacementValidatesBeforePublication(t *testing.T) {
 	}
 }
 
-func TestPruneOwnsStoragePublicationBeforeExcludingReaders(t *testing.T) {
+func TestPruneReaderWaitDoesNotBlockCommit(t *testing.T) {
 	store, err := OpenParquetStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -230,23 +230,82 @@ func TestPruneOwnsStoragePublicationBeforeExcludingReaders(t *testing.T) {
 	if err := store.CommitBatch(BatchMetadata{ID: "expired", MaxIngestedNanos: 1}, []Span{{TraceID: "trace"}}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	store.publishMu.Lock()
 	entered := make(chan struct{})
+	release := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
 		_, err := store.PruneBefore(2, 1, func(prune func() error) error {
 			close(entered)
+			<-release
 			return prune()
 		})
 		done <- err
 	}()
 	select {
 	case <-entered:
-		store.publishMu.Unlock()
-		t.Fatal("reader exclusion began before storage publication ownership")
-	case <-time.After(20 * time.Millisecond):
+	case <-time.After(time.Second):
+		t.Fatal("prune did not begin waiting for reader exclusion")
 	}
-	store.publishMu.Unlock()
+	commitDone := make(chan error, 1)
+	go func() {
+		commitDone <- store.CommitBatch(BatchMetadata{ID: "concurrent", MaxIngestedNanos: 3}, []Span{{TraceID: "trace-2"}}, nil, nil)
+	}()
+	select {
+	case err := <-commitDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("commit blocked behind prune's reader wait")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReplacementReaderWaitDoesNotBlockCommit(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
+	if err := store.CommitBatch(BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	output := BatchMetadata{ID: "output"}
+	if err := store.CommitBatch(output, span, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	stage := filepath.Join(t.TempDir(), "missing-stage")
+	go func() {
+		done <- store.PublishReplacement(stage, output, []string{"input"}, func(publish func() error) error {
+			close(entered)
+			<-release
+			return publish()
+		})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("replacement did not begin waiting for reader exclusion")
+	}
+	commitDone := make(chan error, 1)
+	go func() {
+		commitDone <- store.CommitBatch(BatchMetadata{ID: "concurrent"}, []Span{{TraceID: "trace-2"}}, nil, nil)
+	}()
+	select {
+	case err := <-commitDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("commit blocked behind replacement's reader wait")
+	}
+	close(release)
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
@@ -284,6 +343,48 @@ func TestPublishReplacementKeepsOutputOnlyAfterSyncFailure(t *testing.T) {
 	metadata := store.BatchMetadata()
 	if len(metadata) != 1 || metadata[0].ID != "output" {
 		t.Fatalf("live batches after sync failure = %#v, want output only", metadata)
+	}
+}
+
+func TestPublishReplacementUnpublishesRecoveredOutputBeforeRetiringInputs(t *testing.T) {
+	store, err := OpenParquetStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	span := []Span{{TraceID: "trace", SpanID: "span", StartUnixNanos: 1}}
+	if err := store.CommitBatch(BatchMetadata{ID: "input"}, span, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	output := BatchMetadata{ID: "output"}
+	if err := store.CommitBatch(output, span, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	blockedRetired := filepath.Join(store.BatchesDir(), "input.retired-output")
+	if err := os.Mkdir(blockedRetired, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(blockedRetired, "block"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stage := filepath.Join(t.TempDir(), "recovery", "output")
+	err = store.PublishReplacement(stage, output, []string{"input"}, func(publish func() error) error {
+		return publish()
+	})
+	if err == nil {
+		t.Fatal("replacement succeeded despite blocked input retirement")
+	}
+	if _, err := os.Stat(store.BatchPath("output")); !os.IsNotExist(err) {
+		t.Fatalf("recovered output remained visible beside active input: %v", err)
+	}
+	if _, err := os.Stat(store.BatchPath("input")); err != nil {
+		t.Fatalf("input was not left queryable after rollback: %v", err)
+	}
+	if _, err := os.Stat(stage); err != nil {
+		t.Fatalf("output was not preserved for the next recovery attempt: %v", err)
+	}
+	metadata := store.BatchMetadata()
+	if len(metadata) != 1 || metadata[0].ID != "input" {
+		t.Fatalf("live batches after rollback = %#v, want input only", metadata)
 	}
 }
 

@@ -239,8 +239,8 @@ func (h *HealthHandler) checkMaintenance() CheckResult {
 		}
 	}
 
-	lastOK, lastAt, lastErr := h.duck.MaintenanceHealth()
-	return maintenanceResult(lastOK, lastAt, lastErr, h.started,
+	lastOK, lastAt, failures, lastErr := h.duck.MaintenanceHealth()
+	return maintenanceResult(lastOK, lastAt, lastErr, failures, h.started,
 		h.cfg.RollupInterval,
 		h.cfg.MaintenanceInterval,
 		time.Now())
@@ -249,16 +249,20 @@ func (h *HealthHandler) checkMaintenance() CheckResult {
 // maintenanceResult classifies the maintenance loop's health. now/started are
 // injected so every branch — a failing pass, never-ran-past-grace, and a loop
 // that stalled after a clean pass — is unit-testable without a running Duck.
-func maintenanceResult(lastOK, lastAt time.Time, lastErr error, started time.Time, rollupEvery, maintEvery time.Duration, now time.Time) CheckResult {
+func maintenanceResult(lastOK, lastAt time.Time, lastErr error, consecutiveFailures int, started time.Time, rollupEvery, maintEvery time.Duration, now time.Time) CheckResult {
 	res := CheckResult{Status: "ok"}
 	if !lastAt.IsZero() {
 		res.UpdatedAt = lastAt.UTC().Format(time.RFC3339)
 	}
 	if lastErr != nil {
 		res.Status = "degraded"
+		if consecutiveFailures >= 3 {
+			res.Status = "unhealthy"
+		}
 		res.Error = lastErr.Error()
+		res.Detail = fmt.Sprintf("%d consecutive failed passes", consecutiveFailures)
 		if !lastOK.IsZero() {
-			res.Detail = "last clean pass: " + lastOK.UTC().Format(time.RFC3339)
+			res.Detail += "; last clean pass: " + lastOK.UTC().Format(time.RFC3339)
 		}
 		return res
 	}

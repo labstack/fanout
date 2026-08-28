@@ -14,6 +14,13 @@ type fakeClock struct {
 	now time.Time
 }
 
+func waitingParquetWriters(g *parquetReadGate) int {
+	g.init()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.waiting)
+}
+
 func TestParquetGateRemovesCanceledPublisher(t *testing.T) {
 	var gate parquetReadGate
 	gate.RLock()
@@ -22,7 +29,7 @@ func TestParquetGateRemovesCanceledPublisher(t *testing.T) {
 	if err := gate.LockContext(ctx); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("LockContext error = %v, want deadline exceeded", err)
 	}
-	if got := gate.WaitingWriters(); got != 0 {
+	if got := waitingParquetWriters(&gate); got != 0 {
 		t.Fatalf("canceled publisher remained queued: %d", got)
 	}
 	gate.RUnlock()
@@ -47,7 +54,7 @@ func (c *fakeClock) Advance(d time.Duration) {
 func waitForQueuedWriter(t *testing.T, gate *parquetReadGate) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
-	for gate.WaitingWriters() == 0 {
+	for waitingParquetWriters(gate) == 0 {
 		if time.Now().After(deadline) {
 			t.Fatal("publisher never queued")
 		}
@@ -58,9 +65,9 @@ func waitForQueuedWriter(t *testing.T, gate *parquetReadGate) {
 func waitForQueuedWriters(t *testing.T, gate *parquetReadGate, count int) {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
-	for gate.WaitingWriters() < count {
+	for waitingParquetWriters(gate) < count {
 		if time.Now().After(deadline) {
-			t.Fatalf("publishers queued = %d, want %d", gate.WaitingWriters(), count)
+			t.Fatalf("publishers queued = %d, want %d", waitingParquetWriters(gate), count)
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -149,9 +156,9 @@ func TestParquetGateDistinguishesWritersQueuedAtSameInstant(t *testing.T) {
 		}
 	}
 	deadline := time.Now().Add(time.Second)
-	for gate.WaitingWriters() != 0 {
+	for waitingParquetWriters(gate) != 0 {
 		if time.Now().After(deadline) {
-			t.Fatalf("stale publisher remained queued: %d", gate.WaitingWriters())
+			t.Fatalf("stale publisher remained queued: %d", waitingParquetWriters(gate))
 		}
 		time.Sleep(time.Millisecond)
 	}

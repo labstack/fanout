@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/duckdb/duckdb-go/v2"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -19,6 +20,12 @@ type testParquetCompactor struct {
 	db         *sql.DB
 	publishErr error
 	afterSwap  func() error
+}
+
+type testParquetPublisherFunc func(context.Context, func() error) error
+
+func (f testParquetPublisherFunc) PublishParquet(ctx context.Context, publish func() error) error {
+	return f(ctx, publish)
 }
 
 func (c *testParquetCompactor) MergeParquet(ctx context.Context, signal string, inputs []string, output string) error {
@@ -269,7 +276,61 @@ func TestRepositoryDiscardsRecoverableMarkerWithoutOutput(t *testing.T) {
 	}
 }
 
-func TestRepositoryPrunesBacklogInBoundedPublications(t *testing.T) {
+func TestRepositoryRestoresInputsThroughPublicationGate(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	batch := testBatch()
+	batch.ID = "retired-input"
+	if err := repository.Commit(batch); err != nil {
+		t.Fatal(err)
+	}
+	marker := compactionMarker{
+		Output: telemetry.BatchMetadata{ID: "missing-output", Generation: 1},
+		Inputs: []string{batch.ID},
+	}
+	data, err := json.Marshal(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeDurableFile(filepath.Join(dir, "COMPACTION.json"), data); err != nil {
+		t.Fatal(err)
+	}
+	retired := filepath.Join(repository.Parquet.BatchesDir(), batch.ID+".retired-"+marker.Output.ID)
+	if err := os.Rename(repository.Parquet.BatchPath(batch.ID), retired); err != nil {
+		t.Fatal(err)
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	publisher := testParquetPublisherFunc(func(_ context.Context, publish func() error) error {
+		close(entered)
+		<-release
+		return publish()
+	})
+	done := make(chan error, 1)
+	go func() { done <- repository.RecoverParquet(context.Background(), publisher) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("recovery did not enter the publication gate")
+	}
+	if _, err := os.Stat(repository.Parquet.BatchPath(batch.ID)); !os.IsNotExist(err) {
+		t.Fatalf("input became visible before publication: %v", err)
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(repository.Parquet.BatchPath(batch.ID)); err != nil {
+		t.Fatalf("input was not restored after publication: %v", err)
+	}
+}
+
+func TestRepositoryPrunePassIsBoundedAndOldestFirst(t *testing.T) {
 	repository, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -278,9 +339,9 @@ func TestRepositoryPrunesBacklogInBoundedPublications(t *testing.T) {
 	for i := range 5 {
 		batch := testBatch()
 		batch.ID = fmt.Sprintf("expired-%d", i)
-		batch.Spans[0].IngestedAt = 1
-		batch.Logs[0].IngestedAt = 1
-		batch.Metrics[0].IngestedAt = 1
+		batch.Spans[0].IngestedAt = int64(i + 1)
+		batch.Logs[0].IngestedAt = int64(i + 1)
+		batch.Metrics[0].IngestedAt = int64(i + 1)
 		if err := repository.Commit(batch); err != nil {
 			t.Fatal(err)
 		}
@@ -290,12 +351,16 @@ func TestRepositoryPrunesBacklogInBoundedPublications(t *testing.T) {
 		publications++
 		return nil
 	}}
-	removed, err := repository.PruneParquetBacklog(context.Background(), publisher, 2, 2)
+	removed, err := repository.PruneParquetPass(context.Background(), publisher, 10, 2, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if removed != 5 || publications != 3 {
-		t.Fatalf("removed=%d publications=%d, want 5 across 3 bounded swaps", removed, publications)
+	if removed != 4 || publications != 2 {
+		t.Fatalf("removed=%d publications=%d, want 4 across 2 bounded swaps", removed, publications)
+	}
+	metadata := repository.Parquet.BatchMetadata()
+	if len(metadata) != 1 || metadata[0].ID != "expired-4" {
+		t.Fatalf("remaining batches = %#v, want newest expired-4", metadata)
 	}
 }
 

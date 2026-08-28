@@ -65,6 +65,14 @@ func (r *Repository) cleanupCompactionArtifacts() error {
 
 func (r *Repository) Close() error { return r.Parquet.Close() }
 
+// CleanupParquet removes retired inputs only while no retention or compaction
+// transaction can still need them for rollback.
+func (r *Repository) CleanupParquet() error {
+	r.compactionMu.Lock()
+	defer r.compactionMu.Unlock()
+	return r.Parquet.CleanupRetired()
+}
+
 func (r *Repository) Commit(batch Batch) error {
 	normalizeBatch(&batch)
 	if err := validateBatch(batch); err != nil {
@@ -90,18 +98,19 @@ func (r *Repository) PruneParquet(ctx context.Context, publisher ParquetPublishe
 	})
 }
 
-func (r *Repository) PruneParquetBacklog(ctx context.Context, publisher ParquetPublisher, cutoff int64, maxBatches int) (int, error) {
-	if maxBatches <= 0 {
+func (r *Repository) PruneParquetPass(ctx context.Context, publisher ParquetPublisher, cutoff int64, maxBatches, maxPublications int) (int, error) {
+	if maxBatches <= 0 || maxPublications <= 0 {
 		return 0, nil
 	}
 	total := 0
-	for {
+	for range maxPublications {
 		count, err := r.PruneParquet(ctx, publisher, cutoff, maxBatches)
 		total += count
 		if err != nil || count < maxBatches {
 			return total, err
 		}
 	}
+	return total, nil
 }
 
 func validateBatch(batch Batch) error {

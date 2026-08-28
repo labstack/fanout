@@ -165,15 +165,19 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) 
 	return selected
 }
 
-func (r *Repository) CompactParquetBacklog(ctx context.Context, compactor ParquetCompactor, maxBatches int) (int, error) {
+func (r *Repository) CompactParquetPass(ctx context.Context, compactor ParquetCompactor, maxBatches, maxPublications int) (int, error) {
+	if maxBatches <= 0 || maxPublications <= 0 {
+		return 0, nil
+	}
 	total := 0
-	for {
+	for range maxPublications {
 		count, err := r.CompactParquet(ctx, compactor, maxBatches)
 		total += count
 		if err != nil || count == 0 {
 			return total, err
 		}
 	}
+	return total, nil
 }
 
 type parquetPublishFunc func(context.Context, func() error) error
@@ -205,7 +209,9 @@ func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPubli
 		return err
 	}
 	if !stageExists && !finalExists {
-		if err := r.Parquet.RestoreRetiredInputs(marker.Inputs, marker.Output.ID); err != nil {
+		if err := r.Parquet.RestoreRetiredInputs(marker.Inputs, marker.Output.ID, func(swap func() error) error {
+			return publish(ctx, swap)
+		}); err != nil {
 			return fmt.Errorf("restore compaction %s inputs: %w", marker.Output.ID, err)
 		}
 		if err := os.Remove(filepath.Join(r.root, "COMPACTION.json")); err != nil && !errors.Is(err, os.ErrNotExist) {

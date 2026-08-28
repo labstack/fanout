@@ -294,23 +294,25 @@ func TestMaintenanceResult(t *testing.T) {
 		name           string
 		lastOK, lastAt time.Time
 		lastErr        error
+		failures       int
 		started        time.Time
 		maintEvery     time.Duration
 		wantStatus     string
 	}{
-		{"clean recent pass", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, now.Add(-2 * time.Hour), time.Hour, "ok"},
-		{"failing pass", now.Add(-3 * time.Hour), now.Add(-time.Hour), errors.New("boom"), now.Add(-4 * time.Hour), time.Hour, "degraded"},
-		{"never ran, past grace", time.Time{}, time.Time{}, nil, now.Add(-10 * time.Minute), time.Hour, "degraded"},
-		{"never ran, within grace", time.Time{}, time.Time{}, nil, now.Add(-time.Minute), time.Hour, "ok"},
-		{"stalled after clean pass", now.Add(-5 * time.Hour), now.Add(-5 * time.Hour), nil, now.Add(-6 * time.Hour), time.Hour, "degraded"},
+		{"clean recent pass", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, 0, now.Add(-2 * time.Hour), time.Hour, "ok"},
+		{"failing pass", now.Add(-3 * time.Hour), now.Add(-time.Hour), errors.New("boom"), 1, now.Add(-4 * time.Hour), time.Hour, "degraded"},
+		{"repeated failure", now.Add(-4 * time.Hour), now.Add(-time.Hour), errors.New("boom"), 3, now.Add(-5 * time.Hour), time.Hour, "unhealthy"},
+		{"never ran, past grace", time.Time{}, time.Time{}, nil, 0, now.Add(-10 * time.Minute), time.Hour, "degraded"},
+		{"never ran, within grace", time.Time{}, time.Time{}, nil, 0, now.Add(-time.Minute), time.Hour, "ok"},
+		{"stalled after clean pass", now.Add(-5 * time.Hour), now.Add(-5 * time.Hour), nil, 0, now.Add(-6 * time.Hour), time.Hour, "degraded"},
 		// maintEvery=0 must still detect staleness: the loop floors 0→1h and keeps
 		// running, so the check mirrors that (2h stale > 1h floored threshold).
-		{"stalled, interval unset (floored)", now.Add(-3 * time.Hour), now.Add(-3 * time.Hour), nil, now.Add(-4 * time.Hour), 0, "degraded"},
-		{"recent pass, interval unset", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, now.Add(-4 * time.Hour), 0, "ok"},
+		{"stalled, interval unset (floored)", now.Add(-3 * time.Hour), now.Add(-3 * time.Hour), nil, 0, now.Add(-4 * time.Hour), 0, "degraded"},
+		{"recent pass, interval unset", now.Add(-10 * time.Minute), now.Add(-10 * time.Minute), nil, 0, now.Add(-4 * time.Hour), 0, "ok"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			res := maintenanceResult(c.lastOK, c.lastAt, c.lastErr, c.started, rollupEvery, c.maintEvery, now)
+			res := maintenanceResult(c.lastOK, c.lastAt, c.lastErr, c.failures, c.started, rollupEvery, c.maintEvery, now)
 			if res.Status != c.wantStatus {
 				t.Errorf("status = %q, want %q (detail=%q err=%q)", res.Status, c.wantStatus, res.Detail, res.Error)
 			}
