@@ -811,3 +811,35 @@ func TestRepositoryOpenRejectsUnsafeCompactionMarker(t *testing.T) {
 		t.Fatalf("Open removed the invalid live marker: %v", err)
 	}
 }
+
+// TestUnresolvedCompactionRunbookExists keeps the startup log's runbook link
+// pointing at a section that exists. The log stopped restating the rollback
+// procedure because maintaining it in two places produced a string of
+// revisions that corrected one copy and left the other unsafe; a link only
+// removes that risk while it resolves, so the anchor is checked here rather
+// than trusted.
+func TestUnresolvedCompactionRunbookExists(t *testing.T) {
+	const guide = "../../../site/src/content/docs/guides/troubleshoot.mdx"
+	data, err := os.ReadFile(guide)
+	if err != nil {
+		t.Fatalf("read the runbook the startup log links to: %v", err)
+	}
+	_, anchor, found := strings.Cut(compactionRunbookURL, "#")
+	if !found {
+		t.Fatalf("runbook URL %q has no anchor", compactionRunbookURL)
+	}
+	var headings []string
+	for _, line := range strings.Split(string(data), "\n") {
+		title, isHeading := strings.CutPrefix(line, "## ")
+		if !isHeading {
+			continue
+		}
+		slug := strings.ToLower(strings.TrimSpace(title))
+		slug = strings.Join(strings.Fields(slug), "-")
+		headings = append(headings, slug)
+		if slug == anchor {
+			return
+		}
+	}
+	t.Fatalf("runbook anchor %q is not a section in %s; sections are %v", anchor, guide, headings)
+}

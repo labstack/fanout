@@ -29,8 +29,7 @@ That is deliberate. The marker lists the batches the compaction retired, and
 recovery must not guess whether the original batches or their replacement are
 authoritative. A wrong guess could delete the only surviving copy of some rows,
 so Fanout stops instead and leaves things where they are: the replacement is
-either staged under
-`telemetry/compaction/` or already published as
+either staged under `telemetry/compaction/` or already published as
 `telemetry/parquet/batches/<output id>.batch`, and the retired inputs sit under
 `telemetry/parquet/batches/`, named `<id>.retired-<output id>`.
 

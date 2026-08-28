@@ -57,6 +57,15 @@ func Open(root string) (*Repository, error) {
 	return r, nil
 }
 
+// compactionRunbookURL is the manual rollback procedure. The startup log links
+// to it rather than restating it, because the procedure has preconditions that
+// are refined as the failure modes are understood, and a copy here drifts from
+// the guide silently — each revision so far has corrected one location and left
+// the other saying something the code no longer guarantees. Guidance an
+// operator can act on wrongly is worse than guidance in one place they have to
+// open. TestUnresolvedCompactionRunbookExists keeps the link honest.
+const compactionRunbookURL = "https://fanout.run/guides/troubleshoot#an-unresolved-compaction-blocks-startup"
+
 // logUnresolvedCompaction spells out the operator's options for a marker that
 // blocks startup.
 //
@@ -80,8 +89,7 @@ func (r *Repository) logUnresolvedCompaction(err error) {
 		"retired_inputs", r.Parquet.BatchesDir(),
 		"preserved_state", "the live marker is retained and startup cleanup will not run after this failure",
 		"retry", "clear the underlying cause and start again; recovery re-runs on its own",
-		"rollback_precondition", "back up telemetry first and verify every marker input exists as either <id>.batch or <id>.retired-<output id>; otherwise do not delete the replacement or marker",
-		"rollback", "after verification, rename each retired input to <id>.batch, delete both possible replacement locations (compaction/<output id> and parquet/batches/<output id>.batch), then delete the marker",
+		"runbook", compactionRunbookURL,
 		"warning", "deleting the marker on its own is not a rollback; cleanup then treats the retired inputs as reclaimable and removes them")
 }
 
