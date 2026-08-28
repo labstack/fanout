@@ -801,3 +801,70 @@ func TestRepositoryOpensDespiteUnrecoverableMarker(t *testing.T) {
 		t.Fatalf("staged output was destroyed rather than preserved: %v", err)
 	}
 }
+
+// TestRepositoryBootsRepeatedlyWithUnreadableMarker pins that setting a marker
+// aside actually ends the failure. The set-aside marker stays on disk, so any
+// boot path that errors on parsing it fails identically forever — turning the
+// mechanism meant to keep one bad marker from bricking the instance into the
+// thing that bricks it.
+func TestRepositoryBootsRepeatedlyWithUnreadableMarker(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "COMPACTION.json"), []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for boot := 1; boot <= 3; boot++ {
+		reopened, err := Open(dir)
+		if err != nil {
+			t.Fatalf("boot %d refused to start with an unreadable marker: %v", boot, err)
+		}
+		if err := reopened.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestRepositoryKeepsSetAsideCompactionStageAcrossBoots pins that the staged
+// output outlives the boot that set the marker aside. It holds the only copy of
+// that compaction's merged rows, so deleting it on the next restart leaves the
+// operator able to roll back but never to complete.
+func TestRepositoryKeepsSetAsideCompactionStageAcrossBoots(t *testing.T) {
+	dir := t.TempDir()
+	repository, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedFailedCompaction(t, dir, repository)
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stage := filepath.Join(dir, "compaction")
+	entries, err := os.ReadDir(stage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if err := os.WriteFile(filepath.Join(stage, entry.Name(), "metadata.json"), []byte("{"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for boot := 1; boot <= 3; boot++ {
+		reopened, err := Open(dir)
+		if err != nil {
+			t.Fatalf("boot %d: %v", boot, err)
+		}
+		if err := reopened.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(stage); err != nil {
+			t.Fatalf("boot %d deleted the set-aside compaction's staged output: %v", boot, err)
+		}
+	}
+}

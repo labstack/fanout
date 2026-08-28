@@ -156,6 +156,9 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) 
 	}
 	selected := make([]telemetry.BatchMetadata, 0, min(maxBatches, counts[chosen]))
 	for _, batch := range batches {
+		if batch.MaxIngestedNanos <= 0 {
+			continue
+		}
 		if (compactionKey{day: batch.MaxIngestedNanos / int64(24*time.Hour), generation: batch.Generation}) == chosen {
 			selected = append(selected, batch)
 			if len(selected) == maxBatches {

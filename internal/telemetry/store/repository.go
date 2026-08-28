@@ -60,7 +60,6 @@ func Open(root string) (*Repository, error) {
 	// live storage. Set it aside instead and come up degraded. Nothing is
 	// deleted — the staged output and the retired inputs both survive — so the
 	// compaction can still be completed or rolled back by hand.
-	quarantined := false
 	if err := r.recoverCompaction(context.Background(), func(ctx context.Context, publish func(context.Context) error) error { return publish(ctx) }); err != nil {
 		slog.Error("Parquet compaction recovery failed at open; setting marker aside",
 			"err", err, "marker", quarantinedMarkerName)
@@ -68,9 +67,8 @@ func Open(root string) (*Repository, error) {
 			_ = r.Close()
 			return nil, errors.Join(fmt.Errorf("recover Parquet compaction: %w", err), quarantineErr)
 		}
-		quarantined = true
 	}
-	if err := r.cleanupCompactionArtifacts(quarantined); err != nil {
+	if err := r.cleanupCompactionArtifacts(); err != nil {
 		_ = r.Close()
 		return nil, fmt.Errorf("clean Parquet compaction staging: %w", err)
 	}
@@ -82,10 +80,18 @@ func Open(root string) (*Repository, error) {
 }
 
 // cleanupCompactionArtifacts drops staging left by an interrupted compaction.
-// preserveStage keeps the staged output for a marker that was set aside, which
-// is the only copy of that compaction's merged rows.
-func (r *Repository) cleanupCompactionArtifacts(preserveStage bool) error {
-	if !preserveStage {
+//
+// A set-aside marker keeps its staged output: that directory holds the only
+// copy of the compaction's merged rows, and it has to survive every boot the
+// marker survives, not just the one that set it aside — otherwise the promise
+// that an operator can still complete the compaction by hand lasts exactly one
+// restart.
+func (r *Repository) cleanupCompactionArtifacts() error {
+	setAside, err := pathExists(filepath.Join(r.root, quarantinedMarkerName))
+	if err != nil {
+		return err
+	}
+	if !setAside {
 		if err := os.RemoveAll(filepath.Join(r.root, "compaction")); err != nil {
 			return err
 		}
@@ -125,9 +131,12 @@ func (r *Repository) CleanupParquet() error {
 }
 
 func (r *Repository) cleanupRetired() error {
-	protected, err := r.protectedRetiredSuffixes()
+	protected, protectAll, err := r.protectedRetiredSuffixes()
 	if err != nil {
 		return err
+	}
+	if protectAll {
+		return nil
 	}
 	entries, err := os.ReadDir(r.Parquet.BatchesDir())
 	if err != nil {
@@ -167,25 +176,32 @@ func protectedRetired(name string, protected map[string]bool) bool {
 // protectedRetiredSuffixes names the retired-input sets that a live or
 // set-aside compaction marker may still need in order to roll back. Deleting
 // one of those is unrecoverable: the input is gone and its rows were never
-// published under the replacement. An unreadable marker therefore fails
-// closed rather than protecting nothing.
-func (r *Repository) protectedRetiredSuffixes() (map[string]bool, error) {
-	protected := make(map[string]bool)
+// published under the replacement.
+//
+// A marker whose contents cannot be parsed names nothing, so protectAll tells
+// the caller to delete no retired directory at all. Returning an error instead
+// would fail Open on every boot — the marker is already set aside and stays on
+// disk, so the failure repeats forever and cleanup can never run, which is the
+// outcome setting it aside exists to avoid.
+func (r *Repository) protectedRetiredSuffixes() (protected map[string]bool, protectAll bool, err error) {
+	protected = make(map[string]bool)
 	for _, name := range []string{"COMPACTION.json", quarantinedMarkerName} {
 		data, err := os.ReadFile(filepath.Join(r.root, name))
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		var marker compactionMarker
 		if err := json.Unmarshal(data, &marker); err != nil {
-			return nil, fmt.Errorf("read compaction marker %s: %w", name, err)
+			slog.Error("compaction marker is unreadable; retaining every retired batch",
+				"marker", name, "err", err)
+			return nil, true, nil
 		}
 		protected[".retired-"+marker.Output.ID] = true
 	}
-	return protected, nil
+	return protected, false, nil
 }
 
 func (r *Repository) Commit(ctx context.Context, batch Batch) error {

@@ -277,10 +277,13 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, 
 	if err := os.Rename(stage, final); err != nil {
 		if info, statErr := os.Stat(final); statErr == nil && info.IsDir() {
 			complete = true
+			// The staged copy lost the race and is now unreferenced; drop it
+			// rather than leaving it to accumulate until the next open.
+			removeErr := os.RemoveAll(stage)
 			if err := syncDirectory(p.batchesDir); err != nil {
-				return err
+				return errors.Join(err, removeErr)
 			}
-			return p.registerBatch(final)
+			return errors.Join(p.registerBatch(final), removeErr)
 		}
 		return fmt.Errorf("publish Parquet batch: %w", err)
 	}
@@ -763,9 +766,14 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 			return err
 		}
 		defer p.unlockPublish()
-		p.mu.Lock()
-		defer p.mu.Unlock()
+		// p.mu covers only the in-memory set, never the renames and fsync
+		// below. CommitBatch's first action reads this same mutex, so holding
+		// it across filesystem work would put ingest behind I/O that the
+		// publish gate cannot see or bound — the reason PruneBefore keeps its
+		// own critical section down to the map mutation.
 		installReplacement := func() {
+			p.mu.Lock()
+			defer p.mu.Unlock()
 			for _, id := range inputs {
 				delete(p.batches, id)
 			}
@@ -776,14 +784,21 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 			for i := len(retired) - 1; i >= 0; i-- {
 				rollbackErr = errors.Join(rollbackErr, os.Rename(retired[i][1], retired[i][0]))
 			}
-			delete(p.batches, metadata.ID)
+			restore := make(map[string]*storedBatch, len(inputBatches))
 			for id, batch := range inputBatches {
 				if _, err := os.Stat(batch.dir); err == nil {
-					p.batches[id] = batch
-				} else {
-					delete(p.batches, id)
+					restore[id] = batch
 				}
 			}
+			p.mu.Lock()
+			delete(p.batches, metadata.ID)
+			for id := range inputBatches {
+				delete(p.batches, id)
+			}
+			for id, batch := range restore {
+				p.batches[id] = batch
+			}
+			p.mu.Unlock()
 			return errors.Join(rollbackErr, syncDirectory(p.batchesDir))
 		}
 		// Recovery may resume with the output already published. Move it back
@@ -797,7 +812,9 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 				return err
 			}
 			source = stage
+			p.mu.Lock()
 			delete(p.batches, metadata.ID)
+			p.mu.Unlock()
 		}
 		for _, id := range inputs {
 			active := p.BatchPath(id)
