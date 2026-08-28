@@ -810,3 +810,27 @@ func TestMaintenanceRunsOnEveryTick(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestUpdateParquetStatsDoesNotParkOnAStalledPublication pins that the gauge
+// refresh gives up rather than waiting out a stuck publication. It is the only
+// Parquet reader that runs on the rollup and maintenance loop goroutines under
+// the process context, so an unbounded wait here stops those loops entirely —
+// the same failure this storage layer has produced repeatedly, one level down.
+func TestUpdateParquetStatsDoesNotParkOnAStalledPublication(t *testing.T) {
+	d := &Duck{}
+	mustLock(&d.parquetMu)
+	defer d.parquetMu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.updateParquetStats(ctx)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("stats refresh parked on a stalled publication instead of giving up")
+	}
+}

@@ -122,6 +122,12 @@ func (r *Repository) cleanupRetired() error {
 		if !entry.IsDir() || strings.HasSuffix(name, telemetry.BatchSuffix) || !strings.Contains(name, ".retired") {
 			continue
 		}
+		// The live marker is the only thing that makes a retired directory
+		// unreclaimable, and it protects exactly one output's inputs. So
+		// removing COMPACTION.json without first renaming its
+		// <id>.retired-<output id> directories back to <id>.batch does not
+		// roll the compaction back — it makes the rows here deletable, and
+		// this loop deletes them on the next pass.
 		if protected != "" && strings.HasSuffix(name, protected) {
 			continue
 		}

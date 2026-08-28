@@ -251,29 +251,15 @@ func (r *Repository) compactionStage(id string) string {
 }
 
 func validateCompactionMarker(marker compactionMarker) error {
-	if err := validateCompactionID(marker.Output.ID); err != nil {
+	if err := telemetry.ValidateBatchID(marker.Output.ID); err != nil {
 		return fmt.Errorf("invalid compaction output: %w", err)
 	}
 	if len(marker.Inputs) == 0 {
 		return errors.New("compaction marker has no inputs")
 	}
 	for _, id := range marker.Inputs {
-		if err := validateCompactionID(id); err != nil {
+		if err := telemetry.ValidateBatchID(id); err != nil {
 			return fmt.Errorf("invalid compaction input: %w", err)
-		}
-	}
-	return nil
-}
-
-// validateCompactionID rejects marker-controlled paths before they are joined
-// to the storage root. It intentionally matches the Parquet batch-ID grammar.
-func validateCompactionID(id string) error {
-	if id == "" || len(id) > 128 || id[0] == '.' {
-		return fmt.Errorf("invalid batch ID %q", id)
-	}
-	for _, r := range id {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
-			return fmt.Errorf("invalid batch ID %q", id)
 		}
 	}
 	return nil

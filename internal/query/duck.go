@@ -84,6 +84,9 @@ const (
 const (
 	parquetDrainBudget = 2 * defaultWriterGrace
 	parquetSwapBudget  = 30 * time.Second
+	// parquetStatsWait bounds the gauge refresh, which is the only Parquet
+	// reader that runs on a loop goroutine rather than behind a request.
+	parquetStatsWait = 5 * time.Second
 )
 
 // rollupPublicationSafetyLag covers the maximum public SQL hold, publication
@@ -404,8 +407,16 @@ func (d *Duck) RunRollups(ctx context.Context) {
 }
 
 // updateParquetStats refreshes the per-signal file-count and byte-size gauges.
+//
+// The wait for the snapshot is bounded. Every other reader carries a request
+// deadline, but this one runs on the rollup and maintenance loops under the
+// process context, so an unbounded wait here would park those loops for as
+// long as a publication stayed stuck. Gauges are refreshed again next tick;
+// skipping one refresh costs nothing that waiting would not cost more.
 func (d *Duck) updateParquetStats(ctx context.Context) {
-	if err := d.lockParquetRead(ctx); err != nil {
+	statsCtx, cancel := context.WithTimeout(ctx, parquetStatsWait)
+	defer cancel()
+	if err := d.lockParquetRead(statsCtx); err != nil {
 		slog.Warn("parquet stats skipped", "err", err)
 		return
 	}

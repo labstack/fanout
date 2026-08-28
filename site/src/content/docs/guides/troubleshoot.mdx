@@ -19,6 +19,46 @@ The one that surprises people is an unrecognised variable. Fanout rejects any
 release — stops the process instead of being ignored. That is deliberate; see
 [configuration](/reference/configuration).
 
+## An unresolved compaction blocks startup
+
+One startup refusal is not about configuration. If a compaction was interrupted
+and Fanout can neither finish nor undo it, recovery fails closed and the error
+names `telemetry/COMPACTION.json`.
+
+That is deliberate. The marker lists the batches the compaction retired, and
+those directories hold the only copy of the rows it was merging. A startup that
+guessed at the rollback set could delete them, so Fanout stops instead and
+leaves everything where it is: the staged replacement under
+`telemetry/compaction/` and the retired inputs under
+`telemetry/parquet/batches/` (named `<id>.retired-<output id>`) are both intact.
+
+Usually the interruption was transient — a full disk, or the process killed
+mid-swap. **Clear the underlying cause and start Fanout again.** Recovery
+re-runs on its own and needs no manual step.
+
+If recovery keeps failing, roll the compaction back by hand. With the process
+stopped, and from `telemetry/parquet/batches/`:
+
+1. Read `telemetry/COMPACTION.json`. It is JSON, with an `output` object and an
+   `inputs` list of batch ids.
+2. For each id in `inputs`, if `<id>.retired-<output id>` exists, rename it back
+   to `<id>.batch`. Ids already present as `<id>.batch` were never retired and
+   need nothing.
+3. Delete the staged replacement directory under `telemetry/compaction/`.
+4. Delete `telemetry/COMPACTION.json`.
+5. Start Fanout.
+
+Deleting the whole `telemetry/` directory also clears the refusal, and discards
+exactly the telemetry the refusal was protecting. Neither step above needs it.
+
+:::caution[Restore the inputs before deleting the marker]
+Step 2 comes before step 4 for a reason. The marker is what protects the
+retired directories from cleanup — with it gone, the next successful startup
+treats every `*.retired-*` directory as reclaimable and removes it. Deleting
+the marker on its own is therefore not a rollback; it discards the rows the
+compaction had retired.
+:::
+
 ## An exporter is rejected
 
 Work down this list in order:

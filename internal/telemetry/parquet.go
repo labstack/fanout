@@ -156,7 +156,7 @@ func (p *ParquetStore) RowCount() uint64 {
 // therefore cannot hang ingest, while a large valid encode does not consume
 // the gate budget before it starts waiting.
 func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, spans []Span, logs []Log, metrics []Metric) error {
-	if err := validateBatchID(metadata.ID); err != nil {
+	if err := ValidateBatchID(metadata.ID); err != nil {
 		return err
 	}
 	metadata.Version = batchMetadataVersion
@@ -314,11 +314,11 @@ func (p *ParquetStore) unlockPublish() { p.publishGate <- struct{}{} }
 // RestoreRetiredInputs rolls back a compaction whose durable output vanished.
 // The complete namespace change is hidden from readers by publish.
 func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID string, publish func(func(context.Context) error) error) error {
-	if err := validateBatchID(replacementID); err != nil {
+	if err := ValidateBatchID(replacementID); err != nil {
 		return err
 	}
 	for _, id := range inputs {
-		if err := validateBatchID(id); err != nil {
+		if err := ValidateBatchID(id); err != nil {
 			return err
 		}
 	}
@@ -711,11 +711,11 @@ func (p *ParquetStore) PrepareReplacement(dir string, metadata BatchMetadata) er
 // PublishReplacement validates a prepared compacted batch, atomically swaps it
 // for its inputs while readers are pinned, then deletes retired inputs.
 func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, inputs []string, publish func(func(context.Context) error) error) error {
-	if err := validateBatchID(metadata.ID); err != nil {
+	if err := ValidateBatchID(metadata.ID); err != nil {
 		return err
 	}
 	for _, id := range inputs {
-		if err := validateBatchID(id); err != nil {
+		if err := ValidateBatchID(id); err != nil {
 			return err
 		}
 	}
@@ -1033,7 +1033,7 @@ func readBatchMetadata(path string) (BatchMetadata, error) {
 	if metadata.Version != batchMetadataVersion {
 		return BatchMetadata{}, fmt.Errorf("unsupported batch metadata version %d", metadata.Version)
 	}
-	if err := validateBatchID(metadata.ID); err != nil {
+	if err := ValidateBatchID(metadata.ID); err != nil {
 		return BatchMetadata{}, err
 	}
 	if metadata.Spans < 0 || metadata.Logs < 0 || metadata.Metrics < 0 {
@@ -1078,7 +1078,12 @@ func syncDirectory(dir string) error {
 	return f.Sync()
 }
 
-func validateBatchID(id string) error {
+// ValidateBatchID is the one grammar for identifiers that become directory
+// names under the storage root. It is exported because the store package
+// validates marker-supplied IDs against the same rule before joining them to a
+// path; a second copy there could drift and leave the two gates disagreeing
+// about what is a safe name.
+func ValidateBatchID(id string) error {
 	if id == "" || len(id) > 128 || id[0] == '.' || strings.ContainsAny(id, `/\\`) {
 		return fmt.Errorf("invalid telemetry batch ID %q", id)
 	}

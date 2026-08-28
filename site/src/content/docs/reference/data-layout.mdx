@@ -17,7 +17,7 @@ Everything Fanout persists lives under `FANOUT_DATA_DIR` (`./data` by default,
 | `telemetry/parquet/batches/_schema.batch/` | Empty schema anchors that keep every DuckDB view queryable |
 | `telemetry/parquet/staging/` | Unacknowledged writes being prepared for atomic publication |
 | `telemetry/compaction/` | Prepared replacement batches during compaction |
-| `telemetry/COMPACTION.json` | Transient durable marker for an interrupted compaction swap |
+| `telemetry/COMPACTION.json` | Durable marker for an interrupted compaction swap. Present only while one is unresolved, and blocks startup until it is — see [troubleshoot](/guides/troubleshoot) |
 | `query/catalog.duckdb` | Rebuildable DuckDB rollups and query state |
 | `query/tmp/` | Spill space for queries that exceed the memory cap |
 | `control/fanout.sqlite` | Users, sessions, dashboards, alert rules, agent history |
