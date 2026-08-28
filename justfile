@@ -184,21 +184,31 @@ ui-check:
 # and `check`: the SVG is committed, so only someone editing a diagram needs d2
 # installed at all.
 #
-# The committed SVG was produced by d2 0.7.1. d2's output changes between minor
-# versions, so a different version re-renders every file and produces a large
-# diff that looks like a change but is not — check `d2 --version` before
-# committing one.
+# D2 output changes between minor versions, so the recipe pins the generator
+# used for committed SVGs instead of depending on a contributor's installed
+# binary.
 
-# Render every d2 diagram to SVG.
+# Render every d2 diagram to SVG and publish the same assets on the docs site.
 diagrams:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v d2 >/dev/null; then
-      echo "d2 not found — install with: brew install d2" >&2
-      exit 1
-    fi
     for src in docs/diagrams/*.d2; do
-      d2 "$src" "${src%.d2}.svg"
+      go run oss.terrastruct.com/d2@v0.7.1 "$src" "${src%.d2}.svg"
+    done
+    mkdir -p site/public/diagrams
+    cp docs/diagrams/*.svg site/public/diagrams/
+
+# Fail when the site serves a diagram other than the committed documentation
+# copy. Regeneration stays a deliberate writing step.
+diagrams-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    for src in docs/diagrams/*.svg; do
+      dst="site/public/diagrams/$(basename "$src")"
+      if ! cmp -s "$src" "$dst"; then
+        echo "$dst does not match $src; run 'just diagrams'" >&2
+        exit 1
+      fi
     done
 
 # ── Documentation site ───────────────────────────────────────────────────────
@@ -233,7 +243,7 @@ site: docs-generate
 # a gate that rewrites the tree it is inspecting cannot tell you whether the
 # tree was already right. Use `just site` for the writing path during
 # development.
-site-build: docs-generate-check site-deps
+site-build: docs-generate-check diagrams-check site-deps
     cd site && npm run build
 
 # Renders the social preview card from docs/media/social-card.typ into

@@ -22,28 +22,36 @@ executable, including the React client.
 
 ![Fanout architecture](docs/diagrams/architecture.svg)
 
-Telemetry lands over OTLP/gRPC or OTLP/HTTP, is durably committed as atomic
-Parquet batches with persistent trace indexes, and is read back through a
-DuckDB query kernel that also maintains service,
-endpoint, and edge rollups. The browser client, an in-process agent, and any
+Telemetry lands over OTLP/gRPC or OTLP/HTTP. Concurrent small requests may
+share a group-commit batch, while up to four workers independently encode and
+durably publish atomic Parquet directories with persistent trace indexes.
+Targeted trace reads go through those indexes; DuckDB scans the same Parquet
+for SQL and maintains rebuildable service, endpoint, and edge rollups. The
+browser client, an in-process agent, and any
 external MCP host all reach the same typed observability contract rather than
 issuing raw SQL.
 
-Independent ingest batches encode in parallel. Rollup-cache writes are
-serialized inside DuckDB, while retention and compaction atomically swap
-immutable Parquet directories behind active readers:
+Parquet is the telemetry source of truth, DuckDB query state is disposable,
+and SQLite is reserved for transactional product state. Native compaction
+prepares replacements while reads continue and briefly gates readers only for
+the crash-safe namespace swap:
 
 ![Fanout persistence](docs/diagrams/persistence.svg)
 
 Application state (users, sessions, dashboards, alert rules, agent threads)
-lives in a separate SQLite database and never sits on the telemetry write path.
+lives in that separate SQLite database and never sits on the telemetry write
+path. There is no Iceberg, DuckLake, external catalog, or telemetry server
+database.
 
 ## Performance
 
 The bundled [`cmd/bench`](cmd/bench) driver measures authenticated ingest and
-optional dashboard read load against your hardware. Fanout does not publish a
-throughput headline until the raw reports and exact driver revision can ship
-with it; see [the benchmark publication standard](docs/benchmarking.md).
+optional dashboard read load against your hardware. Ingest, DuckDB queries,
+and native Parquet maintenance have separate coordination paths but still
+compete for the same CPU, memory bandwidth, filesystem cache, and disk. Fanout
+does not publish a throughput headline until the raw reports and exact driver
+revision can ship with it; see [the benchmark publication
+standard](docs/benchmarking.md).
 
 ## How it compares
 

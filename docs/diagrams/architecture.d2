@@ -28,6 +28,7 @@ fanout: "fanout — one Go process" {
   obs: "Typed observability contract"
   commit: "Telemetry commit workers\natomic Parquet batches"
   query: "Query kernel\nDuckDB + rollups"
+  maint: "Storage maintenance\nretention + native compaction"
   alert: "Alert engine\nrule evaluation + webhooks"
 
   ingest -> commit
@@ -39,7 +40,6 @@ fanout: "fanout — one Go process" {
   http -> obs: typed HTTP API
   obs -> query
   alert -> query: evaluates rollups
-  query -> commit: "merge and maintenance"
 }
 
 store: Storage {
@@ -56,7 +56,9 @@ clients.browser -> fanout.http: HTTPS
 clients.ext -> fanout.http: "/mcp — OAuth"
 
 fanout.commit -> store.telemetry
+fanout.query -> store.telemetry: "indexed traces + SQL scans"
 fanout.query -> store.qstate
+fanout.maint -> store.telemetry: "atomic replacement"
 fanout.http -> store.control: "users, sessions, settings, dashboards, threads"
 fanout.alert -> store.control: "rules and fired alerts"
 fanout.agent -> model: HTTPS

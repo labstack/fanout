@@ -22,18 +22,32 @@ state—users, sessions, dashboards, alert rules, and agent history—lives in S
 There is no Iceberg, DuckLake, external catalog, or server database in the
 telemetry path.
 
+<figure class="docs-diagram">
+  <a href="/diagrams/persistence.svg" class="docs-diagram__asset" aria-label="Open the Fanout persistence diagram at full size">
+    <img
+      src="/diagrams/persistence.svg"
+      alt="Fanout persistence flow: authenticated OTLP requests enter bounded group admission and parallel commit workers, publish immutable Parquet batches atomically, then serve indexed trace reads and DuckDB SQL while native maintenance prepares and swaps compacted replacements."
+      loading="lazy"
+      decoding="async"
+    />
+  </a>
+  <figcaption>Parquet is authoritative; indexes and DuckDB rollups are derived state.</figcaption>
+</figure>
+
 ## Writes are durable immediately
 
-Concurrent small OTLP requests may share one bounded Parquet batch. Up to four
+Concurrent small OTLP requests may share one group-commit batch. Up to four
 commit workers encode independent batches in parallel. Each worker writes all
-present signals, metadata, and the trace index into a staging directory, fsyncs
-them, and publishes the complete directory with one atomic rename. Fanout
+present signals and metadata into a staging directory, adds `trace.fidx` when
+spans are present, fsyncs them, and publishes the complete directory with one
+atomic rename. Fanout
 returns success only after every batch belonging to the request is published.
 
 A crash before the rename leaves only an unacknowledged staging directory,
 which startup removes. A crash after the rename leaves a complete batch that
 startup discovers directly from the filesystem. There is no separate WAL,
-manifest, catalog, timer-based flush window, or acknowledged memory-only state.
+manifest, catalog, post-acknowledgement flush timer, or acknowledged memory-only
+state.
 
 ## One authoritative copy for logs and metrics
 
@@ -49,11 +63,16 @@ stores only transactional product state.
 ## Small files are bounded by compaction
 
 Atomic ingestion creates immutable batch directories. Maintenance drains every
-eligible compaction group, combines files within bounded day/generation levels,
-builds a replacement trace index, and atomically swaps the replacement for its
-inputs. A durable compaction marker makes an interrupted swap resumable. Active
-DuckDB readers pin immutable files while retention or compaction removes them,
-so reads never lose an open input file.
+eligible compaction group, choosing inputs by both count and a 25-million-row
+ceiling. It combines same-day, same-generation files, builds a replacement trace
+index, and atomically swaps the replacement for its inputs. A durable compaction
+marker makes an interrupted swap resumable. Active DuckDB readers pin immutable
+files while retention or compaction removes them, so reads never lose an open
+input file.
+
+The expensive merge runs before readers are excluded. Only the bounded directory
+swap takes the exclusive reader gate; new ingest batches continue encoding while
+that work is prepared.
 
 Retention is based on ingestion time rather than event time. A service with a
 bad clock therefore cannot pin a batch on disk by emitting a far-future event.

@@ -13,8 +13,10 @@ Everything Fanout persists lives under `FANOUT_DATA_DIR` (`./data` by default,
 
 | Path | Holds |
 |---|---|
-| `telemetry/parquet/batches/*.batch/` | Atomic batches containing Parquet signals, metadata, and a trace index |
+| `telemetry/parquet/batches/*.batch/` | Authoritative atomic batches containing `metadata.json`, present signal Parquet files, and `trace.fidx` when spans are present |
 | `telemetry/parquet/batches/_schema.batch/` | Empty schema anchors that keep every DuckDB view queryable |
+| `telemetry/parquet/batches/*.retired-*/` | Compaction inputs retained temporarily for crash rollback; a live marker protects its own set |
+| `telemetry/parquet/batches/*.quarantined-*/` | Unreadable batches explicitly set aside by `fanout repair quarantine`; preserved but not queryable |
 | `telemetry/parquet/staging/` | Unacknowledged writes being prepared for atomic publication |
 | `telemetry/compaction/` | Prepared replacement batches during compaction |
 | `telemetry/COMPACTION.json` | Durable marker for an interrupted compaction swap. Present only while one is unresolved, and blocks startup until it is — see [troubleshoot](/guides/troubleshoot) |
@@ -25,9 +27,10 @@ Everything Fanout persists lives under `FANOUT_DATA_DIR` (`./data` by default,
 ## Why it is one unit
 
 Each published Parquet batch directory is a self-contained crash-recovery unit.
-Its trace sidecar is an index over the batch's span file, while DuckDB rollups
-can be rebuilt. Keeping the complete data directory is the supported and fastest
-restore path.
+Its metadata records row counts and time bounds; its fixed-width trace sidecar
+maps hashes to sorted span row ranges. The sidecar is verified against the
+Parquet rows by offline repair, while DuckDB rollups can be rebuilt. Keeping the
+complete data directory is the supported and fastest restore path.
 
 `control/fanout.sqlite` is independent of both in format but not in meaning: it
 holds the dashboards and alert rules that refer to the telemetry, and the

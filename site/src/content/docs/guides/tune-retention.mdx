@@ -30,26 +30,28 @@ FANOUT_MAINTENANCE_INTERVAL=1h
 This is the expensive pass: retention deletes plus full compaction. Lower it to
 reclaim space sooner, at the cost of running the heavy work more often.
 
-## Publication batching
+## Group-commit target
 
-The maximum number of telemetry rows in one atomic Parquet batch:
+The target number of telemetry rows that concurrent small requests may share in
+one atomic Parquet batch:
 
 ```sh
 FANOUT_INGEST_BATCH_SIZE=50000
 ```
 
-A larger batch can improve sustained write throughput and create fewer files
-under concurrent ingest. Every request is still acknowledged only after all of
-its Parquet batches are durably published; this setting does not create a timer
-window or put accepted telemetry at risk. Requests larger than the limit are
-split into bounded atomic batches.
+A larger target can improve sustained write throughput and create fewer files
+under concurrent ingest. Every request is still acknowledged only after its
+Parquet batch is durably published. An individual request is never split merely
+to satisfy this target: an oversized request remains one atomic batch. The
+setting controls admission grouping, not the durability boundary.
 
 ## What the knobs interact with
 
-Maintenance briefly gates readers while it swaps or removes immutable files.
-New batches continue encoding independently and need only the short publication
-lock. Running maintenance much more often still creates extra disk and CPU
-work, so change one setting at a time and watch `/-/metrics`.
+Maintenance prepares merges while reads continue, then briefly gates readers
+while it swaps or removes immutable files. New batches keep encoding and need
+only the short publication lock. Ingest, queries, and maintenance still share
+CPU, memory bandwidth, and disk, so running maintenance much more often is not
+free. Change one setting at a time and watch `/-/metrics`.
 
 The full list, with defaults and types, is in the [storage
 settings](/reference/settings/storage) reference.

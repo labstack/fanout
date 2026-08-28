@@ -38,10 +38,13 @@ loader binds.
 a machine. There is no scaling the query layer without also scaling ingest,
 because they are the same thing.
 
-**They contend.** Maintenance and rollups serialise against ingest through one
-write gate. On a busy instance, compacting harder is not free — it is traded
-against ingest headroom. [Tuning retention](/guides/tune-retention) is mostly
-about managing that trade.
+**They contend for one machine.** Parquet ingest, DuckDB reads, rollups, and
+native compaction have separate coordination paths, but they consume the same
+CPU, memory bandwidth, filesystem cache, and disk. Maintenance excludes readers
+only for bounded namespace changes—compaction swaps and retention removals; the
+merge itself runs outside that gate.
+Compacting harder is still traded against ingest and query headroom. [Tuning
+retention](/guides/tune-retention) is mostly about managing that trade.
 
 **One process is one failure domain.** Nothing degrades independently. A process
 that dies takes ingest, query, alerting and the UI with it.
