@@ -26,9 +26,10 @@ and Fanout can neither finish nor undo it, recovery fails closed and the error
 names `telemetry/COMPACTION.json`.
 
 That is deliberate. The marker lists the batches the compaction retired, and
-those directories hold the only copy of the rows it was merging. A startup that
-guessed at the rollback set could delete them, so Fanout stops instead and
-leaves things where they are: the replacement is either staged under
+recovery must not guess whether the original batches or their replacement are
+authoritative. A wrong guess could delete the only surviving copy of some rows,
+so Fanout stops instead and leaves things where they are: the replacement is
+either staged under
 `telemetry/compaction/` or already published as
 `telemetry/parquet/batches/<output id>.batch`, and the retired inputs sit under
 `telemetry/parquet/batches/`, named `<id>.retired-<output id>`.
@@ -43,16 +44,17 @@ mid-swap. **Clear the underlying cause and start Fanout again.** Recovery
 re-runs on its own and needs no manual step.
 
 If recovery keeps failing, roll the compaction back by hand. With the process
-stopped, and from `telemetry/parquet/batches/`:
+stopped, use `telemetry/parquet/batches/` as the batch directory:
 
 1. Read `telemetry/COMPACTION.json`. It is JSON, with an `output` object and an
    `inputs` list of batch ids.
-2. Back up `telemetry/`, then check every id in `inputs`. Each must exist as
-   either `<id>.batch` (never retired) or `<id>.retired-<output id>` (retired,
-   restorable). **If any id is missing in both forms, stop here.** Its rows now
-   survive only inside the replacement, so deleting the replacement or the
-   marker would destroy them. Recover that batch from a backup, or complete the
-   compaction instead of rolling it back.
+2. Back up `telemetry/`, then check every id in `inputs`. Each must exist in
+   exactly one form: `<id>.batch` (never retired) or
+   `<id>.retired-<output id>` (retired, restorable). **If an id exists in both
+   forms or neither form, stop here.** Both forms make the authoritative copy
+   ambiguous; neither means its rows may survive only inside the replacement.
+   Reconcile the batch from the backup, or complete the compaction instead of
+   rolling it back.
 3. Rename each `<id>.retired-<output id>` back to `<id>.batch`.
 4. Delete `telemetry/compaction/<output id>` if it exists.
 5. Delete `telemetry/parquet/batches/<output id>.batch` if it exists. Leaving
