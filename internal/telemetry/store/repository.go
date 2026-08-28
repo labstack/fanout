@@ -78,9 +78,10 @@ func (r *Repository) logUnresolvedCompaction(err error) {
 		"marker", filepath.Join(r.root, "COMPACTION.json"),
 		"compaction_staging", filepath.Join(r.root, "compaction"),
 		"retired_inputs", r.Parquet.BatchesDir(),
-		"nothing_deleted", "the replacement — staged as compaction/<output id>, or already published as parquet/batches/<output id>.batch — and the retired inputs (named <id>.retired-<output id>) are all intact",
+		"preserved_state", "the live marker is retained and startup cleanup will not run after this failure",
 		"retry", "clear the underlying cause and start again; recovery re-runs on its own",
-		"rollback", "rename every <id>.retired-<output id> directory to <id>.batch, delete both possible replacement locations (compaction/<output id> and parquet/batches/<output id>.batch), then delete the marker",
+		"rollback_precondition", "back up telemetry first and verify every marker input exists as either <id>.batch or <id>.retired-<output id>; otherwise do not delete the replacement or marker",
+		"rollback", "after verification, rename each retired input to <id>.batch, delete both possible replacement locations (compaction/<output id> and parquet/batches/<output id>.batch), then delete the marker",
 		"warning", "deleting the marker on its own is not a rollback; cleanup then treats the retired inputs as reclaimable and removes them")
 }
 
