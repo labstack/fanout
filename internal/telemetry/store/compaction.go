@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -189,31 +188,12 @@ func (r *Repository) CompactParquetPass(ctx context.Context, compactor ParquetCo
 
 type parquetPublishFunc func(context.Context, func(context.Context) error) error
 
-// RecoverParquet resolves a pending compaction marker. A marker that keeps
-// failing is set aside after maxCompactionRecoveryAttempts so it stops gating
-// the rest of maintenance; see quarantineCompactionMarker for why that
-// preserves every input and output it touched.
+// RecoverParquet resolves a pending compaction marker before any cleanup,
+// retention, or new compaction can mutate its rollback set.
 func (r *Repository) RecoverParquet(ctx context.Context, publisher ParquetPublisher) error {
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
-	err := r.recoverCompaction(ctx, publisher.PublishParquet)
-	if err == nil {
-		r.recoveryFailures = 0
-		return nil
-	}
-	// A cancelled pass says nothing about the marker: shutdown and publication
-	// contention must not count toward giving up on it.
-	if ctx.Err() != nil {
-		return err
-	}
-	r.recoveryFailures++
-	if r.recoveryFailures < maxCompactionRecoveryAttempts {
-		return err
-	}
-	slog.Error("Parquet compaction recovery failed repeatedly; setting marker aside",
-		"attempts", r.recoveryFailures, "err", err, "marker", quarantinedMarkerName)
-	r.recoveryFailures = 0
-	return errors.Join(err, r.quarantineCompactionMarker())
+	return r.recoverCompaction(ctx, publisher.PublishParquet)
 }
 
 func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPublishFunc) error {
@@ -226,6 +206,9 @@ func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPubli
 	}
 	var marker compactionMarker
 	if err := json.Unmarshal(data, &marker); err != nil {
+		return err
+	}
+	if err := validateCompactionMarker(marker); err != nil {
 		return err
 	}
 	stageExists, err := pathExists(r.compactionStage(marker.Output.ID))
@@ -265,6 +248,35 @@ func (r *Repository) completeCompaction(ctx context.Context, marker compactionMa
 
 func (r *Repository) compactionStage(id string) string {
 	return filepath.Join(r.root, "compaction", id)
+}
+
+func validateCompactionMarker(marker compactionMarker) error {
+	if err := validateCompactionID(marker.Output.ID); err != nil {
+		return fmt.Errorf("invalid compaction output: %w", err)
+	}
+	if len(marker.Inputs) == 0 {
+		return errors.New("compaction marker has no inputs")
+	}
+	for _, id := range marker.Inputs {
+		if err := validateCompactionID(id); err != nil {
+			return fmt.Errorf("invalid compaction input: %w", err)
+		}
+	}
+	return nil
+}
+
+// validateCompactionID rejects marker-controlled paths before they are joined
+// to the storage root. It intentionally matches the Parquet batch-ID grammar.
+func validateCompactionID(id string) error {
+	if id == "" || len(id) > 128 || id[0] == '.' {
+		return fmt.Errorf("invalid batch ID %q", id)
+	}
+	for _, r := range id {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_' || r == '.') {
+			return fmt.Errorf("invalid batch ID %q", id)
+		}
+	}
+	return nil
 }
 
 func syncFile(path string) error {

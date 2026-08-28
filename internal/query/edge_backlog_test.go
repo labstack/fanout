@@ -376,3 +376,50 @@ SELECT count(DISTINCT date_trunc('minute', start_time)) FROM telemetry.spans`).S
 	}
 	t.Logf("converged in %d passes over %d sub-windows; buckets edge=%d spans=%d", passes, wantWindows, edgeBuckets, spanBuckets)
 }
+
+func TestEdgeSubWindowShrinksForDenseIngest(t *testing.T) {
+	db := openTestDuck(t)
+	if err := CreateTables(db); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateViews(db); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	base := time.Now().UTC().Truncate(time.Minute)
+	ingested := base.UnixNano()
+	if _, err := db.ExecContext(ctx, `
+WITH input AS (SELECT CAST(? AS TIMESTAMP) AS base_time)
+INSERT INTO telemetry.spans (
+  namespace, trace_id, span_id, service, start_time, start_unix_nano,
+  ingested_at, ingested_unix_nano
+)
+SELECT
+  'default', printf('trace-%d', i), printf('span-%d', i), 'svc',
+  base_time + ((i % 30) * INTERVAL '1' MINUTE),
+  epoch_ns(base_time + ((i % 30) * INTERVAL '1' MINUTE)), base_time, ?
+FROM range(100) t(i), input`, base, ingested); err != nil {
+		t.Fatal(err)
+	}
+	var affected int64
+	if err := db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM spans
+WHERE ingested_unix_nano > ? AND ingested_unix_nano <= ?`, ingested-1, ingested).Scan(&affected); err != nil {
+		t.Fatal(err)
+	}
+	if affected != 100 {
+		t.Fatalf("affected fixture rows = %d, want 100", affected)
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	subHi, err := edgeSubWindowEnd(ctx, tx, ingested-1, ingested, base, base.Add(29*time.Minute), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := base.Add(time.Minute); !subHi.Equal(want) {
+		t.Fatalf("dense sub-window ended at %s, want %s", subHi, want)
+	}
+}

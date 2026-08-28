@@ -151,14 +151,11 @@ func (p *ParquetStore) RowCount() uint64 {
 	return count
 }
 
-// CommitBatch publishes one atomic batch directory. ctx bounds the wait for
-// the publish gate: ingest is the only caller that used to wait on it without
-// a deadline, so a publication that stalled took the ingest path down with it
-// and OTLP clients lost rows to their own timeouts. A commit that cannot get
-// the gate now fails, retries, and is counted, instead of hanging.
+// CommitBatch publishes one atomic batch directory. Preparation is allowed to
+// finish; only the final publish-gate wait is capped. A stalled publication
+// therefore cannot hang ingest, while a large valid encode does not consume
+// the gate budget before it starts waiting.
 func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, spans []Span, logs []Log, metrics []Metric) error {
-	ctx, cancel := context.WithTimeout(ctx, commitPublishWait)
-	defer cancel()
 	if err := validateBatchID(metadata.ID); err != nil {
 		return err
 	}
@@ -177,7 +174,7 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, 
 		if err != nil {
 			return err
 		}
-		if err := p.lockPublish(ctx); err != nil {
+		if err := p.lockCommitPublish(ctx); err != nil {
 			return err
 		}
 		defer p.unlockPublish()
@@ -266,7 +263,7 @@ func (p *ParquetStore) CommitBatch(ctx context.Context, metadata BatchMetadata, 
 		prepared.traces.path = filepath.Join(final, "trace.fidx")
 	}
 
-	if err := p.lockPublish(ctx); err != nil {
+	if err := p.lockCommitPublish(ctx); err != nil {
 		return err
 	}
 	defer p.unlockPublish()
@@ -304,6 +301,12 @@ func (p *ParquetStore) lockPublish(ctx context.Context) error {
 	case <-p.publishGate:
 		return nil
 	}
+}
+
+func (p *ParquetStore) lockCommitPublish(ctx context.Context) error {
+	waitCtx, cancel := context.WithTimeout(ctx, commitPublishWait)
+	defer cancel()
+	return p.lockPublish(waitCtx)
 }
 
 func (p *ParquetStore) unlockPublish() { p.publishGate <- struct{}{} }

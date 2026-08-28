@@ -654,12 +654,10 @@ func seedFailedCompaction(t *testing.T, dir string, repository *Repository) {
 	}
 }
 
-// TestRepositorySetsAsideUnrecoverableMarker pins the give-up path. A marker
-// that cannot be recovered correctly gates retention, compaction, and retired
-// cleanup — all three can destroy what a rollback needs — so without a bound on
-// how long it may do so, one bad marker disables every form of maintenance for
-// the process lifetime while storage grows behind a healthy-looking probe.
-func TestRepositorySetsAsideUnrecoverableMarker(t *testing.T) {
+// TestRepositoryRecoveryFailureStaysLive pins fail-closed recovery. The marker
+// and rollback set remain authoritative until recovery succeeds; silently
+// bypassing them can make old inputs eligible for deletion.
+func TestRepositoryRecoveryFailureStaysLive(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)
 	if err != nil {
@@ -671,52 +669,16 @@ func TestRepositorySetsAsideUnrecoverableMarker(t *testing.T) {
 	failing := testParquetPublisherFunc(func(context.Context, func(context.Context) error) error {
 		return errors.New("publication unavailable")
 	})
-	for attempt := 1; attempt < maxCompactionRecoveryAttempts; attempt++ {
+	for attempt := 1; attempt <= 5; attempt++ {
 		if err := repository.RecoverParquet(context.Background(), failing); err == nil {
 			t.Fatalf("attempt %d: recovery reported success", attempt)
 		}
 		if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {
-			t.Fatalf("attempt %d: marker set aside too early: %v", attempt, err)
+			t.Fatalf("attempt %d: live marker was removed: %v", attempt, err)
 		}
 	}
-	if err := repository.RecoverParquet(context.Background(), failing); err == nil {
-		t.Fatal("final attempt reported success")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); !os.IsNotExist(err) {
-		t.Fatalf("marker still live after %d failures: %v", maxCompactionRecoveryAttempts, err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, quarantinedMarkerName)); err != nil {
-		t.Fatalf("marker was not preserved for the operator: %v", err)
-	}
-	// Maintenance is unblocked: recovery is a no-op now, so a later pass runs.
-	if err := repository.RecoverParquet(context.Background(), failing); err != nil {
-		t.Fatalf("maintenance still gated after the marker was set aside: %v", err)
-	}
-}
-
-// TestRepositoryCancelledRecoveryDoesNotCountTowardGivingUp keeps shutdown and
-// publication contention from being mistaken for a bad marker.
-func TestRepositoryCancelledRecoveryDoesNotCountTowardGivingUp(t *testing.T) {
-	dir := t.TempDir()
-	repository, err := Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer repository.Close()
-	seedFailedCompaction(t, dir, repository)
-
-	cancelled, cancel := context.WithCancel(context.Background())
-	cancel()
-	failing := testParquetPublisherFunc(func(ctx context.Context, _ func(context.Context) error) error {
-		return ctx.Err()
-	})
-	for range maxCompactionRecoveryAttempts * 2 {
-		if err := repository.RecoverParquet(cancelled, failing); err == nil {
-			t.Fatal("cancelled recovery reported success")
-		}
-	}
-	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {
-		t.Fatalf("cancelled attempts set the marker aside: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json.failed")); !os.IsNotExist(err) {
+		t.Fatalf("recovery created a fallback marker: %v", err)
 	}
 }
 
@@ -763,11 +725,7 @@ func TestRepositoryCleanupPreservesMarkerRollbackSet(t *testing.T) {
 	}
 }
 
-// TestRepositoryOpensDespiteUnrecoverableMarker pins that a bad marker cannot
-// stop the process from booting. Failing Open left the operator with no way to
-// run the cleanup that would clear it, so the only recovery was a manual
-// rm -rf of live storage.
-func TestRepositoryOpensDespiteUnrecoverableMarker(t *testing.T) {
+func TestRepositoryOpenFailsClosedOnUnrecoverableMarker(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)
 	if err != nil {
@@ -789,25 +747,19 @@ func TestRepositoryOpensDespiteUnrecoverableMarker(t *testing.T) {
 		}
 	}
 
-	reopened, err := Open(dir)
-	if err != nil {
-		t.Fatalf("Open refused to boot with an unrecoverable marker: %v", err)
+	if reopened, err := Open(dir); err == nil {
+		_ = reopened.Close()
+		t.Fatal("Open succeeded with an unrecoverable marker")
 	}
-	defer reopened.Close()
-	if _, err := os.Stat(filepath.Join(dir, quarantinedMarkerName)); err != nil {
-		t.Fatalf("marker was not set aside at open: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {
+		t.Fatalf("Open removed the live marker: %v", err)
 	}
 	if _, err := os.Stat(stage); err != nil {
-		t.Fatalf("staged output was destroyed rather than preserved: %v", err)
+		t.Fatalf("Open destroyed the staged output: %v", err)
 	}
 }
 
-// TestRepositoryBootsRepeatedlyWithUnreadableMarker pins that setting a marker
-// aside actually ends the failure. The set-aside marker stays on disk, so any
-// boot path that errors on parsing it fails identically forever — turning the
-// mechanism meant to keep one bad marker from bricking the instance into the
-// thing that bricks it.
-func TestRepositoryBootsRepeatedlyWithUnreadableMarker(t *testing.T) {
+func TestRepositoryOpenFailsOnUnreadableMarker(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)
 	if err != nil {
@@ -820,51 +772,42 @@ func TestRepositoryBootsRepeatedlyWithUnreadableMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	for boot := 1; boot <= 3; boot++ {
-		reopened, err := Open(dir)
-		if err != nil {
-			t.Fatalf("boot %d refused to start with an unreadable marker: %v", boot, err)
+		if reopened, err := Open(dir); err == nil {
+			_ = reopened.Close()
+			t.Fatalf("boot %d accepted an unreadable marker", boot)
 		}
-		if err := reopened.Close(); err != nil {
-			t.Fatal(err)
+		if _, err := os.Stat(filepath.Join(dir, "COMPACTION.json")); err != nil {
+			t.Fatalf("boot %d removed the unreadable marker: %v", boot, err)
 		}
 	}
 }
 
-// TestRepositoryKeepsSetAsideCompactionStageAcrossBoots pins that the staged
-// output outlives the boot that set the marker aside. It holds the only copy of
-// that compaction's merged rows, so deleting it on the next restart leaves the
-// operator able to roll back but never to complete.
-func TestRepositoryKeepsSetAsideCompactionStageAcrossBoots(t *testing.T) {
+func TestRepositoryOpenRejectsUnsafeCompactionMarker(t *testing.T) {
 	dir := t.TempDir()
 	repository, err := Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedFailedCompaction(t, dir, repository)
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	stage := filepath.Join(dir, "compaction")
-	entries, err := os.ReadDir(stage)
+	marker := compactionMarker{
+		Output: telemetry.BatchMetadata{ID: "../outside"},
+		Inputs: []string{"input"},
+	}
+	data, err := json.Marshal(marker)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, entry := range entries {
-		if err := os.WriteFile(filepath.Join(stage, entry.Name(), "metadata.json"), []byte("{"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	markerPath := filepath.Join(dir, "COMPACTION.json")
+	if err := os.WriteFile(markerPath, data, 0o600); err != nil {
+		t.Fatal(err)
 	}
-
-	for boot := 1; boot <= 3; boot++ {
-		reopened, err := Open(dir)
-		if err != nil {
-			t.Fatalf("boot %d: %v", boot, err)
-		}
-		if err := reopened.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := os.Stat(stage); err != nil {
-			t.Fatalf("boot %d deleted the set-aside compaction's staged output: %v", boot, err)
-		}
+	if reopened, err := Open(dir); err == nil {
+		_ = reopened.Close()
+		t.Fatal("Open accepted a marker-controlled path outside storage")
+	}
+	if _, err := os.Stat(markerPath); err != nil {
+		t.Fatalf("Open removed the invalid live marker: %v", err)
 	}
 }

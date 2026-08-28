@@ -377,7 +377,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 	} else if rows > 0 {
 		slog.Info("startup rollup complete", "rows", rows, "duration", time.Since(start))
 	}
-	d.updateParquetStats()
+	d.updateParquetStats(ctx)
 	maintenanceDone := make(chan struct{})
 	go func() {
 		defer close(maintenanceDone)
@@ -396,7 +396,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 			if err != nil {
 				slog.Error("rollup failed", "component", "rollup", "rows", rows, "err", err)
 			}
-			d.updateParquetStats()
+			d.updateParquetStats(ctx)
 		case <-ctx.Done():
 			return
 		}
@@ -404,7 +404,12 @@ func (d *Duck) RunRollups(ctx context.Context) {
 }
 
 // updateParquetStats refreshes the per-signal file-count and byte-size gauges.
-func (d *Duck) updateParquetStats() {
+func (d *Duck) updateParquetStats(ctx context.Context) {
+	if err := d.lockParquetRead(ctx); err != nil {
+		slog.Warn("parquet stats skipped", "err", err)
+		return
+	}
+	defer d.parquetMu.RUnlock()
 	stats, err := d.repository.Parquet.Stats()
 	if err != nil {
 		slog.Warn("parquet stats failed", "err", err)
@@ -449,7 +454,7 @@ func (d *Duck) runMaintenanceLoop(ctx context.Context) {
 		if err := d.runRepositoryMaintenance(ctx); err != nil && ctx.Err() == nil {
 			slog.Warn("telemetry maintenance failed", "err", err)
 		}
-		d.updateParquetStats()
+		d.updateParquetStats(ctx)
 	}
 	run()
 	ticker := time.NewTicker(every)
@@ -906,7 +911,10 @@ WHERE ingested_unix_nano > ?
 				nextCursor = subLo.UnixNano()
 				break
 			}
-			subHi := subLo.Add(time.Duration(edgeStartChunkNanos))
+			subHi, err := edgeSubWindowEnd(ctx, tx, windowStart, windowEnd, subLo, maxT, maxEdgeSpansPerSubWindow)
+			if err != nil {
+				return 0, err
+			}
 			if _, err := tx.ExecContext(ctx, edgeRollupDeleteSQL, windowStart, windowEnd, subLo, subHi); err != nil {
 				return 0, err
 			}
@@ -983,6 +991,12 @@ const rollupChunkNanos = int64(time.Hour)
 // (catch-up/bulk-load) can't exhaust memory. The pass loops over sub-windows.
 const edgeStartChunkNanos = int64(30 * time.Minute)
 
+// maxEdgeSpansPerSubWindow makes the start-time window adaptive under dense
+// ingest. The one-minute rollup bucket is the indivisible lower bound: a hot
+// bucket above this limit still runs as one correct aggregate instead of being
+// split into partial results.
+const maxEdgeSpansPerSubWindow int64 = 250_000
+
 // maxEdgeSubWindowsPerPass bounds how many start_time sub-windows one pass
 // processes, and with it how long that pass holds the Parquet read gate.
 //
@@ -992,10 +1006,43 @@ const edgeStartChunkNanos = int64(30 * time.Minute)
 // the gate for as long as that takes. No timeout can bound that from outside —
 // cancelling mid-transaction only discards the work and retries it forever. So
 // the pass instead stops at a fixed number of sub-windows, persists where to
-// resume, and leaves the ingested watermark where it was. Hold time is then a
-// function of this constant rather than of the dataset's shape, and every pass
-// makes durable forward progress.
+// resume, and leaves the ingested watermark where it was. Combined with the
+// adaptive row limit above, every pass makes bounded forward progress without
+// assuming a uniform event rate.
 const maxEdgeSubWindowsPerPass = 8
+
+func edgeSubWindowEnd(ctx context.Context, tx *sql.Tx, windowStart, windowEnd int64, subLo, maxT time.Time, rowLimit int64) (time.Time, error) {
+	maxEnd := maxT.Add(time.Minute)
+	subHi := subLo.Add(time.Duration(edgeStartChunkNanos))
+	if subHi.After(maxEnd) {
+		subHi = maxEnd
+	}
+	for rowLimit > 0 && subHi.Sub(subLo) > time.Minute {
+		var rows int64
+		if err := tx.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM (
+  SELECT 1
+  FROM spans
+  WHERE ingested_unix_nano > ?
+    AND ingested_unix_nano <= ?
+    AND start_time >= ?
+    AND start_time < ?
+  LIMIT ?
+)`, windowStart, windowEnd, subLo, subHi, rowLimit+1).Scan(&rows); err != nil {
+			return time.Time{}, err
+		}
+		if rows <= rowLimit {
+			break
+		}
+		minutes := int64(subHi.Sub(subLo) / time.Minute / 2)
+		if minutes < 1 {
+			minutes = 1
+		}
+		subHi = subLo.Add(time.Duration(minutes) * time.Minute)
+	}
+	return subHi, nil
+}
 
 // rollupWindow bounds one pass's scan to (start, end]. start falls back to
 // just before the oldest ingested row when there's no stored watermark, so a

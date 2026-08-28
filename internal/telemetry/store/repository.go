@@ -26,24 +26,10 @@ type Batch struct {
 // Repository publishes self-contained Parquet batch directories. The
 // directory rename is the transaction and the filesystem is the catalog.
 type Repository struct {
-	root    string
-	Parquet *telemetry.ParquetStore
-	// compactionMu guards the compaction marker and the retired directories a
-	// pending marker may still need, along with recoveryFailures.
-	compactionMu     sync.Mutex
-	recoveryFailures int
+	root         string
+	Parquet      *telemetry.ParquetStore
+	compactionMu sync.Mutex
 }
-
-// maxCompactionRecoveryAttempts bounds how many passes a marker may fail
-// recovery before it is set aside. A marker that cannot be recovered gates
-// retention, compaction, and retired-directory cleanup — correctly, since all
-// three could destroy what a rollback needs — so without a give-up path one
-// bad marker latches every form of maintenance off for the process lifetime
-// and storage grows unreclaimed behind a healthy-looking probe.
-const maxCompactionRecoveryAttempts = 3
-
-// quarantinedMarkerName is the marker set aside by quarantineCompactionMarker.
-const quarantinedMarkerName = "COMPACTION.json.failed"
 
 func Open(root string) (*Repository, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
@@ -54,19 +40,11 @@ func Open(root string) (*Repository, error) {
 		return nil, err
 	}
 	r := &Repository{root: root, Parquet: parquetStore}
-	// A marker that cannot be recovered must not keep the process from
-	// booting: refusing to start leaves the operator with no way to run the
-	// cleanup that would clear it, so the only recovery was a manual rm -rf of
-	// live storage. Set it aside instead and come up degraded. Nothing is
-	// deleted — the staged output and the retired inputs both survive — so the
-	// compaction can still be completed or rolled back by hand.
 	if err := r.recoverCompaction(context.Background(), func(ctx context.Context, publish func(context.Context) error) error { return publish(ctx) }); err != nil {
-		slog.Error("Parquet compaction recovery failed at open; setting marker aside",
-			"err", err, "marker", quarantinedMarkerName)
-		if quarantineErr := r.quarantineCompactionMarker(); quarantineErr != nil {
-			_ = r.Close()
-			return nil, errors.Join(fmt.Errorf("recover Parquet compaction: %w", err), quarantineErr)
-		}
+		r.logUnresolvedCompaction(err)
+		_ = r.Close()
+		return nil, fmt.Errorf("recover Parquet compaction (unresolved marker at %s): %w",
+			filepath.Join(root, "COMPACTION.json"), err)
 	}
 	if err := r.cleanupCompactionArtifacts(); err != nil {
 		_ = r.Close()
@@ -79,42 +57,40 @@ func Open(root string) (*Repository, error) {
 	return r, nil
 }
 
-// cleanupCompactionArtifacts drops staging left by an interrupted compaction.
+// logUnresolvedCompaction spells out the operator's options for a marker that
+// blocks startup.
 //
-// A set-aside marker keeps its staged output: that directory holds the only
-// copy of the compaction's merged rows, and it has to survive every boot the
-// marker survives, not just the one that set it aside — otherwise the promise
-// that an operator can still complete the compaction by hand lasts exactly one
-// restart.
-func (r *Repository) cleanupCompactionArtifacts() error {
-	setAside, err := pathExists(filepath.Join(r.root, quarantinedMarkerName))
-	if err != nil {
-		return err
-	}
-	if !setAside {
-		if err := os.RemoveAll(filepath.Join(r.root, "compaction")); err != nil {
-			return err
-		}
-	}
-	if err := os.Remove(filepath.Join(r.root, "COMPACTION.json.tmp")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	return syncDirectory(r.root)
+// Refusing to boot is only the safe half of the decision. A marker names the
+// retired inputs a rollback still needs, and those directories hold the only
+// copy of the rows the compaction was merging, so a startup that guessed at
+// the rollback set could delete them — which is why recovery fails closed. The
+// other half is saying where to look, because the reachable next step for an
+// instance that will not start is rm -rf of the data directory, and that
+// destroys exactly what failing closed preserved.
+//
+// The guidance is logged rather than wrapped into the error: the paths and the
+// ordering constraint do not fit an error string that composes, and the
+// rollback warning is the kind of thing an operator has to be able to read
+// once, in full, at the moment the process refuses to come up.
+func (r *Repository) logUnresolvedCompaction(err error) {
+	slog.Error("Parquet compaction is unresolved; Fanout will not start",
+		"err", err,
+		"marker", filepath.Join(r.root, "COMPACTION.json"),
+		"staged_replacement", filepath.Join(r.root, "compaction"),
+		"retired_inputs", r.Parquet.BatchesDir(),
+		"nothing_deleted", "the staged replacement and the retired inputs (named <id>.retired-<output id>) are both intact",
+		"retry", "clear the underlying cause and start again; recovery re-runs on its own",
+		"rollback", "rename every <id>.retired-<output id> directory to <id>.batch, then delete the staged replacement and the marker",
+		"warning", "deleting the marker on its own is not a rollback; cleanup then treats the retired inputs as reclaimable and removes them")
 }
 
-// quarantineCompactionMarker sets aside a marker whose recovery keeps failing
-// so it stops gating retention, compaction, and retired-directory cleanup.
-//
-// Nothing is deleted: the staged output stays, and the retired inputs are
-// protected from cleanup by protectedRetiredSuffixes, so the operator can
-// still complete or roll back the compaction by hand. This is not the
-// batch-level quarantine that was rejected — no authoritative telemetry is
-// discarded, and no batch becomes unreadable that was readable before.
-func (r *Repository) quarantineCompactionMarker() error {
-	if err := os.Rename(filepath.Join(r.root, "COMPACTION.json"), filepath.Join(r.root, quarantinedMarkerName)); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
+// cleanupCompactionArtifacts drops staging left after compaction recovery has
+// completed and consumed its live marker.
+func (r *Repository) cleanupCompactionArtifacts() error {
+	if err := os.RemoveAll(filepath.Join(r.root, "compaction")); err != nil {
+		return err
+	}
+	if err := os.Remove(filepath.Join(r.root, "COMPACTION.json.tmp")); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return syncDirectory(r.root)
@@ -131,12 +107,9 @@ func (r *Repository) CleanupParquet() error {
 }
 
 func (r *Repository) cleanupRetired() error {
-	protected, protectAll, err := r.protectedRetiredSuffixes()
+	protected, err := r.protectedRetiredSuffix()
 	if err != nil {
 		return err
-	}
-	if protectAll {
-		return nil
 	}
 	entries, err := os.ReadDir(r.Parquet.BatchesDir())
 	if err != nil {
@@ -149,7 +122,7 @@ func (r *Repository) cleanupRetired() error {
 		if !entry.IsDir() || strings.HasSuffix(name, telemetry.BatchSuffix) || !strings.Contains(name, ".retired") {
 			continue
 		}
-		if protectedRetired(name, protected) {
+		if protected != "" && strings.HasSuffix(name, protected) {
 			continue
 		}
 		if err := os.RemoveAll(filepath.Join(r.Parquet.BatchesDir(), name)); err != nil {
@@ -164,44 +137,24 @@ func (r *Repository) cleanupRetired() error {
 	return cleanupErr
 }
 
-func protectedRetired(name string, protected map[string]bool) bool {
-	for suffix := range protected {
-		if strings.HasSuffix(name, suffix) {
-			return true
-		}
+// protectedRetiredSuffix names the retired-input set a live compaction marker
+// may still need. An unreadable marker fails cleanup closed.
+func (r *Repository) protectedRetiredSuffix() (string, error) {
+	data, err := os.ReadFile(filepath.Join(r.root, "COMPACTION.json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
 	}
-	return false
-}
-
-// protectedRetiredSuffixes names the retired-input sets that a live or
-// set-aside compaction marker may still need in order to roll back. Deleting
-// one of those is unrecoverable: the input is gone and its rows were never
-// published under the replacement.
-//
-// A marker whose contents cannot be parsed names nothing, so protectAll tells
-// the caller to delete no retired directory at all. Returning an error instead
-// would fail Open on every boot — the marker is already set aside and stays on
-// disk, so the failure repeats forever and cleanup can never run, which is the
-// outcome setting it aside exists to avoid.
-func (r *Repository) protectedRetiredSuffixes() (protected map[string]bool, protectAll bool, err error) {
-	protected = make(map[string]bool)
-	for _, name := range []string{"COMPACTION.json", quarantinedMarkerName} {
-		data, err := os.ReadFile(filepath.Join(r.root, name))
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return nil, false, err
-		}
-		var marker compactionMarker
-		if err := json.Unmarshal(data, &marker); err != nil {
-			slog.Error("compaction marker is unreadable; retaining every retired batch",
-				"marker", name, "err", err)
-			return nil, true, nil
-		}
-		protected[".retired-"+marker.Output.ID] = true
+	if err != nil {
+		return "", err
 	}
-	return protected, false, nil
+	var marker compactionMarker
+	if err := json.Unmarshal(data, &marker); err != nil {
+		return "", fmt.Errorf("read live compaction marker: %w", err)
+	}
+	if err := validateCompactionMarker(marker); err != nil {
+		return "", err
+	}
+	return ".retired-" + marker.Output.ID, nil
 }
 
 func (r *Repository) Commit(ctx context.Context, batch Batch) error {

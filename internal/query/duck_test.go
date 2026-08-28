@@ -447,6 +447,33 @@ func TestIndexedTraceReadHonorsParquetGateContext(t *testing.T) {
 	}
 }
 
+func TestParquetStatsWaitForStableNamespace(t *testing.T) {
+	repository, err := telemetrystore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	d := &Duck{repository: repository}
+	mustLock(&d.parquetMu)
+	done := make(chan struct{})
+	go func() {
+		d.updateParquetStats(context.Background())
+		close(done)
+	}()
+	select {
+	case <-done:
+		d.parquetMu.Unlock()
+		t.Fatal("Parquet stats read while the batch namespace was changing")
+	case <-time.After(25 * time.Millisecond):
+	}
+	d.parquetMu.Unlock()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Parquet stats did not resume after publication")
+	}
+}
+
 func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
