@@ -84,10 +84,12 @@ const (
 const (
 	parquetDrainBudget = 2 * defaultWriterGrace
 	parquetSwapBudget  = 30 * time.Second
-	// parquetStatsWait bounds the gauge refresh, which is the only Parquet
-	// reader that runs on a loop goroutine rather than behind a request.
-	parquetStatsWait = 5 * time.Second
 )
+
+// parquetStatsWait bounds the gauge refresh, which is the only Parquet reader
+// that runs on a loop goroutine rather than behind a request. It is a variable
+// so the internal lease can be exercised without a five-second test.
+var parquetStatsWait = 5 * time.Second
 
 // rollupPublicationSafetyLag covers the maximum public SQL hold, publication
 // grace, bounded commit retries, and queued Parquet encoding with headroom for

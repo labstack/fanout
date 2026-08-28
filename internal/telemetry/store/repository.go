@@ -80,7 +80,7 @@ func (r *Repository) logUnresolvedCompaction(err error) {
 		"retired_inputs", r.Parquet.BatchesDir(),
 		"nothing_deleted", "the staged replacement and the retired inputs (named <id>.retired-<output id>) are both intact",
 		"retry", "clear the underlying cause and start again; recovery re-runs on its own",
-		"rollback", "rename every <id>.retired-<output id> directory to <id>.batch, then delete the staged replacement and the marker",
+		"rollback", "rename every <id>.retired-<output id> directory to <id>.batch, delete both possible replacement locations (compaction/<output id> and parquet/batches/<output id>.batch), then delete the marker",
 		"warning", "deleting the marker on its own is not a rollback; cleanup then treats the retired inputs as reclaimable and removes them")
 }
 

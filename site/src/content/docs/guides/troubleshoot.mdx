@@ -28,9 +28,10 @@ names `telemetry/COMPACTION.json`.
 That is deliberate. The marker lists the batches the compaction retired, and
 those directories hold the only copy of the rows it was merging. A startup that
 guessed at the rollback set could delete them, so Fanout stops instead and
-leaves everything where it is: the staged replacement under
-`telemetry/compaction/` and the retired inputs under
-`telemetry/parquet/batches/` (named `<id>.retired-<output id>`) are both intact.
+leaves everything where it is: the replacement is either staged under
+`telemetry/compaction/` or already published as
+`telemetry/parquet/batches/<output id>.batch`, and the retired inputs under
+`telemetry/parquet/batches/` (named `<id>.retired-<output id>`) remain intact.
 
 Usually the interruption was transient — a full disk, or the process killed
 mid-swap. **Clear the underlying cause and start Fanout again.** Recovery
@@ -44,9 +45,12 @@ stopped, and from `telemetry/parquet/batches/`:
 2. For each id in `inputs`, if `<id>.retired-<output id>` exists, rename it back
    to `<id>.batch`. Ids already present as `<id>.batch` were never retired and
    need nothing.
-3. Delete the staged replacement directory under `telemetry/compaction/`.
-4. Delete `telemetry/COMPACTION.json`.
-5. Start Fanout.
+3. Delete `telemetry/compaction/<output id>` if it exists.
+4. Delete `telemetry/parquet/batches/<output id>.batch` if it exists. Leaving
+   a published replacement beside the restored inputs duplicates its rows; a
+   corrupt replacement continues to block startup.
+5. Delete `telemetry/COMPACTION.json`.
+6. Start Fanout.
 
 Deleting the whole `telemetry/` directory also clears the refusal, and discards
 exactly the telemetry the refusal was protecting. Neither step above needs it.

@@ -817,20 +817,22 @@ func TestMaintenanceRunsOnEveryTick(t *testing.T) {
 // the process context, so an unbounded wait here stops those loops entirely —
 // the same failure this storage layer has produced repeatedly, one level down.
 func TestUpdateParquetStatsDoesNotParkOnAStalledPublication(t *testing.T) {
+	originalWait := parquetStatsWait
+	parquetStatsWait = 25 * time.Millisecond
+	t.Cleanup(func() { parquetStatsWait = originalWait })
+
 	d := &Duck{}
 	mustLock(&d.parquetMu)
 	defer d.parquetMu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.updateParquetStats(ctx)
+		d.updateParquetStats(context.Background())
 	}()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(time.Second):
 		t.Fatal("stats refresh parked on a stalled publication instead of giving up")
 	}
 }
