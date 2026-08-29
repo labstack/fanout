@@ -65,6 +65,15 @@
   --sl-color-gray-5: #1d2433;
   --sl-color-gray-6: #131721;
   --sl-color-black: #0b0e14;
+
+  /* Healthy, degraded, unhealthy. These three are load-bearing: they mean the
+     same thing on this site as they do inside the product, and three landing
+     components were each carrying their own copy of the hex. Tokens because
+     the dark values wash out on a light background — the pale green and coral
+     that read clearly on Ayu surfaces fall under 4.5:1 on white. */
+  --fo-status-ok: #7fd962;
+  --fo-status-warn: #ffb454;
+  --fo-status-bad: #f26d78;
 }
 
 :root[data-theme="light"] {
@@ -78,6 +87,9 @@
   --sl-color-gray-4: #a4abb4;
   --sl-color-gray-5: #d6d9dd;
   --sl-color-gray-6: #eceef0;
+  --fo-status-ok: #3c7a2a;
+  --fo-status-warn: #9a5b00;
+  --fo-status-bad: #b3352c;
   --sl-color-gray-7: #f3f4f5;
   --sl-color-black: #fcfcfc;
 }
@@ -312,5 +324,8 @@ h1#_top {
     --sl-color-gray-6: #eceef0;
     --sl-color-gray-7: #f3f4f5;
     --sl-color-black: #ffffff;
+    --fo-status-ok: #3c7a2a;
+    --fo-status-warn: #9a5b00;
+    --fo-status-bad: #b3352c;
   }
 }

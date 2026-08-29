@@ -30,7 +30,7 @@ const state = { ok: "healthy", warn: "degraded", bad: "unhealthy" };
 const spark = "M0,30 L12,26 L24,28 L36,20 L48,24 L60,16 L72,19 L84,12 L96,15 L108,9 L120,13 L132,22 L144,31 L156,27 L168,18 L180,13 L192,9 L200,7";
 ---
 
-<div class="fo-preview">
+<div class="fo-preview not-content">
   <div class="fo-chrome">
     <span class="fo-dots"><i></i><i></i><i></i></span>
     <span class="fo-url">demo.fanout.run<span> · Overview</span></span>
@@ -69,6 +69,7 @@ const spark = "M0,30 L12,26 L24,28 L36,20 L48,24 L60,16 L72,19 L84,12 L96,15 L10
         </tbody>
       </table>
       </div>
+      <p class="fo-panel-foot">5 of 47 services · worst first</p>
     </section>
 
     <section class="fo-panel">
@@ -161,6 +162,34 @@ const spark = "M0,30 L12,26 L24,28 L36,20 L48,24 L60,16 L72,19 L84,12 L96,15 L10
     background: var(--sl-color-gray-6);
   }
 
+  /* Closes the left pane. Without it the table stopped halfway down a panel
+     whose neighbour runs to the bottom, which read as a rendering fault rather
+     than as a short list. The count agrees with the Services tile beside it. */
+  .fo-panel-foot {
+    margin: 1.1rem 0 0;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--sl-color-hairline-shade);
+    font-family: var(--fo-font-display);
+    font-size: 0.66rem;
+    letter-spacing: 0.06em;
+    color: var(--sl-color-gray-4);
+  }
+
+  .fo-panel {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .fo-panel .table-wrap {
+    flex: 1;
+  }
+
+  /* The scroll wrapper is a documentation-content affordance and carries that
+     stylesheet's top margin; inside a panel the heading already sets the gap. */
+  .fo-panel .table-wrap {
+    margin-top: 0;
+  }
+
   .fo-panel h3 {
     font-family: var(--fo-font-display);
     font-size: 0.66rem;
@@ -203,13 +232,24 @@ const spark = "M0,30 L12,26 L24,28 L36,20 L48,24 L60,16 L72,19 L84,12 L96,15 L10
     color: var(--sl-color-white);
   }
 
+  /* Right-aligned, and the last column loses its trailing padding: with every
+     column left-aligned the table's slack collected in the final cell, so the
+     numbers huddled against the service names with an empty half-pane beside
+     them. Aligning on the right also lets the figures compare down a column. */
+  .fo-panel th:nth-child(n + 3),
   .fo-num {
+    text-align: right;
     font-variant-numeric: tabular-nums;
+  }
+
+  .fo-panel th:last-child,
+  .fo-panel td:last-child {
+    padding-inline-end: 0;
   }
 
   .fo-delta {
     margin-inline-start: 0.4rem;
-    color: #f26d78;
+    color: var(--fo-status-bad);
   }
 
   /* The three status hues are the palette's load-bearing ones: they mean the
@@ -226,9 +266,9 @@ const spark = "M0,30 L12,26 L24,28 L36,20 L48,24 L60,16 L72,19 L84,12 L96,15 L10
     border-radius: 50%;
   }
 
-  .fo-ok i { background: #7fd962; }
-  .fo-warn i { background: #ffb454; }
-  .fo-bad i { background: #f26d78; }
+  .fo-ok i { background: var(--fo-status-ok); }
+  .fo-warn i { background: var(--fo-status-warn); }
+  .fo-bad i { background: var(--fo-status-bad); }
 
   .fo-kpis {
     display: grid;
@@ -262,7 +302,7 @@ const spark = "M0,30 L12,26 L24,28 L36,20 L48,24 L60,16 L72,19 L84,12 L96,15 L10
     font-variant-numeric: tabular-nums;
   }
 
-  .fo-hot { color: #f26d78 !important; }
+  .fo-hot { color: var(--fo-status-bad) !important; }
 
   .fo-kpi em {
     font-family: var(--fo-font-body);

@@ -21,7 +21,7 @@ const signals = [
 const gates = ["server drops 0", "no restarts", "Parquet verified"];
 ---
 
-<div class="fo-benchmark" role="group" aria-labelledby="fo-benchmark-title" data-fo-benchmark>
+<div class="fo-benchmark not-content" role="group" aria-labelledby="fo-benchmark-title" data-fo-benchmark>
   <div class="fo-benchmark-status">
     <span class="fo-candidate-dot" aria-hidden="true"></span>
     <span>Publication candidate</span>
@@ -143,8 +143,8 @@ const gates = ["server drops 0", "no restarts", "Parquet verified"];
 
 <style>
   .fo-benchmark {
-    --fo-bench-pass: #7fd962;
-    --fo-bench-warn: #ffb454;
+    --fo-bench-pass: var(--fo-status-ok);
+    --fo-bench-warn: var(--fo-status-warn);
     /* Small type on this card sits at the 0.6rem site floor, where gray-3 on
      * the light background is only 4.16:1 — under AA. The muted token drops a
      * step darker in light mode and stays gray-3 in dark, where the card is
@@ -159,34 +159,16 @@ const gates = ["server drops 0", "no restarts", "Parquet verified"];
   }
 
   :global(:root[data-theme="light"]) .fo-benchmark {
-    --fo-bench-pass: #3c7a2a;
-    --fo-bench-warn: #9a5b00;
     --fo-bench-muted: var(--sl-color-gray-2);
   }
 
-  /* fanout.css forces the light palette for every theme under @media print, so
-   * a dark-mode reader printing this card would otherwise keep the dark-mode
-   * status and gate colours on white paper. These are local tokens, so the
-   * global print override cannot reach them — restate them here. */
+  /* fanout.css forces the light palette for every theme under @media print. The
+   * status hues follow it now that they are site tokens; this one is local, so
+   * the global print override cannot reach it — restate it here. */
   @media print {
     .fo-benchmark {
-      --fo-bench-pass: #3c7a2a;
-      --fo-bench-warn: #9a5b00;
       --fo-bench-muted: var(--sl-color-gray-2);
     }
-  }
-
-  /* Starlight gives every block that follows a sibling a 1rem top margin inside
-   * rendered content. This card draws its own separators and lays out its own
-   * grids, so each region opts out: otherwise the rules float away from what
-   * they divide, and the tiles in a row stop sharing a baseline because only
-   * the first one is exempt. */
-  .fo-benchmark .fo-benchmark-main,
-  .fo-benchmark .fo-benchmark-signals,
-  .fo-benchmark .fo-signals-grid,
-  .fo-benchmark .fo-signals-grid > div,
-  .fo-benchmark .fo-benchmark-foot {
-    margin-top: 0;
   }
 
   /* Header rail. The card reads as an assembled instrument rather than a panel

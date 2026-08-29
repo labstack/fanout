@@ -97,6 +97,16 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
           });
         });
 
+        // The copy button writes through the Clipboard API, which raises no
+        // copy event. It announces itself instead, so both paths are counted
+        // the same way.
+        document.addEventListener("fanout:copy", function (event) {
+          gtag("event", "copy_command", {
+            action: event.detail || "unknown",
+            location: "closing_cta",
+          });
+        });
+
         var tag = document.createElement("script");
         tag.async = true;
         tag.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(measurementId);
