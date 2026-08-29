@@ -1,0 +1,643 @@
+---
+/* A publication-candidate benchmark rendered as an instrument, not a claim card.
+ *
+ * Every number in this component comes from the same fanout-bench report and is
+ * also published in /explanation/performance, so no figure lives only in
+ * markup. The status line is deliberately impossible to miss: this branch
+ * previews the presentation before the required clean, repeated run replaces
+ * the candidate. Green remains a health/status colour, matching the product;
+ * throughput uses the site's violet interaction accent instead.
+ *
+ * The per-signal rates below are three separate saturation runs, not a
+ * breakdown of the sustained three-signal figure — they sum to roughly twice
+ * it, so the strip says so in text rather than leaving the reader to guess.
+ */
+const signals = [
+  { name: "Traces", unit: "spans/s", value: "220,324" },
+  { name: "Logs", unit: "records/s", value: "187,303" },
+  { name: "Metrics", unit: "points/s", value: "209,638" },
+];
+
+const gates = ["server drops 0", "no restarts", "Parquet verified"];
+---
+
+<div class="fo-benchmark" role="group" aria-labelledby="fo-benchmark-title" data-fo-benchmark>
+  <div class="fo-benchmark-status">
+    <span class="fo-candidate-dot" aria-hidden="true"></span>
+    <span>Publication candidate</span>
+    <span class="fo-status-detail">measured on one machine · <a href="/explanation/performance">methodology</a></span>
+  </div>
+
+  <div class="fo-benchmark-main">
+    <div class="fo-benchmark-headline">
+      <p class="fo-benchmark-kicker">Sustained three-signal ingest</p>
+      <p class="fo-benchmark-value" id="fo-benchmark-title">
+        296,196 <span>items/s</span>
+      </p>
+      <p class="fo-benchmark-copy">
+        Fanout's accepted-row counter over five minutes—not the load
+        generator's requested rate.
+      </p>
+
+      <div class="fo-benchmark-flow" role="img" aria-label="Traces, logs, and metrics enter one Fanout binary and are stored as verified Parquet">
+        <div class="fo-flow-inputs">
+          <span>TRACES</span>
+          <span>LOGS</span>
+          <span>METRICS</span>
+        </div>
+        <span class="fo-flow-line" aria-hidden="true"></span>
+        <span class="fo-flow-core">FANOUT<br /><small>ONE BINARY</small></span>
+        <span class="fo-flow-line" aria-hidden="true"></span>
+        <span class="fo-flow-output">PARQUET<br /><small>VERIFIED</small></span>
+      </div>
+    </div>
+
+    <figure class="fo-benchmark-chart">
+      <figcaption>
+        <span>Accepted throughput</span>
+        <span>items/s</span>
+      </figcaption>
+      <svg viewBox="0 -30 640 252" role="img" aria-labelledby="fo-chart-title fo-chart-desc">
+        <title id="fo-chart-title">Accepted three-signal throughput by generator process count</title>
+        <desc id="fo-chart-desc">Throughput rose from 38,853 items per second with one generator process per signal to a 355,938 short peak with sixteen. The five-minute sustained rate at sixteen processes, the headline figure, was 296,196. The horizontal axis doubles at every step, so its points are evenly spaced.</desc>
+        <g class="fo-grid" aria-hidden="true">
+          <line x1="66" y1="20" x2="582" y2="20"></line>
+          <line x1="66" y1="57.5" x2="582" y2="57.5"></line>
+          <line x1="66" y1="95" x2="582" y2="95"></line>
+          <line x1="66" y1="132.5" x2="582" y2="132.5"></line>
+          <line x1="66" y1="20" x2="66" y2="170"></line>
+          <line x1="195" y1="20" x2="195" y2="170"></line>
+          <line x1="324" y1="20" x2="324" y2="170"></line>
+          <line x1="453" y1="20" x2="453" y2="170"></line>
+          <line x1="582" y1="20" x2="582" y2="170"></line>
+        </g>
+        <g class="fo-y-labels">
+          <text x="54" y="24">400k</text>
+          <text x="54" y="61.5">300k</text>
+          <text x="54" y="99">200k</text>
+          <text x="54" y="136.5">100k</text>
+          <text x="54" y="174">0</text>
+        </g>
+        <path class="fo-area" d="M66 155 L195 139 L324 114 L453 56 L582 37 L582 170 L66 170 Z"></path>
+        <line class="fo-endpoint-drop" x1="582" y1="37" x2="582" y2="170"></line>
+        <path class="fo-line" pathLength="1" d="M66 155 L195 139 L324 114 L453 56 L582 37"></path>
+        <g class="fo-points">
+          <circle cx="66" cy="155" r="4"></circle>
+          <circle cx="195" cy="139" r="4"></circle>
+          <circle cx="324" cy="114" r="4"></circle>
+          <circle cx="453" cy="56" r="4"></circle>
+          <circle class="fo-point-last" cx="582" cy="37" r="4"></circle>
+        </g>
+        <g class="fo-datum" aria-hidden="true">
+          <line x1="66" y1="170" x2="582" y2="170"></line>
+          <line x1="66" y1="170" x2="66" y2="176"></line>
+          <line x1="195" y1="170" x2="195" y2="176"></line>
+          <line x1="324" y1="170" x2="324" y2="176"></line>
+          <line x1="453" y1="170" x2="453" y2="176"></line>
+          <line x1="582" y1="170" x2="582" y2="176"></line>
+        </g>
+        <g class="fo-x-labels">
+          <text x="66" y="195">1</text>
+          <text x="195" y="195">2</text>
+          <text x="324" y="195">4</text>
+          <text x="453" y="195">8</text>
+          <text x="582" y="195">16</text>
+        </g>
+        <text class="fo-axis-title" x="324" y="215">generator processes per signal · doubling, evenly spaced</text>
+        <text class="fo-endpoint-value" x="582" y="-16">355,938/s short peak</text>
+        <text class="fo-endpoint-note" x="582" y="-3">296,196/s sustained over five minutes</text>
+      </svg>
+    </figure>
+  </div>
+
+  <div class="fo-benchmark-signals">
+    <p class="fo-signals-note">
+      Each signal was also saturated on its own. These three runs are separate
+      measurements, not a breakdown of the sustained three-signal rate above.
+    </p>
+    <div class="fo-signals-grid" role="group" aria-label="Peak accepted rate per signal, each measured in its own saturation run, and the cumulative total for the whole suite">
+      {signals.map((signal) => (
+        <div>
+          <span>{signal.name} alone</span>
+          <strong>{signal.value}</strong>
+          <small>{signal.unit}</small>
+        </div>
+      ))}
+      <div class="fo-total">
+        <span>Whole suite</span>
+        <strong>153.8M</strong>
+        <small>items accepted, cumulative</small>
+      </div>
+    </div>
+  </div>
+
+  <div class="fo-benchmark-foot">
+    <div class="fo-gates" aria-label="Quality gates">
+      {gates.map((gate) => (
+        <span><i aria-hidden="true">✓</i>{gate}</span>
+      ))}
+    </div>
+    <p>v2026.8.11 · 8 logical CPUs · 15.6 GiB · same-host generators · OTLP/gRPC</p>
+  </div>
+</div>
+
+<style>
+  .fo-benchmark {
+    --fo-bench-pass: #7fd962;
+    --fo-bench-warn: #ffb454;
+    /* Small type on this card sits at the 0.6rem site floor, where gray-3 on
+     * the light background is only 4.16:1 — under AA. The muted token drops a
+     * step darker in light mode and stays gray-3 in dark, where the card is
+     * near-black and gray-3 already clears the ratio. */
+    --fo-bench-muted: var(--sl-color-gray-3);
+    margin-top: 2rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 2px;
+    overflow: hidden;
+    background: var(--sl-color-gray-6);
+    font-family: var(--fo-font-display);
+  }
+
+  :global(:root[data-theme="light"]) .fo-benchmark {
+    --fo-bench-pass: #3c7a2a;
+    --fo-bench-warn: #9a5b00;
+    --fo-bench-muted: var(--sl-color-gray-2);
+  }
+
+  /* fanout.css forces the light palette for every theme under @media print, so
+   * a dark-mode reader printing this card would otherwise keep the dark-mode
+   * status and gate colours on white paper. These are local tokens, so the
+   * global print override cannot reach them — restate them here. */
+  @media print {
+    .fo-benchmark {
+      --fo-bench-pass: #3c7a2a;
+      --fo-bench-warn: #9a5b00;
+      --fo-bench-muted: var(--sl-color-gray-2);
+    }
+  }
+
+  /* Starlight gives every block that follows a sibling a 1rem top margin inside
+   * rendered content. This card draws its own separators and lays out its own
+   * grids, so each region opts out: otherwise the rules float away from what
+   * they divide, and the tiles in a row stop sharing a baseline because only
+   * the first one is exempt. */
+  .fo-benchmark .fo-benchmark-main,
+  .fo-benchmark .fo-benchmark-signals,
+  .fo-benchmark .fo-signals-grid,
+  .fo-benchmark .fo-signals-grid > div,
+  .fo-benchmark .fo-benchmark-foot {
+    margin-top: 0;
+  }
+
+  /* Header rail. The card reads as an assembled instrument rather than a panel
+   * of text because its three surfaces step apart tonally — rail, body, and the
+   * recessed plotting well — with hairlines rather than shadows between them. */
+  .fo-benchmark-status {
+    min-height: 2.35rem;
+    padding: 0.55rem clamp(0.75rem, 2vw, 1.2rem);
+    border-bottom: 1px solid var(--sl-color-gray-5);
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    background: var(--sl-color-black);
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--sl-color-gray-2);
+  }
+
+  /* The lamp carries the status colour; the label stays neutral, so the rail
+   * reads as an instrument's state line instead of a warning banner. */
+  .fo-candidate-dot {
+    color: var(--fo-bench-warn);
+  }
+
+  .fo-status-detail a {
+    color: var(--sl-color-gray-2);
+    text-decoration-color: var(--sl-color-gray-4);
+    text-underline-offset: 0.25em;
+  }
+
+  .fo-status-detail a:hover {
+    color: var(--sl-color-accent-high);
+    text-decoration-color: currentColor;
+  }
+
+  .fo-candidate-dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 16%, transparent);
+  }
+
+  .fo-status-detail {
+    margin-inline-start: auto;
+    letter-spacing: 0.04em;
+    text-transform: none;
+    color: var(--fo-bench-muted);
+  }
+
+  .fo-benchmark-main {
+    display: grid;
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  }
+
+  .fo-benchmark-headline,
+  .fo-benchmark-chart {
+    min-width: 0;
+    padding: clamp(1.25rem, 3vw, 2rem);
+  }
+
+  .fo-benchmark-headline {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+
+  p.fo-benchmark-kicker.fo-benchmark-kicker {
+    margin: 0;
+    font-family: var(--fo-font-display);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fo-bench-muted);
+  }
+
+  p#fo-benchmark-title {
+    margin: 0.7rem 0 0;
+    max-width: none;
+    font-family: var(--fo-font-display);
+    font-size: clamp(2.25rem, 5.6vw, 4.25rem);
+    font-weight: 400;
+    line-height: 0.98;
+    letter-spacing: -0.065em;
+    color: var(--sl-color-white);
+    white-space: nowrap;
+  }
+
+  .fo-benchmark .fo-benchmark-value span {
+    font-size: 0.28em;
+    letter-spacing: 0.02em;
+    color: var(--fo-bench-muted);
+  }
+
+  p.fo-benchmark-copy.fo-benchmark-copy {
+    margin: 0.9rem 0 0;
+    max-width: 44ch;
+    font-family: var(--fo-font-body);
+    font-size: 0.82rem;
+    line-height: 1.55;
+    color: var(--fo-bench-muted);
+  }
+
+  .fo-benchmark-flow {
+    display: grid;
+    grid-template-columns: auto minmax(0.8rem, 1fr) auto minmax(0.8rem, 1fr) auto;
+    align-items: center;
+    margin-top: clamp(1.5rem, 4vw, 2.75rem);
+    padding-top: clamp(1.25rem, 3vw, 1.75rem);
+    border-top: 1px solid var(--sl-color-gray-5);
+    color: var(--fo-bench-muted);
+  }
+
+  .fo-flow-inputs {
+    display: grid;
+    gap: 0.28rem;
+    font-size: 0.6rem;
+    letter-spacing: 0.07em;
+  }
+
+  .fo-flow-line {
+    height: 1px;
+    background: var(--sl-color-gray-4);
+  }
+
+  .fo-flow-core,
+  .fo-flow-output {
+    padding: 0.55rem 0.65rem;
+    border: 1px solid var(--sl-color-gray-4);
+    border-radius: 1px;
+    font-size: 0.68rem;
+    line-height: 1.25;
+    text-align: center;
+    color: var(--sl-color-white);
+  }
+
+  .fo-flow-output {
+    border-color: color-mix(in srgb, var(--fo-bench-pass) 45%, var(--sl-color-gray-5));
+  }
+
+  .fo-flow-core small,
+  .fo-flow-output small {
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    color: var(--fo-bench-muted);
+  }
+
+  .fo-flow-output small {
+    color: var(--fo-bench-pass);
+  }
+
+  .fo-benchmark-chart {
+    margin: 0;
+    border-inline-start: 1px solid var(--sl-color-gray-5);
+    background: color-mix(in srgb, var(--sl-color-black) 74%, transparent);
+  }
+
+  .fo-benchmark-chart figcaption {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    font-size: 0.6rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fo-bench-muted);
+  }
+
+  .fo-benchmark-chart svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    margin-top: 1rem;
+    overflow: visible;
+  }
+
+  /* Ruled plotting field: fine hairlines on both axes, so the curve reads as
+   * something plotted on a measurement grid rather than a marketing sparkline.
+   * The baseline is a separate, stronger datum with ticks at each sample. */
+  .fo-grid line {
+    stroke: var(--sl-color-gray-5);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .fo-datum line {
+    stroke: var(--sl-color-gray-4);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+  }
+
+  /* Drops the sample that produced the headline onto the axis, tying the two
+   * labelled figures to the point they were measured at. */
+  .fo-endpoint-drop {
+    stroke: var(--sl-color-accent-high);
+    stroke-width: 1;
+    stroke-dasharray: 2 4;
+    opacity: 0.5;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .fo-y-labels text,
+  .fo-x-labels text,
+  .fo-axis-title {
+    fill: var(--fo-bench-muted);
+    font-family: var(--fo-font-display);
+    font-size: 12px;
+  }
+
+  .fo-y-labels text { text-anchor: end; }
+  .fo-x-labels text { text-anchor: middle; }
+
+  .fo-axis-title {
+    text-anchor: middle;
+    letter-spacing: 0.06em;
+  }
+
+  /* Anchored to the last plotted point rather than to the figure box: an
+   * absolutely positioned overlay landed on the point itself at desktop
+   * widths. Both figures for the sixteen-process run are labelled here, so the
+   * headline sustained rate appears on its own chart beside the short peak the
+   * curve actually plots. */
+  .fo-endpoint-value,
+  .fo-endpoint-note {
+    text-anchor: end;
+    font-family: var(--fo-font-display);
+  }
+
+  .fo-endpoint-value {
+    fill: var(--sl-color-white);
+    font-size: 14px;
+  }
+
+  .fo-endpoint-note {
+    fill: var(--fo-bench-muted);
+    font-size: 12px;
+  }
+
+  .fo-area {
+    fill: color-mix(in srgb, var(--sl-color-accent) 13%, transparent);
+  }
+
+  .fo-line {
+    fill: none;
+    stroke: var(--sl-color-accent-high);
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .fo-points circle {
+    fill: var(--sl-color-black);
+    stroke: var(--sl-color-accent-high);
+    stroke-width: 2;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .fo-points .fo-point-last {
+    fill: var(--sl-color-accent-high);
+  }
+
+  .fo-benchmark-signals {
+    border-top: 1px solid var(--sl-color-gray-5);
+  }
+
+  .fo-benchmark .fo-signals-note {
+    margin: 0;
+    max-width: none;
+    padding: 0.7rem clamp(0.75rem, 2vw, 1.2rem) 0;
+    font-family: var(--fo-font-body);
+    font-size: 0.7rem;
+    line-height: 1.5;
+    color: var(--fo-bench-muted);
+  }
+
+  .fo-signals-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .fo-signals-grid > div {
+    min-width: 0;
+    padding: 1rem clamp(0.75rem, 2vw, 1.2rem);
+    border-inline-start: 1px solid var(--sl-color-gray-5);
+    display: grid;
+    gap: 0.18rem;
+  }
+
+  .fo-signals-grid > div:first-child { border-inline-start: 0; }
+
+  .fo-signals-grid span,
+  .fo-signals-grid small {
+    font-size: 0.6rem;
+    color: var(--fo-bench-muted);
+  }
+
+  .fo-signals-grid span {
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .fo-signals-grid strong {
+    font-size: clamp(1rem, 2.2vw, 1.45rem);
+    font-weight: 400;
+    letter-spacing: -0.04em;
+    color: var(--sl-color-white);
+  }
+
+  /* A cumulative count, not a rate: it keeps the strip's alignment but drops
+   * the accent so it does not read as a fourth throughput figure. */
+  .fo-signals-grid > .fo-total {
+    border-inline-start-color: var(--sl-color-gray-4);
+  }
+
+  .fo-signals-grid .fo-total strong { color: var(--fo-bench-muted); }
+
+  .fo-benchmark-foot {
+    padding: 0.75rem 0.9rem;
+    border-top: 1px solid var(--sl-color-gray-5);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    background: var(--sl-color-black);
+  }
+
+  .fo-gates {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.85rem;
+  }
+
+  .fo-gates span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.6rem;
+    color: var(--sl-color-gray-2);
+  }
+
+  .fo-gates i {
+    color: var(--fo-bench-pass);
+    font-style: normal;
+  }
+
+  .fo-benchmark .fo-benchmark-foot p {
+    margin: 0;
+    max-width: none;
+    font-family: var(--fo-font-display);
+    font-size: 0.6rem;
+    line-height: 1.4;
+    text-align: right;
+    color: var(--fo-bench-muted);
+  }
+
+  @media (max-width: 52rem) {
+    .fo-benchmark-main { grid-template-columns: minmax(0, 1fr); }
+    .fo-benchmark-chart {
+      border-inline-start: 0;
+      border-top: 1px solid var(--sl-color-gray-5);
+    }
+    .fo-benchmark-foot {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+    .fo-benchmark .fo-benchmark-foot p { text-align: left; }
+  }
+
+  @media (max-width: 36rem) {
+    .fo-benchmark-status { align-items: flex-start; flex-wrap: wrap; }
+    .fo-status-detail { width: 100%; margin-inline-start: 1rem; }
+    p#fo-benchmark-title { font-size: clamp(2rem, 12vw, 3.25rem); }
+    /* The schematic reads left to right only while there is width for it. On a
+     * phone it becomes the same pipeline running down the column, so the
+     * connectors still join the stages they describe. */
+    .fo-benchmark-flow {
+      grid-template-columns: minmax(0, 1fr);
+      justify-items: center;
+      row-gap: 0.5rem;
+    }
+    .fo-flow-inputs {
+      grid-auto-flow: column;
+      gap: 0.9rem;
+    }
+    .fo-flow-line {
+      width: 1px;
+      height: 1.1rem;
+    }
+    .fo-flow-core,
+    .fo-flow-output {
+      width: 100%;
+      max-width: 11rem;
+    }
+    .fo-signals-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* The chart scales with the card, so its type has to grow inside the
+     * viewBox to stay legible once the SVG is drawn at roughly half size. */
+    .fo-y-labels text,
+    .fo-x-labels text,
+    .fo-axis-title { font-size: 16px; }
+    .fo-endpoint-value { font-size: 19px; }
+    .fo-endpoint-note { font-size: 16px; }
+    .fo-signals-grid > div:nth-child(3) { border-inline-start: 0; }
+    .fo-signals-grid > div:nth-child(n + 3) { border-top: 1px solid var(--sl-color-gray-5); }
+  }
+
+  /* The draw is normalised with pathLength="1" so the dash length matches the
+   * polyline instead of a guessed 820 user units, and it runs linearly so time
+   * along the animation is distance along the line. Each point then fades in at
+   * its own cumulative share of the path — 0, 0.244, 0.490, 0.755, 1 — and the
+   * dot lands exactly as the stroke reaches it. */
+  @media (prefers-reduced-motion: no-preference) {
+    [data-fo-benchmark][data-animate] .fo-line {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+      animation: fo-benchmark-draw 0.9s linear 0.15s forwards;
+    }
+
+    [data-fo-benchmark][data-animate] .fo-points circle {
+      opacity: 0;
+      animation: fo-benchmark-point 0.2s ease forwards;
+    }
+
+    [data-fo-benchmark][data-animate] .fo-points circle:nth-child(1) { animation-delay: 0.15s; }
+    [data-fo-benchmark][data-animate] .fo-points circle:nth-child(2) { animation-delay: 0.37s; }
+    [data-fo-benchmark][data-animate] .fo-points circle:nth-child(3) { animation-delay: 0.59s; }
+    [data-fo-benchmark][data-animate] .fo-points circle:nth-child(4) { animation-delay: 0.83s; }
+    [data-fo-benchmark][data-animate] .fo-points circle:nth-child(5) { animation-delay: 1.05s; }
+  }
+
+  @keyframes fo-benchmark-draw { to { stroke-dashoffset: 0; } }
+  @keyframes fo-benchmark-point { to { opacity: 1; } }
+</style>
+
+<script>
+  const benchmark = document.querySelector<HTMLElement>("[data-fo-benchmark]");
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  if (benchmark && !reduced && "IntersectionObserver" in window) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          benchmark.setAttribute("data-animate", "");
+          observer.disconnect();
+        }
+      },
+      // The animated styles hide the line until data-animate lands, so the card
+      // paints fully drawn and then blanks if the attribute arrives after it is
+      // already on screen. Firing on the first sliver of intersection — the
+      // status bar, well above the chart — keeps the redraw off screen.
+      { threshold: 0, rootMargin: "0px 0px -15% 0px" },
+    );
+    observer.observe(benchmark);
+  }
+</script>

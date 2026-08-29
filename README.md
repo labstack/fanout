@@ -58,8 +58,8 @@ filesystem cache, and disk.
 The current publication candidate is **296,196 accepted OpenTelemetry items per
 second** sustained for five minutes with traces, logs, and metrics arriving
 together on a machine with eight logical CPUs and 15.6 GiB of memory. It is a
-single repetition from a dirty harness checkout, not Fanout's official headline
-yet. The [performance methodology](https://fanout.run/explanation/performance)
+single run, and the benchmark harness that produced it carried uncommitted
+local changes, so it is not Fanout's official headline yet. The [performance methodology](https://fanout.run/explanation/performance)
 shows the signal breakdown, quality gates, limitations, and publication bar.
 
 ## How it compares

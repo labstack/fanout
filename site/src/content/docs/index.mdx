@@ -36,7 +36,7 @@ status: shipped
 
 import Section from "../../components/landing/Section.astro";
 import ProofStrip from "../../components/landing/ProofStrip.astro";
-import BenchmarkProof from "../../components/landing/BenchmarkProof.astro";
+import Benchmark from "../../components/landing/Benchmark.astro";
 import Preview from "../../components/landing/Preview.astro";
 import Pipeline from "../../components/landing/Pipeline.astro";
 import Contrast from "../../components/landing/Contrast.astro";
@@ -59,6 +59,19 @@ import CtaBar from "../../components/landing/CtaBar.astro";
 
 </ProofStrip>
 
+<Section eyebrow="What you look at">
+
+## Every service, one screen, no query language.
+
+Health, latency, error rate and throughput for everything reporting — with the
+slow one already at the top. The chat investigator works from the same typed
+queries this view does, so what it tells you and what you are looking at cannot
+disagree.
+
+<Preview />
+
+</Section>
+
 <Section eyebrow="Measured on one machine">
 
 ## Nearly 300,000 OpenTelemetry items a second. One binary.
@@ -71,26 +84,13 @@ resulting Parquet store passed verification. The load generators shared the
 machine, so this is an observed whole-host result—not an isolated
 storage-engine ceiling.
 
-<BenchmarkProof />
+<Benchmark />
 
-This is intentionally labeled a candidate: it is one successful repetition
-from a dirty harness checkout. It will not become Fanout's published headline
-until the clean harness repeats it three times. [Read the methodology and every
-qualification](/explanation/performance), or [run the same open-source
-harness](https://github.com/labstack/fanout-bench) on your own host.
-
-</Section>
-
-<Section eyebrow="What you look at">
-
-## Every service, one screen, no query language.
-
-Health, latency, error rate and throughput for everything reporting — with the
-slow one already at the top. The chat investigator works from the same typed
-queries this view does, so what it tells you and what you are looking at cannot
-disagree.
-
-<Preview />
+It is labeled a candidate because it is a single run: the published headline
+waits on a clean harness repeating it three times.
+[Read the methodology and every qualification](/explanation/performance), or
+[run the same open-source harness](https://github.com/labstack/fanout-bench) on
+your own host.
 
 </Section>
 

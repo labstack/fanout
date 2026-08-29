@@ -36,11 +36,24 @@ The run passed its functional quality gates: every generator exited
 successfully, Fanout reported zero dropped rows and no restart, and `fanout
 repair verify` validated the authoritative Parquet store.
 
+### Generator load, not a Fanout scaling curve
+
+The chart on the landing page plots the same run's generator sweep: one, two,
+four, eight and sixteen `telemetrygen` processes per signal, doubling at every
+step. Accepted throughput rose from 38,853 items per second at one process per
+signal to the 355,938 short peak at sixteen. That is a 9.2x gain for a 16x
+increase in generators, and the shape is the point—below sixteen processes the
+load generators, not Fanout, set the rate. Read it as evidence that the
+saturating configuration was reached, not as a scaling law for Fanout itself.
+The intermediate process counts are plotted from the same run and their exact
+values ship with the raw artifacts.
+
 :::caution[Why this is not published evidence yet]
-This was one repetition, and its benchmark checkout was dirty. The result is a
-useful design and capacity preview, but it will not become the official
-headline until the clean harness produces at least three passing repetitions
-and the raw artifacts are published together.
+This was one repetition, and the benchmark harness it ran from carried
+uncommitted local changes, so no commit identifies the code that produced it.
+The result is a useful design and capacity preview, but it will not become the
+official headline until the clean harness produces at least three passing
+repetitions and the raw artifacts are published together.
 :::
 
 ## What this number does—and does not—measure
