@@ -263,9 +263,9 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 // skipRollupToLatest advances every rollup watermark to the current max ingested
 // timestamp, so existing data is treated as already-processed rather than
 // aggregated as a backlog. This avoids a multi-minute first-rollup catch-up
-// (a wide-start_time backlog holds the write gate and starves ingest) when standing up
-// a large pre-seeded historical dataset. Runs once at boot before RunRollups, so
-// taking the write gate here is uncontended.
+// that monopolizes DuckDB write capacity when standing up a large pre-seeded
+// historical dataset. Runs once at boot before RunRollups, so taking the write
+// gate here is uncontended.
 func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	unlock := d.writeGate.Lock(writegate.WriteRollupSkip)
 	defer unlock()

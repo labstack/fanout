@@ -39,8 +39,9 @@ const outPath = (y: number) =>
   <svg viewBox="0 0 800 220" role="img" aria-labelledby="fo-fan-title">
     <title id="fo-fan-title">
       Traces, logs and metrics arrive over OTLP into a single Fanout process
-      that writes Parquet and queries it with DuckDB, and the answers leave to a
-      browser, the HTTP API, or an agent over MCP.
+      that publishes authoritative Parquet with trace indexes and uses DuckDB
+      for analytics, and the answers leave to a browser, the HTTP API, or an
+      agent over MCP.
     </title>
 
     <defs>
@@ -82,8 +83,8 @@ const outPath = (y: number) =>
       stroke-width="1.5"
     ></rect>
     <text class="fo-fan-box-title" x="400" y="92">one process</text>
-    <text class="fo-fan-box-line" x="400" y="112">Parquet on disk</text>
-    <text class="fo-fan-box-line" x="400" y="130">DuckDB in-process</text>
+    <text class="fo-fan-box-line" x="400" y="112">Parquet + trace indexes</text>
+    <text class="fo-fan-box-line" x="400" y="130">DuckDB analytics</text>
 
     <text class="fo-fan-proto" x="206" y="98">OTLP</text>
   </svg>

@@ -25,7 +25,7 @@ head:
       content: "https://fanout.run/"
 hero:
   title: See what broke without operating an observability stack.
-  tagline: Point your traces, logs and metrics at one process over OpenTelemetry. Get a fast browser client, a chat investigator that works through the evidence, and alerts — without standing up a stack to hold them.
+  tagline: Send traces, logs and metrics to one process over OpenTelemetry. Investigate incidents in the browser or through an agent, and run alerts — without operating the stack behind them.
   actions:
     - text: Install Fanout
       link: /start/install
@@ -36,6 +36,7 @@ status: shipped
 
 import Section from "../../components/landing/Section.astro";
 import ProofStrip from "../../components/landing/ProofStrip.astro";
+import BenchmarkProof from "../../components/landing/BenchmarkProof.astro";
 import Preview from "../../components/landing/Preview.astro";
 import Pipeline from "../../components/landing/Pipeline.astro";
 import Contrast from "../../components/landing/Contrast.astro";
@@ -50,13 +51,35 @@ import CtaBar from "../../components/landing/CtaBar.astro";
 
 - **OTLP native** traces, logs and metrics
 
-- **No external database** Parquet and DuckDB in-process
+- **Open local storage** authoritative Parquet, embedded queries
 
 - **One small VM** reference deployment target
 
 - **Apache-2.0** open source
 
 </ProofStrip>
+
+<Section eyebrow="Measured on one machine">
+
+## Nearly 300,000 OpenTelemetry items a second. One binary.
+
+In a five-minute publication-candidate run, Fanout accepted **296,196 spans,
+log records and metric data points per second** on a machine with eight logical
+CPUs and 15.6 GiB of memory.
+Fanout reported zero dropped rows, the process did not restart, and the
+resulting Parquet store passed verification. The load generators shared the
+machine, so this is an observed whole-host result—not an isolated
+storage-engine ceiling.
+
+<BenchmarkProof />
+
+This is intentionally labeled a candidate: it is one successful repetition
+from a dirty harness checkout. It will not become Fanout's published headline
+until the clean harness repeats it three times. [Read the methodology and every
+qualification](/explanation/performance), or [run the same open-source
+harness](https://github.com/labstack/fanout-bench) on your own host.
+
+</Section>
 
 <Section eyebrow="What you look at">
 
@@ -71,7 +94,19 @@ disagree.
 
 </Section>
 
-<Section eyebrow="The shape of it">
+<Section eyebrow="What it replaces">
+
+## Five services, or one process.
+
+This is the whole argument. Every other claim on this page follows from it — the
+short backup procedure, the single configuration, and the absence of an
+integration layer to debug at three in the morning.
+
+<Contrast />
+
+</Section>
+
+<Section eyebrow="Inside the binary">
 
 ## Three signals in, one process, answers back out.
 
@@ -89,18 +124,6 @@ it to answer. The data directory it writes is the whole of its state.
 
 </Section>
 
-<Section eyebrow="What it replaces">
-
-## Five services, or one process.
-
-This is the whole argument. Every other claim on this page follows from it — the
-short backup procedure, the single configuration, and the absence of an
-integration layer to debug at three in the morning.
-
-<Contrast />
-
-</Section>
-
 <Section eyebrow="Limits">
 
 ## What Fanout will not do.
@@ -112,7 +135,7 @@ None of them is a roadmap item phrased as a virtue.
 
 - **Not multi-tenant:** namespaces scope queries, not access. Anyone who can query the instance can query every namespace in it; an instance is one trust domain.
 - **No horizontal scale:** ingest, query and maintenance share a process and a machine. There is no scaling one without the others, because they are the same thing.
-- **No published throughput figure:** the previous benchmark was withdrawn because its raw reports and driver commit were not retained. [Measure your own hardware](/explanation/performance) instead.
+- **No universal capacity number:** the benchmark above describes one release, host and workload. Your payload cardinality, query mix and disk decide the capacity of your instance. [Measure your own hardware](/explanation/performance).
 - **No migration paths:** Fanout is pre-release. A renamed setting is renamed, not aliased, which is why an unknown variable stops the process rather than being ignored.
 
 </Refusals>

@@ -29,7 +29,7 @@ writers: "Durable write path" {
 
 authority: "Authoritative telemetry\nimmutable *.batch directories" {
   shape: cylinder
-  tooltip: Ordinary Parquet files are the source of truth; the filesystem is the catalog.
+  tooltip: Ordinary Parquet files are authoritative; published batch directories are discovered directly from the filesystem.
 }
 
 readers: Readers {

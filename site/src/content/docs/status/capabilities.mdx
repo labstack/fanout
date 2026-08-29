@@ -28,11 +28,10 @@ inline, so something reading the index knows before it fetches the page.
 Every page states its status explicitly rather than relying on the default.
 That is deliberate: `shipped` is the schema's default, so a page that says
 nothing asserts stability by silence — which is the opposite of what a
-pre-release product should do. Most pages here are `preview`, and the reasons
-are concrete rather than cautious. In the week this documentation was written,
-the ingest header was replaced, `FANOUT_MCP_PUBLIC_URL` was removed outright,
-namespace query scoping inverted, and `viewer` gained the ability to run the
-agent. Pages describing those surfaces are marked accordingly.
+pre-release product should do. Most pages here are `preview` because their
+user-facing contracts are still being refined. The marker describes the
+current stability of a capability; it does not imply an unlisted compatibility
+surface.
 
 `shipped` is reserved for what has not moved and is not expected to: what
 Fanout is, the release and install mechanics, and backing up the data
@@ -43,7 +42,7 @@ directory.
 | Capability | Status | Notes |
 |---|---|---|
 | OTLP ingest over gRPC and HTTP | shipped | Both listeners, one ingest token. |
-| Parquet storage and DuckDB queries | shipped | Local data directory; no external database. |
+| Parquet storage, trace indexes, and DuckDB analytics | shipped | Authoritative local Parquet; rebuildable DuckDB query state. |
 | Browser client | preview | Ships in the binary; surfaces still moving. |
 | Chat investigator | preview | Requires an AI provider key; disabled and logged without one. |
 | MCP tools | preview | Served at `/mcp`; the tool set is not frozen. |
@@ -54,7 +53,7 @@ directory.
 | OIDC sign-in | shipped | Provider flow, with group and domain mapping. |
 | Generated settings reference | shipped | `cmd/fanout-docgen` writes it; `just check` fails when it drifts from the type. |
 | Release checksums and provenance | shipped | `SHA256SUMS` plus GitHub build attestations on every archive. |
-| Published throughput figure | planned | Withdrawn before release; the standard a new one must meet is on [Performance](/explanation/performance). |
+| Publication benchmark | preview | A qualified candidate is visible on [Performance](/explanation/performance); repeatable public artifacts are still required. |
 | Signatures and SBOM | planned | Deliberately deferred until something consumes them. |
 | Guides for every operational task | preview | The query surface — what the browser client actually shows — has no page yet. |
 | Namespace scoping on alert rules | planned | The field is stored but evaluation ignores it; scope with `service`. |

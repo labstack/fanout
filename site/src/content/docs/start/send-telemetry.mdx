@@ -18,17 +18,11 @@ Fanout accepts traces, logs and metrics over OTLP on two listeners: gRPC on
 The raw ingest token is shown once, immediately after you create the first
 administrator. It is `fo_`-prefixed, and Fanout stores only its hash.
 
-Send it as a bearer token:
+Send it as a bearer token; this is the only accepted ingest credential form:
 
 ```text
 Authorization: Bearer fo_<token>
 ```
-
-:::caution[The `x-fanout-ingest-token` header was removed]
-Earlier builds also accepted `x-fanout-ingest-token`. That header is no longer
-accepted on either listener — an exporter still sending it is rejected as
-unauthenticated. `Authorization: Bearer` is the only form.
-:::
 
 Two things are worth knowing before you debug a rejection:
 

@@ -1,53 +1,90 @@
 ---
 title: Performance
-description: Why Fanout publishes no throughput headline, and how to measure your own hardware instead.
-summary: There is no official throughput number. The bundled driver measures your hardware, and the standard a published result would have to meet.
+description: Fanout's benchmark candidate, its limits, and how to reproduce the measurement on your hardware.
+summary: A qualified preview of Fanout's measured three-signal ingest, plus the evidence required before it becomes a published result.
 read_when:
-  - You are looking for a benchmark figure and cannot find one.
+  - You want to understand the performance figure on the landing page.
   - You need to size an instance for your own load.
 status: preview
 ---
 
-Fanout does not publish a throughput headline. That is a decision, not an
-omission, and it is worth stating plainly because the absence otherwise reads as
-something to be embarrassed about.
+Fanout has a publication candidate, not an official throughput claim yet. The
+distinction is visible beside the number because provenance is part of a
+benchmark result, not a footnote added after it.
 
-## The number that used to be here
+## Candidate result
 
-An earlier two-vCPU report quoted specific ingest and query figures. It was
-withdrawn before the first public release, for reasons that had nothing to do
-with the numbers being unflattering:
+On a machine with eight logical CPUs and 15.6 GiB of memory, Fanout v2026.8.11
+accepted **296,196 OpenTelemetry items per second** for five minutes. The load
+contained traces, logs and metrics at the same time, and Fanout and the load
+generators shared the host.
 
-- Its raw JSON reports and the exact benchmark-driver commit were not retained.
-- Its ingest run predated mandatory ingest authentication, so it measured a path
-  the current release does not have.
+| Workload | Fanout accepted/s | Offered/s | Average Fanout CPU | Peak RSS |
+|---|---:|---:|---:|---:|
+| Traces, spans | 220,324 | 320,000 | 2.45 cores | 1.2 GiB |
+| Logs, records | 187,303 | 320,000 | 3.04 cores | 1.3 GiB |
+| Metrics, data points | 209,638 | 320,000 | 1.69 cores | 1.1 GiB |
+| Three-signal short peak | 355,938 | 960,000 | 4.57 cores | 3.0 GiB |
+| Three-signal sustained | 296,196 | 960,000 | 4.90 cores | 9.4 GiB |
 
-The prose was detailed. Detail is not provenance — a result nobody can reproduce
-from the artifacts that produced it is an anecdote with decimal places.
+Accepted throughput is the change in Fanout's own
+`fanout_ingest_rows_total` counter over the measured phase. It is not the rate
+requested or reported by the generator. Across the complete saturation suite,
+Fanout accepted 153.8 million items.
 
-## What a published result would have to carry
+The run passed its functional quality gates: every generator exited
+successfully, Fanout reported zero dropped rows and no restart, and `fanout
+repair verify` validated the authoritative Parquet store.
 
-Before any figure goes back on this page, it has to ship with:
+:::caution[Why this is not published evidence yet]
+This was one repetition, and its benchmark checkout was dirty. The result is a
+useful design and capacity preview, but it will not become the official
+headline until the clean harness produces at least three passing repetitions
+and the raw artifacts are published together.
+:::
 
-- the Fanout image digest and the benchmark-driver commit;
+## What this number does—and does not—measure
+
+This is a **three-signal ingest** result: spans, log records and metric data
+points were written concurrently. It is not a read/write result. Calling it a
+mixed workload would imply that dashboard queries ran beside ingest, which
+they did not.
+
+The official read-under-write result will separately report requested,
+completed, failed and shed query rates plus p50, p95 and p99 latency. Until that
+result passes, Fanout makes no claim about interactive query capacity at the
+headline write rate.
+
+The generators shared the Fanout host, so generator CPU and memory contention
+can make the observed result lower than an isolated-server ceiling. Synthetic
+`telemetrygen` payloads are also highly compressible, so this run is not a
+storage-sizing formula for production data.
+
+## What the official result must carry
+
+Before the candidate becomes Fanout's official headline, it has to ship with:
+
+- the Fanout release artifact and checksum plus the benchmark-driver commit;
 - complete machine, network, container and Fanout configuration;
-- the raw `ingest.json` and `mixed.json` reports from that same run;
+- the raw `report.json`, `report.md` and `samples.jsonl` from that same run;
 - an authenticated OTLP path matching the current release;
-- repeated runs, or an explicit note that it is a single run;
-- separate ingest-only and mixed read/write results.
+- at least three publish-preset repetitions and their variability;
+- separate ingest-only and read-under-write results;
+- the query completion rate and latency distribution beside any read claim;
+- limitations stated next to the result rather than hidden at the bottom.
 
-## Measure your own instead
+## Reproduce it on your hardware
 
 The independent
 [Fanout Bench](https://github.com/labstack/fanout-bench) project drives the
 official OpenTelemetry `telemetrygen` client, counts rows accepted by Fanout,
 and emits raw JSON plus a publication-ready report. It can add authenticated
 dashboard reads on top, which is the part that matters.
-Parquet ingest and DuckDB reads no longer serialize through one write gate, but
-they still compete for the same CPU, memory bandwidth, filesystem cache, and
-disk. Maintenance adds native Parquet merge work and short reader-exclusive
-namespace changes. An ingest-only number therefore still overstates what an
-instance does while anyone is looking at it.
+Parquet ingest, indexed trace reads, and DuckDB analytics have separate
+coordination paths, but they still compete for the same CPU, memory bandwidth,
+filesystem cache, and disk. Maintenance adds native Parquet merge work and
+short reader-exclusive namespace changes. An ingest-only number therefore
+still overstates what an instance does while anyone is looking at it.
 
 Create a short-lived ingest token through first-admin setup, configure Fanout
 with a dedicated `FANOUT_METRICS_TOKEN`, then expose that same metrics token to
@@ -64,8 +101,19 @@ fanout-bench run \
   --same-host
 ```
 
-The harness repository documents signal-specific saturation, sustained mixed
-load, read-under-write latency, machine identity, and publication rules.
+The harness repository documents signal-specific saturation, sustained
+three-signal load, read-under-write latency, machine identity, and publication
+rules. For a publication-quality run, use the `publish` preset and retain all
+three repetitions:
+
+```sh
+fanout-bench run \
+  --host your-benchmark-host \
+  --fanout-version v2026.8.11 \
+  --preset publish \
+  --repeat 3 \
+  --output results/fanout-v2026.8.11
+```
 
 :::caution[A result describes the machine it ran on]
 Benchmark output describes the hardware and dataset you tested, not an
@@ -75,7 +123,7 @@ Fanout is sensitive to all three — [storage](/explanation/storage-model)
 explains why.
 :::
 
-## What to watch instead of a headline
+## What to watch in production
 
 For capacity, the useful signals are the ones an instance emits about itself:
 telemetry drops, sustained query latency, readiness failures, and free disk.

@@ -116,10 +116,8 @@ Work down this list in order:
    ingest token to check against, and ingest rejects everything. A collector
    started ahead of setup fails until you complete it.
 2. **Is it the right credential, in the right header?** The ingest token is
-   `fo_`-prefixed and goes in `Authorization: Bearer`. The older
-   `x-fanout-ingest-token` header was removed and is no longer accepted, so an
-   exporter that worked against an earlier build now fails as unauthenticated.
-   Browser sessions and MCP tokens are not ingest credentials either.
+   `fo_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
+   tokens are not ingest credentials.
 3. **Is the listener reachable?** The native binary binds ingest to loopback.
    From another host, that is a connection failure rather than an auth one.
 4. **Right port for the protocol?** gRPC on `4317`, HTTP on `4318`. An HTTP
