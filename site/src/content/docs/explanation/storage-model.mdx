@@ -8,19 +8,18 @@ read_when:
 status: preview
 ---
 
-Fanout uses a small embedded storage stack, not a data lake. Telemetry is retained
-as ordinary Parquet files and queried by DuckDB in the same process. Application
-state—users, sessions, dashboards, alert rules, and agent history—lives in SQLite.
+Fanout retains telemetry as ordinary Parquet files in self-contained atomic
+batch directories. Persistent sidecars index traces, and DuckDB handles SQL,
+broad scans, and rebuildable analytical rollups in the same process.
+Application state—users, sessions, dashboards, alert rules, and agent
+history—lives in SQLite.
 
 | Component | Purpose |
 |---|---|
 | Atomic Parquet batches | Authoritative retained spans, logs, and metrics |
 | Trace sidecar | Persistent row-range index for targeted trace reads from Parquet |
-| DuckDB | SQL, log filtering, aggregation, and broad analytical reads |
+| DuckDB | SQL, log filtering, broad analytical reads, and rebuildable rollups |
 | SQLite | Transactional application and identity state |
-
-There is no Iceberg, DuckLake, external catalog, or server database in the
-telemetry path.
 
 <figure class="docs-diagram">
   <a href="/diagrams/persistence.svg" class="docs-diagram__asset" aria-label="Open the Fanout persistence diagram at full size">
@@ -45,9 +44,9 @@ returns success only after every batch belonging to the request is published.
 
 A crash before the rename leaves only an unacknowledged staging directory,
 which startup removes. A crash after the rename leaves a complete batch that
-startup discovers directly from the filesystem. There is no separate WAL,
-manifest, catalog, post-acknowledgement flush timer, or acknowledged memory-only
-state.
+startup discovers directly from the filesystem. The atomic directory publish
+is both the durable commit and the unit startup discovers; acknowledgement
+occurs only after publication and parent-directory fsync complete.
 
 ## One authoritative copy for logs and metrics
 

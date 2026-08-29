@@ -39,8 +39,8 @@ type Config struct {
 	// RollupSkipToLatest, set once at boot, advances every rollup watermark to the
 	// current max ingested timestamp so existing data is treated as already-rolled-up
 	// instead of aggregated as a backlog. Stands up a large pre-seeded historical
-	// dataset (benchmarks, restores) without a multi-minute first-rollup catch-up that
-	// holds the write gate and starves ingest. Off in normal operation.
+	// dataset (benchmarks, restores) without a multi-minute first-rollup catch-up
+	// that monopolizes DuckDB write capacity. Off in normal operation.
 	RollupSkipToLatest bool   `koanf:"storage.rollup_skip_to_latest" env:"FANOUT_ROLLUP_SKIP_TO_LATEST" default:"false"`
 	DefaultNamespace   string `koanf:"ingest.default_namespace" env:"FANOUT_DEFAULT_NAMESPACE" default:"default"`
 	// PprofEnabled exposes Go's net/http/pprof handlers at /debug/pprof/* for

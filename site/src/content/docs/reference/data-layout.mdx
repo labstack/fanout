@@ -62,7 +62,7 @@ as much as byte count for query latency, which is what the compaction pass exist
 bound. [Tune retention](/guides/tune-retention) covers both.
 
 :::caution[Do not edit these files]
-Fanout owns this directory. Editing the SQLite databases directly — deleting a
-user row, for instance — cascades in ways the application would have handled and
-a manual edit will not.
+Fanout owns this directory. Editing control SQLite, DuckDB query state, or
+telemetry batches directly can violate application and storage invariants. Use
+the documented commands and APIs instead.
 :::

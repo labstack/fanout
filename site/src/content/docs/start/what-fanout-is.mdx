@@ -1,6 +1,6 @@
 ---
 title: What Fanout is
-description: One Go process that ingests OpenTelemetry, stores it as Parquet, queries it with DuckDB, and answers questions about it.
+description: One Go process that ingests OpenTelemetry, publishes authoritative Parquet, and answers questions through indexed reads and embedded analytics.
 summary: The scope of the product in one page — what the binary contains, what it deliberately does not, and who it is for.
 read_when:
   - You are deciding whether Fanout fits before installing anything.
@@ -9,9 +9,9 @@ status: preview
 ---
 
 Fanout is a single self-hosted binary for OpenTelemetry. One Go process accepts
-OTLP over gRPC and HTTP, writes telemetry to disk as Parquet, answers queries
-with DuckDB, evaluates alert rules, serves a chat investigator and MCP tools,
-and hosts the browser client.
+OTLP over gRPC and HTTP, publishes atomic Parquet batches with persistent trace
+indexes, runs DuckDB analytics and rollups, evaluates alert rules, serves a chat
+investigator and MCP tools, and hosts the browser client.
 
 <figure class="docs-diagram">
   <a href="/diagrams/architecture.svg" class="docs-diagram__asset" aria-label="Open the Fanout architecture diagram at full size">

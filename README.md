@@ -6,10 +6,12 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Go Reference](https://pkg.go.dev/badge/github.com/labstack/fanout.svg)](https://pkg.go.dev/github.com/labstack/fanout)
 
-Fanout ingests OpenTelemetry data, stores it as Parquet, queries it with DuckDB,
-and puts an AI agent in front of it — in one Go process with no external
-dependencies to operate. Point a collector at it, open the browser, and ask
-questions about your telemetry in plain language.
+Fanout ingests OpenTelemetry data, durably publishes it as atomic Parquet
+batches, and puts an AI agent in front of it — in one Go process with no
+external dependencies to operate. Persistent trace indexes serve targeted
+reads; embedded DuckDB handles SQL, broad scans, and rebuildable rollups. Point
+an SDK or Collector at it, open the browser, and ask questions about your
+telemetry in plain language.
 
 There is no separate ingester, query service, metadata database, object store,
 or dashboard server to deploy. One binary, one data directory.
@@ -31,26 +33,34 @@ browser client, an in-process agent, and any
 external MCP host all reach the same typed observability contract rather than
 issuing raw SQL.
 
-Parquet is the telemetry source of truth, DuckDB query state is disposable,
-and SQLite is reserved for transactional product state. Native compaction
+Parquet is authoritative telemetry, DuckDB query state is rebuildable, and
+SQLite is reserved for transactional product state. Native compaction
 prepares replacements while reads continue and briefly gates readers only for
 the crash-safe namespace swap:
 
 ![Fanout persistence](docs/diagrams/persistence.svg)
 
 Application state (users, sessions, dashboards, alert rules, agent threads)
-lives in that separate SQLite database and never sits on the telemetry write
-path. There is no Iceberg, DuckLake, external catalog, or telemetry server
-database.
+lives in the control SQLite database and never sits on the telemetry write
+path. The published Parquet directories are self-describing, so startup can
+discover the authoritative batch set directly from the filesystem.
 
 ## Performance
 
 The independent [Fanout Bench](https://github.com/labstack/fanout-bench)
 project measures authenticated ingest and optional dashboard read load against
 your hardware. It uses the official OpenTelemetry generator and publishes raw,
-reproducible evidence separately from the production binary. Ingest, DuckDB
-queries, and native Parquet maintenance have separate coordination paths but
-still compete for the same CPU, memory bandwidth, filesystem cache, and disk.
+reproducible evidence separately from the production binary. Ingest, indexed
+reads, DuckDB analytics, and native Parquet maintenance have separate
+coordination paths but still compete for the same CPU, memory bandwidth,
+filesystem cache, and disk.
+
+The current publication candidate is **296,196 accepted OpenTelemetry items per
+second** sustained for five minutes with traces, logs, and metrics arriving
+together on a machine with eight logical CPUs and 15.6 GiB of memory. It is a
+single run, and the benchmark harness that produced it carried uncommitted
+local changes, so it is not Fanout's official headline yet. The [performance methodology](https://fanout.run/explanation/performance)
+shows the signal breakdown, quality gates, limitations, and publication bar.
 
 ## How it compares
 
@@ -61,7 +71,7 @@ what separates it from its neighbours.
 | If you use | Where Fanout differs |
 | --- | --- |
 | **Grafana with Loki, Tempo, and Mimir** | That stack keeps a service and a query language per signal, plus object storage underneath. Fanout keeps one process, one data directory, and one typed contract across all three signals, at the cost of the horizontal scale those components are built for. |
-| **SigNoz** | Both are OTLP-native and self-hosted. SigNoz composes a collector, ClickHouse, and query services; Fanout compiles ingest, indexed storage, DuckDB queries, alerting, and the browser client into one binary, with open Parquet on local disk instead of a database cluster. |
+| **SigNoz** | Both are OTLP-native and self-hosted. SigNoz composes a collector, ClickHouse, and query services; Fanout compiles ingest, authoritative Parquet storage, indexed trace reads, DuckDB analytics, alerting, and the browser client into one binary. |
 | **Jaeger** | Jaeger covers traces and expects a storage backend you run separately. Fanout ingests traces, logs, and metrics into the same store, with nothing else to deploy. |
 | **Prometheus with Grafana** | Prometheus pulls metrics and is excellent at them. Fanout accepts pushed OTLP for all three signals and is built around investigating a specific incident rather than maintaining long-range metric series. |
 | **Datadog**, **Honeycomb**, **Grafana Cloud** | Those are managed services: someone else runs the storage, the scaling, and the upgrades, and your telemetry leaves your network to get there. Fanout is a binary you run, on data that stays on your disk. |

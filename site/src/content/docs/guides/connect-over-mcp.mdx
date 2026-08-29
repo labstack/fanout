@@ -28,13 +28,9 @@ Getting this wrong is the most common failure. A client discovers, registers and
 receives a token, and then every call is rejected because the audience does not
 match the resource it is calling. Set it before connecting anything.
 
-:::caution[`FANOUT_MCP_PUBLIC_URL` was removed]
-Earlier builds took the MCP resource URI from its own setting, ending in
-`/mcp`. That setting is gone; the resource is derived from `FANOUT_PUBLIC_URL`.
-An instance still setting the old variable fails at startup, because an
-unrecognised `FANOUT_`-prefixed variable is a configuration error rather than
-something ignored.
-:::
+The resource is derived from `FANOUT_PUBLIC_URL`; there is no separate MCP
+public-origin setting. An unrecognised `FANOUT_`-prefixed variable is a startup
+error rather than something ignored.
 
 `FANOUT_MCP_ENABLED` (default `true`) turns the endpoint off entirely.
 

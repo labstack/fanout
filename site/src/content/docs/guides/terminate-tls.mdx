@@ -59,7 +59,5 @@ prevent.
 `FANOUT_PUBLIC_URL` above does double duty: Fanout derives the MCP resource URI
 from it, and that derived resource is what tokens are bound to as their
 audience. So it must be HTTPS and stable across restarts — changing it
-invalidates every token already issued.
-
-Earlier builds had a separate `FANOUT_MCP_PUBLIC_URL` for this. It was removed,
-and an instance still setting it fails at startup rather than ignoring it.
+invalidates every token already issued. `FANOUT_PUBLIC_URL` is the only
+public-origin setting.
