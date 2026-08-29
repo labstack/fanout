@@ -65,16 +65,16 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
     <svg class="fo-scope-chart" viewBox="0 0 400 120" preserveAspectRatio="none" aria-hidden="true">
       <defs>
         <linearGradient id="fo-scope-fill" x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0" stop-color="#f26d78" stop-opacity="0.28"></stop>
-          <stop offset="1" stop-color="#f26d78" stop-opacity="0"></stop>
+          <stop offset="0" stop-color="var(--fo-status-bad)" stop-opacity="0.28"></stop>
+          <stop offset="1" stop-color="var(--fo-status-bad)" stop-opacity="0"></stop>
         </linearGradient>
       </defs>
       <path class="fo-scope-area" d={`${series} L400,120 L0,120 Z`} fill="url(#fo-scope-fill)"></path>
-      <path class="fo-scope-line" d={series} fill="none" stroke="#f26d78" stroke-width="2"
+      <path class="fo-scope-line" d={series} fill="none" stroke="var(--fo-status-bad)" stroke-width="2"
         stroke-linecap="round" stroke-linejoin="round"></path>
       <line class="fo-scope-mark" x1="252" y1="8" x2="252" y2="120"
         stroke="var(--sl-color-gray-4)" stroke-width="1" stroke-dasharray="3 3"></line>
-      <circle class="fo-scope-dot" cx="252" cy="52" r="4.5" fill="#f26d78"></circle>
+      <circle class="fo-scope-dot" cx="252" cy="52" r="4.5" fill="var(--fo-status-bad)"></circle>
     </svg>
 
     <div class="fo-scope-axis">
@@ -273,7 +273,7 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
   }
 
   .fo-scope-at {
-    color: #f26d78;
+    color: var(--fo-status-bad);
   }
 
   .fo-scope-readout {
@@ -320,7 +320,7 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
   }
 
   .fo-up {
-    color: #f26d78 !important;
+    color: var(--fo-status-bad) !important;
   }
 
   /* The question, in the words a person would use. Set as a quotation rather
@@ -346,7 +346,7 @@ const { title = data.title, tagline, actions = [] } = data.hero ?? {};
   }
 
   .fo-scope-found :global(svg) {
-    color: #7fd962;
+    color: var(--fo-status-ok);
     margin-top: 0.15rem;
   }
 

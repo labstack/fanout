@@ -64,7 +64,12 @@ const { eyebrow } = Astro.props;
     overflow-wrap: normal;
   }
 
-  .fo-sec :global(p) {
+  /* Direct children only. As a descendant rule this reached every paragraph
+     inside the slotted components too, overriding their own margins and type
+     because a class-plus-element selector outranks the single class they style
+     themselves with — which is why components had started defending themselves
+     with doubled selectors and an id. */
+  .fo-sec > :global(p:not(.fo-eyebrow)) {
     font-family: var(--fo-font-body);
     font-size: 1rem;
     line-height: 1.7;
