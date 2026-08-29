@@ -51,7 +51,8 @@ type Config struct {
 	// values validated on the reference deployment target, a small shared VM
 	// (Hetzner CPX32: 4 vCPU, 8 GB RAM, 160 GB disk). There the self-sizing
 	// resolves to a ~6.4 GB memory cap and 4 query threads (deterministic from
-	// 8 GB / 4 vCPU). Measure the target host with cmd/bench before setting
+	// 8 GB / 4 vCPU). Measure the target host with the external fanout-bench
+	// harness before setting
 	// production limits; throughput and memory use vary with CPU, disk, and the
 	// telemetry mix.
 	//

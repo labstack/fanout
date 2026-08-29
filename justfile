@@ -53,10 +53,9 @@ ui-host:
 # Every embedded browser asset.
 ui: ui-apps ui-host
 
-# Browser assets, then the binaries that embed them.
+# Browser assets, then the binary that embeds them.
 build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`: ui
     go build -ldflags "-s -w -X main.version={{VERSION}}" -o bin/fanout ./cmd/fanout
-    go build -ldflags "-s -w" -o bin/bench ./cmd/bench
 
 # CI publishes ghcr.io/labstack/fanout; this is for trying the image locally
 # without pushing anything.

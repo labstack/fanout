@@ -45,13 +45,12 @@ database.
 
 ## Performance
 
-The bundled [`cmd/bench`](cmd/bench) driver measures authenticated ingest and
-optional dashboard read load against your hardware. Ingest, DuckDB queries,
-and native Parquet maintenance have separate coordination paths but still
-compete for the same CPU, memory bandwidth, filesystem cache, and disk. Fanout
-does not publish a throughput headline until the raw reports and exact driver
-revision can ship with it; see [the benchmark publication
-standard](docs/benchmarking.md).
+The independent [Fanout Bench](https://github.com/labstack/fanout-bench)
+project measures authenticated ingest and optional dashboard read load against
+your hardware. It uses the official OpenTelemetry generator and publishes raw,
+reproducible evidence separately from the production binary. Ingest, DuckDB
+queries, and native Parquet maintenance have separate coordination paths but
+still compete for the same CPU, memory bandwidth, filesystem cache, and disk.
 
 ## How it compares
 
@@ -197,11 +196,9 @@ Fanout serves the UI on <http://localhost:7520>, accepts OTLP/gRPC on
 created becomes the administrator and receives the ingest token once.
 
 Point any OpenTelemetry collector or SDK at either OTLP endpoint with the
-ingest token, or generate load with the bundled gRPC benchmark driver:
-
-```sh
-./bin/bench -endpoint localhost:4317 -token "$INGEST_TOKEN"
-```
+ingest token. Use the separate
+[Fanout Bench](https://github.com/labstack/fanout-bench) project for controlled
+capacity tests.
 
 ## Configuration
 
@@ -293,7 +290,6 @@ the same `just check` unconditionally, and that is what actually enforces it.
 
 ```text
 cmd/fanout/        process composition and the single entry point
-cmd/bench/         load generator and benchmark reporter
 internal/          ingest, storage, query, agent, MCP, auth, alerts
 ui/host/           React AG-UI browser host (build-time)
 ui/apps/           portable React MCP Apps (build-time)
