@@ -78,7 +78,7 @@ func DescribeTools(ctx context.Context) ([]ToolDoc, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	server := NewWithIntelligence(nil, dashboard.New(nil), describeIntelligence{}, "docgen")
+	server := NewWithIntelligence(nil, dashboard.New(nil, 30), describeIntelligence{}, "docgen")
 
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 

@@ -123,7 +123,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
     <Paper withBorder radius="lg" p={{ base: "md", sm: "lg" }} mb="lg" role="group" aria-label="Dashboard controls">
       <Flex align={{ base: "stretch", md: "flex-end" }} justify="space-between" direction={{ base: "column", md: "row" }} gap="md">
         <Group align="flex-end" gap="md" grow wrap="wrap" w={{ base: "100%", md: "auto" }}>
-          <Select label="Window" value={state.filters.window} onChange={(window) => window && update({ ...state, filters: { ...state.filters, window } })} data={[{ value: "15m", label: "15 minutes" }, { value: "1h", label: "1 hour" }, { value: "6h", label: "6 hours" }, { value: "24h", label: "24 hours" }]} w={{ base: "100%", xs: 150 }} />
+          <Select label="Window" value={state.filters.window} onChange={(window) => window && update({ ...state, filters: { ...state.filters, window } })} data={[{ value: "15m", label: "15 minutes" }, { value: "1h", label: "1 hour" }, { value: "6h", label: "6 hours" }, { value: "24h", label: "24 hours" }, { value: "168h", label: "7 days" }, { value: "720h", label: "30 days" }]} w={{ base: "100%", xs: 150 }} />
           <TextInput label="Namespace" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={(event) => update({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} placeholder="All namespaces" w={{ base: "100%", xs: 220 }} />
         </Group>
         <Flex wrap={{ base: "wrap", sm: "nowrap" }} justify={{ base: "flex-start", md: "flex-end" }} align="center" gap={{ base: "sm", sm: "md" }} w={{ base: "100%", md: "auto" }}>

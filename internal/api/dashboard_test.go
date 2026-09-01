@@ -13,7 +13,7 @@ func TestAnonymousCannotOwnDashboards(t *testing.T) {
 	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
 		t.Fatalf("Create admin: %v", err)
 	}
-	RegisterDashboardRoutes(s.e, dashboard.New(s.db.DB))
+	RegisterDashboardRoutes(s.e, dashboard.New(s.db.DB, 30))
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/dashboards", nil))
 	if rec.Code != http.StatusUnauthorized {
@@ -31,7 +31,7 @@ func TestDashboardRoutesHideOtherOwnersResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create owner B: %v", err)
 	}
-	dashboards := dashboard.New(s.db.DB)
+	dashboards := dashboard.New(s.db.DB, 30)
 	item, err := dashboards.Default(t.Context(), ownerA.ID)
 	if err != nil {
 		t.Fatalf("create dashboard: %v", err)

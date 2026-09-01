@@ -15,7 +15,7 @@ func TestDescribeToolsMatchesWhatAClientIsServed(t *testing.T) {
 		t.Fatalf("DescribeTools: %v", err)
 	}
 
-	server := NewWithIntelligence(nil, dashboard.New(nil), describeIntelligence{}, "test")
+	server := NewWithIntelligence(nil, dashboard.New(nil, 30), describeIntelligence{}, "test")
 	session := connectTestClient(t, server, nil)
 	listed, err := session.ListTools(context.Background(), nil)
 	if err != nil {

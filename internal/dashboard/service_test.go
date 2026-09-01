@@ -21,7 +21,7 @@ func TestServiceCreatesNamedOwnerScopedDashboards(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	service := New(database.DB)
+	service := New(database.DB, 30)
 
 	initial, err := service.List(ctx, "owner-a")
 	if err != nil {
@@ -67,6 +67,65 @@ func TestServiceCreatesNamedOwnerScopedDashboards(t *testing.T) {
 	}
 }
 
+func TestServiceClampsDashboardWindowToRetention(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	ctx := context.Background()
+	if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES('owner','owner@example.test','Owner','admin',1)`); err != nil {
+		t.Fatal(err)
+	}
+
+	state := DefaultState()
+	state.Filters.Window = "720h"
+	service := New(database.DB, 7)
+	created, err := service.Create(ctx, "owner", CreateInput{Name: "Long range", State: state})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.State.Filters.Window != "168h" {
+		t.Fatalf("created window = %q, want 168h", created.State.Filters.Window)
+	}
+	var stored string
+	if err := database.DB.QueryRowContext(ctx, `SELECT window FROM dashboards WHERE id=?`, created.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored != "168h" {
+		t.Fatalf("stored window = %q, want 168h", stored)
+	}
+	created.State.Filters.Window = "720h"
+	updated, err := New(database.DB, 1).Update(ctx, "owner", created.ID, UpdateInput{Name: created.Name, State: created.State})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.State.Filters.Window != "24h" {
+		t.Fatalf("updated window = %q, want 24h", updated.State.Filters.Window)
+	}
+
+	// Dashboards saved before the retention setting was lowered must also be
+	// safe to render immediately, before the next edit persists the clamp.
+	if _, err := database.DB.ExecContext(ctx, `UPDATE dashboards SET window='720h' WHERE id=?`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := service.Get(ctx, "owner", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State.Filters.Window != "168h" {
+		t.Fatalf("loaded window = %q, want 168h", loaded.State.Filters.Window)
+	}
+
+	unlimited, err := New(database.DB, 0).Get(ctx, "owner", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unlimited.State.Filters.Window != "720h" {
+		t.Fatalf("unlimited-retention window = %q, want 720h", unlimited.State.Filters.Window)
+	}
+}
+
 func TestServiceMigratesLegacyCanvasOnFirstRead(t *testing.T) {
 	database, err := controlstore.NewSQLite(":memory:")
 	if err != nil {
@@ -81,7 +140,7 @@ func TestServiceMigratesLegacyCanvasOnFirstRead(t *testing.T) {
 	if _, err := database.DB.ExecContext(ctx, `INSERT INTO dashboard_state(owner_id,state_json) VALUES('owner',?)`, legacy); err != nil {
 		t.Fatal(err)
 	}
-	item, err := New(database.DB).Default(ctx, "owner")
+	item, err := New(database.DB, 30).Default(ctx, "owner")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,6 +175,13 @@ func TestValidateRejectsInvalidStates(t *testing.T) {
 	}
 	if err := Validate("Baseline", "", valid()); err != nil {
 		t.Fatalf("baseline state rejected: %v", err)
+	}
+	for _, window := range []string{"168h", "720h"} {
+		state := valid()
+		state.Filters.Window = window
+		if err := Validate("Baseline", "", state); err != nil {
+			t.Fatalf("window %s rejected: %v", window, err)
+		}
 	}
 	cases := []struct {
 		name   string

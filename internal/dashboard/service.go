@@ -87,11 +87,18 @@ type UpdateInput struct {
 }
 
 type Service struct {
-	db  *sql.DB
-	now func() time.Time
+	db        *sql.DB
+	maxWindow time.Duration
+	now       func() time.Time
 }
 
-func New(db *sql.DB) *Service { return &Service{db: db, now: time.Now} }
+func New(db *sql.DB, retentionDays int) *Service {
+	maxWindow := 30 * 24 * time.Hour
+	if retentionDays > 0 {
+		maxWindow = time.Duration(retentionDays) * 24 * time.Hour
+	}
+	return &Service{db: db, maxWindow: maxWindow, now: time.Now}
+}
 
 func DefaultState() State {
 	return State{
@@ -162,6 +169,7 @@ func (s *Service) Create(ctx context.Context, ownerID string, input CreateInput)
 	if err := Validate(input.Name, input.Description, input.State); err != nil {
 		return Dashboard{}, err
 	}
+	input.State.Filters.Window = clampDashboardWindow(input.State.Filters.Window, s.maxWindow)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Dashboard{}, err
@@ -204,6 +212,7 @@ func (s *Service) Update(ctx context.Context, ownerID, id string, input UpdateIn
 	if err := Validate(input.Name, input.Description, input.State); err != nil {
 		return Dashboard{}, err
 	}
+	input.State.Filters.Window = clampDashboardWindow(input.State.Filters.Window, s.maxWindow)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Dashboard{}, err
@@ -266,6 +275,7 @@ func (s *Service) get(ctx context.Context, q interface {
 	} else if err != nil {
 		return Dashboard{}, err
 	}
+	out.State.Filters.Window = clampDashboardWindow(out.State.Filters.Window, s.maxWindow)
 	rows, err := q.QueryContext(ctx, `SELECT id,type,title,config_json,enabled,x,y,w,h,min_w,min_h FROM dashboard_widgets WHERE dashboard_id=? ORDER BY sort_order,id`, id)
 	if err != nil {
 		return Dashboard{}, err
@@ -367,6 +377,18 @@ func (s *Service) ensureInitial(ctx context.Context, ownerID string) error {
 // duplicating the literals.
 var WidgetTypes = []string{"overview", "topology", "activity", "assistant", "performance", "trace", "logs"}
 
+var dashboardWindows = []struct {
+	value    string
+	duration time.Duration
+}{
+	{"15m", 15 * time.Minute},
+	{"1h", time.Hour},
+	{"6h", 6 * time.Hour},
+	{"24h", 24 * time.Hour},
+	{"168h", 7 * 24 * time.Hour},
+	{"720h", 30 * 24 * time.Hour},
+}
+
 func Validate(name, description string, state State) error {
 	if len(strings.TrimSpace(name)) == 0 || len([]rune(strings.TrimSpace(name))) > 80 {
 		return invalid("dashboard name must be between 1 and 80 characters")
@@ -409,10 +431,32 @@ func Validate(name, description string, state State) error {
 			}
 		}
 	}
-	if state.Filters.Window != "15m" && state.Filters.Window != "1h" && state.Filters.Window != "6h" && state.Filters.Window != "24h" {
+	if _, ok := dashboardWindowDuration(state.Filters.Window); !ok {
 		return invalid("unsupported dashboard window")
 	}
 	return nil
+}
+
+func dashboardWindowDuration(value string) (time.Duration, bool) {
+	for _, option := range dashboardWindows {
+		if option.value == value {
+			return option.duration, true
+		}
+	}
+	return 0, false
+}
+
+func clampDashboardWindow(value string, maxWindow time.Duration) string {
+	requested, ok := dashboardWindowDuration(value)
+	if !ok || requested <= maxWindow {
+		return value
+	}
+	for index := len(dashboardWindows) - 1; index >= 0; index-- {
+		if dashboardWindows[index].duration <= maxWindow {
+			return dashboardWindows[index].value
+		}
+	}
+	return dashboardWindows[0].value
 }
 
 // normalizeStateIDs makes the service, rather than callers or the model, the
