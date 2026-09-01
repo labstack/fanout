@@ -6,7 +6,7 @@ import { createRoot } from "react-dom/client";
 import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme, healthColor, seriesColor, statusHex, usePagedItems } from "./components";
 import type { Endpoint, Performance, Result } from "./contracts";
 import { EChart, useECharts } from "./echart";
-import { duration, integer, percent, windowLabel } from "./format";
+import { duration, integer, percent, timelineTimestamp, windowLabel } from "./format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 
@@ -22,8 +22,8 @@ function PerformanceApp() {
     <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading performance signals…" : undefined} />
     {result && <>
       <Tabs active={view} onChange={setView} items={[{ id: "activity", label: "Activity" }, { id: "latency", label: "Latency map" }, { id: "endpoints", label: "Endpoints", count: result.data.endpoints.length }, { id: "compare", label: "Compare" }]} />
-      {view === "activity" && <ActivityView data={result.data} dark={dark} />}
-      {view === "latency" && <HeatmapView data={result.data} dark={dark} />}
+      {view === "activity" && <ActivityView data={result.data} dark={dark} window={result.provenance.window} />}
+      {view === "latency" && <HeatmapView data={result.data} dark={dark} window={result.provenance.window} />}
       {view === "endpoints" && <EndpointsView endpoints={result.data.endpoints} onEndpoint={(endpoint) => askAbout(app, `Investigate ${endpoint.method} ${endpoint.path}. Explain its latency and errors.`)} />}
       {view === "compare" && <ComparisonView data={result.data} />}
       <MetaFooter left={windowLabel(result.provenance.window)} right={`Updated ${new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`} />
@@ -31,26 +31,26 @@ function PerformanceApp() {
   </ViewShell>;
 }
 
-function ActivityView({ data, dark }: { data: Performance; dark: boolean }) {
+function ActivityView({ data, dark, window }: { data: Performance; dark: boolean; window: string }) {
   const last = data.points.at(-1);
   if (!last) return <EmptyState tall icon={<Pulse size={20} weight="duotone" />} title="No activity in this window">Trends will appear as activity is recorded.</EmptyState>;
   const labels = data.points.map((point) => point.time);
   return <Stack px={{ base: "md", sm: "lg" }} pb="md">
     <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm"><Metric label="Operations" value={integer.format(last.spans)} /><Metric label="P95 latency" value={duration(last.p95_ms)} color={last.p95_ms >= 750 ? "warn" : "ok"} /><Metric label="Error rate" value={percent(last.error_rate)} color={last.error_rate >= .01 ? "bad" : "ok"} /></SimpleGrid>
-    <PerformanceChart dark={dark} labels={labels} title="Traffic and logs" series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: seriesColor("operations", dark) }, { name: "Logs", data: data.points.map((point) => point.log_count), color: seriesColor("logs", dark) }]} />
-    <PerformanceChart dark={dark} labels={labels} title="Latency and error correlation" series={[{ name: "P95 latency", data: data.points.map((point) => point.p95_ms), color: statusHex(dark).warn }, { name: "Error rate × 1000", data: data.points.map((point) => point.error_rate * 1000), color: statusHex(dark).bad }]} />
+    <PerformanceChart dark={dark} labels={labels} title="Traffic and logs" window={window} series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: seriesColor("operations", dark) }, { name: "Logs", data: data.points.map((point) => point.log_count), color: seriesColor("logs", dark) }]} />
+    <PerformanceChart dark={dark} labels={labels} title="Latency and error correlation" window={window} series={[{ name: "P95 latency", data: data.points.map((point) => point.p95_ms), color: statusHex(dark).warn }, { name: "Error rate × 1000", data: data.points.map((point) => point.error_rate * 1000), color: statusHex(dark).bad }]} />
   </Stack>;
 }
 
-function PerformanceChart({ labels, title, series, dark }: { labels: string[]; title: string; series: Array<{ name: string; data: number[]; color: string }>; dark: boolean }) {
+function PerformanceChart({ labels, title, series, dark, window }: { labels: string[]; title: string; series: Array<{ name: string; data: number[]; color: string }>; dark: boolean; window: string }) {
   const option = useMemo(() => {
     const colors = chartTheme(dark);
-    return { color: series.map((item) => item.color), grid: { left: 42, right: 18, top: 42, bottom: 30 }, legend: { top: 5, left: 0, textStyle: { color: colors.muted, fontSize: 10 }, icon: "circle", itemWidth: 7, itemHeight: 7 }, tooltip: { trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } }, xAxis: { type: "category", data: labels.map((value) => new Date(value).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true } }, yAxis: { type: "value", splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: 9 } }, series: series.map((item) => ({ name: item.name, type: "line", data: item.data, smooth: .22, showSymbol: false, lineStyle: { width: 2 }, areaStyle: { opacity: .045 } })) };
-  }, [dark, labels, series]);
+    return { color: series.map((item) => item.color), grid: { left: 42, right: 18, top: 42, bottom: 30 }, legend: { top: 5, left: 0, textStyle: { color: colors.muted, fontSize: 10 }, icon: "circle", itemWidth: 7, itemHeight: 7 }, tooltip: { trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } }, xAxis: { type: "category", data: labels.map((value) => timelineTimestamp(value, window)), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true } }, yAxis: { type: "value", splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: 9 } }, series: series.map((item) => ({ name: item.name, type: "line", data: item.data, smooth: .22, showSymbol: false, lineStyle: { width: 2 }, areaStyle: { opacity: .045 } })) };
+  }, [dark, labels, series, window]);
   return <Paper withBorder radius="md" p="sm"><Text fw={650} size="sm" mb="xs">{title}</Text><EChart option={option} height={210} label={title} /></Paper>;
 }
 
-function HeatmapView({ data, dark }: { data: Performance; dark: boolean }) {
+function HeatmapView({ data, dark, window }: { data: Performance; dark: boolean; window: string }) {
   const model = useMemo(() => {
     const services = [...new Set(data.heatmap.map((point) => point.service))];
     const times = [...new Set(data.heatmap.map((point) => point.time))];
@@ -59,7 +59,7 @@ function HeatmapView({ data, dark }: { data: Performance; dark: boolean }) {
   }, [data.heatmap]);
   if (model.services.length === 0) return <EmptyState tall icon={<GridFour size={20} weight="duotone" />} title="No latency samples yet">The heatmap will compare service latency across time buckets.</EmptyState>;
   const colors = chartTheme(dark);
-  const option = { grid: { left: 105, right: 20, top: 20, bottom: 45 }, tooltip: { position: "top", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 }, formatter: (params: { data: [number, number, number] }) => `${model.services[params.data[1]]}<br/>${duration(params.data[2])}` }, xAxis: { type: "category", data: model.times.map((time) => new Date(time).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })), splitArea: { show: true }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "category", data: model.services, splitArea: { show: true }, axisLabel: { color: colors.text, fontSize: 9 }, axisLine: { lineStyle: { color: colors.border } } }, visualMap: { min: 0, max: model.max, calculable: true, orient: "horizontal", left: "center", bottom: 0, textStyle: { color: colors.muted, fontSize: 8 }, inRange: { color: [colors.grid, statusHex(dark).warn, statusHex(dark).bad] } }, series: [{ type: "heatmap", data: model.services.flatMap((service, y) => model.times.map((time, x) => [x, y, model.values.get(`${service}\u0000${time}`) ?? 0])) }] };
+  const option = { grid: { left: 105, right: 20, top: 20, bottom: 45 }, tooltip: { position: "top", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 }, formatter: (params: { data: [number, number, number] }) => `${model.services[params.data[1]]}<br/>${duration(params.data[2])}` }, xAxis: { type: "category", data: model.times.map((time) => timelineTimestamp(time, window)), splitArea: { show: true }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "category", data: model.services, splitArea: { show: true }, axisLabel: { color: colors.text, fontSize: 9 }, axisLine: { lineStyle: { color: colors.border } } }, visualMap: { min: 0, max: model.max, calculable: true, orient: "horizontal", left: "center", bottom: 0, textStyle: { color: colors.muted, fontSize: 8 }, inRange: { color: [colors.grid, statusHex(dark).warn, statusHex(dark).bad] } }, series: [{ type: "heatmap", data: model.services.flatMap((service, y) => model.times.map((time, x) => [x, y, model.values.get(`${service}\u0000${time}`) ?? 0])) }] };
   return <Paper withBorder radius="md" mx={{ base: "md", sm: "lg" }} mb="md" p="xs"><EChart option={option} height={Math.max(280, model.services.length * 32 + 110)} label="Service P95 latency heatmap" /></Paper>;
 }
 

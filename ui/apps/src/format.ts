@@ -18,3 +18,18 @@ export function windowLabel(window: string) {
   if (minutes >= 60 && minutes % 60 === 0) return `Last ${minutes / 60}h`;
   return `Last ${Math.max(minutes, 1)}m`;
 }
+
+export function timelineTimestamp(value: string, window: string, seconds = false) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return value;
+  const [startValue, endValue] = window.split("/");
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  const multiDay = !Number.isNaN(start.valueOf()) && !Number.isNaN(end.valueOf()) && end.valueOf() - start.valueOf() > 24 * 60 * 60 * 1000;
+  return date.toLocaleString([], {
+    ...(multiDay ? { month: "short", day: "numeric" } as const : {}),
+    hour: "numeric",
+    minute: "2-digit",
+    ...(seconds ? { second: "2-digit" } as const : {}),
+  });
+}

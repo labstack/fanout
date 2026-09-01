@@ -36,7 +36,7 @@ func TestDashboardToolsUseAuthenticatedOwner(t *testing.T) {
 	if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES('owner','owner@example.test','Owner','admin',1)`); err != nil {
 		t.Fatal(err)
 	}
-	server := New(&fakeObservability{}, dashboard.New(database.DB), "test")
+	server := New(&fakeObservability{}, dashboard.New(database.DB, 30), "test")
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{}, Extra: &mcp.RequestExtra{TokenInfo: &mcpgoauth.TokenInfo{UserID: "owner", Scopes: []string{dashboard.OAuthScope}}}}
 	state := dashboard.State{Filters: dashboard.Filters{Window: "1h"}, Widgets: []dashboard.Widget{{ID: "health", Type: "overview", Title: "System health", Enabled: true}}, Layout: []dashboard.Layout{{I: "health", X: 0, Y: 0, W: 12, H: 3}}}
 	_, output, err := server.dashboardCreate(ctx, req, DashboardCreateInput{Name: "AI overview", State: state})
@@ -70,7 +70,7 @@ func TestDashboardOwnerIgnoresSpoofedMetaWhenTokenPresent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	server := New(&fakeObservability{}, dashboard.New(database.DB), "test")
+	server := New(&fakeObservability{}, dashboard.New(database.DB, 30), "test")
 	// A remote client always carries TokenInfo (ProtectMCP guarantees it), so a
 	// spoofed _meta owner key must lose to the token identity.
 	req := &mcp.CallToolRequest{

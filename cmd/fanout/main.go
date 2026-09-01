@@ -306,7 +306,7 @@ func main() {
 	queries := observability.New(q, q, cfg.RetentionDays)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
 	api.RegisterIntelligenceRoutes(e, detector)
-	dashboards := dashboard.New(sqlite.DB)
+	dashboards := dashboard.New(sqlite.DB, cfg.RetentionDays)
 	api.RegisterDashboardRoutes(e, dashboards)
 
 	// Alert management REST endpoints
