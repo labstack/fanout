@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 )
 
 var logFilters = `
@@ -23,13 +24,17 @@ SELECT time, severity, coalesce(service, ''), ` + redactLogBodySQL("body") + `,
 ORDER BY time DESC
 LIMIT ?`
 
-var logBucketsQuery = `
-SELECT time_bucket(INTERVAL '5 minutes', time) AS point_time,
+var logBucketsQueryTemplate = `
+SELECT time_bucket(INTERVAL '%s', time) AS point_time,
        coalesce(nullif(upper(severity), ''), 'UNSPECIFIED') AS bucket_severity,
        CAST(count(*) AS BIGINT)
 	FROM logs` + logFilters + `
 GROUP BY point_time, bucket_severity
 ORDER BY point_time ASC, bucket_severity ASC`
+
+func logBucketsSQL(window time.Duration) string {
+	return fmt.Sprintf(logBucketsQueryTemplate, timelineBucketWidth(window))
+}
 
 func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, search string, limit int) (Result[Logs], error) {
 	scope, err := s.normalizeScope(scope)
@@ -66,7 +71,7 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 	rows.Close()
 
 	matched := 0
-	bucketRows, err := s.db.QueryContext(ctx, logBucketsQuery, filters...)
+	bucketRows, err := s.db.QueryContext(ctx, logBucketsSQL(scope.End.Sub(scope.Start)), filters...)
 	if err != nil {
 		return Result[Logs]{}, fmt.Errorf("query log histogram: %w", err)
 	}

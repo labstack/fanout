@@ -93,7 +93,7 @@ Read-only. Calling it changes nothing.
 |---|---|---|---|
 | `limit` | `integer` | no | Maximum services or edges to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
-| `window` | `string` | no | Time window such as 15m, 1h, or 24h; defaults to 1h |
+| `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## search_logs
 
@@ -108,7 +108,7 @@ Read-only. Calling it changes nothing.
 | `search` | `string` | no | Optional case-insensitive text contained in the log body |
 | `service` | `string` | no | Optional exact OpenTelemetry service name |
 | `severity` | `string` | no | Optional exact severity such as ERROR, WARN, or INFO |
-| `window` | `string` | no | Time window such as 15m, 1h, or 24h; defaults to 1h |
+| `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## service_performance
 
@@ -121,7 +121,7 @@ Read-only. Calling it changes nothing.
 | `limit` | `integer` | no | Maximum endpoints to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `service` | `string` | no | Optional exact OpenTelemetry service name; omit for the whole system |
-| `window` | `string` | no | Time window such as 15m, 1h, or 24h; defaults to 1h |
+| `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## service_topology
 
@@ -133,7 +133,7 @@ Read-only. Calling it changes nothing.
 |---|---|---|---|
 | `limit` | `integer` | no | Maximum services or edges to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
-| `window` | `string` | no | Time window such as 15m, 1h, or 24h; defaults to 1h |
+| `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## trace_detail
 
@@ -147,7 +147,7 @@ Read-only. Calling it changes nothing.
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `service` | `string` | no | Optional service filter when choosing a recent trace |
 | `trace_id` | `string` | no | Exact trace ID; omit to inspect the most relevant recent error or slow trace |
-| `window` | `string` | no | Trace lookup window such as 1h or 24h; defaults to 1h |
+| `window` | `string` | no | Trace lookup window such as 1h, 24h, 168h, or 720h; defaults to 1h |
 
 ## Authentication
 

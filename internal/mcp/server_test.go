@@ -139,18 +139,25 @@ func (f *fakeObservability) Logs(_ context.Context, scope observability.Scope, _
 }
 
 func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
-	backend := &fakeObservability{}
-	s := New(backend, nil, "test")
-	s.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
-	result, output, err := s.overview(context.Background(), nil, QueryInput{Window: "15m", Namespace: "prod"})
-	if err != nil {
-		t.Fatalf("overview: %v", err)
-	}
-	if len(result.Content) != 1 || output.Schema != observability.OverviewSchema {
-		t.Fatalf("unexpected result: %#v %#v", result, output)
-	}
-	if got := backend.scope.End.Sub(backend.scope.Start); got != 15*time.Minute {
-		t.Fatalf("window = %s, want 15m", got)
+	for _, tt := range []struct {
+		window string
+		want   time.Duration
+	}{{"15m", 15 * time.Minute}, {"720h", 30 * 24 * time.Hour}} {
+		t.Run(tt.window, func(t *testing.T) {
+			backend := &fakeObservability{}
+			s := New(backend, nil, "test")
+			s.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
+			result, output, err := s.overview(context.Background(), nil, QueryInput{Window: tt.window, Namespace: "prod"})
+			if err != nil {
+				t.Fatalf("overview: %v", err)
+			}
+			if len(result.Content) != 1 || output.Schema != observability.OverviewSchema {
+				t.Fatalf("unexpected result: %#v %#v", result, output)
+			}
+			if got := backend.scope.End.Sub(backend.scope.Start); got != tt.want {
+				t.Fatalf("window = %s, want %s", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -11,9 +11,9 @@ import (
 	"github.com/labstack/fanout/internal/query"
 )
 
-const performancePointsQuery = `
+const performancePointsQueryTemplate = `
 SELECT
-  time_bucket(INTERVAL '5 minutes', bucket) AS point_time,
+  time_bucket(INTERVAL '%s', bucket) AS point_time,
   CAST(SUM(spans) AS BIGINT),
   COALESCE(SUM(error_rate * spans) / NULLIF(SUM(spans), 0), 0),
   COALESCE(SUM(p50_ms * spans) / NULLIF(SUM(spans), 0), 0),
@@ -189,8 +189,8 @@ FROM endpoint_totals t
 ORDER BY t.calls DESC, p95_ms DESC
 LIMIT ?`
 
-const performanceHeatmapQuery = `
-SELECT time_bucket(INTERVAL '5 minutes', bucket) AS point_time, service, COALESCE(MAX(p95_ms), 0)
+const performanceHeatmapQueryTemplate = `
+SELECT time_bucket(INTERVAL '%s', bucket) AS point_time, service, COALESCE(MAX(p95_ms), 0)
 FROM service_rollup
 WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?)
   AND service IN (
@@ -200,6 +200,14 @@ WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?)
   )
 GROUP BY point_time, service
 ORDER BY point_time ASC, service ASC`
+
+func performancePointsSQL(window time.Duration) string {
+	return fmt.Sprintf(performancePointsQueryTemplate, timelineBucketWidth(window))
+}
+
+func performanceHeatmapSQL(window time.Duration) string {
+	return fmt.Sprintf(performanceHeatmapQueryTemplate, timelineBucketWidth(window))
+}
 
 const performanceAggregateQuery = `
 SELECT
@@ -220,9 +228,10 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 		return Result[Performance]{}, err
 	}
 	service = strings.TrimSpace(service)
+	window := scope.End.Sub(scope.Start)
 
 	data := Performance{Service: service, Points: []PerformancePoint{}, Endpoints: []Endpoint{}, Heatmap: []HeatmapPoint{}, Comparison: []ComparisonMetric{}}
-	rows, err := s.db.QueryContext(ctx, performancePointsQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service)
+	rows, err := s.db.QueryContext(ctx, performancePointsSQL(window), scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service)
 	if err != nil {
 		return Result[Performance]{}, fmt.Errorf("query performance points: %w", err)
 	}
@@ -246,7 +255,7 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 	}
 	data.Endpoints = endpoints
 
-	rows, err = s.db.QueryContext(ctx, performanceHeatmapQuery, scope.Start, scope.End, scope.Namespace, scope.Namespace, scope.Start, scope.End, scope.Namespace, scope.Namespace)
+	rows, err = s.db.QueryContext(ctx, performanceHeatmapSQL(window), scope.Start, scope.End, scope.Namespace, scope.Namespace, scope.Start, scope.End, scope.Namespace, scope.Namespace)
 	if err != nil {
 		return Result[Performance]{}, fmt.Errorf("query latency heatmap: %w", err)
 	}

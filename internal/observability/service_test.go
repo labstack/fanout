@@ -25,6 +25,10 @@ func newTestRepository(t *testing.T) *telemetrystore.Repository {
 }
 
 func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock, *telemetrystore.Repository) {
+	return newMockServiceWithRetention(t, 30)
+}
+
+func newMockServiceWithRetention(t *testing.T, retentionDays int) (*Service, sqlmock.Sqlmock, *telemetrystore.Repository) {
 	t.Helper()
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -32,7 +36,7 @@ func newMockService(t *testing.T) (*Service, sqlmock.Sqlmock, *telemetrystore.Re
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	repository := newTestRepository(t)
-	svc := New(SQLDB(db), repository.Parquet)
+	svc := New(SQLDB(db), repository.Parquet, retentionDays)
 	svc.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
 	return svc, mock, repository
 }
@@ -50,9 +54,52 @@ func TestNormalizeScopeDefaultsAndBounds(t *testing.T) {
 		t.Fatalf("window = %s, want 1h", got)
 	}
 
-	_, err = svc.normalizeScope(Scope{Start: scope.End.Add(-25 * time.Hour), End: scope.End})
+	if _, err = svc.normalizeScope(Scope{Start: scope.End.Add(-25 * time.Hour), End: scope.End}); err != nil {
+		t.Fatalf("25h scope rejected: %v", err)
+	}
+	if _, err = svc.normalizeScope(Scope{Start: scope.End.Add(-30 * 24 * time.Hour), End: scope.End}); err != nil {
+		t.Fatalf("30d scope rejected: %v", err)
+	}
+	_, err = svc.normalizeScope(Scope{Start: scope.End.Add(-30*24*time.Hour - time.Nanosecond), End: scope.End})
 	if !errors.Is(err, ErrInvalidScope) {
 		t.Fatalf("error = %v, want ErrInvalidScope", err)
+	}
+}
+
+func TestUnlimitedRetentionKeepsFiniteQueryWindow(t *testing.T) {
+	svc, _, _ := newMockServiceWithRetention(t, 0)
+	if svc.maxWindow != defaultMaxWindow {
+		t.Fatalf("maxWindow = %s, want %s", svc.maxWindow, defaultMaxWindow)
+	}
+}
+
+func TestTimelineBucketWidth(t *testing.T) {
+	tests := []struct {
+		window time.Duration
+		want   string
+	}{
+		{24 * time.Hour, "5 minutes"},
+		{48 * time.Hour, "30 minutes"},
+		{7 * 24 * time.Hour, "30 minutes"},
+		{30 * 24 * time.Hour, "4 hours"},
+		{31 * 24 * time.Hour, "1 day"},
+	}
+	for _, tt := range tests {
+		if got := timelineBucketWidth(tt.window); got != tt.want {
+			t.Errorf("timelineBucketWidth(%s) = %q, want %q", tt.window, got, tt.want)
+		}
+	}
+}
+
+func TestTimelineQueriesUseAdaptiveBucket(t *testing.T) {
+	for name, query := range map[string]string{
+		"performance points":  performancePointsSQL(30 * 24 * time.Hour),
+		"performance heatmap": performanceHeatmapSQL(30 * 24 * time.Hour),
+		"log buckets":         logBucketsSQL(30 * 24 * time.Hour),
+	} {
+		if !strings.Contains(query, "INTERVAL '4 hours'") {
+			t.Errorf("%s query does not use the 30-day bucket: %s", name, query)
+		}
 	}
 }
 
@@ -124,7 +171,7 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	end := start.Add(time.Hour)
 	midpoint := start.Add(30 * time.Minute)
 
-	mock.ExpectQuery(regexp.QuoteMeta(performancePointsQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(performancePointsSQL(time.Hour))).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}).
 			AddRow(start, int64(120), 0.10, 80.0, 220.0, int64(30), int64(8)))
@@ -134,7 +181,7 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 		WithArgs(start, end, end, "prod", "checkout", 25).
 		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
 			AddRow("GET", "/pay", int64(50), 75.0, 210.0, 350.0, 0.08))
-	mock.ExpectQuery(regexp.QuoteMeta(performanceHeatmapQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(performanceHeatmapSQL(time.Hour))).
 		WithArgs(start, end, "prod", "prod", start, end, "prod", "prod").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "service", "p95_ms"}).
 			AddRow(start, "checkout", 220.0))
@@ -270,7 +317,7 @@ func TestLogsAppliesFiltersAndBuildsHistogram(t *testing.T) {
 			AddRow(start.Add(2*time.Millisecond), "ERROR", "checkout", `auth declined: {"password":"hunter2"}`, "trace-3", "root3").
 			AddRow(start.Add(time.Millisecond), "ERROR", "checkout", "card declined: token=abc123", "trace-2", "root2").
 			AddRow(start, "ERROR", "checkout", "payment declined", "trace-1", "root"))
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "declined", "declined").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).AddRow(start, "ERROR", int64(3)))
 
@@ -309,7 +356,7 @@ func TestLogsRetainsOnlyNewestLimit(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta(logEntriesQuery)).
 		WithArgs(start, start.Add(time.Hour), "prod", "prod", "", "", "", "", "", "", 5).
 		WillReturnRows(entryRows)
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
 		WithArgs(start, start.Add(time.Hour), "prod", "prod", "", "", "", "", "", "").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).AddRow(start, "INFO", int64(100)))
 	result, err := svc.Logs(context.Background(), Scope{Namespace: "prod", Start: start, End: start.Add(time.Hour)}, "", "", "", 5)
@@ -335,7 +382,7 @@ func TestLogsAlwaysUseAuthoritativeParquet(t *testing.T) {
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}).
 			AddRow(start.Add(time.Minute), "ERROR", "checkout", "token=[REDACTED]", "trace-parquet", ""))
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", "error", "error", "", "").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
 			AddRow(start, "ERROR", int64(1)))
@@ -374,7 +421,7 @@ func TestLogsQueryParquetAcrossBatches(t *testing.T) {
 			AddRow(start.Add(200*time.Millisecond), "INFO", "", "late-boundary", "", "").
 			AddRow(start.Add(150*time.Millisecond), "INFO", "", "newer-old", "", "").
 			AddRow(start.Add(100*time.Millisecond), "INFO", "", "late-old", "", ""))
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
 		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
 			AddRow(start, "INFO", int64(4)))
@@ -556,7 +603,7 @@ func TestLogsBoundsParquetQueryWithLimitAndAggregatedBuckets(t *testing.T) {
 			AddRow(start.Add(2*time.Minute), "INFO", "checkout", "older", "trace-b", ""))
 	// Histogram counts come back aggregated, so a million matching rows cost
 	// one row per bucket rather than a million transfers.
-	mock.ExpectQuery(regexp.QuoteMeta(logBucketsQuery)).
+	mock.ExpectQuery(regexp.QuoteMeta(logBucketsSQL(time.Hour))).
 		WithArgs(start, end, "prod", "prod", "", "", "", "", "", "").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "severity", "count"}).
 			AddRow(start, "ERROR", int64(900000)).

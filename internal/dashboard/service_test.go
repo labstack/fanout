@@ -117,6 +117,13 @@ func TestValidateRejectsInvalidStates(t *testing.T) {
 	if err := Validate("Baseline", "", valid()); err != nil {
 		t.Fatalf("baseline state rejected: %v", err)
 	}
+	for _, window := range []string{"168h", "720h"} {
+		state := valid()
+		state.Filters.Window = window
+		if err := Validate("Baseline", "", state); err != nil {
+			t.Fatalf("window %s rejected: %v", window, err)
+		}
+	}
 	cases := []struct {
 		name   string
 		mutate func(*State)

@@ -21,6 +21,10 @@ Zero means keep everything. Changing it does not delete anything immediately —
 expired data goes when maintenance next runs, so disk use falls on the
 maintenance cycle rather than at the moment you change the setting.
 
+Observability API, MCP, and dashboard queries can span up to this retention
+period. With unlimited retention, each query remains capped at 30 days. Fanout
+automatically uses wider timeline buckets for windows longer than 24 hours.
+
 ## The maintenance cycle
 
 ```sh

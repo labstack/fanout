@@ -46,30 +46,37 @@ func (f *fakeQueries) Logs(_ context.Context, _ observability.Scope, _, _, _ str
 }
 
 func TestOverviewRouteUsesDurationScope(t *testing.T) {
-	queries := &fakeQueries{}
-	h := NewObservabilityHandler(queries)
-	h.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
-	e := echo.New()
-	h.Register(e.Group("/api/observability"))
+	for _, tt := range []struct {
+		window string
+		want   time.Duration
+	}{{"15m", 15 * time.Minute}, {"720h", 30 * 24 * time.Hour}} {
+		t.Run(tt.window, func(t *testing.T) {
+			queries := &fakeQueries{}
+			h := NewObservabilityHandler(queries)
+			h.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
+			e := echo.New()
+			h.Register(e.Group("/api/observability"))
 
-	req := httptest.NewRequest(http.MethodGet, "/api/observability/overview?window=15m&namespace=prod", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
-	}
-	if got := queries.overviewScope.End.Sub(queries.overviewScope.Start); got != 15*time.Minute {
-		t.Fatalf("window = %s, want 15m", got)
-	}
-	if queries.overviewScope.Namespace != "prod" {
-		t.Fatalf("namespace = %q, want prod", queries.overviewScope.Namespace)
-	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if body["schema"] != observability.OverviewSchema {
-		t.Fatalf("schema = %v", body["schema"])
+			req := httptest.NewRequest(http.MethodGet, "/api/observability/overview?window="+tt.window+"&namespace=prod", nil)
+			rec := httptest.NewRecorder()
+			e.ServeHTTP(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if got := queries.overviewScope.End.Sub(queries.overviewScope.Start); got != tt.want {
+				t.Fatalf("window = %s, want %s", got, tt.want)
+			}
+			if queries.overviewScope.Namespace != "prod" {
+				t.Fatalf("namespace = %q, want prod", queries.overviewScope.Namespace)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if body["schema"] != observability.OverviewSchema {
+				t.Fatalf("schema = %v", body["schema"])
+			}
+		})
 	}
 }
 

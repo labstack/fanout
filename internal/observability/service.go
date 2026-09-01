@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	defaultWindow = time.Hour
-	maxWindow     = 24 * time.Hour
-	defaultLimit  = 100
-	maxLimit      = 500
+	defaultWindow    = time.Hour
+	defaultMaxWindow = 30 * 24 * time.Hour
+	defaultLimit     = 100
+	maxLimit         = 500
 )
 
 var (
@@ -34,15 +34,20 @@ type traceReader interface {
 type Service struct {
 	db             DB
 	repository     traceReader
+	maxWindow      time.Duration
 	now            func() time.Time
 	endpointMature atomic.Bool
 }
 
-func New(db DB, repository traceReader) *Service {
+func New(db DB, repository traceReader, retentionDays int) *Service {
 	if db == nil || repository == nil {
 		panic("observability requires query engine and indexed trace reader")
 	}
-	return &Service{db: db, repository: repository, now: time.Now}
+	maxWindow := defaultMaxWindow
+	if retentionDays > 0 {
+		maxWindow = time.Duration(retentionDays) * 24 * time.Hour
+	}
+	return &Service{db: db, repository: repository, maxWindow: maxWindow, now: time.Now}
 }
 
 // SQLDB adapts a standard database/sql queryer for tests and callers that do
@@ -59,11 +64,24 @@ func (s *Service) normalizeScope(scope Scope) (Scope, error) {
 	}
 	scope.Start = scope.Start.UTC()
 	scope.End = scope.End.UTC()
-	if !scope.Start.Before(scope.End) || scope.End.Sub(scope.Start) > maxWindow {
-		return Scope{}, fmt.Errorf("%w: window must be positive and at most %s", ErrInvalidScope, maxWindow)
+	if !scope.Start.Before(scope.End) || scope.End.Sub(scope.Start) > s.maxWindow {
+		return Scope{}, fmt.Errorf("%w: window must be positive and at most %s", ErrInvalidScope, s.maxWindow)
 	}
 	scope.Namespace = strings.TrimSpace(scope.Namespace)
 	return scope, nil
+}
+
+func timelineBucketWidth(window time.Duration) string {
+	switch {
+	case window <= 24*time.Hour:
+		return "5 minutes"
+	case window <= 7*24*time.Hour:
+		return "30 minutes"
+	case window <= 30*24*time.Hour:
+		return "4 hours"
+	default:
+		return "1 day"
+	}
 }
 
 func normalizeLimit(limit int) (int, error) {

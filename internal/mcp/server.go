@@ -33,20 +33,20 @@ type IntelligenceSnapshots interface {
 }
 
 type QueryInput struct {
-	Window    string `json:"window,omitempty" jsonschema:"Time window such as 15m, 1h, or 24h; defaults to 1h"`
+	Window    string `json:"window,omitempty" jsonschema:"Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"OpenTelemetry service namespace; empty queries all namespaces"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Maximum services or edges to return, from 1 to 500"`
 }
 
 type PerformanceInput struct {
-	Window    string `json:"window,omitempty" jsonschema:"Time window such as 15m, 1h, or 24h; defaults to 1h"`
+	Window    string `json:"window,omitempty" jsonschema:"Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"OpenTelemetry service namespace; empty queries all namespaces"`
 	Service   string `json:"service,omitempty" jsonschema:"Optional exact OpenTelemetry service name; omit for the whole system"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Maximum endpoints to return, from 1 to 500"`
 }
 
 type TraceInput struct {
-	Window    string `json:"window,omitempty" jsonschema:"Trace lookup window such as 1h or 24h; defaults to 1h"`
+	Window    string `json:"window,omitempty" jsonschema:"Trace lookup window such as 1h, 24h, 168h, or 720h; defaults to 1h"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"OpenTelemetry service namespace; empty queries all namespaces"`
 	TraceID   string `json:"trace_id,omitempty" jsonschema:"Exact trace ID; omit to inspect the most relevant recent error or slow trace"`
 	Service   string `json:"service,omitempty" jsonschema:"Optional service filter when choosing a recent trace"`
@@ -54,7 +54,7 @@ type TraceInput struct {
 }
 
 type LogsInput struct {
-	Window    string `json:"window,omitempty" jsonschema:"Time window such as 15m, 1h, or 24h; defaults to 1h"`
+	Window    string `json:"window,omitempty" jsonschema:"Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"OpenTelemetry service namespace; empty queries all namespaces"`
 	Service   string `json:"service,omitempty" jsonschema:"Optional exact OpenTelemetry service name"`
 	Severity  string `json:"severity,omitempty" jsonschema:"Optional exact severity such as ERROR, WARN, or INFO"`

@@ -409,7 +409,7 @@ func Validate(name, description string, state State) error {
 			}
 		}
 	}
-	if state.Filters.Window != "15m" && state.Filters.Window != "1h" && state.Filters.Window != "6h" && state.Filters.Window != "24h" {
+	if state.Filters.Window != "15m" && state.Filters.Window != "1h" && state.Filters.Window != "6h" && state.Filters.Window != "24h" && state.Filters.Window != "168h" && state.Filters.Window != "720h" {
 		return invalid("unsupported dashboard window")
 	}
 	return nil
