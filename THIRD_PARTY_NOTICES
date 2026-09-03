@@ -93,10 +93,10 @@ COMPONENT INVENTORY
 - Go: modernc.org/mathutil v1.7.1
 - Go: modernc.org/memory v1.12.1
 - Go: modernc.org/sqlite v1.57.0
-- npm: @ag-ui/client 0.0.58 (declared license: MIT)
-- npm: @ag-ui/core 0.0.58 (declared license: MIT)
-- npm: @ag-ui/encoder 0.0.58 (declared license: MIT)
-- npm: @ag-ui/proto 0.0.58 (declared license: MIT)
+- npm: @ag-ui/client 0.0.59 (declared license: MIT)
+- npm: @ag-ui/core 0.0.59 (declared license: MIT)
+- npm: @ag-ui/encoder 0.0.59 (declared license: MIT)
+- npm: @ag-ui/proto 0.0.59 (declared license: MIT)
 - npm: @bufbuild/protobuf 2.14.1 (declared license: (Apache-2.0 AND BSD-3-Clause)); no license file was present in the installed package
 - npm: @floating-ui/core 1.8.0 (declared license: MIT)
 - npm: @floating-ui/dom 1.8.0 (declared license: MIT)
@@ -114,8 +114,8 @@ COMPONENT INVENTORY
 - npm: @protobuf-ts/protoc 2.11.1 (declared license: Apache-2.0)
 - npm: @standard-schema/spec 1.1.0 (declared license: MIT)
 - npm: @tanstack/history 1.162.1 (declared license: MIT)
-- npm: @tanstack/query-core 5.102.5 (declared license: MIT)
-- npm: @tanstack/react-query 5.102.5 (declared license: MIT)
+- npm: @tanstack/query-core 5.102.8 (declared license: MIT)
+- npm: @tanstack/react-query 5.102.8 (declared license: MIT)
 - npm: @tanstack/react-router 1.170.32 (declared license: MIT)
 - npm: @tanstack/react-store 0.9.3 (declared license: MIT)
 - npm: @tanstack/router-core 1.171.27 (declared license: MIT)
@@ -813,10 +813,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --- Applies to -------------------------------------------------------------
 - Go: github.com/ag-ui-protocol/ag-ui/sdks/community/go v0.0.0-20260826145851-49e71f2b2d21 / LICENSE
-- npm: @ag-ui/client 0.0.58 / LICENSE
-- npm: @ag-ui/core 0.0.58 / LICENSE
-- npm: @ag-ui/encoder 0.0.58 / LICENSE
-- npm: @ag-ui/proto 0.0.58 / LICENSE
+- npm: @ag-ui/client 0.0.59 / LICENSE
+- npm: @ag-ui/core 0.0.59 / LICENSE
+- npm: @ag-ui/encoder 0.0.59 / LICENSE
+- npm: @ag-ui/proto 0.0.59 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
@@ -4844,8 +4844,8 @@ SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
 - npm: @tanstack/history 1.162.1 / LICENSE
-- npm: @tanstack/query-core 5.102.5 / LICENSE
-- npm: @tanstack/react-query 5.102.5 / LICENSE
+- npm: @tanstack/query-core 5.102.8 / LICENSE
+- npm: @tanstack/react-query 5.102.8 / LICENSE
 - npm: @tanstack/react-router 1.170.32 / LICENSE
 - npm: @tanstack/router-core 1.171.27 / LICENSE
 ----------------------------------------------------------------------------
