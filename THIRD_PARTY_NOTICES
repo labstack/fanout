@@ -97,7 +97,7 @@ COMPONENT INVENTORY
 - npm: @ag-ui/core 0.0.58 (declared license: MIT)
 - npm: @ag-ui/encoder 0.0.58 (declared license: MIT)
 - npm: @ag-ui/proto 0.0.58 (declared license: MIT)
-- npm: @bufbuild/protobuf 2.12.1 (declared license: (Apache-2.0 AND BSD-3-Clause))
+- npm: @bufbuild/protobuf 2.14.1 (declared license: (Apache-2.0 AND BSD-3-Clause)); no license file was present in the installed package
 - npm: @floating-ui/core 1.8.0 (declared license: MIT)
 - npm: @floating-ui/dom 1.8.0 (declared license: MIT)
 - npm: @floating-ui/react 0.27.20 (declared license: MIT)
@@ -130,7 +130,7 @@ COMPONENT INVENTORY
 - npm: @types/unist 2.0.11 (declared license: MIT)
 - npm: @types/unist 3.0.3 (declared license: MIT)
 - npm: @types/uuid 10.0.0 (declared license: MIT)
-- npm: @ungap/structured-clone 1.3.3 (declared license: ISC)
+- npm: @ungap/structured-clone 1.4.0 (declared license: ISC)
 - npm: accepts 2.0.0 (declared license: MIT)
 - npm: ajv 8.20.0 (declared license: MIT)
 - npm: ajv-formats 3.0.1 (declared license: MIT)
@@ -149,7 +149,7 @@ COMPONENT INVENTORY
 - npm: compare-versions 6.1.1 (declared license: MIT)
 - npm: content-disposition 1.1.0 (declared license: MIT)
 - npm: content-type 1.0.5 (declared license: MIT)
-- npm: content-type 2.0.0 (declared license: MIT)
+- npm: content-type 2.1.0 (declared license: MIT)
 - npm: cookie 0.7.2 (declared license: MIT)
 - npm: cookie-es 3.1.1 (declared license: MIT)
 - npm: cookie-signature 1.2.2 (declared license: MIT)
@@ -174,14 +174,14 @@ COMPONENT INVENTORY
 - npm: estree-util-is-identifier-name 3.0.0 (declared license: MIT)
 - npm: etag 1.8.1 (declared license: MIT)
 - npm: eventsource 3.0.7 (declared license: MIT)
-- npm: eventsource-parser 3.1.0 (declared license: MIT)
+- npm: eventsource-parser 3.1.1 (declared license: MIT)
 - npm: express 5.2.1 (declared license: MIT)
-- npm: express-rate-limit 8.6.0 (declared license: MIT)
+- npm: express-rate-limit 8.7.0 (declared license: MIT)
 - npm: extend 3.0.2 (declared license: MIT)
 - npm: fast-deep-equal 3.1.3 (declared license: MIT)
 - npm: fast-equals 4.0.3 (declared license: MIT)
 - npm: fast-json-patch 3.1.1 (declared license: MIT)
-- npm: fast-uri 3.1.5 (declared license: BSD-3-Clause)
+- npm: fast-uri 3.1.7 (declared license: BSD-3-Clause)
 - npm: finalhandler 2.1.1 (declared license: MIT)
 - npm: forwarded 0.2.0 (declared license: MIT)
 - npm: fresh 2.0.0 (declared license: MIT)
@@ -208,9 +208,9 @@ COMPONENT INVENTORY
 - npm: is-hexadecimal 2.0.1 (declared license: MIT)
 - npm: is-plain-obj 4.1.0 (declared license: MIT)
 - npm: is-promise 4.0.0 (declared license: MIT)
-- npm: isbot 5.2.1 (declared license: Unlicense)
+- npm: isbot 5.2.2 (declared license: Unlicense)
 - npm: isexe 2.0.0 (declared license: ISC)
-- npm: jose 6.2.3 (declared license: MIT)
+- npm: jose 6.2.10 (declared license: MIT)
 - npm: js-tokens 4.0.0 (declared license: MIT)
 - npm: json-schema-traverse 1.0.0 (declared license: MIT)
 - npm: json-schema-typed 8.0.2 (declared license: BSD-2-Clause)
@@ -233,7 +233,7 @@ COMPONENT INVENTORY
 - npm: mdast-util-to-hast 13.2.1 (declared license: MIT)
 - npm: mdast-util-to-markdown 2.1.2 (declared license: MIT)
 - npm: mdast-util-to-string 4.0.0 (declared license: MIT)
-- npm: media-typer 1.1.0 (declared license: MIT)
+- npm: media-typer 1.1.1 (declared license: MIT)
 - npm: merge-descriptors 2.0.0 (declared license: MIT)
 - npm: micromark 4.0.2 (declared license: MIT)
 - npm: micromark-core-commonmark 2.0.3 (declared license: MIT)
@@ -266,7 +266,7 @@ COMPONENT INVENTORY
 - npm: mime-db 1.54.0 (declared license: MIT)
 - npm: mime-types 3.0.2 (declared license: MIT)
 - npm: ms 2.1.3 (declared license: MIT)
-- npm: negotiator 1.0.0 (declared license: MIT)
+- npm: negotiator 1.1.0 (declared license: MIT)
 - npm: object-assign 4.1.1 (declared license: MIT)
 - npm: object-inspect 1.13.4 (declared license: MIT)
 - npm: on-finished 2.4.1 (declared license: MIT)
@@ -279,12 +279,12 @@ COMPONENT INVENTORY
 - npm: prop-types 15.8.1 (declared license: MIT)
 - npm: property-information 7.2.0 (declared license: MIT)
 - npm: proxy-addr 2.0.7 (declared license: MIT)
-- npm: qs 6.15.3 (declared license: BSD-3-Clause)
+- npm: qs 6.16.0 (declared license: BSD-3-Clause)
 - npm: range-parser 1.3.0 (declared license: MIT)
 - npm: raw-body 3.0.2 (declared license: MIT)
 - npm: react 19.2.8 (declared license: MIT)
 - npm: react-dom 19.2.8 (declared license: MIT)
-- npm: react-draggable 4.7.0 (declared license: MIT)
+- npm: react-draggable 4.7.1 (declared license: MIT)
 - npm: react-grid-layout 2.2.4 (declared license: MIT)
 - npm: react-is 16.13.1 (declared license: MIT)
 - npm: react-markdown 10.1.0 (declared license: MIT)
@@ -304,8 +304,8 @@ COMPONENT INVENTORY
 - npm: safer-buffer 2.1.2 (declared license: MIT)
 - npm: scheduler 0.27.0 (declared license: MIT)
 - npm: send 1.2.1 (declared license: MIT)
-- npm: seroval 1.6.3 (declared license: MIT)
-- npm: seroval-plugins 1.6.3 (declared license: MIT)
+- npm: seroval 1.6.4 (declared license: MIT)
+- npm: seroval-plugins 1.6.4 (declared license: MIT)
 - npm: serve-static 2.2.1 (declared license: MIT)
 - npm: setprototypeof 1.2.0 (declared license: ISC)
 - npm: shebang-command 2.0.0 (declared license: MIT)
@@ -326,7 +326,7 @@ COMPONENT INVENTORY
 - npm: trough 2.2.0 (declared license: MIT)
 - npm: tslib 2.3.0 (declared license: 0BSD)
 - npm: tslib 2.8.1 (declared license: 0BSD)
-- npm: type-fest 5.8.0 (declared license: (MIT OR CC0-1.0))
+- npm: type-fest 5.9.0 (declared license: (MIT OR CC0-1.0))
 - npm: type-is 2.1.0 (declared license: MIT)
 - npm: unified 11.0.5 (declared license: MIT)
 - npm: unist-util-is 6.0.1 (declared license: MIT)
@@ -347,7 +347,7 @@ COMPONENT INVENTORY
 - npm: which 2.0.2 (declared license: ISC)
 - npm: wrappy 1.0.2 (declared license: ISC)
 - npm: zod 3.25.76 (declared license: MIT)
-- npm: zod 4.4.3 (declared license: MIT)
+- npm: zod 4.5.4 (declared license: MIT)
 - npm: zod-to-json-schema 3.25.2 (declared license: ISC)
 - npm: zrender 6.1.0 (declared license: BSD-3-Clause)
 - npm: zwitch 2.0.4 (declared license: MIT)
@@ -369,7 +369,6 @@ LICENSE AND NOTICE TEXTS
 - Go: google.golang.org/genproto/googleapis/api v0.0.0-20260825221802-da73d73af1c5 / LICENSE
 - Go: google.golang.org/genproto/googleapis/rpc v0.0.0-20260825221802-da73d73af1c5 / LICENSE
 - Go: google.golang.org/grpc v1.83.2 / LICENSE
-- npm: @bufbuild/protobuf 2.12.1 / supplemental/LICENSE
 - npm: @protobuf-ts/protoc 2.11.1 / supplemental/LICENSE
 ----------------------------------------------------------------------------
 
@@ -4267,46 +4266,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: @bufbuild/protobuf 2.12.1 / supplemental/bufbuild-protobuf-BSD.txt
-----------------------------------------------------------------------------
-
-Copyright 2008 Google Inc. All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-* Redistributions of source code must retain the above copyright notice,
-  this list of conditions and the following disclaimer.
-* Redistributions in binary form must reproduce the above copyright notice,
-  this list of conditions and the following disclaimer in the documentation
-  and/or other materials provided with the distribution.
-* Neither the name of Google Inc. nor the names of its contributors may be
-  used to endorse or promote products derived from this software without
-  specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
-ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
-ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-
-Code generated by the Protocol Buffer compiler is owned by the owner of the
-input file used when generating it. This code is not standalone and requires a
-support library to be linked with it. This support library is itself covered
-by the above license.
-
---- Applies to -------------------------------------------------------------
-- npm: @bufbuild/protobuf 2.12.1 / supplemental/bufbuild-protobuf-NOTICE.txt
-----------------------------------------------------------------------------
-
-Copyright 2021-2026 Buf Technologies, Inc.
-
---- Applies to -------------------------------------------------------------
 - npm: @floating-ui/core 1.8.0 / LICENSE
 - npm: @floating-ui/dom 1.8.0 / LICENSE
 - npm: @floating-ui/react 0.27.20 / LICENSE
@@ -4976,7 +4935,7 @@ MIT License
     SOFTWARE
 
 --- Applies to -------------------------------------------------------------
-- npm: @ungap/structured-clone 1.3.3 / LICENSE
+- npm: @ungap/structured-clone 1.4.0 / LICENSE
 ----------------------------------------------------------------------------
 
 ISC License
@@ -5280,7 +5239,7 @@ SOFTWARE.
 --- Applies to -------------------------------------------------------------
 - npm: content-disposition 1.1.0 / LICENSE
 - npm: forwarded 0.2.0 / LICENSE
-- npm: media-typer 1.1.0 / LICENSE
+- npm: media-typer 1.1.1 / LICENSE
 - npm: vary 1.1.2 / LICENSE
 ----------------------------------------------------------------------------
 
@@ -5309,7 +5268,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
 - npm: content-type 1.0.5 / LICENSE
-- npm: content-type 2.0.0 / LICENSE
+- npm: content-type 2.1.0 / LICENSE
 ----------------------------------------------------------------------------
 
 (The MIT License)
@@ -6038,7 +5997,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - npm: escape-string-regexp 5.0.0 / license
 - npm: is-plain-obj 4.1.0 / license
 - npm: tagged-tag 1.0.0 / license
-- npm: type-fest 5.8.0 / license-mit
+- npm: type-fest 5.9.0 / license-mit
 ----------------------------------------------------------------------------
 
 MIT License
@@ -6146,7 +6105,7 @@ OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: eventsource-parser 3.1.0 / LICENSE
+- npm: eventsource-parser 3.1.1 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
@@ -6201,10 +6160,10 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: express-rate-limit 8.6.0 / license.md
+- npm: express-rate-limit 8.7.0 / license
 ----------------------------------------------------------------------------
 
-﻿# MIT License
+MIT License
 
 Copyright 2023 Nathan Friedly, Vedant K
 
@@ -6219,11 +6178,12 @@ The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
-CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
 - npm: extend 3.0.2 / LICENSE
@@ -6333,7 +6293,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: fast-uri 3.1.5 / LICENSE
+- npm: fast-uri 3.1.7 / LICENSE
 ----------------------------------------------------------------------------
 
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
@@ -6813,7 +6773,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: isbot 5.2.1 / LICENSE
+- npm: isbot 5.2.2 / LICENSE
 ----------------------------------------------------------------------------
 
 # Unlicense
@@ -6867,7 +6827,7 @@ ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
 IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: jose 6.2.3 / LICENSE.md
+- npm: jose 6.2.10 / LICENSE.md
 ----------------------------------------------------------------------------
 
 The MIT License (MIT)
@@ -7161,7 +7121,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: negotiator 1.0.0 / LICENSE
+- npm: negotiator 1.1.0 / LICENSE
 ----------------------------------------------------------------------------
 
 (The MIT License)
@@ -7419,7 +7379,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: qs 6.15.3 / LICENSE.md
+- npm: qs 6.16.0 / LICENSE.md
 ----------------------------------------------------------------------------
 
 BSD 3-Clause License
@@ -7537,7 +7497,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: react-draggable 4.7.0 / LICENSE
+- npm: react-draggable 4.7.1 / LICENSE
 ----------------------------------------------------------------------------
 
 (MIT License)
@@ -8115,8 +8075,8 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: seroval 1.6.3 / LICENSE
-- npm: seroval-plugins 1.6.3 / LICENSE
+- npm: seroval 1.6.4 / LICENSE
+- npm: seroval-plugins 1.6.4 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License Copyright (c) 2025 Alexis Munsayac <alexis.munsayac@gmail.com>
@@ -8394,7 +8354,7 @@ OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: type-fest 5.8.0 / license-cc0
+- npm: type-fest 5.9.0 / license-cc0
 ----------------------------------------------------------------------------
 
 Creative Commons Legal Code
@@ -8643,7 +8603,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 --- Applies to -------------------------------------------------------------
 - npm: zod 3.25.76 / LICENSE
-- npm: zod 4.4.3 / LICENSE
+- npm: zod 4.5.4 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
