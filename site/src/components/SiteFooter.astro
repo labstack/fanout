@@ -11,16 +11,20 @@
  * chrome. PageFrame renders it only on splash pages; putting it in page source
  * would leak it into the Markdown alternate.
  *
- * It holds two things: who owns this and under what licence, and where the
- * organisation is. Nothing else, on purpose. Documentation pages already have
- * sidebar navigation, page metadata and previous/next links, so this band would
- * only restate their chrome. Security, the trademark policy, contributing and
- * llms.txt are all real and all deliberately absent: a reader who wants them
- * reaches them from the repository or from the head of the page, and four more
- * links here would turn the band into a link farm nobody arrived looking for.
+ * It holds three things: who owns this and under what licence, where the
+ * organisation is, and how to change the analytics answer. Nothing else, on
+ * purpose. Documentation pages already have sidebar navigation, page metadata
+ * and previous/next links, so this band would only restate their chrome.
+ * Security, the trademark policy, contributing and llms.txt are all real and
+ * all deliberately absent: a reader who wants them reaches them from the
+ * repository or from the head of the page, and four more links here would turn
+ * the band into a link farm nobody arrived looking for.
  *
  * The bar for adding anything: it is something a stranger needs, the sidebar
- * cannot hold it, and they would not otherwise find it.
+ * cannot hold it, and they would not otherwise find it. Privacy clears it on
+ * all three counts — a reader who allowed analytics and wants to take that back
+ * has nowhere else to go, and the page is deliberately not in the sidebar,
+ * which is for documentation rather than for the site's own terms.
  */
 import { Icon } from "@astrojs/starlight/components";
 
@@ -33,6 +37,8 @@ const year = new Date().getFullYear();
       <span>&copy; {year} <a href="/">Fanout</a> by <a href="https://labstack.com">LabStack LLC</a></span>
       <span class="sep" aria-hidden="true">·</span>
       <span><a href="https://github.com/labstack/fanout/blob/main/LICENSE">Apache-2.0</a></span>
+      <span class="sep" aria-hidden="true">·</span>
+      <span><a href="/privacy">Privacy</a></span>
     </p>
     <nav class="fo-sitefooter-links" aria-label="LabStack">
       <a

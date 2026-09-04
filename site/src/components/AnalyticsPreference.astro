@@ -1,0 +1,153 @@
+---
+/* The standing analytics control, for the privacy page.
+ *
+ * The banner asks once. This is where the answer is changed afterwards, which
+ * is the half of consent that is easy to leave out: permission that cannot be
+ * withdrawn as readily as it was given was never permission.
+ *
+ * It states the current situation before offering the buttons, because "allowed
+ * or not" is the question a reader arrives with, and in the regions that do not
+ * require a prompt the honest answer is that measurement is already running.
+ *
+ * The status line is scripted rather than rendered, since the answer lives in
+ * the reader's browser and this site is static: every reader would otherwise be
+ * served the same cached sentence about a choice that is theirs alone.
+ */
+const enabled =
+  Boolean(import.meta.env.PUBLIC_GA_MEASUREMENT_ID?.trim()) && import.meta.env.PROD;
+---
+
+{
+  enabled ? (
+    <div id="fo-analytics-preference" class="fo-preference">
+      <p class="fo-preference-status" aria-live="polite">
+        Checking whether analytics are running in this browser.
+      </p>
+      <div class="fo-preference-actions">
+        <button type="button" class="fo-preference-button" data-consent="denied">
+          Do not allow
+        </button>
+        <button type="button" class="fo-preference-button" data-consent="granted">
+          Allow
+        </button>
+      </div>
+    </div>
+  ) : (
+    <p class="fo-preference-status">
+      This build of the site has no analytics configured, so nothing is measured and there is
+      nothing to turn off.
+    </p>
+  )
+}
+
+<script is:inline>
+  (function () {
+    var root = document.getElementById("fo-analytics-preference");
+    var api = window.fanoutAnalytics;
+    if (!root || !api) return;
+
+    var status = root.querySelector(".fo-preference-status");
+    var buttons = root.querySelectorAll("[data-consent]");
+
+    function render() {
+      var preference = api.preference();
+
+      if (api.refused()) {
+        status.textContent =
+          "Your browser sends a Do Not Track or Global Privacy Control signal, so " +
+          "analytics do not run here whatever this control says.";
+        for (var i = 0; i < buttons.length; i++) buttons[i].disabled = true;
+        return;
+      }
+
+      for (var j = 0; j < buttons.length; j++) {
+        buttons[j].disabled = false;
+        buttons[j].setAttribute(
+          "aria-pressed",
+          String(buttons[j].dataset.consent === preference),
+        );
+      }
+
+      if (preference === "granted") {
+        status.textContent = "Analytics are allowed in this browser.";
+        return;
+      }
+      if (preference === "denied") {
+        status.textContent = "Analytics are not allowed in this browser.";
+        return;
+      }
+
+      api.requirement().then(function (requirement) {
+        if (api.preference() !== null) return;
+        status.textContent =
+          requirement === "not_required"
+            ? "Analytics are running in this browser. You can turn them off here."
+            : "You have not yet answered the analytics question in this browser.";
+      });
+    }
+
+    root.addEventListener("click", function (event) {
+      var button = event.target instanceof Element && event.target.closest("[data-consent]");
+      if (!button) return;
+      api.setPreference(button.dataset.consent);
+    });
+
+    api.subscribe(render);
+    render();
+  })();
+</script>
+
+<style>
+  .fo-preference {
+    margin-block: 1rem;
+    padding: 1rem 1.15rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.6rem;
+    background: var(--sl-color-black);
+  }
+
+  .fo-preference-status {
+    margin: 0;
+    font-size: var(--sl-text-sm);
+    line-height: 1.6;
+    color: var(--sl-color-gray-2);
+  }
+
+  .fo-preference-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-block-start: 0.85rem;
+  }
+
+  .fo-preference-button {
+    padding: 0.4rem 0.85rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.35rem;
+    background: transparent;
+    color: var(--sl-color-gray-2);
+    font: inherit;
+    font-size: var(--sl-text-xs);
+    cursor: pointer;
+  }
+
+  .fo-preference-button:hover:not(:disabled) {
+    border-color: var(--sl-color-gray-4);
+    color: var(--sl-color-white);
+  }
+
+  .fo-preference-button[aria-pressed="true"] {
+    border-color: var(--sl-color-accent);
+    background: var(--sl-color-accent);
+    color: var(--sl-color-white);
+  }
+
+  .fo-preference-button:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .fo-preference-button:focus-visible {
+    outline: 2px solid var(--sl-color-accent-high);
+    outline-offset: 2px;
+  }
+</style>

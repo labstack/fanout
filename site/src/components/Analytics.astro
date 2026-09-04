@@ -1,12 +1,35 @@
 ---
-/* Privacy-respecting Google Analytics 4.
+/* Consent-gated Google Analytics 4.
  *
  * The component is absent unless PUBLIC_GA_MEASUREMENT_ID is configured for a
- * production build. It denies analytics/ad storage before loading gtag, turns
- * off advertising signals, honors DNT and GPC before making a request, and
- * drops query strings from recorded locations. That keeps local builds and
- * forks silent and avoids asking for consent to store identifiers Fanout does
- * not need.
+ * production build, so local builds and forks stay silent.
+ *
+ * Nothing is loaded until the visitor is allowed to be measured. Earlier this
+ * file loaded gtag on every page and then held it in Consent Mode's denied
+ * state, which sent a cookieless ping for every view: no `_ga` cookie, no
+ * stable client id, so every pageview arrived as a new user and a new session.
+ * That is a report in which sessions, bounce rate and returning visitors are
+ * all meaningless, bought at the price of shipping Google's tag to everybody.
+ * The tag now does not exist until it may set the cookie that makes its numbers
+ * mean something.
+ *
+ * Whether consent must be asked for is a question about the reader's location,
+ * not about this site. The EEA, the UK and the Crown Dependencies require
+ * permission before the cookie is set; elsewhere measurement may run with a way
+ * to turn it off. Cloudflare already knows which one applies and says so at
+ * /cdn-cgi/trace, so most readers are measured properly and never see a banner,
+ * and the readers who are owed the question get it. A failed or unavailable
+ * lookup is treated as "ask" — the safe direction, and what local development
+ * gets, where the whole component is compiled out anyway.
+ *
+ * Do Not Track and Global Privacy Control are honoured above all of it. A
+ * reader who has already answered this question in their browser is not asked
+ * it again, and is not measured either way.
+ *
+ * The preference lives in localStorage rather than a cookie, so declining
+ * stores nothing that travels with a request, and is mirrored across tabs. The
+ * control that changes it later is on /privacy; consent that cannot be
+ * withdrawn as easily as it was given is not consent.
  */
 const measurementId = import.meta.env.PUBLIC_GA_MEASUREMENT_ID?.trim().toUpperCase();
 
@@ -25,92 +48,305 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
   enabled && (
     <script is:inline define:vars={{ measurementId }}>
       (function () {
-        var signals = [navigator.doNotTrack, window.doNotTrack, navigator.msDoNotTrack];
-        for (var i = 0; i < signals.length; i++) {
-          if (signals[i] === "1" || signals[i] === "yes") return;
+        var STORAGE_KEY = "fanout.analytics-consent.v1";
+        var PREFERENCE_EVENT = "fanout:analytics-preference";
+
+        // The EEA, the UK and the Crown Dependencies: the places that require
+        // permission before a browser stores an analytics identifier. A country
+        // this list does not name gets measurement with an opt-out instead.
+        var PRIOR_CONSENT = [
+          "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE",
+          "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT",
+          "RO", "SK", "SI", "ES", "SE", "IS", "LI", "NO",
+          "GB", "GG", "IM", "JE",
+        ];
+
+        var memoryPreference = null;
+        var started = false;
+        var listenersAttached = false;
+        var requirementPromise = null;
+
+        // A reader who has set either signal has answered this already.
+        function signalsRefusal() {
+          var flags = [navigator.doNotTrack, window.doNotTrack, navigator.msDoNotTrack];
+          for (var i = 0; i < flags.length; i++) {
+            if (flags[i] === "1" || flags[i] === "yes") return true;
+          }
+          return navigator.globalPrivacyControl === true;
         }
-        if (navigator.globalPrivacyControl === true) return;
 
-        window.dataLayer = window.dataLayer || [];
-        function gtag() { window.dataLayer.push(arguments); }
-        window.gtag = gtag;
+        function readPreference() {
+          try {
+            var stored = window.localStorage.getItem(STORAGE_KEY);
+            return stored === "granted" || stored === "denied" ? stored : null;
+          } catch (_) {
+            // A locked-down browser throws on access rather than returning
+            // null. The in-memory answer still governs this page.
+            return memoryPreference;
+          }
+        }
 
-        gtag("consent", "default", {
-          analytics_storage: "denied",
-          ad_storage: "denied",
-          ad_user_data: "denied",
-          ad_personalization: "denied",
-        });
+        function writePreference(preference) {
+          memoryPreference = preference;
+          try {
+            window.localStorage.setItem(STORAGE_KEY, preference);
+          } catch (_) {
+            // Storage is unavailable; the choice holds for this page only,
+            // which is the direction that does not weaken the gate.
+          }
+          apply();
+          window.dispatchEvent(new Event(PREFERENCE_EVENT));
+        }
 
-        gtag("js", new Date());
-        gtag("config", measurementId, {
-          allow_google_signals: false,
-          allow_ad_personalization_signals: false,
-          page_location: window.location.origin + window.location.pathname,
-        });
+        function consentRequirementFor(country) {
+          if (!country || country === "XX" || country === "T1") return "required";
+          return PRIOR_CONSENT.indexOf(country) === -1 ? "not_required" : "required";
+        }
 
-        document.addEventListener("click", function (event) {
-          var target = event.target;
-          if (!(target instanceof Element)) return;
+        function consentRequirement() {
+          if (requirementPromise) return requirementPromise;
+          requirementPromise = window
+            .fetch("/cdn-cgi/trace", {
+              cache: "no-store",
+              credentials: "omit",
+              headers: { Accept: "text/plain" },
+            })
+            .then(function (response) {
+              if (!response.ok) throw new Error("trace " + response.status);
+              return response.text();
+            })
+            .then(function (trace) {
+              var match = trace.match(/^loc=([A-Z0-9]{2})$/m);
+              return consentRequirementFor(match ? match[1] : null);
+            })
+            .catch(function () {
+              return "required";
+            });
+          return requirementPromise;
+        }
 
-          var link = target.closest("a");
-          if (!link) return;
+        function gtag() {
+          window.dataLayer.push(arguments);
+        }
 
-          var eventName = link.dataset.analyticsEvent;
-          var action = link.dataset.analyticsAction;
-          var location = link.dataset.analyticsLocation;
+        function referrerOrigin() {
+          if (!document.referrer) return "";
+          try {
+            return new URL(document.referrer).origin;
+          } catch (_) {
+            return "";
+          }
+        }
 
-          // The header's GitHub link is generated by Starlight and cannot carry
-          // the explicit attributes used by Fanout-owned links.
-          if (!eventName) {
-            try {
-              var url = new URL(link.href, window.location.href);
-              if (url.hostname === "github.com" && url.pathname === "/labstack/fanout") {
-                eventName = "outbound_click";
-                action = "fanout_github";
-                location = "site_header";
+        function start() {
+          // Above the stored preference on purpose: a browser-level refusal is
+          // not overridden by a click on this site's own control.
+          if (started || signalsRefusal()) return;
+          started = true;
+
+          window.dataLayer = window.dataLayer || [];
+          window.gtag = gtag;
+          window["ga-disable-" + measurementId] = false;
+
+          gtag("consent", "default", {
+            analytics_storage: "denied",
+            ad_storage: "denied",
+            ad_user_data: "denied",
+            ad_personalization: "denied",
+          });
+          // The tag exists only on the path where measurement is allowed, so
+          // this is the state it is created in rather than a later upgrade.
+          gtag("consent", "update", { analytics_storage: "granted" });
+          gtag("set", "ads_data_redaction", true);
+          gtag("js", new Date());
+          gtag("config", measurementId, {
+            allow_google_signals: false,
+            allow_ad_personalization_signals: false,
+            cookie_flags: "SameSite=Lax;Secure",
+            // Query strings can carry whatever a referrer put there. The path
+            // is the whole of what this site wants to know, and the same is
+            // true of where the reader came from: the site is worth knowing,
+            // the search terms in the rest of the URL are not.
+            page_location: window.location.origin + window.location.pathname,
+            page_referrer: referrerOrigin(),
+          });
+
+          attachListeners();
+
+          var tag = document.createElement("script");
+          tag.async = true;
+          tag.src =
+            "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(measurementId);
+          document.head.appendChild(tag);
+        }
+
+        // Withdrawal has to actually remove what acceptance stored, or the
+        // control is a checkbox that lies. The disable flag stops a tag that is
+        // already on the page from sending anything further.
+        function stop() {
+          window["ga-disable-" + measurementId] = true;
+          if (window.gtag) {
+            window.gtag("consent", "update", {
+              analytics_storage: "denied",
+              ad_storage: "denied",
+              ad_user_data: "denied",
+              ad_personalization: "denied",
+            });
+          }
+          var names = ["_ga", "_ga_" + measurementId.replace(/^G-/, "")];
+          for (var i = 0; i < names.length; i++) {
+            document.cookie = names[i] + "=; Max-Age=0; Path=/; SameSite=Lax; Secure";
+            document.cookie =
+              names[i] +
+              "=; Max-Age=0; Path=/; Domain=." +
+              window.location.hostname +
+              "; SameSite=Lax; Secure";
+          }
+        }
+
+        function send(name, parameters) {
+          if (!started || window["ga-disable-" + measurementId]) return;
+          gtag("event", name, parameters);
+        }
+
+        function attachListeners() {
+          if (listenersAttached) return;
+          listenersAttached = true;
+
+          document.addEventListener("click", function (event) {
+            var target = event.target;
+            if (!(target instanceof Element)) return;
+
+            var link = target.closest("a");
+            if (!link) return;
+
+            var eventName = link.dataset.analyticsEvent;
+            var action = link.dataset.analyticsAction;
+            var location = link.dataset.analyticsLocation;
+
+            // The header's GitHub link is generated by Starlight and cannot
+            // carry the explicit attributes used by Fanout-owned links.
+            if (!eventName) {
+              try {
+                var url = new URL(link.href, window.location.href);
+                if (url.hostname === "github.com" && url.pathname === "/labstack/fanout") {
+                  eventName = "outbound_click";
+                  action = "fanout_github";
+                  location = "site_header";
+                }
+              } catch (_) {
+                return;
               }
-            } catch (_) {
+            }
+
+            if (!eventName) return;
+            send(eventName, {
+              action: action || "unknown",
+              location: location || "unknown",
+              link_text: (link.textContent || link.getAttribute("aria-label") || "").trim(),
+              link_url: link.href,
+            });
+          });
+
+          document.addEventListener("copy", function () {
+            var selection = window.getSelection();
+            var node = selection && selection.anchorNode;
+            var element =
+              node && (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement);
+            var source = element && element.closest("[data-analytics-copy]");
+            if (!source) return;
+
+            send("copy_command", {
+              action: source.dataset.analyticsCopy,
+              location: "closing_cta",
+            });
+          });
+
+          // The copy button writes through the Clipboard API, which raises no
+          // copy event. It announces itself instead, so both paths are counted
+          // the same way.
+          document.addEventListener("fanout:copy", function (event) {
+            send("copy_command", { action: event.detail || "unknown", location: "closing_cta" });
+          });
+        }
+
+        function mayRun(requirement, preference) {
+          if (preference === "granted") return true;
+          return requirement === "not_required" && preference !== "denied";
+        }
+
+        function banner() {
+          return document.getElementById("fo-analytics-consent");
+        }
+
+        function apply() {
+          var preference = readPreference();
+          if (preference === "denied") {
+            stop();
+            var element = banner();
+            if (element) element.hidden = true;
+            return;
+          }
+          if (preference === "granted") {
+            start();
+            var accepted = banner();
+            if (accepted) accepted.hidden = true;
+            return;
+          }
+          consentRequirement().then(function (requirement) {
+            if (readPreference() !== null) return;
+            if (mayRun(requirement, null)) {
+              start();
               return;
             }
+            var prompt = banner();
+            if (prompt) prompt.hidden = false;
+          });
+        }
+
+        // The privacy page's control and the banner both drive the same state.
+        window.fanoutAnalytics = {
+          preference: readPreference,
+          setPreference: writePreference,
+          requirement: consentRequirement,
+          refused: signalsRefusal,
+          subscribe: function (onChange) {
+            window.addEventListener(PREFERENCE_EVENT, onChange);
+            window.addEventListener("storage", function (event) {
+              if (event.key === STORAGE_KEY) onChange();
+            });
+          },
+        };
+
+        function ready(run) {
+          if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", run, { once: true });
+          } else {
+            run();
           }
+        }
 
-          if (!eventName) return;
-          gtag("event", eventName, {
-            action: action || "unknown",
-            location: location || "unknown",
-            link_text: (link.textContent || link.getAttribute("aria-label") || "").trim(),
-            link_url: link.href,
+        if (signalsRefusal()) {
+          // Neither measured nor asked. The banner stays in the document,
+          // hidden, so nothing depends on it having rendered.
+          ready(function () {
+            var element = banner();
+            if (element) element.hidden = true;
           });
+          return;
+        }
+
+        ready(function () {
+          var element = banner();
+          if (element) {
+            element.addEventListener("click", function (event) {
+              var button = event.target instanceof Element && event.target.closest("button");
+              if (!button || !button.dataset.consent) return;
+              writePreference(button.dataset.consent);
+            });
+          }
+          apply();
         });
-
-        document.addEventListener("copy", function () {
-          var selection = window.getSelection();
-          var node = selection && selection.anchorNode;
-          var element = node && (node.nodeType === Node.ELEMENT_NODE ? node : node.parentElement);
-          var source = element && element.closest("[data-analytics-copy]");
-          if (!source) return;
-
-          gtag("event", "copy_command", {
-            action: source.dataset.analyticsCopy,
-            location: "closing_cta",
-          });
-        });
-
-        // The copy button writes through the Clipboard API, which raises no
-        // copy event. It announces itself instead, so both paths are counted
-        // the same way.
-        document.addEventListener("fanout:copy", function (event) {
-          gtag("event", "copy_command", {
-            action: event.detail || "unknown",
-            location: "closing_cta",
-          });
-        });
-
-        var tag = document.createElement("script");
-        tag.async = true;
-        tag.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(measurementId);
-        document.head.appendChild(tag);
       })();
     </script>
   )
