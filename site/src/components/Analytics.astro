@@ -141,12 +141,23 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
         function start() {
           // Above the stored preference on purpose: a browser-level refusal is
           // not overridden by a click on this site's own control.
-          if (started || signalsRefusal()) return;
+          if (signalsRefusal()) return;
+
+          window["ga-disable-" + measurementId] = false;
+
+          // Allowing after declining, without leaving the page. The tag is
+          // already loaded and must not be configured twice, but the state
+          // stop() left behind is exactly what has to be undone: clearing the
+          // disable flag above and re-granting here. Returning early on
+          // `started` alone made the pair of buttons one-way until a reload.
+          if (started) {
+            gtag("consent", "update", { analytics_storage: "granted" });
+            return;
+          }
           started = true;
 
           window.dataLayer = window.dataLayer || [];
           window.gtag = gtag;
-          window["ga-disable-" + measurementId] = false;
 
           gtag("consent", "default", {
             analytics_storage: "denied",
