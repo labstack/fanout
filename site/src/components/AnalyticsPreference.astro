@@ -19,23 +19,31 @@ const enabled =
 
 {
   enabled ? (
-    <div id="fo-analytics-preference" class="fo-preference">
-      <p class="fo-preference-status" aria-live="polite">
-        Checking whether analytics are running in this browser.
+    <>
+      <p>
+        The site uses Google Analytics 4 to count visits and see which pages get read. It runs
+        only when it is allowed to, and it is configured to learn as little as will still
+        answer that question.
       </p>
-      <div class="fo-preference-actions">
-        <button type="button" class="fo-preference-button" data-consent="denied">
-          Do not allow
-        </button>
-        <button type="button" class="fo-preference-button" data-consent="granted">
-          Allow
-        </button>
+      <div id="fo-analytics-preference" class="fo-preference">
+        <p class="fo-preference-status" aria-live="polite">
+          Checking whether analytics are running in this browser.
+        </p>
+        <div class="fo-preference-actions">
+          <button type="button" class="fo-preference-button" data-consent="denied">
+            Do not allow
+          </button>
+          <button type="button" class="fo-preference-button" data-consent="granted">
+            Allow
+          </button>
+        </div>
       </div>
-    </div>
+    </>
   ) : (
-    <p class="fo-preference-status">
-      This build of the site has no analytics configured, so nothing is measured and there is
-      nothing to turn off.
+    <p>
+      This build of the site has no analytics configured, so nothing is measured, nothing is
+      stored, and there is nothing to turn off. The rest of this section describes what a build
+      that has them does.
     </p>
   )
 }
