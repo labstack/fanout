@@ -113,15 +113,21 @@ const enabled =
     color: var(--sl-color-white);
   }
 
+  /* The landing page's primary action, in miniature: a solid fill of the
+     token that contrasts with the page, labelled in the token that contrasts
+     with the fill. `--sl-color-white` is a role rather than a colour — it is
+     near-black under the light theme — so a label set in it on an accent fill
+     is dark-on-blue in daylight. The pair below inverts correctly in both. */
   .fo-consent-button-primary {
-    border-color: var(--sl-color-accent);
-    background: var(--sl-color-accent);
-    color: var(--sl-color-white);
+    border-color: var(--sl-color-white);
+    background: var(--sl-color-white);
+    color: var(--sl-color-black);
   }
 
   .fo-consent-button-primary:hover {
-    border-color: var(--sl-color-accent-high);
-    background: var(--sl-color-accent-high);
+    border-color: var(--sl-color-gray-1);
+    background: var(--sl-color-gray-1);
+    color: var(--sl-color-black);
   }
 
   .fo-consent-button:focus-visible {

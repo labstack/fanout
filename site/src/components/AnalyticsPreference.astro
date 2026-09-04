@@ -135,10 +135,13 @@ const enabled =
     color: var(--sl-color-white);
   }
 
+  /* Same inversion as the banner's primary action: `--sl-color-white` is the
+     token that contrasts with the page, so it is the fill here and never the
+     label on top of it. */
   .fo-preference-button[aria-pressed="true"] {
-    border-color: var(--sl-color-accent);
-    background: var(--sl-color-accent);
-    color: var(--sl-color-white);
+    border-color: var(--sl-color-white);
+    background: var(--sl-color-white);
+    color: var(--sl-color-black);
   }
 
   .fo-preference-button:disabled {
