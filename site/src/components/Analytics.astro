@@ -186,6 +186,12 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
 
           var tag = document.createElement("script");
           tag.async = true;
+          // Every current browser defaults to strict-origin-when-cross-origin,
+          // which already keeps the path and query out of the `Referer` on this
+          // request. Stating it means the guarantee this file makes about query
+          // strings is the file's own rather than one inherited from whatever
+          // default the reader's browser happens to ship.
+          tag.referrerPolicy = "strict-origin";
           tag.src =
             "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(measurementId);
           document.head.appendChild(tag);
