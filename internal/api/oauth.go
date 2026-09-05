@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -30,6 +31,8 @@ import (
 const mcpReadScope = appauth.MCPScopeTelemetryRead
 
 const browserMCPSessionBearer = "fanout-browser-session"
+
+const maxMCPAuthorizationBodyBytes = 4 << 20
 
 type browserMCPUserContextKey struct{}
 
@@ -112,10 +115,50 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 }
 
 func requiredMCPToolScope(r *http.Request) string {
-	if r.Header.Get("Mcp-Method") != "tools/call" {
+	if r.Method != http.MethodPost || r.Body == nil {
 		return ""
 	}
-	switch r.Header.Get("Mcp-Name") {
+	original := r.Body
+	body, err := io.ReadAll(io.LimitReader(original, maxMCPAuthorizationBodyBytes+1))
+	r.Body = struct {
+		io.Reader
+		io.Closer
+	}{
+		Reader: io.MultiReader(bytes.NewReader(body), original),
+		Closer: original,
+	}
+	if err != nil || len(body) > maxMCPAuthorizationBodyBytes {
+		return ""
+	}
+
+	var single mcpAuthorizationRequest
+	if json.Unmarshal(body, &single) == nil {
+		return single.requiredScope()
+	}
+	var batch []mcpAuthorizationRequest
+	if json.Unmarshal(body, &batch) != nil {
+		return ""
+	}
+	for _, request := range batch {
+		if scope := request.requiredScope(); scope != "" {
+			return scope
+		}
+	}
+	return ""
+}
+
+type mcpAuthorizationRequest struct {
+	Method string `json:"method"`
+	Params struct {
+		Name string `json:"name"`
+	} `json:"params"`
+}
+
+func (r mcpAuthorizationRequest) requiredScope() string {
+	if r.Method != "tools/call" {
+		return ""
+	}
+	switch r.Params.Name {
 	case "dashboard_list", "dashboard_get", "dashboard_create", "dashboard_update":
 		return dashboard.OAuthScope
 	default:
@@ -531,7 +574,7 @@ func (h *MCPAuthorization) Token(c *echo.Context) error {
 	}
 	if err != nil {
 		if errors.Is(err, appauth.ErrInvalidOAuthScope) {
-			return oauthJSONError(c, http.StatusBadRequest, "invalid_scope", "requested scope exceeds the original grant")
+			return oauthJSONError(c, http.StatusBadRequest, "invalid_scope", "requested scope is invalid or exceeds the original grant")
 		}
 		if errors.Is(err, appauth.ErrInvalidOAuthGrant) || errors.Is(err, appauth.ErrOAuthRefreshReuse) {
 			return oauthJSONError(c, http.StatusBadRequest, "invalid_grant", "grant is invalid or expired")
