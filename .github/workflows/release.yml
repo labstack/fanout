@@ -16,6 +16,8 @@ env:
   GO_VERSION: "1.27.0"
   IMAGE: ghcr.io/labstack/fanout
   DOCKERHUB_IMAGE: docker.io/labstack/fanout
+  MCP_PUBLISHER_VERSION: "1.8.1"
+  MCP_PUBLISHER_LINUX_AMD64_SHA256: "a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc"
 
 jobs:
   verify:
@@ -347,3 +349,33 @@ jobs:
             curl -fsSLO "${base}/${archive}"
             gh attestation verify "${archive}" --repo labstack/fanout
           done
+
+  mcp-registry:
+    name: publish MCP Registry metadata
+    needs: verify-release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set the released version
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          jq --arg version "${version}" '.version = $version' server.json > server.tmp
+          mv server.tmp server.json
+      - name: Install the MCP publisher
+        run: |
+          set -euo pipefail
+          archive="mcp-publisher_linux_amd64.tar.gz"
+          url="https://github.com/modelcontextprotocol/registry/releases/download/v${MCP_PUBLISHER_VERSION}/${archive}"
+          curl -fsSLo "${archive}" "${url}"
+          echo "${MCP_PUBLISHER_LINUX_AMD64_SHA256}  ${archive}" | sha256sum -c -
+          tar -xzf "${archive}" mcp-publisher
+      - name: Validate MCP Registry metadata
+        run: ./mcp-publisher validate
+      - name: Authenticate to the MCP Registry
+        run: ./mcp-publisher login github-oidc
+      - name: Publish to the MCP Registry
+        run: ./mcp-publisher publish
