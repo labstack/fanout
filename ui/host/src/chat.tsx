@@ -110,8 +110,18 @@ function ChatMessage({ message, time, send }: { message: Message; time?: number;
 
 function CopyButton({ text, label }: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
-  return <Tooltip label={copied ? "Copied" : label}>
-    <ActionIcon variant="subtle" color="gray" size="sm" aria-label={label} onClick={() => { void navigator.clipboard.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }); }}>
+  const [failed, setFailed] = useState(false);
+  // A denied permission refuses the write, and an insecure context has no
+  // clipboard to refuse with. Either way the button says so for a moment
+  // rather than dying on a rejection nobody handles.
+  function copy() {
+    setCopied(false);
+    setFailed(false);
+    const written = navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error("clipboard unavailable"));
+    void written.then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => { setFailed(true); setTimeout(() => setFailed(false), 1500); });
+  }
+  return <Tooltip label={failed ? "Could not copy" : copied ? "Copied" : label}>
+    <ActionIcon variant="subtle" color="gray" size="sm" aria-label={label} data-state={failed ? "failed" : copied ? "copied" : undefined} onClick={copy}>
       {copied ? <Check size={13} weight="bold" /> : <Copy size={13} />}
     </ActionIcon>
   </Tooltip>;

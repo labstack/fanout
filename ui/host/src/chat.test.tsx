@@ -99,4 +99,57 @@ describe("ChatPage", () => {
     expect(context.newThread).toHaveBeenCalled();
     await act(async () => root.unmount());
   });
+
+  it("marks the copy button copied when the clipboard accepts", async () => {
+    const writeText = stubClipboard(async () => undefined);
+    const root = await mount(value({ messages: [{ id: "a1", role: "assistant", content: "All clear." } as Message] }));
+    await clickCopy();
+    expect(writeText).toHaveBeenCalledWith("All clear.");
+    expect(copyButton()?.getAttribute("data-state")).toBe("copied");
+    await act(async () => root.unmount());
+  });
+
+  // A denied permission or an insecure context rejects the write. That must
+  // read as a failure on the button, not as an unhandled rejection.
+  it("reports a refused clipboard copy instead of rejecting", async () => {
+    const writeText = stubClipboard(async () => { throw new Error("write permission denied"); });
+    const unhandled: unknown[] = [];
+    const capture = (reason: unknown) => { unhandled.push(reason); };
+    node.process.on("unhandledRejection", capture);
+    try {
+      const root = await mount(value({ messages: [{ id: "a1", role: "assistant", content: "All clear." } as Message] }));
+      expect(copyButton()).not.toBeNull();
+      await clickCopy();
+      expect(writeText).toHaveBeenCalledWith("All clear.");
+      expect(unhandled).toEqual([]);
+      expect(copyButton()?.getAttribute("data-state")).toBe("failed");
+      await act(async () => root.unmount());
+    } finally {
+      node.process.off("unhandledRejection", capture);
+    }
+  });
 });
+
+// The suite runs on Node but does not depend on @types/node, so the rejection
+// hooks are reached through globalThis rather than through a type dependency.
+const node = globalThis as unknown as { process: { on(event: string, listener: (reason: unknown) => void): void; off(event: string, listener: (reason: unknown) => void): void } };
+
+function copyButton() {
+  return document.querySelector<HTMLButtonElement>('button[aria-label="Copy message"]');
+}
+
+function stubClipboard(writeText: (text: string) => Promise<void>) {
+  const spy = vi.fn(writeText);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText: spy }, configurable: true });
+  return spy;
+}
+
+// One act scope covers the click and the clipboard promise it starts, so the
+// state the promise sets lands inside it — and a rejection nobody handled has
+// drained the microtask queue by the time the timer fires.
+async function clickCopy() {
+  await act(async () => {
+    copyButton()?.click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
