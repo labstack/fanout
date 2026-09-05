@@ -40,6 +40,16 @@ import Pagination from "@astrojs/starlight/components/Pagination.astro";
  * The copyright is no longer part of this component. It is chrome, not the end
  * of an article, so it lives in SiteFooter.astro, which PageFrame puts below
  * the content column entirely.
+ *
+ * Privacy is the exception to that split, and it earns it. Outside the regions
+ * that require a consent prompt no banner is ever shown, so the control on
+ * /privacy is the only way to turn analytics off — and SiteFooter, which
+ * carries the other link to it, renders on splash pages alone. A reader who
+ * arrives from a search result lands here, on a documentation page, and would
+ * have had no route to the control at all. One text link, not the whole band:
+ * the objection to a second footer here was duplicated navigation and social
+ * icons colliding with the fixed right sidebar, and a single word in the row
+ * that already exists is neither.
  */
 const isSplash = Astro.locals.starlightRoute.entry.data.template === "splash";
 ---
@@ -50,6 +60,7 @@ const isSplash = Astro.locals.starlightRoute.entry.data.template === "splash";
       <div class="meta sl-flex">
         <EditLink />
         <LastUpdated />
+        <a href="/privacy">Privacy</a>
       </div>
     )
   }
@@ -73,6 +84,16 @@ const isSplash = Astro.locals.starlightRoute.entry.data.template === "splash";
 
   .meta > :global(p:only-child) {
     margin-inline-start: auto;
+  }
+
+  .meta a {
+    color: var(--sl-color-gray-3);
+    text-decoration: none;
+  }
+
+  .meta a:hover {
+    color: var(--sl-color-white);
+    text-decoration: underline;
   }
 
 </style>
