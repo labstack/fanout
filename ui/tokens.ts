@@ -103,8 +103,10 @@ export const series = {
 export const ground = { light: "#fcfcfc", dark: "#0b0e14" } as const;
 
 export const fonts = {
-  /** Mono owns the brand, headings and technical artifacts. */
-  display: '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-  /** Sans is for sustained reading: prose, table cells, chat. */
-  body: '"IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  /** Mono is for data: code, ids, timestamps, numeric cells, and the chart
+   *  axes that borrow it. It no longer sets headings. */
+  display: '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  /** One grotesk for everything a person reads: UI, prose, headings, the
+   *  brand lockup. Headings differ by weight and size, not by family. */
+  body: '"Geist Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
 } as const;

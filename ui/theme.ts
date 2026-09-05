@@ -24,10 +24,10 @@ export const fanoutThemeConfig = {
   defaultRadius: "md",
   fontFamily: fonts.body,
   fontFamilyMonospace: fonts.display,
-  /* Mono for headings, sans for prose — the site's rule, and the reason the
-     role change reads as hierarchy rather than as a second identity. 500 rather
-     than bold, so a heading reads as a precise label instead of shouting. */
-  headings: { fontFamily: fonts.display, fontWeight: "500" },
+  /* Headings share the body family and differ by weight and size only; 600
+     rather than bold, so a heading reads as a precise label instead of
+     shouting. Mono is a data face now, not a display face. */
+  headings: { fontFamily: fonts.body, fontWeight: "600" },
   cursorType: "pointer",
 } as const;
 

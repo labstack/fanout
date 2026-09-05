@@ -6,17 +6,10 @@ import { router } from "./router";
 import { fanoutTheme } from "./theme";
 import { fanoutCssVariables } from "../../theme";
 import "@mantine/core/styles.css";
-// The typeface is shipped rather than named. The previous stack asked for Inter
-// and never loaded it, so the product rendered in whatever sans the machine
-// happened to have.
-import "@fontsource/ibm-plex-sans/latin-400.css";
-import "@fontsource/ibm-plex-sans/latin-400-italic.css";
-import "@fontsource/ibm-plex-sans/latin-500.css";
-import "@fontsource/ibm-plex-sans/latin-600.css";
-import "@fontsource/ibm-plex-sans/latin-700.css";
-import "@fontsource/ibm-plex-mono/latin-400.css";
-import "@fontsource/ibm-plex-mono/latin-500.css";
-import "@fontsource/ibm-plex-mono/latin-600.css";
+// The typeface is shipped rather than named: one variable file per family
+// covers every weight the app uses.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import "./index.css";

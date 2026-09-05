@@ -1,11 +1,8 @@
 import "@mantine/core/styles.css";
-// Four faces rather than the host app's eight: every byte here is base64'd
-// into all five single-file bundles, so this is the smallest set that still
-// puts the product's own typography inside an embedded view.
-import "@fontsource/ibm-plex-sans/latin-400.css";
-import "@fontsource/ibm-plex-sans/latin-600.css";
-import "@fontsource/ibm-plex-sans/latin-700.css";
-import "@fontsource/ibm-plex-mono/latin-500.css";
+// Two variable files rather than the host's eight static faces: every byte
+// here is base64'd into all five single-file bundles.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
 import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";

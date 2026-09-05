@@ -19,12 +19,16 @@ html[data-mantine-color-scheme="dark"] {
   background: #0b0e14;
 }
 
-/* Headings are set in the mono display face, which puts every glyph on the same
-   advance, so a title needs pulling in to read as a precise label rather than
-   as spaced-out text. Same -0.015em the site uses. :where() keeps specificity
-   at zero, so a component's own lts prop still wins. */
+/* Headings share the body grotesk; a touch of negative tracking at display
+   sizes keeps them reading as labels. :where() keeps specificity at zero so a
+   component's own lts prop still wins. */
 :where(.mantine-Title-root, h1, h2, h3, h4, h5, h6) {
-  letter-spacing: -0.015em;
+  letter-spacing: -0.01em;
+}
+
+/* Numbers line up as they update in tables and tiles. */
+body {
+  font-variant-numeric: tabular-nums;
 }
 html,
 body,
