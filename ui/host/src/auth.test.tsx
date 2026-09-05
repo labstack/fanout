@@ -33,6 +33,7 @@ describe("AuthGate OAuth return", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
     window.happyDOM.setURL("https://fanout.example.com/");
@@ -50,7 +51,8 @@ describe("AuthGate OAuth return", () => {
       </MantineProvider>,
     ));
 
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in to investigate"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in"));
+    expect(document.body.textContent).not.toContain("Sign in to investigate");
     expect(window.location.pathname).toBe("/");
     expect(window.location.search).toContain("return_to=");
     expect(document.body.textContent).not.toContain("Fanout application");
@@ -119,7 +121,7 @@ describe("AuthGate OAuth return", () => {
     ));
 
     await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
-    expect(document.body.textContent).not.toContain("Sign in to investigate");
+    expect(document.body.textContent).not.toContain("Sign in");
 
     await act(async () => root.unmount());
   });
@@ -207,6 +209,69 @@ describe("AuthGate OAuth return", () => {
     ));
 
     await vi.waitFor(() => expect(document.body.textContent).toContain("Signed in as v@example.com (viewer)"));
+    await act(async () => root.unmount());
+  });
+
+  it("verifies automatically after six digits and offers resend and change email", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval", "Date"] });
+    window.happyDOM.setURL("https://fanout.example.com/");
+    const posts: Array<{ path: string; body: unknown }> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: false });
+      if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
+      if (init?.method === "POST") {
+        posts.push({ path, body: JSON.parse(String(init.body)) });
+        if (path === "/api/auth/start") return json({ code_sent: true });
+        if (path === "/api/auth/verify") return json({ status: "authenticated" });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MantineProvider><AuthGate><div>Fanout application</div></AuthGate></MantineProvider>));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in"));
+    expect(document.body.textContent).not.toContain("Sign in to investigate");
+
+    const email = document.querySelector('input[type="email"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(email, "v@example.com");
+      email.dispatchEvent(new InputEvent("input", { bubbles: true, data: "v@example.com", inputType: "insertText" }));
+    });
+    const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
+    await act(async () => send?.click());
+    await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/start"]));
+    expect(document.body.textContent).toContain("Sent to v@example.com");
+    expect(document.body.textContent).toContain("Codes expire in 5 minutes");
+
+    const resend = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"));
+    expect(resend?.disabled).toBe(true);
+    expect(resend?.textContent).toMatch(/Resend in \d+s/);
+    await act(async () => { vi.advanceTimersByTime(31_000); });
+    await vi.waitFor(() => expect(Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"))?.disabled).toBe(false));
+
+    const change = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Change email"));
+    await act(async () => change?.click());
+    expect((document.querySelector('input[type="email"]') as HTMLInputElement).disabled).toBe(false);
+    expect(document.querySelectorAll('input[inputmode="numeric"]')).toHaveLength(0);
+
+    const resend2 = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
+    await act(async () => resend2?.click());
+    await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/start", "/api/auth/start"]));
+
+    const cells = Array.from(document.querySelectorAll<HTMLInputElement>('[data-pin-input] input, input[inputmode="numeric"]'));
+    expect(cells).toHaveLength(6);
+    for (const [index, digit] of ["1", "2", "3", "4", "5", "6"].entries()) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(cells[index], digit);
+        cells[index].dispatchEvent(new InputEvent("input", { bubbles: true, data: digit, inputType: "insertText" }));
+      });
+    }
+    await vi.waitFor(() => expect(posts.at(-1)).toEqual({ path: "/api/auth/verify", body: { email: "v@example.com", code: "123456" } }));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
+
+    vi.useRealTimers();
     await act(async () => root.unmount());
   });
 });
