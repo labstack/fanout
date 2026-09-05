@@ -18,9 +18,9 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://{host}/mcp",
+      "url": "https://{fanout_host}/mcp",
       "variables": {
-        "host": {
+        "fanout_host": {
           "description": "Public hostname of your Fanout instance, without a scheme or path.",
           "isRequired": true,
           "placeholder": "fanout.example.com"
