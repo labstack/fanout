@@ -12,14 +12,6 @@ const maxConnectionAcquireAttempts = 3;
 const maxReconnectAttempts = 5;
 const maxAppHeight = 2000;
 
-const appMinimumHeights: Record<string, number> = {
-  observability_overview: 620,
-  service_topology: 760,
-  service_performance: 700,
-  trace_detail: 720,
-  search_logs: 720,
-};
-
 class InvalidMCPAppResourceError extends Error {}
 
 export type MCPAppContent = {
@@ -183,7 +175,9 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
   const connectionRef = useRef<BrowserMCPConnection | null>(null);
   const bridgeRef = useRef<AppBridge | null>(null);
   const [html, setHTML] = useState("");
-  const minimumHeight = appMinimumHeights[content.toolName] ?? 620;
+  // The app reports its own size through the bridge; the floor only covers
+  // the moment before the first report.
+  const minimumHeight = 240;
   const [height, setHeight] = useState(minimumHeight);
   const [error, setError] = useState("");
   const [connectionGeneration, setConnectionGeneration] = useState(0);

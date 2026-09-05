@@ -102,7 +102,7 @@ describe("MCPAppFrame", () => {
     }
     expect(mcp.bridgeClients).toEqual(resources.map(() => null));
     const firstFrame = container.querySelector("iframe")!;
-    expect(firstFrame.style.height).toBe("620px");
+    expect(firstFrame.style.height).toBe("240px");
     await act(async () => mcp.bridges[0].onsizechange?.({ height: 1080 }));
     expect(firstFrame.style.height).toBe("1112px");
     await act(async () => mcp.bridges[0].onsizechange?.({ height: 5000 }));

@@ -6,7 +6,7 @@ import "@fontsource/ibm-plex-sans/latin-400.css";
 import "@fontsource/ibm-plex-sans/latin-600.css";
 import "@fontsource/ibm-plex-sans/latin-700.css";
 import "@fontsource/ibm-plex-mono/latin-500.css";
-import { Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
+import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { fanoutCssVariables, fanoutThemeConfig } from "../../theme";
@@ -17,15 +17,18 @@ export function ViewShell({ dark, children }: { dark: boolean; children: ReactNo
   return <MantineProvider theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} forceColorScheme={dark ? "dark" : "light"}><Paper withBorder radius="lg" style={{ overflow: "hidden" }}>{children}</Paper></MantineProvider>;
 }
 
-export function ViewHeader({ eyebrow, title, summary, onRefresh, disabled }: { eyebrow: string; title: string; summary?: string; onRefresh: () => void | Promise<unknown>; disabled?: boolean }) {
-  return <Group justify="space-between" align="flex-start" wrap="nowrap" px={{ base: "md", sm: "lg" }} pt="md" pb="sm">
-    <Box miw={0}><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.1em">{eyebrow}</Text><Title order={1} fz="lg" mt={2} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</Title>{summary && <Text c="dimmed" size="sm" mt={4}>{summary}</Text>}</Box>
-    <Button variant="default" size="xs" leftSection={<ArrowClockwise size={15} weight="bold" />} onClick={() => void onRefresh()} disabled={disabled}>Refresh</Button>
+export function ViewHeader({ title, summary, onRefresh, disabled }: { title: string; summary?: string; onRefresh: () => void | Promise<unknown>; disabled?: boolean }) {
+  return <Group justify="space-between" align="flex-start" wrap="nowrap" px={{ base: "md", sm: "lg" }} pt="sm" pb="xs">
+    <Box miw={0}>
+      <Title order={2} fz="lg" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</Title>
+      {summary && <Text c="dimmed" size="sm" mt={2}>{summary}</Text>}
+    </Box>
+    <Tooltip label="Refresh this view"><ActionIcon variant="default" size="md" aria-label="Refresh this view" onClick={() => void onRefresh()} disabled={disabled}><ArrowClockwise size={15} weight="bold" /></ActionIcon></Tooltip>
   </Group>;
 }
 
-export function ViewStatus({ error, loading }: { error?: string | null; loading?: string }) {
-  if (error) return <Alert color="bad" m="md">{error}</Alert>;
+export function ViewStatus({ error, loading, retry }: { error?: string | null; loading?: string; retry?: () => void }) {
+  if (error) return <Alert color="bad" m="md" radius="md"><Group justify="space-between"><Text size="sm">{error}</Text>{retry && <Button size="compact-sm" variant="light" color="bad" onClick={retry}>Retry</Button>}</Group></Alert>;
   if (loading) return <Center mih={160} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">{loading}</Text></Center>;
   return null;
 }
