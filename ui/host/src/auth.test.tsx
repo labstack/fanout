@@ -3,7 +3,7 @@ import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tan
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import AuthGate from "./auth";
+import AuthGate, { useViewer } from "./auth";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -148,12 +148,17 @@ describe("AuthGate OAuth return", () => {
 
   it("redeems a login link once and removes the credential from the URL", async () => {
     window.happyDOM.setURL("https://fanout.example.com/login?login_token=one-time-secret");
+    let redeemed = false;
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);
       if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: false, smtp_configured: false, self_signup: false });
-      if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
+      if (path === "/api/auth/me") {
+        if (!redeemed) return json({ message: "not authenticated" }, 401);
+        return json({ id: "viewer-123", email: "v@example.com", name: "Vee", role: "viewer" });
+      }
       if (path === "/api/auth/login-link" && init?.method === "POST") {
         expect(JSON.parse(String(init.body))).toEqual({ token: "one-time-secret" });
+        redeemed = true;
         return json({ status: "authenticated" });
       }
       throw new Error(`unexpected request: ${path}`);
@@ -181,6 +186,32 @@ describe("AuthGate OAuth return", () => {
     expect(window.location.search).toBe("");
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/auth/login-link")).toHaveLength(1);
 
+    await act(async () => root.unmount());
+  });
+
+  it("exposes the signed-in account through useViewer", async () => {
+    window.happyDOM.setURL("https://fanout.example.com/");
+    fetchMock.mockImplementation(async (input) => authResponse(input, {
+      id: "viewer-123",
+      email: "v@example.com",
+      name: "Vee",
+      role: "viewer",
+    }));
+    function Probe() {
+      const viewer = useViewer();
+      return <div>Signed in as {viewer.email} ({viewer.role})</div>;
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(
+      <MantineProvider>
+        <AuthGate><Probe /></AuthGate>
+      </MantineProvider>,
+    ));
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Signed in as v@example.com (viewer)"));
     await act(async () => root.unmount());
   });
 });

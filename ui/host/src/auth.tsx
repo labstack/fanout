@@ -23,6 +23,27 @@ export function useRuntimeStatus(): Status {
   return status;
 }
 
+export type Viewer = { id: string; email: string; name: string; role: string };
+const ViewerContext = createContext<Viewer | null>(null);
+
+export function useViewer(): Viewer {
+  const viewer = useContext(ViewerContext);
+  if (!viewer) throw new Error("Fanout viewer is unavailable");
+  return viewer;
+}
+
+function viewerFromMe(user: unknown): Viewer | null {
+  if (!user || typeof user !== "object") return null;
+  const record = user as Record<string, unknown>;
+  if (typeof record.id !== "string" || record.id === "") return null;
+  return {
+    id: record.id,
+    email: typeof record.email === "string" ? record.email : "",
+    name: typeof record.name === "string" ? record.name : "",
+    role: typeof record.role === "string" ? record.role : "",
+  };
+}
+
 async function jsonRequest(path: string, body?: unknown) {
   const response = await fetch(path, {
     method: body === undefined ? "GET" : "POST",
@@ -82,6 +103,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<Status | null>(null);
   const [statusReady, setStatusReady] = useState(false);
   const [viewer, setViewer] = useState<BrowserViewer>("none");
+  const [account, setAccount] = useState<Viewer | null>(null);
   const [sessionReady, setSessionReady] = useState(false);
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
@@ -96,6 +118,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const returnTo = oauthReturnTo();
   const authenticated = viewer === "user";
 
+  async function loadAccount() {
+    const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+    if (!response.ok) { setViewer("none"); setAccount(null); return; }
+    const user = await response.json().catch(() => null);
+    setViewer(browserViewerFromMe(user));
+    setAccount(viewerFromMe(user));
+  }
+
   useEffect(() => {
     const url = new URL(window.location.href);
     if (!url.searchParams.has("setup_token") && !url.searchParams.has("login_token")) return;
@@ -107,17 +137,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     clearLegacySession();
     jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value))).finally(() => setStatusReady(true));
-    fetch("/api/auth/me", { credentials: "same-origin" })
-      .then(async (response) => {
-        if (!response.ok) {
-          setViewer("none");
-          return;
-        }
-        const user = await response.json().catch(() => null);
-        setViewer(browserViewerFromMe(user));
-      })
-      .catch(() => setViewer("none"))
-      .finally(() => setSessionReady(true));
+    loadAccount().catch(() => setViewer("none")).finally(() => setSessionReady(true));
     const handleUnauthorized = () => setViewer("none");
     window.addEventListener(unauthorizedEvent, handleUnauthorized);
     return () => window.removeEventListener(unauthorizedEvent, handleUnauthorized);
@@ -128,7 +148,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     setBusy(true);
     setError("");
     jsonRequest("/api/auth/login-link", { token: loginToken })
-      .then(() => setViewer("user"))
+      .then(() => { setViewer("user"); void loadAccount(); })
       .catch((value) => setError(value instanceof Error ? value.message : String(value)))
       .finally(() => { setLoginToken(""); setBusy(false); });
   }, [loginToken, sessionReady, viewer]);
@@ -156,7 +176,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       {error && <Alert color="bad" radius="md">{error}</Alert>}
       <Group grow align="stretch">
         <Button variant="light" radius="md" leftSection={copied ? <Check size={16} weight="bold" /> : <Copy size={16} />} onClick={() => void copyIngestToken()}>{copied ? "Copied" : "Copy token"}</Button>
-        <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setViewer("user"); setSetupResult(null); }}>Continue to Fanout</Button>
+        <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setViewer("user"); setSetupResult(null); void loadAccount(); }}>Continue to Fanout</Button>
       </Group>
     </Stack></AuthSurface>;
   }
@@ -164,7 +184,9 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   if (!sessionReady || !statusReady || loginToken) return <Center mih="100dvh"><Loader size="sm" /></Center>;
   if (!status) return <AuthSurface><Stack gap="lg"><BrandLockup /><Title order={1}>Fanout is unavailable</Title><Alert color="bad" radius="md">{error || "Authentication status could not be loaded."}</Alert></Stack></AuthSurface>;
   if (authenticated && returnTo) return null;
-  if (authenticated) return <RuntimeStatusContext.Provider value={status}>{children}</RuntimeStatusContext.Provider>;
+  if (authenticated) return <RuntimeStatusContext.Provider value={status}>
+    <ViewerContext.Provider value={account ?? { id: "", email, name, role: "" }}>{children}</ViewerContext.Provider>
+  </RuntimeStatusContext.Provider>;
 
   if (status && !status.setup_required && status.auth_mode === "oidc") {
     const target = returnTo ? `/api/auth/oidc/start?return_to=${encodeURIComponent(returnTo)}` : "/api/auth/oidc/start";
@@ -187,13 +209,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     try {
       if (status?.setup_required) {
         const result = await jsonRequest("/api/auth/setup", { email, name, setup_token: setupToken }) as SetupResult;
-        if (result.ingest_token) setSetupResult(result); else setViewer("user");
+        if (result.ingest_token) setSetupResult(result); else { setViewer("user"); void loadAccount(); }
       } else if (!codeSent) {
         await jsonRequest("/api/auth/start", { email });
         setCodeSent(true);
       } else {
         await jsonRequest("/api/auth/verify", { email, code });
         setViewer("user");
+        void loadAccount();
       }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
