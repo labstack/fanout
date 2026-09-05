@@ -92,6 +92,10 @@ function Session() {
         setError("Fanout could not complete this analysis.");
         setRunning(false);
         setActivity("");
+        // A run that did not finish may have persisted nothing, so stop
+        // treating this id as a draft: coming back to it must ask the server
+        // rather than open an empty pane over a thread that does exist.
+        draftsRef.current.delete(threadID);
         void queryClient.invalidateQueries({ queryKey: threadHistoryQueryKey });
       },
     });
@@ -124,6 +128,7 @@ function Session() {
       setError("Fanout could not complete this analysis.");
       setRunning(false);
       setActivity("");
+      draftsRef.current.delete(threadID);
     }
   }
 
@@ -150,7 +155,7 @@ function Session() {
   }, [ready, routeThreadID, threadID]);
 
   function submit(event: FormEvent) { event.preventDefault(); void send(input); }
-  function stop() { agent.abortRun(); setRunning(false); setActivity(""); }
+  function stop() { agent.abortRun(); setRunning(false); setActivity(""); draftsRef.current.delete(threadID); }
   function retry() { if (!running && agent.messages.some((message) => message.role === "user")) void run(); }
   function openChat(prompt?: string) {
     if (!agentAvailable) return;

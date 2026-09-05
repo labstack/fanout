@@ -96,6 +96,42 @@ describe("Session", () => {
     await act(async () => root.unmount());
   });
 
+  it("forgets a draft whose first run failed", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    agentMocks.runAgent.mockRejectedValueOnce(new Error("run failed"));
+    const rootRoute = createRootRoute({ component: App });
+    const chatIndex = createRoute({ getParentRoute: () => rootRoute, path: "/chat/", component: ChatPage });
+    const chatThread = createRoute({ getParentRoute: () => rootRoute, path: "/chat/$threadId", component: ChatPage });
+    const router = createRouter({ routeTree: rootRoute.addChildren([chatIndex, chatThread]) });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
+    await vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Message Fanout"]')).not.toBeNull());
+
+    const composer = document.querySelector('textarea[aria-label="Message Fanout"]') as HTMLTextAreaElement;
+    await act(async () => setValue(composer, "Summarize system health"));
+    await act(async () => composer.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout could not complete this analysis"));
+    const threadID = window.location.pathname.slice("/chat/".length);
+    expect(threadID).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes(`/api/agent/threads/${threadID}`))).toBe(false);
+
+    // Open another chat, then come back. The failed draft is no longer
+    // remembered, so the session asks the server instead of opening an empty
+    // pane, and learns the thread was never persisted.
+    await act(async () => { await router.navigate({ to: "/chat/$threadId", params: { threadId: "another-thread" } }); });
+    await act(async () => { await router.navigate({ to: "/chat/$threadId", params: { threadId: threadID } }); });
+
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes(`/api/agent/threads/${threadID}`))).toBe(true));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("This chat no longer exists"));
+
+    await act(async () => root.unmount());
+    consoleError.mockRestore();
+  });
+
   it("explains a thread that no longer exists", async () => {
     window.happyDOM.setURL("https://fanout.example.com/chat/deleted-thread");
     const rootRoute = createRootRoute({ component: App });
