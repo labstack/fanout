@@ -2,9 +2,8 @@ import { HttpAgent, type Message } from "@ag-ui/client";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import { FanoutAppContext } from "./app-context";
+import { activityLabel, FanoutAppContext } from "./app-context";
 import AuthGate, { authorizedFetch, useRuntimeStatus } from "./auth";
-import { activityLabel } from "./chat";
 import { createID } from "./id";
 import { threadHistoryQueryKey } from "./rail";
 import Shell from "./shell";
@@ -31,8 +30,14 @@ function Session() {
   const pendingPromptRef = useRef("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  // A turn can hold several tool calls at once, and each one ends separately.
+  // Counting them keeps the activity line on the work still in flight instead
+  // of blanking it the moment the first call returns.
+  const toolCallsRef = useRef(0);
   const agent = useMemo(() => new HttpAgent({ url: "/api/agent", threadId: threadID, fetch: (url, init) => authorizedFetch(url, init) }), [threadID]);
   const ready = !agentAvailable || loadedThreadID === threadID;
+
+  function clearActivity() { toolCallsRef.current = 0; setActivity(""); }
 
   // Keyed on the thread, not on the route. Naming a draft moves the same
   // conversation from /chat to /chat/<id>; restarting the session there would
@@ -45,7 +50,7 @@ function Session() {
     setLoadedThreadID("");
     setThreadMissing(false);
     setRunning(false);
-    setActivity("");
+    clearActivity();
     setError("");
     if (!agentAvailable) { setLoadedThreadID(threadID); return; }
     const isDraft = !routeThreadID || draftsRef.current.has(threadID);
@@ -72,8 +77,8 @@ function Session() {
     const subscription = agent.subscribe({
       onEvent: ({ messages: next }) => setMessages([...next] as Message[]),
       onRunInitialized: () => { setRunning(true); setError(""); },
-      onToolCallStartEvent: ({ event }: { event: { toolCallName: string } }) => setActivity(activityLabel(event.toolCallName)),
-      onToolCallEndEvent: () => setActivity(""),
+      onToolCallStartEvent: ({ event }: { event: { toolCallName: string } }) => { toolCallsRef.current += 1; setActivity(activityLabel(event.toolCallName)); },
+      onToolCallEndEvent: () => { toolCallsRef.current = Math.max(0, toolCallsRef.current - 1); if (toolCallsRef.current === 0) setActivity(""); },
       onRunFinalized: ({ messages: next }) => {
         const finished = [...next] as Message[];
         setMessages(finished);
@@ -83,7 +88,7 @@ function Session() {
           return stamped;
         });
         setRunning(false);
-        setActivity("");
+        clearActivity();
         draftsRef.current.delete(threadID);
         void queryClient.invalidateQueries({ queryKey: threadHistoryQueryKey });
       },
@@ -91,7 +96,7 @@ function Session() {
         console.error("Agent run failed", failure);
         setError("Fanout could not complete this analysis.");
         setRunning(false);
-        setActivity("");
+        clearActivity();
         // A run that did not finish may have persisted nothing, so stop
         // treating this id as a draft: coming back to it must ask the server
         // rather than open an empty pane over a thread that does exist.
@@ -127,7 +132,7 @@ function Session() {
       console.error("Agent run failed", cause);
       setError("Fanout could not complete this analysis.");
       setRunning(false);
-      setActivity("");
+      clearActivity();
       draftsRef.current.delete(threadID);
     }
   }
@@ -155,7 +160,7 @@ function Session() {
   }, [ready, routeThreadID, threadID]);
 
   function submit(event: FormEvent) { event.preventDefault(); void send(input); }
-  function stop() { agent.abortRun(); setRunning(false); setActivity(""); draftsRef.current.delete(threadID); }
+  function stop() { agent.abortRun(); setRunning(false); clearActivity(); draftsRef.current.delete(threadID); }
   function retry() { if (!running && agent.messages.some((message) => message.role === "user")) void run(); }
   function openChat(prompt?: string) {
     if (!agentAvailable) return;

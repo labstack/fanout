@@ -33,3 +33,19 @@ export function useFanoutApp(): FanoutAppContextValue {
 }
 
 export const createDashboardPrompt = "Create a new dashboard for me. First ask what I want to monitor, then design it when you have enough context.";
+
+// What a tool call is doing, in the reader's words rather than the tool's.
+// The session names the activity, so the map lives beside it: nothing here
+// may reach for the view.
+const activityLabels: Record<string, string> = {
+  observability_overview: "Checking system health…",
+  service_topology: "Mapping service dependencies…",
+  service_performance: "Reading performance signals…",
+  trace_detail: "Inspecting a trace…",
+  search_logs: "Searching logs…",
+  intelligence_snapshot: "Reviewing detected anomalies…",
+};
+
+export function activityLabel(toolName: string): string {
+  return activityLabels[toolName] ?? "Working on it…";
+}

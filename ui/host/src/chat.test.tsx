@@ -1,0 +1,102 @@
+import { MantineProvider } from "@mantine/core";
+import type { Message } from "@ag-ui/client";
+import { act, createRef, type FormEvent } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { FanoutAppContext, type FanoutAppContextValue } from "./app-context";
+import { ChatPage } from "./chat";
+
+function value(overrides: Partial<FanoutAppContextValue> = {}): FanoutAppContextValue {
+  return {
+    agentAvailable: true, threadID: "thread-1", threadMissing: false, messages: [], messageTimes: {}, ready: true, running: false, activity: "",
+    input: "", setInput: vi.fn(), error: "", bottomRef: createRef<HTMLDivElement>(), inputRef: createRef<HTMLTextAreaElement>(),
+    send: vi.fn(async () => undefined), submit: vi.fn((event: FormEvent) => event.preventDefault()), stop: vi.fn(), retry: vi.fn(),
+    openChat: vi.fn(), newThread: vi.fn(), selectThread: vi.fn(),
+    ...overrides,
+  };
+}
+
+async function mount(context: FanoutAppContextValue) {
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => root.render(<MantineProvider><FanoutAppContext.Provider value={context}><ChatPage /></FanoutAppContext.Provider></MantineProvider>));
+  return root;
+}
+
+function button(text: string) {
+  return Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim() === text);
+}
+
+describe("ChatPage", () => {
+  afterEach(() => { document.body.innerHTML = ""; });
+
+  it("offers suggestions on an empty draft and sends the chosen one", async () => {
+    const context = value();
+    const root = await mount(context);
+    expect(document.body.textContent).toContain("What do you want to know about your system?");
+    expect(document.body.textContent).not.toContain("See what changed");
+    const chip = button("Find the source of elevated errors");
+    expect(chip).not.toBeUndefined();
+    await act(async () => chip?.click());
+    expect(context.send).toHaveBeenCalledWith("Find the source of elevated errors");
+    await act(async () => root.unmount());
+  });
+
+  it("renders markdown tables and code blocks with product chrome", async () => {
+    const messages: Message[] = [
+      { id: "u1", role: "user", content: "Show the slowest endpoints" } as Message,
+      { id: "a1", role: "assistant", content: "| Endpoint | P95 |\n|---|---|\n| GET /orders | 650ms |\n\n```sql\nSELECT 1\n```" } as Message,
+    ];
+    const root = await mount(value({ messages, messageTimes: { u1: Date.UTC(2026, 8, 5, 18, 16) } }));
+    const table = document.querySelector(".chat-markdown table");
+    expect(table).not.toBeNull();
+    expect(table?.closest(".chat-table")).not.toBeNull();
+    expect(document.querySelector(".chat-markdown pre code")?.textContent).toContain("SELECT 1");
+    expect(document.querySelector('button[aria-label="Copy code"]')).not.toBeNull();
+    expect(document.querySelector('button[aria-label="Copy message"]')).not.toBeNull();
+    expect(document.querySelector(".mantine-Avatar-root")).toBeNull();
+    await act(async () => root.unmount());
+  });
+
+  it("shows the activity line and a stop button while running", async () => {
+    const context = value({ running: true, activity: "Checking system health…", messages: [{ id: "u1", role: "user", content: "hi" } as Message] });
+    const root = await mount(context);
+    expect(document.body.textContent).toContain("Checking system health…");
+    const stop = document.querySelector('button[aria-label="Stop"]') as HTMLButtonElement;
+    expect(stop).not.toBeNull();
+    await act(async () => stop.click());
+    expect(context.stop).toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it("offers retry after a failed run and a new chat for a missing thread", async () => {
+    const failed = value({ error: "Fanout could not complete this analysis.", messages: [{ id: "u1", role: "user", content: "hi" } as Message] });
+    let root = await mount(failed);
+    await act(async () => button("Retry")?.click());
+    expect(failed.retry).toHaveBeenCalled();
+    await act(async () => root.unmount());
+    document.body.innerHTML = "";
+
+    const missing = value({ threadMissing: true });
+    root = await mount(missing);
+    expect(document.body.textContent).toContain("This chat no longer exists");
+    await act(async () => button("New chat")?.click());
+    expect(missing.newThread).toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  // A thread whose load failed never becomes ready, so the loader would spin
+  // forever; the pane has to state the failure and offer a way out instead.
+  it("explains a thread that could not be restored instead of loading forever", async () => {
+    const context = value({ ready: false, error: "This chat could not be restored. Start a new chat or try again." });
+    const root = await mount(context);
+    expect(document.body.textContent).toContain("This chat could not be restored");
+    expect(document.body.textContent).not.toContain("Loading chat");
+    await act(async () => button("Retry")?.click());
+    expect(context.retry).toHaveBeenCalled();
+    await act(async () => button("New chat")?.click());
+    expect(context.newThread).toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+});

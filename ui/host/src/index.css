@@ -91,3 +91,70 @@ body,
 .react-grid-item:focus-within > .react-resizable-handle {
   opacity: 0.55;
 }
+
+/* The chat pane fills the space under the header; messages scroll inside it
+   and the composer sits at the bottom of the pane, not of the window. */
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--app-shell-header-offset, 0px));
+}
+
+.chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chat-composer {
+  flex: 0 0 auto;
+  padding-bottom: var(--mantine-spacing-sm);
+  background: var(--mantine-color-body);
+}
+
+.chat-message-meta,
+.chat-code-actions {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.chat-message:hover .chat-message-meta,
+.chat-message:focus-within .chat-message-meta,
+.chat-code:hover .chat-code-actions,
+.chat-code:focus-within .chat-code-actions {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .chat-message-meta,
+  .chat-code-actions {
+    opacity: 1;
+  }
+}
+
+.chat-markdown :where(h1, h2, h3, h4) {
+  font-size: var(--mantine-font-size-lg);
+  margin-top: var(--mantine-spacing-md);
+  margin-bottom: var(--mantine-spacing-xs);
+}
+
+.chat-markdown :where(p, ul, ol) {
+  margin-top: 0;
+  margin-bottom: var(--mantine-spacing-sm);
+}
+
+.chat-table {
+  overflow-x: auto;
+  margin-bottom: var(--mantine-spacing-sm);
+}
+
+.chat-code pre {
+  margin: 0 0 var(--mantine-spacing-sm);
+  padding: var(--mantine-spacing-sm) var(--mantine-spacing-md);
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-md);
+  background: var(--mantine-color-default);
+  font-family: var(--mantine-font-family-monospace);
+  font-size: var(--mantine-font-size-sm);
+  overflow-x: auto;
+}
