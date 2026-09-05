@@ -162,3 +162,37 @@ body,
   font-size: var(--mantine-font-size-sm);
   overflow-x: auto;
 }
+
+.widget-card .widget-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.widget-card .widget-body > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.widget-chart {
+  flex: 1;
+  min-height: 140px;
+}
+
+.widget-actions {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.widget-card:hover .widget-actions,
+.widget-card:focus-within .widget-actions,
+.widget-actions[data-open] {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .widget-actions {
+    opacity: 1;
+  }
+}
