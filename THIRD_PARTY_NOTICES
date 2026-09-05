@@ -103,8 +103,8 @@ COMPONENT INVENTORY
 - npm: @floating-ui/react 0.27.20 (declared license: MIT)
 - npm: @floating-ui/react-dom 2.1.9 (declared license: MIT)
 - npm: @floating-ui/utils 0.2.12 (declared license: MIT)
-- npm: @fontsource/ibm-plex-mono 5.3.0 (declared license: OFL-1.1)
-- npm: @fontsource/ibm-plex-sans 5.3.0 (declared license: OFL-1.1)
+- npm: @fontsource-variable/geist 5.3.0 (declared license: OFL-1.1)
+- npm: @fontsource-variable/geist-mono 5.3.0 (declared license: OFL-1.1)
 - npm: @hono/node-server 1.19.15 (declared license: MIT)
 - npm: @mantine/core 9.5.2 (declared license: MIT)
 - npm: @mantine/hooks 9.5.2 (declared license: MIT)
@@ -4295,10 +4295,10 @@ IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: @fontsource/ibm-plex-mono 5.3.0 / LICENSE
+- npm: @fontsource-variable/geist 5.3.0 / LICENSE
 ----------------------------------------------------------------------------
 
-Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-ThinItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-ExtraLight.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-ExtraLightItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Light.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-LightItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Regular.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Italic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Medium.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-MediumItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-SemiBold.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-SemiBoldItalic.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-Bold.ttf: Copyright 2017 IBM Corp. All rights reserved. IBMPlexMono-BoldItalic.ttf: Copyright 2017 IBM Corp. All rights reserved.
+Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font) Geist-Italic[wght].ttf: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
@@ -4393,10 +4393,10 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: @fontsource/ibm-plex-sans 5.3.0 / LICENSE
+- npm: @fontsource-variable/geist-mono 5.3.0 / LICENSE
 ----------------------------------------------------------------------------
 
-Copyright 2019 IBM Corp. All rights reserved. IBMPlexSans-Italic[wdth,wght].ttf: Copyright 2019 IBM Corp. All rights reserved.
+Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git) GeistMono-Italic[wght].ttf: Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font.git)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
