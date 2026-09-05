@@ -4,7 +4,7 @@ import { ArrowSquareOut, ListMagnifyingGlass, MagnifyingGlass } from "@phosphor-
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { EmptyState, MetaFooter, PageControls, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
-import { chartTheme, severityColor, severityHex, statusHex } from "../../chart";
+import { chartTheme, severityColor, severityHex } from "../../chart";
 import type { LogEntry, Logs, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
 import { timelineTimestamp, windowLabel } from "../../format";
