@@ -3,6 +3,7 @@ import { ArrowClockwise, ArrowUpRight, CaretDown, Check, ListMagnifyingGlass, Pl
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
+import { dashboardsQueryKey, getJSON, type DashboardRecord, type DashboardSummary, type Envelope } from "./api";
 import { authorizedFetch } from "./auth";
 import { compactDashboardLayout, nextDashboardRow, type DashboardLayoutItem } from "./dashboard-layout";
 import { createID } from "./id";
@@ -13,15 +14,6 @@ type WidgetType = "overview" | "topology" | "activity" | "assistant" | "performa
 type Widget = { id: string; type: WidgetType; title: string; config?: Record<string, unknown>; enabled: boolean };
 type LayoutItem = DashboardLayoutItem;
 type State = { layout: LayoutItem[]; widgets: Widget[]; filters: { window: string; namespace: string } };
-type DashboardRecord = { id: string; name: string; description: string; is_default: boolean; state: State; updated_at: string };
-type DashboardSummary = { id: string; name: string; description: string; is_default: boolean; widget_count: number; updated_at: string };
-type Envelope<T> = { data: T };
-
-async function getJSON<T>(url: string): Promise<T> {
-  const response = await authorizedFetch(url);
-  if (!response.ok) throw new Error(`Request failed (${response.status})`);
-  return response.json();
-}
 
 // Keep polling a widget whose backend call failed so it recovers without a manual refresh.
 const retryEvery = (query: { state: { status: string } }) => (query.state.status === "error" ? 15000 : false);
@@ -32,7 +24,7 @@ const widgetMinimumRows: Record<WidgetType, number> = { overview: 4, topology: 4
 
 export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat, onDashboardChange }: { dashboardID?: string; agentAvailable: boolean; onOpenChat: (prompt?: string) => void; onDashboardChange?: (id: string, replace?: boolean) => void }) {
   const queryClient = useQueryClient();
-  const dashboards = useQuery({ queryKey: ["dashboards"], queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 3000 });
+  const dashboards = useQuery({ queryKey: dashboardsQueryKey, queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 3000 });
   const [selectedID, setSelectedID] = useState(() => dashboardID || localStorage.getItem(dashboardKey) || "");
   const save = useMutation({
     mutationFn: async (next: State) => {
@@ -42,7 +34,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
       return response.json() as Promise<DashboardRecord>;
     },
     scope: { id: `dashboard-${selectedID}` },
-    onSuccess: (data) => { queryClient.setQueryData(["dashboard", data.id], data); void queryClient.invalidateQueries({ queryKey: ["dashboards"] }); },
+    onSuccess: (data) => { queryClient.setQueryData(["dashboard", data.id], data); void queryClient.invalidateQueries({ queryKey: dashboardsQueryKey }); },
     onError: (cause) => console.error("Dashboard save failed", cause),
   });
   // Pause polling while a save is in flight or failing so the refetch cannot clobber unsaved local edits.
@@ -65,7 +57,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
   }, [dashboardID, dashboards.data, selectedID]);
   useEffect(() => {
     if (save.isPending || save.isError) return;
-    if (selected.data?.state) setState(selected.data.state);
+    if (selected.data?.state) setState(selected.data.state as State);
   }, [selected.data?.updated_at, save.isPending, save.isError]);
   // A failed save must not follow the user to another dashboard: reset the
   // mutation on switch so state sync and polling resume for the new

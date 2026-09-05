@@ -1,0 +1,100 @@
+import { ActionIcon, Alert, AppShell, Avatar, Burger, Drawer, Group, Menu, Tooltip, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
+import { useDisclosure } from "@mantine/hooks";
+import { GithubLogo, GlobeHemisphereWest, Moon, SignOut, Sun } from "@phosphor-icons/react";
+import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createDashboardPrompt, useFanoutApp } from "./app-context";
+import { logout, useViewer } from "./auth";
+import { BrandLockup } from "./brand";
+import Rail, { type RailHandle, type RailProps } from "./rail";
+
+export default function Shell({ children }: { children: ReactNode }) {
+  const { agentAvailable, threadID, threadMissing, newThread, selectThread, openChat } = useFanoutApp();
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const { dashboardId } = useParams({ strict: false }) as { dashboardId?: string };
+  const isChat = pathname === "/chat" || pathname.startsWith("/chat/");
+  const [drawerOpened, drawer] = useDisclosure(false);
+  const [signOutError, setSignOutError] = useState("");
+  const railRef = useRef<RailHandle>(null);
+
+  // A navigation from inside the drawer should close it.
+  useEffect(() => { drawer.close(); }, [pathname]);
+
+  useEffect(() => {
+    const shortcuts = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        if (railRef.current) railRef.current.focusSearch(); else drawer.open();
+      }
+    };
+    window.addEventListener("keydown", shortcuts);
+    return () => window.removeEventListener("keydown", shortcuts);
+  }, []);
+
+  const railProps: Omit<RailProps, "ref"> = {
+    agentAvailable,
+    activeThreadID: isChat && !threadMissing && pathname !== "/chat" ? threadID : undefined,
+    activeDashboardID: dashboardId,
+    onNewChat: newThread,
+    onSelectThread: selectThread,
+    onDeletedThread: (deletedID) => { if (deletedID === threadID) newThread(); },
+    onSelectDashboard: (id) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id } }),
+    onCreateDashboard: () => openChat(createDashboardPrompt),
+  };
+
+  return <AppShell header={{ height: 52 }} navbar={{ width: 256, breakpoint: "md", collapsed: { mobile: true } }} padding={0}>
+    <AppShell.Header>
+      <Group h="100%" px={{ base: "sm", sm: "md" }} justify="space-between" wrap="nowrap">
+        <Group gap="sm" wrap="nowrap">
+          <Burger hiddenFrom="md" opened={drawerOpened} onClick={drawer.toggle} size="sm" aria-label="Open navigation" />
+          <BrandLockup size="small" />
+        </Group>
+        <Group gap="xs" wrap="nowrap">
+          <ColorSchemeToggle />
+          <AccountMenu onError={setSignOutError} />
+        </Group>
+      </Group>
+    </AppShell.Header>
+    <AppShell.Navbar p="sm"><Rail ref={railRef} {...railProps} /></AppShell.Navbar>
+    <Drawer opened={drawerOpened} onClose={drawer.close} hiddenFrom="md" size={288} padding="sm" title={<BrandLockup size="small" />} overlayProps={{ backgroundOpacity: 0.24, blur: 1 }}>
+      <Rail {...railProps} autoFocusSearch={drawerOpened} />
+    </Drawer>
+    <AppShell.Main>
+      {signOutError && <Alert color="bad" m="md" withCloseButton onClose={() => setSignOutError("")}>{signOutError}</Alert>}
+      {children}
+    </AppShell.Main>
+  </AppShell>;
+}
+
+function ColorSchemeToggle() {
+  const { setColorScheme } = useMantineColorScheme();
+  // Reading the computed scheme rather than the stored one means the button
+  // offers the opposite of what is on screen even while the setting is "auto".
+  const scheme = useComputedColorScheme("light", { getInitialValueInEffect: true });
+  const next = scheme === "dark" ? "light" : "dark";
+  return <Tooltip label={`Switch to ${next} theme`}>
+    <ActionIcon variant="subtle" color="gray" aria-label={`Switch to ${next} theme`} onClick={() => setColorScheme(next)}>
+      {scheme === "dark" ? <Sun size={17} weight="bold" /> : <Moon size={17} weight="bold" />}
+    </ActionIcon>
+  </Tooltip>;
+}
+
+function AccountMenu({ onError }: { onError: (message: string) => void }) {
+  const viewer = useViewer();
+  const initial = (viewer.name || viewer.email || "?").trim().charAt(0).toUpperCase();
+  return <Menu position="bottom-end" withinPortal shadow="md">
+    <Menu.Target>
+      <ActionIcon variant="subtle" color="gray" size="lg" radius="xl" aria-label="Account menu">
+        <Avatar size={26} radius="xl" color="brand">{initial}</Avatar>
+      </ActionIcon>
+    </Menu.Target>
+    <Menu.Dropdown>
+      <Menu.Label>{viewer.email || "Signed in"}</Menu.Label>
+      <Menu.Item component="a" href="https://github.com/labstack/fanout" target="_blank" rel="noreferrer" leftSection={<GithubLogo size={15} weight="bold" />}>Fanout on GitHub</Menu.Item>
+      <Menu.Item component="a" href="https://labstack.com" target="_blank" rel="noreferrer" leftSection={<GlobeHemisphereWest size={15} />}>LabStack</Menu.Item>
+      <Menu.Divider />
+      <Menu.Item leftSection={<SignOut size={15} />} onClick={() => void logout().catch((cause) => onError(cause instanceof Error ? cause.message : "Sign-out failed — your session is still active."))}>Sign out</Menu.Item>
+    </Menu.Dropdown>
+  </Menu>;
+}
