@@ -148,17 +148,12 @@ describe("AuthGate OAuth return", () => {
 
   it("redeems a login link once and removes the credential from the URL", async () => {
     window.happyDOM.setURL("https://fanout.example.com/login?login_token=one-time-secret");
-    let redeemed = false;
     fetchMock.mockImplementation(async (input, init) => {
       const path = String(input);
       if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: false, smtp_configured: false, self_signup: false });
-      if (path === "/api/auth/me") {
-        if (!redeemed) return json({ message: "not authenticated" }, 401);
-        return json({ id: "viewer-123", email: "v@example.com", name: "Vee", role: "viewer" });
-      }
+      if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
       if (path === "/api/auth/login-link" && init?.method === "POST") {
         expect(JSON.parse(String(init.body))).toEqual({ token: "one-time-secret" });
-        redeemed = true;
         return json({ status: "authenticated" });
       }
       throw new Error(`unexpected request: ${path}`);

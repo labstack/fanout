@@ -126,6 +126,18 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     setAccount(viewerFromMe(user));
   }
 
+  // After a login the session is known to exist; a failed reload must not
+  // undo it, so this only fills in the account.
+  async function refreshAccount() {
+    try {
+      const response = await fetch("/api/auth/me", { credentials: "same-origin" });
+      if (!response.ok) return;
+      setAccount(viewerFromMe(await response.json().catch(() => null)));
+    } catch {
+      // The typed email stands in until the next boot.
+    }
+  }
+
   useEffect(() => {
     const url = new URL(window.location.href);
     if (!url.searchParams.has("setup_token") && !url.searchParams.has("login_token")) return;
@@ -148,7 +160,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     setBusy(true);
     setError("");
     jsonRequest("/api/auth/login-link", { token: loginToken })
-      .then(() => { setViewer("user"); void loadAccount(); })
+      .then(() => { setViewer("user"); void refreshAccount(); })
       .catch((value) => setError(value instanceof Error ? value.message : String(value)))
       .finally(() => { setLoginToken(""); setBusy(false); });
   }, [loginToken, sessionReady, viewer]);
@@ -176,7 +188,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
       {error && <Alert color="bad" radius="md">{error}</Alert>}
       <Group grow align="stretch">
         <Button variant="light" radius="md" leftSection={copied ? <Check size={16} weight="bold" /> : <Copy size={16} />} onClick={() => void copyIngestToken()}>{copied ? "Copied" : "Copy token"}</Button>
-        <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setViewer("user"); setSetupResult(null); void loadAccount(); }}>Continue to Fanout</Button>
+        <Button radius="md" rightSection={<ArrowRight size={16} weight="bold" />} onClick={() => { setViewer("user"); setSetupResult(null); void refreshAccount(); }}>Continue to Fanout</Button>
       </Group>
     </Stack></AuthSurface>;
   }
@@ -209,14 +221,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     try {
       if (status?.setup_required) {
         const result = await jsonRequest("/api/auth/setup", { email, name, setup_token: setupToken }) as SetupResult;
-        if (result.ingest_token) setSetupResult(result); else { setViewer("user"); void loadAccount(); }
+        if (result.ingest_token) setSetupResult(result); else { setViewer("user"); void refreshAccount(); }
       } else if (!codeSent) {
         await jsonRequest("/api/auth/start", { email });
         setCodeSent(true);
       } else {
         await jsonRequest("/api/auth/verify", { email, code });
         setViewer("user");
-        void loadAccount();
+        void refreshAccount();
       }
     } catch (value) {
       setError(value instanceof Error ? value.message : String(value));
