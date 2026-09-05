@@ -34,6 +34,8 @@ const browserMCPSessionBearer = "fanout-browser-session"
 
 const maxMCPAuthorizationBodyBytes = 4 << 20
 
+var errMCPAuthorizationBodyTooLarge = errors.New("MCP request body exceeds authorization limit")
+
 type browserMCPUserContextKey struct{}
 
 var mcpSupportedScopes = []string{mcpReadScope, dashboard.OAuthScope}
@@ -86,9 +88,24 @@ func (h *MCPAuthorization) Register(e *echo.Echo) {
 
 func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 	scopeChecked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requiredScope := requiredMCPToolScope(r)
+		info := mcpgoauth.TokenInfoFromContext(r.Context())
+		if info != nil && slices.Contains(info.Scopes, dashboard.OAuthScope) {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		requiredScope, err := requiredMCPToolScope(r)
+		if err != nil {
+			status := http.StatusBadRequest
+			message := "invalid MCP request body"
+			if errors.Is(err, errMCPAuthorizationBodyTooLarge) {
+				status = http.StatusRequestEntityTooLarge
+				message = "MCP request body is too large"
+			}
+			http.Error(w, message, status)
+			return
+		}
 		if requiredScope != "" {
-			info := mcpgoauth.TokenInfoFromContext(r.Context())
 			if info == nil || !slices.Contains(info.Scopes, requiredScope) {
 				w.Header().Set("WWW-Authenticate", fmt.Sprintf(
 					`Bearer error="insufficient_scope", scope=%q, resource_metadata=%q`,
@@ -114,9 +131,9 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 	})
 }
 
-func requiredMCPToolScope(r *http.Request) string {
+func requiredMCPToolScope(r *http.Request) (string, error) {
 	if r.Method != http.MethodPost || r.Body == nil {
-		return ""
+		return "", nil
 	}
 	original := r.Body
 	body, err := io.ReadAll(io.LimitReader(original, maxMCPAuthorizationBodyBytes+1))
@@ -127,24 +144,27 @@ func requiredMCPToolScope(r *http.Request) string {
 		Reader: io.MultiReader(bytes.NewReader(body), original),
 		Closer: original,
 	}
-	if err != nil || len(body) > maxMCPAuthorizationBodyBytes {
-		return ""
+	if err != nil {
+		return "", fmt.Errorf("read MCP request body: %w", err)
+	}
+	if len(body) > maxMCPAuthorizationBodyBytes {
+		return "", errMCPAuthorizationBodyTooLarge
 	}
 
 	var single mcpAuthorizationRequest
 	if json.Unmarshal(body, &single) == nil {
-		return single.requiredScope()
+		return single.requiredScope(), nil
 	}
 	var batch []mcpAuthorizationRequest
 	if json.Unmarshal(body, &batch) != nil {
-		return ""
+		return "", errors.New("invalid MCP request body")
 	}
 	for _, request := range batch {
 		if scope := request.requiredScope(); scope != "" {
-			return scope
+			return scope, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 type mcpAuthorizationRequest struct {

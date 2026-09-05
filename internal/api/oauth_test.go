@@ -24,6 +24,8 @@ import (
 
 const testMCPResource = "https://fanout.example.com/mcp"
 
+const testReadMCPCall = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"observability_overview","arguments":{}}}`
+
 func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	return newOAuthTestServerWithConfig(t, config.Config{})
 }
@@ -213,7 +215,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 		t.Fatalf("unexpected token response: %#v", tokenBody)
 	}
 
-	mcp := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer " + access})
+	mcp := serve(t, e, http.MethodPost, "/mcp", testReadMCPCall, map[string]string{"Authorization": "Bearer " + access})
 	if mcp.Code != http.StatusNoContent {
 		t.Fatalf("MCP with OAuth token = %d %s", mcp.Code, mcp.Body.String())
 	}
@@ -223,7 +225,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	if err := users.RevokeAllSessions(user.ID); err != nil {
 		t.Fatalf("logout everywhere: %v", err)
 	}
-	replayed := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer " + access})
+	replayed := serve(t, e, http.MethodPost, "/mcp", testReadMCPCall, map[string]string{"Authorization": "Bearer " + access})
 	if replayed.Code != http.StatusUnauthorized {
 		t.Fatalf("MCP token survived logout everywhere: %d %s", replayed.Code, replayed.Body.String())
 	}
@@ -512,7 +514,11 @@ func TestRequiredMCPToolScopeUsesPayloadAndReplaysBody(t *testing.T) {
 	req.Header.Set("Mcp-Method", "tools/call")
 	req.Header.Set("Mcp-Name", "observability_overview")
 
-	if got := requiredMCPToolScope(req); got != auth.MCPScopeDashboardManage {
+	got, err := requiredMCPToolScope(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != auth.MCPScopeDashboardManage {
 		t.Fatalf("required scope = %q, want %q", got, auth.MCPScopeDashboardManage)
 	}
 	replayed, err := io.ReadAll(req.Body)
@@ -659,7 +665,7 @@ func TestMCPOAuthRefreshGrantOverHTTP(t *testing.T) {
 	if rotated["scope"] != mcpReadScope {
 		t.Fatalf("rotated scope = %v, want %q", rotated["scope"], mcpReadScope)
 	}
-	mcp := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer " + rotated["access_token"].(string)})
+	mcp := serve(t, e, http.MethodPost, "/mcp", testReadMCPCall, map[string]string{"Authorization": "Bearer " + rotated["access_token"].(string)})
 	if mcp.Code != http.StatusNoContent {
 		t.Fatalf("MCP with rotated token = %d %s", mcp.Code, mcp.Body.String())
 	}
@@ -720,6 +726,20 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 	if spoofed.Code != http.StatusForbidden {
 		t.Fatalf("spoofed dashboard step-up = %d %s, want 403", spoofed.Code, spoofed.Body.String())
 	}
+	malformed := serve(t, e, http.MethodPost, "/mcp", `{`, map[string]string{
+		"Authorization": "Bearer " + tokens["access_token"].(string),
+		"Content-Type":  "application/json",
+	})
+	if malformed.Code != http.StatusBadRequest {
+		t.Fatalf("malformed MCP body = %d %s, want 400", malformed.Code, malformed.Body.String())
+	}
+	oversized := serve(t, e, http.MethodPost, "/mcp", strings.Repeat(" ", maxMCPAuthorizationBodyBytes+1), map[string]string{
+		"Authorization": "Bearer " + tokens["access_token"].(string),
+		"Content-Type":  "application/json",
+	})
+	if oversized.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized MCP body = %d %s, want 413", oversized.Code, oversized.Body.String())
+	}
 }
 
 // When dashboard write access is requested, the consent card must say so and
@@ -755,6 +775,15 @@ func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
 	})
 	if allowed.Code != http.StatusNoContent {
 		t.Fatalf("dashboard scope was rejected: %d %s", allowed.Code, allowed.Body.String())
+	}
+	// Fully scoped tokens bypass authorization-body buffering; payload validity
+	// remains the MCP protocol handler's responsibility.
+	unparsed := serve(t, e, http.MethodPost, "/mcp", `{`, map[string]string{
+		"Authorization": "Bearer " + tokens["access_token"].(string),
+		"Content-Type":  "application/json",
+	})
+	if unparsed.Code != http.StatusNoContent {
+		t.Fatalf("fully scoped request was parsed by authorization gate: %d %s", unparsed.Code, unparsed.Body.String())
 	}
 }
 
