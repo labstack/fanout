@@ -1,0 +1,31 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.labstack/fanout",
+  "title": "Fanout",
+  "description": "Investigate OpenTelemetry traces, metrics, and logs, and manage personal dashboards.",
+  "websiteUrl": "https://fanout.run",
+  "icons": [
+    {
+      "src": "https://fanout.run/favicon.svg",
+      "mimeType": "image/svg+xml"
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/labstack/fanout",
+    "source": "github"
+  },
+  "version": "2026.9.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://{host}/mcp",
+      "variables": {
+        "host": {
+          "description": "Public hostname of your Fanout instance, without a scheme or path.",
+          "isRequired": true,
+          "placeholder": "fanout.example.com"
+        }
+      }
+    }
+  ]
+}

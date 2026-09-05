@@ -7,6 +7,7 @@ Fanout publishes one release from a verified commit on `main`. A release contain
   multi-architecture images;
 - byte-identical `labstack/fanout:<version>` and `latest` Docker Hub mirrors;
 - SHA-256 checksums and GitHub build-provenance attestations for every archive;
+- an `io.github.labstack/fanout` entry in the official MCP Registry;
 - the Apache-2.0 license, project notice, trademark policy, and generated
   third-party notices in every archive and container image.
 
@@ -39,7 +40,9 @@ copies that accepted manifest to Docker Hub; requires the registry digests to
 match; and creates the GitHub release only after anonymous pulls from both GHCR
 and Docker Hub succeed. A final job downloads every release asset without
 credentials, verifies checksums, inspects the legal payload, exercises the
-installer, and verifies provenance.
+installer, and verifies provenance. Only after those checks pass does the
+workflow publish the release's `server.json` to the MCP Registry with GitHub
+OIDC; no long-lived registry credential is stored in the repository.
 
 Fanout does not currently use GoReleaser. DuckDB requires CGO and the supported
 targets are built on four native runners. GoReleaser's supported split-and-merge
