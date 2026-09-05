@@ -3432,3 +3432,90 @@ Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
 - [ ] **Step 5: Hand off**
 
 Use the superpowers:finishing-a-development-branch skill to decide between merging and opening a pull request. The pull request description, if one is opened, lists the spec path, the six areas above, and ends with `https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N`.
+
+## Phase G: added during execution (user requests on 2026-09-05)
+
+### Task 15: The model must not draw diagrams the view already shows
+
+**Files:**
+- Modify: `internal/agent/runtime.go:26` (the `systemPrompt` constant)
+- Test: `internal/agent/runtime_test.go`
+
+**Interfaces:**
+- No signature changes. `systemPrompt` stays an unexported string constant.
+
+**Why:** with the interactive service map attached to a reply, the model also drew an ASCII tree of the same services in its prose. The prompt already says attached views carry the detail; it does not forbid diagrams.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `internal/agent/runtime_test.go`:
+
+```go
+func TestSystemPromptForbidsTextDiagrams(t *testing.T) {
+	for _, want := range []string{
+		"Never draw diagrams, trees, or charts in text",
+		"never restate what an attached view already shows",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("system prompt is missing %q", want)
+		}
+	}
+}
+```
+
+Add `"strings"` to the test file's imports if it is not already there.
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `go test ./internal/agent -run TestSystemPromptForbidsTextDiagrams`
+Expected: FAIL, `system prompt is missing "Never draw diagrams, trees, or charts in text"`.
+
+- [ ] **Step 3: Extend the prompt**
+
+In `runtime.go`, inside the `systemPrompt` string, after the sentence `Keep answers concise because attached views provide interactive details.` insert:
+
+```
+Never draw diagrams, trees, or charts in text (no ASCII art, no box drawing); the attached view is the picture, and your prose should say what matters in it and never restate what an attached view already shows.
+```
+
+- [ ] **Step 4: Run the package tests**
+
+Run: `go test ./internal/agent`
+Expected: PASS.
+
+- [ ] **Step 5: Lint and commit**
+
+```bash
+gofmt -l internal/agent   # prints nothing
+golangci-lint run ./internal/agent
+git add internal/agent/runtime.go internal/agent/runtime_test.go
+git commit -m "fix(agent): stop the model drawing text diagrams beside an attached view
+
+Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+```
+
+---
+
+### Task 16: UX walk of every logged-in screen
+
+**Files:**
+- Create: `.superpowers/sdd/2026-09-05-logged-in-ui-shell/ux-walk.md` (findings, not committed)
+- Modify: whatever the fix wave needs; each fix commits separately.
+
+**Interfaces:** none.
+
+This task runs after Task 14's gate and before the final whole-branch code review. It is a design-quality review, not a code review.
+
+- [ ] **Step 1: Walk**
+
+On the seeded local instance (memory note "local UI screenshot loop"), at 1440x900 and 390x844, light and dark, capture and judge every screen against the spec's intent (`docs/superpowers/specs/2026-09-05-logged-in-ui-shell-design.md`): setup, setup success, sign-in email step, sign-in code step, shell with rail (empty rail, populated rail, search with and without matches), chat empty state, chat with a running agent (activity line, Stop), chat with two embedded views, chat with a markdown table and a code block, a missing thread, a failed run, dashboard with every widget type (populated and empty window), the Add view menu, a widget's actions menu and Configure modal, the save-failure alert (stop the server briefly), the account menu, the mobile drawer.
+
+For every screen record: what a first-time user sees first, what competes for attention, anything cut off, misaligned, mis-sized, low-contrast, inconsistent in spacing or type, or worded off-brand. One line per finding with severity (Important = a user would notice and be slowed or misled; Minor = polish) and the file that owns it.
+
+- [ ] **Step 2: Fix wave**
+
+Dispatch one fix pass for every Important finding and any Minor that is a one-line change. Each fix re-runs the covering test file and commits separately with the session trailer. Rebuild embedded assets afterwards (`just ui`) and commit them.
+
+- [ ] **Step 3: Re-walk the changed screens**
+
+Capture the screens the fixes touched and confirm each finding is gone. Then `just check`.
