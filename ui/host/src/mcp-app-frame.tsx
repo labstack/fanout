@@ -155,9 +155,11 @@ export function mcpAppCSP(meta: unknown): string {
     `style-src 'self' 'unsafe-inline'${resourceSuffix}`,
     `img-src 'self' data:${resourceSuffix}`,
     `media-src 'self' data:${resourceSuffix}`,
+    // The apps build inlines their woff2 files as data: URIs; without this
+    // every embedded view falls back to the system font.
+    `font-src 'self' data:${resourceSuffix}`,
     `connect-src ${connect.length ? connect.join(" ") : "'none'"}`,
   ];
-  if (resources.length) directives.push(`font-src 'self' ${resources.join(" ")}`);
   if (frames.length) directives.push(`frame-src ${frames.join(" ")}`);
   if (bases.length) directives.push(`base-uri ${bases.join(" ")}`);
   return `${directives.join("; ")};`;
