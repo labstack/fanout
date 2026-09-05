@@ -151,20 +151,31 @@ func requiredMCPToolScope(r *http.Request) (string, error) {
 		return "", errMCPAuthorizationBodyTooLarge
 	}
 
-	var single mcpAuthorizationRequest
-	if json.Unmarshal(body, &single) == nil {
-		return single.requiredScope(), nil
-	}
-	var batch []mcpAuthorizationRequest
-	if json.Unmarshal(body, &batch) != nil {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
 		return "", errors.New("invalid MCP request body")
 	}
-	for _, request := range batch {
-		if scope := request.requiredScope(); scope != "" {
-			return scope, nil
+	switch trimmed[0] {
+	case '{':
+		var single mcpAuthorizationRequest
+		if json.Unmarshal(trimmed, &single) != nil {
+			return "", errors.New("invalid MCP request body")
 		}
+		return single.requiredScope(), nil
+	case '[':
+		var batch []mcpAuthorizationRequest
+		if json.Unmarshal(trimmed, &batch) != nil || len(batch) == 0 {
+			return "", errors.New("invalid MCP request body")
+		}
+		for _, request := range batch {
+			if scope := request.requiredScope(); scope != "" {
+				return scope, nil
+			}
+		}
+		return "", nil
+	default:
+		return "", errors.New("invalid MCP request body")
 	}
-	return "", nil
 }
 
 type mcpAuthorizationRequest struct {

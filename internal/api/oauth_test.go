@@ -726,12 +726,14 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 	if spoofed.Code != http.StatusForbidden {
 		t.Fatalf("spoofed dashboard step-up = %d %s, want 403", spoofed.Code, spoofed.Body.String())
 	}
-	malformed := serve(t, e, http.MethodPost, "/mcp", `{`, map[string]string{
-		"Authorization": "Bearer " + tokens["access_token"].(string),
-		"Content-Type":  "application/json",
-	})
-	if malformed.Code != http.StatusBadRequest {
-		t.Fatalf("malformed MCP body = %d %s, want 400", malformed.Code, malformed.Body.String())
+	for _, body := range []string{"{", "null", "[]"} {
+		malformed := serve(t, e, http.MethodPost, "/mcp", body, map[string]string{
+			"Authorization": "Bearer " + tokens["access_token"].(string),
+			"Content-Type":  "application/json",
+		})
+		if malformed.Code != http.StatusBadRequest {
+			t.Fatalf("malformed MCP body %q = %d %s, want 400", body, malformed.Code, malformed.Body.String())
+		}
 	}
 	oversized := serve(t, e, http.MethodPost, "/mcp", strings.Repeat(" ", maxMCPAuthorizationBodyBytes+1), map[string]string{
 		"Authorization": "Bearer " + tokens["access_token"].(string),
