@@ -27,7 +27,7 @@ import (
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
-const mcpReadScope = "fanout:read"
+const mcpReadScope = appauth.MCPScopeTelemetryRead
 
 const browserMCPSessionBearer = "fanout-browser-session"
 
@@ -82,10 +82,26 @@ func (h *MCPAuthorization) Register(e *echo.Echo) {
 }
 
 func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
+	scopeChecked := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requiredScope := requiredMCPToolScope(r)
+		if requiredScope != "" {
+			info := mcpgoauth.TokenInfoFromContext(r.Context())
+			if info == nil || !slices.Contains(info.Scopes, requiredScope) {
+				w.Header().Set("WWW-Authenticate", fmt.Sprintf(
+					`Bearer error="insufficient_scope", scope=%q, resource_metadata=%q`,
+					requiredScope,
+					h.metadataURL,
+				))
+				http.Error(w, "insufficient scope", http.StatusForbidden)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 	protected := mcpgoauth.RequireBearerToken(h.verifyMCPToken, &mcpgoauth.RequireBearerTokenOptions{
 		ResourceMetadataURL: h.metadataURL,
 		Scopes:              []string{mcpReadScope},
-	})(next)
+	})(scopeChecked)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.EqualFold(strings.TrimSpace(r.Host), h.allowedHost) {
 			http.Error(w, "MCP request host does not match the configured public URL", http.StatusMisdirectedRequest)
@@ -93,6 +109,18 @@ func (h *MCPAuthorization) ProtectMCP(next http.Handler) http.Handler {
 		}
 		protected.ServeHTTP(w, r)
 	})
+}
+
+func requiredMCPToolScope(r *http.Request) string {
+	if r.Header.Get("Mcp-Method") != "tools/call" {
+		return ""
+	}
+	switch r.Header.Get("Mcp-Name") {
+	case "dashboard_list", "dashboard_get", "dashboard_create", "dashboard_update":
+		return dashboard.OAuthScope
+	default:
+		return ""
+	}
 }
 
 // ProtectBrowserMCP adapts an already-authenticated browser session to the
@@ -117,7 +145,7 @@ func ProtectBrowserMCP(sessions *appauth.BrowserSessions, next http.Handler) ech
 			Scopes:     scopes,
 			Expiration: sessions.Deadline(ctx),
 			UserID:     user.ID,
-			Extra:      map[string]any{"role": user.Role, "credential": "browser_session"},
+			Extra:      map[string]any{"credential": "browser_session"},
 		}, nil
 	}, nil)(next)
 
@@ -156,13 +184,15 @@ func (h *MCPAuthorization) verifyMCPToken(ctx context.Context, raw string, _ *ht
 	if !user.Active {
 		return nil, mcpgoauth.ErrInvalidToken
 	}
+	if !userCanUseMCPScopes(user, record.Scope) {
+		return nil, mcpgoauth.ErrInvalidToken
+	}
 	return &mcpgoauth.TokenInfo{
 		Scopes:     strings.Fields(record.Scope),
 		Expiration: record.ExpiresAt,
 		UserID:     record.UserID,
 		Extra: map[string]any{
 			"client_id": record.ClientID,
-			"role":      user.Role,
 		},
 	}, nil
 }
@@ -171,6 +201,7 @@ func (h *MCPAuthorization) ProtectedResourceMetadata(c *echo.Context) error {
 	setDiscoveryHeaders(c)
 	return c.JSON(http.StatusOK, map[string]any{
 		"resource":                 h.resource,
+		"resource_name":            "Fanout Observability",
 		"authorization_servers":    []string{h.issuer},
 		"scopes_supported":         mcpSupportedScopes,
 		"bearer_methods_supported": []string{"header"},
@@ -180,17 +211,18 @@ func (h *MCPAuthorization) ProtectedResourceMetadata(c *echo.Context) error {
 func (h *MCPAuthorization) AuthorizationServerMetadata(c *echo.Context) error {
 	setDiscoveryHeaders(c)
 	return c.JSON(http.StatusOK, map[string]any{
-		"issuer":                                h.issuer,
-		"authorization_endpoint":                h.issuer + "/api/auth/oauth/authorize",
-		"token_endpoint":                        h.issuer + "/oauth/token",
-		"registration_endpoint":                 h.issuer + "/oauth/register",
-		"scopes_supported":                      mcpSupportedScopes,
-		"response_types_supported":              []string{"code"},
-		"response_modes_supported":              []string{"query"},
-		"grant_types_supported":                 []string{"authorization_code", "refresh_token"},
-		"token_endpoint_auth_methods_supported": []string{"none"},
-		"code_challenge_methods_supported":      []string{"S256"},
-		"client_id_metadata_document_supported": false,
+		"issuer":                                         h.issuer,
+		"authorization_endpoint":                         h.issuer + "/api/auth/oauth/authorize",
+		"token_endpoint":                                 h.issuer + "/oauth/token",
+		"registration_endpoint":                          h.issuer + "/oauth/register",
+		"scopes_supported":                               mcpSupportedScopes,
+		"response_types_supported":                       []string{"code"},
+		"response_modes_supported":                       []string{"query"},
+		"grant_types_supported":                          []string{"authorization_code", "refresh_token"},
+		"token_endpoint_auth_methods_supported":          []string{"none"},
+		"code_challenge_methods_supported":               []string{"S256"},
+		"authorization_response_iss_parameter_supported": true,
+		"client_id_metadata_document_supported":          false,
 	})
 }
 
@@ -290,7 +322,7 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 	client, errorCode, description := h.validateAuthorizationRequest(c.Request().Context(), req)
 	if errorCode != "" {
 		if client.ClientID != "" {
-			return redirectOAuthError(c, req.RedirectURI, req.State, errorCode, description)
+			return h.redirectOAuthError(c, req.RedirectURI, req.State, errorCode, description)
 		}
 		status := http.StatusBadRequest
 		if errorCode == "server_error" {
@@ -304,13 +336,16 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 		slog.Error("oauth consent reached handler without an authenticated browser user")
 		return oauthJSONError(c, http.StatusUnauthorized, "access_denied", "browser authentication is required")
 	}
+	grantedScope := authorizationScope(req.Scope)
+	if !userCanUseMCPScopes(user, grantedScope) {
+		return h.redirectOAuthError(c, req.RedirectURI, req.State, "invalid_scope", "requested scope is not available to this account")
+	}
 	if c.Request().Method == http.MethodGet {
 		redirectOrigin, formActionSource, err := redirectURIOrigin(req.RedirectURI)
 		if err != nil {
 			slog.Error("registered OAuth redirect URI is invalid", "client_id", req.ClientID, "err", err)
 			return oauthJSONError(c, http.StatusInternalServerError, "server_error", "authorization failed")
 		}
-		grantedScope := authorizationScope(req.Scope)
 		c.Response().Header().Set("Cache-Control", "no-store")
 		// Chromium applies form-action across the redirect after this
 		// same-origin form POST. Permit the exact validated callback origin
@@ -334,13 +369,13 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 	}
 
 	if c.Request().Form.Get("decision") != "approve" {
-		return redirectOAuthError(c, req.RedirectURI, req.State, "access_denied", "authorization was denied")
+		return h.redirectOAuthError(c, req.RedirectURI, req.State, "access_denied", "authorization was denied")
 	}
 	code, err := h.store.CreateAuthorizationCode(c.Request().Context(), appauth.OAuthAuthorizationCode{
 		ClientID:      req.ClientID,
 		UserID:        user.ID,
 		RedirectURI:   req.RedirectURI,
-		Scope:         authorizationScope(req.Scope),
+		Scope:         grantedScope,
 		Resource:      h.resource,
 		CodeChallenge: req.CodeChallenge,
 	})
@@ -348,8 +383,8 @@ func (h *MCPAuthorization) Authorize(c *echo.Context) error {
 		slog.Error("oauth authorization code creation failed", "client_id", req.ClientID, "user_id", user.ID, "err", err)
 		return oauthJSONError(c, http.StatusInternalServerError, "server_error", "authorization failed")
 	}
-	slog.Info("oauth authorization approved", "client_id", req.ClientID, "user_id", user.ID, "scope", authorizationScope(req.Scope))
-	return redirectOAuthSuccess(c, req.RedirectURI, req.State, code)
+	slog.Info("oauth authorization approved", "client_id", req.ClientID, "user_id", user.ID, "scope", grantedScope)
+	return h.redirectOAuthSuccess(c, req.RedirectURI, req.State, code)
 }
 
 func (h *MCPAuthorization) validateAuthorizationRequest(ctx context.Context, req authorizationRequest) (appauth.OAuthClient, string, string) {
@@ -387,7 +422,8 @@ func authorizationScope(requested string) string {
 	if strings.TrimSpace(requested) == "" {
 		return mcpReadScope
 	}
-	return strings.Join(strings.Fields(requested), " ")
+	canonical, _ := appauth.CanonicalMCPOAuthScope(requested)
+	return canonical
 }
 
 type consentGrant struct {
@@ -413,11 +449,26 @@ func consentGrants(scope string) []consentGrant {
 }
 
 func validMCPScopes(scopes []string) bool {
-	if !slices.Contains(scopes, mcpReadScope) {
+	_, ok := appauth.CanonicalMCPOAuthScope(strings.Join(scopes, " "))
+	return ok
+}
+
+func userCanUseMCPScopes(user appauth.User, raw string) bool {
+	canonical, ok := appauth.CanonicalMCPOAuthScope(raw)
+	if !ok {
 		return false
 	}
-	for _, scope := range scopes {
-		if !slices.Contains(mcpSupportedScopes, scope) {
+	for _, scope := range strings.Fields(canonical) {
+		switch scope {
+		case mcpReadScope:
+			if !HasCapability(user, ReadTelemetry) {
+				return false
+			}
+		case dashboard.OAuthScope:
+			if !HasCapability(user, ManageOwnDashboards) {
+				return false
+			}
+		default:
 			return false
 		}
 	}
@@ -456,6 +507,9 @@ func (h *MCPAuthorization) Token(c *echo.Context) error {
 	var pair appauth.OAuthTokenPair
 	switch grantType {
 	case "authorization_code":
+		if _, present := c.Request().PostForm["scope"]; present {
+			return oauthJSONError(c, http.StatusBadRequest, "invalid_request", "scope is not allowed for an authorization_code grant")
+		}
 		pair, err = h.exchangeAuthorizationCode(c, clientID)
 	case "refresh_token":
 		resource := c.Request().PostForm.Get("resource")
@@ -465,11 +519,20 @@ func (h *MCPAuthorization) Token(c *echo.Context) error {
 		if resource != h.resource {
 			return oauthJSONError(c, http.StatusBadRequest, "invalid_target", "resource must identify this MCP server")
 		}
-		pair, err = h.store.RotateRefreshToken(c.Request().Context(), clientID, c.Request().PostForm.Get("refresh_token"), resource)
+		pair, err = h.store.RotateRefreshToken(
+			c.Request().Context(),
+			clientID,
+			c.Request().PostForm.Get("refresh_token"),
+			resource,
+			c.Request().PostForm.Get("scope"),
+		)
 	default:
 		return oauthJSONError(c, http.StatusBadRequest, "unsupported_grant_type", "unsupported grant type")
 	}
 	if err != nil {
+		if errors.Is(err, appauth.ErrInvalidOAuthScope) {
+			return oauthJSONError(c, http.StatusBadRequest, "invalid_scope", "requested scope exceeds the original grant")
+		}
 		if errors.Is(err, appauth.ErrInvalidOAuthGrant) || errors.Is(err, appauth.ErrOAuthRefreshReuse) {
 			return oauthJSONError(c, http.StatusBadRequest, "invalid_grant", "grant is invalid or expired")
 		}
@@ -592,10 +655,11 @@ func sameStringSet(got, want []string) bool {
 	return true
 }
 
-func redirectOAuthSuccess(c *echo.Context, redirectURI, state, code string) error {
+func (h *MCPAuthorization) redirectOAuthSuccess(c *echo.Context, redirectURI, state, code string) error {
 	u, _ := url.Parse(redirectURI)
 	query := u.Query()
 	query.Set("code", code)
+	query.Set("iss", h.issuer)
 	if state != "" {
 		query.Set("state", state)
 	}
@@ -603,11 +667,12 @@ func redirectOAuthSuccess(c *echo.Context, redirectURI, state, code string) erro
 	return c.Redirect(http.StatusFound, u.String())
 }
 
-func redirectOAuthError(c *echo.Context, redirectURI, state, code, description string) error {
+func (h *MCPAuthorization) redirectOAuthError(c *echo.Context, redirectURI, state, code, description string) error {
 	u, _ := url.Parse(redirectURI)
 	query := u.Query()
 	query.Set("error", code)
 	query.Set("error_description", description)
+	query.Set("iss", h.issuer)
 	if state != "" {
 		query.Set("state", state)
 	}

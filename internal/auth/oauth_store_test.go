@@ -22,7 +22,7 @@ func TestOAuthStoreAuthorizationCodeIsSingleUse(t *testing.T) {
 	}
 	raw, err := store.CreateAuthorizationCode(t.Context(), OAuthAuthorizationCode{
 		ClientID: client.ClientID, UserID: user.ID,
-		RedirectURI: "http://localhost:4321/callback", Scope: "fanout:read",
+		RedirectURI: "http://localhost:4321/callback", Scope: MCPScopeTelemetryRead,
 		Resource: "https://fanout.example.com/mcp", CodeChallenge: "challenge",
 	})
 	if err != nil {
@@ -40,6 +40,45 @@ func TestOAuthStoreAuthorizationCodeIsSingleUse(t *testing.T) {
 	}
 }
 
+func TestOAuthStoreCanonicalizesLegacyScopesWithoutInvalidatingGrants(t *testing.T) {
+	sqlite := newTestSQLite(t)
+	users := NewUserStore(sqlite.DB)
+	user, err := users.Create("legacy-oauth@example.com", "Legacy OAuth", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewOAuthStore(sqlite.DB)
+	client, err := store.RegisterClient(t.Context(), "Legacy client", "", []string{"http://localhost:4321/callback"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resource := "https://fanout.example.com/mcp"
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead+" "+MCPScopeDashboardManage, resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := legacyMCPScopeRead + " " + legacyMCPScopeDashboard
+	if _, err := sqlite.DB.Exec(`UPDATE oauth_tokens SET scope = ? WHERE family_id IN (SELECT family_id FROM oauth_tokens WHERE token_hash = ?)`, legacy, oauthHash(pair.AccessToken)); err != nil {
+		t.Fatal(err)
+	}
+
+	record, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource)
+	if err != nil {
+		t.Fatalf("VerifyAccessToken legacy scope: %v", err)
+	}
+	want := MCPScopeTelemetryRead + " " + MCPScopeDashboardManage
+	if record.Scope != want {
+		t.Fatalf("verified scope = %q, want %q", record.Scope, want)
+	}
+	rotated, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, "")
+	if err != nil {
+		t.Fatalf("RotateRefreshToken legacy scope: %v", err)
+	}
+	if rotated.Scope != want {
+		t.Fatalf("rotated scope = %q, want %q", rotated.Scope, want)
+	}
+}
+
 func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {
 	sqlite := newTestSQLite(t)
 	users := NewUserStore(sqlite.DB)
@@ -53,18 +92,18 @@ func TestOAuthStoreRefreshRotationAndReuseRevokesFamily(t *testing.T) {
 		t.Fatalf("RegisterClient: %v", err)
 	}
 	resource := "https://fanout.example.com/mcp"
-	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, "fanout:read", resource)
+	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
 	}
-	second, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource)
+	second, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, "")
 	if err != nil {
 		t.Fatalf("RotateRefreshToken: %v", err)
 	}
 	if second.RefreshToken == first.RefreshToken || second.AccessToken == first.AccessToken {
 		t.Fatal("rotation must issue fresh credentials")
 	}
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource); !errors.Is(err, ErrOAuthRefreshReuse) {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
 		t.Fatalf("reused refresh = %v, want reuse detection", err)
 	}
 	if _, err := store.VerifyAccessToken(t.Context(), second.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
@@ -85,7 +124,7 @@ func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 	resource := "https://fanout.example.com/mcp"
-	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, "fanout:read", resource)
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +134,7 @@ func TestRevokeAllSessionsAlsoRevokesOAuthCredentials(t *testing.T) {
 	if _, err := store.VerifyAccessToken(t.Context(), pair.AccessToken, resource); !errors.Is(err, ErrInvalidOAuthToken) {
 		t.Fatalf("replayed access token = %v, want invalid token", err)
 	}
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource); !errors.Is(err, ErrOAuthRefreshReuse) {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
 		t.Fatalf("replayed refresh token = %v, want reuse detection", err)
 	}
 }
@@ -113,7 +152,7 @@ func TestOAuthStoreRejectsWrongAudienceAndInactiveRefresh(t *testing.T) {
 		t.Fatalf("RegisterClient: %v", err)
 	}
 	resource := "https://fanout.example.com/mcp"
-	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, "fanout:read", resource)
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
 	}
@@ -124,7 +163,7 @@ func TestOAuthStoreRejectsWrongAudienceAndInactiveRefresh(t *testing.T) {
 	if _, err := users.Update(user.ID, nil, nil, nil, &active); err != nil {
 		t.Fatalf("deactivate user: %v", err)
 	}
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource); !errors.Is(err, ErrInvalidOAuthGrant) {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); !errors.Is(err, ErrInvalidOAuthGrant) {
 		t.Fatalf("inactive user refresh = %v, want invalid grant", err)
 	}
 }
@@ -147,16 +186,16 @@ func TestOAuthStoreReuseDetectionRunsBeforeExpiryCheck(t *testing.T) {
 		t.Fatalf("RegisterClient: %v", err)
 	}
 	resource := "https://fanout.example.com/mcp"
-	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, "fanout:read", resource)
+	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
 	}
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource); err != nil {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); err != nil {
 		t.Fatalf("RotateRefreshToken: %v", err)
 	}
 
 	store.now = func() time.Time { return base.Add(OAuthRefreshTTL + time.Hour) }
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource); !errors.Is(err, ErrOAuthRefreshReuse) {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
 		t.Fatalf("expired reused refresh = %v, want reuse detection", err)
 	}
 	var live int
@@ -183,7 +222,7 @@ func TestOAuthStoreRotateDBErrorDoesNotRevokeFamily(t *testing.T) {
 		t.Fatalf("RegisterClient: %v", err)
 	}
 	resource := "https://fanout.example.com/mcp"
-	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, "fanout:read", resource)
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
 	}
@@ -192,7 +231,7 @@ func TestOAuthStoreRotateDBErrorDoesNotRevokeFamily(t *testing.T) {
 	if _, err := sqlite.DB.Exec(`ALTER TABLE users RENAME TO users_offline`); err != nil {
 		t.Fatalf("hide users table: %v", err)
 	}
-	_, err = store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource)
+	_, err = store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, "")
 	if err == nil || errors.Is(err, ErrInvalidOAuthGrant) || errors.Is(err, ErrOAuthRefreshReuse) {
 		t.Fatalf("rotate during DB failure = %v, want wrapped infrastructure error", err)
 	}
@@ -202,7 +241,7 @@ func TestOAuthStoreRotateDBErrorDoesNotRevokeFamily(t *testing.T) {
 	if _, err := sqlite.DB.Exec(`ALTER TABLE users_offline RENAME TO users`); err != nil {
 		t.Fatalf("restore users table: %v", err)
 	}
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource); err != nil {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); err != nil {
 		t.Fatalf("rotate after DB recovery = %v, want success", err)
 	}
 }
@@ -222,7 +261,7 @@ func TestOAuthStoreVerifyAccessTokenDBErrorIsNotInvalidToken(t *testing.T) {
 		t.Fatalf("RegisterClient: %v", err)
 	}
 	resource := "https://fanout.example.com/mcp"
-	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, "fanout:read", resource)
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
 	}
@@ -258,15 +297,15 @@ func TestOAuthStoreCleanupExpired(t *testing.T) {
 	resource := "https://fanout.example.com/mcp"
 	if _, err := store.CreateAuthorizationCode(t.Context(), OAuthAuthorizationCode{
 		ClientID: client.ClientID, UserID: user.ID, RedirectURI: "http://localhost:5555/callback",
-		Scope: "fanout:read", Resource: resource, CodeChallenge: "challenge",
+		Scope: MCPScopeTelemetryRead, Resource: resource, CodeChallenge: "challenge",
 	}); err != nil {
 		t.Fatalf("CreateAuthorizationCode: %v", err)
 	}
-	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, "fanout:read", resource)
+	first, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
 	}
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource); err != nil {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); err != nil {
 		t.Fatalf("RotateRefreshToken: %v", err)
 	}
 
@@ -281,7 +320,7 @@ func TestOAuthStoreCleanupExpired(t *testing.T) {
 		t.Fatalf("early cleanup deleted %d rows, want 0", deleted)
 	}
 	// The revoked row survived, so reuse detection still fires.
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource); !errors.Is(err, ErrOAuthRefreshReuse) {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, first.RefreshToken, resource, ""); !errors.Is(err, ErrOAuthRefreshReuse) {
 		t.Fatalf("reuse after cleanup = %v, want reuse detection", err)
 	}
 
@@ -321,7 +360,7 @@ func TestOAuthStoreCleanupKeepsLiveFamiliesAndActiveClients(t *testing.T) {
 		t.Fatalf("RegisterClient: %v", err)
 	}
 	resource := "https://fanout.example.com/mcp"
-	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, "fanout:read", resource)
+	pair, err := store.IssueTokenPair(t.Context(), client.ClientID, user.ID, MCPScopeTelemetryRead, resource)
 	if err != nil {
 		t.Fatalf("IssueTokenPair: %v", err)
 	}
@@ -341,13 +380,13 @@ func TestOAuthStoreCleanupKeepsLiveFamiliesAndActiveClients(t *testing.T) {
 		t.Fatalf("client with live tokens was collected: %v", err)
 	}
 	store.now = func() time.Time { return at }
-	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource); err != nil {
+	if _, err := store.RotateRefreshToken(t.Context(), client.ClientID, pair.RefreshToken, resource, ""); err != nil {
 		t.Fatalf("rotate after cleanup = %v, want success", err)
 	}
 }
 
 func TestOAuthTokenPairStringRedactsSecrets(t *testing.T) {
-	pair := OAuthTokenPair{AccessToken: "foa_secret", RefreshToken: "for_secret", ExpiresIn: 900, Scope: "fanout:read"}
+	pair := OAuthTokenPair{AccessToken: "foa_secret", RefreshToken: "for_secret", ExpiresIn: 900, Scope: MCPScopeTelemetryRead}
 	got := fmt.Sprintf("%v", pair)
 	if strings.Contains(got, "foa_secret") || strings.Contains(got, "for_secret") {
 		t.Fatalf("String() leaked token material: %s", got)
@@ -367,7 +406,7 @@ func TestOAuthStoreExpiredCodeFails(t *testing.T) {
 	client, _ := store.RegisterClient(t.Context(), "Client", "", []string{"http://localhost:1111/callback"})
 	raw, err := store.CreateAuthorizationCode(t.Context(), OAuthAuthorizationCode{
 		ClientID: client.ClientID, UserID: user.ID, RedirectURI: "http://localhost:1111/callback",
-		Scope: "fanout:read", Resource: "https://fanout.example.com/mcp", CodeChallenge: "challenge",
+		Scope: MCPScopeTelemetryRead, Resource: "https://fanout.example.com/mcp", CodeChallenge: "challenge",
 	})
 	if err != nil {
 		t.Fatalf("CreateAuthorizationCode: %v", err)

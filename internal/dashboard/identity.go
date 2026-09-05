@@ -1,6 +1,10 @@
 package dashboard
 
-import "context"
+import (
+	"context"
+
+	"github.com/labstack/fanout/internal/auth"
+)
 
 // OwnerMetaKey carries the dashboard owner's user ID in MCP request _meta.
 //
@@ -12,7 +16,7 @@ import "context"
 // leaving the _meta fallback reachable only via the in-process transport,
 // where internal/agent/tools.go injects the already-authenticated user.
 const OwnerMetaKey = "io.fanout/owner-id"
-const OAuthScope = "fanout:dashboard"
+const OAuthScope = auth.MCPScopeDashboardManage
 
 type ownerContextKey struct{}
 

@@ -46,23 +46,24 @@ needs only the URL:
    nothing is pre-provisioned by hand.
 3. Obtains a token from `/oauth/token`, bound to the resource URI above.
 
-You authorize it in the browser as yourself, which is what ties the agent to
-your account and your role.
+You authorize it in the browser as yourself, which ties the agent to your
+account without delegating your first-party account role.
 
 ## Scopes
 
 | Scope | Grants |
 |---|---|
-| `fanout:read` | The read-only observability tools |
-| `fanout:dashboard` | The dashboard tools |
+| `telemetry:read` | The read-only observability tools |
+| `dashboard:manage` | List, read, create, and replace your dashboards |
 
-An agent holding only `fanout:read` can investigate but cannot create or replace
+An agent holding only `telemetry:read` can investigate but cannot create or replace
 a dashboard.
 
 ## What the agent can and cannot do
 
-It acts as **you**. Its reach is your role's capabilities and no more — see
-[roles](/reference/roles). Two consequences:
+It acts on your behalf, but its delegated authority comes from the scopes you
+approve rather than your account role. Fanout also checks that your current
+account capabilities still permit those scopes. Two consequences:
 
 - Dashboard tools are owner-scoped. An agent can manage your dashboards and
   cannot touch anyone else's.

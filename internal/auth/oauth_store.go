@@ -24,6 +24,7 @@ const (
 var (
 	ErrOAuthClientNotFound = errors.New("oauth client not found")
 	ErrInvalidOAuthGrant   = errors.New("invalid oauth grant")
+	ErrInvalidOAuthScope   = errors.New("invalid oauth scope")
 	ErrOAuthRefreshReuse   = errors.New("oauth refresh token reuse detected")
 	ErrInvalidOAuthToken   = errors.New("invalid oauth token")
 )
@@ -156,6 +157,11 @@ func (s *OAuthStore) GetClient(ctx context.Context, clientID string) (OAuthClien
 }
 
 func (s *OAuthStore) CreateAuthorizationCode(ctx context.Context, code OAuthAuthorizationCode) (string, error) {
+	canonicalScope, ok := CanonicalMCPOAuthScope(code.Scope)
+	if !ok {
+		return "", ErrInvalidOAuthGrant
+	}
+	code.Scope = canonicalScope
 	raw, err := randomOAuthValue("foc_")
 	if err != nil {
 		return "", err
@@ -218,18 +224,27 @@ func (s *OAuthStore) ConsumeAuthorizationCode(ctx context.Context, raw string) (
 	if !code.ExpiresAt.After(s.now()) {
 		return OAuthAuthorizationCode{}, ErrInvalidOAuthGrant
 	}
+	canonicalScope, ok := CanonicalMCPOAuthScope(code.Scope)
+	if !ok {
+		return OAuthAuthorizationCode{}, ErrInvalidOAuthGrant
+	}
+	code.Scope = canonicalScope
 	return code, nil
 }
 
 func (s *OAuthStore) IssueTokenPair(ctx context.Context, clientID, userID, scope, resource string) (OAuthTokenPair, error) {
+	canonicalScope, ok := CanonicalMCPOAuthScope(scope)
+	if !ok {
+		return OAuthTokenPair{}, ErrInvalidOAuthGrant
+	}
 	family, err := appid.New()
 	if err != nil {
 		return OAuthTokenPair{}, fmt.Errorf("oauth: generate token family: %w", err)
 	}
-	return s.insertTokenPair(ctx, s.db, family, clientID, userID, scope, resource)
+	return s.insertTokenPair(ctx, s.db, family, clientID, userID, canonicalScope, resource)
 }
 
-func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, resource string) (OAuthTokenPair, error) {
+func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, resource, requestedScope string) (OAuthTokenPair, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return OAuthTokenPair{}, fmt.Errorf("oauth: open refresh transaction: %w", err)
@@ -297,10 +312,14 @@ func (s *OAuthStore) RotateRefreshToken(ctx context.Context, clientID, raw, reso
 		committed = true
 		return OAuthTokenPair{}, ErrInvalidOAuthGrant
 	}
+	rotationScope, ok := ResolveMCPRefreshScope(record.Scope, requestedScope)
+	if !ok {
+		return OAuthTokenPair{}, ErrInvalidOAuthScope
+	}
 	if _, err := conn.ExecContext(ctx, `UPDATE oauth_tokens SET revoked_at = ? WHERE token_hash = ?`, now, oauthHash(raw)); err != nil {
 		return OAuthTokenPair{}, fmt.Errorf("oauth: rotate refresh token: %w", err)
 	}
-	pair, err := s.insertTokenPair(ctx, conn, record.FamilyID, record.ClientID, record.UserID, record.Scope, record.Resource)
+	pair, err := s.insertTokenPair(ctx, conn, record.FamilyID, record.ClientID, record.UserID, rotationScope, record.Resource)
 	if err != nil {
 		return OAuthTokenPair{}, err
 	}
@@ -326,6 +345,11 @@ func (s *OAuthStore) VerifyAccessToken(ctx context.Context, raw, resource string
 	if record.Kind != TokenKindAccess || record.Resource != resource || record.RevokedAt.Valid || !record.ExpiresAt.After(s.now()) {
 		return OAuthTokenRecord{}, ErrInvalidOAuthToken
 	}
+	canonicalScope, ok := CanonicalMCPOAuthScope(record.Scope)
+	if !ok {
+		return OAuthTokenRecord{}, ErrInvalidOAuthToken
+	}
+	record.Scope = canonicalScope
 	return record, nil
 }
 
