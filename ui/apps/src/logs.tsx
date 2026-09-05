@@ -3,10 +3,11 @@ import { ActionIcon, Badge, Group, Paper, SegmentedControl, Table, Text, TextInp
 import { ArrowSquareOut, ListMagnifyingGlass, MagnifyingGlass } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, PageControls, ViewHeader, ViewShell, ViewStatus, chartTheme, statusHex, usePagedItems } from "./components";
-import type { LogEntry, Logs, Result } from "./contracts";
+import { EmptyState, MetaFooter, PageControls, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
+import { chartTheme, severityColor, severityHex, statusHex } from "../../chart";
+import type { LogEntry, Logs, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
-import { timelineTimestamp, windowLabel } from "./format";
+import { timelineTimestamp, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 
@@ -53,8 +54,5 @@ function LogList({ entries, onTrace, window }: { entries: LogEntry[]; onTrace: (
     <Table.Tbody>{logs.pageItems.map((entry, index) => <Table.Tr key={`${entry.time}-${logs.from + index}`}><Table.Td><Text size="xs" ff="monospace">{timelineTimestamp(entry.time, window, true)}</Text></Table.Td><Table.Td><Badge size="sm" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td><Table.Td><Text size="sm" fw={600}>{entry.service}</Text></Table.Td><Table.Td><Text size="sm" lineClamp={2} title={entry.body}>{entry.body}</Text></Table.Td><Table.Td>{entry.trace_id && <Tooltip label="Investigate trace"><ActionIcon variant="subtle" aria-label={`Investigate trace ${entry.trace_id}`} onClick={() => onTrace(entry)}><ArrowSquareOut size={15} weight="bold" /></ActionIcon></Tooltip>}</Table.Td></Table.Tr>)}</Table.Tbody>
   </Table></Table.ScrollContainer><PageControls {...logs} onChange={logs.setPage} /></>;
 }
-
-function severityColor(value: string) { const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return "bad"; if (severity === "WARN" || severity === "WARNING") return "warn"; if (severity === "INFO") return "info"; return "gray"; }
-function severityHex(value: string, dark: boolean) { const status = statusHex(dark); const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return status.bad; if (severity === "WARN" || severity === "WARNING") return status.warn; if (severity === "INFO") return status.info; return chartTheme(dark).muted; }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><LogsApp /></StrictMode>);

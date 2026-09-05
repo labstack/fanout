@@ -2,9 +2,10 @@ import { Badge, Box, Group, Progress, SimpleGrid, Table, Text } from "@mantine/c
 import { Pulse } from "@phosphor-icons/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, Metric, PageControls, ViewHeader, ViewShell, ViewStatus, healthColor, usePagedItems } from "./components";
-import type { Overview, Result, ServiceHealth } from "./contracts";
-import { duration, integer, percent, windowLabel } from "./format";
+import { EmptyState, MetaFooter, Metric, PageControls, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
+import { healthColor } from "../../chart";
+import type { Overview, Result, ServiceHealth } from "../../contracts";
+import { duration, integer, percent, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 

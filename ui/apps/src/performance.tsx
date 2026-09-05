@@ -3,10 +3,11 @@ import { Badge, Paper, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { ArrowUpRight, ArrowsLeftRight, GridFour, Pulse } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme, healthColor, seriesColor, statusHex, usePagedItems } from "./components";
-import type { Endpoint, Performance, Result } from "./contracts";
+import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
+import { chartTheme, healthColor, seriesColor, statusHex } from "../../chart";
+import type { Endpoint, Performance, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
-import { duration, integer, percent, timelineTimestamp, windowLabel } from "./format";
+import { duration, integer, percent, timelineTimestamp, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 

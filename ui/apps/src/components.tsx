@@ -10,7 +10,6 @@ import { Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagi
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { fanoutCssVariables, fanoutThemeConfig } from "../../theme";
-import { bad, chart, info, ok, series, warn } from "../../tokens";
 
 const fanoutTheme = createTheme(fanoutThemeConfig);
 
@@ -75,30 +74,3 @@ export function PageControls({ page, totalPages, from, to, total, onChange }: { 
   </Group>;
 }
 
-export function healthColor(health: string) {
-  return health === "healthy" ? "ok" : health === "degraded" ? "warn" : "bad";
-}
-
-/* A chart is drawn into a canvas, which cannot read CSS custom properties, so
-   everything below hands ECharts resolved values from the same ramps Mantine
-   gets. The shade differs by scheme for the same reason the accent does: the
-   palette's own hue reads on Ayu, a darker stop is needed on white. */
-
-export function chartTheme(dark: boolean) {
-  return chart[dark ? "dark" : "light"];
-}
-
-export function statusHex(dark: boolean) {
-  const shade = dark ? 5 : 7;
-  return { ok: ok[shade], warn: warn[shade], bad: bad[shade], info: info[shade] };
-}
-
-/** One color per service or metric, where the color identifies rather than
- *  grades. Hashed so a service keeps its color between renders, and drawn from
- *  a palette with no health hue in it. */
-export function seriesColor(name: string, dark: boolean) {
-  const palette = series[dark ? "dark" : "light"];
-  let hash = 0;
-  for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) | 0;
-  return palette[Math.abs(hash) % palette.length];
-}

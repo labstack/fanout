@@ -3,10 +3,11 @@ import { Button, Paper, Stack, Table, Text } from "@mantine/core";
 import { FlowArrow, MagnifyingGlass, ShareNetwork } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme, statusHex, usePagedItems } from "./components";
-import type { Edge, Result, Topology } from "./contracts";
+import { EmptyState, MetaFooter, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
+import { chartTheme, statusHex } from "../../chart";
+import type { Edge, Result, Topology } from "../../contracts";
 import { EChart, useECharts } from "./echart";
-import { duration, integer, percent, windowLabel } from "./format";
+import { duration, integer, percent, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 

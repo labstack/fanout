@@ -2,9 +2,10 @@ import { Badge, Box, Button, Group, Paper, ScrollArea, SimpleGrid, Stack, Table,
 import { ListBullets, Path } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, seriesColor, usePagedItems } from "./components";
-import type { LogEntry, Result, TraceDetail, TraceSpan } from "./contracts";
-import { duration, integer, windowLabel } from "./format";
+import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
+import { seriesColor, severityColor } from "../../chart";
+import type { LogEntry, Result, TraceDetail, TraceSpan } from "../../contracts";
+import { duration, integer, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 
@@ -97,6 +98,5 @@ function TraceLogs({ entries }: { entries: LogEntry[] }) {
 }
 
 function shortID(value: string) { return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value; }
-function severityColor(value: string) { const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return "bad"; if (severity === "WARN" || severity === "WARNING") return "warn"; if (severity === "INFO") return "info"; return "gray"; }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><TraceApp /></StrictMode>);
