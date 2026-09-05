@@ -3519,3 +3519,151 @@ Dispatch one fix pass for every Important finding and any Minor that is a one-li
 - [ ] **Step 3: Re-walk the changed screens**
 
 Capture the screens the fixes touched and confirm each finding is gone. Then `just check`.
+
+### Task 17: Typeface: Geist Sans for UI and headings, Geist Mono for data
+
+Runs immediately after Task 9 so Tasks 10 to 16 are checked against the final type.
+
+**Files:**
+- Modify: `ui/tokens.ts` (the `fonts` export and its comment), `ui/theme.ts` (`fontFamilyMonospace`, `headings`), `ui/host/package.json` and `ui/host/bun.lock` (via `bun add` / `bun remove`), `ui/host/src/main.tsx` (font imports), `ui/host/src/index.css` (heading tracking rule, tabular figures), `ui/apps/package.json` and `ui/apps/bun.lock`, `ui/apps/src/components.tsx` (font imports)
+- Test: `ui/host/src/theme.test.ts` (new)
+- Rebuild and commit: `internal/mcp/apps/*.html` (the fonts are inlined into the bundles)
+
+**Interfaces:**
+- `fonts.body` and `fonts.display` keep their names and roles-by-name in `ui/tokens.ts`; only the families change. `theme.headings.fontFamily` now equals `fonts.body`. Every `ff="monospace"` prop and `var(--mantine-font-family-monospace)` keeps working and now resolves to Geist Mono.
+
+**Decision ledger (from the Refero research on 2026-09-05):**
+
+| Decision | Source | Rule / role preserved | Why |
+|---|---|---|---|
+| One grotesk family for UI, body and headings | Linear changelog style (primary lock); craft rule "work tools use one family" | Headlines at weight 500 to 600, never 700; tracking -0.01em | Mono headings at 32 to 56px read as typewriter; a medium-weight sans reads as a precise label |
+| Geist rather than Inter | User choice; Better Stack's "compact grotesk" trait; anti-default rule | Distinct dev-tool identity, tabular figures available | Inter is the AI default; Geist was designed for dense developer UI |
+| Mono demoted to data and code | Linear (Berkeley Mono only for code and timestamps); Axiom rejected as primary | `ff="monospace"` stays on ids, timestamps, numeric cells, code blocks | Mono earns its place where alignment carries meaning |
+| Tabular figures everywhere | Better Stack data density | `font-variant-numeric: tabular-nums` on `body` | Numbers in tables and tiles stop jittering as they update |
+| Site unchanged in this task | Scope | `site/` keeps Plex until its own task | The app ships first; a site task follows so both match |
+
+Reference lock: primary Linear changelog typography discipline; borrow Better Stack's compact tracking; reject mono display headings, 700-weight display, in-app hero sizes.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `ui/host/src/theme.test.ts`:
+
+```ts
+import { describe, expect, it } from "vitest";
+import { fanoutThemeConfig } from "../../theme";
+import { fonts } from "../../tokens";
+
+describe("typeface", () => {
+  it("sets one grotesk for UI and headings and mono for data", () => {
+    expect(fonts.body).toMatch(/^"Geist Variable"/);
+    expect(fonts.display).toMatch(/^"Geist Mono Variable"/);
+    expect(fanoutThemeConfig.fontFamily).toBe(fonts.body);
+    expect(fanoutThemeConfig.headings.fontFamily).toBe(fonts.body);
+    expect(fanoutThemeConfig.headings.fontWeight).toBe("600");
+    expect(fanoutThemeConfig.fontFamilyMonospace).toBe(fonts.display);
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `cd ui/host && bun run test src/theme.test.ts`
+Expected: FAIL, `fonts.body` still starts with `"IBM Plex Sans"`.
+
+- [ ] **Step 3: Swap the packages**
+
+```bash
+cd ui/host && bun remove @fontsource/ibm-plex-sans @fontsource/ibm-plex-mono && bun add @fontsource-variable/geist@5.3.0 @fontsource-variable/geist-mono@5.3.0
+cd ../apps && bun remove @fontsource/ibm-plex-sans @fontsource/ibm-plex-mono && bun add @fontsource-variable/geist@5.3.0 @fontsource-variable/geist-mono@5.3.0
+```
+
+- [ ] **Step 4: Tokens and theme**
+
+In `ui/tokens.ts` replace the `fonts` export and its comments with:
+
+```ts
+export const fonts = {
+  /** Mono is for data: code, ids, timestamps, numeric cells, and the chart
+   *  axes that borrow it. It no longer sets headings. */
+  display: '"Geist Mono Variable", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+  /** One grotesk for everything a person reads: UI, prose, headings, the
+   *  brand lockup. Headings differ by weight and size, not by family. */
+  body: '"Geist Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+} as const;
+```
+
+In `ui/theme.ts` change the two typography lines and their comment to:
+
+```ts
+  fontFamily: fonts.body,
+  fontFamilyMonospace: fonts.display,
+  /* Headings share the body family and differ by weight and size only; 600
+     rather than bold, so a heading reads as a precise label instead of
+     shouting. Mono is a data face now, not a display face. */
+  headings: { fontFamily: fonts.body, fontWeight: "600" },
+```
+
+- [ ] **Step 5: Font imports**
+
+`ui/host/src/main.tsx`: delete the eight `@fontsource/ibm-plex-*` imports and the comment above them; add:
+
+```ts
+// The typeface is shipped rather than named: one variable file per family
+// covers every weight the app uses.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+```
+
+`ui/apps/src/components.tsx`: delete the four `@fontsource/ibm-plex-*` imports and the comment above them; add:
+
+```ts
+// Two variable files rather than the host's eight static faces: every byte
+// here is base64'd into all five single-file bundles.
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+```
+
+- [ ] **Step 6: CSS**
+
+In `ui/host/src/index.css` replace the heading letter-spacing rule and its comment with:
+
+```css
+/* Headings share the body grotesk; a touch of negative tracking at display
+   sizes keeps them reading as labels. :where() keeps specificity at zero so a
+   component's own lts prop still wins. */
+:where(.mantine-Title-root, h1, h2, h3, h4, h5, h6) {
+  letter-spacing: -0.01em;
+}
+
+/* Numbers line up as they update in tables and tiles. */
+body {
+  font-variant-numeric: tabular-nums;
+}
+```
+
+- [ ] **Step 7: Tests, lint, builds**
+
+```bash
+cd ui/host && bun run test src/theme.test.ts && bun run test && bun run lint
+cd ../apps && bun run lint && bun run build
+cd ../.. && git status --short internal/mcp/apps   # five modified bundles
+```
+
+- [ ] **Step 8: Commit (sources, lockfiles, rebuilt bundles)**
+
+```bash
+git add ui/tokens.ts ui/theme.ts ui/host/package.json ui/host/bun.lock ui/host/src/main.tsx ui/host/src/index.css ui/host/src/theme.test.ts ui/apps/package.json ui/apps/bun.lock ui/apps/src/components.tsx internal/mcp/apps
+git commit -m "feat(ui): set the app in Geist, with mono reserved for data
+
+One grotesk for UI, prose and headings at weight 600, Geist Mono for code,
+ids, timestamps and numeric cells, tabular figures throughout. Headings no
+longer use the mono display face.
+
+Claude-Session: https://claude.ai/code/session_015K38gEgWmGkXJyyC8GiZ8N"
+```
+
+- [ ] **Step 9: Hand check (controller)**
+
+Rebuild the binary, reload the chat and dashboard: headings in Geist at 600, body in Geist, ids and durations in Geist Mono, no fallback face inside the embedded views (the CSP already allows the inlined fonts), the brand lockup still tracked uppercase.
+
+---
