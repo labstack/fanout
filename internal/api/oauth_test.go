@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -21,6 +23,8 @@ import (
 )
 
 const testMCPResource = "https://fanout.example.com/mcp"
+
+const testReadMCPCall = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"observability_overview","arguments":{}}}`
 
 func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	return newOAuthTestServerWithConfig(t, config.Config{})
@@ -55,7 +59,12 @@ func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, 
 		return c.NoContent(http.StatusNoContent)
 	})
 	handler.Register(e)
-	e.Any("/mcp", echo.WrapHandler(handler.ProtectMCP(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	e.Any("/mcp", echo.WrapHandler(handler.ProtectMCP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if info := mcpgoauth.TokenInfoFromContext(r.Context()); info != nil {
+			if role, ok := info.Extra["role"]; ok {
+				w.Header().Set("X-Test-MCP-Role", fmt.Sprint(role))
+			}
+		}
 		w.WriteHeader(http.StatusNoContent)
 	}))))
 	e.Any("/api/mcp", ProtectBrowserMCP(sessions, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +75,9 @@ func newOAuthTestServerWithConfig(t *testing.T, cfg config.Config) (*echo.Echo, 
 		}
 		w.Header().Set("X-Test-MCP-User", info.UserID)
 		w.Header().Set("X-Test-MCP-Scopes", strings.Join(info.Scopes, " "))
+		if role, ok := info.Extra["role"]; ok {
+			w.Header().Set("X-Test-MCP-Role", fmt.Sprint(role))
+		}
 		w.WriteHeader(http.StatusNoContent)
 	})))
 	e.GET("/api/auth/me", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
@@ -101,11 +113,17 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	}
 
 	metadata := serve(t, e, http.MethodGet, "/.well-known/oauth-protected-resource/mcp", "", nil)
-	if metadata.Code != http.StatusOK || !strings.Contains(metadata.Body.String(), testMCPResource) {
+	if metadata.Code != http.StatusOK ||
+		!strings.Contains(metadata.Body.String(), testMCPResource) ||
+		!strings.Contains(metadata.Body.String(), `"resource_name":"Fanout Observability"`) ||
+		!strings.Contains(metadata.Body.String(), `"scopes_supported":["telemetry:read","dashboard:manage"]`) {
 		t.Fatalf("protected resource metadata = %d %s", metadata.Code, metadata.Body.String())
 	}
 	authorizationMetadata := serve(t, e, http.MethodGet, "/.well-known/oauth-authorization-server", "", nil)
-	if authorizationMetadata.Code != http.StatusOK || !strings.Contains(authorizationMetadata.Body.String(), `"code_challenge_methods_supported":["S256"]`) {
+	if authorizationMetadata.Code != http.StatusOK ||
+		!strings.Contains(authorizationMetadata.Body.String(), `"code_challenge_methods_supported":["S256"]`) ||
+		!strings.Contains(authorizationMetadata.Body.String(), `"scopes_supported":["telemetry:read","dashboard:manage"]`) ||
+		!strings.Contains(authorizationMetadata.Body.String(), `"authorization_response_iss_parameter_supported":true`) {
 		t.Fatalf("authorization metadata = %d %s", authorizationMetadata.Code, authorizationMetadata.Body.String())
 	}
 
@@ -172,7 +190,7 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse callback: %v", err)
 	}
-	if callback.Query().Get("state") != "state-123" || callback.Query().Get("code") == "" {
+	if callback.Query().Get("state") != "state-123" || callback.Query().Get("code") == "" || callback.Query().Get("iss") != "https://fanout.example.com" {
 		t.Fatalf("callback = %s", callback)
 	}
 
@@ -197,14 +215,17 @@ func TestMCPOAuthDiscoveryAndAuthorizationCodeFlow(t *testing.T) {
 		t.Fatalf("unexpected token response: %#v", tokenBody)
 	}
 
-	mcp := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer " + access})
+	mcp := serve(t, e, http.MethodPost, "/mcp", testReadMCPCall, map[string]string{"Authorization": "Bearer " + access})
 	if mcp.Code != http.StatusNoContent {
 		t.Fatalf("MCP with OAuth token = %d %s", mcp.Code, mcp.Body.String())
+	}
+	if role := mcp.Header().Get("X-Test-MCP-Role"); role != "" {
+		t.Fatalf("delegated MCP context exposed account role %q", role)
 	}
 	if err := users.RevokeAllSessions(user.ID); err != nil {
 		t.Fatalf("logout everywhere: %v", err)
 	}
-	replayed := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer " + access})
+	replayed := serve(t, e, http.MethodPost, "/mcp", testReadMCPCall, map[string]string{"Authorization": "Bearer " + access})
 	if replayed.Code != http.StatusUnauthorized {
 		t.Fatalf("MCP token survived logout everywhere: %d %s", replayed.Code, replayed.Body.String())
 	}
@@ -258,8 +279,11 @@ func TestBrowserMCPUsesSessionWithoutWeakeningRemoteMCP(t *testing.T) {
 		t.Fatalf("browser MCP user = %q, want %q", got, user.ID)
 	}
 	scopes := strings.Fields(browser.Header().Get("X-Test-MCP-Scopes"))
-	if !slices.Contains(scopes, mcpReadScope) || !slices.Contains(scopes, "fanout:dashboard") {
+	if !slices.Contains(scopes, mcpReadScope) || !slices.Contains(scopes, auth.MCPScopeDashboardManage) {
 		t.Fatalf("browser MCP scopes = %v, want read and dashboard access", scopes)
+	}
+	if role := browser.Header().Get("X-Test-MCP-Role"); role != "" {
+		t.Fatalf("browser MCP context exposed account role %q", role)
 	}
 
 	remoteWithSessionOnly := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Fanout-Request": "1"}, cookie)
@@ -467,6 +491,93 @@ func decodeTokens(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 
 // --- HTTP-layer negative-path and scope tests ---------------------------------
 
+func TestMCPOAuthScopePolicyCanonicalizesLegacyNames(t *testing.T) {
+	legacy := "fanout:dashboard fanout:read fanout:dashboard"
+	if !validMCPScopes(strings.Fields(legacy)) {
+		t.Fatal("legacy scope aliases were rejected")
+	}
+	want := mcpReadScope + " " + auth.MCPScopeDashboardManage
+	if got := authorizationScope(legacy); got != want {
+		t.Fatalf("canonical scope = %q, want %q", got, want)
+	}
+	if !userCanUseMCPScopes(auth.User{Role: auth.RoleViewer}, want) {
+		t.Fatal("viewer lost its configured MCP capabilities")
+	}
+	if userCanUseMCPScopes(auth.User{Role: auth.Role("retired")}, want) {
+		t.Fatal("unknown role received MCP capabilities")
+	}
+}
+
+func TestRequiredMCPToolScopeUsesPayloadAndReplaysBody(t *testing.T) {
+	body := `[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"observability_overview"}},{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"dashboard_get"}}]`
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
+	req.Header.Set("Mcp-Method", "tools/call")
+	req.Header.Set("Mcp-Name", "observability_overview")
+
+	got, err := requiredMCPToolScope(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != auth.MCPScopeDashboardManage {
+		t.Fatalf("required scope = %q, want %q", got, auth.MCPScopeDashboardManage)
+	}
+	replayed, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(replayed) != body {
+		t.Fatalf("replayed body = %q, want original payload", replayed)
+	}
+}
+
+func TestMCPOAuthTokenEndpointEnforcesScopeByGrantType(t *testing.T) {
+	e, users, _ := newOAuthTestServer(t)
+	cookie := oauthSessionCookie(t, e, users, "token-scope@example.com")
+	client := registerOAuthClient(t, e)
+	verifier, challenge := pkcePair()
+	fullScope := mcpReadScope + " " + auth.MCPScopeDashboardManage
+	params := authorizeParams(client.ClientID, fullScope, challenge)
+	code := approveAndGetCode(t, e, params, cookie)
+
+	codeExchange := url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {client.ClientID},
+		"code":          {code},
+		"redirect_uri":  {testRedirectURI},
+		"code_verifier": {verifier},
+		"resource":      {testMCPResource},
+		"scope":         {mcpReadScope},
+	}
+	rejectedCodeExchange := serve(t, e, http.MethodPost, "/oauth/token", codeExchange.Encode(), formHeaders)
+	if rejectedCodeExchange.Code != http.StatusBadRequest || !strings.Contains(rejectedCodeExchange.Body.String(), `"error":"invalid_request"`) {
+		t.Fatalf("code exchange scope = %d %s, want 400 invalid_request", rejectedCodeExchange.Code, rejectedCodeExchange.Body.String())
+	}
+
+	// Rejecting the extra parameter must not consume the authorization code.
+	tokens := decodeTokens(t, exchangeCode(t, e, client.ClientID, code, testRedirectURI, verifier))
+	refresh := url.Values{
+		"grant_type":    {"refresh_token"},
+		"client_id":     {client.ClientID},
+		"refresh_token": {tokens["refresh_token"].(string)},
+		"scope":         {mcpReadScope},
+	}
+	narrowed := decodeTokens(t, serve(t, e, http.MethodPost, "/oauth/token", refresh.Encode(), formHeaders))
+	if narrowed["scope"] != mcpReadScope {
+		t.Fatalf("narrowed refresh scope = %v, want %q", narrowed["scope"], mcpReadScope)
+	}
+
+	refresh.Set("refresh_token", narrowed["refresh_token"].(string))
+	refresh.Set("scope", fullScope)
+	expanded := serve(t, e, http.MethodPost, "/oauth/token", refresh.Encode(), formHeaders)
+	if expanded.Code != http.StatusBadRequest || !strings.Contains(expanded.Body.String(), `"error":"invalid_scope"`) {
+		t.Fatalf("expanded refresh scope = %d %s, want 400 invalid_scope", expanded.Code, expanded.Body.String())
+	}
+
+	// An invalid scope request must not consume the refresh token.
+	refresh.Set("scope", mcpReadScope)
+	decodeTokens(t, serve(t, e, http.MethodPost, "/oauth/token", refresh.Encode(), formHeaders))
+}
+
 func TestMCPOAuthTokenExchangeRejectsWrongPKCEVerifier(t *testing.T) {
 	e, users, _ := newOAuthTestServer(t)
 	cookie := oauthSessionCookie(t, e, users, "pkce@example.com")
@@ -501,6 +612,9 @@ func TestMCPOAuthConsentDenyRedirectsAccessDenied(t *testing.T) {
 	}
 	if callback.Query().Get("state") != "state-xyz" {
 		t.Fatalf("deny callback dropped state: %s", callback)
+	}
+	if callback.Query().Get("iss") != "https://fanout.example.com" {
+		t.Fatalf("deny callback issuer = %q", callback.Query().Get("iss"))
 	}
 }
 
@@ -551,7 +665,7 @@ func TestMCPOAuthRefreshGrantOverHTTP(t *testing.T) {
 	if rotated["scope"] != mcpReadScope {
 		t.Fatalf("rotated scope = %v, want %q", rotated["scope"], mcpReadScope)
 	}
-	mcp := serve(t, e, http.MethodPost, "/mcp", "", map[string]string{"Authorization": "Bearer " + rotated["access_token"].(string)})
+	mcp := serve(t, e, http.MethodPost, "/mcp", testReadMCPCall, map[string]string{"Authorization": "Bearer " + rotated["access_token"].(string)})
 	if mcp.Code != http.StatusNoContent {
 		t.Fatalf("MCP with rotated token = %d %s", mcp.Code, mcp.Body.String())
 	}
@@ -580,7 +694,7 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 	if !strings.Contains(body, "read-only") || !strings.Contains(body, mcpReadScope) {
 		t.Fatalf("consent for omitted scope must advertise read-only %s, got: %s", mcpReadScope, body)
 	}
-	if strings.Contains(body, "fanout:dashboard") || strings.Contains(body, "dashboards and overwrite") {
+	if strings.Contains(body, auth.MCPScopeDashboardManage) || strings.Contains(body, "dashboards and overwrite") {
 		t.Fatalf("consent for omitted scope leaked dashboard write access: %s", body)
 	}
 
@@ -588,6 +702,45 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 	tokens := decodeTokens(t, exchangeCode(t, e, client.ClientID, code, testRedirectURI, verifier))
 	if tokens["scope"] != mcpReadScope {
 		t.Fatalf("granted scope = %v, want %q", tokens["scope"], mcpReadScope)
+	}
+	dashboardCall := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dashboard_list","arguments":{}}}`
+	challenged := serve(t, e, http.MethodPost, "/mcp", dashboardCall, map[string]string{
+		"Authorization": "Bearer " + tokens["access_token"].(string),
+		"Content-Type":  "application/json",
+	})
+	if challenged.Code != http.StatusForbidden {
+		t.Fatalf("dashboard step-up = %d %s, want 403", challenged.Code, challenged.Body.String())
+	}
+	wwwAuthenticate := challenged.Header().Get("WWW-Authenticate")
+	if !strings.Contains(wwwAuthenticate, `error="insufficient_scope"`) ||
+		!strings.Contains(wwwAuthenticate, `scope="dashboard:manage"`) ||
+		!strings.Contains(wwwAuthenticate, `resource_metadata="https://fanout.example.com/.well-known/oauth-protected-resource/mcp"`) {
+		t.Fatalf("dashboard step-up challenge = %q", wwwAuthenticate)
+	}
+	spoofed := serve(t, e, http.MethodPost, "/mcp", dashboardCall, map[string]string{
+		"Authorization": "Bearer " + tokens["access_token"].(string),
+		"Content-Type":  "application/json",
+		"Mcp-Method":    "tools/call",
+		"Mcp-Name":      "observability_overview",
+	})
+	if spoofed.Code != http.StatusForbidden {
+		t.Fatalf("spoofed dashboard step-up = %d %s, want 403", spoofed.Code, spoofed.Body.String())
+	}
+	for _, body := range []string{"{", "null", "[]"} {
+		malformed := serve(t, e, http.MethodPost, "/mcp", body, map[string]string{
+			"Authorization": "Bearer " + tokens["access_token"].(string),
+			"Content-Type":  "application/json",
+		})
+		if malformed.Code != http.StatusBadRequest {
+			t.Fatalf("malformed MCP body %q = %d %s, want 400", body, malformed.Code, malformed.Body.String())
+		}
+	}
+	oversized := serve(t, e, http.MethodPost, "/mcp", strings.Repeat(" ", maxMCPAuthorizationBodyBytes+1), map[string]string{
+		"Authorization": "Bearer " + tokens["access_token"].(string),
+		"Content-Type":  "application/json",
+	})
+	if oversized.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized MCP body = %d %s, want 413", oversized.Code, oversized.Body.String())
 	}
 }
 
@@ -598,7 +751,7 @@ func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
 	cookie := oauthSessionCookie(t, e, users, "dashboard-scope@example.com")
 	client := registerOAuthClient(t, e)
 	verifier, challenge := pkcePair()
-	scope := mcpReadScope + " fanout:dashboard"
+	scope := mcpReadScope + " " + auth.MCPScopeDashboardManage
 	params := authorizeParams(client.ClientID, scope, challenge)
 
 	consent := serve(t, e, http.MethodGet, "/api/auth/oauth/authorize?"+params.Encode(), "", nil, cookie)
@@ -606,7 +759,7 @@ func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
 		t.Fatalf("consent = %d %s", consent.Code, consent.Body.String())
 	}
 	body := consent.Body.String()
-	if !strings.Contains(body, "Create and replace dashboards") || !strings.Contains(body, "fanout:dashboard") {
+	if !strings.Contains(body, "Create and replace dashboards") || !strings.Contains(body, auth.MCPScopeDashboardManage) {
 		t.Fatalf("consent must disclose dashboard write access, got: %s", body)
 	}
 	if strings.Contains(body, "read-only") {
@@ -617,6 +770,22 @@ func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
 	tokens := decodeTokens(t, exchangeCode(t, e, client.ClientID, code, testRedirectURI, verifier))
 	if tokens["scope"] != scope {
 		t.Fatalf("granted scope = %v, want %q", tokens["scope"], scope)
+	}
+	allowed := serve(t, e, http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dashboard_list","arguments":{}}}`, map[string]string{
+		"Authorization": "Bearer " + tokens["access_token"].(string),
+		"Content-Type":  "application/json",
+	})
+	if allowed.Code != http.StatusNoContent {
+		t.Fatalf("dashboard scope was rejected: %d %s", allowed.Code, allowed.Body.String())
+	}
+	// Fully scoped tokens bypass authorization-body buffering; payload validity
+	// remains the MCP protocol handler's responsibility.
+	unparsed := serve(t, e, http.MethodPost, "/mcp", `{`, map[string]string{
+		"Authorization": "Bearer " + tokens["access_token"].(string),
+		"Content-Type":  "application/json",
+	})
+	if unparsed.Code != http.StatusNoContent {
+		t.Fatalf("fully scoped request was parsed by authorization gate: %d %s", unparsed.Code, unparsed.Body.String())
 	}
 }
 
