@@ -131,7 +131,7 @@ const markdownComponents: Components = {
   th: ({ children }) => <Table.Th>{children}</Table.Th>,
   td: ({ children }) => <Table.Td>{children}</Table.Td>,
   pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
-  a: ({ href, children }) => <a href={href} target="_blank" rel="noreferrer">{children}</a>,
+  a: ({ href, children }) => <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>,
 };
 
 function CodeBlock({ children }: { children: ReactNode }) {

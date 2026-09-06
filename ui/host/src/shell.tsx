@@ -100,8 +100,8 @@ function AccountMenu({ onError }: { onError: (message: string) => void }) {
     </Menu.Target>
     <Menu.Dropdown>
       <Menu.Label>{viewer.email || "Signed in"}</Menu.Label>
-      <Menu.Item component="a" href="https://github.com/labstack/fanout" target="_blank" rel="noreferrer" leftSection={<GithubLogo size={15} weight="bold" />}>Fanout on GitHub</Menu.Item>
-      <Menu.Item component="a" href="https://labstack.com" target="_blank" rel="noreferrer" leftSection={<GlobeHemisphereWest size={15} />}>LabStack</Menu.Item>
+      <Menu.Item component="a" href="https://github.com/labstack/fanout" target="_blank" rel="noopener noreferrer" leftSection={<GithubLogo size={15} weight="bold" />}>Fanout on GitHub</Menu.Item>
+      <Menu.Item component="a" href="https://labstack.com" target="_blank" rel="noopener noreferrer" leftSection={<GlobeHemisphereWest size={15} />}>LabStack</Menu.Item>
       <Menu.Divider />
       <Menu.Item leftSection={<SignOut size={15} />} onClick={() => void logout().catch((cause) => onError(cause instanceof Error ? cause.message : "Sign-out failed — your session is still active."))}>Sign out</Menu.Item>
     </Menu.Dropdown>
