@@ -1,12 +1,6 @@
-import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { useMemo } from "react";
-import { createID } from "../id";
+import { createFileRoute } from "@tanstack/react-router";
+import { ChatPage } from "../chat";
 
 export const Route = createFileRoute("/chat/")({
-  component: NewChat,
+  component: ChatPage,
 });
-
-function NewChat() {
-  const threadID = useMemo(() => createID(), []);
-  return <Navigate to="/chat/$threadId" params={{ threadId: threadID }} replace />;
-}

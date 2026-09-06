@@ -3,10 +3,11 @@ import { ActionIcon, Badge, Group, Paper, SegmentedControl, Table, Text, TextInp
 import { ArrowSquareOut, ListMagnifyingGlass, MagnifyingGlass } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, PageControls, ViewHeader, ViewShell, ViewStatus, chartTheme, statusHex, usePagedItems } from "./components";
-import type { LogEntry, Logs, Result } from "./contracts";
+import { EmptyState, MetaFooter, PageControls, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
+import { chartTheme, severityColor, severityHex } from "../../chart";
+import type { LogEntry, Logs, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
-import { timelineTimestamp, windowLabel } from "./format";
+import { timelineTimestamp, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 
@@ -19,14 +20,14 @@ function LogsApp() {
   const dark = host?.theme === "dark";
   const entries = useMemo(() => (result?.data.entries ?? []).filter((entry) => (severity === "ALL" || entry.severity.toUpperCase() === severity) && (!search || entry.body.toLowerCase().includes(search.toLowerCase()) || entry.service.toLowerCase().includes(search.toLowerCase()))), [result, search, severity]);
   return <ViewShell dark={dark}>
-    <ViewHeader eyebrow="Application activity" title="Logs" summary={result ? `${result.data.entries.length} entries in this time range` : undefined} onRefresh={() => callTool("search_logs")} disabled={!app} />
-    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Searching logs…" : undefined} />
+    <ViewHeader title="Logs" summary={result ? `${result.data.entries.length} entries in this time range` : undefined} onRefresh={() => callTool("search_logs")} disabled={!app} />
+    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Searching logs…" : undefined} retry={() => void callTool("search_logs")} />
     {result && result.data.entries.length === 0 && <><EmptyState tall icon={<ListMagnifyingGlass size={20} weight="duotone" />} title="No logs matched">Try a wider time window, a different service, or a less restrictive search.</EmptyState><MetaFooter left={windowLabel(result.provenance.window)} right="No entries found" /></>}
     {result && result.data.entries.length > 0 && <>
       <LogHistogram data={result.data} dark={dark} window={result.provenance.window} />
       <Group px={{ base: "md", sm: "lg" }} py="sm" justify="space-between" align="center">
         <SegmentedControl size="xs" value={severity} onChange={setSeverity} data={["ALL", "ERROR", "WARN", "INFO"]} />
-        <TextInput aria-label="Filter visible logs" type="search" value={search} onChange={(event) => setSearch(event.currentTarget.value)} placeholder="Filter visible logs…" leftSection={<MagnifyingGlass size={15} />} w={{ base: "100%", xs: 250 }} />
+        <TextInput aria-label="Filter visible logs" type="search" size="xs" value={search} onChange={(event) => setSearch(event.currentTarget.value)} placeholder="Filter visible logs…" leftSection={<MagnifyingGlass size={15} />} w={{ base: "100%", xs: 250 }} />
       </Group>
       <LogList entries={entries} window={result.provenance.window} onTrace={(entry) => askAbout(app, `Investigate trace ${entry.trace_id} related to this ${entry.severity} log from ${entry.service}.`)} />
       <MetaFooter left={windowLabel(result.provenance.window)} right={`${entries.length} matching`} />
@@ -50,11 +51,8 @@ function LogList({ entries, onTrace, window }: { entries: LogEntry[]; onTrace: (
   if (entries.length === 0) return <EmptyState icon={<MagnifyingGlass size={20} weight="duotone" />} title="No visible matches">Adjust the local severity or text filter.</EmptyState>;
   return <><Table.ScrollContainer minWidth={680}><Table striped highlightOnHover verticalSpacing="xs">
     <Table.Thead><Table.Tr><Table.Th>Time</Table.Th><Table.Th>Level</Table.Th><Table.Th>Service</Table.Th><Table.Th>Message</Table.Th><Table.Th /></Table.Tr></Table.Thead>
-    <Table.Tbody>{logs.pageItems.map((entry, index) => <Table.Tr key={`${entry.time}-${logs.from + index}`}><Table.Td><Text size="xs" ff="monospace">{timelineTimestamp(entry.time, window, true)}</Text></Table.Td><Table.Td><Badge size="sm" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td><Table.Td><Text size="sm" fw={600}>{entry.service}</Text></Table.Td><Table.Td><Text size="sm" lineClamp={2} title={entry.body}>{entry.body}</Text></Table.Td><Table.Td>{entry.trace_id && <Tooltip label="Investigate trace"><ActionIcon variant="subtle" aria-label={`Investigate trace ${entry.trace_id}`} onClick={() => onTrace(entry)}><ArrowSquareOut size={15} weight="bold" /></ActionIcon></Tooltip>}</Table.Td></Table.Tr>)}</Table.Tbody>
+    <Table.Tbody>{logs.pageItems.map((entry, index) => <Table.Tr key={`${entry.time}-${logs.from + index}`}><Table.Td style={{ whiteSpace: "nowrap" }}><Text size="xs" ff="monospace">{timelineTimestamp(entry.time, window, true)}</Text></Table.Td><Table.Td><Badge size="sm" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td><Table.Td><Text size="sm" fw={600}>{entry.service}</Text></Table.Td><Table.Td><Text size="sm" lineClamp={2} title={entry.body}>{entry.body}</Text></Table.Td><Table.Td>{entry.trace_id && <Tooltip label="Investigate trace"><ActionIcon variant="subtle" aria-label={`Investigate trace ${entry.trace_id}`} onClick={() => onTrace(entry)}><ArrowSquareOut size={15} weight="bold" /></ActionIcon></Tooltip>}</Table.Td></Table.Tr>)}</Table.Tbody>
   </Table></Table.ScrollContainer><PageControls {...logs} onChange={logs.setPage} /></>;
 }
-
-function severityColor(value: string) { const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return "bad"; if (severity === "WARN" || severity === "WARNING") return "warn"; if (severity === "INFO") return "info"; return "gray"; }
-function severityHex(value: string, dark: boolean) { const status = statusHex(dark); const severity = value.toUpperCase(); if (severity === "ERROR" || severity === "FATAL") return status.bad; if (severity === "WARN" || severity === "WARNING") return status.warn; if (severity === "INFO") return status.info; return chartTheme(dark).muted; }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><LogsApp /></StrictMode>);

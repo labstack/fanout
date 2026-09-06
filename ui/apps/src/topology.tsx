@@ -3,10 +3,11 @@ import { Button, Paper, Stack, Table, Text } from "@mantine/core";
 import { FlowArrow, MagnifyingGlass, ShareNetwork } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme, statusHex, usePagedItems } from "./components";
-import type { Edge, Result, Topology } from "./contracts";
+import { EmptyState, MetaFooter, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
+import { chartTheme, statusHex } from "../../chart";
+import type { Edge, Result, Topology } from "../../contracts";
 import { EChart, useECharts } from "./echart";
-import { duration, integer, percent, windowLabel } from "./format";
+import { duration, integer, percent, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 
@@ -19,8 +20,8 @@ function TopologyApp() {
   const [view, setView] = useState<View>("graph");
   const dark = host?.theme === "dark";
   return <ViewShell dark={dark}>
-    <ViewHeader eyebrow="Service map" title="Dependencies" summary={result ? `${result.data.nodes.length} services connected by ${result.data.edges.length} routes` : undefined} onRefresh={() => callTool("service_topology")} disabled={!app} />
-    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading service relationships…" : undefined} />
+    <ViewHeader title="Service map" summary={result ? `${result.data.nodes.length} services connected by ${result.data.edges.length} routes` : undefined} onRefresh={() => callTool("service_topology")} disabled={!app} />
+    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading service relationships…" : undefined} retry={() => void callTool("service_topology")} />
     {result && result.data.nodes.length === 0 && <><EmptyState tall icon={<ShareNetwork size={20} weight="duotone" />} title="No service relationships yet">Connections will appear as services communicate.</EmptyState><MetaFooter left={windowLabel(result.provenance.window)} right="No routes found" /></>}
     {result && result.data.nodes.length > 0 && <>
       <Tabs active={view} onChange={setView} items={[{ id: "graph", label: "Graph" }, { id: "flow", label: "Traffic flow" }, { id: "matrix", label: "Matrix" }]} />
@@ -74,9 +75,9 @@ function MatrixView({ data, dark }: { data: Topology; dark: boolean }) {
 }
 
 function EdgeList({ edges, onSelect }: { edges: Edge[]; onSelect: (id: string) => void }) {
-  const routes = usePagedItems(edges, 4);
+  const routes = usePagedItems(edges, 6);
   if (edges.length === 0) return null;
-  return <Paper withBorder radius="md" style={{ overflow: "hidden" }}><Table.ScrollContainer minWidth={520}><Table striped highlightOnHover verticalSpacing="sm"><Table.Thead><Table.Tr><Table.Th>Route</Table.Th><Table.Th>Calls</Table.Th><Table.Th>Latency</Table.Th><Table.Th>Errors</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{routes.pageItems.map((edge) => <Table.Tr key={`${edge.caller}-${edge.callee}-${edge.type}`} tabIndex={0} onClick={() => onSelect(edge.caller)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(edge.caller); }} style={{ cursor: "pointer" }}><Table.Td><Text fw={600} size="sm">{edge.caller} → {edge.callee}</Text></Table.Td><Table.Td>{integer.format(edge.calls)}</Table.Td><Table.Td>{duration(edge.average_ms)}</Table.Td><Table.Td>{percent(edge.error_rate)}</Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer><PageControls {...routes} onChange={routes.setPage} /></Paper>;
+  return <Paper withBorder radius="md" style={{ overflow: "hidden" }}><Table.ScrollContainer minWidth={520}><Table striped highlightOnHover verticalSpacing="sm"><Table.Thead><Table.Tr><Table.Th>Route</Table.Th><Table.Th>Calls</Table.Th><Table.Th>Latency</Table.Th><Table.Th>Errors</Table.Th></Table.Tr></Table.Thead><Table.Tbody>{routes.pageItems.map((edge) => <Table.Tr key={`${edge.caller}-${edge.callee}-${edge.type}`} tabIndex={0} onClick={() => onSelect(edge.caller)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onSelect(edge.caller); }} style={{ cursor: "pointer" }}><Table.Td><Text component="span" ff="monospace" size="sm">{edge.caller} → {edge.callee}</Text></Table.Td><Table.Td>{integer.format(edge.calls)}</Table.Td><Table.Td>{duration(edge.average_ms)}</Table.Td><Table.Td>{percent(edge.error_rate)}</Table.Td></Table.Tr>)}</Table.Tbody></Table></Table.ScrollContainer><PageControls {...routes} onChange={routes.setPage} /></Paper>;
 }
 
 function healthHex(health: string, dark: boolean) { const status = statusHex(dark); return health === "unhealthy" ? status.bad : health === "degraded" ? status.warn : status.ok; }

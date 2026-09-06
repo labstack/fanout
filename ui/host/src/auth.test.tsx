@@ -3,7 +3,7 @@ import { createRootRoute, createRoute, createRouter, RouterProvider } from "@tan
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import AuthGate from "./auth";
+import AuthGate, { useViewer } from "./auth";
 
 declare global {
   interface Window { happyDOM: { setURL(url: string): void } }
@@ -33,6 +33,7 @@ describe("AuthGate OAuth return", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
     window.happyDOM.setURL("https://fanout.example.com/");
@@ -50,7 +51,8 @@ describe("AuthGate OAuth return", () => {
       </MantineProvider>,
     ));
 
-    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in to investigate"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in"));
+    expect(document.body.textContent).not.toContain("Sign in to investigate");
     expect(window.location.pathname).toBe("/");
     expect(window.location.search).toContain("return_to=");
     expect(document.body.textContent).not.toContain("Fanout application");
@@ -119,7 +121,7 @@ describe("AuthGate OAuth return", () => {
     ));
 
     await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
-    expect(document.body.textContent).not.toContain("Sign in to investigate");
+    expect(document.body.textContent).not.toContain("Sign in");
 
     await act(async () => root.unmount());
   });
@@ -180,6 +182,160 @@ describe("AuthGate OAuth return", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
     expect(window.location.search).toBe("");
     expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/auth/login-link")).toHaveLength(1);
+
+    await act(async () => root.unmount());
+  });
+
+  it("exposes the signed-in account through useViewer", async () => {
+    window.happyDOM.setURL("https://fanout.example.com/");
+    fetchMock.mockImplementation(async (input) => authResponse(input, {
+      id: "viewer-123",
+      email: "v@example.com",
+      name: "Vee",
+      role: "viewer",
+    }));
+    function Probe() {
+      const viewer = useViewer();
+      return <div>Signed in as {viewer.email} ({viewer.role})</div>;
+    }
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(
+      <MantineProvider>
+        <AuthGate><Probe /></AuthGate>
+      </MantineProvider>,
+    ));
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Signed in as v@example.com (viewer)"));
+    await act(async () => root.unmount());
+  });
+
+  it("verifies automatically after six digits and offers resend and change email", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "setInterval", "clearTimeout", "clearInterval", "Date"] });
+    window.happyDOM.setURL("https://fanout.example.com/");
+    const posts: Array<{ path: string; body: unknown }> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: false });
+      if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
+      if (init?.method === "POST") {
+        posts.push({ path, body: JSON.parse(String(init.body)) });
+        if (path === "/api/auth/start") return json({ code_sent: true });
+        if (path === "/api/auth/verify") return json({ status: "authenticated" });
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MantineProvider><AuthGate><div>Fanout application</div></AuthGate></MantineProvider>));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in"));
+    expect(document.body.textContent).not.toContain("Sign in to investigate");
+
+    const email = document.querySelector('input[type="email"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(email, "v@example.com");
+      email.dispatchEvent(new InputEvent("input", { bubbles: true, data: "v@example.com", inputType: "insertText" }));
+    });
+    const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
+    await act(async () => send?.click());
+    await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/start"]));
+    expect(document.body.textContent).toContain("Check your email");
+    expect(document.body.textContent).toContain("We sent a code to v@example.com");
+    expect(document.body.textContent).toContain("Sent to v@example.com");
+    expect(document.body.textContent).toContain("Codes expire in 5 minutes");
+
+    const resend = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"));
+    expect(resend?.disabled).toBe(true);
+    expect(resend?.textContent).toMatch(/Resend in \d+s/);
+    await act(async () => { vi.advanceTimersByTime(31_000); });
+    await vi.waitFor(() => expect(Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"))?.disabled).toBe(false));
+    const armed = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"));
+    expect(armed?.textContent).toBe("Resend code");
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"))?.textContent).toBe("Resend code");
+    expect(vi.getTimerCount()).toBe(0);
+
+    const change = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Change email"));
+    await act(async () => change?.click());
+    expect((document.querySelector('input[type="email"]') as HTMLInputElement).disabled).toBe(false);
+    expect(document.querySelectorAll('input[inputmode="numeric"]')).toHaveLength(0);
+
+    const resend2 = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
+    await act(async () => resend2?.click());
+    await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/start", "/api/auth/start"]));
+
+    const cells = Array.from(document.querySelectorAll<HTMLInputElement>('[data-pin-input] input, input[inputmode="numeric"]'));
+    expect(cells).toHaveLength(6);
+    for (const [index, digit] of ["1", "2", "3", "4", "5", "6"].entries()) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(cells[index], digit);
+        cells[index].dispatchEvent(new InputEvent("input", { bubbles: true, data: digit, inputType: "insertText" }));
+      });
+    }
+    await vi.waitFor(() => expect(posts.at(-1)).toEqual({ path: "/api/auth/verify", body: { email: "v@example.com", code: "123456" } }));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
+
+    const settled = posts.length;
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+    expect(posts).toHaveLength(settled);
+    expect(posts.filter((post) => post.path === "/api/auth/start")).toHaveLength(2);
+    expect(posts.filter((post) => post.path === "/api/auth/verify")).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+
+    vi.useRealTimers();
+    await act(async () => root.unmount());
+  });
+
+  it("offers a verify button and returns focus to the first digit after a rejected code", async () => {
+    window.happyDOM.setURL("https://fanout.example.com/");
+    const posts: Array<{ path: string; body: unknown }> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: false });
+      if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
+      if (init?.method === "POST") {
+        posts.push({ path, body: JSON.parse(String(init.body)) });
+        if (path === "/api/auth/start") return json({ code_sent: true });
+        if (path === "/api/auth/verify") return json({ message: "invalid or expired code" }, 401);
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MantineProvider><AuthGate><div>Fanout application</div></AuthGate></MantineProvider>));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in"));
+
+    const email = document.querySelector('input[type="email"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(email, "v@example.com");
+      email.dispatchEvent(new InputEvent("input", { bubbles: true, data: "v@example.com", inputType: "insertText" }));
+    });
+    const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
+    await act(async () => send?.click());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Check your email"));
+
+    const verify = () => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Verify code"));
+    expect(verify()).toBeDefined();
+    expect(verify()?.disabled).toBe(true);
+
+    const cells = Array.from(document.querySelectorAll<HTMLInputElement>('input[inputmode="numeric"]'));
+    expect(cells).toHaveLength(6);
+    for (const [index, digit] of ["1", "2", "3", "4", "5", "6"].entries()) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(cells[index], digit);
+        cells[index].dispatchEvent(new InputEvent("input", { bubbles: true, data: digit, inputType: "insertText" }));
+      });
+    }
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("invalid or expired code"));
+    const cleared = Array.from(document.querySelectorAll<HTMLInputElement>('input[inputmode="numeric"]'));
+    expect(cleared.map((cell) => cell.value)).toEqual(["", "", "", "", "", ""]);
+    await vi.waitFor(() => expect(document.activeElement).toBe(cleared[0]));
+    expect(posts.filter((post) => post.path === "/api/auth/verify")).toHaveLength(1);
 
     await act(async () => root.unmount());
   });

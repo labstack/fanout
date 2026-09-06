@@ -102,7 +102,7 @@ describe("MCPAppFrame", () => {
     }
     expect(mcp.bridgeClients).toEqual(resources.map(() => null));
     const firstFrame = container.querySelector("iframe")!;
-    expect(firstFrame.style.height).toBe("620px");
+    expect(firstFrame.style.height).toBe("240px");
     await act(async () => mcp.bridges[0].onsizechange?.({ height: 1080 }));
     expect(firstFrame.style.height).toBe("1112px");
     await act(async () => mcp.bridges[0].onsizechange?.({ height: 5000 }));
@@ -191,5 +191,12 @@ describe("MCPAppFrame", () => {
     expect(policy).toContain("frame-src https://frames.example.com");
     expect(policy).toContain("base-uri https://base.example.com");
     expect(policy).not.toContain("evil.example");
+  });
+
+  it("always allows inlined fonts so embedded views render in the product typeface", () => {
+    expect(mcpAppCSP({})).toContain("font-src 'self' data:");
+    expect(mcpAppCSP(undefined)).toContain("font-src 'self' data:");
+    const policy = mcpAppCSP({ ui: { csp: { resourceDomains: ["https://cdn.example.com"] } } });
+    expect(policy).toContain("font-src 'self' data: https://cdn.example.com");
   });
 });

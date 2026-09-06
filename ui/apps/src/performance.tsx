@@ -3,10 +3,11 @@ import { Badge, Paper, SimpleGrid, Stack, Table, Text } from "@mantine/core";
 import { ArrowUpRight, ArrowsLeftRight, GridFour, Pulse } from "@phosphor-icons/react";
 import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, chartTheme, healthColor, seriesColor, statusHex, usePagedItems } from "./components";
-import type { Endpoint, Performance, Result } from "./contracts";
+import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
+import { chartTheme, healthColor, seriesColor, statusHex } from "../../chart";
+import type { Endpoint, Performance, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
-import { duration, integer, percent, timelineTimestamp, windowLabel } from "./format";
+import { duration, integer, percent, timelineTimestamp, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 
@@ -18,8 +19,8 @@ function PerformanceApp() {
   const [view, setView] = useState<View>("activity");
   const dark = host?.theme === "dark";
   return <ViewShell dark={dark}>
-    <ViewHeader eyebrow="Trends and latency" title={result?.data.service || "System performance"} summary={result ? `Traffic, latency, and errors ${result.data.service ? `for ${result.data.service}` : "across all services"}` : undefined} onRefresh={() => callTool("service_performance")} disabled={!app} />
-    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading performance signals…" : undefined} />
+    <ViewHeader title={result?.data.service || "System performance"} summary={result ? `Traffic, latency, and errors ${result.data.service ? `for ${result.data.service}` : "across all services"}` : undefined} onRefresh={() => callTool("service_performance")} disabled={!app} />
+    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading performance signals…" : undefined} retry={() => void callTool("service_performance")} />
     {result && <>
       <Tabs active={view} onChange={setView} items={[{ id: "activity", label: "Activity" }, { id: "latency", label: "Latency map" }, { id: "endpoints", label: "Endpoints", count: result.data.endpoints.length }, { id: "compare", label: "Compare" }]} />
       {view === "activity" && <ActivityView data={result.data} dark={dark} window={result.provenance.window} />}
@@ -67,8 +68,8 @@ function EndpointsView({ endpoints, onEndpoint }: { endpoints: Endpoint[]; onEnd
   const routes = usePagedItems(endpoints, 8);
   if (endpoints.length === 0) return <EmptyState tall icon={<ArrowUpRight size={20} weight="duotone" />} title="No endpoints detected">HTTP routes and span operations will appear here as traffic arrives.</EmptyState>;
   return <><Table.ScrollContainer minWidth={700}><Table striped highlightOnHover verticalSpacing="sm">
-    <Table.Thead><Table.Tr><Table.Th>Endpoint</Table.Th><Table.Th>Calls</Table.Th><Table.Th>P50</Table.Th><Table.Th>P95</Table.Th><Table.Th>P99</Table.Th><Table.Th>Errors</Table.Th></Table.Tr></Table.Thead>
-    <Table.Tbody>{routes.pageItems.map((endpoint) => <Table.Tr key={`${endpoint.method}-${endpoint.path}`} tabIndex={0} onClick={() => onEndpoint(endpoint)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEndpoint(endpoint); }} style={{ cursor: "pointer" }}><Table.Td><Badge variant="light" mr="xs">{endpoint.method}</Badge><Text component="code" size="sm">{endpoint.path}</Text></Table.Td><Table.Td>{integer.format(endpoint.calls)}</Table.Td><Table.Td>{duration(endpoint.p50_ms)}</Table.Td><Table.Td>{duration(endpoint.p95_ms)}</Table.Td><Table.Td>{duration(endpoint.p99_ms)}</Table.Td><Table.Td><Text c={healthColor(endpoint.health)}>{percent(endpoint.error_rate)}</Text></Table.Td></Table.Tr>)}</Table.Tbody>
+    <Table.Thead><Table.Tr><Table.Th>Endpoint</Table.Th><Table.Th ta="right">Calls</Table.Th><Table.Th ta="right">P50</Table.Th><Table.Th ta="right">P95</Table.Th><Table.Th ta="right">P99</Table.Th><Table.Th ta="right">Errors</Table.Th></Table.Tr></Table.Thead>
+    <Table.Tbody>{routes.pageItems.map((endpoint) => <Table.Tr key={`${endpoint.method}-${endpoint.path}`} tabIndex={0} onClick={() => onEndpoint(endpoint)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onEndpoint(endpoint); }} style={{ cursor: "pointer" }}><Table.Td><Badge variant="light" mr="xs">{endpoint.method}</Badge><Text component="span" ff="monospace" size="sm">{endpoint.path}</Text></Table.Td><Table.Td ta="right">{integer.format(endpoint.calls)}</Table.Td><Table.Td ta="right">{duration(endpoint.p50_ms)}</Table.Td><Table.Td ta="right">{duration(endpoint.p95_ms)}</Table.Td><Table.Td ta="right">{duration(endpoint.p99_ms)}</Table.Td><Table.Td ta="right"><Text c={healthColor(endpoint.health)}>{percent(endpoint.error_rate)}</Text></Table.Td></Table.Tr>)}</Table.Tbody>
   </Table></Table.ScrollContainer><PageControls {...routes} onChange={routes.setPage} /></>;
 }
 

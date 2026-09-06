@@ -1,16 +1,14 @@
 import "@mantine/core/styles.css";
-// Four faces rather than the host app's eight: every byte here is base64'd
-// into all five single-file bundles, so this is the smallest set that still
-// puts the product's own typography inside an embedded view.
-import "@fontsource/ibm-plex-sans/latin-400.css";
-import "@fontsource/ibm-plex-sans/latin-600.css";
-import "@fontsource/ibm-plex-sans/latin-700.css";
-import "@fontsource/ibm-plex-mono/latin-500.css";
-import { Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
+// Two variable files rather than the host's eight static faces: every byte
+// here is base64'd into all five single-file bundles. The entry point is named
+// rather than left to the exports map, because this package version offers no
+// latin-only stylesheet to narrow it to.
+import "@fontsource-variable/geist/index.css";
+import "@fontsource-variable/geist-mono/index.css";
+import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
 import { fanoutCssVariables, fanoutThemeConfig } from "../../theme";
-import { bad, chart, info, ok, series, warn } from "../../tokens";
 
 const fanoutTheme = createTheme(fanoutThemeConfig);
 
@@ -18,21 +16,24 @@ export function ViewShell({ dark, children }: { dark: boolean; children: ReactNo
   return <MantineProvider theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} forceColorScheme={dark ? "dark" : "light"}><Paper withBorder radius="lg" style={{ overflow: "hidden" }}>{children}</Paper></MantineProvider>;
 }
 
-export function ViewHeader({ eyebrow, title, summary, onRefresh, disabled }: { eyebrow: string; title: string; summary?: string; onRefresh: () => void | Promise<unknown>; disabled?: boolean }) {
-  return <Group justify="space-between" align="flex-start" wrap="nowrap" px={{ base: "md", sm: "lg" }} pt="md" pb="sm">
-    <Box miw={0}><Text c="dimmed" size="xs" fw={700} tt="uppercase" lts="0.1em">{eyebrow}</Text><Title order={1} fz="lg" mt={2} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</Title>{summary && <Text c="dimmed" size="sm" mt={4}>{summary}</Text>}</Box>
-    <Button variant="default" size="xs" leftSection={<ArrowClockwise size={15} weight="bold" />} onClick={() => void onRefresh()} disabled={disabled}>Refresh</Button>
+export function ViewHeader({ title, summary, onRefresh, disabled }: { title: string; summary?: string; onRefresh: () => void | Promise<unknown>; disabled?: boolean }) {
+  return <Group justify="space-between" align="flex-start" wrap="nowrap" px={{ base: "md", sm: "lg" }} pt="sm" pb="xs">
+    <Box miw={0}>
+      <Title order={2} fz="lg" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</Title>
+      {summary && <Text c="dimmed" size="sm" mt={2}>{summary}</Text>}
+    </Box>
+    <Tooltip label="Refresh this view"><ActionIcon variant="default" size="md" aria-label="Refresh this view" onClick={() => void onRefresh()} disabled={disabled}><ArrowClockwise size={15} weight="bold" /></ActionIcon></Tooltip>
   </Group>;
 }
 
-export function ViewStatus({ error, loading }: { error?: string | null; loading?: string }) {
-  if (error) return <Alert color="bad" m="md">{error}</Alert>;
+export function ViewStatus({ error, loading, retry }: { error?: string | null; loading?: string; retry?: () => void }) {
+  if (error) return <Alert color="bad" m="md" radius="md"><Group justify="space-between"><Text size="sm">{error}</Text>{retry && <Button size="compact-sm" variant="light" color="bad" onClick={retry}>Retry</Button>}</Group></Alert>;
   if (loading) return <Center mih={160} p="xl"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">{loading}</Text></Center>;
   return null;
 }
 
 export function Tabs<T extends string>({ active, items, onChange }: { active: T; items: Array<{ id: T; label: string; count?: number }>; onChange: (id: T) => void }) {
-  return <ScrollArea type="auto" offsetScrollbars scrollbarSize={6}><MantineTabs value={active} onChange={(value) => value && onChange(value as T)} variant="pills" px={{ base: "md", sm: "lg" }} pb="sm"><MantineTabs.List style={{ flexWrap: "nowrap" }}>{items.map((item) => <MantineTabs.Tab key={item.id} value={item.id} rightSection={item.count !== undefined ? <Badge size="xs" variant="light" circle>{item.count}</Badge> : undefined}>{item.label}</MantineTabs.Tab>)}</MantineTabs.List></MantineTabs></ScrollArea>;
+  return <ScrollArea type="auto" offsetScrollbars scrollbarSize={6}><MantineTabs value={active} onChange={(value) => value && onChange(value as T)} variant="pills" px={{ base: "md", sm: "lg" }} pb="sm"><MantineTabs.List style={{ flexWrap: "nowrap" }}>{items.map((item) => <MantineTabs.Tab key={item.id} value={item.id} rightSection={item.count !== undefined ? <Badge size="xs" variant="light">{item.count}</Badge> : undefined}>{item.label}</MantineTabs.Tab>)}</MantineTabs.List></MantineTabs></ScrollArea>;
 }
 
 export function Hint({ label, children }: { label: string; children: ReactNode }) {
@@ -75,30 +76,3 @@ export function PageControls({ page, totalPages, from, to, total, onChange }: { 
   </Group>;
 }
 
-export function healthColor(health: string) {
-  return health === "healthy" ? "ok" : health === "degraded" ? "warn" : "bad";
-}
-
-/* A chart is drawn into a canvas, which cannot read CSS custom properties, so
-   everything below hands ECharts resolved values from the same ramps Mantine
-   gets. The shade differs by scheme for the same reason the accent does: the
-   palette's own hue reads on Ayu, a darker stop is needed on white. */
-
-export function chartTheme(dark: boolean) {
-  return chart[dark ? "dark" : "light"];
-}
-
-export function statusHex(dark: boolean) {
-  const shade = dark ? 5 : 7;
-  return { ok: ok[shade], warn: warn[shade], bad: bad[shade], info: info[shade] };
-}
-
-/** One color per service or metric, where the color identifies rather than
- *  grades. Hashed so a service keeps its color between renders, and drawn from
- *  a palette with no health hue in it. */
-export function seriesColor(name: string, dark: boolean) {
-  const palette = series[dark ? "dark" : "light"];
-  let hash = 0;
-  for (const character of name) hash = (hash * 31 + character.charCodeAt(0)) | 0;
-  return palette[Math.abs(hash) % palette.length];
-}

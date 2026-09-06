@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compactDashboardLayout, nextDashboardRow, type DashboardLayoutItem } from "./dashboard-layout";
+import { compactDashboardLayout, nextDashboardRow, type DashboardLayoutItem, nextDashboardSlot, widgetDefaults, widgetTypes } from "./dashboard-layout";
 
 const layout: DashboardLayoutItem[] = [
   { i: "health", x: 0, y: 0, w: 4, h: 4, minW: 3 },
@@ -21,5 +21,45 @@ describe("dashboard layout", () => {
     const tablet = compactDashboardLayout(layout, 6);
     expect(tablet.every((item) => item.w === 6)).toBe(true);
     expect(tablet.map((item) => item.minW)).toEqual([3, 4, 4]);
+  });
+});
+
+describe("widget placement", () => {
+  it("fills the free space on the last row before starting a new one", () => {
+    expect(nextDashboardSlot([], 4, 4)).toEqual({ x: 0, y: 0, w: 4 });
+    expect(nextDashboardSlot([{ i: "a", x: 0, y: 0, w: 4, h: 4 }], 8, 5)).toEqual({ x: 4, y: 0, w: 8 });
+    expect(nextDashboardSlot([{ i: "a", x: 0, y: 0, w: 4, h: 4 }, { i: "b", x: 4, y: 0, w: 4, h: 4 }], 4, 4)).toEqual({ x: 8, y: 0, w: 4 });
+    expect(nextDashboardSlot([{ i: "a", x: 0, y: 0, w: 4, h: 4 }, { i: "b", x: 4, y: 0, w: 8, h: 6 }], 4, 4)).toEqual({ x: 0, y: 6, w: 4 });
+  });
+
+  it("shrinks a wide widget into the gap left on the row when it may", () => {
+    const layout: DashboardLayoutItem[] = [
+      { i: "a", x: 0, y: 0, w: 4, h: 4 },
+      { i: "b", x: 4, y: 0, w: 4, h: 4 },
+    ];
+    expect(nextDashboardSlot(layout, 8, 5, 12, 4)).toEqual({ x: 8, y: 0, w: 4 });
+    expect(nextDashboardSlot(layout, 8, 5, 12, 6)).toEqual({ x: 0, y: 4, w: 8 });
+  });
+
+  it("considers only the last row when looking for a gap", () => {
+    const layout: DashboardLayoutItem[] = [
+      { i: "a", x: 0, y: 0, w: 4, h: 4 },
+      { i: "b", x: 0, y: 4, w: 8, h: 4 },
+    ];
+    expect(nextDashboardSlot(layout, 4, 4)).toEqual({ x: 8, y: 4, w: 4 });
+    expect(nextDashboardSlot(layout, 6, 4)).toEqual({ x: 0, y: 8, w: 6 });
+  });
+
+  it("gives every widget type a default size that fits twelve columns", () => {
+    expect(widgetTypes).toEqual(["overview", "topology", "activity", "assistant", "performance", "trace", "logs"]);
+    for (const type of widgetTypes) {
+      const size = widgetDefaults[type];
+      expect(size.w).toBeLessThanOrEqual(12);
+      expect(size.minW).toBeLessThanOrEqual(size.w);
+      expect(size.minH).toBeLessThanOrEqual(size.h);
+    }
+    expect(widgetDefaults.assistant.w).toBe(4);
+    expect(widgetDefaults.overview).toEqual({ w: 4, h: 3, minW: 3, minH: 3 });
+    expect(widgetDefaults.topology).toEqual({ w: 8, h: 5, minW: 4, minH: 4 });
   });
 });

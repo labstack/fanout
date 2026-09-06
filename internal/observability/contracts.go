@@ -116,7 +116,7 @@ type HeatmapPoint struct {
 	P95MS   float64   `json:"p95_ms"`
 }
 
-// Direction mirrors the closed union in ui/apps/src/contracts.ts
+// Direction mirrors the closed union in ui/contracts.ts
 // ("improvement" | "regression" | "stable"); keep the two in sync.
 type Direction string
 

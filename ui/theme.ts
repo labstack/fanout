@@ -1,4 +1,4 @@
-import { ayu, bad, brand, fonts, info, ok, warn } from "./tokens";
+import { ayu, bad, brand, chart, fonts, info, ok, warn } from "./tokens";
 
 /* The Mantine binding for the tokens in ./tokens.ts.
  *
@@ -24,10 +24,10 @@ export const fanoutThemeConfig = {
   defaultRadius: "md",
   fontFamily: fonts.body,
   fontFamilyMonospace: fonts.display,
-  /* Mono for headings, sans for prose — the site's rule, and the reason the
-     role change reads as hierarchy rather than as a second identity. 500 rather
-     than bold, so a heading reads as a precise label instead of shouting. */
-  headings: { fontFamily: fonts.display, fontWeight: "500" },
+  /* Headings share the body family and differ by weight and size only; 600
+     rather than bold, so a heading reads as a precise label instead of
+     shouting. Mono is a data face now, not a display face. */
+  headings: { fontFamily: fonts.body, fontWeight: "600" },
   cursorType: "pointer",
 } as const;
 
@@ -37,6 +37,11 @@ export const fanoutThemeConfig = {
    introduce a fourth red to the page. */
 export const fanoutCssVariables = () => ({
   variables: { "--mantine-color-error": "var(--mantine-color-bad-filled)" },
-  light: {},
+  /* Mantine's light-scheme dimmed is #868e96, which is 3.3:1 on this ground —
+     under WCAG AA, and dimmed carries real content here: page descriptions,
+     timestamps, log times, healthy error rates. The chart palette's light muted
+     is the same grey family at 4.8:1, and using it keeps a dimmed label and the
+     axis beside it the same color. Dark already clears AA. */
+  light: { "--mantine-color-dimmed": chart.light.muted },
   dark: {},
 });

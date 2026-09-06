@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useFanoutApp } from "../App";
+import { useFanoutApp } from "../app-context";
 import Dashboard from "../dashboard";
 
 export const Route = createFileRoute("/dashboards/$dashboardId")({
