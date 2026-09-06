@@ -1,0 +1,1 @@
+import{pt as e}from"./brand-CCB4_HD8.js";import{t}from"./dashboard-B2f64YIm.js";import{q as n,u as r}from"./index-CNe99VOp.js";var i=e();function a(){let e=n(),{agentAvailable:a,openChat:o}=r();return(0,i.jsx)(t,{agentAvailable:a,onOpenChat:o,onDashboardChange:t=>void e({to:`/dashboards/$dashboardId`,params:{dashboardId:t},replace:!0})})}export{a as component};
