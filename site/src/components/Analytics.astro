@@ -350,7 +350,12 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
           subscribe: function (onChange) {
             window.addEventListener(PREFERENCE_EVENT, onChange);
             window.addEventListener("storage", function (event) {
-              if (event.key === STORAGE_KEY) onChange();
+              // A null key is clear(), where the preference is gone rather than
+              // changed. The listener that re-applies the preference already
+              // covers it; this one redraws the control that displays it, and
+              // without the null case /privacy went on describing an answer the
+              // browser no longer held.
+              if (event.key === STORAGE_KEY || event.key === null) onChange();
             });
           },
         };
