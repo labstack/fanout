@@ -1,7 +1,7 @@
 import { Alert, Box, Button, Center, Code, Container, Group, Loader, Paper, PinInput, Stack, Text, TextInput, Title } from "@mantine/core";
 import { ArrowLeft, ArrowRight, Check, Copy, UserPlus } from "@phosphor-icons/react";
 import { useNavigate } from "@tanstack/react-router";
-import { createContext, FormEvent, ReactNode, useContext, useEffect, useState } from "react";
+import { createContext, FormEvent, ReactNode, useContext, useEffect, useRef, useState } from "react";
 import { browserViewerFromMe, BrowserViewer, clearLegacySession, oauthReturnTo, unauthorizedEvent } from "./auth-session";
 import { BrandLockup } from "./brand";
 
@@ -117,6 +117,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   const [error, setError] = useState("");
   const [setupResult, setSetupResult] = useState<SetupResult | null>(null);
   const [copied, setCopied] = useState(false);
+  const codeRef = useRef<HTMLDivElement>(null);
   const returnTo = oauthReturnTo();
   const authenticated = viewer === "user";
 
@@ -184,6 +185,14 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     return () => clearInterval(timer);
   }, [resendAt]);
   const resendWait = Math.max(0, Math.ceil((resendAt - now) / 1000));
+
+  // A rejected code empties the boxes, which leaves the caret in the last one
+  // with nowhere to type. Focus goes back to the first digit once the request
+  // has settled, because the boxes are disabled while it is in flight.
+  useEffect(() => {
+    if (!codeSent || busy || !error) return;
+    codeRef.current?.querySelector("input")?.focus();
+  }, [busy, codeSent, error]);
 
   async function copyText(value: string) {
     try {
@@ -296,26 +305,33 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     }
   }
 
+  // The code step is its own page: it says a code was sent above the fold
+  // rather than in the smallest line on the screen, and it computes its copy
+  // first so an empty description holds no space.
+  const onCodeStep = codeSent && !status?.setup_required;
+  const heading = status?.setup_required ? "Create the first admin" : onCodeStep ? "Check your email" : status?.self_signup ? "Sign in or create an account" : "Sign in";
+  const description = status?.setup_required ? "Use the one-time token printed by the Fanout process."
+    : !status?.smtp_configured ? "Email delivery is not configured. Ask the operator to run fanout login-link with your email address."
+      : onCodeStep ? `We sent a code to ${email}.`
+        : status?.self_signup ? "Enter your email to sign in or create a viewer account. No password needed."
+          : "Enter your email and we’ll send a short verification code. No password needed.";
+
   return <AuthSurface><Stack gap={28}>
     <BrandLockup />
     <Stack gap={10}>
       <Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">
         {status?.setup_required ? "One-time setup" : "Secure workspace"}
       </Text>
-      <Title order={1} fz={{ base: 28, sm: 32 }} lh={1.08}>
-        {status?.setup_required ? "Create the first admin" : status?.self_signup ? "Sign in or create an account" : "Sign in"}
-      </Title>
-      <Text c="dimmed" size="md" lh={1.6} maw={390}>
-        {status?.setup_required ? "Use the one-time token printed by the Fanout process." : !status?.smtp_configured ? "Email delivery is not configured. Ask the operator to run fanout login-link with your email address." : codeSent ? "" : status?.self_signup ? "Enter your email to sign in or create a viewer account. No password needed." : "Enter your email and we’ll send a short verification code. No password needed."}
-      </Text>
+      <Title order={1} fz={{ base: 28, sm: 32 }} lh={1.08}>{heading}</Title>
+      {description && <Text c="dimmed" size="md" lh={1.6} maw={390}>{description}</Text>}
     </Stack>
     <form onSubmit={submit}><Stack gap="md">
       <TextInput label="Email" placeholder="you@company.com" type="email" required value={email} onChange={(event) => setEmail(event.currentTarget.value)} disabled={codeSent} variant="filled" radius="md" size="md" autoFocus={!codeSent} />
       {status?.setup_required && <TextInput label="Name" placeholder="Your name" value={name} onChange={(event) => setName(event.currentTarget.value)} variant="filled" radius="md" size="md" />}
       {status?.setup_required && <TextInput label="Setup token" placeholder="from the setup URL printed at startup" required value={setupToken} onChange={(event) => setSetupToken(event.currentTarget.value)} autoComplete="one-time-code" variant="filled" radius="md" size="md" />}
-      {!status?.setup_required && codeSent && <Stack gap="xs">
+      {onCodeStep && <Stack gap="xs">
         <Text size="sm" fw={600}>Verification code</Text>
-        <PinInput length={6} type="number" oneTimeCode autoFocus value={code} onChange={setCode} onComplete={(value) => void verifyCode(value)} disabled={busy} error={Boolean(error)} size="md" radius="md" aria-label="Verification code" getInputProps={(index) => ({ "aria-label": `Digit ${index + 1}` })} />
+        <Box ref={codeRef}><PinInput length={6} type="number" oneTimeCode autoFocus value={code} onChange={setCode} onComplete={(value) => void verifyCode(value)} disabled={busy} error={Boolean(error)} size="md" radius="md" aria-label="Verification code" getInputProps={(index) => ({ "aria-label": `Digit ${index + 1}` })} /></Box>
         <Group justify="space-between" gap="xs">
           <Text c="dimmed" size="xs">Sent to {email}</Text>
           <Button variant="subtle" size="compact-xs" leftSection={<ArrowLeft size={12} weight="bold" />} onClick={changeEmail} disabled={busy}>Change email</Button>
@@ -326,7 +342,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         </Group>
       </Stack>}
       {error && <Alert color="bad" radius="md">{error}</Alert>}
-      {!(codeSent && !status?.setup_required) && <Button type="submit" size="md" radius="md" mt={4} loading={busy} disabled={!status || (!status.setup_required && !status.smtp_configured)} leftSection={status?.setup_required ? <UserPlus size={17} weight="bold" /> : undefined} rightSection={!status?.setup_required ? <ArrowRight size={17} weight="bold" /> : undefined}>{status?.setup_required ? "Create admin" : "Send code"}</Button>}
+      {/* The sixth digit still submits on its own, but a partial paste, a short
+          autofill or a cleared field has to leave something to press. */}
+      {onCodeStep
+        ? <Button type="submit" size="md" radius="md" mt={4} loading={busy} disabled={busy || code.length < 6} rightSection={<ArrowRight size={17} weight="bold" />}>Verify code</Button>
+        : <Button type="submit" size="md" radius="md" mt={4} loading={busy} disabled={!status || (!status.setup_required && !status.smtp_configured)} leftSection={status?.setup_required ? <UserPlus size={17} weight="bold" /> : undefined} rightSection={!status?.setup_required ? <ArrowRight size={17} weight="bold" /> : undefined}>{status?.setup_required ? "Create admin" : "Send code"}</Button>}
     </Stack></form>
   </Stack></AuthSurface>;
 }

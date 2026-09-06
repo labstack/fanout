@@ -242,6 +242,8 @@ describe("AuthGate OAuth return", () => {
     const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
     await act(async () => send?.click());
     await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/start"]));
+    expect(document.body.textContent).toContain("Check your email");
+    expect(document.body.textContent).toContain("We sent a code to v@example.com");
     expect(document.body.textContent).toContain("Sent to v@example.com");
     expect(document.body.textContent).toContain("Codes expire in 5 minutes");
 
@@ -284,6 +286,57 @@ describe("AuthGate OAuth return", () => {
     expect(vi.getTimerCount()).toBe(0);
 
     vi.useRealTimers();
+    await act(async () => root.unmount());
+  });
+
+  it("offers a verify button and returns focus to the first digit after a rejected code", async () => {
+    window.happyDOM.setURL("https://fanout.example.com/");
+    const posts: Array<{ path: string; body: unknown }> = [];
+    fetchMock.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: false });
+      if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
+      if (init?.method === "POST") {
+        posts.push({ path, body: JSON.parse(String(init.body)) });
+        if (path === "/api/auth/start") return json({ code_sent: true });
+        if (path === "/api/auth/verify") return json({ message: "invalid or expired code" }, 401);
+      }
+      throw new Error(`unexpected request: ${path}`);
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MantineProvider><AuthGate><div>Fanout application</div></AuthGate></MantineProvider>));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Sign in"));
+
+    const email = document.querySelector('input[type="email"]') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(email, "v@example.com");
+      email.dispatchEvent(new InputEvent("input", { bubbles: true, data: "v@example.com", inputType: "insertText" }));
+    });
+    const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
+    await act(async () => send?.click());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Check your email"));
+
+    const verify = () => Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Verify code"));
+    expect(verify()).toBeDefined();
+    expect(verify()?.disabled).toBe(true);
+
+    const cells = Array.from(document.querySelectorAll<HTMLInputElement>('input[inputmode="numeric"]'));
+    expect(cells).toHaveLength(6);
+    for (const [index, digit] of ["1", "2", "3", "4", "5", "6"].entries()) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(cells[index], digit);
+        cells[index].dispatchEvent(new InputEvent("input", { bubbles: true, data: digit, inputType: "insertText" }));
+      });
+    }
+
+    await vi.waitFor(() => expect(document.body.textContent).toContain("invalid or expired code"));
+    const cleared = Array.from(document.querySelectorAll<HTMLInputElement>('input[inputmode="numeric"]'));
+    expect(cleared.map((cell) => cell.value)).toEqual(["", "", "", "", "", ""]);
+    await vi.waitFor(() => expect(document.activeElement).toBe(cleared[0]));
+    expect(posts.filter((post) => post.path === "/api/auth/verify")).toHaveLength(1);
+
     await act(async () => root.unmount());
   });
 });
