@@ -1,8 +1,10 @@
 import "@mantine/core/styles.css";
 // Two variable files rather than the host's eight static faces: every byte
-// here is base64'd into all five single-file bundles.
-import "@fontsource-variable/geist";
-import "@fontsource-variable/geist-mono";
+// here is base64'd into all five single-file bundles. The entry point is named
+// rather than left to the exports map, because this package version offers no
+// latin-only stylesheet to narrow it to.
+import "@fontsource-variable/geist/index.css";
+import "@fontsource-variable/geist-mono/index.css";
 import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
