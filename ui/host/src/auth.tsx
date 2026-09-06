@@ -172,12 +172,17 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }, [authenticated, returnTo, sessionReady]);
 
   // The resend cooldown is a wall-clock deadline rather than a tick count, so a
-  // backgrounded tab cannot stall it.
+  // backgrounded tab cannot stall it. The ticker exists only for the countdown:
+  // it never starts without a live deadline and stops itself at the deadline, so
+  // no interval outlives the code step.
   useEffect(() => {
-    if (!codeSent) return;
-    const timer = setInterval(() => setNow(Date.now()), 1000);
+    if (resendAt <= Date.now()) return;
+    const timer = setInterval(() => {
+      setNow(Date.now());
+      if (Date.now() >= resendAt) clearInterval(timer);
+    }, 1000);
     return () => clearInterval(timer);
-  }, [codeSent]);
+  }, [resendAt]);
   const resendWait = Math.max(0, Math.ceil((resendAt - now) / 1000));
 
   async function copyText(value: string) {
@@ -248,6 +253,12 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     try {
       await jsonRequest("/api/auth/verify", { email, code: value });
       setViewer("user");
+      // A later re-authentication in the same tab starts on the email step
+      // rather than remounting on a stale code step, and clearing the deadline
+      // stops the countdown ticker now instead of when it would have expired.
+      setCodeSent(false);
+      setCode("");
+      setResendAt(0);
       void refreshAccount();
     } catch (cause) {
       setCode("");

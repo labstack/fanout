@@ -250,6 +250,11 @@ describe("AuthGate OAuth return", () => {
     expect(resend?.textContent).toMatch(/Resend in \d+s/);
     await act(async () => { vi.advanceTimersByTime(31_000); });
     await vi.waitFor(() => expect(Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"))?.disabled).toBe(false));
+    const armed = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"));
+    expect(armed?.textContent).toBe("Resend code");
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+    expect(Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Resend"))?.textContent).toBe("Resend code");
+    expect(vi.getTimerCount()).toBe(0);
 
     const change = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Change email"));
     await act(async () => change?.click());
@@ -270,6 +275,13 @@ describe("AuthGate OAuth return", () => {
     }
     await vi.waitFor(() => expect(posts.at(-1)).toEqual({ path: "/api/auth/verify", body: { email: "v@example.com", code: "123456" } }));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
+
+    const settled = posts.length;
+    await act(async () => { vi.advanceTimersByTime(5_000); });
+    expect(posts).toHaveLength(settled);
+    expect(posts.filter((post) => post.path === "/api/auth/start")).toHaveLength(2);
+    expect(posts.filter((post) => post.path === "/api/auth/verify")).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
 
     vi.useRealTimers();
     await act(async () => root.unmount());
