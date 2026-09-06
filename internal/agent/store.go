@@ -183,23 +183,18 @@ func threadTitle(messages []agtypes.Message) string {
 // running. The SELECT-then-INSERT runs under BEGIN IMMEDIATE on a pinned
 // connection so two concurrent first-runs on the same thread serialize
 // instead of racing into a unique-constraint error.
-func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunAgentInput) error {
+func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunAgentInput) ([]agtypes.Message, error) {
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		return fmt.Errorf("encode run input: %w", err)
+		return nil, fmt.Errorf("encode run input: %w", err)
 	}
-	messagesJSON, err := json.Marshal(input.Messages)
-	if err != nil {
-		return fmt.Errorf("encode messages: %w", err)
-	}
-	title := threadTitle(input.Messages)
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("open run connection: %w", err)
+		return nil, fmt.Errorf("open run connection: %w", err)
 	}
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return fmt.Errorf("begin run: %w", err)
+		return nil, fmt.Errorf("begin run: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -208,26 +203,41 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 		}
 	}()
 
-	var existingOwner string
-	err = conn.QueryRowContext(ctx, `SELECT owner_id FROM agui_threads WHERE thread_id = ?`, input.ThreadID).Scan(&existingOwner)
+	var existingOwner, storedJSON string
+	err = conn.QueryRowContext(ctx, `SELECT owner_id, messages_json FROM agui_threads WHERE thread_id = ?`, input.ThreadID).Scan(&existingOwner, &storedJSON)
+	var messages []agtypes.Message
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
+		messages = mergeThreadMessages(nil, input.Messages)
+		messagesJSON, err := json.Marshal(messages)
+		if err != nil {
+			return nil, fmt.Errorf("encode messages: %w", err)
+		}
 		if _, err := conn.ExecContext(ctx,
 			`INSERT INTO agui_threads (thread_id, owner_id, title_derived, messages_json) VALUES (?, ?, ?, ?)`,
-			input.ThreadID, ownerID, title, string(messagesJSON),
+			input.ThreadID, ownerID, threadTitle(messages), string(messagesJSON),
 		); err != nil {
-			return fmt.Errorf("create thread: %w", err)
+			return nil, fmt.Errorf("create thread: %w", err)
 		}
 	case err != nil:
-		return fmt.Errorf("check thread owner: %w", err)
+		return nil, fmt.Errorf("check thread owner: %w", err)
 	case existingOwner != ownerID:
-		return ErrThreadNotFound
+		return nil, ErrThreadNotFound
 	default:
+		var stored []agtypes.Message
+		if err := json.Unmarshal([]byte(storedJSON), &stored); err != nil {
+			return nil, fmt.Errorf("decode stored messages: %w", err)
+		}
+		messages = mergeThreadMessages(stored, input.Messages)
+		messagesJSON, err := json.Marshal(messages)
+		if err != nil {
+			return nil, fmt.Errorf("encode messages: %w", err)
+		}
 		if _, err := conn.ExecContext(ctx,
 			`UPDATE agui_threads SET title_derived = ?, messages_json = ?, updated_at = datetime('now') WHERE thread_id = ?`,
-			title, string(messagesJSON), input.ThreadID,
+			threadTitle(messages), string(messagesJSON), input.ThreadID,
 		); err != nil {
-			return fmt.Errorf("update thread input: %w", err)
+			return nil, fmt.Errorf("update thread input: %w", err)
 		}
 	}
 	var parent any
@@ -238,13 +248,94 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 		`INSERT INTO agui_runs (run_id, thread_id, parent_run_id, input_json, status) VALUES (?, ?, ?, ?, 'running')`,
 		input.RunID, input.ThreadID, parent, string(inputJSON),
 	); err != nil {
-		return fmt.Errorf("create run: %w", err)
+		return nil, fmt.Errorf("create run: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return fmt.Errorf("commit run: %w", err)
+		return nil, fmt.Errorf("commit run: %w", err)
 	}
 	committed = true
-	return nil
+	return messages, nil
+}
+
+// mergeThreadMessages returns the stored history with the request's new user
+// turns appended.
+//
+// The server owns the record. A request may add to a thread but cannot rewrite
+// or delete what is already stored, so the views the agent attached to earlier
+// runs survive a browser that no longer carries them, and a caller cannot
+// fabricate assistant or tool history by posting it.
+//
+// Turns are matched by the id the client mints, so re-posting a history the
+// server has already seen adds nothing. That is deduplication, not replay
+// protection: a client that mints a fresh id for the same question asks it
+// twice, which is what a person clicking twice means anyway.
+//
+// The cost of dropping what the client authored is that a failed FinishRun —
+// the loss runtime.Run already tolerates — is no longer healed by the next
+// request carrying the browser's copy. The thread keeps the question and loses
+// the answer, where before it might have been restored by accident.
+func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
+	stored = dropUnansweredToolCalls(stored)
+	known := make(map[string]struct{}, len(stored))
+	for _, message := range stored {
+		if message.ID != "" {
+			known[message.ID] = struct{}{}
+		}
+	}
+	merged := append([]agtypes.Message(nil), stored...)
+	for _, message := range incoming {
+		if message.Role != agtypes.RoleUser {
+			continue
+		}
+		if message.ID != "" {
+			if _, seen := known[message.ID]; seen {
+				continue
+			}
+			known[message.ID] = struct{}{}
+		}
+		merged = append(merged, message)
+	}
+	return merged
+}
+
+// dropUnansweredToolCalls removes tool calls that no result answers.
+//
+// A run can die between the model asking for a tool and the tool replying —
+// the reader pressing Stop is the everyday case, since that cancels the
+// request while the final write still goes through on an uncancelled context.
+// What lands is an ask with no answer, and both providers reject a
+// conversation carrying one. That used to be survivable because the next run
+// rebuilt the thread from the browser's copy; now that the server seeds from
+// its own record, an orphan left in it would fail every later run on the
+// thread with no way for the reader to clear it. An assistant turn that said
+// something keeps its words and loses the dangling call; one that only asked
+// is dropped whole, because nothing of it remains to say.
+func dropUnansweredToolCalls(messages []agtypes.Message) []agtypes.Message {
+	answered := make(map[string]struct{})
+	for _, message := range messages {
+		if message.Role == agtypes.RoleTool && message.ToolCallID != "" {
+			answered[message.ToolCallID] = struct{}{}
+		}
+	}
+	repaired := make([]agtypes.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role != agtypes.RoleAssistant || len(message.ToolCalls) == 0 {
+			repaired = append(repaired, message)
+			continue
+		}
+		kept := make([]agtypes.ToolCall, 0, len(message.ToolCalls))
+		for _, call := range message.ToolCalls {
+			if _, ok := answered[call.ID]; ok {
+				kept = append(kept, call)
+			}
+		}
+		if len(kept) == 0 && strings.TrimSpace(messageText(message.Content)) == "" {
+			continue
+		}
+		message.ToolCalls = kept
+		repaired = append(repaired, message)
+	}
+	return repaired
 }
 
 // FinishRun persists the final conversation and the run outcome. The thread's
