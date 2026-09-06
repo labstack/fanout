@@ -1,0 +1,1 @@
+import{t as e}from"./chat-BWEtId3_.js";var t=e;export{t as component};
