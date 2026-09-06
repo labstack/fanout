@@ -78,12 +78,17 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
         function readPreference() {
           try {
             var stored = window.localStorage.getItem(STORAGE_KEY);
-            return stored === "granted" || stored === "denied" ? stored : null;
+            if (stored === "granted" || stored === "denied") return stored;
           } catch (_) {
             // A locked-down browser throws on access rather than returning
-            // null. The in-memory answer still governs this page.
-            return memoryPreference;
+            // null.
           }
+          // Storage had no answer, or would not give one. Either way the
+          // choice made on this page still governs it: a browser can let the
+          // read succeed and refuse the write — Safari's private mode and a
+          // full quota both do — and reading back null there would discard an
+          // explicit refusal and start measuring anyway.
+          return memoryPreference;
         }
 
         function writePreference(preference) {
@@ -334,6 +339,17 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
             });
           },
         };
+
+        // Mirrored across tabs, which this file has claimed from the start and
+        // nothing did. The listener above reaches only subscribers, and the
+        // only subscriber is the privacy page's control, which redraws its own
+        // text. So a reader with a docs page open who went to /privacy and
+        // denied kept being measured in the tab they left behind until it
+        // happened to reload. Applying the preference here is what makes the
+        // claim true.
+        window.addEventListener("storage", function (event) {
+          if (event.key === STORAGE_KEY || event.key === null) apply();
+        });
 
         function ready(run) {
           if (document.readyState === "loading") {
