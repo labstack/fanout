@@ -1,6 +1,7 @@
 import { ActionIcon, Group, Menu, Paper, Stack, Title } from "@mantine/core";
 import { DotsThree, SlidersHorizontal, Trash } from "@phosphor-icons/react";
 import { useState, type JSX } from "react";
+import type { DashboardWidgetRecord } from "../api";
 import type { WidgetType } from "../dashboard-layout";
 import ActivityWidget from "./activity";
 import AssistantWidget from "./assistant";
@@ -13,7 +14,11 @@ import { Empty } from "./pieces";
 import TopologyWidget from "./topology";
 import TraceWidget from "./trace";
 
-export type Widget = { id: string; type: WidgetType; title: string; config?: WidgetConfig; enabled: boolean };
+// The server is the source of widget types, so a stored dashboard's widget
+// can name one this build does not know. Widget mirrors that truth (type is
+// a plain string) rather than the narrower WidgetType this build handles —
+// DashboardWidgetRecord already says exactly this, so Widget just aliases it.
+export type Widget = DashboardWidgetRecord;
 
 export type WidgetBodyProps = {
   widget: Widget;
@@ -32,6 +37,14 @@ function UnknownWidget() {
   return <Empty text="This view type is not supported by this version" />;
 }
 
+/* The server is the source of widget types, so a stored dashboard can name
+   one this build does not know. The map stays exhaustive over WidgetType,
+   which keeps a new type a compile error, and the guard is what proves the
+   narrowing at runtime. */
+function bodyFor(type: string) {
+  return Object.hasOwn(bodies, type) ? bodies[type as WidgetType] : UnknownWidget;
+}
+
 export default function WidgetCard(props: WidgetBodyProps & { onRemove: () => void; onConfigure: (config: WidgetConfig) => void }) {
   const { widget, services, onRemove, onConfigure } = props;
   const [menuOpened, setMenuOpened] = useState(false);
@@ -39,7 +52,7 @@ export default function WidgetCard(props: WidgetBodyProps & { onRemove: () => vo
   // A dashboard saved by a newer build can name a view this one has never
   // heard of. That is one card that says so, not a crash that takes the
   // whole page down with it.
-  const Body = bodies[widget.type] ?? UnknownWidget;
+  const Body = bodyFor(widget.type);
   return <Paper withBorder radius="lg" p="md" h="100%" className="widget-card" style={{ overflow: "hidden" }}>
     <Stack h="100%" gap="sm">
       <Group justify="space-between" align="center" wrap="nowrap" className="widget-drag" style={{ cursor: "grab" }}>

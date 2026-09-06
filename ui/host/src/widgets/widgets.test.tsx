@@ -119,13 +119,26 @@ describe("widgets", () => {
   });
 
   // A dashboard saved by a newer build can name a view this one has never
-  // heard of. That card says so; it does not take the page down.
+  // heard of. That card says so; it does not take the page down. `type` is a
+  // plain string on Widget (the server, not this build, is the source of
+  // truth for it), so "mystery" needs no cast to reach the component.
   it("says so when a widget type is unknown", async () => {
-    const root = await mount({ id: "w8", type: "mystery" as never, title: "Mystery", enabled: true });
+    const root = await mount({ id: "w8", type: "mystery", title: "Mystery", enabled: true });
     expect(document.body.textContent).toContain("This view type is not supported by this version");
     expect(document.body.textContent).toContain("Mystery");
     expect(fetchMock).not.toHaveBeenCalled();
     await act(async () => root.unmount());
+  });
+
+  it("falls back only for the unknown type — a known type still renders its own body", async () => {
+    const unknown = await mount({ id: "w8a", type: "not-a-real-widget", title: "Mystery", enabled: true });
+    expect(document.body.textContent).toContain("This view type is not supported by this version");
+    await act(async () => unknown.unmount());
+
+    const known = await mount({ id: "w8b", type: "overview", title: "System health", enabled: true });
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Unhealthy"));
+    expect(document.body.textContent).not.toContain("This view type is not supported by this version");
+    await act(async () => known.unmount());
   });
 
   it("removes through the actions menu and saves configuration", async () => {

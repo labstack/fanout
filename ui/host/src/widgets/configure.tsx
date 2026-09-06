@@ -14,8 +14,15 @@ const fields: Partial<Record<WidgetType, Field[]>> = {
   trace: ["trace_id"],
 };
 
-export function configurable(type: WidgetType): boolean {
-  return (fields[type]?.length ?? 0) > 0;
+// The server is the source of widget types, so a widget's stored type can be
+// one this build does not know — the guard is what proves the narrowing
+// before indexing into a map keyed by the known WidgetType union.
+function fieldsFor(type: string): Field[] | undefined {
+  return Object.hasOwn(fields, type) ? fields[type as WidgetType] : undefined;
+}
+
+export function configurable(type: string): boolean {
+  return (fieldsFor(type)?.length ?? 0) > 0;
 }
 
 export function ConfigureWidget({ opened, widget, services, onClose, onSave }: { opened: boolean; widget: Widget; services: string[]; onClose: () => void; onSave: (config: WidgetConfig) => void }) {
@@ -24,7 +31,7 @@ export function ConfigureWidget({ opened, widget, services, onClose, onSave }: {
     if (!opened) return;
     setDraft({ service: configString(widget.config, "service"), severity: configString(widget.config, "severity"), search: configString(widget.config, "search"), trace_id: configString(widget.config, "trace_id") });
   }, [opened, widget.config]);
-  const wanted = fields[widget.type] ?? [];
+  const wanted = fieldsFor(widget.type) ?? [];
   const serviceOptions = [...new Set([...services, draft.service].filter(Boolean))];
 
   function save() {

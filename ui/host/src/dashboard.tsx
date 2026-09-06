@@ -9,11 +9,18 @@ import { authorizedFetch } from "./auth";
 import { compactDashboardLayout, nextDashboardSlot, widgetDefaults, widgetTypes, type DashboardLayoutItem, type WidgetType } from "./dashboard-layout";
 import { createID } from "./id";
 import { dashboardWindows, useLastUpdated, useObservability, widgetParams, type WidgetConfig } from "./widgets/data";
-import WidgetCard, { widgetTitles, type Widget } from "./widgets/widget-card";
+import WidgetCard, { widgetTitles } from "./widgets/widget-card";
 
 const Grid = WidthProvider(Responsive);
 const dashboardKey = "fanout.dashboard-id";
 const emptyState: DashboardState = { layout: [], widgets: [], filters: { window: "1h", namespace: "" } };
+
+// The server is the source of widget types, so a saved dashboard's widget can
+// name one this build does not know. The guard is what proves the narrowing
+// before indexing into a map keyed by the known WidgetType union.
+function widgetSizeFor(type: string) {
+  return Object.hasOwn(widgetDefaults, type) ? widgetDefaults[type as WidgetType] : undefined;
+}
 
 export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat, onDashboardChange }: { dashboardID?: string; agentAvailable: boolean; onOpenChat: (prompt?: string) => void; onDashboardChange?: (id: string, replace?: boolean) => void }) {
   const queryClient = useQueryClient();
@@ -63,11 +70,11 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
   useEffect(() => { save.reset(); }, [selectedID]);
 
   const layouts = useMemo(() => {
-    const widgetType = new Map(state.widgets.map((widget) => [widget.id, widget.type as WidgetType]));
+    const widgetType = new Map(state.widgets.map((widget) => [widget.id, widget.type]));
     const normalized: DashboardLayoutItem[] = state.layout.map((item) => {
       // A saved dashboard can name a widget type this build does not know,
       // and an unknown key has no default size to read minimums from.
-      const size = widgetDefaults[widgetType.get(item.i) ?? "overview"] ?? widgetDefaults.overview;
+      const size = widgetSizeFor(widgetType.get(item.i) ?? "overview") ?? widgetDefaults.overview;
       return { ...item, h: Math.max(item.h, size.minH), minW: Math.max(item.minW ?? 0, size.minW), minH: Math.max(item.minH ?? 0, size.minH) };
     });
     return { lg: normalized, md: normalized, sm: compactDashboardLayout(normalized, 6), xs: compactDashboardLayout(normalized, 2), xxs: compactDashboardLayout(normalized, 1) };
@@ -122,7 +129,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
 
     <Grid className="dashboard-grid" layouts={layouts} breakpoints={{ lg: 1100, md: 800, sm: 600, xs: 420, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 2, xxs: 1 }} rowHeight={76} margin={[16, 16]} containerPadding={[0, 0]} compactType="vertical" draggableHandle=".widget-drag" draggableCancel="button,input,select,textarea,a,label,[role=menu],[role=dialog],.widget-actions" onBreakpointChange={setBreakpoint} onDragStop={(layout: readonly DashboardLayoutItem[]) => { if (breakpoint === "lg") update({ ...state, layout: [...layout] }); }} onResizeStop={(layout: readonly DashboardLayoutItem[]) => { if (breakpoint === "lg") update({ ...state, layout: [...layout] }); }}>
       {state.widgets.map((widget) => <div key={widget.id}>
-        <WidgetCard widget={widget as Widget} filters={state.filters} dark={dark} services={services} agentAvailable={agentAvailable} onOpenChat={onOpenChat} onRemove={() => remove(widget.id)} onConfigure={(config) => configure(widget.id, config)} />
+        <WidgetCard widget={widget} filters={state.filters} dark={dark} services={services} agentAvailable={agentAvailable} onOpenChat={onOpenChat} onRemove={() => remove(widget.id)} onConfigure={(config) => configure(widget.id, config)} />
       </div>)}
     </Grid>
   </Box>;
