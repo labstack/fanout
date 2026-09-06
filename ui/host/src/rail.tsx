@@ -193,6 +193,11 @@ function dayStart(value: Date): number {
   return new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
 }
 
+// Sections read top to bottom as most to least recent regardless of the
+// order threads arrive from the API, so the label order is fixed here
+// rather than derived from insertion order.
+const GROUP_ORDER = ["Today", "Yesterday", "Previous 7 days", "Older"];
+
 export function groupThreads(threads: ThreadSummary[]): Array<{ label: string; threads: ThreadSummary[] }> {
   const today = dayStart(new Date());
   const day = 24 * 60 * 60 * 1000;
@@ -204,7 +209,7 @@ export function groupThreads(threads: ThreadSummary[]): Array<{ label: string; t
     group.push(thread);
     groups.set(label, group);
   }
-  return [...groups].map(([label, items]) => ({ label, threads: items }));
+  return GROUP_ORDER.filter((label) => groups.has(label)).map((label) => ({ label, threads: groups.get(label)! }));
 }
 
 export function threadTime(value: string): string {

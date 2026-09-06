@@ -97,6 +97,33 @@ describe("Rail", () => {
     await act(async () => root.unmount());
   });
 
+  // The label order reads most to least recent regardless of the order
+  // threads arrive from the API, so the mock deliberately returns an older
+  // thread before a same-day one.
+  it("groups chats in a fixed section order regardless of API order", async () => {
+    const now = new Date();
+    const sqliteTimestamp = (date: Date) => date.toISOString().slice(0, 19).replace("T", " ");
+    const todayThread = { threadId: "thread-standup", title: "Standup notes", updatedAt: sqliteTimestamp(now) };
+    const olderThread = { threadId: "thread-legacy", title: "Legacy migration", updatedAt: sqliteTimestamp(new Date(now.getTime() - 10 * 24 * 60 * 60 * 1000)) };
+    fetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/dashboards") return dashboards();
+      if (url.pathname === "/api/agent/threads") return json({ threads: [olderThread, todayThread], nextCursor: "" });
+      throw new Error(`unexpected request: ${url.pathname}`);
+    });
+    const { root, render } = mount();
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Legacy migration"));
+    expect(document.body.textContent).toContain("Standup notes");
+    const text = document.body.textContent ?? "";
+    const todayIndex = text.indexOf("Today");
+    const olderIndex = text.indexOf("Older");
+    expect(todayIndex).toBeGreaterThanOrEqual(0);
+    expect(olderIndex).toBeGreaterThanOrEqual(0);
+    expect(todayIndex).toBeLessThan(olderIndex);
+    await act(async () => root.unmount());
+  });
+
   it("hides chat affordances when the agent is unavailable", async () => {
     const { root, render } = mount({ agentAvailable: false });
     await act(async () => render());
