@@ -14,17 +14,22 @@
  * mean something.
  *
  * Whether consent must be asked for is a question about the reader's location,
- * not about this site. The EEA, the UK and the Crown Dependencies require
- * permission before the cookie is set; elsewhere measurement may run with a way
- * to turn it off. Cloudflare already knows which one applies and says so at
+ * not about this site. The EEA and the UK require permission before the cookie
+ * is set; elsewhere measurement may run with a way to turn it off. Cloudflare already knows which one applies and says so at
  * /cdn-cgi/trace, so most readers are measured properly and never see a banner,
  * and the readers who are owed the question get it. A failed or unavailable
  * lookup is treated as "ask" — the safe direction, and what local development
  * gets, where the whole component is compiled out anyway.
  *
- * Do Not Track and Global Privacy Control are honoured above all of it. A
- * reader who has already answered this question in their browser is not asked
- * it again, and is not measured either way.
+ * Global Privacy Control stands in for an answer that has not been given here.
+ * A reader who sends one and has not used the control below is treated as
+ * having declined, and is not asked either. It does not outrank an answer given
+ * on this site: Allow is the later and more specific statement of the same
+ * preference, so a reader who clicks it is measured with the signal still on.
+ *
+ * Do Not Track is not consulted. The W3C withdrew the specification in 2019,
+ * Safari removed the header, and Chrome and Firefox leave it off by default, so
+ * it carries neither a legal obligation nor a reliable statement of intent.
  *
  * The preference lives in localStorage rather than a cookie, so declining
  * stores nothing that travels with a request, and is mirrored across tabs. The
@@ -51,14 +56,19 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
         var STORAGE_KEY = "fanout.analytics-consent.v1";
         var PREFERENCE_EVENT = "fanout:analytics-preference";
 
-        // The EEA, the UK and the Crown Dependencies: the places that require
-        // permission before a browser stores an analytics identifier. A country
-        // this list does not name gets measurement with an opt-out instead.
+        // The EEA and the UK: the places whose law requires permission before a
+        // browser stores an analytics identifier. A country this list does not
+        // name gets measurement with an opt-out instead.
+        //
+        // Guernsey, the Isle of Man and Jersey were on this list and are not now.
+        // Their data protection law follows the GDPR, but none of them enacted a
+        // PECR equivalent, so the rule that governs storing an identifier does
+        // not reach them.
         var PRIOR_CONSENT = [
           "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE",
           "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT",
           "RO", "SK", "SI", "ES", "SE", "IS", "LI", "NO",
-          "GB", "GG", "IM", "JE",
+          "GB",
         ];
 
         var memoryPreference = null;
@@ -66,12 +76,10 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
         var listenersAttached = false;
         var requirementPromise = null;
 
-        // A reader who has set either signal has answered this already.
-        function signalsRefusal() {
-          var flags = [navigator.doNotTrack, window.doNotTrack, navigator.msDoNotTrack];
-          for (var i = 0; i < flags.length; i++) {
-            if (flags[i] === "1" || flags[i] === "yes") return true;
-          }
+        // A default answer for a reader who has not given one here, rather than a
+        // veto over the one they do give. Consulted only where the preference is
+        // absent -- see mayRun and apply.
+        function signalsOptOut() {
           return navigator.globalPrivacyControl === true;
         }
 
@@ -144,10 +152,6 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
         }
 
         function start() {
-          // Above the stored preference on purpose: a browser-level refusal is
-          // not overridden by a click on this site's own control.
-          if (signalsRefusal()) return;
-
           window["ga-disable-" + measurementId] = false;
 
           // Allowing after declining, without leaving the page. The tag is
@@ -315,6 +319,17 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
             if (accepted) accepted.hidden = true;
             return;
           }
+          // No answer stored here. A browser-level opt-out supplies one, and a
+          // reader who has already refused globally is not asked again. stop()
+          // rather than nothing, so an identifier left by an earlier grant whose
+          // preference has since been cleared does not survive the signal.
+          if (signalsOptOut()) {
+            stop();
+            var refused = banner();
+            if (refused) refused.hidden = true;
+            return;
+          }
+
           consentRequirement().then(function (requirement) {
             if (readPreference() !== null) return;
             if (mayRun(requirement, null)) {
@@ -331,7 +346,7 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
           preference: readPreference,
           setPreference: writePreference,
           requirement: consentRequirement,
-          refused: signalsRefusal,
+          optedOut: signalsOptOut,
           subscribe: function (onChange) {
             window.addEventListener(PREFERENCE_EVENT, onChange);
             window.addEventListener("storage", function (event) {
@@ -357,16 +372,6 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
           } else {
             run();
           }
-        }
-
-        if (signalsRefusal()) {
-          // Neither measured nor asked. The banner stays in the document,
-          // hidden, so nothing depends on it having rendered.
-          ready(function () {
-            var element = banner();
-            if (element) element.hidden = true;
-          });
-          return;
         }
 
         ready(function () {

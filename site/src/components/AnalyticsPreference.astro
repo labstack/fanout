@@ -60,19 +60,10 @@ const enabled =
     function render() {
       var preference = api.preference();
 
-      if (api.refused()) {
-        status.textContent =
-          "Your browser sends a Do Not Track or Global Privacy Control signal, so " +
-          "analytics do not run here whatever this control says.";
-        for (var i = 0; i < buttons.length; i++) buttons[i].disabled = true;
-        return;
-      }
-
-      for (var j = 0; j < buttons.length; j++) {
-        buttons[j].disabled = false;
-        buttons[j].setAttribute(
+      for (var i = 0; i < buttons.length; i++) {
+        buttons[i].setAttribute(
           "aria-pressed",
-          String(buttons[j].dataset.consent === preference),
+          String(buttons[i].dataset.consent === preference),
         );
       }
 
@@ -82,6 +73,16 @@ const enabled =
       }
       if (preference === "denied") {
         status.textContent = "Analytics are not allowed in this browser.";
+        return;
+      }
+
+      // Nothing has been answered here. A Global Privacy Control signal is the
+      // answer until this control gives a different one, which is why the
+      // buttons stay live rather than being disabled underneath the sentence.
+      if (api.optedOut()) {
+        status.textContent =
+          "Your browser sends a Global Privacy Control signal, so analytics are off " +
+          "in this browser. Allow turns them on.";
         return;
       }
 
