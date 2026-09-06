@@ -23,10 +23,13 @@ vi.mock("@ag-ui/client", () => ({
   },
 }));
 
+const defaultViewer = { id: "viewer-1", email: "v@example.com", name: "Vee", role: "admin" };
+const viewerMock = vi.hoisted(() => ({ current: { id: "viewer-1", email: "v@example.com", name: "Vee", role: "admin" } }));
+
 vi.mock("./auth", () => ({
   default: ({ children }: { children: React.ReactNode }) => children,
   useRuntimeStatus: () => ({ setup_required: false, auth_mode: "local", agent_available: true, smtp_configured: true, self_signup: false }),
-  useViewer: () => ({ id: "viewer-1", email: "v@example.com", name: "Vee", role: "admin" }),
+  useViewer: () => viewerMock.current,
   authorizedFetch: (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init),
   logout: vi.fn(async () => undefined),
   clearSession: vi.fn(),
@@ -70,6 +73,7 @@ describe("Session", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
+    viewerMock.current = defaultViewer;
   });
 
   it("starts a draft without fetching a thread and names the thread on first send", async () => {
@@ -184,6 +188,43 @@ describe("Session", () => {
     await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
     await vi.waitFor(() => expect(document.body.textContent).toContain("This chat no longer exists"));
     expect(document.body.textContent).toContain("New chat");
+    await act(async () => root.unmount());
+  });
+
+  it("the burger's label names the action it performs, not a fixed state", async () => {
+    const rootRoute = createRootRoute({ component: App });
+    const chatIndex = createRoute({ getParentRoute: () => rootRoute, path: "/chat/", component: ChatPage });
+    const router = createRouter({ routeTree: rootRoute.addChildren([chatIndex]) });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
+    await vi.waitFor(() => expect(document.querySelector('button[aria-label="Open navigation"]')).not.toBeNull());
+
+    await act(async () => (document.querySelector('button[aria-label="Open navigation"]') as HTMLButtonElement).click());
+    expect(document.querySelector('button[aria-label="Close navigation"]')).not.toBeNull();
+    expect(document.querySelector('button[aria-label="Open navigation"]')).toBeNull();
+
+    await act(async () => (document.querySelector('button[aria-label="Close navigation"]') as HTMLButtonElement).click());
+    expect(document.querySelector('button[aria-label="Open navigation"]')).not.toBeNull();
+
+    await act(async () => root.unmount());
+  });
+
+  it("falls back to the email initial when the viewer's name is only whitespace", async () => {
+    viewerMock.current = { id: "viewer-1", email: "v@example.com", name: "   ", role: "admin" };
+    const rootRoute = createRootRoute({ component: App });
+    const chatIndex = createRoute({ getParentRoute: () => rootRoute, path: "/chat/", component: ChatPage });
+    const router = createRouter({ routeTree: rootRoute.addChildren([chatIndex]) });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+
+    await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
+    await vi.waitFor(() => expect(document.querySelector('button[aria-label="Account menu"]')).not.toBeNull());
+    expect(document.querySelector('button[aria-label="Account menu"]')?.textContent?.trim()).toBe("V");
+
     await act(async () => root.unmount());
   });
 });

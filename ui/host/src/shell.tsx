@@ -56,7 +56,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     <AppShell.Header>
       <Group h="100%" px={{ base: "sm", sm: "md" }} justify="space-between" wrap="nowrap">
         <Group gap="sm" wrap="nowrap">
-          <Burger hiddenFrom="md" opened={drawerOpened} onClick={() => { setKeyboardOpen(false); drawer.toggle(); }} size="sm" aria-label="Open navigation" />
+          <Burger hiddenFrom="md" opened={drawerOpened} onClick={() => { setKeyboardOpen(false); drawer.toggle(); }} size="sm" aria-label={drawerOpened ? "Close navigation" : "Open navigation"} />
           <BrandLockup size="small" />
         </Group>
         <Group gap="xs" wrap="nowrap">
@@ -91,7 +91,8 @@ function ColorSchemeToggle() {
 
 function AccountMenu({ onError }: { onError: (message: string) => void }) {
   const viewer = useViewer();
-  const initial = (viewer.name || viewer.email || "?").trim().charAt(0).toUpperCase();
+  const label = viewer.name.trim() || viewer.email.trim() || "?";
+  const initial = label.charAt(0).toUpperCase();
   return <Menu position="bottom-end" withinPortal shadow="md">
     <Menu.Target>
       <ActionIcon variant="subtle" color="gray" size="lg" radius="xl" aria-label="Account menu">
