@@ -86,11 +86,17 @@ describe("widgets", () => {
     await act(async () => root.unmount());
   });
 
-  it("logs show a histogram and timestamps", async () => {
+  it("logs show a histogram, timestamps and a severity badge that holds its width", async () => {
     const root = await mount({ id: "w4", type: "logs", title: "Logs", enabled: true });
     await vi.waitFor(() => expect(document.body.textContent).toContain("POST /charge failed"));
     expect(document.querySelector('[data-chart="Log volume by severity"]')).not.toBeNull();
     expect(document.body.textContent).toMatch(/\d{1,2}:59/);
+    // A Badge is an inline-grid with hidden overflow, so a squeezed row
+    // collapses its track and ERROR measures zero. happy-dom does not lay out,
+    // so the guard is on the declaration the browser needs.
+    const severity = Array.from(document.querySelectorAll<HTMLElement>(".mantine-Badge-root")).find((badge) => badge.textContent === "ERROR");
+    expect(severity).not.toBeUndefined();
+    expect(severity?.style.minWidth).toBe("max-content");
     await act(async () => root.unmount());
   });
 

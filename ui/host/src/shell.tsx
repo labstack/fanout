@@ -1,5 +1,5 @@
 import { ActionIcon, Alert, AppShell, Avatar, Burger, Drawer, Group, Menu, Tooltip, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
-import { useDisclosure } from "@mantine/hooks";
+import { useDisclosure, useMediaQuery } from "@mantine/hooks";
 import { GithubLogo, GlobeHemisphereWest, Moon, SignOut, Sun } from "@phosphor-icons/react";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -21,6 +21,11 @@ export default function Shell({ children }: { children: ReactNode }) {
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [signOutError, setSignOutError] = useState("");
   const railRef = useRef<RailHandle>(null);
+  // The navbar stays mounted below `md`, only collapsed, so its ref is never
+  // null and cannot say which rail the viewer can see. The breakpoint can.
+  const mobile = useMediaQuery("(max-width: 62em)");
+  const mobileRef = useRef(mobile);
+  mobileRef.current = mobile;
 
   // A navigation from inside the drawer should close it.
   useEffect(() => { drawer.close(); }, [pathname]);
@@ -29,7 +34,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     const shortcuts = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (railRef.current) railRef.current.focusSearch(); else { setKeyboardOpen(true); drawer.open(); }
+        if (mobileRef.current) { setKeyboardOpen(true); drawer.open(); } else railRef.current?.focusSearch();
       }
     };
     window.addEventListener("keydown", shortcuts);

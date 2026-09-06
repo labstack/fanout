@@ -40,9 +40,12 @@ export default function LogsWidget({ widget, filters, dark }: WidgetBodyProps) {
         <Table.Tbody>{entries.map((entry, index) => <Table.Tr key={`${entry.time}-${index}`}>
           <Table.Td style={{ whiteSpace: "nowrap" }}><Text component="span" size="xs" ff="monospace" c="dimmed">{result ? timelineTimestamp(entry.time, result.provenance.window, true) : entry.time}</Text></Table.Td>
           {/* The body cell takes the whole row, so every other cell has to say
-              it will not be squeezed: a shrunk badge loses INFO/WARN/ERROR and
-              leaves severity as colour alone. */}
-          <Table.Td style={{ whiteSpace: "nowrap", width: 1 }}><Badge size="xs" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td>
+              it will not be squeezed. A Badge is an inline-grid with hidden
+              overflow: squeeze it and the track collapses and the label
+              measures zero, which is what left severity as colour alone. The
+              badge asks for its content's width and the cell does not fight it
+              — a `width: 1` here made the collapse worse. */}
+          <Table.Td style={{ whiteSpace: "nowrap" }}><Badge size="xs" color={severityColor(entry.severity)} variant="light" style={{ minWidth: "max-content" }}>{entry.severity || "LOG"}</Badge></Table.Td>
           <Table.Td style={{ whiteSpace: "nowrap" }}><Text component="span" size="sm" fw={600}>{entry.service}</Text></Table.Td>
           <Table.Td style={{ width: "100%" }}><Text size="sm" lineClamp={1} title={entry.body}>{entry.body}</Text></Table.Td>
         </Table.Tr>)}</Table.Tbody>

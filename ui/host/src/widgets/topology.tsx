@@ -19,17 +19,20 @@ export default function TopologyWidget({ widget, filters, dark, onOpenChat }: Wi
     const colors = chartTheme(dark);
     const status = statusHex(dark);
     const healthHex = (health: string) => (health === "unhealthy" ? status.bad : health === "degraded" ? status.warn : status.ok);
+    // A circular layout assigns ring positions by data index, and the server
+    // orders services by error rate, so the ring would still turn over whenever
+    // a spike aged out. Sorting by name makes a service's position a function
+    // of the service set alone: the same map on every one of the 30 second
+    // polls. The chat view keeps the force layout — it is drawn once, not
+    // polled.
+    const nodes = [...data.nodes].sort((a, b) => a.service.localeCompare(b.service));
     return {
       tooltip: { backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } },
       series: [{
-        // A circular layout puts a node in the same place on every refetch. The
-        // force layout ran again from scratch each time the 30 second poll
-        // returned, so the whole map rearranged itself under the reader. The
-        // chat view keeps the force layout: it is drawn once and not polled.
         type: "graph", layout: "circular", circular: { rotateLabel: false }, roam: false, draggable: false,
         label: { show: true, position: "bottom", color: colors.text, fontSize: 10 },
         edgeSymbol: ["none", "arrow"], edgeSymbolSize: 6,
-        data: data.nodes.map((node) => ({ id: node.service, name: node.service, value: node.spans, symbolSize: Math.min(34, 18 + Math.log10(Math.max(node.spans, 1)) * 4), itemStyle: { color: colors.surface, borderColor: healthHex(node.health), borderWidth: 3 } })),
+        data: nodes.map((node) => ({ id: node.service, name: node.service, value: node.spans, symbolSize: Math.min(34, 18 + Math.log10(Math.max(node.spans, 1)) * 4), itemStyle: { color: colors.surface, borderColor: healthHex(node.health), borderWidth: 3 } })),
         links: data.edges.map((edge) => ({ source: edge.caller, target: edge.callee, value: edge.calls, lineStyle: { width: Math.min(4, 1 + Math.log10(Math.max(edge.calls, 1))), color: edge.error_rate >= 0.05 ? status.bad : colors.muted, opacity: 0.5, curveness: 0.08 } })),
         emphasis: { focus: "adjacency" },
       }],

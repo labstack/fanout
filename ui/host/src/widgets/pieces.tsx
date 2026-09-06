@@ -17,7 +17,9 @@ export function Metric({ label, value, color, hint, children }: { label: string;
 }
 
 export function HealthBadge({ health, label }: { health: string; label: string }) {
-  return <Badge color={healthColor(health)} variant="light" tt="none">{label}</Badge>;
+  // A Badge is an inline-grid with hidden overflow, so a narrow row collapses
+  // its track and the label measures zero. It keeps its content's width.
+  return <Badge color={healthColor(health)} variant="light" tt="none" style={{ minWidth: "max-content" }}>{label}</Badge>;
 }
 
 export function Empty({ text }: { text: string }) {

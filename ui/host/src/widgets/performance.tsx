@@ -41,7 +41,9 @@ export default function PerformanceWidget({ widget, filters, dark }: WidgetBodyP
     {option && <Box style={{ flex: 1, minHeight: 120 }}><EChart option={option} height="100%" label="Operations and P95 latency" /></Box>}
     {endpoints.length > 0 && <Table verticalSpacing={4} fz="sm">
       <Table.Tbody>{endpoints.map((endpoint) => <Table.Tr key={`${endpoint.method}-${endpoint.path}`}>
-        <Table.Td><Badge variant="light" size="xs" mr={6}>{endpoint.method}</Badge><Text component="span" size="sm" ff="monospace">{endpoint.path}</Text></Table.Td>
+        {/* The path beside it can take the whole cell; a squeezed Badge
+            collapses its grid track and loses the method. */}
+        <Table.Td><Badge variant="light" size="xs" mr={6} style={{ minWidth: "max-content" }}>{endpoint.method}</Badge><Text component="span" size="sm" ff="monospace">{endpoint.path}</Text></Table.Td>
         <Table.Td ta="right"><Text component="span" size="sm" c="dimmed">{integer.format(endpoint.calls)} calls</Text></Table.Td>
         <Table.Td ta="right"><Text component="span" size="sm" ff="monospace">{duration(endpoint.p95_ms)}</Text></Table.Td>
       </Table.Tr>)}</Table.Tbody>
