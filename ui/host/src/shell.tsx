@@ -15,6 +15,10 @@ export default function Shell({ children }: { children: ReactNode }) {
   const { dashboardId } = useParams({ strict: false }) as { dashboardId?: string };
   const isChat = pathname === "/chat" || pathname.startsWith("/chat/");
   const [drawerOpened, drawer] = useDisclosure(false);
+  // Why the drawer opened decides whether search takes focus: a burger tap is a
+  // request to read the lists, and focusing search there raises the phone
+  // keyboard over them. Only ⌘K is asking to search.
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [signOutError, setSignOutError] = useState("");
   const railRef = useRef<RailHandle>(null);
 
@@ -25,7 +29,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     const shortcuts = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        if (railRef.current) railRef.current.focusSearch(); else drawer.open();
+        if (railRef.current) railRef.current.focusSearch(); else { setKeyboardOpen(true); drawer.open(); }
       }
     };
     window.addEventListener("keydown", shortcuts);
@@ -47,7 +51,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     <AppShell.Header>
       <Group h="100%" px={{ base: "sm", sm: "md" }} justify="space-between" wrap="nowrap">
         <Group gap="sm" wrap="nowrap">
-          <Burger hiddenFrom="md" opened={drawerOpened} onClick={drawer.toggle} size="sm" aria-label="Open navigation" />
+          <Burger hiddenFrom="md" opened={drawerOpened} onClick={() => { setKeyboardOpen(false); drawer.toggle(); }} size="sm" aria-label="Open navigation" />
           <BrandLockup size="small" />
         </Group>
         <Group gap="xs" wrap="nowrap">
@@ -58,7 +62,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     </AppShell.Header>
     <AppShell.Navbar p="sm"><Rail ref={railRef} {...railProps} /></AppShell.Navbar>
     <Drawer opened={drawerOpened} onClose={drawer.close} hiddenFrom="md" size={288} padding="sm" title={<BrandLockup size="small" />} overlayProps={{ backgroundOpacity: 0.24, blur: 1 }}>
-      <Rail {...railProps} autoFocusSearch={drawerOpened} />
+      <Rail {...railProps} autoFocusSearch={drawerOpened && keyboardOpen} />
     </Drawer>
     <AppShell.Main>
       {signOutError && <Alert color="bad" m="md" withCloseButton onClose={() => setSignOutError("")}>{signOutError}</Alert>}

@@ -160,11 +160,14 @@ function SectionLabel({ children }: { children: string }) {
 function ThreadRow({ thread, active, onSelect, onRename, onDelete }: { thread: ThreadSummary; active: boolean; onSelect: () => void; onRename: () => void; onDelete: () => void }) {
   return <Box data-active={active || undefined} className="rail-row">
     <Group gap={2} wrap="nowrap">
+      {/* Two lines rather than one: a fixed-width time beside the title left it
+          about a hundred pixels of a 219px row, and the cut point moved with
+          the length of the time. On its own line the title gets the row. */}
       <UnstyledButton onClick={onSelect} aria-current={active ? "page" : undefined} p="sm" flex={1} style={{ minWidth: 0 }}>
-        <Group justify="space-between" gap="sm" wrap="nowrap">
+        <Stack gap={0}>
           <Text size="sm" fw={active ? 600 : 500} truncate>{thread.title}</Text>
-          <Text c="dimmed" size="xs" style={{ flexShrink: 0 }}>{threadTime(thread.updatedAt)}</Text>
-        </Group>
+          <Text c="dimmed" size="xs">{threadTime(thread.updatedAt)}</Text>
+        </Stack>
       </UnstyledButton>
       <Menu position="bottom-end" withinPortal>
         <Menu.Target>

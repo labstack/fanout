@@ -163,6 +163,18 @@ body,
   overflow-x: auto;
 }
 
+/* Mantine's Typography styles a bare `code` as an inline chip: its own
+   background, padding, radius and a smaller size. Inside a `pre` that chip
+   paints one ragged rectangle per line and shrinks the block's text below the
+   size the `pre` sets, so the block is handed back to its parent here. */
+.chat-code pre code {
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  font-size: inherit;
+  font-family: inherit;
+}
+
 .widget-card .widget-body {
   flex: 1;
   min-height: 0;
