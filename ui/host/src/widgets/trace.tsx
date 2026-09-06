@@ -1,9 +1,9 @@
 import { ActionIcon, Box, Group, SimpleGrid, Stack, Text, Tooltip } from "@mantine/core";
 import { Check, Copy } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
 import type { TraceDetail } from "../../../contracts";
 import { seriesColor } from "../../../chart";
 import { duration, integer } from "../../../format";
+import { useCopy } from "../copy";
 import { useObservability, widgetParams } from "./data";
 import { Empty, Metric, WidgetError } from "./pieces";
 import type { WidgetBodyProps } from "./widget-card";
@@ -56,24 +56,10 @@ function SpanBars({ spans, dark }: { spans: TraceDetail["spans"]; dark: boolean 
   </Stack>;
 }
 
-/* Same contract as the chat's copy button: a denied permission refuses the
-   write and an insecure context has no clipboard to refuse with, so the
-   rejection is caught and shown for a moment instead of escaping. */
 function CopyTraceID({ value }: { value: string }) {
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-  // The reset timer outlives the click, so it is held and cleared: a second
-  // click must not be cut short by the first one's timer, and a card removed
-  // mid-wait must not set state on a component that is gone.
-  const resetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => { if (resetRef.current) clearTimeout(resetRef.current); }, []);
-  function copy() {
-    if (resetRef.current) clearTimeout(resetRef.current);
-    setState("idle");
-    const written = navigator.clipboard ? navigator.clipboard.writeText(value) : Promise.reject(new Error("clipboard unavailable"));
-    void written.then(() => setState("copied"), () => setState("failed")).finally(() => { resetRef.current = setTimeout(() => setState("idle"), 1500); });
-  }
+  const { state, copy } = useCopy();
   return <Tooltip label={state === "failed" ? "Could not copy" : state === "copied" ? "Copied" : "Copy trace id"}>
-    <ActionIcon variant="subtle" color="gray" size="xs" aria-label="Copy trace id" data-state={state === "idle" ? undefined : state} onClick={copy}>
+    <ActionIcon variant="subtle" color="gray" size="xs" aria-label="Copy trace id" data-state={state === "idle" ? undefined : state} onClick={() => copy(value)}>
       {state === "copied" ? <Check size={12} weight="bold" /> : <Copy size={12} />}
     </ActionIcon>
   </Tooltip>;

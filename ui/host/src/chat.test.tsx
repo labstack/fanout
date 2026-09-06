@@ -131,6 +131,34 @@ describe("ChatPage", () => {
       node.process.off("unhandledRejection", capture);
     }
   });
+
+  // A second click inside the reset window used to be cut short by the first
+  // click's own timer, flipping the button back to idle mid-window.
+  it("keeps the copied state through a second click inside the reset window", async () => {
+    const writeText = stubClipboard(async () => undefined);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const root = await mount(value({ messages: [{ id: "a1", role: "assistant", content: "All clear." } as Message] }));
+      await act(async () => {
+        copyButton()?.click();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(copyButton()?.getAttribute("data-state")).toBe("copied");
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(copyButton()?.getAttribute("data-state")).toBe("copied");
+      await act(async () => {
+        copyButton()?.click();
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(copyButton()?.getAttribute("data-state")).toBe("copied");
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(copyButton()?.getAttribute("data-state")).toBe("copied");
+      expect(writeText).toHaveBeenCalledTimes(2);
+      await act(async () => root.unmount());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 // The suite runs on Node but does not depend on @types/node, so the rejection

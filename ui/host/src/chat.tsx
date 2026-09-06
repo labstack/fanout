@@ -1,11 +1,12 @@
 import type { Message } from "@ag-ui/client";
 import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography } from "@mantine/core";
 import { Check, Copy, PaperPlaneTilt, Stop } from "@phosphor-icons/react";
-import { lazy, Suspense, useState, type ComponentProps, type ReactNode } from "react";
+import { lazy, Suspense, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useFanoutApp } from "./app-context";
 import { BrandMark } from "./brand";
+import { useCopy } from "./copy";
 import type { MCPAppContent } from "./mcp-app-frame";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
@@ -111,20 +112,10 @@ function ChatMessage({ message, time, send }: { message: Message; time?: number;
 }
 
 function CopyButton({ text, label }: { text: string; label: string }) {
-  const [copied, setCopied] = useState(false);
-  const [failed, setFailed] = useState(false);
-  // A denied permission refuses the write, and an insecure context has no
-  // clipboard to refuse with. Either way the button says so for a moment
-  // rather than dying on a rejection nobody handles.
-  function copy() {
-    setCopied(false);
-    setFailed(false);
-    const written = navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject(new Error("clipboard unavailable"));
-    void written.then(() => { setCopied(true); setTimeout(() => setCopied(false), 1500); }).catch(() => { setFailed(true); setTimeout(() => setFailed(false), 1500); });
-  }
-  return <Tooltip label={failed ? "Could not copy" : copied ? "Copied" : label}>
-    <ActionIcon variant="subtle" color="gray" size="sm" aria-label={label} data-state={failed ? "failed" : copied ? "copied" : undefined} onClick={copy}>
-      {copied ? <Check size={13} weight="bold" /> : <Copy size={13} />}
+  const { state, copy } = useCopy();
+  return <Tooltip label={state === "failed" ? "Could not copy" : state === "copied" ? "Copied" : label}>
+    <ActionIcon variant="subtle" color="gray" size="sm" aria-label={label} data-state={state === "idle" ? undefined : state} onClick={() => copy(text)}>
+      {state === "copied" ? <Check size={13} weight="bold" /> : <Copy size={13} />}
     </ActionIcon>
   </Tooltip>;
 }
