@@ -14,9 +14,9 @@
  * mean something.
  *
  * Whether consent must be asked for is a question about the reader's location,
- * not about this site. The EEA and the UK require permission before the cookie
- * is set; elsewhere measurement may run with a way to turn it off. Cloudflare
- * already knows which one applies and says so at
+ * not about this site. The EEA, the UK and the Crown Dependencies require
+ * permission before the cookie is set; elsewhere measurement may run with a way
+ * to turn it off. Cloudflare already knows which one applies and says so at
  * /cdn-cgi/trace, so most readers are measured properly and never see a banner,
  * and the readers who are owed the question get it. A failed or unavailable
  * lookup is treated as "ask" — the safe direction, and what local development
@@ -57,19 +57,22 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
         var STORAGE_KEY = "fanout.analytics-consent.v1";
         var PREFERENCE_EVENT = "fanout:analytics-preference";
 
-        // The EEA and the UK: the places whose law requires permission before a
-        // browser stores an analytics identifier. A country this list does not
-        // name gets measurement with an opt-out instead.
+        // The EEA, the UK and the Crown Dependencies: the places that require
+        // permission before a browser stores an analytics identifier. A country
+        // this list does not name gets measurement with an opt-out instead.
         //
-        // Guernsey, the Isle of Man and Jersey were on this list and are not now.
-        // Their data protection law follows the GDPR, but none of them enacted a
-        // PECR equivalent, so the rule that governs storing an identifier does
-        // not reach them.
+        // Guernsey, the Isle of Man and Jersey are here on the regulators' word
+        // rather than on a reading of the statutes. None of the three enacted a
+        // PECR equivalent, and it is PECR, not the GDPR, that makes storage
+        // itself the thing consent is owed for -- but their data protection
+        // authorities publish cookie guidance that asks for consent anyway, and
+        // three jurisdictions of negligible traffic are not worth being right
+        // about. Removing them is not a decision to take from this file.
         var PRIOR_CONSENT = [
           "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE",
           "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT",
           "RO", "SK", "SI", "ES", "SE", "IS", "LI", "NO",
-          "GB",
+          "GB", "GG", "IM", "JE",
         ];
 
         var memoryPreference = null;
