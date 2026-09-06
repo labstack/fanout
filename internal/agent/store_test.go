@@ -460,3 +460,75 @@ func messageIDs(messages []agtypes.Message) []string {
 	}
 	return ids
 }
+
+func TestStoreStartRunRepairsUnansweredToolCalls(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewStore(database.DB)
+	ctx := context.Background()
+
+	first := agtypes.RunAgentInput{ThreadID: "thread-1", RunID: "run-1", Messages: []agtypes.Message{{ID: "user-1", Role: agtypes.RoleUser, Content: "health?"}}}
+	if _, err := store.StartRun(ctx, "owner-1", first); err != nil {
+		t.Fatal(err)
+	}
+	// A run stopped between the model asking for a tool and the tool answering:
+	// the ask is persisted, the answer never arrives.
+	interrupted := []agtypes.Message{
+		{ID: "user-1", Role: agtypes.RoleUser, Content: "health?"},
+		{ID: "assistant-1", Role: agtypes.RoleAssistant, Content: "checking", ToolCalls: []agtypes.ToolCall{{ID: "call-1", Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: "observability_overview"}}}},
+	}
+	if err := store.FinishRun(ctx, "owner-1", first.ThreadID, first.RunID, interrupted, nil, false, context.Canceled); err != nil {
+		t.Fatal(err)
+	}
+
+	second := agtypes.RunAgentInput{ThreadID: "thread-1", RunID: "run-2", Messages: []agtypes.Message{{ID: "user-2", Role: agtypes.RoleUser, Content: "still there?"}}}
+	seed, err := store.StartRun(ctx, "owner-1", second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range seed {
+		for _, call := range message.ToolCalls {
+			t.Fatalf("seed still carries the unanswered tool call %q, which the provider rejects", call.ID)
+		}
+	}
+	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,assistant-1,user-2" {
+		t.Fatalf("seed = %v, want the turn kept with its unanswered call dropped", got)
+	}
+	if seed[1].Content != "checking" {
+		t.Fatalf("assistant text = %q, want the spoken part kept", seed[1].Content)
+	}
+}
+
+func TestStoreStartRunDropsAnEmptyInterruptedTurn(t *testing.T) {
+	database, err := controlstore.NewSQLite(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	store := NewStore(database.DB)
+	ctx := context.Background()
+
+	first := agtypes.RunAgentInput{ThreadID: "thread-1", RunID: "run-1", Messages: []agtypes.Message{{ID: "user-1", Role: agtypes.RoleUser, Content: "health?"}}}
+	if _, err := store.StartRun(ctx, "owner-1", first); err != nil {
+		t.Fatal(err)
+	}
+	// The model asked for a tool and said nothing else before the run died.
+	interrupted := []agtypes.Message{
+		{ID: "user-1", Role: agtypes.RoleUser, Content: "health?"},
+		{ID: "assistant-1", Role: agtypes.RoleAssistant, ToolCalls: []agtypes.ToolCall{{ID: "call-1", Type: agtypes.ToolCallTypeFunction, Function: agtypes.FunctionCall{Name: "observability_overview"}}}},
+	}
+	if err := store.FinishRun(ctx, "owner-1", first.ThreadID, first.RunID, interrupted, nil, false, context.Canceled); err != nil {
+		t.Fatal(err)
+	}
+
+	seed, err := store.StartRun(ctx, "owner-1", agtypes.RunAgentInput{ThreadID: "thread-1", RunID: "run-2", Messages: []agtypes.Message{{ID: "user-2", Role: agtypes.RoleUser, Content: "still there?"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := messageIDs(seed); strings.Join(got, ",") != "user-1,user-2" {
+		t.Fatalf("seed = %v, want the empty interrupted turn dropped entirely", got)
+	}
+}

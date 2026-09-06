@@ -263,11 +263,19 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 // The server owns the record. A request may add to a thread but cannot rewrite
 // or delete what is already stored, so the views the agent attached to earlier
 // runs survive a browser that no longer carries them, and a caller cannot
-// fabricate assistant or tool history by posting it. Turns are matched by the
-// id the client mints, which makes a retry that re-posts the same history a
-// no-op; a turn without an id cannot be recognised on a second pass, so it is
-// appended rather than silently dropped.
+// fabricate assistant or tool history by posting it.
+//
+// Turns are matched by the id the client mints, so re-posting a history the
+// server has already seen adds nothing. That is deduplication, not replay
+// protection: a client that mints a fresh id for the same question asks it
+// twice, which is what a person clicking twice means anyway.
+//
+// The cost of dropping what the client authored is that a failed FinishRun —
+// the loss runtime.Run already tolerates — is no longer healed by the next
+// request carrying the browser's copy. The thread keeps the question and loses
+// the answer, where before it might have been restored by accident.
 func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
+	stored = dropUnansweredToolCalls(stored)
 	known := make(map[string]struct{}, len(stored))
 	for _, message := range stored {
 		if message.ID != "" {
@@ -288,6 +296,46 @@ func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
 		merged = append(merged, message)
 	}
 	return merged
+}
+
+// dropUnansweredToolCalls removes tool calls that no result answers.
+//
+// A run can die between the model asking for a tool and the tool replying —
+// the reader pressing Stop is the everyday case, since that cancels the
+// request while the final write still goes through on an uncancelled context.
+// What lands is an ask with no answer, and both providers reject a
+// conversation carrying one. That used to be survivable because the next run
+// rebuilt the thread from the browser's copy; now that the server seeds from
+// its own record, an orphan left in it would fail every later run on the
+// thread with no way for the reader to clear it. An assistant turn that said
+// something keeps its words and loses the dangling call; one that only asked
+// is dropped whole, because nothing of it remains to say.
+func dropUnansweredToolCalls(messages []agtypes.Message) []agtypes.Message {
+	answered := make(map[string]struct{})
+	for _, message := range messages {
+		if message.Role == agtypes.RoleTool && message.ToolCallID != "" {
+			answered[message.ToolCallID] = struct{}{}
+		}
+	}
+	repaired := make([]agtypes.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Role != agtypes.RoleAssistant || len(message.ToolCalls) == 0 {
+			repaired = append(repaired, message)
+			continue
+		}
+		kept := make([]agtypes.ToolCall, 0, len(message.ToolCalls))
+		for _, call := range message.ToolCalls {
+			if _, ok := answered[call.ID]; ok {
+				kept = append(kept, call)
+			}
+		}
+		if len(kept) == 0 && strings.TrimSpace(messageText(message.Content)) == "" {
+			continue
+		}
+		message.ToolCalls = kept
+		repaired = append(repaired, message)
+	}
+	return repaired
 }
 
 // FinishRun persists the final conversation and the run outcome. The thread's
