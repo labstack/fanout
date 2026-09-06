@@ -31,7 +31,7 @@ export default function LogsWidget({ widget, filters, dark }: WidgetBodyProps) {
     };
   }, [dark, result]);
   if (logs.isError) return <WidgetError retry={() => void logs.refetch()} />;
-  const entries = (result?.data.entries ?? []).slice(0, 6);
+  const entries = (result?.data.entries ?? []).slice(0, 5);
   if (result && entries.length === 0) return <Empty text="No matching logs in this window" />;
   return <Stack gap="xs" h="100%">
     {option && <Box h={72}><EChart option={option} height={72} label="Log volume by severity" /></Box>}

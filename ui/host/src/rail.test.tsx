@@ -120,6 +120,20 @@ describe("Rail", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Result for checkout"));
     expect(document.body.textContent).toContain("Checkout");
     expect(document.body.textContent).not.toContain("System overview");
+    expect(document.body.textContent).not.toContain("No matching dashboards");
+    await act(async () => root.unmount());
+  });
+
+  // A search that matches no dashboard has to say so, or the section reads as
+  // an app with no dashboards in it.
+  it("says when a search matches no dashboard", async () => {
+    const { root, render } = mount();
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
+    const search = document.querySelector('input[aria-label="Search chats and dashboards"]') as HTMLInputElement;
+    await act(async () => setValue(search, "zzz"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("No matching dashboards"), { timeout: 1500 });
+    expect(document.body.textContent).toContain("Create with AI");
     await act(async () => root.unmount());
   });
 

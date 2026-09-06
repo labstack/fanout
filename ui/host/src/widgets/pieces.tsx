@@ -1,7 +1,8 @@
 import { Badge, Box, Button, Center, Paper, Text } from "@mantine/core";
 import { ListMagnifyingGlass, WarningCircle } from "@phosphor-icons/react";
-import type { ReactNode } from "react";
-import { EChart } from "../echart";
+import { LineChart } from "echarts/charts";
+import { useMemo, type ReactNode } from "react";
+import { EChart, useECharts } from "../echart";
 import { healthColor } from "../../../chart";
 
 /** A tile. Anything passed as children sits under the value, inside the tile's
@@ -34,15 +35,19 @@ export function WidgetError({ retry }: { retry: () => void }) {
   </Center>;
 }
 
+// The sparkline draws a line, so it registers the line chart here rather than
+// relying on whichever widget happened to import it first.
+useECharts([LineChart]);
+
 /** A line with no axes, for a metric tile. */
 export function Sparkline({ values, color, label }: { values: number[]; color: string; label: string }) {
-  const option = {
+  const option = useMemo(() => ({
     animation: false,
     grid: { left: 0, right: 0, top: 2, bottom: 2 },
     xAxis: { type: "category", show: false, data: values.map((_, index) => index) },
     yAxis: { type: "value", show: false, min: 0 },
     tooltip: { show: false },
     series: [{ type: "line", data: values, showSymbol: false, smooth: 0.3, lineStyle: { width: 1.5, color }, areaStyle: { opacity: 0.12, color } }],
-  };
+  }), [values, color]);
   return <EChart option={option} height={28} label={label} />;
 }

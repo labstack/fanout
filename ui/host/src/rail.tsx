@@ -112,6 +112,10 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           <SectionLabel>Dashboards</SectionLabel>
           {dashboards.isLoading && <Center py="md"><Loader size="xs" /></Center>}
           {dashboards.isError && <Alert color="bad" radius="md" p="xs">Dashboards could not be loaded.</Alert>}
+          {/* A search that matches nothing here would otherwise leave the
+              label sitting on top of the Create button with no word about
+              why the list emptied. */}
+          {!dashboards.isLoading && !dashboards.isError && query && visibleDashboards.length === 0 && <Text c="dimmed" size="sm" px="sm" py="xs">No matching dashboards</Text>}
           {visibleDashboards.map((dashboard) => {
             const active = dashboard.id === activeDashboardID;
             return <UnstyledButton key={dashboard.id} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={() => onSelectDashboard(dashboard.id)}>

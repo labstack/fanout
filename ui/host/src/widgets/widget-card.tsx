@@ -9,6 +9,7 @@ import type { Filters, WidgetConfig } from "./data";
 import LogsWidget from "./logs";
 import OverviewWidget from "./overview";
 import PerformanceWidget from "./performance";
+import { Empty } from "./pieces";
 import TopologyWidget from "./topology";
 import TraceWidget from "./trace";
 
@@ -27,11 +28,18 @@ export const widgetTitles: Record<WidgetType, string> = { overview: "System heal
 
 const bodies: Record<WidgetType, (props: WidgetBodyProps) => JSX.Element> = { overview: OverviewWidget, topology: TopologyWidget, activity: ActivityWidget, assistant: AssistantWidget, performance: PerformanceWidget, trace: TraceWidget, logs: LogsWidget };
 
+function UnknownWidget() {
+  return <Empty text="This view type is not supported by this version" />;
+}
+
 export default function WidgetCard(props: WidgetBodyProps & { onRemove: () => void; onConfigure: (config: WidgetConfig) => void }) {
   const { widget, services, onRemove, onConfigure } = props;
   const [menuOpened, setMenuOpened] = useState(false);
   const [configuring, setConfiguring] = useState(false);
-  const Body = bodies[widget.type];
+  // A dashboard saved by a newer build can name a view this one has never
+  // heard of. That is one card that says so, not a crash that takes the
+  // whole page down with it.
+  const Body = bodies[widget.type] ?? UnknownWidget;
   return <Paper withBorder radius="lg" p="md" h="100%" className="widget-card" style={{ overflow: "hidden" }}>
     <Stack h="100%" gap="sm">
       <Group justify="space-between" align="center" wrap="nowrap" className="widget-drag" style={{ cursor: "grab" }}>

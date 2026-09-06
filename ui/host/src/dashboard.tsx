@@ -65,7 +65,9 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
   const layouts = useMemo(() => {
     const widgetType = new Map(state.widgets.map((widget) => [widget.id, widget.type as WidgetType]));
     const normalized: DashboardLayoutItem[] = state.layout.map((item) => {
-      const size = widgetDefaults[widgetType.get(item.i) ?? "overview"];
+      // A saved dashboard can name a widget type this build does not know,
+      // and an unknown key has no default size to read minimums from.
+      const size = widgetDefaults[widgetType.get(item.i) ?? "overview"] ?? widgetDefaults.overview;
       return { ...item, h: Math.max(item.h, size.minH), minW: Math.max(item.minW ?? 0, size.minW), minH: Math.max(item.minH ?? 0, size.minH) };
     });
     return { lg: normalized, md: normalized, sm: compactDashboardLayout(normalized, 6), xs: compactDashboardLayout(normalized, 2), xxs: compactDashboardLayout(normalized, 1) };

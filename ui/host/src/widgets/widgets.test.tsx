@@ -118,6 +118,16 @@ describe("widgets", () => {
     await act(async () => root.unmount());
   });
 
+  // A dashboard saved by a newer build can name a view this one has never
+  // heard of. That card says so; it does not take the page down.
+  it("says so when a widget type is unknown", async () => {
+    const root = await mount({ id: "w8", type: "mystery" as never, title: "Mystery", enabled: true });
+    expect(document.body.textContent).toContain("This view type is not supported by this version");
+    expect(document.body.textContent).toContain("Mystery");
+    expect(fetchMock).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
   it("removes through the actions menu and saves configuration", async () => {
     const onRemove = vi.fn();
     const onConfigure = vi.fn();
