@@ -2,10 +2,10 @@ import { HttpAgent, type Message } from "@ag-ui/client";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { threadHistoryQueryKey } from "./api";
 import { activityLabel, FanoutAppContext } from "./app-context";
 import AuthGate, { authorizedFetch, useRuntimeStatus } from "./auth";
 import { createID } from "./id";
-import { threadHistoryQueryKey } from "./rail";
 import Shell from "./shell";
 
 function Session() {
@@ -27,6 +27,9 @@ function Session() {
   const [activity, setActivity] = useState("");
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
+  // Bumped by the Retry button on a thread that failed to load. It is a
+  // dependency of the session effect, so a bump asks the server again.
+  const [reloadCount, setReloadCount] = useState(0);
   const pendingPromptRef = useRef("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -105,7 +108,7 @@ function Session() {
       },
     });
     return () => { active = false; subscription.unsubscribe(); agent.abortRun(); };
-  }, [agent, agentAvailable, queryClient, threadID]);
+  }, [agent, agentAvailable, queryClient, reloadCount, threadID]);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, running]);
 
@@ -178,8 +181,9 @@ function Session() {
   function selectThread(selectedThreadID: string) {
     void navigate({ to: "/chat/$threadId", params: { threadId: selectedThreadID } });
   }
+  function reloadThread() { setReloadCount((n) => n + 1); }
 
-  return <FanoutAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, input, setInput, error, bottomRef, inputRef, send, submit, stop, retry, openChat, newThread, selectThread }}>
+  return <FanoutAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, input, setInput, error, bottomRef, inputRef, send, submit, stop, retry, reloadThread, openChat, newThread, selectThread }}>
     <Shell><Outlet /></Shell>
   </FanoutAppContext.Provider>;
 }

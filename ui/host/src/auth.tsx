@@ -153,7 +153,10 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     clearLegacySession();
     jsonRequest("/api/auth/status").then(setStatus).catch((value) => setError(String(value))).finally(() => setStatusReady(true));
     loadAccount().catch(() => setViewer("none")).finally(() => setSessionReady(true));
-    const handleUnauthorized = () => setViewer("none");
+    // The session is gone, so the account that came with it is gone too:
+    // leaving it behind would name the signed-out viewer on the next sign-in
+    // screen and in whatever renders before the fresh account arrives.
+    const handleUnauthorized = () => { setViewer("none"); setAccount(null); };
     window.addEventListener(unauthorizedEvent, handleUnauthorized);
     return () => window.removeEventListener(unauthorizedEvent, handleUnauthorized);
   }, []);

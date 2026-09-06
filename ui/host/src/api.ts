@@ -8,6 +8,7 @@ export type DashboardState = { layout: DashboardLayoutRecord[]; widgets: Dashboa
 export type DashboardRecord = { id: string; name: string; description: string; is_default: boolean; state: DashboardState; updated_at: string };
 
 export const dashboardsQueryKey = ["dashboards"] as const;
+export const threadHistoryQueryKey = ["agent-threads"] as const;
 
 export async function getJSON<T>(url: string): Promise<T> {
   const response = await authorizedFetch(url);

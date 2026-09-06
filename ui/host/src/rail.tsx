@@ -3,10 +3,8 @@ import { useDebouncedValue } from "@mantine/hooks";
 import { DotsThree, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import { dashboardsQueryKey, getJSON, type DashboardSummary } from "./api";
+import { dashboardsQueryKey, getJSON, threadHistoryQueryKey, type DashboardSummary } from "./api";
 import { authorizedFetch } from "./auth";
-
-export const threadHistoryQueryKey = ["agent-threads"] as const;
 
 export type RailHandle = { focusSearch(): void };
 

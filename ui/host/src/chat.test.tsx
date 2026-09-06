@@ -10,7 +10,7 @@ function value(overrides: Partial<FanoutAppContextValue> = {}): FanoutAppContext
   return {
     agentAvailable: true, threadID: "thread-1", threadMissing: false, messages: [], messageTimes: {}, ready: true, running: false, activity: "",
     input: "", setInput: vi.fn(), error: "", bottomRef: createRef<HTMLDivElement>(), inputRef: createRef<HTMLTextAreaElement>(),
-    send: vi.fn(async () => undefined), submit: vi.fn((event: FormEvent) => event.preventDefault()), stop: vi.fn(), retry: vi.fn(),
+    send: vi.fn(async () => undefined), submit: vi.fn((event: FormEvent) => event.preventDefault()), stop: vi.fn(), retry: vi.fn(), reloadThread: vi.fn(),
     openChat: vi.fn(), newThread: vi.fn(), selectThread: vi.fn(),
     ...overrides,
   };
@@ -93,8 +93,11 @@ describe("ChatPage", () => {
     const root = await mount(context);
     expect(document.body.textContent).toContain("This chat could not be restored");
     expect(document.body.textContent).not.toContain("Loading chat");
+    // Nothing ran, so Retry has to load the thread again rather than replay
+    // a run that never started.
     await act(async () => button("Retry")?.click());
-    expect(context.retry).toHaveBeenCalled();
+    expect(context.reloadThread).toHaveBeenCalled();
+    expect(context.retry).not.toHaveBeenCalled();
     await act(async () => button("New chat")?.click());
     expect(context.newThread).toHaveBeenCalled();
     await act(async () => root.unmount());

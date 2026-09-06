@@ -22,7 +22,7 @@ export function toolTitle(name: string) {
 }
 
 export function ChatPage() {
-  const { agentAvailable, messages, messageTimes, ready, running, activity, error, threadMissing, bottomRef, send, retry, newThread } = useFanoutApp();
+  const { agentAvailable, messages, messageTimes, ready, running, activity, error, threadMissing, bottomRef, send, retry, reloadThread, newThread } = useFanoutApp();
   if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const visibleMessages = messages.filter((message) => message.role !== "tool");
   return <Box className="chat-pane">
@@ -30,8 +30,10 @@ export function ChatPage() {
       <Container size={880} px={{ base: "md", sm: "xl" }} py="lg">
         {threadMissing && <Alert color="warn" radius="lg" title="This chat no longer exists"><Group justify="space-between"><Text size="sm">It was deleted, or the link is wrong.</Text><Button size="compact-sm" variant="light" onClick={newThread}>New chat</Button></Group></Alert>}
         {/* A thread whose load failed never becomes ready, so showing the
-            loader here would spin forever: state the failure instead. */}
-        {!threadMissing && !ready && error && <RunError message={error} onRetry={retry} onNewThread={newThread} />}
+            loader here would spin forever: state the failure instead. Retry
+            here asks the server for the thread again; there is no run to
+            retry, because the conversation never arrived. */}
+        {!threadMissing && !ready && error && <RunError message={error} onRetry={reloadThread} onNewThread={newThread} />}
         {!threadMissing && !ready && !error && <Center mih="40vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">Loading chat</Text></Center>}
         {!threadMissing && ready && <>
           {visibleMessages.length === 0 && <Welcome onSelect={send} />}

@@ -19,6 +19,8 @@ export type FanoutAppContextValue = {
   submit: (event: FormEvent) => void;
   stop: () => void;
   retry: () => void;
+  /** Asks the server for this thread again after a load that failed. */
+  reloadThread: () => void;
   openChat: (prompt?: string) => void;
   newThread: () => void;
   selectThread: (threadID: string) => void;
