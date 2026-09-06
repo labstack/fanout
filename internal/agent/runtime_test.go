@@ -290,8 +290,8 @@ func TestRuntimeSurfacesTokenLimitTruncation(t *testing.T) {
 
 func TestSystemPromptForbidsTextDiagrams(t *testing.T) {
 	for _, want := range []string{
-		"Never draw diagrams, trees, or charts in text",
-		"never restate what an attached view already shows",
+		"never draw diagrams, trees, or charts in text",
+		"never add a table or list that restates what an attached view already shows",
 	} {
 		if !strings.Contains(systemPrompt, want) {
 			t.Fatalf("system prompt is missing %q", want)

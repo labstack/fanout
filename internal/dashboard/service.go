@@ -108,11 +108,15 @@ func DefaultState() State {
 			{ID: "activity", Type: "activity", Title: "Recent activity", Enabled: true},
 			{ID: "assistant", Type: "assistant", Title: "Ask Fanout", Enabled: true},
 		},
+		// Sizes mirror widgetDefaults in ui/host/src/dashboard-layout.ts: a card
+		// gets the shape its content fills. The old default gave Ask Fanout the
+		// full twelve columns for three chips and left the health card with a
+		// blank band under it.
 		Layout: []Layout{
-			{I: "health", X: 0, Y: 0, W: 4, H: 3, MinW: 3, MinH: 2},
-			{I: "topology", X: 4, Y: 0, W: 8, H: 6, MinW: 4, MinH: 4},
-			{I: "activity", X: 0, Y: 3, W: 4, H: 3, MinW: 3, MinH: 2},
-			{I: "assistant", X: 0, Y: 6, W: 12, H: 3, MinW: 4, MinH: 2},
+			{I: "health", X: 0, Y: 0, W: 4, H: 3, MinW: 3, MinH: 3},
+			{I: "topology", X: 4, Y: 0, W: 8, H: 5, MinW: 4, MinH: 4},
+			{I: "activity", X: 0, Y: 3, W: 4, H: 5, MinW: 3, MinH: 4},
+			{I: "assistant", X: 4, Y: 5, W: 4, H: 3, MinW: 3, MinH: 3},
 		},
 		Filters: Filters{Window: "1h"},
 	}

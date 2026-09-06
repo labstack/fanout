@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	appid "github.com/labstack/fanout/internal/id"
@@ -148,6 +149,38 @@ func TestServiceMigratesLegacyCanvasOnFirstRead(t *testing.T) {
 		t.Fatalf("migrated dashboard = %#v", item)
 	}
 	assertDashboardUUIDv7s(t, item)
+}
+
+func TestDefaultStateMatchesTheClientWidgetSizes(t *testing.T) {
+	state := DefaultState()
+	want := []Layout{
+		{I: "health", X: 0, Y: 0, W: 4, H: 3, MinW: 3, MinH: 3},
+		{I: "topology", X: 4, Y: 0, W: 8, H: 5, MinW: 4, MinH: 4},
+		{I: "activity", X: 0, Y: 3, W: 4, H: 5, MinW: 3, MinH: 4},
+		{I: "assistant", X: 4, Y: 5, W: 4, H: 3, MinW: 3, MinH: 3},
+	}
+	if !reflect.DeepEqual(state.Layout, want) {
+		t.Fatalf("default layout = %#v, want %#v", state.Layout, want)
+	}
+	overlaps := func(a, b Layout) bool {
+		return a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H
+	}
+	for i := range state.Layout {
+		for j := i + 1; j < len(state.Layout); j++ {
+			if overlaps(state.Layout[i], state.Layout[j]) {
+				t.Errorf("%q overlaps %q", state.Layout[i].I, state.Layout[j].I)
+			}
+		}
+	}
+	// Validate wants UUIDv7 widget ids, which the default state is given when
+	// it is created for an owner; everything else it checks holds as written.
+	normalized, err := normalizeStateIDs(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate("System overview", "", normalized); err != nil {
+		t.Fatalf("default state does not validate: %v", err)
+	}
 }
 
 func TestValidateRejectsInvalidStates(t *testing.T) {
