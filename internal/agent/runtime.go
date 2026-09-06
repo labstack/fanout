@@ -182,7 +182,11 @@ func (r *Runtime) Run(c *echo.Context) error {
 		}
 		input.RunID = runID
 	}
-	if err := r.store.StartRun(c.Request().Context(), ownerID, input); err != nil {
+	// The seed is the stored thread plus this request's new user turn, not the
+	// history the browser posted: the server owns the record, so earlier runs'
+	// attached views survive and a request cannot rewrite what came before.
+	seed, err := r.store.StartRun(c.Request().Context(), ownerID, input)
+	if err != nil {
 		if errors.Is(err, ErrThreadNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "thread not found")
 		}
@@ -195,7 +199,7 @@ func (r *Runtime) Run(c *echo.Context) error {
 	response.Header().Set(echo.HeaderConnection, "keep-alive")
 	response.WriteHeader(http.StatusOK)
 	emitter := &eventEmitter{ctx: c.Request().Context(), writer: response, sse: sse.NewSSEWriter()}
-	messages := append([]agtypes.Message(nil), input.Messages...)
+	messages := append([]agtypes.Message(nil), seed...)
 	runCtx := dashboard.WithOwner(c.Request().Context(), ownerID)
 	truncated, runErr := r.execute(runCtx, input.ThreadID, input.RunID, &messages, emitter)
 	if runErr != nil {

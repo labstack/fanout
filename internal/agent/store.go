@@ -183,23 +183,18 @@ func threadTitle(messages []agtypes.Message) string {
 // running. The SELECT-then-INSERT runs under BEGIN IMMEDIATE on a pinned
 // connection so two concurrent first-runs on the same thread serialize
 // instead of racing into a unique-constraint error.
-func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunAgentInput) error {
+func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunAgentInput) ([]agtypes.Message, error) {
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		return fmt.Errorf("encode run input: %w", err)
+		return nil, fmt.Errorf("encode run input: %w", err)
 	}
-	messagesJSON, err := json.Marshal(input.Messages)
-	if err != nil {
-		return fmt.Errorf("encode messages: %w", err)
-	}
-	title := threadTitle(input.Messages)
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return fmt.Errorf("open run connection: %w", err)
+		return nil, fmt.Errorf("open run connection: %w", err)
 	}
 	defer conn.Close()
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return fmt.Errorf("begin run: %w", err)
+		return nil, fmt.Errorf("begin run: %w", err)
 	}
 	committed := false
 	defer func() {
@@ -208,26 +203,41 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 		}
 	}()
 
-	var existingOwner string
-	err = conn.QueryRowContext(ctx, `SELECT owner_id FROM agui_threads WHERE thread_id = ?`, input.ThreadID).Scan(&existingOwner)
+	var existingOwner, storedJSON string
+	err = conn.QueryRowContext(ctx, `SELECT owner_id, messages_json FROM agui_threads WHERE thread_id = ?`, input.ThreadID).Scan(&existingOwner, &storedJSON)
+	var messages []agtypes.Message
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
+		messages = mergeThreadMessages(nil, input.Messages)
+		messagesJSON, err := json.Marshal(messages)
+		if err != nil {
+			return nil, fmt.Errorf("encode messages: %w", err)
+		}
 		if _, err := conn.ExecContext(ctx,
 			`INSERT INTO agui_threads (thread_id, owner_id, title_derived, messages_json) VALUES (?, ?, ?, ?)`,
-			input.ThreadID, ownerID, title, string(messagesJSON),
+			input.ThreadID, ownerID, threadTitle(messages), string(messagesJSON),
 		); err != nil {
-			return fmt.Errorf("create thread: %w", err)
+			return nil, fmt.Errorf("create thread: %w", err)
 		}
 	case err != nil:
-		return fmt.Errorf("check thread owner: %w", err)
+		return nil, fmt.Errorf("check thread owner: %w", err)
 	case existingOwner != ownerID:
-		return ErrThreadNotFound
+		return nil, ErrThreadNotFound
 	default:
+		var stored []agtypes.Message
+		if err := json.Unmarshal([]byte(storedJSON), &stored); err != nil {
+			return nil, fmt.Errorf("decode stored messages: %w", err)
+		}
+		messages = mergeThreadMessages(stored, input.Messages)
+		messagesJSON, err := json.Marshal(messages)
+		if err != nil {
+			return nil, fmt.Errorf("encode messages: %w", err)
+		}
 		if _, err := conn.ExecContext(ctx,
 			`UPDATE agui_threads SET title_derived = ?, messages_json = ?, updated_at = datetime('now') WHERE thread_id = ?`,
-			title, string(messagesJSON), input.ThreadID,
+			threadTitle(messages), string(messagesJSON), input.ThreadID,
 		); err != nil {
-			return fmt.Errorf("update thread input: %w", err)
+			return nil, fmt.Errorf("update thread input: %w", err)
 		}
 	}
 	var parent any
@@ -238,13 +248,46 @@ func (s *Store) StartRun(ctx context.Context, ownerID string, input agtypes.RunA
 		`INSERT INTO agui_runs (run_id, thread_id, parent_run_id, input_json, status) VALUES (?, ?, ?, ?, 'running')`,
 		input.RunID, input.ThreadID, parent, string(inputJSON),
 	); err != nil {
-		return fmt.Errorf("create run: %w", err)
+		return nil, fmt.Errorf("create run: %w", err)
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return fmt.Errorf("commit run: %w", err)
+		return nil, fmt.Errorf("commit run: %w", err)
 	}
 	committed = true
-	return nil
+	return messages, nil
+}
+
+// mergeThreadMessages returns the stored history with the request's new user
+// turns appended.
+//
+// The server owns the record. A request may add to a thread but cannot rewrite
+// or delete what is already stored, so the views the agent attached to earlier
+// runs survive a browser that no longer carries them, and a caller cannot
+// fabricate assistant or tool history by posting it. Turns are matched by the
+// id the client mints, which makes a retry that re-posts the same history a
+// no-op; a turn without an id cannot be recognised on a second pass, so it is
+// appended rather than silently dropped.
+func mergeThreadMessages(stored, incoming []agtypes.Message) []agtypes.Message {
+	known := make(map[string]struct{}, len(stored))
+	for _, message := range stored {
+		if message.ID != "" {
+			known[message.ID] = struct{}{}
+		}
+	}
+	merged := append([]agtypes.Message(nil), stored...)
+	for _, message := range incoming {
+		if message.Role != agtypes.RoleUser {
+			continue
+		}
+		if message.ID != "" {
+			if _, seen := known[message.ID]; seen {
+				continue
+			}
+			known[message.ID] = struct{}{}
+		}
+		merged = append(merged, message)
+	}
+	return merged
 }
 
 // FinishRun persists the final conversation and the run outcome. The thread's

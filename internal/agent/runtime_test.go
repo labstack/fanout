@@ -190,7 +190,7 @@ func TestRuntimeProviderErrorSanitizedAndPersisted(t *testing.T) {
 	defer database.Close()
 	store := NewStore(database.DB)
 	input := agtypes.RunAgentInput{ThreadID: "thread-1", RunID: "run-1", Messages: messages}
-	if err := store.StartRun(context.Background(), "owner-1", input); err != nil {
+	if _, err := store.StartRun(context.Background(), "owner-1", input); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.FinishRun(context.Background(), "owner-1", "thread-1", "run-1", messages, emitter.events, truncated, runErr); err != nil {
