@@ -287,3 +287,14 @@ func TestRuntimeSurfacesTokenLimitTruncation(t *testing.T) {
 		t.Fatalf("assistant message missing truncation notice: %#v", messages)
 	}
 }
+
+func TestSystemPromptForbidsTextDiagrams(t *testing.T) {
+	for _, want := range []string{
+		"Never draw diagrams, trees, or charts in text",
+		"never restate what an attached view already shows",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("system prompt is missing %q", want)
+		}
+	}
+}
