@@ -69,7 +69,7 @@ URLs are unchanged: `/chat`, `/chat/$threadId`, `/dashboards`, `/dashboards/$das
 - No avatars, no uppercase role labels.
 - User: right-aligned `Paper` with the brand-light background, radius `lg`, max width 70%.
 - Assistant: markdown (`react-markdown` + `remark-gfm`) left-aligned, full column width, inside `Typography`.
-- Hovering a message reveals a dimmed timestamp and, on assistant messages, a Copy button (`navigator.clipboard`). Message timestamps come from the AG-UI message when present; otherwise the run's finalisation time is used, held in component state keyed by message id.
+- Hovering a message reveals a dimmed timestamp and, on assistant messages, a Copy button (`navigator.clipboard`). Message timestamps exist only for messages sent or received in this session (stamped when sent and when a run finalises, held in component state keyed by message id); persisted messages carry no time, so a restored thread shows the copy button without a time.
 - Tool messages (`role === "tool"`) stay hidden.
 
 ### Running state
