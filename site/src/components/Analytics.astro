@@ -15,7 +15,8 @@
  *
  * Whether consent must be asked for is a question about the reader's location,
  * not about this site. The EEA and the UK require permission before the cookie
- * is set; elsewhere measurement may run with a way to turn it off. Cloudflare already knows which one applies and says so at
+ * is set; elsewhere measurement may run with a way to turn it off. Cloudflare
+ * already knows which one applies and says so at
  * /cdn-cgi/trace, so most readers are measured properly and never see a banner,
  * and the readers who are owed the question get it. A failed or unavailable
  * lookup is treated as "ask" — the safe direction, and what local development
@@ -77,8 +78,9 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
         var requirementPromise = null;
 
         // A default answer for a reader who has not given one here, rather than a
-        // veto over the one they do give. Consulted only where the preference is
-        // absent -- see mayRun and apply.
+        // veto over the one they do give. apply() is the only caller and the only
+        // place the signal is enforced; mayRun deliberately knows nothing about
+        // it, so do not reach for mayRun as the decision function.
         function signalsOptOut() {
           return navigator.globalPrivacyControl === true;
         }
@@ -352,9 +354,13 @@ const enabled = Boolean(measurementId) && import.meta.env.PROD;
             window.addEventListener("storage", function (event) {
               // A null key is clear(), where the preference is gone rather than
               // changed. The listener that re-applies the preference already
-              // covers it; this one redraws the control that displays it, and
-              // without the null case /privacy went on describing an answer the
-              // browser no longer held.
+              // covers it; this one redraws the control that displays it.
+              //
+              // It reaches a tab that has not recorded an answer itself. A tab
+              // that has keeps it: readPreference falls back to memoryPreference,
+              // which a clear() in another tab does not reset, and should not --
+              // the reader answered in this tab, and clearing storage elsewhere
+              // did not withdraw that.
               if (event.key === STORAGE_KEY || event.key === null) onChange();
             });
           },
