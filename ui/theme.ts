@@ -1,4 +1,4 @@
-import { ayu, bad, brand, fonts, info, ok, warn } from "./tokens";
+import { ayu, bad, brand, chart, fonts, info, ok, warn } from "./tokens";
 
 /* The Mantine binding for the tokens in ./tokens.ts.
  *
@@ -37,6 +37,11 @@ export const fanoutThemeConfig = {
    introduce a fourth red to the page. */
 export const fanoutCssVariables = () => ({
   variables: { "--mantine-color-error": "var(--mantine-color-bad-filled)" },
-  light: {},
+  /* Mantine's light-scheme dimmed is #868e96, which is 3.3:1 on this ground —
+     under WCAG AA, and dimmed carries real content here: page descriptions,
+     timestamps, log times, healthy error rates. The chart palette's light muted
+     is the same grey family at 4.8:1, and using it keeps a dimmed label and the
+     axis beside it the same color. Dark already clears AA. */
+  light: { "--mantine-color-dimmed": chart.light.muted },
   dark: {},
 });
