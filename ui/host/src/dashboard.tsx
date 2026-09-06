@@ -76,8 +76,8 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
   function add(type: WidgetType) {
     const id = createID();
     const size = widgetDefaults[type];
-    const slot = nextDashboardSlot(state.layout, size.w, size.h);
-    update({ ...state, widgets: [...state.widgets, { id, type, title: widgetTitles[type], enabled: true }], layout: [...state.layout, { i: id, x: slot.x, y: slot.y, w: size.w, h: size.h, minW: size.minW, minH: size.minH }] });
+    const slot = nextDashboardSlot(state.layout, size.w, size.h, 12, size.minW);
+    update({ ...state, widgets: [...state.widgets, { id, type, title: widgetTitles[type], enabled: true }], layout: [...state.layout, { i: id, x: slot.x, y: slot.y, w: slot.w, h: size.h, minW: size.minW, minH: size.minH }] });
   }
   function remove(id: string) { update({ ...state, widgets: state.widgets.filter((widget) => widget.id !== id), layout: state.layout.filter((item) => item.i !== id) }); }
   function configure(id: string, config: WidgetConfig) { update({ ...state, widgets: state.widgets.map((widget) => (widget.id === id ? { ...widget, config } : widget)) }); }
@@ -98,7 +98,9 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
           <Select aria-label="Window" value={state.filters.window} onChange={(window) => window && update({ ...state, filters: { ...state.filters, window } })} data={dashboardWindows} w={{ base: "100%", xs: 150 }} size="sm" />
           <TextInput aria-label="Namespace" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={(event) => update({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} placeholder="All namespaces" w={{ base: "100%", xs: 200 }} size="sm" />
         </Group>
-        <Group gap="sm" wrap="nowrap" justify="flex-end">
+        {/* The row wraps rather than squeezing: at 390px a single line clipped
+            both button labels to "Add vie" and "Ask Fano". */}
+        <Group gap="sm" wrap="wrap" justify="flex-end">
           {updatedAt && <Text c="dimmed" size="xs">Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(updatedAt))}</Text>}
           <Menu shadow="md" position="bottom-end" withinPortal>
             <Menu.Target><Button variant="default" size="sm" leftSection={<Plus size={15} weight="bold" />} rightSection={<CaretDown size={13} weight="bold" />}>Add view</Button></Menu.Target>

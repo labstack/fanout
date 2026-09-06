@@ -39,8 +39,11 @@ export default function LogsWidget({ widget, filters, dark }: WidgetBodyProps) {
       <Table verticalSpacing={4} fz="sm">
         <Table.Tbody>{entries.map((entry, index) => <Table.Tr key={`${entry.time}-${index}`}>
           <Table.Td style={{ whiteSpace: "nowrap" }}><Text component="span" size="xs" ff="monospace" c="dimmed">{result ? timelineTimestamp(entry.time, result.provenance.window, true) : entry.time}</Text></Table.Td>
-          <Table.Td><Badge size="xs" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td>
-          <Table.Td><Text component="span" size="sm" fw={600}>{entry.service}</Text></Table.Td>
+          {/* The body cell takes the whole row, so every other cell has to say
+              it will not be squeezed: a shrunk badge loses INFO/WARN/ERROR and
+              leaves severity as colour alone. */}
+          <Table.Td style={{ whiteSpace: "nowrap", width: 1 }}><Badge size="xs" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td>
+          <Table.Td style={{ whiteSpace: "nowrap" }}><Text component="span" size="sm" fw={600}>{entry.service}</Text></Table.Td>
           <Table.Td style={{ width: "100%" }}><Text size="sm" lineClamp={1} title={entry.body}>{entry.body}</Text></Table.Td>
         </Table.Tr>)}</Table.Tbody>
       </Table>

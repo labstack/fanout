@@ -22,8 +22,11 @@ export default function TopologyWidget({ widget, filters, dark, onOpenChat }: Wi
     return {
       tooltip: { backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } },
       series: [{
-        type: "graph", layout: "force", roam: false, draggable: false,
-        force: { repulsion: 160, edgeLength: [50, 110], gravity: 0.12 },
+        // A circular layout puts a node in the same place on every refetch. The
+        // force layout ran again from scratch each time the 30 second poll
+        // returned, so the whole map rearranged itself under the reader. The
+        // chat view keeps the force layout: it is drawn once and not polled.
+        type: "graph", layout: "circular", circular: { rotateLabel: false }, roam: false, draggable: false,
         label: { show: true, position: "bottom", color: colors.text, fontSize: 10 },
         edgeSymbol: ["none", "arrow"], edgeSymbolSize: 6,
         data: data.nodes.map((node) => ({ id: node.service, name: node.service, value: node.spans, symbolSize: Math.min(34, 18 + Math.log10(Math.max(node.spans, 1)) * 4), itemStyle: { color: colors.surface, borderColor: healthHex(node.health), borderWidth: 3 } })),

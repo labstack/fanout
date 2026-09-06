@@ -19,10 +19,9 @@ export default function OverviewWidget({ widget, filters, dark }: WidgetBodyProp
   return <Stack gap="sm">
     <SimpleGrid cols={2} spacing="sm">
       <Metric label="Health" value={healthWord} color={data ? healthColor(data.health) : undefined} hint={data ? `${integer.format(data.service_count)} services` : undefined} />
-      <Stack gap={0}>
-        <Metric label="Error rate" value={data ? percent(data.error_rate) : "—"} color={data && data.error_rate >= 0.01 ? "bad" : undefined} hint={data ? `${integer.format(data.total_spans)} operations` : undefined} />
-        {errorTrend.length > 1 && <Box mt={4}><Sparkline values={errorTrend} color={status.bad} label="Error rate trend" /></Box>}
-      </Stack>
+      <Metric label="Error rate" value={data ? percent(data.error_rate) : "—"} color={data && data.error_rate >= 0.01 ? "bad" : undefined} hint={data ? `${integer.format(data.total_spans)} operations` : undefined}>
+        {errorTrend.length > 1 && <Sparkline values={errorTrend} color={status.bad} label="Error rate trend" />}
+      </Metric>
     </SimpleGrid>
     {data && <Box>
       <Progress.Root size="md" aria-label="Service health distribution">

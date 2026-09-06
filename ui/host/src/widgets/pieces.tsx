@@ -1,13 +1,18 @@
 import { Badge, Box, Button, Center, Paper, Text } from "@mantine/core";
 import { ListMagnifyingGlass, WarningCircle } from "@phosphor-icons/react";
+import type { ReactNode } from "react";
 import { EChart } from "../echart";
 import { healthColor } from "../../../chart";
 
-export function Metric({ label, value, color, hint }: { label: string; value: string | number; color?: string; hint?: string }) {
-  return <Paper withBorder radius="md" p="sm" bg="var(--mantine-color-default)" miw={0}>
+/** A tile. Anything passed as children sits under the value, inside the tile's
+ *  own border — a trend line belongs to the number it describes, and tiles in a
+ *  grid row end level because each one fills its cell. */
+export function Metric({ label, value, color, hint, children }: { label: string; value: string | number; color?: string; hint?: string; children?: ReactNode }) {
+  return <Paper withBorder radius="md" p="sm" bg="var(--mantine-color-default)" miw={0} h="100%">
     <Text c="dimmed" size="xs" truncate>{label}</Text>
     <Text fw={600} fz="xl" c={color} mt={2} lh={1.2} truncate>{value}</Text>
     {hint && <Text c="dimmed" size="xs" mt={2} truncate>{hint}</Text>}
+    {children && <Box mt={4}>{children}</Box>}
   </Paper>;
 }
 

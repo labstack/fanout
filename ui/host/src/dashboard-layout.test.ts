@@ -26,10 +26,19 @@ describe("dashboard layout", () => {
 
 describe("widget placement", () => {
   it("fills the free space on the last row before starting a new one", () => {
-    expect(nextDashboardSlot([], 4, 4)).toEqual({ x: 0, y: 0 });
-    expect(nextDashboardSlot([{ i: "a", x: 0, y: 0, w: 4, h: 4 }], 8, 5)).toEqual({ x: 4, y: 0 });
-    expect(nextDashboardSlot([{ i: "a", x: 0, y: 0, w: 4, h: 4 }, { i: "b", x: 4, y: 0, w: 4, h: 4 }], 4, 4)).toEqual({ x: 8, y: 0 });
-    expect(nextDashboardSlot([{ i: "a", x: 0, y: 0, w: 4, h: 4 }, { i: "b", x: 4, y: 0, w: 8, h: 6 }], 4, 4)).toEqual({ x: 0, y: 6 });
+    expect(nextDashboardSlot([], 4, 4)).toEqual({ x: 0, y: 0, w: 4 });
+    expect(nextDashboardSlot([{ i: "a", x: 0, y: 0, w: 4, h: 4 }], 8, 5)).toEqual({ x: 4, y: 0, w: 8 });
+    expect(nextDashboardSlot([{ i: "a", x: 0, y: 0, w: 4, h: 4 }, { i: "b", x: 4, y: 0, w: 4, h: 4 }], 4, 4)).toEqual({ x: 8, y: 0, w: 4 });
+    expect(nextDashboardSlot([{ i: "a", x: 0, y: 0, w: 4, h: 4 }, { i: "b", x: 4, y: 0, w: 8, h: 6 }], 4, 4)).toEqual({ x: 0, y: 6, w: 4 });
+  });
+
+  it("shrinks a wide widget into the gap left on the row when it may", () => {
+    const layout: DashboardLayoutItem[] = [
+      { i: "a", x: 0, y: 0, w: 4, h: 4 },
+      { i: "b", x: 4, y: 0, w: 4, h: 4 },
+    ];
+    expect(nextDashboardSlot(layout, 8, 5, 12, 4)).toEqual({ x: 8, y: 0, w: 4 });
+    expect(nextDashboardSlot(layout, 8, 5, 12, 6)).toEqual({ x: 0, y: 4, w: 8 });
   });
 
   it("considers only the last row when looking for a gap", () => {
@@ -37,8 +46,8 @@ describe("widget placement", () => {
       { i: "a", x: 0, y: 0, w: 4, h: 4 },
       { i: "b", x: 0, y: 4, w: 8, h: 4 },
     ];
-    expect(nextDashboardSlot(layout, 4, 4)).toEqual({ x: 8, y: 4 });
-    expect(nextDashboardSlot(layout, 6, 4)).toEqual({ x: 0, y: 8 });
+    expect(nextDashboardSlot(layout, 4, 4)).toEqual({ x: 8, y: 4, w: 4 });
+    expect(nextDashboardSlot(layout, 6, 4)).toEqual({ x: 0, y: 8, w: 6 });
   });
 
   it("gives every widget type a default size that fits twelve columns", () => {
@@ -50,6 +59,7 @@ describe("widget placement", () => {
       expect(size.minH).toBeLessThanOrEqual(size.h);
     }
     expect(widgetDefaults.assistant.w).toBe(4);
+    expect(widgetDefaults.overview).toEqual({ w: 4, h: 3, minW: 3, minH: 3 });
     expect(widgetDefaults.topology).toEqual({ w: 8, h: 5, minW: 4, minH: 4 });
   });
 });
