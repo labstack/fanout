@@ -282,6 +282,7 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 	if err != nil {
 		return Result[Performance]{}, err
 	}
+	data.Totals = totalsOf(before, after)
 	data.Comparison = []ComparisonMetric{
 		comparisonMetric("Throughput", "spans", before.Spans, after.Spans, false),
 		comparisonMetric("Error rate", "%", before.ErrorRate*100, after.ErrorRate*100, true),
@@ -408,6 +409,21 @@ func (s *Service) performanceAggregate(ctx context.Context, scope Scope, service
 		}
 	}
 	return value, rows.Err()
+}
+
+// totalsOf folds the two comparison halves back into one window rather than
+// running a third aggregate query: the halves tile the window exactly, so
+// summing spans, weighting the averages by span count and taking the larger
+// P95 reproduces what performanceAggregateQuery would return over the whole
+// scope. Keep these three rules in step with that query.
+func totalsOf(before, after performanceAggregate) PerformanceTotals {
+	spans := before.Spans + after.Spans
+	totals := PerformanceTotals{Spans: int64(spans), P95MS: math.Max(before.P95MS, after.P95MS)}
+	if spans > 0 {
+		totals.ErrorRate = (before.ErrorRate*before.Spans + after.ErrorRate*after.Spans) / spans
+		totals.P50MS = (before.P50MS*before.Spans + after.P50MS*after.Spans) / spans
+	}
+	return totals
 }
 
 func comparisonMetric(label, unit string, before, after float64, lowerIsBetter bool) ComparisonMetric {

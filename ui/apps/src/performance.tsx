@@ -33,11 +33,15 @@ function PerformanceApp() {
 }
 
 function ActivityView({ data, dark, window }: { data: Performance; dark: boolean; window: string }) {
-  const last = data.points.at(-1);
-  if (!last) return <EmptyState tall icon={<Pulse size={20} weight="duotone" />} title="No activity in this window">Trends will appear as activity is recorded.</EmptyState>;
+  if (data.points.length === 0) return <EmptyState tall icon={<Pulse size={20} weight="duotone" />} title="No activity in this window">Trends will appear as activity is recorded.</EmptyState>;
+  // The tiles read totals, not points.at(-1): the footer labels this card with
+  // the whole window, and the newest bucket is both a fraction of it and still
+  // filling, so a headline taken from it disagrees with the chart underneath it
+  // and with the Compare tab beside it.
+  const { totals } = data;
   const labels = data.points.map((point) => point.time);
   return <Stack px={{ base: "md", sm: "lg" }} pb="md">
-    <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm"><Metric label="Operations" value={integer.format(last.spans)} /><Metric label="P95 latency" value={duration(last.p95_ms)} color={last.p95_ms >= 750 ? "warn" : "ok"} /><Metric label="Error rate" value={percent(last.error_rate)} color={last.error_rate >= .01 ? "bad" : "ok"} /></SimpleGrid>
+    <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm"><Metric label="Operations" value={integer.format(totals.spans)} /><Metric label="P95 latency" value={duration(totals.p95_ms)} color={totals.p95_ms >= 750 ? "warn" : "ok"} /><Metric label="Error rate" value={percent(totals.error_rate)} color={totals.error_rate >= .01 ? "bad" : "ok"} /></SimpleGrid>
     <PerformanceChart dark={dark} labels={labels} title="Traffic and logs" window={window} series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: seriesColor("operations", dark) }, { name: "Logs", data: data.points.map((point) => point.log_count), color: seriesColor("logs", dark) }]} />
     <PerformanceChart dark={dark} labels={labels} title="Latency and error correlation" window={window} series={[{ name: "P95 latency", data: data.points.map((point) => point.p95_ms), color: statusHex(dark).warn }, { name: "Error rate × 1000", data: data.points.map((point) => point.error_rate * 1000), color: statusHex(dark).bad }]} />
   </Stack>;

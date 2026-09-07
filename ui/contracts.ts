@@ -86,8 +86,16 @@ export interface ComparisonMetric {
   significant: boolean;
 }
 
+export interface PerformanceTotals {
+  spans: number;
+  error_rate: number;
+  p50_ms: number;
+  p95_ms: number;
+}
+
 export interface Performance {
   service?: string;
+  totals: PerformanceTotals;
   points: PerformancePoint[];
   endpoints: Endpoint[];
   heatmap: HeatmapPoint[];

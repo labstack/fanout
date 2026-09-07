@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"errors"
+	"math"
 	"regexp"
 	"strings"
 	"testing"
@@ -204,6 +205,13 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	}
 	if result.Data.Comparison[1].Direction != "improvement" {
 		t.Fatalf("error-rate comparison = %#v", result.Data.Comparison[1])
+	}
+	// Totals cover the window, so they are the two halves folded together and
+	// not the newest bucket: a headline read off that bucket would say 220ms
+	// here, and the window's worst P95 is 240ms.
+	totals := result.Data.Totals
+	if totals.Spans != 120 || math.Abs(totals.ErrorRate-0.085) > 1e-9 || math.Abs(totals.P50MS-78.333333) > 1e-6 || totals.P95MS != 240 {
+		t.Fatalf("performance totals = %#v", totals)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
