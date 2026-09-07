@@ -86,15 +86,19 @@ export default function Shell({ children }: { children: ReactNode }) {
   </AppShell>;
 }
 
+/* Exported for shell.test.tsx: reaching it through Shell would drag in the
+   router, the app context and a viewer. */
 export function ColorSchemeToggle() {
   const { setColorScheme } = useMantineColorScheme();
   // Reading the computed scheme rather than the stored one means the button
   // offers the opposite of what is on screen even while the setting is "auto".
   const scheme = useComputedColorScheme("light", { getInitialValueInEffect: true });
   const next = scheme === "dark" ? "light" : "dark";
-  // The tooltip describes what the button will do, and the click changes that,
-  // so leaving it open leaves the wrong sentence hanging over the header until
-  // the pointer moves. It closes on the click and comes back on the next hover.
+  // The tooltip describes what the button will do, and the click changes that.
+  // The label is reactive, so what stays on screen is not wrong — it is a
+  // sentence rewriting itself under a stationary cursor, which reads as the
+  // page arguing with itself. It closes on the click and comes back on the
+  // next hover or focus.
   const [tip, setTip] = useState(false);
   return <Tooltip label={`Switch to ${next} theme`} opened={tip}>
     <ActionIcon variant="subtle" color="gray" aria-label={`Switch to ${next} theme`}

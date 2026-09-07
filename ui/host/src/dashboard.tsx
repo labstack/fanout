@@ -134,7 +134,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
         {/* The row wraps rather than squeezing: at 390px a single line clipped
             both button labels to "Add vie" and "Ask Fano". */}
         <Group gap="sm" wrap="wrap" justify="flex-end">
-          {updatedAt && <Text c="dimmed" size="xs" title={exactTimestamp(new Date(updatedAt).toISOString())}>Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(updatedAt))} {timeZoneLabel()}</Text>}
+          {updatedAt && <Text c="dimmed" size="xs" title={exactTimestamp(updatedAt)}>Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(updatedAt))} {timeZoneLabel(updatedAt)}</Text>}
           <Menu shadow="md" position="bottom-end" withinPortal>
             <Menu.Target><Button variant="default" size="sm" leftSection={<Plus size={15} weight="bold" />} rightSection={<CaretDown size={13} weight="bold" />}>Add view</Button></Menu.Target>
             <Menu.Dropdown>{widgetTypes.filter((type) => agentAvailable || type !== "assistant").map((type) => <Menu.Item key={type} onClick={() => add(type)}>{widgetTitles[type]}</Menu.Item>)}</Menu.Dropdown>

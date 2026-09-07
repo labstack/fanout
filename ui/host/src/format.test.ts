@@ -78,6 +78,10 @@ describe("time zone", () => {
   // different offices.
   it("names the viewer's zone and spells an instant out in full", () => {
     expect(timeZoneLabel(new Date("2026-09-07T14:00:00Z"))).not.toBe("");
+    // An abbreviation belongs to an instant, not to a zone: a table of rows
+    // from before a daylight-saving change must not be headed with today's.
+    expect(timeZoneLabel("2026-09-07T14:00:00Z")).toBe(timeZoneLabel(new Date("2026-09-07T14:00:00Z")));
+    expect(timeZoneLabel("not a time")).toBe(timeZoneLabel());
     const exact = exactTimestamp("2026-09-07T14:00:00Z");
     expect(exact).toContain("2026");
     expect(exact).toMatch(/\d{1,2}:\d{2}:\d{2}/);
@@ -85,5 +89,9 @@ describe("time zone", () => {
     // A value that is not a time is passed through rather than shown as
     // "Invalid Date".
     expect(exactTimestamp("not a time")).toBe("not a time");
+    // Callers hold epochs and Dates as often as strings, and a round-trip
+    // through toISOString throws where this returns the value unchanged.
+    expect(exactTimestamp(Date.parse("2026-09-07T14:00:00Z"))).toBe(exact);
+    expect(exactTimestamp(new Date("2026-09-07T14:00:00Z"))).toBe(exact);
   });
 });

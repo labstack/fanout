@@ -34,7 +34,10 @@ export function ChatPage() {
   if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const visibleMessages = messages.filter((message) => message.role !== "tool");
   return <Box className="chat-pane">
-    <Box className="chat-scroll" ref={scrollRef}>
+    {/* A scroll region has to be reachable without a mouse. Chrome makes a
+        scroller focusable only when it holds no focusable children, and this
+        one holds copy buttons and links, so it says so itself. */}
+    <Box className="chat-scroll" ref={scrollRef} tabIndex={0} role="log" aria-label="Conversation">
       <Container size={880} px={{ base: "md", sm: "xl" }} py="lg" ref={contentRef}>
         {threadMissing && <Alert color="warn" radius="lg" title="This chat no longer exists"><Group justify="space-between"><Text size="sm">It was deleted, or the link is wrong.</Text><Button size="compact-sm" variant="light" onClick={newThread}>New chat</Button></Group></Alert>}
         {/* A thread whose load failed never becomes ready, so showing the
@@ -111,7 +114,7 @@ function ChatMessage({ message, time, send }: { message: Message; time?: number;
       ? <Paper radius="lg" px="md" py="sm" bg="var(--mantine-color-brand-light)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
       : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
     <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4}>
-      {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(new Date(time).toISOString())}>{stamp}</Text>}
+      {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(time)}>{stamp}</Text>}
       {!user && <CopyButton text={content} label="Copy message" />}
     </Group>
   </Box>;

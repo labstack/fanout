@@ -55,8 +55,13 @@ func TestHandlerServesRobotsAndRefusesMissingAssets(t *testing.T) {
 	if missing.Code != http.StatusNotFound {
 		t.Fatalf("GET a missing asset = %d, want 404", missing.Code)
 	}
-	if icon := request(t, handler, "/favicon.ico"); icon.Code == http.StatusOK && strings.Contains(icon.Body.String(), "<div id=\"root\">") {
-		t.Fatal("/favicon.ico answered with the application shell")
+	// dist ships favicon.svg, so the .ico a browser asks for first is simply
+	// not there and has to say so.
+	if icon := request(t, handler, "/favicon.ico"); icon.Code != http.StatusNotFound {
+		t.Fatalf("GET /favicon.ico = %d, want 404", icon.Code)
+	}
+	if trailing := request(t, handler, "/checkout."); trailing.Code != http.StatusOK {
+		t.Fatalf("a trailing dot is a client route, not a file: got %d", trailing.Code)
 	}
 
 	// A client route still resolves to the shell, extension or not.

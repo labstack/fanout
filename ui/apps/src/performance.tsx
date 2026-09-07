@@ -28,7 +28,7 @@ function PerformanceApp() {
       {view === "latency" && <HeatmapView data={result.data} dark={dark} window={result.provenance.window} />}
       {view === "endpoints" && <EndpointsView endpoints={result.data.endpoints} onEndpoint={(endpoint) => askAbout(app, `Investigate ${endpoint.method} ${endpoint.path}. Explain its latency and errors.`)} />}
       {view === "compare" && <ComparisonView data={result.data} />}
-      <MetaFooter left={windowLabel(result.provenance.window)} right={`Updated ${new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${timeZoneLabel()}`} />
+      <MetaFooter left={windowLabel(result.provenance.window)} right={`Updated ${new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${timeZoneLabel(result.provenance.generated_at)}`} />
     </>}
   </ViewShell>;
 }

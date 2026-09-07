@@ -26,4 +26,13 @@ describe("colour scheme toggle", () => {
     await vi.waitFor(() => expect(tooltip()).toBe(0));
     await act(async () => root.unmount());
   });
+
+  it("still answers to keyboard focus, which taking control of the tooltip could have broken", async () => {
+    const { root, button } = await mount();
+    await act(async () => { button.dispatchEvent(new FocusEvent("focus", { bubbles: false })); button.dispatchEvent(new FocusEvent("focusin", { bubbles: true })); });
+    expect(tooltip()).toBe(1);
+    await act(async () => { button.dispatchEvent(new FocusEvent("blur", { bubbles: false })); button.dispatchEvent(new FocusEvent("focusout", { bubbles: true })); });
+    await vi.waitFor(() => expect(tooltip()).toBe(0));
+    await act(async () => root.unmount());
+  });
 });

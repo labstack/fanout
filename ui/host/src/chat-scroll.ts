@@ -27,9 +27,11 @@ const inputSettles = 300;
  *  thread moves the same conversation from /chat to /chat/<id> without
  *  changing the thread's identity: React reconciles the two routes into one
  *  component instance and swaps the DOM underneath it, so an effect keyed on
- *  anything the component knows about does not re-run, and every listener
- *  stays on a container that is no longer on the page. A ref callback fires
- *  exactly when the node it is given changes, which is the event that matters.
+ *  anything the component knows about does not re-run — while the listeners
+ *  and the observer it installed are still on the discarded nodes. (A plain
+ *  ref would have survived that: React repopulates `.current`. It is the
+ *  wiring, not the ref, that goes stale.) A ref callback fires exactly when
+ *  the node it is given changes, which is the event that matters.
  *
  *  It lets go only for an actual wheel, drag or key. Position cannot be used
  *  to infer that the reader left: the pane's own scrolling moves scrollTop,

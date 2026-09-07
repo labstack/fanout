@@ -51,7 +51,7 @@ function OverviewBody({ result, onService }: { result: Result<Overview>; onServi
       <Table.Thead><Table.Tr><Table.Th>Service</Table.Th><Table.Th ta="right">Traffic</Table.Th><Table.Th ta="right">P95</Table.Th><Table.Th ta="right">Errors</Table.Th></Table.Tr></Table.Thead>
       <Table.Tbody>{services.pageItems.map((service) => <ServiceRow key={service.service} service={service} onClick={() => onService(service.service)} />)}</Table.Tbody>
     </Table></Table.ScrollContainer><PageControls {...services} onChange={services.setPage} /></>}
-    <MetaFooter left={windowLabel(result.provenance.window)} right={`Updated ${new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${timeZoneLabel()}`} />
+    <MetaFooter left={windowLabel(result.provenance.window)} right={`Updated ${new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${timeZoneLabel(result.provenance.generated_at)}`} />
   </>;
 }
 

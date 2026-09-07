@@ -32,8 +32,12 @@ func Handler() http.Handler {
 			name = "index.html"
 		}
 		if name == "robots.txt" {
-			serveRobots(response)
-			return
+			// A robots.txt shipped in the build wins: this default is for a
+			// binary that has none, not an override of one that does.
+			if _, err := fs.Stat(dist, name); err != nil {
+				serveRobots(response)
+				return
+			}
 		}
 		if _, err := fs.Stat(dist, name); err != nil {
 			if looksLikeAFile(name) {
@@ -68,8 +72,14 @@ func serveRobots(response http.ResponseWriter) {
 // browser as HTML that parsed as neither script nor image, and nothing in the
 // response said it was missing.
 //
-// Client routes have no extension (/dashboards/<id>, /chat/<id>), so the last
-// segment carrying a dot is the signal.
+// Client routes have no extension (/dashboards/<id>, /chat/<id>) — both
+// parameters are UUIDs — so the last segment carrying a dot is the signal. A
+// route parameter that can hold a dot (a service name, an email, a filename)
+// would arrive here as a 404 instead of the application, so a new route of
+// that shape needs this to become an allow-list of static paths.
+//
+// A trailing dot is not an extension: "/checkout." is a client route with a
+// typo, not a request for a file.
 func looksLikeAFile(name string) bool {
-	return path.Ext(name) != ""
+	return path.Ext(name) != "" && !strings.HasSuffix(name, ".")
 }
