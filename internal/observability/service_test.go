@@ -136,6 +136,32 @@ func TestOverviewReturnsCanonicalEnvelope(t *testing.T) {
 	}
 }
 
+func TestOverviewReportsEmptyWindowAsUnknownNotHealthy(t *testing.T) {
+	svc, mock, _ := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	mock.ExpectQuery(regexp.QuoteMeta(overviewQuery)).
+		WithArgs(start, end, "nonexistent", "nonexistent", 100).
+		WillReturnRows(sqlmock.NewRows([]string{"service", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}))
+
+	result, err := svc.Overview(context.Background(), Scope{Namespace: "nonexistent", Start: start, End: end}, 0)
+	if err != nil {
+		t.Fatalf("Overview: %v", err)
+	}
+	if result.Data.Health != HealthUnknown {
+		t.Fatalf("health = %q, want %q: an empty window is not a clean bill of health", result.Data.Health, HealthUnknown)
+	}
+	if result.Data.ServiceCount != 0 || result.Data.Counts.Healthy != 0 {
+		t.Fatalf("unexpected counts: %#v", result.Data)
+	}
+	if !strings.Contains(result.Summary, "no services reported") {
+		t.Fatalf("summary = %q, want it to state the window is empty", result.Summary)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 	svc, mock, _ := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)

@@ -22,20 +22,24 @@ function OverviewBody({ result, onService }: { result: Result<Overview>; onServi
   const { data } = result;
   const total = Math.max(data.service_count, 1);
   const services = usePagedItems(data.services, 6);
+  // With nothing reported there is no rate to state and no distribution to
+  // draw; an em dash and the empty state below say that, where "0.00%" over an
+  // all-grey bar reads as a system running cleanly.
+  const empty = data.health === "unknown";
   return <>
     <SimpleGrid cols={{ base: 3 }} spacing="sm" px={{ base: "md", sm: "lg" }} pb="md">
       <Metric label="Services" value={integer.format(data.service_count)} />
       <Metric label="Operations" value={integer.format(data.total_spans)} />
-      <Metric label="Error rate" value={percent(data.error_rate)} color={healthColor(data.health)} />
+      <Metric label="Error rate" value={empty ? "—" : percent(data.error_rate)} color={healthColor(data.health)} />
     </SimpleGrid>
-    <Box px={{ base: "md", sm: "lg" }} pb="md">
+    {!empty && <Box px={{ base: "md", sm: "lg" }} pb="md">
       <Progress.Root size="lg" aria-label="Service health distribution">
         <Progress.Section value={data.counts.healthy / total * 100} color="ok"><Progress.Label>{data.counts.healthy}</Progress.Label></Progress.Section>
         <Progress.Section value={data.counts.degraded / total * 100} color="warn"><Progress.Label>{data.counts.degraded}</Progress.Label></Progress.Section>
         <Progress.Section value={data.counts.unhealthy / total * 100} color="bad"><Progress.Label>{data.counts.unhealthy}</Progress.Label></Progress.Section>
       </Progress.Root>
       <Group mt="xs" gap="lg"><Legend color="ok" text={`${data.counts.healthy} healthy`} /><Legend color="warn" text={`${data.counts.degraded} degraded`} /><Legend color="bad" text={`${data.counts.unhealthy} unhealthy`} /></Group>
-    </Box>
+    </Box>}
     {data.services.length === 0 ? <EmptyState icon={<Pulse size={20} weight="duotone" />} title="No activity in this window">Services will appear as data begins to arrive.</EmptyState> : <><Table.ScrollContainer minWidth={560}><Table striped highlightOnHover verticalSpacing="sm">
       <Table.Thead><Table.Tr><Table.Th>Service</Table.Th><Table.Th ta="right">Traffic</Table.Th><Table.Th ta="right">P95</Table.Th><Table.Th ta="right">Errors</Table.Th></Table.Tr></Table.Thead>
       <Table.Tbody>{services.pageItems.map((service) => <ServiceRow key={service.service} service={service} onClick={() => onService(service.service)} />)}</Table.Tbody>

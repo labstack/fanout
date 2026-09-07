@@ -54,9 +54,16 @@ func (s *Service) Overview(ctx context.Context, scope Scope, limit int) (Result[
 	}
 	data.Health = overallHealth(data.Counts)
 
+	// An empty window is reported as such rather than as a clean bill of
+	// health, so a model reading the summary cannot conclude the system is
+	// fine from the absence of evidence that it is.
+	summary := fmt.Sprintf("%d services: %d unhealthy, %d degraded, %d healthy", data.ServiceCount, data.Counts.Unhealthy, data.Counts.Degraded, data.Counts.Healthy)
+	if data.ServiceCount == 0 {
+		summary = "no services reported telemetry in this window"
+	}
 	return Result[Overview]{
 		Schema:     OverviewSchema,
-		Summary:    fmt.Sprintf("%d services: %d unhealthy, %d degraded, %d healthy", data.ServiceCount, data.Counts.Unhealthy, data.Counts.Degraded, data.Counts.Healthy),
+		Summary:    summary,
 		Data:       data,
 		Provenance: s.provenance(scope),
 	}, nil

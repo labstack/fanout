@@ -47,6 +47,11 @@ const (
 	HealthHealthy   Health = "healthy"
 	HealthDegraded  Health = "degraded"
 	HealthUnhealthy Health = "unhealthy"
+	// HealthUnknown is what a window with no telemetry reports. Silence is not
+	// health: a namespace filter that matches nothing, an agent that stopped
+	// exporting and an interval before onboarding all land here, and calling
+	// any of them "healthy" states the opposite of what is known.
+	HealthUnknown Health = "unknown"
 )
 
 type ServiceHealth struct {

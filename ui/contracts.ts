@@ -1,4 +1,6 @@
-export type Health = "healthy" | "degraded" | "unhealthy";
+/** "unknown" is an empty window — no telemetry rather than good news. Mirrors
+ *  the Health constants in internal/observability/contracts.go; keep in sync. */
+export type Health = "healthy" | "degraded" | "unhealthy" | "unknown";
 
 export interface Provenance {
   query_id: string;
