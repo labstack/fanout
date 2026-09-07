@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ChatIndexRouteImport } from './routes/chat.index'
 import { Route as ChatThreadIdRouteImport } from './routes/chat.$threadId'
 import { Route as DashboardsIndexRouteImport } from './routes/dashboards.index'
@@ -18,6 +19,11 @@ import { Route as DashboardsDashboardIdRouteImport } from './routes/dashboards.$
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChatIndexRoute = ChatIndexRouteImport.update({
@@ -43,6 +49,7 @@ const DashboardsDashboardIdRoute = DashboardsDashboardIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/settings': typeof SettingsRoute
   '/chat/$threadId': typeof ChatThreadIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/chat/': typeof ChatIndexRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/settings': typeof SettingsRoute
   '/chat/$threadId': typeof ChatThreadIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/chat': typeof ChatIndexRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/settings': typeof SettingsRoute
   '/chat/$threadId': typeof ChatThreadIdRoute
   '/dashboards/$dashboardId': typeof DashboardsDashboardIdRoute
   '/chat/': typeof ChatIndexRoute
@@ -67,6 +76,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/settings'
     | '/chat/$threadId'
     | '/dashboards/$dashboardId'
     | '/chat/'
@@ -74,6 +84,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/settings'
     | '/chat/$threadId'
     | '/dashboards/$dashboardId'
     | '/chat'
@@ -81,6 +92,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/settings'
     | '/chat/$threadId'
     | '/dashboards/$dashboardId'
     | '/chat/'
@@ -89,6 +101,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  SettingsRoute: typeof SettingsRoute
   ChatThreadIdRoute: typeof ChatThreadIdRoute
   DashboardsDashboardIdRoute: typeof DashboardsDashboardIdRoute
   ChatIndexRoute: typeof ChatIndexRoute
@@ -102,6 +115,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/chat/': {
@@ -137,6 +157,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  SettingsRoute: SettingsRoute,
   ChatThreadIdRoute: ChatThreadIdRoute,
   DashboardsDashboardIdRoute: DashboardsDashboardIdRoute,
   ChatIndexRoute: ChatIndexRoute,
