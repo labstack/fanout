@@ -98,6 +98,10 @@ CREATE TABLE service_rollup (
   bucket TIMESTAMP,
   service TEXT,
   spans BIGINT,
+  -- Spans that describe work this service performed, rather than a call it was
+  -- waiting on. A bucket with none of them has no latency of its own to report,
+  -- and readers prefer the buckets that do; see the rollup's span_agg.
+  served_spans BIGINT DEFAULT 0,
   p50_ms DOUBLE,
   p95_ms DOUBLE,
   error_rate DOUBLE,
@@ -270,7 +274,7 @@ func CreateTables(db *sql.DB) error {
 // production telemetry rows themselves live in immutable Parquet batches.
 func CreateCacheTables(db *sql.DB) error {
 	if err := ensureCacheTable(db, "service_rollup", createServiceRollupTable,
-		"namespace", "bucket", "service", "spans", "p50_ms", "p95_ms", "error_rate", "log_count", "metric_count"); err != nil {
+		"namespace", "bucket", "service", "spans", "served_spans", "p50_ms", "p95_ms", "error_rate", "log_count", "metric_count"); err != nil {
 		return err
 	}
 	if err := ensureCacheTable(db, "edge_rollup", createEdgeRollupTable,
