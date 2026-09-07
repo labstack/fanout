@@ -5,12 +5,15 @@ import "@mantine/core/styles.css";
 // latin-only stylesheet to narrow it to.
 import "@fontsource-variable/geist/index.css";
 import "@fontsource-variable/geist-mono/index.css";
-import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme } from "@mantine/core";
+import { ActionIcon, Alert, Badge, Box, Button, Center, Group, Loader, MantineProvider, Pagination, Paper, ScrollArea, Stack, Tabs as MantineTabs, Text, ThemeIcon, Title, Tooltip, createTheme, defaultVariantColorsResolver } from "@mantine/core";
 import { ArrowClockwise } from "@phosphor-icons/react";
 import { useEffect, useState, type ReactNode } from "react";
-import { fanoutCssVariables, fanoutThemeConfig } from "../../theme";
+import { fanoutCssVariables, fanoutThemeConfig, schemeAwareFilledText } from "../../theme";
 
-const fanoutTheme = createTheme(fanoutThemeConfig);
+// The embedded views mount their own provider, so they need the same filled-text
+// rule the host has: without it a button inside a chat card reads white on the
+// dark accent at 3.16:1 while the identical button outside the card does not.
+const fanoutTheme = createTheme({ ...fanoutThemeConfig, variantColorResolver: schemeAwareFilledText(defaultVariantColorsResolver) });
 
 export function ViewShell({ dark, children }: { dark: boolean; children: ReactNode }) {
   return <MantineProvider theme={fanoutTheme} cssVariablesResolver={fanoutCssVariables} forceColorScheme={dark ? "dark" : "light"}><Paper withBorder radius="lg" style={{ overflow: "hidden" }}>{children}</Paper></MantineProvider>;

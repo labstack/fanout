@@ -35,6 +35,42 @@ export function seriesColor(name: string, dark: boolean) {
   return palette[Math.abs(hash) % palette.length];
 }
 
+/** A node's shape says what its colour says.
+ *
+ *  Health was drawn in green, amber and red alone, which is the one channel a
+ *  reader with a colour vision deficiency does not have: a service map became
+ *  twenty identical circles. The shapes are ordered by severity so the map also
+ *  reads at a glance — a diamond stands out from a ring the way an alarm should.
+ */
+export function healthSymbol(health: string) {
+  if (health === "unhealthy") return "diamond";
+  if (health === "degraded") return "roundRect";
+  return "circle";
+}
+
+/** Shape is the severity channel, so an ungraded node keeps the circle and
+ *  says so with its outline instead: a dashed ring reads as "nothing to grade"
+ *  without claiming a place in the severity order. */
+export function healthBorderType(health: string) {
+  return health === "unknown" ? "dashed" : "solid";
+}
+
+/** ECharts sizes a symbol by its bounding box, and the shapes do not fill one
+ *  equally: a diamond covers half of it against a circle's ~0.79 and a rounded
+ *  square's ~0.95. Sized naively the unhealthy node drew a third smaller than a
+ *  healthy one — and shrank its click target with it — which is the opposite of
+ *  what the shape is for. The scale evens the drawn area out.
+ *
+ *  It multiplies the capped size rather than being capped with it: clamping
+ *  the product puts every busy service back on the same bounding box, which is
+ *  where the diamond loses a third of its area again. The node a map is
+ *  shouting about is allowed to be the biggest thing on it. */
+export function healthSymbolScale(health: string) {
+  if (health === "unhealthy") return 1.25;
+  if (health === "degraded") return 0.91;
+  return 1;
+}
+
 export function severityColor(value: string) {
   const severity = String(value).toUpperCase();
   if (severity === "ERROR" || severity === "FATAL") return "bad";

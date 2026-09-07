@@ -5,6 +5,7 @@ import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { EmptyState, MetaFooter, PageControls, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
 import { chartTheme, severityColor, severityHex } from "../../chart";
+import { typeScale } from "../../tokens";
 import type { LogEntry, Logs, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
 import { timelineTimestamp, windowLabel } from "../../format";
@@ -41,7 +42,7 @@ function LogHistogram({ data, dark, window }: { data: Logs; dark: boolean; windo
     const times = [...new Set(data.buckets.map((bucket) => bucket.time))];
     const severities = [...new Set(data.buckets.map((bucket) => bucket.severity))];
     const values = new Map(data.buckets.map((bucket) => [`${bucket.time}\u0000${bucket.severity}`, bucket.count]));
-    return { color: severities.map((severity) => severityHex(severity, dark)), grid: { left: 42, right: 18, top: 30, bottom: 28 }, tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } }, legend: { top: 0, right: 0, textStyle: { color: colors.muted, fontSize: 9 }, itemWidth: 7, itemHeight: 7, icon: "circle" }, xAxis: { type: "category", data: times.map((time) => timelineTimestamp(time, window)), axisLabel: { color: colors.muted, fontSize: 8, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: 8 } }, series: severities.map((severity) => ({ name: severity, type: "bar", stack: "logs", barMaxWidth: 22, data: times.map((time) => values.get(`${time}\u0000${severity}`) ?? 0), itemStyle: { borderRadius: [2, 2, 0, 0] } })) };
+    return { color: severities.map((severity) => severityHex(severity, dark)), grid: { left: 42, right: 18, top: 30, bottom: 28 }, tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: typeScale.micro } }, legend: { top: 0, right: 0, textStyle: { color: colors.muted, fontSize: typeScale.micro }, itemWidth: 7, itemHeight: 7, icon: "circle" }, xAxis: { type: "category", data: times.map((time) => timelineTimestamp(time, window)), axisLabel: { color: colors.muted, fontSize: typeScale.micro, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: typeScale.micro } }, series: severities.map((severity) => ({ name: severity, type: "bar", stack: "logs", barMaxWidth: 22, data: times.map((time) => values.get(`${time}\u0000${severity}`) ?? 0), itemStyle: { borderRadius: [2, 2, 0, 0] } })) };
   }, [dark, data.buckets, window]);
   return <Paper withBorder radius="md" mx={{ base: "md", sm: "lg" }} p="xs"><EChart option={option} height={190} label="Log volume by severity over time" /></Paper>;
 }

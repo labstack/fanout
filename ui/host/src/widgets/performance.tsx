@@ -3,6 +3,7 @@ import { Badge, Box, Stack, Table, Text } from "@mantine/core";
 import { useMemo } from "react";
 import type { Performance } from "../../../contracts";
 import { chartTheme, seriesColor, statusHex } from "../../../chart";
+import { typeScale } from "../../../tokens";
 import { duration, integer, timelineTimestamp } from "../../../format";
 import { EChart, useECharts } from "../echart";
 import { useObservability, widgetParams } from "./data";
@@ -21,12 +22,12 @@ export default function PerformanceWidget({ widget, filters, dark }: WidgetBodyP
     return {
       color: [seriesColor("operations", dark), statusHex(dark).warn],
       grid: { left: 36, right: 40, top: 24, bottom: 22 },
-      legend: { top: 0, left: 0, textStyle: { color: colors.muted, fontSize: 10 }, icon: "circle", itemWidth: 7, itemHeight: 7 },
-      tooltip: { trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } },
-      xAxis: { type: "category", data: result.data.points.map((point) => timelineTimestamp(point.time, window)), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true } },
+      legend: { top: 0, left: 0, textStyle: { color: colors.muted, fontSize: typeScale.micro }, icon: "circle", itemWidth: 7, itemHeight: 7 },
+      tooltip: { trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: typeScale.micro } },
+      xAxis: { type: "category", data: result.data.points.map((point) => timelineTimestamp(point.time, window)), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: typeScale.micro, hideOverlap: true } },
       yAxis: [
-        { type: "value", splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: 9 } },
-        { type: "value", splitLine: { show: false }, axisLabel: { color: colors.muted, fontSize: 9, formatter: (value: number) => duration(value) } },
+        { type: "value", splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: typeScale.micro } },
+        { type: "value", splitLine: { show: false }, axisLabel: { color: colors.muted, fontSize: typeScale.micro, formatter: (value: number) => duration(value) } },
       ],
       series: [
         { name: "Operations", type: "line", data: result.data.points.map((point) => point.spans), smooth: 0.22, showSymbol: false, lineStyle: { width: 2 }, areaStyle: { opacity: 0.05 } },
