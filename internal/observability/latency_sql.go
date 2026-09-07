@@ -14,9 +14,12 @@ const (
 	// worst bucket is the one worth knowing about.
 	windowP95SQL = `COALESCE(MAX(p95_ms) FILTER (WHERE served_spans > 0), MAX(p95_ms), 0)`
 
-	// windowP50SQL weights each bucket by the spans it holds.
+	// windowP50SQL weights each bucket by the spans the figure describes. A
+	// bucket's p50 is computed over served spans, so weighting it by the
+	// bucket's total would let one served request sitting beside a thousand
+	// outbound calls outweigh a bucket that served hundreds.
 	windowP50SQL = `COALESCE(
-    SUM(p50_ms * spans) FILTER (WHERE served_spans > 0) / NULLIF(SUM(spans) FILTER (WHERE served_spans > 0), 0),
+    SUM(p50_ms * served_spans) FILTER (WHERE served_spans > 0) / NULLIF(SUM(served_spans) FILTER (WHERE served_spans > 0), 0),
     SUM(p50_ms * spans) / NULLIF(SUM(spans), 0),
     0)`
 )

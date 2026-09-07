@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 )
 
 const createSpansTable = `
@@ -341,8 +342,32 @@ func ensureCacheTable(db *sql.DB, table, createStmt string, requiredColumns ...s
 			if _, err := db.Exec(createStmt); err != nil {
 				return fmt.Errorf("recreate %s: %w", table, err)
 			}
+			return forgetRollupProgress(db, table)
+		}
+	}
+	return nil
+}
+
+// forgetRollupProgress discards the watermarks belonging to a cache table that
+// has just been emptied.
+//
+// A rollup only rebuilds what its watermark says is missing. Recreating the
+// table without clearing that watermark leaves it pointing past every bucket
+// that was just dropped, so the history never comes back and every query over
+// it reports an empty window — a silent, permanent data loss on upgrade rather
+// than a rebuild. Progress keys are named for their table, which is what lets
+// this find them.
+func forgetRollupProgress(db *sql.DB, table string) error {
+	if table == "rollup_state" {
+		return nil
+	}
+	if _, err := db.Exec("DELETE FROM rollup_state WHERE cache_key LIKE ? || '%'", table); err != nil {
+		// A fresh database has no rollup_state yet; it is created alongside
+		// these tables and has nothing to forget.
+		if strings.Contains(err.Error(), "rollup_state") {
 			return nil
 		}
+		return fmt.Errorf("clear %s rollup progress: %w", table, err)
 	}
 	return nil
 }

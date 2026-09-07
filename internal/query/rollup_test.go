@@ -768,3 +768,45 @@ func nullIfEmpty(v string) any {
 	}
 	return v
 }
+
+// A cache table that is dropped for a schema change has to be rebuilt, and a
+// rollup only rebuilds what its watermark says is missing. Leaving the
+// watermark in place after emptying the table loses every historical bucket
+// permanently, and every query over that window then reports no data.
+func TestRecreatingAServiceRollupClearsItsWatermark(t *testing.T) {
+	db := openTestDuck(t)
+	if err := CreateTables(db); err != nil {
+		t.Fatalf("CreateTables failed: %v", err)
+	}
+	if err := CreateViews(db); err != nil {
+		t.Fatalf("CreateViews failed: %v", err)
+	}
+	d := &Duck{DB: db, cfg: config.Config{RetentionDays: 30}}
+	ctx := context.Background()
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
+
+	insertRollupTestSpan(t, db, rollupTestSpan{
+		namespace: "ns", traceID: "t-1", spanID: "s-1", service: "checkout",
+		operation: "POST /checkout", start: bucket.Add(5 * time.Second),
+		duration: 50 * time.Millisecond, ingested: 100,
+	})
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("rollupOnce failed: %v", err)
+	}
+	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
+
+	// Stand in for the upgrade: the stored table is missing a column this
+	// build requires, so ensureCacheTable empties it.
+	if _, err := db.Exec(`ALTER TABLE service_rollup DROP COLUMN served_spans`); err != nil {
+		t.Fatalf("simulate an older table: %v", err)
+	}
+	if err := CreateTables(db); err != nil {
+		t.Fatalf("CreateTables after the schema change: %v", err)
+	}
+	requireRowCount(t, db, `SELECT count(*) FROM service_rollup`, nil, 0)
+
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("rollupOnce after recreate failed: %v", err)
+	}
+	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
+}

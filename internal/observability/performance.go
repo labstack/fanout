@@ -446,8 +446,14 @@ func totalsOf(before, after performanceAggregate) PerformanceTotals {
 	var weight float64
 	for _, half := range latency {
 		totals.P95MS = math.Max(totals.P95MS, half.P95MS)
-		totals.P50MS += half.P50MS * half.Spans
-		weight += half.Spans
+		// Weighted by served spans, matching windowP50SQL: the half's p50
+		// describes the requests it served, not the calls it also made.
+		span := half.ServedSpans
+		if span == 0 {
+			span = half.Spans
+		}
+		totals.P50MS += half.P50MS * span
+		weight += span
 	}
 	if weight > 0 {
 		totals.P50MS /= weight

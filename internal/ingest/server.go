@@ -699,8 +699,6 @@ func anyValueString(v *common.AnyValue) string {
 	}
 }
 
-// normalizeSeverity returns uppercase severity text. If text is empty,
-// derives it from the OTel severity number (1-24).
 // normalizeSeverity maps a record onto the six OTel severity names, so that a
 // search for ERROR finds every error however its emitter spelled it.
 //
