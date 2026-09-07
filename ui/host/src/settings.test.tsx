@@ -43,9 +43,10 @@ describe("connect telemetry", () => {
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("Collector configuration"));
     const config = document.body.textContent ?? "";
-    expect(config).toContain("endpoint: ingest.example.com:4317");
+    // Quoted, because an advertised IPv6 endpoint is a YAML flow sequence bare.
+    expect(config).toContain('endpoint: "ingest.example.com:4317"');
     // A secret pasted into a config file is a secret in version control.
-    expect(config).toContain("${FANOUT_INGEST_TOKEN}");
+    expect(config).toContain("${env:FANOUT_INGEST_TOKEN}");
     // This instance serves plaintext, so the exporter has to be told.
     expect(config).toContain("insecure: true");
     await act(async () => root.unmount());
@@ -74,6 +75,61 @@ describe("connect telemetry", () => {
     await act(async () => confirm?.click());
     await vi.waitFor(() => expect(document.body.textContent).toContain("fo_newtoken"));
     expect(document.body.textContent).toContain("Fanout shows this once");
+    await act(async () => root.unmount());
+  });
+
+  it("omits tls.insecure when the advertised endpoint is already https", async () => {
+    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: "https://ingest.example.com" }));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Collector configuration"));
+    expect(document.body.textContent).not.toContain("insecure: true");
+    expect(document.body.textContent).toContain("secured with TLS");
+    await act(async () => root.unmount());
+  });
+
+  it("stops offering to issue a token once one has been issued", async () => {
+    fetchMock.mockImplementation(async (_url, init) => json((init as RequestInit | undefined)?.method === "POST"
+      ? { ...connection, token_required: true, ingest_token: "fo_firsttoken" }
+      : { ...connection, token_required: false }));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("rejecting telemetry"));
+    const open = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Issue token");
+    await act(async () => open?.click());
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Issue token");
+    await act(async () => confirm?.click());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("fo_firsttoken"));
+    // The page has changed the fact it describes: leaving the old copy up
+    // invites the admin to rotate away the token they were just handed.
+    expect(document.body.textContent).not.toContain("rejecting telemetry");
+    const done = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Done");
+    await act(async () => done?.click());
+    expect(document.body.textContent).not.toContain("fo_firsttoken");
+    expect(document.body.textContent).toContain("Rotate when a token may have been exposed");
+    await act(async () => root.unmount());
+  });
+
+  it("explains a rotation that failed, and forgets it when the dialog is reopened", async () => {
+    fetchMock.mockImplementation(async (_url, init) => ((init as RequestInit | undefined)?.method === "POST" ? json({ message: "nope" }, 500) : json(connection)));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Rotate token"));
+    const open = () => [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Rotate token" && !button.closest('[role="dialog"]'));
+    await act(async () => open()?.click());
+    const confirm = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Rotate token");
+    await act(async () => confirm?.click());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("could not issue a new token"));
+    const cancel = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((button) => button.textContent?.trim() === "Cancel");
+    await act(async () => cancel?.click());
+    await act(async () => open()?.click());
+    // A stale failure standing over an untouched dialog reads as a new one.
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain("could not issue a new token");
+    await act(async () => root.unmount());
+  });
+
+  it("offers a retry instead of a spinner when the details cannot be loaded", async () => {
+    fetchMock.mockImplementation(async () => json({ message: "boom" }, 500));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("could not load"));
+    expect([...document.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Try again")).toBe(true);
     await act(async () => root.unmount());
   });
 
