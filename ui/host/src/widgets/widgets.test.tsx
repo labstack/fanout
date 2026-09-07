@@ -86,6 +86,17 @@ describe("widgets", () => {
     await act(async () => root.unmount());
   });
 
+  it("trace scopes its query to the configured service", async () => {
+    const root = await mount({ id: "w5b", type: "trace", title: "Slow checkout trace", enabled: true, config: { service: "payments" } });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const requested = fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => url.includes("/api/observability/trace"));
+    expect(requested.length).toBeGreaterThan(0);
+    // Without this the widget asks for the worst trace anywhere in the window,
+    // which is rarely the service the widget is named after.
+    expect(requested.every((url) => new URL(url, "http://localhost").searchParams.get("service") === "payments")).toBe(true);
+    await act(async () => root.unmount());
+  });
+
   it("topology draws a graph and counts routes", async () => {
     const root = await mount({ id: "w2", type: "topology", title: "Service map", enabled: true });
     await vi.waitFor(() => expect(document.body.textContent).toContain("2 services · 1 route"));
