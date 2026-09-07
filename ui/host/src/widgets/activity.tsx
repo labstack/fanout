@@ -1,8 +1,8 @@
 import { ScrollArea, Table, Text } from "@mantine/core";
 import type { KeyboardEvent } from "react";
 import type { Overview } from "../../../contracts";
-import { healthColor } from "../../../chart";
 import { duration, percent } from "../../../format";
+import { errorRateTone, latencyTone } from "../../../health";
 import { useObservability, widgetParams } from "./data";
 import { Empty, HealthBadge, WidgetError } from "./pieces";
 import type { WidgetBodyProps } from "./widget-card";
@@ -31,11 +31,13 @@ export default function ActivityWidget({ widget, filters, agentAvailable, onOpen
           style: { cursor: "pointer" },
         })}>
         <Table.Td><HealthBadge health={entry.health} label={entry.service} /></Table.Td>
-        <Table.Td ta="right"><Text component="span" size="sm" ff="monospace">{duration(entry.p95_ms)}</Text></Table.Td>
-        {/* The number takes its colour from the same health as the badge beside
-            it. A threshold of its own put a red pill next to a grey rate on one
-            row, which asks the reader which of the two to believe. */}
-        <Table.Td ta="right"><Text component="span" size="sm" c={entry.health === "healthy" ? "dimmed" : healthColor(entry.health)}>{percent(entry.error_rate)}</Text></Table.Td>
+        <Table.Td ta="right"><Text component="span" size="sm" ff="monospace" c={latencyTone(entry.p95_ms)}>{duration(entry.p95_ms)}</Text></Table.Td>
+        {/* Each number is coloured by the signal it shows, against the same
+            thresholds the badge is computed from. Colouring the rate by the row
+            verdict instead put "0.00%" in red on a service that was unhealthy
+            purely on latency — red where there were no errors, and nothing on
+            the figure that caused it. */}
+        <Table.Td ta="right"><Text component="span" size="sm" c={errorRateTone(entry.error_rate)}>{percent(entry.error_rate)}</Text></Table.Td>
       </Table.Tr>)}</Table.Tbody>
     </Table>
   </ScrollArea>;

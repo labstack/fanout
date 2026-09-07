@@ -48,3 +48,26 @@ describe("percent", () => {
     expect(percent(0)).toBe("0.00%");
   });
 });
+
+describe("duration seams", () => {
+  // 999.5ms used to print "1000ms": four digits of milliseconds sitting in a
+  // column of seconds.
+  it("never rounds up into the unit it just left", () => {
+    expect(duration(999.5)).toBe("1.00s");
+    expect(duration(999.9)).toBe("1.00s");
+    expect(duration(99.96)).toBe("100ms");
+    expect(duration(59_950)).toBe("1m");
+    expect(duration(3_599_600)).toBe("1h");
+  });
+
+  // A microsecond span is not a zero-length one, for the same reason a rate of
+  // 0.002% is not no errors.
+  it("says a tiny duration is tiny rather than zero", () => {
+    expect(duration(0.004)).toBe("<0.01ms");
+    expect(duration(0)).toBe("0ms");
+  });
+
+  it("shows a negative duration rather than hiding it as missing", () => {
+    expect(duration(-5)).toBe("-5.0ms");
+  });
+});

@@ -81,6 +81,7 @@ func TestTimelineBucketWidth(t *testing.T) {
 		want   string
 	}{
 		{6 * time.Hour, "5 minutes"},
+		{12 * time.Hour, "15 minutes"},
 		// A day at five minutes is 288 points on one card; the line stops being
 		// a shape and becomes a band.
 		{24 * time.Hour, "15 minutes"},

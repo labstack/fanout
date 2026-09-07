@@ -155,7 +155,7 @@ SELECT
   t.duration_count,
   ` + endpointDurationColumns() + `
 FROM endpoint_totals t
-ORDER BY t.calls DESC, (t.duration_count - le_1000) DESC
+ORDER BY t.calls DESC, (t.duration_count - le_100) DESC, t.method, t.path
 LIMIT ?`
 
 var performanceHeatmapQueryTemplate = `
@@ -529,7 +529,10 @@ func comparisonMetric(label, unit string, before, after float64, lowerIsBetter b
 	}
 	direction := DirectionStable
 	if unit == "ms" && math.Abs(after-before) < latencyNoiseMS {
-		return ComparisonMetric{Label: label, Unit: unit, Before: before, After: after, ChangePct: change, Direction: direction}
+		// The percentage goes too. Passing it through printed "↑ 100.0%" inside
+		// a grey "stable" badge whenever the earlier half had no traffic — the
+		// same number-against-colour contradiction this floor exists to remove.
+		return ComparisonMetric{Label: label, Unit: unit, Before: before, After: after, Direction: direction}
 	}
 	if math.Abs(change) >= 1 {
 		improved := change > 0

@@ -115,11 +115,20 @@ func (s *Service) provenanceFor(scope Scope, source string) Provenance {
 	}
 }
 
+// The thresholds a service or endpoint is graded against. ui/health.ts mirrors
+// them so a table can colour each figure by the signal that produced it.
+const (
+	latencyDegradedThresholdMS  = 750.0
+	latencyUnhealthyThresholdMS = 2000.0
+	errorRateDegraded           = 0.01
+	errorRateUnhealthy          = 0.05
+)
+
 func classify(errorRate, p95MS float64) Health {
 	switch {
-	case errorRate >= 0.05 || p95MS >= 2000:
+	case errorRate >= errorRateUnhealthy || p95MS >= latencyUnhealthyThresholdMS:
 		return HealthUnhealthy
-	case errorRate >= 0.01 || p95MS >= 750:
+	case errorRate >= errorRateDegraded || p95MS >= latencyDegradedThresholdMS:
 		return HealthDegraded
 	default:
 		return HealthHealthy

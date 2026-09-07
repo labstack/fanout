@@ -55,6 +55,15 @@ const axisFormat: Record<Axis, (value: number) => string> = {
   percent,
 };
 
+/* Tick labels are not table cells. `percent` says "<0.01%" for a rate too small
+   to write out, which is right in a cell and useless on an axis — every
+   gridline would carry the same label. Ticks state the number they sit on. */
+const tickFormat: Record<Axis, (value: number) => string> = {
+  count: (value) => integer.format(value),
+  duration,
+  percent: (value) => `${(value * 100).toFixed(value >= 0.1 ? 0 : 2)}%`,
+};
+
 /* Each series is drawn against an axis in its own units. A rate used to be
    multiplied by a thousand so it could share the latency axis, which put
    "Error rate × 1000" in the legend and left the reader converting in their
@@ -78,8 +87,13 @@ function PerformanceChart({ labels, title, series, dark, window }: { labels: str
       yAxis: axes.map((kind, index) => ({
         type: "value",
         position: index === 0 ? "left" : "right",
+        min: 0,
+        // A rate series that is all zeroes has no range of its own, and the
+        // chart would invent one: a "100.0%" tick above a window with no errors
+        // in it.
+        ...(kind === "percent" && !series.some((item) => item.axis === "percent" && item.data.some((value) => value > 0)) ? { max: 0.01 } : {}),
         splitLine: index === 0 ? { lineStyle: { color: colors.grid } } : { show: false },
-        axisLabel: { color: colors.muted, fontSize: 9, formatter: (value: number) => axisFormat[kind](value) },
+        axisLabel: { color: colors.muted, fontSize: 9, formatter: (value: number) => tickFormat[kind](value) },
       })),
       series: series.map((item) => ({ name: item.name, type: "line", yAxisIndex: axes.indexOf(item.axis ?? "count"), data: item.data, smooth: .22, showSymbol: false, lineStyle: { width: 2 }, areaStyle: { opacity: .045 } })),
     };

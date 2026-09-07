@@ -161,3 +161,35 @@ func TestEndpointDurationBucketsAreConsistent(t *testing.T) {
 		t.Fatalf("the rollup query does not select %q in order", endpointDurationColumns())
 	}
 }
+
+func TestComparisonFloorAlsoSilencesThePercentage(t *testing.T) {
+	// No traffic in the earlier half sends change through the divide-by-zero
+	// branch and out at 100%. Printed inside a grey "stable" badge, that is the
+	// same number-against-colour contradiction the floor exists to remove.
+	quiet := comparisonMetric("P50 latency", "ms", 0, 0.5, true)
+	if quiet.Direction != DirectionStable || quiet.ChangePct != 0 {
+		t.Fatalf("metric = %#v, want a stable reading with no percentage", quiet)
+	}
+	if quiet.Before != 0 || quiet.After != 0.5 {
+		t.Fatalf("metric = %#v, the underlying figures should still be reported", quiet)
+	}
+}
+
+// Interpolating inside the bucket moves an endpoint whose calls sit under a
+// boundary out of the class the bound alone put it in. 100 calls at 700ms are
+// healthy; reporting the 750ms bound called them degraded.
+func TestInterpolationGradesAnEndpointOnItsCallsNotItsBucket(t *testing.T) {
+	cumulative := make([]float64, len(endpointDurationBuckets))
+	for i, bucket := range endpointDurationBuckets {
+		if bucket.Bound >= 750 {
+			cumulative[i] = 100
+		}
+	}
+	p95 := histogramQuantile(cumulative, 100, 0.95)
+	if p95 >= latencyDegradedThresholdMS {
+		t.Fatalf("p95 = %v, want it under the %vms boundary its calls sit below", p95, latencyDegradedThresholdMS)
+	}
+	if classify(0, p95) != HealthHealthy {
+		t.Fatalf("health = %q, want healthy for calls that never reached the boundary", classify(0, p95))
+	}
+}
