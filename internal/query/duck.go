@@ -1259,8 +1259,25 @@ span_agg AS (
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
     COUNT(*) AS spans,
-    quantile_cont(s.duration_ms, 0.50) AS p50_ms,
-    quantile_cont(s.duration_ms, 0.95) AS p95_ms,
+    -- Latency describes the work a service performs, not the calls it waits
+    -- on. A CLIENT or PRODUCER span measures a dependency: a subscription held
+    -- open for ten minutes makes its subscriber look broken while saying
+    -- nothing about how that subscriber serves anyone. Grading on those is what
+    -- marked half the demo's services unhealthy for holding a flagd event
+    -- stream open. Error rate still counts every span, because a failing
+    -- outbound call is the caller's problem too.
+    --
+    -- COALESCE keeps a service that only makes outbound calls — a load
+    -- generator, a cron worker — measured on what it does have rather than
+    -- silently reported as having no latency at all.
+    COALESCE(
+      quantile_cont(s.duration_ms, 0.50) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')),
+      quantile_cont(s.duration_ms, 0.50)
+    ) AS p50_ms,
+    COALESCE(
+      quantile_cont(s.duration_ms, 0.95) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')),
+      quantile_cont(s.duration_ms, 0.95)
+    ) AS p95_ms,
     avg(CASE WHEN s.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
   JOIN affected a
