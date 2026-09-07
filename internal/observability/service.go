@@ -71,10 +71,16 @@ func (s *Service) normalizeScope(scope Scope) (Scope, error) {
 	return scope, nil
 }
 
+// timelineBucketWidth keeps a chart readable as the window grows. A day at five
+// minutes is 288 points drawn across a card a few hundred pixels wide: the line
+// becomes a band and its shape stops being legible, so the buckets widen with
+// the window instead.
 func timelineBucketWidth(window time.Duration) string {
 	switch {
-	case window <= 24*time.Hour:
+	case window <= 6*time.Hour:
 		return "5 minutes"
+	case window <= 24*time.Hour:
+		return "15 minutes"
 	case window <= 7*24*time.Hour:
 		return "30 minutes"
 	case window <= 30*24*time.Hour:
@@ -109,11 +115,20 @@ func (s *Service) provenanceFor(scope Scope, source string) Provenance {
 	}
 }
 
+// The thresholds a service or endpoint is graded against. ui/health.ts mirrors
+// them so a table can colour each figure by the signal that produced it.
+const (
+	latencyDegradedThresholdMS  = 750.0
+	latencyUnhealthyThresholdMS = 2000.0
+	errorRateDegraded           = 0.01
+	errorRateUnhealthy          = 0.05
+)
+
 func classify(errorRate, p95MS float64) Health {
 	switch {
-	case errorRate >= 0.05 || p95MS >= 2000:
+	case errorRate >= errorRateUnhealthy || p95MS >= latencyUnhealthyThresholdMS:
 		return HealthUnhealthy
-	case errorRate >= 0.01 || p95MS >= 750:
+	case errorRate >= errorRateDegraded || p95MS >= latencyDegradedThresholdMS:
 		return HealthDegraded
 	default:
 		return HealthHealthy

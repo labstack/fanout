@@ -54,7 +54,7 @@ FROM (SELECT DISTINCT bucket FROM endpoint_rollup LIMIT 5)`
 // endpointRollupQuery uses the minute cache only through its current watermark.
 // Raw spans cover both partial boundary minutes and any newer complete minutes,
 // so the cache lag cannot appear as zero traffic and raw work stays bounded.
-const endpointRollupQuery = `
+var endpointRollupQuery = `
 WITH params AS (
   SELECT
     ?::TIMESTAMP AS start_time,
@@ -151,42 +151,11 @@ SELECT
   t.method,
   t.path,
   t.calls,
-  CASE
-    WHEN duration_count = 0 THEN 0
-    WHEN le_0_1 >= duration_count * 0.50 THEN 0.1 WHEN le_0_5 >= duration_count * 0.50 THEN 0.5
-    WHEN le_1 >= duration_count * 0.50 THEN 1 WHEN le_2_5 >= duration_count * 0.50 THEN 2.5
-    WHEN le_5 >= duration_count * 0.50 THEN 5 WHEN le_10 >= duration_count * 0.50 THEN 10
-    WHEN le_25 >= duration_count * 0.50 THEN 25 WHEN le_50 >= duration_count * 0.50 THEN 50
-    WHEN le_100 >= duration_count * 0.50 THEN 100 WHEN le_250 >= duration_count * 0.50 THEN 250
-    WHEN le_500 >= duration_count * 0.50 THEN 500 WHEN le_750 >= duration_count * 0.50 THEN 750
-    WHEN le_1000 >= duration_count * 0.50 THEN 1000 WHEN le_2000 >= duration_count * 0.50 THEN 2000
-    WHEN le_5000 >= duration_count * 0.50 THEN 5000 WHEN le_30000 >= duration_count * 0.50 THEN 30000
-    ELSE 300000 END AS p50_ms,
-  CASE
-    WHEN duration_count = 0 THEN 0
-    WHEN le_0_1 >= duration_count * 0.95 THEN 0.1 WHEN le_0_5 >= duration_count * 0.95 THEN 0.5
-    WHEN le_1 >= duration_count * 0.95 THEN 1 WHEN le_2_5 >= duration_count * 0.95 THEN 2.5
-    WHEN le_5 >= duration_count * 0.95 THEN 5 WHEN le_10 >= duration_count * 0.95 THEN 10
-    WHEN le_25 >= duration_count * 0.95 THEN 25 WHEN le_50 >= duration_count * 0.95 THEN 50
-    WHEN le_100 >= duration_count * 0.95 THEN 100 WHEN le_250 >= duration_count * 0.95 THEN 250
-    WHEN le_500 >= duration_count * 0.95 THEN 500 WHEN le_750 >= duration_count * 0.95 THEN 750
-    WHEN le_1000 >= duration_count * 0.95 THEN 1000 WHEN le_2000 >= duration_count * 0.95 THEN 2000
-    WHEN le_5000 >= duration_count * 0.95 THEN 5000 WHEN le_30000 >= duration_count * 0.95 THEN 30000
-    ELSE 300000 END AS p95_ms,
-  CASE
-    WHEN duration_count = 0 THEN 0
-    WHEN le_0_1 >= duration_count * 0.99 THEN 0.1 WHEN le_0_5 >= duration_count * 0.99 THEN 0.5
-    WHEN le_1 >= duration_count * 0.99 THEN 1 WHEN le_2_5 >= duration_count * 0.99 THEN 2.5
-    WHEN le_5 >= duration_count * 0.99 THEN 5 WHEN le_10 >= duration_count * 0.99 THEN 10
-    WHEN le_25 >= duration_count * 0.99 THEN 25 WHEN le_50 >= duration_count * 0.99 THEN 50
-    WHEN le_100 >= duration_count * 0.99 THEN 100 WHEN le_250 >= duration_count * 0.99 THEN 250
-    WHEN le_500 >= duration_count * 0.99 THEN 500 WHEN le_750 >= duration_count * 0.99 THEN 750
-    WHEN le_1000 >= duration_count * 0.99 THEN 1000 WHEN le_2000 >= duration_count * 0.99 THEN 2000
-    WHEN le_5000 >= duration_count * 0.99 THEN 5000 WHEN le_30000 >= duration_count * 0.99 THEN 30000
-    ELSE 300000 END AS p99_ms,
-  t.error_rate
+  t.error_rate,
+  t.duration_count,
+  ` + endpointDurationColumns() + `
 FROM endpoint_totals t
-ORDER BY t.calls DESC, p95_ms DESC
+ORDER BY t.calls DESC, (t.duration_count - le_100) DESC, t.method, t.path
 LIMIT ?`
 
 var performanceHeatmapQueryTemplate = `
@@ -318,7 +287,7 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 	if ready {
 		query = endpointRollupQuery
 		args = []any{scope.Start, scope.End, watermark, scope.Namespace, service, limit}
-		source = "endpoint_rollup + raw spans (histogram upper-bound percentiles)"
+		source = "endpoint_rollup + raw spans (interpolated histogram percentiles)"
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -329,7 +298,20 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 	endpoints := make([]Endpoint, 0)
 	for rows.Next() {
 		var endpoint Endpoint
-		if err := rows.Scan(&endpoint.Method, &endpoint.Path, &endpoint.Calls, &endpoint.P50MS, &endpoint.P95MS, &endpoint.P99MS, &endpoint.ErrorRate); err != nil {
+		if ready {
+			var total float64
+			cumulative := make([]float64, len(endpointDurationBuckets))
+			targets := []any{&endpoint.Method, &endpoint.Path, &endpoint.Calls, &endpoint.ErrorRate, &total}
+			for i := range cumulative {
+				targets = append(targets, &cumulative[i])
+			}
+			if err := rows.Scan(targets...); err != nil {
+				return nil, "", fmt.Errorf("scan endpoint: %w", err)
+			}
+			endpoint.P50MS = histogramQuantile(cumulative, total, 0.50)
+			endpoint.P95MS = histogramQuantile(cumulative, total, 0.95)
+			endpoint.P99MS = histogramQuantile(cumulative, total, 0.99)
+		} else if err := rows.Scan(&endpoint.Method, &endpoint.Path, &endpoint.Calls, &endpoint.P50MS, &endpoint.P95MS, &endpoint.P99MS, &endpoint.ErrorRate); err != nil {
 			return nil, "", fmt.Errorf("scan endpoint: %w", err)
 		}
 		endpoint.Health = classify(endpoint.ErrorRate, endpoint.P95MS)
@@ -339,6 +321,75 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 		return nil, "", fmt.Errorf("iterate endpoints: %w", err)
 	}
 	return endpoints, source, nil
+}
+
+// endpointDurationBuckets pairs each histogram boundary with the column that
+// counts it, and both the query's column list and the interpolation read from
+// here.
+//
+// The two were written out separately at first, which couples them by position
+// alone: reordering one list, or adding a boundary to the rollup without adding
+// it here, would go on compiling and quietly report one bucket's count against
+// another's boundary. Percentiles would shift and nothing would look broken.
+// The boundaries themselves must stay in step with the histogram the rollup
+// writes (endpointRollupInsertSQL, in internal/query). Nothing here can check
+// that at compile time; TestEndpointRollupQueryMergesBucketsAndExactBoundaries
+// is what catches a drift, because it fills a real rollup row by column name
+// and reads the percentiles back out.
+var endpointDurationBuckets = []struct {
+	Column string
+	Bound  float64
+}{
+	{"le_0_1", 0.1}, {"le_0_5", 0.5}, {"le_1", 1}, {"le_2_5", 2.5},
+	{"le_5", 5}, {"le_10", 10}, {"le_25", 25}, {"le_50", 50},
+	{"le_100", 100}, {"le_250", 250}, {"le_500", 500}, {"le_750", 750},
+	{"le_1000", 1000}, {"le_2000", 2000}, {"le_5000", 5000},
+	{"le_30000", 30000}, {"le_300000", 300000},
+}
+
+// endpointDurationColumns is the SELECT list for those counts, in the order
+// histogramQuantile expects to read them.
+func endpointDurationColumns() string {
+	names := make([]string, len(endpointDurationBuckets))
+	for i, bucket := range endpointDurationBuckets {
+		names[i] = bucket.Column
+	}
+	return strings.Join(names, ", ")
+}
+
+// histogramQuantile reads a quantile out of cumulative bucket counts,
+// interpolating inside the bucket it lands in.
+//
+// Reporting the bucket's upper bound instead — which is what the rollup query
+// used to do — makes a table that reads as broken: every endpoint whose P95 and
+// P99 fall in one bucket shows the same number twice, and a page of "25.0ms /
+// 25.0ms" invites the reader to distrust the whole view. Interpolation also
+// stops a busy endpoint reporting 50ms when almost all of its calls sit just
+// above 25ms.
+//
+// Values beyond the last boundary are reported at that boundary: the rollup
+// stops counting there, so it is the most the data can support.
+func histogramQuantile(cumulative []float64, total, quantile float64) float64 {
+	if total <= 0 || len(cumulative) == 0 {
+		return 0
+	}
+	rank := quantile * total
+	previousBound, previousCount := 0.0, 0.0
+	for i, count := range cumulative {
+		if i >= len(endpointDurationBuckets) {
+			break
+		}
+		bound := endpointDurationBuckets[i].Bound
+		if count >= rank {
+			width, inBucket := bound-previousBound, count-previousCount
+			if width <= 0 || inBucket <= 0 {
+				return bound
+			}
+			return previousBound + width*((rank-previousCount)/inBucket)
+		}
+		previousBound, previousCount = bound, count
+	}
+	return endpointDurationBuckets[len(endpointDurationBuckets)-1].Bound
 }
 
 func (s *Service) endpointCacheState(ctx context.Context) (bool, time.Time, error) {
@@ -463,6 +514,12 @@ func totalsOf(before, after performanceAggregate) PerformanceTotals {
 	return totals
 }
 
+// latencyNoiseMS is the smallest latency move worth calling a change. A p50
+// that goes from 3.9ms to 4.0ms is not a regression, but as a percentage it is
+// 2.2% — enough to have been painted red beside an arrow, which spends the
+// colour that should mean "look here" on sampling noise.
+const latencyNoiseMS = 1.0
+
 func comparisonMetric(label, unit string, before, after float64, lowerIsBetter bool) ComparisonMetric {
 	change := 0.0
 	if before != 0 {
@@ -471,6 +528,12 @@ func comparisonMetric(label, unit string, before, after float64, lowerIsBetter b
 		change = 100
 	}
 	direction := DirectionStable
+	if unit == "ms" && math.Abs(after-before) < latencyNoiseMS {
+		// The percentage goes too. Passing it through printed "↑ 100.0%" inside
+		// a grey "stable" badge whenever the earlier half had no traffic — the
+		// same number-against-colour contradiction this floor exists to remove.
+		return ComparisonMetric{Label: label, Unit: unit, Before: before, After: after, Direction: direction}
+	}
 	if math.Abs(change) >= 1 {
 		improved := change > 0
 		if lowerIsBetter {

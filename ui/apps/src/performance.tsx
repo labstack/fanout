@@ -43,14 +43,60 @@ function ActivityView({ data, dark, window }: { data: Performance; dark: boolean
   return <Stack px={{ base: "md", sm: "lg" }} pb="md">
     <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm"><Metric label="Operations" value={integer.format(totals.spans)} /><Metric label="P95 latency" value={duration(totals.p95_ms)} color={totals.p95_ms >= 750 ? "warn" : "ok"} /><Metric label="Error rate" value={percent(totals.error_rate)} color={totals.error_rate >= .01 ? "bad" : "ok"} /></SimpleGrid>
     <PerformanceChart dark={dark} labels={labels} title="Traffic and logs" window={window} series={[{ name: "Operations", data: data.points.map((point) => point.spans), color: seriesColor("operations", dark) }, { name: "Logs", data: data.points.map((point) => point.log_count), color: seriesColor("logs", dark) }]} />
-    <PerformanceChart dark={dark} labels={labels} title="Latency and error correlation" window={window} series={[{ name: "P95 latency", data: data.points.map((point) => point.p95_ms), color: statusHex(dark).warn }, { name: "Error rate × 1000", data: data.points.map((point) => point.error_rate * 1000), color: statusHex(dark).bad }]} />
+    <PerformanceChart dark={dark} labels={labels} title="Latency and error correlation" window={window} series={[{ name: "P95 latency", data: data.points.map((point) => point.p95_ms), color: statusHex(dark).warn, axis: "duration" }, { name: "Error rate", data: data.points.map((point) => point.error_rate), color: statusHex(dark).bad, axis: "percent" }]} />
   </Stack>;
 }
 
-function PerformanceChart({ labels, title, series, dark, window }: { labels: string[]; title: string; series: Array<{ name: string; data: number[]; color: string }>; dark: boolean; window: string }) {
+type Axis = "count" | "duration" | "percent";
+
+const axisFormat: Record<Axis, (value: number) => string> = {
+  count: (value) => integer.format(value),
+  duration,
+  percent,
+};
+
+/* Tick labels are not table cells. `percent` says "<0.01%" for a rate too small
+   to write out, which is right in a cell and useless on an axis — every
+   gridline would carry the same label. Ticks state the number they sit on. */
+const tickFormat: Record<Axis, (value: number) => string> = {
+  count: (value) => integer.format(value),
+  duration,
+  percent: (value) => `${(value * 100).toFixed(value >= 0.1 ? 0 : 2)}%`,
+};
+
+/* Each series is drawn against an axis in its own units. A rate used to be
+   multiplied by a thousand so it could share the latency axis, which put
+   "Error rate × 1000" in the legend and left the reader converting in their
+   head. Latency labels read in the units `duration` chooses, so one axis no
+   longer carries both "0.0ms" and "100.00s". */
+function PerformanceChart({ labels, title, series, dark, window }: { labels: string[]; title: string; series: Array<{ name: string; data: number[]; color: string; axis?: Axis }>; dark: boolean; window: string }) {
   const option = useMemo(() => {
     const colors = chartTheme(dark);
-    return { color: series.map((item) => item.color), grid: { left: 42, right: 18, top: 42, bottom: 30 }, legend: { top: 5, left: 0, textStyle: { color: colors.muted, fontSize: 10 }, icon: "circle", itemWidth: 7, itemHeight: 7 }, tooltip: { trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } }, xAxis: { type: "category", data: labels.map((value) => timelineTimestamp(value, window)), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true } }, yAxis: { type: "value", splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: 9 } }, series: series.map((item) => ({ name: item.name, type: "line", data: item.data, smooth: .22, showSymbol: false, lineStyle: { width: 2 }, areaStyle: { opacity: .045 } })) };
+    const axes = [...new Set(series.map((item) => item.axis ?? "count"))] as Axis[];
+    const unitOf = (name: string) => series.find((item) => item.name === name)?.axis ?? "count";
+    return {
+      color: series.map((item) => item.color),
+      grid: { left: 46, right: axes.length > 1 ? 54 : 18, top: 42, bottom: 30 },
+      legend: { top: 5, left: 0, textStyle: { color: colors.muted, fontSize: 10 }, icon: "circle", itemWidth: 7, itemHeight: 7 },
+      tooltip: {
+        trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 },
+        formatter: (params: Array<{ seriesName: string; value: number; marker: string; axisValueLabel: string }>) =>
+          [params[0]?.axisValueLabel, ...params.map((entry) => `${entry.marker}${entry.seriesName}: ${axisFormat[unitOf(entry.seriesName)](entry.value)}`)].join("<br/>"),
+      },
+      xAxis: { type: "category", data: labels.map((value) => timelineTimestamp(value, window)), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true } },
+      yAxis: axes.map((kind, index) => ({
+        type: "value",
+        position: index === 0 ? "left" : "right",
+        min: 0,
+        // A rate series that is all zeroes has no range of its own, and the
+        // chart would invent one: a "100.0%" tick above a window with no errors
+        // in it.
+        ...(kind === "percent" && !series.some((item) => item.axis === "percent" && item.data.some((value) => value > 0)) ? { max: 0.01 } : {}),
+        splitLine: index === 0 ? { lineStyle: { color: colors.grid } } : { show: false },
+        axisLabel: { color: colors.muted, fontSize: 9, formatter: (value: number) => tickFormat[kind](value) },
+      })),
+      series: series.map((item) => ({ name: item.name, type: "line", yAxisIndex: axes.indexOf(item.axis ?? "count"), data: item.data, smooth: .22, showSymbol: false, lineStyle: { width: 2 }, areaStyle: { opacity: .045 } })),
+    };
   }, [dark, labels, series, window]);
   return <Paper withBorder radius="md" p="sm"><Text fw={650} size="sm" mb="xs">{title}</Text><EChart option={option} height={210} label={title} /></Paper>;
 }

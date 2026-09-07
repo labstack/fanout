@@ -109,12 +109,20 @@ WHERE bucket >= ? AND bucket < ? AND namespace = 'prod' AND service = 'checkout'
 	if err != nil {
 		t.Fatalf("queryEndpoints: %v", err)
 	}
-	if source != "endpoint_rollup + raw spans (histogram upper-bound percentiles)" || len(got) != 1 {
+	if source != "endpoint_rollup + raw spans (interpolated histogram percentiles)" || len(got) != 1 {
 		t.Fatalf("queryEndpoints = (%#v, %q), want one rollup endpoint", got, source)
 	}
 	endpoint := got[0]
-	if endpoint.Calls != 6 || endpoint.P50MS != 100 || endpoint.P95MS != 2000 || endpoint.P99MS != 2000 {
-		t.Fatalf("endpoint = %#v, want calls=6 p50=100 p95=p99=2000", endpoint)
+	// The six merged calls are 5, 10, 100, 500, 1000 and 2000ms. Reporting the
+	// containing bucket's upper bound put P95 and P99 both at 2000ms — the same
+	// number twice, which reads as a broken table. Interpolating inside the
+	// 1000–2000ms bucket separates them: rank 5.7 of 6 lands at 1700ms, rank
+	// 5.94 at 1940ms.
+	if endpoint.Calls != 6 || endpoint.P50MS != 100 {
+		t.Fatalf("endpoint = %#v, want calls=6 p50=100", endpoint)
+	}
+	if math.Abs(endpoint.P95MS-1700) > 1e-6 || math.Abs(endpoint.P99MS-1940) > 1e-6 {
+		t.Fatalf("p95/p99 = %v/%v, want 1700/1940 interpolated inside the bucket", endpoint.P95MS, endpoint.P99MS)
 	}
 	if math.Abs(endpoint.ErrorRate-2.0/6.0) > 1e-9 {
 		t.Fatalf("error rate = %v, want %v", endpoint.ErrorRate, 2.0/6.0)
