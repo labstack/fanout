@@ -71,10 +71,16 @@ func (s *Service) normalizeScope(scope Scope) (Scope, error) {
 	return scope, nil
 }
 
+// timelineBucketWidth keeps a chart readable as the window grows. A day at five
+// minutes is 288 points drawn across a card a few hundred pixels wide: the line
+// becomes a band and its shape stops being legible, so the buckets widen with
+// the window instead.
 func timelineBucketWidth(window time.Duration) string {
 	switch {
-	case window <= 24*time.Hour:
+	case window <= 6*time.Hour:
 		return "5 minutes"
+	case window <= 24*time.Hour:
+		return "15 minutes"
 	case window <= 7*24*time.Hour:
 		return "30 minutes"
 	case window <= 30*24*time.Hour:

@@ -89,3 +89,58 @@ func TestTotalsTakeLatencyFromHalvesThatServedSomething(t *testing.T) {
 		t.Fatalf("p95 = %.0f, want the subscription figure when there is nothing else", onlyWaiting.P95MS)
 	}
 }
+
+func TestHistogramQuantileInterpolatesInsideTheBucket(t *testing.T) {
+	// Six calls at 5, 10, 100, 500, 1000 and 2000ms.
+	cumulative := []float64{0, 0, 0, 0, 1, 2, 2, 2, 3, 3, 4, 4, 5, 6, 6, 6, 6}
+	if got := histogramQuantile(cumulative, 6, 0.50); math.Abs(got-100) > 1e-6 {
+		t.Fatalf("p50 = %v, want 100", got)
+	}
+	// The bound alone would report 2000 for both, which is the tell that a
+	// table is reporting buckets rather than latencies.
+	p95, p99 := histogramQuantile(cumulative, 6, 0.95), histogramQuantile(cumulative, 6, 0.99)
+	if math.Abs(p95-1700) > 1e-6 || math.Abs(p99-1940) > 1e-6 {
+		t.Fatalf("p95/p99 = %v/%v, want 1700/1940", p95, p99)
+	}
+	if p95 >= p99 {
+		t.Fatalf("p95 %v should sit below p99 %v", p95, p99)
+	}
+}
+
+func TestHistogramQuantileHandlesEmptyAndOverflow(t *testing.T) {
+	if got := histogramQuantile(nil, 0, 0.95); got != 0 {
+		t.Fatalf("no data = %v, want 0", got)
+	}
+	if got := histogramQuantile([]float64{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, 5, 0.95); got != 300000 {
+		t.Fatalf("everything past the last boundary = %v, want the boundary itself", got)
+	}
+	// Ten calls somewhere in the 2.5–5ms bucket: the 95th sits near the top of
+	// that bucket rather than exactly on its boundary, which is the point of
+	// interpolating at all.
+	if got := histogramQuantile([]float64{0, 0, 0, 0, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10}, 10, 0.95); math.Abs(got-4.875) > 1e-9 {
+		t.Fatalf("quantile inside the last populated bucket = %v, want 4.875", got)
+	}
+}
+
+func TestComparisonIgnoresSubMillisecondLatencyMoves(t *testing.T) {
+	// 3.9ms to 4.0ms is 2.2%, which was enough to paint a red regression arrow
+	// beside a number that had not meaningfully moved.
+	quiet := comparisonMetric("P50 latency", "ms", 3.9, 4.0, true)
+	if quiet.Direction != DirectionStable {
+		t.Fatalf("direction = %q, want stable for a 0.1ms move", quiet.Direction)
+	}
+	if quiet.Significant {
+		t.Fatalf("a 0.1ms move should never be significant: %#v", quiet)
+	}
+	// A real move still reads as one.
+	real := comparisonMetric("P95 latency", "ms", 13690, 10410, true)
+	if real.Direction != DirectionImprovement || !real.Significant {
+		t.Fatalf("13.7s to 10.4s = %#v, want a significant improvement", real)
+	}
+	// The floor is for latency only; a rate moving by less than a point is
+	// still a rate that moved.
+	rate := comparisonMetric("Error rate", "%", 0.10, 0.40, true)
+	if rate.Direction != DirectionRegression {
+		t.Fatalf("error rate = %#v, want a regression", rate)
+	}
+}

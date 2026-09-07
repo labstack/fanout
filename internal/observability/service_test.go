@@ -2,7 +2,9 @@ package observability
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
+	"fmt"
 	"math"
 	"regexp"
 	"strings"
@@ -79,7 +81,10 @@ func TestTimelineBucketWidth(t *testing.T) {
 		window time.Duration
 		want   string
 	}{
-		{24 * time.Hour, "5 minutes"},
+		{6 * time.Hour, "5 minutes"},
+		// A day at five minutes is 288 points on one card; the line stops being
+		// a shape and becomes a band.
+		{24 * time.Hour, "15 minutes"},
 		{48 * time.Hour, "30 minutes"},
 		{7 * 24 * time.Hour, "30 minutes"},
 		{30 * 24 * time.Hour, "4 hours"},
@@ -204,10 +209,20 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 			AddRow(start, int64(120), 0.10, 80.0, 220.0, int64(30), int64(8)))
 	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupStatusQuery)).
 		WillReturnRows(sqlmock.NewRows([]string{"ready", "watermark"}).AddRow(true, end.UnixNano()))
+	// The rollup path returns cumulative histogram counts and the percentiles
+	// are interpolated from them; 50 calls all at or under 250ms put p95 inside
+	// the 100–250ms bucket.
+	endpointColumns := []string{"method", "path", "calls", "error_rate", "duration_count"}
+	endpointCounts := []driver.Value{"GET", "/pay", int64(50), 0.08, 50.0}
+	for _, count := range []float64{0, 0, 0, 0, 0, 0, 0, 10, 40, 50, 50, 50, 50, 50, 50, 50, 50} {
+		endpointCounts = append(endpointCounts, count)
+	}
+	for i := range endpointDurationBounds {
+		endpointColumns = append(endpointColumns, fmt.Sprintf("le_%d", i))
+	}
 	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupQuery)).
 		WithArgs(start, end, end, "prod", "checkout", 25).
-		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
-			AddRow("GET", "/pay", int64(50), 75.0, 210.0, 350.0, 0.08))
+		WillReturnRows(sqlmock.NewRows(endpointColumns).AddRow(endpointCounts...))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceHeatmapSQL(time.Hour))).
 		WithArgs(start, end, "prod", "prod", start, end, "prod", "prod").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "service", "p95_ms"}).

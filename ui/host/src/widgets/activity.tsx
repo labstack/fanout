@@ -1,6 +1,7 @@
 import { ScrollArea, Table, Text } from "@mantine/core";
 import type { KeyboardEvent } from "react";
 import type { Overview } from "../../../contracts";
+import { healthColor } from "../../../chart";
 import { duration, percent } from "../../../format";
 import { useObservability, widgetParams } from "./data";
 import { Empty, HealthBadge, WidgetError } from "./pieces";
@@ -31,7 +32,10 @@ export default function ActivityWidget({ widget, filters, agentAvailable, onOpen
         })}>
         <Table.Td><HealthBadge health={entry.health} label={entry.service} /></Table.Td>
         <Table.Td ta="right"><Text component="span" size="sm" ff="monospace">{duration(entry.p95_ms)}</Text></Table.Td>
-        <Table.Td ta="right"><Text component="span" size="sm" c={entry.error_rate >= 0.01 ? "bad" : "dimmed"}>{percent(entry.error_rate)}</Text></Table.Td>
+        {/* The number takes its colour from the same health as the badge beside
+            it. A threshold of its own put a red pill next to a grey rate on one
+            row, which asks the reader which of the two to believe. */}
+        <Table.Td ta="right"><Text component="span" size="sm" c={entry.health === "healthy" ? "dimmed" : healthColor(entry.health)}>{percent(entry.error_rate)}</Text></Table.Td>
       </Table.Tr>)}</Table.Tbody>
     </Table>
   </ScrollArea>;
