@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -95,7 +96,7 @@ func (s *Server) dashboardCreate(ctx context.Context, req *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
-	return summary(fmt.Sprintf("Created dashboard %q with %d widgets.", item.Name, len(item.State.Widgets))), dashboardOutput{Dashboard: item}, nil
+	return summary(fmt.Sprintf("Created dashboard %q with %d widgets.%s", item.Name, len(item.State.Widgets), s.emptyWidgetNote(ctx, item.State))), dashboardOutput{Dashboard: item}, nil
 }
 
 func (s *Server) dashboardUpdate(ctx context.Context, req *mcp.CallToolRequest, input DashboardUpdateInput) (*mcp.CallToolResult, dashboardOutput, error) {
@@ -107,7 +108,85 @@ func (s *Server) dashboardUpdate(ctx context.Context, req *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
-	return summary(fmt.Sprintf("Updated dashboard %q with %d widgets.", item.Name, len(item.State.Widgets))), dashboardOutput{Dashboard: item}, nil
+	return summary(fmt.Sprintf("Updated dashboard %q with %d widgets.%s", item.Name, len(item.State.Widgets), s.emptyWidgetNote(ctx, item.State))), dashboardOutput{Dashboard: item}, nil
+}
+
+// probeLimit bounds the work a single create or update can trigger. A design
+// with more filtered cards than this is reported on its first few; the point is
+// to catch a dashboard built entirely out of empty cards, not to audit each one.
+const probeLimit = 8
+
+// probeBudget caps how long the whole check may take. Whatever has answered by
+// then is reported; the rest are left unmentioned rather than delaying a
+// dashboard that is already saved.
+const probeBudget = 3 * time.Second
+
+// emptyWidgetNote reports which of the new dashboard's filtered cards have
+// nothing to show right now.
+//
+// A design is composed from what the model believes is there, and a filter it
+// invents can match nothing at all — a demo dashboard shipped with "Error
+// logs" and "Warnings" cards that were empty on arrival and stayed empty,
+// because the service in question logs no such levels. Nothing in the tool
+// result said so, so the model described them to the user as working views.
+// Saying it here lets the model drop the card or explain it in the same turn.
+//
+// Probes never fail the call and never hold it open: an empty note is the
+// honest answer when a probe cannot run, and a dashboard that saved correctly
+// must not be reported as an error — or left waiting — because a follow-up
+// query was slow. A log query over a busy window has been seen to take twelve
+// seconds, and eight of those would be the answer's latency.
+func (s *Server) emptyWidgetNote(ctx context.Context, state dashboard.State) string {
+	if s.queries == nil {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeBudget)
+	defer cancel()
+	scope, err := s.scope(QueryInput{Window: state.Filters.Window, Namespace: state.Filters.Namespace})
+	if err != nil {
+		return ""
+	}
+	var empty []string
+	probes := 0
+	for _, widget := range state.Widgets {
+		if probes >= probeLimit || ctx.Err() != nil {
+			break
+		}
+		service := widgetConfigString(widget, "service")
+		switch widget.Type {
+		case "logs":
+			severity, search := widgetConfigString(widget, "severity"), widgetConfigString(widget, "search")
+			if service == "" && severity == "" && search == "" {
+				continue
+			}
+			probes++
+			result, probeErr := s.queries.Logs(ctx, scope, service, severity, search, 1)
+			if probeErr == nil && len(result.Data.Entries) == 0 {
+				empty = append(empty, widget.Title)
+			}
+		case "trace":
+			if service == "" && widgetConfigString(widget, "trace_id") == "" {
+				continue
+			}
+			probes++
+			result, probeErr := s.queries.Trace(ctx, scope, widgetConfigString(widget, "trace_id"), service, 1)
+			if probeErr == nil && len(result.Data.Spans) == 0 {
+				empty = append(empty, widget.Title)
+			}
+		}
+	}
+	if len(empty) == 0 {
+		return ""
+	}
+	return fmt.Sprintf(" No data matches these cards in the dashboard's own window, so they will render empty: %s. Tell the user, or replace them.", strings.Join(empty, ", "))
+}
+
+func widgetConfigString(widget dashboard.Widget, key string) string {
+	value, ok := widget.Config[key].(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
 }
 
 // dashboardOwner resolves the authenticated owner for a dashboard tool call.

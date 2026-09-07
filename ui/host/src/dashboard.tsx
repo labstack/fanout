@@ -8,7 +8,7 @@ import type { Overview } from "../../contracts";
 import { authorizedFetch } from "./auth";
 import { compactDashboardLayout, nextDashboardSlot, widgetDefaults, widgetTypes, type DashboardLayoutItem, type WidgetType } from "./dashboard-layout";
 import { createID } from "./id";
-import { dashboardWindows, useLastUpdated, useObservability, widgetParams, type WidgetConfig } from "./widgets/data";
+import { dashboardWindows, useLastUpdated, useObservability, widgetParams, type Filters, type WidgetConfig } from "./widgets/data";
 import WidgetCard, { widgetTitles } from "./widgets/widget-card";
 
 const Grid = WidthProvider(Responsive);
@@ -22,7 +22,7 @@ function widgetSizeFor(type: string) {
   return Object.hasOwn(widgetDefaults, type) ? widgetDefaults[type as WidgetType] : undefined;
 }
 
-export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat, onDashboardChange }: { dashboardID?: string; agentAvailable: boolean; onOpenChat: (prompt?: string) => void; onDashboardChange?: (id: string, replace?: boolean) => void }) {
+export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat, onDashboardChange, urlFilters, onFiltersChange }: { dashboardID?: string; agentAvailable: boolean; onOpenChat: (prompt?: string) => void; onDashboardChange?: (id: string, replace?: boolean) => void; urlFilters?: Partial<Filters>; onFiltersChange?: (filters: Filters) => void }) {
   const queryClient = useQueryClient();
   const dark = useComputedColorScheme("light") === "dark";
   const dashboards = useQuery({ queryKey: dashboardsQueryKey, queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 30_000 });
@@ -42,7 +42,20 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
   const selected = useQuery({ queryKey: ["dashboard", selectedID], queryFn: () => getJSON<DashboardRecord>(`/api/dashboards/${encodeURIComponent(selectedID)}`), enabled: Boolean(selectedID), refetchInterval: save.isPending || save.isError ? false : 30_000 });
   const [state, setState] = useState<DashboardState>(emptyState);
   const [breakpoint, setBreakpoint] = useState("lg");
-  const overview = useObservability<Overview>("overview", widgetParams(state.filters), Boolean(selected.data));
+  // While the address bar names a namespace it decides what is shown, which
+  // would make the field itself unusable: every keystroke would be overwritten
+  // by the value in the URL. Typing edits a draft; blurring commits it to both.
+  const [namespaceDraft, setNamespaceDraft] = useState<string | null>(null);
+  // A link carries what its sender was looking at. Without this the window and
+  // namespace lived only in the saved dashboard, so a shared URL opened on
+  // whatever the recipient had chosen and the two people discussed different
+  // numbers. The URL wins while it says something; it is not written back to
+  // the dashboard until the recipient changes a control themselves.
+  const filters = useMemo<Filters>(() => ({
+    window: dashboardWindows.some((option) => option.value === urlFilters?.window) ? urlFilters!.window! : state.filters.window,
+    namespace: urlFilters?.namespace ?? state.filters.namespace,
+  }), [urlFilters?.window, urlFilters?.namespace, state.filters.window, state.filters.namespace]);
+  const overview = useObservability<Overview>("overview", widgetParams(filters), Boolean(selected.data));
   const services = useMemo(() => (overview.data?.data.services ?? []).map((service) => service.service), [overview.data]);
   const updatedAt = useLastUpdated();
 
@@ -55,7 +68,11 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
     const items = dashboards.data?.dashboards;
     if (!items?.length) return;
     if (dashboardID && items.some((item) => item.id === dashboardID)) return;
-    if (!dashboardID && selectedID && items.some((item) => item.id === selectedID)) { onDashboardChange?.(selectedID, true); return; }
+    // An address naming a dashboard that is not there is answered, not
+    // redecorated: quietly swapping in the default left the URL pointing at one
+    // dashboard while the screen showed another.
+    if (dashboardID) return;
+    if (selectedID && items.some((item) => item.id === selectedID)) { onDashboardChange?.(selectedID, true); return; }
     const next = items.find((item) => item.is_default) ?? items[0];
     choose(next.id, true);
   }, [dashboardID, dashboards.data, selectedID]);
@@ -88,10 +105,16 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
     const slot = nextDashboardSlot(state.layout, size.w, size.h, 12, size.minW);
     update({ ...state, widgets: [...state.widgets, { id, type, title: widgetTitles[type], enabled: true }], layout: [...state.layout, { i: id, x: slot.x, y: slot.y, w: slot.w, h: size.h, minW: size.minW, minH: size.minH }] });
   }
+  // A filter change is both saved and put in the address bar, so the link the
+  // user copies afterwards shows what they are looking at.
+  function applyFilters(next: Filters) { update({ ...state, filters: next }); onFiltersChange?.(next); }
   function remove(id: string) { update({ ...state, widgets: state.widgets.filter((widget) => widget.id !== id), layout: state.layout.filter((item) => item.i !== id) }); }
   function configure(id: string, config: WidgetConfig) { update({ ...state, widgets: state.widgets.map((widget) => (widget.id === id ? { ...widget, config } : widget)) }); }
 
   if (dashboards.isLoading || (selectedID && selected.isLoading)) return <LoadingState label="Loading your dashboard…" />;
+  const known = dashboards.data?.dashboards ?? [];
+  const missing = Boolean(dashboardID) && known.length > 0 && !known.some((entry) => entry.id === dashboardID);
+  if (missing) return <NotFoundState onOpenDefault={() => choose((known.find((entry) => entry.is_default) ?? known[0]).id, true)} />;
   if (dashboards.isError || selected.isError) return <LoadingState label="Your dashboard is unavailable. Try refreshing." />;
   const item = selected.data;
   if (!item) return <LoadingState label="Preparing your dashboard…" />;
@@ -104,8 +127,8 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
       </Box>
       <Flex align={{ base: "stretch", md: "center" }} justify="space-between" direction={{ base: "column", md: "row" }} gap="sm" role="group" aria-label="Dashboard controls">
         <Group gap="sm" wrap="wrap">
-          <Select aria-label="Window" value={state.filters.window} onChange={(window) => window && update({ ...state, filters: { ...state.filters, window } })} data={dashboardWindows} w={{ base: "100%", xs: 150 }} size="sm" />
-          <TextInput aria-label="Namespace" value={state.filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={(event) => update({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} placeholder="All namespaces" w={{ base: "100%", xs: 200 }} size="sm" />
+          <Select aria-label="Window" value={filters.window} onChange={(window) => window && applyFilters({ ...filters, window })} data={dashboardWindows} w={{ base: "100%", xs: 150 }} size="sm" />
+          <TextInput aria-label="Namespace" value={namespaceDraft ?? filters.namespace} onChange={(event) => setNamespaceDraft(event.currentTarget.value)} onBlur={(event) => { setNamespaceDraft(null); applyFilters({ ...filters, namespace: event.currentTarget.value.trim() }); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} placeholder="All namespaces" w={{ base: "100%", xs: 200 }} size="sm" />
         </Group>
         {/* The row wraps rather than squeezing: at 390px a single line clipped
             both button labels to "Add vie" and "Ask Fano". */}
@@ -129,7 +152,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
 
     <Grid className="dashboard-grid" layouts={layouts} breakpoints={{ lg: 1100, md: 800, sm: 600, xs: 420, xxs: 0 }} cols={{ lg: 12, md: 10, sm: 6, xs: 2, xxs: 1 }} rowHeight={76} margin={[16, 16]} containerPadding={[0, 0]} compactType="vertical" draggableHandle=".widget-drag" draggableCancel="button,input,select,textarea,a,label,[role=menu],[role=dialog],.widget-actions" onBreakpointChange={setBreakpoint} onDragStop={(layout: readonly DashboardLayoutItem[]) => { if (breakpoint === "lg") update({ ...state, layout: [...layout] }); }} onResizeStop={(layout: readonly DashboardLayoutItem[]) => { if (breakpoint === "lg") update({ ...state, layout: [...layout] }); }}>
       {state.widgets.map((widget) => <div key={widget.id}>
-        <WidgetCard widget={widget} filters={state.filters} dark={dark} services={services} agentAvailable={agentAvailable} onOpenChat={onOpenChat} onRemove={() => remove(widget.id)} onConfigure={(config) => configure(widget.id, config)} />
+        <WidgetCard widget={widget} filters={filters} dark={dark} services={services} agentAvailable={agentAvailable} onOpenChat={onOpenChat} onRemove={() => remove(widget.id)} onConfigure={(config) => configure(widget.id, config)} />
       </div>)}
     </Grid>
   </Box>;
@@ -137,4 +160,14 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
 
 function LoadingState({ label }: { label: string }) {
   return <Center mih="50vh"><Loader size="sm" /><Text c="dimmed" size="sm" ml="sm">{label}</Text></Center>;
+}
+
+function NotFoundState({ onOpenDefault }: { onOpenDefault: () => void }) {
+  return <Center mih="50vh">
+    <Stack align="center" gap="xs">
+      <Title order={1} fz={24} lts="-0.02em">This dashboard isn&apos;t here</Title>
+      <Text c="dimmed" size="sm" ta="center">The link may be out of date, or the dashboard may have been renamed or deleted.</Text>
+      <Button mt="sm" variant="default" size="sm" onClick={onOpenDefault}>Open your default dashboard</Button>
+    </Stack>
+  </Center>;
 }

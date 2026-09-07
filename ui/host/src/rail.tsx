@@ -4,7 +4,9 @@ import { DotsThree, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from "
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { dashboardsQueryKey, getJSON, threadHistoryQueryKey, type DashboardSummary } from "./api";
+import type { Overview } from "../../contracts";
 import { authorizedFetch } from "./auth";
+import { useObservability, widgetParams } from "./widgets/data";
 
 export type RailHandle = { focusSearch(): void };
 
@@ -19,6 +21,7 @@ export type RailProps = {
   onDeletedThread: (threadID: string) => void;
   onSelectDashboard: (dashboardID: string) => void;
   onCreateDashboard: () => void;
+  onInvestigateService?: (service: string) => void;
   ref?: Ref<RailHandle>;
 };
 
@@ -34,7 +37,7 @@ async function fetchThreads(query: string, cursor: string): Promise<ThreadPage> 
   return response.json();
 }
 
-export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, ref }: RailProps) {
+export default function Rail({ agentAvailable, activeThreadID, activeDashboardID, autoFocusSearch = false, onNewChat, onSelectThread, onDeletedThread, onSelectDashboard, onCreateDashboard, onInvestigateService, ref }: RailProps) {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [query] = useDebouncedValue(search.trim(), 250);
@@ -57,6 +60,16 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
   const dashboards = useQuery({ queryKey: dashboardsQueryKey, queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 30_000 });
   const threads = useMemo(() => history.data?.pages.flatMap((page) => page.threads) ?? [], [history.data]);
   const groups = useMemo(() => groupThreads(threads), [threads]);
+  // Searching for a service used to answer "No matching chats / No matching
+  // dashboards" while that service was live, traced and logged — the search
+  // looked only at what the user had already named. The catalogue is fetched
+  // only once someone is actually searching.
+  const overview = useObservability<Overview>("overview", widgetParams({ window: "1h", namespace: "" }), Boolean(query) && Boolean(onInvestigateService));
+  const matchingServices = useMemo(() => {
+    if (!query) return [];
+    const needle = query.toLowerCase();
+    return (overview.data?.data.services ?? []).map((entry) => entry.service).filter((service) => service.toLowerCase().includes(needle)).slice(0, 6);
+  }, [overview.data, query]);
   const visibleDashboards = useMemo(() => {
     const items = dashboards.data?.dashboards ?? [];
     const needle = query.toLowerCase();
@@ -108,6 +121,12 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           </Stack>)}
           {history.hasNextPage && <Button variant="subtle" color="gray" size="compact-sm" loading={history.isFetchingNextPage} onClick={() => void history.fetchNextPage()}>See all</Button>}
         </Stack>}
+        {matchingServices.length > 0 && onInvestigateService && <Stack gap={4}>
+          <SectionLabel>Services</SectionLabel>
+          {matchingServices.map((service) => <UnstyledButton key={service} className="rail-row" p="sm" onClick={() => onInvestigateService(service)}>
+            <Text size="sm" fw={500} truncate>{service}</Text>
+          </UnstyledButton>)}
+        </Stack>}
         <Stack gap={4}>
           <SectionLabel>Dashboards</SectionLabel>
           {dashboards.isLoading && <Center py="md"><Loader size="xs" /></Center>}
@@ -129,7 +148,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
         </Stack>
       </Stack>
     </ScrollArea>
-    <TextInput ref={searchRef} value={search} onChange={(event) => setSearch(event.currentTarget.value)} leftSection={<MagnifyingGlass size={15} />} rightSection={<Kbd size="xs">⌘K</Kbd>} rightSectionWidth={44} placeholder="Search" aria-label="Search chats and dashboards" size="sm" />
+    <TextInput ref={searchRef} value={search} onChange={(event) => setSearch(event.currentTarget.value)} leftSection={<MagnifyingGlass size={15} />} rightSection={<Kbd size="xs">⌘K</Kbd>} rightSectionWidth={44} placeholder="Search" aria-label="Search chats, dashboards and services" size="sm" />
     <Modal opened={renaming !== null} onClose={() => !busy && setRenaming(null)} title="Rename chat" centered>
       <form onSubmit={(event) => { event.preventDefault(); void renameThread(); }}>
         <Stack>

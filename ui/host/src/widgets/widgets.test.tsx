@@ -187,7 +187,36 @@ describe("widgets", () => {
     await act(async () => actions.click());
     const remove = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((item) => item.textContent?.includes("Remove"));
     await act(async () => remove?.click());
+    // The menu item asks; it does not remove. A dashboard has no undo.
+    expect(onRemove).not.toHaveBeenCalled();
+    const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((button) => button.textContent?.trim() === "Remove");
+    await act(async () => confirm?.click());
     expect(onRemove).toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it("keeps the widget when the removal is cancelled", async () => {
+    const onRemove = vi.fn();
+    const root = await mount({ id: "w7b", type: "logs", title: "Logs", enabled: true }, { onRemove });
+    await vi.waitFor(() => expect(document.body.textContent).toContain("POST /charge failed"));
+    const actions = document.querySelector('button[aria-label="Actions for Logs"]') as HTMLButtonElement;
+    await act(async () => actions.click());
+    const remove = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find((item) => item.textContent?.includes("Remove"));
+    await act(async () => remove?.click());
+    const cancel = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')).find((button) => button.textContent?.trim() === "Cancel");
+    await act(async () => cancel?.click());
+    expect(onRemove).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it("recent activity rows lead to an investigation", async () => {
+    const onOpenChat = vi.fn();
+    const root = await mount({ id: "w9", type: "activity", title: "Recent activity", enabled: true }, { onOpenChat });
+    await vi.waitFor(() => expect(document.body.textContent).toContain("payments"));
+    const row = document.querySelector('[aria-label="Investigate payments"]') as HTMLElement;
+    expect(row).not.toBeNull();
+    await act(async () => row.click());
+    expect(onOpenChat).toHaveBeenCalledWith(expect.stringContaining("payments"));
     await act(async () => root.unmount());
   });
 });
