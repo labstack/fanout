@@ -93,8 +93,12 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					StartUnixNanos: int64(sp.StartTimeUnixNano),
 					EndUnixNanos:   int64(sp.EndTimeUnixNano),
 					DurationMS:     spanDurationMS(sp.StartTimeUnixNano, sp.EndTimeUnixNano),
-					StatusCode:     sp.Status.Code.String(),
-					StatusMsg:      sp.Status.Message,
+					// status is optional in OTLP and most SDKs omit it entirely
+					// for an unset status, so these read through generated
+					// getters: dereferencing sp.Status panicked the handler and
+					// lost the whole export, not just the span.
+					StatusCode:     sp.GetStatus().GetCode().String(),
+					StatusMsg:      sp.GetStatus().GetMessage(),
 					ResourceJSON:   resourceJSON,
 					AttributesJSON: attrsJSON(sp.Attributes),
 					EventsJSON:     eventsToJSON(sp.Events),
