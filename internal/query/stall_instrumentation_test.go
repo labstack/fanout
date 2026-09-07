@@ -2,6 +2,8 @@ package query
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,6 +43,16 @@ func TestWritesDoNotDrawFromTheReadPool(t *testing.T) {
 		t.Fatal("writes are not going through the write handle")
 	}
 
+	// Use the read pool first, so its idle count is non-zero and the assertion
+	// below is about where the write went rather than about a pool nobody has
+	// touched.
+	if err := d.DB.QueryRowContext(ctx, "SELECT 1").Scan(new(int)); err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if idle := d.DB.Stats().Idle; idle == 0 {
+		t.Fatal("the read pool holds no connection after a read; the assertion below would prove nothing")
+	}
+
 	// Hold a write transaction open and prove the read pool is untouched.
 	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
@@ -69,14 +81,15 @@ func TestWritesDoNotDrawFromTheReadPool(t *testing.T) {
 func TestSnapshotWaitIsMeasuredForReaders(t *testing.T) {
 	// Label values of this test's own, so the counts are this test's alone
 	// however the package's tests are ordered.
-	const admitted, refused = "test-admitted", "test-refused"
+	admitted := fmt.Sprintf("test-admitted-%d", time.Now().UnixNano())
+	refused := fmt.Sprintf("test-refused-%d", time.Now().UnixNano())
 	d := &Duck{}
-	before := testutil.CollectAndCount(metrics.ParquetReadWait)
+	before := testutil.CollectAndCount(metrics.ParquetReadWaitForTest())
 	if err := d.lockParquetRead(context.Background(), admitted); err != nil {
 		t.Fatalf("lockParquetRead: %v", err)
 	}
 	d.parquetMu.RUnlock()
-	admittedCount := testutil.CollectAndCount(metrics.ParquetReadWait)
+	admittedCount := testutil.CollectAndCount(metrics.ParquetReadWaitForTest())
 	if admittedCount != before+1 {
 		t.Fatalf("an admitted reader added %d wait series, want 1", admittedCount-before)
 	}
@@ -92,19 +105,19 @@ func TestSnapshotWaitIsMeasuredForReaders(t *testing.T) {
 	if err := d.lockParquetRead(ctx, refused); err == nil {
 		t.Fatal("reader entered a snapshot held by a publisher")
 	}
-	if got := testutil.ToFloat64(metrics.ParquetReadRefusals.WithLabelValues(refused)); got != 1 {
-		t.Fatalf("refusals = %v, want 1", got)
+	if refusals := testutil.ToFloat64(metrics.ParquetReadRefusalsForTest(refused)); refusals != 1 {
+		t.Fatalf("refusals = %v, want 1", refusals)
 	}
 	// A refusal is not also counted as a wait: they are different failures.
-	if got := testutil.CollectAndCount(metrics.ParquetReadWait); got != admittedCount {
-		t.Fatalf("a refused reader added %d wait series, want 0", got-admittedCount)
+	if series := testutil.CollectAndCount(metrics.ParquetReadWaitForTest()); series != admittedCount {
+		t.Fatalf("a refused reader added %d wait series, want 0", series-admittedCount)
 	}
 }
 
-func TestPublisherQueuedReportsAWaitingSwap(t *testing.T) {
-	var gate parquetReadGate
-	if gate.publisherQueued() {
-		t.Fatal("an idle gate reports a queued publisher")
+func TestPublisherGraceLeftTracksAWaitingSwap(t *testing.T) {
+	gate := parquetReadGate{writerGrace: time.Second}
+	if left := gate.publisherGraceLeft(); left != time.Second {
+		t.Fatalf("an idle gate reports %v of grace left, want the whole %v", left, time.Second)
 	}
 	if err := gate.RLockContext(context.Background()); err != nil {
 		t.Fatalf("RLockContext: %v", err)
@@ -118,11 +131,96 @@ func TestPublisherQueuedReportsAWaitingSwap(t *testing.T) {
 	}()
 	<-queued
 	deadline := time.Now().Add(time.Second)
-	for !gate.publisherQueued() {
+	for gate.publisherGraceLeft() == time.Second {
 		if time.Now().After(deadline) {
-			t.Fatal("a publisher waiting for readers is not reported as queued")
+			t.Fatal("a publisher waiting for readers did not start consuming its grace")
 		}
 		time.Sleep(time.Millisecond)
 	}
+	// The grace runs down rather than vanishing: a reader admitted now is not
+	// blocking anything yet, which is what stops the rollup yielding on sight.
+	if left := gate.publisherGraceLeft(); left <= 0 || left > time.Second {
+		t.Fatalf("grace left = %v, want a positive remainder under %v", left, time.Second)
+	}
+	deadline = time.Now().Add(3 * time.Second)
+	for gate.publisherGraceLeft() > 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("grace never ran out")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	gate.RUnlock()
+}
+
+// database/sql closes a connector that implements io.Closer when its DB is
+// closed, and duckdb's connector closes the instance behind an unsynchronized
+// bool. Two handles over one connector therefore meant two duckdb_close calls
+// on one instance — a double free that kills the process rather than returning
+// an error. The write handle borrows the instance; the read pool owns it.
+func TestClosingTheWriteHandleLeavesTheInstanceAlive(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Config{DataDir: t.TempDir(), RollupInterval: time.Minute, DuckDBMemory: "128MB"}
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatalf("open telemetry repository: %v", err)
+	}
+	defer repository.Close()
+	d, err := NewDuck(ctx, cfg, repository)
+	if err != nil {
+		t.Fatalf("NewDuck: %v", err)
+	}
+
+	if err := d.writeDB.Close(); err != nil {
+		t.Fatalf("close write handle: %v", err)
+	}
+	var one int
+	if err := d.DB.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil {
+		t.Fatalf("read pool died with the write handle: %v", err)
+	}
+
+	// Close is idempotent, including under a second shutdown path arriving at
+	// the same time.
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_ = d.Close()
+		}()
+	}
+	wg.Wait()
+	if err := d.Close(); err != nil {
+		t.Fatalf("closing an already-closed Duck: %v", err)
+	}
+}
+
+// Installing a gauge source is last-caller-wins; removing one is not. A Duck
+// that closes after another has taken over must clear nothing, or the gauges
+// go blank while a pool is still serving.
+func TestClosingADisplacedDuckLeavesTheGaugeSourceAlone(t *testing.T) {
+	ctx := context.Background()
+	open := func(conns int) *Duck {
+		t.Helper()
+		cfg := config.Config{DataDir: t.TempDir(), RollupInterval: time.Minute, DuckDBMemory: "128MB", DuckDBMaxConns: conns}
+		repository, err := telemetrystore.Open(cfg.TelemetryDir())
+		if err != nil {
+			t.Fatalf("open telemetry repository: %v", err)
+		}
+		t.Cleanup(func() { _ = repository.Close() })
+		d, err := NewDuck(ctx, cfg, repository)
+		if err != nil {
+			t.Fatalf("NewDuck: %v", err)
+		}
+		return d
+	}
+	first := open(2)
+	second := open(3)
+	defer second.Close()
+	// second installed itself over first. first closing must leave it alone.
+	if err := first.Close(); err != nil {
+		t.Fatalf("close first: %v", err)
+	}
+	if got := metrics.DuckDBPoolStatsForTest().MaxOpenConnections; got != 3 {
+		t.Fatalf("pool gauges read MaxOpenConnections = %d after a displaced Duck closed, want the live pool's 3", got)
+	}
 }

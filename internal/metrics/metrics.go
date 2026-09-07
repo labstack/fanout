@@ -210,19 +210,24 @@ var (
 	// reader's side was not, which left the one question a stalled query asks
 	// — "how long did I wait to enter the snapshot?" — unanswerable. These
 	// three complete the pair.
+	// An uncontended admission costs single-digit microseconds, so the ladder
+	// starts below that: a histogram whose healthy traffic all lands in the
+	// first bucket can tell you a stall happened but not what normal was.
+	snapshotBuckets = []float64{.000001, .000005, .00002, .0001, .0005, .001, .005, .025, .1, .5, 1, 2.5, 5, 10, 30, 60}
+
 	ParquetPublishHold = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "fanout_parquet_publish_hold_seconds",
 		Help:    "Time readers were excluded while a new Parquet file set was swapped in",
-		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+		Buckets: snapshotBuckets,
 	})
 
-	ParquetReadWait = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	parquetReadWait = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "fanout_parquet_read_wait_seconds",
 		Help:    "Time a reader spent waiting to enter the Parquet snapshot",
-		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+		Buckets: snapshotBuckets,
 	}, []string{"reader"})
 
-	ParquetReadRefusals = promauto.NewCounterVec(prometheus.CounterOpts{
+	parquetReadRefusals = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_parquet_read_refusals_total",
 		Help: "Readers that gave up waiting to enter the Parquet snapshot",
 	}, []string{"reader"})
@@ -284,14 +289,18 @@ func RecordFlush(signal string, durationSec float64) {
 // on the second one. Unset, every gauge reads zero.
 var duckDBPoolStats atomic.Pointer[func() sql.DBStats]
 
-// SetDuckDBPoolSource points the connection-pool gauges at a pool. The last
-// caller wins, which is what a test binary that builds several wants.
-func SetDuckDBPoolSource(stats func() sql.DBStats) {
+// SetDuckDBPoolSource points the connection-pool gauges at a pool and returns
+// the function that stops reading it. The last caller wins; the returned
+// release only clears the source if it is still the one it installed, so a
+// second Duck closing in a test binary cannot blank the gauges of one that is
+// still serving.
+func SetDuckDBPoolSource(stats func() sql.DBStats) (release func()) {
 	if stats == nil {
-		duckDBPoolStats.Store(nil)
-		return
+		return func() {}
 	}
-	duckDBPoolStats.Store(&stats)
+	installed := &stats
+	duckDBPoolStats.Store(installed)
+	return func() { duckDBPoolStats.CompareAndSwap(installed, nil) }
 }
 
 func poolStats() sql.DBStats {
@@ -331,6 +340,30 @@ var (
 		Help: "Total time callers spent waiting for a free DuckDB read connection",
 	}, func() float64 { return poolStats().WaitDuration.Seconds() })
 )
+
+// RecordParquetRead records one attempt to enter the Parquet snapshot.
+//
+// Both series are behind this function for the same reason RecordWriteGate
+// exists: the label is a fixed reader class, and a vector left exported is a
+// vector something eventually calls with a service name in it.
+func RecordParquetRead(reader string, waitSec float64, admitted bool) {
+	if admitted {
+		parquetReadWait.WithLabelValues(reader).Observe(waitSec)
+		return
+	}
+	parquetReadRefusals.WithLabelValues(reader).Inc()
+}
+
+// ParquetReadWaitForTest and ParquetReadRefusalsForTest hand the two series to
+// a test in another package, which asserts on them rather than on the call —
+// the call is the easy half. They return collectors rather than the vectors so
+// production code still cannot set an arbitrary label, and they keep
+// prometheus/testutil out of the release dependency graph.
+func ParquetReadWaitForTest() prometheus.Collector { return parquetReadWait }
+
+func ParquetReadRefusalsForTest(reader string) prometheus.Counter {
+	return parquetReadRefusals.WithLabelValues(reader)
+}
 
 // DuckDBPoolStatsForTest exposes what the pool gauges are reading, so a test
 // can prove they point at the read pool rather than the write handle.

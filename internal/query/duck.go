@@ -27,6 +27,15 @@ type Duck struct {
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
 	// sized from the machine.
 	DB *sql.DB
+	// closeOnce makes Close idempotent. Both handles come from one connector,
+	// and database/sql closes a connector that implements io.Closer — so a
+	// second Close would call duckdb_close twice on the same instance, which
+	// is a double free the runtime cannot recover from.
+	closeOnce sync.Once
+	closeErr  error
+	// releasePoolGauges stops the pool gauges reading this Duck's pool, and
+	// only if they are still reading it.
+	releasePoolGauges func()
 	// writeDB is the single connection every rollup and maintenance write uses.
 	//
 	// Those writes are serialized by writeGate anyway, so one connection is all
@@ -110,6 +119,13 @@ const (
 // that runs on a loop goroutine rather than behind a request. It is a variable
 // so the internal lease can be exercised without a five-second test.
 var parquetStatsWait = 5 * time.Second
+
+// edgeYieldMargin is how much of a queued publication's grace has to be left
+// for the edge rollup to take another sub-window. It is a rough estimate of
+// what one more sub-window costs: enough that the pass usually finishes before
+// readers start queuing, small enough that the eight-sub-window budget is not
+// given up for a publication that has only just arrived.
+const edgeYieldMargin = 10 * time.Second
 
 // rollupPublicationSafetyLag covers the maximum public SQL hold, publication
 // grace, bounded commit retries, and queued Parquet encoding with headroom for
@@ -245,10 +261,9 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 	if err != nil {
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
-	// Reads are the pool that can starve, so it is the one worth watching.
-	metrics.SetDuckDBPoolSource(db.Stats)
-
 	d := &Duck{DB: db, writeDB: writeDB, cfg: cfg, repository: repository, rollupLagNanos: int64(rollupPublicationSafetyLag)}
+	// Reads are the pool that can starve, so it is the one worth watching.
+	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
 	if cfg.DuckDBMemory == "" {
 		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
@@ -339,8 +354,12 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 }
 
 // openDuckDB returns the read pool and the single-connection write handle.
-// Both come from one connector: DuckDB allows a file one read-write instance
-// per process, so a second connector to the same DSN would fail on its lock.
+//
+// Both come from one connector so they share one DuckDB instance and therefore
+// one catalog: a write committed on one handle is visible to the other, and
+// DDL run at boot applies to both. (A second connector to the same file would
+// also work — DuckDB keeps an instance cache — but two owners of one instance
+// is exactly the hazard the wrapper below exists to avoid.)
 func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, error) {
 	// Every pooled connection must use UTC. DuckDB otherwise inherits the host
 	// timezone and casts TIMESTAMPTZ rollup buckets into local wall-clock
@@ -384,23 +403,42 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 
 	// One connection is all the writers can use — writeGate already lets one
 	// through at a time — and keeping it out of the read pool is the point.
-	writeDB := sql.OpenDB(connector)
+	//
+	// The write handle gets a connector that cannot close the instance.
+	// database/sql closes a connector that implements io.Closer when its DB is
+	// closed, and duckdb's Connector.Close calls duckdb_close behind an
+	// unsynchronized bool — so two handles over one connector means two
+	// duckdb_close calls on one instance, which crashes the process rather
+	// than returning an error. The read pool owns the instance; the write
+	// handle borrows it.
+	writeDB := sql.OpenDB(borrowedConnector{connector})
 	writeDB.SetMaxOpenConns(1)
 	writeDB.SetMaxIdleConns(1)
 	return db, writeDB, nil
 }
+
+// borrowedConnector hands out connections from a connector it does not own.
+// It deliberately does not implement io.Closer: that is the whole point.
+type borrowedConnector struct{ driver.Connector }
 
 func sqlLiteral(v string) string {
 	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }
 
 func (d *Duck) Close() error {
-	var writeErr error
-	if d.writeDB != nil {
-		writeErr = d.writeDB.Close()
-	}
-	metrics.SetDuckDBPoolSource(nil)
-	return errors.Join(writeErr, d.DB.Close())
+	d.closeOnce.Do(func() {
+		if d.releasePoolGauges != nil {
+			d.releasePoolGauges()
+		}
+		var writeErr error
+		if d.writeDB != nil {
+			// The write handle holds a connector that does not close the
+			// instance, so this releases its connection and nothing else.
+			writeErr = d.writeDB.Close()
+		}
+		d.closeErr = errors.Join(writeErr, d.DB.Close())
+	})
+	return d.closeErr
 }
 
 // writer returns the handle every write goes through. NewDuck always sets one;
@@ -415,18 +453,22 @@ func (d *Duck) writer() *sql.DB {
 
 // checkpoint folds the rollup cache's WAL back into its file, and says how long
 // that took. A checkpoint blocks new transactions for its duration, so it is a
-// candidate explanation for a stalled query and has to be measurable. The
-// non-FORCE form also fails outright while any transaction is open, which on a
-// live instance is most of the time — the failure counter is how often that
-// happens rather than a guess.
+// candidate explanation for a stalled query and has to be measurable.
+//
+// The non-FORCE form refuses while another *write* transaction is open. Every
+// write here is serialized behind the write gate on one connection, and this
+// runs under that gate, so a refusal should not happen — the counter is there
+// to say so rather than to be assumed. Only a checkpoint that ran is timed: a
+// refusal returns in microseconds and would drag the distribution towards zero,
+// which is the opposite of what the histogram is for.
 func (d *Duck) checkpoint(ctx context.Context) error {
 	start := time.Now()
-	_, err := d.writer().ExecContext(ctx, "CHECKPOINT")
-	metrics.DuckDBCheckpoint.Observe(time.Since(start).Seconds())
-	if err != nil {
+	if _, err := d.writer().ExecContext(ctx, "CHECKPOINT"); err != nil {
 		metrics.DuckDBCheckpointFailures.Inc()
+		return err
 	}
-	return err
+	metrics.DuckDBCheckpoint.Observe(time.Since(start).Seconds())
+	return nil
 }
 
 // DefaultNamespace returns empty string so queries search all namespaces.
@@ -1015,13 +1057,21 @@ WHERE ingested_unix_nano > ?
 		processed := 0
 		for !subLo.After(maxT) {
 			// Stop at a resumable point when the budget is spent, and also when
-			// a publication is waiting: this pass holds the Parquet snapshot
-			// until it commits, and every query that arrives after the
-			// publisher's grace expires waits out whatever is left of it. One
-			// sub-window is the unit; the cursor below is what makes stopping
-			// free. Never before the first, so a pass always makes progress and
-			// a busy compaction cycle cannot starve the rollup.
-			if processed == maxEdgeSubWindowsPerPass || (processed > 0 && d.parquetMu.publisherQueued()) {
+			// a queued publication is about to start refusing readers: this
+			// pass holds the Parquet snapshot until it commits, so from that
+			// moment every arriving query waits out whatever is left of it.
+			//
+			// The trigger is the grace running out, not a publisher existing.
+			// A publication queues every ten seconds under compaction, and
+			// yielding on sight would cut a pass from eight sub-windows to one
+			// whenever ingest is busy — which is when the eight are needed.
+			// While the grace holds, readers are still being admitted and
+			// nothing is waiting on this pass.
+			//
+			// One sub-window is the unit, and the cursor below is what makes
+			// stopping free. Never before the first, so a pass always makes
+			// progress and a busy compaction cycle cannot starve the rollup.
+			if processed == maxEdgeSubWindowsPerPass || (processed > 0 && d.parquetMu.publisherGraceLeft() <= edgeYieldMargin) {
 				completed = false
 				nextCursor = subLo.UnixNano()
 				break
@@ -1756,10 +1806,10 @@ const (
 func (d *Duck) lockParquetRead(ctx context.Context, reader string) error {
 	start := time.Now()
 	if err := d.parquetMu.RLockContext(ctx); err != nil {
-		metrics.ParquetReadRefusals.WithLabelValues(reader).Inc()
+		metrics.RecordParquetRead(reader, time.Since(start).Seconds(), false)
 		return errors.Join(ErrParquetReadWait, err)
 	}
-	metrics.ParquetReadWait.WithLabelValues(reader).Observe(time.Since(start).Seconds())
+	metrics.RecordParquetRead(reader, time.Since(start).Seconds(), true)
 	return nil
 }
 

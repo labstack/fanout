@@ -80,15 +80,32 @@ func (g *parquetReadGate) admitsReaderLocked() bool {
 	return g.clock().Sub(g.waiting[0].queuedAt) < g.grace()
 }
 
-// publisherQueued reports whether a publication is waiting for readers to
-// leave. A long-running internal reader asks between units of work so it can
-// stop at a resumable point instead of making every query behind it wait out
-// the rest of its pass.
-func (g *parquetReadGate) publisherQueued() bool {
+// publisherGraceLeft reports how long the oldest queued publication may still
+// be kept waiting before the gate starts refusing new readers.
+//
+// A long-running internal reader asks between units of work, so it can stop at
+// a resumable point rather than make every query behind it wait out the rest
+// of its pass. It is the remaining grace and not the mere presence of a
+// publisher that matters: while the grace holds, readers are still being
+// admitted and nothing is blocked, so yielding then would give up throughput
+// to relieve congestion that does not exist yet.
+//
+// Zero means a publication is holding the gate, or has waited out its grace
+// and new readers are already queuing. With nothing queued, the full grace.
+func (g *parquetReadGate) publisherGraceLeft() time.Duration {
 	g.init()
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.writer || len(g.waiting) > 0
+	if g.writer {
+		return 0
+	}
+	if len(g.waiting) == 0 {
+		return g.grace()
+	}
+	if left := g.grace() - g.clock().Sub(g.waiting[0].queuedAt); left > 0 {
+		return left
+	}
+	return 0
 }
 
 func (g *parquetReadGate) TryRLock() bool {
