@@ -214,10 +214,10 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 			AddRow(start, "checkout", 220.0))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceAggregateQuery)).
 		WithArgs(start, midpoint, "prod", "prod", "checkout", "checkout").
-		WillReturnRows(sqlmock.NewRows([]string{"spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(50.0, 0.12, 90.0, 240.0))
+		WillReturnRows(sqlmock.NewRows([]string{"spans", "served_spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(50.0, 50.0, 0.12, 90.0, 240.0))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceAggregateQuery)).
 		WithArgs(midpoint, end, "prod", "prod", "checkout", "checkout").
-		WillReturnRows(sqlmock.NewRows([]string{"spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(70.0, 0.06, 70.0, 180.0))
+		WillReturnRows(sqlmock.NewRows([]string{"spans", "served_spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(70.0, 70.0, 0.06, 70.0, 180.0))
 
 	result, err := svc.Performance(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", 25)
 	if err != nil {

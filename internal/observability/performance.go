@@ -212,6 +212,7 @@ func performanceHeatmapSQL(window time.Duration) string {
 var performanceAggregateQuery = `
 SELECT
   CAST(COALESCE(SUM(spans), 0) AS DOUBLE),
+  CAST(COALESCE(SUM(served_spans), 0) AS DOUBLE),
   COALESCE(SUM(error_rate * spans) / NULLIF(SUM(spans), 0), 0),
   ` + windowP50SQL + `,
   ` + windowP95SQL + `
@@ -390,10 +391,11 @@ func (s *Service) endpointCacheState(ctx context.Context) (bool, time.Time, erro
 }
 
 type performanceAggregate struct {
-	Spans     float64
-	ErrorRate float64
-	P50MS     float64
-	P95MS     float64
+	Spans       float64
+	ServedSpans float64
+	ErrorRate   float64
+	P50MS       float64
+	P95MS       float64
 }
 
 func (s *Service) performanceAggregate(ctx context.Context, scope Scope, service string) (performanceAggregate, error) {
@@ -404,7 +406,7 @@ func (s *Service) performanceAggregate(ctx context.Context, scope Scope, service
 	defer rows.Close()
 	var value performanceAggregate
 	if rows.Next() {
-		if err := rows.Scan(&value.Spans, &value.ErrorRate, &value.P50MS, &value.P95MS); err != nil {
+		if err := rows.Scan(&value.Spans, &value.ServedSpans, &value.ErrorRate, &value.P50MS, &value.P95MS); err != nil {
 			return performanceAggregate{}, fmt.Errorf("scan performance comparison: %w", err)
 		}
 	}
@@ -415,13 +417,42 @@ func (s *Service) performanceAggregate(ctx context.Context, scope Scope, service
 // running a third aggregate query: the halves tile the window exactly, so
 // summing spans, weighting the averages by span count and taking the larger
 // P95 reproduces what performanceAggregateQuery would return over the whole
-// scope. Keep these three rules in step with that query.
+// scope. Keep these rules in step with that query.
+//
+// Latency comes only from halves in which the service served something,
+// matching what the whole-window query does across buckets. Taking the larger
+// P95 of both halves regardless would let a half spent holding a subscription
+// open decide the figure, and the card would then disagree with the overview
+// beside it — which is the disagreement these totals exist to end. Counts and
+// error rate still cover every span: an operation the service waited on is
+// still an operation it performed, and a failed outbound call is still its
+// problem.
 func totalsOf(before, after performanceAggregate) PerformanceTotals {
 	spans := before.Spans + after.Spans
-	totals := PerformanceTotals{Spans: int64(spans), P95MS: math.Max(before.P95MS, after.P95MS)}
+	totals := PerformanceTotals{Spans: int64(spans)}
 	if spans > 0 {
 		totals.ErrorRate = (before.ErrorRate*before.Spans + after.ErrorRate*after.Spans) / spans
-		totals.P50MS = (before.P50MS*before.Spans + after.P50MS*after.Spans) / spans
+	}
+
+	latency := []performanceAggregate{}
+	for _, half := range []performanceAggregate{before, after} {
+		if half.ServedSpans > 0 {
+			latency = append(latency, half)
+		}
+	}
+	if len(latency) == 0 {
+		latency = []performanceAggregate{before, after}
+	}
+	var weight float64
+	for _, half := range latency {
+		totals.P95MS = math.Max(totals.P95MS, half.P95MS)
+		totals.P50MS += half.P50MS * half.Spans
+		weight += half.Spans
+	}
+	if weight > 0 {
+		totals.P50MS /= weight
+	} else {
+		totals.P50MS = 0
 	}
 	return totals
 }

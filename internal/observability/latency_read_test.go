@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"database/sql"
+	"math"
 	"testing"
 	"time"
 
@@ -56,5 +57,35 @@ CREATE TABLE service_rollup (
 	// A service that served nothing all window keeps the only number it has.
 	if p95 := got["generator"].P95MS; p95 != 250 {
 		t.Fatalf("generator p95 = %.0fms, want 250ms rather than a flat zero", p95)
+	}
+}
+
+// The card's headline figures are folded from the two comparison halves. A half
+// spent holding a subscription open has no latency of its own, and letting it
+// decide the number would put the card back in disagreement with the overview
+// beside it.
+func TestTotalsTakeLatencyFromHalvesThatServedSomething(t *testing.T) {
+	served := performanceAggregate{Spans: 100, ServedSpans: 100, ErrorRate: 0.02, P50MS: 30, P95MS: 40}
+	waiting := performanceAggregate{Spans: 3, ServedSpans: 0, ErrorRate: 0, P50MS: 600000, P95MS: 600000}
+
+	totals := totalsOf(served, waiting)
+	if totals.P95MS != 40 {
+		t.Fatalf("p95 = %.0f, want the served half's 40ms rather than the subscription's 600000ms", totals.P95MS)
+	}
+	if totals.P50MS != 30 {
+		t.Fatalf("p50 = %.0f, want 30ms", totals.P50MS)
+	}
+	// Counts and error rate still describe everything the service did.
+	if totals.Spans != 103 {
+		t.Fatalf("spans = %d, want every span in the window", totals.Spans)
+	}
+	if math.Abs(totals.ErrorRate-(0.02*100/103)) > 1e-9 {
+		t.Fatalf("error rate = %v, want it weighted across all spans", totals.ErrorRate)
+	}
+
+	// With nothing served all window, the only numbers available are kept.
+	onlyWaiting := totalsOf(waiting, waiting)
+	if onlyWaiting.P95MS != 600000 {
+		t.Fatalf("p95 = %.0f, want the subscription figure when there is nothing else", onlyWaiting.P95MS)
 	}
 }
