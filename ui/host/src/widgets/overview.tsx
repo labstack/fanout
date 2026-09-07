@@ -1,6 +1,6 @@
 import { Box, Group, Progress, SimpleGrid, Stack, Text } from "@mantine/core";
 import type { Overview, Performance } from "../../../contracts";
-import { healthColor, statusHex } from "../../../chart";
+import { chartTheme, healthColor, statusHex } from "../../../chart";
 import { integer, percent } from "../../../format";
 import { useObservability, widgetParams } from "./data";
 import { Metric, Sparkline, WidgetError } from "./pieces";
@@ -24,7 +24,7 @@ export default function OverviewWidget({ widget, filters, dark }: WidgetBodyProp
     <SimpleGrid cols={2} spacing="sm">
       <Metric label="Health" value={healthWord} color={data ? healthColor(data.health) : undefined} hint={data ? (empty ? "No telemetry in this window" : `${integer.format(data.service_count)} services`) : undefined} />
       <Metric label="Error rate" value={data && !empty ? percent(data.error_rate) : "—"} color={data && data.error_rate >= 0.01 ? "bad" : undefined} hint={data && !empty ? `${integer.format(data.total_spans)} operations` : undefined}>
-        {errorTrend.length > 1 && <Sparkline values={errorTrend} color={status.bad} label="Error rate trend" format={(value) => `${value.toFixed(2)}%`} />}
+        {errorTrend.length > 1 && <Sparkline values={errorTrend} color={status.bad} baseline={chartTheme(dark).border} label="Error rate trend" format={(value) => `${value.toFixed(2)}%`} />}
       </Metric>
     </SimpleGrid>
     {data && !empty && <Box>

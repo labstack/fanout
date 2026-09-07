@@ -10,6 +10,35 @@ import { ayu, bad, brand, chart, fonts, info, ok, warn } from "./tokens";
  * arrangement wrong, where "teal" was simultaneously the primary color and the
  * literal a health badge asked for.
  */
+/* Mantine reads the text colour for a filled surface from parseThemeColor,
+   which resolves a two-shade primaryShade against the light scheme whatever
+   scheme is actually rendering. With { light: 7, dark: 5 } the decision is made
+   against #7c4dcc while the CSS paints #a97ce0: white on a fill light enough to
+   need black, measured at 3.16:1 on the most-used button in the product.
+
+   --mantine-primary-color-contrast is emitted per scheme and is already right,
+   so a filled primary surface defers to it: near-black on the dark scheme's
+   #a97ce0 and white on the light scheme's #7c4dcc. Every other colour keeps
+   Mantine's own answer.
+
+   The default resolver is passed in because this directory is shared with the
+   embedded views and has no node_modules to import Mantine from. Both apps wire
+   it, so a filled button reads the same inside a chat card as outside one. */
+export function schemeAwareFilledText<Input extends { color?: string; variant?: string }, Result extends { color: string }>(
+  base: (input: Input) => Result,
+) {
+  return (input: Input): Result => {
+    // Components pass `color || theme.primaryColor`, so this is normally set;
+    // Mantine's own resolver throws on undefined rather than falling back.
+    const color = input.color ?? fanoutThemeConfig.primaryColor;
+    const resolved = base({ ...input, color });
+    const isFilled = input.variant === "filled" || input.variant === undefined;
+    return color === fanoutThemeConfig.primaryColor && isFilled
+      ? { ...resolved, color: "var(--mantine-primary-color-contrast)" }
+      : resolved;
+  };
+}
+
 export const fanoutThemeConfig = {
   primaryColor: "brand",
   /* Shade 7 is the site's link color on a light ground and shade 5 is its

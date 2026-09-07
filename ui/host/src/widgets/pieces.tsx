@@ -51,7 +51,7 @@ useECharts([LineChart]);
  *  a line hovering near zero from one near its own peak, which is the only
  *  question a sparkline is asked. The peak is stated beside it and a zero line
  *  is drawn under it, so the shape has something to be a shape against. */
-export function Sparkline({ values, color, label, format }: { values: number[]; color: string; label: string; format?: (value: number) => string }) {
+export function Sparkline({ values, color, baseline, label, format }: { values: number[]; color: string; baseline: string; label: string; format?: (value: number) => string }) {
   const peak = values.length ? Math.max(...values) : 0;
   const option = useMemo(() => ({
     animation: false,
@@ -67,9 +67,12 @@ export function Sparkline({ values, color, label, format }: { values: number[]; 
     series: [{
       type: "line", data: values, showSymbol: false, smooth: 0.3,
       lineStyle: { width: 1.5, color }, areaStyle: { opacity: 0.12, color },
-      markLine: { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: "var(--mantine-color-dimmed)", width: 1, opacity: 0.35, type: "solid" }, data: [{ yAxis: 0 }] },
+      // The baseline colour is passed in resolved: a chart is drawn into a
+      // canvas, which cannot read a CSS custom property, so a var() here would
+      // have drawn nothing at all.
+      markLine: { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: baseline, width: 1, opacity: 0.5, type: "solid" }, data: [{ yAxis: 0 }] },
     }],
-  }), [values, color]);
+  }), [values, color, baseline]);
   return <Box>
     <EChart option={option} height={28} label={label} />
     {peak > 0 && format && <Text c="dimmed" size="xs" ta="right" mt={2}>peak {format(peak)}</Text>}
