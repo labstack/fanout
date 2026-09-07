@@ -67,6 +67,12 @@ service:
       exporters: [otlp/fanout]
 ```
 
+The `otlp` exporter uses TLS by default. If nothing in front of Fanout
+terminates TLS — a local instance, or one on a private network — the exporter
+needs `tls: { insecure: true }` under `otlp/fanout`, or it will fail to
+connect. **Connect telemetry** in the application generates this block with
+your own endpoint already in it, and includes that line when it applies.
+
 A Collector is optional. Fanout speaks the same protocol your SDKs already
 export, so it can sit directly behind them — but if you already run a Collector
 for sampling, enrichment or fan-out to a second backend, Fanout is just another

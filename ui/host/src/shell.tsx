@@ -1,11 +1,12 @@
 import { ActionIcon, Alert, AppShell, Avatar, Burger, Drawer, Group, Menu, Tooltip, useComputedColorScheme, useMantineColorScheme } from "@mantine/core";
 import { useDisclosure, useMediaQuery } from "@mantine/hooks";
-import { GithubLogo, GlobeHemisphereWest, Moon, SignOut, Sun } from "@phosphor-icons/react";
+import { BookOpen, Moon, PlugsConnected, SignOut, Sun } from "@phosphor-icons/react";
 import { useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createDashboardPrompt, useFanoutApp } from "./app-context";
 import { logout, useViewer } from "./auth";
 import { BrandLockup } from "./brand";
+import { docs } from "../../links";
 import Rail, { type RailHandle, type RailProps } from "./rail";
 
 export default function Shell({ children }: { children: ReactNode }) {
@@ -61,6 +62,14 @@ export default function Shell({ children }: { children: ReactNode }) {
           <BrandLockup size="small" />
         </Group>
         <Group gap="xs" wrap="nowrap">
+          {/* Documentation sits in the chrome, not in the account menu: it is
+              a question someone has while working, on any page, and the menu is
+              for acting on your own account. */}
+          <Tooltip label="Documentation">
+            <ActionIcon component="a" href={docs.home} target="_blank" rel="noopener noreferrer" variant="subtle" color="gray" aria-label="Documentation">
+              <BookOpen size={17} weight="bold" />
+            </ActionIcon>
+          </Tooltip>
           <ColorSchemeToggle />
           <AccountMenu onError={setSignOutError} />
         </Group>
@@ -91,6 +100,7 @@ function ColorSchemeToggle() {
 }
 
 function AccountMenu({ onError }: { onError: (message: string) => void }) {
+  const navigate = useNavigate();
   const viewer = useViewer();
   const label = viewer.name.trim() || viewer.email.trim() || "?";
   const initial = label.charAt(0).toUpperCase();
@@ -102,8 +112,10 @@ function AccountMenu({ onError }: { onError: (message: string) => void }) {
     </Menu.Target>
     <Menu.Dropdown>
       <Menu.Label>{viewer.email || "Signed in"}</Menu.Label>
-      <Menu.Item component="a" href="https://github.com/labstack/fanout" target="_blank" rel="noopener noreferrer" leftSection={<GithubLogo size={15} weight="bold" />}>Fanout on GitHub</Menu.Item>
-      <Menu.Item component="a" href="https://labstack.com" target="_blank" rel="noopener noreferrer" leftSection={<GlobeHemisphereWest size={15} />}>LabStack</Menu.Item>
+      {/* Account actions only. This menu carried two outbound marketing links
+          and no way to reach the workspace's own settings, so the one thing an
+          operator came here for was the one thing missing. */}
+      <Menu.Item leftSection={<PlugsConnected size={15} />} onClick={() => void navigate({ to: "/settings" })}>Connect telemetry</Menu.Item>
       <Menu.Divider />
       <Menu.Item leftSection={<SignOut size={15} />} onClick={() => void logout().catch((cause) => onError(cause instanceof Error ? cause.message : "Sign-out failed — your session is still active."))}>Sign out</Menu.Item>
     </Menu.Dropdown>
