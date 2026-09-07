@@ -550,3 +550,41 @@ func TestTraceExportContextCancellation(t *testing.T) {
 		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }
+
+func TestTraceExportAcceptsSpanWithoutStatus(t *testing.T) {
+	// status is optional in OTLP and most SDKs omit it for an unset status.
+	// Reading it through the struct field panicked the handler, so a single
+	// ordinary span took the whole export down with it.
+	spans := make(chan telemetry.Span, 1)
+	logs := make(chan telemetry.Log, 1)
+	metrics := make(chan telemetry.Metric, 1)
+	srv := NewServer(config.Config{}, newTestSubmitter(spans, logs, metrics))
+
+	req := &collectortrace.ExportTraceServiceRequest{
+		ResourceSpans: []*tracepb.ResourceSpans{{
+			Resource: &resourcepb.Resource{Attributes: []*common.KeyValue{
+				{Key: "service.name", Value: &common.AnyValue{Value: &common.AnyValue_StringValue{StringValue: "checkout"}}},
+			}},
+			ScopeSpans: []*tracepb.ScopeSpans{{Spans: []*tracepb.Span{{
+				TraceId: []byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16},
+				SpanId:  []byte{1, 2, 3, 4, 5, 6, 7, 8},
+				Name:    "POST /checkout",
+			}}}},
+		}},
+	}
+
+	if _, err := (&traceService{srv: srv}).Export(context.Background(), req); err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	select {
+	case row := <-spans:
+		if row.StatusCode != tracepb.Status_STATUS_CODE_UNSET.String() {
+			t.Fatalf("status code = %q, want the unset status", row.StatusCode)
+		}
+		if row.StatusMsg != "" {
+			t.Fatalf("status message = %q, want empty", row.StatusMsg)
+		}
+	default:
+		t.Fatal("span was dropped")
+	}
+}
