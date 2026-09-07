@@ -28,6 +28,12 @@ function dashboards() {
 function respond(input: RequestInfo | URL, init?: RequestInit) {
   const url = new URL(String(input), "http://localhost");
   if (url.pathname === "/api/dashboards") return dashboards();
+  if (url.pathname === "/api/observability/overview") {
+    return json({ schema: "test", summary: "", provenance: {}, data: { health: "unhealthy", counts: { healthy: 0, degraded: 0, unhealthy: 1 }, total_spans: 10, error_rate: 0.1, service_count: 2, services: [
+      { service: "checkout", health: "unhealthy", spans: 10, error_rate: 0.1, p50_ms: 4, p95_ms: 900, log_count: 0, metric_count: 0 },
+      { service: "payments", health: "healthy", spans: 8, error_rate: 0, p50_ms: 3, p95_ms: 40, log_count: 0, metric_count: 0 },
+    ] } });
+  }
   if (url.pathname === "/api/agent/threads") return threadsPage(url.searchParams.get("q") ?? "");
   if (url.pathname.startsWith("/api/agent/threads/") && init?.method === "PATCH") return json({ title: "Checkout follow-up" });
   if (url.pathname.startsWith("/api/agent/threads/") && init?.method === "DELETE") return new Response(null, { status: 204 });
@@ -40,7 +46,7 @@ function mount(props: Partial<Parameters<typeof Rail>[0]> = {}) {
   const root = createRoot(container);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const handlers = {
-    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(),
+    onNewChat: vi.fn(), onSelectThread: vi.fn(), onDeletedThread: vi.fn(), onSelectDashboard: vi.fn(), onCreateDashboard: vi.fn(), onInvestigateService: vi.fn(),
   };
   const ref = createRef<RailHandle>();
   const render = () => root.render(
@@ -140,7 +146,7 @@ describe("Rail", () => {
     await act(async () => render());
     await vi.waitFor(() => expect(document.body.textContent).toContain("Checkout latency"));
     act(() => ref.current?.focusSearch());
-    const search = document.querySelector('input[aria-label="Search chats and dashboards"]') as HTMLInputElement;
+    const search = document.querySelector('input[aria-label="Search chats, dashboards and services"]') as HTMLInputElement;
     expect(document.activeElement).toBe(search);
     await act(async () => setValue(search, "checkout"));
     await vi.waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input).includes("q=checkout"))).toBe(true), { timeout: 1500 });
@@ -157,10 +163,34 @@ describe("Rail", () => {
     const { root, render } = mount();
     await act(async () => render());
     await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
-    const search = document.querySelector('input[aria-label="Search chats and dashboards"]') as HTMLInputElement;
+    const search = document.querySelector('input[aria-label="Search chats, dashboards and services"]') as HTMLInputElement;
     await act(async () => setValue(search, "zzz"));
     await vi.waitFor(() => expect(document.body.textContent).toContain("No matching dashboards"), { timeout: 1500 });
     expect(document.body.textContent).toContain("Create with AI");
+    await act(async () => root.unmount());
+  });
+
+  // A search naming a live service used to come back empty-handed, because the
+  // search only knew about things the user had already named.
+  it("offers a matching service and opens an investigation", async () => {
+    const { root, handlers, render } = mount();
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
+    const search = document.querySelector('input[aria-label="Search chats, dashboards and services"]') as HTMLInputElement;
+    await act(async () => setValue(search, "payments"));
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Services"), { timeout: 1500 });
+    const service = Array.from(document.querySelectorAll<HTMLElement>(".rail-row")).find((row) => row.textContent?.trim() === "payments");
+    expect(service).not.toBeUndefined();
+    await act(async () => service?.click());
+    expect(handlers.onInvestigateService).toHaveBeenCalledWith("payments");
+    await act(async () => root.unmount());
+  });
+
+  it("does not ask for the service catalogue until someone searches", async () => {
+    const { root, render } = mount();
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("System overview"));
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/observability/overview"))).toBe(false);
     await act(async () => root.unmount());
   });
 

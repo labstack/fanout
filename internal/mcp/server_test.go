@@ -16,6 +16,10 @@ import (
 
 type fakeObservability struct {
 	scope observability.Scope
+	// Zero means the query matches nothing, which is what a widget probe is
+	// looking for; a test that needs a populated answer sets these.
+	logEntries int
+	traceSpans int
 }
 
 type fakeIntelligence struct {
@@ -130,12 +134,12 @@ func (f *fakeObservability) Performance(_ context.Context, scope observability.S
 
 func (f *fakeObservability) Trace(_ context.Context, scope observability.Scope, _, _ string, _ int) (observability.Result[observability.TraceDetail], error) {
 	f.scope = scope
-	return observability.Result[observability.TraceDetail]{Schema: observability.TraceSchema, Summary: "trace"}, nil
+	return observability.Result[observability.TraceDetail]{Schema: observability.TraceSchema, Summary: "trace", Data: observability.TraceDetail{Spans: make([]observability.TraceSpan, f.traceSpans)}}, nil
 }
 
 func (f *fakeObservability) Logs(_ context.Context, scope observability.Scope, _, _, _ string, _ int) (observability.Result[observability.Logs], error) {
 	f.scope = scope
-	return observability.Result[observability.Logs]{Schema: observability.LogsSchema, Summary: "logs"}, nil
+	return observability.Result[observability.Logs]{Schema: observability.LogsSchema, Summary: "logs", Data: observability.Logs{Entries: make([]observability.LogEntry, f.logEntries)}}, nil
 }
 
 func TestOverviewReturnsSummaryAndStructuredOutput(t *testing.T) {
