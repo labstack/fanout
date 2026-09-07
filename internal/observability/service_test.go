@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"errors"
+	"math"
 	"regexp"
 	"strings"
 	"testing"
@@ -135,6 +136,32 @@ func TestOverviewReturnsCanonicalEnvelope(t *testing.T) {
 	}
 }
 
+func TestOverviewReportsEmptyWindowAsUnknownNotHealthy(t *testing.T) {
+	svc, mock, _ := newMockService(t)
+	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	mock.ExpectQuery(regexp.QuoteMeta(overviewQuery)).
+		WithArgs(start, end, "nonexistent", "nonexistent", 100).
+		WillReturnRows(sqlmock.NewRows([]string{"service", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}))
+
+	result, err := svc.Overview(context.Background(), Scope{Namespace: "nonexistent", Start: start, End: end}, 0)
+	if err != nil {
+		t.Fatalf("Overview: %v", err)
+	}
+	if result.Data.Health != HealthUnknown {
+		t.Fatalf("health = %q, want %q: an empty window is not a clean bill of health", result.Data.Health, HealthUnknown)
+	}
+	if result.Data.ServiceCount != 0 || result.Data.Counts.Healthy != 0 {
+		t.Fatalf("unexpected counts: %#v", result.Data)
+	}
+	if !strings.Contains(result.Summary, "no services reported") {
+		t.Fatalf("summary = %q, want it to state the window is empty", result.Summary)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 	svc, mock, _ := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
@@ -187,10 +214,10 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 			AddRow(start, "checkout", 220.0))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceAggregateQuery)).
 		WithArgs(start, midpoint, "prod", "prod", "checkout", "checkout").
-		WillReturnRows(sqlmock.NewRows([]string{"spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(50.0, 0.12, 90.0, 240.0))
+		WillReturnRows(sqlmock.NewRows([]string{"spans", "served_spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(50.0, 50.0, 0.12, 90.0, 240.0))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceAggregateQuery)).
 		WithArgs(midpoint, end, "prod", "prod", "checkout", "checkout").
-		WillReturnRows(sqlmock.NewRows([]string{"spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(70.0, 0.06, 70.0, 180.0))
+		WillReturnRows(sqlmock.NewRows([]string{"spans", "served_spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(70.0, 70.0, 0.06, 70.0, 180.0))
 
 	result, err := svc.Performance(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", 25)
 	if err != nil {
@@ -204,6 +231,13 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	}
 	if result.Data.Comparison[1].Direction != "improvement" {
 		t.Fatalf("error-rate comparison = %#v", result.Data.Comparison[1])
+	}
+	// Totals cover the window, so they are the two halves folded together and
+	// not the newest bucket: a headline read off that bucket would say 220ms
+	// here, and the window's worst P95 is 240ms.
+	totals := result.Data.Totals
+	if totals.Spans != 120 || math.Abs(totals.ErrorRate-0.085) > 1e-9 || math.Abs(totals.P50MS-78.333333) > 1e-6 || totals.P95MS != 240 {
+		t.Fatalf("performance totals = %#v", totals)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

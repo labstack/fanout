@@ -96,8 +96,16 @@ service_rollup columns:
 - namespace (VARCHAR)
 - bucket (TIMESTAMP)
 - service (VARCHAR)
-- spans, log_count, metric_count (BIGINT)
+- spans, served_spans, log_count, metric_count (BIGINT)
 - p50_ms, p95_ms, error_rate (DOUBLE)
+
+served_spans counts the spans describing work the service performed, excluding
+the SPAN_KIND_CLIENT and SPAN_KIND_PRODUCER spans that measure a call it was
+waiting on. p50_ms and p95_ms are computed over those served spans, falling
+back to all spans in a bucket that served none — a subscription held open for
+ten minutes is a bucket like that, and it must not be read as the service's own
+latency. When aggregating across buckets, prefer the ones with served_spans > 0
+and weight p50_ms by served_spans; error_rate and spans cover every span.
 
 edge_rollup columns:
 - namespace (VARCHAR)

@@ -127,5 +127,8 @@ func overallHealth(counts HealthCounts) Health {
 	if counts.Degraded > 0 {
 		return HealthDegraded
 	}
+	if counts.Healthy == 0 {
+		return HealthUnknown
+	}
 	return HealthHealthy
 }

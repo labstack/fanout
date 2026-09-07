@@ -11,13 +11,13 @@ import (
 	"github.com/labstack/fanout/internal/query"
 )
 
-const performancePointsQueryTemplate = `
+var performancePointsQueryTemplate = `
 SELECT
   time_bucket(INTERVAL '%s', bucket) AS point_time,
   CAST(SUM(spans) AS BIGINT),
   COALESCE(SUM(error_rate * spans) / NULLIF(SUM(spans), 0), 0),
-  COALESCE(SUM(p50_ms * spans) / NULLIF(SUM(spans), 0), 0),
-  COALESCE(MAX(p95_ms), 0),
+  ` + windowP50SQL + `,
+  ` + windowP95SQL + `,
   CAST(SUM(log_count) AS BIGINT),
   CAST(SUM(metric_count) AS BIGINT)
 FROM service_rollup
@@ -189,8 +189,8 @@ FROM endpoint_totals t
 ORDER BY t.calls DESC, p95_ms DESC
 LIMIT ?`
 
-const performanceHeatmapQueryTemplate = `
-SELECT time_bucket(INTERVAL '%s', bucket) AS point_time, service, COALESCE(MAX(p95_ms), 0)
+var performanceHeatmapQueryTemplate = `
+SELECT time_bucket(INTERVAL '%s', bucket) AS point_time, service, ` + windowP95SQL + `
 FROM service_rollup
 WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?)
   AND service IN (
@@ -209,12 +209,13 @@ func performanceHeatmapSQL(window time.Duration) string {
 	return fmt.Sprintf(performanceHeatmapQueryTemplate, timelineBucketWidth(window))
 }
 
-const performanceAggregateQuery = `
+var performanceAggregateQuery = `
 SELECT
   CAST(COALESCE(SUM(spans), 0) AS DOUBLE),
+  CAST(COALESCE(SUM(served_spans), 0) AS DOUBLE),
   COALESCE(SUM(error_rate * spans) / NULLIF(SUM(spans), 0), 0),
-  COALESCE(SUM(p50_ms * spans) / NULLIF(SUM(spans), 0), 0),
-  COALESCE(MAX(p95_ms), 0)
+  ` + windowP50SQL + `,
+  ` + windowP95SQL + `
 FROM service_rollup
 WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)`
 
@@ -282,6 +283,7 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 	if err != nil {
 		return Result[Performance]{}, err
 	}
+	data.Totals = totalsOf(before, after)
 	data.Comparison = []ComparisonMetric{
 		comparisonMetric("Throughput", "spans", before.Spans, after.Spans, false),
 		comparisonMetric("Error rate", "%", before.ErrorRate*100, after.ErrorRate*100, true),
@@ -389,10 +391,11 @@ func (s *Service) endpointCacheState(ctx context.Context) (bool, time.Time, erro
 }
 
 type performanceAggregate struct {
-	Spans     float64
-	ErrorRate float64
-	P50MS     float64
-	P95MS     float64
+	Spans       float64
+	ServedSpans float64
+	ErrorRate   float64
+	P50MS       float64
+	P95MS       float64
 }
 
 func (s *Service) performanceAggregate(ctx context.Context, scope Scope, service string) (performanceAggregate, error) {
@@ -403,11 +406,61 @@ func (s *Service) performanceAggregate(ctx context.Context, scope Scope, service
 	defer rows.Close()
 	var value performanceAggregate
 	if rows.Next() {
-		if err := rows.Scan(&value.Spans, &value.ErrorRate, &value.P50MS, &value.P95MS); err != nil {
+		if err := rows.Scan(&value.Spans, &value.ServedSpans, &value.ErrorRate, &value.P50MS, &value.P95MS); err != nil {
 			return performanceAggregate{}, fmt.Errorf("scan performance comparison: %w", err)
 		}
 	}
 	return value, rows.Err()
+}
+
+// totalsOf folds the two comparison halves back into one window rather than
+// running a third aggregate query: the halves tile the window exactly, so
+// summing spans, weighting the averages by span count and taking the larger
+// P95 reproduces what performanceAggregateQuery would return over the whole
+// scope. Keep these rules in step with that query.
+//
+// Latency comes only from halves in which the service served something,
+// matching what the whole-window query does across buckets. Taking the larger
+// P95 of both halves regardless would let a half spent holding a subscription
+// open decide the figure, and the card would then disagree with the overview
+// beside it — which is the disagreement these totals exist to end. Counts and
+// error rate still cover every span: an operation the service waited on is
+// still an operation it performed, and a failed outbound call is still its
+// problem.
+func totalsOf(before, after performanceAggregate) PerformanceTotals {
+	spans := before.Spans + after.Spans
+	totals := PerformanceTotals{Spans: int64(spans)}
+	if spans > 0 {
+		totals.ErrorRate = (before.ErrorRate*before.Spans + after.ErrorRate*after.Spans) / spans
+	}
+
+	latency := []performanceAggregate{}
+	for _, half := range []performanceAggregate{before, after} {
+		if half.ServedSpans > 0 {
+			latency = append(latency, half)
+		}
+	}
+	if len(latency) == 0 {
+		latency = []performanceAggregate{before, after}
+	}
+	var weight float64
+	for _, half := range latency {
+		totals.P95MS = math.Max(totals.P95MS, half.P95MS)
+		// Weighted by served spans, matching windowP50SQL: the half's p50
+		// describes the requests it served, not the calls it also made.
+		span := half.ServedSpans
+		if span == 0 {
+			span = half.Spans
+		}
+		totals.P50MS += half.P50MS * span
+		weight += span
+	}
+	if weight > 0 {
+		totals.P50MS /= weight
+	} else {
+		totals.P50MS = 0
+	}
+	return totals
 }
 
 func comparisonMetric(label, unit string, before, after float64, lowerIsBetter bool) ComparisonMetric {

@@ -70,6 +70,33 @@ describe("widgets", () => {
     await act(async () => root.unmount());
   });
 
+  it("overview reports an empty window as no data rather than healthy", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://localhost");
+      if (url.pathname === "/api/observability/overview") {
+        return json({ schema: "test", summary: "no services reported telemetry in this window", provenance, data: { health: "unknown", counts: { healthy: 0, degraded: 0, unhealthy: 0 }, total_spans: 0, error_rate: 0, services: [], service_count: 0 } });
+      }
+      return respond(input);
+    });
+    const root = await mount({ id: "w1b", type: "overview", title: "System health", enabled: true });
+    await vi.waitFor(() => expect(document.body.textContent).toContain("No data"));
+    expect(document.body.textContent).not.toContain("Healthy");
+    expect(document.body.textContent).not.toContain("0 healthy");
+    expect(document.body.textContent).not.toContain("0.00%");
+    await act(async () => root.unmount());
+  });
+
+  it("trace scopes its query to the configured service", async () => {
+    const root = await mount({ id: "w5b", type: "trace", title: "Slow checkout trace", enabled: true, config: { service: "payments" } });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const requested = fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => url.includes("/api/observability/trace"));
+    expect(requested.length).toBeGreaterThan(0);
+    // Without this the widget asks for the worst trace anywhere in the window,
+    // which is rarely the service the widget is named after.
+    expect(requested.every((url) => new URL(url, "http://localhost").searchParams.get("service") === "payments")).toBe(true);
+    await act(async () => root.unmount());
+  });
+
   it("topology draws a graph and counts routes", async () => {
     const root = await mount({ id: "w2", type: "topology", title: "Service map", enabled: true });
     await vi.waitFor(() => expect(document.body.textContent).toContain("2 services · 1 route"));

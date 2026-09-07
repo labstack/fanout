@@ -3,8 +3,13 @@
  * nothing here may import a package. */
 import { bad, chart, info, ok, series, warn } from "./tokens";
 
+/* "unknown" is neutral, not alarming: an empty window has nothing to grade, and
+   painting it red claims a failure as confidently as green claimed health. */
 export function healthColor(health: string) {
-  return health === "healthy" ? "ok" : health === "degraded" ? "warn" : "bad";
+  if (health === "healthy") return "ok";
+  if (health === "degraded") return "warn";
+  if (health === "unknown") return "gray";
+  return "bad";
 }
 
 /* A chart is drawn into a canvas or SVG that cannot read CSS custom

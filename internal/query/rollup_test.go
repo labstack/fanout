@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -79,6 +80,59 @@ SELECT count(*)
 FROM service_rollup
 WHERE bucket = ?
   AND service = 'checkout'`, bucket, 2)
+}
+
+func TestServiceRollupLatencyExcludesDependencyWaits(t *testing.T) {
+	db := openTestDuck(t)
+	if err := CreateTables(db); err != nil {
+		t.Fatalf("CreateTables failed: %v", err)
+	}
+	if err := CreateViews(db); err != nil {
+		t.Fatalf("CreateViews failed: %v", err)
+	}
+	d := &Duck{DB: db, cfg: config.Config{RetentionDays: 30}}
+	ctx := context.Background()
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
+
+	// A subscriber holding a ten-minute stream open while serving fast
+	// requests: the CLIENT spans are the wait, the SERVER spans are the work.
+	for i := range 3 {
+		insertRollupTestSpan(t, db, rollupTestSpan{
+			namespace: "ns", traceID: "t-sub", spanID: fmt.Sprintf("stream-%d", i), service: "reviews",
+			operation: "flagd.evaluation.v1.Service/EventStream", kind: "SPAN_KIND_CLIENT",
+			start: bucket.Add(time.Duration(i) * time.Second), duration: 10 * time.Minute, ingested: int64(100 + i),
+		})
+		insertRollupTestSpan(t, db, rollupTestSpan{
+			namespace: "ns", traceID: "t-req", spanID: fmt.Sprintf("serve-%d", i), service: "reviews",
+			operation: "GET /reviews", kind: "SPAN_KIND_SERVER",
+			start: bucket.Add(time.Duration(i) * time.Second), duration: 40 * time.Millisecond, ingested: int64(200 + i),
+		})
+	}
+	// A service that only ever calls out still needs a number.
+	insertRollupTestSpan(t, db, rollupTestSpan{
+		namespace: "ns", traceID: "t-gen", spanID: "gen-1", service: "load-generator",
+		operation: "GET /", kind: "SPAN_KIND_CLIENT",
+		start: bucket.Add(4 * time.Second), duration: 250 * time.Millisecond, ingested: 300,
+	})
+
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("rollupOnce failed: %v", err)
+	}
+
+	p95 := func(service string) float64 {
+		t.Helper()
+		var value float64
+		if err := db.QueryRow(`SELECT p95_ms FROM service_rollup WHERE namespace = 'ns' AND bucket = ? AND service = ?`, bucket, service).Scan(&value); err != nil {
+			t.Fatalf("query p95 for %s: %v", service, err)
+		}
+		return value
+	}
+	if got := p95("reviews"); got > 100 {
+		t.Fatalf("reviews p95 = %.1fms, want the served requests (~40ms) rather than the stream it subscribes to", got)
+	}
+	if got := p95("load-generator"); got < 200 {
+		t.Fatalf("load-generator p95 = %.1fms, want its outbound calls to still count when it has nothing else", got)
+	}
 }
 
 func TestRollupOnceRebuildsAffectedEndpointBuckets(t *testing.T) {
@@ -713,4 +767,46 @@ func nullIfEmpty(v string) any {
 		return nil
 	}
 	return v
+}
+
+// A cache table that is dropped for a schema change has to be rebuilt, and a
+// rollup only rebuilds what its watermark says is missing. Leaving the
+// watermark in place after emptying the table loses every historical bucket
+// permanently, and every query over that window then reports no data.
+func TestRecreatingAServiceRollupClearsItsWatermark(t *testing.T) {
+	db := openTestDuck(t)
+	if err := CreateTables(db); err != nil {
+		t.Fatalf("CreateTables failed: %v", err)
+	}
+	if err := CreateViews(db); err != nil {
+		t.Fatalf("CreateViews failed: %v", err)
+	}
+	d := &Duck{DB: db, cfg: config.Config{RetentionDays: 30}}
+	ctx := context.Background()
+	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
+
+	insertRollupTestSpan(t, db, rollupTestSpan{
+		namespace: "ns", traceID: "t-1", spanID: "s-1", service: "checkout",
+		operation: "POST /checkout", start: bucket.Add(5 * time.Second),
+		duration: 50 * time.Millisecond, ingested: 100,
+	})
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("rollupOnce failed: %v", err)
+	}
+	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
+
+	// Stand in for the upgrade: the stored table is missing a column this
+	// build requires, so ensureCacheTable empties it.
+	if _, err := db.Exec(`ALTER TABLE service_rollup DROP COLUMN served_spans`); err != nil {
+		t.Fatalf("simulate an older table: %v", err)
+	}
+	if err := CreateTables(db); err != nil {
+		t.Fatalf("CreateTables after the schema change: %v", err)
+	}
+	requireRowCount(t, db, `SELECT count(*) FROM service_rollup`, nil, 0)
+
+	if _, err := d.rollupOnce(ctx); err != nil {
+		t.Fatalf("rollupOnce after recreate failed: %v", err)
+	}
+	requireServiceRollupSpans(t, db, "ns", bucket, "checkout", 1)
 }

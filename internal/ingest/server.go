@@ -703,13 +703,18 @@ func anyValueString(v *common.AnyValue) string {
 	}
 }
 
-// normalizeSeverity returns uppercase severity text. If text is empty,
-// derives it from the OTel severity number (1-24).
+// normalizeSeverity maps a record onto the six OTel severity names, so that a
+// search for ERROR finds every error however its emitter spelled it.
+//
+// Passing SeverityText through unchanged is what produced a store holding
+// INFO, INFORMATION and "" for the same level: .NET writes "Information",
+// Envoy's access logs carry no severity at all, and each spelling then answered
+// a different query. severity_number is preferred because the specification
+// makes it the authoritative field and the text the display form, and a record
+// that carries neither is stored as UNSPECIFIED rather than as an empty string
+// — the log-bucket query already labels that case UNSPECIFIED, and a level you
+// can see in the chart should be one you can filter on.
 func normalizeSeverity(text string, number int32) string {
-	s := strings.ToUpper(text)
-	if s != "" {
-		return s
-	}
 	switch {
 	case number >= 21:
 		return "FATAL"
@@ -723,9 +728,35 @@ func normalizeSeverity(text string, number int32) string {
 		return "DEBUG"
 	case number >= 1:
 		return "TRACE"
-	default:
-		return ""
 	}
+	return severityFromText(text)
+}
+
+// severityFromText canonicalizes the spellings emitters use when they send no
+// severity_number: OTel's own numbered short names (INFO2, WARN3), the syslog
+// names, and the long forms favoured by .NET and Python.
+func severityFromText(text string) string {
+	name := strings.ToUpper(strings.TrimSpace(text))
+	name = strings.TrimRight(name, "0123456789")
+	switch name {
+	case "FATAL", "CRIT", "CRITICAL", "EMERG", "EMERGENCY", "ALERT", "PANIC":
+		return "FATAL"
+	case "ERROR", "ERR", "SEVERE", "EXCEPTION":
+		return "ERROR"
+	case "WARN", "WARNING":
+		return "WARN"
+	case "INFO", "INFORMATION", "INFORMATIONAL", "NOTICE":
+		return "INFO"
+	case "DEBUG", "DBG", "FINE":
+		return "DEBUG"
+	case "TRACE", "VERBOSE", "FINEST":
+		return "TRACE"
+	case "":
+		return "UNSPECIFIED"
+	}
+	// An unrecognised level is still the emitter's own word for it, and
+	// discarding it would lose the only grading the record carries.
+	return name
 }
 
 func getServiceName(r *resourcepb.Resource) string {

@@ -60,8 +60,16 @@ func (d *Duck) MaintenanceHealth() (lastOK, lastAt time.Time, consecutiveFailure
 }
 
 const (
-	serviceRollupStateKey         = "service_rollup_v2"
-	serviceRollupRawMaxKey        = "service_rollup_v2_rawmax"
+	// v3: service_rollup gained served_spans, and its p50/p95 stopped counting
+	// the calls a service waits on. ensureCacheTable drops the table when the
+	// new column is missing, but the watermark decides what gets rebuilt — left
+	// at v2 it would point past every historical bucket, so the dropped rows
+	// would never come back and the whole window would read as empty. A new key
+	// has no watermark, which is what makes the next pass a full backfill.
+	// Bump this whenever the table's shape or the meaning of its columns
+	// changes.
+	serviceRollupStateKey         = "service_rollup_v3"
+	serviceRollupRawMaxKey        = "service_rollup_v3_rawmax"
 	edgeRollupStateKey            = "edge_rollup_v2"
 	edgeRollupRawMaxKey           = "edge_rollup_v2_rawmax"
 	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"
@@ -1259,8 +1267,26 @@ span_agg AS (
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
     COUNT(*) AS spans,
-    quantile_cont(s.duration_ms, 0.50) AS p50_ms,
-    quantile_cont(s.duration_ms, 0.95) AS p95_ms,
+    COUNT(*) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')) AS served_spans,
+    -- Latency describes the work a service performs, not the calls it waits
+    -- on. A CLIENT or PRODUCER span measures a dependency: a subscription held
+    -- open for ten minutes makes its subscriber look broken while saying
+    -- nothing about how that subscriber serves anyone. Grading on those is what
+    -- marked half the demo's services unhealthy for holding a flagd event
+    -- stream open. Error rate still counts every span, because a failing
+    -- outbound call is the caller's problem too.
+    --
+    -- COALESCE keeps a service that only makes outbound calls — a load
+    -- generator, a cron worker — measured on what it does have rather than
+    -- silently reported as having no latency at all.
+    COALESCE(
+      quantile_cont(s.duration_ms, 0.50) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')),
+      quantile_cont(s.duration_ms, 0.50)
+    ) AS p50_ms,
+    COALESCE(
+      quantile_cont(s.duration_ms, 0.95) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')),
+      quantile_cont(s.duration_ms, 0.95)
+    ) AS p95_ms,
     avg(CASE WHEN s.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
   JOIN affected a
@@ -1313,6 +1339,7 @@ INSERT INTO service_rollup (
   bucket,
   service,
   spans,
+  served_spans,
   p50_ms,
   p95_ms,
   error_rate,
@@ -1324,6 +1351,7 @@ SELECT
   a.bucket,
   a.service,
   COALESCE(s.spans, 0),
+  COALESCE(s.served_spans, 0),
   COALESCE(s.p50_ms, 0),
   COALESCE(s.p95_ms, 0),
   COALESCE(s.error_rate, 0),

@@ -551,6 +551,31 @@ func TestTraceExportContextCancellation(t *testing.T) {
 	}
 }
 
+func TestNormalizeSeverityCanonicalizesEmitterSpellings(t *testing.T) {
+	tests := []struct {
+		name   string
+		text   string
+		number int32
+		want   string
+	}{
+		{"otel short name", "INFO", 9, "INFO"},
+		{"number wins over display text", "Information", 9, "INFO"},
+		{"dotnet long form without a number", "Information", 0, "INFO"},
+		{"python style warning", "WARNING", 0, "WARN"},
+		{"syslog critical", "crit", 0, "FATAL"},
+		{"numbered short name", "ERROR2", 0, "ERROR"},
+		{"envoy access log carries neither", "", 0, "UNSPECIFIED"},
+		{"unrecognised level is kept", "audit", 0, "AUDIT"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeSeverity(tt.text, tt.number); got != tt.want {
+				t.Errorf("normalizeSeverity(%q, %d) = %q, want %q", tt.text, tt.number, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestTraceExportAcceptsSpanWithoutStatus(t *testing.T) {
 	// status is optional in OTLP and most SDKs omit it for an unset status.
 	// Reading it through the struct field panicked the handler, so a single

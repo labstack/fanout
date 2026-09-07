@@ -11,7 +11,10 @@ import type { WidgetBodyProps } from "./widget-card";
 function shortID(value: string) { return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value; }
 
 export default function TraceWidget({ widget, filters, dark }: WidgetBodyProps) {
-  const trace = useObservability<TraceDetail>("trace", widgetParams(filters, widget.config, ["trace_id"]));
+  // service is forwarded as well as trace_id: without it a widget titled after
+  // one service picks the slowest or most broken trace in the whole window,
+  // which is usually some other service entirely.
+  const trace = useObservability<TraceDetail>("trace", widgetParams(filters, widget.config, ["trace_id", "service"]));
   if (trace.isError) return <WidgetError retry={() => void trace.refetch()} />;
   const data = trace.data?.data;
   if (data && data.spans.length === 0) return <Empty text="No traces in this window" />;

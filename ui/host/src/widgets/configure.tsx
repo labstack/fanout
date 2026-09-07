@@ -11,7 +11,7 @@ const fields: Partial<Record<WidgetType, Field[]>> = {
   topology: ["service"],
   performance: ["service"],
   logs: ["service", "severity", "search"],
-  trace: ["trace_id"],
+  trace: ["trace_id", "service"],
 };
 
 // The server is the source of widget types, so a widget's stored type can be

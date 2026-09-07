@@ -47,6 +47,11 @@ const (
 	HealthHealthy   Health = "healthy"
 	HealthDegraded  Health = "degraded"
 	HealthUnhealthy Health = "unhealthy"
+	// HealthUnknown is what a window with no telemetry reports. Silence is not
+	// health: a namespace filter that matches nothing, an agent that stopped
+	// exporting and an interval before onboarding all land here, and calling
+	// any of them "healthy" states the opposite of what is known.
+	HealthUnknown Health = "unknown"
 )
 
 type ServiceHealth struct {
@@ -136,8 +141,21 @@ type ComparisonMetric struct {
 	Significant bool      `json:"significant"`
 }
 
+// PerformanceTotals covers the whole requested window, so a headline figure
+// agrees with the window the view is labelled with. Points are per-bucket and
+// the last one is still filling, so reading a headline off it reports a
+// fraction of the traffic and whatever latency the final seconds happened to
+// see.
+type PerformanceTotals struct {
+	Spans     int64   `json:"spans"`
+	ErrorRate float64 `json:"error_rate"`
+	P50MS     float64 `json:"p50_ms"`
+	P95MS     float64 `json:"p95_ms"`
+}
+
 type Performance struct {
 	Service    string             `json:"service,omitempty"`
+	Totals     PerformanceTotals  `json:"totals"`
 	Points     []PerformancePoint `json:"points"`
 	Endpoints  []Endpoint         `json:"endpoints"`
 	Heatmap    []HeatmapPoint     `json:"heatmap"`
