@@ -35,6 +35,41 @@ func TestHandlerServesEmbeddedSPAAndFallback(t *testing.T) {
 	}
 }
 
+func TestHandlerServesRobotsAndRefusesMissingAssets(t *testing.T) {
+	handler := Handler()
+
+	robots := request(t, handler, "/robots.txt")
+	if robots.Code != http.StatusOK {
+		t.Fatalf("GET /robots.txt = %d", robots.Code)
+	}
+	if got := robots.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
+		t.Fatalf("robots.txt content type = %q", got)
+	}
+	if body := robots.Body.String(); !strings.Contains(body, "Disallow: /") {
+		t.Fatalf("robots.txt = %q", body)
+	}
+
+	// A missing asset used to answer with the application shell and a 200, so
+	// nothing in the response said it was missing.
+	missing := request(t, handler, "/assets/does-not-exist.js")
+	if missing.Code != http.StatusNotFound {
+		t.Fatalf("GET a missing asset = %d, want 404", missing.Code)
+	}
+	// dist ships favicon.svg, so the .ico a browser asks for first is simply
+	// not there and has to say so.
+	if icon := request(t, handler, "/favicon.ico"); icon.Code != http.StatusNotFound {
+		t.Fatalf("GET /favicon.ico = %d, want 404", icon.Code)
+	}
+	if trailing := request(t, handler, "/checkout."); trailing.Code != http.StatusOK {
+		t.Fatalf("a trailing dot is a client route, not a file: got %d", trailing.Code)
+	}
+
+	// A client route still resolves to the shell, extension or not.
+	if route := request(t, handler, "/chat/01a07a17-b2e2-7334-b77d-64e9ed69fa8e"); route.Code != http.StatusOK {
+		t.Fatalf("GET a client route = %d", route.Code)
+	}
+}
+
 func request(t *testing.T, handler http.Handler, target string) *httptest.ResponseRecorder {
 	t.Helper()
 	recorder := httptest.NewRecorder()

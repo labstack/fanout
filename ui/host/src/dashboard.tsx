@@ -5,10 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Responsive, WidthProvider } from "react-grid-layout/legacy";
 import { dashboardsQueryKey, getJSON, type DashboardRecord, type DashboardState, type DashboardSummary } from "./api";
 import type { Overview } from "../../contracts";
+import { exactTimestamp, timeZoneLabel } from "../../format";
 import { authorizedFetch } from "./auth";
 import { compactDashboardLayout, nextDashboardSlot, widgetDefaults, widgetTypes, type DashboardLayoutItem, type WidgetType } from "./dashboard-layout";
 import { createID } from "./id";
-import { dashboardWindows, useLastUpdated, useObservability, widgetParams, type Filters, type WidgetConfig } from "./widgets/data";
+import { dashboardWindows, freshFor, useLastUpdated, useObservability, widgetParams, type Filters, type WidgetConfig } from "./widgets/data";
 import WidgetCard, { widgetTitles } from "./widgets/widget-card";
 
 const Grid = WidthProvider(Responsive);
@@ -25,7 +26,7 @@ function widgetSizeFor(type: string) {
 export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat, onDashboardChange, urlFilters, onFiltersChange }: { dashboardID?: string; agentAvailable: boolean; onOpenChat: (prompt?: string) => void; onDashboardChange?: (id: string, replace?: boolean) => void; urlFilters?: Partial<Filters>; onFiltersChange?: (filters: Filters) => void }) {
   const queryClient = useQueryClient();
   const dark = useComputedColorScheme("light") === "dark";
-  const dashboards = useQuery({ queryKey: dashboardsQueryKey, queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 30_000 });
+  const dashboards = useQuery({ queryKey: dashboardsQueryKey, queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 30_000, staleTime: freshFor });
   const [selectedID, setSelectedID] = useState(() => dashboardID || localStorage.getItem(dashboardKey) || "");
   const save = useMutation({
     mutationFn: async (next: DashboardState) => {
@@ -39,7 +40,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
     onError: (cause) => console.error("Dashboard save failed", cause),
   });
   // Pause polling while a save is in flight or failing so the refetch cannot clobber unsaved local edits.
-  const selected = useQuery({ queryKey: ["dashboard", selectedID], queryFn: () => getJSON<DashboardRecord>(`/api/dashboards/${encodeURIComponent(selectedID)}`), enabled: Boolean(selectedID), refetchInterval: save.isPending || save.isError ? false : 30_000 });
+  const selected = useQuery({ queryKey: ["dashboard", selectedID], queryFn: () => getJSON<DashboardRecord>(`/api/dashboards/${encodeURIComponent(selectedID)}`), enabled: Boolean(selectedID), refetchInterval: save.isPending || save.isError ? false : 30_000, staleTime: freshFor });
   const [state, setState] = useState<DashboardState>(emptyState);
   const [breakpoint, setBreakpoint] = useState("lg");
   // While the address bar names a namespace it decides what is shown, which
@@ -133,7 +134,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
         {/* The row wraps rather than squeezing: at 390px a single line clipped
             both button labels to "Add vie" and "Ask Fano". */}
         <Group gap="sm" wrap="wrap" justify="flex-end">
-          {updatedAt && <Text c="dimmed" size="xs">Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(updatedAt))}</Text>}
+          {updatedAt && <Text c="dimmed" size="xs" title={exactTimestamp(updatedAt)}>Updated {new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(updatedAt))} {timeZoneLabel(updatedAt)}</Text>}
           <Menu shadow="md" position="bottom-end" withinPortal>
             <Menu.Target><Button variant="default" size="sm" leftSection={<Plus size={15} weight="bold" />} rightSection={<CaretDown size={13} weight="bold" />}>Add view</Button></Menu.Target>
             <Menu.Dropdown>{widgetTypes.filter((type) => agentAvailable || type !== "assistant").map((type) => <Menu.Item key={type} onClick={() => add(type)}>{widgetTitles[type]}</Menu.Item>)}</Menu.Dropdown>

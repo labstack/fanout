@@ -8,7 +8,7 @@ import { chartTheme, severityColor, severityHex } from "../../chart";
 import { typeScale } from "../../tokens";
 import type { LogEntry, Logs, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
-import { timelineTimestamp, windowLabel } from "../../format";
+import { exactTimestamp, timeZoneLabel, timelineTimestamp, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 
@@ -51,8 +51,8 @@ function LogList({ entries, onTrace, window }: { entries: LogEntry[]; onTrace: (
   const logs = usePagedItems(entries, 6);
   if (entries.length === 0) return <EmptyState icon={<MagnifyingGlass size={20} weight="duotone" />} title="No visible matches">Adjust the local severity or text filter.</EmptyState>;
   return <><Table.ScrollContainer minWidth={680}><Table striped highlightOnHover verticalSpacing="xs">
-    <Table.Thead><Table.Tr><Table.Th>Time</Table.Th><Table.Th>Level</Table.Th><Table.Th>Service</Table.Th><Table.Th>Message</Table.Th><Table.Th /></Table.Tr></Table.Thead>
-    <Table.Tbody>{logs.pageItems.map((entry, index) => <Table.Tr key={`${entry.time}-${logs.from + index}`}><Table.Td style={{ whiteSpace: "nowrap" }}><Text size="xs" ff="monospace">{timelineTimestamp(entry.time, window, true)}</Text></Table.Td><Table.Td><Badge size="sm" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td><Table.Td><Text size="sm" fw={600}>{entry.service}</Text></Table.Td><Table.Td><Text size="sm" lineClamp={2} title={entry.body}>{entry.body}</Text></Table.Td><Table.Td>{entry.trace_id && <Tooltip label="Investigate trace"><ActionIcon variant="subtle" aria-label={`Investigate trace ${entry.trace_id}`} onClick={() => onTrace(entry)}><ArrowSquareOut size={15} weight="bold" /></ActionIcon></Tooltip>}</Table.Td></Table.Tr>)}</Table.Tbody>
+    <Table.Thead><Table.Tr><Table.Th>Time ({timeZoneLabel(logs.pageItems[0]?.time)})</Table.Th><Table.Th>Level</Table.Th><Table.Th>Service</Table.Th><Table.Th>Message</Table.Th><Table.Th /></Table.Tr></Table.Thead>
+    <Table.Tbody>{logs.pageItems.map((entry, index) => <Table.Tr key={`${entry.time}-${logs.from + index}`}><Table.Td style={{ whiteSpace: "nowrap" }}><Text size="xs" ff="monospace" title={exactTimestamp(entry.time)}>{timelineTimestamp(entry.time, window, true)}</Text></Table.Td><Table.Td><Badge size="sm" color={severityColor(entry.severity)} variant="light">{entry.severity || "LOG"}</Badge></Table.Td><Table.Td><Text size="sm" fw={600}>{entry.service}</Text></Table.Td><Table.Td><Text size="sm" lineClamp={2} title={entry.body}>{entry.body}</Text></Table.Td><Table.Td>{entry.trace_id && <Tooltip label="Investigate trace"><ActionIcon variant="subtle" aria-label={`Investigate trace ${entry.trace_id}`} onClick={() => onTrace(entry)}><ArrowSquareOut size={15} weight="bold" /></ActionIcon></Tooltip>}</Table.Td></Table.Tr>)}</Table.Tbody>
   </Table></Table.ScrollContainer><PageControls {...logs} onChange={logs.setPage} /></>;
 }
 

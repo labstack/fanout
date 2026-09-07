@@ -51,4 +51,28 @@ describe("useObservability and useLastUpdated", () => {
     expect(String(fetchMock.mock.calls[0][0])).toBe("/api/observability/overview?window=1h");
     await act(async () => root.unmount());
   });
+
+  // Opening /dashboards renders the default dashboard and then navigates to
+  // its own URL, which unmounts the pane and mounts a new one. Every widget
+  // asked the server again on that second mount.
+  it("does not ask again when a pane is remounted moments later", async () => {
+    function Probe() {
+      const overview = useObservability<{ health: string }>("overview", new URLSearchParams({ window: "1h" }));
+      return <div>{overview.data?.data.health ?? "loading"}</div>;
+    }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const mount = async () => {
+      const container = document.createElement("div");
+      document.body.append(container);
+      const root = createRoot(container);
+      await act(async () => root.render(<QueryClientProvider client={client}><Probe /></QueryClientProvider>));
+      await vi.waitFor(() => expect(container.textContent).toContain("healthy"));
+      return root;
+    };
+    const first = await mount();
+    await act(async () => first.unmount());
+    const second = await mount();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => second.unmount());
+  });
 });

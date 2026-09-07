@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { Logs } from "../../../contracts";
 import { chartTheme, severityColor, severityHex } from "../../../chart";
 import { typeScale } from "../../../tokens";
-import { timelineTimestamp } from "../../../format";
+import { exactTimestamp, timelineTimestamp } from "../../../format";
 import { EChart, useECharts } from "../echart";
 import { useObservability, widgetParams } from "./data";
 import { Empty, WidgetError } from "./pieces";
@@ -39,7 +39,7 @@ export default function LogsWidget({ widget, filters, dark }: WidgetBodyProps) {
     <ScrollArea type="auto" offsetScrollbars style={{ flex: 1 }}>
       <Table verticalSpacing={4} fz="sm">
         <Table.Tbody>{entries.map((entry, index) => <Table.Tr key={`${entry.time}-${index}`}>
-          <Table.Td style={{ whiteSpace: "nowrap" }}><Text component="span" size="xs" ff="monospace" c="dimmed">{result ? timelineTimestamp(entry.time, result.provenance.window, true) : entry.time}</Text></Table.Td>
+          <Table.Td style={{ whiteSpace: "nowrap" }}><Text component="span" size="xs" ff="monospace" c="dimmed" title={exactTimestamp(entry.time)}>{result ? timelineTimestamp(entry.time, result.provenance.window, true) : entry.time}</Text></Table.Td>
           {/* The body cell takes the whole row, so every other cell has to say
               it will not be squeezed. A Badge is an inline-grid with hidden
               overflow: squeeze it and the track collapses and the label

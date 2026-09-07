@@ -9,7 +9,7 @@ import { ChatPage } from "./chat";
 function value(overrides: Partial<FanoutAppContextValue> = {}): FanoutAppContextValue {
   return {
     agentAvailable: true, threadID: "thread-1", threadMissing: false, messages: [], messageTimes: {}, ready: true, running: false, activity: "",
-    input: "", setInput: vi.fn(), error: "", bottomRef: createRef<HTMLDivElement>(), inputRef: createRef<HTMLTextAreaElement>(),
+    input: "", setInput: vi.fn(), error: "", inputRef: createRef<HTMLTextAreaElement>(),
     send: vi.fn(async () => undefined), submit: vi.fn((event: FormEvent) => event.preventDefault()), stop: vi.fn(), retry: vi.fn(), reloadThread: vi.fn(),
     openChat: vi.fn(), newThread: vi.fn(), selectThread: vi.fn(),
     ...overrides,

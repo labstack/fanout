@@ -71,11 +71,18 @@ export function usePagedItems<T>(items: T[], pageSize = 8) {
   };
 }
 
+const controlLabel: Record<string, string> = { first: "First page", previous: "Previous page", next: "Next page", last: "Last page" };
+
 export function PageControls({ page, totalPages, from, to, total, onChange }: { page: number; totalPages: number; from: number; to: number; total: number; onChange: (page: number) => void }) {
   if (totalPages <= 1) return null;
   return <Group justify="space-between" gap="sm" px={{ base: "md", sm: "lg" }} py="xs" style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
     <Text c="dimmed" size="xs">{from}–{to} of {total}</Text>
-    <Pagination value={page} total={totalPages} onChange={onChange} size="xs" withEdges aria-label="Table pages" />
+    {/* Mantine names the numbered controls by their own text and leaves the
+        four edge controls as unlabelled icon buttons — half the control set
+        reaches the accessibility tree as "button". */}
+    <Pagination value={page} total={totalPages} onChange={onChange} size="xs" withEdges aria-label="Table pages"
+      getItemProps={(item) => ({ "aria-label": `Page ${item}` })}
+      getControlProps={(control) => ({ "aria-label": controlLabel[control] })} />
   </Group>;
 }
 
