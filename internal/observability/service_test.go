@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql/driver"
 	"errors"
-	"fmt"
 	"math"
 	"regexp"
 	"strings"
@@ -217,8 +216,8 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	for _, count := range []float64{0, 0, 0, 0, 0, 0, 0, 10, 40, 50, 50, 50, 50, 50, 50, 50, 50} {
 		endpointCounts = append(endpointCounts, count)
 	}
-	for i := range endpointDurationBounds {
-		endpointColumns = append(endpointColumns, fmt.Sprintf("le_%d", i))
+	for _, bucket := range endpointDurationBuckets {
+		endpointColumns = append(endpointColumns, bucket.Column)
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupQuery)).
 		WithArgs(start, end, end, "prod", "checkout", 25).

@@ -54,7 +54,7 @@ FROM (SELECT DISTINCT bucket FROM endpoint_rollup LIMIT 5)`
 // endpointRollupQuery uses the minute cache only through its current watermark.
 // Raw spans cover both partial boundary minutes and any newer complete minutes,
 // so the cache lag cannot appear as zero traffic and raw work stays bounded.
-const endpointRollupQuery = `
+var endpointRollupQuery = `
 WITH params AS (
   SELECT
     ?::TIMESTAMP AS start_time,
@@ -153,8 +153,7 @@ SELECT
   t.calls,
   t.error_rate,
   t.duration_count,
-  le_0_1, le_0_5, le_1, le_2_5, le_5, le_10, le_25, le_50, le_100,
-  le_250, le_500, le_750, le_1000, le_2000, le_5000, le_30000, le_300000
+  ` + endpointDurationColumns() + `
 FROM endpoint_totals t
 ORDER BY t.calls DESC, (t.duration_count - le_1000) DESC
 LIMIT ?`
@@ -301,7 +300,7 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 		var endpoint Endpoint
 		if ready {
 			var total float64
-			cumulative := make([]float64, len(endpointDurationBounds))
+			cumulative := make([]float64, len(endpointDurationBuckets))
 			targets := []any{&endpoint.Method, &endpoint.Path, &endpoint.Calls, &endpoint.ErrorRate, &total}
 			for i := range cumulative {
 				targets = append(targets, &cumulative[i])
@@ -324,9 +323,39 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 	return endpoints, source, nil
 }
 
-// endpointDurationBounds mirrors the fixed histogram boundaries the endpoint
-// rollup counts into; see endpointRollupInsertSQL.
-var endpointDurationBounds = []float64{0.1, 0.5, 1, 2.5, 5, 10, 25, 50, 100, 250, 500, 750, 1000, 2000, 5000, 30000, 300000}
+// endpointDurationBuckets pairs each histogram boundary with the column that
+// counts it, and both the query's column list and the interpolation read from
+// here.
+//
+// The two were written out separately at first, which couples them by position
+// alone: reordering one list, or adding a boundary to the rollup without adding
+// it here, would go on compiling and quietly report one bucket's count against
+// another's boundary. Percentiles would shift and nothing would look broken.
+// The boundaries themselves must stay in step with the histogram the rollup
+// writes (endpointRollupInsertSQL, in internal/query). Nothing here can check
+// that at compile time; TestEndpointRollupQueryMergesBucketsAndExactBoundaries
+// is what catches a drift, because it fills a real rollup row by column name
+// and reads the percentiles back out.
+var endpointDurationBuckets = []struct {
+	Column string
+	Bound  float64
+}{
+	{"le_0_1", 0.1}, {"le_0_5", 0.5}, {"le_1", 1}, {"le_2_5", 2.5},
+	{"le_5", 5}, {"le_10", 10}, {"le_25", 25}, {"le_50", 50},
+	{"le_100", 100}, {"le_250", 250}, {"le_500", 500}, {"le_750", 750},
+	{"le_1000", 1000}, {"le_2000", 2000}, {"le_5000", 5000},
+	{"le_30000", 30000}, {"le_300000", 300000},
+}
+
+// endpointDurationColumns is the SELECT list for those counts, in the order
+// histogramQuantile expects to read them.
+func endpointDurationColumns() string {
+	names := make([]string, len(endpointDurationBuckets))
+	for i, bucket := range endpointDurationBuckets {
+		names[i] = bucket.Column
+	}
+	return strings.Join(names, ", ")
+}
 
 // histogramQuantile reads a quantile out of cumulative bucket counts,
 // interpolating inside the bucket it lands in.
@@ -347,10 +376,10 @@ func histogramQuantile(cumulative []float64, total, quantile float64) float64 {
 	rank := quantile * total
 	previousBound, previousCount := 0.0, 0.0
 	for i, count := range cumulative {
-		if i >= len(endpointDurationBounds) {
+		if i >= len(endpointDurationBuckets) {
 			break
 		}
-		bound := endpointDurationBounds[i]
+		bound := endpointDurationBuckets[i].Bound
 		if count >= rank {
 			width, inBucket := bound-previousBound, count-previousCount
 			if width <= 0 || inBucket <= 0 {
@@ -360,7 +389,7 @@ func histogramQuantile(cumulative []float64, total, quantile float64) float64 {
 		}
 		previousBound, previousCount = bound, count
 	}
-	return endpointDurationBounds[len(endpointDurationBounds)-1]
+	return endpointDurationBuckets[len(endpointDurationBuckets)-1].Bound
 }
 
 func (s *Service) endpointCacheState(ctx context.Context) (bool, time.Time, error) {

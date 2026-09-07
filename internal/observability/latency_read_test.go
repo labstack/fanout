@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -142,5 +143,21 @@ func TestComparisonIgnoresSubMillisecondLatencyMoves(t *testing.T) {
 	rate := comparisonMetric("Error rate", "%", 0.10, 0.40, true)
 	if rate.Direction != DirectionRegression {
 		t.Fatalf("error rate = %#v, want a regression", rate)
+	}
+}
+
+func TestEndpointDurationBucketsAreConsistent(t *testing.T) {
+	previous := 0.0
+	for _, bucket := range endpointDurationBuckets {
+		if bucket.Bound <= previous {
+			t.Fatalf("bound %v follows %v; the boundaries must increase or interpolation reads a negative bucket width", bucket.Bound, previous)
+		}
+		previous = bucket.Bound
+	}
+	// The query reads these counts positionally, so its SELECT list has to be
+	// this list — a reordering would report one bucket's count against
+	// another's boundary and quietly shift every percentile.
+	if !strings.Contains(endpointRollupQuery, endpointDurationColumns()) {
+		t.Fatalf("the rollup query does not select %q in order", endpointDurationColumns())
 	}
 }
