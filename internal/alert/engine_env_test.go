@@ -27,15 +27,15 @@ func TestBuildEnvs_IntegerSumsSurviveHugeint(t *testing.T) {
 	if _, err := db.Exec(`
 CREATE TABLE service_rollup (
   namespace VARCHAR, bucket TIMESTAMP, service VARCHAR,
-  spans BIGINT, error_rate DOUBLE, p50_ms DOUBLE, p95_ms DOUBLE,
+  spans BIGINT, served_spans BIGINT, error_rate DOUBLE, p50_ms DOUBLE, p95_ms DOUBLE,
   log_count BIGINT, metric_count BIGINT
 )`); err != nil {
 		t.Fatalf("create service_rollup: %v", err)
 	}
 	if _, err := db.Exec(`
 INSERT INTO service_rollup VALUES
-  ('', now(),                      'svc-a', 100, 0.0, 10.0, 20.0, 5, 0),
-  ('', now() - INTERVAL 1 MINUTE,  'svc-a', 100, 0.0, 10.0, 20.0, 5, 0)`); err != nil {
+  ('', now(),                      'svc-a', 100, 100, 0.0, 10.0, 20.0, 5, 0),
+  ('', now() - INTERVAL 1 MINUTE,  'svc-a', 100, 100, 0.0, 10.0, 20.0, 5, 0)`); err != nil {
 		t.Fatalf("seed service_rollup: %v", err)
 	}
 

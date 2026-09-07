@@ -421,7 +421,8 @@ func (e *Engine) buildEnvs(ctx context.Context) map[string]AlertEnv {
 WITH current AS (
     SELECT service,
            avg(error_rate) as error_rate,
-           avg(p50_ms) as p50, avg(p95_ms) as p95,
+           COALESCE(avg(p50_ms) FILTER (WHERE served_spans > 0), avg(p50_ms)) as p50,
+           COALESCE(avg(p95_ms) FILTER (WHERE served_spans > 0), avg(p95_ms)) as p95,
            sum(spans) as throughput, sum(log_count) as log_count
     FROM service_rollup
     WHERE bucket >= (SELECT max(bucket) FROM service_rollup) - INTERVAL '5 minutes'
@@ -429,7 +430,9 @@ WITH current AS (
 ),
 previous AS (
     SELECT service,
-           avg(error_rate) as error_rate, avg(p95_ms) as p95, sum(spans) as throughput
+           avg(error_rate) as error_rate,
+           COALESCE(avg(p95_ms) FILTER (WHERE served_spans > 0), avg(p95_ms)) as p95,
+           sum(spans) as throughput
     FROM service_rollup
     WHERE bucket >= (SELECT max(bucket) FROM service_rollup) - INTERVAL '10 minutes'
       AND bucket < (SELECT max(bucket) FROM service_rollup) - INTERVAL '5 minutes'

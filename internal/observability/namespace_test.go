@@ -22,6 +22,7 @@ CREATE TABLE service_rollup (
   namespace VARCHAR,
   service VARCHAR,
   spans BIGINT,
+  served_spans BIGINT,
   error_rate DOUBLE,
   p50_ms DOUBLE,
   p95_ms DOUBLE,
@@ -33,8 +34,8 @@ CREATE TABLE service_rollup (
 
 	stamp := time.Date(2026, 8, 23, 20, 0, 0, 0, time.UTC)
 	if _, err := db.Exec(`INSERT INTO service_rollup VALUES
-    (?, 'prod', 'checkout', 2, 0, 10, 20, 1, 1),
-    (?, 'staging', 'catalog', 3, 0, 10, 20, 1, 1)`, stamp, stamp); err != nil {
+    (?, 'prod', 'checkout', 2, 2, 0, 10, 20, 1, 1),
+    (?, 'staging', 'catalog', 3, 3, 0, 10, 20, 1, 1)`, stamp, stamp); err != nil {
 		t.Fatalf("insert service rollups: %v", err)
 	}
 

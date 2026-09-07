@@ -11,13 +11,13 @@ import (
 	"github.com/labstack/fanout/internal/query"
 )
 
-const performancePointsQueryTemplate = `
+var performancePointsQueryTemplate = `
 SELECT
   time_bucket(INTERVAL '%s', bucket) AS point_time,
   CAST(SUM(spans) AS BIGINT),
   COALESCE(SUM(error_rate * spans) / NULLIF(SUM(spans), 0), 0),
-  COALESCE(SUM(p50_ms * spans) / NULLIF(SUM(spans), 0), 0),
-  COALESCE(MAX(p95_ms), 0),
+  ` + windowP50SQL + `,
+  ` + windowP95SQL + `,
   CAST(SUM(log_count) AS BIGINT),
   CAST(SUM(metric_count) AS BIGINT)
 FROM service_rollup
@@ -189,8 +189,8 @@ FROM endpoint_totals t
 ORDER BY t.calls DESC, p95_ms DESC
 LIMIT ?`
 
-const performanceHeatmapQueryTemplate = `
-SELECT time_bucket(INTERVAL '%s', bucket) AS point_time, service, COALESCE(MAX(p95_ms), 0)
+var performanceHeatmapQueryTemplate = `
+SELECT time_bucket(INTERVAL '%s', bucket) AS point_time, service, ` + windowP95SQL + `
 FROM service_rollup
 WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?)
   AND service IN (
@@ -209,12 +209,12 @@ func performanceHeatmapSQL(window time.Duration) string {
 	return fmt.Sprintf(performanceHeatmapQueryTemplate, timelineBucketWidth(window))
 }
 
-const performanceAggregateQuery = `
+var performanceAggregateQuery = `
 SELECT
   CAST(COALESCE(SUM(spans), 0) AS DOUBLE),
   COALESCE(SUM(error_rate * spans) / NULLIF(SUM(spans), 0), 0),
-  COALESCE(SUM(p50_ms * spans) / NULLIF(SUM(spans), 0), 0),
-  COALESCE(MAX(p95_ms), 0)
+  ` + windowP50SQL + `,
+  ` + windowP95SQL + `
 FROM service_rollup
 WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)`
 

@@ -5,13 +5,13 @@ import (
 	"fmt"
 )
 
-const overviewQuery = `
+var overviewQuery = `
 SELECT
   service,
   CAST(SUM(spans) AS BIGINT) AS spans,
   COALESCE(SUM(error_rate * spans) / NULLIF(SUM(spans), 0), 0) AS error_rate,
-  COALESCE(SUM(p50_ms * spans) / NULLIF(SUM(spans), 0), 0) AS p50_ms,
-  COALESCE(MAX(p95_ms), 0) AS p95_ms,
+  ` + windowP50SQL + ` AS p50_ms,
+  ` + windowP95SQL + ` AS p95_ms,
   CAST(SUM(log_count) AS BIGINT) AS log_count,
   CAST(SUM(metric_count) AS BIGINT) AS metric_count
 FROM service_rollup

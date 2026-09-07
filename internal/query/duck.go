@@ -1259,6 +1259,7 @@ span_agg AS (
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
     COUNT(*) AS spans,
+    COUNT(*) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')) AS served_spans,
     -- Latency describes the work a service performs, not the calls it waits
     -- on. A CLIENT or PRODUCER span measures a dependency: a subscription held
     -- open for ten minutes makes its subscriber look broken while saying
@@ -1330,6 +1331,7 @@ INSERT INTO service_rollup (
   bucket,
   service,
   spans,
+  served_spans,
   p50_ms,
   p95_ms,
   error_rate,
@@ -1341,6 +1343,7 @@ SELECT
   a.bucket,
   a.service,
   COALESCE(s.spans, 0),
+  COALESCE(s.served_spans, 0),
   COALESCE(s.p50_ms, 0),
   COALESCE(s.p95_ms, 0),
   COALESCE(s.error_rate, 0),
