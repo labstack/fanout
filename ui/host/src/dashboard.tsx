@@ -42,6 +42,10 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
   const selected = useQuery({ queryKey: ["dashboard", selectedID], queryFn: () => getJSON<DashboardRecord>(`/api/dashboards/${encodeURIComponent(selectedID)}`), enabled: Boolean(selectedID), refetchInterval: save.isPending || save.isError ? false : 30_000 });
   const [state, setState] = useState<DashboardState>(emptyState);
   const [breakpoint, setBreakpoint] = useState("lg");
+  // While the address bar names a namespace it decides what is shown, which
+  // would make the field itself unusable: every keystroke would be overwritten
+  // by the value in the URL. Typing edits a draft; blurring commits it to both.
+  const [namespaceDraft, setNamespaceDraft] = useState<string | null>(null);
   // A link carries what its sender was looking at. Without this the window and
   // namespace lived only in the saved dashboard, so a shared URL opened on
   // whatever the recipient had chosen and the two people discussed different
@@ -124,7 +128,7 @@ export default function Dashboard({ dashboardID = "", agentAvailable, onOpenChat
       <Flex align={{ base: "stretch", md: "center" }} justify="space-between" direction={{ base: "column", md: "row" }} gap="sm" role="group" aria-label="Dashboard controls">
         <Group gap="sm" wrap="wrap">
           <Select aria-label="Window" value={filters.window} onChange={(window) => window && applyFilters({ ...filters, window })} data={dashboardWindows} w={{ base: "100%", xs: 150 }} size="sm" />
-          <TextInput aria-label="Namespace" value={filters.namespace} onChange={(event) => setState({ ...state, filters: { ...state.filters, namespace: event.currentTarget.value } })} onBlur={(event) => applyFilters({ ...filters, namespace: event.currentTarget.value })} placeholder="All namespaces" w={{ base: "100%", xs: 200 }} size="sm" />
+          <TextInput aria-label="Namespace" value={namespaceDraft ?? filters.namespace} onChange={(event) => setNamespaceDraft(event.currentTarget.value)} onBlur={(event) => { setNamespaceDraft(null); applyFilters({ ...filters, namespace: event.currentTarget.value.trim() }); }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} placeholder="All namespaces" w={{ base: "100%", xs: 200 }} size="sm" />
         </Group>
         {/* The row wraps rather than squeezing: at 390px a single line clipped
             both button labels to "Add vie" and "Ask Fano". */}
