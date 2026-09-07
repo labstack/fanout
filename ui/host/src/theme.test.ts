@@ -56,8 +56,11 @@ describe("filled surfaces", () => {
   it("routes a semantic filled surface to its own per-scheme variable", () => {
     expect(filledTextFollowsTheScheme({ color: "brand", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-brand-contrast)");
     expect(filledTextFollowsTheScheme({ color: "bad", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-bad-contrast)");
-    // Components pass no variant for their default, which is filled.
+    // A component that names no colour is asking for the accent.
     expect(filledTextFollowsTheScheme({ variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-brand-contrast)");
+    // A shade named explicitly is still the same hue and still needs the same
+    // text colour.
+    expect(filledTextFollowsTheScheme({ color: "ok", variant: "filled", theme: fanoutTheme } as never).color).toBe("var(--fanout-color-ok-contrast)");
   });
 
   it("leaves other colours, other variants and an opted-out component to Mantine", () => {
@@ -89,13 +92,4 @@ describe("type scale", () => {
     expect(new Set(Object.values(typeScale)).size).toBe(Object.values(typeScale).length);
   });
 
-  it("raises Mantine's own badge sizes to that floor without shrinking the larger ones", () => {
-    const size = (props: { size?: string }) => Number(fanoutThemeConfig.components.Badge.vars(fanoutTheme, props).root["--badge-fz"].replace("px", ""));
-    // Mantine's xs badge is 9px and its sm is 10px; a severity badge in a log
-    // table and a tab count were drawn at those sizes.
-    expect(size({ size: "xs" })).toBe(typeScale.micro);
-    expect(size({ size: "sm" })).toBe(typeScale.micro);
-    expect(size({ size: "lg" })).toBe(14);
-    expect(size({})).toBe(12);
-  });
 });

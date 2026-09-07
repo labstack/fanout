@@ -1,4 +1,4 @@
-import { Badge, Box, Button, Center, Paper, Text } from "@mantine/core";
+import { Badge, Box, Button, Center, Paper, Text, VisuallyHidden } from "@mantine/core";
 import { ListMagnifyingGlass, WarningCircle } from "@phosphor-icons/react";
 import { LineChart } from "echarts/charts";
 import { useMemo, type ReactNode } from "react";
@@ -30,12 +30,14 @@ export function HealthBadge({ health, label }: { health: string; label: string }
   // its track and the label measures zero. It keeps its content's width.
   //
   // The glyph is a second channel for the eye and carries nothing for a screen
-  // reader, so the state is named in the accessible name instead: the badge
-  // read out as the service name alone, in the one component whose whole point
-  // is that hue is not enough.
+  // reader, which heard the service name and no state at all — in the one
+  // component whose whole point is that hue is not enough. The state is added
+  // as text rather than as an aria-label: a Badge renders a bare div, which
+  // maps to role=generic, where a name from the author is discarded.
   return <Badge color={healthColor(health)} variant="light" tt="none" style={{ minWidth: "max-content" }}
-    aria-label={`${label} — ${healthWord[health] ?? healthWord.unknown}`}
-    leftSection={<Box component="span" aria-hidden style={{ fontSize: typeScale.micro, lineHeight: 1 }}>{healthGlyph[health] ?? healthGlyph.unknown}</Box>}>{label}</Badge>;
+    leftSection={<Box component="span" aria-hidden style={{ fontSize: typeScale.micro, lineHeight: 1 }}>{healthGlyph[health] ?? healthGlyph.unknown}</Box>}>
+    {label}<VisuallyHidden> — {healthWord[health] ?? healthWord.unknown}</VisuallyHidden>
+  </Badge>;
 }
 
 export function Empty({ text }: { text: string }) {

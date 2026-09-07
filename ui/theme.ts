@@ -25,11 +25,17 @@ import { ayu, bad, brand, chart, fonts, info, ok, typeScale, warn } from "./toke
    defers to its variable; everything else keeps Mantine's own answer. */
 const semanticColors = { brand, ok, warn, bad, info };
 
+/* The shade each scheme paints for a filled surface. Mantine reads
+   primaryShade for every colour, not just the primary, so these are the two
+   stops a filled Button, Badge or Progress section is actually drawn in. */
+const filledShade = { light: 7, dark: 5 } as const;
+
 /** WCAG relative luminance, the quantity Mantine's own isLight compares
  *  against luminanceThreshold. Kept here rather than imported because this
  *  directory is shared with the embedded views and has no node_modules. */
 export function relativeLuminance(hex: string) {
-  const value = hex.replace("#", "");
+  const short = hex.replace("#", "");
+  const value = short.length === 3 ? [...short].map((digit) => digit + digit).join("") : short;
   const channel = (offset: number) => {
     const part = parseInt(value.slice(offset, offset + 2), 16) / 255;
     return part <= 0.03928 ? part / 12.92 : ((part + 0.055) / 1.055) ** 2.4;
@@ -52,8 +58,7 @@ export function filledTextOn(hex: string) {
 }
 
 export function filledContrastVariables(scheme: "light" | "dark") {
-  const shade = scheme === "dark" ? 5 : 7;
-  return Object.fromEntries(Object.entries(semanticColors).map(([name, ramp]) => [`--fanout-color-${name}-contrast`, filledTextOn(ramp[shade])]));
+  return Object.fromEntries(Object.entries(semanticColors).map(([name, ramp]) => [`--fanout-color-${name}-contrast`, filledTextOn(ramp[filledShade[scheme]])]));
 }
 
 export function schemeAwareFilledText<Input extends { color?: string; variant?: string; autoContrast?: boolean }, Result extends { color: string }>(
@@ -67,7 +72,7 @@ export function schemeAwareFilledText<Input extends { color?: string; variant?: 
     const isFilled = input.variant === "filled" || input.variant === undefined;
     // A component that has turned auto-contrast off has asked for Mantine's
     // white, and overriding it here would ignore the request.
-    if (input.autoContrast === false || !isFilled || !(color in semanticColors)) return resolved;
+    if (input.autoContrast === false || !isFilled || !Object.hasOwn(semanticColors, color)) return resolved;
     return { ...resolved, color: `var(--fanout-color-${color}-contrast)` };
   };
 }
@@ -82,18 +87,20 @@ export function schemeAwareFilledText<Input extends { color?: string; variant?: 
    improvement — black on #7fd962 reads 12.0:1 where white read 1.75:1. */
 const luminanceThreshold = 0.25;
 
-/* Mantine's Badge carries its own scale: xs is 9px and sm is 10px, both under
-   the floor the type scale sets. A severity badge in a log table and the count
-   on a tab were drawn at 9px. Each size is raised to the floor and no
-   further, so md and up keep the size they had. */
-const badgeFontSize: Record<string, number> = { xs: 9, sm: 10, md: 12, lg: 14, xl: 16 };
+/* Mantine's own Badge scale, in pixels (styles.css: 0.5625rem, 0.625rem,
+   0.6875rem, 0.8125rem, 1rem). xs and sm sit under the floor the type scale
+   sets — the severity badge in a log table and the count on a tab were drawn
+   at 9px — and only those two are raised. A size that is not one of these is
+   left alone rather than collapsed onto a default: Badge accepts any length,
+   and rewriting it would silently resize a badge nobody asked to change. */
+const badgeFontSize: Record<string, number> = { xs: 9, sm: 10, md: 11, lg: 13, xl: 16 };
 
 export const fanoutThemeConfig = {
   primaryColor: "brand",
   /* Shade 7 is the site's link color on a light ground and shade 5 is its
      color on a dark one, so each scheme picks the accent the documentation
      already uses. */
-  primaryShade: { light: 7, dark: 5 },
+  primaryShade: filledShade,
   /* Mantine picks the text color for filled surfaces from the fill's own
      luminance, which the two-shade accent needs: white on #7c4dcc, near-black
      on #a97ce0. */
@@ -117,7 +124,7 @@ export const fanoutThemeConfig = {
   components: {
     Tabs: { styles: (_theme: unknown, props: { color?: string }) => ({ tab: primaryOnly(props.color, "--tabs-text-color") }) },
     Pagination: { styles: (_theme: unknown, props: { color?: string }) => ({ control: primaryOnly(props.color, "--pagination-active-color") }) },
-    Badge: { vars: (_theme: unknown, props: { size?: string }) => ({ root: { "--badge-fz": `${Math.max(badgeFontSize[props.size ?? "md"] ?? badgeFontSize.md, typeScale.micro)}px` } }) },
+    Badge: { vars: (_theme: unknown, props: { size?: string }) => ({ root: badgeFloor(props.size) }) },
   },
 } as const;
 
@@ -139,6 +146,14 @@ export const fanoutCssVariables = () => ({
 /* The override is aimed at the accent Mantine gets wrong. A Tabs or Pagination
    given another colour keeps that colour's own answer rather than the
    accent's, which would be right only by luck. */
+/* Sizes are emitted in rem so a badge still answers to the root font size and
+   to --mantine-scale, like the rest of the type. */
+function badgeFloor(size: string | undefined) {
+  const declared = badgeFontSize[size ?? "md"];
+  if (declared === undefined || declared >= typeScale.micro) return {};
+  return { "--badge-fz": `${typeScale.micro / 16}rem` };
+}
+
 function primaryOnly(color: string | undefined, variable: string) {
   return !color || color === fanoutThemeConfig.primaryColor ? { [variable]: `var(--fanout-color-${fanoutThemeConfig.primaryColor}-contrast)` } : {};
 }
