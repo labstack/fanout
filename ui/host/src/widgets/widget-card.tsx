@@ -1,4 +1,4 @@
-import { ActionIcon, Group, Menu, Paper, Stack, Title } from "@mantine/core";
+import { ActionIcon, Button, Group, Menu, Modal, Paper, Stack, Text, Title } from "@mantine/core";
 import { DotsThree, SlidersHorizontal, Trash } from "@phosphor-icons/react";
 import { useState, type JSX } from "react";
 import type { DashboardWidgetRecord } from "../api";
@@ -49,6 +49,10 @@ export default function WidgetCard(props: WidgetBodyProps & { onRemove: () => vo
   const { widget, services, onRemove, onConfigure } = props;
   const [menuOpened, setMenuOpened] = useState(false);
   const [configuring, setConfiguring] = useState(false);
+  // Remove used to take effect on the click, and a dashboard has no undo: the
+  // card, its size and its configuration were gone, and rebuilding one that
+  // the assistant had composed meant asking for it again.
+  const [confirmingRemove, setConfirmingRemove] = useState(false);
   // A dashboard saved by a newer build can name a view this one has never
   // heard of. That is one card that says so, not a crash that takes the
   // whole page down with it.
@@ -66,12 +70,21 @@ export default function WidgetCard(props: WidgetBodyProps & { onRemove: () => vo
           </Menu.Target>
           <Menu.Dropdown>
             {configurable(widget.type) && <Menu.Item leftSection={<SlidersHorizontal size={15} />} onClick={() => setConfiguring(true)}>Configure</Menu.Item>}
-            <Menu.Item color="bad" leftSection={<Trash size={15} />} onClick={onRemove}>Remove</Menu.Item>
+            <Menu.Item color="bad" leftSection={<Trash size={15} />} onClick={() => setConfirmingRemove(true)}>Remove</Menu.Item>
           </Menu.Dropdown>
         </Menu>
       </Group>
       <div className="widget-body"><Body {...props} /></div>
     </Stack>
     <ConfigureWidget opened={configuring} widget={widget} services={services} onClose={() => setConfiguring(false)} onSave={onConfigure} />
+    <Modal opened={confirmingRemove} onClose={() => setConfirmingRemove(false)} title={`Remove ${widget.title}?`} centered radius="md">
+      <Stack gap="md">
+        <Text size="sm" c="dimmed">This takes the card off the dashboard for everyone who opens it. You can add it again from Add view, but its size and settings are not kept.</Text>
+        <Group justify="flex-end" gap="sm">
+          <Button variant="default" size="sm" onClick={() => setConfirmingRemove(false)}>Cancel</Button>
+          <Button color="bad" size="sm" onClick={() => { setConfirmingRemove(false); onRemove(); }}>Remove</Button>
+        </Group>
+      </Stack>
+    </Modal>
   </Paper>;
 }
