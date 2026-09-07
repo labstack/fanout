@@ -1,12 +1,14 @@
 import type { Message } from "@ag-ui/client";
 import { ActionIcon, Alert, Box, Button, Center, Container, Group, Loader, Paper, Stack, Table, Text, Textarea, Title, Tooltip, Typography } from "@mantine/core";
 import { Check, Copy, PaperPlaneTilt, Stop } from "@phosphor-icons/react";
-import { lazy, Suspense, type ComponentProps, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useFanoutApp } from "./app-context";
+import { useStickToBottom } from "./chat-scroll";
 import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
+import { exactTimestamp } from "../../format";
 import type { MCPAppContent } from "./mcp-app-frame";
 
 const MCPAppFrame = lazy(() => import("./mcp-app-frame"));
@@ -23,12 +25,17 @@ export function toolTitle(name: string) {
 }
 
 export function ChatPage() {
-  const { agentAvailable, messages, messageTimes, ready, running, activity, error, threadMissing, bottomRef, send, retry, reloadThread, newThread } = useFanoutApp();
+  const { agentAvailable, messages, messageTimes, ready, running, activity, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();
+  const { scrollRef, contentRef, toBottom } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
+  // Sending is a request to see the answer, so it returns a reader who had
+  // scrolled back through the thread to the bottom of it.
+  const lastSent = messages.filter((message) => message.role === "user").at(-1)?.id;
+  useEffect(() => { if (lastSent) toBottom(); }, [lastSent, toBottom]);
   if (!agentAvailable) return <Container size="sm" py={96}><Paper withBorder radius="lg" p={{ base: "xl", sm: 40 }}><Stack gap="md"><Text c="brand" fw={700} size="xs" tt="uppercase" lts="0.12em">Optional capability</Text><Title order={1} fz={28}>Chat is not configured</Title><Text c="dimmed">Add an AI provider key to enable chat. Telemetry ingest, dashboards, traces, logs, and metrics remain available without it.</Text><Button component="a" href="/dashboards" variant="light" mt="sm">Open dashboards</Button></Stack></Paper></Container>;
   const visibleMessages = messages.filter((message) => message.role !== "tool");
   return <Box className="chat-pane">
-    <Box className="chat-scroll">
-      <Container size={880} px={{ base: "md", sm: "xl" }} py="lg">
+    <Box className="chat-scroll" ref={scrollRef}>
+      <Container size={880} px={{ base: "md", sm: "xl" }} py="lg" ref={contentRef}>
         {threadMissing && <Alert color="warn" radius="lg" title="This chat no longer exists"><Group justify="space-between"><Text size="sm">It was deleted, or the link is wrong.</Text><Button size="compact-sm" variant="light" onClick={newThread}>New chat</Button></Group></Alert>}
         {/* A thread whose load failed never becomes ready, so showing the
             loader here would spin forever: state the failure instead. Retry
@@ -42,7 +49,6 @@ export function ChatPage() {
             {visibleMessages.map((message) => <ChatMessage key={message.id} message={message} time={messageTimes[message.id]} send={send} />)}
             {running && <Group gap="xs"><Loader type="dots" size="sm" /><Text c="dimmed" size="sm">{activity || "Analyzing your system"}</Text></Group>}
             {error && <RunError message={error} onRetry={retry} />}
-            <div ref={bottomRef} />
           </Stack>
         </>}
       </Container>
@@ -105,7 +111,7 @@ function ChatMessage({ message, time, send }: { message: Message; time?: number;
       ? <Paper radius="lg" px="md" py="sm" bg="var(--mantine-color-brand-light)" maw="70%" ml="auto" w="fit-content"><Text style={{ whiteSpace: "pre-wrap" }}>{content}</Text></Paper>
       : <Typography className="chat-markdown"><Markdown remarkPlugins={[remarkGfm]} components={markdownComponents}>{content}</Markdown></Typography>}
     <Group className="chat-message-meta" gap={6} justify={user ? "flex-end" : "flex-start"} mt={4}>
-      {stamp && <Text c="dimmed" size="xs">{stamp}</Text>}
+      {stamp && time && <Text c="dimmed" size="xs" title={exactTimestamp(new Date(time).toISOString())}>{stamp}</Text>}
       {!user && <CopyButton text={content} label="Copy message" />}
     </Group>
   </Box>;

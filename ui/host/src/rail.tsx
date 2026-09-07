@@ -6,7 +6,7 @@ import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } f
 import { dashboardsQueryKey, getJSON, threadHistoryQueryKey, type DashboardSummary } from "./api";
 import type { Overview } from "../../contracts";
 import { authorizedFetch } from "./auth";
-import { useObservability, widgetParams } from "./widgets/data";
+import { freshFor, useObservability, widgetParams } from "./widgets/data";
 
 export type RailHandle = { focusSearch(): void };
 
@@ -57,7 +57,7 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
     getNextPageParam: (last) => last.nextCursor || undefined,
     enabled: agentAvailable,
   });
-  const dashboards = useQuery({ queryKey: dashboardsQueryKey, queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 30_000 });
+  const dashboards = useQuery({ queryKey: dashboardsQueryKey, queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 30_000, staleTime: freshFor });
   const threads = useMemo(() => history.data?.pages.flatMap((page) => page.threads) ?? [], [history.data]);
   const groups = useMemo(() => groupThreads(threads), [threads]);
   // Searching for a service used to answer "No matching chats / No matching

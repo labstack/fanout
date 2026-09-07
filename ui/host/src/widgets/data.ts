@@ -46,12 +46,24 @@ export function observabilityKey(kind: ObservabilityKind, params: URLSearchParam
 // a widget recovers without a manual refresh.
 const refetchInterval = (query: { state: { status: string } }) => (query.state.status === "error" ? 15_000 : 30_000);
 
+/** How long an answer is treated as current.
+ *
+ *  Opening /dashboards renders the default dashboard and then navigates to its
+ *  own URL, which unmounts the pane and mounts a new one. With nothing held
+ *  fresh, that second mount asked the server for the overview, the service map
+ *  and the performance summary all over again — a measured thirteen requests
+ *  for a page that needs seven, and the same again on every focus of the tab.
+ *  Half the poll interval keeps a remount free without letting a widget show
+ *  anything the poll would not have shown anyway. */
+export const freshFor = 15_000;
+
 export function useObservability<T>(kind: ObservabilityKind, params: URLSearchParams, enabled = true): UseQueryResult<Result<T>> {
   return useQuery({
     queryKey: observabilityKey(kind, params),
     queryFn: () => getJSON<Result<T>>(`/api/observability/${kind}?${params}`),
     enabled,
     refetchInterval,
+    staleTime: freshFor,
   });
 }
 

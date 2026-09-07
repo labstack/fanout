@@ -69,3 +69,21 @@ export function timelineTimestamp(value: string, window: string, seconds = false
     ...(seconds ? { second: "2-digit" } as const : {}),
   });
 }
+
+/** The viewer's time zone, abbreviated the way their locale writes it.
+ *
+ *  Every timestamp in the product is rendered in the browser's zone and none
+ *  of them said so, which is a real ambiguity when the reader is looking at an
+ *  incident with someone in another office, or at a server that logs in UTC. */
+export function timeZoneLabel(when: Date = new Date()) {
+  const parts = new Intl.DateTimeFormat([], { timeZoneName: "short" }).formatToParts(when);
+  return parts.find((part) => part.type === "timeZoneName")?.value ?? "";
+}
+
+/** The whole instant — date, seconds and zone — for the title of a timestamp
+ *  that is displayed shortened. */
+export function exactTimestamp(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return value;
+  return date.toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit", timeZoneName: "short" });
+}

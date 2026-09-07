@@ -31,7 +31,6 @@ function Session() {
   // dependency of the session effect, so a bump asks the server again.
   const [reloadCount, setReloadCount] = useState(0);
   const pendingPromptRef = useRef("");
-  const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // A turn can hold several tool calls at once, and each one ends separately.
   // Counting them keeps the activity line on the work still in flight instead
@@ -110,8 +109,6 @@ function Session() {
     return () => { active = false; subscription.unsubscribe(); agent.abortRun(); };
   }, [agent, agentAvailable, queryClient, reloadCount, threadID]);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }); }, [messages, running]);
-
   useEffect(() => {
     if (!agentAvailable) return;
     const shortcuts = (event: KeyboardEvent) => {
@@ -183,7 +180,7 @@ function Session() {
   }
   function reloadThread() { setReloadCount((n) => n + 1); }
 
-  return <FanoutAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, input, setInput, error, bottomRef, inputRef, send, submit, stop, retry, reloadThread, openChat, newThread, selectThread }}>
+  return <FanoutAppContext.Provider value={{ agentAvailable, threadID, threadMissing, messages, messageTimes, ready, running, activity, input, setInput, error, inputRef, send, submit, stop, retry, reloadThread, openChat, newThread, selectThread }}>
     <Shell><Outlet /></Shell>
   </FanoutAppContext.Provider>;
 }

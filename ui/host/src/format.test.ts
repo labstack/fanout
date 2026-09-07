@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { duration, percent } from "../../format";
+import { duration, exactTimestamp, percent, timeZoneLabel } from "../../format";
 
 describe("duration", () => {
   it("keeps sub-millisecond values legible", () => {
@@ -69,5 +69,21 @@ describe("duration seams", () => {
 
   it("shows a negative duration rather than hiding it as missing", () => {
     expect(duration(-5)).toBe("-5.0ms");
+  });
+});
+
+describe("time zone", () => {
+  // Every timestamp is rendered in the browser's zone and none of them said
+  // so, which is ambiguous the moment two people read the same incident from
+  // different offices.
+  it("names the viewer's zone and spells an instant out in full", () => {
+    expect(timeZoneLabel(new Date("2026-09-07T14:00:00Z"))).not.toBe("");
+    const exact = exactTimestamp("2026-09-07T14:00:00Z");
+    expect(exact).toContain("2026");
+    expect(exact).toMatch(/\d{1,2}:\d{2}:\d{2}/);
+    expect(exact).toContain(timeZoneLabel(new Date("2026-09-07T14:00:00Z")));
+    // A value that is not a time is passed through rather than shown as
+    // "Invalid Date".
+    expect(exactTimestamp("not a time")).toBe("not a time");
   });
 });

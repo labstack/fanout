@@ -8,7 +8,7 @@ import { chartTheme, healthColor, seriesColor, statusHex } from "../../chart";
 import { typeScale } from "../../tokens";
 import type { Endpoint, Performance, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
-import { duration, integer, percent, timelineTimestamp, windowLabel } from "../../format";
+import { duration, integer, percent, timeZoneLabel, timelineTimestamp, windowLabel } from "../../format";
 import { askAbout, useFanoutApp } from "./use-fanout-app";
 import "./app.css";
 
@@ -28,7 +28,7 @@ function PerformanceApp() {
       {view === "latency" && <HeatmapView data={result.data} dark={dark} window={result.provenance.window} />}
       {view === "endpoints" && <EndpointsView endpoints={result.data.endpoints} onEndpoint={(endpoint) => askAbout(app, `Investigate ${endpoint.method} ${endpoint.path}. Explain its latency and errors.`)} />}
       {view === "compare" && <ComparisonView data={result.data} />}
-      <MetaFooter left={windowLabel(result.provenance.window)} right={`Updated ${new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`} />
+      <MetaFooter left={windowLabel(result.provenance.window)} right={`Updated ${new Date(result.provenance.generated_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} ${timeZoneLabel()}`} />
     </>}
   </ViewShell>;
 }

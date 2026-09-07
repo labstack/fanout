@@ -13,7 +13,6 @@ export type FanoutAppContextValue = {
   input: string;
   setInput: (value: string) => void;
   error: string;
-  bottomRef: RefObject<HTMLDivElement | null>;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   send: (text: string) => Promise<void>;
   submit: (event: FormEvent) => void;
