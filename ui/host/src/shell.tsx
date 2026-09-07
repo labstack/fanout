@@ -50,6 +50,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     onDeletedThread: (deletedID) => { if (deletedID === threadID) newThread(); },
     onSelectDashboard: (id) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id } }),
     onCreateDashboard: () => openChat(createDashboardPrompt),
+    onInvestigateService: (service) => openChat(`Investigate the ${service} service. Explain its errors and latency.`),
   };
 
   return <AppShell header={{ height: 52 }} navbar={{ width: 256, breakpoint: "md", collapsed: { mobile: true } }} padding={0}>
