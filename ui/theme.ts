@@ -50,11 +50,15 @@ export const fanoutThemeConfig = {
      on #a97ce0. */
   autoContrast: true,
   /* #a97ce0 has a relative luminance of 0.282, just under Mantine's default
-     threshold of 0.3. The threshold is what decides the text colour on a
-     virtual colour and on --mantine-primary-color-contrast; the accent needs it
-     lowered to be read as light. Only fills between 0.25 and 0.3 change hands,
-     and the accent is the palette's only one: ok, warn, bad and info all sit
-     above 0.31. */
+     threshold of 0.3. The threshold decides the text colour on a virtual colour
+     and on --mantine-primary-color-contrast, so the accent needs it lowered to
+     be read as light.
+
+     Three other stops sit in the 0.25-0.30 band and change with it, because the
+     colour Mantine evaluates is shade 7, not shade 5: ok[7] #4f9c3a (0.257),
+     warn[7] #c87d21 (0.271) and dark[3] #8b8e99 (0.271). Each flips from white
+     to near-black text on a filled surface, and each is an improvement — black
+     on #7fd962 reads 12.0:1 where white read 1.75:1. */
   luminanceThreshold: 0.25,
   colors: { dark: ayu, brand, ok, warn, bad, info },
   defaultRadius: "md",
@@ -65,6 +69,15 @@ export const fanoutThemeConfig = {
      shouting. Mono is a data face now, not a display face. */
   headings: { fontFamily: fonts.body, fontWeight: "600" },
   cursorType: "pointer",
+  /* Tabs and Pagination do not go through variantColorResolver — they set their
+     own text colour from Mantine's other auto-contrast path, which resolves the
+     same two-shade primaryShade against the light scheme and lands on white
+     over the dark accent at 3.16:1. Both are pointed at the per-scheme contrast
+     variable, the same answer schemeAwareFilledText gives filled surfaces. */
+  components: {
+    Tabs: { styles: { tab: { "--tabs-text-color": "var(--mantine-primary-color-contrast)" } } },
+    Pagination: { styles: { control: { "--pagination-active-color": "var(--mantine-primary-color-contrast)" } } },
+  },
 } as const;
 
 /* Mantine derives a handful of variables from `red` no matter what the theme

@@ -48,6 +48,17 @@ export function healthSymbol(health: string) {
   return "circle";
 }
 
+/** ECharts sizes a symbol by its bounding box, and the shapes do not fill one
+ *  equally: a diamond covers half of it against a circle's ~0.79 and a rounded
+ *  square's ~0.95. Sized naively the unhealthy node drew a third smaller than a
+ *  healthy one — and shrank its click target with it — which is the opposite of
+ *  what the shape is for. The scale evens the drawn area out. */
+export function healthSymbolScale(health: string) {
+  if (health === "unhealthy") return 1.25;
+  if (health === "degraded") return 0.91;
+  return 1;
+}
+
 export function severityColor(value: string) {
   const severity = String(value).toUpperCase();
   if (severity === "ERROR" || severity === "FATAL") return "bad";

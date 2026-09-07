@@ -4,6 +4,7 @@ import { LineChart } from "echarts/charts";
 import { useMemo, type ReactNode } from "react";
 import { EChart, useECharts } from "../echart";
 import { healthColor } from "../../../chart";
+import { typeScale } from "../../../tokens";
 
 /** A tile. Anything passed as children sits under the value, inside the tile's
  *  own border — a trend line belongs to the number it describes, and tiles in a
@@ -26,7 +27,7 @@ export function HealthBadge({ health, label }: { health: string; label: string }
   // A Badge is an inline-grid with hidden overflow, so a narrow row collapses
   // its track and the label measures zero. It keeps its content's width.
   return <Badge color={healthColor(health)} variant="light" tt="none" style={{ minWidth: "max-content" }}
-    leftSection={<Box component="span" aria-hidden style={{ fontSize: 9, lineHeight: 1 }}>{healthGlyph[health] ?? healthGlyph.unknown}</Box>}>{label}</Badge>;
+    leftSection={<Box component="span" aria-hidden style={{ fontSize: typeScale.micro, lineHeight: 1 }}>{healthGlyph[health] ?? healthGlyph.unknown}</Box>}>{label}</Badge>;
 }
 
 export function Empty({ text }: { text: string }) {
@@ -47,11 +48,12 @@ useECharts([LineChart]);
 
 /** A line with no axes, for a metric tile.
  *
- *  A trend with no baseline and no scale is decoration: the reader cannot tell
- *  a line hovering near zero from one near its own peak, which is the only
- *  question a sparkline is asked. The peak is stated beside it and a zero line
- *  is drawn under it, so the shape has something to be a shape against. */
-export function Sparkline({ values, color, baseline, label, format }: { values: number[]; color: string; baseline: string; label: string; format?: (value: number) => string }) {
+ *  A trend with no scale is decoration: the reader cannot tell a line hovering
+ *  near zero from one near its own peak, which is the only question a sparkline
+ *  is asked. Stating the peak answers it. A zero rule does not — the axis is
+ *  pinned at zero and auto-scales its top, so the shape fills the box either
+ *  way and the rule lands on the floor of the plot. */
+export function Sparkline({ values, color, label, format }: { values: number[]; color: string; label: string; format?: (value: number) => string }) {
   const peak = values.length ? Math.max(...values) : 0;
   const option = useMemo(() => ({
     animation: false,
@@ -62,17 +64,15 @@ export function Sparkline({ values, color, baseline, label, format }: { values: 
     // Decals are the chart layer's second channel for colour vision, and they
     // stay on everywhere a chart distinguishes one series from another. A
     // sparkline draws a single series 28px tall, where the texture only muddies
-    // the shape it is meant to support.
-    aria: { enabled: true, decal: { show: false } },
+    // the shape it is meant to support. `description` is repeated because
+    // EChart spreads the option over its defaults, and dropping it lets ECharts
+    // generate an aria-label that reads out the data instead of the label.
+    aria: { enabled: true, decal: { show: false }, description: label },
     series: [{
       type: "line", data: values, showSymbol: false, smooth: 0.3,
       lineStyle: { width: 1.5, color }, areaStyle: { opacity: 0.12, color },
-      // The baseline colour is passed in resolved: a chart is drawn into a
-      // canvas, which cannot read a CSS custom property, so a var() here would
-      // have drawn nothing at all.
-      markLine: { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: baseline, width: 1, opacity: 0.5, type: "solid" }, data: [{ yAxis: 0 }] },
     }],
-  }), [values, color, baseline]);
+  }), [values, color]);
   return <Box>
     <EChart option={option} height={28} label={label} />
     {peak > 0 && format && <Text c="dimmed" size="xs" ta="right" mt={2}>peak {format(peak)}</Text>}
