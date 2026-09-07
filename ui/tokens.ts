@@ -102,6 +102,28 @@ export const series = {
  *  document — the address bar and the tab strip. */
 export const ground = { light: "#fcfcfc", dark: "#0b0e14" } as const;
 
+/** The type sizes this product uses, in pixels.
+ *
+ *  A survey of one screen found fifteen size-and-weight pairs, including a 9px
+ *  badge and 10px chart labels — under the size at which this face stays
+ *  legible, and on the axis labels a reader is expected to actually read. The
+ *  scale is the set of sizes anything may use; charts draw into a canvas and
+ *  cannot inherit them, so they read the same numbers from here. */
+export const typeScale = {
+  /** Axis ticks, chart legends, badges: the smallest text the product sets. */
+  micro: 11,
+  /** Dense table cells and secondary labels. */
+  small: 12,
+  /** Body, controls, most cells. */
+  body: 14,
+  /** Card titles and tile values. */
+  title: 16,
+  /** Section headings, and the step a page title steps down to. */
+  section: 22,
+  /** Page titles. */
+  page: 32,
+} as const;
+
 export const fonts = {
   /** Mono is for data: code, ids, timestamps, numeric cells, and the chart
    *  axes that borrow it. It no longer sets headings. */

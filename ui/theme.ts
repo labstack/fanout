@@ -20,6 +20,13 @@ export const fanoutThemeConfig = {
      luminance, which the two-shade accent needs: white on #7c4dcc, near-black
      on #a97ce0. */
   autoContrast: true,
+  /* #a97ce0 has a relative luminance of 0.282, just under Mantine's default
+     threshold of 0.3. The threshold is what decides the text colour on a
+     virtual colour and on --mantine-primary-color-contrast; the accent needs it
+     lowered to be read as light. Only fills between 0.25 and 0.3 change hands,
+     and the accent is the palette's only one: ok, warn, bad and info all sit
+     above 0.31. */
+  luminanceThreshold: 0.25,
   colors: { dark: ayu, brand, ok, warn, bad, info },
   defaultRadius: "md",
   fontFamily: fonts.body,

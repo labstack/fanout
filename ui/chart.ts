@@ -35,6 +35,19 @@ export function seriesColor(name: string, dark: boolean) {
   return palette[Math.abs(hash) % palette.length];
 }
 
+/** A node's shape says what its colour says.
+ *
+ *  Health was drawn in green, amber and red alone, which is the one channel a
+ *  reader with a colour vision deficiency does not have: a service map became
+ *  twenty identical circles. The shapes are ordered by severity so the map also
+ *  reads at a glance — a diamond stands out from a ring the way an alarm should.
+ */
+export function healthSymbol(health: string) {
+  if (health === "unhealthy") return "diamond";
+  if (health === "degraded") return "roundRect";
+  return "circle";
+}
+
 export function severityColor(value: string) {
   const severity = String(value).toUpperCase();
   if (severity === "ERROR" || severity === "FATAL") return "bad";

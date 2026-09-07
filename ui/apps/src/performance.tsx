@@ -5,6 +5,7 @@ import { StrictMode, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { EmptyState, MetaFooter, Metric, PageControls, Tabs, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
 import { chartTheme, healthColor, seriesColor, statusHex } from "../../chart";
+import { typeScale } from "../../tokens";
 import type { Endpoint, Performance, Result } from "../../contracts";
 import { EChart, useECharts } from "./echart";
 import { duration, integer, percent, timelineTimestamp, windowLabel } from "../../format";
@@ -77,13 +78,13 @@ function PerformanceChart({ labels, title, series, dark, window }: { labels: str
     return {
       color: series.map((item) => item.color),
       grid: { left: 46, right: axes.length > 1 ? 54 : 18, top: 42, bottom: 30 },
-      legend: { top: 5, left: 0, textStyle: { color: colors.muted, fontSize: 10 }, icon: "circle", itemWidth: 7, itemHeight: 7 },
+      legend: { top: 5, left: 0, textStyle: { color: colors.muted, fontSize: typeScale.micro }, icon: "circle", itemWidth: 7, itemHeight: 7 },
       tooltip: {
-        trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 },
+        trigger: "axis", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: typeScale.micro },
         formatter: (params: Array<{ seriesName: string; value: number; marker: string; axisValueLabel: string }>) =>
           [params[0]?.axisValueLabel, ...params.map((entry) => `${entry.marker}${entry.seriesName}: ${axisFormat[unitOf(entry.seriesName)](entry.value)}`)].join("<br/>"),
       },
-      xAxis: { type: "category", data: labels.map((value) => timelineTimestamp(value, window)), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true } },
+      xAxis: { type: "category", data: labels.map((value) => timelineTimestamp(value, window)), boundaryGap: false, axisLine: { lineStyle: { color: colors.border } }, axisTick: { show: false }, axisLabel: { color: colors.muted, fontSize: typeScale.micro, hideOverlap: true } },
       yAxis: axes.map((kind, index) => ({
         type: "value",
         position: index === 0 ? "left" : "right",
@@ -93,7 +94,7 @@ function PerformanceChart({ labels, title, series, dark, window }: { labels: str
         // in it.
         ...(kind === "percent" && !series.some((item) => item.axis === "percent" && item.data.some((value) => value > 0)) ? { max: 0.01 } : {}),
         splitLine: index === 0 ? { lineStyle: { color: colors.grid } } : { show: false },
-        axisLabel: { color: colors.muted, fontSize: 9, formatter: (value: number) => tickFormat[kind](value) },
+        axisLabel: { color: colors.muted, fontSize: typeScale.micro, formatter: (value: number) => tickFormat[kind](value) },
       })),
       series: series.map((item) => ({ name: item.name, type: "line", yAxisIndex: axes.indexOf(item.axis ?? "count"), data: item.data, smooth: .22, showSymbol: false, lineStyle: { width: 2 }, areaStyle: { opacity: .045 } })),
     };
@@ -110,7 +111,10 @@ function HeatmapView({ data, dark, window }: { data: Performance; dark: boolean;
   }, [data.heatmap]);
   if (model.services.length === 0) return <EmptyState tall icon={<GridFour size={20} weight="duotone" />} title="No latency samples yet">The heatmap will compare service latency across time buckets.</EmptyState>;
   const colors = chartTheme(dark);
-  const option = { grid: { left: 105, right: 20, top: 20, bottom: 45 }, tooltip: { position: "top", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 }, formatter: (params: { data: [number, number, number] }) => `${model.services[params.data[1]]}<br/>${duration(params.data[2])}` }, xAxis: { type: "category", data: model.times.map((time) => timelineTimestamp(time, window)), splitArea: { show: true }, axisLabel: { color: colors.muted, fontSize: 9, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "category", data: model.services, splitArea: { show: true }, axisLabel: { color: colors.text, fontSize: 9 }, axisLine: { lineStyle: { color: colors.border } } }, visualMap: { min: 0, max: model.max, calculable: true, orient: "horizontal", left: "center", bottom: 0, textStyle: { color: colors.muted, fontSize: 8 }, inRange: { color: [colors.grid, statusHex(dark).warn, statusHex(dark).bad] } }, series: [{ type: "heatmap", data: model.services.flatMap((service, y) => model.times.map((time, x) => [x, y, model.values.get(`${service}\u0000${time}`) ?? 0])) }] };
+  const option = { grid: { left: 105, right: 20, top: 20, bottom: 78 }, tooltip: { position: "top", backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: typeScale.micro }, formatter: (params: { data: [number, number, number] }) => `${model.services[params.data[1]]}<br/>${duration(params.data[2])}` }, xAxis: { type: "category", data: model.times.map((time) => timelineTimestamp(time, window)), splitArea: { show: true }, axisLabel: { color: colors.muted, fontSize: typeScale.micro, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } }, yAxis: { type: "category", data: model.services, splitArea: { show: true }, axisLabel: { color: colors.text, fontSize: typeScale.micro }, axisLine: { lineStyle: { color: colors.border } } }, // The scale sat on top of the time labels and said "600000" with no unit
+      // — a number the reader had to guess the meaning of. It has its own band
+      // now, and reads in the same units as every other latency in the product.
+      visualMap: { min: 0, max: model.max, calculable: true, orient: "horizontal", left: "center", bottom: 0, itemWidth: 12, itemHeight: 90, text: ["slower", "faster"], textGap: 8, formatter: (value: number) => duration(value), textStyle: { color: colors.muted, fontSize: typeScale.micro }, inRange: { color: [colors.grid, statusHex(dark).warn, statusHex(dark).bad] } }, series: [{ type: "heatmap", data: model.services.flatMap((service, y) => model.times.map((time, x) => [x, y, model.values.get(`${service}\u0000${time}`) ?? 0])) }] };
   return <Paper withBorder radius="md" mx={{ base: "md", sm: "lg" }} mb="md" p="xs"><EChart option={option} height={Math.max(280, model.services.length * 32 + 110)} label="Service P95 latency heatmap" /></Paper>;
 }
 

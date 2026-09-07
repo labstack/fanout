@@ -2,7 +2,8 @@ import { GraphChart } from "echarts/charts";
 import { Stack, Text } from "@mantine/core";
 import { useMemo } from "react";
 import type { Topology } from "../../../contracts";
-import { chartTheme, statusHex } from "../../../chart";
+import { chartTheme, healthSymbol, statusHex } from "../../../chart";
+import { typeScale } from "../../../tokens";
 import { EChart, useECharts } from "../echart";
 import { useObservability, widgetParams } from "./data";
 import { Empty, WidgetError } from "./pieces";
@@ -27,13 +28,20 @@ export default function TopologyWidget({ widget, filters, dark, onOpenChat }: Wi
     // polled.
     const nodes = [...data.nodes].sort((a, b) => a.service.localeCompare(b.service));
     return {
-      tooltip: { backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } },
+      tooltip: { backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: typeScale.micro } },
       series: [{
         type: "graph", layout: "circular", circular: { rotateLabel: false }, roam: false, draggable: false,
-        label: { show: true, position: "bottom", color: colors.text, fontSize: 10 },
+        label: { show: true, position: "bottom", color: colors.text, fontSize: typeScale.micro },
         edgeSymbol: ["none", "arrow"], edgeSymbolSize: 6,
-        data: nodes.map((node) => ({ id: node.service, name: node.service, value: node.spans, symbolSize: Math.min(34, 18 + Math.log10(Math.max(node.spans, 1)) * 4), itemStyle: { color: colors.surface, borderColor: healthHex(node.health), borderWidth: 3 } })),
-        links: data.edges.map((edge) => ({ source: edge.caller, target: edge.callee, value: edge.calls, lineStyle: { width: Math.min(4, 1 + Math.log10(Math.max(edge.calls, 1))), color: edge.error_rate >= 0.05 ? status.bad : colors.muted, opacity: 0.5, curveness: 0.08 } })),
+        data: nodes.map((node) => ({ id: node.service, name: node.service, value: node.spans, symbol: healthSymbol(node.health), symbolSize: Math.min(34, 18 + Math.log10(Math.max(node.spans, 1)) * 4), itemStyle: { color: colors.surface, borderColor: healthHex(node.health), borderWidth: 3 } })),
+        // A failing dependency was the thinnest, palest line on the canvas: it
+        // took its width from call volume like every other edge, and the same
+        // half-opacity. It is now the widest and the only one drawn at full
+        // strength, because it is the one thing the map exists to show.
+        links: data.edges.map((edge) => {
+          const failing = edge.error_rate >= 0.05;
+          return { source: edge.caller, target: edge.callee, value: edge.calls, lineStyle: { width: failing ? 3.5 : Math.min(3, 1 + Math.log10(Math.max(edge.calls, 1))), color: failing ? status.bad : colors.muted, opacity: failing ? 0.95 : 0.35, curveness: 0.08 } };
+        }),
         emphasis: { focus: "adjacency" },
       }],
     };

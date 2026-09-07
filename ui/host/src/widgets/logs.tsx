@@ -3,6 +3,7 @@ import { Badge, Box, ScrollArea, Stack, Table, Text } from "@mantine/core";
 import { useMemo } from "react";
 import type { Logs } from "../../../contracts";
 import { chartTheme, severityColor, severityHex } from "../../../chart";
+import { typeScale } from "../../../tokens";
 import { timelineTimestamp } from "../../../format";
 import { EChart, useECharts } from "../echart";
 import { useObservability, widgetParams } from "./data";
@@ -24,9 +25,9 @@ export default function LogsWidget({ widget, filters, dark }: WidgetBodyProps) {
     return {
       color: severities.map((severity) => severityHex(severity, dark)),
       grid: { left: 28, right: 8, top: 8, bottom: 20 },
-      tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: 10 } },
-      xAxis: { type: "category", data: times.map((time) => timelineTimestamp(time, window)), axisLabel: { color: colors.muted, fontSize: 8, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } },
-      yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: 8 } },
+      tooltip: { trigger: "axis", axisPointer: { type: "shadow" }, backgroundColor: colors.surface, borderColor: colors.border, textStyle: { color: colors.text, fontSize: typeScale.micro } },
+      xAxis: { type: "category", data: times.map((time) => timelineTimestamp(time, window)), axisLabel: { color: colors.muted, fontSize: typeScale.micro, hideOverlap: true }, axisLine: { lineStyle: { color: colors.border } } },
+      yAxis: { type: "value", minInterval: 1, splitLine: { lineStyle: { color: colors.grid } }, axisLabel: { color: colors.muted, fontSize: typeScale.micro } },
       series: severities.map((severity) => ({ name: severity, type: "bar", stack: "logs", barMaxWidth: 14, data: times.map((time) => values.get(`${time} ${severity}`) ?? 0), itemStyle: { borderRadius: [2, 2, 0, 0] } })),
     };
   }, [dark, result]);

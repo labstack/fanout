@@ -17,10 +17,16 @@ export function Metric({ label, value, color, hint, children }: { label: string;
   </Paper>;
 }
 
+/** Health states, in the order severity reads. The glyph is the second channel:
+ *  the badge was hue alone, which is the one channel a reader with a colour
+ *  vision deficiency does not have. */
+const healthGlyph: Record<string, string> = { unhealthy: "◆", degraded: "■", healthy: "●", unknown: "○" };
+
 export function HealthBadge({ health, label }: { health: string; label: string }) {
   // A Badge is an inline-grid with hidden overflow, so a narrow row collapses
   // its track and the label measures zero. It keeps its content's width.
-  return <Badge color={healthColor(health)} variant="light" tt="none" style={{ minWidth: "max-content" }}>{label}</Badge>;
+  return <Badge color={healthColor(health)} variant="light" tt="none" style={{ minWidth: "max-content" }}
+    leftSection={<Box component="span" aria-hidden style={{ fontSize: 9, lineHeight: 1 }}>{healthGlyph[health] ?? healthGlyph.unknown}</Box>}>{label}</Badge>;
 }
 
 export function Empty({ text }: { text: string }) {
@@ -39,15 +45,33 @@ export function WidgetError({ retry }: { retry: () => void }) {
 // relying on whichever widget happened to import it first.
 useECharts([LineChart]);
 
-/** A line with no axes, for a metric tile. */
-export function Sparkline({ values, color, label }: { values: number[]; color: string; label: string }) {
+/** A line with no axes, for a metric tile.
+ *
+ *  A trend with no baseline and no scale is decoration: the reader cannot tell
+ *  a line hovering near zero from one near its own peak, which is the only
+ *  question a sparkline is asked. The peak is stated beside it and a zero line
+ *  is drawn under it, so the shape has something to be a shape against. */
+export function Sparkline({ values, color, label, format }: { values: number[]; color: string; label: string; format?: (value: number) => string }) {
+  const peak = values.length ? Math.max(...values) : 0;
   const option = useMemo(() => ({
     animation: false,
     grid: { left: 0, right: 0, top: 2, bottom: 2 },
     xAxis: { type: "category", show: false, data: values.map((_, index) => index) },
     yAxis: { type: "value", show: false, min: 0 },
     tooltip: { show: false },
-    series: [{ type: "line", data: values, showSymbol: false, smooth: 0.3, lineStyle: { width: 1.5, color }, areaStyle: { opacity: 0.12, color } }],
+    // Decals are the chart layer's second channel for colour vision, and they
+    // stay on everywhere a chart distinguishes one series from another. A
+    // sparkline draws a single series 28px tall, where the texture only muddies
+    // the shape it is meant to support.
+    aria: { enabled: true, decal: { show: false } },
+    series: [{
+      type: "line", data: values, showSymbol: false, smooth: 0.3,
+      lineStyle: { width: 1.5, color }, areaStyle: { opacity: 0.12, color },
+      markLine: { silent: true, symbol: "none", label: { show: false }, lineStyle: { color: "var(--mantine-color-dimmed)", width: 1, opacity: 0.35, type: "solid" }, data: [{ yAxis: 0 }] },
+    }],
   }), [values, color]);
-  return <EChart option={option} height={28} label={label} />;
+  return <Box>
+    <EChart option={option} height={28} label={label} />
+    {peak > 0 && format && <Text c="dimmed" size="xs" ta="right" mt={2}>peak {format(peak)}</Text>}
+  </Box>;
 }
