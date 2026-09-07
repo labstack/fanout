@@ -1,6 +1,6 @@
 import { Badge, Box, Group, Progress, SimpleGrid, Table, Text } from "@mantine/core";
 import { Pulse } from "@phosphor-icons/react";
-import { StrictMode } from "react";
+import { StrictMode, type CSSProperties } from "react";
 import { createRoot } from "react-dom/client";
 import { EmptyState, MetaFooter, Metric, PageControls, ViewHeader, ViewShell, ViewStatus, usePagedItems } from "./components";
 import { healthColor } from "../../chart";
@@ -34,9 +34,13 @@ function OverviewBody({ result, onService }: { result: Result<Overview>; onServi
     </SimpleGrid>
     {!empty && <Box px={{ base: "md", sm: "lg" }} pb="md">
       <Progress.Root size="lg" aria-label="Service health distribution">
-        <Progress.Section value={data.counts.healthy / total * 100} color="ok"><Progress.Label>{data.counts.healthy}</Progress.Label></Progress.Section>
-        <Progress.Section value={data.counts.degraded / total * 100} color="warn"><Progress.Label>{data.counts.degraded}</Progress.Label></Progress.Section>
-        <Progress.Section value={data.counts.unhealthy / total * 100} color="bad"><Progress.Label>{data.counts.unhealthy}</Progress.Label></Progress.Section>
+        {/* Progress picks its label colour from the light-scheme shade whatever
+            scheme is rendering, the same mistake the filled variant made: the
+            unhealthy count was white on #f26d78 at 2.90:1 in the dark scheme.
+            Each section is pointed at its own per-scheme contrast instead. */}
+        <Progress.Section value={data.counts.healthy / total * 100} color="ok" style={labelContrast("ok")}><Progress.Label>{data.counts.healthy}</Progress.Label></Progress.Section>
+        <Progress.Section value={data.counts.degraded / total * 100} color="warn" style={labelContrast("warn")}><Progress.Label>{data.counts.degraded}</Progress.Label></Progress.Section>
+        <Progress.Section value={data.counts.unhealthy / total * 100} color="bad" style={labelContrast("bad")}><Progress.Label>{data.counts.unhealthy}</Progress.Label></Progress.Section>
       </Progress.Root>
       <Group mt="xs" gap="lg"><Legend color="ok" text={`${data.counts.healthy} healthy`} /><Legend color="warn" text={`${data.counts.degraded} degraded`} /><Legend color="bad" text={`${data.counts.unhealthy} unhealthy`} /></Group>
     </Box>}
@@ -60,3 +64,7 @@ function ServiceRow({ service, onClick }: { service: ServiceHealth; onClick: () 
 }
 
 createRoot(document.getElementById("root")!).render(<StrictMode><OverviewApp /></StrictMode>);
+
+function labelContrast(color: string) {
+  return { "--progress-label-color": `var(--fanout-color-${color}-contrast)` } as CSSProperties;
+}

@@ -102,13 +102,18 @@ export const series = {
  *  document — the address bar and the tab strip. */
 export const ground = { light: "#fcfcfc", dark: "#0b0e14" } as const;
 
-/** The type sizes this product uses, in pixels.
+/** The small-text sizes this product sets by hand, in pixels.
  *
  *  A survey of one screen found fifteen size-and-weight pairs, including a 9px
  *  badge and 10px chart labels — under the size at which this face stays
- *  legible, and on the axis labels a reader is expected to actually read. The
- *  scale is the set of sizes anything may use; charts draw into a canvas and
- *  cannot inherit them, so they read the same numbers from here. */
+ *  legible, and on the axis labels a reader is expected to actually read.
+ *  micro is the floor: nothing sets text smaller, and Mantine's own sub-11px
+ *  badge sizes are raised to it in ./theme.ts.
+ *
+ *  This is not the whole type ramp. Headings and display sizes come from
+ *  Mantine's own scale; these are the sizes a component or a chart sets
+ *  directly, and charts draw into a canvas that cannot inherit CSS, so they
+ *  read the same numbers from here. */
 export const typeScale = {
   /** Axis ticks, chart legends, badges: the smallest text the product sets. */
   micro: 11,

@@ -48,6 +48,13 @@ export function healthSymbol(health: string) {
   return "circle";
 }
 
+/** Shape is the severity channel, so an ungraded node keeps the circle and
+ *  says so with its outline instead: a dashed ring reads as "nothing to grade"
+ *  without claiming a place in the severity order. */
+export function healthBorderType(health: string) {
+  return health === "unknown" ? "dashed" : "solid";
+}
+
 /** ECharts sizes a symbol by its bounding box, and the shapes do not fill one
  *  equally: a diamond covers half of it against a circle's ~0.79 and a rounded
  *  square's ~0.95. Sized naively the unhealthy node drew a third smaller than a

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { healthSymbol, healthSymbolScale } from "../../chart";
+import { healthBorderType, healthColor, healthSymbol, healthSymbolScale } from "../../chart";
 import { errorRateTone, latencyTone } from "../../health";
 
 describe("status encoding", () => {
@@ -8,7 +8,11 @@ describe("status encoding", () => {
   it("gives each health state a distinct shape", () => {
     const shapes = ["healthy", "degraded", "unhealthy"].map(healthSymbol);
     expect(new Set(shapes).size).toBe(3);
+    // Shape is the severity channel and an ungraded node has no place in it,
+    // so it keeps the circle and separates itself by outline and by colour.
     expect(healthSymbol("unknown")).toBe(healthSymbol("healthy"));
+    expect(healthBorderType("unknown")).not.toBe(healthBorderType("healthy"));
+    expect(healthColor("unknown")).not.toBe(healthColor("healthy"));
   });
 
   it("colours a figure by its own threshold, not the row verdict", () => {

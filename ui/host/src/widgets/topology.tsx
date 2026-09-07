@@ -2,7 +2,7 @@ import { GraphChart } from "echarts/charts";
 import { Stack, Text } from "@mantine/core";
 import { useMemo } from "react";
 import type { Topology } from "../../../contracts";
-import { chartTheme, healthSymbol, healthSymbolScale, statusHex } from "../../../chart";
+import { chartTheme, healthBorderType, healthSymbol, healthSymbolScale, statusHex } from "../../../chart";
 import { typeScale } from "../../../tokens";
 import { EChart, useECharts } from "../echart";
 import { useObservability, widgetParams } from "./data";
@@ -19,7 +19,9 @@ export default function TopologyWidget({ widget, filters, dark, onOpenChat }: Wi
     if (!data) return null;
     const colors = chartTheme(dark);
     const status = statusHex(dark);
-    const healthHex = (health: string) => (health === "unhealthy" ? status.bad : health === "degraded" ? status.warn : status.ok);
+    // An ungraded service is not a healthy one: falling through to green
+    // claimed health the data never established.
+    const healthHex = (health: string) => (health === "unhealthy" ? status.bad : health === "degraded" ? status.warn : health === "unknown" ? colors.muted : status.ok);
     // A circular layout assigns ring positions by data index, and the server
     // orders services by error rate, so the ring would still turn over whenever
     // a spike aged out. Sorting by name makes a service's position a function
@@ -33,7 +35,7 @@ export default function TopologyWidget({ widget, filters, dark, onOpenChat }: Wi
         type: "graph", layout: "circular", circular: { rotateLabel: false }, roam: false, draggable: false,
         label: { show: true, position: "bottom", color: colors.text, fontSize: typeScale.micro },
         edgeSymbol: ["none", "arrow"], edgeSymbolSize: 6,
-        data: nodes.map((node) => ({ id: node.service, name: node.service, value: node.spans, symbol: healthSymbol(node.health), symbolSize: healthSymbolScale(node.health) * Math.min(34, 18 + Math.log10(Math.max(node.spans, 1)) * 4), itemStyle: { color: colors.surface, borderColor: healthHex(node.health), borderWidth: 3 } })),
+        data: nodes.map((node) => ({ id: node.service, name: node.service, value: node.spans, symbol: healthSymbol(node.health), symbolSize: Math.min(34, healthSymbolScale(node.health) * (18 + Math.log10(Math.max(node.spans, 1)) * 4)), itemStyle: { color: colors.surface, borderColor: healthHex(node.health), borderWidth: 3, borderType: healthBorderType(node.health) } })),
         // A failing dependency was the thinnest, palest line on the canvas: it
         // took its width from call volume like every other edge, and the same
         // half-opacity. It is now the widest and the only one drawn at full

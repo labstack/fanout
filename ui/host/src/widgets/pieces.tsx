@@ -23,10 +23,18 @@ export function Metric({ label, value, color, hint, children }: { label: string;
  *  vision deficiency does not have. */
 const healthGlyph: Record<string, string> = { unhealthy: "◆", degraded: "■", healthy: "●", unknown: "○" };
 
+const healthWord: Record<string, string> = { unhealthy: "unhealthy", degraded: "degraded", healthy: "healthy", unknown: "health unknown" };
+
 export function HealthBadge({ health, label }: { health: string; label: string }) {
   // A Badge is an inline-grid with hidden overflow, so a narrow row collapses
   // its track and the label measures zero. It keeps its content's width.
+  //
+  // The glyph is a second channel for the eye and carries nothing for a screen
+  // reader, so the state is named in the accessible name instead: the badge
+  // read out as the service name alone, in the one component whose whole point
+  // is that hue is not enough.
   return <Badge color={healthColor(health)} variant="light" tt="none" style={{ minWidth: "max-content" }}
+    aria-label={`${label} — ${healthWord[health] ?? healthWord.unknown}`}
     leftSection={<Box component="span" aria-hidden style={{ fontSize: typeScale.micro, lineHeight: 1 }}>{healthGlyph[health] ?? healthGlyph.unknown}</Box>}>{label}</Badge>;
 }
 
@@ -72,7 +80,7 @@ export function Sparkline({ values, color, label, format }: { values: number[]; 
       type: "line", data: values, showSymbol: false, smooth: 0.3,
       lineStyle: { width: 1.5, color }, areaStyle: { opacity: 0.12, color },
     }],
-  }), [values, color]);
+  }), [values, color, label]);
   return <Box>
     <EChart option={option} height={28} label={label} />
     {peak > 0 && format && <Text c="dimmed" size="xs" ta="right" mt={2}>peak {format(peak)}</Text>}
