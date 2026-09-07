@@ -1,7 +1,9 @@
 package metrics
 
 import (
+	"database/sql"
 	"math"
+	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -204,6 +206,41 @@ var (
 		Help: "Parquet publications abandoned after reader wait timeout",
 	})
 
+	// The publisher's side of Parquet publication was measured and the
+	// reader's side was not, which left the one question a stalled query asks
+	// — "how long did I wait to enter the snapshot?" — unanswerable. These
+	// three complete the pair.
+	ParquetPublishHold = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "fanout_parquet_publish_hold_seconds",
+		Help:    "Time readers were excluded while a new Parquet file set was swapped in",
+		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+	})
+
+	ParquetReadWait = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "fanout_parquet_read_wait_seconds",
+		Help:    "Time a reader spent waiting to enter the Parquet snapshot",
+		Buckets: []float64{.0001, .0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30, 60},
+	}, []string{"reader"})
+
+	ParquetReadRefusals = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "fanout_parquet_read_refusals_total",
+		Help: "Readers that gave up waiting to enter the Parquet snapshot",
+	}, []string{"reader"})
+
+	// An explicit CHECKPOINT blocks new transactions for its duration, and the
+	// non-FORCE form fails outright while any transaction is open — so both
+	// how long it takes and how often it does not happen are worth knowing.
+	DuckDBCheckpoint = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "fanout_duckdb_checkpoint_seconds",
+		Help:    "Duration of an explicit DuckDB checkpoint on the rollup cache",
+		Buckets: []float64{.001, .005, .01, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
+	})
+
+	DuckDBCheckpointFailures = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_duckdb_checkpoint_failures_total",
+		Help: "Explicit DuckDB checkpoints that returned an error",
+	})
+
 	// HTTP metrics
 	HTTPRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_http_requests_total",
@@ -238,6 +275,66 @@ func RecordFlush(signal string, durationSec float64) {
 	FlushTotal.WithLabelValues(signal).Inc()
 	FlushDuration.WithLabelValues(signal).Observe(durationSec)
 }
+
+// duckDBPoolStats is the live source for the connection-pool gauges below.
+//
+// A holder rather than a promauto.NewGaugeFunc closure over the pool: the
+// gauges are declared once for the process, while a *Duck is constructed many
+// times in a test binary, and registering a collector per construction panics
+// on the second one. Unset, every gauge reads zero.
+var duckDBPoolStats atomic.Pointer[func() sql.DBStats]
+
+// SetDuckDBPoolSource points the connection-pool gauges at a pool. The last
+// caller wins, which is what a test binary that builds several wants.
+func SetDuckDBPoolSource(stats func() sql.DBStats) {
+	if stats == nil {
+		duckDBPoolStats.Store(nil)
+		return
+	}
+	duckDBPoolStats.Store(&stats)
+}
+
+func poolStats() sql.DBStats {
+	if fn := duckDBPoolStats.Load(); fn != nil {
+		return (*fn)()
+	}
+	return sql.DBStats{}
+}
+
+// The read pool is the one that can starve: background writers, the detector,
+// the alert engine and every dashboard widget draw from it, and a request that
+// waits for a connection waits invisibly — database/sql counts that wait and
+// nothing exported it.
+var (
+	_ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "fanout_duckdb_pool_in_use",
+		Help: "DuckDB read connections currently in use",
+	}, func() float64 { return float64(poolStats().InUse) })
+
+	_ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "fanout_duckdb_pool_idle",
+		Help: "DuckDB read connections currently idle",
+	}, func() float64 { return float64(poolStats().Idle) })
+
+	_ = promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "fanout_duckdb_pool_max_open",
+		Help: "Configured DuckDB read connection limit",
+	}, func() float64 { return float64(poolStats().MaxOpenConnections) })
+
+	_ = promauto.NewCounterFunc(prometheus.CounterOpts{
+		Name: "fanout_duckdb_pool_waits_total",
+		Help: "Times a caller waited for a free DuckDB read connection",
+	}, func() float64 { return float64(poolStats().WaitCount) })
+
+	_ = promauto.NewCounterFunc(prometheus.CounterOpts{
+		Name: "fanout_duckdb_pool_wait_seconds_total",
+		Help: "Total time callers spent waiting for a free DuckDB read connection",
+	}, func() float64 { return poolStats().WaitDuration.Seconds() })
+)
+
+// DuckDBPoolStatsForTest exposes what the pool gauges are reading, so a test
+// can prove they point at the read pool rather than the write handle.
+func DuckDBPoolStatsForTest() sql.DBStats { return poolStats() }
 
 // RecordWriteGate records one complete Telemetry catalog write critical section.
 // Callers constrain operation to the fixed writegate.WriteOperation set so this

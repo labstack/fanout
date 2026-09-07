@@ -80,6 +80,17 @@ func (g *parquetReadGate) admitsReaderLocked() bool {
 	return g.clock().Sub(g.waiting[0].queuedAt) < g.grace()
 }
 
+// publisherQueued reports whether a publication is waiting for readers to
+// leave. A long-running internal reader asks between units of work so it can
+// stop at a resumable point instead of making every query behind it wait out
+// the rest of its pass.
+func (g *parquetReadGate) publisherQueued() bool {
+	g.init()
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.writer || len(g.waiting) > 0
+}
+
 func (g *parquetReadGate) TryRLock() bool {
 	g.init()
 	g.mu.Lock()

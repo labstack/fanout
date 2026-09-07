@@ -24,7 +24,17 @@ import (
 )
 
 type Duck struct {
-	DB         *sql.DB
+	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
+	// sized from the machine.
+	DB *sql.DB
+	// writeDB is the single connection every rollup and maintenance write uses.
+	//
+	// Those writes are serialized by writeGate anyway, so one connection is all
+	// they can use — and taking it from the read pool is what let a background
+	// pass occupy a quarter of a four-core host's read capacity for the length
+	// of a rollup. A request that then waits for a connection waits invisibly:
+	// database/sql counts that wait, and nothing charged it to anything.
+	writeDB    *sql.DB
 	cfg        config.Config
 	repository *telemetrystore.Repository
 	// rollupLagNanos holds the rollup watermark back from the max ingested
@@ -231,12 +241,14 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		return nil, err
 	}
 
-	db, err := openDuckDB(ctx, dsn, tempDir, duckDBPoolSize(cfg))
+	db, writeDB, err := openDuckDB(ctx, dsn, tempDir, duckDBPoolSize(cfg))
 	if err != nil {
 		return nil, fmt.Errorf("open DuckDB query cache: %w (the cache at %s is rebuildable from Parquet)", err, dbPath)
 	}
+	// Reads are the pool that can starve, so it is the one worth watching.
+	metrics.SetDuckDBPoolSource(db.Stats)
 
-	d := &Duck{DB: db, cfg: cfg, repository: repository, rollupLagNanos: int64(rollupPublicationSafetyLag)}
+	d := &Duck{DB: db, writeDB: writeDB, cfg: cfg, repository: repository, rollupLagNanos: int64(rollupPublicationSafetyLag)}
 	if cfg.DuckDBMemory == "" {
 		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
@@ -245,16 +257,19 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 			slog.Warn("apply memory headroom failed; using DuckDB default memory_limit", "err", err)
 		}
 	}
-	if err := CreateCacheTables(db); err != nil {
-		_ = db.Close()
+	// DDL goes through the write handle for the same reason every other write
+	// does; the two handles share one DuckDB instance, so the tables and views
+	// are the same ones the read pool sees.
+	if err := CreateCacheTables(writeDB); err != nil {
+		_ = d.Close()
 		return nil, err
 	}
-	if err := CreateParquetViews(db, repository.Parquet.Dir()); err != nil {
-		_ = db.Close()
+	if err := CreateParquetViews(writeDB, repository.Parquet.Dir()); err != nil {
+		_ = d.Close()
 		return nil, err
 	}
-	if err := CreateViews(db); err != nil {
-		_ = db.Close()
+	if err := CreateViews(writeDB); err != nil {
+		_ = d.Close()
 		return nil, fmt.Errorf("create views: %w", err)
 	}
 	if cfg.RollupSkipToLatest {
@@ -278,7 +293,7 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	unlock := d.writeGate.Lock(writegate.WriteRollupSkip)
 	defer unlock()
 
-	tx, err := d.DB.BeginTx(ctx, nil)
+	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -323,7 +338,10 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	return tx.Commit()
 }
 
-func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB, error) {
+// openDuckDB returns the read pool and the single-connection write handle.
+// Both come from one connector: DuckDB allows a file one read-write instance
+// per process, so a second connector to the same DSN would fail on its lock.
+func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB, *sql.DB, error) {
 	// Every pooled connection must use UTC. DuckDB otherwise inherits the host
 	// timezone and casts TIMESTAMPTZ rollup buckets into local wall-clock
 	// TIMESTAMP values, while API windows arrive in UTC.
@@ -352,7 +370,7 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	db := sql.OpenDB(connector)
@@ -363,7 +381,13 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 	}
 	db.SetMaxOpenConns(maxConns)
 	db.SetMaxIdleConns(maxConns)
-	return db, nil
+
+	// One connection is all the writers can use — writeGate already lets one
+	// through at a time — and keeping it out of the read pool is the point.
+	writeDB := sql.OpenDB(connector)
+	writeDB.SetMaxOpenConns(1)
+	writeDB.SetMaxIdleConns(1)
+	return db, writeDB, nil
 }
 
 func sqlLiteral(v string) string {
@@ -371,7 +395,38 @@ func sqlLiteral(v string) string {
 }
 
 func (d *Duck) Close() error {
-	return d.DB.Close()
+	var writeErr error
+	if d.writeDB != nil {
+		writeErr = d.writeDB.Close()
+	}
+	metrics.SetDuckDBPoolSource(nil)
+	return errors.Join(writeErr, d.DB.Close())
+}
+
+// writer returns the handle every write goes through. NewDuck always sets one;
+// the fallback is for a Duck assembled field-by-field in a test, where one
+// handle is the whole point.
+func (d *Duck) writer() *sql.DB {
+	if d.writeDB != nil {
+		return d.writeDB
+	}
+	return d.DB
+}
+
+// checkpoint folds the rollup cache's WAL back into its file, and says how long
+// that took. A checkpoint blocks new transactions for its duration, so it is a
+// candidate explanation for a stalled query and has to be measurable. The
+// non-FORCE form also fails outright while any transaction is open, which on a
+// live instance is most of the time — the failure counter is how often that
+// happens rather than a guess.
+func (d *Duck) checkpoint(ctx context.Context) error {
+	start := time.Now()
+	_, err := d.writer().ExecContext(ctx, "CHECKPOINT")
+	metrics.DuckDBCheckpoint.Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.DuckDBCheckpointFailures.Inc()
+	}
+	return err
 }
 
 // DefaultNamespace returns empty string so queries search all namespaces.
@@ -428,7 +483,7 @@ func (d *Duck) RunRollups(ctx context.Context) {
 func (d *Duck) updateParquetStats(ctx context.Context) {
 	statsCtx, cancel := context.WithTimeout(ctx, parquetStatsWait)
 	defer cancel()
-	if err := d.lockParquetRead(statsCtx); err != nil {
+	if err := d.lockParquetRead(statsCtx, readerStats); err != nil {
 		slog.Warn("parquet stats skipped", "err", err)
 		return
 	}
@@ -556,13 +611,12 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		var errs []error
 		if d.cfg.RetentionDays > 0 {
 			for _, table := range []string{"service_rollup", "endpoint_rollup", "edge_rollup"} {
-				if _, err := d.DB.ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY", table, d.cfg.RetentionDays)); err != nil {
+				if _, err := d.writer().ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY", table, d.cfg.RetentionDays)); err != nil {
 					errs = append(errs, fmt.Errorf("prune %s: %w", table, err))
 				}
 			}
 		}
-		_, checkpointErr := d.DB.ExecContext(ctx, "CHECKPOINT")
-		return errors.Join(errors.Join(errs...), checkpointErr)
+		return errors.Join(errors.Join(errs...), d.checkpoint(ctx))
 	}()
 	err := errors.Join(pruneErr, cacheErr)
 	maintenanceResult := metrics.TelemetrySuccess
@@ -612,7 +666,7 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	}
 	defer d.parquetMu.RUnlock()
 
-	tx, err := d.DB.BeginTx(ctx, nil)
+	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -733,7 +787,7 @@ func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
 	}
 	defer d.parquetMu.RUnlock()
 
-	tx, err := d.DB.BeginTx(ctx, nil)
+	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -856,7 +910,7 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	}
 	defer d.parquetMu.RUnlock()
 
-	tx, err := d.DB.BeginTx(ctx, nil)
+	tx, err := d.writer().BeginTx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
@@ -960,7 +1014,14 @@ WHERE ingested_unix_nano > ?
 		maxT := maxStartT.Time
 		processed := 0
 		for !subLo.After(maxT) {
-			if processed == maxEdgeSubWindowsPerPass {
+			// Stop at a resumable point when the budget is spent, and also when
+			// a publication is waiting: this pass holds the Parquet snapshot
+			// until it commits, and every query that arrives after the
+			// publisher's grace expires waits out whatever is left of it. One
+			// sub-window is the unit; the cursor below is what makes stopping
+			// free. Never before the first, so a pass always makes progress and
+			// a busy compaction cycle cannot starve the rollup.
+			if processed == maxEdgeSubWindowsPerPass || (processed > 0 && d.parquetMu.publisherQueued()) {
 				completed = false
 				nextCursor = subLo.UnixNano()
 				break
@@ -1600,7 +1661,7 @@ FROM messaging_edges;`
 // QueryContext executes a read against immutable Parquet files and DuckDB's
 // local rollup cache.
 func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
-	if err := d.lockParquetRead(ctx); err != nil {
+	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
 		return nil, err
 	}
 	rows, err := d.DB.QueryContext(ctx, query, args...)
@@ -1636,7 +1697,7 @@ func (r *lockedRows) release() { r.unlockOnce.Do(r.unlock) }
 // QueryRowScan executes a single-row query against immutable Parquet files and
 // DuckDB's local rollup cache.
 func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
-	if err := d.lockParquetRead(ctx); err != nil {
+	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
 		return err
 	}
 	defer d.parquetMu.RUnlock()
@@ -1645,7 +1706,7 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 
 // Trace pins the immutable Parquet snapshot for the full indexed-file read.
 func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemetry.IndexedSpan, error) {
-	if err := d.lockParquetRead(ctx); err != nil {
+	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
 		return nil, err
 	}
 	defer d.parquetMu.RUnlock()
@@ -1673,22 +1734,39 @@ func (d *Duck) PublishParquet(ctx context.Context, publish func(context.Context)
 		return fmt.Errorf("wait for Parquet readers: %w", err)
 	}
 	defer d.parquetMu.Unlock()
+	swapStarted := time.Now()
+	defer func() { metrics.ParquetPublishHold.Observe(time.Since(swapStarted).Seconds()) }()
 	swapCtx, cancelSwap := context.WithTimeout(ctx, parquetSwapBudget)
 	defer cancelSwap()
 	return publish(swapCtx)
 }
 
-func (d *Duck) lockParquetRead(ctx context.Context) error {
+// Reader classes for the snapshot-wait metric. A query that waits and a rollup
+// that waits are different problems with the same symptom, and the whole point
+// of measuring here is to tell them apart.
+const (
+	readerQuery  = "query"
+	readerRollup = "rollup"
+	readerStats  = "stats"
+)
+
+// lockParquetRead admits a reader to the Parquet snapshot and records what the
+// wait cost. The publisher's wait was already measured and the reader's was
+// not, which is why a multi-second query could not be attributed to anything.
+func (d *Duck) lockParquetRead(ctx context.Context, reader string) error {
+	start := time.Now()
 	if err := d.parquetMu.RLockContext(ctx); err != nil {
+		metrics.ParquetReadRefusals.WithLabelValues(reader).Inc()
 		return errors.Join(ErrParquetReadWait, err)
 	}
+	metrics.ParquetReadWait.WithLabelValues(reader).Observe(time.Since(start).Seconds())
 	return nil
 }
 
 func (d *Duck) lockRollupParquetRead(ctx context.Context) error {
 	waitCtx, cancel := context.WithTimeout(ctx, rollupReaderLease)
 	defer cancel()
-	return d.lockParquetRead(waitCtx)
+	return d.lockParquetRead(waitCtx, readerRollup)
 }
 
 // ---- Queries for API ----
