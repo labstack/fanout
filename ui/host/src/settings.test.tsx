@@ -19,11 +19,13 @@ function json(body: unknown, status = 200) {
 
 const connection = { token_required: true, suggested_endpoint: "ingest.example.com:4317", tls_configured: false, header_name: "Authorization" };
 
+let client: QueryClient;
+
 async function mount() {
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => root.render(
     <QueryClientProvider client={client}><MantineProvider><Settings /></MantineProvider></QueryClientProvider>,
   ));
@@ -46,7 +48,7 @@ describe("connect telemetry", () => {
     // Quoted, because an advertised IPv6 endpoint is a YAML flow sequence bare.
     expect(config).toContain('endpoint: "ingest.example.com:4317"');
     // A secret pasted into a config file is a secret in version control.
-    expect(config).toContain("${env:FANOUT_INGEST_TOKEN}");
+    expect(config).toContain("${env:INGEST_TOKEN}");
     // This instance serves plaintext, so the exporter has to be told.
     expect(config).toContain("insecure: true");
     await act(async () => root.unmount());
@@ -87,6 +89,17 @@ describe("connect telemetry", () => {
     await act(async () => root.unmount());
   });
 
+  it("treats an endpoint on port 443 as TLS even without a scheme", async () => {
+    // An operator naming a TLS-terminating proxy usually writes the port and
+    // not the scheme, and tls.insecure against it fails with a gRPC error that
+    // explains nothing.
+    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: "ingest.example.com:443" }));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Collector configuration"));
+    expect(document.body.textContent).not.toContain("insecure: true");
+    await act(async () => root.unmount());
+  });
+
   it("stops offering to issue a token once one has been issued", async () => {
     fetchMock.mockImplementation(async (_url, init) => json((init as RequestInit | undefined)?.method === "POST"
       ? { ...connection, token_required: true, ingest_token: "fo_firsttoken" }
@@ -104,6 +117,8 @@ describe("connect telemetry", () => {
     const done = [...document.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "Done");
     await act(async () => done?.click());
     expect(document.body.textContent).not.toContain("fo_firsttoken");
+    // "Shown once" has to be true of the cache as well as the screen.
+    expect(JSON.stringify(client.getMutationCache().getAll().map((mutation) => mutation.state.data))).not.toContain("fo_firsttoken");
     expect(document.body.textContent).toContain("Rotate when a token may have been exposed");
     await act(async () => root.unmount());
   });

@@ -15,13 +15,17 @@ type IngestSettings = {
 
 const ingestQueryKey = ["settings", "ingest"] as const;
 
-/** Whether the exporter reaches this instance over TLS. The endpoint may be an
- *  advertised URL, in which case its scheme is the answer; otherwise it is
- *  plaintext unless this process holds the certificate itself. A proxy that
- *  terminates TLS without an https endpoint being advertised is invisible from
- *  here, which is why the hint says so rather than asserting plaintext. */
+/** Whether the exporter reaches this instance over TLS.
+ *
+ *  Three things can say so: the process holds the certificate itself, the
+ *  advertised endpoint carries an https scheme, or it names port 443 — an
+ *  operator pointing at a TLS-terminating proxy usually writes the port and
+ *  not the scheme, and telling that collector to send plaintext produces a
+ *  gRPC error that explains nothing. Anything else is treated as plaintext,
+ *  which is what an unproxied instance serves. */
 function overTLS(endpoint: string, tlsConfigured: boolean) {
-  return tlsConfigured || /^https:\/\//i.test(endpoint.trim());
+  const value = endpoint.trim();
+  return tlsConfigured || /^https:\/\//i.test(value) || /:443$/.test(value);
 }
 
 /** The collector block an engineer actually pastes, with this instance's own
@@ -30,16 +34,16 @@ function overTLS(endpoint: string, tlsConfigured: boolean) {
  *
  *  The endpoint is quoted because an advertised IPv6 address arrives as
  *  "[2001:db8::1]:4317", which unquoted YAML reads as a flow sequence. The
- *  token is referenced as ${env:...}, the form the documentation uses and the
- *  only one that is unambiguous when a distribution sets its own default
- *  config scheme. */
+ *  token is referenced as ${env:INGEST_TOKEN}, the name and the form the
+ *  documentation and the README both use — the braced form alone is ambiguous
+ *  where a distribution sets its own default config scheme. */
 function collectorConfig(endpoint: string, header: string, tlsConfigured: boolean) {
   const insecure = overTLS(endpoint, tlsConfigured) ? "" : "\n    tls:\n      insecure: true";
   return `exporters:
   otlp/fanout:
     endpoint: "${endpoint}"
     headers:
-      ${header}: "Bearer \${env:FANOUT_INGEST_TOKEN}"${insecure}
+      ${header}: "Bearer \${env:INGEST_TOKEN}"${insecure}
 
 service:
   pipelines:
@@ -76,6 +80,15 @@ export default function Settings() {
   const [issued, setIssued] = useState<string | null>(null);
 
   const rotate = useMutation({
+    // The plaintext lives in this mutation's result, and the cache keeps a
+    // result for five minutes after its last observer lets go. Zero means
+    // "shown once" is true of the tab as well as the screen.
+    gcTime: 0,
+    // A GET already in flight resolves after the POST and writes the
+    // pre-rotation answer over the refreshed one — the page then says the
+    // workspace is rejecting telemetry and offers to issue the token it has
+    // just issued. Cancelling first is what makes the write below hold.
+    onMutate: () => queryClient.cancelQueries({ queryKey: ingestQueryKey }),
     mutationFn: async () => {
       // A failure between the write and the response leaves the old token dead
       // and the new one unrecoverable, so this case gets its own instruction
@@ -105,13 +118,14 @@ export default function Settings() {
 
   function dismissToken() {
     setIssued(null);
-    // Drops the plaintext from the mutation cache, which otherwise holds it
-    // for the life of the tab.
+    // Drops the mutation's result, and with gcTime: 0 the cache entry goes
+    // with it rather than lingering.
     rotate.reset();
   }
 
-  if (settings.isLoading) return <Loading />;
-  if (settings.isError || !settings.data) return <Unavailable onRetry={() => void settings.refetch()} />;
+  // A page that has loaded stays loaded: one failed background refetch is not
+  // a reason to replace a working screen with an alert.
+  if (!settings.data) return settings.isLoading ? <Loading /> : <Unavailable onRetry={() => void settings.refetch()} />;
 
   const { suggested_endpoint: endpoint, header_name: header, tls_configured: tlsConfigured, token_required: hasToken } = settings.data;
   const canRotate = viewer.role === "admin";
@@ -134,7 +148,7 @@ export default function Settings() {
       <Stack gap="sm">
         <Box>
           <Title order={2} fz={22} lts="-0.02em">Collector configuration</Title>
-          <Text c="dimmed" size="sm" mt={2}>Merge these blocks into your collector configuration, alongside the receivers it already has, and set FANOUT_INGEST_TOKEN in its environment.</Text>
+          <Text c="dimmed" size="sm" mt={2}>Merge these blocks into your collector configuration, alongside the receivers it already has, and set INGEST_TOKEN in its environment.</Text>
         </Box>
         <Paper withBorder radius="lg" p="md">
           <Stack gap="sm">

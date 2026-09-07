@@ -8,7 +8,8 @@
  * their own account — and neither answers a question an operator has while
  * using the product. They belong on the marketing site. */
 export const docs = {
-  home: "https://fanout.run/",
+  /** Where an operator starts reading, not the marketing page above it. */
+  home: "https://fanout.run/start/what-fanout-is",
   /** Sending telemetry: endpoint, authentication, collector and SDK setup. */
   ingest: "https://fanout.run/start/send-telemetry",
 } as const;
