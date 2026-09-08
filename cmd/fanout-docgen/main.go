@@ -433,8 +433,8 @@ type groupPage struct {
 var groups = map[string]groupPage{
 	"server": {
 		Title:       "Server settings",
-		Description: "The HTTP listener, the public URL, TLS, and proxy trust.",
-		Summary:     "Settings for the listener that serves the browser client, the API, chat and MCP.",
+		Description: "The shared HTTP and OTLP listener, the public URL, TLS, and proxy trust.",
+		Summary:     "Settings for the listener that serves the browser, API, chat, MCP and both OTLP transports.",
 		ReadWhen: []string{
 			"You are putting Fanout behind a reverse proxy.",
 			"Browser sessions are not getting Secure cookies.",
@@ -442,7 +442,7 @@ var groups = map[string]groupPage{
 	},
 	"ingest": {
 		Title:       "Ingest settings",
-		Description: "The OTLP listeners, the advertised endpoint, batching, and the default namespace.",
+		Description: "The advertised OTLP endpoint, batching, and the default namespace.",
 		Summary:     "Settings for how telemetry arrives and how it is batched before it is written.",
 		ReadWhen: []string{
 			"Exporters cannot reach the instance.",

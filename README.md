@@ -110,7 +110,7 @@ choose the installation directory.
 ### Docker
 
 ```sh
-docker run --name fanout -p 7520:7520 -p 4317:4317 -p 4318:4318 \
+docker run --name fanout -p 7520:7520 \
   -v fanout-data:/var/lib/fanout/data \
   -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   labstack/fanout:latest
@@ -122,7 +122,7 @@ your collector secrets. A standard OTLP/HTTP exporter can then use:
 
 ```sh
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:7520
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20$INGEST_TOKEN"
 ```
 
@@ -131,7 +131,7 @@ For a Collector on the same private container network, the forwarding side is:
 ```yaml
 exporters:
   otlp_http/fanout:
-    endpoint: http://fanout:4318
+    endpoint: http://fanout:7520
     headers:
       Authorization: "Bearer ${env:INGEST_TOKEN}"
 
@@ -146,7 +146,10 @@ This assumes the Collector's existing `otlp` receiver and an environment
 variable containing the one-time token. Replace `fanout` with the private
 hostname reachable from that Collector.
 
-The equivalent OTLP/gRPC endpoint is `localhost:4317`. For later sign-in
+The equivalent OTLP/gRPC endpoint is `localhost:7520` (plaintext locally).
+Behind a TLS proxy, both transports use the public origin; gRPC requires
+HTTP/2 to Fanout. See the [single-port migration notes](docs/operations.md#single-port-migration).
+For later sign-in
 without SMTP, mint a 15-minute, single-use link against the running
 container's control database:
 
@@ -166,7 +169,7 @@ needs no such handling.
 The image selects `/etc/fanout/fanout.yaml` by default. That file contains only
 the container listener and data-directory defaults; it does not contain
 credentials. Start a container-specific document from that file so it retains
-the externally reachable HTTP and OTLP bind addresses:
+the shared listener and persistent data-directory settings:
 
 ```sh
 cp fanout.docker.yaml fanout.yaml
@@ -175,10 +178,8 @@ docker run -v ./fanout.yaml:/etc/fanout/fanout.yaml:ro \
   labstack/fanout:latest
 ```
 
-A replacement document must set `server.http_addr: ":7520"`,
-`ingest.otlp_grpc_addr: ":4317"`, and `ingest.otlp_http_addr: ":4318"`;
-omitting either ingest address restores its secure loopback-only built-in
-default, which is unreachable through a published container port.
+All surfaces use `server.addr` (`:7520` by default). Publish only that
+port; OTLP/HTTP and OTLP/gRPC use the same address as the application.
 
 ### From source
 
@@ -201,8 +202,8 @@ Optionally set `FANOUT_AI_API_KEY` for chat and the SMTP variables shown above
 for email-code login. Without SMTP, run `./bin/fanout login-link
 admin@example.com` from the same configuration and data directory.
 
-Fanout serves the UI on <http://localhost:7520>, accepts OTLP/gRPC on
-`127.0.0.1:4317`, and accepts OTLP/HTTP on `127.0.0.1:4318`. The first account
+Fanout serves the UI, API, MCP, OTLP/gRPC and OTLP/HTTP on
+<http://localhost:7520>. The first account
 created becomes the administrator and receives the ingest token once.
 
 Point any OpenTelemetry collector or SDK at either OTLP endpoint with the
@@ -241,9 +242,7 @@ operators touch are:
 
 | YAML key | Environment override | Default | Purpose |
 | --- | --- | --- | --- |
-| `server.http_addr` | `FANOUT_HTTP_ADDR` | `:7520` | UI, API, and MCP listener |
-| `ingest.otlp_grpc_addr` | `FANOUT_OTLP_GRPC_ADDR` | `127.0.0.1:4317` | OTLP/gRPC ingest listener |
-| `ingest.otlp_http_addr` | `FANOUT_OTLP_HTTP_ADDR` | `127.0.0.1:4318` | OTLP/HTTP ingest listener |
+| `server.addr` | `FANOUT_ADDR` | `:7520` | UI, API, MCP, and both OTLP transports |
 | `storage.data_dir` | `FANOUT_DATA_DIR` | `./data` | Parquet, query state, and control SQLite |
 | `auth.mode` | `FANOUT_AUTH_MODE` | `local` | `local` (login link or SMTP) or `oidc` |
 | `auth.code_secret` | `FANOUT_AUTH_CODE_SECRET` | — | Required in local mode, 32+ characters |

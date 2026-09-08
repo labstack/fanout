@@ -17,7 +17,7 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-const connection = { token_required: true, suggested_endpoint: "ingest.example.com:4317", tls_configured: false, header_name: "Authorization" };
+const connection = { token_required: true, suggested_endpoint: "ingest.example.com:7520", tls_configured: false, header_name: "Authorization" };
 
 let client: QueryClient;
 
@@ -46,7 +46,7 @@ describe("connect telemetry", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Collector configuration"));
     const config = document.body.textContent ?? "";
     // Quoted, because an advertised IPv6 endpoint is a YAML flow sequence bare.
-    expect(config).toContain('endpoint: "ingest.example.com:4317"');
+    expect(config).toContain('endpoint: "ingest.example.com:7520"');
     // A secret pasted into a config file is a secret in version control.
     expect(config).toContain("${env:INGEST_TOKEN}");
     // This instance serves plaintext, so the exporter has to be told.
@@ -86,6 +86,25 @@ describe("connect telemetry", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Collector configuration"));
     expect(document.body.textContent).not.toContain("insecure: true");
     expect(document.body.textContent).toContain("secured with TLS");
+    await act(async () => root.unmount());
+  });
+
+  it.each([
+    ["https://ingest.example.com", "https://ingest.example.com:443", false],
+    ["http://ingest.example.com", "http://ingest.example.com:80", true],
+    ["https://ingest.example.com:443/", "https://ingest.example.com:443", false],
+    ["https://ingest.example.com:7520", "https://ingest.example.com:7520", false],
+    ["http://localhost:7520", "http://localhost:7520", true],
+    ["https://[2001:db8::1]/", "https://[2001:db8::1]:443", false],
+    ["http://[::1]:7520", "http://[::1]:7520", true],
+    ["[::1]:7520", "[::1]:7520", true],
+  ])("generates a Collector endpoint with an explicit port for %s", async (endpoint, expected, insecure) => {
+    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: endpoint }));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Collector configuration"));
+    const config = document.body.textContent ?? "";
+    expect(config).toContain(`endpoint: "${expected}"`);
+    expect(config.includes("insecure: true")).toBe(insecure);
     await act(async () => root.unmount());
   });
 

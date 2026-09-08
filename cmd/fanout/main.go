@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -39,6 +38,7 @@ import (
 	appmetrics "github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/server"
 	"github.com/labstack/fanout/internal/settings"
 	"github.com/labstack/fanout/internal/store"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -190,53 +190,12 @@ func main() {
 			slog.Error("setup token init failed", "err", err)
 			os.Exit(1)
 		}
-		printSetupBanner(cfg.HTTPAddr, token)
+		printSetupBanner(cfg.Addr, token)
 	}
 
-	// Start gRPC ingest (OTLP)
-	grpcLis, err := net.Listen("tcp", cfg.OTLPGRPCAddr)
-	if err != nil {
-		slog.Error("listen gRPC failed", "err", err)
-		os.Exit(1)
-	}
-	grpcOpts, err := ingest.GRPCServerOptions(cfg, settingsStore)
-	if err != nil {
-		slog.Error("OTLP gRPC TLS init failed", "err", err)
-		os.Exit(1)
-	}
-	grpcSrv := grpc.NewServer(grpcOpts...)
+	grpcSrv := grpc.NewServer(ingest.GRPCServerOptions(settingsStore)...)
 	ing := ingest.NewServer(cfg, writer)
 	ingest.RegisterOTLP(grpcSrv, ing)
-	otlpHTTPLis, err := net.Listen("tcp", cfg.OTLPHTTPAddr)
-	if err != nil {
-		slog.Error("listen OTLP HTTP failed", "err", err)
-		os.Exit(1)
-	}
-	otlpHTTPSrv := &http.Server{
-		Handler:           ingest.NewHTTPHandler(ing, settingsStore),
-		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS13},
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       2 * time.Minute,
-	}
-
-	go func() {
-		slog.Info("gRPC OTLP listening", "addr", cfg.OTLPGRPCAddr, "tls", cfg.TLSEnabled())
-		if err := grpcSrv.Serve(grpcLis); err != nil && err != grpc.ErrServerStopped {
-			errCh <- fmt.Errorf("gRPC server: %w", err)
-		}
-	}()
-	go func() {
-		slog.Info("HTTP OTLP listening", "addr", cfg.OTLPHTTPAddr, "tls", cfg.TLSEnabled())
-		var serveErr error
-		if cfg.TLSEnabled() {
-			serveErr = otlpHTTPSrv.ServeTLS(otlpHTTPLis, cfg.TLSCertFile, cfg.TLSKeyFile)
-		} else {
-			serveErr = otlpHTTPSrv.Serve(otlpHTTPLis)
-		}
-		if serveErr != nil && serveErr != http.ErrServerClosed {
-			errCh <- fmt.Errorf("OTLP HTTP server: %w", serveErr)
-		}
-	}()
 
 	// Start Echo HTTP API
 	e := echo.New()
@@ -417,22 +376,14 @@ func main() {
 	e.GET("/", spa)
 	e.GET("/*", spa)
 
-	// Run HTTP
-	httpCtx, httpCancel := context.WithCancel(context.Background())
+	httpSrv := server.New(cfg.Addr, e, ingest.NewHTTPHandler(ing, settingsStore), grpcSrv)
 	go func() {
-		sc := echo.StartConfig{
-			Address:         cfg.HTTPAddr,
-			HideBanner:      true,
-			GracefulTimeout: 5 * time.Second,
-		}
-		slog.Info("HTTP listening", "addr", cfg.HTTPAddr, "tls", cfg.TLSEnabled())
+		slog.Info("HTTP and OTLP listening", "addr", cfg.Addr, "tls", cfg.TLSEnabled())
 		var err error
 		if cfg.TLSEnabled() {
-			// Match the OTLP gRPC listener's TLS 1.3 floor; Echo otherwise defaults to 1.2.
-			sc.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS13}
-			err = sc.StartTLS(httpCtx, e, cfg.TLSCertFile, cfg.TLSKeyFile)
+			err = httpSrv.ListenAndServeTLS(cfg.TLSCertFile, cfg.TLSKeyFile)
 		} else {
-			err = sc.Start(httpCtx, e)
+			err = httpSrv.ListenAndServe()
 		}
 		if err != nil && err != http.ErrServerClosed {
 			errCh <- fmt.Errorf("HTTP server: %w", err)
@@ -450,22 +401,21 @@ func main() {
 		slog.Error("fatal error, shutting down", "err", err)
 	}
 
-	// Stop accepting OTLP and let in-flight exporters finish while the writer is
-	// still draining. Cancelling the writer first could strand a handler on a full
-	// channel or accept rows after its final drain.
-	otlpShutdownCtx, otlpShutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if err := otlpHTTPSrv.Shutdown(otlpShutdownCtx); err != nil {
-		slog.Error("OTLP HTTP graceful shutdown failed", "err", err)
-		_ = otlpHTTPSrv.Close()
+	// Stop every surface and finish in-flight exports before stopping the writer.
+	// The deadline also bounds long-lived SSE requests; Close cancels any that
+	// remain. net/http owns the gRPC connections, including plaintext HTTP/2.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("HTTP graceful shutdown failed", "err", err)
+		_ = httpSrv.Close()
 	}
-	otlpShutdownCancel()
-	grpcSrv.GracefulStop()
+	shutdownCancel()
+	grpcSrv.Stop()
 	cancel()
 	writer.Wait()
 	if err := <-writerResult; err != nil {
 		slog.Error("telemetry writer stopped with unwritten telemetry", "err", err)
 	}
-	httpCancel() // triggers graceful HTTP shutdown (5s timeout)
 }
 
 func parseCommandLine(args []string, output io.Writer) (configPath string, showVersion bool, loginEmail, healthURL string, repair *repairCommand, err error) {
@@ -630,7 +580,7 @@ func browserLoginURL(cfg config.Config) *url.URL {
 		publicURL.Fragment = ""
 		return publicURL
 	}
-	loginURL, _ := url.Parse(setupLoginURL(cfg.HTTPAddr))
+	loginURL, _ := url.Parse(setupLoginURL(cfg.Addr))
 	return loginURL
 }
 

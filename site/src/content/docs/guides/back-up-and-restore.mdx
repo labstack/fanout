@@ -19,8 +19,8 @@ that looks like a backup and does not restore.
 
 1. Record the running version and configuration, keeping secrets out of ordinary
    logs and tickets.
-2. Stop Fanout cleanly and wait for the process to exit. Shutdown closes both
-   OTLP listeners before draining the telemetry commit workers, so a clean exit
+2. Stop Fanout cleanly and wait for the process to exit. Shutdown closes the
+   shared listener before draining the telemetry commit workers, so a clean exit
    leaves no accepted request waiting for publication.
 3. Copy or snapshot the complete data directory, preserving ownership and
    permissions.

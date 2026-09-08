@@ -40,7 +40,7 @@ func (h *SettingsHandler) GetIngest(c *echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     current.TokenHash != "",
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestAdvertisedEndpoint),
+		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg),
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "Authorization",
 	})
@@ -65,7 +65,7 @@ func (h *SettingsHandler) RotateIngestToken(c *echo.Context) error {
 	c.Response().Header().Set("Cache-Control", "no-store")
 	return c.JSON(http.StatusOK, ingestResponse{
 		TokenRequired:     true,
-		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestAdvertisedEndpoint),
+		SuggestedEndpoint: suggestedIngestEndpoint(c.Request(), h.cfg),
 		TLSConfigured:     h.cfg.TLSEnabled(),
 		HeaderName:        "Authorization",
 		IngestToken:       token,
@@ -80,33 +80,26 @@ type ingestResponse struct {
 	IngestToken       string `json:"ingest_token,omitempty"`
 }
 
-func suggestedIngestEndpoint(req *http.Request, grpcAddr, advertised string) string {
-	// An explicit advertised endpoint (e.g. "https://ingest.example.com")
-	// wins — it's the only value that's correct behind a reverse proxy, where
-	// the browser host and the OTLP host differ.
-	if advertised != "" {
-		return advertised
+func suggestedIngestEndpoint(req *http.Request, cfg config.Config) string {
+	if cfg.IngestAdvertisedEndpoint != "" {
+		return cfg.IngestAdvertisedEndpoint
 	}
-	host, port := splitHostPort(grpcAddr)
-	bindIP := net.ParseIP(strings.Trim(host, "[]"))
-	if host == "" || host == "0.0.0.0" || host == "::" || host == "localhost" || (bindIP != nil && bindIP.IsLoopback()) {
-		host = req.Host
-		if requestHost, _, err := net.SplitHostPort(req.Host); err == nil {
-			host = requestHost
+	if cfg.PublicURL != "" {
+		return strings.TrimRight(cfg.PublicURL, "/")
+	}
+	scheme := "http"
+	if cfg.TLSEnabled() || req.TLS != nil {
+		scheme = "https"
+	}
+	host := req.Host
+	if host == "" {
+		host = cfg.Addr
+		if bindHost, port, err := net.SplitHostPort(host); err == nil && (bindHost == "" || bindHost == "0.0.0.0" || bindHost == "::") {
+			host = net.JoinHostPort("localhost", port)
+		}
+		if host == "" {
+			host = "localhost:7520"
 		}
 	}
-	if host == "" {
-		host = "localhost"
-	}
-	return net.JoinHostPort(host, port)
-}
-
-func splitHostPort(addr string) (string, string) {
-	if host, port, err := net.SplitHostPort(addr); err == nil {
-		return host, port
-	}
-	if strings.HasPrefix(addr, ":") {
-		return "", strings.TrimPrefix(addr, ":")
-	}
-	return addr, "4317"
+	return scheme + "://" + host
 }

@@ -1,7 +1,7 @@
 ---
 title: "Server settings"
-description: "The HTTP listener, the public URL, TLS, and proxy trust."
-summary: "Settings for the listener that serves the browser client, the API, chat and MCP."
+description: "The shared HTTP and OTLP listener, the public URL, TLS, and proxy trust."
+summary: "Settings for the listener that serves the browser, API, chat, MCP and both OTLP transports."
 read_when:
   - "You are putting Fanout behind a reverse proxy."
   - "Browser sessions are not getting Secure cookies."
@@ -18,7 +18,7 @@ as a refusal to start rather than as a default nobody chose.
 
 | Setting | Environment variable | Type | Default |
 |---|---|---|---|
-| `server.http_addr` | `FANOUT_HTTP_ADDR` | string | `:7520` |
+| `server.addr` | `FANOUT_ADDR` | string | `:7520` |
 | `server.pprof_enabled` | `FANOUT_PPROF_ENABLED` | boolean | `false` |
 | `server.public_url` | `FANOUT_PUBLIC_URL` | string | — |
 | `server.tls.cert_file` | `FANOUT_TLS_CERT_FILE` | string | — |
@@ -26,6 +26,10 @@ as a refusal to start rather than as a default nobody chose.
 | `server.trusted_proxy_cidrs` | `FANOUT_TRUSTED_PROXY_CIDRS` | string | — |
 
 ## Notes
+
+### `server.addr`
+
+Binds the browser, API, MCP, OTLP/gRPC and OTLP/HTTP listener.
 
 ### `server.pprof_enabled`
 

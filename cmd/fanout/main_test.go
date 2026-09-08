@@ -157,7 +157,7 @@ func TestCreateLoginLink(t *testing.T) {
 		AuthMode:       "local",
 		AuthCodeSecret: "0123456789abcdef0123456789abcdef",
 		DataDir:        t.TempDir(),
-		HTTPAddr:       ":7520",
+		Addr:           ":7520",
 		PublicURL:      "https://fanout.example.com/base",
 	}
 	if err := os.MkdirAll(cfg.ControlDir(), 0o755); err != nil {

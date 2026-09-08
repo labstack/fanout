@@ -1,7 +1,7 @@
 ---
 title: Send your first telemetry
 description: Authenticate an exporter and point an OpenTelemetry SDK or Collector at a Fanout instance.
-summary: The ingest token, the two OTLP endpoints, and a working SDK and Collector configuration.
+summary: The ingest token, one shared OTLP address, and a working SDK and Collector configuration.
 read_when:
   - You have a running instance and nothing in it yet.
   - An exporter is being rejected and you need to know which credential it wants.
@@ -10,8 +10,8 @@ status: preview
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
 
-Fanout accepts traces, logs and metrics over OTLP on two listeners: gRPC on
-`4317` and HTTP on `4318`. Both want the same credential.
+Fanout accepts traces, logs and metrics over OTLP/gRPC and OTLP/HTTP on the
+same port as the application: `7520` by default. Both require the ingest token.
 
 ## The ingest token
 
@@ -37,23 +37,25 @@ Two things are worth knowing before you debug a rejection:
 ## Configure an SDK
 
 ```sh
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:7520
 export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
 export OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20fo_<token>"
 export OTEL_SERVICE_NAME=checkout
 export OTEL_RESOURCE_ATTRIBUTES=service.namespace=storefront
 ```
 
-For the HTTP listener, use port `4318` and
+For OTLP/HTTP, keep the same endpoint and set
 `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`. Use `https://` when Fanout or a
-proxy in front of it terminates TLS.
+proxy terminates TLS. A general OTLP endpoint is a base URL; signal-specific
+variables such as `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` must include their path
+(`/v1/traces`, `/v1/metrics` or `/v1/logs`).
 
 ## Configure a Collector
 
 ```yaml
 exporters:
   otlp/fanout:
-    endpoint: fanout.example.com:4317
+    endpoint: fanout.example.com:443
     headers:
       Authorization: "Bearer ${env:INGEST_TOKEN}"
 
@@ -92,15 +94,13 @@ They are not an authorisation boundary. A namespace is not a user, an
 organisation or a tenant, and anyone who can query the instance can query every
 namespace in it. An instance is the trust domain.
 
-## Opening the listeners to other hosts
+## One listener
 
-The native binary binds both ingest ports to loopback. Once you have a token and
-know how TLS is terminated, set the addresses explicitly:
+`FANOUT_ADDR` (`:7520`) controls the shared listener in both the native
+binary and container. Use `127.0.0.1:7520` to restrict it to local clients, or
+publish `7520:7520` in Docker. There are no separate ingest address settings.
 
-```sh
-FANOUT_OTLP_GRPC_ADDR=:4317
-FANOUT_OTLP_HTTP_ADDR=:4318
-```
-
-The container image already binds all interfaces, which is why its ports are
-publishable as shipped.
+When using a reverse proxy, enable HTTP/2 to the backend for gRPC. Plaintext
+Fanout accepts prior-knowledge HTTP/2 (h2c); a TLS listener negotiates HTTP/2
+through ALPN. HTTP/1.1 forwarding works for OTLP/HTTP, but cannot carry gRPC.
+See [terminate TLS](/guides/terminate-tls).

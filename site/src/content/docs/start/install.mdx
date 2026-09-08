@@ -19,7 +19,7 @@ collector to place first.
 
 ```sh
 docker run -d --name fanout \
-  -p 7520:7520 -p 4317:4317 -p 4318:4318 \
+  -p 7520:7520 \
   -v fanout-data:/var/lib/fanout/data \
   -e FANOUT_AUTH_CODE_SECRET=$(openssl rand -hex 32) \
   labstack/fanout:latest
@@ -43,8 +43,8 @@ is not: `-v "$PWD/data:/var/lib/fanout/data"` fails to open its data directory
 unless that directory is already writable by 65532.
 :::
 
-The image binds every listener on all interfaces so the published ports work.
-The native binary does not — see the table below.
+Both the image and native binary bind the shared listener on all interfaces.
+Set `FANOUT_ADDR=127.0.0.1:7520` for a local-only instance.
 
   </TabItem>
   <TabItem label="Install script">
@@ -114,17 +114,26 @@ reasoning is in the repository's release contract.
 
 | Port or path | Purpose | Native default |
 |---|---|---|
-| `7520` | Browser client, HTTP API, chat, and MCP | `:7520`, all interfaces |
-| `4317` | OTLP ingest over gRPC | `127.0.0.1:4317`, loopback only |
-| `4318` | OTLP ingest over HTTP | `127.0.0.1:4318`, loopback only |
+| `7520` | Browser, API, chat, MCP, OTLP/gRPC and OTLP/HTTP | `:7520`, all interfaces |
 | `./data` | Telemetry, query state, users, sessions, dashboards, alerts and agent history | `./data` |
 
-The two ingest listeners bind to loopback by default in the native binary. That
-is deliberate: an ingest port reachable from the network before you have set a
-token is worse than one you have to open on purpose. Set
-`FANOUT_OTLP_GRPC_ADDR` and `FANOUT_OTLP_HTTP_ADDR` when you are ready to accept
-telemetry from other hosts, and read [authenticate
-exporters](/start/send-telemetry) first.
+Every OTLP export requires the ingest token, including on the shared port.
+Ingest rejects requests before setup completes. Read [authenticate
+exporters](/start/send-telemetry) before pointing a service at the instance.
+
+Upgrading from separate ports? Remove `FANOUT_OTLP_GRPC_ADDR` and
+`FANOUT_OTLP_HTTP_ADDR` (or YAML `ingest.otlp_grpc_addr` and
+`ingest.otlp_http_addr`), update exporters to port `7520` or your public HTTPS
+origin, and remove the old port mappings. Rename `FANOUT_HTTP_ADDR` to
+`FANOUT_ADDR` (YAML `server.http_addr` to `server.addr`). Removed settings are
+startup errors.
+
+Separate interface bindings are also removed. If the dashboard is public but
+ingest must remain LAN-only, keep Fanout's backend port private and deny
+`/v1`, `/v1/*`, and `/opentelemetry.proto.collector.*` on the public proxy.
+Allow collectors through the private network or a restricted proxy route,
+and verify that neither OTLP transport is reachable through the public origin.
+One port simplifies deployment; it does not replace this access policy.
 
 ## Next
 
