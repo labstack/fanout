@@ -81,9 +81,6 @@ type ingestResponse struct {
 }
 
 func suggestedIngestEndpoint(req *http.Request, cfg config.Config) string {
-	if cfg.IngestAdvertisedEndpoint != "" {
-		return cfg.IngestAdvertisedEndpoint
-	}
 	if cfg.PublicURL != "" {
 		return strings.TrimRight(cfg.PublicURL, "/")
 	}

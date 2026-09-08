@@ -110,36 +110,6 @@ func TestLoadTypedEnvironmentValues(t *testing.T) {
 	}
 }
 
-func TestLoadAdvertisedIngestEndpoint(t *testing.T) {
-	const endpoint = "https://ingest.example.com"
-
-	t.Run("environment", func(t *testing.T) {
-		cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
-			"FANOUT_INGEST_ADVERTISED_ENDPOINT="+endpoint,
-		)})
-		if err != nil {
-			t.Fatalf("Load: %v", err)
-		}
-		if cfg.IngestAdvertisedEndpoint != endpoint {
-			t.Fatalf("IngestAdvertisedEndpoint = %q, want %q", cfg.IngestAdvertisedEndpoint, endpoint)
-		}
-	})
-
-	t.Run("YAML", func(t *testing.T) {
-		path := filepath.Join(t.TempDir(), "fanout.yaml")
-		if err := os.WriteFile(path, []byte("ingest:\n  advertised_endpoint: "+endpoint+"\n"), 0o600); err != nil {
-			t.Fatalf("write config: %v", err)
-		}
-		cfg, err := Load(LoadOptions{Path: path, Environ: validEnvironment()})
-		if err != nil {
-			t.Fatalf("Load: %v", err)
-		}
-		if cfg.IngestAdvertisedEndpoint != endpoint {
-			t.Fatalf("IngestAdvertisedEndpoint = %q, want %q", cfg.IngestAdvertisedEndpoint, endpoint)
-		}
-	})
-}
-
 func TestLoadTreatsEmptyEnvironmentValuesAsAbsent(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
 		"FANOUT_ADDR=",
@@ -843,7 +813,7 @@ func TestSecureCookies(t *testing.T) {
 	}
 }
 
-func TestRemovedIngestListenersRejected(t *testing.T) {
+func TestRemovedListenerAndEndpointSettingsRejected(t *testing.T) {
 	t.Run("old server address", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "fanout.yaml")
 		if err := os.WriteFile(path, []byte("server:\n  http_addr: ':7520'\n"), 0o600); err != nil {
@@ -853,7 +823,7 @@ func TestRemovedIngestListenersRejected(t *testing.T) {
 			t.Fatalf("removed key: %v", err)
 		}
 	})
-	for _, key := range []string{"otlp_grpc_addr", "otlp_http_addr"} {
+	for _, key := range []string{"otlp_grpc_addr", "otlp_http_addr", "advertised_endpoint"} {
 		t.Run(key, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "fanout.yaml")
 			if err := os.WriteFile(path, []byte("ingest:\n  "+key+": ':4317'\n"), 0o600); err != nil {
@@ -864,7 +834,7 @@ func TestRemovedIngestListenersRejected(t *testing.T) {
 			}
 		})
 	}
-	for _, name := range []string{"FANOUT_HTTP_ADDR", "FANOUT_OTLP_GRPC_ADDR", "FANOUT_OTLP_HTTP_ADDR"} {
+	for _, name := range []string{"FANOUT_HTTP_ADDR", "FANOUT_OTLP_GRPC_ADDR", "FANOUT_OTLP_HTTP_ADDR", "FANOUT_INGEST_ADVERTISED_ENDPOINT"} {
 		if _, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"=:4317")}); err == nil || !strings.Contains(err.Error(), name) {
 			t.Fatalf("removed variable: %v", err)
 		}

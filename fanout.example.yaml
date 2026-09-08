@@ -17,7 +17,6 @@ server:
     key_file: "" # FANOUT_TLS_KEY_FILE
 
 ingest:
-  advertised_endpoint: "" # FANOUT_INGEST_ADVERTISED_ENDPOINT
   default_namespace: default # FANOUT_DEFAULT_NAMESPACE
   batch_size: 50000 # FANOUT_INGEST_BATCH_SIZE
 

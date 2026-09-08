@@ -20,18 +20,12 @@ const maxIngestBatchSize = 50_000
 // Elapsed-time settings use time.Duration with unit-bearing values.
 type Config struct {
 	// Addr binds the browser, API, MCP, OTLP/gRPC and OTLP/HTTP listener.
-	Addr string `koanf:"server.addr" env:"FANOUT_ADDR" default:":7520"`
-	// IngestAdvertisedEndpoint is the OTLP endpoint shown in collector setup
-	// guidance (e.g. "https://ingest.example.com"). It is an operator hint for
-	// trusted services and collectors, not a public-client or mobile endpoint;
-	// it does not control the bind address. Empty uses server.public_url, or
-	// the browser request origin when no public URL is configured.
-	IngestAdvertisedEndpoint string        `koanf:"ingest.advertised_endpoint" env:"FANOUT_INGEST_ADVERTISED_ENDPOINT"`
-	DataDir                  string        `koanf:"storage.data_dir" env:"FANOUT_DATA_DIR" default:"./data"`
-	IngestBatchSize          int           `koanf:"ingest.batch_size" env:"FANOUT_INGEST_BATCH_SIZE" default:"50000"`
-	RollupInterval           time.Duration `koanf:"storage.rollup_interval" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
-	MCPEnabled               bool          `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" default:"true"`
-	RetentionDays            int           `koanf:"storage.retention_days" env:"FANOUT_RETENTION_DAYS" default:"30"`
+	Addr            string        `koanf:"server.addr" env:"FANOUT_ADDR" default:":7520"`
+	DataDir         string        `koanf:"storage.data_dir" env:"FANOUT_DATA_DIR" default:"./data"`
+	IngestBatchSize int           `koanf:"ingest.batch_size" env:"FANOUT_INGEST_BATCH_SIZE" default:"50000"`
+	RollupInterval  time.Duration `koanf:"storage.rollup_interval" env:"FANOUT_ROLLUP_INTERVAL" default:"1m"`
+	MCPEnabled      bool          `koanf:"mcp.enabled" env:"FANOUT_MCP_ENABLED" default:"true"`
+	RetentionDays   int           `koanf:"storage.retention_days" env:"FANOUT_RETENTION_DAYS" default:"30"`
 	// MaintenanceInterval controls Parquet retention and compaction, and
 	// query-cache checkpointing.
 	MaintenanceInterval time.Duration `koanf:"storage.maintenance_interval" env:"FANOUT_MAINTENANCE_INTERVAL" default:"1h"`

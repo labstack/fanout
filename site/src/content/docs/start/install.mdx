@@ -126,7 +126,9 @@ Upgrading from separate ports? Remove `FANOUT_OTLP_GRPC_ADDR` and
 `ingest.otlp_http_addr`), update exporters to port `7520` or your public HTTPS
 origin, and remove the old port mappings. Rename `FANOUT_HTTP_ADDR` to
 `FANOUT_ADDR` (YAML `server.http_addr` to `server.addr`). Removed settings are
-startup errors.
+startup errors. Also remove `FANOUT_INGEST_ADVERTISED_ENDPOINT` or YAML
+`ingest.advertised_endpoint`; change a private collector hostname directly on
+**Connect telemetry** before copying its generated configuration.
 
 Separate interface bindings are also removed. If the dashboard is public but
 ingest must remain LAN-only, keep Fanout's backend port private and deny

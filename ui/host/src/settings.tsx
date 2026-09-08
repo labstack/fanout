@@ -1,4 +1,4 @@
-import { Alert, Anchor, Box, Button, Code, CopyButton, Group, Loader, Modal, Paper, Stack, Text, Title, Tooltip } from "@mantine/core";
+import { Alert, Anchor, Box, Button, Code, CopyButton, Group, Loader, Modal, Paper, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
 import { ArrowsClockwise, Check, Copy, WarningCircle } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -88,6 +88,7 @@ export default function Settings() {
   const settings = useQuery({ queryKey: ingestQueryKey, queryFn: () => getJSON<IngestSettings>("/api/settings/ingest") });
   const [confirming, setConfirming] = useState(false);
   const [issued, setIssued] = useState<string | null>(null);
+  const [endpointOverride, setEndpointOverride] = useState<string | null>(null);
 
   const rotate = useMutation({
     // The plaintext lives in this mutation's result, and the cache keeps a
@@ -137,7 +138,9 @@ export default function Settings() {
   // a reason to replace a working screen with an alert.
   if (!settings.data) return settings.isLoading ? <Loading /> : <Unavailable onRetry={() => void settings.refetch()} />;
 
-  const { suggested_endpoint: endpoint, header_name: header, tls_configured: tlsConfigured, token_required: hasToken } = settings.data;
+  const { suggested_endpoint: suggestedEndpoint, header_name: header, tls_configured: tlsConfigured, token_required: hasToken } = settings.data;
+  const endpointInput = endpointOverride ?? suggestedEndpoint;
+  const endpoint = endpointInput.trim() || suggestedEndpoint;
   const canRotate = viewer.role === "admin";
   const authorization = `${header}: Bearer <your token>`;
 
@@ -150,7 +153,20 @@ export default function Settings() {
 
       <Paper withBorder radius="lg" p="lg">
         <Stack gap="lg">
-          <Field label="Endpoint" value={endpoint} hint={overTLS(endpoint, tlsConfigured) ? "OTLP over gRPC, secured with TLS." : "OTLP over gRPC. Fanout serves this endpoint in plaintext, so an exporter needs tls.insecure unless a proxy in front of it terminates TLS."} />
+          <Stack gap={4}>
+            <Text size="sm" fw={600}>Endpoint</Text>
+            <Group gap="xs" wrap="nowrap" align="center">
+              <TextInput aria-label="Endpoint" value={endpointInput} onChange={(event) => setEndpointOverride(event.currentTarget.value)} style={{ flex: 1 }} styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }} />
+              <CopyButton value={endpoint} timeout={1500}>
+                {({ copied, copy }) => <Tooltip label={copied ? "Copied" : "Copy endpoint"} withArrow>
+                  <Button variant="subtle" color="gray" size="compact-sm" onClick={copy} aria-label="Copy endpoint">
+                    {copied ? <Check size={15} weight="bold" /> : <Copy size={15} />}
+                  </Button>
+                </Tooltip>}
+              </CopyButton>
+            </Group>
+            <Text c="dimmed" size="xs">{overTLS(endpoint, tlsConfigured) ? "OTLP over gRPC, secured with TLS." : "OTLP over gRPC. Fanout serves this endpoint in plaintext, so an exporter needs tls.insecure unless a proxy in front of it terminates TLS."} Edit this when collectors reach Fanout through another hostname.</Text>
+          </Stack>
           <Field label="Authorization" value={authorization} hint="Send the token your workspace issued. Fanout stores only its hash, so it cannot show you an existing one." />
         </Stack>
       </Paper>

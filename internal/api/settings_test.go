@@ -84,7 +84,6 @@ func TestSuggestedIngestEndpoint(t *testing.T) {
 		host string
 		want string
 	}{
-		{"advertised wins", config.Config{PublicURL: "https://fanout.example.com", IngestAdvertisedEndpoint: "https://ingest.example.com"}, "ignored", "https://ingest.example.com"},
 		{"public origin", config.Config{Addr: ":7520", PublicURL: "https://fanout.example.com/"}, "internal:7520", "https://fanout.example.com"},
 		{"request port", config.Config{Addr: ":7520"}, "localhost:8080", "http://localhost:8080"},
 		{"direct TLS", config.Config{TLSCertFile: "cert", TLSKeyFile: "key"}, "fanout.example.com:8443", "https://fanout.example.com:8443"},

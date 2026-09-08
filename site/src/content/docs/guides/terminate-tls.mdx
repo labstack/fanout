@@ -64,8 +64,9 @@ fanout.example.com {
 On a platform that supplies one port, set `FANOUT_ADDR` to that port
 (for example `:8080`). For Cloud Run, [enable end-to-end HTTP/2](https://docs.cloud.google.com/run/docs/configuring/http2); Fanout accepts
 its h2c backend connections. A dedicated ingest hostname can still point at the
-same backend port, with `FANOUT_INGEST_ADVERTISED_ENDPOINT` overriding setup
-instructions when needed.
+same backend port. Enter that hostname on **Connect telemetry** before copying
+the Collector configuration; it belongs to the collector's network route, not
+the server listener configuration.
 
 ## External MCP clients
 
