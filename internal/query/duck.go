@@ -430,13 +430,18 @@ func (d *Duck) Close() error {
 		if d.releasePoolGauges != nil {
 			d.releasePoolGauges()
 		}
-		var writeErr error
+		var errs []error
 		if d.writeDB != nil {
 			// The write handle holds a connector that does not close the
 			// instance, so this releases its connection and nothing else.
-			writeErr = d.writeDB.Close()
+			errs = append(errs, d.writeDB.Close())
 		}
-		d.closeErr = errors.Join(writeErr, d.DB.Close())
+		// A Duck assembled field by field, as tests do, may hold neither
+		// handle; closing one is then nothing to do rather than a panic.
+		if d.DB != nil {
+			errs = append(errs, d.DB.Close())
+		}
+		d.closeErr = errors.Join(errs...)
 	})
 	return d.closeErr
 }
@@ -1708,18 +1713,48 @@ FROM messaging_edges;`
 
 // ---- Read query helpers ----
 
+// acquireRead takes a connection from the read pool. The wait is already
+// counted by the pool's own gauges; taking it explicitly keeps it out of the
+// statement histogram.
+func (d *Duck) acquireRead(ctx context.Context) (*sql.Conn, error) {
+	return d.DB.Conn(ctx)
+}
+
 // QueryContext executes a read against immutable Parquet files and DuckDB's
 // local rollup cache.
 func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (queryrows.Rows, error) {
 	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
 		return nil, err
 	}
-	rows, err := d.DB.QueryContext(ctx, query, args...)
+	// The connection is taken first and timed separately: DB.QueryContext would
+	// fold the wait for a free connection into the statement's duration, and
+	// telling queueing from execution is the whole reason this is measured.
+	conn, err := d.acquireRead(ctx)
 	if err != nil {
 		d.parquetMu.RUnlock()
 		return nil, err
 	}
-	return &lockedRows{Rows: rows, unlock: d.parquetMu.RUnlock}, nil
+	started := time.Now()
+	rows, err := conn.QueryContext(ctx, query, args...)
+	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
+	if err != nil {
+		_ = conn.Close()
+		d.parquetMu.RUnlock()
+		return nil, err
+	}
+	release := func() {
+		// The connection goes back to the pool only once its rows are done
+		// with it, which is what closing the rows first guarantees.
+		//
+		// A caller that neither closes nor exhausts its rows now leaks the
+		// pool slot as well as the snapshot read-lock — database/sql used to
+		// return the connection when the context died, and an explicitly held
+		// one is the caller's until it says otherwise. Every call site closes
+		// on every path; this is what it costs if one stops.
+		_ = conn.Close()
+		d.parquetMu.RUnlock()
+	}
+	return &lockedRows{Rows: rows, unlock: release}, nil
 }
 
 type lockedRows struct {
@@ -1751,7 +1786,17 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 		return err
 	}
 	defer d.parquetMu.RUnlock()
-	return d.DB.QueryRowContext(ctx, query, args...).Scan(dest...)
+	conn, err := d.acquireRead(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	// This one covers the scan as well as the statement: a single row cannot
+	// be fetched separately from being read. Both are DuckDB's time rather
+	// than the pool's, which is the distinction the histogram is drawing.
+	started := time.Now()
+	defer func() { metrics.DuckDBStatement.Observe(time.Since(started).Seconds()) }()
+	return conn.QueryRowContext(ctx, query, args...).Scan(dest...)
 }
 
 // Trace pins the immutable Parquet snapshot for the full indexed-file read.

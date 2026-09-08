@@ -17,12 +17,28 @@ WHERE time >= ? AND time < ?
 // DuckDB answers the two questions the API asks: the newest `limit` entries
 // and per-bucket counts. LIMIT bounds the entry stream and GROUP BY bounds the
 // histogram stream regardless of the retained Parquet row count.
+//
+// Redaction runs outside the LIMIT, and that placement is the whole cost of
+// this query. A projection in the same SELECT as ORDER BY ... LIMIT is
+// evaluated below the top-N operator, so four chained regexp_replace ran over
+// every row in the window to return a hundred: measured at 140ms for a page of
+// 100 out of 372,000 rows, and 347ms with four DuckDB threads, against 8ms
+// once the top-N runs first. It was the one statement here whose cost grew
+// with retained rows rather than with the answer.
+//
+// The search predicate stays inside, on purpose: a search has to match what
+// the reader will be shown, so it matches the redacted text. It is skipped
+// entirely when no search term is given.
 var logEntriesQuery = `
-SELECT time, severity, coalesce(service, ''), ` + redactLogBodySQL("body") + `,
-       coalesce(trace_id, ''), coalesce(span_id, '')
-	FROM logs` + logFilters + `
-ORDER BY time DESC
-LIMIT ?`
+SELECT time, severity, service, ` + redactLogBodySQL("body") + `, trace_id, span_id
+FROM (
+  SELECT time, severity, coalesce(service, '') AS service, body,
+         coalesce(trace_id, '') AS trace_id, coalesce(span_id, '') AS span_id
+  FROM logs` + logFilters + `
+  ORDER BY time DESC
+  LIMIT ?
+)
+ORDER BY time DESC`
 
 var logBucketsQueryTemplate = `
 SELECT time_bucket(INTERVAL '%s', time) AS point_time,

@@ -224,3 +224,74 @@ func TestClosingADisplacedDuckLeavesTheGaugeSourceAlone(t *testing.T) {
 		t.Fatalf("pool gauges read MaxOpenConnections = %d after a displaced Duck closed, want the live pool's 3", got)
 	}
 }
+
+// The statement histogram exists to separate execution from queueing, so the
+// wait for a pool connection must not be inside it. DB.QueryContext would fold
+// the two together; the connection is taken first for that reason.
+func TestStatementTimerExcludesTheWaitForAConnection(t *testing.T) {
+	ctx := context.Background()
+	cfg := config.Config{DataDir: t.TempDir(), RollupInterval: time.Minute, DuckDBMemory: "128MB", DuckDBMaxConns: 1}
+	repository, err := telemetrystore.Open(cfg.TelemetryDir())
+	if err != nil {
+		t.Fatalf("open telemetry repository: %v", err)
+	}
+	defer repository.Close()
+	d, err := NewDuck(ctx, cfg, repository)
+	if err != nil {
+		t.Fatalf("NewDuck: %v", err)
+	}
+	defer d.Close()
+
+	// Hold the pool's only connection, so a second reader must wait for it.
+	held, err := d.DB.Conn(ctx)
+	if err != nil {
+		t.Fatalf("hold the connection: %v", err)
+	}
+	waited := make(chan time.Duration, 1)
+	go func() {
+		started := time.Now()
+		rows, err := d.QueryContext(ctx, "SELECT 1")
+		if err != nil {
+			waited <- -1
+			return
+		}
+		_ = rows.Close()
+		waited <- time.Since(started)
+	}()
+
+	// Long enough that a timer covering the wait could not miss it.
+	time.Sleep(250 * time.Millisecond)
+	before := statementSeconds(t)
+	if err := held.Close(); err != nil {
+		t.Fatalf("release the connection: %v", err)
+	}
+	total := <-waited
+	if total < 200*time.Millisecond {
+		t.Fatalf("the second reader waited %s; the test did not create contention", total)
+	}
+	observed := statementSeconds(t) - before
+	if observed <= 0 {
+		t.Fatal("no statement duration was recorded")
+	}
+	if observed > 0.2 {
+		t.Fatalf("statement recorded %.3fs of a %s call: the wait for a connection is inside the timer", observed, total)
+	}
+}
+
+// statementSeconds reports the histogram's running total.
+func statementSeconds(t *testing.T) float64 {
+	t.Helper()
+	return metrics.DuckDBStatementSecondsForTest()
+}
+
+// Close is reached from error paths and from test cleanup, where a Duck may
+// hold no handles at all. It has nothing to do there, rather than a panic.
+func TestClosingADuckWithNoHandlesIsHarmless(t *testing.T) {
+	var empty Duck
+	if err := empty.Close(); err != nil {
+		t.Fatalf("closing a Duck with no handles: %v", err)
+	}
+	if err := empty.Close(); err != nil {
+		t.Fatalf("closing it again: %v", err)
+	}
+}

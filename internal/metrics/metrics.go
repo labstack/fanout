@@ -7,6 +7,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
+	dto "github.com/prometheus/client_model/go"
 )
 
 type RollupComponent string
@@ -232,8 +233,19 @@ var (
 		Help: "Readers that gave up waiting to enter the Parquet snapshot",
 	}, []string{"reader"})
 
+	// The wait to enter the snapshot and the wait for a connection are both
+	// measured; how long the statement itself takes was not, so a slow request
+	// could be attributed to queueing or to execution only by elimination.
+	// The connection is acquired before this timer starts, so the two do not
+	// overlap.
+	DuckDBStatement = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "fanout_duckdb_statement_seconds",
+		Help:    "Time a read statement spent executing in DuckDB, excluding any wait to start it",
+		Buckets: []float64{.0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10, 30},
+	})
+
 	// An explicit CHECKPOINT blocks new transactions for its duration, and the
-	// non-FORCE form fails outright while any transaction is open — so both
+	// non-FORCE form refuses while another write transaction is open — so both
 	// how long it takes and how often it does not happen are worth knowing.
 	DuckDBCheckpoint = promauto.NewHistogram(prometheus.HistogramOpts{
 		Name:    "fanout_duckdb_checkpoint_seconds",
@@ -363,6 +375,16 @@ func ParquetReadWaitForTest() prometheus.Collector { return parquetReadWait }
 
 func ParquetReadRefusalsForTest(reader string) prometheus.Counter {
 	return parquetReadRefusals.WithLabelValues(reader)
+}
+
+// DuckDBStatementSecondsForTest reports the statement histogram's running
+// total, so a test can prove what the timer does and does not cover.
+func DuckDBStatementSecondsForTest() float64 {
+	metric := &dto.Metric{}
+	if err := DuckDBStatement.Write(metric); err != nil {
+		return 0
+	}
+	return metric.GetHistogram().GetSampleSum()
 }
 
 // DuckDBPoolStatsForTest exposes what the pool gauges are reading, so a test
