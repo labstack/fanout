@@ -220,8 +220,15 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	for _, bucket := range endpointDurationBuckets {
 		endpointColumns = append(endpointColumns, bucket.Column)
 	}
+	// The interior bounds are computed in Go now, so the cache range and the
+	// boundary exclusion arrive as parameters DuckDB can push into the scan.
+	interiorStart, interiorEnd := endpointInteriorBounds(start, end, end)
 	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupQuery)).
-		WithArgs(start, end, end, "prod", "checkout", 25).
+		WithArgs(
+			interiorStart, interiorEnd, "prod", "prod", "checkout", "checkout",
+			start, end, interiorStart, interiorEnd, "prod", "prod", "checkout", "checkout",
+			25,
+		).
 		WillReturnRows(sqlmock.NewRows(endpointColumns).AddRow(endpointCounts...))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceHeatmapSQL(time.Hour))).
 		WithArgs(start, end, "prod", "prod", start, end, "prod", "prod").

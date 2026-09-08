@@ -29,15 +29,42 @@ func NewObservabilityHandler(queries ObservabilityQueries) *ObservabilityHandler
 	return &ObservabilityHandler{queries: queries, now: time.Now}
 }
 
-// Register mounts the deterministic product API. These endpoints are for
-// dashboards and drill-downs; the browser does not need an agent for ordinary
-// telemetry navigation.
+// observabilityDeadline bounds one dashboard query.
+//
+// The SQL API has always been bounded; these endpoints, which every widget
+// calls, had no deadline of their own — a query that went pathological held a
+// connection until the client gave up, and the client's own timeout is not
+// something the server can rely on.
+//
+// Twenty seconds is well clear of the slowest query measured under load here,
+// about two seconds, and stricter than the SQL API's own ceiling. It is
+// deliberately shorter than the worst legitimate wait behind a stuck
+// publication — the drain remainder plus the swap budget can exceed a minute —
+// so a publication that goes wrong answers the dashboard instead of holding
+// every widget's connection until it finishes.
+const observabilityDeadline = 20 * time.Second
+
+// Register mounts the deterministic product API, each endpoint under a
+// deadline. These endpoints are for dashboards and drill-downs; the browser
+// does not need an agent for ordinary telemetry navigation.
 func (h *ObservabilityHandler) Register(group *echo.Group) {
-	group.GET("/overview", h.overview)
-	group.GET("/topology", h.topology)
-	group.GET("/performance", h.performance)
-	group.GET("/trace", h.trace)
-	group.GET("/logs", h.logs)
+	group.GET("/overview", h.bounded(h.overview))
+	group.GET("/topology", h.bounded(h.topology))
+	group.GET("/performance", h.bounded(h.performance))
+	group.GET("/trace", h.bounded(h.trace))
+	group.GET("/logs", h.bounded(h.logs))
+}
+
+// bounded gives a handler a deadline. The context reaches DuckDB through
+// QueryContext, so an expired one stops the statement rather than only the
+// reply — and releases the pool connection it was holding.
+func (h *ObservabilityHandler) bounded(handler func(*echo.Context) error) func(*echo.Context) error {
+	return func(c *echo.Context) error {
+		ctx, cancel := context.WithTimeout(c.Request().Context(), observabilityDeadline)
+		defer cancel()
+		c.SetRequest(c.Request().WithContext(ctx))
+		return handler(c)
+	}
 }
 
 func (h *ObservabilityHandler) performance(c *echo.Context) error {
@@ -128,6 +155,12 @@ func (h *ObservabilityHandler) request(c *echo.Context) (observability.Scope, in
 func mapQueryError(err error) error {
 	if errors.Is(err, observability.ErrInvalidScope) || errors.Is(err, observability.ErrInvalidLimit) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	// A query that ran out of time is a load condition, not a fault: reporting
+	// it as a server error logs it at ERROR and counts it towards the 5xx rate
+	// that pages someone.
+	if errors.Is(err, context.DeadlineExceeded) {
+		return echo.NewHTTPError(http.StatusServiceUnavailable, "telemetry query took too long").Wrap(err)
 	}
 	return echo.NewHTTPError(http.StatusInternalServerError, "telemetry query failed").Wrap(err)
 }

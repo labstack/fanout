@@ -51,35 +51,50 @@ const endpointRollupMatureQuery = `
 SELECT COUNT(*) >= 5
 FROM (SELECT DISTINCT bucket FROM endpoint_rollup LIMIT 5)`
 
+// endpointInteriorBounds returns the half-open minute range the rollup cache
+// answers for, given the requested window and the cache's watermark.
+//
+// The interior starts at the first whole minute inside the window — a window
+// that begins mid-minute has a partial minute the cache cannot answer — and
+// ends at the earlier of the window's last whole minute and the watermark's,
+// because the cache knows nothing past what it has rolled up. Raw spans cover
+// everything outside that range.
+func endpointInteriorBounds(start, end, watermark time.Time) (interiorStart, interiorEnd time.Time) {
+	interiorStart = start.Truncate(time.Minute)
+	if !interiorStart.Equal(start) {
+		interiorStart = interiorStart.Add(time.Minute)
+	}
+	interiorEnd = end.Truncate(time.Minute)
+	if rolled := watermark.Truncate(time.Minute); rolled.Before(interiorEnd) {
+		interiorEnd = rolled
+	}
+	return interiorStart, interiorEnd
+}
+
 // endpointRollupQuery uses the minute cache only through its current watermark.
 // Raw spans cover both partial boundary minutes and any newer complete minutes,
-// so the cache lag cannot appear as zero traffic and raw work stays bounded.
+// so the cache lag cannot appear as zero traffic.
+//
+// The interior bounds are computed in Go and bound as parameters rather than
+// derived in a CTE. They read the same either way, but a bound derived from a
+// joined row is not a constant DuckDB can push into the Parquet scan: the
+// boundary exclusion below was applied after reading the window, so a query
+// that wants the two partial minutes at its edges read every row between them —
+// measured at 799,333 rows scanned out of 800,000 to return 7,333. Bound
+// directly, the same filter prunes to 11,333 rows read.
+//
+// The raw half is bounded by the cache being current, not by this query. When
+// the watermark sits behind the window the interior is empty, the boundary
+// predicate admits everything, and the scan reads the whole window — which is
+// correct, and is the case worth watching after an outage or a first run.
 var endpointRollupQuery = `
-WITH params AS (
-  SELECT
-    ?::TIMESTAMP AS start_time,
-    ?::TIMESTAMP AS end_time,
-    ?::TIMESTAMP AS rollup_end,
-    ?::VARCHAR AS namespace,
-    ?::VARCHAR AS service
-),
-bounds AS (
-  SELECT
-    *,
-    CASE
-      WHEN start_time = date_trunc('minute', start_time) THEN start_time
-      ELSE date_trunc('minute', start_time) + INTERVAL 1 MINUTE
-    END AS interior_start,
-    LEAST(date_trunc('minute', end_time), date_trunc('minute', rollup_end)) AS interior_end
-  FROM params
-),
-rollup_source AS (
+WITH rollup_source AS (
   SELECT e.method, e.path, e.calls, e.error_count, e.duration_count, e.duration_buckets
-  FROM endpoint_rollup e, bounds b
-  WHERE e.bucket >= b.interior_start
-    AND e.bucket < b.interior_end
-    AND (b.namespace = '' OR e.namespace = b.namespace)
-    AND (b.service = '' OR e.service = b.service)
+  FROM endpoint_rollup e
+  WHERE e.bucket >= ?
+    AND e.bucket < ?
+    AND (? = '' OR e.namespace = ?)
+    AND (? = '' OR e.service = ?)
 ),
 boundary_source AS (
   SELECT
@@ -107,12 +122,12 @@ boundary_source AS (
       le_30000 := COUNT(*) FILTER (WHERE s.duration_ms <= 30000),
       le_300000 := COUNT(*) FILTER (WHERE s.duration_ms <= 300000)
     ) AS duration_buckets
-  FROM spans s, bounds b
-  WHERE s.start_time >= b.start_time
-    AND s.start_time < b.end_time
-    AND (s.start_time < b.interior_start OR s.start_time >= b.interior_end)
-    AND (b.namespace = '' OR s.namespace = b.namespace)
-    AND (b.service = '' OR COALESCE(s.service, '') = b.service)
+  FROM spans s
+  WHERE s.start_time >= ?
+    AND s.start_time < ?
+    AND (s.start_time < ? OR s.start_time >= ?)
+    AND (? = '' OR s.namespace = ?)
+    AND (? = '' OR COALESCE(s.service, '') = ?)
   GROUP BY method, path
 ),
 sources AS (
@@ -286,7 +301,12 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 	source := "spans"
 	if ready {
 		query = endpointRollupQuery
-		args = []any{scope.Start, scope.End, watermark, scope.Namespace, service, limit}
+		interiorStart, interiorEnd := endpointInteriorBounds(scope.Start, scope.End, watermark)
+		args = []any{
+			interiorStart, interiorEnd, scope.Namespace, scope.Namespace, service, service,
+			scope.Start, scope.End, interiorStart, interiorEnd, scope.Namespace, scope.Namespace, service, service,
+			limit,
+		}
 		source = "endpoint_rollup + raw spans (interpolated histogram percentiles)"
 	}
 	rows, err := s.db.QueryContext(ctx, query, args...)
