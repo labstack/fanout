@@ -33,7 +33,7 @@ function overTLS(endpoint: string, tlsConfigured: boolean) {
  *  connection; this is the thing that makes telemetry arrive.
  *
  *  The endpoint is quoted because an advertised IPv6 address arrives as
- *  "[2001:db8::1]:4317", which unquoted YAML reads as a flow sequence. The
+ *  "[2001:db8::1]:7520", which unquoted YAML reads as a flow sequence. The
  *  token is referenced as ${env:INGEST_TOKEN}, the name and the form the
  *  documentation and the README both use — the braced form alone is ambiguous
  *  where a distribution sets its own default config scheme. */

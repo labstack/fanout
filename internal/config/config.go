@@ -19,14 +19,13 @@ const maxIngestBatchSize = 50_000
 // same terminology across YAML, environment variables, Go, logs, and docs.
 // Elapsed-time settings use time.Duration with unit-bearing values.
 type Config struct {
-	HTTPAddr     string `koanf:"server.http_addr" env:"FANOUT_HTTP_ADDR" default:":7520"`
-	OTLPGRPCAddr string `koanf:"ingest.otlp_grpc_addr" env:"FANOUT_OTLP_GRPC_ADDR" default:"127.0.0.1:4317"`
-	OTLPHTTPAddr string `koanf:"ingest.otlp_http_addr" env:"FANOUT_OTLP_HTTP_ADDR" default:"127.0.0.1:4318"`
+	// Addr binds the browser, API, MCP, OTLP/gRPC and OTLP/HTTP listener.
+	Addr string `koanf:"server.addr" env:"FANOUT_ADDR" default:":7520"`
 	// IngestAdvertisedEndpoint is the OTLP endpoint shown in collector setup
 	// guidance (e.g. "https://ingest.example.com"). It is an operator hint for
 	// trusted services and collectors, not a public-client or mobile endpoint;
-	// unlike OTLPGRPCAddr, it does not control the bind/listen address. Empty means
-	// derive host:port from the browser request and OTLPGRPCAddr as a best effort.
+	// it does not control the bind address. Empty uses server.public_url, or
+	// the browser request origin when no public URL is configured.
 	IngestAdvertisedEndpoint string        `koanf:"ingest.advertised_endpoint" env:"FANOUT_INGEST_ADVERTISED_ENDPOINT"`
 	DataDir                  string        `koanf:"storage.data_dir" env:"FANOUT_DATA_DIR" default:"./data"`
 	IngestBatchSize          int           `koanf:"ingest.batch_size" env:"FANOUT_INGEST_BATCH_SIZE" default:"50000"`
@@ -161,7 +160,7 @@ func (c Config) ControlSQLitePath() string {
 }
 
 // TLSEnabled reports whether a cert/key pair is configured. When true, HTTP
-// serves HTTPS on server.http_addr and OTLP gRPC accepts TLS.
+// serves HTTPS and OTLP gRPC over TLS on server.addr.
 func (c Config) TLSEnabled() bool {
 	return strings.TrimSpace(c.TLSCertFile) != "" &&
 		strings.TrimSpace(c.TLSKeyFile) != ""
@@ -169,14 +168,8 @@ func (c Config) TLSEnabled() bool {
 
 // Validate checks that config values are sane.
 func (c Config) Validate() error {
-	if strings.TrimSpace(c.HTTPAddr) == "" {
-		return fmt.Errorf("server.http_addr must not be empty")
-	}
-	if strings.TrimSpace(c.OTLPGRPCAddr) == "" {
-		return fmt.Errorf("ingest.otlp_grpc_addr must not be empty")
-	}
-	if strings.TrimSpace(c.OTLPHTTPAddr) == "" {
-		return fmt.Errorf("ingest.otlp_http_addr must not be empty")
+	if strings.TrimSpace(c.Addr) == "" {
+		return fmt.Errorf("server.addr must not be empty")
 	}
 	if strings.TrimSpace(c.DataDir) == "" {
 		return fmt.Errorf("storage.data_dir must not be empty")

@@ -29,7 +29,7 @@ var (
 )
 
 // NewHTTPHandler exposes only the three stable OTLP/HTTP signal endpoints.
-// Browser/API routes live on a different listener and are deliberately absent.
+// Browser/API routes use a separate handler and are deliberately absent.
 func NewHTTPHandler(srv *Server, settingsStore *settings.Store) http.Handler {
 	return &httpIngestHandler{
 		srv:          srv,

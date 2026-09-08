@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,40 +9,17 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/settings"
 )
 
-func GRPCServerOptions(cfg config.Config, settingsStore *settings.Store) ([]grpc.ServerOption, error) {
-	opts := []grpc.ServerOption{
+// GRPCServerOptions authenticates exports. The shared HTTP server owns TLS.
+func GRPCServerOptions(settingsStore *settings.Store) []grpc.ServerOption {
+	return []grpc.ServerOption{
 		grpc.UnaryInterceptor(newIngestAuthorizer(settingsStore).Unary()),
 	}
-	if !cfg.TLSEnabled() {
-		return opts, nil
-	}
-
-	tlsConfig, err := tlsServerConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return append(opts, grpc.Creds(credentials.NewTLS(tlsConfig))), nil
-}
-
-func tlsServerConfig(cfg config.Config) (*tls.Config, error) {
-	cert, err := tls.LoadX509KeyPair(cfg.TLSCertFile, cfg.TLSKeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("load TLS server cert: %w", err)
-	}
-
-	return &tls.Config{
-		MinVersion:   tls.VersionTLS13,
-		Certificates: []tls.Certificate{cert},
-		NextProtos:   []string{"h2"},
-	}, nil
 }
 
 type ingestAuthorizer struct {

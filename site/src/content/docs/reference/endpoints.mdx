@@ -9,7 +9,7 @@ status: preview
 ---
 
 Everything below is served by the same HTTP listener as the browser client, on
-`FANOUT_HTTP_ADDR` (`:7520` by default).
+`FANOUT_ADDR` (`:7520` by default).
 
 This page covers the operational endpoints and what they are for. For the
 complete surface — every route with the exact credential it requires, taken from
@@ -54,14 +54,22 @@ behind `operations:read` rather than `telemetry:read`.
 
 ## Ingest
 
-Telemetry does not arrive on this listener. OTLP has its own two:
-`FANOUT_OTLP_GRPC_ADDR` (`:4317`) and `FANOUT_OTLP_HTTP_ADDR` (`:4318`), both
-requiring the ingest token. See [send your first
-telemetry](/start/send-telemetry).
+Both OTLP transports share `FANOUT_ADDR` with the application and require
+`Authorization: Bearer <ingest-token>`. Browser sessions and MCP OAuth tokens
+cannot authorize ingest, and an ingest token cannot authorize browser API calls.
 
-For OTLP/HTTP, exporters derive `/v1/traces`, `/v1/metrics` and `/v1/logs` from
-the base endpoint themselves — give the exporter `http://host:4318`, not a
-signal path.
+| Transport | Endpoint |
+|---|---|
+| OTLP/gRPC | Same host and port, using HTTP/2 |
+| OTLP/HTTP | `POST /v1/traces`, `POST /v1/metrics`, `POST /v1/logs` |
+
+For OTLP/HTTP, give a general exporter endpoint the base URL
+`http://host:7520`. Signal-specific endpoint settings include the full signal
+path. Unknown `/v1/*` paths return 404 and unsupported methods return 405,
+without falling through to the browser application. The HTTP handler accepts
+protobuf and gzip, with a 64 MiB decompressed body limit.
+
+See [send your first telemetry](/start/send-telemetry).
 
 ## What to alert on
 

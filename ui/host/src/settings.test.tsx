@@ -17,7 +17,7 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-const connection = { token_required: true, suggested_endpoint: "ingest.example.com:4317", tls_configured: false, header_name: "Authorization" };
+const connection = { token_required: true, suggested_endpoint: "ingest.example.com:7520", tls_configured: false, header_name: "Authorization" };
 
 let client: QueryClient;
 
@@ -46,7 +46,7 @@ describe("connect telemetry", () => {
     await vi.waitFor(() => expect(document.body.textContent).toContain("Collector configuration"));
     const config = document.body.textContent ?? "";
     // Quoted, because an advertised IPv6 endpoint is a YAML flow sequence bare.
-    expect(config).toContain('endpoint: "ingest.example.com:4317"');
+    expect(config).toContain('endpoint: "ingest.example.com:7520"');
     // A secret pasted into a config file is a secret in version control.
     expect(config).toContain("${env:INGEST_TOKEN}");
     // This instance serves plaintext, so the exporter has to be told.

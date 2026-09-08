@@ -21,7 +21,7 @@ fanout: "fanout — one Go process" {
   style.stroke-width: 2
 
   http: "HTTP :7520\nroutes + auth middleware"
-  ingest: "Ingest\nOTLP gRPC :4317 + HTTP :4318"
+  ingest: "Ingest\nOTLP gRPC + HTTP :7520"
   ui: "Embedded React assets"
   agent: "Agent runtime\nmodel + tool loop"
   mcp: "MCP server\n5 typed + 4 dashboard tools"

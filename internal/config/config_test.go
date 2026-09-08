@@ -30,15 +30,10 @@ func TestLoadReturnsDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 
-	if cfg.HTTPAddr != ":7520" {
-		t.Errorf("HTTPAddr = %q, want %q", cfg.HTTPAddr, ":7520")
+	if cfg.Addr != ":7520" {
+		t.Errorf("Addr = %q, want %q", cfg.Addr, ":7520")
 	}
-	if cfg.OTLPGRPCAddr != "127.0.0.1:4317" {
-		t.Errorf("OTLPGRPCAddr = %q, want %q", cfg.OTLPGRPCAddr, "127.0.0.1:4317")
-	}
-	if cfg.OTLPHTTPAddr != "127.0.0.1:4318" {
-		t.Errorf("OTLPHTTPAddr = %q, want %q", cfg.OTLPHTTPAddr, "127.0.0.1:4318")
-	}
+
 	if cfg.DataDir != "./data" {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, "./data")
 	}
@@ -73,7 +68,7 @@ func TestLoadReturnsDefaults(t *testing.T) {
 func TestLoadLayering(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "fanout.yaml")
 	if err := os.WriteFile(path, []byte(`server:
-  http_addr: ":1111"
+  addr: ":1111"
 mcp:
   enabled: false
 metrics:
@@ -87,13 +82,13 @@ auth:
 
 	cfg, err := Load(LoadOptions{
 		Path:    path,
-		Environ: append(validEnvironment(), "FANOUT_HTTP_ADDR=:2222"),
+		Environ: append(validEnvironment(), "FANOUT_ADDR=:2222"),
 	})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.HTTPAddr != ":2222" {
-		t.Fatalf("HTTPAddr = %q, want environment override", cfg.HTTPAddr)
+	if cfg.Addr != ":2222" {
+		t.Fatalf("Addr = %q, want environment override", cfg.Addr)
 	}
 	if cfg.MCPEnabled || !cfg.MetricsPublic || cfg.SessionIdleTTL != 10*time.Hour || !cfg.SelfSignup {
 		t.Fatalf("YAML values were not merged: %+v", cfg)
@@ -147,16 +142,14 @@ func TestLoadAdvertisedIngestEndpoint(t *testing.T) {
 
 func TestLoadTreatsEmptyEnvironmentValuesAsAbsent(t *testing.T) {
 	cfg, err := Load(LoadOptions{Environ: append(validEnvironment(),
-		"FANOUT_HTTP_ADDR=",
-		"FANOUT_OTLP_GRPC_ADDR=",
-		"FANOUT_OTLP_HTTP_ADDR=",
+		"FANOUT_ADDR=",
 		"FANOUT_MCP_ENABLED=",
 		"FANOUT_RETENTION_DAYS=",
 	)})
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.HTTPAddr != ":7520" || cfg.OTLPGRPCAddr != "127.0.0.1:4317" || cfg.OTLPHTTPAddr != "127.0.0.1:4318" || !cfg.MCPEnabled || cfg.RetentionDays != 30 {
+	if cfg.Addr != ":7520" || !cfg.MCPEnabled || cfg.RetentionDays != 30 {
 		t.Fatalf("empty environment values erased defaults: %+v", cfg)
 	}
 }
@@ -190,8 +183,8 @@ func TestExampleConfigurationMatchesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load example: %v", err)
 	}
-	if cfg.HTTPAddr != ":7520" || cfg.DataDir != "./data" {
-		t.Fatalf("example defaults = HTTP %q data %q", cfg.HTTPAddr, cfg.DataDir)
+	if cfg.Addr != ":7520" || cfg.DataDir != "./data" {
+		t.Fatalf("example defaults = HTTP %q data %q", cfg.Addr, cfg.DataDir)
 	}
 	defaults, err := Load(LoadOptions{Environ: validEnvironment()})
 	if err != nil {
@@ -320,8 +313,8 @@ func TestDockerConfigurationMatchesSchema(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load Docker config: %v", err)
 	}
-	if cfg.HTTPAddr != ":7520" || cfg.OTLPGRPCAddr != ":4317" || cfg.OTLPHTTPAddr != ":4318" || cfg.DataDir != "/var/lib/fanout/data" {
-		t.Fatalf("Docker config values = HTTP %q OTLP/gRPC %q OTLP/HTTP %q data %q", cfg.HTTPAddr, cfg.OTLPGRPCAddr, cfg.OTLPHTTPAddr, cfg.DataDir)
+	if cfg.Addr != ":7520" || cfg.DataDir != "/var/lib/fanout/data" {
+		t.Fatalf("Docker config values = HTTP %q data %q", cfg.Addr, cfg.DataDir)
 	}
 }
 
@@ -416,7 +409,7 @@ func TestLoadRejectsUnknownInputs(t *testing.T) {
 	})
 
 	t.Run("malformed environment entry", func(t *testing.T) {
-		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_HTTP_ADDR")})
+		_, err := Load(LoadOptions{Environ: append(validEnvironment(), "FANOUT_ADDR")})
 		if err == nil || !strings.Contains(err.Error(), "NAME=value") {
 			t.Fatalf("error = %v, want malformed environment error", err)
 		}
@@ -464,7 +457,7 @@ func TestLoadRejectsYAMLNullValues(t *testing.T) {
 	for _, key := range []struct {
 		name, document string
 	}{
-		{"HTTP address", "server:\n  http_addr:\n"},
+		{"HTTP address", "server:\n  addr:\n"},
 		{"MCP enabled", "mcp:\n  enabled:\n"},
 		{"retention", "storage:\n  retention_days:\n"},
 	} {
@@ -561,7 +554,7 @@ func TestLoadRejectsInvalidFilesAndValues(t *testing.T) {
 
 func TestLoadIgnoresDotenvInputs(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FANOUT_HTTP_ADDR=:9999\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("FANOUT_ADDR=:9999\n"), 0o600); err != nil {
 		t.Fatalf("write .env: %v", err)
 	}
 	t.Chdir(dir)
@@ -570,8 +563,8 @@ func TestLoadIgnoresDotenvInputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.HTTPAddr != ":7520" {
-		t.Fatalf("HTTPAddr = %q, want default", cfg.HTTPAddr)
+	if cfg.Addr != ":7520" {
+		t.Fatalf("Addr = %q, want default", cfg.Addr)
 	}
 }
 
@@ -604,9 +597,7 @@ func TestLoadRequiresPrivatePermissionsForConfigSecrets(t *testing.T) {
 
 func TestValidate(t *testing.T) {
 	valid := Config{
-		HTTPAddr:                ":7520",
-		OTLPGRPCAddr:            "127.0.0.1:4317",
-		OTLPHTTPAddr:            "127.0.0.1:4318",
+		Addr:                    ":7520",
 		DataDir:                 "./data",
 		IngestBatchSize:         50000,
 		RollupInterval:          time.Minute,
@@ -641,9 +632,7 @@ func TestValidate(t *testing.T) {
 		{"RollupInterval=0", func(c *Config) { c.RollupInterval = 0 }},
 		{"RollupInterval=999ms", func(c *Config) { c.RollupInterval = 999 * time.Millisecond }},
 		{"RetentionDays=-1", func(c *Config) { c.RetentionDays = -1 }},
-		{"HTTPAddr empty", func(c *Config) { c.HTTPAddr = "" }},
-		{"OTLPGRPCAddr empty", func(c *Config) { c.OTLPGRPCAddr = "" }},
-		{"OTLPHTTPAddr empty", func(c *Config) { c.OTLPHTTPAddr = "" }},
+		{"Addr empty", func(c *Config) { c.Addr = "" }},
 		{"DataDir empty", func(c *Config) { c.DataDir = "" }},
 		{"MaintenanceInterval=0", func(c *Config) { c.MaintenanceInterval = 0 }},
 		{"MaintenanceInterval=999ms", func(c *Config) { c.MaintenanceInterval = 999 * time.Millisecond }},
@@ -851,5 +840,33 @@ func TestSecureCookies(t *testing.T) {
 				t.Fatalf("SecureCookies = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRemovedIngestListenersRejected(t *testing.T) {
+	t.Run("old server address", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "fanout.yaml")
+		if err := os.WriteFile(path, []byte("server:\n  http_addr: ':7520'\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(LoadOptions{Path: path, Environ: validEnvironment()}); err == nil || !strings.Contains(err.Error(), "server.http_addr") {
+			t.Fatalf("removed key: %v", err)
+		}
+	})
+	for _, key := range []string{"otlp_grpc_addr", "otlp_http_addr"} {
+		t.Run(key, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "fanout.yaml")
+			if err := os.WriteFile(path, []byte("ingest:\n  "+key+": ':4317'\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(LoadOptions{Path: path, Environ: validEnvironment()}); err == nil || !strings.Contains(err.Error(), key) {
+				t.Fatalf("removed key: %v", err)
+			}
+		})
+	}
+	for _, name := range []string{"FANOUT_HTTP_ADDR", "FANOUT_OTLP_GRPC_ADDR", "FANOUT_OTLP_HTTP_ADDR"} {
+		if _, err := Load(LoadOptions{Environ: append(validEnvironment(), name+"=:4317")}); err == nil || !strings.Contains(err.Error(), name) {
+			t.Fatalf("removed variable: %v", err)
+		}
 	}
 }

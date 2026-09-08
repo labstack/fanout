@@ -118,14 +118,15 @@ Work down this list in order:
 2. **Is it the right credential, in the right header?** The ingest token is
    `fo_`-prefixed and goes in `Authorization: Bearer`. Browser sessions and MCP
    tokens are not ingest credentials.
-3. **Is the listener reachable?** The native binary binds ingest to loopback.
-   From another host, that is a connection failure rather than an auth one.
-4. **Right port for the protocol?** gRPC on `4317`, HTTP on `4318`. An HTTP
-   exporter pointed at the gRPC port fails in a way that does not obviously say
-   so.
+3. **Is the listener reachable?** Both OTLP transports use `FANOUT_ADDR`
+   (`:7520` by default).
+   Check container port mappings, bind address and firewall rules.
+4. **Right protocol?** Both use port `7520`. gRPC requires HTTP/2 through
+   any proxy. Use `grpc` or `http/protobuf` consistently with the exporter
+   configuration; HTTP/1.1 proxy forwarding cannot carry gRPC.
 
 For OTLP/HTTP, set the exporter protocol to `http/protobuf` and give it the base
-endpoint — `http://fanout:4318`. Exporters derive `/v1/traces`, `/v1/metrics`
+endpoint — `http://fanout:7520`. Exporters derive `/v1/traces`, `/v1/metrics`
 and `/v1/logs` from it themselves.
 
 ## Someone cannot sign in and SMTP is not configured

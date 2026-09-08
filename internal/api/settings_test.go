@@ -21,7 +21,7 @@ func newConfigServer(t *testing.T, cfg config.Config) (*testAuthServer, *setting
 }
 
 func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
-	s, _ := newConfigServer(t, config.Config{OTLPGRPCAddr: ":4317"})
+	s, _ := newConfigServer(t, config.Config{Addr: ":7520"})
 	admin, _ := s.users.Create("admin@example.com", "", "admin")
 	cookie := s.login(t, admin)
 	req := sessionRequest(http.MethodGet, "/api/settings/ingest", nil, cookie)
@@ -35,13 +35,13 @@ func TestGetIngest_EmptyBeforeSetup(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("Unmarshal: %v", err)
 	}
-	if resp.TokenRequired || resp.SuggestedEndpoint != "fanout.example.com:4317" || resp.HeaderName != "Authorization" {
+	if resp.TokenRequired || resp.SuggestedEndpoint != "http://fanout.example.com:7520" || resp.HeaderName != "Authorization" {
 		t.Fatalf("response = %+v", resp)
 	}
 }
 
 func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
-	s, store := newConfigServer(t, config.Config{OTLPGRPCAddr: ":4317"})
+	s, store := newConfigServer(t, config.Config{Addr: ":7520"})
 	admin, _ := s.users.Create("admin@example.com", "", "admin")
 	cookie := s.login(t, admin)
 	req := sessionRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil, cookie)
@@ -62,7 +62,7 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 }
 
 func TestIngestSettingsCapabilities(t *testing.T) {
-	s, _ := newConfigServer(t, config.Config{OTLPGRPCAddr: ":4317"})
+	s, _ := newConfigServer(t, config.Config{Addr: ":7520"})
 	viewer, _ := s.users.Create("viewer@example.com", "", "viewer")
 	cookie := s.login(t, viewer)
 	readRec := httptest.NewRecorder()
@@ -78,18 +78,27 @@ func TestIngestSettingsCapabilities(t *testing.T) {
 }
 
 func TestSuggestedIngestEndpoint(t *testing.T) {
-	tests := []struct{ name, grpcAddr, advertised, reqHost, want string }{
-		{"advertised endpoint wins verbatim", ":4317", "https://ingest.example.com", "fanout.example.com", "https://ingest.example.com"},
-		{"wildcard addr derives host from request", ":4317", "", "fanout.example.com:443", "fanout.example.com:4317"},
-		{"explicit grpc host is used as-is", "1.2.3.4:5317", "", "ignored.example.com", "1.2.3.4:5317"},
-		{"loopback bind advertises application host", "127.0.0.1:4317", "", "fanout.example.com", "fanout.example.com:4317"},
-		{"missing request host falls back", ":4317", "", "", "localhost:4317"},
+	tests := []struct {
+		name string
+		cfg  config.Config
+		host string
+		want string
+	}{
+		{"advertised wins", config.Config{PublicURL: "https://fanout.example.com", IngestAdvertisedEndpoint: "https://ingest.example.com"}, "ignored", "https://ingest.example.com"},
+		{"public origin", config.Config{Addr: ":7520", PublicURL: "https://fanout.example.com/"}, "internal:7520", "https://fanout.example.com"},
+		{"request port", config.Config{Addr: ":7520"}, "localhost:8080", "http://localhost:8080"},
+		{"direct TLS", config.Config{TLSCertFile: "cert", TLSKeyFile: "key"}, "fanout.example.com:8443", "https://fanout.example.com:8443"},
+		{"IPv6", config.Config{}, "[2001:db8::1]:7520", "http://[2001:db8::1]:7520"},
+		{"missing host", config.Config{Addr: ":8080"}, "", "http://localhost:8080"},
+		{"loopback bind", config.Config{Addr: "127.0.0.1:8080"}, "", "http://127.0.0.1:8080"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/api/settings/ingest", nil)
-			req.Host = tc.reqHost
-			if got := suggestedIngestEndpoint(req, tc.grpcAddr, tc.advertised); got != tc.want {
+			req.Host = tc.host
+			req.Header.Set("X-Forwarded-Host", "untrusted.example.com")
+			req.Header.Set("X-Forwarded-Proto", "https")
+			if got := suggestedIngestEndpoint(req, tc.cfg); got != tc.want {
 				t.Fatalf("got %q want %q", got, tc.want)
 			}
 		})

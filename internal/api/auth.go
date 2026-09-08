@@ -169,8 +169,8 @@ func (h *AuthHandler) Setup(c *echo.Context) error {
 		resp["ingest_header_name"] = "Authorization"
 		// The endpoint collectors should actually use. Behind a reverse proxy
 		// this is the advertised TLS endpoint (e.g. https://ingest.example.com),
-		// not the internal :4317 — see suggestedIngestEndpoint.
-		resp["suggested_endpoint"] = suggestedIngestEndpoint(c.Request(), h.cfg.OTLPGRPCAddr, h.cfg.IngestAdvertisedEndpoint)
+		// not the internal bind address — see suggestedIngestEndpoint.
+		resp["suggested_endpoint"] = suggestedIngestEndpoint(c.Request(), h.cfg)
 	}
 
 	slog.Info("auth: first admin setup completed", "email", email)
