@@ -128,6 +128,13 @@ origin, and remove the old port mappings. Rename `FANOUT_HTTP_ADDR` to
 `FANOUT_ADDR` (YAML `server.http_addr` to `server.addr`). Removed settings are
 startup errors.
 
+Separate interface bindings are also removed. If the dashboard is public but
+ingest must remain LAN-only, keep Fanout's backend port private and deny
+`/v1`, `/v1/*`, and `/opentelemetry.proto.collector.*` on the public proxy.
+Allow collectors through the private network or a restricted proxy route,
+and verify that neither OTLP transport is reachable through the public origin.
+One port simplifies deployment; it does not replace this access policy.
+
 ## Next
 
 The process validates its whole configuration before it opens any listener, so a

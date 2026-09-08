@@ -114,6 +114,23 @@ This is a breaking configuration change:
 
 Local comparison results are in [the single-port benchmark report](benchmarks/single-port-2026-09-08.md).
 
+### Network isolation changes
+
+Ingest can no longer bind to a different interface from the application.
+For an internet-facing dashboard with LAN-only ingest, keep the backend port
+private and configure the public proxy to deny `/v1`, `/v1/*`, and the OTLP
+gRPC service paths under `/opentelemetry.proto.collector.*`. Allow collectors
+through the private network or an explicitly restricted proxy route. Verify
+that both OTLP transports are inaccessible through the public origin; the
+ingest token is still required on the private path.
+
+Single-port removes the need for a proxy solely to combine listeners. Splitting
+public application access from private ingest still requires network-aware
+routing. The mandatory default is deliberate for this pre-release product:
+there is one existing operator, so keeping two listener topologies would add
+configuration and testing costs without an installed compatibility base. The
+address rename is a separate breaking change, bundled into this migration.
+
 ## Upgrade and rollback
 
 1. Read the release notes and pin the target image tag or binary version.

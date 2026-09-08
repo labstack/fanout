@@ -18,6 +18,8 @@ type discardExport struct{}
 
 func (discardExport) Submit(context.Context, telemetrystore.Batch) error { return nil }
 
+// Sharing a listener makes credential isolation a handler responsibility.
+// Preserve these cross-credential cases when changing routing or auth middleware.
 func TestSharedListenerCredentialBoundaries(t *testing.T) {
 	s := newTestAuthServer(t)
 	user, err := s.users.Create("listener@example.com", "", "admin")
