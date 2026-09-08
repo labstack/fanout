@@ -109,8 +109,11 @@ This is a breaking configuration change:
 4. Enable HTTP/2 backend forwarding for gRPC at any proxy. Remove obsolete
    ingest port mappings and proxy upstreams. A separate ingest hostname may
    still route to the same Fanout port if required by the edge configuration.
-5. Set `FANOUT_PUBLIC_URL` to the external origin so setup instructions advertise
-   the reachable endpoint. An explicit `FANOUT_INGEST_ADVERTISED_ENDPOINT` wins.
+5. Set `FANOUT_PUBLIC_URL` to the external origin so setup instructions start
+   with the reachable endpoint. If collectors use a different private hostname,
+   edit the endpoint on **Connect telemetry** before copying the configuration.
+   Remove `FANOUT_INGEST_ADVERTISED_ENDPOINT` or YAML
+   `ingest.advertised_endpoint`; these guidance-only settings are rejected.
 
 Local comparison results are in [the single-port benchmark report](benchmarks/single-port-2026-09-08.md).
 

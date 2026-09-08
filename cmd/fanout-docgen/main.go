@@ -442,7 +442,7 @@ var groups = map[string]groupPage{
 	},
 	"ingest": {
 		Title:       "Ingest settings",
-		Description: "The advertised OTLP endpoint, batching, and the default namespace.",
+		Description: "Telemetry batching and the default namespace.",
 		Summary:     "Settings for how telemetry arrives and how it is batched before it is written.",
 		ReadWhen: []string{
 			"Exporters cannot reach the instance.",

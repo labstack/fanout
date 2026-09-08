@@ -17,6 +17,12 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
+function setValue(input: HTMLInputElement, value: string) {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+  input.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 const connection = { token_required: true, suggested_endpoint: "ingest.example.com:7520", tls_configured: false, header_name: "Authorization" };
 
 let client: QueryClient;
@@ -51,6 +57,18 @@ describe("connect telemetry", () => {
     expect(config).toContain("${env:INGEST_TOKEN}");
     // This instance serves plaintext, so the exporter has to be told.
     expect(config).toContain("insecure: true");
+    await act(async () => root.unmount());
+  });
+
+  it("lets the operator use a different collector route without server configuration", async () => {
+    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: "https://fanout.example.com" }));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('input[aria-label="Endpoint"]')?.value).toBe("https://fanout.example.com"));
+    const endpoint = document.querySelector<HTMLInputElement>('input[aria-label="Endpoint"]');
+    if (!endpoint) throw new Error("endpoint input not found");
+    await act(async () => setValue(endpoint, "https://fanout.internal.example.com"));
+    expect(document.body.textContent).toContain('endpoint: "https://fanout.internal.example.com:443"');
+    expect(document.body.textContent).not.toContain('endpoint: "https://fanout.example.com:443"');
     await act(async () => root.unmount());
   });
 

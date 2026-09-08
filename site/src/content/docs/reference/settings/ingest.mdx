@@ -1,6 +1,6 @@
 ---
 title: "Ingest settings"
-description: "The advertised OTLP endpoint, batching, and the default namespace."
+description: "Telemetry batching and the default namespace."
 summary: "Settings for how telemetry arrives and how it is batched before it is written."
 read_when:
   - "Exporters cannot reach the instance."
@@ -18,12 +18,5 @@ as a refusal to start rather than as a default nobody chose.
 
 | Setting | Environment variable | Type | Default |
 |---|---|---|---|
-| `ingest.advertised_endpoint` | `FANOUT_INGEST_ADVERTISED_ENDPOINT` | string | — |
 | `ingest.batch_size` | `FANOUT_INGEST_BATCH_SIZE` | integer | `50000` |
 | `ingest.default_namespace` | `FANOUT_DEFAULT_NAMESPACE` | string | `default` |
-
-## Notes
-
-### `ingest.advertised_endpoint`
-
-The OTLP endpoint shown in collector setup guidance (e.g. "https://ingest.example.com"). It is an operator hint for trusted services and collectors, not a public-client or mobile endpoint; it does not control the bind address. Empty uses server.public_url, or the browser request origin when no public URL is configured.

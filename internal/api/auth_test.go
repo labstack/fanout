@@ -642,9 +642,9 @@ func TestSetupExpiryAndExistingAdminRetry(t *testing.T) {
 	})
 }
 
-func TestSetupReturnsAdvertisedIngestEndpoint(t *testing.T) {
-	const endpoint = "https://ingest.example.com"
-	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", IngestAdvertisedEndpoint: endpoint}, auth.SMTPConfig{})
+func TestSetupReturnsPublicIngestEndpoint(t *testing.T) {
+	const endpoint = "https://fanout.example.com"
+	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", PublicURL: endpoint}, auth.SMTPConfig{})
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/setup", strings.NewReader(`{"email":"admin@example.com","setup_token":"`+s.setupToken+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
