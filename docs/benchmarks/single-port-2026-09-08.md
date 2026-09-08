@@ -18,7 +18,7 @@ Raw final evidence: [test log](single-port-stdlib-2026-09-08.log), [JSON measure
 Reproduce the final durable comparison:
 
 ```sh
-rtk just test '-tags transportbench ./internal/ingest -run ^TestTransportComparison$/durable=true -v -count=1 -timeout=10m'
+just test '-tags transportbench ./internal/ingest -run ^TestTransportComparison$/durable=true -v -count=1 -timeout=10m'
 ```
 
 Functional validation also passed: full Go suite, 122 UI tests, 13 focused shared-listener tests under the race detector, lint, dependency notices, release-script tests, UI dependency audits, generated docs, diagram consistency and the documentation build. Those tests cover HTTP and gRPC on one port, plaintext and TLS, credential separation, invalid ingest routes, export draining and forced cancellation of long-lived HTTP/2 streams.
@@ -81,7 +81,7 @@ The independent fanout-bench suite was inspected but not used: its managed path 
 The experiment is build-tagged and excluded from normal tests:
 
 ```sh
-rtk proxy env GOTOOLCHAIN=go1.27.0 go test -tags transportbench ./internal/ingest -run '^TestTransportComparison$' -v -count=1 -timeout=10m
+GOTOOLCHAIN=go1.27.0 go test -tags transportbench ./internal/ingest -run '^TestTransportComparison$' -v -count=1 -timeout=10m
 ```
 
 Raw evidence: [test log](single-port-2026-09-08.log), [JSON measurements](single-port-2026-09-08.json), [harness](../../internal/ingest/transport_bench_test.go).

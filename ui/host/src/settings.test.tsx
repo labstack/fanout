@@ -89,6 +89,25 @@ describe("connect telemetry", () => {
     await act(async () => root.unmount());
   });
 
+  it.each([
+    ["https://ingest.example.com", "https://ingest.example.com:443", false],
+    ["http://ingest.example.com", "http://ingest.example.com:80", true],
+    ["https://ingest.example.com:443/", "https://ingest.example.com:443", false],
+    ["https://ingest.example.com:7520", "https://ingest.example.com:7520", false],
+    ["http://localhost:7520", "http://localhost:7520", true],
+    ["https://[2001:db8::1]/", "https://[2001:db8::1]:443", false],
+    ["http://[::1]:7520", "http://[::1]:7520", true],
+    ["[::1]:7520", "[::1]:7520", true],
+  ])("generates a Collector endpoint with an explicit port for %s", async (endpoint, expected, insecure) => {
+    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: endpoint }));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.body.textContent).toContain("Collector configuration"));
+    const config = document.body.textContent ?? "";
+    expect(config).toContain(`endpoint: "${expected}"`);
+    expect(config.includes("insecure: true")).toBe(insecure);
+    await act(async () => root.unmount());
+  });
+
   it("treats an endpoint on port 443 as TLS even without a scheme", async () => {
     // An operator naming a TLS-terminating proxy usually writes the port and
     // not the scheme, and tls.insecure against it fails with a gRPC error that

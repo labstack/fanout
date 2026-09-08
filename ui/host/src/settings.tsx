@@ -38,6 +38,16 @@ function overTLS(endpoint: string, tlsConfigured: boolean) {
  *  documentation and the README both use — the braced form alone is ambiguous
  *  where a distribution sets its own default config scheme. */
 function collectorConfig(endpoint: string, header: string, tlsConfigured: boolean) {
+  // Collector's gRPC exporter requires an explicit port even with an HTTP(S)
+  // scheme. Keep the scheme so its TLS semantics survive normalization.
+  if (/^https?:\/\//i.test(endpoint.trim())) {
+    try {
+      const url = new URL(endpoint);
+      endpoint = `${url.protocol}//${url.hostname}:${url.port || (url.protocol === "https:" ? "443" : "80")}`;
+    } catch {
+      // Leave an invalid advertised override visible without breaking the page.
+    }
+  }
   const insecure = overTLS(endpoint, tlsConfigured) ? "" : "\n    tls:\n      insecure: true";
   return `exporters:
   otlp/fanout:
