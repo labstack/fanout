@@ -72,6 +72,18 @@ describe("connect telemetry", () => {
     await act(async () => root.unmount());
   });
 
+  it("keeps generated configuration valid while the endpoint field is empty", async () => {
+    fetchMock.mockImplementation(async () => json({ ...connection, suggested_endpoint: "https://fanout.example.com" }));
+    const root = await mount();
+    await vi.waitFor(() => expect(document.querySelector<HTMLInputElement>('input[aria-label="Endpoint"]')).not.toBeNull());
+    const endpoint = document.querySelector<HTMLInputElement>('input[aria-label="Endpoint"]');
+    if (!endpoint) throw new Error("endpoint input not found");
+    await act(async () => setValue(endpoint, "   "));
+    expect(endpoint.value).toBe("   ");
+    expect(document.body.textContent).toContain('endpoint: "https://fanout.example.com:443"');
+    await act(async () => root.unmount());
+  });
+
   it("asks before rotating, because the current token stops working at once", async () => {
     const root = await mount();
     await vi.waitFor(() => expect(document.body.textContent).toContain("Rotate token"));

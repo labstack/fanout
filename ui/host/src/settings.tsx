@@ -139,7 +139,8 @@ export default function Settings() {
   if (!settings.data) return settings.isLoading ? <Loading /> : <Unavailable onRetry={() => void settings.refetch()} />;
 
   const { suggested_endpoint: suggestedEndpoint, header_name: header, tls_configured: tlsConfigured, token_required: hasToken } = settings.data;
-  const endpoint = endpointOverride ?? suggestedEndpoint;
+  const endpointInput = endpointOverride ?? suggestedEndpoint;
+  const endpoint = endpointInput.trim() || suggestedEndpoint;
   const canRotate = viewer.role === "admin";
   const authorization = `${header}: Bearer <your token>`;
 
@@ -155,7 +156,7 @@ export default function Settings() {
           <Stack gap={4}>
             <Text size="sm" fw={600}>Endpoint</Text>
             <Group gap="xs" wrap="nowrap" align="center">
-              <TextInput aria-label="Endpoint" value={endpoint} onChange={(event) => setEndpointOverride(event.currentTarget.value)} style={{ flex: 1 }} styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }} />
+              <TextInput aria-label="Endpoint" value={endpointInput} onChange={(event) => setEndpointOverride(event.currentTarget.value)} style={{ flex: 1 }} styles={{ input: { fontFamily: "var(--mantine-font-family-monospace)" } }} />
               <CopyButton value={endpoint} timeout={1500}>
                 {({ copied, copy }) => <Tooltip label={copied ? "Copied" : "Copy endpoint"} withArrow>
                   <Button variant="subtle" color="gray" size="compact-sm" onClick={copy} aria-label="Copy endpoint">
