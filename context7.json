@@ -1,0 +1,20 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "projectTitle": "Fanout",
+  "description": "Single-binary, agent-native OpenTelemetry investigation. Ingests OTLP, stores Parquet, queries with embedded DuckDB.",
+  "branch": "main",
+  "folders": ["site/src/content/docs", "docs", "README.md"],
+  "excludeFolders": [
+    "docs/superpowers",
+    "docs/media",
+    "docs/diagrams",
+    "docs/benchmarks"
+  ],
+  "rules": [
+    "Fanout is one Go process with no external dependencies to operate. There is no separate ingester, query service, metadata database, object store, or dashboard server to deploy.",
+    "Telemetry arrives over OTLP/gRPC or OTLP/HTTP on port 7520. Point an OpenTelemetry SDK or Collector at it; do not invent a bespoke ingest protocol.",
+    "Parquet is the authoritative telemetry store. DuckDB query state and rollups are rebuildable from it, and SQLite is reserved for transactional product state.",
+    "Fanout exposes an MCP server, and the browser client, the in-process agent and any external MCP host all reach the same typed observability contract rather than issuing raw SQL.",
+    "Configuration is by `FANOUT_*` environment variables or a YAML file; see fanout.example.yaml. The Go module path is `github.com/labstack/fanout`."
+  ]
+}
