@@ -8,12 +8,7 @@
     "docs/superpowers",
     "docs/media",
     "docs/diagrams",
-    "site/node_modules",
-    "site/dist",
-    "data",
-    "bin",
-    "experiments",
-    "demo"
+    "docs/benchmarks"
   ],
   "rules": [
     "Fanout is one Go process with no external dependencies to operate. There is no separate ingester, query service, metadata database, object store, or dashboard server to deploy.",
