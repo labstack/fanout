@@ -55,7 +55,7 @@ variables such as `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` must include their path
 ```yaml
 exporters:
   otlp/fanout:
-    endpoint: fanout.example.com:443
+    endpoint: "https://fanout.example.com:443"
     headers:
       Authorization: "Bearer ${env:INGEST_TOKEN}"
 
@@ -69,10 +69,17 @@ service:
       exporters: [otlp/fanout]
 ```
 
-The `otlp` exporter uses TLS by default. If nothing in front of Fanout
-terminates TLS — a local instance, or one on a private network — the exporter
-needs `tls: { insecure: true }` under `otlp/fanout`, or it will fail to
-connect. **Connect telemetry** in the application generates this block with
+The scheme and the port both earn their place. `https://` puts the exporter on
+TLS and keeps it there, whatever `tls.insecure` says below it. The port is not
+optional: the gRPC exporter validates its endpoint before dialling and refuses
+to start without one, with `address fanout.example.com: missing port in
+address`. gRPC's own default of 443 belongs to a resolver path this exporter
+never reaches.
+
+If nothing in front of Fanout terminates TLS — a local instance, or one on a
+private network — the endpoint is `http://fanout.example.com:7520` and the
+exporter needs `tls: { insecure: true }` under `otlp/fanout`, or it will fail
+to connect. **Connect telemetry** in the application generates this block with
 your own endpoint already in it, and includes that line when it applies.
 
 A Collector is optional. Fanout speaks the same protocol your SDKs already
