@@ -194,7 +194,7 @@ COMPONENT INVENTORY
 - npm: hasown 2.0.4 (declared license: MIT)
 - npm: hast-util-to-jsx-runtime 2.3.6 (declared license: MIT)
 - npm: hast-util-whitespace 3.0.0 (declared license: MIT)
-- npm: hono 4.12.34 (declared license: MIT)
+- npm: hono 4.13.7 (declared license: MIT)
 - npm: html-url-attributes 3.0.1 (declared license: MIT)
 - npm: http-errors 2.0.1 (declared license: MIT)
 - npm: iconv-lite 0.7.3 (declared license: MIT)
@@ -6563,7 +6563,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: hono 4.12.34 / LICENSE
+- npm: hono 4.13.7 / LICENSE
 ----------------------------------------------------------------------------
 
 MIT License
