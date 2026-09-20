@@ -32,10 +32,10 @@ func TestToJSON(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := toJSON(tc.input)
-			if tc.nilOut && result != nil {
+			if tc.nilOut && result != "" {
 				t.Errorf("toJSON(%v) = %v, want nil", tc.input, result)
 			}
-			if !tc.nilOut && result == nil {
+			if !tc.nilOut && result == "" {
 				t.Errorf("toJSON(%v) = nil, want non-nil", tc.input)
 			}
 		})
@@ -209,10 +209,10 @@ func TestEventsToJSON(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := eventsToJSON(tc.events)
-			if tc.nilOut && result != nil {
+			if tc.nilOut && result != "" {
 				t.Errorf("eventsToJSON() = %v, want nil", result)
 			}
-			if !tc.nilOut && result == nil {
+			if !tc.nilOut && result == "" {
 				t.Error("eventsToJSON() = nil, want non-nil")
 			}
 		})
@@ -247,10 +247,10 @@ func TestLinksToJSON(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := linksToJSON(tc.links)
-			if tc.nilOut && result != nil {
+			if tc.nilOut && result != "" {
 				t.Errorf("linksToJSON() = %v, want nil", result)
 			}
-			if !tc.nilOut && result == nil {
+			if !tc.nilOut && result == "" {
 				t.Error("linksToJSON() = nil, want non-nil")
 			}
 		})
@@ -319,10 +319,10 @@ func TestExemplarsToJSON(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			result := exemplarsToJSON(tc.exemplars)
-			if tc.nilOut && result != nil {
+			if tc.nilOut && result != "" {
 				t.Errorf("exemplarsToJSON() = %v, want nil", result)
 			}
-			if !tc.nilOut && result == nil {
+			if !tc.nilOut && result == "" {
 				t.Error("exemplarsToJSON() = nil, want non-nil")
 			}
 		})

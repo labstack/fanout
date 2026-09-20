@@ -56,7 +56,7 @@ func makeSpanParquetRow(r Span) spanParquetRow {
 		Service: r.ServiceName, Operation: r.Name, Kind: r.Kind, StartTime: r.StartUnixNanos,
 		EndTime: r.EndUnixNanos, StartUnixNano: r.StartUnixNanos, EndUnixNano: r.EndUnixNanos,
 		DurationMS: r.DurationMS, Status: r.StatusCode, StatusMessage: r.StatusMsg,
-		ResourceJSON: string(r.ResourceJSON), AttributesJSON: string(r.AttributesJSON), EventsJSON: string(r.EventsJSON), LinksJSON: string(r.LinksJSON),
+		ResourceJSON: r.ResourceJSON, AttributesJSON: r.AttributesJSON, EventsJSON: r.EventsJSON, LinksJSON: r.LinksJSON,
 		TraceState: r.TraceState, Flags: int64(r.Flags), ScopeName: r.ScopeName, ScopeVersion: r.ScopeVersion,
 		IngestedAt: r.IngestedAt, IngestedUnixNano: r.IngestedAt, HTTPMethod: r.HTTPMethod,
 		HTTPStatusCode: r.HTTPStatusCode, HTTPRoute: r.HTTPRoute, DBSystem: r.DBSystem, RPCMethod: r.RPCMethod,
@@ -115,7 +115,7 @@ func makeLogParquetRow(r Log) logParquetRow {
 		ObservedTime: FirstPositiveNanos(r.ObservedTimeNanos, r.EventUnixNanos, r.TimeUnixNanos, r.IngestedAt), TimeUnixNano: r.TimeUnixNanos,
 		ObservedTimeUnixNano: r.ObservedTimeNanos, Severity: r.Severity, SeverityNumber: int64(r.SeverityNumber),
 		Body: r.Body, Service: r.ServiceName, TraceID: r.TraceID, SpanID: r.SpanID, Flags: int64(r.Flags),
-		ResourceJSON: string(r.ResourceJSON), AttributesJSON: string(r.AttributesJSON), ScopeName: r.ScopeName,
+		ResourceJSON: r.ResourceJSON, AttributesJSON: r.AttributesJSON, ScopeName: r.ScopeName,
 		ScopeVersion: r.ScopeVersion, IngestedAt: r.IngestedAt, IngestedUnixNano: r.IngestedAt, BodyTemplate: r.BodyTemplate,
 	}
 }
@@ -147,9 +147,9 @@ func makeMetricParquetRow(r Metric) metricParquetRow {
 	return metricParquetRow{
 		Namespace: r.Namespace, MetricTime: FirstPositiveNanos(r.EventUnixNanos, r.TimeUnixNanos, r.IngestedAt), TimeUnixNano: r.TimeUnixNanos,
 		Name: r.Name, Description: r.Description, Unit: r.Unit, MetricType: r.Type, Service: r.ServiceName,
-		Value: r.Value, HistBoundsJSON: string(r.HistBoundsJSON), HistCountsJSON: string(r.HistCountsJSON),
-		HistCount: r.HistCount, HistSum: r.HistSum, ExemplarsJSON: string(r.ExemplarsJSON),
-		AttributesJSON: string(r.AttributesJSON), ResourceJSON: string(r.ResourceJSON), ScopeName: r.ScopeName,
+		Value: r.Value, HistBoundsJSON: r.HistBoundsJSON, HistCountsJSON: r.HistCountsJSON,
+		HistCount: r.HistCount, HistSum: r.HistSum, ExemplarsJSON: r.ExemplarsJSON,
+		AttributesJSON: r.AttributesJSON, ResourceJSON: r.ResourceJSON, ScopeName: r.ScopeName,
 		ScopeVersion: r.ScopeVersion, IngestedAt: r.IngestedAt, IngestedUnixNano: r.IngestedAt,
 	}
 }

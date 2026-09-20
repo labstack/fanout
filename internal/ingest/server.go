@@ -347,16 +347,16 @@ func spanDurationMS(startNano, endNano uint64) float64 {
 	return float64(endNano-startNano) / 1e6
 }
 
-func toJSON(v interface{}) []byte {
+func toJSON(v interface{}) string {
 	if v == nil {
-		return nil
+		return ""
 	}
 	b, err := json.Marshal(v)
 	if err != nil {
 		slog.Error("json marshal failed", "err", err)
-		return []byte("null")
+		return "null"
 	}
-	return b
+	return string(b)
 }
 
 // attrsJSON flattens an OTLP attribute list into a flat JSON object keyed by the
@@ -378,9 +378,9 @@ var attrBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 // whereas the reflect fallback (a map) sorts keys and keeps last-wins. This is
 // immaterial for fanout: OTLP attribute keys are unique by spec, and queries
 // read attributes_json by key via attr()/json_extract (order-independent).
-func attrsJSON(attrs []*common.KeyValue) []byte {
+func attrsJSON(attrs []*common.KeyValue) string {
 	if len(attrs) == 0 {
-		return nil
+		return ""
 	}
 	if attrsNeedReflect(attrs) {
 		return attrsJSONReflect(attrs)
@@ -402,10 +402,10 @@ func attrsJSON(attrs []*common.KeyValue) []byte {
 		appendScalarJSON(buf, kv.Value)
 		n++
 	}
-	var out []byte
+	var out string
 	if n > 0 {
 		buf.WriteByte('}')
-		out = append([]byte(nil), buf.Bytes()...) // copy out before returning buf to the pool
+		out = buf.String() // copies out of the pooled buffer, as []byte did
 	}
 	attrBufPool.Put(buf)
 	return out
@@ -536,7 +536,7 @@ func appendJSONString(buf *bytes.Buffer, s string) {
 }
 
 // attrsJSONReflect is the reflection-based encoder, retained for nested values.
-func attrsJSONReflect(attrs []*common.KeyValue) []byte {
+func attrsJSONReflect(attrs []*common.KeyValue) string {
 	m := make(map[string]any, len(attrs))
 	for _, kv := range attrs {
 		if kv == nil || kv.Key == "" {
@@ -545,21 +545,21 @@ func attrsJSONReflect(attrs []*common.KeyValue) []byte {
 		m[kv.Key] = attrValue(kv.Value)
 	}
 	if len(m) == 0 {
-		return nil
+		return ""
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
 		slog.Error("attrs json marshal failed", "err", err)
-		return nil
+		return ""
 	}
-	return b
+	return string(b)
 }
 
 // resourceAttrsJSON flattens a resource's attributes into the same flat object
 // shape as attrsJSON, so attr(resource_json, 'key') resolves.
-func resourceAttrsJSON(r *resourcepb.Resource) []byte {
+func resourceAttrsJSON(r *resourcepb.Resource) string {
 	if r == nil {
-		return nil
+		return ""
 	}
 	return attrsJSON(r.Attributes)
 }
@@ -811,9 +811,9 @@ func hexOrEmpty(b []byte) string {
 	return fmt.Sprintf("%x", b)
 }
 
-func eventsToJSON(events []*tracepb.Span_Event) []byte {
+func eventsToJSON(events []*tracepb.Span_Event) string {
 	if len(events) == 0 {
-		return nil
+		return ""
 	}
 	type evt struct {
 		Time       int64             `json:"time_unix_nano"`
@@ -837,14 +837,14 @@ func eventsToJSON(events []*tracepb.Span_Event) []byte {
 	b, err := json.Marshal(out)
 	if err != nil {
 		slog.Error("json marshal events failed", "err", err)
-		return nil
+		return ""
 	}
-	return b
+	return string(b)
 }
 
-func linksToJSON(links []*tracepb.Span_Link) []byte {
+func linksToJSON(links []*tracepb.Span_Link) string {
 	if len(links) == 0 {
-		return nil
+		return ""
 	}
 	type link struct {
 		TraceID    string            `json:"trace_id"`
@@ -870,9 +870,9 @@ func linksToJSON(links []*tracepb.Span_Link) []byte {
 	b, err := json.Marshal(out)
 	if err != nil {
 		slog.Error("json marshal links failed", "err", err)
-		return nil
+		return ""
 	}
-	return b
+	return string(b)
 }
 
 func scopeInfo(scope *common.InstrumentationScope) (name, version string) {
@@ -882,9 +882,9 @@ func scopeInfo(scope *common.InstrumentationScope) (name, version string) {
 	return scope.Name, scope.Version
 }
 
-func exemplarsToJSON(exemplars []*metricspb.Exemplar) []byte {
+func exemplarsToJSON(exemplars []*metricspb.Exemplar) string {
 	if len(exemplars) == 0 {
-		return nil
+		return ""
 	}
 	type ex struct {
 		Time       int64             `json:"time_unix_nano"`
@@ -919,9 +919,9 @@ func exemplarsToJSON(exemplars []*metricspb.Exemplar) []byte {
 	b, err := json.Marshal(out)
 	if err != nil {
 		slog.Error("json marshal exemplars failed", "err", err)
-		return nil
+		return ""
 	}
-	return b
+	return string(b)
 }
 
 func expHistBuckets(dp *metricspb.ExponentialHistogramDataPoint) []float64 {

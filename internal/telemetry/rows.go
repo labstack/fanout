@@ -15,10 +15,10 @@ type Span struct {
 	DurationMS       float64
 	StatusCode       string
 	StatusMsg        string
-	ResourceJSON     []byte
-	AttributesJSON   []byte
-	EventsJSON       []byte
-	LinksJSON        []byte
+	ResourceJSON     string
+	AttributesJSON   string
+	EventsJSON       string
+	LinksJSON        string
 	TraceState       string
 	Flags            uint32
 	ScopeName        string
@@ -66,8 +66,8 @@ type Log struct {
 	TraceID           string
 	SpanID            string
 	Flags             uint32
-	ResourceJSON      []byte
-	AttributesJSON    []byte
+	ResourceJSON      string
+	AttributesJSON    string
 	ScopeName         string
 	ScopeVersion      string
 	IngestedAt        int64
@@ -84,13 +84,13 @@ type Metric struct {
 	Type           string
 	ServiceName    string
 	Value          float64
-	HistBoundsJSON []byte
-	HistCountsJSON []byte
+	HistBoundsJSON string
+	HistCountsJSON string
 	HistCount      int64
 	HistSum        float64
-	ExemplarsJSON  []byte
-	AttributesJSON []byte
-	ResourceJSON   []byte
+	ExemplarsJSON  string
+	AttributesJSON string
+	ResourceJSON   string
 	ScopeName      string
 	ScopeVersion   string
 	IngestedAt     int64

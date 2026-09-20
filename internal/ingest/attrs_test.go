@@ -71,10 +71,10 @@ func TestAttrsJSON_MatchesReflect(t *testing.T) {
 		fast := attrsJSON(attrs)
 		slow := attrsJSONReflect(attrs)
 		var mf, ms map[string]any
-		if err := json.Unmarshal(fast, &mf); err != nil {
+		if err := json.Unmarshal([]byte(fast), &mf); err != nil {
 			t.Fatalf("case %d: fast output invalid JSON: %v (%s)", i, err, fast)
 		}
-		if err := json.Unmarshal(slow, &ms); err != nil {
+		if err := json.Unmarshal([]byte(slow), &ms); err != nil {
 			t.Fatalf("case %d: reflect output invalid JSON: %v", i, err)
 		}
 		if !reflect.DeepEqual(mf, ms) {
@@ -84,14 +84,15 @@ func TestAttrsJSON_MatchesReflect(t *testing.T) {
 }
 
 // Non-finite floats route to the reflect path (json.Marshal errors on Inf/NaN),
-// so attrsJSON must never emit invalid JSON like {"k":Inf} — it returns nil for
-// the whole object (the reflect encoder's documented behavior).
+// so attrsJSON must never emit invalid JSON like {"k":Inf} — it returns an
+// empty string for the whole object (the reflect encoder's documented
+// behavior).
 func TestAttrsJSON_NonFiniteFloatIsSafe(t *testing.T) {
 	for _, v := range []float64{math.Inf(1), math.Inf(-1), math.NaN()} {
 		got := attrsJSON([]*common.KeyValue{kvDouble("k", v)})
-		if got != nil {
+		if got != "" {
 			var m map[string]any
-			if err := json.Unmarshal(got, &m); err != nil {
+			if err := json.Unmarshal([]byte(got), &m); err != nil {
 				t.Errorf("attrsJSON(%v) produced invalid JSON: %s", v, got)
 			}
 		}
@@ -110,7 +111,7 @@ func TestAttrsJSON_ConcurrentSafe(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for j := 0; j < 1000; j++ {
-				if got := attrsJSON(attrs); !bytes.Equal(got, want) {
+				if got := attrsJSON(attrs); got != want {
 					t.Errorf("concurrent attrsJSON = %s, want %s", got, want)
 					return
 				}
@@ -179,7 +180,7 @@ func TestAttrsJSON_FlatObject(t *testing.T) {
 	got := attrsJSON(attrs)
 
 	var m map[string]any
-	if err := json.Unmarshal(got, &m); err != nil {
+	if err := json.Unmarshal([]byte(got), &m); err != nil {
 		t.Fatalf("output is not a JSON object: %v (%s)", err, got)
 	}
 	if m["http.method"] != "GET" {
@@ -194,10 +195,10 @@ func TestAttrsJSON_FlatObject(t *testing.T) {
 }
 
 func TestAttrsJSON_EmptyIsNil(t *testing.T) {
-	if got := attrsJSON(nil); got != nil {
+	if got := attrsJSON(nil); got != "" {
 		t.Errorf("attrsJSON(nil) = %s, want nil", got)
 	}
-	if got := attrsJSON([]*common.KeyValue{}); got != nil {
+	if got := attrsJSON([]*common.KeyValue{}); got != "" {
 		t.Errorf("attrsJSON([]) = %s, want nil", got)
 	}
 }
@@ -209,7 +210,7 @@ func TestAttrsJSON_NestedKvlist(t *testing.T) {
 		}}},
 	}
 	var m map[string]any
-	if err := json.Unmarshal(attrsJSON(attrs), &m); err != nil {
+	if err := json.Unmarshal([]byte(attrsJSON(attrs)), &m); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	outer, ok := m["outer"].(map[string]any)
