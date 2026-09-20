@@ -49,6 +49,10 @@ type BatchMetadata struct {
 	Spans             int    `json:"spans"`
 	Logs              int    `json:"logs"`
 	Metrics           int    `json:"metrics"`
+	// Bytes is the batch's on-disk size, derived rather than persisted: it is
+	// measured when a batch is loaded, from stats the load already performs.
+	// Zero means not measured.
+	Bytes int64 `json:"-"`
 }
 
 type TraceQuery struct {
@@ -1119,6 +1123,10 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		if !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("%s Parquet is not a regular file", signal.name)
 		}
+		// Size the batch from the stat this validation already performs.
+		// Compaction prices a merge by the bytes it admits, and measuring here
+		// costs nothing over the estimate it would otherwise fall back to.
+		metadata.Bytes += info.Size()
 		file, err := os.Open(path)
 		if err != nil {
 			return nil, err

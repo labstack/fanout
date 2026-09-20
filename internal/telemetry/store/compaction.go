@@ -16,8 +16,17 @@ import (
 )
 
 const (
-	maxCompactionRows   = 25_000_000
-	minCompactionInputs = 8
+	maxCompactionRows  = 25_000_000
+	maxCompactionBytes = 256 << 20
+
+	// assumedCompactionBytesPerRow prices a batch whose size was never
+	// measured. Measured batches run well under this -- span rows with JSON
+	// attributes compress to roughly 75 bytes on disk -- so the estimate is
+	// deliberately several times pessimistic: over-charging costs smaller
+	// groups and more passes, while under-charging costs the merge that the
+	// byte ceiling exists to prevent.
+	assumedCompactionBytesPerRow = 256
+	minCompactionInputs          = 8
 )
 
 var parquetSignals = [...]string{"spans", "logs", "metrics"}
@@ -198,7 +207,7 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 		return ordered[i].ID < ordered[j].ID
 	})
 	candidate := make([]telemetry.BatchMetadata, 0, min(maxBatches, len(ordered)))
-	var rows int64
+	var rows, bytes int64
 	saturated := false
 	var smallest int64
 	for _, batch := range ordered {
@@ -206,6 +215,7 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 		if batchRows <= 0 || batchRows > maxCompactionRows {
 			continue
 		}
+		batchBytes := compactionBatchBytes(batch)
 		if smallest == 0 {
 			smallest = batchRows
 		}
@@ -217,16 +227,45 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 			saturated = true
 			break
 		}
+		// A merge opens a cursor per row group across every input and holds
+		// each one's dictionaries at once, so the live cost of a pass tracks
+		// the bytes it admits. Rows cannot stand in for that: wide spans and
+		// bare log lines differ by an order of magnitude at equal row counts.
+		// A pair is always admitted, however large: a merge of two inputs is
+		// bounded by those inputs, and refusing it would strand files that are
+		// individually over budget instead of ever shrinking them. Past a pair
+		// the ceiling binds.
+		if len(candidate) >= 2 && bytes > maxCompactionBytes-batchBytes {
+			saturated = true
+			break
+		}
 		candidate = append(candidate, batch)
 		rows += batchRows
+		bytes += batchBytes
 	}
 	if rows == maxCompactionRows || smallest > 0 && smallest > maxCompactionRows-rows {
+		saturated = true
+	}
+	if bytes == maxCompactionBytes {
 		saturated = true
 	}
 	if len(candidate) == maxBatches || saturated && len(candidate) >= 2 {
 		return candidate
 	}
 	return nil
+}
+
+// compactionBatchBytes prices a batch for the byte ceiling, falling back to a
+// pessimistic per-row estimate when the batch was never measured.
+func compactionBatchBytes(batch telemetry.BatchMetadata) int64 {
+	if batch.Bytes > 0 {
+		return batch.Bytes
+	}
+	rows := compactionBatchRows(batch)
+	if rows <= 0 || rows > math.MaxInt64/assumedCompactionBytesPerRow {
+		return math.MaxInt64
+	}
+	return rows * assumedCompactionBytesPerRow
 }
 
 func compactionBatchRows(batch telemetry.BatchMetadata) int64 {

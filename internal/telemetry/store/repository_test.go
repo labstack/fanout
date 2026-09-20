@@ -511,6 +511,9 @@ func TestSelectCompactionBatchesBuildsRowBoundedGroup(t *testing.T) {
 		batches[i] = telemetry.BatchMetadata{
 			ID: fmt.Sprintf("batch-%d", i), MaxIngestedNanos: 1, Generation: 2,
 			Spans: 2_000_000,
+			// Sized well under the byte ceiling so the row ceiling stays the
+			// constraint under test here; the byte ceiling has its own tests.
+			Bytes: 1 << 20,
 		}
 	}
 	selected := selectCompactionBatches(batches, maxBatches)
@@ -533,6 +536,9 @@ func TestSelectCompactionBatchesCombinesSaturatedLargeFiles(t *testing.T) {
 		batches[i] = telemetry.BatchMetadata{
 			ID: fmt.Sprintf("large-%d", i), MaxIngestedNanos: 1, Generation: 3,
 			Spans: 6_000_000,
+			// Sized well under the byte ceiling so saturation here is the row
+			// ceiling, which is what this test is about.
+			Bytes: 1 << 20,
 		}
 	}
 	selected := selectCompactionBatches(batches, maxBatches)
