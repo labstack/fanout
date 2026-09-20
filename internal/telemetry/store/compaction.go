@@ -27,6 +27,10 @@ const (
 	// byte ceiling exists to prevent.
 	assumedCompactionBytesPerRow = 256
 	minCompactionInputs          = 8
+
+	// minCompactionMergeInputs is the smallest group worth merging, and the
+	// floor the interrupted-pass halving stops at.
+	minCompactionMergeInputs = 2
 )
 
 var parquetSignals = [...]string{"spans", "logs", "metrics"}
@@ -34,6 +38,63 @@ var parquetSignals = [...]string{"spans", "logs", "metrics"}
 type compactionMarker struct {
 	Output telemetry.BatchMetadata `json:"output"`
 	Inputs []string                `json:"inputs"`
+}
+
+// compactionAttemptFile records that a merge was started. The completion
+// marker is written only after PrepareReplacement, so a process killed during
+// the merge -- which is the likely way a large merge ends -- leaves no trace
+// that it ever ran. The next start reselects the same group by the same rules
+// and dies identically, and nothing in the system observes the loop. This file
+// is what a restart reads to know the last attempt was too big.
+const compactionAttemptFile = "COMPACTION-ATTEMPT.json"
+
+type compactionAttempt struct {
+	Inputs int `json:"inputs"`
+}
+
+// compactionBatchCap halves the ceiling after an interrupted pass, so repeated
+// kills walk the group down instead of retrying the same one. It never goes
+// below a pair: selection always admits two however large they are, so a lower
+// floor would stop compaction rather than shrink it. A merge that still dies
+// at two inputs is a single file too large to merge, which is a different
+// problem and not one a smaller group can solve.
+func compactionBatchCap(maxBatches, lastAttempt int) int {
+	if lastAttempt <= 0 {
+		return maxBatches
+	}
+	capped := min(maxBatches, lastAttempt) / 2
+	return max(capped, minCompactionMergeInputs)
+}
+
+// readCompactionAttempt reports the size of an interrupted pass, or zero when
+// there was none. A missing, damaged or nonsensical file reads as zero: losing
+// this record costs one oversized merge, while treating it as fatal would cost
+// the ability to compact at all.
+func readCompactionAttempt(root string) int {
+	data, err := os.ReadFile(filepath.Join(root, compactionAttemptFile))
+	if err != nil {
+		return 0
+	}
+	var attempt compactionAttempt
+	if err := json.Unmarshal(data, &attempt); err != nil || attempt.Inputs <= 0 {
+		return 0
+	}
+	return attempt.Inputs
+}
+
+func writeCompactionAttempt(root string, inputs int) error {
+	data, err := json.Marshal(compactionAttempt{Inputs: inputs})
+	if err != nil {
+		return err
+	}
+	return writeDurableFile(filepath.Join(root, compactionAttemptFile), data)
+}
+
+func clearCompactionAttempt(root string) error {
+	if err := os.Remove(filepath.Join(root, compactionAttemptFile)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }
 
 type compactionKey struct {
@@ -63,8 +124,10 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 			return 0, fmt.Errorf("recover pending Parquet compaction: %w", err)
 		}
 	}
-	selected := selectCompactionBatches(r.Parquet.BatchMetadata(), maxBatches)
-	if len(selected) < 2 {
+	// A pass that was killed mid-merge left a record of how much it tried to
+	// take. Take less.
+	selected := selectCompactionBatches(r.Parquet.BatchMetadata(), compactionBatchCap(maxBatches, readCompactionAttempt(r.root)))
+	if len(selected) < minCompactionMergeInputs {
 		return 0, nil
 	}
 	output := telemetry.BatchMetadata{
@@ -122,6 +185,12 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 		}
 		plans = append(plans, mergePlan{signal: signal, inputs: inputs, output: filepath.Join(stage, signal+".parquet")})
 	}
+	// Written before the merge, on purpose: the completion marker below is
+	// only reached if the merge returns, and the failure this guards against
+	// is the merge not returning.
+	if err := writeCompactionAttempt(r.root, len(selected)); err != nil {
+		return 0, err
+	}
 	group, mergeCtx := errgroup.WithContext(ctx)
 	for _, plan := range plans {
 		group.Go(func() error {
@@ -157,11 +226,19 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 	if err := r.completeCompaction(ctx, marker, publisher.PublishParquet); err != nil {
 		return 0, err
 	}
+	if err := clearCompactionAttempt(r.root); err != nil {
+		return 0, err
+	}
 	return len(selected), nil
 }
 
 func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) []telemetry.BatchMetadata {
-	if maxBatches < minCompactionInputs {
+	// minCompactionInputs is a "worth the effort" policy and belongs to the
+	// caller, which applies it to the ceiling it was asked for. Here the floor
+	// is only what a merge needs: after an interrupted pass the ceiling is
+	// deliberately halved below that policy, and refusing it would stop
+	// compaction at exactly the moment it most needs to make smaller progress.
+	if maxBatches < minCompactionMergeInputs {
 		return nil
 	}
 	groups := make(map[compactionKey][]telemetry.BatchMetadata)
