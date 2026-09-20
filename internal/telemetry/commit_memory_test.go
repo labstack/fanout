@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"fmt"
+	"math"
 	"runtime"
 	"runtime/debug"
 	"sync"
@@ -11,24 +12,30 @@ import (
 	"time"
 )
 
-// commitPeakRatioLimit is how much live heap one CommitBatch may hold relative
-// to the payload it was handed. The number that matters is the multiplier, not
-// an absolute byte count: peak scales with batch size, and batch size scales
-// with ingest rate, so a process sized for a quiet hour is sized wrong for a
-// busy one.
+// commitAllocRatioLimit is how many bytes one CommitBatch may allocate
+// relative to the payload it was handed. The number that matters is the
+// multiplier, not an absolute byte count: it scales with batch size, and batch
+// size scales with ingest rate, so a process sized for a quiet hour is sized
+// wrong for a busy one.
+//
+// The assertion is on total bytes allocated rather than peak live heap.
+// Peak heap carries whatever slack the collector happened to be holding when
+// the sampler looked, which varies with GOMAXPROCS and machine speed: the same
+// code measured 2.79x locally and 3.83x on a CI runner, and the two encodings'
+// peak-heap distributions overlap. Total allocation does not overlap and barely
+// varies -- it answers "how many copies does this make", which is the question.
+// Peak heap is still reported, because it is what the kernel kills on.
 //
 // This is a ratchet, not a target, and it is placed between two measured
-// distributions rather than guessed. Under -race, dictionary-encoded
-// near-unique JSON columns ran 4.09x-4.92x across repeated runs; writing them
-// plain runs 2.79x-3.49x. The limit sits in the gap, so it passes the current
-// encoding with headroom for GC timing noise and fails a regression to the one
-// that was OOM-killing the process.
+// distributions rather than guessed. Dictionary-encoded near-unique JSON
+// columns allocate 10.68x-10.90x; writing them plain allocates 4.40x-5.69x.
+// The limit sits in that gap.
 //
 // What remains above 1x is a conversion copy of every JSON column
-// (makeSpanParquetRow) plus ~24 MiB of row-struct headers per 50k spans and
-// the writer's own buffers. Lower this constant as each of those is addressed;
-// see the ordered plan in the ingest-memory issue.
-const commitPeakRatioLimit = 3.75
+// (makeSpanParquetRow) plus row-struct headers and the writer's own buffers.
+// Lower this constant as each is addressed; see the ordered plan in the
+// ingest-memory issue.
+const commitAllocRatioLimit = 7.0
 
 // syntheticSpan builds a span whose JSON columns look like production: a
 // resource block shared across the batch, and attributes/events/links that are
@@ -71,7 +78,7 @@ func payloadBytes(spans []Span) int64 {
 // duration so the figure approximates live bytes rather than live bytes plus
 // whatever slack the collector happened to be carrying; production GOGC roughly
 // doubles it.
-func samplePeakHeapInuse(fn func()) int64 {
+func samplePeakHeapInuse(fn func()) (peakBytes, allocated int64) {
 	previousGC := debug.SetGCPercent(5)
 	defer debug.SetGCPercent(previousGC)
 
@@ -79,6 +86,7 @@ func samplePeakHeapInuse(fn func()) int64 {
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
 	baseline := int64(stats.HeapInuse)
+	allocatedBefore := int64(stats.TotalAlloc)
 
 	var peak atomic.Int64
 	stop := make(chan struct{})
@@ -104,19 +112,18 @@ func samplePeakHeapInuse(fn func()) int64 {
 	fn()
 	close(stop)
 	sampler.Wait()
-	return peak.Load()
+
+	runtime.ReadMemStats(&stats)
+	allocated = int64(stats.TotalAlloc) - allocatedBefore
+	return peak.Load(), allocated
 }
 
-// One commit must not cost several times the payload it was given. Four commit
-// workers run concurrently, each queued behind more batches, so a multiplier
-// here is a multiplier on the whole process.
-func TestCommitBatchPeakHeapStaysNearPayloadSize(t *testing.T) {
+// One commit must not allocate several times the payload it was given. Four
+// commit workers run concurrently, each queued behind more batches, so a
+// multiplier here is a multiplier on the whole process.
+func TestCommitBatchAllocationStaysNearPayloadSize(t *testing.T) {
 	if testing.Short() {
 		t.Skip("allocates ~50k spans")
-	}
-	store, err := OpenParquetStore(t.TempDir())
-	if err != nil {
-		t.Fatalf("open parquet store: %v", err)
 	}
 	base := time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)
 	spans := make([]Span, 50_000)
@@ -125,19 +132,36 @@ func TestCommitBatchPeakHeapStaysNearPayloadSize(t *testing.T) {
 	}
 	raw := payloadBytes(spans)
 
-	peak := samplePeakHeapInuse(func() {
-		if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "peak-heap"}, spans, nil, nil); err != nil {
-			t.Errorf("commit batch: %v", err)
+	const attempts = 3
+	peak, totalAlloc := int64(math.MaxInt64), int64(math.MaxInt64)
+	for attempt := range attempts {
+		store, err := OpenParquetStore(t.TempDir())
+		if err != nil {
+			t.Fatalf("open parquet store: %v", err)
 		}
-	})
+		observed, allocated := samplePeakHeapInuse(func() {
+			// A distinct ID each time: CommitBatch is idempotent, and a repeat
+			// would return early and measure nothing.
+			id := fmt.Sprintf("peak-heap-%d", attempt)
+			if err := store.CommitBatch(context.Background(), BatchMetadata{ID: id}, spans, nil, nil); err != nil {
+				t.Errorf("commit batch: %v", err)
+			}
+		})
+		t.Logf("attempt %d: peak heap %.1f MiB (%.2fx), allocated %.1f MiB (%.2fx)",
+			attempt, float64(observed)/(1<<20), float64(observed)/float64(raw),
+			float64(allocated)/(1<<20), float64(allocated)/float64(raw))
+		peak = min(peak, observed)
+		totalAlloc = min(totalAlloc, allocated)
+	}
 	runtime.KeepAlive(spans)
 
-	ratio := float64(peak) / float64(raw)
-	t.Logf("payload %.1f MiB, peak heap %.1f MiB, ratio %.2fx",
-		float64(raw)/(1<<20), float64(peak)/(1<<20), ratio)
-	if ratio > commitPeakRatioLimit {
-		t.Errorf("CommitBatch peak heap %.2fx payload, limit %.2fx: one batch holds several copies of what it was handed",
-			ratio, commitPeakRatioLimit)
+	ratio := float64(totalAlloc) / float64(raw)
+	t.Logf("payload %.1f MiB, minimum allocated %.1f MiB (%.2fx), minimum peak heap %.1f MiB (%.2fx)",
+		float64(raw)/(1<<20), float64(totalAlloc)/(1<<20), ratio,
+		float64(peak)/(1<<20), float64(peak)/float64(raw))
+	if ratio > commitAllocRatioLimit {
+		t.Errorf("CommitBatch allocated %.2fx payload, limit %.2fx: one batch makes several copies of what it was handed",
+			ratio, commitAllocRatioLimit)
 	}
 }
 
@@ -157,7 +181,7 @@ func BenchmarkCommitBatch(b *testing.B) {
 		if err != nil {
 			b.Fatalf("open parquet store: %v", err)
 		}
-		observed := samplePeakHeapInuse(func() {
+		observed, _ := samplePeakHeapInuse(func() {
 			if err := store.CommitBatch(context.Background(), BatchMetadata{ID: fmt.Sprintf("bench-%d", i)}, spans, nil, nil); err != nil {
 				b.Fatalf("commit batch: %v", err)
 			}
