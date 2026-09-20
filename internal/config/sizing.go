@@ -142,6 +142,16 @@ func (c Config) logResolvedSizing(src sizingSource) {
 	if src.MemoryAuto && c.DuckDBMemory == "" {
 		slog.Warn("could not detect available memory; DuckDB will size itself to 80% of RAM, which can exceed the machine once the Go runtime is added — configure storage.duckdb.memory explicitly")
 	}
+	// A pinned budget skipped detection, so this is the only place it is ever
+	// compared to the machine it will run on.
+	if !src.MemoryAuto {
+		if concern := pinnedMemoryConcern(c.DuckDBMemory, detectMemory().available); concern != "" {
+			slog.Warn("pinned DuckDB memory budget looks too large for this machine",
+				"concern", concern,
+				"duckdb_memory", c.DuckDBMemory,
+			)
+		}
+	}
 }
 
 // resolveDuckDBMemory returns a DuckDB memory budget for a machine of the given
@@ -159,6 +169,72 @@ func resolveDuckDBMemory(available uint64) string {
 		return ""
 	}
 	return fmt.Sprintf("%dMB", budgetMB)
+}
+
+// pinnedMemoryConcern reports why an operator-pinned DuckDB budget looks wrong
+// for this machine, or "" when it looks fine or cannot be judged.
+//
+// Pinning storage.duckdb.memory skips detection entirely (resolveSizing only
+// fills a value that is empty), so without this nothing ever compares the
+// figure to the machine it will run on. DuckDB's budget is not the process's
+// budget: the Go heap, the ingest appender and compaction's merges all sit on
+// top of it, which is why duckDBMemoryPercent leaves 40% of the machine alone
+// when it chooses for itself. A pin above that share is judged by the same
+// standard.
+//
+// This warns rather than refuses. An operator who has measured their workload
+// may legitimately know better than the default share, and failing startup on
+// a configuration that has been running would trade a survivable problem for
+// an outage. But a value that cannot fit should not pass in silence.
+func pinnedMemoryConcern(pinned string, detectedRAM uint64) string {
+	if strings.TrimSpace(pinned) == "" || detectedRAM == 0 {
+		return ""
+	}
+	budget, ok := parseByteSize(pinned)
+	if !ok {
+		return fmt.Sprintf("storage.duckdb.memory %q could not be parsed as a size; DuckDB may reject it or fall back to its own default", pinned)
+	}
+	if budget >= detectedRAM {
+		return fmt.Sprintf("storage.duckdb.memory %q is at or above the %d bytes detected for this machine; the Go runtime and compaction allocate on top of it", pinned, detectedRAM)
+	}
+	share := detectedRAM / 100 * duckDBMemoryPercent
+	if budget > share {
+		return fmt.Sprintf("storage.duckdb.memory %q takes more than the %d%% of %d bytes automatic sizing would leave DuckDB; the remainder has to cover the Go heap, the ingest appender and compaction merges", pinned, duckDBMemoryPercent, detectedRAM)
+	}
+	return ""
+}
+
+// parseByteSize parses the size forms an operator is likely to write: a bare
+// byte count, or a decimal with a GB/GiB/MB/MiB/KB/KiB suffix. DuckDB treats
+// the decimal and binary suffixes alike, so this does too.
+func parseByteSize(value string) (uint64, bool) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return 0, false
+	}
+	units := []struct {
+		suffix string
+		scale  float64
+	}{
+		{"GIB", 1 << 30}, {"GB", 1 << 30},
+		{"MIB", 1 << 20}, {"MB", 1 << 20},
+		{"KIB", 1 << 10}, {"KB", 1 << 10},
+		{"B", 1},
+	}
+	upper := strings.ToUpper(text)
+	scale := float64(1)
+	for _, unit := range units {
+		if strings.HasSuffix(upper, unit.suffix) {
+			scale = unit.scale
+			text = strings.TrimSpace(text[:len(text)-len(unit.suffix)])
+			break
+		}
+	}
+	amount, err := strconv.ParseFloat(strings.TrimSpace(text), 64)
+	if err != nil || amount < 0 {
+		return 0, false
+	}
+	return uint64(amount * scale), true
 }
 
 // resolveDuckDBMaxConns sizes the connection pool from available parallelism.
