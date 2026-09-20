@@ -132,6 +132,7 @@ func main() {
 	defer q.Close()
 
 	writer := telemetrystore.NewWriter(repository, cfg.IngestBatchSize)
+	writer.SetInFlightBudget(cfg.IngestMaxInFlightBytes)
 	writerResult := make(chan error, 1)
 	go func() {
 		err := writer.Run(ctx)

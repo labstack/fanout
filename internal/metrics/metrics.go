@@ -61,6 +61,16 @@ var (
 		Help: "Total flush operations",
 	}, []string{"signal"})
 
+	// IngestShedTotal counts requests refused because accepting them would
+	// take the process past the bytes it is willing to hold in flight. A
+	// non-zero value is the system protecting itself, not a fault -- but a
+	// rising one means senders are being asked to retry, which is worth
+	// seeing before it becomes a support question.
+	IngestShedTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "fanout_ingest_shed_total",
+		Help: "Telemetry requests refused because ingest was over its in-flight byte budget",
+	})
+
 	FlushDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "fanout_flush_duration_seconds",
 		Help:    "Flush duration in seconds",
@@ -288,6 +298,9 @@ func RecordIngest(signal string, count int) {
 }
 
 // RecordFlush records a flush event
+// RecordIngestShed counts one refused telemetry request.
+func RecordIngestShed() { IngestShedTotal.Inc() }
+
 func RecordFlush(signal string, durationSec float64) {
 	FlushTotal.WithLabelValues(signal).Inc()
 	FlushDuration.WithLabelValues(signal).Observe(durationSec)

@@ -19,6 +19,9 @@ server:
 ingest:
   default_namespace: default # FANOUT_DEFAULT_NAMESPACE
   batch_size: 50000 # FANOUT_INGEST_BATCH_SIZE
+  # Decoded telemetry held across concurrent requests before new ones are
+  # refused with a retryable status. 0 disables the ceiling.
+  max_in_flight_bytes: 268435456 # FANOUT_INGEST_MAX_IN_FLIGHT_BYTES
 
 storage:
   data_dir: ./data # FANOUT_DATA_DIR
