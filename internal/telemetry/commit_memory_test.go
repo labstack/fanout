@@ -62,12 +62,12 @@ func syntheticSpan(i int, base time.Time) Span {
 		EndUnixNanos:   start.Add(3 * time.Millisecond).UnixNano(),
 		DurationMS:     3,
 		StatusCode:     "OK",
-		ResourceJSON:   []byte(`{"service.name":"checkout","deployment.environment":"prod","host.name":"cube-10"}`),
-		AttributesJSON: []byte(fmt.Sprintf(
-			`{"http.method":"POST","http.route":"/api/orders","http.status_code":200,"order.id":"%d","user.id":"u-%d","session":"%032x"}`, i, i*7, i)),
-		EventsJSON: []byte(fmt.Sprintf(
-			`[{"name":"validated","time":%d},{"name":"charged","time":%d,"amount":%d}]`, start.UnixNano(), start.UnixNano()+1000, i%9999)),
-		LinksJSON: []byte(fmt.Sprintf(`[{"trace_id":"%032x","span_id":"%016x"}]`, i+1, i+1)),
+		ResourceJSON:   `{"service.name":"checkout","deployment.environment":"prod","host.name":"cube-10"}`,
+		AttributesJSON: fmt.Sprintf(
+			`{"http.method":"POST","http.route":"/api/orders","http.status_code":200,"order.id":"%d","user.id":"u-%d","session":"%032x"}`, i, i*7, i),
+		EventsJSON: fmt.Sprintf(
+			`[{"name":"validated","time":%d},{"name":"charged","time":%d,"amount":%d}]`, start.UnixNano(), start.UnixNano()+1000, i%9999),
+		LinksJSON: fmt.Sprintf(`[{"trace_id":"%032x","span_id":"%016x"}]`, i+1, i+1),
 	}
 }
 
