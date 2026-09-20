@@ -20,3 +20,10 @@ as a refusal to start rather than as a default nobody chose.
 |---|---|---|---|
 | `ingest.batch_size` | `FANOUT_INGEST_BATCH_SIZE` | integer | `50000` |
 | `ingest.default_namespace` | `FANOUT_DEFAULT_NAMESPACE` | string | `default` |
+| `ingest.max_in_flight_bytes` | `FANOUT_INGEST_MAX_IN_FLIGHT_BYTES` | integer | `268435456` |
+
+## Notes
+
+### `ingest.max_in_flight_bytes`
+
+Caps the decoded telemetry the process will hold across concurrent requests. Concurrency is HTTP/2 streams times connections and each handler holds its batch until the commit is durable, so without a ceiling a burst is bounded only by memory. Zero is unbounded, which is the behaviour that predates this setting.

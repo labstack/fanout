@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -29,13 +30,15 @@ type batchCommitter interface {
 }
 
 type Writer struct {
-	repository    batchCommitter
-	batchSize     int
-	retryDelay    func(int) time.Duration
-	groupWindow   time.Duration
-	shutdownGrace time.Duration
-	done          chan struct{}
-	submissions   chan submission
+	inFlightBudget int
+	inFlightBytes  atomic.Int64
+	repository     batchCommitter
+	batchSize      int
+	retryDelay     func(int) time.Duration
+	groupWindow    time.Duration
+	shutdownGrace  time.Duration
+	done           chan struct{}
+	submissions    chan submission
 }
 
 type submission struct {
@@ -48,12 +51,53 @@ type commitJob struct {
 	acks    []chan error
 }
 
+// ErrIngestOverBudget is returned when accepting a request would take the
+// process past the bytes it is willing to hold in flight. Callers map it to a
+// retryable status so a sender backs off and resends: shedding load is the
+// point, and a dropped request would defeat it.
+var ErrIngestOverBudget = errors.New("telemetry ingest is over its in-flight byte budget")
+
+// reserve charges a batch against the in-flight budget, or refuses it.
+//
+// An empty ledger admits anything, however large. One request is one atomic
+// batch and refusing the only thing in flight would shed load the process is
+// not actually short of -- the budget exists to stop requests accumulating,
+// not to reject a single large one. A budget of zero is unbounded, so an
+// unconfigured deployment behaves exactly as it did before.
+func (w *Writer) reserve(batch Batch) error {
+	if w.inFlightBudget <= 0 {
+		return nil
+	}
+	cost := int64(batchBytes(batch))
+	for {
+		current := w.inFlightBytes.Load()
+		if current > 0 && current > int64(w.inFlightBudget)-cost {
+			metrics.RecordIngestShed()
+			return ErrIngestOverBudget
+		}
+		if w.inFlightBytes.CompareAndSwap(current, current+cost) {
+			return nil
+		}
+	}
+}
+
+func (w *Writer) release(batch Batch) {
+	if w.inFlightBudget <= 0 {
+		return
+	}
+	w.inFlightBytes.Add(-int64(batchBytes(batch)))
+}
+
 func NewWriter(repository *Repository, batchSize int) *Writer {
 	return &Writer{
 		repository: repository, batchSize: batchSize, groupWindow: groupAdmissionWindow,
 		done: make(chan struct{}), submissions: make(chan submission, submissionQueueDepth),
 	}
 }
+
+// SetInFlightBudget caps the decoded telemetry the writer will hold across
+// concurrent requests. Zero is unbounded.
+func (w *Writer) SetInFlightBudget(bytes int) { w.inFlightBudget = bytes }
 
 func (w *Writer) Wait() { <-w.done }
 
@@ -65,6 +109,13 @@ func (w *Writer) Submit(ctx context.Context, batch Batch) error {
 	if batchRows(batch) == 0 {
 		return nil
 	}
+	// Charged here rather than at the transport because both transports funnel
+	// through this call, and it already blocks until durable acknowledgement --
+	// so the ledger measures exactly the bytes the process is holding.
+	if err := w.reserve(batch); err != nil {
+		return err
+	}
+	defer w.release(batch)
 	request := submission{batch: batch, ack: make(chan error, 1)}
 	select {
 	case w.submissions <- request:
@@ -188,16 +239,20 @@ drained:
 
 		batch := Batch{ID: uuid.NewString()}
 		group := make([]submission, 0, len(requests))
-		rows := 0
+		rows, groupBytes := 0, 0
 		for len(requests) > 0 {
 			next := requests[0]
 			nextRows := batchRows(next.batch)
 			if len(group) > 0 && rows+nextRows > limit {
 				break
 			}
+			if !groupBatchFits(groupBytes, next.batch, len(group)) {
+				break
+			}
 			requests = requests[1:]
 			group = append(group, next)
 			rows += nextRows
+			groupBytes += batchBytes(next.batch)
 			batch.Spans = append(batch.Spans, next.batch.Spans...)
 			batch.Logs = append(batch.Logs, next.batch.Logs...)
 			batch.Metrics = append(batch.Metrics, next.batch.Metrics...)
@@ -291,6 +346,48 @@ func (w *Writer) commitJob(ctx context.Context, job commitJob) error {
 		recordFlushes(batch, time.Since(started).Seconds())
 	}
 	return nil
+}
+
+// maxGroupBatchBytes bounds a group-commit batch by payload rather than row
+// count. maxGroupBatchRows caps rows, but a row is whatever the sender put in
+// it: 50,000 bare log lines and 50,000 spans carrying kilobytes of attributes
+// are the same count and differ by orders of magnitude in what the commit
+// holds. The row ceiling alone therefore bounds nothing on a fat-row stream,
+// which is precisely the stream that gets the process killed.
+const maxGroupBatchBytes = 64 << 20
+
+// batchBytes approximates what a batch will cost to hold. It counts the JSON
+// columns and the free-form strings, which carry effectively all of the
+// variable size; the fixed-width fields are already bounded by the row count.
+func batchBytes(batch Batch) int {
+	total := 0
+	for i := range batch.Spans {
+		span := &batch.Spans[i]
+		total += len(span.ResourceJSON) + len(span.AttributesJSON) + len(span.EventsJSON) + len(span.LinksJSON) +
+			len(span.Name) + len(span.StatusMsg) + len(span.TraceID) + len(span.SpanID)
+	}
+	for i := range batch.Logs {
+		log := &batch.Logs[i]
+		total += len(log.ResourceJSON) + len(log.AttributesJSON) + len(log.Body) + len(log.BodyTemplate)
+	}
+	for i := range batch.Metrics {
+		metric := &batch.Metrics[i]
+		total += len(metric.ResourceJSON) + len(metric.AttributesJSON) + len(metric.ExemplarsJSON) +
+			len(metric.HistBoundsJSON) + len(metric.HistCountsJSON) + len(metric.Name) + len(metric.Description)
+	}
+	return total
+}
+
+// groupBatchFits reports whether next can join a group already holding
+// groupBytes. An empty group admits anything: one request is already one
+// atomic directory, and refusing it would drop data rather than batch it more
+// carefully -- the same reason the row ceiling lets a lone oversized request
+// through.
+func groupBatchFits(groupBytes int, next Batch, groupLen int) bool {
+	if groupLen == 0 {
+		return true
+	}
+	return groupBytes <= maxGroupBatchBytes-batchBytes(next)
 }
 
 func batchRows(batch Batch) int {

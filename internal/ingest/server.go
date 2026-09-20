@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -26,6 +27,8 @@ import (
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type batchSubmitter interface {
@@ -128,9 +131,20 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 		}
 	}
 	if err := s.submitter.Submit(ctx, batch); err != nil {
-		return nil, err
+		return nil, ingestStatusError(err)
 	}
 	return &collectortrace.ExportTraceServiceResponse{}, nil
+}
+
+// ingestStatusError maps a refusal to a status a sender knows how to act on.
+// RESOURCE_EXHAUSTED is what the OTLP specification tells an exporter to back
+// off and retry on, which is the entire point of shedding rather than dying:
+// the data is not lost, it arrives a moment later.
+func ingestStatusError(err error) error {
+	if errors.Is(err, telemetrystore.ErrIngestOverBudget) {
+		return status.Error(codes.ResourceExhausted, err.Error())
+	}
+	return err
 }
 
 // ---- Logs ingest ----
@@ -178,7 +192,7 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 		}
 	}
 	if err := s.submitter.Submit(ctx, batch); err != nil {
-		return nil, err
+		return nil, ingestStatusError(err)
 	}
 	return &collectorlogs.ExportLogsServiceResponse{}, nil
 }
@@ -329,7 +343,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 		}
 	}
 	if err := s.submitter.Submit(ctx, batch); err != nil {
-		return nil, err
+		return nil, ingestStatusError(err)
 	}
 	return &collectormetrics.ExportMetricsServiceResponse{}, nil
 }
