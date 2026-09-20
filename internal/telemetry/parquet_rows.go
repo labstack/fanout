@@ -1,5 +1,16 @@
 package telemetry
 
+// Dictionary encoding is applied per column chunk and holds every distinct
+// value for the whole row group, which ingest flushes only at
+// parquetRowGroupRows. That pays for itself on a column whose values repeat —
+// service names, HTTP methods, scope identifiers, the resource block shared by
+// every span in a ResourceSpans — and costs a full second copy of the payload
+// on a column whose values do not. The JSON columns carrying per-row
+// attributes, events, links and exemplars are near-unique by construction, so
+// they are written plain: dictionary-encoding them made one 50k-span commit
+// hold several times the batch it was handed, which is what
+// TestCommitBatchPeakHeapStaysNearPayloadSize pins.
+
 type spanParquetRow struct {
 	Namespace        string  `parquet:"namespace"`
 	TraceID          string  `parquet:"trace_id"`
@@ -17,9 +28,9 @@ type spanParquetRow struct {
 	Status           string  `parquet:"status"`
 	StatusMessage    string  `parquet:"status_message"`
 	ResourceJSON     string  `parquet:"resource_json,dict"`
-	AttributesJSON   string  `parquet:"attributes_json,dict"`
-	EventsJSON       string  `parquet:"events_json,dict"`
-	LinksJSON        string  `parquet:"links_json,dict"`
+	AttributesJSON   string  `parquet:"attributes_json"`
+	EventsJSON       string  `parquet:"events_json"`
+	LinksJSON        string  `parquet:"links_json"`
 	TraceState       string  `parquet:"trace_state,dict"`
 	Flags            int64   `parquet:"flags"`
 	ScopeName        string  `parquet:"scope_name,dict"`
@@ -36,7 +47,7 @@ type spanParquetRow struct {
 	ServiceVersion   string  `parquet:"service_version,dict"`
 	DeploymentEnv    string  `parquet:"deployment_env,dict"`
 	ExceptionType    string  `parquet:"exception_type,dict"`
-	ExceptionMessage string  `parquet:"exception_message,dict"`
+	ExceptionMessage string  `parquet:"exception_message"`
 }
 
 func makeSpanParquetRow(r Span) spanParquetRow {
@@ -90,7 +101,7 @@ type logParquetRow struct {
 	SpanID               string `parquet:"span_id"`
 	Flags                int64  `parquet:"flags"`
 	ResourceJSON         string `parquet:"resource_json,dict"`
-	AttributesJSON       string `parquet:"attributes_json,dict"`
+	AttributesJSON       string `parquet:"attributes_json"`
 	ScopeName            string `parquet:"scope_name,dict"`
 	ScopeVersion         string `parquet:"scope_version,dict"`
 	IngestedAt           int64  `parquet:"ingested_at,timestamp(nanosecond)"`
@@ -123,8 +134,8 @@ type metricParquetRow struct {
 	HistCountsJSON   string  `parquet:"hist_counts_json,dict"`
 	HistCount        int64   `parquet:"hist_count"`
 	HistSum          float64 `parquet:"hist_sum"`
-	ExemplarsJSON    string  `parquet:"exemplars_json,dict"`
-	AttributesJSON   string  `parquet:"attributes_json,dict"`
+	ExemplarsJSON    string  `parquet:"exemplars_json"`
+	AttributesJSON   string  `parquet:"attributes_json"`
 	ResourceJSON     string  `parquet:"resource_json,dict"`
 	ScopeName        string  `parquet:"scope_name,dict"`
 	ScopeVersion     string  `parquet:"scope_version,dict"`
