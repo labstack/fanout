@@ -19,6 +19,15 @@ ORDER BY MAX(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1 EL
          MAX(end_time) - MIN(start_time) DESC
 LIMIT 1`
 
+const traceSummaryQuery = `
+SELECT
+  CAST(count(*) AS BIGINT),
+  CAST(count(DISTINCT service) AS BIGINT),
+  COALESCE((max(end_unix_nano) - min(start_unix_nano)) / 1000000.0, 0),
+  COALESCE(bool_or(upper(status) IN ('ERROR', 'STATUS_CODE_ERROR')), false)
+FROM spans
+WHERE trace_id = ? AND start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?)`
+
 const traceLogsQuery = `
 SELECT time, severity, coalesce(service, ''), body, coalesce(trace_id, ''), coalesce(span_id, '')
 FROM logs
@@ -68,29 +77,28 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 			data.Spans = append(data.Spans, TraceSpan{SpanID: row.SpanID, ParentSpanID: row.ParentSpanID, Service: row.ServiceName, Operation: row.Name, Kind: row.Kind, Start: time.Unix(0, row.StartUnixNanos).UTC(), DurationMS: row.DurationMS, Status: row.StatusCode, StatusMessage: row.StatusMsg})
 		}
 
+		// Only the page's own service list is derived here. Duration and
+		// has_error describe the whole trace and come from the aggregate below.
 		serviceSet := make(map[string]struct{})
-		var first, last time.Time
 		for _, span := range data.Spans {
-			if first.IsZero() || span.Start.Before(first) {
-				first = span.Start
-			}
-			if end := span.Start.Add(time.Duration(span.DurationMS * float64(time.Millisecond))); end.After(last) {
-				last = end
-			}
-			if strings.Contains(strings.ToUpper(span.Status), "ERROR") {
-				data.HasError = true
-			}
 			if span.Service != "" {
 				serviceSet[span.Service] = struct{}{}
 			}
-		}
-		if !first.IsZero() {
-			data.DurationMS = last.Sub(first).Seconds() * 1000
 		}
 		for name := range serviceSet {
 			data.Services = append(data.Services, name)
 		}
 		sort.Strings(data.Services)
+		// The page above is what limit admitted. Everything the caller reads as
+		// a fact about the trace — how many spans it has, how many services it
+		// crosses, how long it took, whether it failed — comes from an
+		// aggregate over the whole trace instead, so a narrow page cannot
+		// silently redefine the trace. The aggregate reads no rows into this
+		// process: it is counted in DuckDB and returns one row.
+		if err := s.traceTotals(ctx, scope, traceID, &data); err != nil {
+			return Result[TraceDetail]{}, err
+		}
+		data.Truncated = data.SpanCount > len(data.Spans)
 		data.Logs, err = s.traceLogsFromParquet(ctx, scope, traceID, limit)
 		if err != nil {
 			return Result[TraceDetail]{}, err
@@ -99,9 +107,34 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 
 	summary := "No traces found in this telemetry window"
 	if traceID != "" {
-		summary = fmt.Sprintf("Trace %s contains %d spans across %d services", traceID, len(data.Spans), len(data.Services))
+		summary = fmt.Sprintf("Trace %s contains %d spans across %d services", traceID, data.SpanCount, data.ServiceCount)
+		if data.Truncated {
+			summary += fmt.Sprintf("; showing %d", len(data.Spans))
+		}
 	}
 	return Result[TraceDetail]{Schema: TraceSchema, Summary: summary, Data: data, Provenance: s.provenanceFor(scope, dataSource)}, nil
+}
+
+// traceTotals fills the fields that describe the trace rather than the page.
+// A trace that has aged out of the window reports zeros, which leaves the
+// summary saying the trace holds no spans — true for the window asked about.
+func (s *Service) traceTotals(ctx context.Context, scope Scope, traceID string, data *TraceDetail) error {
+	rows, err := s.db.QueryContext(ctx, traceSummaryQuery, traceID, scope.Start, scope.End, scope.Namespace, scope.Namespace)
+	if err != nil {
+		return fmt.Errorf("query trace totals: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var spanCount, serviceCount int64
+		if err := rows.Scan(&spanCount, &serviceCount, &data.DurationMS, &data.HasError); err != nil {
+			return fmt.Errorf("scan trace totals: %w", err)
+		}
+		data.SpanCount, data.ServiceCount = int(spanCount), int(serviceCount)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate trace totals: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) traceLogsFromParquet(ctx context.Context, scope Scope, traceID string, limit int) ([]LogEntry, error) {
