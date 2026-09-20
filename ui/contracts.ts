@@ -132,6 +132,11 @@ export interface TraceDetail {
   services: string[];
   spans: TraceSpan[];
   logs: LogEntry[];
+  // span_count and service_count describe the trace; spans and services
+  // describe the page the limit admitted, which may be narrower.
+  span_count: number;
+  service_count: number;
+  truncated: boolean;
 }
 
 export interface LogBucket {

@@ -190,6 +190,11 @@ type TraceDetail struct {
 	Services   []string    `json:"services"`
 	Spans      []TraceSpan `json:"spans"`
 	Logs       []LogEntry  `json:"logs"`
+	// SpanCount and ServiceCount describe the trace. Spans and Services
+	// describe the page the limit admitted, which may be narrower.
+	SpanCount    int  `json:"span_count"`
+	ServiceCount int  `json:"service_count"`
+	Truncated    bool `json:"truncated"`
 }
 
 type LogBucket struct {
