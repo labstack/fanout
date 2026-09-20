@@ -1,3 +1,11 @@
+//go:build !race
+
+// Memory measurement does not survive the race detector: it instruments every
+// allocation, which inflated total allocation from roughly 5x payload to 33x
+// on the same code. Peak heap is distorted too. The figures this file asserts
+// on are only meaningful in an uninstrumented build, so it is excluded from
+// the race target rather than given a second, meaningless threshold.
+
 package telemetry
 
 import (
