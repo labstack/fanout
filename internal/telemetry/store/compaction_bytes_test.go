@@ -24,7 +24,7 @@ func TestSelectBoundedCompactionGroupStopsAtTheByteBudget(t *testing.T) {
 		})
 	}
 
-	candidate := selectBoundedCompactionGroup(group, 128)
+	candidate := selectBoundedCompactionGroup(group, 128, false)
 
 	if len(candidate) == 0 {
 		t.Fatal("no group selected; the byte budget must still admit a mergeable group")
@@ -58,7 +58,7 @@ func TestSelectBoundedCompactionGroupChargesUnsizedBatchesAnEstimate(t *testing.
 		})
 	}
 
-	candidate := selectBoundedCompactionGroup(group, 128)
+	candidate := selectBoundedCompactionGroup(group, 128, false)
 
 	if len(candidate) == 0 {
 		t.Fatal("no group selected; unsized batches must still be compactable")

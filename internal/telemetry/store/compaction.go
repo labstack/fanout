@@ -16,8 +16,26 @@ import (
 )
 
 const (
-	maxCompactionRows  = 25_000_000
-	maxCompactionBytes = 256 << 20
+	maxCompactionRows = 25_000_000
+
+	// maxCompactionBytes bounds a pass by the bytes it admits, because that is
+	// what a merge costs: parquet-go opens a cursor per row group across every
+	// input and holds each one's dictionaries at once. Measured on real batches,
+	// peak RSS tracks the on-disk input bytes almost exactly -- 4 inputs
+	// totalling 442 MiB on disk merged at +413 MiB RSS.
+	//
+	// Row counts cannot stand in for it: wide spans carrying large attribute
+	// payloads and bare log lines differ by an order of magnitude at equal row
+	// counts.
+	//
+	// The figure is a memory budget, so it also decides how fast compaction can
+	// consolidate. Set too low it throttles the cascade: at 256 MiB a pass
+	// admitted only ~16 of the 16 MB generation-2 batches instead of the 128 the
+	// count ceiling allows, and 290 of them piled up unpromoted. 768 MiB keeps
+	// merge peak well inside the headroom the process now has -- it sits at
+	// 1.5 GiB against a 4 GB DuckDB budget -- while admitting enough inputs per
+	// pass for the higher generations to drain.
+	maxCompactionBytes = 768 << 20
 
 	// assumedCompactionBytesPerRow prices a batch whose size was never
 	// measured. Measured batches run well under this -- span rows with JSON
@@ -249,15 +267,46 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) 
 		key := compactionKey{day: batch.MaxIngestedNanos / int64(24*time.Hour), generation: batch.Generation}
 		groups[key] = append(groups[key], batch)
 	}
+	// Within a day, take the HIGHEST generation that has a compactable group,
+	// not the lowest.
+	//
+	// Lowest-first starves everything above it. Ingest refills generation 0
+	// continuously, so if it always wins no later generation is ever selected,
+	// while each pass it does run adds one more batch to the generation above.
+	// Observed on the live box as 508 / 371 / 290 batches at generations
+	// 0 / 1 / 2, generation 2 untouched for hours, and the live file count
+	// settling at an equilibrium instead of falling. That count is what every
+	// query pays per-file overhead on, so an equilibrium there is a permanent
+	// tax rather than a backlog that clears.
+	//
+	// Highest-first cannot starve anything. A generation above 0 only grows by
+	// one batch per pass of the generation below it, so its group fills slowly
+	// and empties in a few passes; once it no longer has a full group it stops
+	// being a candidate and generation 0 -- which is almost always ready --
+	// takes every remaining pass. Reducing the count by a group is worth the
+	// same wherever it happens, because the cost being reduced is per file.
+	//
+	// The older day still wins outright. Reclaiming space retention is about to
+	// drop matters more than consolidating today, and a day no longer being
+	// written finishes and stays finished.
+	newestDay := int64(math.MinInt64)
+	for key := range groups {
+		if key.day > newestDay {
+			newestDay = key.day
+		}
+	}
 	var chosen compactionKey
 	var selected []telemetry.BatchMetadata
 	found := false
 	for key, group := range groups {
-		candidate := selectBoundedCompactionGroup(group, maxBatches)
+		candidate := selectBoundedCompactionGroup(group, maxBatches, key.day < newestDay)
 		if len(candidate) < 2 {
 			continue
 		}
-		if !found || key.day < chosen.day || key.day == chosen.day && key.generation < chosen.generation {
+		better := !found ||
+			key.day < chosen.day ||
+			key.day == chosen.day && key.generation > chosen.generation
+		if better {
 			chosen, selected, found = key, candidate, true
 		}
 	}
@@ -271,7 +320,7 @@ func selectCompactionBatches(batches []telemetry.BatchMetadata, maxBatches int) 
 // small files, but admits a smaller group when the row ceiling fills first.
 // Without the latter, one successful generation can make every later group too
 // large for the ceiling and permanently strand those files.
-func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches int) []telemetry.BatchMetadata {
+func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches int, finished bool) []telemetry.BatchMetadata {
 	ordered := append([]telemetry.BatchMetadata(nil), group...)
 	sort.Slice(ordered, func(i, j int) bool {
 		left, right := compactionBatchRows(ordered[i]), compactionBatchRows(ordered[j])
@@ -326,7 +375,23 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 	if bytes == maxCompactionBytes {
 		saturated = true
 	}
+	// A group is worth merging when it is full, when a ceiling stopped it, or
+	// when it belongs to a day that has finished and already holds enough files
+	// to be worth the merge.
+	//
+	// Holding out for a full group is right while a day is still being written:
+	// more batches are coming, and merging early wastes the work. It is wrong
+	// once the day is over, because the group will never grow again. On the
+	// live box that stranded almost everything -- 1,243 batches in 69
+	// (day, generation) groups across 25 days, not one of them a candidate,
+	// because only the current day ever reached 128 files. Every compaction
+	// output was generation 1 and every older day was untouchable, which is why
+	// the live file count held at an equilibrium that neither reordering nor a
+	// larger byte budget could move.
 	if len(candidate) == maxBatches || saturated && len(candidate) >= 2 {
+		return candidate
+	}
+	if finished && len(candidate) >= minCompactionInputs {
 		return candidate
 	}
 	return nil

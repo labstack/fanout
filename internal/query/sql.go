@@ -148,10 +148,18 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse
 			row := make(RowMap)
 			for i, col := range columns {
 				val := values[i]
-				// Convert []uint8 to string for better JSON representation
-				if b, ok := val.([]byte); ok {
-					row[col] = string(b)
-				} else {
+				switch v := val.(type) {
+				case []byte:
+					// Convert []uint8 to string for better JSON representation
+					row[col] = string(v)
+				case float32:
+					// DuckDB's FLOAT is single precision, so the driver returns
+					// float32. Callers assert float64 -- every other numeric
+					// column they meet is one -- and a failed assertion yields
+					// 0.0 from a value that was never zero, silently. Widening
+					// here costs nothing and disarms the whole class.
+					row[col] = float64(v)
+				default:
 					row[col] = val
 				}
 			}

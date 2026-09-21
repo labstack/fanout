@@ -297,10 +297,10 @@ func RecordIngest(signal string, count int) {
 	IngestTotal.WithLabelValues(signal).Add(float64(count))
 }
 
-// RecordFlush records a flush event
 // RecordIngestShed counts one refused telemetry request.
 func RecordIngestShed() { IngestShedTotal.Inc() }
 
+// RecordFlush records a flush event.
 func RecordFlush(signal string, durationSec float64) {
 	FlushTotal.WithLabelValues(signal).Inc()
 	FlushDuration.WithLabelValues(signal).Observe(durationSec)
@@ -313,6 +313,64 @@ func RecordFlush(signal string, durationSec float64) {
 // times in a test binary, and registering a collector per construction panics
 // on the second one. Unset, every gauge reads zero.
 var duckDBPoolStats atomic.Pointer[func() sql.DBStats]
+
+// duckDBMemoryStats is the live source for the per-tag DuckDB memory gauge.
+//
+// memory_limit bounds DuckDB's buffer pool and nothing else, so the figure that
+// actually predicts an out-of-memory kill is the gap between what the process
+// holds and what DuckDB admits to holding. Exporting the tags makes that gap
+// directly observable: untracked = process_resident_memory_bytes
+// - sum(fanout_duckdb_memory_bytes) - go_memstats_heap_sys_bytes. Without it
+// every diagnosis of this process is an inference, which is how a whole day
+// got spent optimising a Go heap that was never the problem.
+var duckDBMemoryStats atomic.Pointer[func() map[string]int64]
+
+// SetDuckDBMemorySource installs the reader for the per-tag memory gauge.
+func SetDuckDBMemorySource(tags func() map[string]int64) (release func()) {
+	if tags == nil {
+		return func() {}
+	}
+	installed := &tags
+	duckDBMemoryStats.Store(installed)
+	return func() { duckDBMemoryStats.CompareAndSwap(installed, nil) }
+}
+
+// duckDBMemoryDesc is emitted by a Collector, not held in a GaugeVec.
+//
+// The obvious implementation -- a GaugeVec that a scrape hook Resets and
+// refills -- is shared mutable state across concurrent scrapes, and a scrape
+// that lands mid-refill exports a subset of the tags. That understates what
+// DuckDB holds and correspondingly overstates the untracked gap, which is the
+// single number this series exists to compute. It also leaves the last good
+// values in place when a read fails, reporting them as current: the reading
+// that was meant to reveal an impending out-of-memory kill then looks normal.
+//
+// A Collector has neither problem. Each scrape builds its own metrics from its
+// own read, and a read that returns nothing exports nothing -- the series goes
+// absent, which is visibly different from "DuckDB is holding nothing".
+var duckDBMemoryDesc = prometheus.NewDesc(
+	"fanout_duckdb_memory_bytes",
+	"DuckDB memory usage by tag, as DuckDB itself accounts for it",
+	[]string{"tag"}, nil,
+)
+
+type duckDBMemoryCollector struct{}
+
+func (duckDBMemoryCollector) Describe(ch chan<- *prometheus.Desc) { ch <- duckDBMemoryDesc }
+
+func (duckDBMemoryCollector) Collect(ch chan<- prometheus.Metric) {
+	fn := duckDBMemoryStats.Load()
+	if fn == nil {
+		return
+	}
+	for tag, bytes := range (*fn)() {
+		ch <- prometheus.MustNewConstMetric(duckDBMemoryDesc, prometheus.GaugeValue, float64(bytes), tag)
+	}
+}
+
+func init() {
+	prometheus.DefaultRegisterer.MustRegister(duckDBMemoryCollector{})
+}
 
 // SetDuckDBPoolSource points the connection-pool gauges at a pool and returns
 // the function that stops reading it. The last caller wins; the returned

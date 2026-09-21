@@ -689,9 +689,10 @@ func openTestDuckDB(t *testing.T) *sql.DB {
 }
 
 func traceAll(repository *Repository, traceID string) ([]telemetry.IndexedSpan, error) {
-	return repository.Parquet.Trace(context.Background(), telemetry.TraceQuery{
+	spans, _, err := repository.Parquet.Trace(context.Background(), telemetry.TraceQuery{
 		TraceID: traceID, StartNanos: -1 << 63, EndNanos: 1<<63 - 1, Limit: 500,
 	})
+	return spans, err
 }
 
 // seedFailedCompaction leaves a live COMPACTION.json whose recovery always

@@ -35,7 +35,8 @@ type Duck struct {
 	closeErr  error
 	// releasePoolGauges stops the pool gauges reading this Duck's pool, and
 	// only if they are still reading it.
-	releasePoolGauges func()
+	releasePoolGauges   func()
+	releaseMemoryGauges func()
 	// writeDB is the single connection every rollup and maintenance write uses.
 	//
 	// Those writes are serialized by writeGate anyway, so one connection is all
@@ -264,6 +265,32 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 	d := &Duck{DB: db, writeDB: writeDB, cfg: cfg, repository: repository, rollupLagNanos: int64(rollupPublicationSafetyLag)}
 	// Reads are the pool that can starve, so it is the one worth watching.
 	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
+	// And what DuckDB admits to holding, so the gap against process RSS is
+	// observable rather than inferred.
+	d.releaseMemoryGauges = metrics.SetDuckDBMemorySource(func() map[string]int64 {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		rows, err := db.QueryContext(ctx, "SELECT tag, sum(memory_usage_bytes) FROM duckdb_memory() GROUP BY tag")
+		if err != nil {
+			return nil
+		}
+		defer rows.Close()
+		tags := make(map[string]int64, 16)
+		for rows.Next() {
+			var tag string
+			var bytes int64
+			if err := rows.Scan(&tag, &bytes); err != nil {
+				return nil
+			}
+			tags[tag] = bytes
+		}
+		// A partial read is worse than no read: it publishes a low sum, and
+		// the untracked figure derived from it reads correspondingly high.
+		if err := rows.Err(); err != nil {
+			return nil
+		}
+		return tags
+	})
 	if cfg.DuckDBMemory == "" {
 		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
@@ -429,6 +456,13 @@ func (d *Duck) Close() error {
 	d.closeOnce.Do(func() {
 		if d.releasePoolGauges != nil {
 			d.releasePoolGauges()
+		}
+		// Same reason as the pool source: the closure captures this Duck's
+		// read pool, so leaving it installed past Close means the next scrape
+		// queries a closed pool and the gauges freeze at stale values that
+		// still look live.
+		if d.releaseMemoryGauges != nil {
+			d.releaseMemoryGauges()
 		}
 		var errs []error
 		if d.writeDB != nil {
@@ -1287,6 +1321,35 @@ SET last_ingested_unix_nano = excluded.last_ingested_unix_nano,
 	return err
 }
 
+// serviceRollupP50SQL and serviceRollupP95SQL build the latency columns of a
+// rollup pass.
+//
+// These are approximate on purpose. quantile_cont is holistic: it retains every
+// value of every group in a vector on the raw allocator, so its cost grows with
+// the rows a pass scans, and memory_limit does not bound it -- DuckDB reports
+// zero usage while the process grows by gigabytes. A pass covering an hour of
+// ingest at this product's certified rate scans tens of millions of spans, and
+// that is how the process reached 11.5 GiB anon-rss on a box configured for a
+// 4 GB limit.
+//
+// approx_quantile keeps a fixed-size t-digest per group instead. Measured on
+// 30M rows: 861 MiB of untracked growth becomes 8 MiB. The error is a fraction
+// of a percent on a latency percentile that already describes a one-minute
+// bucket, which is not a figure anyone reads to three significant digits.
+//
+// The COALESCE keeps a service that only makes outbound calls -- a load
+// generator, a cron worker -- measured on what it does have rather than
+// silently reported as having no latency at all.
+func serviceRollupP50SQL(alias string) string { return serviceRollupQuantileSQL(alias, 1, "p50_ms") }
+
+func serviceRollupP95SQL(alias string) string { return serviceRollupQuantileSQL(alias, 2, "p95_ms") }
+
+func serviceRollupQuantileSQL(alias string, index int, column string) string {
+	served := fmt.Sprintf("approx_quantile(%[1]s.duration_ms, [0.50, 0.95]) FILTER (WHERE COALESCE(%[1]s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER'))", alias)
+	all := fmt.Sprintf("approx_quantile(%s.duration_ms, [0.50, 0.95])", alias)
+	return fmt.Sprintf("COALESCE(%s[%d], %s[%d]) AS %s", served, index, all, index, column)
+}
+
 // rollupSafetyLagNanos is how far behind the max ingested timestamp the rollup
 // watermark is held, covering the worst-case delay between a row being stamped at
 // ingest and committed to Parquet (the bounded commit retry window plus queueing).
@@ -1351,7 +1414,7 @@ WHERE EXISTS (
     AND affected.service = service_rollup.service
 );`
 
-const serviceRollupInsertSQL = `
+var serviceRollupInsertSQL = `
 WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
   FROM spans
@@ -1395,14 +1458,8 @@ span_agg AS (
     -- COALESCE keeps a service that only makes outbound calls — a load
     -- generator, a cron worker — measured on what it does have rather than
     -- silently reported as having no latency at all.
-    COALESCE(
-      quantile_cont(s.duration_ms, 0.50) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')),
-      quantile_cont(s.duration_ms, 0.50)
-    ) AS p50_ms,
-    COALESCE(
-      quantile_cont(s.duration_ms, 0.95) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')),
-      quantile_cont(s.duration_ms, 0.95)
-    ) AS p95_ms,
+    ` + serviceRollupP50SQL("s") + `,
+    ` + serviceRollupP95SQL("s") + `,
     avg(CASE WHEN s.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
   JOIN affected a
@@ -1594,6 +1651,36 @@ WITH affected AS (
     AND start_time >= ?
     AND start_time < ?
 ),
+-- The affected bucket range, computed once. As four scalar subqueries
+-- repeated across the predicates below, these read as correlated to the
+-- planner and cost a re-derivation each.
+bounds AS (
+  SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
+),
+-- The parent side is range-filtered HERE rather than in the join's ON
+-- clause, which keeps the hash build off every span ever ingested. The
+-- affected window is one minute of newly ingested spans; the table behind
+-- this view is the whole retention period, so the two differ by orders of
+-- magnitude and the ON-clause form pays for the difference on every pass.
+--
+-- Measured (TestEdgeRollupPlanUsesHashJoins, spans as a Parquet-backed view,
+-- 600k spans over 25 days, one affected minute): 14ms here against 33ms with
+-- the range predicate in the ON clause. Both plan a HASH_JOIN -- the cost is
+-- the size of the build side, not the join algorithm.
+--
+-- Parents more than 1h outside the affected bucket range are dropped, which
+-- is acceptable for minute-bucket dependency edges. Caveat retained from the
+-- original: buckets come from span start_time while the window bounds
+-- ingested_unix_nano, so one late-arriving span with an old start_time
+-- widens this range for the pass that ingests it.
+parent_scope AS (
+  SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
+  FROM spans parent, bounds
+  WHERE parent.start_time >= bounds.lo - INTERVAL 1 HOUR
+    AND parent.start_time <= bounds.hi + INTERVAL 1 HOUR
+    AND parent.service IS NOT NULL
+    AND parent.service != ''
+),
 call_edges AS (
   SELECT
     child.namespace,
@@ -1605,29 +1692,27 @@ call_edges AS (
     AVG(CASE WHEN child.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate,
     'call' AS edge_type
   FROM spans child
-  JOIN spans parent
+  JOIN parent_scope parent
     ON child.parent_span_id = parent.span_id
    AND child.trace_id = parent.trace_id
    AND child.namespace = parent.namespace
-   -- Bound the parent side to the affected BUCKET RANGE ±1h: without this
-   -- the hash build covers every span ever ingested. Parents more than 1h
-   -- outside [MIN(affected.bucket), MAX(affected.bucket)] are dropped —
-   -- acceptable for minute-bucket dependency edges. Caveat: buckets come
-   -- from span start_time while the window bounds ingested_unix_nano, so
-   -- one late-arriving span with an old start_time widens the range (and
-   -- this scan) back to that bucket for the pass that ingests it.
-   AND parent.start_time >= (SELECT MIN(bucket) FROM affected) - INTERVAL 1 HOUR
-   AND parent.start_time <= (SELECT MAX(bucket) FROM affected) + INTERVAL 1 HOUR
   JOIN affected a
     ON a.namespace = child.namespace
    AND a.bucket = date_trunc('minute', child.start_time)
-  WHERE parent.service IS NOT NULL
-    AND parent.service != ''
-    AND child.service IS NOT NULL
+  -- bounds joins last, and as an explicit CROSS JOIN. Written as
+  -- "FROM spans child, bounds JOIN parent_scope ON child...", the comma binds
+  -- looser than JOIN: that parses as "spans child" comma "(bounds JOIN
+  -- parent_scope ON ...)", so DuckDB materialises a CROSS_PRODUCT of the child
+  -- scan with bounds instead of folding the single bounds row into the filters.
+  -- Same rows either way, so nothing fails and no row assertion notices; on the
+  -- fixture above it is 21ms against 14ms. TestEdgeRollupPlanUsesHashJoins
+  -- asserts the CROSS_PRODUCT is absent here and present in the comma form.
+  CROSS JOIN bounds
+  WHERE child.service IS NOT NULL
     AND child.service != ''
     AND parent.service != child.service
-    AND child.start_time >= (SELECT MIN(bucket) FROM affected)
-    AND child.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
+    AND child.start_time >= bounds.lo
+    AND child.start_time < bounds.hi + INTERVAL 1 MINUTE
   GROUP BY child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
 ),
 -- Producers and consumers are aggregated per (namespace, bucket, service,
@@ -1648,8 +1733,8 @@ producers AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_PRODUCER'
-    AND s.start_time >= (SELECT MIN(bucket) FROM affected)
-    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
+    AND s.start_time >= (SELECT lo FROM bounds)
+    AND s.start_time < (SELECT hi FROM bounds) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
     AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
@@ -1667,8 +1752,8 @@ consumers AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_CONSUMER'
-    AND s.start_time >= (SELECT MIN(bucket) FROM affected)
-    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
+    AND s.start_time >= (SELECT lo FROM bounds)
+    AND s.start_time < (SELECT hi FROM bounds) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
     AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
@@ -1800,9 +1885,9 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 }
 
 // Trace pins the immutable Parquet snapshot for the full indexed-file read.
-func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemetry.IndexedSpan, error) {
+func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemetry.IndexedSpan, telemetry.TraceTotals, error) {
 	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return nil, err
+		return nil, telemetry.TraceTotals{}, err
 	}
 	defer d.parquetMu.RUnlock()
 	return d.repository.Parquet.Trace(ctx, query)
