@@ -305,23 +305,22 @@ func CreateParquetViews(db *sql.DB, parquetDir string) error {
 		if signal == "spans" {
 			projection = "* EXCLUDE (_trace_hash)"
 		}
-		// union_by_name is deliberately off. It makes bind open every file in
-		// the glob and hold a reader and footer per file for the life of the
-		// query, on the raw allocator -- outside anything memory_limit bounds.
-		// Measured on 3,281 live batches: 510 MiB per query with it against
-		// 89 MiB without, while duckdb_memory() reported the same 69 MiB in
-		// both cases. That cost is paid by every concurrent binder and grows
-		// with the batch count, which is why process memory tracked file count
-		// rather than query size.
+		// union_by_name is load-bearing and must stay. ensureSchemaBatch writes
+		// an empty _schema.batch from the current binary's structs so the glob
+		// always carries the full column set, and this flag is what lets an
+		// older batch that predates an added column read as NULL instead of
+		// failing the whole glob with "schema mismatch in glob". Without it
+		// CreateViews, which names every column explicitly and binds eagerly,
+		// fails at NewDuck and the process will not start until every
+		// pre-deploy batch has aged out.
 		//
-		// It buys nothing here. Every batch is written from the same Go struct
-		// by one binary, so the files share a schema, and DuckDB matches
-		// columns by name across a glob regardless of this flag -- it only
-		// changes whether a file that is genuinely MISSING a column is
-		// tolerated or raises "schema mismatch in glob". A build that adds a
-		// column must therefore rewrite or expire older batches, which
-		// compaction already does.
-		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s)`, signal, projection, sqlLiteral(pattern))
+		// It is expensive: bind opens every file in the glob and holds a reader
+		// and footer per file for the query's life, on the raw allocator, where
+		// memory_limit cannot see it. Measured on 3,281 live batches: 510 MiB
+		// per query against 89 MiB without, paid by every concurrent binder.
+		// That cost is bounded by keeping the live batch count down, which is
+		// compaction's job, not by removing this flag.
+		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=true)`, signal, projection, sqlLiteral(pattern))
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create parquet view telemetry.%s: %w", signal, err)
 		}

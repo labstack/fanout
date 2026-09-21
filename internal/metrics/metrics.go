@@ -319,6 +319,7 @@ var duckDBPoolStats atomic.Pointer[func() sql.DBStats]
 // release only clears the source if it is still the one it installed, so a
 // second Duck closing in a test binary cannot blank the gauges of one that is
 // still serving.
+
 // duckDBMemoryStats is the live source for the per-tag DuckDB memory gauge.
 //
 // memory_limit bounds DuckDB's buffer pool and nothing else, so the figure that
@@ -340,20 +341,42 @@ func SetDuckDBMemorySource(tags func() map[string]int64) (release func()) {
 	return func() { duckDBMemoryStats.CompareAndSwap(installed, nil) }
 }
 
-// DuckDBMemoryTags is the collector hook for the per-tag gauge.
-var DuckDBMemoryTags = promauto.NewGaugeVec(prometheus.GaugeOpts{
+// duckDBMemoryTags is published by a pull-based collector rather than a gauge
+// somebody has to remember to refresh. A push gauge with no pump exports an
+// empty metric family, which looks exactly like "DuckDB is holding nothing" --
+// the most misleading possible reading for a series whose entire purpose is
+// measuring what DuckDB holds.
+var duckDBMemoryTags = promauto.NewGaugeVec(prometheus.GaugeOpts{
 	Name: "fanout_duckdb_memory_bytes",
 	Help: "DuckDB memory usage by tag, as DuckDB itself accounts for it",
 }, []string{"tag"})
 
-// RefreshDuckDBMemory republishes the per-tag gauge from the installed source.
-func RefreshDuckDBMemory() {
+func init() {
+	prometheus.DefaultRegisterer.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+		Name: "fanout_duckdb_memory_scrape_total",
+		Help: "Refreshes of the per-tag DuckDB memory gauge",
+	}, func() float64 {
+		refreshDuckDBMemory()
+		return 1
+	}))
+}
+
+// refreshDuckDBMemory republishes the per-tag gauge from the installed source.
+// Reset first: a tag that stops appearing must stop being reported, or the sum
+// overstates what DuckDB holds and understates the untracked gap, which is the
+// one number this exists to compute.
+func refreshDuckDBMemory() {
 	fn := duckDBMemoryStats.Load()
 	if fn == nil {
 		return
 	}
-	for tag, bytes := range (*fn)() {
-		DuckDBMemoryTags.WithLabelValues(tag).Set(float64(bytes))
+	tags := (*fn)()
+	if tags == nil {
+		return
+	}
+	duckDBMemoryTags.Reset()
+	for tag, bytes := range tags {
+		duckDBMemoryTags.WithLabelValues(tag).Set(float64(bytes))
 	}
 }
 

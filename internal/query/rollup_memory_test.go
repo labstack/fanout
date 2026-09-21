@@ -28,15 +28,26 @@ import (
 // and far above the latter.
 const rollupUntrackedLimitMiB = 200
 
+// processRSSMiB reads this process's resident size, or skips the test where it
+// cannot: a busybox ps without -o/-p would otherwise fail the whole suite for a
+// reason unrelated to the regression this guards.
 func processRSSMiB(t *testing.T) float64 {
 	t.Helper()
+	if raw, err := os.ReadFile("/proc/self/statm"); err == nil {
+		fields := strings.Fields(string(raw))
+		if len(fields) > 1 {
+			if pages, err := strconv.ParseFloat(fields[1], 64); err == nil {
+				return pages * float64(os.Getpagesize()) / (1 << 20)
+			}
+		}
+	}
 	out, err := exec.Command("ps", "-o", "rss=", "-p", strconv.Itoa(os.Getpid())).Output()
 	if err != nil {
-		t.Fatalf("ps: %v", err)
+		t.Skipf("no way to read RSS on this platform: %v", err)
 	}
 	kb, err := strconv.ParseFloat(strings.TrimSpace(string(out)), 64)
 	if err != nil {
-		t.Fatalf("parse rss %q: %v", out, err)
+		t.Skipf("unreadable ps output %q: %v", out, err)
 	}
 	return kb / 1024
 }
@@ -55,6 +66,9 @@ func TestServiceRollupLatencyDoesNotAllocatePerRow(t *testing.T) {
 		}
 	}
 
+	if testing.Short() {
+		t.Skip("scans 30M rows")
+	}
 	baseline := processRSSMiB(t)
 	query := fmt.Sprintf(`SELECT service, %s, %s
 		FROM (

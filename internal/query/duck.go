@@ -280,9 +280,14 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 			var tag string
 			var bytes int64
 			if err := rows.Scan(&tag, &bytes); err != nil {
-				return tags
+				return nil
 			}
 			tags[tag] = bytes
+		}
+		// A partial read is worse than no read: it publishes a low sum, and
+		// the untracked figure derived from it reads correspondingly high.
+		if err := rows.Err(); err != nil {
+			return nil
 		}
 		return tags
 	})
@@ -451,6 +456,13 @@ func (d *Duck) Close() error {
 	d.closeOnce.Do(func() {
 		if d.releasePoolGauges != nil {
 			d.releasePoolGauges()
+		}
+		// Same reason as the pool source: the closure captures this Duck's
+		// read pool, so leaving it installed past Close means the next scrape
+		// queries a closed pool and the gauges freeze at stale values that
+		// still look live.
+		if d.releaseMemoryGauges != nil {
+			d.releaseMemoryGauges()
 		}
 		var errs []error
 		if d.writeDB != nil {
