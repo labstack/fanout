@@ -35,7 +35,8 @@ type Duck struct {
 	closeErr  error
 	// releasePoolGauges stops the pool gauges reading this Duck's pool, and
 	// only if they are still reading it.
-	releasePoolGauges func()
+	releasePoolGauges   func()
+	releaseMemoryGauges func()
 	// writeDB is the single connection every rollup and maintenance write uses.
 	//
 	// Those writes are serialized by writeGate anyway, so one connection is all
@@ -264,6 +265,27 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 	d := &Duck{DB: db, writeDB: writeDB, cfg: cfg, repository: repository, rollupLagNanos: int64(rollupPublicationSafetyLag)}
 	// Reads are the pool that can starve, so it is the one worth watching.
 	d.releasePoolGauges = metrics.SetDuckDBPoolSource(db.Stats)
+	// And what DuckDB admits to holding, so the gap against process RSS is
+	// observable rather than inferred.
+	d.releaseMemoryGauges = metrics.SetDuckDBMemorySource(func() map[string]int64 {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		rows, err := db.QueryContext(ctx, "SELECT tag, sum(memory_usage_bytes) FROM duckdb_memory() GROUP BY tag")
+		if err != nil {
+			return nil
+		}
+		defer rows.Close()
+		tags := make(map[string]int64, 16)
+		for rows.Next() {
+			var tag string
+			var bytes int64
+			if err := rows.Scan(&tag, &bytes); err != nil {
+				return tags
+			}
+			tags[tag] = bytes
+		}
+		return tags
+	})
 	if cfg.DuckDBMemory == "" {
 		// Only when the operator hasn't pinned storage.duckdb.memory: keep DuckDB's
 		// cgroup-aware auto limit on big boxes but leave absolute RAM headroom on
@@ -1287,6 +1309,35 @@ SET last_ingested_unix_nano = excluded.last_ingested_unix_nano,
 	return err
 }
 
+// serviceRollupP50SQL and serviceRollupP95SQL build the latency columns of a
+// rollup pass.
+//
+// These are approximate on purpose. quantile_cont is holistic: it retains every
+// value of every group in a vector on the raw allocator, so its cost grows with
+// the rows a pass scans, and memory_limit does not bound it -- DuckDB reports
+// zero usage while the process grows by gigabytes. A pass covering an hour of
+// ingest at this product's certified rate scans tens of millions of spans, and
+// that is how the process reached 11.5 GiB anon-rss on a box configured for a
+// 4 GB limit.
+//
+// approx_quantile keeps a fixed-size t-digest per group instead. Measured on
+// 30M rows: 861 MiB of untracked growth becomes 8 MiB. The error is a fraction
+// of a percent on a latency percentile that already describes a one-minute
+// bucket, which is not a figure anyone reads to three significant digits.
+//
+// The COALESCE keeps a service that only makes outbound calls -- a load
+// generator, a cron worker -- measured on what it does have rather than
+// silently reported as having no latency at all.
+func serviceRollupP50SQL(alias string) string { return serviceRollupQuantileSQL(alias, 1, "p50_ms") }
+
+func serviceRollupP95SQL(alias string) string { return serviceRollupQuantileSQL(alias, 2, "p95_ms") }
+
+func serviceRollupQuantileSQL(alias string, index int, column string) string {
+	served := fmt.Sprintf("approx_quantile(%[1]s.duration_ms, [0.50, 0.95]) FILTER (WHERE COALESCE(%[1]s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER'))", alias)
+	all := fmt.Sprintf("approx_quantile(%s.duration_ms, [0.50, 0.95])", alias)
+	return fmt.Sprintf("COALESCE(%s[%d], %s[%d]) AS %s", served, index, all, index, column)
+}
+
 // rollupSafetyLagNanos is how far behind the max ingested timestamp the rollup
 // watermark is held, covering the worst-case delay between a row being stamped at
 // ingest and committed to Parquet (the bounded commit retry window plus queueing).
@@ -1351,7 +1402,7 @@ WHERE EXISTS (
     AND affected.service = service_rollup.service
 );`
 
-const serviceRollupInsertSQL = `
+var serviceRollupInsertSQL = `
 WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
   FROM spans
@@ -1395,14 +1446,8 @@ span_agg AS (
     -- COALESCE keeps a service that only makes outbound calls — a load
     -- generator, a cron worker — measured on what it does have rather than
     -- silently reported as having no latency at all.
-    COALESCE(
-      quantile_cont(s.duration_ms, 0.50) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')),
-      quantile_cont(s.duration_ms, 0.50)
-    ) AS p50_ms,
-    COALESCE(
-      quantile_cont(s.duration_ms, 0.95) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')),
-      quantile_cont(s.duration_ms, 0.95)
-    ) AS p95_ms,
+    ` + serviceRollupP50SQL("s") + `,
+    ` + serviceRollupP95SQL("s") + `,
     avg(CASE WHEN s.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate
   FROM spans s
   JOIN affected a

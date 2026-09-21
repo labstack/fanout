@@ -148,6 +148,10 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 	scope := detectorScopeClause(namespace)
 
 	// Compare current error rate to baseline (previous period)
+	// approx_quantile, not PERCENTILE_CONT: the exact form is holistic and
+	// retains every value of every group on the raw allocator, outside anything
+	// memory_limit bounds. This runs every 60s over a 15-minute window of spans,
+	// so its cost tracked ingest rate with no ceiling. See serviceRollupP95SQL.
 	sql := fmt.Sprintf(`
 		WITH current_period AS (
 			SELECT
@@ -229,7 +233,7 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 		WITH current_period AS (
 			SELECT
 				service as service_name,
-				PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_latency
+				approx_quantile(duration_ms, 0.95) AS p95_latency
 			FROM spans
 			WHERE start_unix_nano >= %d AND start_unix_nano < %d
 			  AND kind = 'SPAN_KIND_SERVER'
@@ -240,7 +244,7 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 			SELECT
 				service as service_name,
 				time_bucket(INTERVAL '5 minutes', start_time) AS bucket,
-				PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms) AS p95_latency
+				approx_quantile(duration_ms, 0.95) AS p95_latency
 			FROM spans
 			WHERE start_unix_nano >= %d AND start_unix_nano < %d
 			  AND kind = 'SPAN_KIND_SERVER'

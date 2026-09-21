@@ -319,6 +319,44 @@ var duckDBPoolStats atomic.Pointer[func() sql.DBStats]
 // release only clears the source if it is still the one it installed, so a
 // second Duck closing in a test binary cannot blank the gauges of one that is
 // still serving.
+// duckDBMemoryStats is the live source for the per-tag DuckDB memory gauge.
+//
+// memory_limit bounds DuckDB's buffer pool and nothing else, so the figure that
+// actually predicts an out-of-memory kill is the gap between what the process
+// holds and what DuckDB admits to holding. Exporting the tags makes that gap
+// directly observable: untracked = process_resident_memory_bytes
+// - sum(fanout_duckdb_memory_bytes) - go_memstats_heap_sys_bytes. Without it
+// every diagnosis of this process is an inference, which is how a whole day
+// got spent optimising a Go heap that was never the problem.
+var duckDBMemoryStats atomic.Pointer[func() map[string]int64]
+
+// SetDuckDBMemorySource installs the reader for the per-tag memory gauge.
+func SetDuckDBMemorySource(tags func() map[string]int64) (release func()) {
+	if tags == nil {
+		return func() {}
+	}
+	installed := &tags
+	duckDBMemoryStats.Store(installed)
+	return func() { duckDBMemoryStats.CompareAndSwap(installed, nil) }
+}
+
+// DuckDBMemoryTags is the collector hook for the per-tag gauge.
+var DuckDBMemoryTags = promauto.NewGaugeVec(prometheus.GaugeOpts{
+	Name: "fanout_duckdb_memory_bytes",
+	Help: "DuckDB memory usage by tag, as DuckDB itself accounts for it",
+}, []string{"tag"})
+
+// RefreshDuckDBMemory republishes the per-tag gauge from the installed source.
+func RefreshDuckDBMemory() {
+	fn := duckDBMemoryStats.Load()
+	if fn == nil {
+		return
+	}
+	for tag, bytes := range (*fn)() {
+		DuckDBMemoryTags.WithLabelValues(tag).Set(float64(bytes))
+	}
+}
+
 func SetDuckDBPoolSource(stats func() sql.DBStats) (release func()) {
 	if stats == nil {
 		return func() {}

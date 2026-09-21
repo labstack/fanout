@@ -305,7 +305,23 @@ func CreateParquetViews(db *sql.DB, parquetDir string) error {
 		if signal == "spans" {
 			projection = "* EXCLUDE (_trace_hash)"
 		}
-		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=true)`, signal, projection, sqlLiteral(pattern))
+		// union_by_name is deliberately off. It makes bind open every file in
+		// the glob and hold a reader and footer per file for the life of the
+		// query, on the raw allocator -- outside anything memory_limit bounds.
+		// Measured on 3,281 live batches: 510 MiB per query with it against
+		// 89 MiB without, while duckdb_memory() reported the same 69 MiB in
+		// both cases. That cost is paid by every concurrent binder and grows
+		// with the batch count, which is why process memory tracked file count
+		// rather than query size.
+		//
+		// It buys nothing here. Every batch is written from the same Go struct
+		// by one binary, so the files share a schema, and DuckDB matches
+		// columns by name across a glob regardless of this flag -- it only
+		// changes whether a file that is genuinely MISSING a column is
+		// tolerated or raises "schema mismatch in glob". A build that adds a
+		// column must therefore rewrite or expire older batches, which
+		// compaction already does.
+		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s)`, signal, projection, sqlLiteral(pattern))
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create parquet view telemetry.%s: %w", signal, err)
 		}
