@@ -373,16 +373,18 @@ func toJSON(v interface{}) string {
 	return string(b)
 }
 
-// attrsJSON flattens an OTLP attribute list into a flat JSON object keyed by the
-// literal (dotted) attribute name, e.g. {"http.method":"GET","http.status_code":200}.
-// This is the shape the attr() macro and json_extract_string(col, '$."key"') paths
-// expect. Marshaling the raw []*KeyValue (as the old toJSON path did) produced an
-// array of {Key,Value} structs that no JSON-path query could read. Returns nil for
-// an empty list so the column stays NULL.
+// attrBufPool holds the buffers attrsJSON's fast path writes into.
 var attrBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
-// attrsJSON flattens an OTLP attribute list into a flat JSON object. The fast
-// path writes the object directly into a pooled buffer, skipping the
+// attrsJSON flattens an OTLP attribute list into a flat JSON object keyed by
+// the literal (dotted) attribute name, e.g.
+// {"http.method":"GET","http.status_code":200}. That is the shape the attr()
+// macro and json_extract_string(col, '$."key"') paths expect; marshaling the
+// raw []*KeyValue, as the old toJSON path did, produced an array of
+// {Key,Value} structs that no JSON-path query could read. Returns "" for an
+// empty list so the column stays NULL.
+//
+// The fast path writes the object directly into a pooled buffer, skipping the
 // map[string]any + interface boxing + reflection that json.Marshal needs — that
 // path dominated ingest allocations under load (profiled: ~7GB / 14% of
 // alloc_space at 175k rows/s). Attributes whose values are nested (array/kvlist)

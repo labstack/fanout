@@ -148,6 +148,10 @@ func (d *Detector) detectAnomalies(ctx context.Context, start, end time.Time) []
 	return anomalies
 }
 
+// minErrorRateStddev floors the error-rate z-score denominator at one
+// percentage point. See errorRateAnomalySQL.
+const minErrorRateStddev = 0.01
+
 // errorRateAnomalySQL compares the error rate in [startNano, endNano) against
 // the window of equal length immediately before it.
 //
@@ -167,10 +171,6 @@ func (d *Detector) detectAnomalies(ctx context.Context, start, end time.Time) []
 // errors to 42%). One percentage point is the least noise worth assuming: it
 // keeps a single stray error in a few thousand spans below the threshold while
 // letting a real break through.
-// minErrorRateStddev floors the error-rate z-score denominator at one
-// percentage point. See errorRateAnomalySQL.
-const minErrorRateStddev = 0.01
-
 func errorRateAnomalySQL(startNano, endNano int64, scope string) string {
 	return fmt.Sprintf(`
 		WITH current_period AS (

@@ -241,7 +241,7 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 		WithArgs(midpoint, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"spans", "served_spans", "error_rate", "p50_ms", "p95_ms"}).AddRow(70.0, 70.0, 0.06, 70.0, 180.0))
 
-	result, err := svc.Performance(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", 25)
+	result, err := svc.Performance(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, PerformanceOptions{Service: "checkout", Limit: 25, Heatmap: true})
 	if err != nil {
 		t.Fatalf("Performance: %v", err)
 	}

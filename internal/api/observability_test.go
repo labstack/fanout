@@ -35,7 +35,7 @@ func (f *fakeQueries) Topology(_ context.Context, scope observability.Scope, _ i
 	}, nil
 }
 
-func (f *fakeQueries) Performance(_ context.Context, _ observability.Scope, _ string, _ int) (observability.Result[observability.Performance], error) {
+func (f *fakeQueries) Performance(_ context.Context, _ observability.Scope, _ observability.PerformanceOptions) (observability.Result[observability.Performance], error) {
 	return observability.Result[observability.Performance]{Schema: observability.PerformanceSchema}, nil
 }
 
@@ -151,7 +151,7 @@ func (p deadlineProbe) Topology(ctx context.Context, scope observability.Scope, 
 	return observability.Result[observability.Topology]{}, nil
 }
 
-func (p deadlineProbe) Performance(ctx context.Context, scope observability.Scope, service string, limit int) (observability.Result[observability.Performance], error) {
+func (p deadlineProbe) Performance(ctx context.Context, scope observability.Scope, opts observability.PerformanceOptions) (observability.Result[observability.Performance], error) {
 	p.note(ctx, "/api/observability/performance")
 	return observability.Result[observability.Performance]{}, nil
 }
