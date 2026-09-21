@@ -25,7 +25,7 @@ func (registryQueries) Topology(context.Context, observability.Scope, int) (obse
 	return observability.Result[observability.Topology]{}, nil
 }
 
-func (registryQueries) Performance(context.Context, observability.Scope, string, int) (observability.Result[observability.Performance], error) {
+func (registryQueries) Performance(context.Context, observability.Scope, observability.PerformanceOptions) (observability.Result[observability.Performance], error) {
 	return observability.Result[observability.Performance]{}, nil
 }
 

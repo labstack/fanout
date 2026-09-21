@@ -23,7 +23,7 @@ const serverInstructions = "Start with observability_overview for system health,
 type Observability interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
 	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
-	Performance(context.Context, observability.Scope, string, int) (observability.Result[observability.Performance], error)
+	Performance(context.Context, observability.Scope, observability.PerformanceOptions) (observability.Result[observability.Performance], error)
 	Trace(context.Context, observability.Scope, string, string, int) (observability.Result[observability.TraceDetail], error)
 	Logs(context.Context, observability.Scope, string, string, string, int) (observability.Result[observability.Logs], error)
 }
@@ -287,7 +287,7 @@ func (s *Server) performance(ctx context.Context, _ *mcp.CallToolRequest, input 
 	if err != nil {
 		return nil, observability.Result[observability.Performance]{}, err
 	}
-	output, err := s.queries.Performance(ctx, scope, input.Service, input.Limit)
+	output, err := s.queries.Performance(ctx, scope, observability.PerformanceOptions{Service: input.Service, Limit: input.Limit})
 	if err != nil {
 		return nil, output, err
 	}

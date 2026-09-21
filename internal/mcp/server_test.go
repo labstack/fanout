@@ -127,7 +127,7 @@ func (f *fakeObservability) Topology(_ context.Context, scope observability.Scop
 	}, nil
 }
 
-func (f *fakeObservability) Performance(_ context.Context, scope observability.Scope, _ string, _ int) (observability.Result[observability.Performance], error) {
+func (f *fakeObservability) Performance(_ context.Context, scope observability.Scope, _ observability.PerformanceOptions) (observability.Result[observability.Performance], error) {
 	f.scope = scope
 	return observability.Result[observability.Performance]{Schema: observability.PerformanceSchema, Summary: "performance"}, nil
 }

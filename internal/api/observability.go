@@ -15,7 +15,7 @@ import (
 type ObservabilityQueries interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
 	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
-	Performance(context.Context, observability.Scope, string, int) (observability.Result[observability.Performance], error)
+	Performance(context.Context, observability.Scope, observability.PerformanceOptions) (observability.Result[observability.Performance], error)
 	Trace(context.Context, observability.Scope, string, string, int) (observability.Result[observability.TraceDetail], error)
 	Logs(context.Context, observability.Scope, string, string, string, int) (observability.Result[observability.Logs], error)
 }
@@ -72,7 +72,9 @@ func (h *ObservabilityHandler) performance(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	result, err := h.queries.Performance(c.Request().Context(), scope, c.QueryParam("service"), limit)
+	result, err := h.queries.Performance(c.Request().Context(), scope, observability.PerformanceOptions{
+		Service: c.QueryParam("service"), Limit: limit, Heatmap: true,
+	})
 	if err != nil {
 		return mapQueryError(err)
 	}

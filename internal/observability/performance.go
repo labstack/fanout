@@ -203,7 +203,21 @@ SELECT
 FROM service_rollup
 WHERE bucket >= ? AND bucket < ? AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)`
 
-func (s *Service) Performance(ctx context.Context, scope Scope, service string, limit int) (Result[Performance], error) {
+// PerformanceOptions selects what a performance read costs.
+//
+// Heatmap is the cross-service comparison grid: 12 services by every bucket in
+// the window. The browser's performance page draws it. An MCP caller asked
+// about one service, so for that path it is a second DuckDB query and a payload
+// -- about 85% of a 113 KB response on the live demo -- covering 12 services it
+// did not ask about.
+type PerformanceOptions struct {
+	Service string
+	Limit   int
+	Heatmap bool
+}
+
+func (s *Service) Performance(ctx context.Context, scope Scope, opts PerformanceOptions) (Result[Performance], error) {
+	service, limit := opts.Service, opts.Limit
 	scope, err := s.normalizeScope(scope)
 	if err != nil {
 		return Result[Performance]{}, err
@@ -240,23 +254,25 @@ func (s *Service) Performance(ctx context.Context, scope Scope, service string, 
 	}
 	data.Endpoints = endpoints
 
-	rows, err = s.db.QueryContext(ctx, performanceHeatmapSQL(window), scope.Start, scope.End, scope.Namespace, scope.Namespace, scope.Start, scope.End, scope.Namespace, scope.Namespace)
-	if err != nil {
-		return Result[Performance]{}, fmt.Errorf("query latency heatmap: %w", err)
-	}
-	for rows.Next() {
-		var point HeatmapPoint
-		if err := rows.Scan(&point.Time, &point.Service, &point.P95MS); err != nil {
-			rows.Close()
-			return Result[Performance]{}, fmt.Errorf("scan latency heatmap: %w", err)
+	if opts.Heatmap {
+		rows, err = s.db.QueryContext(ctx, performanceHeatmapSQL(window), scope.Start, scope.End, scope.Namespace, scope.Namespace, scope.Start, scope.End, scope.Namespace, scope.Namespace)
+		if err != nil {
+			return Result[Performance]{}, fmt.Errorf("query latency heatmap: %w", err)
 		}
-		data.Heatmap = append(data.Heatmap, point)
-	}
-	if err := rows.Err(); err != nil {
+		for rows.Next() {
+			var point HeatmapPoint
+			if err := rows.Scan(&point.Time, &point.Service, &point.P95MS); err != nil {
+				rows.Close()
+				return Result[Performance]{}, fmt.Errorf("scan latency heatmap: %w", err)
+			}
+			data.Heatmap = append(data.Heatmap, point)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return Result[Performance]{}, fmt.Errorf("iterate latency heatmap: %w", err)
+		}
 		rows.Close()
-		return Result[Performance]{}, fmt.Errorf("iterate latency heatmap: %w", err)
 	}
-	rows.Close()
 
 	midpoint := scope.Start.Add(scope.End.Sub(scope.Start) / 2)
 	before, err := s.performanceAggregate(ctx, Scope{Namespace: scope.Namespace, Start: scope.Start, End: midpoint}, service)
