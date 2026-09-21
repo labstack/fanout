@@ -148,37 +148,61 @@ func (d *Detector) detectAnomalies(ctx context.Context, start, end time.Time) []
 	return anomalies
 }
 
-// detectErrorRateAnomalies detects error rate spikes
-func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
-	startNano := start.UnixNano()
-	endNano := end.UnixNano()
-	namespace := d.duck.DefaultNamespace()
-	scope := detectorScopeClause(namespace)
+// errorRateAnomalySQL compares the error rate in [startNano, endNano) against
+// the window of equal length immediately before it.
+//
+// The z-score divides a difference of rates, so its denominator has to be the
+// scatter of the RATE from bucket to bucket. It used to be
+// STDDEV(CASE WHEN status = error THEN 1.0 ELSE 0.0 END) over raw spans, which
+// is the scatter of individual span outcomes -- sqrt(p(1-p)), about 0.34 at a
+// 14% error rate. Those are different quantities, and the mismatch punished
+// exactly the services worth watching: the noisier the service, the larger the
+// denominator, so at the 13.8% baseline the live demo ran, clearing the 2.0
+// threshold needed the rate to jump 69 percentage points. A tripling to 41%
+// scored 0.80.
+//
+// The denominator is floored because a healthy service's rate is flat at zero,
+// giving it a bucket-to-bucket stddev of exactly zero -- so the service that
+// just started failing was the one that could not alert (z=0.00 going from no
+// errors to 42%). One percentage point is the least noise worth assuming: it
+// keeps a single stray error in a few thousand spans below the threshold while
+// letting a real break through.
+// minErrorRateStddev floors the error-rate z-score denominator at one
+// percentage point. See errorRateAnomalySQL.
+const minErrorRateStddev = 0.01
 
-	// Compare current error rate to baseline (previous period)
-	sql := fmt.Sprintf(`
+func errorRateAnomalySQL(startNano, endNano int64, scope string) string {
+	return fmt.Sprintf(`
 		WITH current_period AS (
 			SELECT
-				service as service_name,
-				COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR')) AS error_count,
-				COUNT(*) AS total_count,
-				(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::DOUBLE / COUNT(*)::DOUBLE) AS error_rate
-			FROM spans
-			WHERE start_unix_nano >= %d AND start_unix_nano < %d
-			%s
-			GROUP BY service
+				service_name,
+				AVG(bucket_rate) AS error_rate
+			FROM (
+				SELECT
+					service as service_name,
+					(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::DOUBLE / COUNT(*)::DOUBLE) AS bucket_rate
+				FROM spans
+				WHERE start_unix_nano >= %d AND start_unix_nano < %d
+				%s
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time)
+			) buckets
+			GROUP BY service_name
 		),
 		baseline_period AS (
 			SELECT
-				service as service_name,
-				COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR')) AS error_count,
-				COUNT(*) AS total_count,
-				(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::DOUBLE / COUNT(*)::DOUBLE) AS error_rate,
-				STDDEV(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_stddev
-			FROM spans
-			WHERE start_unix_nano >= %d AND start_unix_nano < %d
-			%s
-			GROUP BY service
+				service_name,
+				AVG(bucket_rate) AS error_rate,
+				GREATEST(COALESCE(STDDEV(bucket_rate), 0.0), %f) AS error_stddev
+			FROM (
+				SELECT
+					service as service_name,
+					(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::DOUBLE / COUNT(*)::DOUBLE) AS bucket_rate
+				FROM spans
+				WHERE start_unix_nano >= %d AND start_unix_nano < %d
+				%s
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time)
+			) buckets
+			GROUP BY service_name
 		)
 		SELECT
 			c.service_name,
@@ -191,7 +215,18 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 		FROM current_period c
 		LEFT JOIN baseline_period b ON c.service_name = b.service_name
 		WHERE c.error_rate > 0
-	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope)
+	`, startNano, endNano, scope, minErrorRateStddev, startNano-endNano+startNano, startNano, scope)
+}
+
+// detectErrorRateAnomalies detects error rate spikes
+func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
+	startNano := start.UnixNano()
+	endNano := end.UnixNano()
+	namespace := d.duck.DefaultNamespace()
+	scope := detectorScopeClause(namespace)
+
+	// Compare current error rate to baseline (previous period)
+	sql := errorRateAnomalySQL(startNano, endNano, scope)
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
