@@ -938,14 +938,24 @@ func (p *ParquetStore) PublishReplacement(stage string, metadata BatchMetadata, 
 	return errors.Join(removeErr, syncDirectory(p.batchesDir))
 }
 
+// ensureSchemaBatch writes _schema.batch: an empty Parquet batch whose only
+// purpose is to carry this binary's column list. internal/query derives every
+// view's explicit read_parquet(schema=MAP{...}) from it, so a column absent
+// here is a column absent from the view.
+//
+// It is rewritten on every open rather than created once. Written once, it
+// pinned the views to whichever build first created the data directory, for
+// the life of that deployment -- and a later build that added a column to
+// spanParquetRow could not start at all: the view would not expose it,
+// CreateViews would fail to bind it, NewDuck would return an error, and
+// restarting would not help because the stale file was still there. The files
+// are empty, so this is three small writes per boot.
 func (p *ParquetStore) ensureSchemaBatch() error {
 	final := filepath.Join(p.batchesDir, SchemaBatch)
-	if info, err := os.Stat(final); err == nil && info.IsDir() {
-		return nil
-	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+	stage := filepath.Join(p.stagingDir, "_schema")
+	if err := os.RemoveAll(stage); err != nil {
 		return err
 	}
-	stage := filepath.Join(p.stagingDir, "_schema")
 	if err := os.Mkdir(stage, 0o755); err != nil {
 		return err
 	}
@@ -959,6 +969,12 @@ func (p *ParquetStore) ensureSchemaBatch() error {
 		return err
 	}
 	if err := syncDirectory(stage); err != nil {
+		return err
+	}
+	// Rename cannot replace a non-empty directory, so the old one is removed
+	// first. A crash between the two leaves no _schema.batch at all, which the
+	// next open recreates: the batch holds no rows, only the column list.
+	if err := os.RemoveAll(final); err != nil {
 		return err
 	}
 	if err := os.Rename(stage, final); err != nil {

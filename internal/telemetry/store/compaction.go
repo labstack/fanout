@@ -376,18 +376,6 @@ func selectBoundedCompactionGroup(group []telemetry.BatchMetadata, maxBatches in
 		saturated = true
 	}
 	// A group is worth merging when it is full, when a ceiling stopped it, or
-	// when it simply holds enough files to be worth the merge.
-	//
-	// That last case is the one this was missing. The escape hatch above only
-	// covered groups too LARGE for a ceiling; a group merely too SMALL to reach
-	// maxBatches was stranded forever. Days stop being written -- the group for
-	// a past day never grows again -- so on the live box 1,243 batches sat in 69
-	// (day, generation) groups across 25 days and not one produced a candidate.
-	// Only the current day ever reached 128 files, so every output was
-	// generation 1 and everything older was untouchable. The live file count,
-	// which every query pays per-file overhead on, held at an equilibrium that
-	// no reordering or budget change could move.
-	// A group is worth merging when it is full, when a ceiling stopped it, or
 	// when it belongs to a day that has finished and already holds enough files
 	// to be worth the merge.
 	//

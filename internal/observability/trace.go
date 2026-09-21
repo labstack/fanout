@@ -69,7 +69,10 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		}
 
 		// Only the page's own service list is derived here. Duration and
-		// has_error describe the whole trace and come from the aggregate below.
+		// has_error describe the whole trace, so they come from the totals the
+		// repository accumulated over every span it walked -- not from this
+		// page, which is why trace_detail used to report the page's span count
+		// and duration as the trace's.
 		serviceSet := make(map[string]struct{})
 		for _, span := range data.Spans {
 			if span.Service != "" {

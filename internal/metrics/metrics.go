@@ -297,10 +297,10 @@ func RecordIngest(signal string, count int) {
 	IngestTotal.WithLabelValues(signal).Add(float64(count))
 }
 
-// RecordFlush records a flush event
 // RecordIngestShed counts one refused telemetry request.
 func RecordIngestShed() { IngestShedTotal.Inc() }
 
+// RecordFlush records a flush event.
 func RecordFlush(signal string, durationSec float64) {
 	FlushTotal.WithLabelValues(signal).Inc()
 	FlushDuration.WithLabelValues(signal).Observe(durationSec)
@@ -313,12 +313,6 @@ func RecordFlush(signal string, durationSec float64) {
 // times in a test binary, and registering a collector per construction panics
 // on the second one. Unset, every gauge reads zero.
 var duckDBPoolStats atomic.Pointer[func() sql.DBStats]
-
-// SetDuckDBPoolSource points the connection-pool gauges at a pool and returns
-// the function that stops reading it. The last caller wins; the returned
-// release only clears the source if it is still the one it installed, so a
-// second Duck closing in a test binary cannot blank the gauges of one that is
-// still serving.
 
 // duckDBMemoryStats is the live source for the per-tag DuckDB memory gauge.
 //
@@ -341,45 +335,48 @@ func SetDuckDBMemorySource(tags func() map[string]int64) (release func()) {
 	return func() { duckDBMemoryStats.CompareAndSwap(installed, nil) }
 }
 
-// duckDBMemoryTags is published by a pull-based collector rather than a gauge
-// somebody has to remember to refresh. A push gauge with no pump exports an
-// empty metric family, which looks exactly like "DuckDB is holding nothing" --
-// the most misleading possible reading for a series whose entire purpose is
-// measuring what DuckDB holds.
-var duckDBMemoryTags = promauto.NewGaugeVec(prometheus.GaugeOpts{
-	Name: "fanout_duckdb_memory_bytes",
-	Help: "DuckDB memory usage by tag, as DuckDB itself accounts for it",
-}, []string{"tag"})
+// duckDBMemoryDesc is emitted by a Collector, not held in a GaugeVec.
+//
+// The obvious implementation -- a GaugeVec that a scrape hook Resets and
+// refills -- is shared mutable state across concurrent scrapes, and a scrape
+// that lands mid-refill exports a subset of the tags. That understates what
+// DuckDB holds and correspondingly overstates the untracked gap, which is the
+// single number this series exists to compute. It also leaves the last good
+// values in place when a read fails, reporting them as current: the reading
+// that was meant to reveal an impending out-of-memory kill then looks normal.
+//
+// A Collector has neither problem. Each scrape builds its own metrics from its
+// own read, and a read that returns nothing exports nothing -- the series goes
+// absent, which is visibly different from "DuckDB is holding nothing".
+var duckDBMemoryDesc = prometheus.NewDesc(
+	"fanout_duckdb_memory_bytes",
+	"DuckDB memory usage by tag, as DuckDB itself accounts for it",
+	[]string{"tag"}, nil,
+)
 
-func init() {
-	prometheus.DefaultRegisterer.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
-		Name: "fanout_duckdb_memory_scrape_total",
-		Help: "Refreshes of the per-tag DuckDB memory gauge",
-	}, func() float64 {
-		refreshDuckDBMemory()
-		return 1
-	}))
-}
+type duckDBMemoryCollector struct{}
 
-// refreshDuckDBMemory republishes the per-tag gauge from the installed source.
-// Reset first: a tag that stops appearing must stop being reported, or the sum
-// overstates what DuckDB holds and understates the untracked gap, which is the
-// one number this exists to compute.
-func refreshDuckDBMemory() {
+func (duckDBMemoryCollector) Describe(ch chan<- *prometheus.Desc) { ch <- duckDBMemoryDesc }
+
+func (duckDBMemoryCollector) Collect(ch chan<- prometheus.Metric) {
 	fn := duckDBMemoryStats.Load()
 	if fn == nil {
 		return
 	}
-	tags := (*fn)()
-	if tags == nil {
-		return
-	}
-	duckDBMemoryTags.Reset()
-	for tag, bytes := range tags {
-		duckDBMemoryTags.WithLabelValues(tag).Set(float64(bytes))
+	for tag, bytes := range (*fn)() {
+		ch <- prometheus.MustNewConstMetric(duckDBMemoryDesc, prometheus.GaugeValue, float64(bytes), tag)
 	}
 }
 
+func init() {
+	prometheus.DefaultRegisterer.MustRegister(duckDBMemoryCollector{})
+}
+
+// SetDuckDBPoolSource points the connection-pool gauges at a pool and returns
+// the function that stops reading it. The last caller wins; the returned
+// release only clears the source if it is still the one it installed, so a
+// second Duck closing in a test binary cannot blank the gauges of one that is
+// still serving.
 func SetDuckDBPoolSource(stats func() sql.DBStats) (release func()) {
 	if stats == nil {
 		return func() {}

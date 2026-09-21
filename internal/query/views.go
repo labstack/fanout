@@ -315,10 +315,13 @@ func CreateParquetViews(db *sql.DB, parquetDir string) error {
 	}
 	for _, signal := range []string{"spans", "logs", "metrics"} {
 		pattern := filepath.ToSlash(filepath.Join(parquetDir, "batches", "*.batch", signal+".parquet"))
-		// _schema.batch is written from the current binary's row structs and is
-		// the definition of "every column this build knows about", so reading
-		// its schema keeps the view in lockstep with the writer instead of
-		// duplicating the column list here for someone to forget.
+		// _schema.batch is rewritten from the current binary's row structs on
+		// every open (ParquetStore.ensureSchemaBatch), so it is the definition
+		// of "every column this build knows about". Reading its schema keeps
+		// the view in lockstep with the writer instead of duplicating the
+		// column list here for someone to forget. That rewrite is load-bearing:
+		// while the file was written once and kept, these views were pinned to
+		// whichever build created the data directory.
 		schemaFile := filepath.ToSlash(filepath.Join(parquetDir, "batches", "_schema.batch", signal+".parquet"))
 		columns, err := parquetSchemaMap(db, schemaFile, signal == "spans")
 		if err != nil {

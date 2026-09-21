@@ -1658,22 +1658,21 @@ bounds AS (
   SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
 ),
 -- The parent side is range-filtered HERE rather than in the join's ON
--- clause, and that placement is the whole cost of this statement.
+-- clause, which keeps the hash build off every span ever ingested. The
+-- affected window is one minute of newly ingested spans; the table behind
+-- this view is the whole retention period, so the two differ by orders of
+-- magnitude and the ON-clause form pays for the difference on every pass.
 --
--- Mixing an equality with an inequality in one ON clause leaves DuckDB
--- nothing to hash the range on, so it plans the whole thing as a
--- NESTED_LOOP_JOIN: spans x spans, quadratic, inside a window every other
--- bound in this file has already made small. Measured on one stuck pass,
--- the ON-clause form spilled 45 GiB and hit max_temp_directory_size; this
--- form returns the same rows in 30s with zero spill. No row or time bound
--- can catch that, because the window really was small -- the plan was not.
+-- Measured (TestEdgeRollupPlanUsesHashJoins, spans as a Parquet-backed view,
+-- 600k spans over 25 days, one affected minute): 14ms here against 33ms with
+-- the range predicate in the ON clause. Both plan a HASH_JOIN -- the cost is
+-- the size of the build side, not the join algorithm.
 --
--- Bounding the parent side to the affected bucket range ±1h keeps the hash
--- build off every span ever ingested. Parents further out are dropped,
--- which is acceptable for minute-bucket dependency edges. Caveat retained
--- from the original: buckets come from span start_time while the window
--- bounds ingested_unix_nano, so one late-arriving span with an old
--- start_time widens this range for the pass that ingests it.
+-- Parents more than 1h outside the affected bucket range are dropped, which
+-- is acceptable for minute-bucket dependency edges. Caveat retained from the
+-- original: buckets come from span start_time while the window bounds
+-- ingested_unix_nano, so one late-arriving span with an old start_time
+-- widens this range for the pass that ingests it.
 parent_scope AS (
   SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
   FROM spans parent, bounds
@@ -1692,7 +1691,7 @@ call_edges AS (
     AVG(child.duration_ms) AS avg_ms,
     AVG(CASE WHEN child.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate,
     'call' AS edge_type
-  FROM spans child, bounds
+  FROM spans child
   JOIN parent_scope parent
     ON child.parent_span_id = parent.span_id
    AND child.trace_id = parent.trace_id
@@ -1700,6 +1699,15 @@ call_edges AS (
   JOIN affected a
     ON a.namespace = child.namespace
    AND a.bucket = date_trunc('minute', child.start_time)
+  -- bounds joins last, and as an explicit CROSS JOIN. Written as
+  -- "FROM spans child, bounds JOIN parent_scope ON child...", the comma binds
+  -- looser than JOIN: that parses as "spans child" comma "(bounds JOIN
+  -- parent_scope ON ...)", so DuckDB materialises a CROSS_PRODUCT of the child
+  -- scan with bounds instead of folding the single bounds row into the filters.
+  -- Same rows either way, so nothing fails and no row assertion notices; on the
+  -- fixture above it is 21ms against 14ms. TestEdgeRollupPlanUsesHashJoins
+  -- asserts the CROSS_PRODUCT is absent here and present in the comma form.
+  CROSS JOIN bounds
   WHERE child.service IS NOT NULL
     AND child.service != ''
     AND parent.service != child.service
