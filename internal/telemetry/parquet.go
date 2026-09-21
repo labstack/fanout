@@ -436,9 +436,6 @@ func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID strin
 	})
 }
 
-// Trace reads only ranges selected by the persistent hash index. Scope filters
-// and the limit are applied while decoding so a pathological trace cannot grow
-// request memory without bound.
 // TraceTotals describes the whole trace, not the page a limit admitted.
 //
 // These come free: readIndexedTrace already decodes every row of the trace and
@@ -454,6 +451,10 @@ type TraceTotals struct {
 	MaxEndNano   int64
 }
 
+// Trace reads only ranges selected by the persistent hash index. Scope filters
+// and the limit are applied while decoding so a pathological trace cannot grow
+// request memory without bound. The totals it returns describe the whole trace,
+// not the page the limit admitted.
 func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSpan, TraceTotals, error) {
 	var totals TraceTotals
 	services := make(map[string]struct{}, 8)
