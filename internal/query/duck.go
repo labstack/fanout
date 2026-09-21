@@ -1651,6 +1651,37 @@ WITH affected AS (
     AND start_time >= ?
     AND start_time < ?
 ),
+-- The affected bucket range, computed once. As four scalar subqueries
+-- repeated across the predicates below, these read as correlated to the
+-- planner and cost a re-derivation each.
+bounds AS (
+  SELECT MIN(bucket) AS lo, MAX(bucket) AS hi FROM affected
+),
+-- The parent side is range-filtered HERE rather than in the join's ON
+-- clause, and that placement is the whole cost of this statement.
+--
+-- Mixing an equality with an inequality in one ON clause leaves DuckDB
+-- nothing to hash the range on, so it plans the whole thing as a
+-- NESTED_LOOP_JOIN: spans x spans, quadratic, inside a window every other
+-- bound in this file has already made small. Measured on one stuck pass,
+-- the ON-clause form spilled 45 GiB and hit max_temp_directory_size; this
+-- form returns the same rows in 30s with zero spill. No row or time bound
+-- can catch that, because the window really was small -- the plan was not.
+--
+-- Bounding the parent side to the affected bucket range ±1h keeps the hash
+-- build off every span ever ingested. Parents further out are dropped,
+-- which is acceptable for minute-bucket dependency edges. Caveat retained
+-- from the original: buckets come from span start_time while the window
+-- bounds ingested_unix_nano, so one late-arriving span with an old
+-- start_time widens this range for the pass that ingests it.
+parent_scope AS (
+  SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
+  FROM spans parent, bounds
+  WHERE parent.start_time >= bounds.lo - INTERVAL 1 HOUR
+    AND parent.start_time <= bounds.hi + INTERVAL 1 HOUR
+    AND parent.service IS NOT NULL
+    AND parent.service != ''
+),
 call_edges AS (
   SELECT
     child.namespace,
@@ -1661,30 +1692,19 @@ call_edges AS (
     AVG(child.duration_ms) AS avg_ms,
     AVG(CASE WHEN child.status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_rate,
     'call' AS edge_type
-  FROM spans child
-  JOIN spans parent
+  FROM spans child, bounds
+  JOIN parent_scope parent
     ON child.parent_span_id = parent.span_id
    AND child.trace_id = parent.trace_id
    AND child.namespace = parent.namespace
-   -- Bound the parent side to the affected BUCKET RANGE ±1h: without this
-   -- the hash build covers every span ever ingested. Parents more than 1h
-   -- outside [MIN(affected.bucket), MAX(affected.bucket)] are dropped —
-   -- acceptable for minute-bucket dependency edges. Caveat: buckets come
-   -- from span start_time while the window bounds ingested_unix_nano, so
-   -- one late-arriving span with an old start_time widens the range (and
-   -- this scan) back to that bucket for the pass that ingests it.
-   AND parent.start_time >= (SELECT MIN(bucket) FROM affected) - INTERVAL 1 HOUR
-   AND parent.start_time <= (SELECT MAX(bucket) FROM affected) + INTERVAL 1 HOUR
   JOIN affected a
     ON a.namespace = child.namespace
    AND a.bucket = date_trunc('minute', child.start_time)
-  WHERE parent.service IS NOT NULL
-    AND parent.service != ''
-    AND child.service IS NOT NULL
+  WHERE child.service IS NOT NULL
     AND child.service != ''
     AND parent.service != child.service
-    AND child.start_time >= (SELECT MIN(bucket) FROM affected)
-    AND child.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
+    AND child.start_time >= bounds.lo
+    AND child.start_time < bounds.hi + INTERVAL 1 MINUTE
   GROUP BY child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
 ),
 -- Producers and consumers are aggregated per (namespace, bucket, service,
@@ -1705,8 +1725,8 @@ producers AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_PRODUCER'
-    AND s.start_time >= (SELECT MIN(bucket) FROM affected)
-    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
+    AND s.start_time >= (SELECT lo FROM bounds)
+    AND s.start_time < (SELECT hi FROM bounds) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
     AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
@@ -1724,8 +1744,8 @@ consumers AS (
     ON a.namespace = s.namespace
    AND a.bucket = date_trunc('minute', s.start_time)
   WHERE s.kind = 'SPAN_KIND_CONSUMER'
-    AND s.start_time >= (SELECT MIN(bucket) FROM affected)
-    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
+    AND s.start_time >= (SELECT lo FROM bounds)
+    AND s.start_time < (SELECT hi FROM bounds) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
     AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
@@ -1857,9 +1877,9 @@ func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args 
 }
 
 // Trace pins the immutable Parquet snapshot for the full indexed-file read.
-func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemetry.IndexedSpan, error) {
+func (d *Duck) Trace(ctx context.Context, query telemetry.TraceQuery) ([]telemetry.IndexedSpan, telemetry.TraceTotals, error) {
 	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
-		return nil, err
+		return nil, telemetry.TraceTotals{}, err
 	}
 	defer d.parquetMu.RUnlock()
 	return d.repository.Parquet.Trace(ctx, query)

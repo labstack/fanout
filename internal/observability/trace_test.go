@@ -2,7 +2,6 @@ package observability
 
 import (
 	"context"
-	"database/sql"
 	"regexp"
 	"strings"
 	"testing"
@@ -44,10 +43,6 @@ func TestTracePagedSpansStillDescribeTheWholeTrace(t *testing.T) {
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(traceSummaryQuery)).
-		WithArgs("wide-trace", start, end, "prod", "prod").
-		WillReturnRows(sqlmock.NewRows([]string{"span_count", "service_count", "duration_ms", "has_error"}).
-			AddRow(int64(3), int64(2), 3.0, true))
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
 		WithArgs("wide-trace", start, end, "prod", "prod", 1).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
@@ -71,6 +66,11 @@ func TestTracePagedSpansStillDescribeTheWholeTrace(t *testing.T) {
 	}
 	if !result.Data.HasError {
 		t.Error("has_error = false, want true: the trace errors in a span the page omitted")
+	}
+	// Spans start at +0 (2ms), +1ms (1ms) and +2ms (1ms), so the trace runs 3ms
+	// end to end -- a figure the single returned span cannot produce on its own.
+	if result.Data.DurationMS != 3 {
+		t.Errorf("duration_ms = %v, want 3: the duration spans the trace, not the page", result.Data.DurationMS)
 	}
 	if strings.Contains(result.Summary, "1 spans") || strings.Contains(result.Summary, "1 services") {
 		t.Errorf("summary reports the page as the trace: %q", result.Summary)
@@ -96,10 +96,6 @@ func TestTraceWholeTraceIsNotReportedAsTruncated(t *testing.T) {
 	}}}); err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery(regexp.QuoteMeta(traceSummaryQuery)).
-		WithArgs("small-trace", start, end, "prod", "prod").
-		WillReturnRows(sqlmock.NewRows([]string{"span_count", "service_count", "duration_ms", "has_error"}).
-			AddRow(int64(1), int64(1), 25.0, false))
 	mock.ExpectQuery(regexp.QuoteMeta(traceLogsQuery)).
 		WithArgs("small-trace", start, end, "prod", "prod", 10).
 		WillReturnRows(sqlmock.NewRows([]string{"time", "severity", "service", "body", "trace_id", "span_id"}))
@@ -117,65 +113,5 @@ func TestTraceWholeTraceIsNotReportedAsTruncated(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// The sqlmock tests above prove the plumbing but never execute the SQL, so the
-// aggregate's own arithmetic needs DuckDB to check it. start_time and end_time
-// are TIMESTAMP (internal/query/views.go:19-20); subtracting them yields an
-// INTERVAL, which is not a nanosecond count and cannot be scaled to
-// milliseconds by division. Only the BIGINT *_unix_nano columns can.
-func TestTraceSummaryQueryComputesDurationInMilliseconds(t *testing.T) {
-	db, err := sql.Open("duckdb", "")
-	if err != nil {
-		t.Fatalf("open duckdb: %v", err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE spans (
-		namespace VARCHAR, trace_id VARCHAR, service VARCHAR, status VARCHAR,
-		start_time TIMESTAMP, end_time TIMESTAMP,
-		start_unix_nano BIGINT, end_unix_nano BIGINT)`); err != nil {
-		t.Fatalf("create spans: %v", err)
-	}
-	base := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	// The trace spans 3ms end-to-end: first span starts at base, last ends 3ms later.
-	rows := []struct {
-		service string
-		status  string
-		startMS int64
-		endMS   int64
-	}{
-		{"cart", "OK", 0, 3},
-		{"cart", "OK", 1, 2},
-		{"flagd", "ERROR", 2, 3},
-	}
-	for _, r := range rows {
-		start := base.Add(time.Duration(r.startMS) * time.Millisecond)
-		end := base.Add(time.Duration(r.endMS) * time.Millisecond)
-		if _, err := db.Exec(`INSERT INTO spans VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-			"prod", "t1", r.service, r.status, start, end, start.UnixNano(), end.UnixNano()); err != nil {
-			t.Fatalf("insert span: %v", err)
-		}
-	}
-
-	var spanCount, serviceCount int64
-	var durationMS float64
-	var hasError bool
-	if err := db.QueryRow(traceSummaryQuery, "t1", base, base.Add(time.Hour), "prod", "prod").
-		Scan(&spanCount, &serviceCount, &durationMS, &hasError); err != nil {
-		t.Fatalf("trace summary query: %v", err)
-	}
-
-	if spanCount != 3 {
-		t.Errorf("span_count = %d, want 3", spanCount)
-	}
-	if serviceCount != 2 {
-		t.Errorf("service_count = %d, want 2", serviceCount)
-	}
-	if durationMS != 3 {
-		t.Errorf("duration_ms = %v, want 3", durationMS)
-	}
-	if !hasError {
-		t.Error("has_error = false, want true")
 	}
 }

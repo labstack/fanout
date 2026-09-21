@@ -28,7 +28,7 @@ var (
 type DB = queryrows.Queryer
 
 type traceReader interface {
-	Trace(context.Context, telemetry.TraceQuery) ([]telemetry.IndexedSpan, error)
+	Trace(context.Context, telemetry.TraceQuery) ([]telemetry.IndexedSpan, telemetry.TraceTotals, error)
 }
 
 type Service struct {

@@ -428,7 +428,7 @@ func TestIndexedTraceReadHonorsParquetGateContext(t *testing.T) {
 	mustLock(&d.parquetMu)
 	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Millisecond)
 	defer cancel()
-	_, err = d.Trace(ctx, telemetry.TraceQuery{TraceID: "trace", StartNanos: 1, EndNanos: 2, Limit: 1})
+	_, _, err = d.Trace(ctx, telemetry.TraceQuery{TraceID: "trace", StartNanos: 1, EndNanos: 2, Limit: 1})
 	d.parquetMu.Unlock()
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Trace error = %v, want deadline exceeded", err)

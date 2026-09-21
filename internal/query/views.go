@@ -295,37 +295,72 @@ func CreateCacheTables(db *sql.DB) error {
 
 // CreateParquetViews exposes the repository's open Parquet files under the
 // canonical telemetry schema used by Fanout's SQL kernel.
+//
+// The schema is pinned explicitly rather than unioned from the files. Both
+// approaches tolerate an older batch that predates an added column -- it reads
+// as NULL either way, which is the property the views cannot do without, since
+// CreateViews names every column and binds eagerly, so a glob that rejects one
+// old file stops the process from starting.
+//
+// They differ entirely in cost. union_by_name derives the column set by opening
+// every file in the glob at bind and holding a reader and footer per file for
+// the statement's life, on the raw allocator where memory_limit cannot see it:
+// measured at 510 MiB per query against 3,281 live batches and 857 MiB against
+// 5,709, scaling at roughly 150 KB per file and paid again by every concurrent
+// binder. Pinning the schema opens nothing at bind, so the same query costs
+// tens of MiB and stops tracking how many batches happen to exist.
 func CreateParquetViews(db *sql.DB, parquetDir string) error {
 	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS telemetry`); err != nil {
 		return err
 	}
 	for _, signal := range []string{"spans", "logs", "metrics"} {
 		pattern := filepath.ToSlash(filepath.Join(parquetDir, "batches", "*.batch", signal+".parquet"))
-		projection := "*"
-		if signal == "spans" {
-			projection = "* EXCLUDE (_trace_hash)"
+		// _schema.batch is written from the current binary's row structs and is
+		// the definition of "every column this build knows about", so reading
+		// its schema keeps the view in lockstep with the writer instead of
+		// duplicating the column list here for someone to forget.
+		schemaFile := filepath.ToSlash(filepath.Join(parquetDir, "batches", "_schema.batch", signal+".parquet"))
+		columns, err := parquetSchemaMap(db, schemaFile, signal == "spans")
+		if err != nil {
+			return err
 		}
-		// union_by_name is load-bearing and must stay. ensureSchemaBatch writes
-		// an empty _schema.batch from the current binary's structs so the glob
-		// always carries the full column set, and this flag is what lets an
-		// older batch that predates an added column read as NULL instead of
-		// failing the whole glob with "schema mismatch in glob". Without it
-		// CreateViews, which names every column explicitly and binds eagerly,
-		// fails at NewDuck and the process will not start until every
-		// pre-deploy batch has aged out.
-		//
-		// It is expensive: bind opens every file in the glob and holds a reader
-		// and footer per file for the query's life, on the raw allocator, where
-		// memory_limit cannot see it. Measured on 3,281 live batches: 510 MiB
-		// per query against 89 MiB without, paid by every concurrent binder.
-		// That cost is bounded by keeping the live batch count down, which is
-		// compaction's job, not by removing this flag.
-		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=true)`, signal, projection, sqlLiteral(pattern))
+		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT * FROM read_parquet(%s, schema=%s)`, signal, sqlLiteral(pattern), columns)
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create parquet view telemetry.%s: %w", signal, err)
 		}
 	}
 	return nil
+}
+
+// parquetSchemaMap renders the schema argument for read_parquet from one file's
+// own schema. A column absent from a given file takes its default, which is how
+// an older batch survives a build that added a column.
+func parquetSchemaMap(db *sql.DB, file string, dropTraceHash bool) (string, error) {
+	rows, err := db.Query(fmt.Sprintf(`SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_parquet(%s))`, sqlLiteral(file)))
+	if err != nil {
+		return "", fmt.Errorf("describe %s: %w", file, err)
+	}
+	defer rows.Close()
+	var entries []string
+	for rows.Next() {
+		var name, columnType string
+		if err := rows.Scan(&name, &columnType); err != nil {
+			return "", err
+		}
+		// _trace_hash is a physical sort key, not part of the telemetry schema.
+		if dropTraceHash && name == "_trace_hash" {
+			continue
+		}
+		entries = append(entries, fmt.Sprintf("%s: {'name': %s, 'type': %s, 'default_value': NULL}",
+			sqlLiteral(name), sqlLiteral(name), sqlLiteral(columnType)))
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	if len(entries) == 0 {
+		return "", fmt.Errorf("no columns described for %s", file)
+	}
+	return "MAP{" + strings.Join(entries, ", ") + "}", nil
 }
 
 // CreateViews creates stable clean-name views plus the attr() macro.

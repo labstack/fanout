@@ -145,6 +145,14 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	namespace := d.duck.DefaultNamespace()
+	// The percentile below is approx_quantile, not PERCENTILE_CONT: the exact
+	// form is holistic and retains every value of every group on the raw
+	// allocator, outside anything memory_limit bounds. This runs every 60s over
+	// a 15-minute window. See serviceRollupP95SQL.
+	//
+	// Keep rationale in Go comments, not SQL ones: these statements go through a
+	// validator that rejects "--" outright, so a SQL comment here fails the query
+	// at runtime rather than at build time.
 	scope := detectorScopeClause(namespace)
 
 	// Compare current error rate to baseline (previous period)
@@ -229,10 +237,6 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 		WITH current_period AS (
 			SELECT
 				service as service_name,
-				-- approx_quantile, not PERCENTILE_CONT: the exact form is
-				-- holistic and retains every value of every group on the raw
-				-- allocator, outside anything memory_limit bounds. This runs
-				-- every 60s over a 15-minute window. See serviceRollupP95SQL.
 				approx_quantile(duration_ms, 0.95) AS p95_latency
 			FROM spans
 			WHERE start_unix_nano >= %d AND start_unix_nano < %d

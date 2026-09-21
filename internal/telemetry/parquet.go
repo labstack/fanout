@@ -439,18 +439,35 @@ func (p *ParquetStore) RestoreRetiredInputs(inputs []string, replacementID strin
 // Trace reads only ranges selected by the persistent hash index. Scope filters
 // and the limit are applied while decoding so a pathological trace cannot grow
 // request memory without bound.
-func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSpan, error) {
+// TraceTotals describes the whole trace, not the page a limit admitted.
+//
+// These come free: readIndexedTrace already decodes every row of the trace and
+// applies the same predicates a separate aggregate would, and only the heap is
+// bounded by Limit. Deriving them here removes a second pass over every batch
+// file -- the thing that made trace_detail pay for its own correctness.
+type TraceTotals struct {
+	Spans        int
+	Services     int
+	DurationMS   float64
+	HasError     bool
+	MinStartNano int64
+	MaxEndNano   int64
+}
+
+func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSpan, TraceTotals, error) {
+	var totals TraceTotals
+	services := make(map[string]struct{}, 8)
 	if query.TraceID == "" {
-		return nil, nil
+		return nil, totals, nil
 	}
 	if query.Limit <= 0 {
-		return nil, errors.New("trace query limit must be positive")
+		return nil, totals, errors.New("trace query limit must be positive")
 	}
 	if query.Limit > maxTraceQueryResults {
-		return nil, fmt.Errorf("trace query limit exceeds %d", maxTraceQueryResults)
+		return nil, totals, fmt.Errorf("trace query limit exceeds %d", maxTraceQueryResults)
 	}
 	if query.StartNanos >= query.EndNanos {
-		return nil, errors.New("trace query time range must be positive")
+		return nil, totals, errors.New("trace query time range must be positive")
 	}
 	hash := xxh3.HashString(query.TraceID)
 	p.mu.RLock()
@@ -462,7 +479,7 @@ func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSp
 	selected := make(indexedSpanHeap, 0, query.Limit)
 	for _, batch := range batches {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, totals, err
 		}
 		if batch.metadata.MaxSpanStartNanos > 0 &&
 			(batch.metadata.MaxSpanStartNanos < query.StartNanos || batch.metadata.MinSpanStartNanos >= query.EndNanos) {
@@ -470,23 +487,27 @@ func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSp
 		}
 		match, found, err := batch.traces.Lookup(hash)
 		if err != nil {
-			return nil, err
+			return nil, totals, err
 		}
 		if !found {
 			continue
 		}
-		if err := readIndexedTrace(ctx, batch, match, query, &selected); err != nil {
-			return nil, err
+		if err := readIndexedTrace(ctx, batch, match, query, &selected, &totals, services); err != nil {
+			return nil, totals, err
 		}
+	}
+	totals.Services = len(services)
+	if totals.Spans > 0 && totals.MaxEndNano > totals.MinStartNano {
+		totals.DurationMS = float64(totals.MaxEndNano-totals.MinStartNano) / float64(time.Millisecond)
 	}
 	out := []IndexedSpan(selected)
 	sort.Slice(out, func(i, j int) bool {
 		return indexedSpanEarlier(out[i], out[j])
 	})
-	return out, nil
+	return out, totals, nil
 }
 
-func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange, query TraceQuery, selected *indexedSpanHeap) (err error) {
+func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange, query TraceQuery, selected *indexedSpanHeap, totals *TraceTotals, services map[string]struct{}) (err error) {
 	if match.row > uint64(math.MaxInt64) {
 		return errors.New("trace index row exceeds Parquet reader limit")
 	}
@@ -521,6 +542,21 @@ func readIndexedTrace(ctx context.Context, batch *storedBatch, match traceRange,
 			if row.TraceID != query.TraceID || row.StartUnixNano < query.StartNanos ||
 				(query.Namespace != "" && row.Namespace != query.Namespace) {
 				continue
+			}
+			// Counted before the heap, so the totals describe the trace while
+			// the heap keeps describing the page.
+			totals.Spans++
+			if row.Service != "" {
+				services[row.Service] = struct{}{}
+			}
+			if strings.Contains(strings.ToUpper(row.Status), "ERROR") {
+				totals.HasError = true
+			}
+			if totals.MinStartNano == 0 || row.StartUnixNano < totals.MinStartNano {
+				totals.MinStartNano = row.StartUnixNano
+			}
+			if end := row.StartUnixNano + int64(row.DurationMS*float64(time.Millisecond)); end > totals.MaxEndNano {
+				totals.MaxEndNano = end
 			}
 			selected.Add(row.span(), query.Limit)
 		}

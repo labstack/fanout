@@ -19,15 +19,6 @@ ORDER BY MAX(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1 EL
          MAX(end_time) - MIN(start_time) DESC
 LIMIT 1`
 
-const traceSummaryQuery = `
-SELECT
-  CAST(count(*) AS BIGINT),
-  CAST(count(DISTINCT service) AS BIGINT),
-  COALESCE((max(end_unix_nano) - min(start_unix_nano)) / 1000000.0, 0),
-  COALESCE(bool_or(upper(status) IN ('ERROR', 'STATUS_CODE_ERROR')), false)
-FROM spans
-WHERE trace_id = ? AND start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?)`
-
 const traceLogsQuery = `
 SELECT time, severity, coalesce(service, ''), body, coalesce(trace_id, ''), coalesce(span_id, '')
 FROM logs
@@ -66,7 +57,7 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 	dataSource := "parquet_index"
 	data := TraceDetail{TraceID: traceID, Services: []string{}, Spans: []TraceSpan{}, Logs: []LogEntry{}}
 	if traceID != "" {
-		storedSpans, readErr := s.repository.Trace(ctx, telemetry.TraceQuery{
+		storedSpans, totals, readErr := s.repository.Trace(ctx, telemetry.TraceQuery{
 			TraceID: traceID, Namespace: scope.Namespace,
 			StartNanos: scope.Start.UnixNano(), EndNanos: scope.End.UnixNano(), Limit: limit,
 		})
@@ -91,13 +82,15 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		sort.Strings(data.Services)
 		// The page above is what limit admitted. Everything the caller reads as
 		// a fact about the trace — how many spans it has, how many services it
-		// crosses, how long it took, whether it failed — comes from an
-		// aggregate over the whole trace instead, so a narrow page cannot
-		// silently redefine the trace. The aggregate reads no rows into this
-		// process: it is counted in DuckDB and returns one row.
-		if err := s.traceTotals(ctx, scope, traceID, &data); err != nil {
-			return Result[TraceDetail]{}, err
-		}
+		// crosses, how long it took, whether it failed — describes the whole
+		// trace, so a narrow page cannot silently redefine it.
+		//
+		// These come from the index walk that produced the page: it already
+		// decodes every row of the trace and applies the same predicates, and
+		// only the heap is bounded by limit. An aggregate over every batch file
+		// would answer the same question and cost a second pass.
+		data.SpanCount, data.ServiceCount = totals.Spans, totals.Services
+		data.DurationMS, data.HasError = totals.DurationMS, totals.HasError
 		data.Truncated = data.SpanCount > len(data.Spans)
 		data.Logs, err = s.traceLogsFromParquet(ctx, scope, traceID, limit)
 		if err != nil {
@@ -113,28 +106,6 @@ func (s *Service) Trace(ctx context.Context, scope Scope, traceID, service strin
 		}
 	}
 	return Result[TraceDetail]{Schema: TraceSchema, Summary: summary, Data: data, Provenance: s.provenanceFor(scope, dataSource)}, nil
-}
-
-// traceTotals fills the fields that describe the trace rather than the page.
-// A trace that has aged out of the window reports zeros, which leaves the
-// summary saying the trace holds no spans — true for the window asked about.
-func (s *Service) traceTotals(ctx context.Context, scope Scope, traceID string, data *TraceDetail) error {
-	rows, err := s.db.QueryContext(ctx, traceSummaryQuery, traceID, scope.Start, scope.End, scope.Namespace, scope.Namespace)
-	if err != nil {
-		return fmt.Errorf("query trace totals: %w", err)
-	}
-	defer rows.Close()
-	if rows.Next() {
-		var spanCount, serviceCount int64
-		if err := rows.Scan(&spanCount, &serviceCount, &data.DurationMS, &data.HasError); err != nil {
-			return fmt.Errorf("scan trace totals: %w", err)
-		}
-		data.SpanCount, data.ServiceCount = int(spanCount), int(serviceCount)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate trace totals: %w", err)
-	}
-	return nil
 }
 
 func (s *Service) traceLogsFromParquet(ctx context.Context, scope Scope, traceID string, limit int) ([]LogEntry, error) {

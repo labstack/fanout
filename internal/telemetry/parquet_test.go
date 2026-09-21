@@ -163,7 +163,7 @@ func TestParquetStoreTraceFiltersAndBoundsResultsDuringRead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := store.Trace(context.Background(), TraceQuery{
+	got, _, err := store.Trace(context.Background(), TraceQuery{
 		TraceID: "large-trace", Namespace: "prod", StartNanos: 10, EndNanos: 90, Limit: 3,
 	})
 	if err != nil {
@@ -226,7 +226,7 @@ func TestParquetStoreSkipsTraceIndexesOutsideTimeWindow(t *testing.T) {
 	if err := os.Remove(filepath.Join(store.BatchPath("old-traces"), "trace.fidx")); err != nil {
 		t.Fatal(err)
 	}
-	got, err := store.Trace(context.Background(), TraceQuery{
+	got, _, err := store.Trace(context.Background(), TraceQuery{
 		TraceID: "wanted", StartNanos: 1_000, EndNanos: 2_000, Limit: 10,
 	})
 	if err != nil {
@@ -502,9 +502,10 @@ func completeTestSpan() Span {
 }
 
 func traceAll(store *ParquetStore, traceID string) ([]IndexedSpan, error) {
-	return store.Trace(context.Background(), TraceQuery{
+	spans, _, err := store.Trace(context.Background(), TraceQuery{
 		TraceID: traceID, StartNanos: math.MinInt64, EndNanos: math.MaxInt64, Limit: maxTraceQueryResults,
 	})
+	return spans, err
 }
 
 func readOneParquetRow[T any](t *testing.T, path string) T {
