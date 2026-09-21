@@ -1,3 +1,11 @@
+// Package intelligence derives anomalies and log patterns from telemetry.
+//
+// Every SQL string in this file goes through internal/query's validator, which
+// rejects "--" outright. A SQL comment in one of these statements therefore
+// fails the query at runtime, on a background goroutine, as a logged error
+// nobody is watching -- that is how latency detection stopped reporting for
+// half an hour. Rationale goes in Go comments; TestNoSQLCommentsInQueryStrings
+// enforces it.
 package intelligence
 
 import (
@@ -145,14 +153,6 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	namespace := d.duck.DefaultNamespace()
-	// The percentile below is approx_quantile, not PERCENTILE_CONT: the exact
-	// form is holistic and retains every value of every group on the raw
-	// allocator, outside anything memory_limit bounds. This runs every 60s over
-	// a 15-minute window. See serviceRollupP95SQL.
-	//
-	// Keep rationale in Go comments, not SQL ones: these statements go through a
-	// validator that rejects "--" outright, so a SQL comment here fails the query
-	// at runtime rather than at build time.
 	scope := detectorScopeClause(namespace)
 
 	// Compare current error rate to baseline (previous period)
@@ -162,7 +162,7 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 				service as service_name,
 				COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR')) AS error_count,
 				COUNT(*) AS total_count,
-				(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::FLOAT / COUNT(*)::FLOAT) AS error_rate
+				(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::DOUBLE / COUNT(*)::DOUBLE) AS error_rate
 			FROM spans
 			WHERE start_unix_nano >= %d AND start_unix_nano < %d
 			%s
@@ -173,7 +173,7 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 				service as service_name,
 				COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR')) AS error_count,
 				COUNT(*) AS total_count,
-				(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::FLOAT / COUNT(*)::FLOAT) AS error_rate,
+				(COUNT(*) FILTER (WHERE status IN ('STATUS_CODE_ERROR', 'ERROR'))::DOUBLE / COUNT(*)::DOUBLE) AS error_rate,
 				STDDEV(CASE WHEN status IN ('STATUS_CODE_ERROR', 'ERROR') THEN 1.0 ELSE 0.0 END) AS error_stddev
 			FROM spans
 			WHERE start_unix_nano >= %d AND start_unix_nano < %d
@@ -228,6 +228,10 @@ func (d *Detector) detectErrorRateAnomalies(ctx context.Context, start, end time
 
 // detectLatencyAnomalies detects latency degradation
 func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
+	// The percentile below is approx_quantile, not PERCENTILE_CONT: the exact
+	// form is holistic and retains every value of every group on the raw
+	// allocator, outside anything memory_limit bounds. This runs every 60s over
+	// a 15-minute window. See serviceRollupP95SQL.
 	startNano := start.UnixNano()
 	endNano := end.UnixNano()
 	namespace := d.duck.DefaultNamespace()
@@ -308,22 +312,32 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 	return anomalies
 }
 
-// detectVolumeAnomalies detects unusual traffic volume changes
-func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
-	startNano := start.UnixNano()
-	endNano := end.UnixNano()
-	namespace := d.duck.DefaultNamespace()
-	scope := detectorScopeClause(namespace)
-
-	sql := fmt.Sprintf(`
+// volumeAnomalySQL compares span volume in [startNano, endNano) against the
+// window of equal length immediately before it.
+//
+// Both sides are averaged over 5-minute buckets, and that symmetry is the whole
+// point. The current side used to be a single COUNT(*) over the entire window
+// while the baseline averaged per-bucket counts, so on a 15-minute window the
+// current figure was three times the baseline for every service no matter what
+// the traffic did. Every service was permanently a critical volume anomaly:
+// steady traffic scored z=75 in TestVolumeAnomalyComparesEqualWindows, and the
+// live demo sat at health score 0 with 17 meaningless critical insights.
+func volumeAnomalySQL(startNano, endNano int64, scope string) string {
+	return fmt.Sprintf(`
 		WITH current_period AS (
 			SELECT
-				service as service_name,
-				COUNT(*) AS span_count
-			FROM spans
-			WHERE start_unix_nano >= %d AND start_unix_nano < %d
-			%s
-			GROUP BY service
+				service_name,
+				AVG(cnt) AS span_count
+			FROM (
+				SELECT
+					service as service_name,
+					COUNT(*) AS cnt
+				FROM spans
+				WHERE start_unix_nano >= %d AND start_unix_nano < %d
+				%s
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time)
+			) subq
+			GROUP BY service_name
 		),
 		baseline_period AS (
 			SELECT
@@ -343,7 +357,7 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 		)
 		SELECT
 			c.service_name,
-			c.span_count::FLOAT AS current_count,
+			c.span_count::DOUBLE AS current_count,
 			COALESCE(b.avg_count, 0.0) AS baseline_count,
 			CASE
 				WHEN b.count_stddev > 0 THEN (c.span_count - b.avg_count) / b.count_stddev
@@ -352,6 +366,16 @@ func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Ti
 		FROM current_period c
 		LEFT JOIN baseline_period b ON c.service_name = b.service_name
 	`, startNano, endNano, scope, startNano-endNano+startNano, startNano, scope)
+}
+
+// detectVolumeAnomalies detects unusual traffic volume changes
+func (d *Detector) detectVolumeAnomalies(ctx context.Context, start, end time.Time) []Anomaly {
+	startNano := start.UnixNano()
+	endNano := end.UnixNano()
+	namespace := d.duck.DefaultNamespace()
+	scope := detectorScopeClause(namespace)
+
+	sql := volumeAnomalySQL(startNano, endNano, scope)
 
 	resp := d.duck.ExecuteSQL(ctx, query.SQLRequest{Query: sql})
 	if resp.Error != "" {
