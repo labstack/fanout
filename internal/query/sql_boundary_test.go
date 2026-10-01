@@ -25,6 +25,11 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 		"SELECT * FROM query('SELECT * FROM rollup_state')",
 		"SELECT * FROM read_parquet('/etc/passwd')",
 		"SELECT * FROM (SHOW ALL TABLES)",
+		"SELECT * FROM read_batches",
+		"SELECT * FROM read_span_events",
+		"SELECT * FROM read_log_times",
+		"SELECT * FROM read_traces",
+		"SELECT * FROM endpoint_rollup",
 		"SELECT current_setting('allowed_directories')",
 		"SELECT getvariable('operator_secret')",
 		"WITH x AS MATERIALIZED (COPY (SELECT 1) TO '" + output + "') SELECT * FROM x",
@@ -100,6 +105,11 @@ func TestExecuteSQLRejectsEngineMetadataReads(t *testing.T) {
 	d := &Duck{DB: openTestDuck(t)}
 	for _, statement := range []string{
 		"SELECT * FROM (SHOW ALL TABLES)",
+		"SELECT * FROM read_batches",
+		"SELECT * FROM read_span_events",
+		"SELECT * FROM read_log_times",
+		"SELECT * FROM read_traces",
+		"SELECT * FROM endpoint_rollup",
 		"SELECT current_setting('allowed_directories')",
 		"SELECT getvariable('operator_secret')",
 	} {

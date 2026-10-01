@@ -29,6 +29,17 @@
   and shredded Parquet VARIANT columns. Preserve integers, booleans, bytes,
   nested values, and nanosecond UTC timestamps. Convert nested SQL results to
   JSON only at the client boundary; attribute keys containing dots are literal.
+- Dashboard file snapshots use each signal's actual event-time footer bounds,
+  including signed nanoseconds. Unknown statistics include the file. Never
+  substitute ingestion time or prune public arbitrary SQL from a dashboard scope.
+- Endpoint histograms, log counts, and notable-trace candidates acknowledge
+  complete immutable batch IDs transactionally. Query cache markers and rows in
+  one read transaction under the pinned file snapshot; uncached active files
+  remain immediately visible. Compaction and retention must invalidate retired
+  contributions without double counting or losing late publications.
+- Exact partial windows read narrow derived event-time projections. Keep them
+  private to dashboard queries and rebuildable from format-3 Parquet; body search
+  still matches redacted text. Analytical service/edge watermark lag is separate.
 - Batch format 3, including its physical schema, is the only accepted telemetry
   format. Schema changes require a format version change. Disable schema unioning
   and Hive partition inference; use native Parquet binding so VARIANT extracts

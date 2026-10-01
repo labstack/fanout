@@ -198,7 +198,7 @@ func TestTopologyUsesSharedNodesAndTypedEdges(t *testing.T) {
 
 func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	svc, mock, _ := newMockService(t)
-	svc.endpointMature.Store(true)
+	svc.db = completedReadDB{svc.db}
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 	midpoint := start.Add(30 * time.Minute)
@@ -207,8 +207,6 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout").
 		WillReturnRows(sqlmock.NewRows([]string{"point_time", "spans", "error_rate", "p50_ms", "p95_ms", "log_count", "metric_count"}).
 			AddRow(start, int64(120), 0.10, 80.0, 220.0, int64(30), int64(8)))
-	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupStatusQuery)).
-		WillReturnRows(sqlmock.NewRows([]string{"ready", "watermark"}).AddRow(true, end.UnixNano()))
 	// The rollup path returns cumulative histogram counts and the percentiles
 	// are interpolated from them; 50 calls all at or under 250ms put p95 inside
 	// the 100–250ms bucket.
@@ -220,15 +218,8 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	for _, bucket := range endpointDurationBuckets {
 		endpointColumns = append(endpointColumns, bucket.Column)
 	}
-	// The interior bounds are computed in Go now, so the cache range and the
-	// boundary exclusion arrive as parameters DuckDB can push into the scan.
-	interiorStart, interiorEnd := endpointInteriorBounds(start, end, end)
-	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupQuery)).
-		WithArgs(
-			interiorStart, interiorEnd, "prod", "prod", "checkout", "checkout",
-			start, end, interiorStart, interiorEnd, "prod", "prod", "checkout", "checkout",
-			25,
-		).
+	mock.ExpectQuery(regexp.QuoteMeta(completedEndpointsQuery)).
+		WithArgs(start, end, "prod", "prod", "checkout", "checkout", 25).
 		WillReturnRows(sqlmock.NewRows(endpointColumns).AddRow(endpointCounts...))
 	mock.ExpectQuery(regexp.QuoteMeta(performanceHeatmapSQL(time.Hour))).
 		WithArgs(start, end, "prod", "prod", start, end, "prod", "prod").
@@ -266,37 +257,11 @@ func TestPerformanceReturnsAllVisualizationDatasets(t *testing.T) {
 	}
 }
 
-func TestQueryEndpointsFallsBackToRawUntilBackfillReady(t *testing.T) {
+func TestQueryEndpointsOnMutableSQLDB(t *testing.T) {
 	svc, mock, _ := newMockService(t)
 	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
 	end := start.Add(time.Hour)
 
-	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupStatusQuery)).
-		WillReturnRows(sqlmock.NewRows([]string{"ready", "watermark"}).AddRow(false, int64(0)))
-	mock.ExpectQuery(regexp.QuoteMeta(rawEndpointsQuery)).
-		WithArgs(start, end, "prod", "prod", "checkout", "checkout", 25).
-		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
-			AddRow("GET", "/pay", int64(2), 10.0, 20.0, 25.0, 0.0))
-
-	endpoints, source, err := svc.queryEndpoints(context.Background(), Scope{Namespace: "prod", Start: start, End: end}, "checkout", 25)
-	if err != nil {
-		t.Fatalf("queryEndpoints: %v", err)
-	}
-	if source != "spans" || len(endpoints) != 1 {
-		t.Fatalf("queryEndpoints = (%#v, %q), want one raw endpoint", endpoints, source)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestQueryEndpointsFallsBackToRawWhenRollupProbeFails(t *testing.T) {
-	svc, mock, _ := newMockService(t)
-	start := time.Date(2026, 7, 20, 11, 0, 0, 0, time.UTC)
-	end := start.Add(time.Hour)
-
-	mock.ExpectQuery(regexp.QuoteMeta(endpointRollupStatusQuery)).
-		WillReturnError(errors.New("rollup state temporarily unavailable"))
 	mock.ExpectQuery(regexp.QuoteMeta(rawEndpointsQuery)).
 		WithArgs(start, end, "prod", "prod", "checkout", "checkout", 25).
 		WillReturnRows(sqlmock.NewRows([]string{"method", "path", "calls", "p50_ms", "p95_ms", "p99_ms", "error_rate"}).
@@ -681,3 +646,7 @@ func TestLogsBoundsParquetQueryWithLimitAndAggregatedBuckets(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+type completedReadDB struct{ DB }
+
+func (completedReadDB) CompletedBatchReads() bool { return true }

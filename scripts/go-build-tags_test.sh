@@ -41,6 +41,13 @@ duckdb_build_tags go test -run '-tags=pattern' -tags=integration ./...
 [[ "${duckdb_go_args[3]}" == '-tags=pattern' ]]
 [[ "${duckdb_go_args[4]}" == '-tags=duckdb_use_static_lib,integration' ]]
 
+GOFLAGS='--tags=custom'
+duckdb_build_tags go test --tags=integration ./...
+[[ "${duckdb_go_args[2]}" == '-tags=duckdb_use_static_lib,custom,integration' ]]
+GOFLAGS=''
+duckdb_build_tags go test --tags integration ./...
+[[ "${duckdb_go_args[3]}" == 'duckdb_use_static_lib,integration' ]]
+
 GOFLAGS="'-tags=unclosed"
 if duckdb_build_tags go test ./... 2>/dev/null; then
 	echo 'Accepted unterminated GOFLAGS quote.' >&2

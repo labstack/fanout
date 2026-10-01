@@ -130,6 +130,36 @@ that work is prepared.
 Retention is based on ingestion time rather than event time. A service with a
 bad clock therefore cannot pin a batch on disk by emitting a far-future event.
 
+## Dashboard reads pin completed batches
+
+Dashboard log, metric, and span scans select immutable files from their actual
+minimum and maximum event timestamps. Bounds come from every Parquet row-group
+footer, including negative timestamps. Files without complete statistics remain
+eligible. Late-arriving telemetry is selected by its event time, independently of
+its ingestion timestamp. Arbitrary SQL retains access to all active files.
+
+Endpoints merge fixed-boundary duration histograms for completed minutes with
+exact partial-minute contributions. Log histograms merge minute counts by
+namespace, service, and severity; text searches still count rows whose redacted
+body matches. Notable-trace selection uses an exact candidate index by namespace
+and service, preserving error priority, duration, and trace-ID tie ordering.
+Partial traces are recomputed within the selected window.
+
+These caches acknowledge complete batch IDs rather than an ingestion watermark.
+A batch's scalar projections, aggregates, candidate index, and acknowledgement
+commit in one transaction. A read pins active files and reads cache rows and
+acknowledgements from one DuckDB transaction. Newly published uncached files are
+read directly, so cache backfill does not delay visibility. Compaction replaces
+contributions by batch ID, and retention removes retired contributions. An
+invalidated trace index is excluded until rebuilt.
+
+Narrow scalar projections answer exact partial minutes and partial traces
+without rereading attributes or log bodies from a large compacted file. They add
+derived DuckDB storage, which can be rebuilt from authoritative Parquet. The
+background cache worker processes bounded groups and yields between passes;
+`fanout_read_cache_pending_batches` reports its backlog. This work is independent
+of the service and edge rollups' safety window.
+
 ## Rollups lag deliberately
 
 Overview and alert queries read rebuildable DuckDB rollups. Their watermark

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/labstack/fanout/internal/queryrows"
 )
 
 var logFilters = `
@@ -16,8 +18,9 @@ WHERE time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < ?::TIMESTAMP_NS::TIMEST
 
 // DuckDB answers the two questions the API asks: the newest `limit` entries
 // and per-bucket counts. LIMIT and GROUP BY bound the response size. Both
-// statements still scan rows in the selected window; the histogram has no
-// persistent aggregate and its work grows with the number of matching rows.
+// statements use the event-time file snapshot. Histograms without a text
+// search merge completed minutes with exact boundary and uncached-file
+// contributions; text searches count matching redacted rows.
 //
 // Redaction runs outside the LIMIT, and that placement is the whole cost of
 // this query. A projection in the same SELECT as ORDER BY ... LIMIT is
@@ -64,6 +67,7 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 	}
 	service, severity, search = strings.TrimSpace(service), strings.TrimSpace(severity), strings.TrimSpace(search)
 	search = strings.ToLower(search)
+	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: service})
 	data := Logs{Entries: []LogEntry{}, Buckets: []LogBucket{}}
 	filters := []any{scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, severity, severity, search, search}
 	rows, err := s.db.QueryContext(ctx, logEntriesQuery, append(append([]any{}, filters...), limit)...)
@@ -88,7 +92,12 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 	rows.Close()
 
 	matched := 0
-	bucketRows, err := s.db.QueryContext(ctx, logBucketsSQL(scope.End.Sub(scope.Start)), filters...)
+	histogramQuery := logBucketsSQL(scope.End.Sub(scope.Start))
+	if reader, ok := s.db.(queryrows.BatchReader); ok && reader.CompletedBatchReads() && search == "" {
+		ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: service, Kind: queryrows.LogHistogramRead})
+		histogramQuery = logMinuteBucketsSQL(scope.End.Sub(scope.Start))
+	}
+	bucketRows, err := s.db.QueryContext(ctx, histogramQuery, filters...)
 	if err != nil {
 		return Result[Logs]{}, fmt.Errorf("query log histogram: %w", err)
 	}
@@ -111,4 +120,17 @@ func (s *Service) Logs(ctx context.Context, scope Scope, service, severity, sear
 		Schema: LogsSchema, Summary: fmt.Sprintf("%d logs matched the selected telemetry window", matched),
 		Data: data, Provenance: s.provenanceFor(scope, "parquet"),
 	}, nil
+}
+
+func logMinuteBucketsSQL(window time.Duration) string {
+	return fmt.Sprintf(`WITH counts AS (
+ SELECT bucket AS time, severity, namespace, service, count FROM log_minutes
+ UNION ALL
+ SELECT date_trunc('minute',time::TIMESTAMP_NS), coalesce(lower(severity),''), namespace, service, sum(count)::BIGINT FROM log_tail
+ WHERE time>= $1::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time<$2::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ GROUP BY 1,2,3,4
+ ) SELECT time_bucket(INTERVAL '%s',time::TIMESTAMP_NS) AS point_time,
+ coalesce(nullif(upper(severity),''),'UNSPECIFIED') AS bucket_severity, sum(count)::BIGINT
+ FROM counts WHERE ($3='' OR namespace=$4) AND ($5='' OR service=$6) AND ($7='' OR lower(severity)=lower($8))
+ AND ($9='' AND $10='') GROUP BY point_time,bucket_severity ORDER BY point_time,bucket_severity`, timelineBucketWidth(window))
 }

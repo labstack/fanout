@@ -20,7 +20,6 @@ Primary query surfaces:
 - metrics view: clean metric columns for most queries
 - service_rollup table: partition-aware cached service health buckets
 - edge_rollup table: partition-aware cached service dependency edges
-- endpoint_rollup table: minute endpoint counts, errors, and mergeable latency histograms
 
 ### 1. Spans
 Parquet relation: telemetry.spans
@@ -117,11 +116,8 @@ edge_rollup columns:
 - calls (BIGINT)
 - avg_ms, error_rate (DOUBLE)
 
-endpoint_rollup columns:
-- namespace, service, method, path (VARCHAR)
-- bucket (TIMESTAMP)
-- calls, error_count, duration_count (BIGINT)
-- duration_buckets (STRUCT): cumulative fixed-boundary latency counters
+Dashboard reads use private completed-batch endpoint/log aggregates and exact
+trace candidates. These implementation tables are not public SQL relations.
 
 ## Query Guidelines
 1. Prefer spans, logs, and metrics over raw telemetry.* tables.
@@ -132,7 +128,7 @@ endpoint_rollup columns:
    attr(attributes, 'http.method') returns a VARIANT; cast for comparisons and
    aggregation: TRY_CAST(attr(attributes, 'http.status_code') AS BIGINT).
    TRY_CAST handles heterogeneous producer types. Missing keys return SQL NULL.
-5. Use service_rollup, edge_rollup, and endpoint_rollup as rebuildable cache tables for dashboards before scanning raw telemetry.
+5. Use service_rollup and edge_rollup as rebuildable cache tables for dashboards before scanning raw telemetry.
 6. Always include a LIMIT unless aggregation makes it unnecessary.
 
 ## Useful DuckDB Functions

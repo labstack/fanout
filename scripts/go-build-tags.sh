@@ -26,8 +26,8 @@ duckdb_build_tags() {
 			remaining="${remaining:${#token}}"
 			;;
 		esac
-		if [[ "$token" == -tags=* ]]; then
-			value="${token#-tags=}"
+		if [[ "$token" == -tags=* || "$token" == --tags=* ]]; then
+			value="${token#*=}"
 			tags+=",${value// /,}"
 		else
 			flags+=" $raw"
@@ -54,13 +54,13 @@ duckdb_build_tags() {
 			[[ "$stop" == false ]] || continue
 			case "$token" in
 			-- | -args) stop=true ;;
-			-tags=*)
-				tags+=",${token#-tags=}"
+			-tags=* | --tags=*)
+				tags+=",${token#*=}"
 				positions+=("$i")
 				prefixes+=("-tags=")
 				((position_count += 1))
 				;;
-			-tags)
+			-tags | --tags)
 				((i += 1))
 				if ((i >= ${#duckdb_go_args[@]})); then
 					echo 'Missing value for -tags.' >&2

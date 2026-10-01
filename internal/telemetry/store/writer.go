@@ -16,9 +16,12 @@ import (
 )
 
 const (
-	commitQueueDepth     = maxCommitWorkers
-	commitRetryLimit     = 5
-	groupAdmissionWindow = 20 * time.Millisecond
+	commitQueueDepth = maxCommitWorkers
+	commitRetryLimit = 5
+	// Bound group admission independently of encode time. Ten milliseconds
+	// coalesces concurrent exports without imposing a 20ms floor on every
+	// durable acknowledgement when the row target is not reached.
+	groupAdmissionWindow = 10 * time.Millisecond
 	maxAdmissionRequests = 512
 	maxGroupBatchRows    = 50_000
 	maxCommitWorkers     = 4

@@ -3,6 +3,7 @@ package telemetry
 import (
 	"container/heap"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -53,6 +54,16 @@ type BatchMetadata struct {
 	// measured when a batch is loaded, from stats the load already performs.
 	// Zero means not measured.
 	Bytes int64 `json:"-"`
+	// Event times come from fixed-schema Parquet footer statistics, not ingest
+	// timestamps. They are derived on publication/load and never change format 3.
+	SpanTime   TimeRange `json:"-"`
+	LogTime    TimeRange `json:"-"`
+	MetricTime TimeRange `json:"-"`
+}
+
+type TimeRange struct {
+	MinNanos, MaxNanos int64
+	Known              bool
 }
 
 type TraceQuery struct {
@@ -90,10 +101,8 @@ func OpenParquetStore(dir string) (*ParquetStore, error) {
 	}
 	p.publishGate <- struct{}{}
 	// Reject incompatible published data before touching staging or schema files.
-	for _, path := range []string{p.batchesDir, filepath.Join(p.dir, "retired")} {
-		if err := validateBatchFormats(path); err != nil {
-			return nil, err
-		}
+	if err := validateBatchFormats(p.batchesDir); err != nil {
+		return nil, err
 	}
 	for _, path := range []string{p.dir, p.batchesDir} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
@@ -488,8 +497,8 @@ func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSp
 		if err := ctx.Err(); err != nil {
 			return nil, totals, err
 		}
-		if batch.metadata.MaxSpanStartNanos > 0 &&
-			(batch.metadata.MaxSpanStartNanos < query.StartNanos || batch.metadata.MinSpanStartNanos >= query.EndNanos) {
+		if bounds := batch.metadata.SpanTime; bounds.Known &&
+			(bounds.MaxNanos < query.StartNanos || bounds.MinNanos >= query.EndNanos) {
 			continue
 		}
 		match, found, err := batch.traces.Lookup(hash)
@@ -1195,6 +1204,14 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		if rows := parquetFile.NumRows(); rows != int64(signal.count) {
 			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.name, rows, signal.count)
 		}
+		switch signal.name {
+		case "spans":
+			metadata.SpanTime = parquetTimeRange(parquetFile, "start_time")
+		case "logs":
+			metadata.LogTime = parquetTimeRange(parquetFile, "log_time")
+		case "metrics":
+			metadata.MetricTime = parquetTimeRange(parquetFile, "metric_time")
+		}
 	}
 	var traces traceIndex
 	if metadata.Spans > 0 {
@@ -1204,6 +1221,40 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		}
 	}
 	return &storedBatch{metadata: metadata, dir: dir, traces: traces}, nil
+}
+
+// Statistics are optional in Parquet. Without complete bounds, the file stays
+// in every candidate snapshot. Ingest bounds never substitute for event time.
+func parquetTimeRange(file *parquet.File, column string) TimeRange {
+	var result TimeRange
+	for _, group := range file.Metadata().RowGroups {
+		found := false
+		for _, chunk := range group.Columns {
+			if len(chunk.MetaData.PathInSchema) != 1 || chunk.MetaData.PathInSchema[0] != column {
+				continue
+			}
+			stats := chunk.MetaData.Statistics
+			if len(stats.MinValue) != 8 || len(stats.MaxValue) != 8 {
+				return TimeRange{}
+			}
+			low := int64(binary.LittleEndian.Uint64(stats.MinValue))
+			high := int64(binary.LittleEndian.Uint64(stats.MaxValue))
+			if low > high {
+				return TimeRange{}
+			}
+			if !result.Known || low < result.MinNanos {
+				result.MinNanos = low
+			}
+			if !result.Known || high > result.MaxNanos {
+				result.MaxNanos = high
+			}
+			result.Known, found = true, true
+		}
+		if !found {
+			return TimeRange{}
+		}
+	}
+	return result
 }
 
 func (p *ParquetStore) hasBatch(id string) bool {

@@ -95,15 +95,15 @@ func TestRecordRollupComponentAndProgress(t *testing.T) {
 	RollupBacklogChunks.Reset()
 
 	RecordRollupComponent(RollupService, RollupSuccess, 12, 0.25)
-	RecordRollupComponent(RollupEndpoint, RollupDisabled, 0, 0.01)
+	RecordRollupComponent(RollupReadCache, RollupDisabled, 0, 0.01)
 	if got := testutil.ToFloat64(RollupComponentTotal.WithLabelValues("service", "success")); got != 1 {
 		t.Errorf("service success count = %f, want 1", got)
 	}
 	if got := testutil.ToFloat64(RollupComponentRows.WithLabelValues("service")); got != 12 {
 		t.Errorf("service rows = %f, want 12", got)
 	}
-	if got := testutil.ToFloat64(RollupComponentTotal.WithLabelValues("endpoint", "disabled")); got != 1 {
-		t.Errorf("endpoint disabled count = %f, want 1", got)
+	if got := testutil.ToFloat64(RollupComponentTotal.WithLabelValues("read_cache", "disabled")); got != 1 {
+		t.Errorf("read cache disabled count = %f, want 1", got)
 	}
 
 	UpdateRollupProgress(RollupService, true, 10_000_000_000, 13_500_000_000, 2)
@@ -123,9 +123,9 @@ func TestRecordRollupComponentAndProgress(t *testing.T) {
 		t.Errorf("service backlog chunks = %f, want 2", got)
 	}
 
-	UpdateRollupProgress(RollupEndpoint, false, 0, 0, 0)
-	if got := testutil.ToFloat64(RollupEnabled.WithLabelValues("endpoint")); got != 0 {
-		t.Errorf("endpoint enabled = %f, want 0", got)
+	UpdateRollupProgress(RollupReadCache, false, 0, 0, 0)
+	if got := testutil.ToFloat64(RollupEnabled.WithLabelValues("read_cache")); got != 0 {
+		t.Errorf("read cache enabled = %f, want 0", got)
 	}
 }
 

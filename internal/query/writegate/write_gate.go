@@ -16,11 +16,11 @@ import (
 type WriteOperation string
 
 const (
-	WriteRollupSkip     WriteOperation = "rollup_skip_to_latest"
-	WriteRollupService  WriteOperation = "rollup_service"
-	WriteRollupEndpoint WriteOperation = "rollup_endpoint"
-	WriteRollupEdge     WriteOperation = "rollup_edge"
-	WriteMaintenance    WriteOperation = "maintenance"
+	WriteRollupSkip    WriteOperation = "rollup_skip_to_latest"
+	WriteRollupService WriteOperation = "rollup_service"
+	WriteReadCache     WriteOperation = "read_cache"
+	WriteRollupEdge    WriteOperation = "rollup_edge"
+	WriteMaintenance   WriteOperation = "maintenance"
 )
 
 // WriteGate serializes DuckDB writes while measuring how long each operation

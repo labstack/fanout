@@ -25,6 +25,8 @@ import (
 )
 
 type Duck struct {
+	snapshotMu      sync.Mutex
+	snapshotQueries map[string]compiledSnapshot
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
 	// sized from the machine.
 	DB *sql.DB
@@ -95,11 +97,6 @@ const (
 	edgeRollupRawMaxKey           = "edge_rollup_v2_rawmax"
 	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"
 	edgeRollupSubWindowKey        = "edge_rollup_v2_subwindow_end"
-	EndpointRollupStateKey        = "endpoint_rollup_v1"
-	endpointRollupRawMaxKey       = "endpoint_rollup_v1_rawmax"
-	endpointBackfillStateKey      = "endpoint_rollup_v1_backfill_started"
-	EndpointReadyStateKey         = "endpoint_rollup_v1_ready"
-	EndpointDisabledStateKey      = "endpoint_rollup_v1_disabled"
 	defaultDuckDBPoolSize         = 1
 	parquetCompactionCycle        = 10 * time.Second
 	parquetCompactionCycleBudget  = 8 * time.Second
@@ -354,11 +351,6 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// A skipped endpoint cache is never queryable: clear any cache left by a
-	// previous normal backfill as well as its persisted readiness bit.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM endpoint_rollup`); err != nil {
-		return err
-	}
 	for _, w := range []struct {
 		key       string
 		watermark int64
@@ -372,11 +364,6 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 		// watermark it just advanced.
 		{edgeRollupSubCursorKey, 0},
 		{edgeRollupSubWindowKey, 0},
-		// Endpoint queries remain on their raw-span fallback when the operator
-		// explicitly skips historical rollups. Mark this cache disabled instead of
-		// later declaring a new-only, incomplete endpoint cache ready.
-		{EndpointReadyStateKey, 0},
-		{EndpointDisabledStateKey, 1},
 	} {
 		if err := storeRollupWatermark(ctx, tx, w.key, w.watermark); err != nil {
 			return err
@@ -540,6 +527,12 @@ func (d *Duck) RunRollups(ctx context.Context) {
 		d.runMaintenanceLoop(ctx)
 	}()
 	defer func() { <-maintenanceDone }()
+	readCacheDone := make(chan struct{})
+	go func() {
+		defer close(readCacheDone)
+		d.runReadCacheLoop(ctx)
+	}()
+	defer func() { <-readCacheDone }()
 
 	ticker := time.NewTicker(d.cfg.RollupInterval)
 	defer ticker.Stop()
@@ -594,8 +587,8 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 		affected += n
 	}
 
-	if n, err := d.refreshEndpointRollup(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("endpoint rollup: %w", err))
+	if n, err := d.RefreshReadCaches(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("completed batch read cache: %w", err))
 	} else {
 		affected += n
 	}
@@ -607,6 +600,28 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 	}
 
 	return int(affected), errors.Join(errs...)
+}
+
+// Completed-file caches do not inherit the minute-based analytical watermark.
+// Drain bounded transactions promptly, yielding to other writers between passes.
+func (d *Duck) runReadCacheLoop(ctx context.Context) {
+	delay := time.Second
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		rows, err := d.RefreshReadCaches(ctx)
+		delay = time.Second
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("completed batch read cache failed", "err", err)
+		} else if rows > 0 {
+			delay = 100 * time.Millisecond
+		}
+	}
 }
 
 func (d *Duck) runMaintenanceLoop(ctx context.Context) {
@@ -696,7 +711,7 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 		defer unlock()
 		var errs []error
 		if d.cfg.RetentionDays > 0 {
-			for _, table := range []string{"service_rollup", "endpoint_rollup", "edge_rollup"} {
+			for _, table := range []string{"service_rollup", "edge_rollup"} {
 				if _, err := d.writer().ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY", table, d.cfg.RetentionDays)); err != nil {
 					errs = append(errs, fmt.Errorf("prune %s: %w", table, err))
 				}
@@ -849,129 +864,6 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 		// so a silent zero here reads in benchmark evidence as "the rollup ran and
 		// matched nothing" when it actually means "we do not know".
 		slog.Warn("service rollup rows affected unavailable", "err", err)
-		return 0, nil
-	}
-	recordedRows = rows
-	return rows, nil
-}
-
-func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
-	start := time.Now()
-	result := metrics.RollupError
-	var recordedRows int64
-	var watermark, sourceMax int64 // see refreshServiceRollup
-	defer func() {
-		metrics.RecordRollupComponent(metrics.RollupEndpoint, result, recordedRows, time.Since(start).Seconds())
-		if result == metrics.RollupError && sourceMax > 0 {
-			updateRollupProgress(metrics.RollupEndpoint, true, watermark, sourceMax)
-		}
-	}()
-	unlock := d.writeGate.Lock(writegate.WriteRollupEndpoint)
-	defer unlock()
-	if err := d.lockRollupParquetRead(ctx); err != nil {
-		return 0, err
-	}
-	defer d.parquetMu.RUnlock()
-
-	tx, err := d.writer().BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	disabled, err := rollupWatermark(ctx, tx, EndpointDisabledStateKey)
-	if err != nil {
-		return 0, err
-	}
-	if disabled != 0 {
-		err := tx.Commit()
-		if err == nil {
-			result = metrics.RollupDisabled
-			updateRollupProgress(metrics.RollupEndpoint, false, 0, 0)
-		}
-		return 0, err
-	}
-	lastWatermark, err := rollupWatermark(ctx, tx, EndpointRollupStateKey)
-	if err != nil {
-		return 0, err
-	}
-	watermark = lastWatermark
-	lastRawMax, err := rollupWatermark(ctx, tx, endpointRollupRawMaxKey)
-	if err != nil {
-		return 0, err
-	}
-	backfillStarted, err := rollupWatermark(ctx, tx, endpointBackfillStateKey)
-	if err != nil {
-		return 0, err
-	}
-
-	rawWatermark, err := maxEdgeRollupWatermark(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-	sourceMax = rawWatermark
-	if rawWatermark <= lastWatermark {
-		err := tx.Commit()
-		if err == nil {
-			result = metrics.RollupNoop
-			updateRollupProgress(metrics.RollupEndpoint, true, lastWatermark, rawWatermark)
-		}
-		return 0, err
-	}
-	minIngested := int64(0)
-	if lastWatermark == 0 {
-		if minIngested, err = minEdgeRollupIngested(ctx, tx); err != nil {
-			return 0, err
-		}
-		if err := storeRollupWatermark(ctx, tx, endpointBackfillStateKey, 1); err != nil {
-			return 0, err
-		}
-		backfillStarted = 1
-	}
-	windowStart, windowEnd, chunked := rollupWindow(lastWatermark, minIngested, rawWatermark)
-
-	newWatermark := windowEnd
-	if rawWatermark > lastRawMax {
-		if guarded := rawWatermark - d.rollupSafetyLagNanos(); newWatermark > guarded {
-			newWatermark = guarded
-		}
-		if newWatermark < lastWatermark {
-			newWatermark = lastWatermark
-		}
-	}
-	rawMaxProcessed := rawWatermark
-	if chunked {
-		rawMaxProcessed = windowEnd
-	}
-
-	if _, err := tx.ExecContext(ctx, endpointRollupDeleteSQL, windowStart, windowEnd); err != nil {
-		return 0, err
-	}
-	res, err := tx.ExecContext(ctx, endpointRollupInsertSQL, windowStart, windowEnd)
-	if err != nil {
-		return 0, err
-	}
-	if err := storeRollupWatermark(ctx, tx, EndpointRollupStateKey, newWatermark); err != nil {
-		return 0, err
-	}
-	if err := storeRollupWatermark(ctx, tx, endpointRollupRawMaxKey, rawMaxProcessed); err != nil {
-		return 0, err
-	}
-	// The product query remains on raw spans until a normal (non-skip) backfill
-	// reaches the live tip. This prevents partial endpoint history on upgrade.
-	if backfillStarted != 0 && !chunked && windowEnd == rawWatermark {
-		if err := storeRollupWatermark(ctx, tx, EndpointReadyStateKey, 1); err != nil {
-			return 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	result = metrics.RollupSuccess
-	updateRollupProgress(metrics.RollupEndpoint, true, newWatermark, rawWatermark)
-	rows, err := res.RowsAffected()
-	if err != nil {
-		slog.Warn("endpoint rollup rows affected unavailable", "err", err)
 		return 0, nil
 	}
 	recordedRows = rows
@@ -1540,94 +1432,6 @@ LEFT JOIN span_agg s USING (namespace, bucket, service)
 LEFT JOIN log_agg l USING (namespace, bucket, service)
 LEFT JOIN metric_agg m USING (namespace, bucket, service);`
 
-// Endpoint latency is stored as a mergeable fixed-boundary histogram. Unlike
-// averaging minute p95 values, summing these bin counts preserves the latency
-// distribution across arbitrary query windows. Bounds include Fanout's health
-// thresholds (750ms and 2s) and cap the overflow bucket at five minutes.
-const endpointRollupDeleteSQL = `
-WITH affected AS (
-  SELECT DISTINCT
-    namespace,
-    date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket,
-    COALESCE(service, '') AS service,
-    COALESCE(NULLIF(http_method, ''), 'CALL') AS method,
-    COALESCE(NULLIF(http_route, ''), NULLIF(operation, ''), 'unknown') AS path
-  FROM spans
-  WHERE ingested_unix_nano > ?
-    AND ingested_unix_nano <= ?
-    AND start_time IS NOT NULL
-)
-DELETE FROM endpoint_rollup
-WHERE EXISTS (
-  SELECT 1
-  FROM affected
-  WHERE affected.namespace = endpoint_rollup.namespace
-    AND affected.bucket = endpoint_rollup.bucket
-    AND affected.service = endpoint_rollup.service
-    AND affected.method = endpoint_rollup.method
-    AND affected.path = endpoint_rollup.path
-);`
-
-const endpointRollupInsertSQL = `
-WITH affected AS (
-  SELECT DISTINCT
-    namespace,
-    date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket,
-    COALESCE(service, '') AS service,
-    COALESCE(NULLIF(http_method, ''), 'CALL') AS method,
-    COALESCE(NULLIF(http_route, ''), NULLIF(operation, ''), 'unknown') AS path
-  FROM spans
-  WHERE ingested_unix_nano > ?
-    AND ingested_unix_nano <= ?
-    AND start_time IS NOT NULL
-)
-INSERT INTO endpoint_rollup (
-  namespace, bucket, service, method, path, calls, error_count, duration_count, duration_buckets
-)
-SELECT
-  s.namespace,
-  date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
-  COALESCE(s.service, '') AS service,
-  COALESCE(NULLIF(s.http_method, ''), 'CALL') AS method,
-  COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown') AS path,
-  COUNT(*) AS calls,
-  COUNT(*) FILTER (WHERE upper(s.status) IN ('ERROR', 'STATUS_CODE_ERROR')) AS error_count,
-  COUNT(s.duration_ms) AS duration_count,
-  struct_pack(
-    le_0_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.1),
-    le_0_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.5),
-    le_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 1),
-    le_2_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 2.5),
-    le_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 5),
-    le_10 := COUNT(*) FILTER (WHERE s.duration_ms <= 10),
-    le_25 := COUNT(*) FILTER (WHERE s.duration_ms <= 25),
-    le_50 := COUNT(*) FILTER (WHERE s.duration_ms <= 50),
-    le_100 := COUNT(*) FILTER (WHERE s.duration_ms <= 100),
-    le_250 := COUNT(*) FILTER (WHERE s.duration_ms <= 250),
-    le_500 := COUNT(*) FILTER (WHERE s.duration_ms <= 500),
-    le_750 := COUNT(*) FILTER (WHERE s.duration_ms <= 750),
-    le_1000 := COUNT(*) FILTER (WHERE s.duration_ms <= 1000),
-    le_2000 := COUNT(*) FILTER (WHERE s.duration_ms <= 2000),
-    le_5000 := COUNT(*) FILTER (WHERE s.duration_ms <= 5000),
-    le_30000 := COUNT(*) FILTER (WHERE s.duration_ms <= 30000),
-    le_300000 := COUNT(*) FILTER (WHERE s.duration_ms <= 300000)
-  ) AS duration_buckets
-FROM spans s
-JOIN affected a
-  ON a.namespace = s.namespace
- AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
- AND a.service = COALESCE(s.service, '')
- AND a.method = COALESCE(NULLIF(s.http_method, ''), 'CALL')
- AND a.path = COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown')
-WHERE s.start_time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
-  AND s.start_time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
-GROUP BY
-  s.namespace,
-  date_trunc('minute', s.start_time::TIMESTAMP_NS),
-  COALESCE(s.service, ''),
-  COALESCE(NULLIF(s.http_method, ''), 'CALL'),
-  COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown');`
-
 const edgeRollupDeleteSQL = `
 WITH affected AS (
   SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket
@@ -1824,15 +1628,38 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		d.parquetMu.RUnlock()
 		return nil, err
 	}
+	var tx *sql.Tx
+	var db snapshotSQL = conn
+	if window, ok := queryrows.ReadWindow(ctx); ok && d.repository != nil {
+		tx, err = conn.BeginTx(ctx, nil)
+		if err == nil {
+			db = tx
+			query, err = d.bindSnapshot(ctx, tx, query, window)
+		}
+		if err != nil {
+			if tx != nil {
+				_ = tx.Rollback()
+			}
+			_ = conn.Close()
+			d.parquetMu.RUnlock()
+			return nil, err
+		}
+	}
 	started := time.Now()
-	rows, err := conn.QueryContext(ctx, query, args...)
+	rows, err := db.QueryContext(ctx, query, args...)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
 		_ = conn.Close()
 		d.parquetMu.RUnlock()
 		return nil, err
 	}
 	release := func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
 		// The connection goes back to the pool only once its rows are done
 		// with it, which is what closing the rows first guarantees.
 		//
@@ -1872,6 +1699,21 @@ func (r *lockedRows) release() { r.unlockOnce.Do(r.unlock) }
 // QueryRowScan executes a single-row query against immutable Parquet files and
 // DuckDB's local rollup cache.
 func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
+	if _, ok := queryrows.ReadWindow(ctx); ok && d.repository != nil {
+		rows, err := d.QueryContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		if rows.Next() {
+			return rows.Scan(dest...)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return sql.ErrNoRows
+	}
+
 	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
 		return err
 	}

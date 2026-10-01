@@ -28,7 +28,7 @@ func TestVariantRoundTripAcrossRowGroupsAndCompaction(t *testing.T) {
 		rows[i] = logParquetRow{LogTime: int64(i), Attributes: map[string]any{
 			"messaging.system": system, key: int64(math.MaxInt64), "zero": int64(0), "false": false,
 			"null": nil, "bytes": []byte{0, 255}, "nested": []any{int64(i), map[string]any{"ok": true}},
-		}, Resource: map[string]any{"service.name": "test"}}
+		}, Resource: map[string]any{"service.name": "test", "service.namespace": int64(i), key: int64(math.MaxInt64), "bytes": []byte{0, 255}, "nested": []any{false, map[string]any{"zero": int64(0)}}, "null": nil}}
 	}
 	dir := t.TempDir()
 	first := filepath.Join(dir, "first.parquet")
@@ -45,6 +45,42 @@ func TestVariantRoundTripAcrossRowGroupsAndCompaction(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkVariantRows(t, merged, append(rows, rows[:3]...))
+}
+
+func TestSharedResourceCellsPreserveInterleavedRows(t *testing.T) {
+	shared := map[string]any{"service.name": "shared", "integer": int64(math.MaxInt64), "bytes": []byte{0, 255}, "nested": []any{false, map[string]any{"null": nil}}}
+	objects := make([]map[string]any, 80)
+	for i := range objects {
+		objects[i] = map[string]any{"service.name": fmt.Sprint(i), "integer": int64(i)}
+	}
+	rows := make([]logParquetRow, parquetRowGroupRows+257)
+	for i := range rows {
+		var resource any
+		switch i % 5 {
+		case 0:
+			resource = shared
+		case 1:
+			resource = map[string]any{"unique": int64(i), "bytes": []byte{byte(i)}}
+		case 2:
+			resource = objects[(i/5)%len(objects)]
+		case 3:
+			resource = nil
+		case 4:
+			resource = map[string]any(nil)
+		}
+		rows[i] = logParquetRow{LogTime: int64(i), Resource: resource}
+	}
+	path := filepath.Join(t.TempDir(), "interleaved.parquet")
+	if err := writeTypedParquet(path, rows, parquetPageSize); err != nil {
+		t.Fatal(err)
+	}
+	// Both forms of an absent canonical resource are SQL NULL, not VARIANT null.
+	for i := range rows {
+		if m, ok := rows[i].Resource.(map[string]any); ok && m == nil {
+			rows[i].Resource = nil
+		}
+	}
+	checkVariantRows(t, path, rows)
 }
 
 func checkVariantRows(t *testing.T, path string, want []logParquetRow) {

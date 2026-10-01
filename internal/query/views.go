@@ -126,8 +126,9 @@ CREATE TABLE edge_rollup (
   PRIMARY KEY (namespace, bucket, caller, callee, edge_type)
 );`
 
-const createEndpointRollupTable = `
-CREATE TABLE endpoint_rollup (
+const createReadEndpointTable = `
+CREATE TABLE IF NOT EXISTS read_endpoints (
+  batch_id VARCHAR,
   namespace TEXT,
   bucket TIMESTAMP,
   service TEXT,
@@ -155,7 +156,7 @@ CREATE TABLE endpoint_rollup (
     le_30000 UBIGINT,
     le_300000 UBIGINT
   ),
-  PRIMARY KEY (namespace, bucket, service, method, path)
+  PRIMARY KEY (batch_id, namespace, bucket, service, method, path)
 );`
 
 const createRollupStateTable = `
@@ -286,15 +287,17 @@ func CreateCacheTables(db *sql.DB) error {
 		"namespace", "bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"); err != nil {
 		return err
 	}
-	if err := ensureCacheTable(db, "endpoint_rollup", createEndpointRollupTable,
-		"namespace", "bucket", "service", "method", "path", "calls", "error_count", "duration_count", "duration_buckets"); err != nil {
-		return err
-	}
 	if err := ensureCacheTable(db, "rollup_state", createRollupStateTable,
 		"cache_key", "last_ingested_unix_nano", "updated_at"); err != nil {
 		return err
 	}
-	return nil
+	if _, err := db.Exec(`DROP TABLE IF EXISTS endpoint_rollup`); err != nil {
+		return err
+	}
+	if err := forgetRollupProgress(db, "endpoint_rollup"); err != nil {
+		return err
+	}
+	return createBatchCaches(db)
 }
 
 // CreateParquetViews exposes the fixed format-3 schema. Binding one file

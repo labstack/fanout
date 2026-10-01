@@ -195,7 +195,7 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 			name, _ := node["table_name"].(string)
 			schema, _ := node["schema_name"].(string)
 			catalog, _ := node["catalog_name"].(string)
-			allowed := map[string]bool{"spans": true, "logs": true, "metrics": true, "service_rollup": true, "edge_rollup": true, "endpoint_rollup": true}
+			allowed := map[string]bool{"spans": true, "logs": true, "metrics": true, "service_rollup": true, "edge_rollup": true}
 			cte := catalog == "" && ((schema == "" && ctes[strings.ToLower(name)]) ||
 				(schema == "recurring" && ctes["recurring:"+strings.ToLower(name)]))
 			if !cte && (catalog != "" || (schema != "" && schema != "main" && schema != "telemetry") || !allowed[strings.ToLower(name)]) {

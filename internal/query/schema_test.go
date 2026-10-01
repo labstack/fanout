@@ -27,7 +27,6 @@ func TestGetSchema(t *testing.T) {
 		"Logs",
 		"Metrics",
 		"service_rollup",
-		"endpoint_rollup",
 		"trace_id",
 		"service",
 		"telemetry.spans",

@@ -40,13 +40,6 @@ func TestRollupOnceRebuildsAffectedServiceBuckets(t *testing.T) {
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
-	var ready int64
-	if err := db.QueryRow(`SELECT last_ingested_unix_nano FROM rollup_state WHERE cache_key = ?`, EndpointReadyStateKey).Scan(&ready); err != nil {
-		t.Fatalf("query endpoint readiness: %v", err)
-	}
-	if ready != 1 {
-		t.Fatalf("endpoint readiness = %d, want 1 after initial backfill", ready)
-	}
 
 	insertRollupTestSpan(t, db, rollupTestSpan{
 		namespace: "ns-a",
@@ -132,55 +125,6 @@ func TestServiceRollupLatencyExcludesDependencyWaits(t *testing.T) {
 	}
 	if got := p95("load-generator"); got < 200 {
 		t.Fatalf("load-generator p95 = %.1fms, want its outbound calls to still count when it has nothing else", got)
-	}
-}
-
-func TestRollupOnceRebuildsAffectedEndpointBuckets(t *testing.T) {
-	db := openTestDuck(t)
-	if err := CreateTables(db); err != nil {
-		t.Fatalf("CreateTables failed: %v", err)
-	}
-	if err := CreateViews(db); err != nil {
-		t.Fatalf("CreateViews failed: %v", err)
-	}
-	d := &Duck{DB: db, cfg: config.Config{RetentionDays: 30}}
-	ctx := context.Background()
-	bucket := time.Now().UTC().Truncate(time.Minute).Add(-2 * time.Minute)
-
-	insertRollupTestSpan(t, db, rollupTestSpan{
-		namespace: "ns-a", traceID: "t-1", spanID: "s-1", service: "checkout",
-		operation: "POST checkout", httpMethod: "POST", httpRoute: "/checkout",
-		start: bucket.Add(5 * time.Second), duration: 10 * time.Millisecond, ingested: 100,
-	})
-	insertRollupTestSpan(t, db, rollupTestSpan{
-		namespace: "ns-a", traceID: "t-2", spanID: "s-2", service: "checkout",
-		operation: "POST checkout", httpMethod: "POST", httpRoute: "/checkout", status: "STATUS_CODE_ERROR",
-		start: bucket.Add(10 * time.Second), duration: 100 * time.Millisecond, ingested: 100,
-	})
-	if _, err := d.rollupOnce(ctx); err != nil {
-		t.Fatalf("first rollupOnce failed: %v", err)
-	}
-	// A late row in the same minute must rebuild, not append to, the cached
-	// bucket; otherwise calls and histogram bins double count prior rows.
-	insertRollupTestSpan(t, db, rollupTestSpan{
-		namespace: "ns-a", traceID: "t-3", spanID: "s-3", service: "checkout",
-		operation: "POST checkout", httpMethod: "POST", httpRoute: "/checkout",
-		start: bucket.Add(15 * time.Second), duration: 500 * time.Millisecond, ingested: 200,
-	})
-	if _, err := d.rollupOnce(ctx); err != nil {
-		t.Fatalf("second rollupOnce failed: %v", err)
-	}
-
-	var calls, errors, histogramCount int64
-	if err := db.QueryRow(`
-SELECT calls, error_count, duration_buckets.le_300000::BIGINT
-FROM endpoint_rollup
-WHERE namespace = 'ns-a' AND bucket = ? AND service = 'checkout'
-  AND method = 'POST' AND path = '/checkout'`, bucket).Scan(&calls, &errors, &histogramCount); err != nil {
-		t.Fatalf("query endpoint_rollup failed: %v", err)
-	}
-	if calls != 3 || errors != 1 || histogramCount != 3 {
-		t.Fatalf("endpoint_rollup = calls:%d errors:%d histogram:%d, want 3/1/3", calls, errors, histogramCount)
 	}
 }
 
@@ -614,13 +558,7 @@ WHERE namespace = ?
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("first rollupOnce failed: %v", err)
 	}
-	var endpointReady int64
-	if err := db.QueryRow(`SELECT COALESCE(MAX(last_ingested_unix_nano), 0)::BIGINT FROM rollup_state WHERE cache_key = ?`, EndpointReadyStateKey).Scan(&endpointReady); err != nil {
-		t.Fatalf("query endpoint readiness after first chunk: %v", err)
-	}
-	if endpointReady != 0 {
-		t.Fatalf("endpoint readiness after first chunk = %d, want 0", endpointReady)
-	}
+
 	requireServiceRollupSpans(t, db, "ns-old", bucket, "checkout", 1)
 	if got := edgeCount("ns-old"); got != 1 {
 		t.Fatalf("ns-old call edges after first pass = %d, want 1", got)
@@ -638,12 +576,6 @@ WHERE namespace = 'ns-new'`, nil, 0)
 	}
 	if _, err := d.rollupOnce(ctx); err != nil {
 		t.Fatalf("third rollupOnce failed: %v", err)
-	}
-	if err := db.QueryRow(`SELECT COALESCE(MAX(last_ingested_unix_nano), 0)::BIGINT FROM rollup_state WHERE cache_key = ?`, EndpointReadyStateKey).Scan(&endpointReady); err != nil {
-		t.Fatalf("query endpoint readiness after catch-up: %v", err)
-	}
-	if endpointReady != 1 {
-		t.Fatalf("endpoint readiness after catch-up = %d, want 1", endpointReady)
 	}
 	requireServiceRollupSpans(t, db, "ns-new", bucket, "checkout", 1)
 	if got := edgeCount("ns-new"); got != 1 {
