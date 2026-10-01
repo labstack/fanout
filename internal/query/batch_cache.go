@@ -409,14 +409,20 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 				partialFiles = append(partialFiles, b)
 			}
 		}
+		interior := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
 		if len(partialFiles) > 0 {
 			tail += " UNION ALL SELECT " + projection + " FROM (" + cleanSource("spans", d.snapshotSource("spans", partialFiles, batches)) + ") WHERE " + windowPredicate("start_time", w) + " AND trace_id IN (SELECT trace_id FROM (" + partial + "))"
 			// A partial trace may also have in-window contributions in other batches.
 			// Include these parts as candidates; boundary rows merge them in the kernel.
-			interior := fmt.Sprintf("min_start>=%d AND max_start<%d", w.Start.UnixNano(), w.End.UnixNano())
 			sources["trace_candidates"] = `SELECT trace_id,min(min_start) AS min_start,max(max_end) AS max_end,max(has_error) AS has_error FROM read_trace_parts WHERE ` + scope + ` AND ` + interior + ` GROUP BY trace_id`
 		} else {
-			sources["trace_candidates"] = "SELECT * FROM (" + index + ") WHERE " + full
+			// Every overlapping cached file lies inside the window, so a partial
+			// trace's other spans are in files outside it. Its in-window parts are
+			// still a candidate; the kernel needs one row per trace, and partial
+			// traces are disjoint from the fully contained index rows.
+			sources["trace_candidates"] = "SELECT trace_id,min_start,max_end,has_error FROM (" + index + ") WHERE " + full +
+				` UNION ALL SELECT trace_id,min(min_start),max(max_end),max(has_error) FROM read_trace_parts WHERE ` + scope + ` AND ` + interior +
+				` AND trace_id IN (SELECT trace_id FROM (` + partial + `)) GROUP BY trace_id`
 		}
 		sources["trace_tail"] = tail
 	}
