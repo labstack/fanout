@@ -32,7 +32,10 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Verify pinned engine, typed Parquet and SQL boundary
-        run: bash scripts/with-duckdb.sh go test ./internal/query ./internal/telemetry ./internal/observability -run 'TestPinnedEngine|TestSQLBoundary|TestLogicalType|TestVariant|TestUnsupportedFormat|TestCommitBatchAllocation|TestDependencies' -count=1
+        run: >-
+          bash scripts/with-duckdb.sh go test ./internal/query ./internal/telemetry ./internal/observability ./internal/ingest
+          -run 'TestPinnedEngine|TestSQLBoundary|TestLogicalType|TestVariant|TestUnsupportedFormat|TestCommitBatchAllocation|TestDependencies|TestExportsBound|TestMaximumAttributeNesting|TestHTTPRejectsExcessiveAttributeNesting'
+          -count=1
 
   # Every step below runs a justfile recipe, named after it. Reproduce any
   # failure locally with the command in the step name — nothing about the gate
