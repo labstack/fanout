@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import { unified } from "@astrojs/markdown-remark";
 import { rehypeTableWrap } from "./src/plugins/rehype-table-wrap.mjs";
 import { fanoutCodeDark, fanoutCodeLight } from "./src/styles/code-theme.mjs";
 
@@ -21,7 +22,7 @@ export default defineConfig({
   // a busy port is an error rather than the site silently moving to 7522, where
   // nobody is looking for it.
   vite: { server: { strictPort: true } },
-  markdown: { rehypePlugins: [rehypeTableWrap] },
+  markdown: { processor: unified({ rehypePlugins: [rehypeTableWrap] }) },
   integrations: [
     starlight({
       title: "Fanout",
@@ -29,12 +30,6 @@ export default defineConfig({
       titleDelimiter: "·",
       description:
         "One binary that ingests OpenTelemetry, stores it, and answers questions about it.",
-      // The project tagline, in the same words as the GitHub description and the
-      // landing page. Starlight renders this only on a splash page that does not
-      // supply its own hero tagline; index.mdx supplies one, so today this has
-      // no output. It is kept in step anyway, because the day a second splash
-      // page exists is not the day to discover the tagline drifted.
-      tagline: "OpenTelemetry observability in one binary.",
       social: [
         {
           icon: "github",

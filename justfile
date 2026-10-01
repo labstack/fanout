@@ -59,7 +59,7 @@ ui: ui-apps ui-host
 
 # Browser assets, then the binary that embeds them.
 build VERSION=`git describe --tags --always --dirty 2>/dev/null || echo dev`: ui
-    go build -ldflags "-s -w -X main.version={{VERSION}}" -o bin/fanout ./cmd/fanout
+    bash scripts/with-duckdb.sh go build -ldflags "-s -w -X main.version={{VERSION}}" -o bin/fanout ./cmd/fanout
 
 # CI publishes ghcr.io/labstack/fanout; this is for trying the image locally
 # without pushing anything.
@@ -82,13 +82,17 @@ release:
 release-test:
     bash ./scripts/release_test.sh
 
+# Caller tags must never replace the pinned native binding.
+duckdb-wrapper-test:
+    bash scripts/go-build-tags_test.sh
+
 # Regenerate the legal inventory for every shipped Go target and browser app.
 notices:
-    go run ./internal/cmd/notices -root .
+    bash scripts/with-duckdb.sh go run ./internal/cmd/notices -root .
 
 # Fail if THIRD_PARTY_NOTICES does not match the release dependency graph.
 notices-check:
-    go run ./internal/cmd/notices -root . -check
+    bash scripts/with-duckdb.sh go run ./internal/cmd/notices -root . -check
 
 # ── Database ─────────────────────────────────────────────────────────────────
 
@@ -115,13 +119,13 @@ fmt-check:
 
 # Standalone; `lint` already runs govet via golangci-lint's standard set.
 vet:
-    go vet ./...
+    bash scripts/with-duckdb.sh go vet ./...
 
 lint:
-    golangci-lint run
+    bash scripts/with-duckdb.sh golangci-lint run
 
 test *ARGS='./...':
-    go test {{ARGS}}
+    bash scripts/with-duckdb.sh go test {{ARGS}}
 
 # duckdb-go's CGO vector readers trip checkptr's unsafe-pointer *alignment*
 # check under -race on linux/amd64 and abort with "misaligned pointer
@@ -130,7 +134,7 @@ test *ARGS='./...':
 
 # Run the Go tests under the race detector.
 test-race:
-    go test -race -gcflags=all=-d=checkptr=0 ./...
+    bash scripts/with-duckdb.sh go test -race -gcflags=all=-d=checkptr=0 ./...
 
 # ── Browser quality ──────────────────────────────────────────────────────────
 
@@ -216,11 +220,11 @@ diagrams-check:
 
 # Rewrite the generated settings reference from internal/config.
 docs-generate:
-    go run ./cmd/fanout-docgen
+    bash scripts/with-duckdb.sh go run ./cmd/fanout-docgen
 
 # Fail when a committed settings page is behind the configuration type.
 docs-generate-check:
-    go run ./cmd/fanout-docgen --check
+    bash scripts/with-duckdb.sh go run ./cmd/fanout-docgen --check
 
 # Install the documentation site's dependencies from the lockfile.
 #
@@ -313,7 +317,7 @@ social-card:
 # a settings page that no longer matches the type the loader binds is a
 # documented setting the binary would reject, and it should fail here rather
 # than be published.
-check: fmt-check lint release-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
+check: fmt-check lint release-test duckdb-wrapper-test ui-audit ui-check notices-check test ui-test docs-generate-check site-build
     @echo "All checks passed"
 
 clean:

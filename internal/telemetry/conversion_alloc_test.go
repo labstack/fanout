@@ -27,7 +27,7 @@ func TestSpanConversionDoesNotCopyJSONPayloads(t *testing.T) {
 	}
 	var jsonBytes int64
 	for i := range spans {
-		jsonBytes += int64(len(spans[i].ResourceJSON) + len(spans[i].AttributesJSON) +
+		jsonBytes += int64(ValueBytes(spans[i].Resource) + ValueBytes(spans[i].Attributes) +
 			len(spans[i].EventsJSON) + len(spans[i].LinksJSON))
 	}
 

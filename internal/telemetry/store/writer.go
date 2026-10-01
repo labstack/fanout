@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -12,12 +13,16 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 const (
-	commitQueueDepth     = maxCommitWorkers
-	commitRetryLimit     = 5
-	groupAdmissionWindow = 20 * time.Millisecond
+	commitQueueDepth = maxCommitWorkers
+	commitRetryLimit = 5
+	// Bound group admission independently of encode time. Ten milliseconds
+	// coalesces concurrent exports without imposing a 20ms floor on every
+	// durable acknowledgement when the row target is not reached.
+	groupAdmissionWindow = 10 * time.Millisecond
 	maxAdmissionRequests = 512
 	maxGroupBatchRows    = 50_000
 	maxCommitWorkers     = 4
@@ -356,23 +361,35 @@ func (w *Writer) commitJob(ctx context.Context, job commitJob) error {
 // which is precisely the stream that gets the process killed.
 const maxGroupBatchBytes = 64 << 20
 
-// batchBytes approximates what a batch will cost to hold. It counts the JSON
-// columns and the free-form strings, which carry effectively all of the
-// variable size; the fixed-width fields are already bounded by the row count.
+// batchBytes estimates retained variable-size payloads. A resource object is
+// shared within an export, so charge each distinct map only once per request.
+// Fixed-width fields and resource references are bounded by the row count.
 func batchBytes(batch Batch) int {
 	total := 0
+	resources := make(map[reflect.Value]struct{})
+	resourceBytes := func(resource map[string]any) int {
+		if resource == nil {
+			return 0
+		}
+		key := reflect.ValueOf(resource)
+		if _, seen := resources[key]; seen {
+			return 0
+		}
+		resources[key] = struct{}{}
+		return telemetry.ValueBytes(resource)
+	}
 	for i := range batch.Spans {
 		span := &batch.Spans[i]
-		total += len(span.ResourceJSON) + len(span.AttributesJSON) + len(span.EventsJSON) + len(span.LinksJSON) +
+		total += resourceBytes(span.Resource) + telemetry.ValueBytes(span.Attributes) + len(span.EventsJSON) + len(span.LinksJSON) +
 			len(span.Name) + len(span.StatusMsg) + len(span.TraceID) + len(span.SpanID)
 	}
 	for i := range batch.Logs {
 		log := &batch.Logs[i]
-		total += len(log.ResourceJSON) + len(log.AttributesJSON) + len(log.Body) + len(log.BodyTemplate)
+		total += resourceBytes(log.Resource) + telemetry.ValueBytes(log.Attributes) + len(log.Body) + len(log.BodyTemplate)
 	}
 	for i := range batch.Metrics {
 		metric := &batch.Metrics[i]
-		total += len(metric.ResourceJSON) + len(metric.AttributesJSON) + len(metric.ExemplarsJSON) +
+		total += resourceBytes(metric.Resource) + telemetry.ValueBytes(metric.Attributes) + len(metric.ExemplarsJSON) +
 			len(metric.HistBoundsJSON) + len(metric.HistCountsJSON) + len(metric.Name) + len(metric.Description)
 	}
 	return total

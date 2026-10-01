@@ -3,12 +3,15 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/labstack/fanout/internal/telemetry"
+	"github.com/parquet-go/parquet-go"
 )
 
 func TestVerifyBatchesReportsOnlyUnreadableBatches(t *testing.T) {
@@ -58,6 +61,13 @@ func TestQuarantineBatchRefusesValidData(t *testing.T) {
 }
 
 func TestQuarantineBatchSetsAsideUnreadableDataAndRestoresStartup(t *testing.T) {
+	for _, file := range []string{"trace.fidx", "metadata.json"} {
+		t.Run(file, func(t *testing.T) { testQuarantineRestoresStartup(t, file) })
+	}
+}
+
+func testQuarantineRestoresStartup(t *testing.T, file string) {
+	t.Helper()
 	root := t.TempDir()
 	repository, err := Open(root)
 	if err != nil {
@@ -73,7 +83,7 @@ func TestQuarantineBatchSetsAsideUnreadableDataAndRestoresStartup(t *testing.T) 
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	corruptBatchFile(t, root, "broken", "trace.fidx")
+	corruptBatchFile(t, root, "broken", file)
 
 	destination, err := QuarantineBatch(root, "broken")
 	if err != nil {
@@ -96,6 +106,38 @@ func TestQuarantineBatchSetsAsideUnreadableDataAndRestoresStartup(t *testing.T) 
 	defer reopened.Close()
 	if got := reopened.RowCount(); got != 1 {
 		t.Fatalf("row count after quarantine = %d, want 1", got)
+	}
+}
+
+func TestSchemaMismatchCannotAuthorizeQuarantine(t *testing.T) {
+	root := t.TempDir()
+	repository, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Commit(t.Context(), Batch{ID: "schema", Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}}}); err != nil {
+		t.Fatal(err)
+	}
+	repository.Close()
+	path := filepath.Join(root, "parquet", "batches", "schema.batch", "spans.parquet")
+	if err := parquet.WriteFile(path, []struct {
+		TraceID string `parquet:"trace_id"`
+	}{{"trace"}}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyBatches(root); !errors.Is(err, telemetry.ErrUnsupportedBatchFormat) {
+		t.Fatalf("verify: %v", err)
+	}
+	if _, err := QuarantineBatch(root, "schema"); !errors.Is(err, telemetry.ErrUnsupportedBatchFormat) {
+		t.Fatalf("quarantine: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("unsupported data changed: %v", err)
 	}
 }
 
@@ -138,5 +180,25 @@ func corruptBatchFile(t *testing.T, root, id, name string) {
 	path := filepath.Join(root, "parquet", "batches", id+telemetry.BatchSuffix, name)
 	if err := os.WriteFile(path, []byte("corrupt"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestQuarantineRefusesVerifierFailureAndUnsupportedFormat(t *testing.T) {
+	root := t.TempDir()
+	repository, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Commit(context.Background(), Batch{ID: "valid", Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}}}); err != nil {
+		t.Fatal(err)
+	}
+	repository.Close()
+	for _, err := range []error{context.Canceled, fmt.Errorf("native engine exhausted memory"), telemetry.ErrUnsupportedBatchFormat} {
+		if _, got := quarantineBatch(root, "valid", func(string) error { return err }); got == nil {
+			t.Fatalf("quarantined after %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(root, "parquet", "batches", "valid.batch")); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

@@ -18,11 +18,12 @@ const mcpUIExtension = "io.modelcontextprotocol/ui"
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
-const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for dependencies, get_service_performance for latency and errors, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user: list or get a dashboard before changing it, create only when asked, and replace an existing dashboard only with explicit user intent."
+const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges, get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency and errors, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user: list or get a dashboard before changing it, create only when asked, and replace an existing dashboard only with explicit user intent."
 
 type Observability interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
 	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
+	Dependencies(context.Context, observability.Scope, observability.DependencyOptions) (observability.Result[observability.Dependencies], error)
 	Performance(context.Context, observability.Scope, observability.PerformanceOptions) (observability.Result[observability.Performance], error)
 	Trace(context.Context, observability.Scope, string, string, int) (observability.Result[observability.TraceDetail], error)
 	Logs(context.Context, observability.Scope, string, string, string, int) (observability.Result[observability.Logs], error)
@@ -36,6 +37,15 @@ type QueryInput struct {
 	Window    string `json:"window,omitempty" jsonschema:"Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h"`
 	Namespace string `json:"namespace,omitempty" jsonschema:"OpenTelemetry service namespace; empty queries all namespaces"`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Maximum services or edges to return, from 1 to 500"`
+}
+
+type DependencyInput struct {
+	Window    string `json:"window,omitempty" jsonschema:"Bounded telemetry window, defaults to 1h"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"Filter by namespace; traversal always keeps namespaces separate"`
+	Service   string `json:"service" jsonschema:"Root service name"`
+	Direction string `json:"direction,omitempty" jsonschema:"upstream or downstream; defaults to downstream"`
+	MaxDepth  int    `json:"max_depth,omitempty" jsonschema:"Maximum hops from 1 to 32; defaults to 8"`
+	MaxNodes  int    `json:"max_nodes,omitempty" jsonschema:"Maximum accumulated nodes from 1 to 500 including roots; defaults to 100"`
 }
 
 type PerformanceInput struct {
@@ -206,6 +216,11 @@ func (s *Server) HTTPHandler() http.Handler {
 func (s *Server) registerTools() {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)}
 	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "get_service_dependencies", Title: "Service dependency traversal",
+		Description: "Find upstream or downstream dependencies of one service with minimum hop counts. Uses the full scoped edge rollup, handles cycles, and reports truncation from depth or node limits.",
+		Annotations: readOnly,
+	}, s.dependencies)
+	mcp.AddTool(s.mcp, &mcp.Tool{
 		Name:        "get_observability_overview",
 		Title:       "System health overview",
 		Description: "Summarize service health for a bounded telemetry window. Start here for incident triage.",
@@ -248,6 +263,18 @@ func (s *Server) registerTools() {
 			Annotations: readOnly,
 		}, s.intelligenceSnapshot)
 	}
+}
+
+func (s *Server) dependencies(ctx context.Context, _ *mcp.CallToolRequest, input DependencyInput) (*mcp.CallToolResult, observability.Result[observability.Dependencies], error) {
+	scope, err := s.scope(QueryInput{Window: input.Window, Namespace: input.Namespace})
+	if err != nil {
+		return nil, observability.Result[observability.Dependencies]{}, err
+	}
+	output, err := s.queries.Dependencies(ctx, scope, observability.DependencyOptions{Service: input.Service, Direction: input.Direction, MaxDepth: input.MaxDepth, MaxNodes: input.MaxNodes})
+	if err != nil {
+		return nil, output, err
+	}
+	return summary(output.Summary), output, nil
 }
 
 func (s *Server) intelligenceSnapshot(_ context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, intelligence.IntelligenceSnapshot, error) {

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	appid "github.com/labstack/fanout/internal/id"
@@ -32,11 +31,10 @@ type traceReader interface {
 }
 
 type Service struct {
-	db             DB
-	repository     traceReader
-	maxWindow      time.Duration
-	now            func() time.Time
-	endpointMature atomic.Bool
+	db         DB
+	repository traceReader
+	maxWindow  time.Duration
+	now        func() time.Time
 }
 
 func New(db DB, repository traceReader, retentionDays int) *Service {

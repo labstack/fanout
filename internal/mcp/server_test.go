@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -118,6 +119,11 @@ func (f *fakeObservability) Overview(_ context.Context, scope observability.Scop
 	}, nil
 }
 
+func (f *fakeObservability) Dependencies(_ context.Context, scope observability.Scope, options observability.DependencyOptions) (observability.Result[observability.Dependencies], error) {
+	f.scope = scope
+	return observability.Result[observability.Dependencies]{Schema: observability.DependenciesSchema, Data: observability.Dependencies{Service: options.Service, Direction: options.Direction, MaxDepth: options.MaxDepth, MaxNodes: options.MaxNodes}}, nil
+}
+
 func (f *fakeObservability) Topology(_ context.Context, scope observability.Scope, _ int) (observability.Result[observability.Topology], error) {
 	f.scope = scope
 	return observability.Result[observability.Topology]{
@@ -172,6 +178,31 @@ func TestInvalidWindowIsToolError(t *testing.T) {
 	}
 }
 
+func TestDependencyToolForwardsScopeAndBounds(t *testing.T) {
+	backend := &fakeObservability{}
+	server := New(backend, nil, "test")
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	server.now = func() time.Time { return now }
+	session := connectTestClient(t, server, nil)
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "get_service_dependencies", Arguments: map[string]any{
+		"window": "15m", "namespace": "prod", "service": "checkout", "direction": "upstream", "max_depth": 3, "max_nodes": 25,
+	}})
+	if err != nil || result.IsError {
+		t.Fatalf("dependency call: %#v %v", result, err)
+	}
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output observability.Result[observability.Dependencies]
+	if err := json.Unmarshal(data, &output); err != nil {
+		t.Fatal(err)
+	}
+	if output.Schema != observability.DependenciesSchema || output.Data.Service != "checkout" || output.Data.Direction != "upstream" || output.Data.MaxDepth != 3 || output.Data.MaxNodes != 25 || backend.scope.Namespace != "prod" || !backend.scope.Start.Equal(now.Add(-15*time.Minute)) {
+		t.Fatalf("scope or parameters lost: %#v %#v", output, backend.scope)
+	}
+}
+
 func TestIntelligenceSnapshotReturnsStructuredOutput(t *testing.T) {
 	want := &intelligence.IntelligenceSnapshot{
 		GeneratedAt: time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC),
@@ -214,11 +245,17 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(listed.Tools) != 5 {
-			t.Fatalf("tool count = %d, want 5", len(listed.Tools))
+		if len(listed.Tools) != 6 {
+			t.Fatalf("tool count = %d, want 6", len(listed.Tools))
 		}
 		resources := map[string]bool{}
 		for _, tool := range listed.Tools {
+			if tool.Name == "get_service_dependencies" {
+				if _, ok := tool.Meta["ui"]; ok {
+					t.Fatal("dependency traversal advertised a UI resource")
+				}
+				continue
+			}
 			ui, ok := tool.Meta["ui"].(map[string]any)
 			if !ok {
 				t.Fatalf("tool %s has no nested ui metadata: %#v", tool.Name, tool.Meta)
@@ -257,8 +294,8 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(listed.Tools) != 5 {
-			t.Fatalf("tool count = %d, want 5", len(listed.Tools))
+		if len(listed.Tools) != 6 {
+			t.Fatalf("tool count = %d, want 6", len(listed.Tools))
 		}
 		for _, tool := range listed.Tools {
 			if _, ok := tool.Meta["ui"]; ok {

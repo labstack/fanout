@@ -11,7 +11,7 @@ const mcp = vi.hoisted(() => ({
     text: "<!doctype html><html><head></head><body><div id=\"root\"></div></body></html>",
     _meta: { ui: { csp: {} } },
   }] })),
-  request: vi.fn().mockResolvedValue({ content: [] }),
+  callTool: vi.fn().mockResolvedValue({ content: [] }),
   closeClient: vi.fn().mockResolvedValue(undefined),
   closeTransport: vi.fn().mockResolvedValue(undefined),
   clients: [] as Array<{ onclose?: () => void; onerror?: (error: Error) => void }>,
@@ -20,7 +20,7 @@ const mcp = vi.hoisted(() => ({
   bridges: [] as Array<{ onsizechange?: (size: { height?: number }) => void }>,
 }));
 
-vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
+vi.mock("@modelcontextprotocol/client", () => ({
   Client: class {
     onclose?: () => void;
     onerror?: (error: Error) => void;
@@ -30,12 +30,9 @@ vi.mock("@modelcontextprotocol/sdk/client/index.js", () => ({
     }
     connect = mcp.connect;
     readResource = mcp.readResource;
-    request = mcp.request;
+    callTool = mcp.callTool;
     close = mcp.closeClient;
   },
-}));
-
-vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
   StreamableHTTPClientTransport: class {
     close = mcp.closeTransport;
   },
@@ -44,7 +41,7 @@ vi.mock("@modelcontextprotocol/sdk/client/streamableHttp.js", () => ({
 vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
   AppBridge: class {
     oninitialized?: () => Promise<void>;
-    oncalltool?: (params: unknown, extra: { signal: AbortSignal }) => Promise<unknown>;
+    oncalltool?: (params: unknown, extra: { mcpReq: { signal: AbortSignal } }) => Promise<unknown>;
     onsizechange?: (size: { height?: number }) => void;
     constructor(client: unknown) { mcp.bridgeClients.push(client); mcp.bridges.push(this); }
     async connect() { await this.oninitialized?.(); }

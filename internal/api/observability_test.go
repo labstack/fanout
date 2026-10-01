@@ -15,8 +15,14 @@ import (
 )
 
 type fakeQueries struct {
-	overviewScope observability.Scope
-	topologyScope observability.Scope
+	overviewScope   observability.Scope
+	topologyScope   observability.Scope
+	dependencyScope observability.Scope
+}
+
+func (f *fakeQueries) Dependencies(_ context.Context, scope observability.Scope, options observability.DependencyOptions) (observability.Result[observability.Dependencies], error) {
+	f.dependencyScope = scope
+	return observability.Result[observability.Dependencies]{Schema: observability.DependenciesSchema, Data: observability.Dependencies{Service: options.Service, Direction: options.Direction, MaxDepth: options.MaxDepth, MaxNodes: options.MaxNodes}}, nil
 }
 
 func (f *fakeQueries) Overview(_ context.Context, scope observability.Scope, _ int) (observability.Result[observability.Overview], error) {
@@ -94,11 +100,41 @@ func TestRouteRejectsInvalidWindow(t *testing.T) {
 	}
 }
 
-// A dashboard query that runs out of time is a load condition. Reporting it as
-// a server error logs it at ERROR and counts towards the 5xx rate that pages
-// someone; the deadline itself exists so a pathological query stops holding a
-// connection once the answer can no longer be useful.
-func TestObservabilityQueryDeadlineIsNotAServerError(t *testing.T) {
+func TestDependencyRouteForwardsScopeAndBounds(t *testing.T) {
+	backend := &fakeQueries{}
+	h := NewObservabilityHandler(backend)
+	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	h.now = func() time.Time { return now }
+	e := echo.New()
+	h.Register(e.Group("/api/observability"))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/observability/services/dependencies?window=15m&namespace=prod&service=checkout&direction=upstream&max_depth=3&max_nodes=25", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rec.Code, rec.Body)
+	}
+	var result observability.Result[observability.Dependencies]
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Schema != observability.DependenciesSchema || result.Data.Service != "checkout" || result.Data.Direction != "upstream" || result.Data.MaxDepth != 3 || result.Data.MaxNodes != 25 || backend.dependencyScope.Namespace != "prod" || !backend.dependencyScope.Start.Equal(now.Add(-15*time.Minute)) {
+		t.Fatalf("scope or parameters lost: %#v %#v", result, backend.dependencyScope)
+	}
+	for _, bounds := range []string{"max_depth=0", "max_nodes=-1", "max_nodes=invalid"} {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/observability/services/dependencies?service=checkout&"+bounds, nil))
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("invalid %s accepted: %d", bounds, rec.Code)
+		}
+	}
+}
+
+// A canceled client is distinct from a server deadline or an execution fault.
+// Wrapped backend errors must retain that distinction at the HTTP boundary.
+func TestObservabilityQueryErrorClassification(t *testing.T) {
+	var canceled *echo.HTTPError
+	if !errors.As(mapQueryError(fmt.Errorf("query endpoints: %w", context.Canceled)), &canceled) || canceled.Code != 499 {
+		t.Fatal("client cancellation must map to 499")
+	}
 	err := mapQueryError(fmt.Errorf("query endpoints: %w", context.DeadlineExceeded))
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) {
@@ -122,7 +158,7 @@ func TestRegisteredObservabilityRoutesCarryADeadline(t *testing.T) {
 	handler := &ObservabilityHandler{queries: deadlineProbe{seen: deadlines}, now: time.Now}
 	e := echo.New()
 	handler.Register(e.Group("/api/observability"))
-	for _, path := range []string{"/api/observability/overview", "/api/observability/topology", "/api/observability/performance", "/api/observability/logs", "/api/observability/trace"} {
+	for _, path := range []string{"/api/observability/overview", "/api/observability/topology", "/api/observability/services/dependencies", "/api/observability/performance", "/api/observability/logs", "/api/observability/trace"} {
 		recorder := httptest.NewRecorder()
 		e.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path+"?window=1h", nil))
 		if !deadlines[path] {
@@ -134,6 +170,11 @@ func TestRegisteredObservabilityRoutesCarryADeadline(t *testing.T) {
 // deadlineProbe records, per route, whether the context that reached it had a
 // deadline. It answers every query with an empty result.
 type deadlineProbe struct{ seen map[string]bool }
+
+func (p deadlineProbe) Dependencies(ctx context.Context, _ observability.Scope, _ observability.DependencyOptions) (observability.Result[observability.Dependencies], error) {
+	p.note(ctx, "/api/observability/services/dependencies")
+	return observability.Result[observability.Dependencies]{}, nil
+}
 
 func (p deadlineProbe) note(ctx context.Context, path string) {
 	if _, ok := ctx.Deadline(); ok {

@@ -13,9 +13,9 @@ import (
 type RollupComponent string
 
 const (
-	RollupService  RollupComponent = "service"
-	RollupEndpoint RollupComponent = "endpoint"
-	RollupEdge     RollupComponent = "edge"
+	RollupService   RollupComponent = "service"
+	RollupReadCache RollupComponent = "read_cache"
+	RollupEdge      RollupComponent = "edge"
 )
 
 type RollupResult string
@@ -45,6 +45,8 @@ const (
 )
 
 var (
+	ReadCachePendingBatches = promauto.NewGauge(prometheus.GaugeOpts{Name: "fanout_read_cache_pending_batches", Help: "Active immutable batches not covered at the start of the last read-cache pass"})
+
 	// Ingest metrics
 	IngestTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "fanout_ingest_rows_total",
@@ -552,7 +554,7 @@ func UpdateQueueDepth(signal string, depth int) {
 
 func validateRollupComponent(component RollupComponent) {
 	switch component {
-	case RollupService, RollupEndpoint, RollupEdge:
+	case RollupService, RollupReadCache, RollupEdge:
 		return
 	default:
 		panic("metrics: invalid rollup component: " + string(component))

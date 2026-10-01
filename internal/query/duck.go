@@ -16,6 +16,7 @@ import (
 	"github.com/duckdb/duckdb-go/v2"
 
 	"github.com/labstack/fanout/internal/config"
+	engine "github.com/labstack/fanout/internal/duckdb"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/query/writegate"
 	"github.com/labstack/fanout/internal/queryrows"
@@ -24,6 +25,10 @@ import (
 )
 
 type Duck struct {
+	cachePublishMu  sync.Mutex
+	cachePublishing map[string]bool
+	snapshotMu      sync.Mutex
+	snapshotQueries map[string]compiledSnapshot
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
 	// sized from the machine.
 	DB *sql.DB
@@ -37,13 +42,9 @@ type Duck struct {
 	// only if they are still reading it.
 	releasePoolGauges   func()
 	releaseMemoryGauges func()
-	// writeDB is the single connection every rollup and maintenance write uses.
-	//
-	// Those writes are serialized by writeGate anyway, so one connection is all
-	// they can use — and taking it from the read pool is what let a background
-	// pass occupy a quarter of a four-core host's read capacity for the length
-	// of a rollup. A request that then waits for a connection waits invisibly:
-	// database/sql counts that wait, and nothing charged it to anything.
+	// writeDB has two connections: analytical rollups share writeGate, while
+	// completed-batch aggregates use cacheGate and disjoint tables. Both stay
+	// outside the read pool. Maintenance acquires both gates for checkpointing.
 	writeDB    *sql.DB
 	cfg        config.Config
 	repository *telemetrystore.Repository
@@ -53,6 +54,7 @@ type Duck struct {
 	rollupLagNanos int64
 	// writeGate serializes writes to the rebuildable DuckDB rollup cache.
 	writeGate writegate.WriteGate
+	cacheGate writegate.WriteGate
 	// parquetMu pins immutable files for active DuckDB readers. Its reader-first
 	// gate keeps a queued maintenance publish from stalling unrelated new reads.
 	parquetMu parquetReadGate
@@ -94,11 +96,6 @@ const (
 	edgeRollupRawMaxKey           = "edge_rollup_v2_rawmax"
 	edgeRollupSubCursorKey        = "edge_rollup_v2_substart"
 	edgeRollupSubWindowKey        = "edge_rollup_v2_subwindow_end"
-	EndpointRollupStateKey        = "endpoint_rollup_v1"
-	endpointRollupRawMaxKey       = "endpoint_rollup_v1_rawmax"
-	endpointBackfillStateKey      = "endpoint_rollup_v1_backfill_started"
-	EndpointReadyStateKey         = "endpoint_rollup_v1_ready"
-	EndpointDisabledStateKey      = "endpoint_rollup_v1_disabled"
 	defaultDuckDBPoolSize         = 1
 	parquetCompactionCycle        = 10 * time.Second
 	parquetCompactionCycleBudget  = 8 * time.Second
@@ -314,6 +311,10 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 		_ = d.Close()
 		return nil, fmt.Errorf("create views: %w", err)
 	}
+	if err := engine.ConfigurePolicy(ctx, writeDB, repository.Parquet.Dir(), cfg.QueryDir()); err != nil {
+		_ = d.Close()
+		return nil, err
+	}
 	if cfg.RollupSkipToLatest {
 		// Best-effort: on failure the rollup just catches up normally.
 		if err := d.skipRollupToLatest(ctx); err != nil {
@@ -349,11 +350,6 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	// A skipped endpoint cache is never queryable: clear any cache left by a
-	// previous normal backfill as well as its persisted readiness bit.
-	if _, err := tx.ExecContext(ctx, `DELETE FROM endpoint_rollup`); err != nil {
-		return err
-	}
 	for _, w := range []struct {
 		key       string
 		watermark int64
@@ -367,11 +363,6 @@ func (d *Duck) skipRollupToLatest(ctx context.Context) error {
 		// watermark it just advanced.
 		{edgeRollupSubCursorKey, 0},
 		{edgeRollupSubWindowKey, 0},
-		// Endpoint queries remain on their raw-span fallback when the operator
-		// explicitly skips historical rollups. Mark this cache disabled instead of
-		// later declaring a new-only, incomplete endpoint cache ready.
-		{EndpointReadyStateKey, 0},
-		{EndpointDisabledStateKey, 1},
 	} {
 		if err := storeRollupWatermark(ctx, tx, w.key, w.watermark); err != nil {
 			return err
@@ -428,8 +419,8 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 	db.SetMaxOpenConns(maxConns)
 	db.SetMaxIdleConns(maxConns)
 
-	// One connection is all the writers can use — writeGate already lets one
-	// through at a time — and keeping it out of the read pool is the point.
+	// Independent analytical and completed-batch writers need two connections.
+	// Their tables are disjoint; each domain serializes its own mutations.
 	//
 	// The write handle gets a connector that cannot close the instance.
 	// database/sql closes a connector that implements io.Closer when its DB is
@@ -439,8 +430,8 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 	// than returning an error. The read pool owns the instance; the write
 	// handle borrows it.
 	writeDB := sql.OpenDB(borrowedConnector{connector})
-	writeDB.SetMaxOpenConns(1)
-	writeDB.SetMaxIdleConns(1)
+	writeDB.SetMaxOpenConns(2)
+	writeDB.SetMaxIdleConns(2)
 	return db, writeDB, nil
 }
 
@@ -495,8 +486,8 @@ func (d *Duck) writer() *sql.DB {
 // candidate explanation for a stalled query and has to be measurable.
 //
 // The non-FORCE form refuses while another *write* transaction is open. Every
-// write here is serialized behind the write gate on one connection, and this
-// runs under that gate, so a refusal should not happen — the counter is there
+// domain is serialized by its own gate. Maintenance holds both gates before
+// calling this function, so a refusal should not happen — the counter is there
 // to say so rather than to be assumed. Only a checkpoint that ran is timed: a
 // refusal returns in microseconds and would drag the distribution towards zero,
 // which is the opposite of what the histogram is for.
@@ -535,6 +526,12 @@ func (d *Duck) RunRollups(ctx context.Context) {
 		d.runMaintenanceLoop(ctx)
 	}()
 	defer func() { <-maintenanceDone }()
+	readCacheDone := make(chan struct{})
+	go func() {
+		defer close(readCacheDone)
+		d.runReadCacheLoop(ctx)
+	}()
+	defer func() { <-readCacheDone }()
 
 	ticker := time.NewTicker(d.cfg.RollupInterval)
 	defer ticker.Stop()
@@ -589,8 +586,8 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 		affected += n
 	}
 
-	if n, err := d.refreshEndpointRollup(ctx); err != nil {
-		errs = append(errs, fmt.Errorf("endpoint rollup: %w", err))
+	if n, err := d.RefreshReadCaches(ctx); err != nil {
+		errs = append(errs, fmt.Errorf("completed batch read cache: %w", err))
 	} else {
 		affected += n
 	}
@@ -602,6 +599,28 @@ func (d *Duck) rollupOnce(ctx context.Context) (int, error) {
 	}
 
 	return int(affected), errors.Join(errs...)
+}
+
+// Completed-file caches do not inherit the minute-based analytical watermark.
+// Drain bounded transactions promptly, yielding to other writers between passes.
+func (d *Duck) runReadCacheLoop(ctx context.Context) {
+	delay := time.Second
+	for {
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		rows, err := d.RefreshReadCaches(ctx)
+		delay = time.Second
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("completed batch read cache failed", "err", err)
+		} else if rows > 0 {
+			delay = 100 * time.Millisecond
+		}
+	}
 }
 
 func (d *Duck) runMaintenanceLoop(ctx context.Context) {
@@ -689,9 +708,14 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 			return err
 		}
 		defer unlock()
+		unlockCache, err := d.cacheGate.LockContext(ctx, writegate.WriteMaintenance)
+		if err != nil {
+			return err
+		}
+		defer unlockCache()
 		var errs []error
 		if d.cfg.RetentionDays > 0 {
-			for _, table := range []string{"service_rollup", "endpoint_rollup", "edge_rollup"} {
+			for _, table := range []string{"service_rollup", "edge_rollup"} {
 				if _, err := d.writer().ExecContext(ctx, fmt.Sprintf("DELETE FROM %s WHERE bucket < now() - INTERVAL %d DAY", table, d.cfg.RetentionDays)); err != nil {
 					errs = append(errs, fmt.Errorf("prune %s: %w", table, err))
 				}
@@ -850,129 +874,6 @@ func (d *Duck) refreshServiceRollup(ctx context.Context) (int64, error) {
 	return rows, nil
 }
 
-func (d *Duck) refreshEndpointRollup(ctx context.Context) (int64, error) {
-	start := time.Now()
-	result := metrics.RollupError
-	var recordedRows int64
-	var watermark, sourceMax int64 // see refreshServiceRollup
-	defer func() {
-		metrics.RecordRollupComponent(metrics.RollupEndpoint, result, recordedRows, time.Since(start).Seconds())
-		if result == metrics.RollupError && sourceMax > 0 {
-			updateRollupProgress(metrics.RollupEndpoint, true, watermark, sourceMax)
-		}
-	}()
-	unlock := d.writeGate.Lock(writegate.WriteRollupEndpoint)
-	defer unlock()
-	if err := d.lockRollupParquetRead(ctx); err != nil {
-		return 0, err
-	}
-	defer d.parquetMu.RUnlock()
-
-	tx, err := d.writer().BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	disabled, err := rollupWatermark(ctx, tx, EndpointDisabledStateKey)
-	if err != nil {
-		return 0, err
-	}
-	if disabled != 0 {
-		err := tx.Commit()
-		if err == nil {
-			result = metrics.RollupDisabled
-			updateRollupProgress(metrics.RollupEndpoint, false, 0, 0)
-		}
-		return 0, err
-	}
-	lastWatermark, err := rollupWatermark(ctx, tx, EndpointRollupStateKey)
-	if err != nil {
-		return 0, err
-	}
-	watermark = lastWatermark
-	lastRawMax, err := rollupWatermark(ctx, tx, endpointRollupRawMaxKey)
-	if err != nil {
-		return 0, err
-	}
-	backfillStarted, err := rollupWatermark(ctx, tx, endpointBackfillStateKey)
-	if err != nil {
-		return 0, err
-	}
-
-	rawWatermark, err := maxEdgeRollupWatermark(ctx, tx)
-	if err != nil {
-		return 0, err
-	}
-	sourceMax = rawWatermark
-	if rawWatermark <= lastWatermark {
-		err := tx.Commit()
-		if err == nil {
-			result = metrics.RollupNoop
-			updateRollupProgress(metrics.RollupEndpoint, true, lastWatermark, rawWatermark)
-		}
-		return 0, err
-	}
-	minIngested := int64(0)
-	if lastWatermark == 0 {
-		if minIngested, err = minEdgeRollupIngested(ctx, tx); err != nil {
-			return 0, err
-		}
-		if err := storeRollupWatermark(ctx, tx, endpointBackfillStateKey, 1); err != nil {
-			return 0, err
-		}
-		backfillStarted = 1
-	}
-	windowStart, windowEnd, chunked := rollupWindow(lastWatermark, minIngested, rawWatermark)
-
-	newWatermark := windowEnd
-	if rawWatermark > lastRawMax {
-		if guarded := rawWatermark - d.rollupSafetyLagNanos(); newWatermark > guarded {
-			newWatermark = guarded
-		}
-		if newWatermark < lastWatermark {
-			newWatermark = lastWatermark
-		}
-	}
-	rawMaxProcessed := rawWatermark
-	if chunked {
-		rawMaxProcessed = windowEnd
-	}
-
-	if _, err := tx.ExecContext(ctx, endpointRollupDeleteSQL, windowStart, windowEnd); err != nil {
-		return 0, err
-	}
-	res, err := tx.ExecContext(ctx, endpointRollupInsertSQL, windowStart, windowEnd)
-	if err != nil {
-		return 0, err
-	}
-	if err := storeRollupWatermark(ctx, tx, EndpointRollupStateKey, newWatermark); err != nil {
-		return 0, err
-	}
-	if err := storeRollupWatermark(ctx, tx, endpointRollupRawMaxKey, rawMaxProcessed); err != nil {
-		return 0, err
-	}
-	// The product query remains on raw spans until a normal (non-skip) backfill
-	// reaches the live tip. This prevents partial endpoint history on upgrade.
-	if backfillStarted != 0 && !chunked && windowEnd == rawWatermark {
-		if err := storeRollupWatermark(ctx, tx, EndpointReadyStateKey, 1); err != nil {
-			return 0, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	result = metrics.RollupSuccess
-	updateRollupProgress(metrics.RollupEndpoint, true, newWatermark, rawWatermark)
-	rows, err := res.RowsAffected()
-	if err != nil {
-		slog.Warn("endpoint rollup rows affected unavailable", "err", err)
-		return 0, nil
-	}
-	recordedRows = rows
-	return rows, nil
-}
-
 func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	start := time.Now()
 	result := metrics.RollupError
@@ -1072,8 +973,8 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	var minStartT, maxStartT sql.NullTime
 	err = tx.QueryRowContext(ctx, `
 SELECT
-  MIN(date_trunc('minute', start_time)),
-  MAX(date_trunc('minute', start_time))
+  MIN(date_trunc('minute', start_time::TIMESTAMP_NS)),
+  MAX(date_trunc('minute', start_time::TIMESTAMP_NS))
 FROM spans
 WHERE ingested_unix_nano > ?
   AND ingested_unix_nano <= ?
@@ -1230,8 +1131,8 @@ FROM (
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
-    AND start_time >= ?
-    AND start_time < ?
+    AND start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   LIMIT ?
 )`, windowStart, windowEnd, subLo, subHi, rowLimit+1).Scan(&rows); err != nil {
 			return time.Time{}, err
@@ -1381,7 +1282,7 @@ FROM spans`).Scan(&watermark)
 
 const serviceRollupDeleteSQL = `
 WITH affected AS (
-  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1389,7 +1290,7 @@ WITH affected AS (
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1397,7 +1298,7 @@ WITH affected AS (
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1416,7 +1317,7 @@ WHERE EXISTS (
 
 var serviceRollupInsertSQL = `
 WITH affected AS (
-  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1424,7 +1325,7 @@ WITH affected AS (
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1432,7 +1333,7 @@ WITH affected AS (
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1443,7 +1344,7 @@ WITH affected AS (
 span_agg AS (
   SELECT
     s.namespace,
-    date_trunc('minute', s.start_time) AS bucket,
+    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
     s.service,
     COUNT(*) AS spans,
     COUNT(*) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')) AS served_spans,
@@ -1464,7 +1365,7 @@ span_agg AS (
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time)
+   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
    AND a.service = s.service
   -- Bound the scan to the affected bucket range so Telemetry prunes parquet by
   -- start_time stats instead of scanning all history (the join on a computed
@@ -1473,39 +1374,39 @@ span_agg AS (
   -- [MIN(bucket), MAX(bucket)+1min) — so it drops no rows. A late span with an
   -- old start_time widens the range (and this scan) only for the pass that
   -- ingests it, same trade-off as the edge rollup's parent bound.
-  WHERE s.start_time >= (SELECT MIN(bucket) FROM affected)
-    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
-  GROUP BY s.namespace, date_trunc('minute', s.start_time), s.service
+  WHERE s.start_time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service
 ),
 log_agg AS (
   SELECT
     l.namespace,
-    date_trunc('minute', l.time) AS bucket,
+    date_trunc('minute', l.time::TIMESTAMP_NS) AS bucket,
     l.service,
     COUNT(*) AS log_count
   FROM logs l
   JOIN affected a
     ON a.namespace = l.namespace
-   AND a.bucket = date_trunc('minute', l.time)
+   AND a.bucket = date_trunc('minute', l.time::TIMESTAMP_NS)
    AND a.service = l.service
-  WHERE l.time >= (SELECT MIN(bucket) FROM affected)
-    AND l.time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
-  GROUP BY l.namespace, date_trunc('minute', l.time), l.service
+  WHERE l.time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND l.time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  GROUP BY l.namespace, date_trunc('minute', l.time::TIMESTAMP_NS), l.service
 ),
 metric_agg AS (
   SELECT
     m.namespace,
-    date_trunc('minute', m.time) AS bucket,
+    date_trunc('minute', m.time::TIMESTAMP_NS) AS bucket,
     m.service,
     COUNT(DISTINCT m.name) AS metric_count
   FROM metrics m
   JOIN affected a
     ON a.namespace = m.namespace
-   AND a.bucket = date_trunc('minute', m.time)
+   AND a.bucket = date_trunc('minute', m.time::TIMESTAMP_NS)
    AND a.service = m.service
-  WHERE m.time >= (SELECT MIN(bucket) FROM affected)
-    AND m.time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
-  GROUP BY m.namespace, date_trunc('minute', m.time), m.service
+  WHERE m.time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND m.time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  GROUP BY m.namespace, date_trunc('minute', m.time::TIMESTAMP_NS), m.service
 )
 INSERT INTO service_rollup (
   namespace,
@@ -1535,103 +1436,15 @@ LEFT JOIN span_agg s USING (namespace, bucket, service)
 LEFT JOIN log_agg l USING (namespace, bucket, service)
 LEFT JOIN metric_agg m USING (namespace, bucket, service);`
 
-// Endpoint latency is stored as a mergeable fixed-boundary histogram. Unlike
-// averaging minute p95 values, summing these bin counts preserves the latency
-// distribution across arbitrary query windows. Bounds include Fanout's health
-// thresholds (750ms and 2s) and cap the overflow bucket at five minutes.
-const endpointRollupDeleteSQL = `
-WITH affected AS (
-  SELECT DISTINCT
-    namespace,
-    date_trunc('minute', start_time) AS bucket,
-    COALESCE(service, '') AS service,
-    COALESCE(NULLIF(http_method, ''), 'CALL') AS method,
-    COALESCE(NULLIF(http_route, ''), NULLIF(operation, ''), 'unknown') AS path
-  FROM spans
-  WHERE ingested_unix_nano > ?
-    AND ingested_unix_nano <= ?
-    AND start_time IS NOT NULL
-)
-DELETE FROM endpoint_rollup
-WHERE EXISTS (
-  SELECT 1
-  FROM affected
-  WHERE affected.namespace = endpoint_rollup.namespace
-    AND affected.bucket = endpoint_rollup.bucket
-    AND affected.service = endpoint_rollup.service
-    AND affected.method = endpoint_rollup.method
-    AND affected.path = endpoint_rollup.path
-);`
-
-const endpointRollupInsertSQL = `
-WITH affected AS (
-  SELECT DISTINCT
-    namespace,
-    date_trunc('minute', start_time) AS bucket,
-    COALESCE(service, '') AS service,
-    COALESCE(NULLIF(http_method, ''), 'CALL') AS method,
-    COALESCE(NULLIF(http_route, ''), NULLIF(operation, ''), 'unknown') AS path
-  FROM spans
-  WHERE ingested_unix_nano > ?
-    AND ingested_unix_nano <= ?
-    AND start_time IS NOT NULL
-)
-INSERT INTO endpoint_rollup (
-  namespace, bucket, service, method, path, calls, error_count, duration_count, duration_buckets
-)
-SELECT
-  s.namespace,
-  date_trunc('minute', s.start_time) AS bucket,
-  COALESCE(s.service, '') AS service,
-  COALESCE(NULLIF(s.http_method, ''), 'CALL') AS method,
-  COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown') AS path,
-  COUNT(*) AS calls,
-  COUNT(*) FILTER (WHERE upper(s.status) IN ('ERROR', 'STATUS_CODE_ERROR')) AS error_count,
-  COUNT(s.duration_ms) AS duration_count,
-  struct_pack(
-    le_0_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.1),
-    le_0_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 0.5),
-    le_1 := COUNT(*) FILTER (WHERE s.duration_ms <= 1),
-    le_2_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 2.5),
-    le_5 := COUNT(*) FILTER (WHERE s.duration_ms <= 5),
-    le_10 := COUNT(*) FILTER (WHERE s.duration_ms <= 10),
-    le_25 := COUNT(*) FILTER (WHERE s.duration_ms <= 25),
-    le_50 := COUNT(*) FILTER (WHERE s.duration_ms <= 50),
-    le_100 := COUNT(*) FILTER (WHERE s.duration_ms <= 100),
-    le_250 := COUNT(*) FILTER (WHERE s.duration_ms <= 250),
-    le_500 := COUNT(*) FILTER (WHERE s.duration_ms <= 500),
-    le_750 := COUNT(*) FILTER (WHERE s.duration_ms <= 750),
-    le_1000 := COUNT(*) FILTER (WHERE s.duration_ms <= 1000),
-    le_2000 := COUNT(*) FILTER (WHERE s.duration_ms <= 2000),
-    le_5000 := COUNT(*) FILTER (WHERE s.duration_ms <= 5000),
-    le_30000 := COUNT(*) FILTER (WHERE s.duration_ms <= 30000),
-    le_300000 := COUNT(*) FILTER (WHERE s.duration_ms <= 300000)
-  ) AS duration_buckets
-FROM spans s
-JOIN affected a
-  ON a.namespace = s.namespace
- AND a.bucket = date_trunc('minute', s.start_time)
- AND a.service = COALESCE(s.service, '')
- AND a.method = COALESCE(NULLIF(s.http_method, ''), 'CALL')
- AND a.path = COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown')
-WHERE s.start_time >= (SELECT MIN(bucket) FROM affected)
-  AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
-GROUP BY
-  s.namespace,
-  date_trunc('minute', s.start_time),
-  COALESCE(s.service, ''),
-  COALESCE(NULLIF(s.http_method, ''), 'CALL'),
-  COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown');`
-
 const edgeRollupDeleteSQL = `
 WITH affected AS (
-  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket
+  SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
-    AND start_time >= ?
-    AND start_time < ?
+    AND start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
 )
 DELETE FROM edge_rollup
 WHERE EXISTS (
@@ -1643,13 +1456,13 @@ WHERE EXISTS (
 
 const edgeRollupInsertSQL = `
 WITH affected AS (
-  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket
+  SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
-    AND start_time >= ?
-    AND start_time < ?
+    AND start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
 ),
 -- The affected bucket range, computed once. As four scalar subqueries
 -- repeated across the predicates below, these read as correlated to the
@@ -1676,15 +1489,15 @@ bounds AS (
 parent_scope AS (
   SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
   FROM spans parent, bounds
-  WHERE parent.start_time >= bounds.lo - INTERVAL 1 HOUR
-    AND parent.start_time <= bounds.hi + INTERVAL 1 HOUR
+  WHERE parent.start_time >= (bounds.lo - INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND parent.start_time <= (bounds.hi + INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND parent.service IS NOT NULL
     AND parent.service != ''
 ),
 call_edges AS (
   SELECT
     child.namespace,
-    date_trunc('minute', child.start_time) AS bucket,
+    date_trunc('minute', child.start_time::TIMESTAMP_NS) AS bucket,
     parent.service AS caller,
     child.service AS callee,
     COUNT(*) AS calls,
@@ -1698,7 +1511,7 @@ call_edges AS (
    AND child.namespace = parent.namespace
   JOIN affected a
     ON a.namespace = child.namespace
-   AND a.bucket = date_trunc('minute', child.start_time)
+   AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
   -- bounds joins last, and as an explicit CROSS JOIN. Written as
   -- "FROM spans child, bounds JOIN parent_scope ON child...", the comma binds
   -- looser than JOIN: that parses as "spans child" comma "(bounds JOIN
@@ -1711,9 +1524,9 @@ call_edges AS (
   WHERE child.service IS NOT NULL
     AND child.service != ''
     AND parent.service != child.service
-    AND child.start_time >= bounds.lo
-    AND child.start_time < bounds.hi + INTERVAL 1 MINUTE
-  GROUP BY child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
+    AND child.start_time >= (bounds.lo)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND child.start_time < (bounds.hi + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  GROUP BY child.namespace, date_trunc('minute', child.start_time::TIMESTAMP_NS), parent.service, child.service
 ),
 -- Producers and consumers are aggregated per (namespace, bucket, service,
 -- destination, msg_system) BEFORE the join — joining raw span rows multiplies
@@ -1724,42 +1537,42 @@ call_edges AS (
 producers AS (
   SELECT DISTINCT
     s.namespace,
-    date_trunc('minute', s.start_time) AS bucket,
+    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
     s.service,
-    json_extract_string(s.attributes_json, '$."messaging.destination.name"') AS destination,
-    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system
+    s.messaging_destination AS destination,
+    s.messaging_system AS msg_system
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time)
+   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
   WHERE s.kind = 'SPAN_KIND_PRODUCER'
-    AND s.start_time >= (SELECT lo FROM bounds)
-    AND s.start_time < (SELECT hi FROM bounds) + INTERVAL 1 MINUTE
+    AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND s.service IS NOT NULL
     AND s.service != ''
-    AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
+    AND s.messaging_destination IS NOT NULL
 ),
 consumers AS (
   SELECT
     s.namespace,
-    date_trunc('minute', s.start_time) AS bucket,
+    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
     s.service,
-    json_extract_string(s.attributes_json, '$."messaging.destination.name"') AS destination,
-    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system,
+    s.messaging_destination AS destination,
+    s.messaging_system AS msg_system,
     COUNT(*) AS calls
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time)
+   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
   WHERE s.kind = 'SPAN_KIND_CONSUMER'
-    AND s.start_time >= (SELECT lo FROM bounds)
-    AND s.start_time < (SELECT hi FROM bounds) + INTERVAL 1 MINUTE
+    AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND s.service IS NOT NULL
     AND s.service != ''
-    AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
-  GROUP BY s.namespace, date_trunc('minute', s.start_time), s.service,
-    json_extract_string(s.attributes_json, '$."messaging.destination.name"'),
-    json_extract_string(s.attributes_json, '$."messaging.system"')
+    AND s.messaging_destination IS NOT NULL
+  GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service,
+    s.messaging_destination,
+    s.messaging_system
 ),
 messaging_edges AS (
   SELECT
@@ -1819,15 +1632,38 @@ func (d *Duck) QueryContext(ctx context.Context, query string, args ...any) (que
 		d.parquetMu.RUnlock()
 		return nil, err
 	}
+	var tx *sql.Tx
+	var db snapshotSQL = conn
+	if window, ok := queryrows.ReadWindow(ctx); ok && d.repository != nil {
+		tx, err = conn.BeginTx(ctx, nil)
+		if err == nil {
+			db = tx
+			query, err = d.bindSnapshot(ctx, tx, query, window)
+		}
+		if err != nil {
+			if tx != nil {
+				_ = tx.Rollback()
+			}
+			_ = conn.Close()
+			d.parquetMu.RUnlock()
+			return nil, err
+		}
+	}
 	started := time.Now()
-	rows, err := conn.QueryContext(ctx, query, args...)
+	rows, err := db.QueryContext(ctx, query, args...)
 	metrics.DuckDBStatement.Observe(time.Since(started).Seconds())
 	if err != nil {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
 		_ = conn.Close()
 		d.parquetMu.RUnlock()
 		return nil, err
 	}
 	release := func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
 		// The connection goes back to the pool only once its rows are done
 		// with it, which is what closing the rows first guarantees.
 		//
@@ -1867,6 +1703,21 @@ func (r *lockedRows) release() { r.unlockOnce.Do(r.unlock) }
 // QueryRowScan executes a single-row query against immutable Parquet files and
 // DuckDB's local rollup cache.
 func (d *Duck) QueryRowScan(ctx context.Context, dest []any, query string, args ...any) error {
+	if _, ok := queryrows.ReadWindow(ctx); ok && d.repository != nil {
+		rows, err := d.QueryContext(ctx, query, args...)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		if rows.Next() {
+			return rows.Scan(dest...)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		return sql.ErrNoRows
+	}
+
 	if err := d.lockParquetRead(ctx, readerQuery); err != nil {
 		return err
 	}
@@ -2001,12 +1852,12 @@ func (d *Duck) LogsSamples(ctx context.Context, windowMinutes, limit int, patter
 	namespace := d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT
-  strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+  strftime(time::TIMESTAMP_NS, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
   body,
   service AS service_name,
   severity
 FROM logs
-WHERE time >= now() - INTERVAL %d MINUTE
+WHERE time >= (now() - INTERVAL %d MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND (? = '' OR namespace = ?)
   AND body ~ ?
 ORDER BY time DESC
@@ -2102,7 +1953,7 @@ func (d *Duck) ErrorRoutes(ctx context.Context, windowMinutes, limit int) ([]Err
 	q := fmt.Sprintf(`
 SELECT body AS route, COUNT(*) AS count
 FROM logs
-WHERE time >= now() - INTERVAL %d MINUTE
+WHERE time >= (now() - INTERVAL %d MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND (? = '' OR namespace = ?)
   AND severity IN ('ERROR', 'ERR', 'WARN')
 GROUP BY body
@@ -2138,7 +1989,7 @@ func (d *Duck) ErrorRouteDetails(ctx context.Context, windowMinutes, limit int) 
 WITH spans_with_errors AS (
   SELECT service AS service_name, operation AS name, status AS status_code
   FROM spans
-  WHERE start_time >= now() - INTERVAL %d MINUTE
+  WHERE start_time >= (now() - INTERVAL %d MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND (? = '' OR namespace = ?)
 )
 SELECT service_name,

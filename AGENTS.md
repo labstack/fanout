@@ -16,6 +16,60 @@
   with application tables must have a positive applied Goose version before
   initialization. An empty or zero-only version table is not sufficient.
 
+## Telemetry engine and format
+
+- Use the pinned DuckDB 2 engine in `internal/duckdb`, built with
+  `scripts/with-duckdb.sh`. A Go driver version does not identify its bundled
+  native engine; verify `SELECT version()` when changing the pin.
+- Build and test on native Linux or macOS, AMD64 or ARM64. The wrapper verifies
+  each platform archive's checksum and uses its matching headers and statically
+  linked core, JSON, Parquet, and time-zone extensions. Do not add dynamic
+  extension downloads or a second engine path.
+- Store OTLP attributes and resource attributes as typed maps in canonical rows
+  and shredded Parquet VARIANT columns. Preserve integers, booleans, bytes,
+  nested values, and nanosecond UTC timestamps. Convert nested SQL results to
+  JSON only at the client boundary; attribute keys containing dots are literal.
+- Dashboard file snapshots use each signal's actual event-time footer bounds,
+  including signed nanoseconds. Unknown statistics include the file. Never
+  substitute ingestion time or prune public arbitrary SQL from a dashboard scope.
+- Endpoint histograms, log counts, and notable-trace candidates acknowledge
+  complete immutable batch IDs transactionally. Query cache markers and rows in
+  one read transaction under the pinned file snapshot; uncached active files
+  remain immediately visible. Compaction and retention must invalidate retired
+  contributions without double counting or losing late publications.
+- Version disposable read-cache schema and semantics together; mismatches rebuild
+  all private read tables. Cache minute aggregates, per-batch trace bounds,
+  and one incremental candidate per trace, never individual event copies or
+  four globally rewritten scope indexes. Mixed trace scopes use batch parts. Exact
+  clipped minutes read footer-pruned Parquet, and compaction derives complete
+  output contributions from cached inputs. Body search matches redacted text.
+  Analytical service/edge watermark lag is separate. Completed-batch writes
+  have their own gate and write-pool slot; analytical writes use disjoint tables.
+  Maintenance must hold both gates for checkpointing.
+- Batch format 3, including its physical schema, is the only accepted telemetry
+  format. Schema changes require a format version change. Disable schema unioning
+  and Hive partition inference; use native Parquet binding so VARIANT extracts
+  can reach the scan. Pre-project hot messaging fields into scalar read-view
+  columns; this preview does not push general VARIANT extracts across views.
+  Reject unsupported metadata before cleanup or schema rewriting, preserve those files, and add
+  no legacy reader or format fallback.
+- Keep native `TIMESTAMPTZ_NS` columns in time predicates. Bind Go window
+  parameters as `?::TIMESTAMP_NS::TIMESTAMPTZ_NS` to preserve nanoseconds;
+  cast returned timestamps and datetime-function arguments only. Every engine
+  connection uses UTC. Do not change Parquet UTC-instant semantics for speed.
+- Offline verification reuses one bounded, non-spilling native engine to decode
+  all Parquet columns and checks physical schemas, complete span sort tuples,
+  and exact index ranges. Operational errors and unsupported formats never
+  authorize quarantine. Discarded hashes force decoding; they are not checksums.
+- Keep DuckDB 2's memory-governed asynchronous I/O defaults unless measurements
+  justify tuning them. Do not force an unbounded read-ahead depth.
+- Arbitrary SQL is a single read-only SELECT over approved telemetry relations.
+  Parse its AST and describe/project results on the same connection and pinned
+  Parquet snapshot. Keep engine file access and configuration locked down.
+- Rooted service traversal uses keyed recursion over the complete scoped edge
+  rollup, keeps namespaces separate, and enforces hop, accumulated-node, and
+  execution-time limits. Report truncation explicitly.
+
 ## Product versioning
 
 Fanout uses CalVer with the format `YYYY.M.N[-alpha|-beta|-rc]`.

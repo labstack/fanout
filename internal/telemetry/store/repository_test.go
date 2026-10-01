@@ -40,8 +40,6 @@ func (c *testParquetCompactor) PublishParquet(ctx context.Context, publish func(
 	return nil
 }
 
-func sqlQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "''") + "'" }
-
 func testBatch() Batch {
 	return Batch{
 		ID: "batch-test",
@@ -615,8 +613,6 @@ func TestRepositoryRecoversInterruptedCompactionSwap(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	db := openTestDuckDB(t)
-	defer db.Close()
 	output := telemetry.BatchMetadata{
 		ID: "compact-recovery", MinIngestedNanos: 100, MaxIngestedNanos: 300, Generation: 1,
 		Spans: minCompactionInputs, Logs: minCompactionInputs, Metrics: minCompactionInputs,
@@ -626,12 +622,11 @@ func TestRepositoryRecoversInterruptedCompactionSwap(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, signal := range parquetSignals {
-		query := fmt.Sprintf("SELECT * FROM read_parquet(%s)", sqlQuote(repository.Parquet.Pattern(signal)))
-		if signal == "spans" {
-			query += " ORDER BY _trace_hash, start_unix_nano, span_id"
+		paths := make([]string, minCompactionInputs)
+		for i := range paths {
+			paths[i] = filepath.Join(repository.Parquet.BatchPath(fmt.Sprintf("recover-%d", i)), signal+".parquet")
 		}
-		stmt := fmt.Sprintf("COPY (%s) TO %s (FORMAT PARQUET, COMPRESSION ZSTD)", query, sqlQuote(filepath.Join(stage, signal+".parquet")))
-		if _, err := db.Exec(stmt); err != nil {
+		if err := repository.Parquet.MergeParquet(context.Background(), signal, paths, filepath.Join(stage, signal+".parquet")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -904,4 +899,11 @@ func TestUnresolvedCompactionRunbookExists(t *testing.T) {
 		}
 	}
 	t.Fatalf("runbook anchor %q is not a section in %s; sections are %v", anchor, guide, headings)
+}
+
+func (f testParquetPublisherFunc) PublishParquetReplacement(ctx context.Context, _ telemetry.BatchMetadata, _ []string, publish func(context.Context) error) error {
+	return f.PublishParquet(ctx, publish)
+}
+func (c *testParquetCompactor) PublishParquetReplacement(ctx context.Context, _ telemetry.BatchMetadata, _ []string, publish func(context.Context) error) error {
+	return c.PublishParquet(ctx, publish)
 }

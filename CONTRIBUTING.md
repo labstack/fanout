@@ -10,12 +10,36 @@ just build     # browser assets, then the binaries
 just check     # the full gate
 ```
 
-You need Go and a C compiler with `CGO_ENABLED=1` (DuckDB is a cgo dependency),
+You need Go 1.27.1 and a C/C++ toolchain on native Linux or macOS (amd64 or arm64),
 [Bun](https://bun.sh), [just](https://just.systems),
 [golangci-lint](https://golangci-lint.run/), and
 [Lefthook](https://github.com/evilmartians/lefthook). Running in local auth mode
 also requires a 32-character authentication code secret; SMTP and an AI key are
 optional — see [README](README.md#requirements).
+
+The DuckDB wrapper downloads the pinned, checksum-verified engine from
+[Fanout's dependency artifact mirror](https://github.com/labstack/fanout/releases/tag/duckdb-v2.0.0-alpha43763)
+on the first build. Linux needs the C++ runtime (`libstdc++`); macOS needs
+Xcode Command Line Tools and `libc++`. Cross-compilation is unsupported.
+Use `just` recipes or prefix Go commands with the wrapper:
+
+```sh
+bash scripts/with-duckdb.sh go build ./cmd/fanout
+bash scripts/with-duckdb.sh go test ./internal/ingest
+```
+
+Editor tooling also needs the same build tags, headers, and linker flags.
+Launch a fresh editor process through the wrapper, for example
+`bash scripts/with-duckdb.sh code .`, so its Go tools inherit that environment.
+Alternatively configure your editor to launch `gopls` through
+`bash scripts/with-duckdb.sh gopls serve`. An already-running editor process
+must be restarted to inherit these variables.
+
+The dependency mirror preserves the original DuckDB `v2.0.0-alpha43763`
+archives at upstream commit `96063b9e39` byte for byte. Its `duckdb-` tag
+namespace is separate from Fanout's product CalVer releases; new engine bytes
+require a new artifact tag and checksum pins. It never supplies a second engine
+or downloads extensions at runtime.
 
 ## Before you open a pull request
 

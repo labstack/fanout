@@ -13,6 +13,8 @@ import (
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/labstack/fanout/internal/settings"
@@ -111,8 +113,13 @@ func (h *httpIngestHandler) handleExport(
 	}
 	resp, err := export(r.Context())
 	if err != nil {
-		// The only current processing failure is cancellation/backpressure. Do not
-		// acknowledge a request whose rows were not accepted by the shared pipeline.
+		// Invalid payloads are permanent failures; exporters must not retry them.
+		if status.Code(err) == codes.InvalidArgument {
+			http.Error(w, status.Convert(err).Message(), http.StatusBadRequest)
+			return
+		}
+		// Cancellation/backpressure remains retryable. Never acknowledge rows
+		// that were not accepted by the shared pipeline.
 		http.Error(w, "telemetry was not accepted", http.StatusServiceUnavailable)
 		return
 	}

@@ -55,8 +55,8 @@ producers AS (
     s.namespace,
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
-    json_extract_string(s.attributes_json, '$."messaging.destination.name"') AS destination,
-    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system
+    TRY_CAST(attr(s.attributes, 'messaging.destination.name') AS VARCHAR) AS destination,
+    TRY_CAST(attr(s.attributes, 'messaging.system') AS VARCHAR) AS msg_system
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
@@ -66,15 +66,15 @@ producers AS (
     AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
-    AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
+    AND TRY_CAST(attr(s.attributes, 'messaging.destination.name') AS VARCHAR) IS NOT NULL
 ),
 consumers AS (
   SELECT
     s.namespace,
     date_trunc('minute', s.start_time) AS bucket,
     s.service,
-    json_extract_string(s.attributes_json, '$."messaging.destination.name"') AS destination,
-    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system,
+    TRY_CAST(attr(s.attributes, 'messaging.destination.name') AS VARCHAR) AS destination,
+    TRY_CAST(attr(s.attributes, 'messaging.system') AS VARCHAR) AS msg_system,
     COUNT(*) AS calls
   FROM spans s
   JOIN affected a
@@ -85,10 +85,10 @@ consumers AS (
     AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
     AND s.service IS NOT NULL
     AND s.service != ''
-    AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
+    AND TRY_CAST(attr(s.attributes, 'messaging.destination.name') AS VARCHAR) IS NOT NULL
   GROUP BY s.namespace, date_trunc('minute', s.start_time), s.service,
-    json_extract_string(s.attributes_json, '$."messaging.destination.name"'),
-    json_extract_string(s.attributes_json, '$."messaging.system"')
+    TRY_CAST(attr(s.attributes, 'messaging.destination.name') AS VARCHAR),
+    TRY_CAST(attr(s.attributes, 'messaging.system') AS VARCHAR)
 ),
 messaging_edges AS (
   SELECT

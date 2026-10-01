@@ -23,12 +23,12 @@ func TestSubmitRefusesWorkBeyondTheInFlightBudget(t *testing.T) {
 	w := NewWriter(nil, 1000)
 	w.inFlightBudget = 4096
 
-	big := Batch{Spans: []telemetry.Span{{AttributesJSON: strings.Repeat("x", 8192)}}}
+	big := Batch{Spans: []telemetry.Span{{Attributes: map[string]any{"payload": strings.Repeat("x", 8192)}}}}
 	if got := w.reserve(big); got != nil {
 		t.Fatalf("a lone request must be admitted however large, got %v", got)
 	}
 	// Now over budget on a single oversized reservation.
-	small := Batch{Spans: []telemetry.Span{{AttributesJSON: strings.Repeat("x", 16)}}}
+	small := Batch{Spans: []telemetry.Span{{Attributes: map[string]any{"payload": strings.Repeat("x", 16)}}}}
 	if err := w.reserve(small); !errors.Is(err, ErrIngestOverBudget) {
 		t.Errorf("reserve while over budget = %v, want ErrIngestOverBudget", err)
 	}
@@ -48,7 +48,7 @@ func TestSubmitRefusesWorkBeyondTheInFlightBudget(t *testing.T) {
 func TestSubmitBudgetOfZeroAdmitsEverything(t *testing.T) {
 	w := NewWriter(nil, 1000)
 	w.inFlightBudget = 0
-	huge := Batch{Spans: []telemetry.Span{{AttributesJSON: strings.Repeat("x", 1<<20)}}}
+	huge := Batch{Spans: []telemetry.Span{{Attributes: map[string]any{"payload": strings.Repeat("x", 1<<20)}}}}
 	for range 64 {
 		if err := w.reserve(huge); err != nil {
 			t.Fatalf("unbounded budget refused a request: %v", err)
@@ -62,7 +62,7 @@ func TestSubmitBudgetOfZeroAdmitsEverything(t *testing.T) {
 func TestSubmitOverBudgetIsReportedToTheCaller(t *testing.T) {
 	w := NewWriter(nil, 1000)
 	w.inFlightBudget = 1
-	batch := Batch{Spans: []telemetry.Span{{AttributesJSON: strings.Repeat("x", 4096)}}}
+	batch := Batch{Spans: []telemetry.Span{{Attributes: map[string]any{"payload": strings.Repeat("x", 4096)}}}}
 	if err := w.reserve(batch); err != nil {
 		t.Fatalf("first reservation must be admitted: %v", err)
 	}

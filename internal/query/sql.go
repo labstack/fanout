@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -76,22 +77,12 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse
 		}
 	}
 
-	// Build the query to execute
-	var execQuery string
-	if req.Explain {
-		// EXPLAIN does not need LIMIT
-		execQuery = "EXPLAIN " + req.Query
-	} else {
-		// Add LIMIT if not present
-		execQuery = ensureLimit(req.Query, req.MaxRows)
-	}
-
 	// Add timeout to context
 	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutMs)*time.Millisecond)
 	defer cancel()
 
 	// Execute the query against immutable Parquet files and the local cache.
-	rows, err := d.QueryContext(queryCtx, execQuery)
+	rows, serialized, err := d.querySQL(queryCtx, req.Query, req.MaxRows, req.Explain)
 	if err != nil {
 		return SQLResponse{
 			Error:           fmt.Sprintf("Query execution failed: %v", err),
@@ -148,6 +139,17 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse
 			row := make(RowMap)
 			for i, col := range columns {
 				val := values[i]
+				if serialized[i] && val != nil {
+					text, ok := val.(string)
+					if !ok {
+						return SQLResponse{Error: "Invalid JSON result representation"}
+					}
+					decoder := json.NewDecoder(strings.NewReader(normalizeJSONNumbers(text)))
+					decoder.UseNumber()
+					if err := decoder.Decode(&val); err != nil {
+						return SQLResponse{Error: fmt.Sprintf("Decode JSON result: %v", err)}
+					}
+				}
 				switch v := val.(type) {
 				case []byte:
 					// Convert []uint8 to string for better JSON representation
@@ -158,7 +160,9 @@ func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse
 					// column they meet is one -- and a failed assertion yields
 					// 0.0 from a value that was never zero, silently. Widening
 					// here costs nothing and disarms the whole class.
-					row[col] = float64(v)
+					row[col] = jsonFloat(float64(v))
+				case float64:
+					row[col] = jsonFloat(v)
 				default:
 					row[col] = val
 				}
@@ -305,7 +309,7 @@ func tokenOutsideStrings(query, token string) bool {
 // Pre-compiled patterns for CheckQueryCost to avoid re-compilation on every call.
 var (
 	highCardPatterns = func() map[string]*regexp.Regexp {
-		cols := []string{"TRACE_ID", "SPAN_ID", "ATTRIBUTES_JSON", "RESOURCE_JSON", "BODY", "EVENTS_JSON"}
+		cols := []string{"TRACE_ID", "SPAN_ID", "ATTRIBUTES", "RESOURCE", "BODY", "EVENTS_JSON"}
 		m := make(map[string]*regexp.Regexp, len(cols))
 		for _, col := range cols {
 			m[col] = regexp.MustCompile(`\b` + col + `\b`)
@@ -372,17 +376,4 @@ func CheckQueryCost(sql string) []string {
 	}
 
 	return warnings
-}
-
-// ensureLimit caps the result set at maxRows by wrapping the query in an outer
-// SELECT … LIMIT. Wrapping (rather than rewriting a LIMIT in place) avoids
-// clobbering LIMIT clauses inside subqueries or CTEs — a regex replace would
-// rewrite an inner `LIMIT 5000` and silently change query semantics. Any
-// user-supplied outer LIMIT smaller than maxRows still wins, since the outer cap
-// only ever shrinks the result.
-func ensureLimit(query string, maxRows int) string {
-	trimmed := strings.TrimSpace(query)
-	trimmed = strings.TrimSuffix(trimmed, ";")
-	trimmed = strings.TrimSpace(trimmed)
-	return fmt.Sprintf("SELECT * FROM (%s) AS _capped LIMIT %d", trimmed, maxRows)
 }

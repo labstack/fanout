@@ -15,6 +15,7 @@ import (
 type ObservabilityQueries interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
 	Topology(context.Context, observability.Scope, int) (observability.Result[observability.Topology], error)
+	Dependencies(context.Context, observability.Scope, observability.DependencyOptions) (observability.Result[observability.Dependencies], error)
 	Performance(context.Context, observability.Scope, observability.PerformanceOptions) (observability.Result[observability.Performance], error)
 	Trace(context.Context, observability.Scope, string, string, int) (observability.Result[observability.TraceDetail], error)
 	Logs(context.Context, observability.Scope, string, string, string, int) (observability.Result[observability.Logs], error)
@@ -36,9 +37,9 @@ func NewObservabilityHandler(queries ObservabilityQueries) *ObservabilityHandler
 // connection until the client gave up, and the client's own timeout is not
 // something the server can rely on.
 //
-// Twenty seconds is well clear of the slowest query measured under load here,
-// about two seconds, and stricter than the SQL API's own ceiling. It is
-// deliberately shorter than the worst legitimate wait behind a stuck
+// Twenty seconds bounds execution and pool waits under load and is stricter
+// than the SQL API's own ceiling. It is deliberately shorter than the worst
+// legitimate wait behind a stuck
 // publication — the drain remainder plus the swap budget can exceed a minute —
 // so a publication that goes wrong answers the dashboard instead of holding
 // every widget's connection until it finishes.
@@ -50,6 +51,7 @@ const observabilityDeadline = 20 * time.Second
 func (h *ObservabilityHandler) Register(group *echo.Group) {
 	group.GET("/overview", h.bounded(h.overview))
 	group.GET("/topology", h.bounded(h.topology))
+	group.GET("/services/dependencies", h.bounded(h.dependencies))
 	group.GET("/performance", h.bounded(h.performance))
 	group.GET("/trace", h.bounded(h.trace))
 	group.GET("/logs", h.bounded(h.logs))
@@ -154,15 +156,44 @@ func (h *ObservabilityHandler) request(c *echo.Context) (observability.Scope, in
 	}, limit, nil
 }
 
+func (h *ObservabilityHandler) dependencies(c *echo.Context) error {
+	scope, _, err := h.request(c)
+	if err != nil {
+		return err
+	}
+	options := observability.DependencyOptions{Service: c.QueryParam("service"), Direction: c.QueryParam("direction")}
+	for _, field := range []struct {
+		name  string
+		value *int
+	}{{"max_depth", &options.MaxDepth}, {"max_nodes", &options.MaxNodes}} {
+		if raw := c.QueryParam(field.name); raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value < 1 {
+				return echo.NewHTTPError(http.StatusBadRequest, field.name+" must be a positive integer")
+			}
+			*field.value = value
+		}
+	}
+	result, err := h.queries.Dependencies(c.Request().Context(), scope, options)
+	if err != nil {
+		return mapQueryError(err)
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
 func mapQueryError(err error) error {
 	if errors.Is(err, observability.ErrInvalidScope) || errors.Is(err, observability.ErrInvalidLimit) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	// A query that ran out of time is a load condition, not a fault: reporting
-	// it as a server error logs it at ERROR and counts it towards the 5xx rate
-	// that pages someone.
+	// A server deadline is a service-unavailable response; it remains a failed
+	// server request. Client cancellations below have a separate classification.
 	if errors.Is(err, context.DeadlineExceeded) {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "telemetry query took too long").Wrap(err)
+	}
+	if errors.Is(err, context.Canceled) {
+		// A disconnected client is not a server failure. The nonstandard 499
+		// status is used by our request logger to keep this out of the 5xx rate.
+		return echo.NewHTTPError(499, "telemetry query canceled by client").Wrap(err)
 	}
 	return echo.NewHTTPError(http.StatusInternalServerError, "telemetry query failed").Wrap(err)
 }

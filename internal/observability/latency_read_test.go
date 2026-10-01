@@ -157,7 +157,7 @@ func TestEndpointDurationBucketsAreConsistent(t *testing.T) {
 	// The query reads these counts positionally, so its SELECT list has to be
 	// this list — a reordering would report one bucket's count against
 	// another's boundary and quietly shift every percentile.
-	if !strings.Contains(endpointRollupQuery, endpointDurationColumns()) {
+	if !strings.Contains(completedEndpointsQuery, endpointDurationColumns()) {
 		t.Fatalf("the rollup query does not select %q in order", endpointDurationColumns())
 	}
 }

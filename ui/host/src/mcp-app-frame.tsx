@@ -1,7 +1,5 @@
 import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/app-bridge";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { CallToolResultSchema } from "@modelcontextprotocol/sdk/types.js";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { Alert, Box, Center, Loader, Text, useComputedColorScheme } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { authorizedFetch } from "./auth";
@@ -265,11 +263,7 @@ export default function MCPAppFrame({ content, onMessage }: { content: MCPAppCon
         { openLinks: {}, serverTools: {}, logging: {} },
         { hostContext: { theme: colorSchemeRef.current, displayMode: "inline" } },
       );
-      bridge.oncalltool = (params, extra) => mcpClient.request(
-        { method: "tools/call", params },
-        CallToolResultSchema,
-        { signal: extra.signal },
-      );
+      bridge.oncalltool = (params, extra) => mcpClient.callTool(params, { signal: extra.mcpReq.signal });
       bridgeRef.current = bridge;
       bridge.onsizechange = ({ height: requested }) => {
         if (requested) setHeight(Math.min(maxAppHeight, Math.max(minimumHeight, Math.ceil(requested) + 32)));

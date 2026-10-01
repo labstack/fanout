@@ -16,22 +16,22 @@ CREATE TABLE IF NOT EXISTS telemetry.spans (
   service VARCHAR,
   operation VARCHAR,
   kind VARCHAR,
-  start_time TIMESTAMP,
-  end_time TIMESTAMP,
+  start_time TIMESTAMP_NS,
+  end_time TIMESTAMP_NS,
   start_unix_nano BIGINT,
   end_unix_nano BIGINT,
   duration_ms DOUBLE,
   status VARCHAR,
   status_message VARCHAR,
-  resource_json VARCHAR,
-  attributes_json VARCHAR,
+  resource VARIANT,
+  attributes VARIANT,
   events_json VARCHAR,
   links_json VARCHAR,
   trace_state VARCHAR,
   flags BIGINT,
   scope_name VARCHAR,
   scope_version VARCHAR,
-  ingested_at TIMESTAMP,
+  ingested_at TIMESTAMP_NS,
   ingested_unix_nano BIGINT,
   http_method VARCHAR,
   http_status_code VARCHAR,
@@ -43,14 +43,16 @@ CREATE TABLE IF NOT EXISTS telemetry.spans (
   service_version VARCHAR,
   deployment_env VARCHAR,
   exception_type VARCHAR,
-  exception_message VARCHAR
+  exception_message VARCHAR,
+  messaging_system VARCHAR GENERATED ALWAYS AS (TRY_CAST(attributes['messaging.system'] AS VARCHAR)),
+  messaging_destination VARCHAR GENERATED ALWAYS AS (TRY_CAST(attributes['messaging.destination.name'] AS VARCHAR))
 );`
 
 const createLogsTable = `
 CREATE TABLE IF NOT EXISTS telemetry.logs (
   namespace VARCHAR,
-  log_time TIMESTAMP,
-  observed_time TIMESTAMP,
+  log_time TIMESTAMP_NS,
+  observed_time TIMESTAMP_NS,
   time_unix_nano BIGINT,
   observed_time_unix_nano BIGINT,
   severity VARCHAR,
@@ -60,11 +62,11 @@ CREATE TABLE IF NOT EXISTS telemetry.logs (
   trace_id VARCHAR,
   span_id VARCHAR,
   flags BIGINT,
-  resource_json VARCHAR,
-  attributes_json VARCHAR,
+  resource VARIANT,
+  attributes VARIANT,
   scope_name VARCHAR,
   scope_version VARCHAR,
-  ingested_at TIMESTAMP,
+  ingested_at TIMESTAMP_NS,
   ingested_unix_nano BIGINT,
   body_template VARCHAR
 );`
@@ -72,7 +74,7 @@ CREATE TABLE IF NOT EXISTS telemetry.logs (
 const createMetricsTable = `
 CREATE TABLE IF NOT EXISTS telemetry.metrics (
   namespace VARCHAR,
-  metric_time TIMESTAMP,
+  metric_time TIMESTAMP_NS,
   time_unix_nano BIGINT,
   name VARCHAR,
   description VARCHAR,
@@ -85,11 +87,11 @@ CREATE TABLE IF NOT EXISTS telemetry.metrics (
   hist_count BIGINT,
   hist_sum DOUBLE,
   exemplars_json VARCHAR,
-  attributes_json VARCHAR,
-  resource_json VARCHAR,
+  attributes VARIANT,
+  resource VARIANT,
   scope_name VARCHAR,
   scope_version VARCHAR,
-  ingested_at TIMESTAMP,
+  ingested_at TIMESTAMP_NS,
   ingested_unix_nano BIGINT
 );`
 
@@ -124,8 +126,9 @@ CREATE TABLE edge_rollup (
   PRIMARY KEY (namespace, bucket, caller, callee, edge_type)
 );`
 
-const createEndpointRollupTable = `
-CREATE TABLE endpoint_rollup (
+const createReadEndpointTable = `
+CREATE TABLE IF NOT EXISTS read_endpoints (
+  batch_id VARCHAR,
   namespace TEXT,
   bucket TIMESTAMP,
   service TEXT,
@@ -153,7 +156,7 @@ CREATE TABLE endpoint_rollup (
     le_30000 UBIGINT,
     le_300000 UBIGINT
   ),
-  PRIMARY KEY (namespace, bucket, service, method, path)
+  PRIMARY KEY (batch_id, namespace, bucket, service, method, path)
 );`
 
 const createRollupStateTable = `
@@ -173,22 +176,22 @@ SELECT
   service,
   operation,
   kind,
-  start_time,
-  end_time,
+  start_time::TIMESTAMPTZ_NS AS start_time,
+  end_time::TIMESTAMPTZ_NS AS end_time,
   start_unix_nano,
   end_unix_nano,
   duration_ms,
   status,
   status_message,
-  resource_json,
-  attributes_json,
+  resource,
+  attributes,
   events_json,
   links_json,
   trace_state,
   flags,
   scope_name,
   scope_version,
-  ingested_at,
+  ingested_at::TIMESTAMPTZ_NS AS ingested_at,
   ingested_unix_nano,
   http_method,
   http_status_code,
@@ -200,15 +203,17 @@ SELECT
   service_version,
   deployment_env,
   exception_type,
-  exception_message
+  exception_message,
+  messaging_system,
+  messaging_destination
 FROM telemetry.spans;`
 
 const viewLogs = `
 CREATE OR REPLACE VIEW logs AS
 SELECT
   namespace,
-  log_time AS time,
-  observed_time,
+  log_time::TIMESTAMPTZ_NS AS time,
+  observed_time::TIMESTAMPTZ_NS AS observed_time,
   time_unix_nano,
   observed_time_unix_nano,
   severity,
@@ -218,11 +223,11 @@ SELECT
   trace_id,
   span_id,
   flags,
-  resource_json,
-  attributes_json,
+  resource,
+  attributes,
   scope_name,
   scope_version,
-  ingested_at,
+  ingested_at::TIMESTAMPTZ_NS AS ingested_at,
   ingested_unix_nano,
   body_template
 FROM telemetry.logs;`
@@ -231,7 +236,7 @@ const viewMetrics = `
 CREATE OR REPLACE VIEW metrics AS
 SELECT
   namespace,
-  metric_time AS time,
+  metric_time::TIMESTAMPTZ_NS AS time,
   time_unix_nano,
   name,
   description,
@@ -244,17 +249,17 @@ SELECT
   hist_count,
   hist_sum,
   exemplars_json,
-  attributes_json,
-  resource_json,
+  attributes,
+  resource,
   scope_name,
   scope_version,
-  ingested_at,
+  ingested_at::TIMESTAMPTZ_NS AS ingested_at,
   ingested_unix_nano
 FROM telemetry.metrics;`
 
 const macroAttr = `
-CREATE OR REPLACE MACRO attr(json_col, key) AS
-  json_extract_string(json_col, '$."' || key || '"');`
+CREATE OR REPLACE MACRO attr(attributes, key) AS
+  variant_extract(attributes, key);`
 
 // CreateTables creates mutable telemetry tables for query-kernel tests and
 // benchmarks. Production startup never calls this function: telemetry is
@@ -282,88 +287,39 @@ func CreateCacheTables(db *sql.DB) error {
 		"namespace", "bucket", "caller", "callee", "calls", "avg_ms", "error_rate", "edge_type"); err != nil {
 		return err
 	}
-	if err := ensureCacheTable(db, "endpoint_rollup", createEndpointRollupTable,
-		"namespace", "bucket", "service", "method", "path", "calls", "error_count", "duration_count", "duration_buckets"); err != nil {
-		return err
-	}
 	if err := ensureCacheTable(db, "rollup_state", createRollupStateTable,
 		"cache_key", "last_ingested_unix_nano", "updated_at"); err != nil {
 		return err
 	}
-	return nil
+	if _, err := db.Exec(`DROP TABLE IF EXISTS endpoint_rollup`); err != nil {
+		return err
+	}
+	if err := forgetRollupProgress(db, "endpoint_rollup"); err != nil {
+		return err
+	}
+	return createBatchCaches(db)
 }
 
-// CreateParquetViews exposes the repository's open Parquet files under the
-// canonical telemetry schema used by Fanout's SQL kernel.
-//
-// The schema is pinned explicitly rather than unioned from the files. Both
-// approaches tolerate an older batch that predates an added column -- it reads
-// as NULL either way, which is the property the views cannot do without, since
-// CreateViews names every column and binds eagerly, so a glob that rejects one
-// old file stops the process from starting.
-//
-// They differ entirely in cost. union_by_name derives the column set by opening
-// every file in the glob at bind and holding a reader and footer per file for
-// the statement's life, on the raw allocator where memory_limit cannot see it:
-// measured at 510 MiB per query against 3,281 live batches and 857 MiB against
-// 5,709, scaling at roughly 150 KB per file and paid again by every concurrent
-// binder. Pinning the schema opens nothing at bind, so the same query costs
-// tens of MiB and stops tracking how many batches happen to exist.
+// CreateParquetViews exposes the fixed format-3 schema. Binding one file
+// rather than unioning every footer bounds binder memory. Supplying a schema
+// MAP suppresses DuckDB 2's VARIANT extraction pushdown, so read the physical
+// schema directly; startup rejects mismatched batch schemas before this point.
 func CreateParquetViews(db *sql.DB, parquetDir string) error {
 	if _, err := db.Exec(`CREATE SCHEMA IF NOT EXISTS telemetry`); err != nil {
 		return err
 	}
 	for _, signal := range []string{"spans", "logs", "metrics"} {
 		pattern := filepath.ToSlash(filepath.Join(parquetDir, "batches", "*.batch", signal+".parquet"))
-		// _schema.batch is rewritten from the current binary's row structs on
-		// every open (ParquetStore.ensureSchemaBatch), so it is the definition
-		// of "every column this build knows about". Reading its schema keeps
-		// the view in lockstep with the writer instead of duplicating the
-		// column list here for someone to forget. That rewrite is load-bearing:
-		// while the file was written once and kept, these views were pinned to
-		// whichever build created the data directory.
-		schemaFile := filepath.ToSlash(filepath.Join(parquetDir, "batches", "_schema.batch", signal+".parquet"))
-		columns, err := parquetSchemaMap(db, schemaFile, signal == "spans")
-		if err != nil {
-			return err
+		projection := "*"
+		if signal == "spans" {
+			projection += " EXCLUDE (_trace_hash), TRY_CAST(attributes['messaging.system'] AS VARCHAR) AS messaging_system, TRY_CAST(attributes['messaging.destination.name'] AS VARCHAR) AS messaging_destination"
 		}
-		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT * FROM read_parquet(%s, schema=%s)`, signal, sqlLiteral(pattern), columns)
+		stmt := fmt.Sprintf(`CREATE OR REPLACE VIEW telemetry.%s AS SELECT %s FROM read_parquet(%s, union_by_name=false, hive_partitioning=false)`, signal, projection, sqlLiteral(pattern))
 		if _, err := db.Exec(stmt); err != nil {
 			return fmt.Errorf("create parquet view telemetry.%s: %w", signal, err)
 		}
 	}
 	return nil
-}
-
-// parquetSchemaMap renders the schema argument for read_parquet from one file's
-// own schema. A column absent from a given file takes its default, which is how
-// an older batch survives a build that added a column.
-func parquetSchemaMap(db *sql.DB, file string, dropTraceHash bool) (string, error) {
-	rows, err := db.Query(fmt.Sprintf(`SELECT column_name, column_type FROM (DESCRIBE SELECT * FROM read_parquet(%s))`, sqlLiteral(file)))
-	if err != nil {
-		return "", fmt.Errorf("describe %s: %w", file, err)
-	}
-	defer rows.Close()
-	var entries []string
-	for rows.Next() {
-		var name, columnType string
-		if err := rows.Scan(&name, &columnType); err != nil {
-			return "", err
-		}
-		// _trace_hash is a physical sort key, not part of the telemetry schema.
-		if dropTraceHash && name == "_trace_hash" {
-			continue
-		}
-		entries = append(entries, fmt.Sprintf("%s: {'name': %s, 'type': %s, 'default_value': NULL}",
-			sqlLiteral(name), sqlLiteral(name), sqlLiteral(columnType)))
-	}
-	if err := rows.Err(); err != nil {
-		return "", err
-	}
-	if len(entries) == 0 {
-		return "", fmt.Errorf("no columns described for %s", file)
-	}
-	return "MAP{" + strings.Join(entries, ", ") + "}", nil
 }
 
 // CreateViews creates stable clean-name views plus the attr() macro.

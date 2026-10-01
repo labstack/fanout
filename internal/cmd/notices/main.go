@@ -16,6 +16,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	engine "github.com/labstack/fanout/internal/duckdb"
 )
 
 type component struct {
@@ -114,6 +116,12 @@ func collect(root string) ([]component, error) {
 	if err := collectGo(root, all); err != nil {
 		return nil, err
 	}
+	data, err := os.ReadFile(filepath.Join(root, "third_party", "notices", "duckdb-NOTICE.txt"))
+	if err != nil {
+		return nil, err
+	}
+	id := "Native: DuckDB " + engine.Version + " (" + engine.SourceCommit + ")"
+	all[id] = component{id: id, kind: "native engine and static extensions", documents: []document{{name: "duckdb-NOTICE", text: string(data)}}}
 	for _, workspace := range []string{"ui/host", "ui/apps"} {
 		if err := collectNPM(root, filepath.Join(root, workspace), all); err != nil {
 			return nil, err
@@ -389,7 +397,7 @@ func render(components []component) []byte {
 	var out strings.Builder
 	out.WriteString("FANOUT THIRD-PARTY NOTICES\n\n")
 	out.WriteString("This file is generated from the Go packages linked into the four supported\n")
-	out.WriteString("release targets and from the production dependency graphs of the two embedded\n")
+	out.WriteString("release targets, the pinned native DuckDB engine, and the production dependency graphs of the two embedded\n")
 	out.WriteString("browser applications. Development-only dependencies are excluded. Regenerate it\n")
 	out.WriteString("with `just notices`; CI verifies it with `just notices-check`.\n\n")
 	out.WriteString("The following components are provided under their own terms. Fanout's Apache-2.0\n")

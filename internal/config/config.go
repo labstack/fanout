@@ -35,11 +35,12 @@ type Config struct {
 	// MaintenanceInterval controls Parquet retention and compaction, and
 	// query-cache checkpointing.
 	MaintenanceInterval time.Duration `koanf:"storage.maintenance_interval" env:"FANOUT_MAINTENANCE_INTERVAL" default:"1h"`
-	// RollupSkipToLatest, set once at boot, advances every rollup watermark to the
-	// current max ingested timestamp so existing data is treated as already-rolled-up
-	// instead of aggregated as a backlog. Stands up a large pre-seeded historical
-	// dataset (benchmarks, restores) without a multi-minute first-rollup catch-up
-	// that monopolizes DuckDB write capacity. Off in normal operation.
+	// RollupSkipToLatest, set once at boot, advances the service and edge rollup
+	// watermarks to the current max ingested timestamp. Existing history is not
+	// aggregated into those analytical rollups. Completed-batch endpoint, log,
+	// and trace caches still rebuild all retained history in bounded passes;
+	// uncached files remain immediately queryable. Useful for large pre-seeded
+	// datasets (benchmarks, restores); off in normal operation.
 	RollupSkipToLatest bool   `koanf:"storage.rollup_skip_to_latest" env:"FANOUT_ROLLUP_SKIP_TO_LATEST" default:"false"`
 	DefaultNamespace   string `koanf:"ingest.default_namespace" env:"FANOUT_DEFAULT_NAMESPACE" default:"default"`
 	// PprofEnabled exposes Go's net/http/pprof handlers at /debug/pprof/* for

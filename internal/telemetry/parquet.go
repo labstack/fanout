@@ -3,6 +3,7 @@ package telemetry
 import (
 	"container/heap"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,7 +25,7 @@ import (
 const (
 	BatchSuffix          = ".batch"
 	SchemaBatch          = "_schema" + BatchSuffix
-	batchMetadataVersion = 2
+	batchMetadataVersion = 3
 	parquetPageSize      = 64 << 10
 	parquetRowGroupRows  = 50_000
 	maxTraceQueryResults = 500
@@ -53,6 +54,16 @@ type BatchMetadata struct {
 	// measured when a batch is loaded, from stats the load already performs.
 	// Zero means not measured.
 	Bytes int64 `json:"-"`
+	// Event times come from fixed-schema Parquet footer statistics, not ingest
+	// timestamps. They are derived on publication/load and never change format 3.
+	SpanTime   TimeRange `json:"-"`
+	LogTime    TimeRange `json:"-"`
+	MetricTime TimeRange `json:"-"`
+}
+
+type TimeRange struct {
+	MinNanos, MaxNanos int64
+	Known              bool
 }
 
 type TraceQuery struct {
@@ -89,6 +100,10 @@ func OpenParquetStore(dir string) (*ParquetStore, error) {
 		publishGate: make(chan struct{}, 1), batches: make(map[string]*storedBatch),
 	}
 	p.publishGate <- struct{}{}
+	// Reject incompatible published data before touching staging or schema files.
+	if err := validateBatchFormats(p.batchesDir); err != nil {
+		return nil, err
+	}
 	for _, path := range []string{p.dir, p.batchesDir} {
 		if err := os.MkdirAll(path, 0o755); err != nil {
 			return nil, err
@@ -482,8 +497,8 @@ func (p *ParquetStore) Trace(ctx context.Context, query TraceQuery) ([]IndexedSp
 		if err := ctx.Err(); err != nil {
 			return nil, totals, err
 		}
-		if batch.metadata.MaxSpanStartNanos > 0 &&
-			(batch.metadata.MaxSpanStartNanos < query.StartNanos || batch.metadata.MinSpanStartNanos >= query.EndNanos) {
+		if bounds := batch.metadata.SpanTime; bounds.Known &&
+			(bounds.MaxNanos < query.StartNanos || bounds.MinNanos >= query.EndNanos) {
 			continue
 		}
 		match, found, err := batch.traces.Lookup(hash)
@@ -1022,32 +1037,6 @@ func loadRegisteredBatch(dir string) (*storedBatch, error) {
 	return batch, nil
 }
 
-// ValidatePublishedBatch performs an offline deep validation: startup's
-// structural checks plus full Parquet decoding and an exact span/index walk.
-// Repair uses it to prove a batch is unreadable before it can be set aside.
-func ValidatePublishedBatch(dir string) error {
-	batch, err := loadRegisteredBatch(dir)
-	if err != nil {
-		return err
-	}
-	if batch.metadata.Spans > 0 {
-		if err := verifySpanParquet(filepath.Join(dir, "spans.parquet"), batch.metadata.Spans, batch.traces); err != nil {
-			return fmt.Errorf("verify spans Parquet: %w", err)
-		}
-	}
-	if batch.metadata.Logs > 0 {
-		if err := verifyTypedParquet[logParquetRow](filepath.Join(dir, "logs.parquet"), batch.metadata.Logs, nil); err != nil {
-			return fmt.Errorf("verify logs Parquet: %w", err)
-		}
-	}
-	if batch.metadata.Metrics > 0 {
-		if err := verifyTypedParquet[metricParquetRow](filepath.Join(dir, "metrics.parquet"), batch.metadata.Metrics, nil); err != nil {
-			return fmt.Errorf("verify metrics Parquet: %w", err)
-		}
-	}
-	return nil
-}
-
 func verifySpanParquet(path string, expected int, index traceIndex) (err error) {
 	indexFile, err := os.Open(index.path)
 	if err != nil {
@@ -1072,7 +1061,12 @@ func verifySpanParquet(path string, expected int, index traceIndex) (err error) 
 		have = false
 		return nil
 	}
-	err = verifyTypedParquet[spanParquetRow](path, expected, func(row spanParquetRow, position uint64) error {
+	var previous verificationSpanRow
+	err = verifyTypedParquet[verificationSpanRow](path, expected, func(row verificationSpanRow, position uint64) error {
+		if position > 0 && (row.TraceHash < previous.TraceHash || row.TraceHash == previous.TraceHash && (row.StartUnixNano < previous.StartUnixNano || row.StartUnixNano == previous.StartUnixNano && row.SpanID < previous.SpanID)) {
+			return fmt.Errorf("span row %d is not sorted by trace hash, start time, span ID", position)
+		}
+		previous = row
 		if row.TraceHash != xxh3.HashString(row.TraceID) {
 			return fmt.Errorf("span row %d trace hash does not match trace ID", position)
 		}
@@ -1165,10 +1159,16 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		{name: "metrics", count: metadata.Metrics},
 	}
 	for _, signal := range signals {
+		path := filepath.Join(dir, signal.name+".parquet")
 		if signal.count == 0 {
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				if err != nil {
+					return nil, err
+				}
+				return nil, fmt.Errorf("%s parquet exists but metadata declares zero rows", signal.name)
+			}
 			continue
 		}
-		path := filepath.Join(dir, signal.name+".parquet")
 		info, err := os.Stat(path)
 		if err != nil {
 			return nil, err
@@ -1189,8 +1189,28 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		if err := errors.Join(openErr, closeErr); err != nil {
 			return nil, fmt.Errorf("open %s Parquet: %w", signal.name, err)
 		}
+		var expectedSchema *parquet.Schema
+		switch signal.name {
+		case "spans":
+			expectedSchema = telemetrySchema[spanParquetRow]()
+		case "logs":
+			expectedSchema = telemetrySchema[logParquetRow]()
+		case "metrics":
+			expectedSchema = telemetrySchema[metricParquetRow]()
+		}
+		if !parquet.EqualNodes(parquetFile.Schema(), expectedSchema) {
+			return nil, fmt.Errorf("%w: %s parquet schema does not match telemetry format %d", ErrUnsupportedBatchFormat, signal.name, batchMetadataVersion)
+		}
 		if rows := parquetFile.NumRows(); rows != int64(signal.count) {
 			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.name, rows, signal.count)
+		}
+		switch signal.name {
+		case "spans":
+			metadata.SpanTime = parquetTimeRange(parquetFile, "start_time")
+		case "logs":
+			metadata.LogTime = parquetTimeRange(parquetFile, "log_time")
+		case "metrics":
+			metadata.MetricTime = parquetTimeRange(parquetFile, "metric_time")
 		}
 	}
 	var traces traceIndex
@@ -1201,6 +1221,40 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 		}
 	}
 	return &storedBatch{metadata: metadata, dir: dir, traces: traces}, nil
+}
+
+// Statistics are optional in Parquet. Without complete bounds, the file stays
+// in every candidate snapshot. Ingest bounds never substitute for event time.
+func parquetTimeRange(file *parquet.File, column string) TimeRange {
+	var result TimeRange
+	for _, group := range file.Metadata().RowGroups {
+		found := false
+		for _, chunk := range group.Columns {
+			if len(chunk.MetaData.PathInSchema) != 1 || chunk.MetaData.PathInSchema[0] != column {
+				continue
+			}
+			stats := chunk.MetaData.Statistics
+			if len(stats.MinValue) != 8 || len(stats.MaxValue) != 8 {
+				return TimeRange{}
+			}
+			low := int64(binary.LittleEndian.Uint64(stats.MinValue))
+			high := int64(binary.LittleEndian.Uint64(stats.MaxValue))
+			if low > high {
+				return TimeRange{}
+			}
+			if !result.Known || low < result.MinNanos {
+				result.MinNanos = low
+			}
+			if !result.Known || high > result.MaxNanos {
+				result.MaxNanos = high
+			}
+			result.Known, found = true, true
+		}
+		if !found {
+			return TimeRange{}
+		}
+	}
+	return result
 }
 
 func (p *ParquetStore) hasBatch(id string) bool {
@@ -1293,6 +1347,7 @@ func mergeTypedParquet[T any](ctx context.Context, inputs []string, output strin
 			_ = os.Remove(output)
 		}
 	}()
+	options = append(options, telemetrySchema[T]())
 	writer := parquet.NewGenericWriter[T](out, parquetWriterOptions(parquetPageSize, options...)...)
 	_, copyErr := parquet.CopyRows(writer, contextParquetRows{Context: ctx, Rows: rows})
 	if closeErr := writer.Close(); copyErr != nil || closeErr != nil {
@@ -1317,8 +1372,9 @@ func writeTypedParquet[T any](path string, rows []T, pageSize int, options ...pa
 			_ = os.Remove(path)
 		}
 	}()
+	options = append(options, telemetrySchema[T]())
 	writer := parquet.NewGenericWriter[T](f, parquetWriterOptions(pageSize, options...)...)
-	if _, err := writer.Write(rows); err != nil {
+	if err := writeTelemetryColumns(writer, rows); err != nil {
 		_ = writer.Close()
 		return err
 	}
@@ -1345,7 +1401,7 @@ func readBatchMetadata(path string) (BatchMetadata, error) {
 		return BatchMetadata{}, err
 	}
 	if metadata.Version != batchMetadataVersion {
-		return BatchMetadata{}, fmt.Errorf("unsupported batch metadata version %d", metadata.Version)
+		return BatchMetadata{}, fmt.Errorf("%w: version %d", ErrUnsupportedBatchFormat, metadata.Version)
 	}
 	if err := ValidateBatchID(metadata.ID); err != nil {
 		return BatchMetadata{}, err

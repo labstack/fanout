@@ -15,8 +15,8 @@ type Span struct {
 	DurationMS       float64
 	StatusCode       string
 	StatusMsg        string
-	ResourceJSON     string
-	AttributesJSON   string
+	Resource         map[string]any
+	Attributes       map[string]any
 	EventsJSON       string
 	LinksJSON        string
 	TraceState       string
@@ -39,7 +39,7 @@ type Span struct {
 
 // IndexedSpan is the narrow projection needed by trace-detail queries. The
 // complete authoritative span remains in Parquet and is available through SQL;
-// keeping this narrow projection small avoids decoding large JSON columns.
+// keeping this narrow projection small avoids decoding large attribute columns.
 type IndexedSpan struct {
 	Namespace      string
 	TraceID        string
@@ -66,8 +66,8 @@ type Log struct {
 	TraceID           string
 	SpanID            string
 	Flags             uint32
-	ResourceJSON      string
-	AttributesJSON    string
+	Resource          map[string]any
+	Attributes        map[string]any
 	ScopeName         string
 	ScopeVersion      string
 	IngestedAt        int64
@@ -89,8 +89,8 @@ type Metric struct {
 	HistCount      int64
 	HistSum        float64
 	ExemplarsJSON  string
-	AttributesJSON string
-	ResourceJSON   string
+	Attributes     map[string]any
+	Resource       map[string]any
 	ScopeName      string
 	ScopeVersion   string
 	IngestedAt     int64

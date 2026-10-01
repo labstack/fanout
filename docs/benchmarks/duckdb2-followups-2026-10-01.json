@@ -1,0 +1,1372 @@
+{
+  "engine": "v2.0.0-alpha43763",
+  "platform": "linux/arm64",
+  "container_cpus": 4,
+  "container_memory_bytes": 6442450944,
+  "harness_commit": "a9843c1fd55b9465d4d77a42fcf8805c467af731",
+  "fanout_binary_sha256": "5b61295e7c3ca5d4b0173864b7b2ced166668f073292975a2783d79b65ea2093",
+  "read_fixture": {
+    "batches": 312,
+    "rows_per_signal": 1200000,
+    "repetitions_per_case": 10,
+    "backfill_seconds": 3.593804327,
+    "binary_sha256": "fc75986a8a3ff43d8817d97e73a0f7d79f963e959fb663b6fff33c3d57eba5b5"
+  },
+  "reads": [
+    {
+      "cpu_seconds_per_request": 0.16519580000000006,
+      "implementation": "raw",
+      "median_ms": 47.126116499999995,
+      "method": "endpoints",
+      "p95_ms": 50.549057,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.049093300000000006,
+      "implementation": "completed",
+      "median_ms": 32.376495500000004,
+      "method": "endpoints",
+      "p95_ms": 35.043831,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.18912960000000006,
+      "implementation": "raw",
+      "median_ms": 60.809444,
+      "method": "trace",
+      "p95_ms": 66.316576,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.042178200000000034,
+      "implementation": "completed",
+      "median_ms": 20.041398,
+      "method": "trace",
+      "p95_ms": 31.82162,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.19311000000000006,
+      "implementation": "raw",
+      "median_ms": 61.007069,
+      "method": "logs",
+      "p95_ms": 63.729781,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.026694700000000182,
+      "implementation": "completed",
+      "median_ms": 18.208583,
+      "method": "logs",
+      "p95_ms": 19.203231,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.0719815999999998,
+      "implementation": "raw",
+      "median_ms": 30.054243,
+      "method": "trace",
+      "p95_ms": 30.696535,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.05076199999999993,
+      "implementation": "completed",
+      "median_ms": 29.025575,
+      "method": "trace",
+      "p95_ms": 30.262701,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.10608470000000025,
+      "implementation": "raw",
+      "median_ms": 39.626587,
+      "method": "logs",
+      "p95_ms": 42.288423,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.021031200000000184,
+      "implementation": "completed",
+      "median_ms": 15.439538500000001,
+      "method": "logs",
+      "p95_ms": 17.121895,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.02312410000000007,
+      "implementation": "raw",
+      "median_ms": 12.844431499999999,
+      "method": "endpoints",
+      "p95_ms": 15.067225,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.036625700000000094,
+      "implementation": "completed",
+      "median_ms": 23.9797975,
+      "method": "endpoints",
+      "p95_ms": 25.478737,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    }
+  ],
+  "mixed_summary": {
+    "peak_traces": {
+      "trial_name": "traces-p8-r1",
+      "offered_items_per_second": 160000,
+      "accepted_items_per_second": 95028.53951124784,
+      "average_cpu_cores": 2.444410773479345,
+      "peak_rss_bytes": 1079513088
+    },
+    "peak_logs": {
+      "trial_name": "logs-p8-r1",
+      "offered_items_per_second": 160000,
+      "accepted_items_per_second": 95678.62310134368,
+      "average_cpu_cores": 1.557826576029755,
+      "peak_rss_bytes": 1249972224
+    },
+    "peak_metrics": {
+      "trial_name": "metrics-p8-r1",
+      "offered_items_per_second": 160000,
+      "accepted_items_per_second": 96356.74388603629,
+      "average_cpu_cores": 1.0301004296651772,
+      "peak_rss_bytes": 1362259968
+    },
+    "peak_mixed": {
+      "trial_name": "mixed-p8-r1",
+      "offered_items_per_second": 480000,
+      "accepted_items_per_second": 141714.59332933233,
+      "average_cpu_cores": 2.8879418275981976,
+      "peak_rss_bytes": 1924915200
+    },
+    "sustained_mixed": {
+      "trial_name": "mixed-sustained",
+      "offered_items_per_second": 120000,
+      "accepted_items_per_second": 58962.631044860806,
+      "average_cpu_cores": 3.5281080676064134,
+      "peak_rss_bytes": 2799415296
+    },
+    "accepted_total": {
+      "spans": 5645254,
+      "log_records": 5667882,
+      "metric_points": 5769163
+    },
+    "cooldown_rss_bytes": 1591586816,
+    "cooldown_heap_bytes": 331751664,
+    "quality_gates": [
+      {
+        "name": "generator-processes",
+        "passed": true,
+        "detail": "all exited successfully"
+      },
+      {
+        "name": "server-dropped-rows",
+        "passed": true,
+        "detail": "zero"
+      },
+      {
+        "name": "server-restarts",
+        "passed": true,
+        "detail": "none"
+      },
+      {
+        "name": "authoritative-counters",
+        "passed": true,
+        "detail": "Fanout accepted rows in every phase"
+      },
+      {
+        "name": "sustained-query-load",
+        "passed": false,
+        "detail": "6.5/20.0 completed/s, 47 errors, 768 shed"
+      },
+      {
+        "name": "storage-repair-verify",
+        "passed": true,
+        "detail": "authoritative Parquet storage verified"
+      }
+    ],
+    "passed": false,
+    "warnings": [
+      "Results describe this exact host, Fanout build, configuration, dataset, and workload; they are not universal capacity claims.",
+      "telemetrygen payloads are intentionally synthetic and highly compressible; storage size is not representative of production telemetry.",
+      "Offered load is a target. Headline throughput uses Fanout's accepted-row counters, never telemetrygen's intended or generated count.",
+      "Fanout and load generators shared one host; generator contention can make the observed peak lower than Fanout's backend ceiling."
+    ]
+  },
+  "mixed_trials": [
+    {
+      "settings": {
+        "name": "warmup",
+        "kind": "warmup",
+        "signal": "mixed",
+        "duration_seconds": 10,
+        "processes_per_signal": 1,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 10.163,
+      "offered_items_per_second": 60000,
+      "accepted": {
+        "spans": 125456,
+        "log_records": 114202,
+        "metric_points": 116548
+      },
+      "accepted_items_per_second": 35043.43055315175,
+      "acceptance_ratio": 0.5936766666666666,
+      "rows_dropped": 0,
+      "generator_processes": 3,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 0.6404516849828973,
+        "peak_rss_bytes": 471748608,
+        "end_rss_bytes": 471748608,
+        "peak_heap_bytes": 269988296,
+        "end_heap_bytes": 246992400,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 0,
+        "parquet_bytes_end": 0,
+        "disk_growth_bytes": 38297695,
+        "allocated_bytes": 2034669184,
+        "gc_pause_seconds": 0.019587247000000002
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "traces-p1-r1",
+        "kind": "sweep",
+        "signal": "traces",
+        "duration_seconds": 15,
+        "processes_per_signal": 1,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.045,
+      "offered_items_per_second": 20000,
+      "accepted": {
+        "spans": 182926,
+        "log_records": 0,
+        "metric_points": 0
+      },
+      "accepted_items_per_second": 12155.446738419034,
+      "acceptance_ratio": 0.6097533333333334,
+      "rows_dropped": 0,
+      "generator_processes": 1,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 0.7435763587620623,
+        "peak_rss_bytes": 755339264,
+        "end_rss_bytes": 302735360,
+        "peak_heap_bytes": 361256744,
+        "end_heap_bytes": 12234400,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 0,
+        "parquet_bytes_end": 0,
+        "disk_growth_bytes": 41871740,
+        "allocated_bytes": 2844720288,
+        "gc_pause_seconds": 0.014678532999999997
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "traces-p2-r1",
+        "kind": "sweep",
+        "signal": "traces",
+        "duration_seconds": 15,
+        "processes_per_signal": 2,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.054,
+      "offered_items_per_second": 40000,
+      "accepted": {
+        "spans": 383604,
+        "log_records": 0,
+        "metric_points": 0
+      },
+      "accepted_items_per_second": 25477.031115631533,
+      "acceptance_ratio": 0.63934,
+      "rows_dropped": 0,
+      "generator_processes": 2,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 1.0659595557029804,
+        "peak_rss_bytes": 800251904,
+        "end_rss_bytes": 642793472,
+        "peak_heap_bytes": 376765224,
+        "end_heap_bytes": 343188456,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 0,
+        "parquet_bytes_end": 0,
+        "disk_growth_bytes": 66002033,
+        "allocated_bytes": 3902989912,
+        "gc_pause_seconds": 0.032851125999999994
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "traces-p4-r1",
+        "kind": "sweep",
+        "signal": "traces",
+        "duration_seconds": 15,
+        "processes_per_signal": 4,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.128,
+      "offered_items_per_second": 80000,
+      "accepted": {
+        "spans": 776440,
+        "log_records": 0,
+        "metric_points": 0
+      },
+      "accepted_items_per_second": 51294.19525963265,
+      "acceptance_ratio": 0.6470333333333333,
+      "rows_dropped": 0,
+      "generator_processes": 4,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 1.9164965798798916,
+        "peak_rss_bytes": 1002156032,
+        "end_rss_bytes": 992190464,
+        "peak_heap_bytes": 504169848,
+        "end_heap_bytes": 504169848,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 0,
+        "parquet_bytes_end": 0,
+        "disk_growth_bytes": 97746839,
+        "allocated_bytes": 9298965232,
+        "gc_pause_seconds": 0.076670153
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "traces-p8-r1",
+        "kind": "sweep",
+        "signal": "traces",
+        "duration_seconds": 15,
+        "processes_per_signal": 8,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.089,
+      "offered_items_per_second": 160000,
+      "accepted": {
+        "spans": 1434130,
+        "log_records": 0,
+        "metric_points": 0
+      },
+      "accepted_items_per_second": 95028.53951124784,
+      "acceptance_ratio": 0.5975541666666667,
+      "rows_dropped": 0,
+      "generator_processes": 8,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 2.444410773479345,
+        "peak_rss_bytes": 1079513088,
+        "end_rss_bytes": 882618368,
+        "peak_heap_bytes": 470294240,
+        "end_heap_bytes": 470294240,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 306,
+        "parquet_bytes_end": 112041274,
+        "disk_growth_bytes": 88845891,
+        "allocated_bytes": 12774862800,
+        "gc_pause_seconds": 0.19572627399999998
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "logs-p1-r1",
+        "kind": "sweep",
+        "signal": "logs",
+        "duration_seconds": 15,
+        "processes_per_signal": 1,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.043,
+      "offered_items_per_second": 20000,
+      "accepted": {
+        "spans": 0,
+        "log_records": 176000,
+        "metric_points": 0
+      },
+      "accepted_items_per_second": 11698.23787103301,
+      "acceptance_ratio": 0.5866666666666667,
+      "rows_dropped": 0,
+      "generator_processes": 1,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 1.2529078628918884,
+        "peak_rss_bytes": 1392234496,
+        "end_rss_bytes": 558174208,
+        "peak_heap_bytes": 478157376,
+        "end_heap_bytes": 18119232,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 306,
+        "parquet_bytes_end": 112041274,
+        "disk_growth_bytes": 220365320,
+        "allocated_bytes": 2359544472,
+        "gc_pause_seconds": 0.01021732000000003
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "logs-p2-r1",
+        "kind": "sweep",
+        "signal": "logs",
+        "duration_seconds": 15,
+        "processes_per_signal": 2,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.065,
+      "offered_items_per_second": 40000,
+      "accepted": {
+        "spans": 0,
+        "log_records": 351895,
+        "metric_points": 0
+      },
+      "accepted_items_per_second": 23355.407160630726,
+      "acceptance_ratio": 0.5864916666666666,
+      "rows_dropped": 0,
+      "generator_processes": 2,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 0.4745482635402876,
+        "peak_rss_bytes": 967979008,
+        "end_rss_bytes": 672571392,
+        "peak_heap_bytes": 233895840,
+        "end_heap_bytes": 25513472,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 306,
+        "parquet_bytes_end": 112041274,
+        "disk_growth_bytes": 23779647,
+        "allocated_bytes": 2166288496,
+        "gc_pause_seconds": 0.01639634299999998
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "logs-p4-r1",
+        "kind": "sweep",
+        "signal": "logs",
+        "duration_seconds": 15,
+        "processes_per_signal": 4,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.054,
+      "offered_items_per_second": 80000,
+      "accepted": {
+        "spans": 0,
+        "log_records": 720570,
+        "metric_points": 0
+      },
+      "accepted_items_per_second": 47857.40530173436,
+      "acceptance_ratio": 0.600475,
+      "rows_dropped": 0,
+      "generator_processes": 4,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 0.3845488664488413,
+        "peak_rss_bytes": 708808704,
+        "end_rss_bytes": 642408448,
+        "peak_heap_bytes": 70058856,
+        "end_heap_bytes": 36165304,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 306,
+        "parquet_bytes_end": 112041274,
+        "allocated_bytes": 2956584192,
+        "gc_pause_seconds": 0.041946786999999985
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "logs-p8-r1",
+        "kind": "sweep",
+        "signal": "logs",
+        "duration_seconds": 15,
+        "processes_per_signal": 8,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.102,
+      "offered_items_per_second": 160000,
+      "accepted": {
+        "spans": 0,
+        "log_records": 1445166,
+        "metric_points": 0
+      },
+      "accepted_items_per_second": 95678.62310134368,
+      "acceptance_ratio": 0.6021525,
+      "rows_dropped": 0,
+      "generator_processes": 8,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 1.557826576029755,
+        "peak_rss_bytes": 1249972224,
+        "end_rss_bytes": 775282688,
+        "peak_heap_bytes": 92475808,
+        "end_heap_bytes": 73124928,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 103,
+        "parquet_bytes_end": 161934790,
+        "disk_growth_bytes": 32122800,
+        "allocated_bytes": 6202282688,
+        "gc_pause_seconds": 0.17198322700000007
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "metrics-p1-r1",
+        "kind": "sweep",
+        "signal": "metrics",
+        "duration_seconds": 15,
+        "processes_per_signal": 1,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.057,
+      "offered_items_per_second": 20000,
+      "accepted": {
+        "spans": 0,
+        "log_records": 0,
+        "metric_points": 173872
+      },
+      "accepted_items_per_second": 11545.553317774495,
+      "acceptance_ratio": 0.5795733333333334,
+      "rows_dropped": 0,
+      "generator_processes": 1,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 0.13346923120874338,
+        "peak_rss_bytes": 863858688,
+        "end_rss_bytes": 689082368,
+        "peak_heap_bytes": 34484168,
+        "end_heap_bytes": 13210152,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 103,
+        "parquet_bytes_end": 161934790,
+        "allocated_bytes": 797385984,
+        "gc_pause_seconds": 0.016522996999999928
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "metrics-p2-r1",
+        "kind": "sweep",
+        "signal": "metrics",
+        "duration_seconds": 15,
+        "processes_per_signal": 2,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.041,
+      "offered_items_per_second": 40000,
+      "accepted": {
+        "spans": 0,
+        "log_records": 0,
+        "metric_points": 352000
+      },
+      "accepted_items_per_second": 23398.84715791845,
+      "acceptance_ratio": 0.5866666666666667,
+      "rows_dropped": 0,
+      "generator_processes": 2,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 0.09904625643550768,
+        "peak_rss_bytes": 710774784,
+        "end_rss_bytes": 681082880,
+        "peak_heap_bytes": 34729632,
+        "end_heap_bytes": 25248712,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 103,
+        "parquet_bytes_end": 161934790,
+        "disk_growth_bytes": 2488802,
+        "allocated_bytes": 1368284816,
+        "gc_pause_seconds": 0.02855761899999998
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "metrics-p4-r1",
+        "kind": "sweep",
+        "signal": "metrics",
+        "duration_seconds": 15,
+        "processes_per_signal": 4,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.069,
+      "offered_items_per_second": 80000,
+      "accepted": {
+        "spans": 0,
+        "log_records": 0,
+        "metric_points": 726320
+      },
+      "accepted_items_per_second": 48193.40330390228,
+      "acceptance_ratio": 0.6052666666666666,
+      "rows_dropped": 0,
+      "generator_processes": 4,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 0.2879713767195397,
+        "peak_rss_bytes": 728825856,
+        "end_rss_bytes": 634359808,
+        "peak_heap_bytes": 60396008,
+        "end_heap_bytes": 27385208,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 103,
+        "parquet_bytes_end": 161934790,
+        "disk_growth_bytes": 11074546,
+        "allocated_bytes": 2856073680,
+        "gc_pause_seconds": 0.07447297900000005
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "metrics-p8-r1",
+        "kind": "sweep",
+        "signal": "metrics",
+        "duration_seconds": 15,
+        "processes_per_signal": 8,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.132,
+      "offered_items_per_second": 160000,
+      "accepted": {
+        "spans": 0,
+        "log_records": 0,
+        "metric_points": 1458306
+      },
+      "accepted_items_per_second": 96356.74388603629,
+      "acceptance_ratio": 0.6076275,
+      "rows_dropped": 0,
+      "generator_processes": 8,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 1.0301004296651772,
+        "peak_rss_bytes": 1362259968,
+        "end_rss_bytes": 829861888,
+        "peak_heap_bytes": 69150144,
+        "end_heap_bytes": 36629536,
+        "peak_queue_depth": 1,
+        "parquet_files_end": 206,
+        "parquet_bytes_end": 183788729,
+        "disk_growth_bytes": 10407877,
+        "allocated_bytes": 5270018288,
+        "gc_pause_seconds": 0.205670951
+      },
+      "query_latency_ms": {
+        "count": 0,
+        "mean_ms": 0,
+        "p50_ms": 0,
+        "p95_ms": 0,
+        "p99_ms": 0,
+        "max_ms": 0
+      },
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "mixed-p1-r1",
+        "kind": "sweep",
+        "signal": "mixed",
+        "duration_seconds": 15,
+        "processes_per_signal": 1,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "query_rate": 20,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.105,
+      "offered_items_per_second": 60000,
+      "accepted": {
+        "spans": 178638,
+        "log_records": 166238,
+        "metric_points": 169703
+      },
+      "accepted_items_per_second": 34025.17120551659,
+      "acceptance_ratio": 0.5717544444444445,
+      "rows_dropped": 0,
+      "generator_processes": 3,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 2.810199748210586,
+        "peak_rss_bytes": 1226956800,
+        "end_rss_bytes": 1071779840,
+        "peak_heap_bytes": 200814480,
+        "end_heap_bytes": 25165320,
+        "peak_queue_depth": 0,
+        "parquet_files_end": 206,
+        "parquet_bytes_end": 183788729,
+        "disk_growth_bytes": 20469831,
+        "allocated_bytes": 4143554184,
+        "gc_pause_seconds": 0.313339707
+      },
+      "query_latency_ms": {
+        "count": 302,
+        "mean_ms": 76.44,
+        "p50_ms": 54.22,
+        "p95_ms": 232.46,
+        "p99_ms": 577.03,
+        "max_ms": 664.91
+      },
+      "query_attempts": 302,
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "mixed-p2-r1",
+        "kind": "sweep",
+        "signal": "mixed",
+        "duration_seconds": 15,
+        "processes_per_signal": 2,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "query_rate": 20,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.151,
+      "offered_items_per_second": 120000,
+      "accepted": {
+        "spans": 304612,
+        "log_records": 279083,
+        "metric_points": 297167
+      },
+      "accepted_items_per_second": 57541.90946573893,
+      "acceptance_ratio": 0.4893677777777778,
+      "rows_dropped": 0,
+      "generator_processes": 6,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 3.353108901140449,
+        "peak_rss_bytes": 1529233408,
+        "end_rss_bytes": 1244499968,
+        "peak_heap_bytes": 290514592,
+        "end_heap_bytes": 58865600,
+        "peak_queue_depth": 1,
+        "parquet_files_end": 206,
+        "parquet_bytes_end": 183788729,
+        "allocated_bytes": 5983231848,
+        "gc_pause_seconds": 0.5904725389999999
+      },
+      "query_latency_ms": {
+        "count": 306,
+        "mean_ms": 579.46,
+        "p50_ms": 332.05,
+        "p95_ms": 1853.81,
+        "p99_ms": 2626.92,
+        "max_ms": 3481.45
+      },
+      "query_attempts": 306,
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit"
+      ]
+    },
+    {
+      "settings": {
+        "name": "mixed-p4-r1",
+        "kind": "sweep",
+        "signal": "mixed",
+        "duration_seconds": 15,
+        "processes_per_signal": 4,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "query_rate": 20,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.311,
+      "offered_items_per_second": 240000,
+      "accepted": {
+        "spans": 593658,
+        "log_records": 533307,
+        "metric_points": 544276
+      },
+      "accepted_items_per_second": 108195.93052474891,
+      "acceptance_ratio": 0.4642336111111111,
+      "rows_dropped": 0,
+      "generator_processes": 12,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 3.2603000173083094,
+        "peak_rss_bytes": 1586159616,
+        "end_rss_bytes": 1428008960,
+        "peak_heap_bytes": 353143856,
+        "end_heap_bytes": 132104912,
+        "peak_queue_depth": 7,
+        "parquet_files_end": 206,
+        "parquet_bytes_end": 183788729,
+        "disk_growth_bytes": 325161567,
+        "allocated_bytes": 8585677136,
+        "gc_pause_seconds": 0.9356431259999998
+      },
+      "query_latency_ms": {
+        "count": 262,
+        "mean_ms": 2777.53,
+        "p50_ms": 2394.97,
+        "p95_ms": 6950.86,
+        "p99_ms": 10047.83,
+        "max_ms": 10665.08
+      },
+      "query_attempts": 308,
+      "query_shed": 46,
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit",
+        "the requested query rate was not sustained"
+      ]
+    },
+    {
+      "settings": {
+        "name": "mixed-p8-r1",
+        "kind": "sweep",
+        "signal": "mixed",
+        "duration_seconds": 15,
+        "processes_per_signal": 8,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "query_rate": 20,
+        "repetition": 1
+      },
+      "elapsed_seconds": 15.6,
+      "offered_items_per_second": 480000,
+      "accepted": {
+        "spans": 565430,
+        "log_records": 839637,
+        "metric_points": 866436
+      },
+      "accepted_items_per_second": 141714.59332933233,
+      "acceptance_ratio": 0.3154865277777778,
+      "rows_dropped": 0,
+      "generator_processes": 24,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 2.8879418275981976,
+        "peak_rss_bytes": 1924915200,
+        "end_rss_bytes": 1614061568,
+        "peak_heap_bytes": 290342376,
+        "end_heap_bytes": 283401632,
+        "peak_queue_depth": 55,
+        "parquet_files_end": 206,
+        "parquet_bytes_end": 183788729,
+        "disk_growth_bytes": 56715770,
+        "allocated_bytes": 9935051928,
+        "gc_pause_seconds": 0.7110637479999999
+      },
+      "query_latency_ms": {
+        "count": 155,
+        "mean_ms": 5035.68,
+        "p50_ms": 4833.55,
+        "p95_ms": 11558.23,
+        "p99_ms": 14173.79,
+        "max_ms": 14820.64
+      },
+      "query_attempts": 320,
+      "query_failures": 8,
+      "query_shed": 157,
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit",
+        "the requested query rate was not sustained"
+      ]
+    },
+    {
+      "settings": {
+        "name": "mixed-sustained",
+        "kind": "sustained",
+        "signal": "mixed",
+        "duration_seconds": 60,
+        "processes_per_signal": 2,
+        "workers_per_process": 8,
+        "rate_per_worker": 2500,
+        "batch_size": 1000,
+        "query_rate": 20,
+        "repetition": 1
+      },
+      "elapsed_seconds": 60.201,
+      "offered_items_per_second": 120000,
+      "accepted": {
+        "spans": 1225816,
+        "log_records": 1155986,
+        "metric_points": 1181083
+      },
+      "accepted_items_per_second": 58962.631044860806,
+      "acceptance_ratio": 0.49484513888888887,
+      "rows_dropped": 0,
+      "generator_processes": 6,
+      "generator_failures": 0,
+      "fanout_restarted": false,
+      "resources": {
+        "average_cpu_cores": 3.5281080676064134,
+        "peak_rss_bytes": 2799415296,
+        "end_rss_bytes": 2799415296,
+        "peak_heap_bytes": 335405800,
+        "end_heap_bytes": 62366256,
+        "peak_queue_depth": 1,
+        "parquet_files_end": 1961,
+        "parquet_bytes_end": 311126046,
+        "allocated_bytes": 20909988768,
+        "gc_pause_seconds": 2.9660317000000003
+      },
+      "query_latency_ms": {
+        "count": 393,
+        "mean_ms": 5097.47,
+        "p50_ms": 4527,
+        "p95_ms": 12470.1,
+        "p99_ms": 14548.95,
+        "max_ms": 14963.32
+      },
+      "query_attempts": 1208,
+      "query_failures": 47,
+      "query_shed": 768,
+      "classification": "saturated-or-generator-limited",
+      "classification_notes": [
+        "the target was not sustained; separate load-generator hosts are needed to attribute the limit",
+        "the requested query rate was not sustained"
+      ]
+    }
+  ],
+  "durable_ingestion": {
+    "baseline": {
+      "repetitions": [
+        {
+          "allocated_bytes_per_row": 3841.016279264214,
+          "concurrency": 16,
+          "cpu_cores_client_and_server": 1.386670723965906,
+          "durable": true,
+          "errors": 0,
+          "mode": "shared",
+          "p50_ms": 32.983173,
+          "p95_ms": 37.233546,
+          "p99_ms": 46.579118,
+          "rows": 4784000,
+          "rows_per_second": 478232.5354001488,
+          "seconds": 10.00350174,
+          "cpu_seconds_per_million_rows": 2.8995742056856186
+        },
+        {
+          "allocated_bytes_per_row": 3827.215571197411,
+          "concurrency": 16,
+          "cpu_cores_client_and_server": 1.3389345902710774,
+          "durable": true,
+          "errors": 0,
+          "mode": "shared",
+          "p50_ms": 32.267016,
+          "p95_ms": 35.18989,
+          "p99_ms": 36.741222,
+          "rows": 4944000,
+          "rows_per_second": 493113.6031033487,
+          "seconds": 10.026087232,
+          "cpu_seconds_per_million_rows": 2.715265978964401
+        },
+        {
+          "allocated_bytes_per_row": 3827.789229773463,
+          "concurrency": 16,
+          "cpu_cores_client_and_server": 1.3422942175040822,
+          "durable": true,
+          "errors": 0,
+          "mode": "shared",
+          "p50_ms": 32.22202,
+          "p95_ms": 35.682391,
+          "p99_ms": 37.382098,
+          "rows": 4944000,
+          "rows_per_second": 493050.47558628663,
+          "seconds": 10.027370918,
+          "cpu_seconds_per_million_rows": 2.722427588996764
+        }
+      ],
+      "median": {
+        "rows_per_second": 493050.47558628663,
+        "allocated_bytes_per_row": 3827.789229773463,
+        "cpu_cores_client_and_server": 1.3422942175040822,
+        "cpu_seconds_per_million_rows": 2.722427588996764,
+        "p50_ms": 32.267016,
+        "p95_ms": 35.682391,
+        "p99_ms": 37.382098
+      },
+      "binary_sha256": "d588363630fa003e81a8582acd50416ab77bed189b3f2daa662d32ed30dd49ce"
+    },
+    "final": {
+      "repetitions": [
+        {
+          "allocated_bytes_per_row": 4018.0189930362117,
+          "concurrency": 16,
+          "cpu_cores_client_and_server": 2.0168743622096437,
+          "durable": true,
+          "errors": 0,
+          "mode": "shared",
+          "p50_ms": 27.349099,
+          "p95_ms": 32.508177,
+          "p99_ms": 44.273124,
+          "rows": 5744000,
+          "rows_per_second": 573131.9162908524,
+          "seconds": 10.022125512,
+          "cpu_seconds_per_million_rows": 3.5190403899721447
+        },
+        {
+          "allocated_bytes_per_row": 4017.786380108992,
+          "concurrency": 16,
+          "cpu_cores_client_and_server": 2.017148073950804,
+          "durable": true,
+          "errors": 0,
+          "mode": "shared",
+          "p50_ms": 26.789268,
+          "p95_ms": 31.753598,
+          "p99_ms": 43.314047,
+          "rows": 5872000,
+          "rows_per_second": 586812.7884127768,
+          "seconds": 10.006598554,
+          "cpu_seconds_per_million_rows": 3.437464407356948
+        },
+        {
+          "allocated_bytes_per_row": 4037.289988031915,
+          "concurrency": 16,
+          "cpu_cores_client_and_server": 2.0203992820509,
+          "durable": true,
+          "errors": 0,
+          "mode": "shared",
+          "p50_ms": 26.447858,
+          "p95_ms": 29.780439,
+          "p99_ms": 32.90123,
+          "rows": 6016000,
+          "rows_per_second": 600172.8755069904,
+          "seconds": 10.023778557,
+          "cpu_seconds_per_million_rows": 3.366362200797873
+        }
+      ],
+      "median": {
+        "rows_per_second": 586812.7884127768,
+        "allocated_bytes_per_row": 4018.0189930362117,
+        "cpu_cores_client_and_server": 2.017148073950804,
+        "cpu_seconds_per_million_rows": 3.437464407356948,
+        "p50_ms": 26.789268,
+        "p95_ms": 31.753598,
+        "p99_ms": 43.314047
+      },
+      "binary_sha256": "1ea1109e8d50ec07ecd9a2269a7cdbbfc1e82ee04301eb525fccbcaaad655d36"
+    }
+  },
+  "prior_read_trial": [
+    {
+      "cpu_seconds_per_request": 0.16752330000000004,
+      "implementation": "raw",
+      "median_ms": 47.8396225,
+      "method": "endpoints",
+      "p95_ms": 50.53142,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.046351799999999874,
+      "implementation": "completed",
+      "median_ms": 31.010892,
+      "method": "endpoints",
+      "p95_ms": 33.511919,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.18807199999999985,
+      "implementation": "raw",
+      "median_ms": 60.092862,
+      "method": "trace",
+      "p95_ms": 64.072038,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.036477199999999856,
+      "implementation": "completed",
+      "median_ms": 19.475008000000003,
+      "method": "trace",
+      "p95_ms": 20.060926,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.18967860000000022,
+      "implementation": "raw",
+      "median_ms": 60.604592499999995,
+      "method": "logs",
+      "p95_ms": 65.922501,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.027257000000000177,
+      "implementation": "completed",
+      "median_ms": 18.129984,
+      "method": "logs",
+      "p95_ms": 22.312432,
+      "rows_per_signal": 1200000,
+      "window_minutes": 1440.0166666666667
+    },
+    {
+      "cpu_seconds_per_request": 0.02699890000000025,
+      "implementation": "raw",
+      "median_ms": 14.6436625,
+      "method": "endpoints",
+      "p95_ms": 17.652086,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.0363745999999999,
+      "implementation": "completed",
+      "median_ms": 23.761456,
+      "method": "endpoints",
+      "p95_ms": 35.10009,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.0638614999999998,
+      "implementation": "raw",
+      "median_ms": 27.057069,
+      "method": "trace",
+      "p95_ms": 28.324614,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.04826499999999996,
+      "implementation": "completed",
+      "median_ms": 28.1259885,
+      "method": "trace",
+      "p95_ms": 29.4372,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.10301620000000007,
+      "implementation": "raw",
+      "median_ms": 38.5614945,
+      "method": "logs",
+      "p95_ms": 40.326145,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    },
+    {
+      "cpu_seconds_per_request": 0.020283799999999984,
+      "implementation": "completed",
+      "median_ms": 15.2523725,
+      "method": "logs",
+      "p95_ms": 16.176833,
+      "rows_per_signal": 1200000,
+      "window_minutes": 20.016666666666666
+    }
+  ]
+}

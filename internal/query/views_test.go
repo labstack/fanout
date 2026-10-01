@@ -14,6 +14,10 @@ func openTestDuck(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("SET TimeZone='UTC'"); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
@@ -52,7 +56,7 @@ func TestCreateTables_CacheTablesIncludePartitionColumns(t *testing.T) {
 	rows, err := db.Query(`
 SELECT table_name, column_name
 FROM duckdb_columns()
-WHERE table_name IN ('service_rollup', 'edge_rollup', 'endpoint_rollup', 'rollup_state')
+WHERE table_name IN ('service_rollup', 'edge_rollup', 'read_endpoints', 'rollup_state')
 ORDER BY table_name, column_name`)
 	if err != nil {
 		t.Fatalf("query duckdb_columns failed: %v", err)
@@ -75,10 +79,10 @@ ORDER BY table_name, column_name`)
 	}
 
 	required := map[string][]string{
-		"service_rollup":  {"namespace", "bucket", "service"},
-		"edge_rollup":     {"namespace", "bucket", "caller", "callee", "edge_type"},
-		"endpoint_rollup": {"namespace", "bucket", "service", "method", "path", "calls", "error_count", "duration_count", "duration_buckets"},
-		"rollup_state":    {"cache_key", "last_ingested_unix_nano", "updated_at"},
+		"service_rollup": {"namespace", "bucket", "service"},
+		"edge_rollup":    {"namespace", "bucket", "caller", "callee", "edge_type"},
+		"read_endpoints": {"batch_id", "namespace", "bucket", "service", "method", "path", "calls", "error_count", "duration_count", "duration_buckets"},
+		"rollup_state":   {"cache_key", "last_ingested_unix_nano", "updated_at"},
 	}
 	for table, columns := range required {
 		for _, column := range columns {
@@ -101,7 +105,7 @@ func TestCreateViews_AttrMacroWorks(t *testing.T) {
 
 	var result string
 	if err := db.QueryRowContext(context.Background(),
-		`SELECT attr('{"key":"hello"}', 'key')`).Scan(&result); err != nil {
+		`SELECT attr('{"key":"hello"}'::JSON::VARIANT, 'key')::VARCHAR`).Scan(&result); err != nil {
 		t.Fatalf("attr() macro failed: %v", err)
 	}
 	if result != "hello" {

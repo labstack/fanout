@@ -3,12 +3,11 @@ package observability
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math"
 	"strings"
 	"time"
 
-	"github.com/labstack/fanout/internal/query"
+	"github.com/labstack/fanout/internal/queryrows"
 )
 
 var performancePointsQueryTemplate = `
@@ -35,68 +34,17 @@ SELECT
   COALESCE(approx_quantile(duration_ms, 0.99), 0) AS p99_ms,
   COALESCE(AVG(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate
 FROM spans
-WHERE start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)
+WHERE start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)
 GROUP BY method, path
 ORDER BY calls DESC, p95_ms DESC
 LIMIT ?`
 
-const endpointRollupStatusQuery = `
-SELECT
-  COALESCE(MAX(CASE WHEN cache_key = '` + query.EndpointReadyStateKey + `' THEN last_ingested_unix_nano END), 0) != 0
-    AND COALESCE(MAX(CASE WHEN cache_key = '` + query.EndpointDisabledStateKey + `' THEN last_ingested_unix_nano END), 0) = 0 AS ready,
-  COALESCE(MAX(CASE WHEN cache_key = '` + query.EndpointRollupStateKey + `' THEN last_ingested_unix_nano END), 0)::BIGINT AS watermark
-FROM rollup_state`
-
-const endpointRollupMatureQuery = `
-SELECT COUNT(*) >= 5
-FROM (SELECT DISTINCT bucket FROM endpoint_rollup LIMIT 5)`
-
-// endpointInteriorBounds returns the half-open minute range the rollup cache
-// answers for, given the requested window and the cache's watermark.
-//
-// The interior starts at the first whole minute inside the window — a window
-// that begins mid-minute has a partial minute the cache cannot answer — and
-// ends at the earlier of the window's last whole minute and the watermark's,
-// because the cache knows nothing past what it has rolled up. Raw spans cover
-// everything outside that range.
-func endpointInteriorBounds(start, end, watermark time.Time) (interiorStart, interiorEnd time.Time) {
-	interiorStart = start.Truncate(time.Minute)
-	if !interiorStart.Equal(start) {
-		interiorStart = interiorStart.Add(time.Minute)
-	}
-	interiorEnd = end.Truncate(time.Minute)
-	if rolled := watermark.Truncate(time.Minute); rolled.Before(interiorEnd) {
-		interiorEnd = rolled
-	}
-	return interiorStart, interiorEnd
-}
-
-// endpointRollupQuery uses the minute cache only through its current watermark.
-// Raw spans cover both partial boundary minutes and any newer complete minutes,
-// so the cache lag cannot appear as zero traffic.
-//
-// The interior bounds are computed in Go and bound as parameters rather than
-// derived in a CTE. They read the same either way, but a bound derived from a
-// joined row is not a constant DuckDB can push into the Parquet scan: the
-// boundary exclusion below was applied after reading the window, so a query
-// that wants the two partial minutes at its edges read every row between them —
-// measured at 799,333 rows scanned out of 800,000 to return 7,333. Bound
-// directly, the same filter prunes to 11,333 rows read.
-//
-// The raw half is bounded by the cache being current, not by this query. When
-// the watermark sits behind the window the interior is empty, the boundary
-// predicate admits everything, and the scan reads the whole window — which is
-// correct, and is the case worth watching after an outage or a first run.
-var endpointRollupQuery = `
-WITH rollup_source AS (
-  SELECT e.method, e.path, e.calls, e.error_count, e.duration_count, e.duration_buckets
-  FROM endpoint_rollup e
-  WHERE e.bucket >= ?
-    AND e.bucket < ?
-    AND (? = '' OR e.namespace = ?)
-    AND (? = '' OR e.service = ?)
-),
-boundary_source AS (
+// Completed minutes and the uncached/partial-minute tail are disjoint. Their
+// histogram counts merge without weighting precomputed percentiles.
+var completedEndpointsQuery = `WITH rollup_source AS (
+ SELECT method,path,calls,error_count,duration_count,duration_buckets FROM endpoint_minutes
+ WHERE ($3='' OR namespace=$4) AND ($5='' OR service=$6)
+), boundary_source AS (
   SELECT
     COALESCE(NULLIF(s.http_method, ''), 'CALL') AS method,
     COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown') AS path,
@@ -122,12 +70,9 @@ boundary_source AS (
       le_30000 := COUNT(*) FILTER (WHERE s.duration_ms <= 30000),
       le_300000 := COUNT(*) FILTER (WHERE s.duration_ms <= 300000)
     ) AS duration_buckets
-  FROM spans s
-  WHERE s.start_time >= ?
-    AND s.start_time < ?
-    AND (s.start_time < ? OR s.start_time >= ?)
-    AND (? = '' OR s.namespace = ?)
-    AND (? = '' OR COALESCE(s.service, '') = ?)
+ FROM endpoint_tail s
+ WHERE s.start_time>=$1::TIMESTAMP_NS::TIMESTAMPTZ_NS AND s.start_time<$2::TIMESTAMP_NS::TIMESTAMPTZ_NS
+ AND ($3='' OR s.namespace=$4) AND ($5='' OR coalesce(s.service,'')=$6)
   GROUP BY method, path
 ),
 sources AS (
@@ -171,7 +116,7 @@ SELECT
   ` + endpointDurationColumns() + `
 FROM endpoint_totals t
 ORDER BY t.calls DESC, (t.duration_count - le_100) DESC, t.method, t.path
-LIMIT ?`
+LIMIT $7`
 
 var performanceHeatmapQueryTemplate = `
 SELECT time_bucket(INTERVAL '%s', bucket) AS point_time, service, ` + windowP95SQL + `
@@ -227,6 +172,7 @@ func (s *Service) Performance(ctx context.Context, scope Scope, opts Performance
 		return Result[Performance]{}, err
 	}
 	service = strings.TrimSpace(service)
+	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: service})
 	window := scope.End.Sub(scope.Start)
 
 	data := Performance{Service: service, Points: []PerformancePoint{}, Endpoints: []Endpoint{}, Heatmap: []HeatmapPoint{}, Comparison: []ComparisonMetric{}}
@@ -304,28 +250,17 @@ func (s *Service) Performance(ctx context.Context, scope Scope, opts Performance
 }
 
 func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service string, limit int) ([]Endpoint, string, error) {
-	ready, watermark, err := s.endpointCacheState(ctx)
-	if err != nil {
-		// The endpoint cache is an optimization. A transient local-state probe
-		// failure must not take down the raw-span query path.
-		slog.Warn("endpoint rollup state unavailable; using raw spans", "err", err)
-		ready = false
-	}
-
-	query := rawEndpointsQuery
-	args := []any{scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, limit}
+	reader, histogram := s.db.(queryrows.BatchReader)
+	histogram = histogram && reader.CompletedBatchReads()
+	statement := rawEndpointsQuery
 	source := "spans"
-	if ready {
-		query = endpointRollupQuery
-		interiorStart, interiorEnd := endpointInteriorBounds(scope.Start, scope.End, watermark)
-		args = []any{
-			interiorStart, interiorEnd, scope.Namespace, scope.Namespace, service, service,
-			scope.Start, scope.End, interiorStart, interiorEnd, scope.Namespace, scope.Namespace, service, service,
-			limit,
-		}
-		source = "endpoint_rollup + raw spans (interpolated histogram percentiles)"
+	if histogram {
+		statement = completedEndpointsQuery
+		source = "completed batch histograms + uncached spans and partial minutes"
+		ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End, Namespace: scope.Namespace, Service: service, Kind: queryrows.EndpointRead})
 	}
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	args := []any{scope.Start, scope.End, scope.Namespace, scope.Namespace, service, service, limit}
+	rows, err := s.db.QueryContext(ctx, statement, args...)
 	if err != nil {
 		return nil, "", fmt.Errorf("query endpoints: %w", err)
 	}
@@ -334,7 +269,7 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 	endpoints := make([]Endpoint, 0)
 	for rows.Next() {
 		var endpoint Endpoint
-		if ready {
+		if histogram {
 			var total float64
 			cumulative := make([]float64, len(endpointDurationBuckets))
 			targets := []any{&endpoint.Method, &endpoint.Path, &endpoint.Calls, &endpoint.ErrorRate, &total}
@@ -368,7 +303,7 @@ func (s *Service) queryEndpoints(ctx context.Context, scope Scope, service strin
 // it here, would go on compiling and quietly report one bucket's count against
 // another's boundary. Percentiles would shift and nothing would look broken.
 // The boundaries themselves must stay in step with the histogram the rollup
-// writes (endpointRollupInsertSQL, in internal/query). Nothing here can check
+// writes (endpointBatchSelect, in internal/query). Nothing here can check
 // that at compile time; TestEndpointRollupQueryMergesBucketsAndExactBoundaries
 // is what catches a drift, because it fills a real rollup row by column name
 // and reads the percentiles back out.
@@ -426,55 +361,6 @@ func histogramQuantile(cumulative []float64, total, quantile float64) float64 {
 		previousBound, previousCount = bound, count
 	}
 	return endpointDurationBuckets[len(endpointDurationBuckets)-1].Bound
-}
-
-func (s *Service) endpointCacheState(ctx context.Context) (bool, time.Time, error) {
-	rows, err := s.db.QueryContext(ctx, endpointRollupStatusQuery)
-	if err != nil {
-		return false, time.Time{}, err
-	}
-	var ready bool
-	var watermarkNanos int64
-	if rows.Next() {
-		if err := rows.Scan(&ready, &watermarkNanos); err != nil {
-			rows.Close()
-			return false, time.Time{}, err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return false, time.Time{}, err
-	}
-	rows.Close()
-	if !ready || watermarkNanos <= 0 {
-		return false, time.Time{}, nil
-	}
-	watermark := time.Unix(0, watermarkNanos).UTC()
-	if s.endpointMature.Load() {
-		return true, watermark, nil
-	}
-
-	// On a brand-new/hot dataset, fewer than five cached minutes cannot offset
-	// the wider histogram aggregation. Stay on the simpler raw query until the
-	// cache is large enough to replace meaningful work, then remember that fact.
-	rows, err = s.db.QueryContext(ctx, endpointRollupMatureQuery)
-	if err != nil {
-		return false, time.Time{}, err
-	}
-	defer rows.Close()
-	var mature bool
-	if rows.Next() {
-		if err := rows.Scan(&mature); err != nil {
-			return false, time.Time{}, err
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return false, time.Time{}, err
-	}
-	if mature {
-		s.endpointMature.Store(true)
-	}
-	return mature, watermark, nil
 }
 
 type performanceAggregate struct {

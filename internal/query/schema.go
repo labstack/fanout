@@ -20,7 +20,6 @@ Primary query surfaces:
 - metrics view: clean metric columns for most queries
 - service_rollup table: partition-aware cached service health buckets
 - edge_rollup table: partition-aware cached service dependency edges
-- endpoint_rollup table: minute endpoint counts, errors, and mergeable latency histograms
 
 ### 1. Spans
 Parquet relation: telemetry.spans
@@ -30,13 +29,16 @@ Important columns:
 - namespace (VARCHAR): partitioning/filtering dimension
 - trace_id, span_id, parent_span_id (VARCHAR)
 - service, operation, kind (VARCHAR)
-- start_time, end_time, ingested_at (TIMESTAMP)
+- start_time, end_time, ingested_at (TIMESTAMPTZ_NS, UTC)
 - start_unix_nano, end_unix_nano, ingested_unix_nano (BIGINT)
 - start_time falls back to ingest time when the producer omits it; the raw
   *_unix_nano columns are unchanged and preserve producer-supplied truth
 - duration_ms (DOUBLE)
 - status, status_message (VARCHAR)
-- attributes_json, resource_json, events_json, links_json (VARCHAR JSON text)
+- attributes, resource (VARIANT: typed OTel objects)
+- messaging_system, messaging_destination (VARCHAR): scalar read projections of
+  literal messaging attributes; use these for shredded Parquet column projection
+- events_json, links_json (VARCHAR JSON text)
 - trace_state, scope_name, scope_version (VARCHAR)
 - http_method, http_status_code, http_route (VARCHAR)
 - db_system, rpc_method, rpc_service, peer_service (VARCHAR)
@@ -44,7 +46,7 @@ Important columns:
 - exception_type, exception_message (VARCHAR)
 
 Common queries:
-- Recent spans: SELECT * FROM spans WHERE start_time > now() - INTERVAL 15 MINUTE
+- Recent spans: SELECT * FROM spans WHERE start_time > (now() - INTERVAL 15 MINUTE)::TIMESTAMPTZ_NS
 - Error spans: ... WHERE status IN ('STATUS_CODE_ERROR', 'ERROR')
 - By trace: ... WHERE trace_id = '...'
 - Root spans only: ... WHERE parent_span_id IS NULL OR parent_span_id = ''
@@ -55,14 +57,14 @@ Preferred query surface: logs
 
 Important columns:
 - namespace (VARCHAR)
-- time, observed_time, ingested_at (TIMESTAMP)
+- time, observed_time, ingested_at (TIMESTAMPTZ_NS, UTC)
 - time_unix_nano, observed_time_unix_nano, ingested_unix_nano (BIGINT)
 - time and observed_time use producer time, then the other log timestamp, then
   ingest time; the raw *_unix_nano columns remain unchanged
 - severity, severity_number (VARCHAR/BIGINT)
 - body, body_template (VARCHAR)
 - service, trace_id, span_id (VARCHAR)
-- attributes_json, resource_json (VARCHAR JSON text)
+- attributes, resource (VARIANT: typed OTel objects)
 - scope_name, scope_version (VARCHAR)
 
 Common queries:
@@ -76,7 +78,7 @@ Preferred query surface: metrics
 
 Important columns:
 - namespace (VARCHAR)
-- time, ingested_at (TIMESTAMP)
+- time, ingested_at (TIMESTAMPTZ_NS, UTC)
 - time_unix_nano, ingested_unix_nano (BIGINT)
 - time falls back to ingest time when omitted; time_unix_nano remains unchanged
 - name, type, unit, description (VARCHAR)
@@ -84,7 +86,7 @@ Important columns:
 - value, hist_sum (DOUBLE)
 - hist_count (BIGINT)
 - hist_bounds_json, hist_counts_json, exemplars_json (VARCHAR JSON text)
-- attributes_json, resource_json (VARCHAR JSON text)
+- attributes, resource (VARIANT: typed OTel objects)
 - scope_name, scope_version (VARCHAR)
 
 Common queries:
@@ -114,26 +116,26 @@ edge_rollup columns:
 - calls (BIGINT)
 - avg_ms, error_rate (DOUBLE)
 
-endpoint_rollup columns:
-- namespace, service, method, path (VARCHAR)
-- bucket (TIMESTAMP)
-- calls, error_count, duration_count (BIGINT)
-- duration_buckets (STRUCT): cumulative fixed-boundary latency counters
+Dashboard reads use private completed-batch endpoint/log aggregates and exact
+trace candidates. These implementation tables are not public SQL relations.
 
 ## Query Guidelines
 1. Prefer spans, logs, and metrics over raw telemetry.* tables.
 2. Always add a recent time filter for large queries.
 3. Filter by namespace when relevant.
-4. JSON columns are flat objects keyed by the literal attribute name. Attribute keys
-   contain dots (e.g. "http.method"), so the key MUST be double-quoted in the path:
-   json_extract_string(attributes_json, '$."http.method"') — or use the attr() macro:
-   attr(attributes_json, 'http.method'). An unquoted '$.http.method' returns NULL.
-5. Use service_rollup, edge_rollup, and endpoint_rollup as rebuildable cache tables for dashboards before scanning raw telemetry.
+4. Attributes and resources preserve integers, doubles, booleans, bytes, arrays,
+   objects and explicit nulls. Dotted names are literal keys, not JSON paths.
+   attr(attributes, 'http.method') returns a VARIANT; cast for comparisons and
+   aggregation: TRY_CAST(attr(attributes, 'http.status_code') AS BIGINT).
+   TRY_CAST handles heterogeneous producer types. Missing keys return SQL NULL.
+5. Use service_rollup and edge_rollup as rebuildable cache tables for dashboards before scanning raw telemetry.
 6. Always include a LIMIT unless aggregation makes it unnecessary.
 
 ## Useful DuckDB Functions
-- json_extract_string(json_text, '$."dotted.key"')  -- quote keys that contain dots
-- time_bucket(INTERVAL '5 minutes', time)
+- attr(attributes, 'dotted.key')  -- literal-key VARIANT extraction
+- TRY_CAST(attr(attributes, 'count') AS BIGINT)
+- to_json(attributes)  -- explicit JSON conversion when needed
+- time_bucket(INTERVAL '5 minutes', time::TIMESTAMP_NS)
 - strftime(timestamp, format)
 - approx_quantile(value, 0.95)
 `

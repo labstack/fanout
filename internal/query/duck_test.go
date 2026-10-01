@@ -477,7 +477,6 @@ func TestRepositoryPublicationDoesNotWaitForDuckDBWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 	mock.ExpectExec("DELETE FROM service_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("DELETE FROM endpoint_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("DELETE FROM edge_rollup").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("CHECKPOINT").WillReturnResult(sqlmock.NewResult(0, 0))
 	d := &Duck{DB: db, repository: repository, cfg: config.Config{MaintenanceInterval: time.Nanosecond, RetentionDays: 1}}
@@ -570,6 +569,10 @@ func (f failingPublishCompactor) PublishParquet(context.Context, func(context.Co
 	return errors.New("injected publication failure")
 }
 
+func (f failingPublishCompactor) PublishParquetReplacement(context.Context, telemetry.BatchMetadata, []string, func(context.Context) error) error {
+	return errors.New("injected publication failure")
+}
+
 func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
 	repository, err := telemetrystore.Open(t.TempDir())
 	if err != nil {
@@ -578,7 +581,7 @@ func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
 	defer repository.Close()
 	db := openTestDuck(t)
 	defer db.Close()
-	for _, table := range []string{"service_rollup", "endpoint_rollup", "edge_rollup"} {
+	for _, table := range []string{"service_rollup", "edge_rollup"} {
 		if _, err := db.Exec("CREATE TABLE " + table + " (bucket TIMESTAMP)"); err != nil {
 			t.Fatal(err)
 		}
@@ -712,16 +715,6 @@ func TestFailedRollupStillPublishesLag(t *testing.T) {
 				{serviceRollupRawMaxKey, watermarkNanos},
 			},
 			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshServiceRollup(ctx) },
-		},
-		{
-			component: "endpoint",
-			stateReads: []stateRead{
-				{EndpointDisabledStateKey, 0},
-				{EndpointRollupStateKey, watermarkNanos},
-				{endpointRollupRawMaxKey, watermarkNanos},
-				{endpointBackfillStateKey, 0},
-			},
-			refresh: func(d *Duck, ctx context.Context) (int64, error) { return d.refreshEndpointRollup(ctx) },
 		},
 		{
 			component: "edge",

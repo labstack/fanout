@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -42,8 +43,8 @@ func TestEndpointRollupQueryMergesBucketsAndExactBoundaries(t *testing.T) {
 		{start.Truncate(time.Minute), "(300000.0)", 1},
 		{end.Truncate(time.Minute), "(300000.0)", 1},
 	} {
-		q := `INSERT INTO endpoint_rollup
-SELECT 'prod', ?, 'checkout', 'GET', '/pay', COUNT(*), ?, COUNT(ms), struct_pack(
+		q := `INSERT INTO read_endpoints
+SELECT 'cached', 'prod', ?, 'checkout', 'GET', '/pay', COUNT(*), ?, COUNT(ms), struct_pack(
   le_0_1 := COUNT(*) FILTER (WHERE ms <= 0.1), le_0_5 := COUNT(*) FILTER (WHERE ms <= 0.5),
   le_1 := COUNT(*) FILTER (WHERE ms <= 1), le_2_5 := COUNT(*) FILTER (WHERE ms <= 2.5),
   le_5 := COUNT(*) FILTER (WHERE ms <= 5), le_10 := COUNT(*) FILTER (WHERE ms <= 10),
@@ -56,7 +57,7 @@ SELECT 'prod', ?, 'checkout', 'GET', '/pay', COUNT(*), ?, COUNT(ms), struct_pack
 )
 FROM (VALUES ` + seed.values + `) t(ms)`
 		if _, err := db.Exec(q, seed.bucket, seed.errors); err != nil {
-			t.Fatalf("seed endpoint_rollup: %v", err)
+			t.Fatalf("seed read_endpoints: %v", err)
 		}
 	}
 	// Include raw rows for every minute. The query must use raw rows for the two
@@ -80,24 +81,22 @@ FROM (VALUES ` + seed.values + `) t(ms)`
 	); err != nil {
 		t.Fatalf("seed spans: %v", err)
 	}
-	// The cache watermark is within the second interior minute. That entire
-	// minute and everything newer must come from raw spans, not disappear while
-	// waiting for the next rollup pass.
-	watermark := start.Truncate(time.Minute).Add(2*time.Minute + 30*time.Second)
-	if _, err := db.Exec(`INSERT INTO rollup_state VALUES
-(?, 1, now()),
-(?, ?, now())`, query.EndpointReadyStateKey, query.EndpointRollupStateKey, watermark.UnixNano()); err != nil {
-		t.Fatalf("seed endpoint rollup state: %v", err)
+	interiorStart := start.Truncate(time.Minute).Add(time.Minute)
+	interiorEnd := end.Truncate(time.Minute)
+	// Views in this kernel test stand in for the production AST-bound relations.
+	if _, err := db.Exec(fmt.Sprintf(`CREATE VIEW endpoint_minutes AS SELECT * EXCLUDE(batch_id) FROM read_endpoints WHERE bucket>=TIMESTAMP '%s' AND bucket<TIMESTAMP '%s'`, interiorStart.Format("2006-01-02 15:04:05"), interiorEnd.Format("2006-01-02 15:04:05"))); err != nil {
+		t.Fatal(err)
 	}
-
-	svc := New(SQLDB(db), newTestRepository(t).Parquet, 30)
-	svc.endpointMature.Store(true)
+	if _, err := db.Exec(fmt.Sprintf(`CREATE VIEW endpoint_tail AS SELECT * FROM spans WHERE start_time<TIMESTAMPTZ_NS '%s' OR start_time>=TIMESTAMPTZ_NS '%s'`, interiorStart.Format("2006-01-02 15:04:05+00"), interiorEnd.Format("2006-01-02 15:04:05+00"))); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(completedReadDB{SQLDB(db)}, newTestRepository(t).Parquet, 30)
 	var cachedCalls, totalCachedCalls int64
 	var minBucket, maxBucket time.Time
-	if err := db.QueryRow(`SELECT COALESCE(SUM(calls), 0)::BIGINT, MIN(bucket), MAX(bucket) FROM endpoint_rollup`).Scan(&totalCachedCalls, &minBucket, &maxBucket); err != nil {
+	if err := db.QueryRow(`SELECT COALESCE(SUM(calls), 0)::BIGINT, MIN(bucket), MAX(bucket) FROM read_endpoints`).Scan(&totalCachedCalls, &minBucket, &maxBucket); err != nil {
 		t.Fatalf("query all cached calls: %v", err)
 	}
-	if err := db.QueryRow(`SELECT COALESCE(SUM(calls), 0)::BIGINT FROM endpoint_rollup
+	if err := db.QueryRow(`SELECT COALESCE(SUM(calls), 0)::BIGINT FROM read_endpoints
 WHERE bucket >= ? AND bucket < ? AND namespace = 'prod' AND service = 'checkout'`,
 		start.Truncate(time.Minute).Add(time.Minute), end.Truncate(time.Minute)).Scan(&cachedCalls); err != nil {
 		t.Fatalf("query cached calls: %v", err)
@@ -109,7 +108,7 @@ WHERE bucket >= ? AND bucket < ? AND namespace = 'prod' AND service = 'checkout'
 	if err != nil {
 		t.Fatalf("queryEndpoints: %v", err)
 	}
-	if source != "endpoint_rollup + raw spans (interpolated histogram percentiles)" || len(got) != 1 {
+	if source != "completed batch histograms + uncached spans and partial minutes" || len(got) != 1 {
 		t.Fatalf("queryEndpoints = (%#v, %q), want one rollup endpoint", got, source)
 	}
 	endpoint := got[0]
@@ -128,14 +127,4 @@ WHERE bucket >= ? AND bucket < ? AND namespace = 'prod' AND service = 'checkout'
 		t.Fatalf("error rate = %v, want %v", endpoint.ErrorRate, 2.0/6.0)
 	}
 
-	if _, err := db.Exec(`INSERT INTO rollup_state VALUES (?, 1, now())`, query.EndpointDisabledStateKey); err != nil {
-		t.Fatalf("disable endpoint rollup: %v", err)
-	}
-	ready, _, err := svc.endpointCacheState(context.Background())
-	if err != nil {
-		t.Fatalf("endpointCacheState after disable: %v", err)
-	}
-	if ready {
-		t.Fatal("endpointCacheState returned ready for a disabled cache")
-	}
 }

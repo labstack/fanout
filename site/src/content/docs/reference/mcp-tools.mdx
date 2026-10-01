@@ -1,7 +1,7 @@
 ---
 title: "MCP tools"
 description: "Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything."
-summary: "Ten tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
+summary: "Eleven tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
 read_when:
   - "You are connecting an agent and want to know what it can call."
   - "You need to know which tools mutate state and which cannot."
@@ -13,7 +13,7 @@ generated: true
     tool list rather than reading the registrations. Edit the generator, not
     this page. */}
 
-A Fanout instance serves MCP at `/mcp`. Ten tools, listed below exactly as the
+A Fanout instance serves MCP at `/mcp`. Eleven tools, listed below exactly as the
 server reports them to a connecting client.
 
 Every tool is **closed-world**: it reads or writes what this instance holds
@@ -25,6 +25,7 @@ and reaches nothing else.
 | [`get_dashboard`](#get_dashboard) | No — read-only |
 | [`get_intelligence_snapshot`](#get_intelligence_snapshot) | No — read-only |
 | [`get_observability_overview`](#get_observability_overview) | No — read-only |
+| [`get_service_dependencies`](#get_service_dependencies) | No — read-only |
 | [`get_service_performance`](#get_service_performance) | No — read-only |
 | [`get_service_topology`](#get_service_topology) | No — read-only |
 | [`inspect_trace`](#inspect_trace) | No — read-only |
@@ -73,6 +74,21 @@ Read-only. Calling it changes nothing.
 | `limit` | `integer` | no | Maximum services or edges to return, from 1 to 500 |
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
+
+## get_service_dependencies
+
+**Service dependency traversal** — Find upstream or downstream dependencies of one service with minimum hop counts. Uses the full scoped edge rollup, handles cycles, and reports truncation from depth or node limits.
+
+Read-only. Calling it changes nothing.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `service` | `string` | **yes** | Root service name |
+| `direction` | `string` | no | upstream or downstream; defaults to downstream |
+| `max_depth` | `integer` | no | Maximum hops from 1 to 32; defaults to 8 |
+| `max_nodes` | `integer` | no | Maximum accumulated nodes from 1 to 500 including roots; defaults to 100 |
+| `namespace` | `string` | no | Filter by namespace; traversal always keeps namespaces separate |
+| `window` | `string` | no | Bounded telemetry window, defaults to 1h |
 
 ## get_service_performance
 

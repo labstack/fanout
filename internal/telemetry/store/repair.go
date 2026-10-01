@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,13 +28,21 @@ func VerifyBatches(root string) ([]BatchIssue, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read telemetry batches: %w", err)
 	}
+	verifier, err := telemetry.NewBatchVerifier(context.Background(), batchesDir)
+	if err != nil {
+		return nil, err
+	}
+	defer verifier.Close()
 	var issues []BatchIssue
 	for _, entry := range entries {
 		if !entry.IsDir() || entry.Name() == telemetry.SchemaBatch || !strings.HasSuffix(entry.Name(), telemetry.BatchSuffix) {
 			continue
 		}
 		path := filepath.Join(batchesDir, entry.Name())
-		if err := telemetry.ValidatePublishedBatch(path); err != nil {
+		if err := verifier.Validate(context.Background(), path); err != nil {
+			if !telemetry.IsBatchCorrupt(err) {
+				return issues, fmt.Errorf("verify batch %s: %w", entry.Name(), err)
+			}
 			issues = append(issues, BatchIssue{
 				ID: strings.TrimSuffix(entry.Name(), telemetry.BatchSuffix), Path: path, Err: err,
 			})
@@ -47,6 +56,10 @@ func VerifyBatches(root string) ([]BatchIssue, error) {
 // are refused. The returned directory remains beside the authoritative set so
 // an operator can recover it from a backup or rename it back after repair.
 func QuarantineBatch(root, id string) (string, error) {
+	return quarantineBatch(root, id, telemetry.ValidatePublishedBatch)
+}
+
+func quarantineBatch(root, id string, validate func(string) error) (string, error) {
 	if err := telemetry.ValidateBatchID(id); err != nil {
 		return "", err
 	}
@@ -65,8 +78,10 @@ func QuarantineBatch(root, id string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("telemetry batch %s is not a directory", id)
 	}
-	if err := telemetry.ValidatePublishedBatch(source); err == nil {
+	if err := validate(source); err == nil {
 		return "", fmt.Errorf("telemetry batch %s is valid; refusing to quarantine authoritative data", id)
+	} else if !telemetry.IsBatchCorrupt(err) {
+		return "", fmt.Errorf("cannot establish batch corruption; refusing quarantine: %w", err)
 	}
 	destination := filepath.Join(batchesDir, fmt.Sprintf("%s.quarantined-%d", id, time.Now().UTC().UnixNano()))
 	if err := os.Rename(source, destination); err != nil {
