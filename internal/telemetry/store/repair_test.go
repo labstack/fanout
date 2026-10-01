@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,5 +139,25 @@ func corruptBatchFile(t *testing.T, root, id, name string) {
 	path := filepath.Join(root, "parquet", "batches", id+telemetry.BatchSuffix, name)
 	if err := os.WriteFile(path, []byte("corrupt"), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestQuarantineRefusesVerifierFailureAndUnsupportedFormat(t *testing.T) {
+	root := t.TempDir()
+	repository, err := Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Commit(context.Background(), Batch{ID: "valid", Spans: []telemetry.Span{{TraceID: "trace", SpanID: "span"}}}); err != nil {
+		t.Fatal(err)
+	}
+	repository.Close()
+	for _, err := range []error{context.Canceled, fmt.Errorf("native engine exhausted memory"), telemetry.ErrUnsupportedBatchFormat} {
+		if _, got := quarantineBatch(root, "valid", func(string) error { return err }); got == nil {
+			t.Fatalf("quarantined after %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(root, "parquet", "batches", "valid.batch")); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

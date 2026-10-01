@@ -16,6 +16,7 @@ import (
 	"github.com/duckdb/duckdb-go/v2"
 
 	"github.com/labstack/fanout/internal/config"
+	engine "github.com/labstack/fanout/internal/duckdb"
 	"github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/query/writegate"
 	"github.com/labstack/fanout/internal/queryrows"
@@ -313,6 +314,10 @@ func NewDuck(ctx context.Context, cfg config.Config, repository *telemetrystore.
 	if err := CreateViews(writeDB); err != nil {
 		_ = d.Close()
 		return nil, fmt.Errorf("create views: %w", err)
+	}
+	if err := engine.ConfigurePolicy(ctx, writeDB, repository.Parquet.Dir(), cfg.QueryDir()); err != nil {
+		_ = d.Close()
+		return nil, err
 	}
 	if cfg.RollupSkipToLatest {
 		// Best-effort: on failure the rollup just catches up normally.
@@ -1072,8 +1077,8 @@ func (d *Duck) refreshEdgeRollup(ctx context.Context) (int64, error) {
 	var minStartT, maxStartT sql.NullTime
 	err = tx.QueryRowContext(ctx, `
 SELECT
-  MIN(date_trunc('minute', start_time)),
-  MAX(date_trunc('minute', start_time))
+  MIN(date_trunc('minute', start_time::TIMESTAMP_NS)),
+  MAX(date_trunc('minute', start_time::TIMESTAMP_NS))
 FROM spans
 WHERE ingested_unix_nano > ?
   AND ingested_unix_nano <= ?
@@ -1230,8 +1235,8 @@ FROM (
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
-    AND start_time >= ?
-    AND start_time < ?
+    AND start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   LIMIT ?
 )`, windowStart, windowEnd, subLo, subHi, rowLimit+1).Scan(&rows); err != nil {
 			return time.Time{}, err
@@ -1381,7 +1386,7 @@ FROM spans`).Scan(&watermark)
 
 const serviceRollupDeleteSQL = `
 WITH affected AS (
-  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1389,7 +1394,7 @@ WITH affected AS (
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1397,7 +1402,7 @@ WITH affected AS (
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1416,7 +1421,7 @@ WHERE EXISTS (
 
 var serviceRollupInsertSQL = `
 WITH affected AS (
-  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket, service
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1424,7 +1429,7 @@ WITH affected AS (
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM logs
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1432,7 +1437,7 @@ WITH affected AS (
     AND service IS NOT NULL
     AND service != ''
   UNION
-  SELECT DISTINCT namespace, date_trunc('minute', time) AS bucket, service
+  SELECT DISTINCT namespace, date_trunc('minute', time::TIMESTAMP_NS) AS bucket, service
   FROM metrics
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
@@ -1443,7 +1448,7 @@ WITH affected AS (
 span_agg AS (
   SELECT
     s.namespace,
-    date_trunc('minute', s.start_time) AS bucket,
+    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
     s.service,
     COUNT(*) AS spans,
     COUNT(*) FILTER (WHERE COALESCE(s.kind, '') NOT IN ('SPAN_KIND_CLIENT', 'SPAN_KIND_PRODUCER')) AS served_spans,
@@ -1464,7 +1469,7 @@ span_agg AS (
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time)
+   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
    AND a.service = s.service
   -- Bound the scan to the affected bucket range so Telemetry prunes parquet by
   -- start_time stats instead of scanning all history (the join on a computed
@@ -1473,39 +1478,39 @@ span_agg AS (
   -- [MIN(bucket), MAX(bucket)+1min) — so it drops no rows. A late span with an
   -- old start_time widens the range (and this scan) only for the pass that
   -- ingests it, same trade-off as the edge rollup's parent bound.
-  WHERE s.start_time >= (SELECT MIN(bucket) FROM affected)
-    AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
-  GROUP BY s.namespace, date_trunc('minute', s.start_time), s.service
+  WHERE s.start_time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service
 ),
 log_agg AS (
   SELECT
     l.namespace,
-    date_trunc('minute', l.time) AS bucket,
+    date_trunc('minute', l.time::TIMESTAMP_NS) AS bucket,
     l.service,
     COUNT(*) AS log_count
   FROM logs l
   JOIN affected a
     ON a.namespace = l.namespace
-   AND a.bucket = date_trunc('minute', l.time)
+   AND a.bucket = date_trunc('minute', l.time::TIMESTAMP_NS)
    AND a.service = l.service
-  WHERE l.time >= (SELECT MIN(bucket) FROM affected)
-    AND l.time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
-  GROUP BY l.namespace, date_trunc('minute', l.time), l.service
+  WHERE l.time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND l.time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  GROUP BY l.namespace, date_trunc('minute', l.time::TIMESTAMP_NS), l.service
 ),
 metric_agg AS (
   SELECT
     m.namespace,
-    date_trunc('minute', m.time) AS bucket,
+    date_trunc('minute', m.time::TIMESTAMP_NS) AS bucket,
     m.service,
     COUNT(DISTINCT m.name) AS metric_count
   FROM metrics m
   JOIN affected a
     ON a.namespace = m.namespace
-   AND a.bucket = date_trunc('minute', m.time)
+   AND a.bucket = date_trunc('minute', m.time::TIMESTAMP_NS)
    AND a.service = m.service
-  WHERE m.time >= (SELECT MIN(bucket) FROM affected)
-    AND m.time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
-  GROUP BY m.namespace, date_trunc('minute', m.time), m.service
+  WHERE m.time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND m.time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  GROUP BY m.namespace, date_trunc('minute', m.time::TIMESTAMP_NS), m.service
 )
 INSERT INTO service_rollup (
   namespace,
@@ -1543,7 +1548,7 @@ const endpointRollupDeleteSQL = `
 WITH affected AS (
   SELECT DISTINCT
     namespace,
-    date_trunc('minute', start_time) AS bucket,
+    date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket,
     COALESCE(service, '') AS service,
     COALESCE(NULLIF(http_method, ''), 'CALL') AS method,
     COALESCE(NULLIF(http_route, ''), NULLIF(operation, ''), 'unknown') AS path
@@ -1567,7 +1572,7 @@ const endpointRollupInsertSQL = `
 WITH affected AS (
   SELECT DISTINCT
     namespace,
-    date_trunc('minute', start_time) AS bucket,
+    date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket,
     COALESCE(service, '') AS service,
     COALESCE(NULLIF(http_method, ''), 'CALL') AS method,
     COALESCE(NULLIF(http_route, ''), NULLIF(operation, ''), 'unknown') AS path
@@ -1581,7 +1586,7 @@ INSERT INTO endpoint_rollup (
 )
 SELECT
   s.namespace,
-  date_trunc('minute', s.start_time) AS bucket,
+  date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
   COALESCE(s.service, '') AS service,
   COALESCE(NULLIF(s.http_method, ''), 'CALL') AS method,
   COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown') AS path,
@@ -1610,28 +1615,28 @@ SELECT
 FROM spans s
 JOIN affected a
   ON a.namespace = s.namespace
- AND a.bucket = date_trunc('minute', s.start_time)
+ AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
  AND a.service = COALESCE(s.service, '')
  AND a.method = COALESCE(NULLIF(s.http_method, ''), 'CALL')
  AND a.path = COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown')
-WHERE s.start_time >= (SELECT MIN(bucket) FROM affected)
-  AND s.start_time < (SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE
+WHERE s.start_time >= ((SELECT MIN(bucket) FROM affected))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  AND s.start_time < ((SELECT MAX(bucket) FROM affected) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
 GROUP BY
   s.namespace,
-  date_trunc('minute', s.start_time),
+  date_trunc('minute', s.start_time::TIMESTAMP_NS),
   COALESCE(s.service, ''),
   COALESCE(NULLIF(s.http_method, ''), 'CALL'),
   COALESCE(NULLIF(s.http_route, ''), NULLIF(s.operation, ''), 'unknown');`
 
 const edgeRollupDeleteSQL = `
 WITH affected AS (
-  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket
+  SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
-    AND start_time >= ?
-    AND start_time < ?
+    AND start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
 )
 DELETE FROM edge_rollup
 WHERE EXISTS (
@@ -1643,13 +1648,13 @@ WHERE EXISTS (
 
 const edgeRollupInsertSQL = `
 WITH affected AS (
-  SELECT DISTINCT namespace, date_trunc('minute', start_time) AS bucket
+  SELECT DISTINCT namespace, date_trunc('minute', start_time::TIMESTAMP_NS) AS bucket
   FROM spans
   WHERE ingested_unix_nano > ?
     AND ingested_unix_nano <= ?
     AND start_time IS NOT NULL
-    AND start_time >= ?
-    AND start_time < ?
+    AND start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
 ),
 -- The affected bucket range, computed once. As four scalar subqueries
 -- repeated across the predicates below, these read as correlated to the
@@ -1676,15 +1681,15 @@ bounds AS (
 parent_scope AS (
   SELECT parent.namespace, parent.span_id, parent.trace_id, parent.service
   FROM spans parent, bounds
-  WHERE parent.start_time >= bounds.lo - INTERVAL 1 HOUR
-    AND parent.start_time <= bounds.hi + INTERVAL 1 HOUR
+  WHERE parent.start_time >= (bounds.lo - INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND parent.start_time <= (bounds.hi + INTERVAL 1 HOUR)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND parent.service IS NOT NULL
     AND parent.service != ''
 ),
 call_edges AS (
   SELECT
     child.namespace,
-    date_trunc('minute', child.start_time) AS bucket,
+    date_trunc('minute', child.start_time::TIMESTAMP_NS) AS bucket,
     parent.service AS caller,
     child.service AS callee,
     COUNT(*) AS calls,
@@ -1698,7 +1703,7 @@ call_edges AS (
    AND child.namespace = parent.namespace
   JOIN affected a
     ON a.namespace = child.namespace
-   AND a.bucket = date_trunc('minute', child.start_time)
+   AND a.bucket = date_trunc('minute', child.start_time::TIMESTAMP_NS)
   -- bounds joins last, and as an explicit CROSS JOIN. Written as
   -- "FROM spans child, bounds JOIN parent_scope ON child...", the comma binds
   -- looser than JOIN: that parses as "spans child" comma "(bounds JOIN
@@ -1711,9 +1716,9 @@ call_edges AS (
   WHERE child.service IS NOT NULL
     AND child.service != ''
     AND parent.service != child.service
-    AND child.start_time >= bounds.lo
-    AND child.start_time < bounds.hi + INTERVAL 1 MINUTE
-  GROUP BY child.namespace, date_trunc('minute', child.start_time), parent.service, child.service
+    AND child.start_time >= (bounds.lo)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND child.start_time < (bounds.hi + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
+  GROUP BY child.namespace, date_trunc('minute', child.start_time::TIMESTAMP_NS), parent.service, child.service
 ),
 -- Producers and consumers are aggregated per (namespace, bucket, service,
 -- destination, msg_system) BEFORE the join — joining raw span rows multiplies
@@ -1724,42 +1729,42 @@ call_edges AS (
 producers AS (
   SELECT DISTINCT
     s.namespace,
-    date_trunc('minute', s.start_time) AS bucket,
+    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
     s.service,
-    json_extract_string(s.attributes_json, '$."messaging.destination.name"') AS destination,
-    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system
+    s.messaging_destination AS destination,
+    s.messaging_system AS msg_system
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time)
+   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
   WHERE s.kind = 'SPAN_KIND_PRODUCER'
-    AND s.start_time >= (SELECT lo FROM bounds)
-    AND s.start_time < (SELECT hi FROM bounds) + INTERVAL 1 MINUTE
+    AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND s.service IS NOT NULL
     AND s.service != ''
-    AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
+    AND s.messaging_destination IS NOT NULL
 ),
 consumers AS (
   SELECT
     s.namespace,
-    date_trunc('minute', s.start_time) AS bucket,
+    date_trunc('minute', s.start_time::TIMESTAMP_NS) AS bucket,
     s.service,
-    json_extract_string(s.attributes_json, '$."messaging.destination.name"') AS destination,
-    json_extract_string(s.attributes_json, '$."messaging.system"') AS msg_system,
+    s.messaging_destination AS destination,
+    s.messaging_system AS msg_system,
     COUNT(*) AS calls
   FROM spans s
   JOIN affected a
     ON a.namespace = s.namespace
-   AND a.bucket = date_trunc('minute', s.start_time)
+   AND a.bucket = date_trunc('minute', s.start_time::TIMESTAMP_NS)
   WHERE s.kind = 'SPAN_KIND_CONSUMER'
-    AND s.start_time >= (SELECT lo FROM bounds)
-    AND s.start_time < (SELECT hi FROM bounds) + INTERVAL 1 MINUTE
+    AND s.start_time >= ((SELECT lo FROM bounds))::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time < ((SELECT hi FROM bounds) + INTERVAL 1 MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND s.service IS NOT NULL
     AND s.service != ''
-    AND json_extract_string(s.attributes_json, '$."messaging.destination.name"') IS NOT NULL
-  GROUP BY s.namespace, date_trunc('minute', s.start_time), s.service,
-    json_extract_string(s.attributes_json, '$."messaging.destination.name"'),
-    json_extract_string(s.attributes_json, '$."messaging.system"')
+    AND s.messaging_destination IS NOT NULL
+  GROUP BY s.namespace, date_trunc('minute', s.start_time::TIMESTAMP_NS), s.service,
+    s.messaging_destination,
+    s.messaging_system
 ),
 messaging_edges AS (
   SELECT
@@ -2001,12 +2006,12 @@ func (d *Duck) LogsSamples(ctx context.Context, windowMinutes, limit int, patter
 	namespace := d.DefaultNamespace()
 	q := fmt.Sprintf(`
 SELECT
-  strftime(time, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
+  strftime(time::TIMESTAMP_NS, '%%Y-%%m-%%dT%%H:%%M:%%SZ') AS ts,
   body,
   service AS service_name,
   severity
 FROM logs
-WHERE time >= now() - INTERVAL %d MINUTE
+WHERE time >= (now() - INTERVAL %d MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND (? = '' OR namespace = ?)
   AND body ~ ?
 ORDER BY time DESC
@@ -2102,7 +2107,7 @@ func (d *Duck) ErrorRoutes(ctx context.Context, windowMinutes, limit int) ([]Err
 	q := fmt.Sprintf(`
 SELECT body AS route, COUNT(*) AS count
 FROM logs
-WHERE time >= now() - INTERVAL %d MINUTE
+WHERE time >= (now() - INTERVAL %d MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND (? = '' OR namespace = ?)
   AND severity IN ('ERROR', 'ERR', 'WARN')
 GROUP BY body
@@ -2138,7 +2143,7 @@ func (d *Duck) ErrorRouteDetails(ctx context.Context, windowMinutes, limit int) 
 WITH spans_with_errors AS (
   SELECT service AS service_name, operation AS name, status AS status_code
   FROM spans
-  WHERE start_time >= now() - INTERVAL %d MINUTE
+  WHERE start_time >= (now() - INTERVAL %d MINUTE)::TIMESTAMP_NS::TIMESTAMPTZ_NS
     AND (? = '' OR namespace = ?)
 )
 SELECT service_name,

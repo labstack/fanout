@@ -16,7 +16,7 @@ func TestBatchBytesMeasuresThePayloadNotTheRowCount(t *testing.T) {
 	thin := Batch{Spans: make([]telemetry.Span, 100)}
 	fat := Batch{Spans: make([]telemetry.Span, 100)}
 	for i := range fat.Spans {
-		fat.Spans[i].AttributesJSON = strings.Repeat("x", 4096)
+		fat.Spans[i].Attributes = map[string]any{"payload": strings.Repeat("x", 4096)}
 	}
 
 	if batchRows(thin) != batchRows(fat) {
@@ -36,7 +36,7 @@ func TestBatchBytesMeasuresThePayloadNotTheRowCount(t *testing.T) {
 // and refusing it would drop data rather than batch it more carefully.
 func TestGroupBatchBytesAdmitsALoneOversizedRequest(t *testing.T) {
 	huge := Batch{Spans: make([]telemetry.Span, 1)}
-	huge.Spans[0].AttributesJSON = strings.Repeat("x", maxGroupBatchBytes*2)
+	huge.Spans[0].Attributes = map[string]any{"payload": strings.Repeat("x", maxGroupBatchBytes*2)}
 
 	if got := batchBytes(huge); got <= maxGroupBatchBytes {
 		t.Fatalf("fixture is wrong: batchBytes = %d, want more than the %d ceiling", got, maxGroupBatchBytes)

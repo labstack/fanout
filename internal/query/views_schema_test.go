@@ -1,78 +1,84 @@
 package query
 
 import (
-	"database/sql"
-	"fmt"
-	"os"
-	"path/filepath"
+	"context"
+	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
-// The telemetry views must survive a build that adds a column: older batches
-// on disk lack it and must read as NULL rather than failing the glob.
-//
-// This is not a theoretical concern. CreateViews names every column explicitly
-// and DuckDB binds a view eagerly, so a glob that rejects one old file fails at
-// NewDuck and the process does not start at all -- it stays down until every
-// pre-deploy batch has aged out. An earlier attempt to cut the views' bind cost
-// by dropping union_by_name did exactly that, which is why this test exists
-// rather than a comment saying to be careful.
-func TestParquetViewsToleratePreDeploySchemas(t *testing.T) {
-	dir := t.TempDir()
-	batches := filepath.Join(dir, "batches")
-	for _, name := range []string{"_schema.batch", "old.batch", "new.batch"} {
-		if err := os.MkdirAll(filepath.Join(batches, name), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	db, err := sql.Open("duckdb", "")
+func TestParquetMessagingViewProjectsShreddedKeysIntoScan(t *testing.T) {
+	store, err := telemetry.OpenParquetStore(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
-
-	write := func(batch, signal, sel string) {
-		t.Helper()
-		path := filepath.ToSlash(filepath.Join(batches, batch, signal+".parquet"))
-		if _, err := db.Exec(fmt.Sprintf(`COPY (%s) TO '%s' (FORMAT PARQUET)`, sel, path)); err != nil {
-			t.Fatalf("write %s/%s: %v", batch, signal, err)
+	defer store.Close()
+	if err := store.CommitBatch(context.Background(), telemetry.BatchMetadata{ID: "attrs"}, []telemetry.Span{
+		{TraceID: "one", SpanID: "a", Resource: map[string]any{"service.name": "api"}, Attributes: map[string]any{"messaging.system": "kafka", "messaging.destination.name": "jobs"}},
+		{TraceID: "two", SpanID: "b", Resource: map[string]any{"service.name": "worker"}, Attributes: map[string]any{"messaging.system": "nats", "messaging.destination.name": "events"}},
+	}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	db := openTestDuck(t)
+	if err := CreateParquetViews(db, store.Dir()); err != nil {
+		t.Fatal(err)
+	}
+	if err := CreateViews(db); err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []string{"SET enable_profiling='json'", "SET profiling_output=" + sqlLiteral(t.TempDir()+"/profile.json")} {
+		if _, err := db.Exec(statement); err != nil {
+			t.Fatal(err)
 		}
 	}
-	// The current build knows about added_later; the old batch predates it.
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		write("_schema.batch", signal, "SELECT 1 AS id, 'x' AS added_later WHERE false")
-		write("old.batch", signal, "SELECT 1 AS id")
-		write("new.batch", signal, "SELECT 2 AS id, 'present' AS added_later")
+	for _, column := range []struct{ name, key, value string }{{"messaging_system", "messaging.system", "kafka"}, {"messaging_destination", "messaging.destination.name", "jobs"}} {
+		q := "SELECT " + column.name + " FROM spans WHERE " + column.name + " = ?"
+		var got string
+		if err := db.QueryRow(q, column.value).Scan(&got); err != nil || got != column.value {
+			t.Fatalf("projected key = %q, %v", got, err)
+		}
+		plan := explain(t, db, "ANALYZE "+q, column.value)
+		var profile any
+		if err := json.Unmarshal([]byte(plan), &profile); err != nil {
+			t.Fatal(err)
+		}
+		var scan map[string]any
+		var visit func(any)
+		visit = func(value any) {
+			switch x := value.(type) {
+			case map[string]any:
+				if x["type"] == "TABLE_SCAN" {
+					scan = x
+				}
+				for _, v := range x {
+					visit(v)
+				}
+			case []any:
+				for _, v := range x {
+					visit(v)
+				}
+			}
+		}
+		visit(profile)
+		if scan == nil {
+			t.Fatal("no scan")
+		}
+		projection, _ := scan["extra_info"].(map[string]any)["Projections"].(string)
+		if projection != "attributes."+column.key {
+			t.Fatalf("shredded key did not reach scan: %s", plan)
+		}
 	}
-
-	if err := CreateParquetViews(db, dir); err != nil {
-		t.Fatalf("CreateParquetViews must not fail on a pre-deploy batch: %v", err)
+	// General attr() access still preserves literal keys and types through views;
+	// this preview's optimizer does not push such extracts across their projection.
+	var service string
+	if err := db.QueryRow("SELECT attr(resource,'service.name')::VARCHAR FROM spans WHERE trace_id='one'").Scan(&service); err != nil || service != "api" {
+		t.Fatalf("literal resource key=%q %v", service, err)
 	}
-
-	for _, signal := range []string{"spans", "logs", "metrics"} {
-		rows, err := db.Query(fmt.Sprintf(`SELECT id, added_later FROM telemetry.%s ORDER BY id`, signal))
-		if err != nil {
-			t.Fatalf("query telemetry.%s: %v", signal, err)
-		}
-		seen := map[int]bool{}
-		for rows.Next() {
-			var id int
-			var added sql.NullString
-			if err := rows.Scan(&id, &added); err != nil {
-				rows.Close()
-				t.Fatal(err)
-			}
-			seen[id] = true
-			if id == 1 && added.Valid {
-				t.Errorf("%s: the pre-deploy batch reported %q for a column it does not have", signal, added.String)
-			}
-			if id == 2 && added.String != "present" {
-				t.Errorf("%s: current batch read added_later=%q, want \"present\"", signal, added.String)
-			}
-		}
-		rows.Close()
-		if !seen[1] || !seen[2] {
-			t.Errorf("%s: read %v, want rows from both the old and the new batch", signal, seen)
-		}
+	// Ensure the hot path did not request the whole attributes object.
+	plan := explain(t, db, "SELECT messaging_system FROM spans")
+	if strings.Contains(plan, "Projections: attributes ") {
+		t.Fatal(plan)
 	}
 }

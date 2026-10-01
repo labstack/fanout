@@ -14,6 +14,10 @@ func openTestDuck(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open duckdb: %v", err)
 	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("SET TimeZone='UTC'"); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
@@ -101,7 +105,7 @@ func TestCreateViews_AttrMacroWorks(t *testing.T) {
 
 	var result string
 	if err := db.QueryRowContext(context.Background(),
-		`SELECT attr('{"key":"hello"}', 'key')`).Scan(&result); err != nil {
+		`SELECT attr('{"key":"hello"}'::JSON::VARIANT, 'key')::VARCHAR`).Scan(&result); err != nil {
 		t.Fatalf("attr() macro failed: %v", err)
 	}
 	if result != "hello" {

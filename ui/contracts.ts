@@ -51,6 +51,17 @@ export interface Topology {
   edges: Edge[];
 }
 
+export interface Dependencies {
+  service: string;
+  direction: "upstream" | "downstream";
+  nodes: { namespace: string; service: string; hops: number }[];
+  max_depth: number;
+  max_nodes: number;
+  truncated: boolean;
+  depth_limit_reached: boolean;
+  node_limit_reached: boolean;
+}
+
 export interface PerformancePoint {
   time: string;
   spans: number;

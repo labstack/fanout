@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/fanout/internal/metrics"
+	"github.com/labstack/fanout/internal/telemetry"
 )
 
 const (
@@ -363,16 +364,16 @@ func batchBytes(batch Batch) int {
 	total := 0
 	for i := range batch.Spans {
 		span := &batch.Spans[i]
-		total += len(span.ResourceJSON) + len(span.AttributesJSON) + len(span.EventsJSON) + len(span.LinksJSON) +
+		total += telemetry.ValueBytes(span.Resource) + telemetry.ValueBytes(span.Attributes) + len(span.EventsJSON) + len(span.LinksJSON) +
 			len(span.Name) + len(span.StatusMsg) + len(span.TraceID) + len(span.SpanID)
 	}
 	for i := range batch.Logs {
 		log := &batch.Logs[i]
-		total += len(log.ResourceJSON) + len(log.AttributesJSON) + len(log.Body) + len(log.BodyTemplate)
+		total += telemetry.ValueBytes(log.Resource) + telemetry.ValueBytes(log.Attributes) + len(log.Body) + len(log.BodyTemplate)
 	}
 	for i := range batch.Metrics {
 		metric := &batch.Metrics[i]
-		total += len(metric.ResourceJSON) + len(metric.AttributesJSON) + len(metric.ExemplarsJSON) +
+		total += telemetry.ValueBytes(metric.Resource) + telemetry.ValueBytes(metric.Attributes) + len(metric.ExemplarsJSON) +
 			len(metric.HistBoundsJSON) + len(metric.HistCountsJSON) + len(metric.Name) + len(metric.Description)
 	}
 	return total

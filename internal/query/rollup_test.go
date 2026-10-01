@@ -692,7 +692,7 @@ INSERT INTO telemetry.spans (
 	  http_method,
 	  http_route,
   kind,
-  attributes_json,
+  attributes,
   start_time,
   end_time,
   start_unix_nano,
@@ -702,7 +702,7 @@ INSERT INTO telemetry.spans (
   ingested_at,
   ingested_unix_nano
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::VARCHAR::JSON::VARIANT, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		span.namespace,
 		span.traceID,
 		span.spanID,

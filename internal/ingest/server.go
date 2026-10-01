@@ -3,17 +3,13 @@ package ingest
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"math"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
-	"unicode/utf8"
 
 	collectorlogs "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	collectormetrics "go.opentelemetry.io/proto/otlp/collector/metrics/v1"
@@ -76,7 +72,7 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 	now := time.Now().UnixNano()
 	batch := telemetrystore.Batch{}
 	for _, rs := range req.ResourceSpans {
-		resourceJSON := resourceAttrsJSON(rs.Resource)
+		resources := resourceAttributes(rs.Resource)
 		svc := getServiceName(rs.Resource)
 		namespace := getServiceNamespace(rs.Resource)
 		if namespace == "" {
@@ -100,17 +96,17 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					// for an unset status, so these read through generated
 					// getters: dereferencing sp.Status panicked the handler and
 					// lost the whole export, not just the span.
-					StatusCode:     sp.GetStatus().GetCode().String(),
-					StatusMsg:      sp.GetStatus().GetMessage(),
-					ResourceJSON:   resourceJSON,
-					AttributesJSON: attrsJSON(sp.Attributes),
-					EventsJSON:     eventsToJSON(sp.Events),
-					LinksJSON:      linksToJSON(sp.Links),
-					TraceState:     sp.TraceState,
-					Flags:          sp.Flags,
-					ScopeName:      scopeName,
-					ScopeVersion:   scopeVer,
-					IngestedAt:     now,
+					StatusCode:   sp.GetStatus().GetCode().String(),
+					StatusMsg:    sp.GetStatus().GetMessage(),
+					Resource:     resources,
+					Attributes:   attributes(sp.Attributes),
+					EventsJSON:   eventsToJSON(sp.Events),
+					LinksJSON:    linksToJSON(sp.Links),
+					TraceState:   sp.TraceState,
+					Flags:        sp.Flags,
+					ScopeName:    scopeName,
+					ScopeVersion: scopeVer,
+					IngestedAt:   now,
 					// Pre-extracted OTel semantic convention attributes.
 					HTTPMethod:     spanAttr(sp.Attributes, "http.method", "http.request.method"),
 					HTTPStatusCode: spanAttrInt(sp.Attributes, "http.status_code", "http.response.status_code"),
@@ -158,7 +154,7 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 	now := time.Now().UnixNano()
 	batch := telemetrystore.Batch{}
 	for _, rl := range req.ResourceLogs {
-		resourceJSON := resourceAttrsJSON(rl.Resource)
+		resources := resourceAttributes(rl.Resource)
 		svc := getServiceName(rl.Resource)
 		namespace := getServiceNamespace(rl.Resource)
 		if namespace == "" {
@@ -181,8 +177,8 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 					TraceID:           hexOrEmpty(lr.TraceId),
 					SpanID:            hexOrEmpty(lr.SpanId),
 					Flags:             lr.Flags,
-					ResourceJSON:      resourceJSON,
-					AttributesJSON:    attrsJSON(lr.Attributes),
+					Resource:          resources,
+					Attributes:        attributes(lr.Attributes),
 					ScopeName:         scopeName,
 					ScopeVersion:      scopeVer,
 					IngestedAt:        now,
@@ -208,7 +204,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 	now := time.Now().UnixNano()
 	batch := telemetrystore.Batch{}
 	for _, rm := range req.ResourceMetrics {
-		resourceJSON := resourceAttrsJSON(rm.Resource)
+		resources := resourceAttributes(rm.Resource)
 		svc := getServiceName(rm.Resource)
 		namespace := getServiceNamespace(rm.Resource)
 		if namespace == "" {
@@ -221,20 +217,20 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 				case *metricspb.Metric_Gauge:
 					for _, dp := range d.Gauge.DataPoints {
 						row := telemetry.Metric{
-							Namespace:      namespace,
-							TimeUnixNanos:  int64(dp.TimeUnixNano),
-							Name:           m.Name,
-							Description:    m.Description,
-							Unit:           m.Unit,
-							Type:           "gauge",
-							ServiceName:    svc,
-							Value:          number(dp.Value),
-							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							AttributesJSON: attrsJSON(dp.Attributes),
-							ResourceJSON:   resourceJSON,
-							ScopeName:      scopeName,
-							ScopeVersion:   scopeVer,
-							IngestedAt:     now,
+							Namespace:     namespace,
+							TimeUnixNanos: int64(dp.TimeUnixNano),
+							Name:          m.Name,
+							Description:   m.Description,
+							Unit:          m.Unit,
+							Type:          "gauge",
+							ServiceName:   svc,
+							Value:         number(dp.Value),
+							ExemplarsJSON: exemplarsToJSON(dp.Exemplars),
+							Attributes:    attributes(dp.Attributes),
+							Resource:      resources,
+							ScopeName:     scopeName,
+							ScopeVersion:  scopeVer,
+							IngestedAt:    now,
 						}
 						batch.Metrics = append(batch.Metrics, row)
 					}
@@ -245,20 +241,20 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 					}
 					for _, dp := range d.Sum.DataPoints {
 						row := telemetry.Metric{
-							Namespace:      namespace,
-							TimeUnixNanos:  int64(dp.TimeUnixNano),
-							Name:           m.Name,
-							Description:    m.Description,
-							Unit:           m.Unit,
-							Type:           kind,
-							ServiceName:    svc,
-							Value:          number(dp.Value),
-							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							AttributesJSON: attrsJSON(dp.Attributes),
-							ResourceJSON:   resourceJSON,
-							ScopeName:      scopeName,
-							ScopeVersion:   scopeVer,
-							IngestedAt:     now,
+							Namespace:     namespace,
+							TimeUnixNanos: int64(dp.TimeUnixNano),
+							Name:          m.Name,
+							Description:   m.Description,
+							Unit:          m.Unit,
+							Type:          kind,
+							ServiceName:   svc,
+							Value:         number(dp.Value),
+							ExemplarsJSON: exemplarsToJSON(dp.Exemplars),
+							Attributes:    attributes(dp.Attributes),
+							Resource:      resources,
+							ScopeName:     scopeName,
+							ScopeVersion:  scopeVer,
+							IngestedAt:    now,
 						}
 						batch.Metrics = append(batch.Metrics, row)
 					}
@@ -281,8 +277,8 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							HistCount:      int64(dp.Count),
 							HistSum:        histSum,
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							AttributesJSON: attrsJSON(dp.Attributes),
-							ResourceJSON:   resourceJSON,
+							Attributes:     attributes(dp.Attributes),
+							Resource:       resources,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
@@ -308,8 +304,8 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							HistCount:      int64(dp.Count),
 							HistSum:        histSum,
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							AttributesJSON: attrsJSON(dp.Attributes),
-							ResourceJSON:   resourceJSON,
+							Attributes:     attributes(dp.Attributes),
+							Resource:       resources,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
@@ -330,8 +326,8 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							HistCountsJSON: toJSON(summaryValues(dp)),
 							HistCount:      int64(dp.Count),
 							HistSum:        dp.Sum,
-							AttributesJSON: attrsJSON(dp.Attributes),
-							ResourceJSON:   resourceJSON,
+							Attributes:     attributes(dp.Attributes),
+							Resource:       resources,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
 							IngestedAt:     now,
@@ -373,216 +369,31 @@ func toJSON(v interface{}) string {
 	return string(b)
 }
 
-// attrBufPool holds the buffers attrsJSON's fast path writes into.
-var attrBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
-
-// attrsJSON flattens an OTLP attribute list into a flat JSON object keyed by
-// the literal (dotted) attribute name, e.g.
-// {"http.method":"GET","http.status_code":200}. That is the shape the attr()
-// macro and json_extract_string(col, '$."key"') paths expect; marshaling the
-// raw []*KeyValue, as the old toJSON path did, produced an array of
-// {Key,Value} structs that no JSON-path query could read. Returns "" for an
-// empty list so the column stays NULL.
-//
-// The fast path writes the object directly into a pooled buffer, skipping the
-// map[string]any + interface boxing + reflection that json.Marshal needs — that
-// path dominated ingest allocations under load (profiled: ~7GB / 14% of
-// alloc_space at 175k rows/s). Attributes whose values are nested (array/kvlist)
-// or non-finite floats fall back to the reflection encoder for exactness.
-//
-// The fast path preserves the OTLP attribute order and keeps duplicate keys,
-// whereas the reflect fallback (a map) sorts keys and keeps last-wins. This is
-// immaterial for fanout: OTLP attribute keys are unique by spec, and queries
-// read attributes_json by key via attr()/json_extract (order-independent).
-func attrsJSON(attrs []*common.KeyValue) string {
+// attributes owns typed OTel values; resource maps are shared within one request.
+func attributes(attrs []*common.KeyValue) map[string]any {
 	if len(attrs) == 0 {
-		return ""
+		return nil
 	}
-	if attrsNeedReflect(attrs) {
-		return attrsJSONReflect(attrs)
-	}
-
-	buf := attrBufPool.Get().(*bytes.Buffer)
-	buf.Reset()
-	buf.WriteByte('{')
-	n := 0
+	values := make(map[string]any, len(attrs))
 	for _, kv := range attrs {
-		if kv == nil || kv.Key == "" {
-			continue
+		if kv != nil && kv.Key != "" {
+			values[kv.Key] = attrValue(kv.Value)
 		}
-		if n > 0 {
-			buf.WriteByte(',')
-		}
-		appendJSONString(buf, kv.Key)
-		buf.WriteByte(':')
-		appendScalarJSON(buf, kv.Value)
-		n++
 	}
-	var out string
-	if n > 0 {
-		buf.WriteByte('}')
-		out = buf.String() // copies out of the pooled buffer, as []byte did
+	if len(values) == 0 {
+		return nil
 	}
-	attrBufPool.Put(buf)
-	return out
+	return values
 }
 
-// attrsNeedReflect reports whether any value is nested (array/kvlist) or a
-// non-finite float — the cases the direct encoder doesn't handle.
-func attrsNeedReflect(attrs []*common.KeyValue) bool {
-	for _, kv := range attrs {
-		if kv == nil || kv.Value == nil {
-			continue
-		}
-		switch x := kv.Value.Value.(type) {
-		case *common.AnyValue_ArrayValue, *common.AnyValue_KvlistValue:
-			return true
-		case *common.AnyValue_DoubleValue:
-			if math.IsInf(x.DoubleValue, 0) || math.IsNaN(x.DoubleValue) {
-				return true
-			}
-		}
+func resourceAttributes(resource *resourcepb.Resource) map[string]any {
+	if resource == nil {
+		return nil
 	}
-	return false
+	return attributes(resource.Attributes)
 }
 
-// appendScalarJSON writes a scalar OTLP value as JSON. Callers guarantee no
-// nested/non-finite values reach here (see attrsNeedReflect).
-func appendScalarJSON(buf *bytes.Buffer, v *common.AnyValue) {
-	if v == nil {
-		buf.WriteString("null")
-		return
-	}
-	var tmp [32]byte
-	switch x := v.Value.(type) {
-	case *common.AnyValue_StringValue:
-		appendJSONString(buf, x.StringValue)
-	case *common.AnyValue_IntValue:
-		buf.Write(strconv.AppendInt(tmp[:0], x.IntValue, 10))
-	case *common.AnyValue_DoubleValue:
-		buf.Write(strconv.AppendFloat(tmp[:0], x.DoubleValue, 'g', -1, 64))
-	case *common.AnyValue_BoolValue:
-		if x.BoolValue {
-			buf.WriteString("true")
-		} else {
-			buf.WriteString("false")
-		}
-	case *common.AnyValue_BytesValue:
-		appendJSONString(buf, base64.StdEncoding.EncodeToString(x.BytesValue))
-	default:
-		buf.WriteString("null")
-	}
-}
-
-// jsonHTMLSafe[b] is true for ASCII bytes that need no escaping — matching
-// encoding/json's default htmlSafeSet (escapes " \ control chars and < > &).
-var jsonHTMLSafe = func() (s [utf8.RuneSelf]bool) {
-	for b := 0; b < utf8.RuneSelf; b++ {
-		s[b] = b >= 0x20 && b != '"' && b != '\\' && b != '<' && b != '>' && b != '&'
-	}
-	return
-}()
-
-const jsonHex = "0123456789abcdef"
-
-// appendJSONString writes s as a JSON string, byte-for-byte identical to
-// encoding/json.Marshal(s) with the default HTML escaping (verified by test).
-func appendJSONString(buf *bytes.Buffer, s string) {
-	buf.WriteByte('"')
-	start := 0
-	for i := 0; i < len(s); {
-		if b := s[i]; b < utf8.RuneSelf {
-			if jsonHTMLSafe[b] {
-				i++
-				continue
-			}
-			if start < i {
-				buf.WriteString(s[start:i])
-			}
-			switch b {
-			case '\\', '"':
-				buf.WriteByte('\\')
-				buf.WriteByte(b)
-			case '\n':
-				buf.WriteString(`\n`)
-			case '\r':
-				buf.WriteString(`\r`)
-			case '\t':
-				buf.WriteString(`\t`)
-			case '\b':
-				buf.WriteString(`\b`)
-			case '\f':
-				buf.WriteString(`\f`)
-			default:
-				buf.WriteString(`\u00`)
-				buf.WriteByte(jsonHex[b>>4])
-				buf.WriteByte(jsonHex[b&0xF])
-			}
-			i++
-			start = i
-			continue
-		}
-		c, size := utf8.DecodeRuneInString(s[i:])
-		if c == utf8.RuneError && size == 1 {
-			if start < i {
-				buf.WriteString(s[start:i])
-			}
-			buf.WriteRune(utf8.RuneError)
-			i += size
-			start = i
-			continue
-		}
-		// U+2028/U+2029 are valid JSON but break JS; encoding/json escapes them.
-		if c == '\u2028' || c == '\u2029' {
-			if start < i {
-				buf.WriteString(s[start:i])
-			}
-			buf.WriteString(`\u202`)
-			buf.WriteByte(jsonHex[c&0xF])
-			i += size
-			start = i
-			continue
-		}
-		i += size
-	}
-	if start < len(s) {
-		buf.WriteString(s[start:])
-	}
-	buf.WriteByte('"')
-}
-
-// attrsJSONReflect is the reflection-based encoder, retained for nested values.
-func attrsJSONReflect(attrs []*common.KeyValue) string {
-	m := make(map[string]any, len(attrs))
-	for _, kv := range attrs {
-		if kv == nil || kv.Key == "" {
-			continue
-		}
-		m[kv.Key] = attrValue(kv.Value)
-	}
-	if len(m) == 0 {
-		return ""
-	}
-	b, err := json.Marshal(m)
-	if err != nil {
-		slog.Error("attrs json marshal failed", "err", err)
-		return ""
-	}
-	return string(b)
-}
-
-// resourceAttrsJSON flattens a resource's attributes into the same flat object
-// shape as attrsJSON, so attr(resource_json, 'key') resolves.
-func resourceAttrsJSON(r *resourcepb.Resource) string {
-	if r == nil {
-		return ""
-	}
-	return attrsJSON(r.Attributes)
-}
-
-// attrValue converts an OTLP AnyValue into a native Go value for JSON encoding,
-// preserving scalar types (string/int/double/bool) and recursing into arrays and
-// key-value lists.
+// attrValue preserves OTel types without an intermediate JSON encoding.
 func attrValue(v *common.AnyValue) any {
 	if v == nil {
 		return nil
@@ -597,7 +408,7 @@ func attrValue(v *common.AnyValue) any {
 	case *common.AnyValue_BoolValue:
 		return x.BoolValue
 	case *common.AnyValue_BytesValue:
-		return base64.StdEncoding.EncodeToString(x.BytesValue)
+		return bytes.Clone(x.BytesValue)
 	case *common.AnyValue_ArrayValue:
 		if x.ArrayValue == nil {
 			return nil

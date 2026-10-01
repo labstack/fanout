@@ -59,7 +59,7 @@ func TestEndpointRollupQueryBindsBoundsDirectly(t *testing.T) {
 	if strings.Contains(endpointRollupQuery, "bounds b") || strings.Contains(endpointRollupQuery, "FROM params") {
 		t.Fatal("the query still derives its bounds from a CTE join; the scan filter cannot be pushed")
 	}
-	if !strings.Contains(endpointRollupQuery, "s.start_time < ? OR s.start_time >= ?") {
+	if !strings.Contains(endpointRollupQuery, "s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS OR s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS") {
 		t.Fatal("the boundary exclusion is no longer expressed against bound parameters")
 	}
 }

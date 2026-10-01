@@ -165,10 +165,10 @@ func TestCheckQueryCost(t *testing.T) {
 		// High-cardinality GROUP BY
 		{"group by trace_id", "SELECT trace_id, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY trace_id", 1},
 		{"group by span_id", "SELECT span_id, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY span_id", 1},
-		{"group by attributes_json", "SELECT attributes_json, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY attributes_json", 1},
+		{"group by attributes", "SELECT attributes, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY attributes", 1},
 		{"group by body", "SELECT body, COUNT(*) FROM logs WHERE time > now() - INTERVAL 1 HOUR GROUP BY body", 1},
 		{"group by events_json", "SELECT events_json, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY events_json", 1},
-		{"group by resource_json", "SELECT resource_json, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY resource_json", 1},
+		{"group by resource", "SELECT resource, COUNT(*) FROM spans WHERE start_time > now() - INTERVAL 1 HOUR GROUP BY resource", 1},
 
 		// Unbounded time range (also triggers SELECT * without LIMIT)
 		{"spans no time filter", "SELECT * FROM spans WHERE service = 'foo'", 2},

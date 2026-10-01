@@ -1,6 +1,5 @@
 import type { App, McpUiHostContext } from "@modelcontextprotocol/ext-apps";
 import { useApp } from "@modelcontextprotocol/ext-apps/react";
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { useEffect, useState } from "react";
 
 export function useFanoutApp<T>(name: string) {
@@ -9,7 +8,7 @@ export function useFanoutApp<T>(name: string) {
   const [host, setHost] = useState<McpUiHostContext>();
   const [toolError, setToolError] = useState<string | null>(null);
 
-  function acceptResult(incoming: CallToolResult) {
+  function acceptResult(incoming: Awaited<ReturnType<App["callServerTool"]>>) {
     if (incoming.isError) {
       setToolError("This view could not be refreshed. Please try again.");
       return;

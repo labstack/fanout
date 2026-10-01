@@ -12,7 +12,7 @@ import (
 // Coverage boundary: redaction is applied ONLY to log body fields on the
 // read path — Logs entries, trace-correlated logs, and the SQL-side search
 // filter built from these same patterns (see redactLogBodySQL). Span
-// status_message, span/log attributes JSON, and all on-disk data are NOT
+// status_message, span/log attributes, and all on-disk data are NOT
 // redacted.
 //
 // The patterns are exported string constants (not just compiled regexps) so

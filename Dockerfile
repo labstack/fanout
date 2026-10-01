@@ -2,7 +2,7 @@
 
 # Bun is a build compiler only. Neither Bun nor Node is copied into the final
 # image or launched by the Fanout process.
-FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS ui-apps-build
+FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS ui-apps-build
 WORKDIR /app
 COPY ui/apps/package.json ui/apps/bun.lock ./ui/apps/
 RUN cd ui/apps && bun install --frozen-lockfile
@@ -11,7 +11,7 @@ COPY ui/apps/ ./ui/apps/
 COPY internal/mcp/apps/ ./internal/mcp/apps/
 RUN cd ui/apps && bun run build
 
-FROM oven/bun:1.4.0@sha256:5ff609364c049b54eb0ff560ec96319729a972078ef2c755d758f0c6ef89c2d6 AS ui-host-build
+FROM oven/bun:1.4.2@sha256:9114c058aeae42162ee16dd5084b95fe9473970bb6bcb5b232ab1630f0546895 AS ui-host-build
 WORKDIR /app
 COPY ui/host/package.json ui/host/bun.lock ./ui/host/
 RUN cd ui/host && bun install --frozen-lockfile
@@ -24,7 +24,7 @@ RUN cd ui/host && bun run build
 # is no cross toolchain here. `--platform=$BUILDPLATFORM` is therefore only
 # correct while TARGETPLATFORM equals BUILDPLATFORM. Adding an architecture to
 # the CI matrix means either a native runner for it or QEMU, not a GOARCH flag.
-FROM --platform=$BUILDPLATFORM golang:1.27-bookworm@sha256:ded31c68586d2e49e760acc2e65a884b23d032e9bbbed0ae0c55abd3fcaf4452 AS build
+FROM --platform=$BUILDPLATFORM golang:1.27.1-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195 AS build
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
@@ -37,7 +37,7 @@ COPY --from=ui-host-build /app/internal/ui/dist/ ./internal/ui/dist/
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=1 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags="-s -w -X main.version=${VERSION}" -o fanout ./cmd/fanout
+    bash scripts/with-duckdb.sh go build -ldflags="-s -w -X main.version=${VERSION}" -o fanout ./cmd/fanout
 
 # Distroless has no shell with which to create mutable paths. Prepare the data
 # directory here, then copy it with the runtime user's ownership below.

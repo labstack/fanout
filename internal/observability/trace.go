@@ -13,16 +13,16 @@ import (
 const recentTraceQuery = `
 SELECT trace_id
 FROM spans
-WHERE start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?) AND trace_id <> '' AND (? = '' OR service = ?)
+WHERE start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (? = '' OR namespace = ?) AND trace_id <> '' AND (? = '' OR service = ?)
 GROUP BY trace_id
 ORDER BY MAX(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1 ELSE 0 END) DESC,
-         MAX(end_time) - MIN(start_time) DESC
+         MAX(end_unix_nano) - MIN(start_unix_nano) DESC
 LIMIT 1`
 
 const traceLogsQuery = `
-SELECT time, severity, coalesce(service, ''), body, coalesce(trace_id, ''), coalesce(span_id, '')
+SELECT time::TIMESTAMP_NS, severity, coalesce(service, ''), body, coalesce(trace_id, ''), coalesce(span_id, '')
 FROM logs
-WHERE trace_id = ? AND time >= ? AND time < ? AND (? = '' OR namespace = ?)
+WHERE trace_id = ? AND time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (? = '' OR namespace = ?)
 ORDER BY time ASC
 LIMIT ?`
 

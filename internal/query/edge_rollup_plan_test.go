@@ -37,19 +37,18 @@ func TestEdgeRollupPlanUsesHashJoins(t *testing.T) {
 	spanHi := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 
 	shippedPlan := explain(t, db, edgeRollupInsertSQL, windowLo, windowHi, spanLo, spanHi)
-	commaPlan := explain(t, db, commaForm, windowLo, windowHi, spanLo, spanHi)
 
-	// The defect stated as an assertion. If DuckDB ever folds this away, the
-	// guard below stops proving anything and this says so rather than passing.
-	if !strings.Contains(commaPlan, "CROSS_PRODUCT") {
-		t.Fatalf("the comma form no longer plans a CROSS_PRODUCT, so this guard proves nothing now:\n%s", commaPlan)
-	}
-	for _, bad := range []string{"CROSS_PRODUCT", "DELIM_JOIN", "DELIM_GET", "NESTED_LOOP_JOIN"} {
+	// DuckDB 2 optimizes the historical comma form too. Guard the shipped plan
+	// directly rather than requiring the optimizer to retain an old defect.
+	// A nested loop against the single-row bounds CTE is legitimate. The
+	// costly span-to-span joins must remain hash joins, without correlated
+	// delim joins or an unfiltered Cartesian product.
+	for _, bad := range []string{"Cross Product", "Delim Join", "Delim Get"} {
 		if strings.Contains(shippedPlan, bad) {
 			t.Errorf("edge rollup plans a %s; the FROM clause has regressed to the comma form:\n%s", bad, shippedPlan)
 		}
 	}
-	if !strings.Contains(shippedPlan, "HASH_JOIN") {
+	if !strings.Contains(shippedPlan, "Hash Join") {
 		t.Errorf("edge rollup plans no HASH_JOIN at all:\n%s", shippedPlan)
 	}
 
@@ -161,10 +160,15 @@ func seedEdgeRollupFixture(t *testing.T, db *sql.DB) {
 	if _, err := db.Exec(createEdgeRollupTable); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec(macroAttr); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec(`CREATE TABLE spans (
 		namespace TEXT, trace_id TEXT, span_id TEXT, parent_span_id TEXT,
 		service TEXT, kind TEXT, status TEXT, duration_ms DOUBLE,
-		start_time TIMESTAMP, ingested_unix_nano BIGINT, attributes_json TEXT
+		start_time TIMESTAMP, ingested_unix_nano BIGINT, attributes VARIANT,
+ messaging_system VARCHAR GENERATED ALWAYS AS (TRY_CAST(attributes['messaging.system'] AS VARCHAR)),
+ messaging_destination VARCHAR GENERATED ALWAYS AS (TRY_CAST(attributes['messaging.destination.name'] AS VARCHAR))
 	)`); err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +189,7 @@ func seedEdgeRollupFixture(t *testing.T, db *sql.DB) {
 		if attributes == "" {
 			attributes = "{}"
 		}
-		if _, err := db.Exec(`INSERT INTO spans VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		if _, err := db.Exec(`INSERT INTO spans VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::VARCHAR::JSON::VARIANT)`,
 			"default", "trace-1", s.id, s.parent, s.service, s.kind,
 			"STATUS_CODE_OK", 5.0, fresh, int64(100), attributes); err != nil {
 			t.Fatal(err)
@@ -197,7 +201,7 @@ func seedEdgeRollupFixture(t *testing.T, db *sql.DB) {
 		SELECT 'default', 'new-' || (i // 2)::VARCHAR, 'new-' || i::VARCHAR,
 		       CASE WHEN i % 2 = 1 THEN 'new-' || (i - 1)::VARCHAR ELSE '' END,
 		       'svc-' || (i % 2 + 4)::VARCHAR, 'SPAN_KIND_SERVER', 'STATUS_CODE_OK', 5.0,
-		       TIMESTAMP '2026-09-20 12:00:00', 100, '{}'
+		       TIMESTAMP '2026-09-20 12:00:00', 100, '{}'::JSON::VARIANT
 		FROM range(2000) t(i)`); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +210,7 @@ func seedEdgeRollupFixture(t *testing.T, db *sql.DB) {
 		SELECT 'default', 'old-' || (i // 2)::VARCHAR, 'old-' || i::VARCHAR,
 		       CASE WHEN i % 2 = 1 THEN 'old-' || (i - 1)::VARCHAR ELSE '' END,
 		       'svc-' || (i % 8)::VARCHAR, 'SPAN_KIND_SERVER', 'STATUS_CODE_OK', 5.0,
-		       TIMESTAMP '2026-08-26 00:00:00' + INTERVAL (i % 36000) MINUTE, 1, '{}'
+		       TIMESTAMP '2026-08-26 00:00:00' + INTERVAL (i % 36000) MINUTE, 1, '{}'::JSON::VARIANT
 		FROM range(600000) t(i)`); err != nil {
 		t.Fatal(err)
 	}

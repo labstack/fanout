@@ -5,9 +5,10 @@ package telemetry
 // parquetRowGroupRows. That pays for itself on a column whose values repeat —
 // service names, HTTP methods, scope identifiers, the resource block shared by
 // every span in a ResourceSpans — and costs a full second copy of the payload
-// on a column whose values do not. The JSON columns carrying per-row
-// attributes, events, links and exemplars are near-unique by construction, so
-// they are written plain: dictionary-encoding them made one 50k-span commit
+// on a column whose values do not. Per-row events, links and exemplars are
+// near-unique by construction and are written plain. Attributes and resources
+// use shredded VARIANT columns with a bounded shared metadata dictionary.
+// Dictionary-encoding whole attribute payloads made one 50k-span commit
 // hold several times the batch it was handed, which is what
 // TestCommitBatchPeakHeapStaysNearPayloadSize pins.
 
@@ -27,8 +28,8 @@ type spanParquetRow struct {
 	DurationMS       float64 `parquet:"duration_ms"`
 	Status           string  `parquet:"status"`
 	StatusMessage    string  `parquet:"status_message"`
-	ResourceJSON     string  `parquet:"resource_json,dict"`
-	AttributesJSON   string  `parquet:"attributes_json"`
+	Resource         any     `parquet:"resource,variant"`
+	Attributes       any     `parquet:"attributes,variant"`
 	EventsJSON       string  `parquet:"events_json"`
 	LinksJSON        string  `parquet:"links_json"`
 	TraceState       string  `parquet:"trace_state,dict"`
@@ -56,7 +57,7 @@ func makeSpanParquetRow(r Span) spanParquetRow {
 		Service: r.ServiceName, Operation: r.Name, Kind: r.Kind, StartTime: r.StartUnixNanos,
 		EndTime: r.EndUnixNanos, StartUnixNano: r.StartUnixNanos, EndUnixNano: r.EndUnixNanos,
 		DurationMS: r.DurationMS, Status: r.StatusCode, StatusMessage: r.StatusMsg,
-		ResourceJSON: r.ResourceJSON, AttributesJSON: r.AttributesJSON, EventsJSON: r.EventsJSON, LinksJSON: r.LinksJSON,
+		Resource: r.Resource, Attributes: r.Attributes, EventsJSON: r.EventsJSON, LinksJSON: r.LinksJSON,
 		TraceState: r.TraceState, Flags: int64(r.Flags), ScopeName: r.ScopeName, ScopeVersion: r.ScopeVersion,
 		IngestedAt: r.IngestedAt, IngestedUnixNano: r.IngestedAt, HTTPMethod: r.HTTPMethod,
 		HTTPStatusCode: r.HTTPStatusCode, HTTPRoute: r.HTTPRoute, DBSystem: r.DBSystem, RPCMethod: r.RPCMethod,
@@ -100,8 +101,8 @@ type logParquetRow struct {
 	TraceID              string `parquet:"trace_id"`
 	SpanID               string `parquet:"span_id"`
 	Flags                int64  `parquet:"flags"`
-	ResourceJSON         string `parquet:"resource_json,dict"`
-	AttributesJSON       string `parquet:"attributes_json"`
+	Resource             any    `parquet:"resource,variant"`
+	Attributes           any    `parquet:"attributes,variant"`
 	ScopeName            string `parquet:"scope_name,dict"`
 	ScopeVersion         string `parquet:"scope_version,dict"`
 	IngestedAt           int64  `parquet:"ingested_at,timestamp(nanosecond)"`
@@ -115,7 +116,7 @@ func makeLogParquetRow(r Log) logParquetRow {
 		ObservedTime: FirstPositiveNanos(r.ObservedTimeNanos, r.EventUnixNanos, r.TimeUnixNanos, r.IngestedAt), TimeUnixNano: r.TimeUnixNanos,
 		ObservedTimeUnixNano: r.ObservedTimeNanos, Severity: r.Severity, SeverityNumber: int64(r.SeverityNumber),
 		Body: r.Body, Service: r.ServiceName, TraceID: r.TraceID, SpanID: r.SpanID, Flags: int64(r.Flags),
-		ResourceJSON: r.ResourceJSON, AttributesJSON: r.AttributesJSON, ScopeName: r.ScopeName,
+		Resource: r.Resource, Attributes: r.Attributes, ScopeName: r.ScopeName,
 		ScopeVersion: r.ScopeVersion, IngestedAt: r.IngestedAt, IngestedUnixNano: r.IngestedAt, BodyTemplate: r.BodyTemplate,
 	}
 }
@@ -135,8 +136,8 @@ type metricParquetRow struct {
 	HistCount        int64   `parquet:"hist_count"`
 	HistSum          float64 `parquet:"hist_sum"`
 	ExemplarsJSON    string  `parquet:"exemplars_json"`
-	AttributesJSON   string  `parquet:"attributes_json"`
-	ResourceJSON     string  `parquet:"resource_json,dict"`
+	Attributes       any     `parquet:"attributes,variant"`
+	Resource         any     `parquet:"resource,variant"`
 	ScopeName        string  `parquet:"scope_name,dict"`
 	ScopeVersion     string  `parquet:"scope_version,dict"`
 	IngestedAt       int64   `parquet:"ingested_at,timestamp(nanosecond)"`
@@ -149,7 +150,7 @@ func makeMetricParquetRow(r Metric) metricParquetRow {
 		Name: r.Name, Description: r.Description, Unit: r.Unit, MetricType: r.Type, Service: r.ServiceName,
 		Value: r.Value, HistBoundsJSON: r.HistBoundsJSON, HistCountsJSON: r.HistCountsJSON,
 		HistCount: r.HistCount, HistSum: r.HistSum, ExemplarsJSON: r.ExemplarsJSON,
-		AttributesJSON: r.AttributesJSON, ResourceJSON: r.ResourceJSON, ScopeName: r.ScopeName,
+		Attributes: r.Attributes, Resource: r.Resource, ScopeName: r.ScopeName,
 		ScopeVersion: r.ScopeVersion, IngestedAt: r.IngestedAt, IngestedUnixNano: r.IngestedAt,
 	}
 }

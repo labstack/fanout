@@ -8,7 +8,7 @@ import (
 )
 
 var logFilters = `
-WHERE time >= ? AND time < ?
+WHERE time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
   AND (? = '' OR namespace = ?)
   AND (? = '' OR service = ?)
   AND (? = '' OR lower(severity) = lower(?))
@@ -30,7 +30,7 @@ WHERE time >= ? AND time < ?
 // the reader will be shown, so it matches the redacted text. It is skipped
 // entirely when no search term is given.
 var logEntriesQuery = `
-SELECT time, severity, service, ` + redactLogBodySQL("body") + `, trace_id, span_id
+SELECT time::TIMESTAMP_NS, severity, service, ` + redactLogBodySQL("body") + `, trace_id, span_id
 FROM (
   SELECT time, severity, coalesce(service, '') AS service, body,
          coalesce(trace_id, '') AS trace_id, coalesce(span_id, '') AS span_id
@@ -41,7 +41,7 @@ FROM (
 ORDER BY time DESC`
 
 var logBucketsQueryTemplate = `
-SELECT time_bucket(INTERVAL '%s', time) AS point_time,
+SELECT time_bucket(INTERVAL '%s', time::TIMESTAMP_NS) AS point_time,
        coalesce(nullif(upper(severity), ''), 'UNSPECIFIED') AS bucket_severity,
        CAST(count(*) AS BIGINT)
 	FROM logs` + logFilters + `

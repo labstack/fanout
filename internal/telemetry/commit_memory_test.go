@@ -62,9 +62,8 @@ func syntheticSpan(i int, base time.Time) Span {
 		EndUnixNanos:   start.Add(3 * time.Millisecond).UnixNano(),
 		DurationMS:     3,
 		StatusCode:     "OK",
-		ResourceJSON:   `{"service.name":"checkout","deployment.environment":"prod","host.name":"cube-10"}`,
-		AttributesJSON: fmt.Sprintf(
-			`{"http.method":"POST","http.route":"/api/orders","http.status_code":200,"order.id":"%d","user.id":"u-%d","session":"%032x"}`, i, i*7, i),
+		Resource:       map[string]any{"service.name": "checkout", "deployment.environment": "prod", "host.name": "cube-10"},
+		Attributes:     map[string]any{"http.method": "POST", "http.route": "/api/orders", "http.status_code": int64(200), "order.id": fmt.Sprint(i), "user.id": fmt.Sprintf("u-%d", i*7), "session": fmt.Sprintf("%032x", i)},
 		EventsJSON: fmt.Sprintf(
 			`[{"name":"validated","time":%d},{"name":"charged","time":%d,"amount":%d}]`, start.UnixNano(), start.UnixNano()+1000, i%9999),
 		LinksJSON: fmt.Sprintf(`[{"trace_id":"%032x","span_id":"%016x"}]`, i+1, i+1),
@@ -74,7 +73,7 @@ func syntheticSpan(i int, base time.Time) Span {
 func payloadBytes(spans []Span) int64 {
 	var total int64
 	for i := range spans {
-		total += int64(len(spans[i].ResourceJSON) + len(spans[i].AttributesJSON) +
+		total += int64(ValueBytes(spans[i].Resource) + ValueBytes(spans[i].Attributes) +
 			len(spans[i].EventsJSON) + len(spans[i].LinksJSON) +
 			len(spans[i].TraceID) + len(spans[i].SpanID) + len(spans[i].ServiceName) + len(spans[i].Name))
 	}

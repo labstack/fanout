@@ -182,16 +182,16 @@ func TestParquetStorePreservesCompleteLogAndMetricRows(t *testing.T) {
 	logRow := Log{
 		Namespace: "tenant", EventUnixNanos: 11, TimeUnixNanos: 12, ObservedTimeNanos: 13,
 		Severity: "ERROR", SeverityNumber: 17, Body: "declined", ServiceName: "checkout",
-		TraceID: "trace", SpanID: "span", Flags: 1, ResourceJSON: `{"host":"one"}`,
-		AttributesJSON: `{"attempt":2}`, ScopeName: "scope", ScopeVersion: "1.2.3",
+		TraceID: "trace", SpanID: "span", Flags: 1, Resource: map[string]any{"host": "one"},
+		Attributes: map[string]any{"attempt": int64(2)}, ScopeName: "scope", ScopeVersion: "1.2.3",
 		IngestedAt: 14, BodyTemplate: "declined: {reason}",
 	}
 	metricRow := Metric{
 		Namespace: "tenant", EventUnixNanos: 21, TimeUnixNanos: 22, Name: "request.duration",
 		Description: "request latency", Unit: "ms", Type: "histogram", ServiceName: "checkout", Value: 23.5,
 		HistBoundsJSON: `[1,5,10]`, HistCountsJSON: `[2,3,4,5]`, HistCount: 14, HistSum: 47,
-		ExemplarsJSON: `[{"trace_id":"trace"}]`, AttributesJSON: `{"route":"/pay"}`,
-		ResourceJSON: `{"host":"one"}`, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 24,
+		ExemplarsJSON: `[{"trace_id":"trace"}]`, Attributes: map[string]any{"route": "/pay"},
+		Resource: map[string]any{"host": "one"}, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 24,
 	}
 	if err := store.CommitBatch(context.Background(), BatchMetadata{ID: "complete-signals"}, nil, []Log{logRow}, []Metric{metricRow}); err != nil {
 		t.Fatal(err)
@@ -492,7 +492,7 @@ func completeTestSpan() Span {
 		Namespace: "tenant", TraceID: "0123456789abcdef0123456789abcdef", SpanID: "0123456789abcdef",
 		ParentSpanID: "fedcba9876543210", ServiceName: "checkout", Name: "POST /orders", Kind: "SERVER",
 		StartUnixNanos: 10, EndUnixNanos: 20, DurationMS: 0.00001, StatusCode: "ERROR", StatusMsg: "declined",
-		ResourceJSON: `{"host":"one"}`, AttributesJSON: `{"http.request.method":"POST"}`,
+		Resource: map[string]any{"host": "one"}, Attributes: map[string]any{"http.request.method": "POST"},
 		EventsJSON: `[{"name":"exception"}]`, LinksJSON: `[{"trace_id":"linked"}]`,
 		TraceState: "vendor=value", Flags: 1, ScopeName: "scope", ScopeVersion: "1.2.3", IngestedAt: 30,
 		HTTPMethod: "POST", HTTPStatusCode: "500", HTTPRoute: "/orders", DBSystem: "postgresql",

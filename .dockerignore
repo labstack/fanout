@@ -11,6 +11,8 @@ data/
 /testdata/
 
 # Build
+/.cache/
+telemetry.test
 bin/
 fanout
 ui/host/node_modules/

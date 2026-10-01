@@ -59,6 +59,60 @@ The sidecar is an index, not another telemetry representation.
 Dashboard rollups are rebuildable DuckDB caches. SQLite remains independent and
 stores only transactional product state.
 
+## Attributes retain their types
+
+Span, log, and metric attributes and resource attributes use Parquet VARIANT
+columns. Frequently queried resource and messaging fields also have typed
+Parquet columns inside the VARIANT encoding. The span read view exposes
+`messaging_system` and `messaging_destination` directly from those shredded
+fields, so messaging rollups can avoid decoding the whole attributes object.
+Values with different types remain in the residual encoding;
+an integer does not become a string just because another row uses one.
+
+Integers, booleans, binary values, nulls, arrays, and nested objects survive
+ingestion, indexed reads, and compaction. Event timestamps retain nanosecond
+precision as UTC instants (`TIMESTAMPTZ_NS`). Keep timestamp columns unchanged
+in filters so Parquet row-group statistics can prune the scan. For datetime
+functions that require a timestamp without a timezone, cast their argument to
+`TIMESTAMP_NS`; the JSON result boundary handles returned timestamps automatically.
+Attribute names such as
+`service.name` are literal keys. In SQL, use `attr(attributes, 'service.name')`
+and an explicit cast when a scalar type is needed, for example
+`TRY_CAST(attr(attributes, 'retry.count') AS BIGINT)`. General attribute extracts
+through views retain their types, but this engine preview does not propagate
+their extraction across view projections. Prefer the existing scalar service,
+namespace, version, environment, and messaging columns for those hot queries.
+
+The JSON SQL response converts nested values only when returning results.
+Integer tokens retain their full precision; clients that parse JSON numbers as
+floating-point values should cast large integers to strings in their query.
+Non-finite floats are returned as `"NaN"`, `"Infinity"`, or `"-Infinity"`.
+Binary values stay binary in storage; cast them explicitly to the desired
+string encoding when querying them for a JSON client.
+
+## Engine and format are pinned
+
+Fanout embeds DuckDB `v2.0.0-alpha43763`, a preview engine, with its extensions
+compiled into the binary. It downloads no extensions at runtime. Native source
+builds use `scripts/with-duckdb.sh`, which checks the platform archive and uses
+the matching engine headers; the ordinary `just` build and test recipes invoke
+it automatically. DuckDB 2's asynchronous I/O uses its default memory-governed
+read-ahead rather than an unlimited queue. Rooted service traversal uses keyed
+recursion with explicit hop, accumulated-node, and execution-time limits.
+
+Offline verification decodes every Parquet column with the native engine and
+separately checks physical schemas, span ordering, row counts, and trace-index
+ranges. It reuses one bounded in-memory engine and creates no spill files.
+Discarded hashes force decoding; they do not establish a stored checksum.
+Verification failures such as memory exhaustion or cancellation never authorize
+quarantine.
+
+Telemetry batches use format 3. An older or unknown batch format makes startup
+fail before cleanup or schema rewriting, leaving the files intact. This build
+has no reader or automatic conversion for previous formats. Start with an
+empty telemetry directory; retain previous data separately for its original
+reader. SQLite control state is independent of this telemetry format change.
+
 ## Small files are bounded by compaction
 
 Atomic ingestion creates immutable batch directories. Maintenance drains every
@@ -82,3 +136,10 @@ Overview and alert queries read rebuildable DuckDB rollups. Their watermark
 trails committed telemetry by a fixed safety window so out-of-order events from
 bounded commit retries are not skipped. Raw committed telemetry is queryable
 before it appears in a rollup.
+
+Service dependency traversal reads the complete edge rollup within the selected
+window, including edges outside the topology view's displayed page. It follows
+upstream or downstream edges from a named service, retains the minimum hop
+count per namespace and service, and bounds depth, accumulated nodes, and
+execution time. A truncated result states which limit was reached. Rollup lag
+still applies; dependency edges describe observed calls, not proof of causality.

@@ -184,7 +184,7 @@ func errorRateAnomalySQL(startNano, endNano int64, scope string) string {
 				FROM spans
 				WHERE start_unix_nano >= %d AND start_unix_nano < %d
 				%s
-				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time)
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS)
 			) buckets
 			GROUP BY service_name
 		),
@@ -200,7 +200,7 @@ func errorRateAnomalySQL(startNano, endNano int64, scope string) string {
 				FROM spans
 				WHERE start_unix_nano >= %d AND start_unix_nano < %d
 				%s
-				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time)
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS)
 			) buckets
 			GROUP BY service_name
 		)
@@ -286,7 +286,7 @@ func (d *Detector) detectLatencyAnomalies(ctx context.Context, start, end time.T
 		baseline_buckets AS (
 			SELECT
 				service as service_name,
-				time_bucket(INTERVAL '5 minutes', start_time) AS bucket,
+				time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS) AS bucket,
 				approx_quantile(duration_ms, 0.95) AS p95_latency
 			FROM spans
 			WHERE start_unix_nano >= %d AND start_unix_nano < %d
@@ -370,7 +370,7 @@ func volumeAnomalySQL(startNano, endNano int64, scope string) string {
 				FROM spans
 				WHERE start_unix_nano >= %d AND start_unix_nano < %d
 				%s
-				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time)
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS)
 			) subq
 			GROUP BY service_name
 		),
@@ -386,7 +386,7 @@ func volumeAnomalySQL(startNano, endNano int64, scope string) string {
 				FROM spans
 				WHERE start_unix_nano >= %d AND start_unix_nano < %d
 				%s
-				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time)
+				GROUP BY service, time_bucket(INTERVAL '5 minutes', start_time::TIMESTAMP_NS)
 			) subq
 			GROUP BY service_name
 		)

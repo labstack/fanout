@@ -35,7 +35,7 @@ SELECT
   COALESCE(approx_quantile(duration_ms, 0.99), 0) AS p99_ms,
   COALESCE(AVG(CASE WHEN upper(status) IN ('ERROR', 'STATUS_CODE_ERROR') THEN 1.0 ELSE 0.0 END), 0) AS error_rate
 FROM spans
-WHERE start_time >= ? AND start_time < ? AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)
+WHERE start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND (? = '' OR namespace = ?) AND (? = '' OR service = ?)
 GROUP BY method, path
 ORDER BY calls DESC, p95_ms DESC
 LIMIT ?`
@@ -123,9 +123,9 @@ boundary_source AS (
       le_300000 := COUNT(*) FILTER (WHERE s.duration_ms <= 300000)
     ) AS duration_buckets
   FROM spans s
-  WHERE s.start_time >= ?
-    AND s.start_time < ?
-    AND (s.start_time < ? OR s.start_time >= ?)
+  WHERE s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS
+    AND (s.start_time < ?::TIMESTAMP_NS::TIMESTAMPTZ_NS OR s.start_time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS)
     AND (? = '' OR s.namespace = ?)
     AND (? = '' OR COALESCE(s.service, '') = ?)
   GROUP BY method, path

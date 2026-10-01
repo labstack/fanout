@@ -39,7 +39,7 @@ CREATE TABLE endpoint_rollup (
 CREATE TABLE spans (
   namespace VARCHAR, service VARCHAR, operation VARCHAR, kind VARCHAR, status VARCHAR,
   http_method VARCHAR, http_route VARCHAR,
-  duration_ms DOUBLE, start_time TIMESTAMP, attributes_json VARCHAR
+  duration_ms DOUBLE, start_time TIMESTAMPTZ_NS, attributes VARIANT
 )`); err != nil {
 		t.Fatal(err)
 	}
