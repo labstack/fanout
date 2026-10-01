@@ -173,7 +173,7 @@ COMPONENT INVENTORY
 - npm: fast-deep-equal 3.1.3 (declared license: MIT)
 - npm: fast-equals 4.0.3 (declared license: MIT)
 - npm: fast-json-patch 3.1.1 (declared license: MIT)
-- npm: fast-uri 3.1.7 (declared license: BSD-3-Clause)
+- npm: fast-uri 3.1.8 (declared license: BSD-3-Clause)
 - npm: finalhandler 2.1.1 (declared license: MIT)
 - npm: forwarded 0.2.0 (declared license: MIT)
 - npm: fresh 2.0.0 (declared license: MIT)
@@ -192,7 +192,7 @@ COMPONENT INVENTORY
 - npm: iconv-lite 0.7.3 (declared license: MIT)
 - npm: inherits 2.0.4 (declared license: ISC)
 - npm: inline-style-parser 0.2.7 (declared license: MIT)
-- npm: ip-address 10.5.0 (declared license: MIT)
+- npm: ip-address 10.7.1 (declared license: MIT)
 - npm: ipaddr.js 1.9.1 (declared license: MIT)
 - npm: is-alphabetical 2.0.1 (declared license: MIT)
 - npm: is-alphanumerical 2.0.1 (declared license: MIT)
@@ -5685,7 +5685,7 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: fast-uri 3.1.7 / LICENSE
+- npm: fast-uri 3.1.8 / LICENSE
 ----------------------------------------------------------------------------
 
 Copyright (c) 2011-2021, Gary Court until https://github.com/garycourt/uri-js/commit/a1acf730b4bba3f1097c9f52e7d9d3aba8cdcaae
@@ -6093,7 +6093,7 @@ The above copyright notice and this permission notice shall be included in all c
 THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 --- Applies to -------------------------------------------------------------
-- npm: ip-address 10.5.0 / LICENSE
+- npm: ip-address 10.7.1 / LICENSE
 ----------------------------------------------------------------------------
 
 Copyright (C) 2011 by Beau Gunderson
