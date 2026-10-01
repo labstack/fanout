@@ -1,0 +1,2 @@
+# Published migrations are checksummed byte for byte; never convert line endings.
+internal/db/migrations/*.sql -text

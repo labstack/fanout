@@ -29,7 +29,7 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	if hasTables {
 		var hasAppliedVersion bool
 		if hasVersionTable {
-			if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM goose_db_version WHERE version_id > 0 AND is_applied = 1)`).Scan(&hasAppliedVersion); err != nil {
+			if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM `+goose.DefaultTablename+` WHERE version_id > 0 AND is_applied = 1)`).Scan(&hasAppliedVersion); err != nil {
 				return fmt.Errorf("inspect applied migrations: %w", err)
 			}
 		}

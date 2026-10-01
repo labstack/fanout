@@ -84,12 +84,12 @@ func (s *Server) registerDashboardTools() {
 	if s.dashboards == nil {
 		return
 	}
-	// AddTool infers input/output schemas, so give each server its own copies.
-	tools := dashboardTools
-	mcp.AddTool(s.mcp, &tools[listDashboardsTool], s.dashboardList)
-	mcp.AddTool(s.mcp, &tools[getDashboardTool], s.dashboardGet)
-	mcp.AddTool(s.mcp, &tools[createDashboardTool], s.dashboardCreate)
-	mcp.AddTool(s.mcp, &tools[replaceDashboardTool], s.dashboardUpdate)
+	// AddTool copies each tool before inferring schemas, so the catalog stays
+	// shared and unmodified across servers.
+	mcp.AddTool(s.mcp, &dashboardTools[listDashboardsTool], s.dashboardList)
+	mcp.AddTool(s.mcp, &dashboardTools[getDashboardTool], s.dashboardGet)
+	mcp.AddTool(s.mcp, &dashboardTools[createDashboardTool], s.dashboardCreate)
+	mcp.AddTool(s.mcp, &dashboardTools[replaceDashboardTool], s.dashboardUpdate)
 }
 
 func (s *Server) dashboardList(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, dashboardListOutput, error) {
