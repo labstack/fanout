@@ -32,14 +32,17 @@ func TestDashboardRoutesHideOtherOwnersResources(t *testing.T) {
 		t.Fatalf("Create owner B: %v", err)
 	}
 	dashboards := dashboard.New(s.db.DB, 30)
-	item, err := dashboards.Default(t.Context(), ownerA.ID)
+	items, err := dashboards.List(t.Context(), ownerA.ID)
 	if err != nil {
 		t.Fatalf("create dashboard: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("initial dashboards = %d, want 1", len(items))
 	}
 	RegisterDashboardRoutes(s.e, dashboards)
 
 	recorder := httptest.NewRecorder()
-	s.e.ServeHTTP(recorder, sessionRequest(http.MethodGet, "/api/dashboards/"+item.ID, nil, s.login(t, ownerB)))
+	s.e.ServeHTTP(recorder, sessionRequest(http.MethodGet, "/api/dashboards/"+items[0].ID, nil, s.login(t, ownerB)))
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("cross-owner dashboard read = %d, want 404", recorder.Code)
 	}

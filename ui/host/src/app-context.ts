@@ -38,15 +38,19 @@ export const createDashboardPrompt = "Create a new dashboard for me. First ask w
 // What a tool call is doing, in the reader's words rather than the tool's.
 // The session names the activity, so the map lives beside it: nothing here
 // may reach for the view.
-const activityLabels: Record<string, string> = {
-  get_observability_overview: "Checking system health…",
-  get_service_topology: "Mapping service dependencies…",
-  get_service_performance: "Reading performance signals…",
-  inspect_trace: "Inspecting a trace…",
-  search_logs: "Searching logs…",
-  get_intelligence_snapshot: "Reviewing detected anomalies…",
+const toolLabels: Record<string, { activity: string; title: string }> = {
+  get_observability_overview: { activity: "Checking system health…", title: "System health" },
+  get_service_topology: { activity: "Mapping service dependencies…", title: "Service map" },
+  get_service_performance: { activity: "Reading performance signals…", title: "Performance" },
+  inspect_trace: { activity: "Inspecting a trace…", title: "Trace analysis" },
+  search_logs: { activity: "Searching logs…", title: "Logs" },
+  get_intelligence_snapshot: { activity: "Reviewing detected anomalies…", title: "Detected anomalies" },
 };
 
 export function activityLabel(toolName: string): string {
-  return activityLabels[toolName] ?? "Working on it…";
+  return toolLabels[toolName]?.activity ?? "Working on it…";
+}
+
+export function toolTitle(toolName: string): string {
+  return toolLabels[toolName]?.title ?? "System analysis";
 }

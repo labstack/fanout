@@ -102,8 +102,7 @@ db-migrate-create NAME:
 
 # Apply migrations (development; production auto-applies on boot).
 db-migrate-apply DB="data/control/fanout.sqlite":
-    mkdir -p "$(dirname "{{DB}}")"
-    {{goose}} -dir internal/db/migrations sqlite3 "{{DB}}?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)" up
+    go run ./internal/cmd/dbmigrate -db "{{DB}}"
 
 # ── Go quality ───────────────────────────────────────────────────────────────
 

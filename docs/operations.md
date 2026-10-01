@@ -56,6 +56,10 @@ original host.
 - `/metrics` exposes Prometheus metrics. Keep it private or configure
   `FANOUT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
 
+When upgrading from a version that exposed `/-/metrics`, change Prometheus
+`metrics_path` and any proxy rules to `/metrics`. The retired path returns 404
+even with a valid metrics token; it does not redirect.
+
 Alert on repeated restarts, readiness failures, ingest authentication failures,
 telemetry drops, sustained query latency, and available disk space. Retention
 is controlled by `FANOUT_RETENTION_DAYS`; maintenance removes expired data on

@@ -4,7 +4,7 @@ import { Check, Copy, PaperPlaneTilt, Stop } from "@phosphor-icons/react";
 import { lazy, Suspense, useEffect, type ComponentProps, type ReactNode } from "react";
 import Markdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useFanoutApp } from "./app-context";
+import { toolTitle, useFanoutApp } from "./app-context";
 import { useStickToBottom } from "./chat-scroll";
 import { BrandMark } from "./brand";
 import { useCopy } from "./copy";
@@ -19,10 +19,6 @@ const suggestions = [
   "Map the current service dependencies",
   "Show the slowest endpoints",
 ];
-
-export function toolTitle(name: string) {
-  return ({ get_observability_overview: "System health", get_service_topology: "Service map", get_service_performance: "Performance", inspect_trace: "Trace analysis", search_logs: "Logs" } as Record<string, string>)[name] ?? "System analysis";
-}
 
 export function ChatPage() {
   const { agentAvailable, messages, messageTimes, ready, running, activity, error, threadMissing, send, retry, reloadThread, newThread } = useFanoutApp();

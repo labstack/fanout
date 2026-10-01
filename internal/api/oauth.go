@@ -25,6 +25,7 @@ import (
 
 	appauth "github.com/labstack/fanout/internal/auth"
 	"github.com/labstack/fanout/internal/brand"
+	appmcp "github.com/labstack/fanout/internal/mcp"
 	mcpgoauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
@@ -189,12 +190,7 @@ func (r mcpAuthorizationRequest) requiredScope() string {
 	if r.Method != "tools/call" {
 		return ""
 	}
-	switch r.Params.Name {
-	case "list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard":
-		return dashboard.OAuthScope
-	default:
-		return ""
-	}
+	return appmcp.RequiredToolScope(r.Params.Name)
 }
 
 // ProtectBrowserMCP adapts an already-authenticated browser session to the

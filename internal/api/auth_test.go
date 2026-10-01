@@ -195,13 +195,13 @@ func TestRoutePolicyClassification(t *testing.T) {
 	}
 }
 
-func TestUnknownProtectedPathsAuthenticateThenReturn404(t *testing.T) {
+func TestUnknownProtectedPathsReturn404BeforeAuthentication(t *testing.T) {
 	s := newTestAuthServer(t)
 	user, _ := s.users.Create("unknown-path@example.com", "", "admin")
 	anonymous := httptest.NewRecorder()
 	s.e.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/api/not-registered", nil))
-	if anonymous.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous unknown API path = %d, want 401", anonymous.Code)
+	if anonymous.Code != http.StatusNotFound {
+		t.Fatalf("anonymous unknown API path = %d, want 404", anonymous.Code)
 	}
 	cookie := s.login(t, user)
 	authenticated := httptest.NewRecorder()
@@ -214,6 +214,30 @@ func TestUnknownProtectedPathsAuthenticateThenReturn404(t *testing.T) {
 	s.e.ServeHTTP(unclassified, sessionRequest(http.MethodGet, "/api/new-unreviewed-route", nil, cookie))
 	if unclassified.Code != http.StatusInternalServerError {
 		t.Fatalf("registered unclassified API route = %d, want 500", unclassified.Code)
+	}
+}
+
+func TestRetiredMetricsReturns404ForScrapers(t *testing.T) {
+	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", MetricsToken: "metrics-test-token"}, auth.SMTPConfig{})
+	s.e.GET("/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.GET("/*", func(c *echo.Context) error { return c.String(http.StatusOK, "SPA") })
+	for _, token := range []string{"", "wrong", "metrics-test-token"} {
+		req := httptest.NewRequest(http.MethodGet, "/-/metrics", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("retired metrics = %d, want 404", rec.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer metrics-test-token")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("current metrics with valid token = %d, want 204", rec.Code)
 	}
 }
 

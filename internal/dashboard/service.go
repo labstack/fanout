@@ -148,17 +148,6 @@ func (s *Service) Get(ctx context.Context, ownerID, id string) (Dashboard, error
 	return s.get(ctx, s.db, ownerID, id)
 }
 
-func (s *Service) Default(ctx context.Context, ownerID string) (Dashboard, error) {
-	if err := s.ensureInitial(ctx, ownerID); err != nil {
-		return Dashboard{}, err
-	}
-	var id string
-	if err := s.db.QueryRowContext(ctx, `SELECT id FROM dashboards WHERE owner_id=? ORDER BY is_default DESC,created_at LIMIT 1`, ownerID).Scan(&id); err != nil {
-		return Dashboard{}, err
-	}
-	return s.get(ctx, s.db, ownerID, id)
-}
-
 func (s *Service) Create(ctx context.Context, ownerID string, input CreateInput) (Dashboard, error) {
 	input.Name = strings.TrimSpace(input.Name)
 	if input.State.Filters.Window == "" {

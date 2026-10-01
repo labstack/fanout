@@ -129,3 +129,83 @@ func TestNewSQLite_WALMode(t *testing.T) {
 		t.Errorf("journal_mode = %q, want %q", mode, "wal")
 	}
 }
+
+func TestNewSQLite_RejectsExistingSchemaWithUnappliedGooseState(t *testing.T) {
+	for _, state := range []string{"empty", "zero", "unapplied"} {
+		t.Run(state, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "control.sqlite")
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			if _, err := db.Exec(`CREATE TABLE alert_rules (value TEXT NOT NULL);
+				INSERT INTO alert_rules VALUES ('keep me');
+				CREATE TABLE goose_db_version (id INTEGER PRIMARY KEY, version_id INTEGER NOT NULL, is_applied INTEGER NOT NULL)`); err != nil {
+				t.Fatal(err)
+			}
+			versions := 0
+			if state != "empty" {
+				version, applied := 0, 1
+				if state == "unapplied" {
+					version, applied = 20260930000000, 0
+				}
+				if _, err := db.Exec(`INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, ?)`, version, applied); err != nil {
+					t.Fatal(err)
+				}
+				versions = 1
+			}
+			if s, err := NewSQLite(path); err == nil {
+				s.Close()
+				t.Fatal("opened existing schema without an applied migration")
+			} else if !strings.Contains(err.Error(), "automatic conversion is not supported") {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			var value string
+			if err := db.QueryRow(`SELECT value FROM alert_rules`).Scan(&value); err != nil || value != "keep me" {
+				t.Fatalf("existing data changed: value=%q, err=%v", value, err)
+			}
+			var tables, rows int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table'`).Scan(&tables); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.QueryRow(`SELECT COUNT(*) FROM goose_db_version`).Scan(&rows); err != nil {
+				t.Fatal(err)
+			}
+			if tables != 2 || rows != versions {
+				t.Fatalf("rejected database changed: tables=%d, versions=%d", tables, rows)
+			}
+		})
+	}
+}
+
+func TestNewSQLite_InitializesWithOnlyGooseMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "control.sqlite")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE goose_db_version (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		version_id INTEGER NOT NULL, is_applied INTEGER NOT NULL,
+		tstamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+		INSERT INTO goose_db_version (version_id, is_applied) VALUES (0, 1)`); err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var applied int
+	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM goose_db_version WHERE version_id > 0 AND is_applied=1`).Scan(&applied); err != nil {
+		t.Fatal(err)
+	}
+	if applied != 1 {
+		t.Fatalf("applied versions = %d, want 1", applied)
+	}
+}

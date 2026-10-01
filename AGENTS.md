@@ -8,10 +8,13 @@
 - `internal/db/migrations` is the control schema source for both Goose and
   sqlc. Do not add a separate schema copy or another migration framework.
 - Use timestamped Goose SQL migrations with `-- +goose Up`. Published
-  migrations are immutable; add a new migration for subsequent changes.
+  migrations are immutable; add a new migration for subsequent changes and
+  extend the checksum ledger in `internal/db/migrations_test.go`. Never replace
+  a published checksum.
 - Run `just db-gen` after schema or query changes and verify the storage tests.
 - No Atlas conversion, legacy migration tracker, or schema fallback. A database
-  without Goose version state must be empty before initialization.
+  with application tables must have a positive applied Goose version before
+  initialization. An empty or zero-only version table is not sufficient.
 
 ## Product versioning
 

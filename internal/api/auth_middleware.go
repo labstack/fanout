@@ -80,15 +80,13 @@ func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg c
 		return func(c *echo.Context) error {
 			path := c.Request().URL.Path
 			policy, classified := classifyRoute(c.Request().Method, path)
-			protectedNotFound := false
 			if !classified {
 				if routePathKnown(path) {
 					return echo.NewHTTPError(http.StatusMethodNotAllowed, "method not allowed")
 				}
 				routePath := c.RouteInfo().Path
 				if isProtectedPath(path) && (routePath == "" || routePath == "/*") {
-					policy = routePolicy{kind: routePolicyAuthenticated}
-					protectedNotFound = true
+					return echo.NewHTTPError(http.StatusNotFound, "not found")
 				} else {
 					slog.Error("request reached an unclassified registered route", "method", c.Request().Method, "path", path, "route", routePath)
 					return echo.NewHTTPError(http.StatusInternalServerError, "route security policy is not configured")
@@ -145,9 +143,6 @@ func AuthMiddleware(users *auth.UserStore, sessions *auth.BrowserSessions, cfg c
 			if policy.kind == routePolicyCapability && !HasCapability(user, policy.capability) {
 				recordAuthorizationDenied(c, user)
 				return echo.NewHTTPError(http.StatusForbidden, "insufficient permissions")
-			}
-			if protectedNotFound {
-				return echo.NewHTTPError(http.StatusNotFound, "not found")
 			}
 			return next(c)
 		}

@@ -38,29 +38,58 @@ type dashboardOutput struct {
 	Dashboard dashboard.Dashboard `json:"dashboard"`
 }
 
+const (
+	listDashboardsTool = iota
+	getDashboardTool
+	createDashboardTool
+	replaceDashboardTool
+)
+
+// Registration and transport authorization use the same dashboard tool catalog.
+var dashboardTools = [...]mcp.Tool{
+	{
+		Name: "list_dashboards", Title: "List dashboards",
+		Description: "List the authenticated user's named dashboards and widget counts before creating or changing one.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)},
+	},
+	{
+		Name: "get_dashboard", Title: "Get dashboard",
+		Description: "Read one named dashboard, including its widgets, filters, and 12-column layout.",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)},
+	},
+	{
+		Name: "create_dashboard", Title: "Create dashboard",
+		Description: "Create a complete named dashboard for the authenticated user. This is additive and does not alter existing dashboards.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
+	},
+	{
+		Name: "replace_dashboard", Title: "Replace dashboard design",
+		Description: "Replace an existing dashboard's complete name, description, widgets, shared filters, and layout. This is not a partial edit: omitted widgets are removed. Only call after the user explicitly asks to change that dashboard.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), IdempotentHint: true, OpenWorldHint: boolPtr(false)},
+	},
+}
+
+// RequiredToolScope reports additional delegated scope needed by a tool.
+// All remote MCP requests already require telemetry:read.
+func RequiredToolScope(name string) string {
+	for _, tool := range dashboardTools {
+		if tool.Name == name {
+			return dashboard.OAuthScope
+		}
+	}
+	return ""
+}
+
 func (s *Server) registerDashboardTools() {
 	if s.dashboards == nil {
 		return
 	}
-	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)}
-	additive := &mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}
-	replacement := &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), IdempotentHint: true, OpenWorldHint: boolPtr(false)}
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "list_dashboards", Title: "List dashboards",
-		Description: "List the authenticated user's named dashboards and widget counts before creating or changing one.", Annotations: readOnly,
-	}, s.dashboardList)
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "get_dashboard", Title: "Get dashboard",
-		Description: "Read one named dashboard, including its widgets, filters, and 12-column layout.", Annotations: readOnly,
-	}, s.dashboardGet)
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "create_dashboard", Title: "Create dashboard",
-		Description: "Create a complete named dashboard for the authenticated user. This is additive and does not alter existing dashboards.", Annotations: additive,
-	}, s.dashboardCreate)
-	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name: "replace_dashboard", Title: "Replace dashboard design",
-		Description: "Replace an existing dashboard's complete name, description, widgets, shared filters, and layout. This is not a partial edit: omitted widgets are removed. Only call after the user explicitly asks to change that dashboard.", Annotations: replacement,
-	}, s.dashboardUpdate)
+	// AddTool infers input/output schemas, so give each server its own copies.
+	tools := dashboardTools
+	mcp.AddTool(s.mcp, &tools[listDashboardsTool], s.dashboardList)
+	mcp.AddTool(s.mcp, &tools[getDashboardTool], s.dashboardGet)
+	mcp.AddTool(s.mcp, &tools[createDashboardTool], s.dashboardCreate)
+	mcp.AddTool(s.mcp, &tools[replaceDashboardTool], s.dashboardUpdate)
 }
 
 func (s *Server) dashboardList(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, dashboardListOutput, error) {

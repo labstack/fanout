@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 
 	"github.com/pressly/goose/v3"
 )
@@ -17,16 +18,24 @@ var migrationsFS embed.FS
 // Migrate applies embedded SQLite migrations. sqlc reads the same SQL files
 // when generating query bindings. Providers have no shared global registry.
 func Migrate(ctx context.Context, db *sql.DB) error {
-	var hasTables, hasVersions bool
+	var hasTables, hasVersionTable bool
 	if err := db.QueryRowContext(ctx, `
 		SELECT
-			EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'),
+			EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*' AND name != ?),
 			EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)`,
-		goose.DefaultTablename).Scan(&hasTables, &hasVersions); err != nil {
+		goose.DefaultTablename, goose.DefaultTablename).Scan(&hasTables, &hasVersionTable); err != nil {
 		return fmt.Errorf("inspect migration state: %w", err)
 	}
-	if hasTables && !hasVersions {
-		return errors.New("control database must be empty or managed by Goose; automatic conversion is not supported")
+	if hasTables {
+		var hasAppliedVersion bool
+		if hasVersionTable {
+			if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM goose_db_version WHERE version_id > 0 AND is_applied = 1)`).Scan(&hasAppliedVersion); err != nil {
+				return fmt.Errorf("inspect applied migrations: %w", err)
+			}
+		}
+		if !hasAppliedVersion {
+			return errors.New("control database must be empty or managed by Goose; automatic conversion is not supported")
+		}
 	}
 	dir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
@@ -37,8 +46,12 @@ func Migrate(ctx context.Context, db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("create migration provider: %w", err)
 	}
-	if _, err := provider.Up(ctx); err != nil {
+	results, err := provider.Up(ctx)
+	if err != nil {
 		return fmt.Errorf("apply migrations: %w", err)
+	}
+	for _, result := range results {
+		slog.Info("control database migration applied", "version", result.Source.Version, "duration", result.Duration)
 	}
 	return nil
 }
