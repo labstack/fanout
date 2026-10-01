@@ -126,7 +126,7 @@ func logMinuteBucketsSQL(window time.Duration) string {
 	return fmt.Sprintf(`WITH counts AS (
  SELECT bucket AS time, severity, namespace, service, count FROM log_minutes
  UNION ALL
- SELECT date_trunc('minute',time::TIMESTAMP_NS), coalesce(lower(severity),''), namespace, service, sum(count)::BIGINT FROM log_tail
+ SELECT date_trunc('minute',time::TIMESTAMP_NS), coalesce(severity,''), namespace, service, sum(count)::BIGINT FROM log_tail
  WHERE time>= $1::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time<$2::TIMESTAMP_NS::TIMESTAMPTZ_NS
  GROUP BY 1,2,3,4
  ) SELECT time_bucket(INTERVAL '%s',time::TIMESTAMP_NS) AS point_time,

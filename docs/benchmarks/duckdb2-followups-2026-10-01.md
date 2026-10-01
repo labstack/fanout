@@ -58,26 +58,28 @@ not attribute the entire gain to faster VARIANT encoding.
 The opt-in read fixture has 1.2 million spans and 1.2 million logs across twelve
 hourly batches, plus 300 old tiny log/metric batches. Both paths read the same
 format-3 files. The raw path runs the existing query kernels; the completed path
-runs the actual production dashboard methods after cache backfill (3.46s).
+runs the actual production dashboard methods after cache backfill (3.59s).
 No compaction or background rollup runs during measurement. Each case has a warmup
 and ten measured requests. These p95 values are the maximum of ten samples, so
 they are not a robust estimate of production tail latency.
 
 | Window / method | Raw median / p95 | Completed median / p95 | Raw / completed CPU ms per request |
 |---|---:|---:|---:|
-| 24h endpoints | 47.84 / 50.53ms | 31.01 / 33.51ms | 167.5 / 46.4 |
-| 24h notable trace | 60.09 / 64.07ms | 19.48 / 20.06ms | 188.1 / 36.5 |
-| 24h logs | 60.60 / 65.92ms | 18.13 / 22.31ms | 189.7 / 27.3 |
-| 20m endpoints | 14.64 / 17.65ms | 23.76 / 35.10ms | 27.0 / 36.4 |
-| 20m notable trace | 27.06 / 28.32ms | 28.13 / 29.44ms | 63.9 / 48.3 |
-| 20m logs | 38.56 / 40.33ms | 15.25 / 16.18ms | 103.0 / 20.3 |
+| 24h endpoints | 47.13 / 50.55ms | 32.38 / 35.04ms | 165.2 / 49.1 |
+| 24h notable trace | 60.81 / 66.32ms | 20.04 / 31.82ms | 189.1 / 42.2 |
+| 24h logs | 61.01 / 63.73ms | 18.21 / 19.20ms | 193.1 / 26.7 |
+| 20m endpoints | 12.84 / 15.07ms | 23.98 / 25.48ms | 23.1 / 36.6 |
+| 20m notable trace | 30.05 / 30.70ms | 29.03 / 30.26ms | 72.0 / 50.8 |
+| 20m logs | 39.63 / 42.29ms | 15.44 / 17.12ms | 106.1 / 21.0 |
 
 Both windows end one second after the fixture's hour boundary and exercise exact
 partial minutes. Broad reads improve substantially. Small endpoint windows still
 pay additional histogram/union planning overhead, and narrow trace latency is
-slightly higher. No claim of uniform latency improvement is made. Endpoints use
+approximately flat. No claim of uniform latency improvement is made. Endpoints use
 the established fixed-boundary histogram estimate rather than the raw kernel's
 `approx_quantile`; cold and completed production reads use the same estimator.
+The JSON also retains the prior identical-file trial; both show broad gains
+and extra planning cost for narrow endpoint windows.
 
 ## Mixed-load saturation diagnostic
 

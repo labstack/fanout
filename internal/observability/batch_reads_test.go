@@ -67,7 +67,7 @@ func TestCompletedDashboardReadsMatchColdAndLateData(t *testing.T) {
 				status = "ERROR"
 			}
 			b.Spans = append(b.Spans, telemetry.Span{Namespace: ns, ServiceName: service, TraceID: trace, SpanID: fmt.Sprint(id, i), StartUnixNanos: n, EndUnixNanos: n + int64((i+1)*1000000), DurationMS: float64(i + 1), StatusCode: status, HTTPMethod: "GET", HTTPRoute: "/test", IngestedAt: at.UnixNano()})
-			sev := []string{"Error", "warn", ""}[i%3]
+			sev := []string{"Error", "warn", "", "İ", "i"}[i%5]
 			b.Logs = append(b.Logs, telemetry.Log{Namespace: ns, ServiceName: service, TimeUnixNanos: n, Severity: sev, Body: fmt.Sprint("event", i, " password=secret"), TraceID: trace, IngestedAt: at.UnixNano()})
 			if i%3 == 1 {
 				b.Logs = append(b.Logs, b.Logs[len(b.Logs)-1])
@@ -119,7 +119,7 @@ func TestCompletedDashboardReadsMatchColdAndLateData(t *testing.T) {
 				if got.Data.TraceID != want.Data.TraceID {
 					t.Fatalf("candidate ns=%s service=%s window=%v: %s != %s", ns, service, window, got.Data.TraceID, want.Data.TraceID)
 				}
-				for _, severity := range []string{"", "error", "warn", "unspecified"} {
+				for _, severity := range []string{"", "error", "warn", "unspecified", "i", "İ"} {
 					for _, search := range []string{"", "event5", "secret"} {
 						got, err := svc.Logs(t.Context(), selected, service, severity, search, 100)
 						if err != nil {

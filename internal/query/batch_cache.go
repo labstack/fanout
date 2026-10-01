@@ -180,7 +180,7 @@ func (d *Duck) cacheBatches(ctx context.Context, batches []telemetry.BatchMetada
 			}
 		}
 		if b.Logs > 0 {
-			if err := exec(`INSERT INTO read_log_times SELECT ?::VARCHAR,coalesce(namespace,''),coalesce(service,''),time::TIMESTAMP_NS,coalesce(lower(severity),''),count(*) FROM (`+logs+`) GROUP BY 2,3,4,5 ORDER BY 4`, b.ID); err != nil {
+			if err := exec(`INSERT INTO read_log_times SELECT ?::VARCHAR,coalesce(namespace,''),coalesce(service,''),time::TIMESTAMP_NS,coalesce(severity,''),count(*) FROM (`+logs+`) GROUP BY 2,3,4,5 ORDER BY 4`, b.ID); err != nil {
 				return 0, err
 			}
 			if err := exec(`INSERT INTO read_logs SELECT batch_id,date_trunc('minute',time),namespace,service,severity,sum(count)::BIGINT FROM read_log_times WHERE batch_id=? GROUP BY 1,2,3,4,5`, b.ID); err != nil {
@@ -283,7 +283,7 @@ func (d *Duck) aggregateSources(ctx context.Context, db snapshotSQL, batches []t
 			sources["endpoint_tail"] = raw + " UNION ALL SELECT * FROM (" + cachedSource + ") WHERE " + windowPredicate(column, w) + " AND NOT (" + interior + ")"
 			sources["endpoint_minutes"] = "SELECT * EXCLUDE(batch_id) FROM read_endpoints WHERE batch_id IN (" + idsSQL(cachedIDs) + ") AND bucket>=" + timeNanosLiteral(start) + " AND bucket<" + timeNanosLiteral(end)
 		} else {
-			raw := "SELECT namespace,service,time,coalesce(lower(severity),'') AS severity,1::BIGINT AS count FROM (" + cleanSource("logs", d.physicalSource("logs", uncached)) + ") WHERE " + windowPredicate(column, w)
+			raw := "SELECT namespace,service,time,coalesce(severity,'') AS severity,1::BIGINT AS count FROM (" + cleanSource("logs", d.physicalSource("logs", uncached)) + ") WHERE " + windowPredicate(column, w)
 			cachedSource := `SELECT namespace,service,time::TIMESTAMPTZ_NS AS time,severity,count FROM read_log_times WHERE batch_id IN (` + idsSQL(cachedIDs) + `) AND ` + boundary
 			sources["log_tail"] = raw + " UNION ALL SELECT * FROM (" + cachedSource + ") WHERE " + windowPredicate(column, w) + " AND NOT (" + interior + ")"
 			sources["log_minutes"] = "SELECT * EXCLUDE(batch_id) FROM read_logs WHERE batch_id IN (" + idsSQL(cachedIDs) + ") AND bucket>=" + timeNanosLiteral(start) + " AND bucket<" + timeNanosLiteral(end)
