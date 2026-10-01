@@ -160,6 +160,10 @@ background cache worker processes bounded groups and yields between passes;
 `fanout_read_cache_pending_batches` reports its backlog. This work is independent
 of the service and edge rollups' safety window.
 
+`storage.rollup_skip_to_latest` skips historical service and edge aggregation.
+Completed-batch endpoint, log, and trace caches still rebuild retained history
+in bounded passes; uncached files remain immediately queryable.
+
 ## Rollups lag deliberately
 
 Overview and alert queries read rebuildable DuckDB rollups. Their watermark
