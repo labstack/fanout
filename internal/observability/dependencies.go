@@ -79,7 +79,7 @@ bounds AS (
    EXISTS(SELECT 1 FROM omitted) OR (SELECT count(*) FROM root_namespaces) > (SELECT count(*) FROM walk WHERE hops=0) AS truncated,
    EXISTS(SELECT 1 FROM omitted WHERE hops >= (SELECT depth FROM settings)) AS depth_limit,
    (SELECT count(*) FROM walk) >= (SELECT nodes FROM settings) AND
-     (EXISTS(SELECT 1 FROM omitted) OR (SELECT count(*) FROM root_namespaces) > (SELECT count(*) FROM walk WHERE hops=0)) AS node_limit
+     (EXISTS(SELECT 1 FROM omitted WHERE hops < (SELECT depth FROM settings)) OR (SELECT count(*) FROM root_namespaces) > (SELECT count(*) FROM walk WHERE hops=0)) AS node_limit
 )
 SELECT namespace,service,hops,truncated,depth_limit,node_limit
 FROM walk CROSS JOIN bounds ORDER BY hops,namespace,service`

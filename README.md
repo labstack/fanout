@@ -33,6 +33,10 @@ browser client, an in-process agent, and any
 external MCP host all reach the same typed observability contract rather than
 issuing raw SQL.
 
+Attribute and resource values support up to 128 nested arrays or objects.
+An export that exceeds this limit is rejected in full with OTLP
+`INVALID_ARGUMENT` (HTTP 400); accepted values retain their original types.
+
 Parquet is authoritative telemetry, DuckDB query state is rebuildable, and
 SQLite is reserved for transactional product state. Native compaction
 prepares replacements while reads continue and briefly gates readers only for
@@ -83,7 +87,10 @@ Fanout.
 
 ## Requirements
 
-- **Go and a C compiler** with `CGO_ENABLED=1` — DuckDB is a cgo dependency
+- **Go 1.27.1 and a C/C++ toolchain** on native Linux or macOS, amd64 or arm64.
+  Build with `just build` or `bash scripts/with-duckdb.sh go build ./cmd/fanout`;
+  the wrapper supplies DuckDB's pinned headers, static libraries, and CGO flags.
+  The first build needs network access to download the checksum-verified engine.
 - **[Bun](https://bun.sh)** — compiles the browser assets
 - **[just](https://just.systems)** — task runner
 - A 32-character **authentication code secret**

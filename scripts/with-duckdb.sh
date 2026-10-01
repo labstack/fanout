@@ -4,7 +4,6 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 version=v2.0.0-alpha43763
-commit=96063b9e39
 case "$(uname -s)/$(uname -m)" in
 Darwin/arm64)
 	platform=osx-arm64
@@ -54,7 +53,7 @@ if [[ ! -f "$libs/.verified" ]]; then
 		if [[ ! -f "$libs/.verified" ]]; then
 			stage="$(mktemp -d "$(dirname "$libs")/.download.XXXXXX")"
 			trap 'rm -rf "$stage"; rmdir "$lock"' EXIT
-			url="https://duckdb-staging.duckdb.org/$commit/$version/duckdb/duckdb/github_release/duckdb-static-libs-$platform.tar.gz"
+			url="https://github.com/labstack/fanout/releases/download/duckdb-$version/duckdb-static-libs-$platform.tar.gz"
 			curl --fail --location --silent --show-error "$url" -o "$stage/archive.tar.gz"
 			if [[ "$platform" == osx-* ]]; then
 				actual="$(shasum -a 256 "$stage/archive.tar.gz" | awk '{print $1}')"

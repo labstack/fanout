@@ -72,7 +72,10 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 	now := time.Now().UnixNano()
 	batch := telemetrystore.Batch{}
 	for _, rs := range req.ResourceSpans {
-		resources := resourceAttributes(rs.Resource)
+		resources, err := resourceAttributes(rs.Resource)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
 		svc := getServiceName(rs.Resource)
 		namespace := getServiceNamespace(rs.Resource)
 		if namespace == "" {
@@ -81,6 +84,10 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 		for _, ss := range rs.ScopeSpans {
 			scopeName, scopeVer := scopeInfo(ss.Scope)
 			for _, sp := range ss.Spans {
+				attrs, err := attributes(sp.Attributes)
+				if err != nil {
+					return nil, status.Error(codes.InvalidArgument, err.Error())
+				}
 				row := telemetry.Span{
 					Namespace:      namespace,
 					TraceID:        fmt.Sprintf("%x", sp.TraceId),
@@ -99,7 +106,7 @@ func (s *Server) exportTraces(ctx context.Context, req *collectortrace.ExportTra
 					StatusCode:   sp.GetStatus().GetCode().String(),
 					StatusMsg:    sp.GetStatus().GetMessage(),
 					Resource:     resources,
-					Attributes:   attributes(sp.Attributes),
+					Attributes:   attrs,
 					EventsJSON:   eventsToJSON(sp.Events),
 					LinksJSON:    linksToJSON(sp.Links),
 					TraceState:   sp.TraceState,
@@ -154,7 +161,10 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 	now := time.Now().UnixNano()
 	batch := telemetrystore.Batch{}
 	for _, rl := range req.ResourceLogs {
-		resources := resourceAttributes(rl.Resource)
+		resources, err := resourceAttributes(rl.Resource)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
 		svc := getServiceName(rl.Resource)
 		namespace := getServiceNamespace(rl.Resource)
 		if namespace == "" {
@@ -163,6 +173,10 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 		for _, sl := range rl.ScopeLogs {
 			scopeName, scopeVer := scopeInfo(sl.Scope)
 			for _, lr := range sl.LogRecords {
+				attrs, err := attributes(lr.Attributes)
+				if err != nil {
+					return nil, status.Error(codes.InvalidArgument, err.Error())
+				}
 				body := bodyString(lr.Body)
 				tmpl := safeNormalizeTemplate(body)
 				row := telemetry.Log{
@@ -178,7 +192,7 @@ func (s *Server) exportLogs(ctx context.Context, req *collectorlogs.ExportLogsSe
 					SpanID:            hexOrEmpty(lr.SpanId),
 					Flags:             lr.Flags,
 					Resource:          resources,
-					Attributes:        attributes(lr.Attributes),
+					Attributes:        attrs,
 					ScopeName:         scopeName,
 					ScopeVersion:      scopeVer,
 					IngestedAt:        now,
@@ -204,7 +218,10 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 	now := time.Now().UnixNano()
 	batch := telemetrystore.Batch{}
 	for _, rm := range req.ResourceMetrics {
-		resources := resourceAttributes(rm.Resource)
+		resources, err := resourceAttributes(rm.Resource)
+		if err != nil {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
 		svc := getServiceName(rm.Resource)
 		namespace := getServiceNamespace(rm.Resource)
 		if namespace == "" {
@@ -216,6 +233,10 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 				switch d := m.Data.(type) {
 				case *metricspb.Metric_Gauge:
 					for _, dp := range d.Gauge.DataPoints {
+						attrs, err := attributes(dp.Attributes)
+						if err != nil {
+							return nil, status.Error(codes.InvalidArgument, err.Error())
+						}
 						row := telemetry.Metric{
 							Namespace:     namespace,
 							TimeUnixNanos: int64(dp.TimeUnixNano),
@@ -226,7 +247,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ServiceName:   svc,
 							Value:         number(dp.Value),
 							ExemplarsJSON: exemplarsToJSON(dp.Exemplars),
-							Attributes:    attributes(dp.Attributes),
+							Attributes:    attrs,
 							Resource:      resources,
 							ScopeName:     scopeName,
 							ScopeVersion:  scopeVer,
@@ -240,6 +261,10 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 						kind = "sum_delta"
 					}
 					for _, dp := range d.Sum.DataPoints {
+						attrs, err := attributes(dp.Attributes)
+						if err != nil {
+							return nil, status.Error(codes.InvalidArgument, err.Error())
+						}
 						row := telemetry.Metric{
 							Namespace:     namespace,
 							TimeUnixNanos: int64(dp.TimeUnixNano),
@@ -250,7 +275,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							ServiceName:   svc,
 							Value:         number(dp.Value),
 							ExemplarsJSON: exemplarsToJSON(dp.Exemplars),
-							Attributes:    attributes(dp.Attributes),
+							Attributes:    attrs,
 							Resource:      resources,
 							ScopeName:     scopeName,
 							ScopeVersion:  scopeVer,
@@ -260,6 +285,10 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 					}
 				case *metricspb.Metric_Histogram:
 					for _, dp := range d.Histogram.DataPoints {
+						attrs, err := attributes(dp.Attributes)
+						if err != nil {
+							return nil, status.Error(codes.InvalidArgument, err.Error())
+						}
 						histSum := 0.0
 						if dp.Sum != nil {
 							histSum = *dp.Sum
@@ -277,7 +306,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							HistCount:      int64(dp.Count),
 							HistSum:        histSum,
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							Attributes:     attributes(dp.Attributes),
+							Attributes:     attrs,
 							Resource:       resources,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
@@ -287,6 +316,10 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 					}
 				case *metricspb.Metric_ExponentialHistogram:
 					for _, dp := range d.ExponentialHistogram.DataPoints {
+						attrs, err := attributes(dp.Attributes)
+						if err != nil {
+							return nil, status.Error(codes.InvalidArgument, err.Error())
+						}
 						histSum := 0.0
 						if dp.Sum != nil {
 							histSum = *dp.Sum
@@ -304,7 +337,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							HistCount:      int64(dp.Count),
 							HistSum:        histSum,
 							ExemplarsJSON:  exemplarsToJSON(dp.Exemplars),
-							Attributes:     attributes(dp.Attributes),
+							Attributes:     attrs,
 							Resource:       resources,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
@@ -314,6 +347,10 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 					}
 				case *metricspb.Metric_Summary:
 					for _, dp := range d.Summary.DataPoints {
+						attrs, err := attributes(dp.Attributes)
+						if err != nil {
+							return nil, status.Error(codes.InvalidArgument, err.Error())
+						}
 						row := telemetry.Metric{
 							Namespace:      namespace,
 							TimeUnixNanos:  int64(dp.TimeUnixNano),
@@ -326,7 +363,7 @@ func (s *Server) exportMetrics(ctx context.Context, req *collectormetrics.Export
 							HistCountsJSON: toJSON(summaryValues(dp)),
 							HistCount:      int64(dp.Count),
 							HistSum:        dp.Sum,
-							Attributes:     attributes(dp.Attributes),
+							Attributes:     attrs,
 							Resource:       resources,
 							ScopeName:      scopeName,
 							ScopeVersion:   scopeVer,
@@ -369,69 +406,91 @@ func toJSON(v interface{}) string {
 	return string(b)
 }
 
+// maxAttributeNesting bounds native VARIANT decoding recursion on macOS stacks.
+// Reject the whole export; never silently change or drop an attribute type.
+const maxAttributeNesting = 128
+
 // attributes owns typed OTel values; resource maps are shared within one request.
-func attributes(attrs []*common.KeyValue) map[string]any {
+func attributes(attrs []*common.KeyValue) (map[string]any, error) {
 	if len(attrs) == 0 {
-		return nil
+		return nil, nil
 	}
 	values := make(map[string]any, len(attrs))
 	for _, kv := range attrs {
 		if kv != nil && kv.Key != "" {
-			values[kv.Key] = attrValue(kv.Value)
+			value, err := attrValue(kv.Value, 1)
+			if err != nil {
+				return nil, fmt.Errorf("attribute %q: %w", kv.Key, err)
+			}
+			values[kv.Key] = value
 		}
 	}
 	if len(values) == 0 {
-		return nil
+		return nil, nil
 	}
-	return values
+	return values, nil
 }
 
-func resourceAttributes(resource *resourcepb.Resource) map[string]any {
+func resourceAttributes(resource *resourcepb.Resource) (map[string]any, error) {
 	if resource == nil {
-		return nil
+		return nil, nil
 	}
 	return attributes(resource.Attributes)
 }
 
 // attrValue preserves OTel types without an intermediate JSON encoding.
-func attrValue(v *common.AnyValue) any {
+func attrValue(v *common.AnyValue, depth int) (any, error) {
 	if v == nil {
-		return nil
+		return nil, nil
 	}
 	switch x := v.Value.(type) {
 	case *common.AnyValue_StringValue:
-		return x.StringValue
+		return x.StringValue, nil
 	case *common.AnyValue_IntValue:
-		return x.IntValue
+		return x.IntValue, nil
 	case *common.AnyValue_DoubleValue:
-		return x.DoubleValue
+		return x.DoubleValue, nil
 	case *common.AnyValue_BoolValue:
-		return x.BoolValue
+		return x.BoolValue, nil
 	case *common.AnyValue_BytesValue:
-		return bytes.Clone(x.BytesValue)
+		return bytes.Clone(x.BytesValue), nil
 	case *common.AnyValue_ArrayValue:
+		if depth > maxAttributeNesting {
+			return nil, fmt.Errorf("nesting exceeds %d containers", maxAttributeNesting)
+		}
 		if x.ArrayValue == nil {
-			return nil
+			return nil, nil
 		}
 		arr := make([]any, 0, len(x.ArrayValue.Values))
 		for _, e := range x.ArrayValue.Values {
-			arr = append(arr, attrValue(e))
+			child, err := attrValue(e, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			arr = append(arr, child)
 		}
-		return arr
+		return arr, nil
 	case *common.AnyValue_KvlistValue:
+		if depth > maxAttributeNesting {
+			return nil, fmt.Errorf("nesting exceeds %d containers", maxAttributeNesting)
+		}
 		if x.KvlistValue == nil {
-			return nil
+			return nil, nil
 		}
 		m := make(map[string]any, len(x.KvlistValue.Values))
 		for _, e := range x.KvlistValue.Values {
 			if e == nil || e.Key == "" {
 				continue
 			}
-			m[e.Key] = attrValue(e.Value)
+			child, err := attrValue(e.Value, depth+1)
+			if err != nil {
+				return nil, err
+			}
+			m[e.Key] = child
 		}
-		return m
+		return m, nil
 	default:
-		return nil
+		return nil, nil
 	}
 }
 

@@ -88,12 +88,19 @@ func TestDependenciesKeyedTraversalIsBoundedAndScoped(t *testing.T) {
 	if exact.Data.Truncated || len(exact.Data.Nodes) != 5 {
 		t.Fatalf("complete graph at exact cap: %#v", exact)
 	}
-	both, err := svc.Dependencies(context.Background(), scope, DependencyOptions{Service: "a", MaxDepth: 1, MaxNodes: 3})
+	depthOnly, err := svc.Dependencies(context.Background(), scope, DependencyOptions{Service: "a", MaxDepth: 1, MaxNodes: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !depthOnly.Data.Truncated || !depthOnly.Data.DepthLimitReached || depthOnly.Data.NodeLimitReached {
+		t.Fatalf("depth exhaustion at exact node cap: %#v", depthOnly)
+	}
+	both, err := svc.Dependencies(context.Background(), scope, DependencyOptions{Service: "a", MaxDepth: 1, MaxNodes: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !both.Data.Truncated || !both.Data.DepthLimitReached || !both.Data.NodeLimitReached {
-		t.Fatalf("simultaneous exhaustion: %#v", both)
+		t.Fatalf("independent depth and node exhaustion: %#v", both)
 	}
 	// A later shorter path must yield its minimum hop count, not a path count.
 	if _, err := db.Exec("INSERT INTO edge_rollup (namespace,bucket,caller,callee,calls) VALUES ('prod',?,'a','e',1)", start); err != nil {

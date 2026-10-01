@@ -17,7 +17,10 @@ func TestAttributesPreserveTypesAndOwnBytes(t *testing.T) {
 		{Key: "object", Value: &common.AnyValue{Value: &common.AnyValue_KvlistValue{KvlistValue: &common.KeyValueList{Values: []*common.KeyValue{kvBool("ok", true)}}}}},
 		{Key: "nan", Value: &common.AnyValue{Value: &common.AnyValue_DoubleValue{DoubleValue: math.NaN()}}},
 	}
-	got := attributes(input)
+	got, err := attributes(input)
+	if err != nil {
+		t.Fatal(err)
+	}
 	want := map[string]any{"http.method": "GET", "big": int64(math.MaxInt64), "false": false, "zero": int64(0), "null": nil, "bytes": []byte{0, 255, 7}, "array": []any{nil, int64(9)}, "object": map[string]any{"ok": true}}
 	if !math.IsNaN(got["nan"].(float64)) {
 		t.Fatal("nonfinite double lost")
@@ -28,7 +31,7 @@ func TestAttributesPreserveTypesAndOwnBytes(t *testing.T) {
 		t.Fatalf("typed attributes: %#v", got)
 	}
 	for _, input := range [][]*common.KeyValue{nil, {}, {nil, {Key: ""}}} {
-		if attributes(input) != nil {
+		if got, err := attributes(input); got != nil || err != nil {
 			t.Fatal("empty attributes should be nil")
 		}
 	}
