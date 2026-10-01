@@ -74,9 +74,9 @@ The broad statement shrinks from 139,610 to 42,760 bytes. The exact captured-ID 
 
 | Window / method | Raw median / p95 | Completed median / p95 | Completed CPU ms / request |
 |---|---:|---:|---:|
-| 24h endpoints | 11.53 / 13.53ms | 17.49 / 18.32ms | 23.32 |
-| 24h trace | 26.03 / 27.04ms | 20.72 / 22.16ms | 34.44 |
-| 24h logs | 33.50 / 36.86ms | 14.14 / 16.06ms | 19.69 |
+| 24h endpoints | 46.62 / 48.81ms | 14.23 / 17.08ms | 16.57 |
+| 24h trace | 56.71 / 59.97ms | 17.46 / 19.20ms | 30.16 |
+| 24h logs | 55.71 / 59.06ms | 15.31 / 17.62ms | 21.73 |
 | 20m endpoints | 11.53 / 13.53ms | 17.49 / 18.32ms | 23.32 |
 | 20m trace | 26.03 / 27.04ms | 20.72 / 22.16ms | 34.44 |
 | 20m logs | 33.50 / 36.86ms | 14.14 / 16.06ms | 19.69 |
