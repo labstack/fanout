@@ -77,7 +77,7 @@ func (s *testAuthServer) login(t *testing.T, user auth.User) *http.Cookie {
 	if err != nil {
 		t.Fatalf("Create code: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"`+user.Email+`","code":"`+code+`"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/code/verify", strings.NewReader(`{"email":"`+user.Email+`","code":"`+code+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
@@ -114,6 +114,37 @@ func firstCookie(t *testing.T, rec *httptest.ResponseRecorder, name string) *htt
 	return nil
 }
 
+func TestRetiredRoutesDoNotReachSPA(t *testing.T) {
+	s := newTestAuthServer(t)
+	registerTestUserRoutes(s)
+	admin, err := s.users.Create("retired-routes@example.com", "", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := s.login(t, admin)
+	s.e.GET("/*", func(c *echo.Context) error { return c.String(http.StatusOK, "SPA") })
+	for _, route := range []struct{ method, path string }{
+		{http.MethodPost, "/api/auth/start"},
+		{http.MethodPost, "/api/auth/verify"},
+		{http.MethodPost, "/api/auth/login-link"},
+		{http.MethodGet, "/api/dashboard"},
+		{http.MethodGet, "/api/health"},
+		{http.MethodGet, "/api/rules"},
+		{http.MethodPost, "/api/agent"},
+		{http.MethodPost, "/api/users/" + admin.ID + "/logout-all"},
+		{http.MethodPost, "/api/settings/ingest/rotate-token"},
+		{http.MethodGet, "/-/metrics"},
+	} {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.e.ServeHTTP(rec, sessionRequest(route.method, route.path, nil, cookie))
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("retired route returned %d, want 404: %s", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestRoutePolicyClassification(t *testing.T) {
 	tests := []struct {
 		method, path string
@@ -122,11 +153,10 @@ func TestRoutePolicyClassification(t *testing.T) {
 	}{
 		{http.MethodGet, "/healthz", routePolicyPublic, ""},
 		{http.MethodGet, "/readyz", routePolicyPublic, ""},
-		{http.MethodGet, "/api/health", routePolicyPublic, ""},
 		{http.MethodPost, "/api/auth/setup", routePolicyPublic, ""},
-		{http.MethodPost, "/api/auth/start", routePolicyPublic, ""},
-		{http.MethodPost, "/api/auth/verify", routePolicyPublic, ""},
-		{http.MethodPost, "/api/auth/login-link", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/code/send", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/code/verify", routePolicyPublic, ""},
+		{http.MethodPost, "/api/auth/link/verify", routePolicyPublic, ""},
 		{http.MethodGet, "/api/auth/oidc/start", routePolicyPublic, ""},
 		{http.MethodGet, "/api/auth/oidc/callback", routePolicyPublic, ""},
 		{http.MethodGet, "/api/auth/me", routePolicyAuthenticated, ""},
@@ -136,15 +166,15 @@ func TestRoutePolicyClassification(t *testing.T) {
 		{http.MethodGet, "/api/observability/overview", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/intelligence", routePolicyCapability, ReadTelemetry},
 		{http.MethodGet, "/api/alerts", routePolicyCapability, ReadTelemetry},
-		{http.MethodPost, "/api/rules", routePolicyCapability, ManageAlerts},
-		{http.MethodPut, "/api/rules/rule-1", routePolicyCapability, ManageAlerts},
+		{http.MethodPost, "/api/alerting/rules", routePolicyCapability, ManageAlerts},
+		{http.MethodPut, "/api/alerting/rules/rule-1", routePolicyCapability, ManageAlerts},
 		{http.MethodGet, "/api/dashboards/dashboard-1", routePolicyCapability, ManageOwnDashboards},
-		{http.MethodPost, "/api/agent", routePolicyCapability, RunAgent},
+		{http.MethodPost, "/api/agent/runs", routePolicyCapability, RunAgent},
 		{http.MethodGet, "/api/settings/ingest", routePolicyCapability, ReadIngestMetadata},
-		{http.MethodPost, "/api/settings/ingest/rotate-token", routePolicyCapability, ManageIngest},
-		{http.MethodPost, "/api/users/user-1/logout-all", routePolicyCapability, ManageUsers},
+		{http.MethodPost, "/api/settings/ingest/token/rotate", routePolicyCapability, ManageIngest},
+		{http.MethodPost, "/api/users/user-1/access/revoke", routePolicyCapability, ManageUsers},
 		{http.MethodGet, "/debug/pprof/heap", routePolicyCapability, ReadOperations},
-		{http.MethodGet, "/-/metrics", routePolicyServiceCredential, ReadOperations},
+		{http.MethodGet, "/metrics", routePolicyServiceCredential, ReadOperations},
 		{http.MethodPost, "/oauth/token", routePolicyProtocol, ""},
 		{http.MethodPost, "/mcp", routePolicyProtocol, ""},
 		{http.MethodPost, "/api/mcp", routePolicyCapability, ReadTelemetry},
@@ -165,13 +195,13 @@ func TestRoutePolicyClassification(t *testing.T) {
 	}
 }
 
-func TestUnknownProtectedPathsAuthenticateThenReturn404(t *testing.T) {
+func TestUnknownProtectedPathsReturn404BeforeAuthentication(t *testing.T) {
 	s := newTestAuthServer(t)
 	user, _ := s.users.Create("unknown-path@example.com", "", "admin")
 	anonymous := httptest.NewRecorder()
 	s.e.ServeHTTP(anonymous, httptest.NewRequest(http.MethodGet, "/api/not-registered", nil))
-	if anonymous.Code != http.StatusUnauthorized {
-		t.Fatalf("anonymous unknown API path = %d, want 401", anonymous.Code)
+	if anonymous.Code != http.StatusNotFound {
+		t.Fatalf("anonymous unknown API path = %d, want 404", anonymous.Code)
 	}
 	cookie := s.login(t, user)
 	authenticated := httptest.NewRecorder()
@@ -184,6 +214,30 @@ func TestUnknownProtectedPathsAuthenticateThenReturn404(t *testing.T) {
 	s.e.ServeHTTP(unclassified, sessionRequest(http.MethodGet, "/api/new-unreviewed-route", nil, cookie))
 	if unclassified.Code != http.StatusInternalServerError {
 		t.Fatalf("registered unclassified API route = %d, want 500", unclassified.Code)
+	}
+}
+
+func TestRetiredMetricsReturns404ForScrapers(t *testing.T) {
+	s := newTestAuthServerWith(t, config.Config{AuthMode: "local", MetricsToken: "metrics-test-token"}, auth.SMTPConfig{})
+	s.e.GET("/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.GET("/*", func(c *echo.Context) error { return c.String(http.StatusOK, "SPA") })
+	for _, token := range []string{"", "wrong", "metrics-test-token"} {
+		req := httptest.NewRequest(http.MethodGet, "/-/metrics", nil)
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotFound {
+			t.Fatalf("retired metrics = %d, want 404", rec.Code)
+		}
+	}
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.Header.Set("Authorization", "Bearer metrics-test-token")
+	rec := httptest.NewRecorder()
+	s.e.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("current metrics with valid token = %d, want 204", rec.Code)
 	}
 }
 
@@ -305,9 +359,9 @@ func TestCapabilityIsEnforcedCentrally(t *testing.T) {
 	viewer, _ := s.users.Create("viewer@example.com", "", "viewer")
 	cookie := s.login(t, viewer)
 	// Deliberately omit route-level RequireCapability. The global policy remains authoritative.
-	s.e.POST("/api/settings/ingest/rotate-token", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.POST("/api/settings/ingest/token/rotate", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	rec := httptest.NewRecorder()
-	s.e.ServeHTTP(rec, sessionRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil, cookie))
+	s.e.ServeHTTP(rec, sessionRequest(http.MethodPost, "/api/settings/ingest/token/rotate", nil, cookie))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer mutation = %d, want 403", rec.Code)
 	}
@@ -317,17 +371,17 @@ func TestViewerCanRunAgentWithoutOperatorPrivileges(t *testing.T) {
 	s := newTestAuthServer(t)
 	viewer, _ := s.users.Create("viewer-agent@example.com", "", "viewer")
 	cookie := s.login(t, viewer)
-	s.e.POST("/api/agent", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	s.e.POST("/api/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.POST("/api/agent/runs", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.POST("/api/alerting/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 
 	agentRec := httptest.NewRecorder()
-	s.e.ServeHTTP(agentRec, sessionRequest(http.MethodPost, "/api/agent", nil, cookie))
+	s.e.ServeHTTP(agentRec, sessionRequest(http.MethodPost, "/api/agent/runs", nil, cookie))
 	if agentRec.Code != http.StatusNoContent {
 		t.Fatalf("viewer agent request = %d, want 204", agentRec.Code)
 	}
 
 	alertRec := httptest.NewRecorder()
-	s.e.ServeHTTP(alertRec, sessionRequest(http.MethodPost, "/api/rules", nil, cookie))
+	s.e.ServeHTTP(alertRec, sessionRequest(http.MethodPost, "/api/alerting/rules", nil, cookie))
 	if alertRec.Code != http.StatusForbidden {
 		t.Fatalf("viewer alert mutation = %d, want 403", alertRec.Code)
 	}
@@ -337,7 +391,7 @@ func TestBrowserMutationValidation(t *testing.T) {
 	s := newTestAuthServer(t)
 	user, _ := s.users.Create("csrf@example.com", "", "operator")
 	cookie := s.login(t, user)
-	s.e.POST("/api/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	s.e.POST("/api/alerting/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	for _, tc := range []struct {
 		name string
 		head map[string]string
@@ -352,7 +406,7 @@ func TestBrowserMutationValidation(t *testing.T) {
 		{name: "cross site overrides header", head: map[string]string{"Fanout-Request": "1", "Sec-Fetch-Site": "cross-site"}, want: http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodPost, "/api/rules", nil)
+			req := httptest.NewRequest(http.MethodPost, "/api/alerting/rules", nil)
 			req.Host = "example.com"
 			req.AddCookie(cookie)
 			for key, value := range tc.head {
@@ -392,7 +446,7 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 		t.Fatalf("Update: %v", err)
 	}
 	for _, email := range []string{"missing@example.com", "inactive@example.com"} {
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"`+email+`"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/code/send", strings.NewReader(`{"email":"`+email+`"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		s.e.ServeHTTP(rec, req)
@@ -404,7 +458,7 @@ func TestStartDoesNotRevealAccountState(t *testing.T) {
 
 func TestStartExplainsWhenSMTPIsNotConfigured(t *testing.T) {
 	s := newTestAuthServer(t)
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"active@example.com"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/code/send", strings.NewReader(`{"email":"active@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
@@ -425,7 +479,7 @@ func TestLoginLinkAuthenticatesExactlyOnce(t *testing.T) {
 	}
 	body := `{"token":"` + token + `"}`
 	first := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/login-link", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/link/verify", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	s.e.ServeHTTP(first, req)
 	if first.Code != http.StatusOK || firstCookie(t, first, "fanout_session") == nil {
@@ -433,7 +487,7 @@ func TestLoginLinkAuthenticatesExactlyOnce(t *testing.T) {
 	}
 
 	second := httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/auth/login-link", strings.NewReader(body))
+	req = httptest.NewRequest(http.MethodPost, "/api/auth/link/verify", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	s.e.ServeHTTP(second, req)
 	if second.Code != http.StatusUnauthorized {
@@ -454,7 +508,7 @@ func TestStartReturnsServiceUnavailableWhenEmailDeliveryFails(t *testing.T) {
 	if _, err := s.users.Create("admin@example.com", "", "admin"); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/start", strings.NewReader(`{"email":"new-viewer@example.com"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/code/send", strings.NewReader(`{"email":"new-viewer@example.com"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
@@ -475,7 +529,7 @@ func TestLocalSelfSignupCreatesVerifiedViewer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create code: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"NEW-viewer@example.com","code":"`+code+`"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/code/verify", strings.NewReader(`{"email":"NEW-viewer@example.com","code":"`+code+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "self-signup-test")
 	rec := httptest.NewRecorder()
@@ -507,7 +561,7 @@ func TestLocalSelfSignupCannotPreemptFirstAdminOrReactivateUser(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create code: %v", err)
 		}
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"visitor@example.com","code":"`+code+`"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/code/verify", strings.NewReader(`{"email":"visitor@example.com","code":"`+code+`"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		s.e.ServeHTTP(rec, req)
@@ -536,7 +590,7 @@ func TestLocalSelfSignupCannotPreemptFirstAdminOrReactivateUser(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create code: %v", err)
 		}
-		req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"inactive@example.com","code":"`+code+`"}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/auth/code/verify", strings.NewReader(`{"email":"inactive@example.com","code":"`+code+`"}`))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		s.e.ServeHTTP(rec, req)
@@ -559,7 +613,7 @@ func TestLocalSelfSignupDisabledRejectsUnknownVerifiedAddress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create code: %v", err)
 	}
-	req := httptest.NewRequest(http.MethodPost, "/api/auth/verify", strings.NewReader(`{"email":"visitor@example.com","code":"`+code+`"}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/code/verify", strings.NewReader(`{"email":"visitor@example.com","code":"`+code+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)

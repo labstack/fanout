@@ -61,6 +61,19 @@ is the complete schema. New settings need a YAML key, a `FANOUT_` environment
 name, a test, and matching documentation; unknown names deliberately fail
 startup.
 
+**SQLite migrations own the control schema.** Write forward SQL changes in
+`internal/db/migrations` using Goose annotations. `just db-migrate-create NAME`
+creates a timestamped migration; `just db-gen` regenerates the sqlc bindings
+from that directory. There is no separate schema file. Published migrations
+are immutable: add a migration rather than editing one already applied.
+The checksum ledger in `internal/db/migrations_test.go` makes the local and CI
+test gates reject edits, renames, and deletions. Extend it for new migrations;
+do not update checksums of published migrations.
+Fanout embeds and applies them at startup; `just db-migrate-apply DB` applies
+them manually with the same database guard used at startup. A version table
+without a positive applied version does not make an existing schema managed.
+DuckDB maintains its own query schema.
+
 ## Commits and pull requests
 
 Write commit messages that explain why the change is needed, not only what it

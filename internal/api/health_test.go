@@ -120,7 +120,7 @@ func TestReadiness_HealthyTelemetryAndRollups(t *testing.T) {
 	defer db.Close()
 
 	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
@@ -228,16 +228,16 @@ func TestCheckMaintenance_DegradedWhenNeverRanPastGrace(t *testing.T) {
 	}
 }
 
-func TestRegisterHealthRoutes_RegistersAPIHealth(t *testing.T) {
+func TestRegisterHealthRoutes_RegistersReadiness(t *testing.T) {
 	e := echo.New()
 	RegisterHealthRoutes(e, nil, config.Config{DataDir: os.TempDir()})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("/api/health status = %d, want 503", rec.Code)
+		t.Fatalf("/readyz status = %d, want 503", rec.Code)
 	}
 }
 

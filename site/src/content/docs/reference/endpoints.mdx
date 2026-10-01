@@ -31,10 +31,10 @@ while its storage is still coming up.
 
 | Path | Requires |
 |---|---|
-| `/-/metrics` | `operations:read`, or a service credential |
+| `/metrics` | `operations:read`, or a service credential |
 | `/debug/pprof/*` | `operations:read` |
 
-`/-/metrics` is Prometheus exposition. It accepts a service credential as well
+`/metrics` is Prometheus exposition. It accepts a service credential as well
 as an admin session, which is how a scraper reaches it without a browser login —
 set `FANOUT_METRICS_TOKEN`. `FANOUT_METRICS_PUBLIC=true` removes the requirement
 entirely, and Fanout logs a warning at startup when you do, because metrics

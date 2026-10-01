@@ -170,7 +170,7 @@ them even though the raw telemetry is queryable.
 
 - `/healthz` — liveness.
 - `/readyz` — storage readiness and resolved runtime sizing.
-- `/-/metrics` — Prometheus metrics. Keep it private or set
+- `/metrics` — Prometheus metrics. Keep it private or set
   `FANOUT_METRICS_TOKEN`. Do not make it public merely to simplify scraping.
 
 Alert on repeated restarts, readiness failures, ingest authentication failures,

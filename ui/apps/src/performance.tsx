@@ -20,8 +20,8 @@ function PerformanceApp() {
   const [view, setView] = useState<View>("activity");
   const dark = host?.theme === "dark";
   return <ViewShell dark={dark}>
-    <ViewHeader title={result?.data.service || "System performance"} summary={result ? `Traffic, latency, and errors ${result.data.service ? `for ${result.data.service}` : "across all services"}` : undefined} onRefresh={() => callTool("service_performance")} disabled={!app} />
-    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading performance signals…" : undefined} retry={() => void callTool("service_performance")} />
+    <ViewHeader title={result?.data.service || "System performance"} summary={result ? `Traffic, latency, and errors ${result.data.service ? `for ${result.data.service}` : "across all services"}` : undefined} onRefresh={() => callTool("get_service_performance")} disabled={!app} />
+    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading performance signals…" : undefined} retry={() => void callTool("get_service_performance")} />
     {result && <>
       <Tabs active={view} onChange={setView} items={[{ id: "activity", label: "Activity" }, { id: "latency", label: "Latency map" }, { id: "endpoints", label: "Endpoints", count: result.data.endpoints.length }, { id: "compare", label: "Compare" }]} />
       {view === "activity" && <ActivityView data={result.data} dark={dark} window={result.provenance.window} />}

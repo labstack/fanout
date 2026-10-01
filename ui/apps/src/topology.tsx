@@ -21,8 +21,8 @@ function TopologyApp() {
   const [view, setView] = useState<View>("graph");
   const dark = host?.theme === "dark";
   return <ViewShell dark={dark}>
-    <ViewHeader title="Service map" summary={result ? `${result.data.nodes.length} services connected by ${result.data.edges.length} routes` : undefined} onRefresh={() => callTool("service_topology")} disabled={!app} />
-    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading service relationships…" : undefined} retry={() => void callTool("service_topology")} />
+    <ViewHeader title="Service map" summary={result ? `${result.data.nodes.length} services connected by ${result.data.edges.length} routes` : undefined} onRefresh={() => callTool("get_service_topology")} disabled={!app} />
+    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading service relationships…" : undefined} retry={() => void callTool("get_service_topology")} />
     {result && result.data.nodes.length === 0 && <><EmptyState tall icon={<ShareNetwork size={20} weight="duotone" />} title="No service relationships yet">Connections will appear as services communicate.</EmptyState><MetaFooter left={windowLabel(result.provenance.window)} right="No routes found" /></>}
     {result && result.data.nodes.length > 0 && <>
       <Tabs active={view} onChange={setView} items={[{ id: "graph", label: "Graph" }, { id: "flow", label: "Traffic flow" }, { id: "matrix", label: "Matrix" }]} />

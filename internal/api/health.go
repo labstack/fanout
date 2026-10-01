@@ -351,5 +351,4 @@ func RegisterHealthRoutes(e *echo.Echo, duck *query.Duck, cfg config.Config) {
 	h := NewHealthHandler(duck, cfg)
 	e.GET("/healthz", h.Liveness)
 	e.GET("/readyz", h.Readiness)
-	e.GET("/api/health", h.Readiness)
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -144,17 +143,6 @@ func (s *Service) List(ctx context.Context, ownerID string) ([]Summary, error) {
 
 func (s *Service) Get(ctx context.Context, ownerID, id string) (Dashboard, error) {
 	if err := s.ensureInitial(ctx, ownerID); err != nil {
-		return Dashboard{}, err
-	}
-	return s.get(ctx, s.db, ownerID, id)
-}
-
-func (s *Service) Default(ctx context.Context, ownerID string) (Dashboard, error) {
-	if err := s.ensureInitial(ctx, ownerID); err != nil {
-		return Dashboard{}, err
-	}
-	var id string
-	if err := s.db.QueryRowContext(ctx, `SELECT id FROM dashboards WHERE owner_id=? ORDER BY is_default DESC,created_at LIMIT 1`, ownerID).Scan(&id); err != nil {
 		return Dashboard{}, err
 	}
 	return s.get(ctx, s.db, ownerID, id)
@@ -326,14 +314,7 @@ func replaceWidgets(ctx context.Context, tx *sql.Tx, dashboardID string, state S
 	return nil
 }
 
-// ensureInitial lazily provisions an owner's first dashboard. The legacy
-// single-canvas dashboard_state row (see the 20260720200000_dashboard_state
-// migration) is retained for exactly this one-way lazy migration: on the
-// owner's first dashboard read, valid legacy state seeds the initial
-// "System overview" dashboard; otherwise the default layout is used. The
-// migration is one-shot — once any dashboard exists for the owner, the
-// legacy row is never consulted again — so a transient read failure must be
-// surfaced rather than treated as "no legacy state".
+// ensureInitial provisions an owner's first dashboard from the default layout.
 func (s *Service) ensureInitial(ctx context.Context, ownerID string) error {
 	if strings.TrimSpace(ownerID) == "" {
 		return errors.New("dashboard owner is required")
@@ -342,33 +323,7 @@ func (s *Service) ensureInitial(ctx context.Context, ownerID string) error {
 	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dashboards WHERE owner_id=?`, ownerID).Scan(&count); err != nil || count > 0 {
 		return err
 	}
-	state := DefaultState()
-	var raw string
-	err := s.db.QueryRowContext(ctx, `SELECT state_json FROM dashboard_state WHERE owner_id=?`, ownerID).Scan(&raw)
-	switch {
-	case errors.Is(err, sql.ErrNoRows):
-		// No legacy canvas; seed from the default layout.
-	case err != nil:
-		// A real read failure (locked database, etc.) is not "no legacy
-		// state". Proceeding would create the default dashboard and the
-		// count check above would skip migration forever, silently
-		// orphaning the user's saved layout.
-		return fmt.Errorf("read legacy dashboard state: %w", err)
-	default:
-		if jsonErr := json.Unmarshal([]byte(raw), &state); jsonErr != nil {
-			slog.Warn("discarding legacy dashboard state; falling back to default layout", "owner_id", ownerID, "reason", "corrupt state_json", "error", jsonErr)
-			state = DefaultState()
-		} else if normalized, normalizeErr := normalizeStateIDs(state); normalizeErr != nil {
-			slog.Warn("discarding legacy dashboard state; falling back to default layout", "owner_id", ownerID, "reason", "widget id normalization failed", "error", normalizeErr)
-			state = DefaultState()
-		} else if validateErr := Validate("System overview", "", normalized); validateErr != nil {
-			slog.Warn("discarding legacy dashboard state; falling back to default layout", "owner_id", ownerID, "reason", "validation failed", "error", validateErr)
-			state = DefaultState()
-		} else {
-			state = normalized
-		}
-	}
-	_, err = s.Create(ctx, ownerID, CreateInput{Name: "System overview", Description: "Live health, dependencies, and recent activity.", State: state})
+	_, err := s.Create(ctx, ownerID, CreateInput{Name: "System overview", Description: "Live health, dependencies, and recent activity.", State: DefaultState()})
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}

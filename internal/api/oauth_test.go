@@ -24,7 +24,7 @@ import (
 
 const testMCPResource = "https://fanout.example.com/mcp"
 
-const testReadMCPCall = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"observability_overview","arguments":{}}}`
+const testReadMCPCall = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_observability_overview","arguments":{}}}`
 
 func newOAuthTestServer(t *testing.T) (*echo.Echo, *auth.UserStore, *auth.BrowserSessions) {
 	return newOAuthTestServerWithConfig(t, config.Config{})
@@ -509,10 +509,10 @@ func TestMCPOAuthScopePolicyCanonicalizesLegacyNames(t *testing.T) {
 }
 
 func TestRequiredMCPToolScopeUsesPayloadAndReplaysBody(t *testing.T) {
-	body := `[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"observability_overview"}},{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"dashboard_get"}}]`
+	body := `[{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_observability_overview"}},{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_dashboard"}}]`
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(body))
 	req.Header.Set("Mcp-Method", "tools/call")
-	req.Header.Set("Mcp-Name", "observability_overview")
+	req.Header.Set("Mcp-Name", "get_observability_overview")
 
 	got, err := requiredMCPToolScope(req)
 	if err != nil {
@@ -703,7 +703,21 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 	if tokens["scope"] != mcpReadScope {
 		t.Fatalf("granted scope = %v, want %q", tokens["scope"], mcpReadScope)
 	}
-	dashboardCall := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dashboard_list","arguments":{}}}`
+	// Every renamed dashboard operation must still require the dashboard grant,
+	// before the protocol handler is reached or input validation can run.
+	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard"} {
+		t.Run(name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":{}}}`, name)
+			rejected := serve(t, e, http.MethodPost, "/mcp", body, map[string]string{
+				"Authorization": "Bearer " + tokens["access_token"].(string),
+				"Content-Type":  "application/json",
+			})
+			if rejected.Code != http.StatusForbidden {
+				t.Fatalf("read-only token calling %s = %d, want 403", name, rejected.Code)
+			}
+		})
+	}
+	dashboardCall := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_dashboards","arguments":{}}}`
 	challenged := serve(t, e, http.MethodPost, "/mcp", dashboardCall, map[string]string{
 		"Authorization": "Bearer " + tokens["access_token"].(string),
 		"Content-Type":  "application/json",
@@ -721,7 +735,7 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 		"Authorization": "Bearer " + tokens["access_token"].(string),
 		"Content-Type":  "application/json",
 		"Mcp-Method":    "tools/call",
-		"Mcp-Name":      "observability_overview",
+		"Mcp-Name":      "get_observability_overview",
 	})
 	if spoofed.Code != http.StatusForbidden {
 		t.Fatalf("spoofed dashboard step-up = %d %s, want 403", spoofed.Code, spoofed.Body.String())
@@ -771,7 +785,7 @@ func TestMCPOAuthConsentShowsDashboardWriteGrant(t *testing.T) {
 	if tokens["scope"] != scope {
 		t.Fatalf("granted scope = %v, want %q", tokens["scope"], scope)
 	}
-	allowed := serve(t, e, http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dashboard_list","arguments":{}}}`, map[string]string{
+	allowed := serve(t, e, http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_dashboards","arguments":{}}}`, map[string]string{
 		"Authorization": "Bearer " + tokens["access_token"].(string),
 		"Content-Type":  "application/json",
 	})

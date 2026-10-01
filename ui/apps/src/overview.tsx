@@ -12,8 +12,8 @@ import "./app.css";
 function OverviewApp() {
   const { app, callTool, error, host, result, toolError } = useFanoutApp<Result<Overview>>("Fanout system health");
   return <ViewShell dark={host?.theme === "dark"}>
-    <ViewHeader title="System health" summary={result?.summary} onRefresh={() => callTool("observability_overview")} disabled={!app} />
-    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading system health…" : undefined} retry={() => void callTool("observability_overview")} />
+    <ViewHeader title="System health" summary={result?.summary} onRefresh={() => callTool("get_observability_overview")} disabled={!app} />
+    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Loading system health…" : undefined} retry={() => void callTool("get_observability_overview")} />
     {result && <OverviewBody result={result} onService={(service) => askAbout(app, `Investigate the ${service} service. Explain its errors and latency.`)} />}
   </ViewShell>;
 }

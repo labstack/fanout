@@ -274,7 +274,7 @@ func TestToolsAdvertiseReadableMCPApps(t *testing.T) {
 func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
 	server := New(&fakeObservability{}, nil, "test")
 	session := connectTestClient(t, server, nil)
-	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "observability_overview") || !strings.Contains(instructions, "authenticated user") {
+	if instructions := session.InitializeResult().Instructions; !strings.Contains(instructions, "get_observability_overview") || !strings.Contains(instructions, "authenticated user") {
 		t.Fatalf("server instructions = %q", instructions)
 	}
 
@@ -291,7 +291,7 @@ func TestServerAdvertisesInstructionsAndStaticCacheHints(t *testing.T) {
 		}
 	}
 	called, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "observability_overview",
+		Name: "get_observability_overview",
 		Arguments: map[string]any{
 			"window": "15m",
 		},

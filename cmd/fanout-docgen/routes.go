@@ -31,7 +31,7 @@ var routeCount []api.RouteDoc
 // It scans several directories because the surface is registered in several
 // places: the application handlers in internal/api, the agent runtime, and the
 // operational, protocol and SPA routes wired up in cmd/fanout. Scanning only
-// internal/api published a table that omitted /-/metrics, /debug/pprof/*, /mcp
+// internal/api published a table that omitted /metrics, /debug/pprof/*, /mcp
 // and every /api/agent route, while the page invited an operator to audit what
 // an instance exposes (#188).
 func collectRoutes(dirs []string) ([]api.RouteDoc, error) {
@@ -101,10 +101,8 @@ func collectRoutes(dirs []string) ([]api.RouteDoc, error) {
 				}
 				switch {
 				case onGroup:
-					// `group.POST("", ...)` registers the group's own root, which
-					// is a real route — POST /api/agent, the one that runs the
-					// investigator, is registered exactly that way. Requiring a
-					// leading slash here dropped it silently.
+					// `group.POST("", ...)` registers the group's own root.
+					// Requiring a leading slash would silently drop that route.
 					path = prefix + path
 				case !strings.HasPrefix(path, "/"):
 					return true
@@ -262,7 +260,7 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	b.WriteString("  **not** the default. Enabling it also turns on mutex and block sampling.\n")
 	b.WriteString("- `/mcp`, `/api/mcp`, `/oauth/*` and `/.well-known/*` — only when\n")
 	b.WriteString("  `FANOUT_MCP_ENABLED` is true, which **is** the default.\n")
-	b.WriteString("- `/api/agent` and `/api/agent/*` — only when an AI provider key is\n")
+	b.WriteString("- `/api/agent/*` — only when an AI provider key is\n")
 	b.WriteString("  configured. Without one the investigator is not registered at all.\n\n")
 	b.WriteString("Everything else is always registered. A path shown with `:name` or `*` is the\n")
 	b.WriteString("pattern Echo matches on, not a literal URL.\n")
@@ -277,7 +275,7 @@ func renderRoutes(routes []api.RouteDoc) []byte {
 	b.WriteString("[MCP tools](/reference/mcp-tools). The stable non-MCP surfaces are OTLP\n")
 	b.WriteString("ingest, and the operational endpoints in [endpoints](/reference/endpoints).\n\n")
 	b.WriteString("Two exceptions worth knowing, because HTTP is currently the only way to reach\n")
-	b.WriteString("them: alert rules (`/api/rules`, `/api/alerts`) and ingest-token rotation\n")
+	b.WriteString("them: alert rules (`/api/alerting/rules`, `/api/alerts`) and ingest-token rotation\n")
 	b.WriteString("(`/api/settings/ingest`). Neither has a browser page yet.\n")
 	b.WriteString(":::\n\n")
 

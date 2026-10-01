@@ -36,7 +36,7 @@ function Session() {
   // Counting them keeps the activity line on the work still in flight instead
   // of blanking it the moment the first call returns.
   const toolCallsRef = useRef(0);
-  const agent = useMemo(() => new HttpAgent({ url: "/api/agent", threadId: threadID, fetch: (url, init) => authorizedFetch(url, init) }), [threadID]);
+  const agent = useMemo(() => new HttpAgent({ url: "/api/agent/runs", threadId: threadID, fetch: (url, init) => authorizedFetch(url, init) }), [threadID]);
   const ready = !agentAvailable || loadedThreadID === threadID;
 
   function clearActivity() { toolCallsRef.current = 0; setActivity(""); }

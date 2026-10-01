@@ -31,12 +31,14 @@ func RegisterUserRoutes(e *echo.Echo, users *auth.UserStore, smtp auth.SMTPConfi
 
 	e.GET("/api/users", h.ListUsers, adminOnly)
 	e.POST("/api/users", h.CreateUser, adminOnly)
-	e.PUT("/api/users/:id", h.UpdateUser, adminOnly)
+	e.PATCH("/api/users/:id", h.UpdateUser, adminOnly)
 	e.DELETE("/api/users/:id", h.DeleteUser, adminOnly)
-	e.POST("/api/users/:id/logout-all", h.LogoutAll, adminOnly)
+	e.POST("/api/users/:id/access/revoke", h.RevokeAccess, adminOnly)
 }
 
-func (h *UserHandler) LogoutAll(c *echo.Context) error {
+// RevokeAccess invalidates existing browser sessions and OAuth tokens.
+// The account remains active and can sign in again.
+func (h *UserHandler) RevokeAccess(c *echo.Context) error {
 	if err := h.users.RevokeAllSessionsWithAudit(c.Param("id"), userAuditEvent(c, "session.revoked")); err != nil {
 		if errors.Is(err, auth.ErrUserNotFound) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")

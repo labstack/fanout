@@ -27,7 +27,7 @@ func RegisterSettingsRoutes(e *echo.Echo, cfg config.Config, store *settings.Sto
 	// GET returns non-secret metadata (token_required, endpoint, header name)
 	// used by the home empty state — readable by any authenticated user.
 	e.GET("/api/settings/ingest", h.GetIngest, RequireCapability(ReadIngestMetadata))
-	e.POST("/api/settings/ingest/rotate-token", h.RotateIngestToken, RequireCapability(ManageIngest))
+	e.POST("/api/settings/ingest/token/rotate", h.RotateIngestToken, RequireCapability(ManageIngest))
 }
 
 // GetIngest returns the current ingest config: whether a token is set

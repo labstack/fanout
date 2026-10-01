@@ -199,7 +199,7 @@ func toolInputs(toolName string, raw any) ([]ToolInput, error) {
 
 	properties, ok := schema["properties"]
 	if !ok {
-		// A tool that genuinely takes nothing, e.g. dashboard_list.
+		// A tool that genuinely takes nothing, e.g. list_dashboards.
 		return nil, nil
 	}
 	fields, ok := properties.(map[string]any)

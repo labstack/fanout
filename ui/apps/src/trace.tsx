@@ -16,8 +16,8 @@ function TraceApp() {
   const [view, setView] = useState<View>("waterfall");
   const dark = host?.theme === "dark";
   return <ViewShell dark={dark}>
-    <ViewHeader title={result?.data.trace_id ? `Trace ${shortID(result.data.trace_id)}` : "Trace analysis"} summary={result ? `${result.data.spans.length} spans across ${result.data.services.length} services` : undefined} onRefresh={() => callTool("trace_detail")} disabled={!app} />
-    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Finding a representative trace…" : undefined} retry={() => void callTool("trace_detail")} />
+    <ViewHeader title={result?.data.trace_id ? `Trace ${shortID(result.data.trace_id)}` : "Trace analysis"} summary={result ? `${result.data.spans.length} spans across ${result.data.services.length} services` : undefined} onRefresh={() => callTool("inspect_trace")} disabled={!app} />
+    <ViewStatus error={toolError ?? (error ? "This view could not be loaded. Please try again." : null)} loading={!result && !error && !toolError ? "Finding a representative trace…" : undefined} retry={() => void callTool("inspect_trace")} />
     {result && result.data.spans.length === 0 && <><EmptyState tall icon={<Path size={20} weight="duotone" />} title="No traces in this window">Try a wider time window.</EmptyState><MetaFooter left={windowLabel(result.provenance.window)} right="No traces found" /></>}
     {result && result.data.spans.length > 0 && <>
       <SimpleGrid cols={{ base: 2, sm: 4 }} spacing="sm" px={{ base: "md", sm: "lg" }} pb="md"><Metric label="Duration" value={duration(result.data.duration_ms)} /><Metric label="Spans" value={integer.format(result.data.spans.length)} /><Metric label="Services" value={integer.format(result.data.services.length)} /><Metric label="Status" value={result.data.has_error ? "Error" : "OK"} color={result.data.has_error ? "bad" : "ok"} /></SimpleGrid>

@@ -154,7 +154,7 @@ describe("AuthGate OAuth return", () => {
       const path = String(input);
       if (path === "/api/auth/status") return json({ setup_required: false, auth_mode: "local", agent_available: false, smtp_configured: false, self_signup: false });
       if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
-      if (path === "/api/auth/login-link" && init?.method === "POST") {
+      if (path === "/api/auth/link/verify" && init?.method === "POST") {
         expect(JSON.parse(String(init.body))).toEqual({ token: "one-time-secret" });
         return json({ status: "authenticated" });
       }
@@ -181,7 +181,7 @@ describe("AuthGate OAuth return", () => {
 
     await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
     expect(window.location.search).toBe("");
-    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/auth/login-link")).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/auth/link/verify")).toHaveLength(1);
 
     await act(async () => root.unmount());
   });
@@ -222,8 +222,8 @@ describe("AuthGate OAuth return", () => {
       if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
       if (init?.method === "POST") {
         posts.push({ path, body: JSON.parse(String(init.body)) });
-        if (path === "/api/auth/start") return json({ code_sent: true });
-        if (path === "/api/auth/verify") return json({ status: "authenticated" });
+        if (path === "/api/auth/code/send") return json({ code_sent: true });
+        if (path === "/api/auth/code/verify") return json({ status: "authenticated" });
       }
       throw new Error(`unexpected request: ${path}`);
     });
@@ -241,7 +241,7 @@ describe("AuthGate OAuth return", () => {
     });
     const send = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
     await act(async () => send?.click());
-    await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/start"]));
+    await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/code/send"]));
     expect(document.body.textContent).toContain("Check your email");
     expect(document.body.textContent).toContain("We sent a code to v@example.com");
     expect(document.body.textContent).toContain("Sent to v@example.com");
@@ -265,7 +265,7 @@ describe("AuthGate OAuth return", () => {
 
     const resend2 = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Send code"));
     await act(async () => resend2?.click());
-    await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/start", "/api/auth/start"]));
+    await vi.waitFor(() => expect(posts.map((post) => post.path)).toEqual(["/api/auth/code/send", "/api/auth/code/send"]));
 
     const cells = Array.from(document.querySelectorAll<HTMLInputElement>('[data-pin-input] input, input[inputmode="numeric"]'));
     expect(cells).toHaveLength(6);
@@ -275,14 +275,14 @@ describe("AuthGate OAuth return", () => {
         cells[index].dispatchEvent(new InputEvent("input", { bubbles: true, data: digit, inputType: "insertText" }));
       });
     }
-    await vi.waitFor(() => expect(posts.at(-1)).toEqual({ path: "/api/auth/verify", body: { email: "v@example.com", code: "123456" } }));
+    await vi.waitFor(() => expect(posts.at(-1)).toEqual({ path: "/api/auth/code/verify", body: { email: "v@example.com", code: "123456" } }));
     await vi.waitFor(() => expect(document.body.textContent).toContain("Fanout application"));
 
     const settled = posts.length;
     await act(async () => { vi.advanceTimersByTime(5_000); });
     expect(posts).toHaveLength(settled);
-    expect(posts.filter((post) => post.path === "/api/auth/start")).toHaveLength(2);
-    expect(posts.filter((post) => post.path === "/api/auth/verify")).toHaveLength(1);
+    expect(posts.filter((post) => post.path === "/api/auth/code/send")).toHaveLength(2);
+    expect(posts.filter((post) => post.path === "/api/auth/code/verify")).toHaveLength(1);
     expect(vi.getTimerCount()).toBe(0);
 
     vi.useRealTimers();
@@ -298,8 +298,8 @@ describe("AuthGate OAuth return", () => {
       if (path === "/api/auth/me") return json({ message: "not authenticated" }, 401);
       if (init?.method === "POST") {
         posts.push({ path, body: JSON.parse(String(init.body)) });
-        if (path === "/api/auth/start") return json({ code_sent: true });
-        if (path === "/api/auth/verify") return json({ message: "invalid or expired code" }, 401);
+        if (path === "/api/auth/code/send") return json({ code_sent: true });
+        if (path === "/api/auth/code/verify") return json({ message: "invalid or expired code" }, 401);
       }
       throw new Error(`unexpected request: ${path}`);
     });
@@ -335,7 +335,7 @@ describe("AuthGate OAuth return", () => {
     const cleared = Array.from(document.querySelectorAll<HTMLInputElement>('input[inputmode="numeric"]'));
     expect(cleared.map((cell) => cell.value)).toEqual(["", "", "", "", "", ""]);
     await vi.waitFor(() => expect(document.activeElement).toBe(cleared[0]));
-    expect(posts.filter((post) => post.path === "/api/auth/verify")).toHaveLength(1);
+    expect(posts.filter((post) => post.path === "/api/auth/code/verify")).toHaveLength(1);
 
     await act(async () => root.unmount());
   });

@@ -44,7 +44,7 @@ func TestRotateIngestToken_PersistsHashReturnsPlaintext(t *testing.T) {
 	s, store := newConfigServer(t, config.Config{Addr: ":7520"})
 	admin, _ := s.users.Create("admin@example.com", "", "admin")
 	cookie := s.login(t, admin)
-	req := sessionRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil, cookie)
+	req := sessionRequest(http.MethodPost, "/api/settings/ingest/token/rotate", nil, cookie)
 	req.Host = "fanout.example.com:7520"
 	rec := httptest.NewRecorder()
 	s.e.ServeHTTP(rec, req)
@@ -71,7 +71,7 @@ func TestIngestSettingsCapabilities(t *testing.T) {
 		t.Fatalf("viewer read = %d", readRec.Code)
 	}
 	writeRec := httptest.NewRecorder()
-	s.e.ServeHTTP(writeRec, sessionRequest(http.MethodPost, "/api/settings/ingest/rotate-token", nil, cookie))
+	s.e.ServeHTTP(writeRec, sessionRequest(http.MethodPost, "/api/settings/ingest/token/rotate", nil, cookie))
 	if writeRec.Code != http.StatusForbidden {
 		t.Fatalf("viewer rotate = %d, want 403", writeRec.Code)
 	}

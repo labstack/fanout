@@ -18,7 +18,7 @@ const mcpUIExtension = "io.modelcontextprotocol/ui"
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
-const serverInstructions = "Start with observability_overview for system health, use intelligence_snapshot for the latest precomputed anomalies and log patterns, service_topology for dependencies, service_performance for latency and errors, trace_detail for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user: list or get a dashboard before changing it, create only when asked, and replace an existing dashboard only with explicit user intent."
+const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for dependencies, get_service_performance for latency and errors, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user: list or get a dashboard before changing it, create only when asked, and replace an existing dashboard only with explicit user intent."
 
 type Observability interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
@@ -206,28 +206,28 @@ func (s *Server) HTTPHandler() http.Handler {
 func (s *Server) registerTools() {
 	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)}
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "observability_overview",
+		Name:        "get_observability_overview",
 		Title:       "System health overview",
 		Description: "Summarize service health for a bounded telemetry window. Start here for incident triage.",
 		Annotations: readOnly,
 		Meta:        appToolMeta(overviewAppURI),
 	}, s.overview)
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "service_topology",
+		Name:        "get_service_topology",
 		Title:       "Service dependency topology",
 		Description: "Return services and observed dependency edges with health, traffic, latency, and error data.",
 		Annotations: readOnly,
 		Meta:        appToolMeta(topologyAppURI),
 	}, s.topology)
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "service_performance",
+		Name:        "get_service_performance",
 		Title:       "Service performance explorer",
 		Description: "Inspect activity, errors, latency, endpoints, cross-signal correlation, and change over time for one service or the system.",
 		Annotations: readOnly,
 		Meta:        appToolMeta(performanceAppURI),
 	}, s.performance)
 	mcp.AddTool(s.mcp, &mcp.Tool{
-		Name:        "trace_detail",
+		Name:        "inspect_trace",
 		Title:       "Trace detail",
 		Description: "Inspect an exact trace, or select the most relevant recent error or slow trace, with spans, waterfall, flame graph, and correlated logs.",
 		Annotations: readOnly,
@@ -242,7 +242,7 @@ func (s *Server) registerTools() {
 	}, s.logs)
 	if s.intelligence != nil {
 		mcp.AddTool(s.mcp, &mcp.Tool{
-			Name:        "intelligence_snapshot",
+			Name:        "get_intelligence_snapshot",
 			Title:       "Latest detected anomalies",
 			Description: "Return the latest precomputed health score, anomalies, insights, and recurring warning or error log patterns.",
 			Annotations: readOnly,

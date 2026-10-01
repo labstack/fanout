@@ -74,10 +74,10 @@ describe("MCPAppFrame", () => {
     document.body.append(container);
     const root = createRoot(container);
     const resources = [
-      { toolName: "observability_overview", slug: "observability-overview" },
-      { toolName: "service_topology", slug: "service-topology" },
-      { toolName: "service_performance", slug: "service-performance" },
-      { toolName: "trace_detail", slug: "trace-detail" },
+      { toolName: "get_observability_overview", slug: "observability-overview" },
+      { toolName: "get_service_topology", slug: "service-topology" },
+      { toolName: "get_service_performance", slug: "service-performance" },
+      { toolName: "inspect_trace", slug: "trace-detail" },
       { toolName: "search_logs", slug: "log-explorer" },
     ];
 
@@ -120,7 +120,7 @@ describe("MCPAppFrame", () => {
     const root = createRoot(container);
 
     await act(async () => root.render(<MantineProvider><MCPAppFrame
-      content={{ resourceUri: "ui://fanout/observability-overview.html", toolName: "observability_overview" }}
+      content={{ resourceUri: "ui://fanout/observability-overview.html", toolName: "get_observability_overview" }}
       onMessage={async () => undefined}
     /></MantineProvider>));
     await vi.waitFor(() => expect(mcp.connect).toHaveBeenCalledTimes(1));
@@ -141,7 +141,7 @@ describe("MCPAppFrame", () => {
     const root = createRoot(container);
 
     await act(async () => root.render(<MantineProvider><MCPAppFrame
-      content={{ resourceUri: "ui://fanout/observability-overview.html", toolName: "observability_overview" }}
+      content={{ resourceUri: "ui://fanout/observability-overview.html", toolName: "get_observability_overview" }}
       onMessage={async () => undefined}
     /></MantineProvider>));
     await vi.waitFor(() => expect(mcp.readResource).toHaveBeenCalledTimes(1));
@@ -169,7 +169,7 @@ describe("MCPAppFrame", () => {
     document.body.append(container);
     const root = createRoot(container);
     await act(async () => root.render(<MantineProvider><MCPAppFrame
-      content={{ resourceUri: "ui://fanout/observability-overview.html", toolName: "observability_overview" }}
+      content={{ resourceUri: "ui://fanout/observability-overview.html", toolName: "get_observability_overview" }}
       onMessage={async () => undefined}
     /></MantineProvider>));
     await vi.waitFor(() => expect(container.textContent).toContain("This view could not be loaded"));

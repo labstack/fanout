@@ -18,11 +18,11 @@ func RegisterAlertRoutes(e *echo.Echo, store *alert.Store, engine *alert.Engine)
 	manage := RequireCapability(ManageAlerts)
 	e.GET("/api/alerts", h.ListAlerts, read)
 	e.GET("/api/alerts/summary", h.AlertSummary, read)
-	e.GET("/api/rules", h.ListRules, read)
-	e.POST("/api/rules", h.CreateRule, manage)
-	e.PUT("/api/rules/:id", h.UpdateRule, manage)
-	e.DELETE("/api/rules/:id", h.DeleteRule, manage)
-	e.POST("/api/rules/:id/test", h.TestRule, manage)
+	e.GET("/api/alerting/rules", h.ListRules, read)
+	e.POST("/api/alerting/rules", h.CreateRule, manage)
+	e.PUT("/api/alerting/rules/:id", h.UpdateRule, manage)
+	e.DELETE("/api/alerting/rules/:id", h.DeleteRule, manage)
+	e.POST("/api/alerting/rules/:id/test", h.TestRule, manage)
 }
 
 type alertHandler struct {

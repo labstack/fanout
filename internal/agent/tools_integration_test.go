@@ -50,11 +50,11 @@ func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
 	})
 
 	want := map[string]string{
-		"observability_overview": "ui://fanout/observability-overview.html",
-		"service_topology":       "ui://fanout/service-topology.html",
-		"service_performance":    "ui://fanout/service-performance.html",
-		"trace_detail":           "ui://fanout/trace-detail.html",
-		"search_logs":            "ui://fanout/log-explorer.html",
+		"get_observability_overview": "ui://fanout/observability-overview.html",
+		"get_service_topology":       "ui://fanout/service-topology.html",
+		"get_service_performance":    "ui://fanout/service-performance.html",
+		"inspect_trace":              "ui://fanout/trace-detail.html",
+		"search_logs":                "ui://fanout/log-explorer.html",
 	}
 	if len(registry.apps) != len(want) {
 		t.Fatalf("registered MCP apps = %v, want %v", registry.apps, want)
@@ -66,12 +66,12 @@ func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
 	}
 	foundIntelligence := false
 	for _, definition := range registry.Definitions() {
-		if definition.Name == "intelligence_snapshot" {
+		if definition.Name == "get_intelligence_snapshot" {
 			foundIntelligence = true
 			break
 		}
 	}
 	if !foundIntelligence {
-		t.Fatal("intelligence_snapshot was not registered for the agent")
+		t.Fatal("get_intelligence_snapshot was not registered for the agent")
 	}
 }
