@@ -377,16 +377,3 @@ func CheckQueryCost(sql string) []string {
 
 	return warnings
 }
-
-// ensureLimit caps the result set at maxRows by wrapping the query in an outer
-// SELECT … LIMIT. Wrapping (rather than rewriting a LIMIT in place) avoids
-// clobbering LIMIT clauses inside subqueries or CTEs — a regex replace would
-// rewrite an inner `LIMIT 5000` and silently change query semantics. Any
-// user-supplied outer LIMIT smaller than maxRows still wins, since the outer cap
-// only ever shrinks the result.
-func ensureLimit(query string, maxRows int) string {
-	trimmed := strings.TrimSpace(query)
-	trimmed = strings.TrimSuffix(trimmed, ";")
-	trimmed = strings.TrimSpace(trimmed)
-	return fmt.Sprintf("SELECT * FROM (%s) AS _capped LIMIT %d", trimmed, maxRows)
-}

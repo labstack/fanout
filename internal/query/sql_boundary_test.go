@@ -24,6 +24,9 @@ func TestSQLBoundaryRejectsHiddenReadsAndMutations(t *testing.T) {
 		"SELECT * FROM (WITH rollup_state AS (SELECT 1) SELECT * FROM rollup_state) x, rollup_state",
 		"SELECT * FROM query('SELECT * FROM rollup_state')",
 		"SELECT * FROM read_parquet('/etc/passwd')",
+		"SELECT * FROM (SHOW ALL TABLES)",
+		"SELECT current_setting('allowed_directories')",
+		"SELECT getvariable('operator_secret')",
 		"WITH x AS MATERIALIZED (COPY (SELECT 1) TO '" + output + "') SELECT * FROM x",
 	} {
 		if err := validateSQLAST(ctx, conn, query); err == nil {
@@ -89,6 +92,19 @@ func TestLogicalTypeDetectionSkipsFieldNames(t *testing.T) {
 	} {
 		if got := containsLogicalType(test.expression, "VARIANT"); got != test.want {
 			t.Errorf("%s: %v", test.expression, got)
+		}
+	}
+}
+
+func TestExecuteSQLRejectsEngineMetadataReads(t *testing.T) {
+	d := &Duck{DB: openTestDuck(t)}
+	for _, statement := range []string{
+		"SELECT * FROM (SHOW ALL TABLES)",
+		"SELECT current_setting('allowed_directories')",
+		"SELECT getvariable('operator_secret')",
+	} {
+		if response := d.ExecuteSQL(t.Context(), SQLRequest{Query: statement}); response.Error == "" {
+			t.Errorf("executed forbidden query %s", statement)
 		}
 	}
 }

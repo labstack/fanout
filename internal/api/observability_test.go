@@ -128,11 +128,13 @@ func TestDependencyRouteForwardsScopeAndBounds(t *testing.T) {
 	}
 }
 
-// A dashboard query that runs out of time is a load condition. Reporting it as
-// a server error logs it at ERROR and counts towards the 5xx rate that pages
-// someone; the deadline itself exists so a pathological query stops holding a
-// connection once the answer can no longer be useful.
-func TestObservabilityQueryDeadlineIsNotAServerError(t *testing.T) {
+// A canceled client is distinct from a server deadline or an execution fault.
+// Wrapped backend errors must retain that distinction at the HTTP boundary.
+func TestObservabilityQueryErrorClassification(t *testing.T) {
+	var canceled *echo.HTTPError
+	if !errors.As(mapQueryError(fmt.Errorf("query endpoints: %w", context.Canceled)), &canceled) || canceled.Code != 499 {
+		t.Fatal("client cancellation must map to 499")
+	}
 	err := mapQueryError(fmt.Errorf("query endpoints: %w", context.DeadlineExceeded))
 	var httpErr *echo.HTTPError
 	if !errors.As(err, &httpErr) {

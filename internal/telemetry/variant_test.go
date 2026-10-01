@@ -75,6 +75,13 @@ func checkVariantRows(t *testing.T, path string, want []logParquetRow) {
 }
 
 func TestUnsupportedFormatLeavesStoreUntouched(t *testing.T) {
+	for _, suffix := range []string{BatchSuffix, ".retired", ".retired-replacement"} {
+		t.Run(suffix, func(t *testing.T) { testUnsupportedFormatLeavesStoreUntouched(t, suffix) })
+	}
+}
+
+func testUnsupportedFormatLeavesStoreUntouched(t *testing.T, suffix string) {
+	t.Helper()
 	dir := t.TempDir()
 	store, err := OpenParquetStore(dir)
 	if err != nil {
@@ -86,6 +93,11 @@ func TestUnsupportedFormatLeavesStoreUntouched(t *testing.T) {
 	metadata := filepath.Join(store.BatchPath("old"), "metadata.json")
 	if err := os.WriteFile(metadata, []byte(`{"version":2,"id":"old","spans":1}`), 0644); err != nil {
 		t.Fatal(err)
+	}
+	if suffix != BatchSuffix {
+		if err := os.Rename(store.BatchPath("old"), filepath.Join(store.batchesDir, "old"+suffix)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	sentinel := filepath.Join(store.stagingDir, "preserve")
 	if err := os.WriteFile(sentinel, []byte("unpublished bytes"), 0644); err != nil {

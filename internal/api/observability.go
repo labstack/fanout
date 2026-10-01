@@ -37,9 +37,9 @@ func NewObservabilityHandler(queries ObservabilityQueries) *ObservabilityHandler
 // connection until the client gave up, and the client's own timeout is not
 // something the server can rely on.
 //
-// Twenty seconds is well clear of the slowest query measured under load here,
-// about two seconds, and stricter than the SQL API's own ceiling. It is
-// deliberately shorter than the worst legitimate wait behind a stuck
+// Twenty seconds bounds execution and pool waits under load and is stricter
+// than the SQL API's own ceiling. It is deliberately shorter than the worst
+// legitimate wait behind a stuck
 // publication — the drain remainder plus the swap budget can exceed a minute —
 // so a publication that goes wrong answers the dashboard instead of holding
 // every widget's connection until it finishes.
@@ -185,11 +185,15 @@ func mapQueryError(err error) error {
 	if errors.Is(err, observability.ErrInvalidScope) || errors.Is(err, observability.ErrInvalidLimit) {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
-	// A query that ran out of time is a load condition, not a fault: reporting
-	// it as a server error logs it at ERROR and counts it towards the 5xx rate
-	// that pages someone.
+	// A server deadline is a service-unavailable response; it remains a failed
+	// server request. Client cancellations below have a separate classification.
 	if errors.Is(err, context.DeadlineExceeded) {
 		return echo.NewHTTPError(http.StatusServiceUnavailable, "telemetry query took too long").Wrap(err)
+	}
+	if errors.Is(err, context.Canceled) {
+		// A disconnected client is not a server failure. The nonstandard 499
+		// status is used by our request logger to keep this out of the 5xx rate.
+		return echo.NewHTTPError(499, "telemetry query canceled by client").Wrap(err)
 	}
 	return echo.NewHTTPError(http.StatusInternalServerError, "telemetry query failed").Wrap(err)
 }

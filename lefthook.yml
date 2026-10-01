@@ -33,7 +33,7 @@ pre-commit:
       glob: "*.go"
       # ~3s for the whole module, so scoping to changed packages would buy
       # nothing and risks missing cross-package breakage.
-      run: golangci-lint run
+      run: bash scripts/with-duckdb.sh golangci-lint run
 
     - name: ui-host-lint
       glob: "{ui/host/**/*.{ts,tsx},ui/theme.ts}"

@@ -92,7 +92,8 @@ escaped_libs="${libs//\\/\\\\}"
 escaped_libs="${escaped_libs//\"/\\\"}"
 
 export CGO_ENABLED=1
-export GOFLAGS="${GOFLAGS:-} -tags=duckdb_use_static_lib"
+source "$root/scripts/go-build-tags.sh"
+duckdb_build_tags "$@"
 export CGO_CPPFLAGS="${CGO_CPPFLAGS:-} -DDUCKDB_STATIC_BUILD \"-I$escaped_libs\""
 export CGO_LDFLAGS="${CGO_LDFLAGS:-} \"$escaped_libs/libcore_functions_extension.a\" \"$escaped_libs/libjson_extension.a\" \"$escaped_libs/libparquet_extension.a\" \"$escaped_libs/libicu_extension.a\" \"$escaped_libs/libduckdb_static.a\" $system_libs"
-exec "$@"
+exec "${duckdb_go_args[@]}"

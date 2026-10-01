@@ -1190,7 +1190,7 @@ func loadStoredBatch(dir string) (*storedBatch, error) {
 			expectedSchema = telemetrySchema[metricParquetRow]()
 		}
 		if !parquet.EqualNodes(parquetFile.Schema(), expectedSchema) {
-			return nil, fmt.Errorf("%s parquet schema does not match telemetry format %d", signal.name, batchMetadataVersion)
+			return nil, fmt.Errorf("%w: %s parquet schema does not match telemetry format %d", ErrUnsupportedBatchFormat, signal.name, batchMetadataVersion)
 		}
 		if rows := parquetFile.NumRows(); rows != int64(signal.count) {
 			return nil, fmt.Errorf("%s Parquet has %d rows; metadata declares %d", signal.name, rows, signal.count)

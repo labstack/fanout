@@ -32,6 +32,11 @@ on:
       - "internal/mcp/**"
       - "cmd/fanout/**"
       - "cmd/fanout-docgen/**"
+      - "internal/duckdb/**"
+      - "scripts/with-duckdb.sh"
+      - "scripts/go-build-tags.sh"
+      - "go.mod"
+      - "go.sum"
       - ".github/workflows/site.yml"
   # Publishing the current main on demand, without an empty commit.
   workflow_dispatch:
@@ -77,7 +82,7 @@ jobs:
       - name: Refuse a reference that is behind the code
         env:
           CGO_ENABLED: "1"
-        run: go run ./cmd/fanout-docgen --check
+        run: bash scripts/with-duckdb.sh go run ./cmd/fanout-docgen --check
 
       - name: Install dependencies
         working-directory: site

@@ -177,6 +177,17 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 			ctes = scope
 		}
 		kind, _ := node["type"].(string)
+		_, hasSample := node["sample"]
+		_, hasAlias := node["alias"]
+		// TableRef's common serialized fields distinguish it from QueryNode
+		// (which also has sample) and Expression (which also has alias).
+		if hasSample && hasAlias {
+			switch kind {
+			case "BASE_TABLE", "SUBQUERY", "JOIN", "TABLE_FUNCTION", "EMPTY", "EXPRESSION_LIST", "PIVOT":
+			default:
+				return fmt.Errorf("table reference %q is not available to telemetry SQL", kind)
+			}
+		}
 		switch kind {
 		case "INSERT_QUERY_NODE", "UPDATE_QUERY_NODE", "DELETE_QUERY_NODE", "COPY_QUERY_NODE", "MERGE_QUERY_NODE", "STATEMENT_NODE":
 			return fmt.Errorf("mutating SQL is not allowed")
@@ -201,7 +212,7 @@ func validateSQLNode(value any, ctes map[string]bool) error {
 		}
 		if name, ok := node["function_name"].(string); ok {
 			switch strings.ToLower(name) {
-			case "nextval", "setval", "setseed", "query", "query_table", "json_execute_serialized_sql", "getenv", "read_csv", "read_csv_auto", "read_json", "read_json_auto", "read_text", "read_blob", "read_parquet", "glob", "http_get", "write_file":
+			case "nextval", "setval", "setseed", "query", "query_table", "json_execute_serialized_sql", "current_setting", "getvariable", "getenv", "read_csv", "read_csv_auto", "read_json", "read_json_auto", "read_text", "read_blob", "read_parquet", "glob", "http_get", "write_file":
 				return fmt.Errorf("function %q is not available to telemetry SQL", name)
 			}
 		}

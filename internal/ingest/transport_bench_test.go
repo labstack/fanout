@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -32,6 +35,8 @@ import (
 // conversion; durable also waits for the production writer's Parquet commit.
 // Client and server share this process: CPU/allocations include both sides.
 // Run: go test -tags transportbench ./internal/ingest -run '^TestTransportComparison$' -v -count=1 -timeout=10m
+// FANOUT_BENCH_PROFILE_DIR writes a CPU profile of each measurement interval
+// and a post-load heap profile under a separate directory for every subtest.
 func TestTransportComparison(t *testing.T) {
 	t.Logf("environment go=%s os=%s arch=%s CPUs=%d GOMAXPROCS=%d", runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), runtime.GOMAXPROCS(0))
 	for _, durable := range []bool{false, true} {
@@ -168,6 +173,22 @@ func runTransportComparison(t *testing.T, mode string, durable bool, concurrency
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
+	profileDir := os.Getenv("FANOUT_BENCH_PROFILE_DIR")
+	var cpuFile *os.File
+	if profileDir != "" {
+		profileDir = filepath.Join(profileDir, t.Name())
+		if err := os.MkdirAll(profileDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		cpuFile, err = os.Create(filepath.Join(profileDir, "cpu.pprof"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := pprof.StartCPUProfile(cpuFile); err != nil {
+			cpuFile.Close()
+			t.Fatal(err)
+		}
+	}
 	cpuBefore := transportCPU()
 	rowsBefore := sink.rows.Load()
 	start := time.Now()
@@ -193,6 +214,23 @@ func runTransportComparison(t *testing.T, mode string, durable bool, concurrency
 	elapsed := time.Since(start).Seconds()
 	cpu := transportCPU() - cpuBefore
 	runtime.ReadMemStats(&after)
+	if cpuFile != nil {
+		pprof.StopCPUProfile()
+		if err := cpuFile.Close(); err != nil {
+			t.Fatal(err)
+		}
+		heapFile, err := os.Create(filepath.Join(profileDir, "heap.pprof"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := pprof.WriteHeapProfile(heapFile); err != nil {
+			heapFile.Close()
+			t.Fatal(err)
+		}
+		if err := heapFile.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	var samples []float64
 	for i := range concurrency {
 		if errors[i] != nil {

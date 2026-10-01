@@ -15,16 +15,17 @@ WHERE time >= ?::TIMESTAMP_NS::TIMESTAMPTZ_NS AND time < ?::TIMESTAMP_NS::TIMEST
   AND (? = '' OR contains(lower(` + redactLogBodySQL("body") + `), lower(?)))`
 
 // DuckDB answers the two questions the API asks: the newest `limit` entries
-// and per-bucket counts. LIMIT bounds the entry stream and GROUP BY bounds the
-// histogram stream regardless of the retained Parquet row count.
+// and per-bucket counts. LIMIT and GROUP BY bound the response size. Both
+// statements still scan rows in the selected window; the histogram has no
+// persistent aggregate and its work grows with the number of matching rows.
 //
 // Redaction runs outside the LIMIT, and that placement is the whole cost of
 // this query. A projection in the same SELECT as ORDER BY ... LIMIT is
 // evaluated below the top-N operator, so four chained regexp_replace ran over
 // every row in the window to return a hundred: measured at 140ms for a page of
 // 100 out of 372,000 rows, and 347ms with four DuckDB threads, against 8ms
-// once the top-N runs first. It was the one statement here whose cost grew
-// with retained rows rather than with the answer.
+// once the top-N runs first. This bounds redaction work for entry retrieval;
+// search predicates and histogram aggregation still process matching rows.
 //
 // The search predicate stays inside, on purpose: a search has to match what
 // the reader will be shown, so it matches the redacted text. It is skipped

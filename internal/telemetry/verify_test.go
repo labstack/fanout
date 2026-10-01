@@ -142,7 +142,12 @@ func TestNativeVerifierRejectsWrongSchemaAndTraceOrdering(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if err := ValidatePublishedBatch(dir); !IsBatchCorrupt(err) {
+			err := ValidatePublishedBatch(dir)
+			if kind == "schema" {
+				if !errors.Is(err, ErrUnsupportedBatchFormat) || IsBatchCorrupt(err) {
+					t.Fatalf("unsupported schema classified as corruption: %v", err)
+				}
+			} else if !IsBatchCorrupt(err) {
 				t.Fatalf("%s error = %v", kind, err)
 			}
 		})

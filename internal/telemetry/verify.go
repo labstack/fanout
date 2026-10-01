@@ -13,7 +13,7 @@ import (
 	engine "github.com/labstack/fanout/internal/duckdb"
 )
 
-var ErrUnsupportedBatchFormat = errors.New("unsupported batch metadata")
+var ErrUnsupportedBatchFormat = errors.New("unsupported telemetry batch format")
 
 // CorruptBatchError denotes evidence of malformed authoritative data. A failed
 // verifier (permissions, engine limits or cancellation) is not such evidence.
