@@ -25,6 +25,8 @@ import (
 )
 
 type Duck struct {
+	cachePublishMu  sync.Mutex
+	cachePublishing map[string]bool
 	snapshotMu      sync.Mutex
 	snapshotQueries map[string]compiledSnapshot
 	// DB is the read pool. Reads scan immutable Parquet concurrently, so it is
@@ -40,13 +42,9 @@ type Duck struct {
 	// only if they are still reading it.
 	releasePoolGauges   func()
 	releaseMemoryGauges func()
-	// writeDB is the single connection every rollup and maintenance write uses.
-	//
-	// Those writes are serialized by writeGate anyway, so one connection is all
-	// they can use — and taking it from the read pool is what let a background
-	// pass occupy a quarter of a four-core host's read capacity for the length
-	// of a rollup. A request that then waits for a connection waits invisibly:
-	// database/sql counts that wait, and nothing charged it to anything.
+	// writeDB has two connections: analytical rollups share writeGate, while
+	// completed-batch aggregates use cacheGate and disjoint tables. Both stay
+	// outside the read pool. Maintenance acquires both gates for checkpointing.
 	writeDB    *sql.DB
 	cfg        config.Config
 	repository *telemetrystore.Repository
@@ -56,6 +54,7 @@ type Duck struct {
 	rollupLagNanos int64
 	// writeGate serializes writes to the rebuildable DuckDB rollup cache.
 	writeGate writegate.WriteGate
+	cacheGate writegate.WriteGate
 	// parquetMu pins immutable files for active DuckDB readers. Its reader-first
 	// gate keeps a queued maintenance publish from stalling unrelated new reads.
 	parquetMu parquetReadGate
@@ -420,8 +419,8 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 	db.SetMaxOpenConns(maxConns)
 	db.SetMaxIdleConns(maxConns)
 
-	// One connection is all the writers can use — writeGate already lets one
-	// through at a time — and keeping it out of the read pool is the point.
+	// Independent analytical and completed-batch writers need two connections.
+	// Their tables are disjoint; each domain serializes its own mutations.
 	//
 	// The write handle gets a connector that cannot close the instance.
 	// database/sql closes a connector that implements io.Closer when its DB is
@@ -431,8 +430,8 @@ func openDuckDB(ctx context.Context, dsn, tempDir string, maxConns int) (*sql.DB
 	// than returning an error. The read pool owns the instance; the write
 	// handle borrows it.
 	writeDB := sql.OpenDB(borrowedConnector{connector})
-	writeDB.SetMaxOpenConns(1)
-	writeDB.SetMaxIdleConns(1)
+	writeDB.SetMaxOpenConns(2)
+	writeDB.SetMaxIdleConns(2)
 	return db, writeDB, nil
 }
 
@@ -487,8 +486,8 @@ func (d *Duck) writer() *sql.DB {
 // candidate explanation for a stalled query and has to be measurable.
 //
 // The non-FORCE form refuses while another *write* transaction is open. Every
-// write here is serialized behind the write gate on one connection, and this
-// runs under that gate, so a refusal should not happen — the counter is there
+// domain is serialized by its own gate. Maintenance holds both gates before
+// calling this function, so a refusal should not happen — the counter is there
 // to say so rather than to be assumed. Only a checkpoint that ran is timed: a
 // refusal returns in microseconds and would drag the distribution towards zero,
 // which is the opposite of what the histogram is for.
@@ -709,6 +708,11 @@ func (d *Duck) runRepositoryMaintenance(ctx context.Context) error {
 			return err
 		}
 		defer unlock()
+		unlockCache, err := d.cacheGate.LockContext(ctx, writegate.WriteMaintenance)
+		if err != nil {
+			return err
+		}
+		defer unlockCache()
 		var errs []error
 		if d.cfg.RetentionDays > 0 {
 			for _, table := range []string{"service_rollup", "edge_rollup"} {

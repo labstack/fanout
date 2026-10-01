@@ -37,9 +37,15 @@
   one read transaction under the pinned file snapshot; uncached active files
   remain immediately visible. Compaction and retention must invalidate retired
   contributions without double counting or losing late publications.
-- Exact partial windows read narrow derived event-time projections. Keep them
-  private to dashboard queries and rebuildable from format-3 Parquet; body search
-  still matches redacted text. Analytical service/edge watermark lag is separate.
+- Version disposable read-cache schema and semantics together; mismatches rebuild
+  all private read tables. Cache minute aggregates, per-batch trace bounds,
+  and one incremental candidate per trace, never individual event copies or
+  four globally rewritten scope indexes. Mixed trace scopes use batch parts. Exact
+  clipped minutes read footer-pruned Parquet, and compaction derives complete
+  output contributions from cached inputs. Body search matches redacted text.
+  Analytical service/edge watermark lag is separate. Completed-batch writes
+  have their own gate and write-pool slot; analytical writes use disjoint tables.
+  Maintenance must hold both gates for checkpointing.
 - Batch format 3, including its physical schema, is the only accepted telemetry
   format. Schema changes require a format version change. Disable schema unioning
   and Hive partition inference; use native Parquet binding so VARIANT extracts

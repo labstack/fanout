@@ -1,7 +1,9 @@
 # DuckDB 2 review follow-ups — 2026-10-01
 
-PR #272 implements the five findings tracked in #273–#277. These results
-measure the implementation; they do not establish general production capacity.
+This report retains the measurements before the nine-comment review at
+`cd916d5`. They are historical results, not measurements of the subsequent
+aggregate-only cache. See [the subsequent nine-comment review report](duckdb2-review-2026-10-01.md). #277 remains open for the encoding CPU regression.
+These results do not establish general production capacity.
 The complete measured values and binary identities are in
 [the accompanying JSON](duckdb2-followups-2026-10-01.json).
 
@@ -47,11 +49,15 @@ allocations. Every run waits for durable publication and then verifies storage.
 | Export p95 | 35.68ms | 31.75ms |
 
 All six runs have zero export errors and pass durable storage verification.
-Throughput increases **19%**, and p95 decreases **11%**. The previous approximately
-15% throughput loss is resolved on this fixture. Typed ingestion still costs
+Throughput increases **19%**, and p95 decreases **11%**. This closed-loop fixture is admission-limited: halving the admission window
+accounts for most of the throughput gain. It does not demonstrate that the
+encoding regression is resolved. Typed ingestion still costs
 **26% more CPU per row** and **5% more Go allocation per row** than #270.
 The admission change contributes to the throughput gain; this comparison does
-not attribute the entire gain to faster VARIANT encoding.
+not establish faster VARIANT encoding. Independent fixed-one-CPU trials from
+the review measured 395k/373k rows/s for #270 versus 322k/298k for `cd916d5`,
+about 19% slower. Keep #277 open; reducing acknowledgement latency does not
+remove the normalized CPU regression.
 
 ## Identical-file dashboard comparison
 
@@ -73,7 +79,8 @@ they are not a robust estimate of production tail latency.
 | 20m logs | 39.63 / 42.29ms | 15.44 / 17.12ms | 106.1 / 21.0 |
 
 Both windows end one second after the fixture's hour boundary and exercise exact
-partial minutes. Broad reads improve substantially. Small endpoint windows still
+partial minutes. Broad reads improve with the caches fully built. This fixture measures
+cache-current reads only; it contains no concurrent ingest or cache lag. Small endpoint windows still
 pay additional histogram/union planning overhead, and narrow trace latency is
 approximately flat. No claim of uniform latency improvement is made. Endpoints use
 the established fixed-boundary histogram estimate rather than the raw kernel's
@@ -113,7 +120,9 @@ diagnostic, not a publishable capacity result. Generator exits, server-dropped
 rows, server restarts, and full authoritative storage verification all pass.
 Same-host generators, adaptive sustained selection, short sweeps, and one trial
 limit interpretation. CPU per row, narrow endpoint planning cost, and saturated
-read capacity remain measured limitations despite the five implemented changes.
+read capacity remain measured limitations. The independent review reproduced
+cache backlog growth from 51 to 843 batches and read shedding under sustained
+load; short sweeps and fully built-cache reads do not establish cache stability.
 
 ## Reproduce
 

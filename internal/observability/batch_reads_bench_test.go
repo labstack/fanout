@@ -65,6 +65,13 @@ func TestCompletedReadBenchmark(t *testing.T) {
 	defer d.Close()
 	svc := New(d, d, 30)
 	raw := New(SQLDB(d.DB), d, 30)
+	if _, err := d.DB.Exec(`CHECKPOINT`); err != nil {
+		t.Fatal(err)
+	}
+	emptyCatalog, err := os.Stat(cfg.QueryDuckDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
 	started := time.Now()
 	for attempt := 0; ; attempt++ {
 		if attempt > 312 {
@@ -83,6 +90,23 @@ func TestCompletedReadBenchmark(t *testing.T) {
 	}
 
 	t.Logf("backfill=%s rows_per_signal=%d immutable_batches=312", time.Since(started), rowsPerBatch*12)
+	if _, err := d.DB.Exec(`CHECKPOINT`); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := os.Stat(cfg.QueryDuckDBPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stats, err := repo.Parquet.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parquetBytes int64
+	for _, stat := range stats {
+		parquetBytes += stat.Bytes
+	}
+	footprint, _ := json.Marshal(map[string]any{"experiment": "cache_footprint", "rows_per_signal": rowsPerBatch * 12, "empty_catalog_bytes": emptyCatalog.Size(), "catalog_bytes": catalog.Size(), "parquet_bytes": parquetBytes})
+	t.Log("RESULT", string(footprint))
 	broad := Scope{Start: at.Add(-24 * time.Hour), End: at.Add(time.Second), Namespace: "prod"}
 	narrow := Scope{Start: at.Add(-20 * time.Minute), End: at.Add(time.Second), Namespace: "prod"}
 	for _, scope := range []Scope{broad, narrow} {

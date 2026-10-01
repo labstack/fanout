@@ -900,3 +900,10 @@ func TestUnresolvedCompactionRunbookExists(t *testing.T) {
 	}
 	t.Fatalf("runbook anchor %q is not a section in %s; sections are %v", anchor, guide, headings)
 }
+
+func (f testParquetPublisherFunc) PublishParquetReplacement(ctx context.Context, _ telemetry.BatchMetadata, _ []string, publish func(context.Context) error) error {
+	return f.PublishParquet(ctx, publish)
+}
+func (c *testParquetCompactor) PublishParquetReplacement(ctx context.Context, _ telemetry.BatchMetadata, _ []string, publish func(context.Context) error) error {
+	return c.PublishParquet(ctx, publish)
+}

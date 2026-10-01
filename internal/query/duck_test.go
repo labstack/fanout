@@ -569,6 +569,10 @@ func (f failingPublishCompactor) PublishParquet(context.Context, func(context.Co
 	return errors.New("injected publication failure")
 }
 
+func (f failingPublishCompactor) PublishParquetReplacement(context.Context, telemetry.BatchMetadata, []string, func(context.Context) error) error {
+	return errors.New("injected publication failure")
+}
+
 func TestMaintenanceRecoversCompactionBeforeRetention(t *testing.T) {
 	repository, err := telemetrystore.Open(t.TempDir())
 	if err != nil {

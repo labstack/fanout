@@ -40,7 +40,9 @@ func Open(root string) (*Repository, error) {
 		return nil, err
 	}
 	r := &Repository{root: root, Parquet: parquetStore}
-	if err := r.recoverCompaction(context.Background(), func(ctx context.Context, publish func(context.Context) error) error { return publish(ctx) }); err != nil {
+	if err := r.recoverCompaction(context.Background(), func(ctx context.Context, _ telemetry.BatchMetadata, _ []string, publish func(context.Context) error) error {
+		return publish(ctx)
+	}); err != nil {
 		r.logUnresolvedCompaction(err)
 		_ = r.Close()
 		return nil, fmt.Errorf("recover Parquet compaction (unresolved marker at %s): %w",

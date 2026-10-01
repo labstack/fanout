@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
@@ -56,6 +57,39 @@ func (d *Duck) physicalSource(signal string, batches []telemetry.BatchMetadata) 
 	}
 	return "SELECT " + projection + " FROM read_parquet([" + strings.Join(files, ",") + "], union_by_name=false, hive_partitioning=false)"
 }
+
+// snapshotSource uses a glob when pruning saves little. The filename predicate
+// admits exactly the captured IDs, including when ingest publishes a new file
+// after metadata capture. Narrow subsets keep explicit lists and footer pruning.
+func (d *Duck) snapshotSource(signal string, selected, active []telemetry.BatchMetadata) string {
+	count := 0
+	for _, b := range active {
+		_, n := batchTime(b, signal)
+		if n > 0 {
+			count++
+		}
+	}
+	if len(selected) < 64 || len(selected)*5 < count*4 {
+		return d.physicalSource(signal, selected)
+	}
+	var ids []string
+	for _, b := range selected {
+		ids = append(ids, b.ID)
+	}
+	batchID := d.batchIDColumn(signal, "filename")
+	projection := "*"
+	if signal == "spans" {
+		projection += " EXCLUDE (_trace_hash), TRY_CAST(attributes['messaging.system'] AS VARCHAR) AS messaging_system, TRY_CAST(attributes['messaging.destination.name'] AS VARCHAR) AS messaging_destination"
+	}
+	return "SELECT " + projection + " FROM read_parquet(" + sqlLiteral(d.repository.Parquet.Pattern(signal)) + ", union_by_name=false, hive_partitioning=false) WHERE " + batchID + " IN (" + idsSQL(ids) + ")"
+}
+
+func (d *Duck) batchIDColumn(signal, filename string) string {
+	root := filepath.ToSlash(d.repository.Parquet.BatchesDir())
+	suffix := ".batch/" + signal + ".parquet"
+	return fmt.Sprintf("substr(%s,%d,length(%s)-%d)", filename, utf8.RuneCountInString(root)+2, filename, utf8.RuneCountInString(root)+1+len(suffix))
+}
+
 func cleanSource(signal, physical string) string {
 	view := map[string]string{"spans": viewSpans, "logs": viewLogs, "metrics": viewMetrics}[signal]
 	body := strings.SplitN(view, " AS\n", 2)[1]
@@ -70,16 +104,25 @@ func (d *Duck) bindSnapshot(ctx context.Context, db snapshotSQL, query string, w
 	if d.repository == nil {
 		return query, nil
 	}
+	compiled, err := d.compileSnapshot(ctx, db, query)
+	if err != nil {
+		return "", err
+	}
 	batches := d.repository.Parquet.BatchMetadata()
 	sources := map[string]string{}
 	for _, signal := range []string{"spans", "logs", "metrics"} {
+		if _, raw := compiled.names["telemetry."+signal]; !raw {
+			if _, clean := compiled.names[signal]; !clean {
+				continue
+			}
+		}
 		selected := []telemetry.BatchMetadata{}
 		for _, b := range batches {
 			if overlapping(b, signal, w) {
 				selected = append(selected, b)
 			}
 		}
-		physical := d.physicalSource(signal, selected)
+		physical := d.snapshotSource(signal, selected, batches)
 		sources["telemetry."+signal] = physical
 		sources[signal] = cleanSource(signal, physical)
 	}
@@ -88,7 +131,7 @@ func (d *Duck) bindSnapshot(ctx context.Context, db snapshotSQL, query string, w
 			return "", err
 		}
 	}
-	return d.bindRelations(ctx, db, query, sources)
+	return bindCompiledSnapshot(compiled, sources)
 }
 func parseSQLTree(ctx context.Context, db snapshotSQL, query string) (map[string]any, error) {
 	var serialized string
@@ -243,22 +286,22 @@ type compiledSnapshot struct {
 	names map[string]string
 }
 
-// bindRelations compiles relation aliases once with the native parser. Per-read
+// compileSnapshot compiles relation aliases once with the native parser. Per-read
 // scopes become ordinary CTEs, avoiding repeated JSON SQL parse/deserialize work.
-func (d *Duck) bindRelations(ctx context.Context, db snapshotSQL, query string, sources map[string]string) (string, error) {
+func (d *Duck) compileSnapshot(ctx context.Context, db snapshotSQL, query string) (compiledSnapshot, error) {
 	d.snapshotMu.Lock()
 	compiled, ok := d.snapshotQueries[query]
 	d.snapshotMu.Unlock()
 	if !ok {
 		aliases := map[string]string{}
-		for name := range sources {
+		for _, name := range []string{"telemetry.spans", "telemetry.logs", "telemetry.metrics", "spans", "logs", "metrics", "endpoint_minutes", "endpoint_tail", "log_minutes", "log_tail", "trace_candidates", "trace_tail"} {
 			alias := "__fanout_snapshot_" + strings.ReplaceAll(name, ".", "_")
 			aliases[name] = "SELECT * FROM " + alias
 		}
 		used := map[string]string{}
 		rewritten, err := compileRelations(ctx, db, query, aliases, used)
 		if err != nil {
-			return "", err
+			return compiledSnapshot{}, err
 		}
 		// The AST records only rewritten table references, never SQL literals.
 		compiled = compiledSnapshot{query: rewritten, names: used}
@@ -269,13 +312,24 @@ func (d *Duck) bindRelations(ctx context.Context, db snapshotSQL, query string, 
 		d.snapshotQueries[query] = compiled
 		d.snapshotMu.Unlock()
 	}
+	return compiled, nil
+}
+
+func bindCompiledSnapshot(compiled compiledSnapshot, sources map[string]string) (string, error) {
 	definitions := []string{}
 	for name, alias := range compiled.names {
 		body, ok := sources[name]
 		if !ok {
 			return "", fmt.Errorf("missing snapshot relation %s", name)
 		}
-		definitions = append(definitions, alias+" AS ("+body+")")
+		materialization := " AS ("
+		if name == "trace_candidates" {
+			// This relation is used by both the top-one and touched-trace branches.
+			// Avoid copying every retained candidate into a temporary relation.
+			// Mixed-scope aggregates retain DuckDB's required barriers.
+			materialization = " AS NOT MATERIALIZED ("
+		}
+		definitions = append(definitions, alias+materialization+body+")")
 	}
 	if len(definitions) == 0 {
 		return compiled.query, nil

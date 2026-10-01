@@ -36,8 +36,8 @@ func TestWritesDoNotDrawFromTheReadPool(t *testing.T) {
 	if got := d.DB.Stats().MaxOpenConnections; got != 4 {
 		t.Fatalf("read pool MaxOpenConnections = %d, want 4", got)
 	}
-	if got := d.writeDB.Stats().MaxOpenConnections; got != 1 {
-		t.Fatalf("write handle MaxOpenConnections = %d, want 1 — writes are serialized by the gate anyway", got)
+	if got := d.writeDB.Stats().MaxOpenConnections; got != 2 {
+		t.Fatalf("write handle MaxOpenConnections = %d, want 2 for disjoint analytical and completed-batch writers", got)
 	}
 	if d.writer() != d.writeDB {
 		t.Fatal("writes are not going through the write handle")

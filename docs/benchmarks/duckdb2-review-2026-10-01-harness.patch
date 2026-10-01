@@ -1,0 +1,69 @@
+--- a/cmd/fanout-bench/main.go
++++ b/cmd/fanout-bench/main.go
+@@ -147,0 +148 @@
++	fs.StringVar(&cfg.FanoutCommit, "fanout-commit", "", "Fanout source identity")
+--- a/internal/bench/managed.go
++++ b/internal/bench/managed.go
+@@ -31,0 +32 @@
++	FanoutCommit           string
+@@ -68,8 +68,0 @@
+-	grpcPort, err := freePort()
+-	if err != nil {
+-		return err
+-	}
+-	httpOTLPPort, err := freePort()
+-	if err != nil {
+-		return err
+-	}
+@@ -81,2 +74,2 @@
+-	grpcAddr := fmt.Sprintf("127.0.0.1:%d", grpcPort)
+-	metricsURL := "http://" + httpAddr + "/-/metrics"
++	grpcAddr := httpAddr
++	metricsURL := "http://" + httpAddr + "/metrics"
+@@ -90,3 +83 @@
+-		"FANOUT_HTTP_ADDR="+httpAddr,
+-		"FANOUT_OTLP_GRPC_ADDR="+grpcAddr,
+-		fmt.Sprintf("FANOUT_OTLP_HTTP_ADDR=127.0.0.1:%d", httpOTLPPort),
++		"FANOUT_ADDR="+httpAddr,
+@@ -186 +177 @@
+-	cfg := Config{Host: managed.ProvisionedHost, SSHPort: managed.ProvisionedSSHPort, SSHIdentity: managed.ProvisionedSSHIdentity, Preset: managed.Preset, Endpoint: grpcAddr, MetricsURL: metricsURL, Insecure: true, Telemetrygen: managed.TelemetrygenPath, Token: ingestToken, OutputDir: managed.OutputDir, FanoutVersion: actualVersion, FanoutArtifact: managed.FanoutArtifact, DataDir: dataDir, SampleInterval: managed.SampleInterval, GeneratorTimeout: 30 * time.Second, Cooldown: managed.Cooldown, Repeat: managed.Repeat, QueryURL: baseURL, QueryCookie: queryCookie, QueryRate: managed.QueryRate, SameHost: true, BatchSize: managed.BatchSize, TelemetrygenVersion: managed.TelemetrygenVersion, ProcessOverride: managed.ProcessOverride, WorkerOverride: managed.WorkerOverride, RateOverride: managed.RateOverride, DurationOverride: managed.DurationOverride}
++	cfg := Config{Host: managed.ProvisionedHost, SSHPort: managed.ProvisionedSSHPort, SSHIdentity: managed.ProvisionedSSHIdentity, Preset: managed.Preset, Endpoint: grpcAddr, MetricsURL: metricsURL, Insecure: true, Telemetrygen: managed.TelemetrygenPath, Token: ingestToken, OutputDir: managed.OutputDir, FanoutVersion: actualVersion, FanoutCommit: managed.FanoutCommit, FanoutArtifact: managed.FanoutArtifact, DataDir: dataDir, SampleInterval: managed.SampleInterval, GeneratorTimeout: 30 * time.Second, Cooldown: managed.Cooldown, Repeat: managed.Repeat, QueryURL: baseURL, QueryCookie: queryCookie, QueryRate: managed.QueryRate, SameHost: true, BatchSize: managed.BatchSize, TelemetrygenVersion: managed.TelemetrygenVersion, ProcessOverride: managed.ProcessOverride, WorkerOverride: managed.WorkerOverride, RateOverride: managed.RateOverride, DurationOverride: managed.DurationOverride}
+--- a/internal/bench/preset.go
++++ b/internal/bench/preset.go
+@@ -13,0 +14,8 @@
++	}
++	// Fixed review reproduction: no adaptive phase selection and five full
++	// minutes of mixed ingest with the production open-loop reader scheduler.
++	if cfg.Preset == "review272" {
++		return []PhaseSpec{
++			{Name: "warmup", Kind: "warmup", Signal: Mixed, Duration: 10 * time.Second, DurationSeconds: 10, ProcessesPerSignal: 1, WorkersPerProcess: 8, RatePerWorker: 2500, BatchSize: 1000, Repetition: 1},
++			{Name: "mixed-sustained", Kind: "sustained", Signal: Mixed, Duration: 5 * time.Minute, DurationSeconds: 300, ProcessesPerSignal: 2, WorkersPerProcess: 8, RatePerWorker: 2500, BatchSize: 1000, QueryRate: 20, Repetition: 1},
++		}, nil
+--- a/internal/bench/runner.go
++++ b/internal/bench/runner.go
+@@ -333 +333,2 @@
+-		AtSeconds: round(at, 3), CPUSeconds: s.total("process_cpu_seconds_total", nil),
++		ReadCachePendingBatches: s.total("fanout_read_cache_pending_batches", nil),
++		AtSeconds:               round(at, 3), CPUSeconds: s.total("process_cpu_seconds_total", nil),
+--- a/internal/bench/types.go
++++ b/internal/bench/types.go
+@@ -126,9 +126,10 @@
+-	AtSeconds       float64 `json:"at_seconds"`
+-	CPUSeconds      float64 `json:"cpu_seconds"`
+-	RSSBytes        float64 `json:"rss_bytes"`
+-	HeapBytes       float64 `json:"heap_bytes"`
+-	QueueDepth      float64 `json:"queue_depth"`
+-	ParquetFiles    float64 `json:"parquet_files"`
+-	ParquetBytes    float64 `json:"parquet_bytes"`
+-	PublishWaiters  float64 `json:"publish_waiters"`
+-	PublishTimeouts float64 `json:"publish_timeouts_total"`
++	ReadCachePendingBatches float64 `json:"fanout_read_cache_pending_batches"`
++	AtSeconds               float64 `json:"at_seconds"`
++	CPUSeconds              float64 `json:"cpu_seconds"`
++	RSSBytes                float64 `json:"rss_bytes"`
++	HeapBytes               float64 `json:"heap_bytes"`
++	QueueDepth              float64 `json:"queue_depth"`
++	ParquetFiles            float64 `json:"parquet_files"`
++	ParquetBytes            float64 `json:"parquet_bytes"`
++	PublishWaiters          float64 `json:"publish_waiters"`
++	PublishTimeouts         float64 `json:"publish_timeouts_total"`

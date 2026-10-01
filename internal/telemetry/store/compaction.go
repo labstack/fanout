@@ -124,6 +124,7 @@ type compactionKey struct {
 // namespace swap; storage owns native merges and crash-safe replacement state.
 type ParquetPublisher interface {
 	PublishParquet(context.Context, func(context.Context) error) error
+	PublishParquetReplacement(context.Context, telemetry.BatchMetadata, []string, func(context.Context) error) error
 }
 
 // CompactParquet combines one same-day, same-generation group. The output is
@@ -138,7 +139,7 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 	if exists, err := pathExists(markerPath); err != nil {
 		return 0, err
 	} else if exists {
-		if err := r.recoverCompaction(ctx, publisher.PublishParquet); err != nil {
+		if err := r.recoverCompaction(ctx, publisher.PublishParquetReplacement); err != nil {
 			return 0, fmt.Errorf("recover pending Parquet compaction: %w", err)
 		}
 	}
@@ -241,7 +242,7 @@ func (r *Repository) CompactParquet(ctx context.Context, publisher ParquetPublis
 		return 0, err
 	}
 	prepared = true
-	if err := r.completeCompaction(ctx, marker, publisher.PublishParquet); err != nil {
+	if err := r.completeCompaction(ctx, marker, publisher.PublishParquetReplacement); err != nil {
 		return 0, err
 	}
 	if err := clearCompactionAttempt(r.root); err != nil {
@@ -442,14 +443,14 @@ func (r *Repository) CompactParquetPass(ctx context.Context, publisher ParquetPu
 	}
 }
 
-type parquetPublishFunc func(context.Context, func(context.Context) error) error
+type parquetPublishFunc func(context.Context, telemetry.BatchMetadata, []string, func(context.Context) error) error
 
 // RecoverParquet resolves a pending compaction marker before any cleanup,
 // retention, or new compaction can mutate its rollback set.
 func (r *Repository) RecoverParquet(ctx context.Context, publisher ParquetPublisher) error {
 	r.compactionMu.Lock()
 	defer r.compactionMu.Unlock()
-	return r.recoverCompaction(ctx, publisher.PublishParquet)
+	return r.recoverCompaction(ctx, publisher.PublishParquetReplacement)
 }
 
 func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPublishFunc) error {
@@ -477,7 +478,7 @@ func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPubli
 	}
 	if !stageExists && !finalExists {
 		if err := r.Parquet.RestoreRetiredInputs(marker.Inputs, marker.Output.ID, func(swap func(context.Context) error) error {
-			return publish(ctx, swap)
+			return publish(ctx, telemetry.BatchMetadata{}, nil, swap)
 		}); err != nil {
 			return fmt.Errorf("restore compaction %s inputs: %w", marker.Output.ID, err)
 		}
@@ -491,7 +492,7 @@ func (r *Repository) recoverCompaction(ctx context.Context, publish parquetPubli
 
 func (r *Repository) completeCompaction(ctx context.Context, marker compactionMarker, publish parquetPublishFunc) error {
 	if err := r.Parquet.PublishReplacement(r.compactionStage(marker.Output.ID), marker.Output, marker.Inputs, func(swap func(context.Context) error) error {
-		return publish(ctx, swap)
+		return publish(ctx, marker.Output, marker.Inputs, swap)
 	}); err != nil {
 		return err
 	}

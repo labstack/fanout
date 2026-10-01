@@ -3,11 +3,14 @@ package query
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/labstack/fanout/internal/config"
+	"github.com/labstack/fanout/internal/query/writegate"
 	"github.com/labstack/fanout/internal/queryrows"
 	"github.com/labstack/fanout/internal/telemetry"
 	telemetrystore "github.com/labstack/fanout/internal/telemetry/store"
@@ -15,7 +18,12 @@ import (
 
 func newBatchCacheTest(t *testing.T) (*Duck, *telemetrystore.Repository) {
 	t.Helper()
-	cfg := config.Config{DataDir: t.TempDir(), DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2}
+	return newBatchCacheTestAt(t, filepath.Join(t.TempDir(), "données-🙂"))
+}
+
+func newBatchCacheTestAt(t *testing.T, dataDir string) (*Duck, *telemetrystore.Repository) {
+	t.Helper()
+	cfg := config.Config{DataDir: dataDir, DuckDBMemory: "256MB", DuckDBThreads: 2, DuckDBMaxConns: 2}
 	repo, err := telemetrystore.Open(cfg.TelemetryDir())
 	if err != nil {
 		t.Fatal(err)
@@ -174,6 +182,10 @@ func TestBatchCachesStayExactThroughCompactionAndRetention(t *testing.T) {
 	if count, err := repo.CompactParquet(t.Context(), d, 8); err != nil || count != 8 {
 		t.Fatalf("compact %d: %v", count, err)
 	}
+	markers, err := batchMarkers(t.Context(), d.DB)
+	if err != nil || len(markers) != 9 {
+		t.Fatalf("output was not derived from eight complete inputs: %v %v", markers, err)
+	}
 	check := func() {
 		t.Helper()
 		w := queryrows.Window{Start: at.Add(-time.Minute), End: at.Add(time.Minute), Kind: queryrows.EndpointRead}
@@ -187,9 +199,9 @@ func TestBatchCachesStayExactThroughCompactionAndRetention(t *testing.T) {
 		if err := d.QueryRowScan(queryrows.WithWindow(t.Context(), w), []any{&count}, `SELECT (SELECT count(*) FROM trace_candidates)+(SELECT count(*) FROM trace_tail)`); err != nil {
 			t.Fatal(err)
 		}
-		// Before the replacement is cached every raw span is visible. Afterwards
-		// the one exact cached trace is visible and the tail contains no rows.
-		if count != 8 && count != 1 {
+		// A replacement derived from complete inputs is immediately cached even
+		// while the retired input markers remain. It has one candidate and no tail.
+		if count != 1 {
 			t.Fatalf("candidate coverage=%d", count)
 		}
 	}
@@ -198,7 +210,7 @@ func TestBatchCachesStayExactThroughCompactionAndRetention(t *testing.T) {
 		t.Fatal(err)
 	}
 	check()
-	markers, err := batchMarkers(t.Context(), d.DB)
+	markers, err = batchMarkers(t.Context(), d.DB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +228,7 @@ func TestBatchCachesStayExactThroughCompactionAndRetention(t *testing.T) {
 	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.DB.QueryRow(`SELECT count(*) FROM read_traces`).Scan(&count); err != nil || count != 0 {
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_trace_parts`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("retired index retained: %d %v", count, err)
 	}
 }
@@ -230,7 +242,7 @@ func TestReadCacheCancellationLeavesNoMarkerOrPartialContributions(t *testing.T)
 	if _, err := d.RefreshReadCaches(ctx); err == nil {
 		t.Fatal("cancelled backfill succeeded")
 	}
-	for _, table := range []string{"read_batches", "read_endpoints", "read_trace_parts", "read_traces"} {
+	for _, table := range []string{"read_batches", "read_endpoints", "read_trace_parts", "read_trace_candidates"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s partial rows=%d: %v", table, count, err)
@@ -246,14 +258,14 @@ func TestFailedBatchCacheTransactionPublishesNoContributions(t *testing.T) {
 	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "atomic", Spans: []telemetry.Span{{TraceID: "trace", StartUnixNanos: 1, IngestedAt: 1}}, Logs: []telemetry.Log{{TimeUnixNanos: 1, IngestedAt: 1}}}); err != nil {
 		t.Fatal(err)
 	}
-	// Fail after the span and exact-log-time writes, before acknowledgement.
+	// Fail after the span writes, before acknowledgement.
 	if _, err := d.DB.Exec(`DROP TABLE read_logs`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.RefreshReadCaches(t.Context()); err == nil {
 		t.Fatal("broken cache schema accepted")
 	}
-	for _, table := range []string{"read_batches", "read_span_events", "read_log_times", "read_endpoints", "read_trace_parts", "read_traces"} {
+	for _, table := range []string{"read_batches", "read_endpoints", "read_trace_parts", "read_trace_candidates"} {
 		var count int
 		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
 			t.Fatalf("%s partial rows=%d: %v", table, count, err)
@@ -297,5 +309,308 @@ func TestReadCacheWorkerAcknowledgesNewFilesWithoutRollupTick(t *testing.T) {
 				return
 			}
 		}
+	}
+}
+
+func TestReadCacheSemanticVersionRebuildsAllContributions(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Now().UTC().Truncate(time.Minute)
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "semantic", Logs: []telemetry.Log{{TimeUnixNanos: at.UnixNano(), Severity: "INFO", IngestedAt: at.UnixNano()}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{`UPDATE read_logs SET severity='info'`, `UPDATE read_cache_version SET version=1`, `CREATE TABLE read_obsolete (value INTEGER)`, `CREATE TABLE endpoint_rollup (value INTEGER)`, `INSERT INTO rollup_state VALUES ('endpoint_rollup:prod',1,now())`} {
+		if _, err := d.DB.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := CreateCacheTables(d.DB); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"read_batches", "read_logs", "read_trace_parts", "read_endpoints", "read_trace_candidates"} {
+		var count int
+		if err := d.DB.QueryRow("SELECT count(*) FROM " + table).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("%s survived semantic change: %d %v", table, count, err)
+		}
+	}
+	var obsolete int
+	if err := d.DB.QueryRow(`SELECT count(*) FROM duckdb_tables() WHERE table_name IN ('read_obsolete','endpoint_rollup')`).Scan(&obsolete); err != nil || obsolete != 0 {
+		t.Fatalf("obsolete tables=%d: %v", obsolete, err)
+	}
+	if err := d.DB.QueryRow(`SELECT count(*) FROM rollup_state WHERE starts_with(cache_key,'endpoint_rollup')`).Scan(&obsolete); err != nil || obsolete != 0 {
+		t.Fatalf("obsolete watermark=%d: %v", obsolete, err)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var severity string
+	if err := d.DB.QueryRow(`SELECT severity FROM read_logs`).Scan(&severity); err != nil || severity != "INFO" {
+		t.Fatalf("rebuilt label=%q: %v", severity, err)
+	}
+	// A matching version preserves valid acknowledgements on the next startup.
+	if err := CreateCacheTables(d.DB); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&obsolete); err != nil || obsolete != 1 {
+		t.Fatalf("current cache discarded: %d %v", obsolete, err)
+	}
+}
+
+func TestBroadGlobRetainsCapturedFileSet(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Now().UTC()
+	for i := range 64 {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprintf("glob-%d", i), Spans: []telemetry.Span{{TraceID: "trace", SpanID: fmt.Sprint(i), StartUnixNanos: at.UnixNano(), IngestedAt: at.UnixNano()}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	captured := repo.Parquet.BatchMetadata()
+	source := d.snapshotSource("spans", captured, captured)
+	if !strings.Contains(source, "*.batch") {
+		t.Fatal("broad selection did not use glob")
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "new-after-capture", Spans: []telemetry.Span{{TraceID: "new", StartUnixNanos: at.UnixNano(), IngestedAt: at.UnixNano()}}}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := d.DB.QueryRow("SELECT count(*) FROM (" + source + ")").Scan(&count); err != nil || count != 64 {
+		t.Fatalf("captured rows=%d: %v", count, err)
+	}
+	narrow := d.snapshotSource("spans", captured[:1], captured)
+	if strings.Contains(narrow, "*.batch") {
+		t.Fatal("narrow selection used glob")
+	}
+	if err := d.DB.QueryRow("SELECT count(*) FROM (" + narrow + ")").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("narrow rows=%d: %v", count, err)
+	}
+}
+
+func TestBatchFilenameIdentityWithRelativeDataDir(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	relative, err := filepath.Rel(cwd, filepath.Join(t.TempDir(), "données-🙂"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, repo := newBatchCacheTestAt(t, relative)
+	for i := range readCacheBatchLimit {
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("relative", i), Logs: []telemetry.Log{{TimeUnixNanos: 1, IngestedAt: 1}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := d.DB.QueryRow(`SELECT sum(count) FROM read_logs WHERE batch_id IN (SELECT batch_id FROM read_batches)`).Scan(&count); err != nil || count != readCacheBatchLimit {
+		t.Fatalf("relative cache batch identity=%d: %v", count, err)
+	}
+	active := repo.Parquet.BatchMetadata()
+	if err := d.DB.QueryRow(`SELECT count(*) FROM (` + d.snapshotSource("logs", active, active) + `)`).Scan(&count); err != nil || count != readCacheBatchLimit {
+		t.Fatalf("relative glob identity=%d: %v", count, err)
+	}
+}
+
+func TestPreparedReplacementDoesNotHoldCacheWriteGate(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "input", Logs: []telemetry.Log{{TimeUnixNanos: 1, IngestedAt: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// Pin a reader so publication has to drain. The worker must still be able to
+	// acknowledge new ingest and must not collect the prepared output marker.
+	if err := d.parquetMu.RLockContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer d.parquetMu.RUnlock()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- d.PublishParquetReplacement(ctx, telemetry.BatchMetadata{ID: "output"}, []string{"input"}, func(context.Context) error { return nil })
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		markers, err := batchMarkers(t.Context(), d.DB)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if markers["output"] {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("replacement was not prepared")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "new-input", Logs: []telemetry.Log{{TimeUnixNanos: 2, IngestedAt: 2}}}); err != nil {
+		t.Fatal(err)
+	}
+	passCtx, stop := context.WithTimeout(t.Context(), time.Second)
+	defer stop()
+	if _, err := d.RefreshReadCaches(passCtx); err != nil {
+		t.Fatalf("worker blocked behind publication: %v", err)
+	}
+	markers, err := batchMarkers(t.Context(), d.DB)
+	if err != nil || !markers["output"] || !markers["new-input"] {
+		t.Fatalf("prepared output/new ingest lost: %v %v", markers, err)
+	}
+	cancel()
+	if err := <-done; err == nil {
+		t.Fatal("cancelled publication succeeded")
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	markers, err = batchMarkers(t.Context(), d.DB)
+	if err != nil || markers["output"] {
+		t.Fatalf("failed output was not collected: %v %v", markers, err)
+	}
+}
+
+func TestRetiredTraceRepairsOnlyItsActiveScopeAndBounds(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Now().UTC().Truncate(time.Hour)
+	old := at.Add(-2 * time.Hour).UnixNano()
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "retire-scope", Spans: []telemetry.Span{{Namespace: "gone", ServiceName: "retired", TraceID: "shared", StartUnixNanos: old, EndUnixNanos: old + 1, StatusCode: "ERROR", IngestedAt: old}}}); err != nil {
+		t.Fatal(err)
+	}
+	now := at.UnixNano()
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "keep-scope", Spans: []telemetry.Span{
+		{Namespace: "prod", ServiceName: "api", TraceID: "shared", StartUnixNanos: now, EndUnixNanos: now + 1, IngestedAt: now},
+		{Namespace: "prod", ServiceName: "api", TraceID: "winner", StartUnixNanos: now, EndUnixNanos: now + 1000, IngestedAt: now},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if count, err := repo.PruneParquet(t.Context(), d, at.Add(-time.Hour).UnixNano(), 8); err != nil || count != 1 {
+		t.Fatalf("prune=%d: %v", count, err)
+	}
+	check := func() {
+		t.Helper()
+		for _, ns := range []string{"", "prod"} {
+			w := queryrows.Window{Start: at.Add(-3 * time.Hour), End: at.Add(time.Minute), Kind: queryrows.TraceCandidateRead, Namespace: ns}
+			var id string
+			if err := d.QueryRowScan(queryrows.WithWindow(t.Context(), w), []any{&id}, `SELECT trace_id FROM trace_candidates ORDER BY has_error DESC,max_end-min_start DESC,trace_id LIMIT 1`); err != nil || id != "winner" {
+				t.Fatalf("namespace %q winner=%q: %v", ns, id, err)
+			}
+		}
+	}
+	check()
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	check()
+	var namespace, service string
+	var hasError int
+	if err := d.DB.QueryRow(`SELECT namespace,service,has_error FROM read_trace_candidates WHERE trace_id='shared'`).Scan(&namespace, &service, &hasError); err != nil || namespace != "prod" || service != "api" || hasError != 0 {
+		t.Fatalf("remaining scope=%q/%q error=%d: %v", namespace, service, hasError, err)
+	}
+}
+
+func TestTraceCacheFollowsMultipleCompactionLevels(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	at := time.Now().UTC().Truncate(time.Hour)
+	for i := range 64 {
+		n := at.Add(time.Duration(i) * time.Second).UnixNano()
+		if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: fmt.Sprint("level", i), Spans: []telemetry.Span{{TraceID: "shared", StartUnixNanos: n, EndUnixNanos: n + 1, IngestedAt: n}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 4 {
+		if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 9 {
+		if count, err := repo.CompactParquet(t.Context(), d, 8); err != nil || count != 8 {
+			t.Fatalf("compact=%d: %v", count, err)
+		}
+	}
+	if batches := repo.Parquet.BatchMetadata(); len(batches) != 1 || batches[0].Generation != 2 {
+		t.Fatalf("replacement=%v", batches)
+	}
+	w := queryrows.Window{Start: at.Add(-time.Minute), End: at.Add(2 * time.Minute), Kind: queryrows.TraceCandidateRead}
+	var count int
+	if err := d.QueryRowScan(queryrows.WithWindow(t.Context(), w), []any{&count}, `SELECT count(*) FROM trace_candidates`); err != nil || count != 1 {
+		t.Fatalf("candidate=%d: %v", count, err)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_batches`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("retired markers=%d: %v", count, err)
+	}
+	if err := d.DB.QueryRow(`SELECT count(*) FROM read_trace_candidates`).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("trace index=%d: %v", count, err)
+	}
+}
+
+func TestCompletedBatchWriterProgressesDuringAnalyticalTransaction(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "independent", Spans: []telemetry.Span{{TraceID: "trace", StartUnixNanos: 1, EndUnixNanos: 2, IngestedAt: 1}}}); err != nil {
+		t.Fatal(err)
+	}
+	unlock := d.writeGate.Lock(writegate.WriteRollupService)
+	defer unlock()
+	tx, err := d.writer().BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`INSERT INTO rollup_state VALUES ('blocked-analytical-pass',1,now())`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if _, err := d.RefreshReadCaches(ctx); err != nil {
+		t.Fatalf("cache stalled behind disjoint analytical write: %v", err)
+	}
+	markers, err := batchMarkers(ctx, d.DB)
+	if err != nil || !markers["independent"] {
+		t.Fatalf("independent batch not published: %v %v", markers, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestReadCacheRowBudgetAndOversizedFileProgress(t *testing.T) {
+	d, repo := newBatchCacheTest(t)
+	old := make([]telemetry.Log, readCacheRowBudget+1)
+	for i := range old {
+		old[i] = telemetry.Log{TimeUnixNanos: 1, IngestedAt: 1, Severity: "INFO"}
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "oversized", Logs: old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Commit(t.Context(), telemetrystore.Batch{ID: "newest", Logs: []telemetry.Log{{TimeUnixNanos: 2, IngestedAt: 2}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	markers, err := batchMarkers(t.Context(), d.DB)
+	if err != nil || !markers["newest"] || markers["oversized"] {
+		t.Fatalf("row budget not respected: %v %v", markers, err)
+	}
+	if _, err := d.RefreshReadCaches(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	markers, err = batchMarkers(t.Context(), d.DB)
+	if err != nil || !markers["oversized"] {
+		t.Fatalf("oversized file made no progress: %v %v", markers, err)
+	}
+	var count int
+	if err := d.DB.QueryRow(`SELECT sum(count) FROM read_logs WHERE batch_id='oversized'`).Scan(&count); err != nil || count != len(old) {
+		t.Fatalf("oversized count=%d: %v", count, err)
 	}
 }
