@@ -104,7 +104,7 @@ export default function Settings() {
       // A failure between the write and the response leaves the old token dead
       // and the new one unrecoverable, so this case gets its own instruction
       // rather than the browser's "Failed to fetch".
-      const response = await authorizedFetch("/api/settings/ingest/rotate-token", { method: "POST" })
+      const response = await authorizedFetch("/api/settings/ingest/token/rotate", { method: "POST" })
         .catch(() => { throw new Error("Fanout could not be reached. A token may still have been issued — reload this page before trying again."); });
       if (!response.ok) throw new Error("Fanout could not issue a new token. Try again.");
       // The plaintext comes back once, under the same key the setup response

@@ -257,7 +257,7 @@ Most deployments should not set DuckDB variables. Give the process or
 container the CPU and memory limits it may use; at startup Fanout reserves
 headroom for Go and sizes the DuckDB connection pool from available CPUs. The
 resolved values and whether Fanout chose them are available in the
-`runtime_sizing` block returned by `/readyz` and `/api/health`.
+`runtime_sizing` block returned by `/readyz`.
 
 These variables are escape hatches for measured, unusual workloads:
 

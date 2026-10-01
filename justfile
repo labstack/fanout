@@ -21,6 +21,10 @@ export CGO_ENABLED := "1"
 go_version := `awk '$1 == "go" { print $2; exit }' go.mod`
 export GOTOOLCHAIN := "go" + go_version
 
+# Match the runtime Goose dependency; compile only its SQLite CLI driver.
+goose_version := `awk '$1 == "github.com/pressly/goose/v3" { print $2; exit }' go.mod`
+goose := "go run -tags=no_postgres,no_mysql,no_mssql,no_clickhouse,no_vertica,no_ydb,no_libsql github.com/pressly/goose/v3/cmd/goose@" + goose_version
+
 # Everything `go:embed` compiles into the binary. Keep in sync with `outDir` in
 # ui/host/vite.config.ts and the `cp` targets in ui/apps/package.json.
 embedded := "internal/ui/dist internal/mcp/apps"
@@ -92,15 +96,14 @@ notices-check:
 db-gen:
     cd internal/db && sqlc generate
 
-# Create a migration from schema changes.
-db-migrate-diff NAME:
-    mkdir -p data/control
-    cd internal/db && atlas migrate diff {{NAME}} --env local
+# Create a timestamped SQLite SQL migration. Edit its Up section, then db-gen.
+db-migrate-create NAME:
+    {{goose}} -dir internal/db/migrations create {{NAME}} sql
 
 # Apply migrations (development; production auto-applies on boot).
-db-migrate-apply:
-    mkdir -p data/control
-    cd internal/db && atlas migrate apply --env local
+db-migrate-apply DB="data/control/fanout.sqlite":
+    mkdir -p "$(dirname "{{DB}}")"
+    {{goose}} -dir internal/db/migrations sqlite3 "{{DB}}?_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)" up
 
 # ── Go quality ───────────────────────────────────────────────────────────────
 

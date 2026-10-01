@@ -45,11 +45,11 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 	cfg := config.Config{MetricsToken: "metrics-secret"}
 	e := echo.New()
 	RegisterAuthMiddleware(e, users, sessions, auth.NewAuditStore(db.DB), cfg)
-	e.POST("/api/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
-	e.GET("/-/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	e.POST("/api/alerting/rules", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	e.GET("/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 
 	cookie := authenticatedSessionCookie(t, sessions, user)
-	withoutHeader := httptest.NewRequest(http.MethodPost, "/api/rules", nil)
+	withoutHeader := httptest.NewRequest(http.MethodPost, "/api/alerting/rules", nil)
 	withoutHeader.AddCookie(cookie)
 	recorder := httptest.NewRecorder()
 	e.ServeHTTP(recorder, withoutHeader)
@@ -57,7 +57,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 		t.Fatalf("session mutation without Fanout header = %d, want 403", recorder.Code)
 	}
 
-	withHeader := httptest.NewRequest(http.MethodPost, "/api/rules", nil)
+	withHeader := httptest.NewRequest(http.MethodPost, "/api/alerting/rules", nil)
 	withHeader.AddCookie(cookie)
 	withHeader.Header.Set("Fanout-Request", "1")
 	recorder = httptest.NewRecorder()
@@ -66,7 +66,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 		t.Fatalf("session mutation with Fanout header = %d, want 204", recorder.Code)
 	}
 
-	metrics := httptest.NewRequest(http.MethodGet, "/-/metrics", nil)
+	metrics := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	metrics.Header.Set("Authorization", "Bearer metrics-secret")
 	recorder = httptest.NewRecorder()
 	e.ServeHTTP(recorder, metrics)
@@ -74,7 +74,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 		t.Fatalf("metrics service credential = %d, want 204", recorder.Code)
 	}
 
-	badMetrics := httptest.NewRequest(http.MethodGet, "/-/metrics", nil)
+	badMetrics := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	badMetrics.Header.Set("Authorization", "Bearer not-a-jwt")
 	recorder = httptest.NewRecorder()
 	e.ServeHTTP(recorder, badMetrics)
@@ -86,7 +86,7 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create viewer: %v", err)
 	}
-	viewerMetrics := httptest.NewRequest(http.MethodGet, "/-/metrics", nil)
+	viewerMetrics := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	viewerMetrics.AddCookie(authenticatedSessionCookie(t, sessions, viewer))
 	recorder = httptest.NewRecorder()
 	e.ServeHTTP(recorder, viewerMetrics)
@@ -96,18 +96,18 @@ func TestSessionMiddlewareCSRFAndMetricsCredential(t *testing.T) {
 
 	noToken := echo.New()
 	RegisterAuthMiddleware(noToken, users, sessions, auth.NewAuditStore(db.DB), config.Config{})
-	noToken.GET("/-/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	noToken.GET("/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	recorder = httptest.NewRecorder()
-	noToken.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/-/metrics", nil))
+	noToken.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if recorder.Code != http.StatusUnauthorized {
 		t.Fatalf("empty configured token accepted missing bearer: %d", recorder.Code)
 	}
 
 	publicMetrics := echo.New()
 	RegisterAuthMiddleware(publicMetrics, users, sessions, auth.NewAuditStore(db.DB), config.Config{MetricsPublic: true})
-	publicMetrics.GET("/-/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
+	publicMetrics.GET("/metrics", func(c *echo.Context) error { return c.NoContent(http.StatusNoContent) })
 	recorder = httptest.NewRecorder()
-	publicMetrics.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/-/metrics", nil))
+	publicMetrics.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("public metrics request = %d, want 204", recorder.Code)
 	}

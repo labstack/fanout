@@ -124,7 +124,7 @@ func (c Config) LogStartup() {
 		slog.Warn("reverse-proxy client IPs are not trusted; configure server.trusted_proxy_cidrs so audit and rate limits use end-client addresses")
 	}
 	if c.MetricsPublic {
-		slog.Warn("Prometheus metrics are publicly accessible", "path", "/-/metrics")
+		slog.Warn("Prometheus metrics are publicly accessible", "path", "/metrics")
 	}
 	if c.SelfSignup {
 		slog.Info("self-signup is enabled", "role", appauth.RoleViewer)

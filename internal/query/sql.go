@@ -39,7 +39,7 @@ const (
 func (d *Duck) ExecuteSQL(ctx context.Context, req SQLRequest) (resp SQLResponse) {
 	start := time.Now()
 
-	// Record query latency + status for /-/metrics (fanout_query_*). Covers the
+	// Record query latency + status for /metrics (fanout_query_*). Covers the
 	// raw SQL path (MCP query tool); service-layer endpoints are timed by the
 	// HTTP request-duration metric.
 	defer func() {

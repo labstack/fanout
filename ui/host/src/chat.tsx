@@ -21,7 +21,7 @@ const suggestions = [
 ];
 
 export function toolTitle(name: string) {
-  return ({ observability_overview: "System health", service_topology: "Service map", service_performance: "Performance", trace_detail: "Trace analysis", search_logs: "Logs" } as Record<string, string>)[name] ?? "System analysis";
+  return ({ get_observability_overview: "System health", get_service_topology: "Service map", get_service_performance: "Performance", inspect_trace: "Trace analysis", search_logs: "Logs" } as Record<string, string>)[name] ?? "System analysis";
 }
 
 export function ChatPage() {

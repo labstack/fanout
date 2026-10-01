@@ -165,7 +165,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     if (!sessionReady || viewer !== "none" || !loginToken) return;
     setBusy(true);
     setError("");
-    jsonRequest("/api/auth/login-link", { token: loginToken })
+    jsonRequest("/api/auth/link/verify", { token: loginToken })
       .then(() => { setViewer("user"); void refreshAccount(); })
       .catch((value) => setError(value instanceof Error ? value.message : String(value)))
       .finally(() => { setLoginToken(""); setBusy(false); });
@@ -247,7 +247,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     setBusy(true);
     setError("");
     try {
-      await jsonRequest("/api/auth/start", { email });
+      await jsonRequest("/api/auth/code/send", { email });
       setCodeSent(true);
       setCode("");
       setResendAt(Date.now() + 30_000);
@@ -263,7 +263,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     setBusy(true);
     setError("");
     try {
-      await jsonRequest("/api/auth/verify", { email, code: value });
+      await jsonRequest("/api/auth/code/verify", { email, code: value });
       setViewer("user");
       // A later re-authentication in the same tab starts on the email step
       // rather than remounting on a stale code step, and clearing the deadline

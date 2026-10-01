@@ -17,8 +17,8 @@ func registerTestUserRoutes(s *testAuthServer) {
 
 func TestUserMutationsProtectLastActiveAdmin(t *testing.T) {
 	for _, tc := range []struct{ name, method, body string }{
-		{"demote", http.MethodPut, `{"role":"viewer"}`},
-		{"deactivate", http.MethodPut, `{"active":false}`},
+		{"demote", http.MethodPatch, `{"role":"viewer"}`},
+		{"deactivate", http.MethodPatch, `{"active":false}`},
 		{"delete", http.MethodDelete, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -56,7 +56,7 @@ func TestDeleteUser_AllowsDeletingAdminWhenAnotherActiveAdminExists(t *testing.T
 	}
 }
 
-func TestLogoutAllRevokesTargetSessions(t *testing.T) {
+func TestRevokeAccessRevokesTargetSessions(t *testing.T) {
 	s := newTestAuthServer(t)
 	registerTestUserRoutes(s)
 	admin, _ := s.users.Create("admin@example.com", "", "admin")
@@ -64,14 +64,49 @@ func TestLogoutAllRevokesTargetSessions(t *testing.T) {
 	adminCookie := s.login(t, admin)
 	targetCookie := s.login(t, target)
 	revoke := httptest.NewRecorder()
-	s.e.ServeHTTP(revoke, sessionRequest(http.MethodPost, "/api/users/"+target.ID+"/logout-all", nil, adminCookie))
+	s.e.ServeHTTP(revoke, sessionRequest(http.MethodPost, "/api/users/"+target.ID+"/access/revoke", nil, adminCookie))
 	if revoke.Code != http.StatusOK {
-		t.Fatalf("logout-all = %d %s", revoke.Code, revoke.Body.String())
+		t.Fatalf("revoke-access = %d %s", revoke.Code, revoke.Body.String())
 	}
 	me := httptest.NewRecorder()
 	s.e.ServeHTTP(me, sessionRequest(http.MethodGet, "/api/auth/me", nil, targetCookie))
 	if me.Code != http.StatusUnauthorized {
 		t.Fatalf("target reused session = %d", me.Code)
+	}
+}
+
+func TestPatchUserPreservesOmittedFieldsAndAppliesFalse(t *testing.T) {
+	s := newTestAuthServer(t)
+	registerTestUserRoutes(s)
+	admin, err := s.users.Create("admin@example.com", "Administrator", "admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := s.users.Create("target@example.com", "Original", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := s.login(t, admin)
+	path := "/api/users/" + target.ID
+	for _, body := range []string{`{"name":"Renamed"}`, `{"active":false}`} {
+		req := sessionRequest(http.MethodPatch, path, strings.NewReader(body), cookie)
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		s.e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PATCH %s = %d: %s", body, rec.Code, rec.Body.String())
+		}
+		var updated auth.User
+		if err := json.Unmarshal(rec.Body.Bytes(), &updated); err != nil {
+			t.Fatal(err)
+		}
+		wantActive := body != `{"active":false}`
+		if updated.Email != target.Email || updated.Role != target.Role || updated.Name != "Renamed" || updated.Active != wantActive {
+			t.Fatalf("PATCH %s changed omitted fields or lost false: %+v", body, updated)
+		}
+	}
+	if _, ok := classifyRoute(http.MethodPut, path); ok {
+		t.Fatal("PUT still classified as a supported user update")
 	}
 }
 

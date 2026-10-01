@@ -56,6 +56,15 @@ Migrations run forward at startup. A rollback to the previous binary after they
 have run is not assumed safe — restore the pre-upgrade backup with the previous
 version instead.
 
+The Goose migration baseline requires a fresh control database. Existing
+Atlas-managed control databases are rejected without conversion or reset. For
+this transition, stop Fanout, back up the complete directory, and move its
+`control` subdirectory aside before starting the new version. Telemetry and
+query files remain in place. Complete first-admin setup again, then reconfigure
+the ingest token, users, alert rules, and dashboards. Prior sessions, OAuth
+grants, and agent history remain in the saved control database; recover that
+state using the previous version and its backup.
+
 ## Never delete an account from the control database
 
 Removing a user row cascades to sessions, OAuth grants and owned dashboards. To

@@ -53,13 +53,29 @@ original host.
 
 - `/healthz` is the liveness check.
 - `/readyz` includes storage readiness and resolved runtime sizing.
-- `/-/metrics` exposes Prometheus metrics. Keep it private or configure
+- `/metrics` exposes Prometheus metrics. Keep it private or configure
   `FANOUT_METRICS_TOKEN`; do not make it public merely to simplify scraping.
 
 Alert on repeated restarts, readiness failures, ingest authentication failures,
 telemetry drops, sustained query latency, and available disk space. Retention
 is controlled by `FANOUT_RETENTION_DAYS`; maintenance removes expired data on
 its configured cycle rather than immediately when the setting changes.
+
+## Control database migrations
+
+Fanout uses SQLite with the modernc driver, sqlc query bindings, and embedded
+Goose SQL migrations. Pending migrations run forward at startup. PostgreSQL
+and pgx are not required.
+
+This preview replaces the Atlas migration history with a fresh Goose baseline.
+Existing Atlas-managed control databases are unsupported; startup rejects them
+without converting or resetting their data. To start fresh, stop Fanout, back
+up the complete data directory, and move `data/control` aside (under your
+configured data directory). Startup creates a new control database. Complete
+first-admin setup again and reconfigure the ingest token, users, alert rules,
+and dashboards; prior sessions, OAuth grants, and agent history remain only in
+the saved control database. Telemetry and query files stay in place. Restore
+the saved directory with the previous binary if you need the previous state.
 
 ## Backup
 

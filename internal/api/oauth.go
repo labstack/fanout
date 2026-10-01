@@ -190,7 +190,7 @@ func (r mcpAuthorizationRequest) requiredScope() string {
 		return ""
 	}
 	switch r.Params.Name {
-	case "dashboard_list", "dashboard_get", "dashboard_create", "dashboard_update":
+	case "list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard":
 		return dashboard.OAuthScope
 	default:
 		return ""

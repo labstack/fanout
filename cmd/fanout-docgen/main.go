@@ -497,7 +497,7 @@ var groups = map[string]groupPage{
 	"metrics": {
 		Title:       "Metrics settings",
 		Description: "The Prometheus endpoint's token and whether it is public.",
-		Summary:     "Settings for the Prometheus scrape endpoint at /-/metrics.",
+		Summary:     "Settings for the Prometheus scrape endpoint at /metrics.",
 		ReadWhen:    []string{"You are scraping Fanout's own metrics."},
 	},
 }

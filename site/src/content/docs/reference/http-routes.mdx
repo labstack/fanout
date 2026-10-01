@@ -29,7 +29,7 @@ concluding a route is reachable — or that it is not:
   **not** the default. Enabling it also turns on mutex and block sampling.
 - `/mcp`, `/api/mcp`, `/oauth/*` and `/.well-known/*` — only when
   `FANOUT_MCP_ENABLED` is true, which **is** the default.
-- `/api/agent` and `/api/agent/*` — only when an AI provider key is
+- `/api/agent/*` — only when an AI provider key is
   configured. Without one the investigator is not registered at all.
 
 Everything else is always registered. A path shown with `:name` or `*` is the
@@ -47,7 +47,7 @@ The supported programmatic interface is **MCP**, at `/mcp` — see
 ingest, and the operational endpoints in [endpoints](/reference/endpoints).
 
 Two exceptions worth knowing, because HTTP is currently the only way to reach
-them: alert rules (`/api/rules`, `/api/alerts`) and ingest-token rotation
+them: alert rules (`/api/alerting/rules`, `/api/alerts`) and ingest-token rotation
 (`/api/settings/ingest`). Neither has a browser page yet.
 :::
 
@@ -60,18 +60,24 @@ Capabilities map to roles in [roles](/reference/roles).
 |---|---|---|
 | `GET` | `/` | none |
 | `GET` | `/*` | none |
-| `GET` | `/-/metrics` | `operations:read`, or a service credential |
 | `GET` | `/.well-known/oauth-authorization-server` | protocol handshake |
 | `GET` | `/.well-known/oauth-protected-resource` | protocol handshake |
 | `GET` | `/.well-known/oauth-protected-resource/mcp` | protocol handshake |
-| `POST` | `/api/agent` | `agent:run` |
+| `POST` | `/api/agent/runs` | `agent:run` |
 | `GET` | `/api/agent/threads` | `agent:run` |
 | `DELETE` | `/api/agent/threads/:threadID` | `agent:run` |
 | `GET` | `/api/agent/threads/:threadID` | `agent:run` |
 | `PATCH` | `/api/agent/threads/:threadID` | `agent:run` |
+| `GET` | `/api/alerting/rules` | `telemetry:read` |
+| `POST` | `/api/alerting/rules` | `alerts:manage` |
+| `DELETE` | `/api/alerting/rules/:id` | `alerts:manage` |
+| `PUT` | `/api/alerting/rules/:id` | `alerts:manage` |
+| `POST` | `/api/alerting/rules/:id/test` | `alerts:manage` |
 | `GET` | `/api/alerts` | `telemetry:read` |
 | `GET` | `/api/alerts/summary` | `telemetry:read` |
-| `POST` | `/api/auth/login-link` | none |
+| `POST` | `/api/auth/code/send` | none |
+| `POST` | `/api/auth/code/verify` | none |
+| `POST` | `/api/auth/link/verify` | none |
 | `POST` | `/api/auth/logout` | any signed-in user |
 | `GET` | `/api/auth/me` | any signed-in user |
 | `GET` | `/api/auth/oauth/authorize` | any signed-in user |
@@ -79,17 +85,12 @@ Capabilities map to roles in [roles](/reference/roles).
 | `GET` | `/api/auth/oidc/callback` | none |
 | `GET` | `/api/auth/oidc/start` | none |
 | `POST` | `/api/auth/setup` | none |
-| `POST` | `/api/auth/start` | none |
 | `GET` | `/api/auth/status` | none |
-| `POST` | `/api/auth/verify` | none |
-| `GET` | `/api/dashboard` | `dashboards:manage-own` |
-| `PUT` | `/api/dashboard` | `dashboards:manage-own` |
 | `GET` | `/api/dashboards` | `dashboards:manage-own` |
 | `POST` | `/api/dashboards` | `dashboards:manage-own` |
 | `DELETE` | `/api/dashboards/:id` | `dashboards:manage-own` |
 | `GET` | `/api/dashboards/:id` | `dashboards:manage-own` |
 | `PUT` | `/api/dashboards/:id` | `dashboards:manage-own` |
-| `GET` | `/api/health` | none |
 | `GET` | `/api/intelligence` | `telemetry:read` |
 | `Any` | `/api/mcp` | `telemetry:read` |
 | `GET` | `/api/observability/logs` | `telemetry:read` |
@@ -97,18 +98,13 @@ Capabilities map to roles in [roles](/reference/roles).
 | `GET` | `/api/observability/performance` | `telemetry:read` |
 | `GET` | `/api/observability/topology` | `telemetry:read` |
 | `GET` | `/api/observability/trace` | `telemetry:read` |
-| `GET` | `/api/rules` | `telemetry:read` |
-| `POST` | `/api/rules` | `alerts:manage` |
-| `DELETE` | `/api/rules/:id` | `alerts:manage` |
-| `PUT` | `/api/rules/:id` | `alerts:manage` |
-| `POST` | `/api/rules/:id/test` | `alerts:manage` |
 | `GET` | `/api/settings/ingest` | `ingest:read-metadata` |
-| `POST` | `/api/settings/ingest/rotate-token` | `ingest:manage` |
+| `POST` | `/api/settings/ingest/token/rotate` | `ingest:manage` |
 | `GET` | `/api/users` | `users:manage` |
 | `POST` | `/api/users` | `users:manage` |
 | `DELETE` | `/api/users/:id` | `users:manage` |
-| `PUT` | `/api/users/:id` | `users:manage` |
-| `POST` | `/api/users/:id/logout-all` | `users:manage` |
+| `PATCH` | `/api/users/:id` | `users:manage` |
+| `POST` | `/api/users/:id/access/revoke` | `users:manage` |
 | `GET` | `/debug/pprof/` | `operations:read` |
 | `GET` | `/debug/pprof/:name` | `operations:read` |
 | `GET` | `/debug/pprof/cmdline` | `operations:read` |
@@ -117,6 +113,7 @@ Capabilities map to roles in [roles](/reference/roles).
 | `GET` | `/debug/pprof/trace` | `operations:read` |
 | `GET` | `/healthz` | none |
 | `Any` | `/mcp` | protocol handshake |
+| `GET` | `/metrics` | `operations:read`, or a service credential |
 | `POST` | `/oauth/register` | protocol handshake |
 | `POST` | `/oauth/token` | protocol handshake |
 | `GET` | `/readyz` | none |

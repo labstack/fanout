@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -25,7 +27,7 @@ func TestCollectRoutesResolvesGroupPrefixes(t *testing.T) {
 	relative := map[string]bool{
 		"/overview": true, "/topology": true, "/logs": true,
 		"/trace": true, "/performance": true,
-		"/threads": true, "/threads/:threadID": true,
+		"/runs": true, "/threads": true, "/threads/:threadID": true,
 	}
 	for _, r := range routes {
 		if relative[r.Path] {
@@ -47,25 +49,32 @@ func TestCollectRoutesResolvesGroupPrefixes(t *testing.T) {
 	}
 }
 
-// A group's own root is registered as `group.POST("", ...)`. Requiring a
-// leading slash dropped it silently, so the one route that actually runs the
-// investigator was absent from a page an operator reads to see what an
-// instance exposes.
+// Keep the empty-relative-path regression covered even though agent runs now
+// have their own nested resource path.
 func TestCollectRoutesIncludesGroupRootRegistrations(t *testing.T) {
-	routes, err := collectRoutes(routeDirs)
+	dir := t.TempDir()
+	groupPrefixes["Fixture.Register"] = "/api/users"
+	t.Cleanup(func() { delete(groupPrefixes, "Fixture.Register") })
+	source := `package fixture
+func (f *Fixture) Register(group *echo.Group) { group.POST("", f.Create) }
+`
+	if err := os.WriteFile(filepath.Join(dir, "routes.go"), []byte(source), 0600); err != nil {
+		t.Fatal(err)
+	}
+	routes, err := collectRoutes([]string{dir})
 	if err != nil {
 		t.Fatalf("collectRoutes: %v", err)
 	}
 
 	for _, r := range routes {
-		if r.Method == "POST" && r.Path == "/api/agent" {
-			if r.Capability != "agent:run" {
-				t.Errorf("POST /api/agent requires %q, want agent:run", r.Capability)
+		if r.Method == "POST" && r.Path == "/api/users" {
+			if r.Capability != "users:manage" {
+				t.Errorf("POST /api/users requires %q, want users:manage", r.Capability)
 			}
 			return
 		}
 	}
-	t.Error("POST /api/agent is registered as group.POST(\"\") but is absent from the reference")
+	t.Error("group.POST(\"\") is absent from the reference")
 }
 
 // #188: the table was built from internal/api alone, so an operator auditing
@@ -82,7 +91,8 @@ func TestCollectRoutesCoversRoutesRegisteredOutsideInternalAPI(t *testing.T) {
 	}
 
 	for _, want := range []struct{ key, capability string }{
-		{"GET /-/metrics", "operations:read"},
+		{"POST /api/agent/runs", "agent:run"},
+		{"GET /metrics", "operations:read"},
 		{"GET /debug/pprof/", "operations:read"},
 		{"GET /debug/pprof/profile", "operations:read"},
 		{"Any /api/mcp", "telemetry:read"},

@@ -257,11 +257,11 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 	unsafe := method == http.MethodPost || method == http.MethodPut || method == http.MethodPatch || method == http.MethodDelete
 
 	switch {
-	case path == "/healthz" || path == "/readyz" || path == "/api/health":
+	case path == "/healthz" || path == "/readyz":
 		return routePolicy{kind: routePolicyPublic}, read
 	case path == "/api/auth/status" || path == "/api/auth/oidc/start" || path == "/api/auth/oidc/callback":
 		return routePolicy{kind: routePolicyPublic}, read
-	case path == "/api/auth/setup" || path == "/api/auth/start" || path == "/api/auth/verify" || path == "/api/auth/login-link":
+	case path == "/api/auth/setup" || path == "/api/auth/code/send" || path == "/api/auth/code/verify" || path == "/api/auth/link/verify":
 		return routePolicy{kind: routePolicyPublic}, method == http.MethodPost
 	case path == "/api/auth/me":
 		return routePolicy{kind: routePolicyAuthenticated}, read
@@ -277,7 +277,7 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyProtocol}, true
 	case path == "/api/mcp":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, true
-	case path == "/-/metrics":
+	case path == "/metrics":
 		return routePolicy{kind: routePolicyServiceCredential, capability: ReadOperations}, read
 	case strings.HasPrefix(path, "/debug/pprof"):
 		return routePolicy{kind: routePolicyCapability, capability: ReadOperations}, read || method == http.MethodPost
@@ -285,34 +285,44 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
 	case path == "/api/intelligence":
 		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
-	case path == "/api/alerts" || path == "/api/alerts/summary" || path == "/api/rules":
+	case path == "/api/alerts" || path == "/api/alerts/summary" || path == "/api/alerting/rules":
 		if read {
 			return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, true
 		}
-		if path == "/api/rules" && method == http.MethodPost {
+		if path == "/api/alerting/rules" && method == http.MethodPost {
 			return routePolicy{kind: routePolicyCapability, capability: ManageAlerts}, true
 		}
-	case strings.HasPrefix(path, "/api/rules/"):
+	case strings.HasPrefix(path, "/api/alerting/rules/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageAlerts}, unsafe
-	case path == "/api/dashboard" || path == "/api/dashboards" || strings.HasPrefix(path, "/api/dashboards/"):
+	case path == "/api/dashboards" || strings.HasPrefix(path, "/api/dashboards/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageOwnDashboards}, read || unsafe
-	case path == "/api/agent" || strings.HasPrefix(path, "/api/agent/"):
+	case path == "/api/agent/runs":
+		return routePolicy{kind: routePolicyCapability, capability: RunAgent}, method == http.MethodPost
+	case path == "/api/agent/threads" || strings.HasPrefix(path, "/api/agent/threads/"):
 		return routePolicy{kind: routePolicyCapability, capability: RunAgent}, read || unsafe
 	case path == "/api/settings/ingest":
 		return routePolicy{kind: routePolicyCapability, capability: ReadIngestMetadata}, read
-	case path == "/api/settings/ingest/rotate-token":
+	case path == "/api/settings/ingest/token/rotate":
 		return routePolicy{kind: routePolicyCapability, capability: ManageIngest}, method == http.MethodPost
-	case path == "/api/users" || strings.HasPrefix(path, "/api/users/"):
-		return routePolicy{kind: routePolicyCapability, capability: ManageUsers}, read || unsafe
+	case path == "/api/users":
+		return routePolicy{kind: routePolicyCapability, capability: ManageUsers}, read || method == http.MethodPost
+	case strings.HasPrefix(path, "/api/users/"):
+		id, action, _ := strings.Cut(strings.TrimPrefix(path, "/api/users/"), "/")
+		if id == "" {
+			return routePolicy{}, false
+		}
+		allowed := action == "" && (method == http.MethodPatch || method == http.MethodDelete) ||
+			action == "access/revoke" && method == http.MethodPost
+		return routePolicy{kind: routePolicyCapability, capability: ManageUsers}, allowed
 	case path == "/" || path == "/favicon.ico" || path == "/favicon.svg" ||
-		(!strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/debug/") && path != "/-/metrics"):
+		(!strings.HasPrefix(path, "/api/") && !strings.HasPrefix(path, "/debug/") && !strings.HasPrefix(path, "/-/") && path != "/metrics"):
 		return routePolicy{kind: routePolicyPublic}, read
 	}
 	return routePolicy{}, false
 }
 
 func isProtectedPath(path string) bool {
-	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/debug/") || path == "/-/metrics"
+	return strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/debug/") || strings.HasPrefix(path, "/-/") || path == "/metrics"
 }
 
 func routePathKnown(path string) bool {

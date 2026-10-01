@@ -127,30 +127,6 @@ func TestServiceClampsDashboardWindowToRetention(t *testing.T) {
 	}
 }
 
-func TestServiceMigratesLegacyCanvasOnFirstRead(t *testing.T) {
-	database, err := controlstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close()
-	ctx := context.Background()
-	if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES('owner','owner@example.test','Owner','admin',1)`); err != nil {
-		t.Fatal(err)
-	}
-	legacy := `{"layout":[{"i":"health","x":0,"y":0,"w":12,"h":3}],"widgets":[{"id":"health","type":"overview","title":"Legacy health","enabled":true}],"filters":{"window":"6h","namespace":"legacy"}}`
-	if _, err := database.DB.ExecContext(ctx, `INSERT INTO dashboard_state(owner_id,state_json) VALUES('owner',?)`, legacy); err != nil {
-		t.Fatal(err)
-	}
-	item, err := New(database.DB, 30).Default(ctx, "owner")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if item.State.Filters.Window != "6h" || item.State.Widgets[0].Title != "Legacy health" {
-		t.Fatalf("migrated dashboard = %#v", item)
-	}
-	assertDashboardUUIDv7s(t, item)
-}
-
 func TestDefaultStateMatchesTheClientWidgetSizes(t *testing.T) {
 	state := DefaultState()
 	want := []Layout{

@@ -60,9 +60,9 @@ func RegisterAuthRoutes(e *echo.Echo, users *auth.UserStore, codes *auth.CodeSto
 
 	e.GET("/api/auth/status", h.Status)
 	e.POST("/api/auth/setup", h.Setup)
-	e.POST("/api/auth/start", h.Start)
-	e.POST("/api/auth/verify", h.Verify)
-	e.POST("/api/auth/login-link", h.LoginLink)
+	e.POST("/api/auth/code/send", h.Start)
+	e.POST("/api/auth/code/verify", h.Verify)
+	e.POST("/api/auth/link/verify", h.LoginLink)
 	e.GET("/api/auth/me", h.Me)
 	e.POST("/api/auth/logout", h.Logout)
 }

@@ -61,6 +61,14 @@ is the complete schema. New settings need a YAML key, a `FANOUT_` environment
 name, a test, and matching documentation; unknown names deliberately fail
 startup.
 
+**SQLite migrations own the control schema.** Write forward SQL changes in
+`internal/db/migrations` using Goose annotations. `just db-migrate-create NAME`
+creates a timestamped migration; `just db-gen` regenerates the sqlc bindings
+from that directory. There is no separate schema file. Published migrations
+are immutable: add a migration rather than editing one already applied.
+Fanout embeds and applies them at startup; `just db-migrate-apply DB` applies
+them manually to a development database. DuckDB maintains its own query schema.
+
 ## Commits and pull requests
 
 Write commit messages that explain why the change is needed, not only what it

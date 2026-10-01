@@ -55,7 +55,7 @@ Maintenance prepares merges while reads continue, then briefly gates readers
 while it swaps or removes immutable files. New batches keep encoding and need
 only the short publication lock. Ingest, queries, and maintenance still share
 CPU, memory bandwidth, and disk, so running maintenance much more often is not
-free. Change one setting at a time and watch `/-/metrics`.
+free. Change one setting at a time and watch `/metrics`.
 
 The full list, with defaults and types, is in the [storage
 settings](/reference/settings/storage) reference.

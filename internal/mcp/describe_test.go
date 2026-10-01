@@ -2,10 +2,33 @@ package mcp
 
 import (
 	"context"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/labstack/fanout/internal/dashboard"
 )
+
+// The public catalogue follows the same verb-first convention as Monk and
+// Cipher. Keep names short enough for clients that expose them as functions.
+func TestToolsUseVerbFirstSnakeCase(t *testing.T) {
+	docs, err := DescribeTools(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pattern := regexp.MustCompile(`^[a-z]+(?:_[a-z]+)+$`)
+	for _, doc := range docs {
+		verb, _, _ := strings.Cut(doc.Name, "_")
+		if !pattern.MatchString(doc.Name) || len(doc.Name) > 64 {
+			t.Errorf("tool name %q must be lowercase snake_case and at most 64 characters", doc.Name)
+		}
+		switch verb {
+		case "get", "list", "search", "inspect", "create", "replace":
+		default:
+			t.Errorf("tool name %q must start with an operation verb", doc.Name)
+		}
+	}
+}
 
 // DescribeTools must agree with what a real client sees, because that agreement
 // is the only reason to generate the page from it rather than write it.
@@ -56,23 +79,23 @@ func TestDescribeToolsIncludesTheDashboardTools(t *testing.T) {
 		found[doc.Name] = doc
 	}
 
-	for _, name := range []string{"dashboard_list", "dashboard_get", "dashboard_create", "dashboard_update"} {
+	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard"} {
 		if _, ok := found[name]; !ok {
 			t.Errorf("%s is registered but absent from DescribeTools", name)
 		}
 	}
 
-	// dashboard_update replaces rather than merges, and that is the single most
+	// replace_dashboard replaces rather than merges, and that is the single most
 	// important fact on the page.
-	update, ok := found["dashboard_update"]
+	update, ok := found["replace_dashboard"]
 	if !ok {
-		t.Fatal("dashboard_update missing")
+		t.Fatal("replace_dashboard missing")
 	}
 	if update.ReadOnly {
-		t.Error("dashboard_update reported read-only")
+		t.Error("replace_dashboard reported read-only")
 	}
 	if !update.Destructive {
-		t.Error("dashboard_update reported non-destructive; it replaces a dashboard's design")
+		t.Error("replace_dashboard reported non-destructive; it replaces a dashboard's design")
 	}
 }
 
@@ -82,14 +105,14 @@ func TestDescribeToolsIncludesIntelligenceSnapshot(t *testing.T) {
 		t.Fatalf("DescribeTools: %v", err)
 	}
 	for _, doc := range docs {
-		if doc.Name == "intelligence_snapshot" {
+		if doc.Name == "get_intelligence_snapshot" {
 			if !doc.ReadOnly || doc.OpenWorld {
-				t.Fatalf("intelligence_snapshot annotations = %+v", doc)
+				t.Fatalf("get_intelligence_snapshot annotations = %+v", doc)
 			}
 			return
 		}
 	}
-	t.Fatal("intelligence_snapshot is registered but absent from DescribeTools")
+	t.Fatal("get_intelligence_snapshot is registered but absent from DescribeTools")
 }
 
 // Every tool must arrive with the facts the page is built from. A blank cell
@@ -136,7 +159,7 @@ func TestDescribeToolsReportsTheSharedObservabilityScope(t *testing.T) {
 	// a tool would silently switch off.
 	want := map[string]string{"window": "string", "namespace": "string", "limit": "integer"}
 
-	for _, name := range []string{"observability_overview", "service_topology"} {
+	for _, name := range []string{"get_observability_overview", "get_service_topology"} {
 		var doc ToolDoc
 		var found bool
 		for _, candidate := range docs {

@@ -1,40 +1,44 @@
 package db
 
 import (
+	"context"
+	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 
-	"ariga.io/atlas/sql/migrate"
+	"github.com/pressly/goose/v3"
 )
 
-//go:embed migrations/*.sql migrations/atlas.sum
+//go:embed migrations/*.sql
 var migrationsFS embed.FS
 
-// OpenMigrationDir loads the Atlas migration directory from the embedded source
-// of truth used by sqlc and atlas diff generation.
-func OpenMigrationDir() (*migrate.MemDir, error) {
-	dir := migrate.OpenMemDir("fanout")
-
-	entries, err := fs.ReadDir(migrationsFS, "migrations")
+// Migrate applies embedded SQLite migrations. sqlc reads the same SQL files
+// when generating query bindings. Providers have no shared global registry.
+func Migrate(ctx context.Context, db *sql.DB) error {
+	var hasTables, hasVersions bool
+	if err := db.QueryRowContext(ctx, `
+		SELECT
+			EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT GLOB 'sqlite_*'),
+			EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?)`,
+		goose.DefaultTablename).Scan(&hasTables, &hasVersions); err != nil {
+		return fmt.Errorf("inspect migration state: %w", err)
+	}
+	if hasTables && !hasVersions {
+		return errors.New("control database must be empty or managed by Goose; automatic conversion is not supported")
+	}
+	dir, err := fs.Sub(migrationsFS, "migrations")
 	if err != nil {
-		dir.Close()
-		return nil, fmt.Errorf("read embedded migrations: %w", err)
+		return fmt.Errorf("open embedded migrations: %w", err)
 	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		content, err := migrationsFS.ReadFile("migrations/" + entry.Name())
-		if err != nil {
-			dir.Close()
-			return nil, fmt.Errorf("read migration %s: %w", entry.Name(), err)
-		}
-		if err := dir.WriteFile(entry.Name(), content); err != nil {
-			dir.Close()
-			return nil, fmt.Errorf("write migration %s: %w", entry.Name(), err)
-		}
+	provider, err := goose.NewProvider(goose.DialectSQLite3, db, dir,
+		goose.WithDisableGlobalRegistry(true))
+	if err != nil {
+		return fmt.Errorf("create migration provider: %w", err)
 	}
-
-	return dir, nil
+	if _, err := provider.Up(ctx); err != nil {
+		return fmt.Errorf("apply migrations: %w", err)
+	}
+	return nil
 }

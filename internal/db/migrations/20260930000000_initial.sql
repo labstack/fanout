@@ -1,6 +1,6 @@
--- Fanout Schema (SQLite)
--- Source of truth for Atlas migrations and sqlc generation.
--- Only covers application state in SQLite — DuckDB has its own schema.
+-- +goose Up
+-- Fanout control schema. sqlc reads these migrations to generate query bindings.
+-- DuckDB maintains its own telemetry query schema.
 
 CREATE TABLE alert_rules (
     id                TEXT PRIMARY KEY,
@@ -49,19 +49,6 @@ CREATE TABLE users (
     updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 
-
--- Older installations retain SQLite datetime defaults that cannot be altered in
--- place. Normalize any default-generated values after insert; application
--- writes already use the same fixed-width UTC format directly.
-CREATE TRIGGER users_normalize_timestamps_after_insert
-AFTER INSERT ON users
-WHEN instr(NEW.created_at, ' ') > 0 OR instr(NEW.updated_at, ' ') > 0
-BEGIN
-  UPDATE users SET
-    created_at = strftime('%Y-%m-%dT%H:%M:%fZ', NEW.created_at),
-    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', NEW.updated_at)
-  WHERE id = NEW.id;
-END;
 
 CREATE TABLE verifications (
     id         TEXT PRIMARY KEY,
@@ -196,13 +183,6 @@ CREATE TABLE agui_runs (
 
 CREATE INDEX idx_agui_runs_thread_created
     ON agui_runs(thread_id, created_at DESC);
-
--- Legacy single-canvas state retained for one-way lazy migration.
-CREATE TABLE dashboard_state (
-    owner_id  TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    state_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
 
 CREATE TABLE dashboards (
     id          TEXT PRIMARY KEY,

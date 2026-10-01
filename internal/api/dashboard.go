@@ -20,12 +20,6 @@ func RegisterDashboardRoutes(e *echo.Echo, dashboards *dashboard.Service) {
 	e.GET("/api/dashboards/:id", h.Get, own)
 	e.PUT("/api/dashboards/:id", h.Put, own)
 	e.DELETE("/api/dashboards/:id", h.Delete, own)
-
-	// Legacy single-canvas endpoints, retained for API clients: they always
-	// address the owner's default dashboard, while the named collection above
-	// addresses dashboards individually.
-	e.GET("/api/dashboard", h.GetDefault, own)
-	e.PUT("/api/dashboard", h.PutDefault, own)
 }
 
 func (h *DashboardHandler) List(c *echo.Context) error {
@@ -96,38 +90,6 @@ func (h *DashboardHandler) Delete(c *echo.Context) error {
 		return mapDashboardError(err)
 	}
 	return c.NoContent(http.StatusNoContent)
-}
-
-func (h *DashboardHandler) GetDefault(c *echo.Context) error {
-	owner, err := dashboardOwner(c)
-	if err != nil {
-		return err
-	}
-	item, err := h.dashboards.Default(c.Request().Context(), owner)
-	if err != nil {
-		return mapDashboardError(err)
-	}
-	return c.JSON(http.StatusOK, map[string]any{"state": item.State, "updated_at": item.UpdatedAt})
-}
-
-func (h *DashboardHandler) PutDefault(c *echo.Context) error {
-	owner, err := dashboardOwner(c)
-	if err != nil {
-		return err
-	}
-	item, err := h.dashboards.Default(c.Request().Context(), owner)
-	if err != nil {
-		return mapDashboardError(err)
-	}
-	var state dashboard.State
-	if err := decodeDashboard(c, &state); err != nil {
-		return err
-	}
-	updated, err := h.dashboards.Update(c.Request().Context(), owner, item.ID, dashboard.UpdateInput{Name: item.Name, Description: item.Description, State: state})
-	if err != nil {
-		return mapDashboardError(err)
-	}
-	return c.JSON(http.StatusOK, map[string]any{"state": updated.State, "updated_at": updated.UpdatedAt})
 }
 
 func dashboardOwner(c *echo.Context) (string, error) {

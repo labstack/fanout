@@ -19,9 +19,9 @@ Rules are managed over HTTP. There is no browser page for them yet — see
 |---|---|
 | `GET /api/alerts` | Current alert state |
 | `GET /api/alerts/summary` | Counts by state |
-| `GET /api/rules` | List rules |
-| `POST /api/rules` | Create and compile a rule |
-| `PUT /api/rules/:id` | Replace and recompile a rule |
+| `GET /api/alerting/rules` | List rules |
+| `POST /api/alerting/rules` | Create and compile a rule |
+| `PUT /api/alerting/rules/:id` | Replace and recompile a rule |
 
 Reading takes `telemetry:read`; creating and replacing takes `alerts:manage`,
 which starts at the `operator` role. See [roles](/reference/roles).

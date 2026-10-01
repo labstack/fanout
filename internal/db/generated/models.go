@@ -89,12 +89,6 @@ type Dashboard struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
-type DashboardState struct {
-	OwnerID   string `json:"owner_id"`
-	StateJson string `json:"state_json"`
-	UpdatedAt string `json:"updated_at"`
-}
-
 type DashboardWidget struct {
 	ID          string `json:"id"`
 	DashboardID string `json:"dashboard_id"`
