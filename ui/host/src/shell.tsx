@@ -49,7 +49,7 @@ export default function Shell({ children }: { children: ReactNode }) {
     onNewChat: newThread,
     onSelectThread: selectThread,
     onDeletedThread: (deletedID) => { if (deletedID === threadID) newThread(); },
-    onSelectDashboard: (id) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id } }),
+    onSelectDashboard: (id) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: {} }),
     onCreateDashboard: () => openChat(createDashboardPrompt),
     onInvestigateService: (service) => openChat(`Investigate the ${service} service. Explain its errors and latency.`),
   };

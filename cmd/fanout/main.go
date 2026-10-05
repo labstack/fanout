@@ -37,6 +37,7 @@ import (
 	"github.com/labstack/fanout/internal/mcp"
 	appmetrics "github.com/labstack/fanout/internal/metrics"
 	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	"github.com/labstack/fanout/internal/server"
 	"github.com/labstack/fanout/internal/settings"
@@ -264,9 +265,11 @@ func main() {
 	// Route both HTTP and MCP reads through Duck's retrying adapter. Passing the
 	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
 	queries := observability.New(q, q, cfg.RetentionDays)
+	panels := panel.NewExecutor(q, cfg.RetentionDays)
+	api.RegisterPanelRoutes(e, panels)
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
 	api.RegisterIntelligenceRoutes(e, detector)
-	dashboards := dashboard.New(sqlite.DB, cfg.RetentionDays)
+	dashboards := dashboard.New(sqlite.DB, panels)
 	api.RegisterDashboardRoutes(e, dashboards)
 
 	// Alert management REST endpoints
@@ -338,7 +341,7 @@ func main() {
 	// The model executes the same standard MCP tools exposed to external clients.
 	// The internal connection is in-memory, so the single binary has no HTTP
 	// self-call, shared secret, or sidecar runtime.
-	mcpServer := mcp.NewWithIntelligence(queries, dashboards, detector, version)
+	mcpServer := mcp.NewWithIntelligence(queries, dashboards, panels, detector, version)
 	if cfg.MCPEnabled {
 		mcpResourceURL := cfg.MCPResourceURL()
 		mcpAuthorization, err := api.NewMCPAuthorization(

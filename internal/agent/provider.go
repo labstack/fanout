@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 )
 
@@ -45,6 +46,8 @@ type ProviderMessage struct {
 	Content    string
 	ToolCalls  []ToolCall
 	ToolResult *ToolResult
+	// ProviderItems are opaque assistant output retained only in the current run.
+	ProviderItems []json.RawMessage `json:"-"`
 }
 
 type ToolCall struct {
@@ -68,11 +71,22 @@ type ToolDef struct {
 // StreamEvent is a single event from the model stream; Type discriminates
 // which payload field is set.
 type StreamEvent struct {
-	Type       EventType
-	Delta      string    // text token (EventText)
-	ToolCall   *ToolCall // completed tool call (EventToolUse)
-	StopReason string    // e.g. "end_turn", "tool_calls", "length", "max_tokens" (EventStop)
-	Error      string    // error message (EventError)
+	Type          EventType
+	Delta         string            // text token (EventText)
+	ToolCall      *ToolCall         // completed tool call (EventToolUse)
+	StopReason    string            // e.g. "end_turn", "tool_calls", "length", "max_tokens" (EventStop)
+	Error         string            // error message (EventError)
+	Usage         *TokenUsage       // token counts (EventStop)
+	ProviderItems []json.RawMessage `json:"-"` // opaque continuation items (EventStop)
+}
+
+// TokenUsage includes reasoning tokens in OutputTokens; ReasoningTokens is a subset.
+type TokenUsage struct {
+	InputTokens      int
+	OutputTokens     int
+	ReasoningTokens  int
+	CacheReadTokens  int
+	CacheWriteTokens int
 }
 
 type APIError struct {

@@ -1,0 +1,213 @@
+import { MantineProvider } from "@mantine/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const charts = vi.hoisted(() => ({ calls: [] as { label: string; option: Record<string, unknown>; height: number; group?: string }[] }));
+vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label, option, height, group, onClick }: { label: string; option: Record<string, unknown>; height: number; group?: string; onClick?: (p: { name: string; seriesName: string }) => void }) => {
+  charts.calls.push({ label, option, height, group });
+  return <button data-chart={label} onClick={() => onClick?.({ name: "cart", seriesName: "cart" })}>{label}</button>;
+} }));
+
+import { PanelGrid } from "./grid";
+import { warn } from "../../../tokens";
+import type { DashboardSpec, PanelResult } from "../../../panels/types";
+
+const spec: DashboardSpec = {
+  version: 1, name: "Shop", time: { range: "1h" },
+  variables: [{ name: "service", kind: "query", from: "spans", field: "service" }],
+  panels: [
+    { id: "requests", title: "Requests", viz: "stat", better: "lower", unit: "count", thresholds: [{ value: 100, status: "warn" }], query: { from: "spans", measures: ["count()"] }, grid: { x: 0, y: 0, w: 3, h: 3 } },
+    { id: "by_service", title: "By service", viz: "bar", click: { set_variable: "service" }, query: { from: "spans", measures: ["count()"], by: ["service"] }, grid: { x: 3, y: 0, w: 6, h: 6 } },
+    { id: "slow", title: "Slow", viz: "table", better: "lower", query: { from: "spans", measures: ["p95(duration_ms)"], by: ["http_route"] }, grid: { x: 0, y: 6, w: 12, h: 6 } },
+    { id: "broken", title: "Broken", viz: "timeseries", query: { from: "spans", measures: ["count()"], bucket: "auto" }, grid: { x: 9, y: 0, w: 3, h: 6 } },
+    { id: "notes", title: "Notes", viz: "text", content: "**Checkout** is the money path.", grid: { x: 0, y: 3, w: 3, h: 3 } },
+  ],
+};
+
+const results = new Map<string, PanelResult>([
+  ["requests", { id: "requests", status: "ok", frame: { columns: [{ name: "time", type: "time", role: "time" }, { name: "count", type: "number", role: "measure", unit: "count" }], values: [[1, 2], [60, 80]], rows: 2, totals: [null, 140] }, previous: { columns: [{ name: "time", type: "time", role: "time" }, { name: "count", type: "number", role: "measure", unit: "count" }], values: [[1], [70]], rows: 1, totals: [null, 70] }, elapsed_ms: 4, sql: "SELECT 1" }],
+  ["by_service", { id: "by_service", status: "ok", frame: { columns: [{ name: "service", type: "string", role: "dimension" }, { name: "count", type: "number", role: "measure", unit: "count" }], values: [["checkout", "cart"], [90, 50]], rows: 2 }, elapsed_ms: 3 }],
+  ["slow", { id: "slow", status: "ok", frame: { columns: [{ name: "http_route", type: "string", role: "dimension" }, { name: "p95", type: "number", role: "measure", unit: "ms" }], values: [["/cart", "/quote"], [900, 40]], rows: 2 }, elapsed_ms: 3 }],
+  ["broken", { id: "broken", status: "error", error: "Conversion Error: Could not convert string 'checkout' to INT32", elapsed_ms: 1 }],
+]);
+
+const cleanups: (() => void)[] = [];
+
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  charts.calls = [];
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  vi.stubGlobal("IntersectionObserver", class { observe() {} unobserve() {} disconnect() {} });
+});
+afterEach(async () => { await act(async () => { cleanups.splice(0).forEach((cleanup) => cleanup()); }); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+
+async function render(overrides: Partial<Parameters<typeof PanelGrid>[0]> = {}) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const props = { dashboardId: "d1", version: 2, spec, vars: { service: "checkout" }, results, fetching: false, editing: false, agentAvailable: true, onOpenChat: vi.fn(), onVariable: vi.fn(), onView: vi.fn(), onVisible: vi.fn(), ...overrides };
+  const root = createRoot(host);
+  const client = new QueryClient();
+  cleanups.push(() => { root.unmount(); client.clear(); });
+  await act(async () => {
+    root.render(<MantineProvider theme={{ colors: { warn: [...warn] } }}><QueryClientProvider client={client}><PanelGrid {...props} /></QueryClientProvider></MantineProvider>);
+  });
+  const rerender = async (overrides: Partial<Parameters<typeof PanelGrid>[0]>) => {
+    await act(async () => { root.render(<MantineProvider theme={{ colors: { warn: [...warn] } }}><QueryClientProvider client={client}><PanelGrid {...props} {...overrides} /></QueryClientProvider></MantineProvider>); });
+  };
+  return { host, props, rerender };
+}
+
+describe("PanelGrid", () => {
+  it("renders every visualization and state", async () => {
+    const { host } = await render();
+    expect(host.textContent).toContain("140");
+    expect(host.textContent).toContain("Degraded");
+    expect(host.textContent).toContain("+100%");
+    expect(host.textContent).toContain("/cart");
+    expect(host.textContent).toContain("900ms");
+    expect(host.textContent).toContain("Could not convert");
+    expect(host.querySelector("strong")?.textContent).toBe("Checkout");
+  });
+
+  it("sets the variable when a bar is clicked", async () => {
+    const { host, props } = await render();
+    await act(async () => { (host.querySelector('[data-chart^="By service"]') as HTMLButtonElement).click(); });
+    expect(props.onVariable).toHaveBeenCalledWith("service", "cart");
+  });
+
+  it("renders gauge and successful time series with stable chart options and the server shift", async () => {
+    const time = results.get("requests")!;
+    const extraSpec: DashboardSpec = { ...spec, panels: [
+      ...spec.panels,
+      { ...spec.panels[0], id: "gauge", title: "Gauge", viz: "gauge" },
+      { ...spec.panels[3], id: "series", title: "Series", click: { set_variable: "service" } },
+    ] };
+    const extraResults = new Map(results);
+    extraResults.set("gauge", { ...time, id: "gauge" });
+    extraResults.set("series", { ...time, frame: { ...time.frame!, columns: [...time.frame!.columns, { name: "service", type: "string", role: "dimension" }], values: [...time.frame!.values, ["cart", "cart"]] }, id: "series", shift_ms: 1234 });
+    const { host, props, rerender } = await render({ spec: extraSpec, results: extraResults });
+    expect(host.querySelector('[data-chart="Gauge: gauge"]')).not.toBeNull();
+    expect(host.querySelector('[data-chart="Series: time series"]')).not.toBeNull();
+    const options = new Map(charts.calls.map((call) => [call.label, call.option]));
+    const series = options.get("Series: time series")!.series as { name: string; data: number[][] }[];
+    expect(series.find((line) => line.name.endsWith(" · previous"))!.data).toEqual([[1235, 70]]);
+    expect(charts.calls.find((call) => call.label === "Series: time series")!.group).toBe("dashboard-d1");
+    charts.calls = [];
+    await rerender({ fetching: true });
+    for (const call of charts.calls) expect(call.option).toBe(options.get(call.label));
+    await act(async () => { host.querySelector<HTMLButtonElement>('[data-chart="Series: time series"]')!.click(); });
+    expect(props.onVariable).toHaveBeenCalledWith("service", "cart");
+  });
+
+  it("sorts table rows, formats units, colours thresholds and selects the first dimension", async () => {
+    const table: DashboardSpec = { ...spec, panels: [{ ...spec.panels[2], thresholds: [{ value: 100, status: "warn" }], click: { set_variable: "service" } }] };
+    const { host, props } = await render({ spec: table });
+    const values = () => [...host.querySelectorAll("tbody tr")].map((row) => row.textContent);
+    expect(values()).toEqual(["/cart900ms", "/quote40.0ms"]);
+    expect(host.querySelector("tbody tr:first-child td:nth-child(2) p")!.getAttribute("style")).toContain("warn");
+    await act(async () => { host.querySelector<HTMLButtonElement>("thead th:nth-child(2) button")!.click(); });
+    await act(async () => { host.querySelector<HTMLButtonElement>("thead th:nth-child(2) button")!.click(); });
+    expect(values()).toEqual(["/quote40.0ms", "/cart900ms"]);
+    await act(async () => { host.querySelector<HTMLTableRowElement>("tbody tr")!.click(); });
+    expect(props.onVariable).toHaveBeenCalledWith("service", "/quote");
+  });
+
+  it("opens inspect with Data, Query, Spec and Timing tabs from the panel menu", async () => {
+    const { host } = await render();
+    await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Requests menu"]')!.click(); });
+    await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((el) => el.textContent === "Inspect")!.click(); });
+    expect(document.body.textContent).toContain("Inspect · Requests");
+    expect([...document.querySelectorAll('[role="tab"]')].map((el) => el.textContent)).toEqual(["Data", "Query", "Spec", "Timing"]);
+    expect(document.body.querySelector('[role="tabpanel"]')!.textContent).toContain("1970-01-01T00:00:00.001Z");
+    for (const [tab, content] of [["Query", "SELECT 1"], ["Spec", '"id": "requests"'], ["Timing", "Ran in 4 ms, 2 rows."]]) {
+      await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((el) => el.textContent === tab)!.click(); });
+      const selected = document.querySelector('[role="tab"][aria-selected="true"]')!;
+      expect(document.getElementById(selected.getAttribute("aria-controls")!)!.textContent).toContain(content);
+    }
+  });
+
+  it("opens and closes the full-screen panel through URL view callbacks", async () => {
+    const { host, props, rerender } = await render();
+    await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Requests menu"]')!.click(); });
+    await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((el) => el.textContent === "View")!.click(); });
+    expect(props.onView).toHaveBeenCalledWith("requests");
+    await rerender({ view: "requests" });
+    const dialog = document.querySelector('[role="dialog"]')!;
+    expect(dialog.textContent).toContain("140");
+    await act(async () => { dialog.querySelector<HTMLButtonElement>('.mantine-Modal-close')!.click(); });
+    expect(props.onView).toHaveBeenLastCalledWith(undefined);
+  });
+
+  it("keeps empty diagnoses and fetching loaders local to each panel", async () => {
+    const extraResults = new Map(results);
+    extraResults.set("requests", { id: "requests", status: "empty", diagnosis: "No requests here.", elapsed_ms: 0 });
+    extraResults.delete("by_service");
+    const { host } = await render({ results: extraResults, fetching: true, agentAvailable: false });
+    expect(host.textContent).toContain("No requests here.");
+    expect(host.querySelector('.mantine-Loader-root')).not.toBeNull();
+    expect(host.textContent).not.toContain("Ask Fanout to fix it");
+    expect(host.textContent).toContain("Could not convert");
+    expect(host.querySelector("strong")!.textContent).toBe("Checkout");
+  });
+
+});
+
+
+async function menu(host: HTMLElement, title: string, item: string) {
+  await act(async () => { host.querySelector<HTMLButtonElement>(`[aria-label="${title} menu"]`)!.click(); });
+  await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((el) => el.textContent === item)!.click(); });
+}
+
+it("includes ids, effective time and resolved variables in Explain without tool names", async () => {
+  const { host, props } = await render({ time: { from: "2026-10-01T00:00:00Z", to: "2026-10-01T01:00:00Z" }, vars: { service: "cart" } });
+  await menu(host, "Broken", "Explain in chat");
+  const prompt = vi.mocked(props.onOpenChat).mock.calls[0][0] as string;
+  for (const value of ["dashboard id: d1", "panel id: broken", "2026-10-01T00:00:00Z", "2026-10-01T01:00:00Z", '"service":"cart"', "fix the panel"]) expect(prompt).toContain(value);
+  expect(prompt).not.toContain("edit_dashboard");
+});
+
+it("copies a view link without edit mode and reports success", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  window.history.replaceState({}, "", "/dashboards/d1?edit=1&range=6h");
+  const { host } = await render();
+  await menu(host, "Requests", "Copy link");
+  expect(host.textContent).toContain("Link copied");
+  const url = new URL(writeText.mock.calls[0][0]);
+  expect(url.searchParams.get("edit")).toBeNull();
+  expect(url.searchParams.get("range")).toBe("6h");
+  expect(url.searchParams.get("view")).toBe("requests");
+});
+
+it("shows a copyable URL when clipboard permission is denied", async () => {
+  vi.stubGlobal("navigator", { clipboard: { writeText: vi.fn().mockRejectedValue(new Error("Denied")) } });
+  window.history.replaceState({}, "", "/dashboards/d1?edit=1");
+  const { host } = await render();
+  await menu(host, "Requests", "Copy link");
+  expect(host.textContent).toContain("Copy this URL:");
+  expect(host.textContent).toContain("view=requests");
+  expect(host.querySelector('[role="status"]')!.textContent).not.toContain("edit=1");
+});
+
+it("resizes the full-screen chart, renders its title once and names close buttons", async () => {
+  const { host, rerender } = await render({ view: "by_service" });
+  const dialog = document.querySelector('[role="dialog"]')!;
+  expect(dialog.querySelector('.mantine-Modal-title')).toBeNull();
+  expect(dialog.querySelectorAll('.mantine-Text-root')).toHaveLength(1);
+  expect(dialog.querySelector('[aria-label="Close panel view"]')).not.toBeNull();
+  const height = charts.calls.at(-1)!.height;
+  vi.stubGlobal("innerHeight", window.innerHeight + 200);
+  await act(async () => { window.dispatchEvent(new Event("resize")); });
+  expect(charts.calls.at(-1)!.height).toBe(height + 200);
+  await rerender({ view: undefined });
+  await menu(host, "Requests", "Inspect");
+  expect(document.querySelector('[aria-label="Close inspect"]')).not.toBeNull();
+});
+
+
+it("announces a truncated frame in the panel status line", async()=>{
+ const {host}=await render({results:new Map([["requests",{...results.get("requests")!,frame:{...results.get("requests")!.frame!,truncated:true}}]])});
+ expect(host.querySelector('[data-panel="requests"] [role="status"]')!.textContent).toContain("Truncated: showing limited data");
+});

@@ -152,8 +152,13 @@ ui-test:
 
 # Audit both independent browser dependency graphs. Security overrides live in
 # each package.json so installs, local checks, and CI all resolve the same fixes.
+#
+# GHSA-vfj7-8cjw-p6xm (braces <= 3.0.3, no patched release as of 2026-10-05)
+# reaches ui/apps only through vite-plugin-singlefile > micromatch, at build
+# time, on glob patterns from our own vite config. No outside input can reach
+# it. Drop the ignore once braces publishes a fix and add an override instead.
 ui-audit:
-    cd ui/apps && bun audit
+    cd ui/apps && bun audit --ignore=GHSA-vfj7-8cjw-p6xm
     cd ui/host && bun audit
 
 # Uses git as the backup, which is sound only because these outputs are

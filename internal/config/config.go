@@ -82,36 +82,41 @@ type Config struct {
 	AlertHistoryDays        int           `koanf:"alerts.history_days" env:"FANOUT_ALERTS_HISTORY_DAYS" default:"7"`
 	AIProvider              string        `koanf:"ai.provider" env:"FANOUT_AI_PROVIDER" default:"anthropic"`
 	AIAPIKey                string        `koanf:"ai.api_key" env:"FANOUT_AI_API_KEY" secret:"true"`
-	AIModel                 string        `koanf:"ai.model" env:"FANOUT_AI_MODEL"`
-	AIBaseURL               string        `koanf:"ai.base_url" env:"FANOUT_AI_BASE_URL"`
-	SMTPHost                string        `koanf:"smtp.host" env:"FANOUT_SMTP_HOST"`
-	SMTPPort                int           `koanf:"smtp.port" env:"FANOUT_SMTP_PORT" default:"587"`
-	SMTPUser                string        `koanf:"smtp.username" env:"FANOUT_SMTP_USERNAME"`
-	SMTPPass                string        `koanf:"smtp.password" env:"FANOUT_SMTP_PASSWORD" secret:"true"`
-	SMTPFrom                string        `koanf:"smtp.from" env:"FANOUT_SMTP_FROM"`
-	AuthMode                string        `koanf:"auth.mode" env:"FANOUT_AUTH_MODE" default:"local"`
-	PublicURL               string        `koanf:"server.public_url" env:"FANOUT_PUBLIC_URL"`
-	AuthCodeSecret          string        `koanf:"auth.code_secret" env:"FANOUT_AUTH_CODE_SECRET" secret:"true"`
-	SelfSignup              bool          `koanf:"auth.self_signup" env:"FANOUT_SELF_SIGNUP" default:"false"`
-	SessionIdleTTL          time.Duration `koanf:"auth.session_idle_ttl" env:"FANOUT_SESSION_IDLE_TTL" default:"12h"`
-	SessionAbsoluteTTL      time.Duration `koanf:"auth.session_absolute_ttl" env:"FANOUT_SESSION_ABSOLUTE_TTL" default:"168h"`
-	OIDCIssuerURL           string        `koanf:"auth.oidc.issuer_url" env:"FANOUT_OIDC_ISSUER_URL"`
-	OIDCClientID            string        `koanf:"auth.oidc.client_id" env:"FANOUT_OIDC_CLIENT_ID"`
-	OIDCClientSecret        string        `koanf:"auth.oidc.client_secret" env:"FANOUT_OIDC_CLIENT_SECRET" secret:"true"`
-	OIDCEmailClaim          string        `koanf:"auth.oidc.email_claim" env:"FANOUT_OIDC_EMAIL_CLAIM" default:"email"`
-	OIDCEmailVerification   string        `koanf:"auth.oidc.email_verification" env:"FANOUT_OIDC_EMAIL_VERIFICATION" default:"required"`
-	OIDCAutoProvision       bool          `koanf:"auth.oidc.auto_provision" env:"FANOUT_OIDC_AUTO_PROVISION" default:"false"`
-	OIDCAllowedGroups       string        `koanf:"auth.oidc.allowed_groups" env:"FANOUT_OIDC_ALLOWED_GROUPS"`
-	OIDCAllowedDomains      string        `koanf:"auth.oidc.allowed_domains" env:"FANOUT_OIDC_ALLOWED_DOMAINS"`
-	OIDCDefaultRole         string        `koanf:"auth.oidc.default_role" env:"FANOUT_OIDC_DEFAULT_ROLE" default:"viewer"`
-	OIDCOperatorGroups      string        `koanf:"auth.oidc.operator_groups" env:"FANOUT_OIDC_OPERATOR_GROUPS"`
-	OIDCAdminGroups         string        `koanf:"auth.oidc.admin_groups" env:"FANOUT_OIDC_ADMIN_GROUPS"`
-	MetricsToken            string        `koanf:"metrics.token" env:"FANOUT_METRICS_TOKEN" secret:"true"`
-	MetricsPublic           bool          `koanf:"metrics.public" env:"FANOUT_METRICS_PUBLIC" default:"false"`
-	TrustedProxyCIDRs       string        `koanf:"server.trusted_proxy_cidrs" env:"FANOUT_TRUSTED_PROXY_CIDRS"`
-	TLSCertFile             string        `koanf:"server.tls.cert_file" env:"FANOUT_TLS_CERT_FILE"`
-	TLSKeyFile              string        `koanf:"server.tls.key_file" env:"FANOUT_TLS_KEY_FILE"`
-	resolvedSizing          sizingSource
+	// AIModel overrides the provider's default: claude-sonnet-5-5 for Anthropic
+	// and gpt-6.1-sol for OpenAI. The OpenAI provider expects a reasoning model
+	// supporting reasoning.encrypted_content for stateless Responses replay.
+	// A 400 rejecting encrypted content is reported as a server-side configuration
+	// error; choose a compatible reasoning model with ai.model.
+	AIModel               string        `koanf:"ai.model" env:"FANOUT_AI_MODEL"`
+	AIBaseURL             string        `koanf:"ai.base_url" env:"FANOUT_AI_BASE_URL"`
+	SMTPHost              string        `koanf:"smtp.host" env:"FANOUT_SMTP_HOST"`
+	SMTPPort              int           `koanf:"smtp.port" env:"FANOUT_SMTP_PORT" default:"587"`
+	SMTPUser              string        `koanf:"smtp.username" env:"FANOUT_SMTP_USERNAME"`
+	SMTPPass              string        `koanf:"smtp.password" env:"FANOUT_SMTP_PASSWORD" secret:"true"`
+	SMTPFrom              string        `koanf:"smtp.from" env:"FANOUT_SMTP_FROM"`
+	AuthMode              string        `koanf:"auth.mode" env:"FANOUT_AUTH_MODE" default:"local"`
+	PublicURL             string        `koanf:"server.public_url" env:"FANOUT_PUBLIC_URL"`
+	AuthCodeSecret        string        `koanf:"auth.code_secret" env:"FANOUT_AUTH_CODE_SECRET" secret:"true"`
+	SelfSignup            bool          `koanf:"auth.self_signup" env:"FANOUT_SELF_SIGNUP" default:"false"`
+	SessionIdleTTL        time.Duration `koanf:"auth.session_idle_ttl" env:"FANOUT_SESSION_IDLE_TTL" default:"12h"`
+	SessionAbsoluteTTL    time.Duration `koanf:"auth.session_absolute_ttl" env:"FANOUT_SESSION_ABSOLUTE_TTL" default:"168h"`
+	OIDCIssuerURL         string        `koanf:"auth.oidc.issuer_url" env:"FANOUT_OIDC_ISSUER_URL"`
+	OIDCClientID          string        `koanf:"auth.oidc.client_id" env:"FANOUT_OIDC_CLIENT_ID"`
+	OIDCClientSecret      string        `koanf:"auth.oidc.client_secret" env:"FANOUT_OIDC_CLIENT_SECRET" secret:"true"`
+	OIDCEmailClaim        string        `koanf:"auth.oidc.email_claim" env:"FANOUT_OIDC_EMAIL_CLAIM" default:"email"`
+	OIDCEmailVerification string        `koanf:"auth.oidc.email_verification" env:"FANOUT_OIDC_EMAIL_VERIFICATION" default:"required"`
+	OIDCAutoProvision     bool          `koanf:"auth.oidc.auto_provision" env:"FANOUT_OIDC_AUTO_PROVISION" default:"false"`
+	OIDCAllowedGroups     string        `koanf:"auth.oidc.allowed_groups" env:"FANOUT_OIDC_ALLOWED_GROUPS"`
+	OIDCAllowedDomains    string        `koanf:"auth.oidc.allowed_domains" env:"FANOUT_OIDC_ALLOWED_DOMAINS"`
+	OIDCDefaultRole       string        `koanf:"auth.oidc.default_role" env:"FANOUT_OIDC_DEFAULT_ROLE" default:"viewer"`
+	OIDCOperatorGroups    string        `koanf:"auth.oidc.operator_groups" env:"FANOUT_OIDC_OPERATOR_GROUPS"`
+	OIDCAdminGroups       string        `koanf:"auth.oidc.admin_groups" env:"FANOUT_OIDC_ADMIN_GROUPS"`
+	MetricsToken          string        `koanf:"metrics.token" env:"FANOUT_METRICS_TOKEN" secret:"true"`
+	MetricsPublic         bool          `koanf:"metrics.public" env:"FANOUT_METRICS_PUBLIC" default:"false"`
+	TrustedProxyCIDRs     string        `koanf:"server.trusted_proxy_cidrs" env:"FANOUT_TRUSTED_PROXY_CIDRS"`
+	TLSCertFile           string        `koanf:"server.tls.cert_file" env:"FANOUT_TLS_CERT_FILE"`
+	TLSKeyFile            string        `koanf:"server.tls.key_file" env:"FANOUT_TLS_KEY_FILE"`
+	resolvedSizing        sizingSource
 }
 
 // LogStartup reports the effective non-secret sizing and security-sensitive

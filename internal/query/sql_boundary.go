@@ -52,12 +52,17 @@ func (d *Duck) querySQL(ctx context.Context, query string, maxRows int, explain 
 	return &lockedRows{Rows: rows, unlock: release}, serialized, nil
 }
 
-func validateSQLAST(ctx context.Context, conn *sql.Conn, query string) error {
-	// The query is a bound value. Serialization parses without preparing or
-	// executing the submitted statement, including statements before a SELECT.
+type rowQueryer interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// parseStatement parses one statement with DuckDB's own parser. The query is
+// a bound value, so nothing is prepared or executed, including statements
+// before a SELECT.
+func parseStatement(ctx context.Context, db rowQueryer, query string) (map[string]any, error) {
 	var text string
-	if err := conn.QueryRowContext(ctx, "SELECT json_serialize_sql(?::VARCHAR)::VARCHAR", query).Scan(&text); err != nil {
-		return err
+	if err := db.QueryRowContext(ctx, "SELECT json_serialize_sql(?::VARCHAR)::VARCHAR", query).Scan(&text); err != nil {
+		return nil, err
 	}
 	var parsed struct {
 		Error      bool   `json:"error"`
@@ -67,41 +72,47 @@ func validateSQLAST(ctx context.Context, conn *sql.Conn, query string) error {
 		} `json:"statements"`
 	}
 	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-		return err
+		return nil, err
 	}
 	if parsed.Error {
-		return fmt.Errorf("SQL parsing failed: %s", parsed.Message)
+		return nil, fmt.Errorf("SQL parsing failed: %s", parsed.Message)
 	}
 	if len(parsed.Statements) != 1 {
-		return fmt.Errorf("exactly one SELECT statement is required")
+		return nil, fmt.Errorf("exactly one SELECT statement is required")
 	}
-	return validateSQLNode(parsed.Statements[0].Node, nil)
+	return parsed.Statements[0].Node, nil
 }
 
-func projectSQLResults(ctx context.Context, conn *sql.Conn, query string, maxRows int) (string, []bool, error) {
+func validateSQLAST(ctx context.Context, conn *sql.Conn, query string) error {
+	node, err := parseStatement(ctx, conn, query)
+	if err != nil {
+		return err
+	}
+	return validateSQLNode(node, nil)
+}
+
+// describeProjection describes a query and returns, per result column, the
+// projection that keeps nested and VARIANT values away from the Go driver.
+func describeProjection(ctx context.Context, conn *sql.Conn, query string) (projection, aliases []string, serialized []bool, err error) {
 	rows, err := conn.QueryContext(ctx, "DESCRIBE "+query)
 	if err != nil {
-		return "", nil, err
+		return nil, nil, nil, err
 	}
 	defer rows.Close()
-	var projection, aliases []string
-	var serialized []bool
 	names := map[string]bool{}
 	for rows.Next() {
 		var name, logicalType string
 		var nullable, key, defaultValue, extra sql.NullString
 		if err := rows.Scan(&name, &logicalType, &nullable, &key, &defaultValue, &extra); err != nil {
-			return "", nil, err
+			return nil, nil, nil, err
 		}
 		if names[strings.ToLower(name)] {
-			return "", nil, fmt.Errorf("duplicate result column %q; use distinct aliases", name)
+			return nil, nil, nil, fmt.Errorf("duplicate result column %q; use distinct aliases", name)
 		}
 		names[strings.ToLower(name)] = true
 		alias := fmt.Sprintf("_c%d", len(aliases))
 		aliases = append(aliases, alias)
 		expression := alias
-		// DESCRIBE reports nested logical types too. Serialize the entire affected
-		// value; no unsupported variant vector reaches the Go driver.
 		encode := containsLogicalType(logicalType, "VARIANT") || containsLogicalType(logicalType, "JSON") ||
 			containsLogicalType(logicalType, "STRUCT") || containsLogicalType(logicalType, "MAP") || containsLogicalType(logicalType, "UNION") || strings.Contains(logicalType, "[")
 		if encode {
@@ -113,7 +124,12 @@ func projectSQLResults(ctx context.Context, conn *sql.Conn, query string, maxRow
 		projection = append(projection, expression+" AS "+sqlIdentifier(name))
 		serialized = append(serialized, encode)
 	}
-	if err := rows.Err(); err != nil {
+	return projection, aliases, serialized, rows.Err()
+}
+
+func projectSQLResults(ctx context.Context, conn *sql.Conn, query string, maxRows int) (string, []bool, error) {
+	projection, aliases, serialized, err := describeProjection(ctx, conn, query)
+	if err != nil {
 		return "", nil, err
 	}
 	return fmt.Sprintf("SELECT %s FROM (%s) AS _result(%s) LIMIT %d", strings.Join(projection, ","), query, strings.Join(aliases, ","), maxRows), serialized, nil

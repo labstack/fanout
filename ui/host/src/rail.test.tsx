@@ -20,8 +20,8 @@ function threadsPage(query = "") {
 
 function dashboards() {
   return json({ dashboards: [
-    { id: "dash-main", name: "System overview", description: "", is_default: true, widget_count: 4, updated_at: "2026-07-22 03:00:00" },
-    { id: "dash-checkout", name: "Checkout", description: "", is_default: false, widget_count: 2, updated_at: "2026-07-22 03:00:00" },
+    { id: "dash-main", name: "System overview", description: "", is_default: true, version: 1, panel_count: 4, updated_at: "2026-07-22 03:00:00" },
+    { id: "dash-checkout", name: "Checkout", description: "", is_default: false, version: 1, panel_count: 2, updated_at: "2026-07-22 03:00:00" },
   ] });
 }
 
@@ -93,13 +93,76 @@ describe("Rail", () => {
     await act(async () => thread?.click());
     expect(handlers.onSelectThread).toHaveBeenCalledWith("thread-checkout");
 
-    const dashboard = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.includes("Checkout") && !button.textContent.includes("latency"));
+    const dashboard = Array.from(document.querySelectorAll<HTMLAnchorElement>("a")).find((button) => button.textContent?.includes("Checkout") && !button.textContent.includes("latency"));
     await act(async () => dashboard?.click());
     expect(handlers.onSelectDashboard).toHaveBeenCalledWith("dash-checkout");
 
     const newChat = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((button) => button.textContent?.trim() === "New chat");
     await act(async () => newChat?.click());
     expect(handlers.onNewChat).toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it("lists panel dashboard summaries from the new dashboard API", async () => {
+    const { root, render } = mount();
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.querySelectorAll('a[href^="/dashboards/"]')).toHaveLength(2));
+    expect(fetchMock.mock.calls.filter(([input]) => String(input) === "/api/dashboards")).toHaveLength(1);
+    expect(document.body.textContent).toContain("System overview");
+    expect(document.body.textContent).toContain("Checkout");
+    await act(async () => root.unmount());
+  });
+
+  it("marks only the default dashboard independently of the active dashboard", async () => {
+    const { root, render } = mount({ activeDashboardID: "dash-checkout" });
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.querySelector('a[href="/dashboards/dash-main"]')).not.toBeNull());
+    const defaultRow = document.querySelector('a[href="/dashboards/dash-main"]');
+    const activeRow = document.querySelector('a[href="/dashboards/dash-checkout"]');
+    expect(defaultRow?.textContent).toContain("Default");
+    expect(defaultRow?.getAttribute("aria-current")).toBeNull();
+    expect(activeRow?.textContent).not.toContain("Default");
+    expect(activeRow?.getAttribute("aria-current")).toBe("page");
+    await act(async () => root.unmount());
+  });
+
+  it("links each dashboard without search state and preserves modified clicks", async () => {
+    const { root, handlers, render } = mount();
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.querySelectorAll('a[href^="/dashboards/"]')).toHaveLength(2));
+    for (const id of ["dash-main", "dash-checkout"]) {
+      const link = document.querySelector<HTMLAnchorElement>(`a[href="/dashboards/${id}"]`)!;
+      expect(new URL(link.href).search).toBe("");
+      await act(async () => link.click());
+      expect(handlers.onSelectDashboard).toHaveBeenLastCalledWith(id);
+    }
+    handlers.onSelectDashboard.mockClear();
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: true });
+    await act(async () => { document.querySelector('a[href="/dashboards/dash-checkout"]')!.dispatchEvent(event); });
+    expect(event.defaultPrevented).toBe(false);
+    expect(handlers.onSelectDashboard).not.toHaveBeenCalled();
+    await act(async () => root.unmount());
+  });
+
+  it("offers New dashboard when the dashboard list is empty and the agent is available", async () => {
+    fetchMock.mockImplementation(async (input, init) => String(input) === "/api/dashboards" ? json({ dashboards: [] }) : respond(input, init));
+    const { root, handlers, render } = mount();
+    await act(async () => render());
+    await vi.waitFor(() => expect(document.body.textContent).toContain("New dashboard"));
+    const create = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((item) => item.textContent?.trim() === "New dashboard");
+    await act(async () => create!.click());
+    expect(handlers.onCreateDashboard).toHaveBeenCalledOnce();
+    expect(document.body.textContent).not.toContain("Create with AI");
+    await act(async () => root.unmount());
+  });
+
+  it("hides New dashboard for an empty list when the agent is unavailable", async () => {
+    fetchMock.mockImplementation(async () => json({ dashboards: [] }));
+    const { root, render } = mount({ agentAvailable: false });
+    await act(async () => render());
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    expect(document.body.textContent).not.toContain("New dashboard");
+    expect(document.body.textContent).not.toContain("Create with AI");
     await act(async () => root.unmount());
   });
 

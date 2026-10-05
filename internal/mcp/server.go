@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/fanout/internal/dashboard"
 	"github.com/labstack/fanout/internal/intelligence"
 	"github.com/labstack/fanout/internal/observability"
+	"github.com/labstack/fanout/internal/panel"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -18,7 +19,7 @@ const mcpUIExtension = "io.modelcontextprotocol/ui"
 
 const staticCatalogTTLMs = 5 * 60 * 1000
 
-const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges, get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency and errors, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user: list or get a dashboard before changing it, create only when asked, and replace an existing dashboard only with explicit user intent."
+const serverInstructions = "Start with get_observability_overview for system health, use get_intelligence_snapshot for the latest precomputed anomalies and log patterns, get_service_topology for direct dependency edges, get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for latency and errors, inspect_trace for one trace, and search_logs for application events. Treat schema, timestamps, provenance, and bounded time windows as authoritative. Dashboard tools are scoped to the authenticated user. To build a dashboard, read get_telemetry_schema, draft panels, run preview_panels until every panel is ok or deliberately empty, then create_dashboard. To change one, get_dashboard first and use edit_dashboard; replace only for a redesign the user asked for."
 
 type Observability interface {
 	Overview(context.Context, observability.Scope, int) (observability.Result[observability.Overview], error)
@@ -77,18 +78,19 @@ type Server struct {
 	queries      Observability
 	intelligence IntelligenceSnapshots
 	dashboards   *dashboard.Service
+	panels       *panel.Executor
 	now          func() time.Time
 }
 
-func New(queries Observability, dashboards *dashboard.Service, version string) *Server {
-	return newServer(queries, dashboards, nil, version)
+func New(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, version string) *Server {
+	return newServer(queries, dashboards, panels, nil, version)
 }
 
-func NewWithIntelligence(queries Observability, dashboards *dashboard.Service, snapshots IntelligenceSnapshots, version string) *Server {
-	return newServer(queries, dashboards, snapshots, version)
+func NewWithIntelligence(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, snapshots IntelligenceSnapshots, version string) *Server {
+	return newServer(queries, dashboards, panels, snapshots, version)
 }
 
-func newServer(queries Observability, dashboards *dashboard.Service, snapshots IntelligenceSnapshots, version string) *Server {
+func newServer(queries Observability, dashboards *dashboard.Service, panels *panel.Executor, snapshots IntelligenceSnapshots, version string) *Server {
 	s := &Server{
 		mcp: mcp.NewServer(&mcp.Implementation{
 			Name:    "fanout",
@@ -105,9 +107,11 @@ func newServer(queries Observability, dashboards *dashboard.Service, snapshots I
 		queries:      queries,
 		intelligence: snapshots,
 		dashboards:   dashboards,
+		panels:       panels,
 		now:          time.Now,
 	}
 	s.registerTools()
+	s.registerPanelTools()
 	s.registerDashboardTools()
 	s.registerAppResources()
 	s.mcp.AddReceivingMiddleware(addStaticCacheHints, filterMCPAppToolMetadata)
@@ -272,7 +276,7 @@ func (s *Server) dependencies(ctx context.Context, _ *mcp.CallToolRequest, input
 	}
 	output, err := s.queries.Dependencies(ctx, scope, observability.DependencyOptions{Service: input.Service, Direction: input.Direction, MaxDepth: input.MaxDepth, MaxNodes: input.MaxNodes})
 	if err != nil {
-		return nil, output, err
+		return nil, output, safePanelToolError(err)
 	}
 	return summary(output.Summary), output, nil
 }
@@ -292,7 +296,7 @@ func (s *Server) overview(ctx context.Context, _ *mcp.CallToolRequest, input Que
 	}
 	output, err := s.queries.Overview(ctx, scope, input.Limit)
 	if err != nil {
-		return nil, output, err
+		return nil, output, safePanelToolError(err)
 	}
 	return summary(output.Summary), output, nil
 }
@@ -304,7 +308,7 @@ func (s *Server) topology(ctx context.Context, _ *mcp.CallToolRequest, input Que
 	}
 	output, err := s.queries.Topology(ctx, scope, input.Limit)
 	if err != nil {
-		return nil, output, err
+		return nil, output, safePanelToolError(err)
 	}
 	return summary(output.Summary), output, nil
 }
@@ -316,7 +320,7 @@ func (s *Server) performance(ctx context.Context, _ *mcp.CallToolRequest, input 
 	}
 	output, err := s.queries.Performance(ctx, scope, observability.PerformanceOptions{Service: input.Service, Limit: input.Limit})
 	if err != nil {
-		return nil, output, err
+		return nil, output, safePanelToolError(err)
 	}
 	return summary(output.Summary), output, nil
 }
@@ -328,7 +332,7 @@ func (s *Server) trace(ctx context.Context, _ *mcp.CallToolRequest, input TraceI
 	}
 	output, err := s.queries.Trace(ctx, scope, input.TraceID, input.Service, input.Limit)
 	if err != nil {
-		return nil, output, err
+		return nil, output, safePanelToolError(err)
 	}
 	return summary(output.Summary), output, nil
 }
@@ -340,7 +344,7 @@ func (s *Server) logs(ctx context.Context, _ *mcp.CallToolRequest, input LogsInp
 	}
 	output, err := s.queries.Logs(ctx, scope, input.Service, input.Severity, input.Search, input.Limit)
 	if err != nil {
-		return nil, output, err
+		return nil, output, safePanelToolError(err)
 	}
 	return summary(output.Summary), output, nil
 }

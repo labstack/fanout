@@ -1,13 +1,14 @@
 package api
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
-	"io"
 	"net/http"
+	"strconv"
 
 	"github.com/labstack/echo/v5"
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/panel"
 )
 
 type DashboardHandler struct{ dashboards *dashboard.Service }
@@ -15,71 +16,110 @@ type DashboardHandler struct{ dashboards *dashboard.Service }
 func RegisterDashboardRoutes(e *echo.Echo, dashboards *dashboard.Service) {
 	h := &DashboardHandler{dashboards: dashboards}
 	own := RequireCapability(ManageOwnDashboards)
-	e.GET("/api/dashboards", h.List, own)
-	e.POST("/api/dashboards", h.Create, own)
-	e.GET("/api/dashboards/:id", h.Get, own)
-	e.PUT("/api/dashboards/:id", h.Put, own)
-	e.DELETE("/api/dashboards/:id", h.Delete, own)
+	e.GET("/api/dashboards", h.list, own)
+	e.POST("/api/dashboards", h.create, own)
+	e.GET("/api/dashboards/:id", h.get, own)
+	e.PUT("/api/dashboards/:id", h.replace, own)
+	e.PATCH("/api/dashboards/:id", h.edit, own)
+	e.DELETE("/api/dashboards/:id", h.delete, own)
+	e.GET("/api/dashboards/:id/versions", h.versions, own)
+	e.POST("/api/dashboards/:id/versions/:version/restore", h.restore, own)
 }
 
-func (h *DashboardHandler) List(c *echo.Context) error {
-	owner, err := dashboardOwner(c)
+const dashboardBodyLimit = 512 << 10
+
+type createDashboardBody struct {
+	Spec panel.Dashboard `json:"spec"`
+}
+
+type replaceDashboardBody struct {
+	Spec        panel.Dashboard `json:"spec"`
+	BaseVersion int             `json:"base_version,omitempty"`
+	Message     string          `json:"message,omitempty"`
+}
+
+type editDashboardBody struct {
+	Operations  []dashboard.Operation `json:"operations"`
+	BaseVersion int                   `json:"base_version,omitempty"`
+	Message     string                `json:"message,omitempty"`
+}
+
+func userAuthor(owner string) dashboard.Author { return dashboard.Author{Kind: "user", ID: owner} }
+
+func (h *DashboardHandler) list(c *echo.Context) error {
+	owner, err := RequestOwner(c)
 	if err != nil {
 		return err
 	}
 	items, err := h.dashboards.List(c.Request().Context(), owner)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "dashboards unavailable").Wrap(err)
+		return dashboardError(c, err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"dashboards": items})
 }
 
-func (h *DashboardHandler) Create(c *echo.Context) error {
-	owner, err := dashboardOwner(c)
+func (h *DashboardHandler) create(c *echo.Context) error {
+	owner, err := RequestOwner(c)
 	if err != nil {
 		return err
 	}
-	var input dashboard.CreateInput
-	if err := decodeDashboard(c, &input); err != nil {
+	var body createDashboardBody
+	if err := decodeStrict(c, &body, dashboardBodyLimit); err != nil {
 		return err
 	}
-	created, err := h.dashboards.Create(c.Request().Context(), owner, input)
+	record, err := h.dashboards.Create(c.Request().Context(), owner, body.Spec, userAuthor(owner))
 	if err != nil {
-		return mapDashboardError(err)
+		return dashboardError(c, err)
 	}
-	return c.JSON(http.StatusCreated, created)
+	return c.JSON(http.StatusCreated, record)
 }
 
-func (h *DashboardHandler) Get(c *echo.Context) error {
-	owner, err := dashboardOwner(c)
+func (h *DashboardHandler) get(c *echo.Context) error {
+	owner, err := RequestOwner(c)
 	if err != nil {
 		return err
 	}
-	item, err := h.dashboards.Get(c.Request().Context(), owner, c.Param("id"))
+	record, err := h.dashboards.Get(c.Request().Context(), owner, c.Param("id"))
 	if err != nil {
-		return mapDashboardError(err)
+		return dashboardError(c, err)
 	}
-	return c.JSON(http.StatusOK, item)
+	return c.JSON(http.StatusOK, record)
 }
 
-func (h *DashboardHandler) Put(c *echo.Context) error {
-	owner, err := dashboardOwner(c)
+func (h *DashboardHandler) replace(c *echo.Context) error {
+	owner, err := RequestOwner(c)
 	if err != nil {
 		return err
 	}
-	var input dashboard.UpdateInput
-	if err := decodeDashboard(c, &input); err != nil {
+	var body replaceDashboardBody
+	if err := decodeStrict(c, &body, dashboardBodyLimit); err != nil {
 		return err
 	}
-	updated, err := h.dashboards.Update(c.Request().Context(), owner, c.Param("id"), input)
+	record, err := h.dashboards.Replace(c.Request().Context(), owner, c.Param("id"), body.Spec, body.BaseVersion, userAuthor(owner), body.Message)
 	if err != nil {
-		return mapDashboardError(err)
+		return dashboardError(c, err)
 	}
-	return c.JSON(http.StatusOK, updated)
+	return c.JSON(http.StatusOK, record)
 }
 
-func (h *DashboardHandler) Delete(c *echo.Context) error {
-	owner, err := dashboardOwner(c)
+func (h *DashboardHandler) edit(c *echo.Context) error {
+	owner, err := RequestOwner(c)
+	if err != nil {
+		return err
+	}
+	var body editDashboardBody
+	if err := decodeStrict(c, &body, dashboardBodyLimit); err != nil {
+		return err
+	}
+	record, err := h.dashboards.Edit(c.Request().Context(), owner, c.Param("id"), body.Operations, body.BaseVersion, userAuthor(owner), body.Message)
+	if err != nil {
+		return dashboardError(c, err)
+	}
+	return c.JSON(http.StatusOK, record)
+}
+
+func (h *DashboardHandler) delete(c *echo.Context) error {
+	owner, err := RequestOwner(c)
 	if err != nil {
 		return err
 	}
@@ -87,35 +127,56 @@ func (h *DashboardHandler) Delete(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusPreconditionRequired, "dashboard deletion requires confirmation")
 	}
 	if err := h.dashboards.Delete(c.Request().Context(), owner, c.Param("id")); err != nil {
-		return mapDashboardError(err)
+		return dashboardError(c, err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
-func dashboardOwner(c *echo.Context) (string, error) {
-	return RequestOwner(c)
-}
-
-func decodeDashboard(c *echo.Context, value any) error {
-	decoder := json.NewDecoder(io.LimitReader(c.Request().Body, 128<<10))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(value); err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "invalid dashboard document")
+func (h *DashboardHandler) versions(c *echo.Context) error {
+	owner, err := RequestOwner(c)
+	if err != nil {
+		return err
 	}
-	return nil
+	versions, err := h.dashboards.Versions(c.Request().Context(), owner, c.Param("id"))
+	if err != nil {
+		return dashboardError(c, err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"versions": versions})
 }
 
-func mapDashboardError(err error) error {
+func (h *DashboardHandler) restore(c *echo.Context) error {
+	owner, err := RequestOwner(c)
+	if err != nil {
+		return err
+	}
+	version, err := strconv.Atoi(c.Param("version"))
+	if err != nil || version < 1 {
+		return echo.NewHTTPError(http.StatusBadRequest, "version must be a positive integer")
+	}
+	record, err := h.dashboards.Restore(c.Request().Context(), owner, c.Param("id"), version, userAuthor(owner))
+	if err != nil {
+		return dashboardError(c, err)
+	}
+	return c.JSON(http.StatusOK, record)
+}
+
+func dashboardError(c *echo.Context, err error) error {
+	if handled, writeErr := writeProblems(c, err); handled {
+		return writeErr
+	}
 	switch {
 	case errors.Is(err, dashboard.ErrNotFound):
 		return echo.NewHTTPError(http.StatusNotFound, "dashboard not found")
 	case errors.Is(err, dashboard.ErrConflict):
 		return echo.NewHTTPError(http.StatusConflict, "a dashboard with that name already exists")
+	case errors.Is(err, dashboard.ErrStale):
+		return echo.NewHTTPError(http.StatusConflict, "The dashboard changed since you opened it. Reload to see the latest version.")
+	case errors.Is(err, context.DeadlineExceeded):
+		return echo.NewHTTPError(http.StatusGatewayTimeout, "Checking the dashboard took too long. Try again, or narrow its panels.").Wrap(err)
+	case errors.Is(err, context.Canceled):
+		// The client is gone; there is nobody to answer.
+		return nil
 	default:
-		var validation *dashboard.ValidationError
-		if errors.As(err, &validation) {
-			return echo.NewHTTPError(http.StatusBadRequest, validation.Message)
-		}
 		return echo.NewHTTPError(http.StatusInternalServerError, "dashboard operation failed").Wrap(err)
 	}
 }

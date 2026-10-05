@@ -3,10 +3,11 @@ import { useDebouncedValue } from "@mantine/hooks";
 import { DotsThree, MagnifyingGlass, PencilSimple, Plus, Sparkle, Trash } from "@phosphor-icons/react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import { dashboardsQueryKey, getJSON, threadHistoryQueryKey, type DashboardSummary } from "./api";
+import { threadHistoryQueryKey } from "./api";
 import type { Overview } from "../../contracts";
 import { authorizedFetch } from "./auth";
-import { freshFor, useObservability, widgetParams } from "./widgets/data";
+import { dashboardsKey, listDashboards } from "./dashboards/api";
+import { freshFor, observabilityParams, useObservability } from "./observability";
 
 export type RailHandle = { focusSearch(): void };
 
@@ -57,21 +58,21 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
     getNextPageParam: (last) => last.nextCursor || undefined,
     enabled: agentAvailable,
   });
-  const dashboards = useQuery({ queryKey: dashboardsQueryKey, queryFn: () => getJSON<{ dashboards: DashboardSummary[] }>("/api/dashboards"), refetchInterval: 30_000, staleTime: freshFor });
+  const dashboards = useQuery({ queryKey: dashboardsKey, queryFn: listDashboards, refetchInterval: 30_000, staleTime: freshFor });
   const threads = useMemo(() => history.data?.pages.flatMap((page) => page.threads) ?? [], [history.data]);
   const groups = useMemo(() => groupThreads(threads), [threads]);
   // Searching for a service used to answer "No matching chats / No matching
   // dashboards" while that service was live, traced and logged — the search
   // looked only at what the user had already named. The catalogue is fetched
   // only once someone is actually searching.
-  const overview = useObservability<Overview>("overview", widgetParams({ window: "1h", namespace: "" }), Boolean(query) && Boolean(onInvestigateService));
+  const overview = useObservability<Overview>("overview", observabilityParams({ window: "1h", namespace: "" }), Boolean(query) && Boolean(onInvestigateService));
   const matchingServices = useMemo(() => {
     if (!query) return [];
     const needle = query.toLowerCase();
     return (overview.data?.data.services ?? []).map((entry) => entry.service).filter((service) => service.toLowerCase().includes(needle)).slice(0, 6);
   }, [overview.data, query]);
   const visibleDashboards = useMemo(() => {
-    const items = dashboards.data?.dashboards ?? [];
+    const items = dashboards.data ?? [];
     const needle = query.toLowerCase();
     return needle ? items.filter((item) => item.name.toLowerCase().includes(needle)) : items;
   }, [dashboards.data, query]);
@@ -137,14 +138,18 @@ export default function Rail({ agentAvailable, activeThreadID, activeDashboardID
           {!dashboards.isLoading && !dashboards.isError && query && visibleDashboards.length === 0 && <Text c="dimmed" size="sm" px="sm" py="xs">No matching dashboards</Text>}
           {visibleDashboards.map((dashboard) => {
             const active = dashboard.id === activeDashboardID;
-            return <UnstyledButton key={dashboard.id} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={() => onSelectDashboard(dashboard.id)}>
+            return <UnstyledButton component="a" href={`/dashboards/${encodeURIComponent(dashboard.id)}`} key={dashboard.id} className="rail-row" data-active={active || undefined} aria-current={active ? "page" : undefined} p="sm" onClick={(event) => {
+              if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+              event.preventDefault();
+              onSelectDashboard(dashboard.id);
+            }}>
               <Group justify="space-between" gap="sm" wrap="nowrap">
                 <Text size="sm" fw={active ? 600 : 500} truncate>{dashboard.name}</Text>
                 {dashboard.is_default && <Badge size="xs" variant="light" color="gray">Default</Badge>}
               </Group>
             </UnstyledButton>;
           })}
-          {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>Create with AI</Button>}
+          {agentAvailable && <Button variant="subtle" color="gray" size="compact-sm" justify="flex-start" leftSection={<Sparkle size={14} weight="fill" />} onClick={onCreateDashboard}>{dashboards.data?.length === 0 ? "New dashboard" : "Create with AI"}</Button>}
         </Stack>
       </Stack>
     </ScrollArea>

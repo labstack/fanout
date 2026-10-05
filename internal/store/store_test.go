@@ -24,7 +24,7 @@ func TestNewSQLite_InMemory(t *testing.T) {
 		"alert_rules", "alerts", "users", "verifications", "sessions",
 		"user_identities", "auth_audit_events", "oauth_clients",
 		"oauth_authorization_codes", "oauth_tokens", "settings", "agui_threads",
-		"agui_runs", "dashboards", "dashboard_widgets", "goose_db_version",
+		"agui_runs", "dashboards", "dashboard_versions", "goose_db_version",
 	}
 	for _, tbl := range tables {
 		var name string
@@ -205,7 +205,7 @@ func TestNewSQLite_InitializesWithOnlyGooseMetadata(t *testing.T) {
 	if err := s.DB.QueryRow(`SELECT COUNT(*) FROM goose_db_version WHERE version_id > 0 AND is_applied=1`).Scan(&applied); err != nil {
 		t.Fatal(err)
 	}
-	if applied != 1 {
-		t.Fatalf("applied versions = %d, want 1", applied)
+	if applied != 2 {
+		t.Fatalf("applied versions = %d, want 2", applied)
 	}
 }

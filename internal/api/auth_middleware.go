@@ -289,6 +289,10 @@ func classifyRoute(method, path string) (routePolicy, bool) {
 		}
 	case strings.HasPrefix(path, "/api/alerting/rules/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageAlerts}, unsafe
+	case path == "/api/panels/query" || path == "/api/variables/resolve":
+		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, method == http.MethodPost
+	case path == "/api/telemetry/schema":
+		return routePolicy{kind: routePolicyCapability, capability: ReadTelemetry}, read
 	case path == "/api/dashboards" || strings.HasPrefix(path, "/api/dashboards/"):
 		return routePolicy{kind: routePolicyCapability, capability: ManageOwnDashboards}, read || unsafe
 	case path == "/api/agent/runs":

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/panel"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -18,16 +19,21 @@ type DashboardIDInput struct {
 }
 
 type DashboardCreateInput struct {
-	Name        string          `json:"name" jsonschema:"Short, unique dashboard name"`
-	Description string          `json:"description,omitempty" jsonschema:"Concise purpose of this dashboard"`
-	State       dashboard.State `json:"state" jsonschema:"Complete widget registry, 12-column layout, and shared filters"`
+	Dashboard panel.Dashboard `json:"dashboard" jsonschema:"Complete v1 dashboard spec"`
 }
 
-type DashboardUpdateInput struct {
-	ID          string          `json:"id" jsonschema:"Dashboard ID to update"`
-	Name        string          `json:"name" jsonschema:"Short, unique dashboard name"`
-	Description string          `json:"description,omitempty" jsonschema:"Concise purpose of this dashboard"`
-	State       dashboard.State `json:"state" jsonschema:"Complete replacement widget registry, 12-column layout, and shared filters"`
+type DashboardReplaceInput struct {
+	ID          string          `json:"id" jsonschema:"Dashboard ID"`
+	Dashboard   panel.Dashboard `json:"dashboard" jsonschema:"Complete replacement spec; omitted panels are removed"`
+	BaseVersion int             `json:"base_version,omitempty" jsonschema:"Version you read; the call fails if someone saved since"`
+	Message     string          `json:"message,omitempty" jsonschema:"One line describing the change, shown in history"`
+}
+
+type DashboardEditInput struct {
+	ID          string                `json:"id" jsonschema:"Dashboard ID"`
+	Operations  []dashboard.Operation `json:"operations" jsonschema:"Edits applied in order, atomically"`
+	BaseVersion int                   `json:"base_version,omitempty" jsonschema:"Version you read; the call fails if someone saved since"`
+	Message     string                `json:"message,omitempty" jsonschema:"One line describing the change, shown in history"`
 }
 
 type dashboardListOutput struct {
@@ -35,7 +41,8 @@ type dashboardListOutput struct {
 }
 
 type dashboardOutput struct {
-	Dashboard dashboard.Dashboard `json:"dashboard"`
+	Dashboard dashboard.Record `json:"dashboard"`
+	Warnings  []string         `json:"warnings,omitempty"`
 }
 
 const (
@@ -43,29 +50,35 @@ const (
 	getDashboardTool
 	createDashboardTool
 	replaceDashboardTool
+	editDashboardTool
 )
 
 // Registration and transport authorization use the same dashboard tool catalog.
 var dashboardTools = [...]mcp.Tool{
 	{
 		Name: "list_dashboards", Title: "List dashboards",
-		Description: "List the authenticated user's named dashboards and widget counts before creating or changing one.",
+		Description: "List the authenticated user's dashboards with panel counts and versions.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "get_dashboard", Title: "Get dashboard",
-		Description: "Read one named dashboard, including its widgets, filters, and 12-column layout.",
+		Description: "Read one dashboard's complete spec and version. Read it before editing so operations name real panel ids.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "create_dashboard", Title: "Create dashboard",
-		Description: "Create a complete named dashboard for the authenticated user. This is additive and does not alter existing dashboards.",
+		Description: "Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every panel is ok or deliberately empty. The result lists any panel that is still empty or failing. " + specGuide,
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)},
 	},
 	{
-		Name: "replace_dashboard", Title: "Replace dashboard design",
-		Description: "Replace an existing dashboard's complete name, description, widgets, shared filters, and layout. This is not a partial edit: omitted widgets are removed. Only call after the user explicitly asks to change that dashboard.",
+		Name: "replace_dashboard", Title: "Replace dashboard",
+		Description: "Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), IdempotentHint: true, OpenWorldHint: boolPtr(false)},
+	},
+	{
+		Name: "edit_dashboard", Title: "Edit dashboard",
+		Description: "Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard.",
+		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 }
 
@@ -89,8 +102,11 @@ func (s *Server) registerDashboardTools() {
 	mcp.AddTool(s.mcp, &dashboardTools[listDashboardsTool], s.dashboardList)
 	mcp.AddTool(s.mcp, &dashboardTools[getDashboardTool], s.dashboardGet)
 	mcp.AddTool(s.mcp, &dashboardTools[createDashboardTool], s.dashboardCreate)
-	mcp.AddTool(s.mcp, &dashboardTools[replaceDashboardTool], s.dashboardUpdate)
+	mcp.AddTool(s.mcp, &dashboardTools[replaceDashboardTool], s.dashboardReplace)
+	mcp.AddTool(s.mcp, &dashboardTools[editDashboardTool], s.dashboardEdit)
 }
+
+func agentAuthor(owner string) dashboard.Author { return dashboard.Author{Kind: "agent", ID: owner} }
 
 func (s *Server) dashboardList(ctx context.Context, req *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, dashboardListOutput, error) {
 	owner, err := dashboardOwner(req)
@@ -109,11 +125,11 @@ func (s *Server) dashboardGet(ctx context.Context, req *mcp.CallToolRequest, inp
 	if err != nil {
 		return nil, dashboardOutput{}, err
 	}
-	item, err := s.dashboards.Get(ctx, owner, strings.TrimSpace(input.ID))
+	record, err := s.dashboards.Get(ctx, owner, strings.TrimSpace(input.ID))
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
-	return summary(fmt.Sprintf("Loaded %q with %d widgets.", item.Name, len(item.State.Widgets))), dashboardOutput{Dashboard: item}, nil
+	return summary(fmt.Sprintf("Loaded %q, version %d, with %d panels.", record.Name, record.Version, len(record.Spec.Panels))), dashboardOutput{Dashboard: record}, nil
 }
 
 func (s *Server) dashboardCreate(ctx context.Context, req *mcp.CallToolRequest, input DashboardCreateInput) (*mcp.CallToolResult, dashboardOutput, error) {
@@ -121,101 +137,71 @@ func (s *Server) dashboardCreate(ctx context.Context, req *mcp.CallToolRequest, 
 	if err != nil {
 		return nil, dashboardOutput{}, err
 	}
-	item, err := s.dashboards.Create(ctx, owner, dashboard.CreateInput{Name: input.Name, Description: input.Description, State: input.State})
+	record, err := s.dashboards.Create(ctx, owner, input.Dashboard, agentAuthor(owner))
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
-	return summary(fmt.Sprintf("Created dashboard %q with %d widgets.%s", item.Name, len(item.State.Widgets), s.emptyWidgetNote(ctx, item.State))), dashboardOutput{Dashboard: item}, nil
+	return s.saved(ctx, "Created", record)
 }
 
-func (s *Server) dashboardUpdate(ctx context.Context, req *mcp.CallToolRequest, input DashboardUpdateInput) (*mcp.CallToolResult, dashboardOutput, error) {
+func (s *Server) dashboardReplace(ctx context.Context, req *mcp.CallToolRequest, input DashboardReplaceInput) (*mcp.CallToolResult, dashboardOutput, error) {
 	owner, err := dashboardOwner(req)
 	if err != nil {
 		return nil, dashboardOutput{}, err
 	}
-	item, err := s.dashboards.Update(ctx, owner, strings.TrimSpace(input.ID), dashboard.UpdateInput{Name: input.Name, Description: input.Description, State: input.State})
+	record, err := s.dashboards.Replace(ctx, owner, strings.TrimSpace(input.ID), input.Dashboard, input.BaseVersion, agentAuthor(owner), input.Message)
 	if err != nil {
 		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
-	return summary(fmt.Sprintf("Updated dashboard %q with %d widgets.%s", item.Name, len(item.State.Widgets), s.emptyWidgetNote(ctx, item.State))), dashboardOutput{Dashboard: item}, nil
+	return s.saved(ctx, "Replaced", record)
 }
 
-// probeLimit bounds the work a single create or update can trigger. A design
-// with more filtered cards than this is reported on its first few; the point is
-// to catch a dashboard built entirely out of empty cards, not to audit each one.
-const probeLimit = 8
-
-// probeBudget caps how long the whole check may take. Whatever has answered by
-// then is reported; the rest are left unmentioned rather than delaying a
-// dashboard that is already saved.
-const probeBudget = 3 * time.Second
-
-// emptyWidgetNote reports which of the new dashboard's filtered cards have
-// nothing to show right now.
-//
-// A design is composed from what the model believes is there, and a filter it
-// invents can match nothing at all — a demo dashboard shipped with "Error
-// logs" and "Warnings" cards that were empty on arrival and stayed empty,
-// because the service in question logs no such levels. Nothing in the tool
-// result said so, so the model described them to the user as working views.
-// Saying it here lets the model drop the card or explain it in the same turn.
-//
-// Probes never fail the call and never hold it open: an empty note is the
-// honest answer when a probe cannot run, and a dashboard that saved correctly
-// must not be reported as an error — or left waiting — because a follow-up
-// query was slow. A log query over a busy window has been seen to take twelve
-// seconds, and eight of those would be the answer's latency.
-func (s *Server) emptyWidgetNote(ctx context.Context, state dashboard.State) string {
-	if s.queries == nil {
-		return ""
-	}
-	ctx, cancel := context.WithTimeout(ctx, probeBudget)
-	defer cancel()
-	scope, err := s.scope(QueryInput{Window: state.Filters.Window, Namespace: state.Filters.Namespace})
+func (s *Server) dashboardEdit(ctx context.Context, req *mcp.CallToolRequest, input DashboardEditInput) (*mcp.CallToolResult, dashboardOutput, error) {
+	owner, err := dashboardOwner(req)
 	if err != nil {
-		return ""
+		return nil, dashboardOutput{}, err
 	}
-	var empty []string
-	probes := 0
-	for _, widget := range state.Widgets {
-		if probes >= probeLimit || ctx.Err() != nil {
-			break
-		}
-		service := widgetConfigString(widget, "service")
-		switch widget.Type {
-		case "logs":
-			severity, search := widgetConfigString(widget, "severity"), widgetConfigString(widget, "search")
-			if service == "" && severity == "" && search == "" {
-				continue
-			}
-			probes++
-			result, probeErr := s.queries.Logs(ctx, scope, service, severity, search, 1)
-			if probeErr == nil && len(result.Data.Entries) == 0 {
-				empty = append(empty, widget.Title)
-			}
-		case "trace":
-			if service == "" && widgetConfigString(widget, "trace_id") == "" {
-				continue
-			}
-			probes++
-			result, probeErr := s.queries.Trace(ctx, scope, widgetConfigString(widget, "trace_id"), service, 1)
-			if probeErr == nil && len(result.Data.Spans) == 0 {
-				empty = append(empty, widget.Title)
-			}
-		}
+	record, err := s.dashboards.Edit(ctx, owner, strings.TrimSpace(input.ID), input.Operations, input.BaseVersion, agentAuthor(owner), input.Message)
+	if err != nil {
+		return nil, dashboardOutput{}, dashboardToolError(err)
 	}
-	if len(empty) == 0 {
-		return ""
-	}
-	return fmt.Sprintf(" No data matches these cards in the dashboard's own window, so they will render empty: %s. Tell the user, or replace them.", strings.Join(empty, ", "))
+	return s.saved(ctx, "Updated", record)
 }
 
-func widgetConfigString(widget dashboard.Widget, key string) string {
-	value, ok := widget.Config[key].(string)
-	if !ok {
-		return ""
+// saveCheckBudget bounds the post-save run that reports empty or failing
+// panels. The dashboard is already saved; a slow check is reported as
+// unchecked, and the result says so, rather than holding the answer.
+const saveCheckBudget = 8 * time.Second
+
+func (s *Server) saved(ctx context.Context, verb string, record dashboard.Record) (*mcp.CallToolResult, dashboardOutput, error) {
+	out := dashboardOutput{Dashboard: record}
+	unchecked := ""
+	if s.panels != nil {
+		checkCtx, cancel := context.WithTimeout(ctx, saveCheckBudget)
+		results, err := s.panels.Run(checkCtx, panel.RunRequest{Dashboard: record.Spec})
+		cancel()
+		if err != nil {
+			reason := panel.SafeError(err)
+			if errors.Is(err, context.DeadlineExceeded) {
+				reason = fmt.Sprintf("the check took longer than %d seconds", int(saveCheckBudget/time.Second))
+			}
+			unchecked = " Panels were not checked: " + reason + "."
+		} else {
+			for _, r := range results {
+				switch r.Status {
+				case panel.StatusEmpty:
+					out.Warnings = append(out.Warnings, fmt.Sprintf("%s is empty: %s", r.ID, r.Diagnosis))
+				case panel.StatusError:
+					out.Warnings = append(out.Warnings, fmt.Sprintf("%s failed: %s", r.ID, r.Error))
+				}
+			}
+		}
 	}
-	return strings.TrimSpace(value)
+	text := fmt.Sprintf("%s %q, version %d, with %d panels.", verb, record.Name, record.Version, len(record.Spec.Panels))
+	if len(out.Warnings) > 0 {
+		text += " Needs attention: " + strings.Join(out.Warnings, " ") + " Fix these with edit_dashboard or tell the user why they are empty."
+	}
+	return summary(text + unchecked), out, nil
 }
 
 // dashboardOwner resolves the authenticated owner for a dashboard tool call.
@@ -243,18 +229,21 @@ func dashboardOwner(req *mcp.CallToolRequest) (string, error) {
 }
 
 func dashboardToolError(err error) error {
+	var problems panel.Problems
 	switch {
+	case errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		return safePanelToolError(err)
+	case errors.As(err, &problems):
+		return problems
 	case errors.Is(err, dashboard.ErrNotFound):
 		return errors.New("dashboard not found")
 	case errors.Is(err, dashboard.ErrConflict):
 		return errors.New("a dashboard with that name already exists")
+	case errors.Is(err, dashboard.ErrStale):
+		return errors.New("the dashboard changed since you read it; get_dashboard again and reapply the change")
 	default:
-		var validation *dashboard.ValidationError
-		if errors.As(err, &validation) {
-			return validation
-		}
 		// MCP tool errors bypass the HTTP request logger, so this is the only
-		// place the underlying storage/tx failure gets recorded.
+		// place the underlying storage failure gets recorded.
 		slog.Error("dashboard tool operation failed", "error", err)
 		return errors.New("dashboard operation failed")
 	}

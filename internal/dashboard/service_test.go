@@ -3,314 +3,191 @@ package dashboard
 import (
 	"context"
 	"errors"
-	"reflect"
+	"path/filepath"
+	"sync"
 	"testing"
 
-	appid "github.com/labstack/fanout/internal/id"
-	controlstore "github.com/labstack/fanout/internal/store"
+	"github.com/labstack/fanout/internal/panel"
+	appstore "github.com/labstack/fanout/internal/store"
 )
 
-func TestServiceCreatesNamedOwnerScopedDashboards(t *testing.T) {
-	database, err := controlstore.NewSQLite(":memory:")
+// structural validates without DuckDB; filter checks are covered in
+// internal/panel and by TestDefaultSpecPassesTheFullCheck.
+type structural struct{}
+
+func (structural) Validate(_ context.Context, d *panel.Dashboard) error {
+	panel.Normalize(d)
+	if problems := panel.Validate(d); len(problems) > 0 {
+		return problems
+	}
+	return nil
+}
+
+func newTestService(t *testing.T) *Service {
+	t.Helper()
+	sqlite, err := appstore.NewSQLite(":memory:")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer database.Close()
-	ctx := context.Background()
-	for _, owner := range []string{"owner-a", "owner-b"} {
-		if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES(?,?,?,'admin',1)`, owner, owner+"@example.test", owner); err != nil {
+	t.Cleanup(func() { _ = sqlite.Close() })
+	for _, id := range []string{"owner", "other"} {
+		if _, err := sqlite.DB.Exec(`INSERT INTO users (id, email) VALUES (?, ?)`, id, id+"@example.com"); err != nil {
 			t.Fatal(err)
 		}
 	}
-	service := New(database.DB, 30)
+	return New(sqlite.DB, structural{})
+}
 
-	initial, err := service.List(ctx, "owner-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(initial) != 1 || initial[0].Name != "System overview" || !initial[0].IsDefault {
-		t.Fatalf("initial dashboards = %#v", initial)
-	}
+func textSpec(name string) panel.Dashboard {
+	return panel.Dashboard{Name: name, Panels: []panel.Panel{{ID: "notes", Title: "Notes", Viz: "text", Content: "hello"}}}
+}
 
-	state := State{
-		Filters: Filters{Window: "15m", Namespace: "prod"},
-		Widgets: []Widget{{ID: "errors", Type: "logs", Title: "Recent errors", Config: map[string]any{"severity": "ERROR"}, Enabled: true}},
-		Layout:  []Layout{{I: "errors", X: 0, Y: 0, W: 12, H: 4, MinW: 4, MinH: 2}},
-	}
-	created, err := service.Create(ctx, "owner-a", CreateInput{Name: "Incident room", Description: "Errors requiring attention.", State: state})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if created.State.Widgets[0].Config["severity"] != "ERROR" {
-		t.Fatalf("widget config = %#v", created.State.Widgets[0].Config)
-	}
-	assertDashboardUUIDv7s(t, created)
-	if _, err := service.Get(ctx, "owner-b", created.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("cross-owner read = %v", err)
-	}
-	if _, err := service.Create(ctx, "owner-a", CreateInput{Name: "incident ROOM", State: state}); !errors.Is(err, ErrConflict) {
-		t.Fatalf("duplicate name = %v", err)
-	}
+var agent = Author{Kind: "agent", ID: "owner"}
 
-	created.Description = "Updated description."
-	updated, err := service.Update(ctx, "owner-a", created.ID, UpdateInput{Name: created.Name, Description: created.Description, State: created.State})
-	if err != nil {
-		t.Fatal(err)
+func TestFirstVisitCreatesTheDefaultDashboard(t *testing.T) {
+	s := newTestService(t)
+	items, err := s.List(t.Context(), "owner")
+	if err != nil || len(items) != 1 || !items[0].IsDefault || items[0].PanelCount != len(DefaultSpec().Panels) {
+		t.Fatalf("items = %+v err %v", items, err)
 	}
-	if updated.Description != created.Description {
-		t.Fatalf("description = %q", updated.Description)
-	}
-	if err := service.Delete(ctx, "owner-a", created.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := service.Get(ctx, "owner-a", created.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("deleted dashboard = %v", err)
+	record, err := s.Get(t.Context(), "owner", items[0].ID)
+	if err != nil || record.Spec.Panels[0].Grid == nil {
+		t.Fatalf("default record = %+v err %v", record, err)
 	}
 }
 
-func TestServiceClampsDashboardWindowToRetention(t *testing.T) {
-	database, err := controlstore.NewSQLite(":memory:")
-	if err != nil {
-		t.Fatal(err)
+func TestCreateEditRestoreAndVersions(t *testing.T) {
+	s := newTestService(t)
+	created, err := s.Create(t.Context(), "owner", textSpec("Ops"), agent)
+	if err != nil || created.Version != 1 || created.Spec.Panels[0].Grid == nil {
+		t.Fatalf("created = %+v err %v", created, err)
 	}
-	defer database.Close()
-	ctx := context.Background()
-	if _, err := database.DB.ExecContext(ctx, `INSERT INTO users(id,email,name,role,active) VALUES('owner','owner@example.test','Owner','admin',1)`); err != nil {
-		t.Fatal(err)
+	edited, err := s.Edit(t.Context(), "owner", created.ID, []Operation{{Op: "update_panel", ID: "notes", Set: map[string]any{"content": "changed"}}}, 1, agent, "Reword the note")
+	if err != nil || edited.Version != 2 || edited.Spec.Panels[0].Content != "changed" {
+		t.Fatalf("edited = %+v err %v", edited, err)
 	}
-
-	state := DefaultState()
-	state.Filters.Window = "720h"
-	service := New(database.DB, 7)
-	created, err := service.Create(ctx, "owner", CreateInput{Name: "Long range", State: state})
-	if err != nil {
-		t.Fatal(err)
+	restored, err := s.Restore(t.Context(), "owner", created.ID, 1, Author{Kind: "user", ID: "owner"})
+	if err != nil || restored.Version != 3 || restored.Spec.Panels[0].Content != "hello" {
+		t.Fatalf("restored = %+v err %v", restored, err)
 	}
-	if created.State.Filters.Window != "168h" {
-		t.Fatalf("created window = %q, want 168h", created.State.Filters.Window)
-	}
-	var stored string
-	if err := database.DB.QueryRowContext(ctx, `SELECT window FROM dashboards WHERE id=?`, created.ID).Scan(&stored); err != nil {
-		t.Fatal(err)
-	}
-	if stored != "168h" {
-		t.Fatalf("stored window = %q, want 168h", stored)
-	}
-	created.State.Filters.Window = "720h"
-	updated, err := New(database.DB, 1).Update(ctx, "owner", created.ID, UpdateInput{Name: created.Name, State: created.State})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.State.Filters.Window != "24h" {
-		t.Fatalf("updated window = %q, want 24h", updated.State.Filters.Window)
-	}
-
-	// Dashboards saved before the retention setting was lowered must also be
-	// safe to render immediately, before the next edit persists the clamp.
-	if _, err := database.DB.ExecContext(ctx, `UPDATE dashboards SET window='720h' WHERE id=?`, created.ID); err != nil {
-		t.Fatal(err)
-	}
-	loaded, err := service.Get(ctx, "owner", created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if loaded.State.Filters.Window != "168h" {
-		t.Fatalf("loaded window = %q, want 168h", loaded.State.Filters.Window)
-	}
-
-	unlimited, err := New(database.DB, 0).Get(ctx, "owner", created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if unlimited.State.Filters.Window != "720h" {
-		t.Fatalf("unlimited-retention window = %q, want 720h", unlimited.State.Filters.Window)
+	versions, err := s.Versions(t.Context(), "owner", created.ID)
+	if err != nil || len(versions) != 3 || versions[0].Version != 3 || versions[1].Message != "Reword the note" || versions[1].AuthorKind != "agent" {
+		t.Fatalf("versions = %+v err %v", versions, err)
 	}
 }
 
-func TestDefaultStateMatchesTheClientWidgetSizes(t *testing.T) {
-	state := DefaultState()
-	want := []Layout{
-		{I: "health", X: 0, Y: 0, W: 4, H: 3, MinW: 3, MinH: 3},
-		{I: "topology", X: 4, Y: 0, W: 8, H: 5, MinW: 4, MinH: 4},
-		{I: "activity", X: 0, Y: 3, W: 4, H: 5, MinW: 3, MinH: 4},
-		{I: "assistant", X: 4, Y: 5, W: 4, H: 3, MinW: 3, MinH: 3},
-	}
-	if !reflect.DeepEqual(state.Layout, want) {
-		t.Fatalf("default layout = %#v, want %#v", state.Layout, want)
-	}
-	overlaps := func(a, b Layout) bool {
-		return a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H
-	}
-	for i := range state.Layout {
-		for j := i + 1; j < len(state.Layout); j++ {
-			if overlaps(state.Layout[i], state.Layout[j]) {
-				t.Errorf("%q overlaps %q", state.Layout[i].I, state.Layout[j].I)
-			}
-		}
-	}
-	// Validate wants UUIDv7 widget ids, which the default state is given when
-	// it is created for an owner; everything else it checks holds as written.
-	normalized, err := normalizeStateIDs(state)
-	if err != nil {
+func TestStaleVersionsAreRejected(t *testing.T) {
+	s := newTestService(t)
+	created, _ := s.Create(t.Context(), "owner", textSpec("Ops"), agent)
+	if _, err := s.Replace(t.Context(), "owner", created.ID, textSpec("Ops 2"), 1, agent, ""); err != nil {
 		t.Fatal(err)
 	}
-	if err := Validate("System overview", "", normalized); err != nil {
-		t.Fatalf("default state does not validate: %v", err)
+	_, err := s.Replace(t.Context(), "owner", created.ID, textSpec("Ops 3"), 1, Author{Kind: "user", ID: "owner"}, "")
+	if !errors.Is(err, ErrStale) {
+		t.Fatalf("stale replace err = %v", err)
+	}
+	if _, err := s.Edit(t.Context(), "owner", created.ID, []Operation{{Op: "rename", Name: "Ops 4"}}, 0, agent, ""); err != nil {
+		t.Fatalf("base version 0 means latest: %v", err)
 	}
 }
 
-func TestValidateRejectsInvalidStates(t *testing.T) {
-	newID := func() string {
-		t.Helper()
-		id, err := appid.New()
+func TestOwnershipNamesAndValidation(t *testing.T) {
+	s := newTestService(t)
+	created, _ := s.Create(t.Context(), "owner", textSpec("Ops"), agent)
+	if _, err := s.Get(t.Context(), "other", created.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("cross-owner read err = %v", err)
+	}
+	if _, err := s.Create(t.Context(), "owner", textSpec("ops"), agent); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate name err = %v", err)
+	}
+	bad := textSpec("Bad")
+	bad.Panels[0].Viz = "piechart"
+	var problems panel.Problems
+	if _, err := s.Create(t.Context(), "owner", bad, agent); !errors.As(err, &problems) {
+		t.Fatalf("invalid spec err = %v", err)
+	}
+	if err := s.Delete(t.Context(), "owner", created.ID); err != nil {
+		t.Fatal(err)
+	}
+	items, _ := s.List(t.Context(), "owner")
+	if len(items) != 1 || !items[0].IsDefault {
+		t.Fatalf("after delete = %+v", items)
+	}
+}
+
+func threePanels() panel.Dashboard {
+	return panel.Dashboard{Name: "Layout", Panels: []panel.Panel{
+		{ID: "a", Title: "A", Viz: "text", Content: "a", Width: 6, Height: "s"},
+		{ID: "b", Title: "B", Viz: "text", Content: "b", Width: 6, Height: "s"},
+		{ID: "c", Title: "C", Viz: "text", Content: "c", Width: 12, Height: "s"},
+	}}
+}
+
+func TestReplaceRepacksOnlyWhenLayoutChanges(t *testing.T) {
+	s := newTestService(t)
+	created, err := s.Create(t.Context(), "owner", threePanels(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Removing a panel leaves no hole.
+	removed := created.Spec
+	removed.Panels = []panel.Panel{removed.Panels[0], removed.Panels[2]}
+	rec, err := s.Replace(t.Context(), "owner", created.ID, removed, 1, agent, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := *rec.Spec.Panels[1].Grid; g != (panel.Grid{X: 0, Y: 3, W: 12, H: 3}) {
+		t.Fatalf("after removal c = %+v", g)
+	}
+	// A width change takes effect.
+	wide := rec.Spec
+	wide.Panels = append([]panel.Panel(nil), wide.Panels...)
+	wide.Panels[0].Width = 12
+	rec, err = s.Replace(t.Context(), "owner", created.ID, wide, 2, agent, "")
+	if err != nil || rec.Spec.Panels[0].Grid.W != 12 {
+		t.Fatalf("width change = %+v err %v", rec.Spec.Panels[0].Grid, err)
+	}
+	// Same ids and sizes with moved grids keep their coordinates.
+	moved := rec.Spec
+	moved.Panels = append([]panel.Panel(nil), moved.Panels...)
+	moved.Panels[1].Grid = &panel.Grid{X: 0, Y: 8, W: 12, H: 3}
+	rec, err = s.Replace(t.Context(), "owner", created.ID, moved, 3, agent, "")
+	if err != nil || *rec.Spec.Panels[1].Grid != (panel.Grid{X: 0, Y: 8, W: 12, H: 3}) {
+		t.Fatalf("layout save = %+v err %v", rec.Spec.Panels[1].Grid, err)
+	}
+}
+
+func TestConcurrentFirstVisitsCreateOneDefault(t *testing.T) {
+	for round := 0; round < 10; round++ {
+		sqlite, err := appstore.NewSQLite(filepath.Join(t.TempDir(), "control.sqlite"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		return id
-	}
-	first, second := newID(), newID()
-	valid := func() State {
-		return State{
-			Filters: Filters{Window: "1h"},
-			Widgets: []Widget{
-				{ID: first, Type: "overview", Title: "Health", Enabled: true},
-				{ID: second, Type: "logs", Title: "Errors", Enabled: true},
-			},
-			Layout: []Layout{
-				{I: first, X: 0, Y: 0, W: 6, H: 3},
-				{I: second, X: 6, Y: 0, W: 6, H: 3},
-			},
+		if _, err := sqlite.DB.Exec(`INSERT INTO users (id, email) VALUES ('owner', 'owner@example.com')`); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if err := Validate("Baseline", "", valid()); err != nil {
-		t.Fatalf("baseline state rejected: %v", err)
-	}
-	for _, window := range []string{"168h", "720h"} {
-		state := valid()
-		state.Filters.Window = window
-		if err := Validate("Baseline", "", state); err != nil {
-			t.Fatalf("window %s rejected: %v", window, err)
+		s := New(sqlite.DB, structural{})
+		var wg sync.WaitGroup
+		errs := make(chan error, 16)
+		for range 16 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				_, err := s.List(t.Context(), "owner")
+				errs <- err
+			}()
 		}
-	}
-	cases := []struct {
-		name   string
-		mutate func(*State)
-	}{
-		{"bad widget type", func(s *State) { s.Widgets[0].Type = "chart" }},
-		{"out of 12-column bounds", func(s *State) { s.Layout[1].X = 8 }},
-		{"negative position", func(s *State) { s.Layout[0].X = -1 }},
-		{"zero widgets", func(s *State) { s.Widgets = nil; s.Layout = nil }},
-		{"too many widgets", func(s *State) {
-			s.Widgets = nil
-			s.Layout = nil
-			for i := 0; i < 33; i++ {
-				id := newID()
-				s.Widgets = append(s.Widgets, Widget{ID: id, Type: "logs", Title: "W", Enabled: true})
-				s.Layout = append(s.Layout, Layout{I: id, X: 0, Y: i, W: 12, H: 1})
+		wg.Wait()
+		close(errs)
+		for err := range errs {
+			if err != nil {
+				t.Fatalf("round %d: %v", round, err)
 			}
-		}},
-		{"layout references unknown widget id", func(s *State) { s.Layout[1].I = newID() }},
-		{"layout count mismatch", func(s *State) { s.Layout = s.Layout[:1] }},
-		{"duplicate widget id", func(s *State) { s.Widgets[1].ID = first }},
-		{"non-UUID widget id", func(s *State) { s.Widgets[0].ID = "health"; s.Layout[0].I = "health" }},
-		{"invalid window", func(s *State) { s.Filters.Window = "7d" }},
-		{"overlapping widgets", func(s *State) { s.Layout[1].X = 3 }},
-		{"contained widget overlaps", func(s *State) { s.Layout[1] = Layout{I: second, X: 1, Y: 1, W: 2, H: 1} }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			state := valid()
-			tc.mutate(&state)
-			err := Validate("Baseline", "", state)
-			if err == nil {
-				t.Fatal("expected validation rejection")
-			}
-			var validation *ValidationError
-			if !errors.As(err, &validation) {
-				t.Fatalf("error %v is not a ValidationError", err)
-			}
-		})
-	}
-}
-
-func TestValidateAcceptsAdjacentWidgets(t *testing.T) {
-	// Widgets sharing an edge (touching, not intersecting) are legal.
-	first, err := appid.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := appid.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	state := State{
-		Filters: Filters{Window: "1h"},
-		Widgets: []Widget{
-			{ID: first, Type: "overview", Title: "Health", Enabled: true},
-			{ID: second, Type: "logs", Title: "Errors", Enabled: true},
-		},
-		Layout: []Layout{
-			{I: first, X: 0, Y: 0, W: 12, H: 3},
-			{I: second, X: 0, Y: 3, W: 12, H: 3},
-		},
-	}
-	if err := Validate("Stacked", "", state); err != nil {
-		t.Fatalf("adjacent widgets rejected: %v", err)
-	}
-}
-
-func TestNormalizeStateIDsRemapsNonUUIDWidgetIDs(t *testing.T) {
-	stable, err := appid.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	state := State{
-		Widgets: []Widget{
-			{ID: "health", Type: "overview", Title: "Health", Enabled: true},
-			{ID: stable, Type: "logs", Title: "Errors", Enabled: true},
-		},
-		Layout: []Layout{
-			{I: "health", X: 0, Y: 0, W: 6, H: 3},
-			{I: stable, X: 6, Y: 0, W: 6, H: 3},
-		},
-	}
-	normalized, err := normalizeStateIDs(state)
-	if err != nil {
-		t.Fatal(err)
-	}
-	remapped := normalized.Widgets[0].ID
-	if !appid.IsV7(remapped) || remapped == "health" {
-		t.Fatalf("non-UUID widget id remapped to %q", remapped)
-	}
-	if normalized.Widgets[1].ID != stable {
-		t.Fatalf("stable UUIDv7 id changed to %q", normalized.Widgets[1].ID)
-	}
-	if normalized.Layout[0].I != remapped {
-		t.Fatalf("layout reference %q does not follow remapped widget id %q", normalized.Layout[0].I, remapped)
-	}
-	if normalized.Layout[1].I != stable {
-		t.Fatalf("layout reference for stable id changed to %q", normalized.Layout[1].I)
-	}
-	if state.Widgets[0].ID != "health" || state.Layout[0].I != "health" {
-		t.Fatalf("normalizeStateIDs mutated its input: %#v", state)
-	}
-}
-
-func assertDashboardUUIDv7s(t *testing.T, item Dashboard) {
-	t.Helper()
-	if !appid.IsV7(item.ID) {
-		t.Fatalf("dashboard id %q is not UUIDv7", item.ID)
-	}
-	widgetIDs := make(map[string]bool, len(item.State.Widgets))
-	for _, widget := range item.State.Widgets {
-		if !appid.IsV7(widget.ID) {
-			t.Fatalf("widget id %q is not UUIDv7", widget.ID)
 		}
-		widgetIDs[widget.ID] = true
-	}
-	for _, layout := range item.State.Layout {
-		if !appid.IsV7(layout.I) || !widgetIDs[layout.I] {
-			t.Fatalf("layout id %q is not a persisted widget UUIDv7", layout.I)
+		var total, defaults int
+		if err := sqlite.DB.QueryRow(`SELECT COUNT(*), COALESCE(SUM(is_default), 0) FROM dashboards WHERE owner_id = 'owner'`).Scan(&total, &defaults); err != nil || total != 1 || defaults != 1 {
+			t.Fatalf("round %d: total %d defaults %d err %v", round, total, defaults, err)
 		}
+		_ = sqlite.Close()
 	}
 }

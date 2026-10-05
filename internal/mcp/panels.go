@@ -1,0 +1,175 @@
+package mcp
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/labstack/fanout/internal/panel"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+type SchemaInput struct {
+	Window    string `json:"window,omitempty" jsonschema:"5m, 15m, 1h, 3h, 6h, 12h or 24h; default 1h"`
+	Namespace string `json:"namespace,omitempty" jsonschema:"Limit discovery to one service namespace"`
+}
+
+type PreviewInput struct {
+	Panels    []panel.Panel     `json:"panels" jsonschema:"Panels to check and run, in the same format as dashboard panels"`
+	Variables []panel.Variable  `json:"variables,omitempty" jsonschema:"Variables the panels reference"`
+	Time      *panel.Time       `json:"time,omitempty" jsonschema:"Time range; default the last hour"`
+	Vars      map[string]string `json:"vars,omitempty" jsonschema:"Variable values to preview with; $__all selects All"`
+}
+
+type PanelPreview struct {
+	ID        string          `json:"id"`
+	Status    string          `json:"status" jsonschema:"ok, empty, error, invalid or not_run"`
+	Rows      int             `json:"rows,omitempty"`
+	Columns   []string        `json:"columns,omitempty"`
+	Sample    [][]any         `json:"sample,omitempty"`
+	Interval  string          `json:"interval,omitempty"`
+	Diagnosis string          `json:"diagnosis,omitempty"`
+	Error     string          `json:"error,omitempty"`
+	Problems  []panel.Problem `json:"problems,omitempty"`
+}
+
+type PreviewOutput struct {
+	Panels   []PanelPreview  `json:"panels"`
+	Problems []panel.Problem `json:"problems,omitempty"`
+}
+
+const specGuide = `A dashboard is {name, description, time:{range}, variables, panels}. Each panel: {id (lowercase), title, viz, width 1-12, query or sql}. viz: stat or gauge (one measure; gauge needs min and max), timeseries (bucket auto, at most one by), bar (one or two by), table (up to three by), text (content in Markdown). query: {from: spans|logs|metrics, where: [filter expressions], measures: [fn(field) as alias], by: [fields], bucket, sort, limit}. Measures: count(), rate() per second, error_rate() percent, share() percent, avg/min/max/sum(field), last(value) for metrics, p50/p75/p90/p95/p99(field), quantile(field, 0.999), count_distinct(field). Fields are columns from get_telemetry_schema or attributes['key'] / resource['key'] with the key written literally. Filters are SQL boolean expressions: service = $service, kind = 'SPAN_KIND_SERVER', status = 'STATUS_CODE_ERROR', http_route IN $routes, attributes['http.response.status_code']::INTEGER >= 500. Variables: {name, kind: query|custom|constant|text, from, field, default, include_all}; $__all selects All and removes filters that use the variable. sql: one SELECT over spans, logs, metrics, service_rollup or edge_rollup that filters time with $__window(column). Use values exactly as get_telemetry_schema lists them. Example panel: {"id":"latency","title":"Checkout latency","viz":"timeseries","width":8,"query":{"from":"spans","where":["service = 'checkout'","kind = 'SPAN_KIND_SERVER'"],"measures":["p50(duration_ms)","p95(duration_ms)","p99(duration_ms)"],"bucket":"auto"},"unit":"ms","thresholds":[{"value":1500,"status":"bad"}]}.`
+
+func (s *Server) registerPanelTools() {
+	readOnly := &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)}
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "get_telemetry_schema", Title: "Telemetry schema",
+		Description: "List the signals, columns with their common values, attribute keys seen per service, metric names, services, measure functions and units. Read this before drafting panels so filters use values that exist.",
+		Annotations: readOnly,
+	}, s.telemetrySchema)
+	mcp.AddTool(s.mcp, &mcp.Tool{
+		Name: "preview_panels", Title: "Preview panels",
+		Description: "Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. Fix every invalid panel and replace or explain every empty one before saving. " + specGuide,
+		Annotations: readOnly,
+	}, s.previewPanels)
+}
+
+func (s *Server) telemetrySchema(ctx context.Context, _ *mcp.CallToolRequest, input SchemaInput) (*mcp.CallToolResult, *panel.Schema, error) {
+	if s.panels == nil {
+		return nil, nil, errors.New("panels are unavailable")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	schema, err := s.panels.Schema(ctx, panel.SchemaRequest{Window: input.Window, Namespace: input.Namespace})
+	if err != nil {
+		return nil, nil, safePanelToolError(err)
+	}
+	attributes := 0
+	for _, sig := range schema.Signals {
+		attributes += len(sig.Attributes)
+	}
+	return summary(fmt.Sprintf("%d services, %d attribute keys and %d metric names in the last %s.", len(schema.Services), attributes, len(schema.Signals["metrics"].Metrics), schema.Window)), schema, nil
+}
+
+var panelPath = regexp.MustCompile(`^panels\[(\d+)\]`)
+
+func (s *Server) previewPanels(ctx context.Context, _ *mcp.CallToolRequest, input PreviewInput) (*mcp.CallToolResult, PreviewOutput, error) {
+	if s.panels == nil {
+		return nil, PreviewOutput{}, errors.New("panels are unavailable")
+	}
+	d := panel.Dashboard{Name: "Preview", Variables: input.Variables, Panels: input.Panels}
+	if input.Time != nil {
+		d.Time = *input.Time
+	}
+	vars := map[string]panel.Value{}
+	for name, value := range input.Vars {
+		if value == panel.AllValue {
+			vars[name] = panel.Value{All: true}
+		} else {
+			vars[name] = panel.Value{Values: []string{value}}
+		}
+	}
+	out := PreviewOutput{Panels: make([]PanelPreview, len(input.Panels))}
+	for i, p := range input.Panels {
+		out.Panels[i] = PanelPreview{ID: p.ID, Status: "not_run"}
+	}
+	results, err := s.panels.Run(ctx, panel.RunRequest{Dashboard: d, Vars: vars})
+	var problems panel.Problems
+	if errors.As(err, &problems) {
+		for _, problem := range problems {
+			if m := panelPath.FindStringSubmatch(problem.Path); m != nil {
+				i, _ := strconv.Atoi(m[1])
+				if i < len(out.Panels) {
+					out.Panels[i].Status = "invalid"
+					out.Panels[i].Problems = append(out.Panels[i].Problems, problem)
+					continue
+				}
+			}
+			out.Problems = append(out.Problems, problem)
+		}
+		return summary(previewSummary(out)), out, nil
+	}
+	if err != nil {
+		return nil, PreviewOutput{}, safePanelToolError(err)
+	}
+	for i, r := range results {
+		preview := PanelPreview{ID: r.ID, Status: r.Status, Interval: r.Interval, Diagnosis: r.Diagnosis, Error: r.Error}
+		if r.Frame != nil {
+			preview.Rows = r.Frame.Rows
+			for _, c := range r.Frame.Columns {
+				preview.Columns = append(preview.Columns, c.Name)
+			}
+			for row := 0; row < min(3, r.Frame.Rows); row++ {
+				sample := make([]any, len(r.Frame.Columns))
+				for c := range r.Frame.Columns {
+					sample[c] = r.Frame.Values[c][row]
+				}
+				preview.Sample = append(preview.Sample, sample)
+			}
+		}
+		out.Panels[i] = preview
+	}
+	return summary(previewSummary(out)), out, nil
+}
+
+func previewSummary(out PreviewOutput) string {
+	counts := map[string]int{}
+	var notes []string
+	for _, p := range out.Panels {
+		counts[p.Status]++
+		switch p.Status {
+		case "invalid":
+			for _, problem := range p.Problems {
+				notes = append(notes, fmt.Sprintf("%s: %s", p.ID, strings.TrimSpace(problem.Message+" "+problem.Hint)))
+			}
+		case "empty":
+			notes = append(notes, fmt.Sprintf("%s is empty: %s", p.ID, p.Diagnosis))
+		case "error":
+			notes = append(notes, fmt.Sprintf("%s failed: %s", p.ID, p.Error))
+		}
+	}
+	for _, problem := range out.Problems {
+		notes = append(notes, problem.Path+": "+problem.Message)
+	}
+	text := fmt.Sprintf("%d ok, %d empty, %d error, %d invalid, %d not run.", counts["ok"], counts["empty"], counts["error"], counts["invalid"], counts["not_run"])
+	if len(notes) > 0 {
+		text += " " + strings.Join(notes, " ")
+	}
+	return text
+}
+
+// Preserve cancellation identity while keeping wrapped engine paths private.
+type redactedToolError struct {
+	cause   error
+	message string
+}
+
+func (e redactedToolError) Error() string { return e.message }
+func (e redactedToolError) Unwrap() error { return e.cause }
+func safePanelToolError(err error) error {
+	return redactedToolError{cause: err, message: panel.SafeError(err)}
+}

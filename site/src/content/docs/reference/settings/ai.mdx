@@ -23,6 +23,12 @@ as a refusal to start rather than as a default nobody chose.
 | `ai.model` | `FANOUT_AI_MODEL` | string | — |
 | `ai.provider` | `FANOUT_AI_PROVIDER` | string | `anthropic` |
 
+## Notes
+
+### `ai.model`
+
+Overrides the provider's default: claude-sonnet-5-5 for Anthropic and gpt-6.1-sol for OpenAI. The OpenAI provider expects a reasoning model supporting reasoning.encrypted_content for stateless Responses replay. A 400 rejecting encrypted content is reported as a server-side configuration error; choose a compatible reasoning model with ai.model.
+
 :::caution[Secrets]
 Settings marked `secret` are redacted from Fanout's startup configuration
 log. They are still plain environment variables: anything that can read the
