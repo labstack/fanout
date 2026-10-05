@@ -37,6 +37,8 @@ vi.mock("./auth", () => ({
 
 import App from "./App";
 import { ChatPage } from "./chat";
+import { createDashboardPrompt } from "./app-context";
+import { parseSearch, toSearchParams } from "./dashboards/search";
 
 const fetchMock = vi.fn<typeof fetch>();
 
@@ -74,6 +76,49 @@ describe("Session", () => {
     vi.unstubAllGlobals();
     document.body.innerHTML = "";
     viewerMock.current = defaultViewer;
+  });
+
+  it("opens a rail dashboard and clears the previous dashboard variable state", async () => {
+    window.happyDOM.setURL("https://fanout.example.com/dashboards/dash-main?var-service=checkout&window=6h");
+    fetchMock.mockImplementation(async (input) => {
+      if (String(input) === "/api/dashboards") return json({ dashboards: [
+        { id: "dash-main", name: "System overview", description: "", is_default: true, version: 1, panel_count: 4, updated_at: "2026-07-22 03:00:00" },
+        { id: "dash-checkout", name: "Checkout", description: "", is_default: false, version: 1, panel_count: 2, updated_at: "2026-07-22 03:00:00" },
+      ] });
+      return json({ threads: [], nextCursor: "" });
+    });
+    const rootRoute = createRootRoute({ component: App });
+    const detail = createRoute({ getParentRoute: () => rootRoute, path: "/dashboards/$dashboardId", validateSearch: (raw: Record<string, unknown>) => toSearchParams(parseSearch(raw)), component: () => <div>Dashboard</div> });
+    const router = createRouter({ routeTree: rootRoute.addChildren([detail]) });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
+    await vi.waitFor(() => expect(document.querySelector('a[href="/dashboards/dash-checkout"]')).not.toBeNull());
+    expect(router.state.location.search).toHaveProperty("var-service", "checkout");
+    await act(async () => (document.querySelector('a[href="/dashboards/dash-checkout"]') as HTMLAnchorElement).click());
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe("/dashboards/dash-checkout"));
+    expect(router.state.location.search).toEqual({});
+    expect(window.location.search).toBe("");
+    await act(async () => root.unmount());
+  });
+
+  it("opens chat from the empty rail with the dashboard page starter prompt", async () => {
+    const rootRoute = createRootRoute({ component: App });
+    const chatIndex = createRoute({ getParentRoute: () => rootRoute, path: "/chat/", component: ChatPage });
+    const chatThread = createRoute({ getParentRoute: () => rootRoute, path: "/chat/$threadId", component: ChatPage });
+    const router = createRouter({ routeTree: rootRoute.addChildren([chatIndex, chatThread]) });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () => root.render(<MantineProvider><RouterProvider router={router} /></MantineProvider>));
+    await vi.waitFor(() => expect(button("New dashboard")).not.toBeUndefined());
+    await act(async () => button("New dashboard")!.click());
+    await vi.waitFor(() => expect(agentMocks.runAgent).toHaveBeenCalledOnce());
+    expect(window.location.pathname).toMatch(/^\/chat\/[0-9a-f-]{36}$/);
+    expect(document.body.textContent).toContain(createDashboardPrompt);
+    expect(createDashboardPrompt).toBe("Build me a dashboard for my services, showing request volume, latency, and errors. Ask me which services to monitor first.");
+    await act(async () => root.unmount());
   });
 
   it("starts a draft without fetching a thread and names the thread on first send", async () => {

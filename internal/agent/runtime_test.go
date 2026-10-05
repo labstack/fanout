@@ -298,3 +298,15 @@ func TestSystemPromptForbidsTextDiagrams(t *testing.T) {
 		}
 	}
 }
+
+func TestSystemPromptBuildsDashboardsForDashboardShapedRequests(t *testing.T) {
+	for _, want := range []string{
+		"Build one whenever the user asks for an overview, asks why something is slow, failing or changing",
+		"when a part has no data, keep its panel and say why",
+		"Title each panel with exactly what it measures",
+	} {
+		if !strings.Contains(systemPrompt, want) {
+			t.Fatalf("system prompt is missing %q", want)
+		}
+	}
+}

@@ -705,7 +705,7 @@ func TestMCPOAuthOmittedScopeGrantsReadOnly(t *testing.T) {
 	}
 	// Every renamed dashboard operation must still require the dashboard grant,
 	// before the protocol handler is reached or input validation can run.
-	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard"} {
+	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard"} {
 		t.Run(name, func(t *testing.T) {
 			body := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":{}}}`, name)
 			rejected := serve(t, e, http.MethodPost, "/mcp", body, map[string]string{

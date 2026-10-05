@@ -23,7 +23,7 @@ func TestToolsUseVerbFirstSnakeCase(t *testing.T) {
 			t.Errorf("tool name %q must be lowercase snake_case and at most 64 characters", doc.Name)
 		}
 		switch verb {
-		case "get", "list", "search", "inspect", "create", "replace":
+		case "get", "list", "search", "inspect", "create", "replace", "edit", "preview":
 		default:
 			t.Errorf("tool name %q must start with an operation verb", doc.Name)
 		}
@@ -38,7 +38,7 @@ func TestDescribeToolsMatchesWhatAClientIsServed(t *testing.T) {
 		t.Fatalf("DescribeTools: %v", err)
 	}
 
-	server := NewWithIntelligence(nil, dashboard.New(nil, 30), describeIntelligence{}, "test")
+	server := NewWithIntelligence(nil, dashboard.New(nil, nil), nil, describeIntelligence{}, "test")
 	session := connectTestClient(t, server, nil)
 	listed, err := session.ListTools(context.Background(), nil)
 	if err != nil {
@@ -79,7 +79,7 @@ func TestDescribeToolsIncludesTheDashboardTools(t *testing.T) {
 		found[doc.Name] = doc
 	}
 
-	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard"} {
+	for _, name := range []string{"list_dashboards", "get_dashboard", "create_dashboard", "replace_dashboard", "edit_dashboard", "get_telemetry_schema", "preview_panels"} {
 		if _, ok := found[name]; !ok {
 			t.Errorf("%s is registered but absent from DescribeTools", name)
 		}
@@ -96,6 +96,9 @@ func TestDescribeToolsIncludesTheDashboardTools(t *testing.T) {
 	}
 	if !update.Destructive {
 		t.Error("replace_dashboard reported non-destructive; it replaces a dashboard's design")
+	}
+	if edit := found["edit_dashboard"]; edit.ReadOnly || !edit.Destructive {
+		t.Errorf("edit_dashboard annotations = %+v, want destructive and not read-only", edit)
 	}
 }
 

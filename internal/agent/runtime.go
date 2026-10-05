@@ -23,7 +23,7 @@ import (
 	appid "github.com/labstack/fanout/internal/id"
 )
 
-const systemPrompt = `You are Fanout's observability assistant. When a view is attached to your reply it is the picture: never draw diagrams, trees, or charts in text, never use code fences to draw boxes, arrows, or trees, and never add a table or list that restates what an attached view already shows; your prose adds only what the view omits. Use get_observability_overview first for broad health questions, get_intelligence_snapshot for the latest precomputed anomalies and recurring log patterns, get_service_topology for direct dependency edges, get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for activity/latency/endpoints/comparisons, inspect_trace for trace or root-cause inspection, and search_logs for log questions. Treat structured outputs as authoritative. You can also list, inspect, create, and replace the user's named dashboards. When asked to create a dashboard, compose a useful complete layout using overview, topology, activity, performance, trace, logs, and assistant widgets; use unique stable widget IDs, valid non-overlapping 12-column positions, and the requested time window. Creating is additive. Only replace an existing dashboard after the user explicitly asks to change or replace it; inspect it first and preserve unrelated views. State the time window you used, distinguish missing data from healthy behavior, and never invent services, metrics, or causal claims. Keep answers concise because attached views provide interactive details. Never expose implementation details to the user: do not mention protocol names, tool names, schemas, query IDs, data-source names, storage engines, providers, or internal execution steps. Refer to attached interactive content simply as a view.`
+const systemPrompt = `You are Fanout's observability assistant. When a view is attached to your reply it is the picture: never draw diagrams, trees, or charts in text, never use code fences to draw boxes, arrows, or trees, and never add a table or list that restates what an attached view already shows; your prose adds only what the view omits. Use get_observability_overview first for broad health questions, get_intelligence_snapshot for the latest precomputed anomalies and recurring log patterns, get_service_topology for direct dependency edges, get_service_dependencies for bounded upstream or downstream reachability from a service, get_service_performance for activity/latency/endpoints/comparisons, inspect_trace for trace or root-cause inspection, and search_logs for log questions. Treat structured outputs as authoritative. You build and change the user's dashboards. Build one whenever the user asks for an overview, asks why something is slow, failing or changing, asks to compare, break down or track telemetry, or asks for anything they would want to look at again; answer a single factual question with a view instead. To build one, read get_telemetry_schema, draft a complete spec of panels that answer the request, run preview_panels, fix every invalid panel, replace or explain every empty one, and only then call create_dashboard. Cover every part of the request: when a part has no data, keep its panel and say why in the panel description instead of dropping it. Title each panel with exactly what it measures. Prefer a few precise panels over many vague ones: headline stats first, then the time series that explain them, then a table of the worst offenders. After saving, reply in two or three sentences with what the dashboard shows and what stands out. Use filter values exactly as the schema lists them. To change a dashboard, get_dashboard first and use edit_dashboard so unrelated panels stay as they are; replace only when the user asks for a redesign. State the time window you used, distinguish missing data from healthy behavior, and never invent services, metrics, or causal claims. Keep answers concise because attached views provide interactive details. Never expose implementation details to the user: do not mention protocol names, tool names, schemas, query IDs, data-source names, storage engines, providers, or internal execution steps. Refer to attached interactive content simply as a view.`
 
 // Error categories used to pick a client-safe RUN_ERROR message; the raw
 // error (which can include provider response bodies) stays server-side.
@@ -32,6 +32,10 @@ var (
 	errStepLimit = errors.New("agent step limit exceeded")
 )
 
+// maxOutputTokens leaves room for a complete dashboard spec in one tool call
+// and for the reasoning tokens that gpt-5.x and later count as output.
+const maxOutputTokens = 32000
+
 // toolExecutor is the tool surface the runtime needs; *ToolRegistry implements it.
 type toolExecutor interface {
 	Definitions() []ToolDef
@@ -39,14 +43,15 @@ type toolExecutor interface {
 }
 
 type Runtime struct {
-	provider Provider
-	tools    toolExecutor
-	store    *Store
-	maxSteps int
+	provider   Provider
+	tools      toolExecutor
+	store      *Store
+	maxSteps   int
+	runTimeout time.Duration
 }
 
 func NewRuntime(provider Provider, tools toolExecutor, store *Store) *Runtime {
-	return &Runtime{provider: provider, tools: tools, store: store, maxSteps: 8}
+	return &Runtime{provider: provider, tools: tools, store: store, maxSteps: 16, runTimeout: 5 * time.Minute}
 }
 
 func (r *Runtime) Register(group *echo.Group) {
@@ -217,12 +222,28 @@ func (r *Runtime) Run(c *echo.Context) error {
 }
 
 func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages *[]agtypes.Message, emitter *eventEmitter) (bool, error) {
+	caller := ctx
+	timeout := r.runTimeout
+	if timeout == 0 {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	truncated := false
+	deadlineError := func(err error) error {
+		if caller.Err() == nil && ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("%w: 5-minute time limit reached", errStepLimit)
+		}
+		return err
+	}
 	if err := emitter.emit(events.NewRunStartedEvent(threadID, runID)); err != nil {
 		return truncated, err
 	}
 	conversation := providerMessages(*messages)
 	for step := 0; step < r.maxSteps; step++ {
+		if ctx.Err() != nil {
+			return truncated, r.fail(threadID, runID, deadlineError(ctx.Err()), emitter)
+		}
 		messageID, err := appid.New()
 		if err != nil {
 			return truncated, err
@@ -230,42 +251,64 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		var text strings.Builder
 		var toolCalls []ToolCall
 		var stopReason string
+		var providerItems []json.RawMessage
+		var usage *TokenUsage
 		textStarted := false
-		streamErr := r.provider.Stream(ctx, StreamParams{System: systemPrompt, Messages: conversation, Tools: r.tools.Definitions(), MaxTokens: 4096}, func(event StreamEvent) error {
+		appendText := func(delta string) error {
+			if delta == "" {
+				return nil
+			}
+			if !textStarted {
+				if err := emitter.emit(events.NewTextMessageStartEvent(messageID, events.WithRole("assistant"))); err != nil {
+					return err
+				}
+				textStarted = true
+			}
+			text.WriteString(delta)
+			return emitter.emit(events.NewTextMessageContentEvent(messageID, delta))
+		}
+		streamErr := r.provider.Stream(ctx, StreamParams{System: systemPrompt, Messages: conversation, Tools: r.tools.Definitions(), MaxTokens: maxOutputTokens}, func(event StreamEvent) error {
 			switch event.Type {
 			case EventError:
 				return fmt.Errorf("%w: %s", errProvider, event.Error)
 			case EventText:
-				if event.Delta == "" {
-					return nil
-				}
-				if !textStarted {
-					if err := emitter.emit(events.NewTextMessageStartEvent(messageID, events.WithRole("assistant"))); err != nil {
-						return err
-					}
-					textStarted = true
-				}
-				text.WriteString(event.Delta)
-				return emitter.emit(events.NewTextMessageContentEvent(messageID, event.Delta))
+				return appendText(event.Delta)
 			case EventToolUse:
 				if event.ToolCall != nil {
 					toolCalls = append(toolCalls, *event.ToolCall)
 				}
 			case EventStop:
 				stopReason = event.StopReason
+				providerItems = event.ProviderItems
+				usage = event.Usage
 			}
 			return nil
 		})
-		if streamErr == nil && stoppedAtTokenLimit(stopReason) {
-			// The model hit MaxTokens: the answer is incomplete, not a clean success.
-			truncated = true
-			slog.Warn("agent response truncated at token limit", "thread_id", threadID, "run_id", runID, "stop_reason", stopReason)
-			if textStarted {
-				const notice = "\n\n[Response truncated: output limit reached.]"
-				if err := emitter.emit(events.NewTextMessageContentEvent(messageID, notice)); err == nil {
-					text.WriteString(notice)
-				} else if streamErr == nil {
-					streamErr = err
+		if ctx.Err() != nil {
+			streamErr = ctx.Err()
+		}
+		if streamErr == nil {
+			logFields := []any{"thread_id", threadID, "run_id", runID, "stop_reason", stopReason}
+			if usage != nil {
+				logFields = append(logFields, "input_tokens", usage.InputTokens, "output_tokens", usage.OutputTokens, "reasoning_tokens", usage.ReasoningTokens, "cache_read_tokens", usage.CacheReadTokens, "cache_write_tokens", usage.CacheWriteTokens)
+			}
+			if stoppedAtTokenLimit(stopReason) || stopReason == "incomplete" || stopReason == "content_filter" {
+				truncated = true
+				toolCalls = nil
+				slog.Warn("agent response truncated", logFields...)
+				notice := "The response was cut off before it finished."
+				if textStarted {
+					if stoppedAtTokenLimit(stopReason) {
+						notice = "\n\n[Response truncated: output limit reached.]"
+					} else {
+						notice = "\n\n" + notice
+					}
+				}
+				streamErr = appendText(notice)
+			} else {
+				slog.Info("llm stream complete", logFields...)
+				if stopReason == "refusal" && !textStarted {
+					streamErr = appendText("The model refused to answer this request.")
 				}
 			}
 		}
@@ -275,7 +318,7 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 			}
 		}
 		if streamErr != nil {
-			return truncated, r.fail(threadID, runID, streamErr, emitter)
+			return truncated, r.fail(threadID, runID, deadlineError(streamErr), emitter)
 		}
 
 		agCalls := make([]agtypes.ToolCall, len(toolCalls))
@@ -284,7 +327,11 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 		}
 		if text.Len() > 0 || len(agCalls) > 0 {
 			*messages = append(*messages, agtypes.Message{ID: messageID, Role: agtypes.RoleAssistant, Content: text.String(), ToolCalls: agCalls})
-			conversation = append(conversation, ProviderMessage{Role: RoleAssistant, Content: text.String(), ToolCalls: toolCalls})
+		}
+		// Opaque reasoning belongs to this run's provider conversation, not
+		// the persisted AG-UI history or client events.
+		if text.Len() > 0 || len(toolCalls) > 0 || len(providerItems) > 0 {
+			conversation = append(conversation, ProviderMessage{Role: RoleAssistant, Content: text.String(), ToolCalls: toolCalls, ProviderItems: providerItems})
 		}
 		if len(toolCalls) == 0 {
 			if err := emitter.emit(events.NewRunFinishedEventWithOptions(threadID, runID, events.WithSuccessOutcome())); err != nil {
@@ -304,6 +351,9 @@ func (r *Runtime) execute(ctx context.Context, threadID, runID string, messages 
 				return truncated, err
 			}
 			execution, err := r.tools.Execute(ctx, call)
+			if ctx.Err() != nil {
+				return truncated, r.fail(threadID, runID, deadlineError(ctx.Err()), emitter)
+			}
 			if err != nil {
 				// Relayed to the model as a tool error; log it so repeated
 				// tool-transport failures are findable server-side.
@@ -355,6 +405,9 @@ func clientErrorMessage(err error) string {
 	case errors.As(err, &apiErr), errors.Is(err, errProvider):
 		return "model provider unavailable"
 	case errors.Is(err, errStepLimit):
+		if strings.Contains(err.Error(), "5-minute") {
+			return "The agent reached its 5-minute time limit. Try a smaller request."
+		}
 		return "step limit exceeded"
 	default:
 		return "agent run failed"

@@ -1,21 +1,14 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useFanoutApp } from "../app-context";
-import Dashboard from "../dashboard";
-import { dashboardSearch, type DashboardSearch } from "../dashboard-search";
+import { DashboardPage } from "../dashboards/page";
+import { parseSearch, toSearchParams } from "../dashboards/search";
 
 export const Route = createFileRoute("/dashboards/")({
   component: DashboardIndex,
-  validateSearch: dashboardSearch,
+  validateSearch: (raw: Record<string, unknown>) => toSearchParams(parseSearch(raw)),
 });
 
 function DashboardIndex() {
-  const search = Route.useSearch();
+  const search = parseSearch(Route.useSearch() as Record<string, unknown>);
   const navigate = useNavigate();
-  const { agentAvailable, openChat } = useFanoutApp();
-  return <Dashboard
-    agentAvailable={agentAvailable}
-    onOpenChat={openChat}
-    onDashboardChange={(dashboardId) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId }, search: search as DashboardSearch, replace: true })}
-    urlFilters={search}
-  />;
+  return <DashboardPage search={search} onSearch={() => undefined} onOpen={(dashboardId, replace) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId }, search: toSearchParams(search), replace })} />;
 }

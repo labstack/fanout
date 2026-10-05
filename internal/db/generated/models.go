@@ -82,27 +82,22 @@ type Dashboard struct {
 	OwnerID     string `json:"owner_id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
-	Window      string `json:"window"`
-	Namespace   string `json:"namespace"`
 	IsDefault   int64  `json:"is_default"`
+	Version     int64  `json:"version"`
+	SpecJson    string `json:"spec_json"`
+	PanelCount  int64  `json:"panel_count"`
 	CreatedAt   string `json:"created_at"`
 	UpdatedAt   string `json:"updated_at"`
 }
 
-type DashboardWidget struct {
-	ID          string `json:"id"`
+type DashboardVersion struct {
 	DashboardID string `json:"dashboard_id"`
-	Type        string `json:"type"`
-	Title       string `json:"title"`
-	ConfigJson  string `json:"config_json"`
-	Enabled     int64  `json:"enabled"`
-	X           int64  `json:"x"`
-	Y           int64  `json:"y"`
-	W           int64  `json:"w"`
-	H           int64  `json:"h"`
-	MinW        int64  `json:"min_w"`
-	MinH        int64  `json:"min_h"`
-	SortOrder   int64  `json:"sort_order"`
+	Version     int64  `json:"version"`
+	SpecJson    string `json:"spec_json"`
+	AuthorKind  string `json:"author_kind"`
+	AuthorID    string `json:"author_id"`
+	Message     string `json:"message"`
+	CreatedAt   string `json:"created_at"`
 }
 
 type OauthAuthorizationCode struct {

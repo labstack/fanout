@@ -1,24 +1,16 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useFanoutApp } from "../app-context";
-import Dashboard from "../dashboard";
-import { dashboardSearch, type DashboardSearch } from "../dashboard-search";
+import { DashboardPage } from "../dashboards/page";
+import { parseSearch, toSearchParams, type DashboardSearch } from "../dashboards/search";
 
 export const Route = createFileRoute("/dashboards/$dashboardId")({
   component: DashboardDetail,
-  validateSearch: dashboardSearch,
+  validateSearch: (raw: Record<string, unknown>) => toSearchParams(parseSearch(raw)),
 });
 
 function DashboardDetail() {
   const { dashboardId } = Route.useParams();
-  const search = Route.useSearch();
+  const search = parseSearch(Route.useSearch() as Record<string, unknown>);
   const navigate = useNavigate();
-  const { agentAvailable, openChat } = useFanoutApp();
-  return <Dashboard
-    dashboardID={dashboardId}
-    agentAvailable={agentAvailable}
-    onOpenChat={openChat}
-    onDashboardChange={(nextID, replace) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: nextID }, search: search as DashboardSearch, replace })}
-    urlFilters={search}
-    onFiltersChange={(filters) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId }, search: { window: filters.window, namespace: filters.namespace || undefined }, replace: true })}
-  />;
+  const go = (id: string, next: DashboardSearch, replace?: boolean) => void navigate({ to: "/dashboards/$dashboardId", params: { dashboardId: id }, search: toSearchParams(next), replace });
+  return <DashboardPage dashboardId={dashboardId} search={search} onSearch={(next, replace) => go(dashboardId, next, replace)} onOpen={(id, replace) => go(id, {}, replace)} />;
 }

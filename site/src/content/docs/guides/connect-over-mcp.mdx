@@ -54,10 +54,14 @@ account without delegating your first-party account role.
 | Scope | Grants |
 |---|---|
 | `telemetry:read` | The read-only observability tools |
-| `dashboard:manage` | List, read, create, and replace your dashboards |
+| `dashboard:manage` | `list_dashboards`, `get_dashboard`, `create_dashboard`, `replace_dashboard`, and `edit_dashboard` |
 
-An agent holding only `telemetry:read` can investigate but cannot create or replace
+An agent holding only `telemetry:read` can investigate but cannot manage
 a dashboard.
+
+The MCP tool catalog provides `list_dashboards`, `get_dashboard`,
+`create_dashboard`, `replace_dashboard`, and `edit_dashboard`. Deletion is
+available in Fanout's dashboard API; there is no MCP delete tool.
 
 ## What the agent can and cannot do
 

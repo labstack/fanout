@@ -1,7 +1,7 @@
 ---
 title: "MCP tools"
 description: "Every tool a Fanout instance exposes over MCP, with its inputs and whether it changes anything."
-summary: "Eleven tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
+summary: "14 tools served at /mcp, each with its inputs and mutation semantics, taken from the server's own tools/list answer."
 read_when:
   - "You are connecting an agent and want to know what it can call."
   - "You need to know which tools mutate state and which cannot."
@@ -13,7 +13,7 @@ generated: true
     tool list rather than reading the registrations. Edit the generator, not
     this page. */}
 
-A Fanout instance serves MCP at `/mcp`. Eleven tools, listed below exactly as the
+A Fanout instance serves MCP at `/mcp`. 14 tools, listed below exactly as the
 server reports them to a connecting client.
 
 Every tool is **closed-world**: it reads or writes what this instance holds
@@ -22,32 +22,46 @@ and reaches nothing else.
 | Tool | Changes state |
 |---|---|
 | [`create_dashboard`](#create_dashboard) | **Yes — additive** |
+| [`edit_dashboard`](#edit_dashboard) | **Yes — replaces existing state** |
 | [`get_dashboard`](#get_dashboard) | No — read-only |
 | [`get_intelligence_snapshot`](#get_intelligence_snapshot) | No — read-only |
 | [`get_observability_overview`](#get_observability_overview) | No — read-only |
 | [`get_service_dependencies`](#get_service_dependencies) | No — read-only |
 | [`get_service_performance`](#get_service_performance) | No — read-only |
 | [`get_service_topology`](#get_service_topology) | No — read-only |
+| [`get_telemetry_schema`](#get_telemetry_schema) | No — read-only |
 | [`inspect_trace`](#inspect_trace) | No — read-only |
 | [`list_dashboards`](#list_dashboards) | No — read-only |
+| [`preview_panels`](#preview_panels) | No — read-only |
 | [`replace_dashboard`](#replace_dashboard) | **Yes — replaces existing state** |
 | [`search_logs`](#search_logs) | No — read-only |
 
 ## create_dashboard
 
-**Create dashboard** — Create a complete named dashboard for the authenticated user. This is additive and does not alter existing dashboards.
+**Create dashboard** — Create a dashboard for the authenticated user from a complete spec. Read get_telemetry_schema first and preview_panels until every panel is ok or deliberately empty. The result lists any panel that is still empty or failing. A dashboard is \{name, description, time:\{range}, variables, panels}. Each panel: \{id (lowercase), title, viz, width 1-12, query or sql}. viz: stat or gauge (one measure; gauge needs min and max), timeseries (bucket auto, at most one by), bar (one or two by), table (up to three by), text (content in Markdown). query: \{from: spans|logs|metrics, where: [filter expressions], measures: [fn(field) as alias], by: [fields], bucket, sort, limit}. Measures: count(), rate() per second, error_rate() percent, share() percent, avg/min/max/sum(field), last(value) for metrics, p50/p75/p90/p95/p99(field), quantile(field, 0.999), count_distinct(field). Fields are columns from get_telemetry_schema or attributes['key'] / resource['key'] with the key written literally. Filters are SQL boolean expressions: service = $service, kind = 'SPAN_KIND_SERVER', status = 'STATUS_CODE_ERROR', http_route IN $routes, attributes['http.response.status_code']::INTEGER >= 500. Variables: \{name, kind: query|custom|constant|text, from, field, default, include_all}; $__all selects All and removes filters that use the variable. sql: one SELECT over spans, logs, metrics, service_rollup or edge_rollup that filters time with $__window(column). Use values exactly as get_telemetry_schema lists them. Example panel: \{"id":"latency","title":"Checkout latency","viz":"timeseries","width":8,"query":\{"from":"spans","where":["service = 'checkout'","kind = 'SPAN_KIND_SERVER'"],"measures":["p50(duration_ms)","p95(duration_ms)","p99(duration_ms)"],"bucket":"auto"},"unit":"ms","thresholds":[\{"value":1500,"status":"bad"}]}.
 
 **Additive.** It creates something new and alters nothing that exists.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
-| `name` | `string` | **yes** | Short, unique dashboard name |
-| `state` | `object` | **yes** | Complete widget registry, 12-column layout, and shared filters |
-| `description` | `string` | no | Concise purpose of this dashboard |
+| `dashboard` | `object` | **yes** | Complete v1 dashboard spec |
+
+## edit_dashboard
+
+**Edit dashboard** — Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard.
+
+**Replaces existing state.**
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `id` | `string` | **yes** | Dashboard ID |
+| `operations` | `array` | **yes** | Edits applied in order, atomically |
+| `base_version` | `integer` | no | Version you read; the call fails if someone saved since |
+| `message` | `string` | no | One line describing the change, shown in history |
 
 ## get_dashboard
 
-**Get dashboard** — Read one named dashboard, including its widgets, filters, and 12-column layout.
+**Get dashboard** — Read one dashboard's complete spec and version. Read it before editing so operations name real panel ids.
 
 Read-only. Calling it changes nothing.
 
@@ -115,6 +129,17 @@ Read-only. Calling it changes nothing.
 | `namespace` | `string` | no | OpenTelemetry service namespace; empty queries all namespaces |
 | `window` | `string` | no | Time window such as 15m, 1h, 24h, 168h, or 720h; defaults to 1h |
 
+## get_telemetry_schema
+
+**Telemetry schema** — List the signals, columns with their common values, attribute keys seen per service, metric names, services, measure functions and units. Read this before drafting panels so filters use values that exist.
+
+Read-only. Calling it changes nothing.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `namespace` | `string` | no | Limit discovery to one service namespace |
+| `window` | `string` | no | 5m, 15m, 1h, 3h, 6h, 12h or 24h; default 1h |
+
 ## inspect_trace
 
 **Trace detail** — Inspect an exact trace, or select the most relevant recent error or slow trace, with spans, waterfall, flame graph, and correlated logs.
@@ -131,24 +156,37 @@ Read-only. Calling it changes nothing.
 
 ## list_dashboards
 
-**List dashboards** — List the authenticated user's named dashboards and widget counts before creating or changing one.
+**List dashboards** — List the authenticated user's dashboards with panel counts and versions.
 
 Read-only. Calling it changes nothing.
 
 Takes no arguments.
 
+## preview_panels
+
+**Preview panels** — Check and run panels without saving them. Each panel reports ok with rows and a sample, empty with the reason, error, or invalid with the exact field and a suggestion. Fix every invalid panel and replace or explain every empty one before saving. A dashboard is \{name, description, time:\{range}, variables, panels}. Each panel: \{id (lowercase), title, viz, width 1-12, query or sql}. viz: stat or gauge (one measure; gauge needs min and max), timeseries (bucket auto, at most one by), bar (one or two by), table (up to three by), text (content in Markdown). query: \{from: spans|logs|metrics, where: [filter expressions], measures: [fn(field) as alias], by: [fields], bucket, sort, limit}. Measures: count(), rate() per second, error_rate() percent, share() percent, avg/min/max/sum(field), last(value) for metrics, p50/p75/p90/p95/p99(field), quantile(field, 0.999), count_distinct(field). Fields are columns from get_telemetry_schema or attributes['key'] / resource['key'] with the key written literally. Filters are SQL boolean expressions: service = $service, kind = 'SPAN_KIND_SERVER', status = 'STATUS_CODE_ERROR', http_route IN $routes, attributes['http.response.status_code']::INTEGER >= 500. Variables: \{name, kind: query|custom|constant|text, from, field, default, include_all}; $__all selects All and removes filters that use the variable. sql: one SELECT over spans, logs, metrics, service_rollup or edge_rollup that filters time with $__window(column). Use values exactly as get_telemetry_schema lists them. Example panel: \{"id":"latency","title":"Checkout latency","viz":"timeseries","width":8,"query":\{"from":"spans","where":["service = 'checkout'","kind = 'SPAN_KIND_SERVER'"],"measures":["p50(duration_ms)","p95(duration_ms)","p99(duration_ms)"],"bucket":"auto"},"unit":"ms","thresholds":[\{"value":1500,"status":"bad"}]}.
+
+Read-only. Calling it changes nothing.
+
+| Input | Type | Required | Means |
+|---|---|---|---|
+| `panels` | `array` | **yes** | Panels to check and run, in the same format as dashboard panels |
+| `time` | `object` | no | Time range; default the last hour |
+| `variables` | `array` | no | Variables the panels reference |
+| `vars` | `object` | no | Variable values to preview with; $__all selects All |
+
 ## replace_dashboard
 
-**Replace dashboard design** — Replace an existing dashboard's complete name, description, widgets, shared filters, and layout. This is not a partial edit: omitted widgets are removed. Only call after the user explicitly asks to change that dashboard.
+**Replace dashboard** — Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels.
 
 **Replaces existing state.** Calling it twice with the same arguments leaves the same result as calling it once, but the first call has already overwritten what was there.
 
 | Input | Type | Required | Means |
 |---|---|---|---|
-| `id` | `string` | **yes** | Dashboard ID to update |
-| `name` | `string` | **yes** | Short, unique dashboard name |
-| `state` | `object` | **yes** | Complete replacement widget registry, 12-column layout, and shared filters |
-| `description` | `string` | no | Concise purpose of this dashboard |
+| `dashboard` | `object` | **yes** | Complete replacement spec; omitted panels are removed |
+| `id` | `string` | **yes** | Dashboard ID |
+| `base_version` | `integer` | no | Version you read; the call fails if someone saved since |
+| `message` | `string` | no | One line describing the change, shown in history |
 
 ## search_logs
 

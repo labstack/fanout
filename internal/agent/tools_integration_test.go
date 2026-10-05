@@ -42,7 +42,7 @@ func (registryQueries) Logs(context.Context, observability.Scope, string, string
 }
 
 func TestToolRegistryNegotiatesMCPApps(t *testing.T) {
-	server := fanoutmcp.NewWithIntelligence(registryQueries{}, nil, registryIntelligence{}, "test")
+	server := fanoutmcp.NewWithIntelligence(registryQueries{}, nil, nil, registryIntelligence{}, "test")
 	registry, err := NewToolRegistry(context.Background(), server.MCP())
 	if err != nil {
 		t.Fatalf("NewToolRegistry: %v", err)

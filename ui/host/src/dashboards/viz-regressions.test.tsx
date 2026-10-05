@@ -1,0 +1,188 @@
+import { MantineProvider } from "@mantine/core";
+import { act, type ReactNode } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Frame, Panel, PanelResult } from "../../../panels/types";
+import { warn, bad, ok } from "../../../tokens";
+
+const mocks = vi.hoisted(() => ({ init: vi.fn() }));
+vi.mock("echarts/core", () => ({ init: mocks.init, use: vi.fn(), connect: vi.fn(), disconnect: vi.fn() }));
+vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, LineChart: {} }));
+vi.mock("echarts/components", () => ({ AriaComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, TooltipComponent: {} }));
+vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
+import { BarViz } from "./viz/bar";
+import { TimeseriesViz } from "./viz/timeseries";
+import { GaugeViz } from "./viz/gauge";
+import { StatViz } from "./viz/stat";
+import { TextViz } from "./viz/text";
+import { TableViz } from "./viz/table";
+import { PanelCard } from "./panel-card";
+import { EChartCanvas } from "./echart-canvas";
+import { ApiError } from "./api";
+import { retryQuery } from "./query-policy";
+import { InspectDrawer } from "./inspect";
+
+const frame: Frame = { columns: [{ name: "time", type: "time", role: "time" }, { name: "count", type: "number", role: "measure" }], values: [[1, 2], [20, 40]], rows: 2, totals: [null, 120] };
+const panel: Panel = { id: "p", title: "For $service", viz: "stat", reduce: "window" };
+const result: PanelResult = { id: "p", status: "ok", frame, elapsed_ms: 1 };
+const cleanups: (() => void)[] = [];
+let instance: { setOption: ReturnType<typeof vi.fn>; on: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; resize: ReturnType<typeof vi.fn> };
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal("ResizeObserver", class { observe() {} unobserve() {} disconnect() {} });
+  instance = { setOption: vi.fn(), on: vi.fn(), dispose: vi.fn(), resize: vi.fn() };
+  mocks.init.mockReturnValue(instance);
+});
+afterEach(async () => {
+  await act(async () => { cleanups.splice(0).forEach((fn) => fn()); });
+  vi.unstubAllGlobals();
+  document.body.innerHTML = "";
+});
+async function render(node: ReactNode) {
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host); cleanups.push(() => root.unmount());
+  const rerender = async (next: ReactNode) => { await act(async () => { root.render(<MantineProvider theme={{ colors: { warn: [...warn], bad: [...bad], ok: [...ok] } }}>{next}</MantineProvider>); }); };
+  await rerender(node);
+  return { host, rerender };
+}
+
+describe("visualization regressions", () => {
+  it("shows Error logs warn at 3 and ok at 0", async () => {
+    const p: Panel = { ...panel, id: "error_logs", title: "Error logs", better: "lower", thresholds: [{ value: 1, status: "warn" }] };
+    const r = (count: number): PanelResult => ({ ...result, frame: { ...frame, totals: [null, count] } });
+    const { host, rerender } = await render(<StatViz panel={p} result={r(3)} />);
+    expect(host.textContent).toContain("Degraded");
+    await rerender(<StatViz panel={p} result={r(0)} />);
+    expect(host.textContent).toContain("Healthy");
+  });
+  it("colours SQL stat thresholds without a direction and honors result then spec", async () => {
+    const p: Panel = { ...panel, sql: "SELECT count(*) FROM logs", thresholds: [{ value: 50, status: "warn" }, { value: 100, status: "bad" }] };
+    const { host, rerender } = await render(<StatViz panel={p} result={result} />);
+    expect(host.textContent).toContain("Unhealthy");
+    await rerender(<StatViz panel={p} result={{ ...result, better: "higher" }} />);
+    expect(host.textContent).toContain("Healthy");
+    await rerender(<StatViz panel={{ ...p, better: "lower" }} result={{ ...result, better: "higher" }} />);
+    expect(host.textContent).toContain("Unhealthy");
+  });
+  it("uses threshold-derived gauge bands and result direction", async () => {
+    const p: Panel = { ...panel, viz: "gauge", min: 0, max: 200, thresholds: [{ value: 50, status: "warn" }, { value: 100, status: "bad" }] };
+    const { rerender } = await render(<GaugeViz panel={p} result={result} dark={false} height={200} />);
+    expect(instance.setOption.mock.lastCall?.[0].series[0].axisLine.lineStyle.color).toHaveLength(3);
+    await rerender(<GaugeViz panel={p} result={{ ...result, better: "higher" }} dark={false} height={200} />);
+    expect(instance.setOption.mock.lastCall?.[0].series[0].axisLine.lineStyle.color).toHaveLength(2);
+  });
+  it("keeps dimension cells nowrap with full titles and only the panel scrollbar", async () => {
+    const service = "checkout-service-with-a-long-unbroken-name";
+    const tableFrame: Frame = { columns: [{ name: "service", type: "string", role: "dimension" }, frame.columns[1]], values: [[service], [1]], rows: 1 };
+    const { host } = await render(<PanelCard panel={{ ...panel, viz: "table" }} title="Services" result={{ ...result, frame: tableFrame }} loading={false} height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+    const cell = host.querySelector("tbody td p")!;
+    expect(cell.classList.contains("dashboard-dimension-nowrap")).toBe(true);
+    expect(cell.getAttribute("title")).toBe(service);
+    const table = host.querySelector("table")!;
+    expect(table.classList.contains("dashboard-table")).toBe(true);
+    let scrollContainers = 0;
+    for (let element: HTMLElement | null = table.parentElement; element && element !== host; element = element.parentElement) {
+      if ([element.style.overflow, element.style.overflowY].some((v) => v === "auto" || v === "scroll")) scrollContainers += 1;
+    }
+    expect(scrollContainers).toBe(1);
+  });
+  it("formats count columns without ms in tables, stats, gauges and inspect", async () => {
+    const countFrame: Frame = { columns: [{ name: "count_distinct", type: "number", role: "measure", unit: "count" }], values: [[1]], rows: 1, totals: [1] };
+    const r = { ...result, frame: countFrame };
+    const p = { ...panel, unit: "ms" as const };
+    const { host } = await render(<><StatViz panel={p} result={r} /><TableViz panel={{ ...p, viz: "table" }} result={r} height={200} /><GaugeViz panel={{ ...p, viz: "gauge" }} result={r} dark={false} height={200} /><InspectDrawer panel={p} result={r} onClose={vi.fn()} /></>);
+    expect(host.querySelector("tbody td p")!.textContent).toBe("1");
+    expect(host.querySelector("p")!.textContent).toBe("1");
+    expect(instance.setOption.mock.lastCall?.[0].series[0].detail.formatter()).toBe("1");
+    expect(document.querySelector('[role="dialog"] tbody td')!.textContent).toBe("1");
+  });
+  it.each([undefined, { ...frame, totals: undefined }])("hides window delta without previous totals (%s)", async (previous) => {
+    const { host } = await render(<StatViz panel={panel} result={{ ...result, previous }} />);
+    expect(host.textContent).toContain("120");
+    expect(host.textContent).not.toContain("vs previous period");
+    expect(host.textContent).not.toContain("%");
+  });
+  it("uses the previous window total for the correct delta", async () => {
+    const { host } = await render(<StatViz panel={panel} result={{ ...result, previous: { ...frame, totals: [null, 60] } }} />);
+    expect(host.textContent).toContain("+100%");
+  });
+  it.each(["bar", "timeseries", "gauge"] as const)("does not setOption again for an equal frame and new elapsed_ms (%s)", async (viz) => {
+    const p = { ...panel, viz };
+    const node = (r: PanelResult) => viz === "bar" ? <BarViz panel={p} result={r} dark={false} height={200} /> : viz === "gauge" ? <GaugeViz panel={p} result={r} dark={false} height={200} /> : <TimeseriesViz panel={p} result={r} dark={false} height={200} group="d" />;
+    const { rerender } = await render(node(result));
+    expect(instance.setOption).toHaveBeenCalledOnce();
+    await rerender(node({ ...result, elapsed_ms: 99 }));
+    expect(instance.setOption).toHaveBeenCalledOnce();
+  });
+  it("retains legend selections across data changes only for surviving series", async () => {
+    const { rerender } = await render(<EChartCanvas label="Services" height={100} option={{ legend: {}, series: [{ name: "cart" }, { name: "gone" }] }} />);
+    const handler = instance.on.mock.calls.find(([name]) => name === "legendselectchanged")?.[1];
+    expect(handler).toBeTypeOf("function");
+    handler({ selected: { cart: false, gone: false } });
+    await rerender(<EChartCanvas label="Services" height={100} option={{ legend: {}, series: [{ name: "cart", data: [1] }, { name: "new", data: [2] }] }} />);
+    expect(instance.setOption.mock.lastCall).toEqual([expect.objectContaining({ legend: { selected: { cart: false } } }), { notMerge: true }]);
+    await rerender(<EChartCanvas label="Services" height={100} option={{ legend: {}, series: [{ name: "gone" }] }} />);
+    expect(instance.setOption.mock.lastCall?.[0].legend.selected).toEqual({});
+  });
+  it("keeps raw HTML inert, unsafe links sanitized, images absent and external links isolated", async () => {
+    const content = '<script>alert(1)</script>\n\n<img src="https://remote.test/leak">\n\n![leak](https://remote.test/leak)\n\n[unsafe](javascript:alert%281%29) [data](data:text/html,test) [external](https://example.com)';
+    const { host } = await render(<TextViz panel={{ ...panel, viz: "text", content }} />);
+    expect(host.querySelector("script, img")).toBeNull();
+    expect(host.textContent).not.toContain("alert(1)");
+    const links = [...host.querySelectorAll("a")];
+    expect(links).toHaveLength(3);
+    expect(links[0].getAttribute("href")).toBe("");
+    expect(links[1].getAttribute("href")).toBe("");
+    expect(links[2].getAttribute("href")).toBe("https://example.com");
+    expect(links[2].target).toBe("_blank");
+    expect(links[2].rel).toBe("noopener noreferrer");
+  });
+  it("does not select a measure name on an ungrouped timeseries click", async () => {
+    const select = vi.fn();
+    await render(<TimeseriesViz panel={{ ...panel, viz: "timeseries" }} result={result} dark={false} height={200} group="d" onSelect={select} />);
+    instance.on.mock.calls.find(([name]) => name === "click")![1]({ seriesName: "count" });
+    expect(select).not.toHaveBeenCalled();
+  });
+  it("colours only unhealthy first measures and prefers column units", async () => {
+    const tableFrame: Frame = { columns: [{ name: "service", type: "string", role: "dimension" }, { name: "latency", type: "number", role: "measure", unit: "ms" }, { name: "size", type: "number", role: "measure", unit: "bytes" }], values: [["cart", "checkout"], [900, 40], [2048, 1024]], rows: 2 };
+    const { host } = await render(<TableViz panel={{ ...panel, viz: "table", better: "lower", unit: "count", thresholds: [{ value: 100, status: "warn" }] }} result={{ ...result, frame: tableFrame }} height={200} />);
+    const cells = host.querySelectorAll("tbody tr:first-child td p");
+    expect(cells[1].textContent).toBe("900ms");
+    expect(cells[1].getAttribute("style")).toContain("warn");
+    expect(cells[2].textContent).toBe("2.0 KiB");
+    expect(cells[2].getAttribute("style") ?? "").not.toMatch(/warn|bad|ok/);
+    expect(host.querySelector("tbody tr:nth-child(2) td:nth-child(2) p")!.getAttribute("style") ?? "").not.toMatch(/warn|bad|ok/);
+  });
+  it("announces table sorting and supports keyboard row selection", async () => {
+    const select = vi.fn();
+    const grouped: Frame = { columns: [{ name: "service", type: "string", role: "dimension" }, frame.columns[1]], values: [["cart", "checkout"], [40, 20]], rows: 2 };
+    const { host } = await render(<TableViz panel={{ ...panel, viz: "table" }} result={{ ...result, frame: grouped }} height={200} onSelect={select} />);
+    const header = host.querySelector("th:nth-child(2)")!;
+    expect(header.getAttribute("aria-sort")).toBe("none");
+    await act(async () => { header.querySelector("button")!.click(); });
+    expect(header.getAttribute("aria-sort")).toBe("descending");
+    const row = host.querySelector("tbody tr")!;
+    expect(row.getAttribute("tabindex")).toBe("0");
+    for (const key of ["Enter", " "]) {
+      const event = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+      await act(async () => { row.dispatchEvent(event); });
+      expect(event.defaultPrevented).toBe(true);
+    }
+    expect(select.mock.calls).toEqual([["cart"], ["cart"]]);
+  });
+  it("uses interpolated chart labels, focusable descriptions, named loaders and scrolling bodies", async () => {
+    const { host } = await render(<PanelCard panel={{ ...panel, viz: "gauge", description: "Details" }} title="For cart" result={result} loading height={200} group="d" editing={false} agentAvailable={false} onView={vi.fn()} onInspect={vi.fn()} onCopyLink={vi.fn()} onExplain={vi.fn()} />);
+    expect(host.querySelector('[role="img"]')!.getAttribute("aria-label")).toBe("For cart: gauge");
+    expect(host.querySelector('[aria-label="For cart description"]')!.tagName).toBe("BUTTON");
+    expect(host.querySelector('[aria-label="Refreshing"]')).not.toBeNull();
+    expect(host.querySelector('[role="img"]')!.parentElement!.style.overflow).toBe("auto");
+  });
+  it("limits retries to two and never retries client ApiErrors", () => {
+    for (const status of [400, 401, 403, 404, 409, 422, 499]) expect(retryQuery(0, new ApiError("bad", status))).toBe(false);
+    for (const error of [new ApiError("server", 500), new Error("network")]) {
+      expect(retryQuery(0, error)).toBe(true);
+      expect(retryQuery(1, error)).toBe(true);
+      expect(retryQuery(2, error)).toBe(false);
+    }
+  });
+});

@@ -1,0 +1,66 @@
+import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
+import { ArrowsOut, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, MagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
+import type { Panel, PanelResult } from "../../../panels/types";
+import { useEffect, useState } from "react";
+import { Viz } from "./viz";
+
+export function PanelCard({ panel, title, result, loading, height, group, editing, agentAvailable, onSelect, onView, onInspect, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
+  panel: Panel; title: string; result?: PanelResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
+  onSelect?: (value: string) => void; onView(): void; onInspect(): void; onCopyLink(): void; onExplain(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
+}) {
+  const dark = useComputedColorScheme("light") === "dark";
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!staleAt) return;
+    setNow(Date.now());
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, [staleAt]);
+  const bodyHeight = Math.max(80, height - 52);
+  return <Paper withBorder radius="md" h="100%" p="sm" style={{ display: "flex", flexDirection: "column", minWidth: 0 }} data-panel={panel.id}>
+    <Group justify="space-between" wrap="nowrap" gap="xs" mb={6} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined }}>
+      <Group gap={6} wrap="nowrap" miw={0}>
+        <Text fw={600} size="sm" truncate>{title}</Text>
+        {panel.description && <Tooltip label={panel.description} multiline w={260}><ActionIcon variant="transparent" color="gray" size="xs" aria-label={`${title} description`}><Info size={14} /></ActionIcon></Tooltip>}
+        {loading && result && <Loader size={12} aria-label="Refreshing" />}
+      </Group>
+      <Menu position="bottom-end" withinPortal>
+        <Menu.Target><ActionIcon variant="subtle" color="gray" size="sm" aria-label={`${title} menu`}><DotsThree size={18} weight="bold" /></ActionIcon></Menu.Target>
+        <Menu.Dropdown>
+          <Menu.Item leftSection={<ArrowsOut size={14} />} onClick={onView}>View</Menu.Item>
+          {panel.viz !== "text" && <Menu.Item leftSection={<MagnifyingGlass size={14} />} onClick={onInspect}>Inspect</Menu.Item>}
+          {agentAvailable && <Menu.Item leftSection={<ChatCircleText size={14} />} onClick={onExplain}>Explain in chat</Menu.Item>}
+          <Menu.Item leftSection={<Copy size={14} />} onClick={onCopyLink}>Copy link</Menu.Item>
+          {onDuplicate && <Menu.Item leftSection={<Copy size={14} />} onClick={onDuplicate}>Duplicate</Menu.Item>}
+          {onRemove && <><Menu.Divider /><Menu.Item color="bad" leftSection={<Trash size={14} />} onClick={onRemove}>Remove panel</Menu.Item></>}
+        </Menu.Dropdown>
+      </Menu>
+    </Group>
+    <Box style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+      {!result && panel.viz !== "text" ? <Center h="100%"><Loader size="sm" /></Center>
+        : result?.status === "error" ? <Center h="100%"><Stack align="center" gap={4} maw={420}>
+          <Group gap={6}><WarningCircle size={18} weight="fill" color="var(--mantine-color-bad-filled)" /><Text size="sm" fw={500} c="bad">This panel failed</Text></Group>
+          <Text size="xs" c="dimmed" ta="center" style={{ overflowWrap: "anywhere" }}>{result.error}</Text>
+          {agentAvailable && <Button size="compact-xs" variant="light" onClick={onExplain}>Ask Fanout to fix it</Button>}
+        </Stack></Center>
+        : result?.status === "empty" ? <Center h="100%"><Stack align="center" gap={4} maw={420}>
+          <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
+          <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>
+        </Stack></Center>
+        : <Viz panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} onSelect={onSelect} />}
+    </Box>
+    {(staleAt || result?.frame?.truncated || result?.previous?.truncated) && <Text size="xs" c={staleAt ? "warn" : "dimmed"} mt={6} role="status">
+      {staleAt ? `Stale: last updated ${relativeTime(staleAt, now)}` : ""}
+      {(result?.frame?.truncated || result?.previous?.truncated) ? `${staleAt ? " · " : ""}Truncated: showing limited data` : ""}
+    </Text>}
+  </Paper>;
+}
+
+function relativeTime(at: number, now: number): string {
+  const seconds = Math.max(0, Math.floor((now - at) / 1000));
+  if (seconds < 60) return "just now";
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+}

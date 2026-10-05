@@ -9,59 +9,37 @@ import (
 	"strings"
 	"time"
 
+	"github.com/labstack/fanout/internal/db/generated"
 	appid "github.com/labstack/fanout/internal/id"
+	"github.com/labstack/fanout/internal/panel"
 )
 
 var (
 	ErrNotFound = errors.New("dashboard not found")
-	ErrConflict = errors.New("dashboard name already exists")
+	ErrConflict = errors.New("a dashboard with that name already exists")
+	ErrStale    = errors.New("the dashboard changed since it was read")
 )
 
-type ValidationError struct{ Message string }
-
-func (e *ValidationError) Error() string { return e.Message }
-
-func invalid(message string, args ...any) error {
-	return &ValidationError{Message: fmt.Sprintf(message, args...)}
+// Validator checks a spec completely, including its filters and SQL.
+// *panel.Executor implements it.
+type Validator interface {
+	Validate(ctx context.Context, d *panel.Dashboard) error
 }
 
-type Filters struct {
-	Window    string `json:"window"`
-	Namespace string `json:"namespace"`
+type Author struct {
+	Kind string // user, agent or system
+	ID   string
 }
 
-type Layout struct {
-	I    string `json:"i"`
-	X    int    `json:"x"`
-	Y    int    `json:"y"`
-	W    int    `json:"w"`
-	H    int    `json:"h"`
-	MinW int    `json:"minW,omitempty"`
-	MinH int    `json:"minH,omitempty"`
-}
-
-type Widget struct {
-	ID      string         `json:"id"`
-	Type    string         `json:"type"`
-	Title   string         `json:"title"`
-	Config  map[string]any `json:"config,omitempty"`
-	Enabled bool           `json:"enabled"`
-}
-
-type State struct {
-	Layout  []Layout `json:"layout"`
-	Widgets []Widget `json:"widgets"`
-	Filters Filters  `json:"filters"`
-}
-
-type Dashboard struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	IsDefault   bool   `json:"is_default"`
-	State       State  `json:"state"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+type Record struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	IsDefault   bool            `json:"is_default"`
+	Version     int             `json:"version"`
+	Spec        panel.Dashboard `json:"spec"`
+	CreatedAt   string          `json:"created_at"`
+	UpdatedAt   string          `json:"updated_at"`
 }
 
 type Summary struct {
@@ -69,389 +47,310 @@ type Summary struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	IsDefault   bool   `json:"is_default"`
-	WidgetCount int    `json:"widget_count"`
+	Version     int    `json:"version"`
+	PanelCount  int    `json:"panel_count"`
 	UpdatedAt   string `json:"updated_at"`
 }
 
-type CreateInput struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	State       State  `json:"state"`
-}
-
-type UpdateInput struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	State       State  `json:"state"`
+type VersionInfo struct {
+	Version    int    `json:"version"`
+	AuthorKind string `json:"author_kind"`
+	AuthorID   string `json:"author_id,omitempty"`
+	Message    string `json:"message,omitempty"`
+	CreatedAt  string `json:"created_at"`
 }
 
 type Service struct {
 	db        *sql.DB
-	maxWindow time.Duration
+	validator Validator
 	now       func() time.Time
 }
 
-func New(db *sql.DB, retentionDays int) *Service {
-	maxWindow := 30 * 24 * time.Hour
-	if retentionDays > 0 {
-		maxWindow = time.Duration(retentionDays) * 24 * time.Hour
-	}
-	return &Service{db: db, maxWindow: maxWindow, now: time.Now}
-}
+const keepVersions = 100
 
-func DefaultState() State {
-	return State{
-		Widgets: []Widget{
-			{ID: "health", Type: "overview", Title: "System health", Enabled: true},
-			{ID: "topology", Type: "topology", Title: "Service map", Enabled: true},
-			{ID: "activity", Type: "activity", Title: "Recent activity", Enabled: true},
-			{ID: "assistant", Type: "assistant", Title: "Ask Fanout", Enabled: true},
-		},
-		// Sizes mirror widgetDefaults in ui/host/src/dashboard-layout.ts: a card
-		// gets the shape its content fills. The old default gave Ask Fanout the
-		// full twelve columns for three chips and left the health card with a
-		// blank band under it.
-		Layout: []Layout{
-			{I: "health", X: 0, Y: 0, W: 4, H: 3, MinW: 3, MinH: 3},
-			{I: "topology", X: 4, Y: 0, W: 8, H: 5, MinW: 4, MinH: 4},
-			{I: "activity", X: 0, Y: 3, W: 4, H: 5, MinW: 3, MinH: 4},
-			{I: "assistant", X: 4, Y: 5, W: 4, H: 3, MinW: 3, MinH: 3},
-		},
-		Filters: Filters{Window: "1h"},
-	}
+func New(db *sql.DB, validator Validator) *Service {
+	return &Service{db: db, validator: validator, now: time.Now}
 }
 
 func (s *Service) List(ctx context.Context, ownerID string) ([]Summary, error) {
 	if err := s.ensureInitial(ctx, ownerID); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT d.id,d.name,d.description,d.is_default,COUNT(w.id),d.updated_at FROM dashboards d LEFT JOIN dashboard_widgets w ON w.dashboard_id=d.id WHERE d.owner_id=? GROUP BY d.id ORDER BY d.is_default DESC,d.updated_at DESC,d.name`, ownerID)
+	rows, err := generated.New(s.db).ListDashboards(ctx, ownerID)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []Summary
-	for rows.Next() {
-		var item Summary
-		if err := rows.Scan(&item.ID, &item.Name, &item.Description, &item.IsDefault, &item.WidgetCount, &item.UpdatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, item)
+	out := make([]Summary, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Summary{ID: r.ID, Name: r.Name, Description: r.Description, IsDefault: r.IsDefault == 1, Version: int(r.Version), PanelCount: int(r.PanelCount), UpdatedAt: r.UpdatedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
-func (s *Service) Get(ctx context.Context, ownerID, id string) (Dashboard, error) {
+func (s *Service) Get(ctx context.Context, ownerID, id string) (Record, error) {
 	if err := s.ensureInitial(ctx, ownerID); err != nil {
-		return Dashboard{}, err
+		return Record{}, err
 	}
-	return s.get(ctx, s.db, ownerID, id)
+	return s.get(ctx, ownerID, id)
 }
 
-func (s *Service) Create(ctx context.Context, ownerID string, input CreateInput) (Dashboard, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	if input.State.Filters.Window == "" {
-		input.State.Filters.Window = "1h"
+func (s *Service) get(ctx context.Context, ownerID, id string) (Record, error) {
+	row, err := generated.New(s.db).GetDashboard(ctx, generated.GetDashboardParams{ID: id, OwnerID: ownerID})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Record{}, ErrNotFound
 	}
-	state, err := normalizeStateIDs(input.State)
 	if err != nil {
-		return Dashboard{}, fmt.Errorf("generate dashboard widget ids: %w", err)
+		return Record{}, err
 	}
-	input.State = state
-	if err := Validate(input.Name, input.Description, input.State); err != nil {
-		return Dashboard{}, err
+	record := Record{ID: row.ID, Name: row.Name, Description: row.Description, IsDefault: row.IsDefault == 1, Version: int(row.Version), CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt}
+	if err := json.Unmarshal([]byte(row.SpecJson), &record.Spec); err != nil {
+		return Record{}, fmt.Errorf("decode dashboard %s: %w", id, err)
 	}
-	input.State.Filters.Window = clampDashboardWindow(input.State.Filters.Window, s.maxWindow)
-	tx, err := s.db.BeginTx(ctx, nil)
+	return record, nil
+}
+
+// prepare normalizes, validates and packs a spec for storage.
+func (s *Service) prepare(ctx context.Context, spec *panel.Dashboard, repack bool) error {
+	panel.Normalize(spec)
+	validationCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	if err := s.validator.Validate(validationCtx, spec); err != nil {
+		return err
+	}
+	if repack {
+		for i := range spec.Panels {
+			spec.Panels[i].Grid = nil
+		}
+	}
+	if repack || needsPack(spec.Panels) {
+		PackMissing(spec.Panels)
+	}
+	return nil
+}
+
+func (s *Service) Create(ctx context.Context, ownerID string, spec panel.Dashboard, author Author) (Record, error) {
+	if err := s.prepare(ctx, &spec, false); err != nil {
+		return Record{}, err
+	}
+	raw, err := json.Marshal(spec)
 	if err != nil {
-		return Dashboard{}, err
+		return Record{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
-	var count int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM dashboards WHERE owner_id=?`, ownerID).Scan(&count); err != nil {
-		return Dashboard{}, err
-	}
-	now := s.now().UTC().Format(time.RFC3339Nano)
 	id, err := appid.New()
 	if err != nil {
-		return Dashboard{}, fmt.Errorf("generate dashboard id: %w", err)
+		return Record{}, err
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO dashboards(id,owner_id,name,description,window,namespace,is_default,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`, id, ownerID, input.Name, strings.TrimSpace(input.Description), input.State.Filters.Window, strings.TrimSpace(input.State.Filters.Namespace), count == 0, now, now); err != nil {
-		if isUnique(err) {
-			return Dashboard{}, ErrConflict
-		}
-		return Dashboard{}, err
-	}
-	if err := replaceWidgets(ctx, tx, id, input.State); err != nil {
-		return Dashboard{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Dashboard{}, err
-	}
-	return s.get(ctx, s.db, ownerID, id)
-}
-
-func (s *Service) Update(ctx context.Context, ownerID, id string, input UpdateInput) (Dashboard, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	if input.State.Filters.Window == "" {
-		input.State.Filters.Window = "1h"
-	}
-	state, err := normalizeStateIDs(input.State)
-	if err != nil {
-		return Dashboard{}, fmt.Errorf("generate dashboard widget ids: %w", err)
-	}
-	input.State = state
-	if err := Validate(input.Name, input.Description, input.State); err != nil {
-		return Dashboard{}, err
-	}
-	input.State.Filters.Window = clampDashboardWindow(input.State.Filters.Window, s.maxWindow)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return Dashboard{}, err
+		return Record{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	q := generated.New(tx)
 	now := s.now().UTC().Format(time.RFC3339Nano)
-	result, err := tx.ExecContext(ctx, `UPDATE dashboards SET name=?,description=?,window=?,namespace=?,updated_at=? WHERE id=? AND owner_id=?`, input.Name, strings.TrimSpace(input.Description), input.State.Filters.Window, strings.TrimSpace(input.State.Filters.Namespace), now, id, ownerID)
+	affected, err := q.InsertDashboardBelowOwnerLimit(ctx, generated.InsertDashboardBelowOwnerLimitParams{ID: id, OwnerID: ownerID, Name: spec.Name, Description: spec.Description, Version: 1, SpecJson: string(raw), PanelCount: int64(len(spec.Panels)), CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		if isUnique(err) {
-			return Dashboard{}, ErrConflict
+			return Record{}, ErrConflict
 		}
-		return Dashboard{}, err
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return Dashboard{}, err
+		return Record{}, err
 	}
 	if affected == 0 {
-		return Dashboard{}, ErrNotFound
+		return Record{}, panel.Problems{{Path: "dashboards", Message: "at most 500 dashboards per owner; delete a dashboard before creating another"}}
 	}
-	if err := replaceWidgets(ctx, tx, id, input.State); err != nil {
-		return Dashboard{}, err
+	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: 1, SpecJson: string(raw), AuthorKind: author.Kind, AuthorID: author.ID, Message: "Created", CreatedAt: now}); err != nil {
+		return Record{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return Dashboard{}, err
+		return Record{}, err
 	}
-	return s.get(ctx, s.db, ownerID, id)
+	return s.get(ctx, ownerID, id)
+}
+
+// Replace stores a whole new spec. baseVersion 0 means "the latest".
+func (s *Service) Replace(ctx context.Context, ownerID, id string, spec panel.Dashboard, baseVersion int, author Author, message string) (Record, error) {
+	return s.update(ctx, ownerID, id, baseVersion, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
+		replacement, err := clone(spec)
+		if err != nil {
+			return panel.Dashboard{}, false, err
+		}
+		spec := replacement
+		// Carry coordinates by id, including browser-resized dimensions.
+		grids := map[string]*panel.Grid{}
+		prior := map[string]panel.Panel{}
+		for _, p := range current.Panels {
+			grids[p.ID] = p.Grid
+			prior[p.ID] = p
+		}
+		for i := range spec.Panels {
+			p := &spec.Panels[i]
+			if p.Grid == nil {
+				p.Grid = grids[p.ID]
+			}
+			old, exists := prior[p.ID]
+			// A deliberate authored size change gets a new placement. Explicit
+			// grids accompanying a browser layout save remain authoritative.
+			if exists && p.Width != 0 && p.Width != old.Width && p.Grid != nil && old.Grid != nil && *p.Grid == *old.Grid {
+				p.Grid = nil
+			}
+			if exists && p.Height != "" && p.Height != old.Height && p.Grid != nil && old.Grid != nil && *p.Grid == *old.Grid {
+				p.Grid = nil
+			}
+		}
+		if len(spec.Panels) < len(current.Panels) {
+			panel.Normalize(&spec)
+			Compact(spec.Panels)
+		}
+		return spec, false, nil
+	})
+}
+
+// Edit applies typed operations atomically. baseVersion 0 means "the latest".
+func (s *Service) Edit(ctx context.Context, ownerID, id string, ops []Operation, baseVersion int, author Author, message string) (Record, error) {
+	return s.update(ctx, ownerID, id, baseVersion, author, message, func(current panel.Dashboard) (panel.Dashboard, bool, error) {
+		return Apply(current, ops)
+	})
+}
+
+func (s *Service) Restore(ctx context.Context, ownerID, id string, version int, author Author) (Record, error) {
+	if _, err := s.get(ctx, ownerID, id); err != nil {
+		return Record{}, err
+	}
+	raw, err := generated.New(s.db).GetDashboardVersion(ctx, generated.GetDashboardVersionParams{DashboardID: id, Version: int64(version)})
+	if errors.Is(err, sql.ErrNoRows) {
+		return Record{}, ErrNotFound
+	}
+	if err != nil {
+		return Record{}, err
+	}
+	var spec panel.Dashboard
+	if err := json.Unmarshal([]byte(raw), &spec); err != nil {
+		return Record{}, err
+	}
+	return s.update(ctx, ownerID, id, 0, author, fmt.Sprintf("Restored version %d", version), func(panel.Dashboard) (panel.Dashboard, bool, error) {
+		return spec, false, nil
+	})
+}
+
+// update reads, changes, validates and writes with an optimistic version
+// check. With baseVersion 0 a concurrent write is retried once on the newer
+// version; with an explicit baseVersion it fails with ErrStale instead of
+// overwriting what someone else saved.
+func (s *Service) update(ctx context.Context, ownerID, id string, baseVersion int, author Author, message string, change func(panel.Dashboard) (panel.Dashboard, bool, error)) (Record, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		current, err := s.get(ctx, ownerID, id)
+		if err != nil {
+			return Record{}, err
+		}
+		if baseVersion != 0 && current.Version != baseVersion {
+			return Record{}, ErrStale
+		}
+		next, repack, err := change(current.Spec)
+		if err != nil {
+			return Record{}, err
+		}
+		if err := s.prepare(ctx, &next, repack); err != nil {
+			return Record{}, err
+		}
+		raw, err := json.Marshal(next)
+		if err != nil {
+			return Record{}, err
+		}
+		written, err := s.write(ctx, ownerID, id, current.Version, next, string(raw), author, message)
+		if err != nil {
+			return Record{}, err
+		}
+		if written {
+			return s.get(ctx, ownerID, id)
+		}
+		if baseVersion != 0 {
+			return Record{}, ErrStale
+		}
+	}
+	return Record{}, ErrStale
+}
+
+func (s *Service) write(ctx context.Context, ownerID, id string, base int, spec panel.Dashboard, raw string, author Author, message string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	q := generated.New(tx)
+	now := s.now().UTC().Format(time.RFC3339Nano)
+	next := int64(base + 1)
+	affected, err := q.UpdateDashboard(ctx, generated.UpdateDashboardParams{Name: spec.Name, Description: spec.Description, NextVersion: next, SpecJson: raw, PanelCount: int64(len(spec.Panels)), UpdatedAt: now, ID: id, OwnerID: ownerID, BaseVersion: int64(base)})
+	if err != nil {
+		if isUnique(err) {
+			return false, ErrConflict
+		}
+		return false, err
+	}
+	if affected == 0 {
+		return false, nil
+	}
+	if err := q.InsertDashboardVersion(ctx, generated.InsertDashboardVersionParams{DashboardID: id, Version: next, SpecJson: raw, AuthorKind: author.Kind, AuthorID: author.ID, Message: strings.TrimSpace(message), CreatedAt: now}); err != nil {
+		return false, err
+	}
+	if err := q.PruneDashboardVersions(ctx, generated.PruneDashboardVersionsParams{DashboardID: id, KeepFrom: next - keepVersions + 1}); err != nil {
+		return false, err
+	}
+	return true, tx.Commit()
 }
 
 func (s *Service) Delete(ctx context.Context, ownerID, id string) error {
+	current, err := s.get(ctx, ownerID, id)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	var isDefault bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_default FROM dashboards WHERE id=? AND owner_id=?`, id, ownerID).Scan(&isDefault); errors.Is(err, sql.ErrNoRows) {
-		return ErrNotFound
-	} else if err != nil {
+	q := generated.New(tx)
+	if _, err := q.DeleteDashboard(ctx, generated.DeleteDashboardParams{ID: id, OwnerID: ownerID}); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM dashboards WHERE id=? AND owner_id=?`, id, ownerID); err != nil {
-		return err
-	}
-	if isDefault {
-		if _, err := tx.ExecContext(ctx, `UPDATE dashboards SET is_default=1 WHERE id=(SELECT id FROM dashboards WHERE owner_id=? ORDER BY updated_at DESC LIMIT 1)`, ownerID); err != nil {
+	if current.IsDefault {
+		if err := q.PromoteNewestDashboard(ctx, ownerID); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
 }
 
-func (s *Service) get(ctx context.Context, q interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
-}, ownerID, id string) (Dashboard, error) {
-	var out Dashboard
-	if err := q.QueryRowContext(ctx, `SELECT id,name,description,is_default,window,namespace,created_at,updated_at FROM dashboards WHERE id=? AND owner_id=?`, id, ownerID).Scan(&out.ID, &out.Name, &out.Description, &out.IsDefault, &out.State.Filters.Window, &out.State.Filters.Namespace, &out.CreatedAt, &out.UpdatedAt); errors.Is(err, sql.ErrNoRows) {
-		return Dashboard{}, ErrNotFound
-	} else if err != nil {
-		return Dashboard{}, err
+func (s *Service) Versions(ctx context.Context, ownerID, id string) ([]VersionInfo, error) {
+	if _, err := s.get(ctx, ownerID, id); err != nil {
+		return nil, err
 	}
-	out.State.Filters.Window = clampDashboardWindow(out.State.Filters.Window, s.maxWindow)
-	rows, err := q.QueryContext(ctx, `SELECT id,type,title,config_json,enabled,x,y,w,h,min_w,min_h FROM dashboard_widgets WHERE dashboard_id=? ORDER BY sort_order,id`, id)
+	rows, err := generated.New(s.db).ListDashboardVersions(ctx, id)
 	if err != nil {
-		return Dashboard{}, err
+		return nil, err
 	}
-	defer rows.Close()
-	for rows.Next() {
-		var widget Widget
-		var layout Layout
-		var raw string
-		if err := rows.Scan(&widget.ID, &widget.Type, &widget.Title, &raw, &widget.Enabled, &layout.X, &layout.Y, &layout.W, &layout.H, &layout.MinW, &layout.MinH); err != nil {
-			return Dashboard{}, err
-		}
-		layout.I = widget.ID
-		if err := json.Unmarshal([]byte(raw), &widget.Config); err != nil {
-			return Dashboard{}, fmt.Errorf("decode widget %s config: %w", widget.ID, err)
-		}
-		out.State.Widgets = append(out.State.Widgets, widget)
-		out.State.Layout = append(out.State.Layout, layout)
+	out := make([]VersionInfo, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, VersionInfo{Version: int(r.Version), AuthorKind: r.AuthorKind, AuthorID: r.AuthorID, Message: r.Message, CreatedAt: r.CreatedAt})
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
-func replaceWidgets(ctx context.Context, tx *sql.Tx, dashboardID string, state State) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM dashboard_widgets WHERE dashboard_id=?`, dashboardID); err != nil {
-		return err
-	}
-	layouts := make(map[string]Layout, len(state.Layout))
-	for _, item := range state.Layout {
-		layouts[item.I] = item
-	}
-	for index, widget := range state.Widgets {
-		layout := layouts[widget.ID]
-		raw, err := json.Marshal(widget.Config)
-		if err != nil {
-			return err
-		}
-		if string(raw) == "null" {
-			raw = []byte("{}")
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO dashboard_widgets(id,dashboard_id,type,title,config_json,enabled,x,y,w,h,min_w,min_h,sort_order) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, widget.ID, dashboardID, widget.Type, widget.Title, raw, widget.Enabled, layout.X, layout.Y, layout.W, layout.H, layout.MinW, layout.MinH, index); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ensureInitial provisions an owner's first dashboard from the default layout.
+// ensureInitial gives an owner with no dashboards the default one.
 func (s *Service) ensureInitial(ctx context.Context, ownerID string) error {
 	if strings.TrimSpace(ownerID) == "" {
 		return errors.New("dashboard owner is required")
 	}
-	var count int
-	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM dashboards WHERE owner_id=?`, ownerID).Scan(&count); err != nil || count > 0 {
+	count, err := generated.New(s.db).CountDashboards(ctx, ownerID)
+	if err != nil || count > 0 {
 		return err
 	}
-	_, err := s.Create(ctx, ownerID, CreateInput{Name: "System overview", Description: "Live health, dependencies, and recent activity.", State: DefaultState()})
+	_, err = s.Create(ctx, ownerID, DefaultSpec(), Author{Kind: "system"})
 	if errors.Is(err, ErrConflict) {
 		return nil
 	}
 	return err
 }
 
-// WidgetTypes is the single source of truth for the dashboard widget-type
-// allowlist. The agent system prompt and the frontend widget registry mirror
-// this list; derive any validation or documentation from it rather than
-// duplicating the literals.
-var WidgetTypes = []string{"overview", "topology", "activity", "assistant", "performance", "trace", "logs"}
-
-var dashboardWindows = []struct {
-	value    string
-	duration time.Duration
-}{
-	{"15m", 15 * time.Minute},
-	{"1h", time.Hour},
-	{"6h", 6 * time.Hour},
-	{"24h", 24 * time.Hour},
-	{"168h", 7 * 24 * time.Hour},
-	{"720h", 30 * 24 * time.Hour},
-}
-
-func Validate(name, description string, state State) error {
-	if len(strings.TrimSpace(name)) == 0 || len([]rune(strings.TrimSpace(name))) > 80 {
-		return invalid("dashboard name must be between 1 and 80 characters")
-	}
-	if len([]rune(strings.TrimSpace(description))) > 280 {
-		return invalid("dashboard description is limited to 280 characters")
-	}
-	if len(state.Widgets) == 0 || len(state.Widgets) > 32 || len(state.Layout) != len(state.Widgets) {
-		return invalid("dashboard must contain between 1 and 32 positioned widgets")
-	}
-	allowed := make(map[string]bool, len(WidgetTypes))
-	for _, widgetType := range WidgetTypes {
-		allowed[widgetType] = true
-	}
-	ids := make(map[string]bool, len(state.Widgets))
-	for _, widget := range state.Widgets {
-		if !appid.IsV7(widget.ID) || ids[widget.ID] {
-			return invalid("widget ids must be unique UUIDv7 values")
-		}
-		if !allowed[widget.Type] {
-			return invalid("unsupported widget type %q", widget.Type)
-		}
-		if len(strings.TrimSpace(widget.Title)) == 0 || len([]rune(widget.Title)) > 80 {
-			return invalid("widget titles must be between 1 and 80 characters")
-		}
-		ids[widget.ID] = true
-	}
-	seen := make(map[string]bool, len(state.Layout))
-	for _, item := range state.Layout {
-		if !ids[item.I] || seen[item.I] || item.W < 1 || item.H < 1 || item.X < 0 || item.Y < 0 || item.X+item.W > 12 {
-			return invalid("invalid widget layout")
-		}
-		seen[item.I] = true
-	}
-	for i := 0; i < len(state.Layout); i++ {
-		for j := i + 1; j < len(state.Layout); j++ {
-			a, b := state.Layout[i], state.Layout[j]
-			if a.X < b.X+b.W && b.X < a.X+a.W && a.Y < b.Y+b.H && b.Y < a.Y+a.H {
-				return invalid("widgets must not overlap")
-			}
-		}
-	}
-	if _, ok := dashboardWindowDuration(state.Filters.Window); !ok {
-		return invalid("unsupported dashboard window")
-	}
-	return nil
-}
-
-func dashboardWindowDuration(value string) (time.Duration, bool) {
-	for _, option := range dashboardWindows {
-		if option.value == value {
-			return option.duration, true
-		}
-	}
-	return 0, false
-}
-
-func clampDashboardWindow(value string, maxWindow time.Duration) string {
-	requested, ok := dashboardWindowDuration(value)
-	if !ok || requested <= maxWindow {
-		return value
-	}
-	for index := len(dashboardWindows) - 1; index >= 0; index-- {
-		if dashboardWindows[index].duration <= maxWindow {
-			return dashboardWindows[index].value
-		}
-	}
-	return dashboardWindows[0].value
-}
-
-// normalizeStateIDs makes the service, rather than callers or the model, the
-// authority for widget identifiers. Existing UUIDv7 values remain stable;
-// omitted, descriptive, and legacy values are replaced and layout references
-// are updated atomically before validation and persistence.
-func normalizeStateIDs(state State) (State, error) {
-	state.Widgets = append([]Widget(nil), state.Widgets...)
-	state.Layout = append([]Layout(nil), state.Layout...)
-	replacements := make(map[string]string, len(state.Widgets))
-	for index := range state.Widgets {
-		oldID := state.Widgets[index].ID
-		newID, exists := replacements[oldID]
-		if !exists {
-			newID = oldID
-			if !appid.IsV7(newID) {
-				var err error
-				newID, err = appid.New()
-				if err != nil {
-					return State{}, err
-				}
-			}
-			replacements[oldID] = newID
-		}
-		state.Widgets[index].ID = newID
-	}
-	for index := range state.Layout {
-		if newID, ok := replacements[state.Layout[index].I]; ok {
-			state.Layout[index].I = newID
-		}
-	}
-	return state, nil
-}
-
-// isUnique detects SQLite unique-constraint violations by substring match on
-// the driver error message; this is driver-version-sensitive but pragmatic.
+// isUnique detects SQLite unique-constraint violations by the driver message.
 func isUnique(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "unique constraint")
 }

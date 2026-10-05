@@ -1,0 +1,64 @@
+import { BarChart, GaugeChart, LineChart } from "echarts/charts";
+import { AriaComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from "echarts/components";
+import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
+import { CanvasRenderer } from "echarts/renderers";
+import { useEffect, useRef } from "react";
+
+use([CanvasRenderer, LineChart, BarChart, GaugeChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, AriaComponent]);
+
+/* Dashboard panels draw on canvas: SVG stays smooth only to a few thousand
+   points, and a dashboard of a dozen time series passes that. One instance
+   lives for the component's lifetime; options are replaced in place. */
+/* Charts per connected group, so the last one out disconnects it. */
+const groups = new Map<string, number>();
+
+export function EChartCanvas({ option, height, label, onClick, group }: { option: EChartsCoreOption; height: number | string; label: string; onClick?: (params: { name?: string; seriesName?: string; value?: unknown }) => void; group?: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const chart = useRef<EChartsType | null>(null);
+  const selected = useRef<Record<string, boolean>>({});
+  const click = useRef(onClick);
+  click.current = onClick;
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const instance = init(ref.current, undefined, { renderer: "canvas" });
+    chart.current = instance;
+    instance.on("click", (params) => click.current?.(params as { name?: string; seriesName?: string; value?: unknown }));
+    instance.on("legendselectchanged", (params) => {
+      selected.current = { ...(params as { selected: Record<string, boolean> }).selected };
+    });
+    const observer = new ResizeObserver(() => instance.resize());
+    observer.observe(ref.current);
+    return () => { observer.disconnect(); instance.dispose(); chart.current = null; };
+  }, []);
+
+  useEffect(() => {
+    // notMerge replaces the whole option: callers must memoize `option`.
+    const series = (option.series ?? []) as { name?: string }[];
+    const names = new Set(series.map((item) => item.name));
+    const retained = Object.fromEntries(Object.entries(selected.current).filter(([name]) => names.has(name)));
+    selected.current = retained;
+    const legend = option.legend as { selected?: Record<string, boolean> } | undefined;
+    chart.current?.setOption({ ...option, ...(legend ? { legend: { ...legend, selected: { ...legend.selected, ...retained } } } : {}), aria: { ...(option as { aria?: object }).aria, enabled: true, description: label } }, { notMerge: true });
+  }, [option, label]);
+
+  useEffect(() => {
+    const instance = chart.current;
+    if (!instance || !group) return;
+    instance.group = group;
+    groups.set(group, (groups.get(group) ?? 0) + 1);
+    connect(group);
+    return () => {
+      instance.group = "";
+      const left = (groups.get(group) ?? 1) - 1;
+      if (left > 0) {
+        groups.set(group, left);
+        return;
+      }
+      groups.delete(group);
+      disconnect(group);
+    };
+  }, [group]);
+
+  return <div ref={ref} role="img" aria-label={label} style={{ height, width: "100%", minWidth: 0, cursor: onClick ? "pointer" : undefined }} />;
+}
