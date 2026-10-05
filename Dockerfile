@@ -16,6 +16,7 @@ WORKDIR /app
 COPY ui/host/package.json ui/host/bun.lock ./ui/host/
 RUN cd ui/host && bun install --frozen-lockfile
 COPY ui/*.ts ./ui/
+COPY ui/panels/ ./ui/panels/
 COPY ui/host/ ./ui/host/
 COPY internal/ui/ ./internal/ui/
 RUN cd ui/host && bun run build
