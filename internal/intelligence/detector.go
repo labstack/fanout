@@ -18,6 +18,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/labstack/fanout/internal/annotations"
 	"github.com/labstack/fanout/internal/query"
 )
 
@@ -28,17 +29,25 @@ func isNoDataError(errMsg string) bool {
 
 // Detector runs intelligence detection on observability data
 type Detector struct {
-	duck     *query.Duck
-	config   DetectorConfig
-	mu       sync.RWMutex
-	snapshot *IntelligenceSnapshot
+	duck              *query.Duck
+	config            DetectorConfig
+	mu                sync.RWMutex
+	snapshot          *IntelligenceSnapshot
+	annotationMu      sync.Mutex
+	annotationBatches chan annotationBatch
+}
+
+type annotationBatch struct {
+	findings []annotations.Anomaly
+	at       time.Time
 }
 
 // NewDetector creates a new intelligence detector
 func NewDetector(duck *query.Duck, config DetectorConfig) *Detector {
 	return &Detector{
-		duck:   duck,
-		config: config,
+		duck:              duck,
+		config:            config,
+		annotationBatches: make(chan annotationBatch, 1),
 	}
 }
 
@@ -53,6 +62,10 @@ func (d *Detector) Run(ctx context.Context) {
 
 	ticker := time.NewTicker(d.config.CheckInterval)
 	defer ticker.Stop()
+	persistenceCtx, cancel := context.WithCancel(ctx)
+	persistenceDone := make(chan struct{})
+	go func() { defer close(persistenceDone); d.persistAnnotations(persistenceCtx, d.duck.RecordAnomalies) }()
+	defer func() { cancel(); <-persistenceDone }()
 
 	// Run once on startup
 	d.safeRunCheck(ctx)
@@ -81,16 +94,49 @@ func (d *Detector) safeRunCheck(ctx context.Context) {
 // runCheck performs a single detection cycle
 func (d *Detector) runCheck(ctx context.Context) {
 	snapshot := d.GenerateSnapshot(ctx)
-
-	d.mu.Lock()
-	d.snapshot = &snapshot
-	d.mu.Unlock()
+	d.publishSnapshot(snapshot)
 
 	anomalyCount := len(snapshot.Anomalies)
 	patternCount := len(snapshot.Patterns)
-
 	if anomalyCount > 0 || patternCount > 0 {
 		slog.Info("detection complete", "anomalies", anomalyCount, "patterns", patternCount, "health", snapshot.HealthScore)
+	}
+}
+
+func (d *Detector) publishSnapshot(snapshot IntelligenceSnapshot) {
+	d.mu.Lock()
+	d.snapshot = &snapshot
+	d.mu.Unlock()
+	batch := annotationBatch{detectorAnnotations(snapshot, d.duck.DefaultNamespace(), d.config.LookbackWindow), snapshot.GeneratedAt}
+	// Only the producer modifies the pending slot. Persistence can be blocked
+	// while a newer cycle replaces the single pending batch.
+	d.annotationMu.Lock()
+	defer d.annotationMu.Unlock()
+	select {
+	case d.annotationBatches <- batch:
+		return
+	default:
+	}
+	select {
+	case <-d.annotationBatches:
+	default:
+	}
+	d.annotationBatches <- batch
+}
+
+func (d *Detector) persistAnnotations(ctx context.Context, record func(context.Context, []annotations.Anomaly, time.Time) error) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case batch := <-d.annotationBatches:
+			if err := record(ctx, batch.findings, batch.at); err != nil && ctx.Err() == nil {
+				slog.Error("persist detector annotations", "error", err)
+			}
+		}
 	}
 }
 
@@ -618,4 +664,17 @@ func toInt64(v interface{}) int64 {
 // toInt converts interface{} to int, handling both int64 and float64
 func toInt(v interface{}) int {
 	return int(toInt64(v))
+}
+
+func detectorAnnotations(snapshot IntelligenceSnapshot, namespace string, lookback time.Duration) []annotations.Anomaly {
+	findings := make([]annotations.Anomaly, 0, len(snapshot.Anomalies))
+	for _, a := range snapshot.Anomalies {
+		severity := "warn"
+		if math.Abs(a.ZScore) >= 4 {
+			severity = "bad"
+		}
+		end := a.DetectedAt.UTC().Truncate(time.Minute)
+		findings = append(findings, annotations.Anomaly{Namespace: namespace, Service: a.ServiceName, Kind: string(a.Type), From: end.Add(-lookback), To: end, Title: a.Description, Severity: severity})
+	}
+	return findings
 }

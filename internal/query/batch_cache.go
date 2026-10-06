@@ -501,6 +501,9 @@ func (d *Duck) PublishParquetReplacement(ctx context.Context, output telemetry.B
 		slog.Warn("compaction cache transfer failed; output will be cached from Parquet", "err", err)
 	}
 	unlock()
+	if err := d.transferVersionMarker(ctx, output, inputs); err != nil {
+		slog.Warn("compaction version marker transfer failed; output will be read", "err", err)
+	}
 	return d.PublishParquet(ctx, publish)
 }
 

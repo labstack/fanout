@@ -55,6 +55,8 @@ type Duck struct {
 	// writeGate serializes writes to the rebuildable DuckDB rollup cache.
 	writeGate writegate.WriteGate
 	cacheGate writegate.WriteGate
+	// Protected by writeGate; controls periodic version-history retirement.
+	versionRollupPasses uint64
 	// parquetMu pins immutable files for active DuckDB readers. Its reader-first
 	// gate keeps a queued maintenance publish from stalling unrelated new reads.
 	parquetMu parquetReadGate
@@ -618,6 +620,11 @@ func (d *Duck) runReadCacheLoop(ctx context.Context) {
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("completed batch read cache failed", "err", err)
 		} else if rows > 0 {
+			delay = 100 * time.Millisecond
+		}
+		if batches, err := d.DrainVersionRollup(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("version rollup failed", "err", err)
+		} else if batches > 0 {
 			delay = 100 * time.Millisecond
 		}
 	}

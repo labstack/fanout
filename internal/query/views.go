@@ -297,6 +297,9 @@ func CreateCacheTables(db *sql.DB) error {
 	if err := forgetRollupProgress(db, "endpoint_rollup"); err != nil {
 		return err
 	}
+	if err := createAnnotationTables(db); err != nil {
+		return err
+	}
 	return createBatchCaches(db)
 }
 
