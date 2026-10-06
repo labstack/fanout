@@ -51,12 +51,13 @@ type Panel struct {
 	ID          string      `json:"id" jsonschema:"Stable identifier: lowercase letters, digits and underscores; edits address panels by id"`
 	Title       string      `json:"title" jsonschema:"Panel title, at most 80 characters; may reference $variables"`
 	Description string      `json:"description,omitempty" jsonschema:"Help text, at most 280 characters"`
-	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table, text, heatmap or histogram"`
+	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table, text, heatmap, histogram, scatter or state_timeline"`
 	Width       int         `json:"width,omitempty" jsonschema:"Grid columns from 1 to 12; default depends on viz"`
 	Height      string      `json:"height,omitempty" jsonschema:"s, m or l; default depends on viz"`
 	Query       *Query      `json:"query,omitempty" jsonschema:"Structured query; exactly one of query or sql, except text panels"`
 	SQL         string      `json:"sql,omitempty" jsonschema:"One read-only SELECT over spans, logs, metrics, service_rollup or edge_rollup; must use $__window(time_column)"`
 	Unit        string      `json:"unit,omitempty" jsonschema:"ms, s, ns, percent, ratio, count, per_second, per_minute, bytes or none; inferred when omitted"`
+	XUnit       string      `json:"x_unit,omitempty" jsonschema:"scatter x axis unit; unit describes y"`
 	Reduce      string      `json:"reduce,omitempty" jsonschema:"stat and gauge: window (default), last, mean, min, max or sum"`
 	Thresholds  []Threshold `json:"thresholds,omitempty" jsonschema:"Up to 4 status boundaries"`
 	Better      string      `json:"better,omitempty" jsonschema:"lower or higher; inferred for known measures"`
@@ -98,6 +99,8 @@ type Options struct {
 	Scale  string `json:"scale,omitempty" jsonschema:"linear or log"`
 	Top    int    `json:"top,omitempty" jsonschema:"Series limit; the rest become Other; default 8"`
 	Legend string `json:"legend,omitempty" jsonschema:"auto or hidden"`
+	XScale string `json:"x_scale,omitempty" jsonschema:"scatter x axis: linear or log"`
+	YScale string `json:"y_scale,omitempty" jsonschema:"scatter y axis: linear or log"`
 }
 
 type Click struct {

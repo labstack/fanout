@@ -139,6 +139,10 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 	if p.Viz == "heatmap" || p.Viz == "histogram" {
 		return compileDistribution(p, filters, scope)
 	}
+	if p.Viz == "scatter" || p.Viz == "state_timeline" {
+		return compileItems(p, measures, filters, scope)
+	}
+
 	q := p.Query
 	sig, ok := lookupSignal(q.From)
 	if !ok {

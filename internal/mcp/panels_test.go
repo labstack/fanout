@@ -94,3 +94,18 @@ func TestDashboardToolScopes(t *testing.T) {
 		}
 	}
 }
+
+func TestM2ItemsSpecGuide(t *testing.T) {
+	for _, phrase := range []string{
+		"Scatter supports options.x_scale and options.y_scale (log or linear)",
+		"distinct x_unit for x and unit for y",
+		"Rows returned use the count unit",
+		"SQL panels cannot use scatter or state_timeline",
+		"Items rank by volume (row count) for top N",
+		"Previous-period comparison is not drawn for scatter or state_timeline",
+	} {
+		if !strings.Contains(specGuide, phrase) {
+			t.Errorf("spec guide missing %q", phrase)
+		}
+	}
+}

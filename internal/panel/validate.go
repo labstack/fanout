@@ -21,17 +21,19 @@ type vizSpec struct {
 }
 
 var vizSpecs = map[string]vizSpec{
-	"stat":       {width: 3, height: "s", query: true, reduces: true},
-	"gauge":      {width: 3, height: "s", query: true, reduces: true},
-	"timeseries": {width: 6, height: "m", query: true, maxBy: 1, bucket: true},
-	"bar":        {width: 6, height: "m", query: true, minBy: 1, maxBy: 2},
-	"table":      {width: 12, height: "m", query: true, maxBy: 3},
-	"text":       {width: 4, height: "s"},
-	"heatmap":    {width: 6, height: "m", query: true, bucket: true},
-	"histogram":  {width: 6, height: "m", query: true, maxBy: 1},
+	"stat":           {width: 3, height: "s", query: true, reduces: true},
+	"gauge":          {width: 3, height: "s", query: true, reduces: true},
+	"timeseries":     {width: 6, height: "m", query: true, maxBy: 1, bucket: true},
+	"bar":            {width: 6, height: "m", query: true, minBy: 1, maxBy: 2},
+	"table":          {width: 12, height: "m", query: true, maxBy: 3},
+	"text":           {width: 4, height: "s"},
+	"heatmap":        {width: 6, height: "m", query: true, bucket: true},
+	"histogram":      {width: 6, height: "m", query: true, maxBy: 1},
+	"scatter":        {width: 6, height: "m", query: true, minBy: 1, maxBy: 2},
+	"state_timeline": {width: 6, height: "m", query: true, minBy: 1, maxBy: 1, bucket: true},
 }
 
-var vizOrder = []string{"stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram"}
+var vizOrder = []string{"stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram", "scatter", "state_timeline"}
 
 var (
 	idPattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
@@ -269,6 +271,7 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 		problems.add(path+".sql", "SQL is limited to 8000 characters")
 	}
 	if p.Viz == "text" {
+		validateItems(p, path, problems)
 		if p.Query != nil || p.SQL != "" {
 			problems.add(path, "text panels have content, not a query")
 		}
@@ -342,6 +345,7 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 	if (p.Viz == "heatmap" || p.Viz == "histogram") && p.Query == nil {
 		problems.add(path+".query", "distribution panels require a structured query")
 	}
+	validateItems(p, path, problems)
 	if p.Query != nil {
 		validateQuery(p, spec, path+".query", problems)
 	} else {
@@ -461,7 +465,7 @@ func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 		families[unitFamilies[m.Unit]] = true
 	}
 	delete(families, "none")
-	if len(families) > 1 && p.Viz != "table" {
+	if len(families) > 1 && p.Viz != "table" && p.Viz != "scatter" {
 		problems.add(path+".measures", "these measures have different units and would share one axis; split them into separate panels")
 	}
 	if p.Options != nil && p.Options.Style == "stacked" {
