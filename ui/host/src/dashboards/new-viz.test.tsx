@@ -14,9 +14,11 @@ import { InspectDrawer } from "./inspect";
 import { frameRows, rowModel } from "../../../panels/rows";
 import { healthSymbol } from "../../../chart";
 import { TableViz } from "./viz/table";
+import { Viz } from "./viz";
 beforeEach(() => vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true));
 vi.mock("./echart-canvas",()=>({EChartCanvas:({label}:{label:string})=><div role="img" aria-label={label}/> }));
-const types:VizType[]=["heatmap","histogram","scatter","state_timeline","service_map","health"];
+const types:VizType[]=["heatmap","histogram","scatter","state_timeline","logs","log_patterns","traces","service_map","health"];
+const rowTypes = new Set<VizType>(["logs", "log_patterns", "traces"]);
 const col=(name:string,type:"time"|"number"|"string"|"json",role:"time"|"dimension"|"measure",unit?:string)=>({name,type,role,unit});
 const fixtures:Record<string,PanelResult["frame"]>={
  heatmap:{columns:[col("time","time","time"),col("bucket_lower","number","dimension","ms"),col("bucket_upper","number","dimension","ms"),col("count","number","measure","count")],values:[[1000],[1],[2],[3]],rows:1},
@@ -68,6 +70,15 @@ describe("M2 visualizations",()=>{
       expect(container.textContent).not.toMatch(/NaN|Infinity/);
       await act(async()=>root.render(<MantineProvider><PanelCard {...props} loading={false} result={result}/></MantineProvider>));
       expect(container.textContent).not.toMatch(/NaN|Infinity/);
+      if (viz === "logs") expect(container.textContent).toContain("failed");
+      if (viz === "log_patterns") {
+        expect(container.textContent).toContain("failed <*>");
+        expect(container.querySelector('svg[aria-label="Pattern count trend"]')).not.toBeNull();
+      }
+      if (viz === "traces") {
+        expect(container.textContent).toContain("cart");
+        expect(container.textContent).toContain("abc");
+      }
     }
     await act(async()=>root.unmount());container.remove();
   });
@@ -103,7 +114,7 @@ it("keeps an aria summary and an Inspect data table reachable for every chart", 
       const panel: Panel = { id: "p", title: viz, viz };
       const result = resultFor(viz);
       await act(async () => root.render(<Harness key={viz} panel={panel} result={result} />));
-      const summary = container.querySelector(viz === "health" ? '[role="region"]' : '[role="img"]');
+      const summary = container.querySelector(viz === "health" || rowTypes.has(viz) ? '[role="region"]' : '[role="img"]');
       expect(summary?.getAttribute("aria-label")).toContain(viz === "health" ? "Service health" : "Window summary");
       expect(summary?.getAttribute("aria-label")).toContain(viz === "health" ? "services" : `${result.frame!.rows} rows`);
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Window summary menu"]')!.click());
@@ -129,6 +140,68 @@ it("preserves literal dimension keys and sanitizes rows without losing selection
   expect(frameRows(frame)[0].count).toBeNull();
   expect(frame.values[4][0]).toBeNaN();
   expect(model.selection(model.rows[0])).toEqual({ time: 1000, dimensions: { "attributes['http.route']": "/checkout" }, trace_id: "trace-1", namespace: "shop" });
+});
+
+it("highlights log bodies and keeps trace IDs accessible until the drill drawer exists", async () => {
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  const onPoint = vi.fn();
+  try {
+    await act(async () => root.render(<MantineProvider><Viz panel={{ id: "p", title: "Logs", viz: "logs", options: { highlight: "failed" } }} result={resultFor("logs")} dark={false} height={200} group="g" onPoint={onPoint} /></MantineProvider>));
+    expect(container.querySelector("mark")?.textContent).toBe("failed");
+    expect(container.querySelector('[data-trace-id="abc"]')?.textContent).toBe("abc");
+    expect(container.querySelector('[data-trace-id="abc"]')?.closest("a, button")).toBeNull();
+    expect(container.querySelector("tbody button")).toBeNull();
+    expect(container.querySelector('[data-trace-id="abc"]')?.getAttribute("aria-label")).toBe("Trace ID abc");
+    expect(container.querySelector(".mantine-Badge-root")?.textContent).toBe("ERROR");
+    expect(onPoint).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount()); container.remove();
+  }
+});
+
+it("selects the service exactly once after sorting trace rows and updating callbacks", async () => {
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  const first = vi.fn(); const next = vi.fn();
+  const frame = { ...fixtures.traces!, values: [["abc", "def"], ["shop", "ops"], ["checkout", "payment"], ["cart", "charge"], [50, 10], ["STATUS_CODE_ERROR", "OK"], [1000, 2000]], rows: 2 };
+  const props = { panel: { id: "p", title: "Traces", viz: "traces" as const }, result: { ...resultFor("traces"), frame }, dark: false, height: 200, group: "g" };
+  try {
+    await act(async () => root.render(<MantineProvider><Viz {...props} onSelect={first} /></MantineProvider>));
+    await act(async () => container.querySelector<HTMLButtonElement>("th:nth-child(5) button")!.click());
+    await act(async () => container.querySelector<HTMLButtonElement>("th:nth-child(5) button")!.click());
+    expect(container.querySelector("th:nth-child(5)")?.getAttribute("aria-sort")).toBe("ascending");
+    expect(container.querySelector("tbody tr [data-trace-id]")?.getAttribute("data-trace-id")).toBe("def");
+    await act(async () => root.render(<MantineProvider><Viz {...props} onSelect={next} /></MantineProvider>));
+    const service = container.querySelector<HTMLButtonElement>("tbody tr button")!;
+    await act(async () => service.click());
+    expect(next.mock.calls).toEqual([["payment"]]);
+    expect(first).not.toHaveBeenCalled();
+    await act(async () => service.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(next).toHaveBeenCalledTimes(1);
+  } finally {
+    await act(async () => root.unmount()); container.remove();
+  }
+});
+
+it("labels pattern points with effective frame timing and retains indexes across invalid counts", async () => {
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container);
+  const props = { panel: { id: "p", title: "Patterns", viz: "log_patterns" as const, query: { from: "logs" as const, bucket: "1m" } }, dark: false, height: 200, group: "g" };
+  try {
+    const frame = { ...fixtures.log_patterns!, trend: { start_ms: -120000, step_ms: 120000 }, values: [["failed <*>"], [4], ["[1,null,1e309,3]"]] };
+    await act(async () => root.render(<MantineProvider><Viz {...props} result={{ ...resultFor("log_patterns"), interval: "2m", frame }} /></MantineProvider>));
+    const trend = container.querySelector('svg[aria-label="Pattern count trend"]')!;
+    expect([...trend.querySelectorAll("circle title")].map(title => title.textContent)).toEqual(["1969-12-31T23:58:00.000Z: 1", "1970-01-01T00:04:00.000Z: 3"]);
+    expect(trend.outerHTML).not.toMatch(/NaN|Infinity/);
+    for (const value of ["invalid", "{}", "[]", "[null,1e309]"]) {
+      await act(async () => root.render(<MantineProvider><Viz {...props} result={{ ...resultFor("log_patterns"), frame: { ...frame, values: [["failed <*>"], [0], [value]] } }} /></MantineProvider>));
+      expect(container.querySelector("svg polyline")?.getAttribute("points")).toBe("");
+      expect(container.innerHTML).not.toMatch(/NaN|Infinity/);
+    }
+  } finally {
+    await act(async () => root.unmount()); container.remove();
+  }
 });
 
 it("aligns split histogram series and preserves numeric bucket selections", () => {
@@ -207,7 +280,7 @@ it("keeps original table indexes after sorting and sanitizes fallback cells", as
 
 it("renders populated and empty analysis options with the real ECharts engine", () => {
   use([SVGRenderer, BarChart, CustomChart, GraphChart, ScatterChart, GridComponent, TooltipComponent, VisualMapComponent]);
-  for (const dark of [false, true]) for (const viz of types.filter(viz => viz !== "health")) {
+  for (const dark of [false, true]) for (const viz of types.filter(viz => viz !== "health" && !rowTypes.has(viz))) {
     const panel: Panel = { id: "p", title: viz, viz, thresholds: [{ value: 1, status: "bad" }] };
     const result = resultFor(viz);
     for (const frame of [result.frame!, { ...result.frame!, values: result.frame!.columns.map(() => []), rows: 0 }]) {

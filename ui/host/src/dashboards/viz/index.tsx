@@ -11,6 +11,9 @@ import { ScatterViz } from "./scatter";
 import { StateTimelineViz } from "./state-timeline";
 import { ServiceMapViz } from "./service-map";
 import { HealthViz } from "./health";
+import { LogsViz } from "./logs";
+import { LogPatternsViz } from "./log-patterns";
+import { TracesViz } from "./traces";
 
 export function Viz(props: { panel: Panel; title?: string; result?: PanelResult; dark: boolean; height: number; group: string; onSelect?: (value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void }) {
   const { panel, title, result, dark, height, group, onSelect } = props;
@@ -29,6 +32,8 @@ export function Viz(props: { panel: Panel; title?: string; result?: PanelResult;
     case "state_timeline": return <StateTimelineViz {...next} />;
     case "service_map": return <ServiceMapViz {...next} />;
     case "health": return <HealthViz {...next} />;
-    case "logs": case "log_patterns": case "traces": return null; // Task 8 installs row renderers.
+    case "logs": return <LogsViz {...next} />;
+    case "log_patterns": return <LogPatternsViz {...next} />;
+    case "traces": return <TracesViz {...next} />;
   }
 }

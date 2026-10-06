@@ -67,7 +67,7 @@ export type Cell = string | number | null;
 export type Column = { name: string; type: "time" | "number" | "string" | "json"; role: "time" | "dimension" | "measure"; unit?: string };
 
 export type HealthFrame = { health: string; counts: { healthy: number; degraded: number; unhealthy: number }; total_spans: number; error_rate: number; service_count: number; error_trend: number[] };
-export type Frame = { columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean; health?: HealthFrame };
+export type Frame = { columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean; health?: HealthFrame; trend?: { start_ms: number; step_ms: number } };
 
 export type PanelResult = {
   id: string;
