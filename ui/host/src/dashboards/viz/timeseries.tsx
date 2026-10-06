@@ -1,10 +1,16 @@
 import { useMemo } from "react";
 import { chartThemeFor, timeseriesOption } from "../../../../panels/compile";
-import type { Panel, PanelResult } from "../../../../panels/types";
+import { pointSelection } from "../../../../panels/interaction";
 import { EChartCanvas } from "../echart-canvas";
+import type { AnalysisProps } from "./analysis-chart";
 
-export function TimeseriesViz({ panel, title = panel.title, result, dark, height, group, onSelect }: { panel: Panel; title?: string; result: PanelResult; dark: boolean; height: number; group: string; onSelect?: (value: string) => void }) {
+export function TimeseriesViz({ panel, title = panel.title, result, dark, height, group, onSelect, onPoint, onZoom }: AnalysisProps) {
   const option = useMemo(() => timeseriesOption(panel, result, chartThemeFor(dark)), [panel, result.frame, result.previous, result.shift_ms, dark]);
-  const select = onSelect && result.frame!.columns.some((column) => column.role === "dimension") ? (params: { seriesName?: string }) => { if (params.seriesName && !params.seriesName.endsWith(" · previous") && params.seriesName !== "Other") onSelect(params.seriesName); } : undefined;
-  return <EChartCanvas option={option} height={height} label={`${title}: time series`} group={group} onClick={select} />;
+  return <EChartCanvas option={option} height={height} label={`${title}: time series`} group={group} onZoom={onZoom} onClick={onPoint || onSelect ? event => {
+    const selection = pointSelection(panel, result, event);
+    if (!selection) return;
+    onPoint?.(selection);
+    const first = Object.values(selection.dimensions)[0];
+    if (first !== undefined) onSelect?.(first);
+  } : undefined} />;
 }

@@ -5,7 +5,10 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DashboardSearch } from "./search";
 
-vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label }: { label: string }) => <div data-chart={label} /> }));
+vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label, onClick, onZoom }: { label: string; onClick?: (event: { name: string; seriesName: string; value: number[] }) => void; onZoom?: (from: number, to: number) => void }) => <div data-chart={label}>
+  {onClick && <button aria-label={`Select ${label}`} onClick={() => onClick({ name: "cart", seriesName: "cart", value: [1000, 3] })} />}
+  {onZoom && <button aria-label={`Zoom ${label}`} onClick={() => onZoom(1000, 9000)} />}
+</div> }));
 const app = vi.hoisted(() => ({ agentAvailable: true, openChat: vi.fn() }));
 vi.mock("../app-context", async (importOriginal) => ({
   ...await importOriginal<typeof import("../app-context")>(),
@@ -90,6 +93,30 @@ async function render(search: DashboardSearch = {}, dashboardId = "d1") {
 }
 
 describe("DashboardPage", () => {
+  it("filters via panel.click.set_variable, removes chips with replace, and pushes brush ranges", async () => {
+    servedRecord = { ...record, spec: { ...spec, panels: [{ ...spec.panels[1], title: "Services", click: { set_variable: "service" }, time: { shift: "1d" }, query: { from: "spans", measures: ["count()"], by: ["service"], bucket: "auto" } }] } };
+    panelResponse = async () => json({ results: [{ id: "latency", status: "ok", frame: { columns: [...frame.columns, { name: "service", type: "string", role: "dimension" }], values: [...frame.values, ["cart", "cart"]], rows: 2 }, elapsed_ms: 1 }] });
+    const initial: DashboardSearch = { range: "1h", compare: "1", vars: { other: "kept" } };
+    const { host, onSearch, rerender } = await render(initial);
+    expect(host.querySelector('[data-panel="latency"] [role="status"]')?.textContent).toBe("Shifted 1d");
+    await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Select Services: time series"]')!.click());
+    expect(onSearch).toHaveBeenLastCalledWith({ ...initial, vars: { other: "kept", service: "cart" } }, true);
+    const filtered = onSearch.mock.lastCall![0] as DashboardSearch;
+    await rerender(filtered);
+    const chip = host.querySelector<HTMLButtonElement>('[aria-label="Remove filter service"]')!;
+    expect(chip.textContent).toContain("$service = cart");
+    await act(async () => chip.click());
+    expect(onSearch).toHaveBeenLastCalledWith(initial, true);
+    await rerender(initial);
+    expect(host.querySelector('[aria-label="Remove filter service"]')).toBeNull();
+    await act(async () => {
+      const zoom = host.querySelector<HTMLButtonElement>('[aria-label="Zoom Services: time series"]')!;
+      for (let i = 0; i < 20; i++) zoom.click();
+    });
+    expect(onSearch).toHaveBeenCalledTimes(3);
+    expect(onSearch).toHaveBeenLastCalledWith({ ...initial, range: undefined, from: new Date(1000).toISOString(), to: new Date(9000).toISOString() }, false);
+  });
+
   it("loads the spec and sends one batch with the URL's view state", async () => {
     const { host } = await render({ range: "6h", vars: { service: "cart" } });
     expect(host.textContent).toContain("Checkout");

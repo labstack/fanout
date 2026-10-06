@@ -6,19 +6,72 @@ const mocks = vi.hoisted(() => ({ init: vi.fn(), connect: vi.fn(), disconnect: v
 
 vi.mock("echarts/core", () => ({ init: mocks.init, use: () => undefined, connect: mocks.connect, disconnect: mocks.disconnect }));
 vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {}, CustomChart: {}, HeatmapChart: {}, ScatterChart: {} }));
-vi.mock("echarts/components", () => ({ AriaComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
+vi.mock("echarts/components", () => ({ AriaComponent: {}, BrushComponent: {}, DataZoomComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, ToolboxComponent: {}, TooltipComponent: {}, VisualMapComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 
 import { EChartCanvas } from "./echart-canvas";
 
 function fresh() {
-  const instance = { setOption: vi.fn(), dispose: vi.fn(), on: vi.fn(), resize: vi.fn(), group: "" };
+  const instance = { setOption: vi.fn(), dispatchAction: vi.fn(), dispose: vi.fn(), on: vi.fn(), resize: vi.fn(), group: "" };
   mocks.init.mockReturnValueOnce(instance);
   return instance;
 }
 
 describe("EChartCanvas", () => {
   afterEach(() => { document.body.innerHTML = ""; vi.clearAllMocks(); });
+
+  it("activates the brush cursor on initial render and option update", async () => {
+    const instance = fresh();
+    const container = document.createElement("div"); document.body.append(container); const root = createRoot(container); const zoom = vi.fn(); const option = { series: [] };
+    await act(async () => root.render(<EChartCanvas option={option} height={100} label="P" onZoom={zoom} />));
+    const cursorCalls = () => instance.dispatchAction.mock.calls.filter(([a]) => a.type === "takeGlobalCursor");
+    expect(cursorCalls()).toHaveLength(1);
+    expect(instance.dispatchAction).toHaveBeenCalledWith({ type: "takeGlobalCursor", key: "brush", brushOption: { brushType: "lineX", brushMode: "single" } });
+    const nextOption = { series: [{ type: "line", data: [[1, 2]] }] };
+    await act(async () => root.render(<EChartCanvas option={nextOption} height={100} label="P" onZoom={zoom} />));
+    expect(instance.setOption).toHaveBeenCalledTimes(2); expect(cursorCalls()).toHaveLength(2);
+    await act(async () => root.unmount()); container.remove();
+  });
+
+  it("commits only brushEnd, keeps one chart on callback changes, and clears the brush", async () => {
+    const instance = fresh();
+    const container = document.createElement("div"); document.body.append(container); const root = createRoot(container); const zoom = vi.fn(); const option = { series: [] };
+    await act(async () => root.render(<EChartCanvas option={option} height={100} label="P" onZoom={zoom} />));
+    const end = instance.on.mock.calls.find(([name]) => name === "brushEnd")?.[1] as ((payload: unknown) => void);
+    expect(end).toBeTypeOf("function"); expect(instance.on.mock.calls.some(([name]) => name === "brushselected")).toBe(false);
+    end({ areas: [{ coordRange: [1000, 5000] }] }); expect(zoom).toHaveBeenCalledOnce(); expect(zoom).toHaveBeenCalledWith(1000, 5000);
+    expect(instance.dispatchAction).toHaveBeenCalledWith({ type: "brush", areas: [] }, { silent: true });
+    expect(instance.dispatchAction.mock.calls.filter(([a]) => a.type === "takeGlobalCursor")).toHaveLength(2);
+    const calls = mocks.init.mock.calls.length;
+    const nextZoom = vi.fn();
+    await act(async () => root.render(<EChartCanvas option={option} height={100} label="P" onZoom={nextZoom} />));
+    expect(mocks.init.mock.calls.length).toBe(calls);
+    expect(instance.setOption).toHaveBeenCalledOnce();
+    end({ areas: [{ coordRange: [2000, 6000] }] });
+    expect(nextZoom).toHaveBeenCalledWith(2000, 6000);
+    expect(zoom).toHaveBeenCalledOnce();
+    for (const areas of [[], [{ coordRange: [2, 2] }], [{ coordRange: [NaN, 3] }]]) end({ areas });
+    expect(nextZoom).toHaveBeenCalledOnce();
+    await act(async () => root.unmount());
+  });
+
+  it("updates zoom availability without replacing the chart or adding point affordances", async () => {
+    const instance = fresh();
+    const container = document.createElement("div"); document.body.append(container); const root = createRoot(container); const option = { series: [] }; const zoom = vi.fn();
+    await act(async () => root.render(<EChartCanvas option={option} height={100} label="P" />));
+    expect(container.querySelector("div")!.style.cursor).toBe("");
+    expect(container.querySelector("div")!.hasAttribute("tabindex")).toBe(false);
+    expect(instance.dispatchAction).not.toHaveBeenCalled();
+    await act(async () => root.render(<EChartCanvas option={option} height={100} label="P" onZoom={zoom} />));
+    expect(instance.setOption.mock.lastCall?.[0].brush).toMatchObject({ xAxisIndex: 0, brushMode: "single" });
+    expect(container.querySelector("div")!.getAttribute("aria-label")).toContain("Brush across the chart to zoom to that range.");
+    await act(async () => root.render(<EChartCanvas option={option} height={100} label="P" />));
+    expect(instance.setOption.mock.lastCall?.[0].brush).toBeUndefined();
+    expect(instance.setOption).toHaveBeenCalledTimes(3);
+    expect(instance.dispatchAction).toHaveBeenCalledOnce();
+    expect(instance.dispose).not.toHaveBeenCalled();
+    await act(async () => root.unmount()); container.remove();
+  });
 
   it("applies the option with the label as the aria description and disposes on unmount", async () => {
     const instance = fresh();

@@ -48,6 +48,8 @@ type Result struct {
 	SQL       string `json:"sql,omitempty"`
 	Interval  string `json:"interval,omitempty"`
 	ElapsedMS int64  `json:"elapsed_ms"`
+	FromMS    int64  `json:"from_ms"`
+	ToMS      int64  `json:"to_ms"`
 	Better    string `json:"better,omitempty"`
 	// ShiftMS is how far Previous sits behind Frame, so a client can overlay it
 	// without guessing from the first populated bucket.
@@ -275,6 +277,7 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 	if err != nil {
 		return failed(res, err, parent.Err() == nil)
 	}
+	res.FromMS, res.ToMS = start.UnixMilli(), end.UnixMilli()
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	reduces := vizSpecs[p.Viz].reduces

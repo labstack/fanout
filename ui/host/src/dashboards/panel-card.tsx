@@ -1,12 +1,14 @@
 import { ActionIcon, Box, Button, Center, Group, Loader, Menu, Paper, Stack, Text, Tooltip, useComputedColorScheme } from "@mantine/core";
 import { ArrowsOut, ChatCircleText, Copy, DotsThree, Info, ListMagnifyingGlass, MagnifyingGlass, Trash, WarningCircle } from "@phosphor-icons/react";
-import type { Panel, PanelResult } from "../../../panels/types";
+import type { Panel, PanelResult, Selection } from "../../../panels/types";
+import { panelTimeLabel } from "../../../panels/interaction";
 import { useEffect, useState } from "react";
 import { Viz } from "./viz";
 
-export function PanelCard({ panel, title, result, loading, height, group, editing, agentAvailable, onSelect, onView, onInspect, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
+export function PanelCard({ panel, title, result, loading, height, group, editing, agentAvailable, onSelect, onPoint, onZoom, onView, onInspect, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
   panel: Panel; title: string; result?: PanelResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   onSelect?: (value: string) => void; onView(): void; onInspect(): void; onCopyLink(): void; onExplain(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
+  onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
   const [now, setNow] = useState(Date.now);
@@ -21,6 +23,7 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
     <Group justify="space-between" wrap="nowrap" gap="xs" mb={6} className={editing ? "panel-drag" : undefined} style={{ cursor: editing ? "grab" : undefined }}>
       <Group gap={6} wrap="nowrap" miw={0}>
         <Text fw={600} size="sm" truncate>{title}</Text>
+        {panelTimeLabel(panel) && <Text size="xs" c="dimmed" role="status">{panelTimeLabel(panel)}</Text>}
         {panel.description && <Tooltip label={panel.description} multiline w={260}><ActionIcon variant="transparent" color="gray" size="xs" aria-label={`${title} description`}><Info size={14} /></ActionIcon></Tooltip>}
         {loading && result && <Loader size={12} aria-label="Refreshing" />}
       </Group>
@@ -47,7 +50,7 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
           <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>
         </Stack></Center>
-        : <Viz panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} onSelect={onSelect} />}
+        : <Viz panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} onSelect={onSelect} onPoint={onPoint} onZoom={onZoom} />}
     </Box>
     {(staleAt || result?.frame?.truncated || result?.previous?.truncated) && <Text size="xs" c={staleAt ? "warn" : "dimmed"} mt={6} role="status">
       {staleAt ? `Stale: last updated ${relativeTime(staleAt, now)}` : ""}

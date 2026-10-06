@@ -8,6 +8,7 @@ import { ApiError, dashboardsKey, getDashboard, listDashboards } from "./api";
 import { PanelGrid } from "./grid";
 import { effectiveTime, type DashboardSearch } from "./search";
 import { Toolbar } from "./toolbar";
+import { useBrushZoom } from "./use-brush-zoom";
 import { usePanelResults } from "./use-panel-results";
 import { currentValue, useVariableOptions } from "./use-variables";
 import { VariableBar } from "./variable-bar";
@@ -42,6 +43,7 @@ export function DashboardPage({ dashboardId, search, onSearch, onOpen }: { dashb
 }
 
 function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat }: { id: string; version: number; spec: DashboardSpec; search: DashboardSearch; onSearch(next: DashboardSearch, replace?: boolean): void; agentAvailable: boolean; openChat(prompt?: string): void }) {
+  const { zoom, reset: resetBrush } = useBrushZoom(search, onSearch);
   const time = effectiveTime(spec, search);
   const [refresh, setRefresh] = useState(time.refresh ?? "30s");
   const compare = search.compare ? search.compare === "1" : spec.time.compare === "previous_period";
@@ -91,8 +93,8 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
           {spec.description && <Text c="dimmed" size="sm" mt={2}>{spec.description}</Text>}
         </Box>
         <Toolbar time={time} refresh={refresh} compare={compare} editing={search.edit === "1"} fetching={data.fetching} updatedAt={data.updatedAt}
-          onRange={(range) => onSearch({ ...search, range, from: undefined, to: undefined })}
-          onAbsolute={(from, to) => onSearch({ ...search, range: undefined, from, to })}
+          onRange={(range) => { resetBrush(); onSearch({ ...search, range, from: undefined, to: undefined }); }}
+          onAbsolute={(from, to) => { resetBrush(); onSearch({ ...search, range: undefined, from, to }); }}
           onZoomOut={() => {
             if (time.from && time.to) {
               const from = Date.parse(time.from);
@@ -107,7 +109,7 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
       </Group>
       <VariableBar variables={spec.variables ?? []} vars={vars} options={options.data ?? {}} onChange={setVar} />
       {Object.entries(vars).filter(([, v]) => v !== ALL).length > 0 && <Group gap={6}>
-        {Object.entries(vars).filter(([, v]) => v !== ALL).map(([name, value]) => <Button key={name} size="compact-xs" variant="light" onClick={() => { const next = { ...vars }; delete next[name]; onSearch({ ...search, vars: next }, true); }}>${name} = {Array.isArray(value) ? value.join(", ") : value} ×</Button>)}
+        {Object.entries(vars).filter(([, v]) => v !== ALL).map(([name, value]) => <Button key={name} size="compact-xs" variant="light" aria-label={`Remove filter ${name}`} onClick={() => setVar(name, undefined)}>${name} = {Array.isArray(value) ? value.join(", ") : value} ×</Button>)}
       </Group>}
     </Stack>
     {loadError && <Alert color="bad" icon={<WarningCircle size={18} weight="fill" />} mb="md" title={options.error ? "Variables could not be loaded" : "Panels could not be loaded"}>
@@ -116,6 +118,6 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={time} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
-      agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible} />
+      agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible} />
   </Box>;
 }

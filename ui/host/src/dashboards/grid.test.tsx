@@ -4,9 +4,9 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const charts = vi.hoisted(() => ({ calls: [] as { label: string; option: Record<string, unknown>; height: number; group?: string }[] }));
-vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label, option, height, group, onClick }: { label: string; option: Record<string, unknown>; height: number; group?: string; onClick?: (p: { name: string; seriesName: string }) => void }) => {
-  charts.calls.push({ label, option, height, group });
+const charts = vi.hoisted(() => ({ calls: [] as { label: string; option: Record<string, unknown>; height: number; group?: string; onClick?: (p: { name: string; seriesName: string }) => void; onZoom?: (from: number, to: number) => void }[] }));
+vi.mock("./echart-canvas", () => ({ EChartCanvas: ({ label, option, height, group, onClick, onZoom }: { label: string; option: Record<string, unknown>; height: number; group?: string; onClick?: (p: { name: string; seriesName: string }) => void; onZoom?: (from: number, to: number) => void }) => {
+  charts.calls.push({ label, option, height, group, onClick, onZoom });
   return <button data-chart={label} onClick={() => onClick?.({ name: "cart", seriesName: "cart" })}>{label}</button>;
 } }));
 
@@ -75,6 +75,25 @@ describe("PanelGrid", () => {
     const { host, props } = await render();
     await act(async () => { (host.querySelector('[data-chart^="By service"]') as HTMLButtonElement).click(); });
     expect(props.onVariable).toHaveBeenCalledWith("service", "cart");
+  });
+
+  it("links and zooms only time charts, and wires point actions only for actionable panels", async () => {
+    const onPoint = vi.fn(); const onZoom = vi.fn();
+    const panels: DashboardSpec["panels"] = ["timeseries", "heatmap", "state_timeline", "histogram", "scatter", "bar"].map(viz => ({ id: viz, title: viz, viz: viz as DashboardSpec["panels"][number]["viz"], query: { from: "spans", measures: ["count()"], by: ["service"] } }));
+    panels.push({ ...panels[5], id: "click", title: "Click", click: { set_variable: "service" }, time: { range: "15m", shift: "1h" } });
+    panels.push({ ...panels[5], id: "drill", title: "Drill", drill: "traces" });
+    const r = results.get("requests")!;
+    const data = new Map(panels.map(p => [p.id, { ...r, id: p.id }]));
+    const { host } = await render({ spec: { ...spec, panels }, results: data, onPoint, onZoom });
+    for (const call of charts.calls) {
+      const time = ["timeseries", "heatmap", "state_timeline"].some(viz => call.label.startsWith(`${viz}:`));
+      expect(call.group).toBe(time ? "dashboard-d1" : undefined);
+      expect(call.onZoom).toBe(time ? onZoom : undefined);
+      expect(Boolean(call.onClick)).toBe(call.label.startsWith("Click:") || call.label.startsWith("Drill:"));
+    }
+    expect(host.querySelector('[data-panel="click"] [role="status"]')?.textContent).toBe("Range 15m · Shifted 1h");
+    charts.calls.find(call => call.label.startsWith("Click:"))!.onClick!({ name: "cart", seriesName: "cart" });
+    expect(onPoint).toHaveBeenCalledWith(panels[6], { time: undefined, dimensions: { service: "cart" } });
   });
 
   it("renders gauge and successful time series with stable chart options and the server shift", async () => {
