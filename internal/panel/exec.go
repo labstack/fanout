@@ -39,18 +39,20 @@ type RunRequest struct {
 }
 
 type Result struct {
-	ID        string `json:"id"`
-	Status    string `json:"status"`
-	Frame     *Frame `json:"frame,omitempty"`
-	Previous  *Frame `json:"previous,omitempty"`
-	Error     string `json:"error,omitempty"`
-	Diagnosis string `json:"diagnosis,omitempty"`
-	SQL       string `json:"sql,omitempty"`
-	Interval  string `json:"interval,omitempty"`
-	ElapsedMS int64  `json:"elapsed_ms"`
-	FromMS    int64  `json:"from_ms"`
-	ToMS      int64  `json:"to_ms"`
-	Better    string `json:"better,omitempty"`
+	AnnotationScope *AnnotationMatch `json:"annotation_scope,omitempty"`
+	AnnotationError string           `json:"annotation_error,omitempty"`
+	ID              string           `json:"id"`
+	Status          string           `json:"status"`
+	Frame           *Frame           `json:"frame,omitempty"`
+	Previous        *Frame           `json:"previous,omitempty"`
+	Error           string           `json:"error,omitempty"`
+	Diagnosis       string           `json:"diagnosis,omitempty"`
+	SQL             string           `json:"sql,omitempty"`
+	Interval        string           `json:"interval,omitempty"`
+	ElapsedMS       int64            `json:"elapsed_ms"`
+	FromMS          int64            `json:"from_ms"`
+	ToMS            int64            `json:"to_ms"`
+	Better          string           `json:"better,omitempty"`
 	// ShiftMS is how far Previous sits behind Frame, so a client can overlay it
 	// without guessing from the first populated bucket.
 	ShiftMS int64 `json:"shift_ms,omitempty"`
@@ -297,6 +299,13 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		return failed(res, err, parent.Err() == nil)
 	}
 	res.Frame, res.SQL = frame, sqlText
+	if p.Query != nil && (p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline") {
+		res.AnnotationScope, err = e.annotationScope(ctx, p, checked.AnnotationFilters[p.ID], scope)
+		if err != nil {
+			res.AnnotationError = "Annotation scope is unavailable."
+		}
+	}
+
 	if interval > 0 && (reduces || p.Query == nil || p.Query.Bucket != "") {
 		res.Interval = formatInterval(interval)
 	}
@@ -351,6 +360,10 @@ func (e *Executor) totals(ctx context.Context, p *Panel, checked *Checked, scope
 
 func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, scope Scope) (*Frame, string, error) {
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
+	if p.Options != nil && p.Options.Split == "deploy" {
+		return e.runDeploySplit(ctx, p, checked, scope)
+	}
+
 	if p.Viz == "health" || p.Viz == "service_map" {
 		return e.runRollupPanel(ctx, p, checked.Filters[p.ID], scope)
 	}

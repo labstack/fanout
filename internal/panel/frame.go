@@ -13,6 +13,7 @@ import (
 
 // Frame is a columnar query result: one array of values per column.
 type Frame struct {
+	Note      string       `json:"note,omitempty"`
 	Health    *HealthFrame `json:"health,omitempty"`
 	Columns   []Column     `json:"columns"`
 	Values    [][]any      `json:"values"`

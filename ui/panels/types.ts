@@ -29,7 +29,7 @@ export type Panel = {
   better?: "lower" | "higher";
   min?: number;
   max?: number;
-  options?: { style?: "line" | "area" | "bars" | "stacked"; scale?: "linear" | "log"; top?: number; legend?: "auto" | "hidden"; x_scale?: "linear" | "log"; y_scale?: "linear" | "log"; highlight?: string; columns?: ColumnFormat[] };
+  options?: { style?: "line" | "area" | "bars" | "stacked"; scale?: "linear" | "log"; top?: number; legend?: "auto" | "hidden"; x_scale?: "linear" | "log"; y_scale?: "linear" | "log"; highlight?: string; columns?: ColumnFormat[]; split?: "deploy" };
   click?: { set_variable: string };
   drill?: "traces" | "logs";
   time?: { range?: string; shift?: string };
@@ -67,9 +67,13 @@ export type Cell = string | number | null;
 export type Column = { name: string; type: "time" | "number" | "string" | "json"; role: "time" | "dimension" | "measure"; unit?: string };
 
 export type HealthFrame = { health: string; counts: { healthy: number; degraded: number; unhealthy: number }; total_spans: number; error_rate: number; service_count: number; error_trend: number[] };
-export type Frame = { columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean; health?: HealthFrame; trend?: { start_ms: number; step_ms: number } };
+export type AnnotationService = { namespace: string; service: string };
+export type AnnotationMatch = { services: AnnotationService[]; namespace_scoped?: boolean; limited?: boolean };
+export type Frame = { note?: string; columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean; health?: HealthFrame; trend?: { start_ms: number; step_ms: number } };
 
 export type PanelResult = {
+  annotation_scope?: AnnotationMatch;
+  annotation_error?: string;
   id: string;
   status: "ok" | "empty" | "error";
   frame?: Frame;

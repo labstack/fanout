@@ -95,6 +95,9 @@ type Threshold struct {
 }
 
 type Options struct {
+	Split   string         `json:"split,omitempty" jsonschema:"bar: deploy, comparing before and since the latest deploy"`
+	Columns []ColumnFormat `json:"columns,omitempty" jsonschema:"table column formats"`
+
 	Highlight string `json:"highlight,omitempty" jsonschema:"logs and log_patterns: literal redacted-body search, at most 200 characters"`
 	Style     string `json:"style,omitempty" jsonschema:"timeseries: line, area, bars or stacked (additive measures only)"`
 	Scale     string `json:"scale,omitempty" jsonschema:"linear or log"`
@@ -102,6 +105,13 @@ type Options struct {
 	Legend    string `json:"legend,omitempty" jsonschema:"auto or hidden"`
 	XScale    string `json:"x_scale,omitempty" jsonschema:"scatter x axis: linear or log"`
 	YScale    string `json:"y_scale,omitempty" jsonschema:"scatter y axis: linear or log"`
+}
+
+type ColumnFormat struct {
+	Field    string `json:"field"`
+	Format   string `json:"format" jsonschema:"unit, bar, status, sparkline, trace_link, service_link or log_template"`
+	Unit     string `json:"unit,omitempty"`
+	Variable string `json:"variable,omitempty" jsonschema:"service_link: query or custom variable to select"`
 }
 
 type Click struct {

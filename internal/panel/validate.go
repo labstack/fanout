@@ -275,6 +275,7 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 	if utf8.RuneCountInString(p.SQL) > 8000 {
 		problems.add(path+".sql", "SQL is limited to 8000 characters")
 	}
+	validateDisplayOptions(p, path, vars, problems)
 	if p.Viz == "text" {
 		validateItems(p, path, problems)
 		validateRows(p, path, problems)
