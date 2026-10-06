@@ -270,7 +270,7 @@ func main() {
 	panels.SetRollupReader(queries)
 	api.RegisterPanelRoutes(e, panels)
 	api.RegisterAnnotationRoutes(e, annotations.New(q))
-	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
+	api.NewObservabilityHandler(queries, cfg.RetentionDays).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))
 	api.RegisterIntelligenceRoutes(e, detector)
 	dashboards := dashboard.New(sqlite.DB, panels)
 	api.RegisterDashboardRoutes(e, dashboards)

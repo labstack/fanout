@@ -19,6 +19,7 @@ type SelectionBucket struct {
 type ExemplarRequest struct {
 	Dashboard  Dashboard         `json:"dashboard"`
 	PanelID    string            `json:"panel_id"`
+	Kind       string            `json:"kind,omitempty"`
 	Time       *Time             `json:"time,omitempty"`
 	From       time.Time         `json:"from"`
 	To         time.Time         `json:"to"`
@@ -36,6 +37,7 @@ type Exemplar struct {
 	Start      time.Time `json:"start"`
 }
 type ExemplarResponse struct {
+	Logs      *Frame     `json:"logs,omitempty"`
 	Traces    []Exemplar `json:"traces"`
 	Truncated bool       `json:"truncated,omitempty"`
 }
@@ -87,6 +89,9 @@ func selectionWhere(p *Panel, filters []Filter, scope Scope, dimensions map[stri
 
 func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (ExemplarResponse, error) {
 	out := ExemplarResponse{Traces: []Exemplar{}}
+	if req.Kind != "" && req.Kind != "traces" && req.Kind != "logs" {
+		return out, Problems{{Path: "kind", Message: "kind must be traces or logs", Hint: "choose traces or logs"}}
+	}
 	ctx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 	d := req.Dashboard
@@ -147,6 +152,31 @@ func (e *Executor) Exemplars(ctx context.Context, req ExemplarRequest) (Exemplar
 	if err != nil {
 		return out, err
 	}
+	if req.Kind == "logs" {
+		if p.Query.From != "logs" {
+			return out, Problems{{Path: "kind", Message: "log selections need a logs-source panel"}}
+		}
+		copyPanel := *p
+		copyQuery := *p.Query
+		copyQuery.Limit = 200
+		copyQuery.Bucket = ""
+		copyQuery.Sort = "time"
+		copyPanel.Query = &copyQuery
+		copyPanel.Viz = "logs"
+		scope := Scope{Start: lo, End: hi, Vars: vars}
+		compiled, err := compileRowsWhere(&copyPanel, where, args, scope)
+		if err != nil {
+			return out, err
+		}
+		logCtx := queryrows.WithWindow(ctx, queryrows.Window{Start: lo, End: hi})
+		rows, err := e.engine.QueryContext(logCtx, compiled.SQL, compiled.Args...)
+		if err != nil {
+			return out, fmt.Errorf("drill logs: %s", SafeError(err))
+		}
+		out.Logs, err = scanFrame(rows, compiled.Columns, 200)
+		return out, err
+	}
+
 	if p.Query.From == "logs" && p.Options != nil && p.Options.Highlight != "" {
 		where += " AND contains(lower(body),lower(?))"
 		args = append(args, p.Options.Highlight)

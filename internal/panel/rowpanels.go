@@ -28,6 +28,10 @@ func compileRows(p *Panel, filters []Filter, scope Scope) (Compiled, error) {
 	if err != nil {
 		return Compiled{}, err
 	}
+	return compileRowsWhere(p, where, args, scope)
+}
+
+func compileRowsWhere(p *Panel, where string, args []any, scope Scope) (Compiled, error) {
 	if p.Viz == "traces" {
 		order := "duration_ms DESC,trace_id,namespace"
 		if p.Query.Sort == "errors" {

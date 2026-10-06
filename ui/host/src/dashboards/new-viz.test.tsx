@@ -142,7 +142,7 @@ it("preserves literal dimension keys and sanitizes rows without losing selection
   expect(model.selection(model.rows[0])).toEqual({ time: 1000, dimensions: { "attributes['http.route']": "/checkout" }, trace_id: "trace-1", namespace: "shop" });
 });
 
-it("highlights log bodies and keeps trace IDs accessible until the drill drawer exists", async () => {
+it("highlights log bodies and opens captured trace links without activating the row twice", async () => {
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container);
   const onPoint = vi.fn();
@@ -150,11 +150,19 @@ it("highlights log bodies and keeps trace IDs accessible until the drill drawer 
     await act(async () => root.render(<MantineProvider><Viz panel={{ id: "p", title: "Logs", viz: "logs", options: { highlight: "failed" } }} result={resultFor("logs")} dark={false} height={200} group="g" onPoint={onPoint} /></MantineProvider>));
     expect(container.querySelector("mark")?.textContent).toBe("failed");
     expect(container.querySelector('[data-trace-id="abc"]')?.textContent).toBe("abc");
-    expect(container.querySelector('[data-trace-id="abc"]')?.closest("a, button")).toBeNull();
+    expect(container.querySelector('[data-trace-id="abc"]')?.closest("a")).not.toBeNull();
     expect(container.querySelector("tbody button")).toBeNull();
     expect(container.querySelector('[data-trace-id="abc"]')?.getAttribute("aria-label")).toBe("Trace ID abc");
     expect(container.querySelector(".mantine-Badge-root")?.textContent).toBe("ERROR");
     expect(onPoint).not.toHaveBeenCalled();
+    const link = container.querySelector<HTMLAnchorElement>('[data-trace-id="abc"]')!;
+    const target = JSON.parse(new URL(link.href).searchParams.get("drill")!);
+    expect(target.trace_id).toBe("abc");
+    expect(target.namespace).toBe("shop");
+    expect(target.window_from).toBe(new Date(0).toISOString());
+    expect(target.window_to).toBe(new Date(10000).toISOString());
+    await act(async () => link.click());
+    expect(onPoint.mock.calls).toEqual([[{ time: 1000, dimensions: {}, trace_id: "abc", namespace: "shop" }]]);
   } finally {
     await act(async () => root.unmount()); container.remove();
   }

@@ -422,3 +422,24 @@ it("keeps only the failed panel stale when the next partial refresh succeeds",as
  expect(host.querySelector('[data-panel="requests"]')!.textContent).toContain("Stale: last updated");
  expect(host.querySelector('[data-panel="latency"]')!.textContent).not.toContain("Stale:");
 });
+
+
+it("pushes drill and click variables atomically while preserving the captured panel window", async () => {
+  servedRecord = { ...record, spec: { ...spec, panels: [{ ...spec.panels[1], title: "Services", drill: "traces", click: { set_variable: "service" }, query: { from: "spans", measures: ["count()"], by: ["service"] } }] } };
+  panelResponse = async () => json({ results: [{ id: "latency", status: "ok", frame: { columns: [...frame.columns, { name: "service", type: "string", role: "dimension" }], values: [...frame.values, ["cart", "cart"]], rows: 2 }, elapsed_ms: 1, interval: "1m", from_ms: 0, to_ms: 10000 }] });
+  const initial: DashboardSearch = { range: "1h", compare: "1", vars: { other: "kept" } };
+  const { host, onSearch, rerender } = await render(initial);
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Select Services: time series"]')!.click());
+  expect(onSearch).toHaveBeenCalledOnce();
+  const next = onSearch.mock.calls[0][0] as DashboardSearch;
+  expect(onSearch.mock.calls[0][1]).toBe(false);
+  expect(next).toMatchObject({ ...initial, vars: { other: "kept", service: "cart" } });
+  const target = JSON.parse(next.drill!);
+  expect(target).toMatchObject({ panel_id: "latency", kind: "traces", from: new Date(1000).toISOString(), to: new Date(10000).toISOString(), window_from: new Date(0).toISOString(), window_to: new Date(10000).toISOString(), dimensions: { service: "cart" } });
+  const implementation = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (input, init) => String(input) === "/api/panels/exemplars" ? json({ traces: [] }) : implementation(input, init));
+  await rerender(next); await settle();
+  const request = fetchMock.mock.calls.find(([url]) => String(url) === "/api/panels/exemplars")!;
+  expect(JSON.parse(String(request[1]?.body))).toMatchObject({ kind: "traces", from: target.from, to: target.to, time: { from: target.window_from, to: target.window_to, refresh: "off" }, vars: { service: "cart" } });
+  expect(document.body.textContent).toContain("No exemplar traces match this selection.");
+});

@@ -15,6 +15,7 @@ import (
 )
 
 type fakeQueries struct {
+	traceScope      observability.Scope
 	overviewScope   observability.Scope
 	topologyScope   observability.Scope
 	dependencyScope observability.Scope
@@ -45,7 +46,8 @@ func (f *fakeQueries) Performance(_ context.Context, _ observability.Scope, _ ob
 	return observability.Result[observability.Performance]{Schema: observability.PerformanceSchema}, nil
 }
 
-func (f *fakeQueries) Trace(_ context.Context, _ observability.Scope, _, _ string, _ int) (observability.Result[observability.TraceDetail], error) {
+func (f *fakeQueries) Trace(_ context.Context, scope observability.Scope, _, _ string, _ int) (observability.Result[observability.TraceDetail], error) {
+	f.traceScope = scope
 	return observability.Result[observability.TraceDetail]{Schema: observability.TraceSchema}, nil
 }
 
@@ -60,7 +62,7 @@ func TestOverviewRouteUsesDurationScope(t *testing.T) {
 	}{{"15m", 15 * time.Minute}, {"720h", 30 * 24 * time.Hour}} {
 		t.Run(tt.window, func(t *testing.T) {
 			queries := &fakeQueries{}
-			h := NewObservabilityHandler(queries)
+			h := NewObservabilityHandler(queries, 30)
 			h.now = func() time.Time { return time.Date(2026, 7, 20, 12, 0, 0, 0, time.UTC) }
 			e := echo.New()
 			h.Register(e.Group("/api/observability"))
@@ -89,7 +91,7 @@ func TestOverviewRouteUsesDurationScope(t *testing.T) {
 }
 
 func TestRouteRejectsInvalidWindow(t *testing.T) {
-	h := NewObservabilityHandler(&fakeQueries{})
+	h := NewObservabilityHandler(&fakeQueries{}, 30)
 	e := echo.New()
 	h.Register(e.Group("/api/observability"))
 	req := httptest.NewRequest(http.MethodGet, "/api/observability/topology?window=forever", nil)
@@ -102,7 +104,7 @@ func TestRouteRejectsInvalidWindow(t *testing.T) {
 
 func TestDependencyRouteForwardsScopeAndBounds(t *testing.T) {
 	backend := &fakeQueries{}
-	h := NewObservabilityHandler(backend)
+	h := NewObservabilityHandler(backend, 30)
 	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	h.now = func() time.Time { return now }
 	e := echo.New()
@@ -227,5 +229,44 @@ func TestObservabilityHandlersCarryADeadline(t *testing.T) {
 	}
 	if seen <= 0 || seen > observabilityDeadline {
 		t.Fatalf("deadline left %s, want a positive value no greater than %s", seen, observabilityDeadline)
+	}
+}
+
+func TestM2TraceAbsoluteWindow(t *testing.T) {
+	queries := &fakeQueries{}
+	h := NewObservabilityHandler(queries, 7)
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	h.now = func() time.Time { return now }
+	e := echo.New()
+	h.Register(e.Group("/api/observability"))
+	cases := []struct {
+		query string
+		code  int
+	}{
+		{"?trace_id=abc&from=2026-10-01T12:00:00.123456789Z&to=2026-10-01T13:00:00.123456789Z&window=15m", 200},
+		{"?from=2026-10-01T12:00:00Z", 400},
+		{"?from=bad&to=2026-10-01T13:00:00Z", 400},
+		{"?from=2026-10-01T13:00:00Z&to=2026-10-01T12:00:00Z", 400},
+		{"?from=2026-09-01T12:00:00Z&to=2026-10-01T12:00:00Z", 400},
+		{"?window=15m", 200},
+	}
+	for _, tc := range cases {
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/observability/trace"+tc.query, nil))
+		if rec.Code != tc.code {
+			t.Fatalf("%s: %d %s", tc.query, rec.Code, rec.Body)
+		}
+		if tc.code == 200 {
+			if tc.query == "?window=15m" {
+				if !queries.traceScope.End.Equal(now) || queries.traceScope.End.Sub(queries.traceScope.Start) != 15*time.Minute {
+					t.Fatalf("window changed: %+v", queries.traceScope)
+				}
+			} else {
+				want := time.Date(2026, 10, 1, 12, 0, 0, 123456789, time.UTC)
+				if !queries.traceScope.Start.Equal(want) || queries.traceScope.End.Sub(want) != time.Hour {
+					t.Fatalf("captured window lost: %+v", queries.traceScope)
+				}
+			}
+		}
 	}
 }

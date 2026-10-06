@@ -1,4 +1,6 @@
-import type { DashboardSpec, DashboardTime, Panel, PanelResult, Variable, VarValue } from "../../../panels/types";
+import type { Result, TraceDetail } from "../../../contracts";
+import type { DrillTarget } from "./drill-state";
+import type { Frame, Selection, DashboardSpec, DashboardTime, Panel, PanelResult, Variable, VarValue } from "../../../panels/types";
 import { authorizedFetch } from "../auth";
 
 export type DashboardSummary = { id: string; name: string; description: string; is_default: boolean; version: number; panel_count: number; updated_at: string };
@@ -54,3 +56,12 @@ export const restoreVersion = (id: string, version: number) => request<Dashboard
 export const queryPanels = (body: QueryBody, signal?: AbortSignal) => request<{ results: PanelResult[] }>("/api/panels/query", { method: "POST", json: body, signal }).then((r) => r.results);
 export const resolveVariables = (body: Omit<QueryBody, "panels" | "widths" | "compare">, signal?: AbortSignal) =>
   request<{ options: Record<string, { value: string; count?: number }[]> }>("/api/variables/resolve", { method: "POST", json: body, signal }).then((r) => r.options);
+
+export type ExemplarBody = { dashboard: DashboardSpec; panel_id: string; kind?: "traces" | "logs"; time?: DashboardTime; from: string; to: string; dimensions?: Record<string, string>; bucket?: Selection["bucket"]; vars?: Record<string, VarValue> };
+export type Exemplar = { trace_id: string; namespace: string; service: string; operation: string; duration_ms: number; status: string; start: string };
+export type ExemplarResponse = { traces: Exemplar[]; logs?: Frame; truncated?: boolean };
+export const queryExemplars = (body: ExemplarBody, signal?: AbortSignal) => request<ExemplarResponse>("/api/panels/exemplars", { method: "POST", json: body, signal });
+export function getTrace(target: DrillTarget, signal?: AbortSignal): Promise<Result<TraceDetail>> {
+  const params = new URLSearchParams({ trace_id: target.trace_id ?? "", namespace: target.namespace ?? "", from: target.window_from, to: target.window_to, limit: "200" });
+  return request<Result<TraceDetail>>(`/api/observability/trace?${params}`, { signal });
+}

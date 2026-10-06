@@ -6,6 +6,8 @@ import { ALL, type DashboardSpec, type VarValue } from "../../../panels/types";
 import { createDashboardPrompt, useFanoutApp } from "../app-context";
 import { ApiError, dashboardsKey, getDashboard, listDashboards } from "./api";
 import { PanelGrid } from "./grid";
+import { DrillDrawer } from "./drill";
+import { makeDrill, parseDrill } from "./drill-state";
 import { effectiveTime, type DashboardSearch } from "./search";
 import { Toolbar } from "./toolbar";
 import { useBrushZoom } from "./use-brush-zoom";
@@ -118,6 +120,14 @@ function Loaded({ id, version, spec, search, onSearch, agentAvailable, openChat 
         <li key={index}>{problem.path}: {problem.message}{problem.hint ? ` (${problem.hint})` : ""}</li>)}</ul>}
     </Alert>}
     <PanelGrid dashboardId={id} version={version} spec={spec} vars={resolvedVars} results={data.results} fetching={data.fetching} fetchingIds={data.fetchingIds} staleAt={data.staleAt} time={time} onEditExit={() => onSearch({ ...search, edit: undefined })} editing={search.edit === "1"} view={search.view}
-      agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible} />
+      agentAvailable={agentAvailable} onOpenChat={openChat} onVariable={setVar} onZoom={zoom} onView={(view) => onSearch({ ...search, view })} onVisible={setVisible}
+      onPoint={(panel, selection) => {
+        const result = data.results.get(panel.id); if (!result) return;
+        const target = makeDrill(panel, result, selection); if (!target) return;
+        const first = Object.values(selection.dimensions)[0]; const variable = panel.click?.set_variable;
+        const vars = variable && first !== undefined ? { ...search.vars, [variable]: first } : search.vars;
+        onSearch({ ...search, vars, drill: JSON.stringify(target) }, false);
+      }} />
+    <DrillDrawer spec={spec} time={time} vars={resolvedVars} target={parseDrill(search.drill)} onChange={target => onSearch({ ...search, drill: target ? JSON.stringify(target) : undefined }, false)} />
   </Box>;
 }

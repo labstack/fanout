@@ -25,7 +25,7 @@ export function Viz(props: { panel: Panel; title?: string; result?: PanelResult;
     case "gauge": return <GaugeViz panel={panel} title={title} result={result} dark={dark} height={height} />;
     case "timeseries": return <TimeseriesViz panel={panel} title={title} result={result} dark={dark} height={height} group={group} onSelect={onSelect} onPoint={onPoint} onZoom={onZoom} />;
     case "bar": return <BarViz panel={panel} title={title} result={result} dark={dark} height={height} onSelect={onSelect} onPoint={onPoint} />;
-    case "table": return <TableViz panel={panel} result={result} height={height} onSelect={onSelect} />;
+    case "table": return <TableViz panel={panel} result={result} height={height} onSelect={onSelect} onPoint={onPoint} />;
     case "heatmap": return <HeatmapViz {...next} />;
     case "histogram": return <HistogramViz {...next} />;
     case "scatter": return <ScatterViz {...next} />;

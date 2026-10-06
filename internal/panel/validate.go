@@ -326,6 +326,10 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 	if p.Drill != "" && p.Drill != "traces" && p.Drill != "logs" {
 		problems.add(path+".drill", "drill must be traces or logs")
 	}
+	if p.Drill != "" && (p.Query == nil || p.Query.From == "metrics" || p.Drill == "logs" && p.Query.From != "logs") {
+		problems.add(path+".drill", "drill requires structured span/log lineage; logs drill requires a logs source")
+	}
+
 	if p.Click != nil {
 		v, ok := vars[p.Click.SetVariable]
 		if !ok || (v.Kind != "query" && v.Kind != "custom") {

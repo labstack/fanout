@@ -114,7 +114,7 @@ export function PanelGrid({ dashboardId, version, spec, vars, results, fetching,
   const group = `dashboard-${dashboardId}`;
 
   const card = (panel: Panel, height: number) => <PanelCard panel={panel} title={interpolate(panel.title, vars)} result={results.get(panel.id)} loading={fetching && fetchingIds.includes(panel.id)} height={height} group={group} editing={canEdit} agentAvailable={agentAvailable}
-    onSelect={panel.click ? (value) => onVariable(panel.click!.set_variable, value) : undefined}
+    onSelect={panel.click && !(panel.drill && onPoint) ? value => onVariable(panel.click!.set_variable, value) : undefined}
     onPoint={onPoint && (panel.click || panel.drill || results.get(panel.id)?.frame?.columns.some((c, i) => c.name === "trace_id" && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")) || panel.options?.columns?.some(c => c.format === "trace_link" && results.get(panel.id)?.frame?.columns.some((column, i) => column.name === c.field && results.get(panel.id)!.frame!.values[i].some(v => typeof v === "string" && v !== "")))) ? selection => onPoint(panel, selection) : undefined}
     onZoom={onZoom}
     onView={() => onView(panel.id)} onInspect={() => setInspecting(panel.id)}

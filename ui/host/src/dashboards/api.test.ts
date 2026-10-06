@@ -3,8 +3,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const fetchMock = vi.hoisted(() => vi.fn());
 vi.mock("../auth", () => ({ authorizedFetch: fetchMock }));
 
+import type { DrillTarget } from "./drill-state";
 import type { DashboardSpec } from "../../../panels/types";
-import { ApiError, deleteDashboard, patchDashboard, replaceDashboard, restoreVersion } from "./api";
+import { ApiError, getTrace, queryExemplars, deleteDashboard, patchDashboard, replaceDashboard, restoreVersion } from "./api";
 
 const spec = { version: 1, name: "n", time: {}, panels: [] } as DashboardSpec;
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -50,4 +51,22 @@ describe("dashboard api", () => {
     expect(lastCall()[0]).toBe("/api/dashboards/d1/versions/3/restore");
     expect(lastCall()[1].method).toBe("POST");
   });
+});
+
+
+it("uses the captured full window for trace lookups and passes cancellation to both drill requests", async () => {
+  fetchMock.mockResolvedValue(json(200, {}));
+  const signal = new AbortController().signal;
+  const target: DrillTarget = { panel_id: "p", kind: "traces", from: "2026-10-01T12:30:00Z", to: "2026-10-01T12:31:00Z", window_from: "2026-10-01T12:00:00Z", window_to: "2026-10-01T13:00:00Z", trace_id: "a&b", namespace: "shop & ops", dimensions: { service: "checkout" }, bucket: { lower: 1, upper: 2 } };
+  await getTrace(target, signal);
+  const url = new URL(lastCall()[0], "http://localhost");
+  expect(url.pathname).toBe("/api/observability/trace");
+  expect(Object.fromEntries(url.searchParams)).toEqual({ trace_id: "a&b", namespace: "shop & ops", from: target.window_from, to: target.window_to, limit: "200" });
+  expect(lastCall()[1].signal).toBe(signal);
+  const body = { dashboard: spec, panel_id: target.panel_id, kind: "traces" as const, from: target.from, to: target.to, time: { from: target.window_from, to: target.window_to, refresh: "off" }, dimensions: target.dimensions, bucket: target.bucket };
+  await queryExemplars(body, signal);
+  expect(lastCall()[0]).toBe("/api/panels/exemplars");
+  expect(lastCall()[1].method).toBe("POST");
+  expect(lastCall()[1].signal).toBe(signal);
+  expect(JSON.parse(String(lastCall()[1].body))).toEqual(body);
 });

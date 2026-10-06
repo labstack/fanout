@@ -1,5 +1,6 @@
 import { Anchor, Badge, Highlight, Mark, Text } from "@mantine/core";
 import { useCallback, useMemo, type ReactNode } from "react";
+import { makeDrill } from "../drill-state";
 import { rowModel } from "../../../../panels/rows";
 import type { AnalysisProps } from "./analysis-chart";
 import { TableViz, type TableCellProps } from "./table";
@@ -24,10 +25,19 @@ function BodyHighlight({ text, term, monospace }: { text: string; term: string; 
 
 export function RowPanel(props: AnalysisProps) {
   const model = useMemo(() => rowModel(props.panel, props.result), [props.panel, props.result]);
-  const cell = useCallback(({ column, value }: TableCellProps) => {
+  const cell = useCallback(({ column, value, rowIndex }: TableCellProps) => {
+    const selection = model.selection(model.rows[rowIndex]);
     const name = column.name;
-    // Task 10 supplies captured trace targets through the drill drawer.
-    if (name === "trace_id" && value) return <Text size="sm" ff="monospace" data-trace-id={String(value)} aria-label={`Trace ID ${value}`}>{String(value)}</Text>;
+    if (name === "trace_id" && value) {
+      const target = makeDrill(props.panel, props.result, selection);
+      if (!target) return <Text size="sm" ff="monospace" data-trace-id={String(value)} aria-label={`Trace ID ${value}`}>{String(value)}</Text>;
+      const url = new URL(window.location.href); url.searchParams.set("drill", JSON.stringify(target));
+      return <Anchor data-trace-id={String(value)} aria-label={`Trace ID ${value}`} ff="monospace" href={url.toString()} onClick={event => {
+        if (props.onPoint && event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+          event.preventDefault(); event.stopPropagation(); props.onPoint(selection);
+        }
+      }}>{String(value)}</Anchor>;
+    }
     if (name === "service" && value && props.onSelect) return <Anchor component="button" type="button" onClick={() => props.onSelect?.(String(value))}>{String(value)}</Anchor>;
     if (name === "health" || name === "severity" || name === "status") return <Badge color={String(value).includes("ERROR") || value === "FATAL" || value === "CRITICAL" || value === "unhealthy" ? "bad" : value === "degraded" || value === "WARN" ? "warn" : "gray"}>{String(value ?? "Unknown")}</Badge>;
     if ((name === "body" || name === "body_template") && props.panel.options?.highlight) return <BodyHighlight text={String(value ?? "")} term={props.panel.options.highlight} monospace={name === "body_template"} />;
@@ -52,8 +62,8 @@ export function RowPanel(props: AnalysisProps) {
       </svg>;
     }
     return undefined;
-  }, [props.panel, props.result, props.onSelect]);
+  }, [props.panel, props.result, props.onSelect, props.onPoint, model]);
   return <div role="region" aria-label={`${props.title ?? props.panel.title}: ${model.rows.length} rows`}>
-    <TableViz panel={props.panel} result={props.result} height={props.height} renderCell={cell} />
+    <TableViz panel={props.panel} result={props.result} height={props.height} renderCell={cell} onPoint={props.onPoint} />
   </div>;
 }
