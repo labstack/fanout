@@ -192,7 +192,7 @@ func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (
 		columns = append(columns, Column{Name: m.Alias, Type: "number", Role: "measure", Unit: unit})
 	}
 	var b strings.Builder
-	b.WriteString("WITH base AS (SELECT * FROM " + sig.name + " WHERE " + where + ")")
+	b.WriteString("WITH base AS (SELECT * FROM " + structuredSource(sig.name) + " WHERE " + where + ")")
 	if top > 0 {
 		fmt.Fprintf(&b, ", top AS (SELECT %s AS d FROM base GROUP BY 1 ORDER BY count(*) DESC LIMIT %d)", dims[0].stringSQL(), top)
 	}

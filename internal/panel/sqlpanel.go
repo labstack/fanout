@@ -50,6 +50,9 @@ func canonicalSQL(ctx context.Context, parser Parser, expanded string) (string, 
 	if err != nil {
 		return "", err
 	}
+	if err := redactSQLLogTables(ctx, parser, node, nil); err != nil {
+		return "", err
+	}
 	rendered, err := parser.RenderSQL(ctx, node)
 	if err != nil {
 		return "", err
@@ -59,4 +62,92 @@ func canonicalSQL(ctx context.Context, parser Parser, expanded string) (string, 
 		return "", errors.New("SQL panels must filter time with $__window(time_column)")
 	}
 	return rendered, nil
+}
+
+// Replace physical logs references with a redacted relation under the same
+// alias. Work on DuckDB's AST, never string substitutions: literals and CTE
+// names keep their meaning, and PrepareTelemetrySQL still validates every
+// underlying relation and function after rendering. Disallowed schemas and
+// catalogs stay intact so the boundary rejects them.
+func redactSQLLogTables(ctx context.Context, parser Parser, value any, ctes map[string]bool) error {
+	switch node := value.(type) {
+	case map[string]any:
+		if cteMap, ok := node["cte_map"].(map[string]any); ok {
+			scope := copyCTEScope(ctes)
+			entries, _ := cteMap["map"].([]any)
+			for _, entry := range entries {
+				entry, _ := entry.(map[string]any)
+				definition, _ := entry["value"].(map[string]any)
+				if err := redactSQLLogTables(ctx, parser, definition, scope); err != nil {
+					return err
+				}
+				name, _ := entry["key"].(string)
+				scope[strings.ToLower(name)] = true
+			}
+			ctes = scope
+		}
+		kind, _ := node["type"].(string)
+		if kind == "BASE_TABLE" {
+			name, _ := node["table_name"].(string)
+			schema, _ := node["schema_name"].(string)
+			catalog, _ := node["catalog_name"].(string)
+			cte := catalog == "" && ((schema == "" && ctes[strings.ToLower(name)]) || (schema == "recurring" && ctes["recurring:"+strings.ToLower(name)]))
+			if strings.EqualFold(name, "logs") && !cte && catalog == "" && (schema == "" || schema == "main" || schema == "telemetry") {
+				projection, err := parser.ParseSQL(ctx, "SELECT * FROM ("+redactedLogSource()+") AS logs")
+				if err != nil {
+					return err
+				}
+				replacement, ok := projection["from_table"].(map[string]any)
+				if !ok {
+					return errors.New("missing redacted logs projection")
+				}
+				if alias, _ := node["alias"].(string); alias != "" {
+					replacement["alias"] = alias
+				}
+				// Preserve sampling and any column aliases on the original TableRef.
+				for _, key := range []string{"sample", "column_name_alias"} {
+					if v, ok := node[key]; ok {
+						replacement[key] = v
+					}
+				}
+				for key := range node {
+					delete(node, key)
+				}
+				for key, child := range replacement {
+					node[key] = child
+				}
+				return nil // Do not recursively redact the trusted inner logs reference.
+			}
+		}
+		for key, child := range node {
+			if key == "cte_map" {
+				continue
+			}
+			scope := ctes
+			if kind == "RECURSIVE_CTE_NODE" && key == "right" {
+				scope = copyCTEScope(ctes)
+				name, _ := node["cte_name"].(string)
+				scope[strings.ToLower(name)] = true
+				scope["recurring:"+strings.ToLower(name)] = true
+			}
+			if err := redactSQLLogTables(ctx, parser, child, scope); err != nil {
+				return err
+			}
+		}
+	case []any:
+		for _, child := range node {
+			if err := redactSQLLogTables(ctx, parser, child, ctes); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func copyCTEScope(ctes map[string]bool) map[string]bool {
+	scope := make(map[string]bool, len(ctes)+2)
+	for name, visible := range ctes {
+		scope[name] = visible
+	}
+	return scope
 }

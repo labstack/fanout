@@ -64,7 +64,7 @@ func (e *Executor) count(ctx context.Context, sig *signal, filters []Filter, sco
 	if err != nil {
 		return 0, err
 	}
-	rows, err := e.engine.QueryContext(ctx, "SELECT count(*) FROM "+sig.name+" WHERE "+where, args...)
+	rows, err := e.engine.QueryContext(ctx, "SELECT count(*) FROM "+structuredSource(sig.name)+" WHERE "+where, args...)
 	if err != nil {
 		return 0, err
 	}
@@ -88,7 +88,7 @@ func (e *Executor) topValues(ctx context.Context, sig *signal, fieldText string,
 		return ""
 	}
 	expr := ref.stringSQL()
-	rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5", expr, sig.name, where, expr), args...)
+	rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 5", expr, structuredSource(sig.name), where, expr), args...)
 	if err != nil {
 		return ""
 	}

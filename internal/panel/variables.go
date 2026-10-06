@@ -103,7 +103,7 @@ func (e *Executor) optionsFor(ctx context.Context, v Variable, checked *Checked,
 		}
 		expr := ref.stringSQL()
 		ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: start, End: end})
-		rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL AND %s <> '' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 500", expr, sig.name, where, expr, expr), args...)
+		rows, err := e.engine.QueryContext(ctx, fmt.Sprintf("SELECT %s AS v, count(*) AS n FROM %s WHERE %s AND %s IS NOT NULL AND %s <> '' GROUP BY 1 ORDER BY 2 DESC, 1 LIMIT 500", expr, structuredSource(sig.name), where, expr, expr), args...)
 		if err != nil {
 			return nil, fmt.Errorf("list values for $%s: %w", v.Name, err)
 		}

@@ -3,6 +3,7 @@ package panel
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -13,6 +14,9 @@ func resolveWindow(t Time, override *PanelTime, now time.Time, maxWindow time.Du
 	var start, end time.Time
 	if t.From != nil && t.To != nil {
 		start, end = t.From.UTC(), t.To.UTC()
+		if !inTimestampNSRange(start) || !inTimestampNSRange(end) {
+			return time.Time{}, time.Time{}, errors.New("times must be within the TIMESTAMP_NS range (1677–2262)")
+		}
 	} else {
 		span, ok := ranges[t.Range]
 		if !ok {
@@ -40,8 +44,16 @@ func resolveWindow(t Time, override *PanelTime, now time.Time, maxWindow time.Du
 	if !start.Before(end) {
 		return time.Time{}, time.Time{}, errors.New("the time range must start before it ends")
 	}
+	if !inTimestampNSRange(start) || !inTimestampNSRange(end) {
+		return time.Time{}, time.Time{}, errors.New("times must be within the TIMESTAMP_NS range (1677–2262)")
+	}
 	if maxWindow > 0 && end.Sub(start) > maxWindow {
 		start = end.Add(-maxWindow)
 	}
 	return start, end, nil
+}
+
+func inTimestampNSRange(t time.Time) bool {
+	// DuckDB reserves the signed extrema for infinite timestamps.
+	return !t.Before(time.Unix(0, math.MinInt64+1)) && !t.After(time.Unix(0, math.MaxInt64-1))
 }
