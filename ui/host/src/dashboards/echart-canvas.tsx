@@ -1,10 +1,10 @@
-import { BarChart, GaugeChart, LineChart } from "echarts/charts";
+import { BarChart, GaugeChart, GraphChart, LineChart } from "echarts/charts";
 import { AriaComponent, GridComponent, LegendComponent, MarkLineComponent, TooltipComponent } from "echarts/components";
 import { connect, disconnect, init, use, type EChartsCoreOption, type EChartsType } from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
 import { useEffect, useRef } from "react";
 
-use([CanvasRenderer, LineChart, BarChart, GaugeChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, AriaComponent]);
+use([CanvasRenderer, LineChart, BarChart, GaugeChart, GraphChart, GridComponent, LegendComponent, TooltipComponent, MarkLineComponent, AriaComponent]);
 
 /* Dashboard panels draw on canvas: SVG stays smooth only to a few thousand
    points, and a dashboard of a dozen time series passes that. One instance

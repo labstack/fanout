@@ -55,7 +55,7 @@ func selectionWhere(p *Panel, filters []Filter, scope Scope, dimensions map[stri
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		if !slices.Contains(p.Query.By, name) || len(dimensions[name]) > 500 {
+		if (!slices.Contains(p.Query.By, name) && !((p.Viz == "health" || p.Viz == "service_map") && name == "service")) || len(dimensions[name]) > 500 {
 			return "", nil, Problems{{Path: "dimensions", Message: "dimensions must name query.by fields and values at most 500 characters", Hint: "select one of the panel grouping fields"}}
 		}
 		if dimensions[name] == "Other" && p.Viz == "timeseries" && len(p.Query.By) == 1 && p.Top() > 0 {

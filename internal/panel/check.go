@@ -82,6 +82,19 @@ func Check(ctx context.Context, parser Parser, d *Dashboard) (*Checked, Problems
 					continue
 				}
 				checked.Filters[p.ID] = append(checked.Filters[p.ID], f)
+				if p.Viz == "health" || p.Viz == "service_map" {
+					sample := Scope{Vars: map[string]Value{}}
+					for name := range earlier {
+						sample.Vars[name] = Value{Values: []string{"check"}}
+					}
+					if _, _, err := rollupFilterValue(ctx, parser, f, sample); err != nil {
+						if isOperational(err) {
+							return nil, nil, err
+						}
+						problems.addHint(fmt.Sprintf("%s.query.where[%d]", path, j), SafeError(err), "use namespace or service equality with a literal or single-value variable")
+					}
+				}
+
 			}
 		case p.SQL != "":
 			if err := checkSQLPanel(ctx, parser, p, earlier); err != nil {

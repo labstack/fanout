@@ -51,7 +51,7 @@ type Panel struct {
 	ID          string      `json:"id" jsonschema:"Stable identifier: lowercase letters, digits and underscores; edits address panels by id"`
 	Title       string      `json:"title" jsonschema:"Panel title, at most 80 characters; may reference $variables"`
 	Description string      `json:"description,omitempty" jsonschema:"Help text, at most 280 characters"`
-	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table, text, heatmap, histogram, scatter, state_timeline, logs, log_patterns or traces"`
+	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table, text, heatmap, histogram, scatter, state_timeline, logs, log_patterns, traces, service_map or health"`
 	Width       int         `json:"width,omitempty" jsonschema:"Grid columns from 1 to 12; default depends on viz"`
 	Height      string      `json:"height,omitempty" jsonschema:"s, m or l; default depends on viz"`
 	Query       *Query      `json:"query,omitempty" jsonschema:"Structured query; exactly one of query or sql, except text panels"`
@@ -74,12 +74,12 @@ type Panel struct {
 type Query struct {
 	From      string     `json:"from" jsonschema:"spans, logs or metrics"`
 	Where     []string   `json:"where,omitempty" jsonschema:"Filter expressions joined by AND, e.g. service = $service or attributes['http.route'] = '/cart'"`
-	Measures  []string   `json:"measures,omitempty" jsonschema:"Fixed logs and traces take no measures; other queries take 1 to 6 of fn(field) [as alias]: count(), rate(), error_rate(), share(), avg, min, max, sum, last, p50, p75, p90, p95, p99, quantile(field, q), count_distinct(field)"`
+	Measures  []string   `json:"measures,omitempty" jsonschema:"Fixed logs, traces, service_map and health take no measures; other queries take 1 to 6 of fn(field) [as alias]: count(), rate(), error_rate(), share(), avg, min, max, sum, last, p50, p75, p90, p95, p99, quantile(field, q), count_distinct(field)"`
 	By        []string   `json:"by,omitempty" jsonschema:"Up to 3 grouping fields: columns or attributes['key']"`
 	Bucket    string     `json:"bucket,omitempty" jsonschema:"auto or 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h, 1d; required for timeseries"`
 	Histogram *Histogram `json:"histogram,omitempty" jsonschema:"heatmap and histogram panels (milestone 2)"`
 	Sort      string     `json:"sort,omitempty" jsonschema:"Measure alias descending (+ ascending); logs: time or +time; traces: duration_ms, errors or +start; log_patterns: count"`
-	Limit     int        `json:"limit,omitempty" jsonschema:"Row limit, at most 1000; logs and traces default 1000; log_patterns default 20, capped at 50"`
+	Limit     int        `json:"limit,omitempty" jsonschema:"Row limit, at most 1000; logs and traces default 1000; log_patterns default 20, capped at 50; health and service_map default 400, capped at 400"`
 }
 
 type Histogram struct {

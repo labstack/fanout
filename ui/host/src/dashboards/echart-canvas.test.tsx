@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ init: vi.fn(), connect: vi.fn(), disconnect: vi.fn(), instance: null as null | Record<string, unknown> }));
 
 vi.mock("echarts/core", () => ({ init: mocks.init, use: () => undefined, connect: mocks.connect, disconnect: mocks.disconnect }));
-vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, LineChart: {} }));
+vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {} }));
 vi.mock("echarts/components", () => ({ AriaComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, TooltipComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 

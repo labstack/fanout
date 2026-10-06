@@ -7,17 +7,19 @@ import (
 	"math/big"
 	"time"
 
+	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/queryrows"
 )
 
 // Frame is a columnar query result: one array of values per column.
 type Frame struct {
-	Columns   []Column `json:"columns"`
-	Values    [][]any  `json:"values"`
-	Rows      int      `json:"rows"`
-	Totals    []any    `json:"totals,omitempty"`
-	Truncated bool     `json:"truncated,omitempty"`
-	Trend     *Trend   `json:"trend,omitempty"`
+	Health    *HealthFrame `json:"health,omitempty"`
+	Columns   []Column     `json:"columns"`
+	Values    [][]any      `json:"values"`
+	Rows      int          `json:"rows"`
+	Totals    []any        `json:"totals,omitempty"`
+	Truncated bool         `json:"truncated,omitempty"`
+	Trend     *Trend       `json:"trend,omitempty"`
 	// Only structured time buckets are exempt from the row cap. A SQL time
 	// column is still subject to the SQL panel cap.
 	bucketed bool
@@ -230,4 +232,13 @@ func totalsOf(f *Frame) []any {
 		out[i] = f.Values[i][0]
 	}
 	return out
+}
+
+type HealthFrame struct {
+	Health       string                     `json:"health"`
+	Counts       observability.HealthCounts `json:"counts"`
+	TotalSpans   int64                      `json:"total_spans"`
+	ErrorRate    float64                    `json:"error_rate"`
+	ServiceCount int                        `json:"service_count"`
+	ErrorTrend   []float64                  `json:"error_trend"`
 }

@@ -267,6 +267,7 @@ func main() {
 	// raw *sql.DB here bypassed the Telemetry maintenance-race protection.
 	queries := observability.New(q, q, cfg.RetentionDays)
 	panels := panel.NewExecutor(q, cfg.RetentionDays)
+	panels.SetRollupReader(queries)
 	api.RegisterPanelRoutes(e, panels)
 	api.RegisterAnnotationRoutes(e, annotations.New(q))
 	api.NewObservabilityHandler(queries).Register(e.Group("/api/observability", api.RequireCapability(api.ReadTelemetry)))

@@ -21,6 +21,8 @@ type vizSpec struct {
 }
 
 var vizSpecs = map[string]vizSpec{
+	"service_map":    {width: 12, height: "m", query: true},
+	"health":         {width: 12, height: "m", query: true},
 	"logs":           {width: 12, height: "l", query: true},
 	"log_patterns":   {width: 12, height: "m", query: true, minBy: 1, maxBy: 1, bucket: true},
 	"traces":         {width: 12, height: "m", query: true},
@@ -36,7 +38,7 @@ var vizSpecs = map[string]vizSpec{
 	"state_timeline": {width: 6, height: "m", query: true, minBy: 1, maxBy: 1, bucket: true},
 }
 
-var vizOrder = []string{"stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram", "scatter", "state_timeline", "logs", "log_patterns", "traces"}
+var vizOrder = []string{"stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram", "scatter", "state_timeline", "logs", "log_patterns", "traces", "service_map", "health"}
 
 var (
 	idPattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
@@ -357,6 +359,7 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 		problems.add(path+".query", "distribution panels require a structured query")
 	}
 	validateItems(p, path, problems)
+	validateRollupPanel(p, path, problems)
 	if p.Query != nil {
 		validateQuery(p, spec, path+".query", problems)
 	} else {
@@ -419,7 +422,7 @@ func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 			problems.add(fmt.Sprintf("%s.where[%d]", path, i), "filters are 1 to 500 characters")
 		}
 	}
-	if (len(q.Measures) == 0 && p.Viz != "logs" && p.Viz != "traces") || len(q.Measures) > 6 {
+	if (len(q.Measures) == 0 && p.Viz != "logs" && p.Viz != "traces" && p.Viz != "health" && p.Viz != "service_map") || len(q.Measures) > 6 {
 		problems.add(path+".measures", "a query has 1 to 6 measures; fixed logs and traces take none")
 	}
 	measures := parseMeasures(sig, q.Measures, path+".measures", problems)

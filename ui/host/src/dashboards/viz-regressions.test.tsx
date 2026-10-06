@@ -7,7 +7,7 @@ import { warn, bad, ok } from "../../../tokens";
 
 const mocks = vi.hoisted(() => ({ init: vi.fn() }));
 vi.mock("echarts/core", () => ({ init: mocks.init, use: vi.fn(), connect: vi.fn(), disconnect: vi.fn() }));
-vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, LineChart: {} }));
+vi.mock("echarts/charts", () => ({ BarChart: {}, GaugeChart: {}, GraphChart: {}, LineChart: {} }));
 vi.mock("echarts/components", () => ({ AriaComponent: {}, GridComponent: {}, LegendComponent: {}, MarkLineComponent: {}, TooltipComponent: {} }));
 vi.mock("echarts/renderers", () => ({ CanvasRenderer: {} }));
 import { BarViz } from "./viz/bar";

@@ -137,3 +137,19 @@ func TestProblemsError(t *testing.T) {
 		t.Fatal(err.Error())
 	}
 }
+
+func TestM2VizOrder(t *testing.T) {
+	if len(vizOrder) != 15 {
+		t.Fatalf("vizOrder has %d types, want 15", len(vizOrder))
+	}
+	seen := map[string]bool{}
+	for _, viz := range vizOrder {
+		if seen[viz] {
+			t.Fatalf("duplicate %s", viz)
+		}
+		seen[viz] = true
+		if _, ok := vizSpecs[viz]; !ok {
+			t.Fatalf("unregistered %s", viz)
+		}
+	}
+}

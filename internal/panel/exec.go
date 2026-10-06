@@ -56,6 +56,7 @@ type Result struct {
 
 type Executor struct {
 	engine       Engine
+	rollups      RollupReader
 	maxWindow    time.Duration
 	now          func() time.Time
 	timeout      time.Duration
@@ -347,6 +348,9 @@ func (e *Executor) totals(ctx context.Context, p *Panel, checked *Checked, scope
 
 func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, scope Scope) (*Frame, string, error) {
 	ctx = queryrows.WithWindow(ctx, queryrows.Window{Start: scope.Start, End: scope.End})
+	if p.Viz == "health" || p.Viz == "service_map" {
+		return e.runRollupPanel(ctx, p, checked.Filters[p.ID], scope)
+	}
 	if p.Query != nil {
 		compiled, err := compileQuery(p, checked.Measures[p.ID], checked.Filters[p.ID], scope)
 		if err != nil {

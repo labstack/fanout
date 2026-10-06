@@ -4,11 +4,11 @@ export const ALL = "$__all";
 
 export type Unit = "ms" | "s" | "ns" | "percent" | "ratio" | "count" | "per_second" | "per_minute" | "bytes" | "none";
 export type Status = "ok" | "warn" | "bad";
-export type Viz = "stat" | "gauge" | "timeseries" | "bar" | "table" | "text";
+export type Viz = "stat" | "gauge" | "timeseries" | "bar" | "table" | "text" | "service_map" | "health";
 
 export type Threshold = { value: number; status: Status; label?: string };
 
-export type Query = { from: "spans" | "logs" | "metrics"; where?: string[]; measures: string[]; by?: string[]; bucket?: string; sort?: string; limit?: number };
+export type Query = { from: "spans" | "logs" | "metrics"; where?: string[]; measures?: string[]; by?: string[]; bucket?: string; sort?: string; limit?: number };
 
 export type Panel = {
   id: string;
@@ -62,7 +62,8 @@ export type Cell = string | number | null;
 
 export type Column = { name: string; type: "time" | "number" | "string" | "json"; role: "time" | "dimension" | "measure"; unit?: string };
 
-export type Frame = { columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean };
+export type HealthFrame = { health: string; counts: { healthy: number; degraded: number; unhealthy: number }; total_spans: number; error_rate: number; service_count: number; error_trend: number[] };
+export type Frame = { columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean; health?: HealthFrame };
 
 export type PanelResult = {
   id: string;
