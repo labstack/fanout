@@ -136,6 +136,9 @@ func buildWhere(sig *signal, filters []Filter, scope Scope) (string, []any, erro
 // selected as "_t" and named "time" in the frame, so it never collides with a
 // signal's own time column.
 func compileQuery(p *Panel, measures []Measure, filters []Filter, scope Scope) (Compiled, error) {
+	if p.Viz == "heatmap" || p.Viz == "histogram" {
+		return compileDistribution(p, filters, scope)
+	}
 	q := p.Query
 	sig, ok := lookupSignal(q.From)
 	if !ok {

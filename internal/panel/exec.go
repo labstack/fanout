@@ -357,9 +357,15 @@ func (e *Executor) runScope(ctx context.Context, p *Panel, checked *Checked, sco
 		if scope.Interval > 0 {
 			rowLimit = 0 // Buckets are already bounded by interval and top-N.
 		}
+		if p.Viz == "heatmap" || p.Viz == "histogram" {
+			rowLimit = distributionRows(p, len(compiled.Columns))
+		}
 		frame, err := scanFrame(rows, compiled.Columns, rowLimit)
 		if frame != nil {
-			frame.bucketed = scope.Interval > 0
+			frame.bucketed = scope.Interval > 0 && len(compiled.Columns) > 0 && compiled.Columns[0].Role == "time"
+		}
+		if err == nil && p.Viz == "heatmap" {
+			boundAnalysisFrame(frame)
 		}
 		return frame, compiled.SQL, err
 	}

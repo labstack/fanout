@@ -51,7 +51,7 @@ type Panel struct {
 	ID          string      `json:"id" jsonschema:"Stable identifier: lowercase letters, digits and underscores; edits address panels by id"`
 	Title       string      `json:"title" jsonschema:"Panel title, at most 80 characters; may reference $variables"`
 	Description string      `json:"description,omitempty" jsonschema:"Help text, at most 280 characters"`
-	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table or text"`
+	Viz         string      `json:"viz" jsonschema:"stat, gauge, timeseries, bar, table, text, heatmap or histogram"`
 	Width       int         `json:"width,omitempty" jsonschema:"Grid columns from 1 to 12; default depends on viz"`
 	Height      string      `json:"height,omitempty" jsonschema:"s, m or l; default depends on viz"`
 	Query       *Query      `json:"query,omitempty" jsonschema:"Structured query; exactly one of query or sql, except text panels"`
@@ -82,8 +82,9 @@ type Query struct {
 }
 
 type Histogram struct {
-	Field   string `json:"field"`
-	Buckets string `json:"buckets,omitempty"`
+	Temporality string `json:"temporality,omitempty" jsonschema:"metric histograms: cumulative (also unknown/default) or delta; cumulative uses last minus first per bound, clamped at zero; a series whose counter resets mid-window contributes 0 for that window"`
+	Field       string `json:"field" jsonschema:"spans duration_ms with log2 buckets or metrics value with explicit buckets; negative span durations clamp to [0,1), +Inf goes to overflow, NaN is excluded because it is not a measurement"`
+	Buckets     string `json:"buckets,omitempty"`
 }
 
 type Threshold struct {

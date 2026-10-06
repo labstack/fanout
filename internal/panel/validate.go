@@ -27,9 +27,11 @@ var vizSpecs = map[string]vizSpec{
 	"bar":        {width: 6, height: "m", query: true, minBy: 1, maxBy: 2},
 	"table":      {width: 12, height: "m", query: true, maxBy: 3},
 	"text":       {width: 4, height: "s"},
+	"heatmap":    {width: 6, height: "m", query: true, bucket: true},
+	"histogram":  {width: 6, height: "m", query: true, maxBy: 1},
 }
 
-var vizOrder = []string{"stat", "gauge", "timeseries", "bar", "table", "text"}
+var vizOrder = []string{"stat", "gauge", "timeseries", "bar", "table", "text", "heatmap", "histogram"}
 
 var (
 	idPattern     = regexp.MustCompile(`^[a-z][a-z0-9_]{0,39}$`)
@@ -337,6 +339,9 @@ func validatePanel(p *Panel, path string, vars map[string]Variable, problems *Pr
 			problems.add(path+".options.legend", "legend must be auto or hidden")
 		}
 	}
+	if (p.Viz == "heatmap" || p.Viz == "histogram") && p.Query == nil {
+		problems.add(path+".query", "distribution panels require a structured query")
+	}
 	if p.Query != nil {
 		validateQuery(p, spec, path+".query", problems)
 	} else {
@@ -423,8 +428,24 @@ func validateQuery(p *Panel, spec vizSpec, path string, problems *Problems) {
 			problems.add(path+".bucket", "bucket must be auto or one of 10s, 30s, 1m, 5m, 10m, 15m, 30m, 1h, 3h, 6h, 12h, 1d")
 		}
 	}
-	if q.Histogram != nil {
-		problems.add(path+".histogram", "histograms need the heatmap or histogram viz, which arrive in a later release")
+	if p.Viz == "heatmap" || p.Viz == "histogram" {
+		if q.Histogram == nil {
+			problems.addHint(path+".histogram", "distribution panels require a histogram", "spans: duration_ms/log2; metrics: value/explicit")
+		} else if (q.From != "spans" || q.Histogram.Field != "duration_ms" || q.Histogram.Buckets != "log2") &&
+			(q.From != "metrics" || q.Histogram.Field != "value" || q.Histogram.Buckets != "explicit") {
+			problems.add(path+".histogram", "use spans duration_ms/log2 or metrics value/explicit")
+		}
+		if q.Histogram != nil && q.Histogram.Temporality != "" && (q.From != "metrics" || (q.Histogram.Temporality != "cumulative" && q.Histogram.Temporality != "delta")) {
+			problems.addHint(path+".histogram.temporality", "temporality applies to metric histograms and must be cumulative or delta", "omit for the OTel cumulative default")
+		}
+		if len(q.Measures) != 1 || q.Measures[0] != "count()" {
+			problems.addHint(path+".measures", "distribution counts require count()", "use count() as the observation weight")
+		}
+		if p.SQL != "" {
+			problems.add(path+".sql", "distribution panels use a structured histogram")
+		}
+	} else if q.Histogram != nil {
+		problems.add(path+".histogram", "histogram applies only to heatmap and histogram")
 	}
 	if q.Limit < 0 || q.Limit > 1000 {
 		problems.add(path+".limit", "limit must be 0 to 1000")
