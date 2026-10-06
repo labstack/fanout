@@ -123,7 +123,7 @@ func validateDisplayOptions(p *Panel, path string, vars map[string]Variable, pro
 		if c.Format == "service_link" {
 			v, ok := vars[c.Variable]
 			if !ok || (v.Kind != "query" && v.Kind != "custom") {
-				problems.add(path+".options.columns", "service_link requires a query or custom variable")
+				problems.addHint(path+".options.columns", "service_link requires a query or custom variable", "set variable to the name of a query or custom variable")
 			}
 		}
 		if p.Query != nil {
@@ -139,8 +139,15 @@ func validateDisplayOptions(p *Panel, path string, vars map[string]Variable, pro
 				}
 			}
 			var ignored Problems
+			measureAliases := map[string]bool{}
 			for _, m := range parseMeasures(sig, p.Query.Measures, "", &ignored) {
 				columns[m.Alias] = true
+				measureAliases[m.Alias] = true
+			}
+			if c.Format == "sparkline" {
+				if !measureAliases[c.Field] {
+					problems.addHint(path+".options.columns", "structured sparklines require a measure column", "choose a measure field; the executor attaches its trend")
+				}
 			}
 			if !columns[c.Field] {
 				problems.add(path+".options.columns", "formatted field does not exist in the structured frame")

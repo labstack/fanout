@@ -6,11 +6,11 @@ import { panelTimeLabel } from "../../../panels/interaction";
 import { useEffect, useState } from "react";
 import { Viz } from "./viz";
 
-export function PanelCard({ panel, title, result, loading, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onZoom, onView, onInspect, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
+export function PanelCard({ panel, title, result, loading, height, group, editing, agentAvailable, annotations, vars, onSelect, onPoint, onVariable, onZoom, onView, onInspect, onCopyLink, onExplain, onRemove, onDuplicate, staleAt }: {
   panel: Panel; title: string; result?: PanelResult; loading: boolean; height: number; group: string; editing: boolean; agentAvailable: boolean;
   annotations?: AnnotationsResponse; vars?: Record<string, VarValue>;
   onSelect?: (value: string) => void; onView(): void; onInspect(): void; onCopyLink(): void; onExplain(): void; onRemove?: () => void; onDuplicate?: () => void; staleAt?: number;
-  onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
+  onVariable?: (name: string, value: string) => void; onPoint?: (selection: Selection) => void; onZoom?: (from: number, to: number) => void;
 }) {
   const dark = useComputedColorScheme("light") === "dark";
   const [now, setNow] = useState(Date.now);
@@ -52,7 +52,7 @@ export function PanelCard({ panel, title, result, loading, height, group, editin
           <ListMagnifyingGlass size={20} color="var(--mantine-color-dimmed)" />
           <Text size="sm" c="dimmed" ta="center">{result.diagnosis || "No data in this time range."}</Text>
         </Stack></Center>
-        : <Viz panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onZoom={onZoom} />}
+        : <Viz panel={panel} title={title} result={result} dark={dark} height={bodyHeight} group={group} annotations={annotations} vars={vars} onSelect={onSelect} onPoint={onPoint} onVariable={onVariable} onZoom={onZoom} />}
     </Box>
     {(staleAt || result?.frame?.truncated || result?.previous?.truncated) && <Text size="xs" c={staleAt ? "warn" : "dimmed"} mt={6} role="status">
       {staleAt ? `Stale: last updated ${relativeTime(staleAt, now)}` : ""}

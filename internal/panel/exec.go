@@ -256,10 +256,38 @@ func limitBatchFrames(results []Result) {
 				for j := range f.Values {
 					f.Values[j] = f.Values[j][start : start+rows]
 				}
+				for name, series := range f.Trends {
+					f.Trends[name] = series[start : start+rows]
+				}
 				f.Rows = rows
 				f.Truncated = true
 			}
 			remaining -= rows * len(f.Columns)
+			if f.Health != nil {
+				points := min(len(f.Health.ErrorTrend), remaining)
+				if points < len(f.Health.ErrorTrend) {
+					f.Health.ErrorTrend = f.Health.ErrorTrend[len(f.Health.ErrorTrend)-points:]
+					f.Truncated = true
+					f.addNote("Health error trend was truncated to stay within the response budget.")
+				}
+				remaining -= points
+			}
+			names := make([]string, 0, len(f.Trends))
+			for name := range f.Trends {
+				names = append(names, name)
+			}
+			slices.Sort(names)
+			for _, name := range names {
+				for row, series := range f.Trends[name] {
+					if len(series) > remaining {
+						f.Trends[name][row] = nil
+						f.Truncated = true
+						f.addNote("Some row trends were omitted to stay within the response budget.")
+						continue
+					}
+					remaining -= len(series)
+				}
+			}
 		}
 	}
 }
@@ -299,6 +327,8 @@ func (e *Executor) runPanel(ctx context.Context, p *Panel, checked *Checked, t T
 		return failed(res, err, parent.Err() == nil)
 	}
 	res.Frame, res.SQL = frame, sqlText
+	// Trend failures are recorded on the frame and preserve the main table.
+	_ = e.attachTableTrends(ctx, p, checked, scope, frame)
 	if p.Query != nil && (p.Viz == "timeseries" || p.Viz == "heatmap" || p.Viz == "state_timeline") {
 		res.AnnotationScope, err = e.annotationScope(ctx, p, checked.AnnotationFilters[p.ID], scope)
 		if err != nil {

@@ -69,7 +69,7 @@ export type Column = { name: string; type: "time" | "number" | "string" | "json"
 export type HealthFrame = { health: string; counts: { healthy: number; degraded: number; unhealthy: number }; total_spans: number; error_rate: number; service_count: number; error_trend: number[] };
 export type AnnotationService = { namespace: string; service: string };
 export type AnnotationMatch = { services: AnnotationService[]; namespace_scoped?: boolean; limited?: boolean };
-export type Frame = { note?: string; columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean; health?: HealthFrame; trend?: { start_ms: number; step_ms: number } };
+export type Frame = { trends?: Record<string, (number | null)[][]>; note?: string; columns: Column[]; values: Cell[][]; rows: number; totals?: Cell[]; truncated?: boolean; health?: HealthFrame; trend?: { start_ms: number; step_ms: number } };
 
 export type PanelResult = {
   annotation_scope?: AnnotationMatch;

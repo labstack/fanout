@@ -37,7 +37,7 @@ function Delta({ value, previous, better, unit }: { value: number; previous: num
   </Group>;
 }
 
-function Sparkline({ points }: { points: (number | null)[] }) {
+export function Sparkline({ points }: { points: (number | null)[] }) {
   const present = points.filter((p): p is number => p !== null);
   if (present.length < 2) return null;
   const min = Math.min(...present);
@@ -47,7 +47,7 @@ function Sparkline({ points }: { points: (number | null)[] }) {
   const x = (i: number) => (i / (points.length - 1)) * w;
   const y = (v: number) => h - 2 - ((v - min) / (max - min || 1)) * (h - 4);
   const line = points.map((p, i) => (p === null ? "" : `${i === 0 || points[i - 1] === null ? "M" : "L"}${x(i).toFixed(1)},${y(p).toFixed(1)}`)).join("");
-  return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" width="100%" height={h} aria-hidden>
+  return <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" width="100%" height={h} role="img" aria-label="Value over this panel's time range">
     <path d={line} fill="none" stroke="var(--mantine-primary-color-filled)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
   </svg>;
 }
