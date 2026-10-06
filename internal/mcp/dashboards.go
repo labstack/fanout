@@ -57,12 +57,12 @@ const (
 var dashboardTools = [...]mcp.Tool{
 	{
 		Name: "list_dashboards", Title: "List dashboards",
-		Description: "List the authenticated user's dashboards with panel counts and versions.",
+		Description: "List the authenticated user's dashboards with panel counts and versions. See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "get_dashboard", Title: "Get dashboard",
-		Description: "Read one dashboard's complete spec and version. Read it before editing so operations name real panel ids.",
+		Description: "Read one dashboard's complete spec and version. Read it before editing so operations name real panel ids. See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true, OpenWorldHint: boolPtr(false)},
 	},
 	{
@@ -72,12 +72,12 @@ var dashboardTools = [...]mcp.Tool{
 	},
 	{
 		Name: "replace_dashboard", Title: "Replace dashboard",
-		Description: "Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels.",
+		Description: "Replace a dashboard's whole spec; omitted panels are removed. Use only for a redesign the user asked for; use edit_dashboard to change a few panels. See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), IdempotentHint: true, OpenWorldHint: boolPtr(false)},
 	},
 	{
 		Name: "edit_dashboard", Title: "Edit dashboard",
-		Description: "Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard.",
+		Description: "Change a dashboard with typed operations, applied in order and saved as one version: add_panel, update_panel (set replaces the named fields), remove_panel, move_panel, set_variable, remove_variable, set_time, rename. Panels not named are left unchanged. Only edit when the user asks to change that dashboard. See create_dashboard for the spec guide.",
 		Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)},
 	},
 }

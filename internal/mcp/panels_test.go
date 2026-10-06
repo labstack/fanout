@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/fanout/internal/config"
 	"github.com/labstack/fanout/internal/dashboard"
+	"github.com/labstack/fanout/internal/observability"
 	"github.com/labstack/fanout/internal/panel"
 	"github.com/labstack/fanout/internal/query"
 	appstore "github.com/labstack/fanout/internal/store"
@@ -34,6 +35,7 @@ func newPanelServer(t *testing.T) *Server {
 		t.Fatal(err)
 	}
 	executor := panel.NewExecutor(duck, 30)
+	executor.SetRollupReader(observability.New(duck, duck, 30))
 	return New(&fakeObservability{}, dashboard.New(sqlite.DB, executor), executor, "test")
 }
 
